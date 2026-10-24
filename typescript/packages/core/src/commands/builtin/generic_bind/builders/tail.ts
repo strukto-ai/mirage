@@ -27,7 +27,7 @@ const tail: CommandFn = async (_accessor, paths, texts, ctx) => {
     ctx,
     dirAwareStream(files, ctx),
     dirAwareStat(files, ctx),
-    files.answers('read_range') ? files.readRange : null,
+    files.answers('read_range') ? files.read : null,
     files.answers('last_lines') ? files.lastLines : undefined,
     files.answers('follow') ? files.follow : undefined,
   )

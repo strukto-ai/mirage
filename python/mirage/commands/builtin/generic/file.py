@@ -19,7 +19,7 @@ from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
 from mirage.io.cooperative import read_prefix
-from mirage.io.types import ByteSource, IOResult
+from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.types import (
     DEVICE_NUMBERS_KEY,
     LINK_TARGET_KEY,
@@ -27,7 +27,7 @@ from mirage.types import (
     FileType,
     PathSpec,
     PolymorphicReadFn,
-    ReadRangeFn,
+    ReadStreamFn,
     StatFn,
 )
 from mirage.utils.path import CycleError
@@ -87,7 +87,7 @@ def _special_description(s: FileStat, mime: bool) -> str | None:
 
 async def _header(
     stream: PolymorphicReadFn,
-    read_range: ReadRangeFn | None,
+    read_range: ReadStreamFn | None,
     path: PathSpec,
 ) -> bytes:
     """The first bytes of a file, the most ``file`` sniffs: one ranged
@@ -100,7 +100,9 @@ async def _header(
         path (PathSpec): the file.
     """
     if read_range is not None:
-        return bytes(await read_range(path, offset=0, size=FILE_HEADER_BYTES))
+        return await materialize(
+            read_range(path, offset=0, size=FILE_HEADER_BYTES)
+        )
     return await read_prefix(normalized_read(stream)(path), FILE_HEADER_BYTES)
 
 
@@ -109,7 +111,7 @@ async def file_cmd(
     *,
     stream: PolymorphicReadFn,
     stat_fn: Callable[..., Awaitable[FileStat]],
-    read_range: ReadRangeFn | None = None,
+    read_range: ReadStreamFn | None = None,
     b: bool = False,
     i: bool = False,
     links: LinkView | None = None,
@@ -194,7 +196,7 @@ async def file_generic(
     ctx: Context,
     stream: PolymorphicReadFn,
     stat_fn: StatFn,
-    read_range: ReadRangeFn | None = None,
+    read_range: ReadStreamFn | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     parsed = parse_flags(ctx.flags)
     return await file_cmd(

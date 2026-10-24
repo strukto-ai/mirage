@@ -38,7 +38,7 @@ async def zip_cmd(
         resolved,
         list(texts),
         ctx,
-        files.read_stream,
+        files.read,
         files.write,
         files.stat,
         walk_of(files, dispatch_of(ctx), "zip"),

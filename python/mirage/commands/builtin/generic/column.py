@@ -1,4 +1,4 @@
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Mapping
 from dataclasses import dataclass
 
 from mirage.commands.builtin.utils.lines import join_file_lines, split_lines
@@ -7,8 +7,8 @@ from mirage.commands.config import Context
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
-from mirage.io.types import ByteSource, IOResult
-from mirage.types import PathSpec
+from mirage.io.types import ByteSource, IOResult, materialize
+from mirage.types import PathSpec, ReadStreamFn
 from mirage.utils.width import advance_column, is_space, text_width
 
 DEFAULT_WIDTH = 80
@@ -91,7 +91,7 @@ def _table_format(text: str, separator: str | None, output_sep: str) -> str:
 async def column(
     paths: list[PathSpec],
     *,
-    read_bytes: Callable[..., Awaitable[bytes]],
+    stream: ReadStreamFn,
     stdin: ByteSource | None = None,
     table: bool = False,
     separator: str | None = None,
@@ -101,7 +101,9 @@ async def column(
     if paths:
         # Every operand is read, as one run of lines in which a file's last
         # line ends where the next file begins.
-        raw = join_file_lines([await read_bytes(p) for p in paths], b"\n")
+        raw = join_file_lines(
+            [await materialize(stream(p)) for p in paths], b"\n"
+        )
     else:
         stdin_raw = await read_stdin_async(stdin)
         raw = stdin_raw if stdin_raw is not None else b""
@@ -140,12 +142,12 @@ async def column_generic(
     paths: list[PathSpec],
     texts: list[str],
     ctx: Context,
-    read_bytes: Callable[..., Awaitable[bytes]],
+    stream: ReadStreamFn,
 ) -> tuple[ByteSource | None, IOResult]:
     parsed = parse_flags(ctx.flags)
     return await column(
         paths,
-        read_bytes=read_bytes,
+        stream=stream,
         stdin=ctx.stdin,
         table=parsed.table,
         separator=parsed.separator,

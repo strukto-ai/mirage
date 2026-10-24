@@ -34,7 +34,7 @@ async def join(
         list(texts),
         ctx,
         files.resolve_glob,
-        files.read_stream,
+        files.read,
     )
 
 

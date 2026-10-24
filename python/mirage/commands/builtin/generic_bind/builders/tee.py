@@ -34,7 +34,7 @@ async def tee(
     return await generic_tee(
         paths,
         texts,
-        read_stream=files.read_stream,
+        read_stream=files.read,
         write_bytes=files.write,
         # A backend that can append natively does; the rest fall back to
         # the read-modify-write inside the generic.

@@ -386,7 +386,7 @@ async def failed_read(
     command = exec_node.command if exec_node is not None else ""
     cmd_name = command.split()[0] if command else ""
     paths = exec_node.paths if exec_node is not None else []
-    existing = await materialize(io.stderr) or b""
+    existing = await materialize(io.stderr)
     io.stderr = existing + format_fs_error(cmd_name, exc, paths)
     io.exit_code = read_fail_exit_code(cmd_name, exc)
 

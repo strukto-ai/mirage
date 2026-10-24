@@ -1,4 +1,5 @@
 import asyncio
+from collections.abc import AsyncIterator
 from contextlib import suppress
 
 import pytest
@@ -312,8 +313,10 @@ class _Growing:
     async def read(self, p: PathSpec) -> bytes:
         return self.data[p.virtual]
 
-    async def read_range(self, p: PathSpec, offset: int, size: int) -> bytes:
-        return self.data[p.virtual][offset : offset + size]
+    async def read_range(
+        self, p: PathSpec, offset: int, size: int
+    ) -> AsyncIterator[bytes]:
+        yield self.data[p.virtual][offset : offset + size]
 
 
 class _GoneAtRead(_Growing):
@@ -336,9 +339,12 @@ class _GoneAtRead(_Growing):
         self._tripped(p)
         return await super().read(p)
 
-    async def read_range(self, p: PathSpec, offset: int, size: int) -> bytes:
+    async def read_range(
+        self, p: PathSpec, offset: int, size: int
+    ) -> AsyncIterator[bytes]:
         self._tripped(p)
-        return await super().read_range(p, offset, size)
+        async for chunk in super().read_range(p, offset, size):
+            yield chunk
 
 
 async def _drain_for(gen, seconds: float) -> list[bytes]:

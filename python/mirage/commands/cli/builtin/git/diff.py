@@ -69,7 +69,6 @@ from mirage.commands.cli.builtin.git.util import (
 )
 from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
-from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult, Rows
 from mirage.types import PathSpec
 
@@ -251,7 +250,7 @@ async def diff(
         body = await asyncio.to_thread(
             _output, repo, old_side, new_side, parsed
         )
-        return yield_bytes(body) if body else None
+        return body or None
 
     return None, IOResult(
         stderr=warning if warning else None, rows=Rows(rows, render)

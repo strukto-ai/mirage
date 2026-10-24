@@ -65,7 +65,6 @@ from mirage.commands.cli.builtin.git.worktree import (
 from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
 from mirage.errors.fs import fs_strerror
-from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.workspace.files import Files
@@ -405,6 +404,4 @@ async def add(
     await write_index(vfs, location.gitdir, state)
     if not parsed.verbose or not lines:
         return None, IOResult()
-    return yield_bytes(
-        "".join(f"{line}\n" for line in lines).encode()
-    ), IOResult()
+    return "".join(f"{line}\n" for line in lines).encode(), IOResult()

@@ -261,8 +261,7 @@ def transfer_links_of(
         dispatch=dispatch,
         cwd=cwd,
         relay=PrimitiveCopy(
-            read_bytes=prim["read_bytes"],
-            read_stream=prim["read_stream"],
+            read=prim["read_stream"],
             write=prim["write"],
             mkdir=prim["mkdir"],
             readdir=prim["readdir"],

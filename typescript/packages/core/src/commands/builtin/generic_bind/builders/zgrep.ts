@@ -20,7 +20,7 @@ import { commandFiles, resolveOrEmpty } from '../files.ts'
 const zgrep: CommandFn = async (_accessor, paths, texts, ctx) => {
   const files = commandFiles(ctx, paths)
   const resolved = await resolveOrEmpty(files, paths)
-  return zgrepGeneric(resolved, texts, ctx, files.readStream, files.stat)
+  return zgrepGeneric(resolved, texts, ctx, files.read, files.stat)
 }
 
 export const BUILDER: GenericCommand = {

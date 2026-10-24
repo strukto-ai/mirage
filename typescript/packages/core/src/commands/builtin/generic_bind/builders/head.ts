@@ -26,7 +26,7 @@ const head: CommandFn = async (_accessor, paths, texts, ctx) => {
     texts,
     ctx,
     dirAwareStat(files, ctx),
-    files.readStream,
+    files.read,
     files.answers('first_lines') ? files.firstLines : undefined,
   )
 }

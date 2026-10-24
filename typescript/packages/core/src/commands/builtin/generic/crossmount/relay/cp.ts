@@ -18,7 +18,7 @@ import type { ByteSource } from '../../../../../io/types.ts'
 import type { PathSpec } from '../../../../../types.ts'
 import { cpGeneric, parseFlags } from '../../cp.ts'
 import type { CrossResult, DispatchFn } from '../types.ts'
-import { flatten, readBytesOp, readdirOp, relayCopy, statOp } from '../utils.ts'
+import { flatten, readdirOp, relayCopy, statOp } from '../utils.ts'
 import type { FlagValue } from '../../../../spec/types.ts'
 import type { LinkView, MountView } from '../../../../../view/types.ts'
 import { FlagView } from '../../../../spec/flag_view.ts'
@@ -76,7 +76,6 @@ export async function runCp(
 ): Promise<CrossResult> {
   const flat = flatten(scopes)
   const stat = statOp(dispatch)
-  const readBytes = readBytesOp(dispatch)
   const fl = new FlagView(flagKwargs, specOf('cp'))
   const mounts = fl.asBool('one_file_system') ? mountView(vfs) : undefined
   const starts = new Set(scopes.map((s) => s.virtual))
@@ -95,7 +94,7 @@ export async function runCp(
     await dispatch('mkdir', p)
   }
   const copy = (src: PathSpec, dst: PathSpec): Promise<void> => relayCopy(dispatch, src, dst)
-  const strategy = { readStream: fileStreamOp(dispatch), readBytes, write, mkdir, readdir, copy }
+  const strategy = { read: fileStreamOp(dispatch), write, mkdir, readdir, copy }
   return cpGeneric(
     flat,
     stat,

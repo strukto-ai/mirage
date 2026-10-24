@@ -18,7 +18,6 @@ from mirage.accessor.discord import DiscordAccessor
 from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
 from mirage.core.discord.post import send_message
-from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -39,4 +38,4 @@ async def send(
     out = json.dumps(
         result, ensure_ascii=False, separators=(",", ":")
     ).encode()
-    return yield_bytes(out), IOResult()
+    return out, IOResult()

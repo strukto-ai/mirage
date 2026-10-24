@@ -528,7 +528,7 @@ async def _check_stream(
 async def sort_generic(
     paths: list[PathSpec],
     *,
-    read_bytes: PolymorphicReadFn,
+    read: PolymorphicReadFn,
     write_bytes: Callable[..., Awaitable[None]] | None = None,
     stdin: ByteSource | None = None,
     flags: Mapping[str, FlagValue] | None = None,
@@ -557,7 +557,7 @@ async def sort_generic(
 
     Args:
         paths (list[PathSpec]): the operands; none reads standard input.
-        read_bytes (Callable): reads one operand's bytes.
+        read (Callable): reads one operand's bytes.
         write_bytes (Callable | None): writes ``-o``'s file, or None where
             the backend cannot write.
         stdin (ByteSource | None): standard input.
@@ -592,12 +592,12 @@ async def sort_generic(
     if parsed.check:
         path = paths[0] if paths else None
         source = (
-            stdin_stream(read_bytes, stdin)(path)
+            stdin_stream(read, stdin)(path)
             if path is not None
             else stdin or b""
         )
         return b"", await _check_stream(source, path, parsed, cfg)
-    ordered = await _external_records(paths, read_bytes, stdin, parsed, cfg)
+    ordered = await _external_records(paths, read, stdin, parsed, cfg)
     if isinstance(ordered, bytes):
         return b"", IOResult(stderr=ordered, exit_code=2)
 

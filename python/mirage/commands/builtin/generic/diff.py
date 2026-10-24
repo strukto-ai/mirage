@@ -16,8 +16,8 @@ from mirage.commands.builtin.utils.links import dispatch_of, links_of
 from mirage.commands.builtin.utils.paths import vfs_stat_path
 from mirage.commands.builtin.utils.stream import (
     is_stdin,
-    stdin_bytes,
     stdin_stat,
+    stdin_stream,
 )
 from mirage.commands.builtin.utils.tree import before_full_walk
 from mirage.commands.config import Context
@@ -37,12 +37,12 @@ from mirage.errors.posix import posix_phrase
 from mirage.errors.render import format_fs_error
 from mirage.errors.types import FsCondition
 from mirage.io.cooperative import chunks
-from mirage.io.types import ByteSource, IOResult
+from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.rs.diff_pool import DiffPool
 from mirage.rs.diff_types import DiffComputer, DiffOptions, PairResult
 from mirage.rs.errors import StreamRefusal
 from mirage.runtime.types import DispatchFn
-from mirage.types import FileStat, FileType, PathSpec
+from mirage.types import FileStat, FileType, PathSpec, ReadStreamFn
 from mirage.utils.fnmatch import fnmatch
 from mirage.utils.key_prefix import rekey
 from mirage.utils.path import gnu_basename
@@ -73,7 +73,7 @@ class DiffFlags:
 
 @dataclass(slots=True)
 class _Walk:
-    read_bytes: Callable[..., Awaitable[bytes]]
+    stream: ReadStreamFn
     readdir_fn: Callable[..., Awaitable[list[str]]]
     stat_fn: Callable[..., Awaitable[FileStat]]
     flags: DiffFlags
@@ -242,8 +242,8 @@ def switch_words(argv: Sequence[str]) -> list[str]:
     return words
 
 
-async def _side(walk: _Walk, path: PathSpec, absent: bool) -> bytes:
-    return b"" if absent else await walk.read_bytes(path)
+async def _side(walk: _Walk, path: PathSpec, absent: bool) -> ByteSource:
+    return b"" if absent else walk.stream(path)
 
 
 async def _diff_pair(
@@ -467,11 +467,11 @@ async def _missing(
 
 
 async def _excluded_patterns(
-    flags: DiffFlags, read_bytes: Callable[..., Awaitable[bytes]]
+    flags: DiffFlags, stream: ReadStreamFn
 ) -> tuple[str, ...]:
     patterns = list(flags.exclude)
     for path in flags.exclude_from:
-        text = (await read_bytes(path)).decode(errors="replace")
+        text = (await materialize(stream(path))).decode(errors="replace")
         patterns.extend(line for line in text.split("\n") if line)
     return tuple(patterns)
 
@@ -479,7 +479,7 @@ async def _excluded_patterns(
 async def diff(
     paths: list[PathSpec],
     *,
-    read_bytes: Callable[..., Awaitable[bytes]],
+    stream: ReadStreamFn,
     readdir_fn: Callable[..., Awaitable[list[str]]],
     stat_fn: Callable[..., Awaitable[FileStat]],
     flags: DiffFlags,
@@ -500,7 +500,7 @@ async def diff(
     if is_stdin(paths[0]) and is_stdin(paths[1]):
         # Both name the one stdin, which GNU sees as the same file.
         return None, IOResult()
-    read_bytes = stdin_bytes(read_bytes, stdin)
+    stream = stdin_stream(stream, stdin)
     stat_fn = stdin_stat(stat_fn)
     dashes = [p.raw_path == "-" for p in paths]
     walk: _Walk | None = None
@@ -510,14 +510,14 @@ async def diff(
     try:
         walk = _Walk(
             computer=service,
-            read_bytes=read_bytes,
+            stream=stream,
             readdir_fn=readdir_fn,
             # diff compares what each link leads to (its default
             # --dereference), the operands' own taken there at dispatch.
             stat_fn=partial(followed_stat, stat_fn, links),
             real=links.resolve if links is not None else None,
             flags=flags,
-            excluded=await _excluded_patterns(flags, read_bytes),
+            excluded=await _excluded_patterns(flags, stream),
             switches="".join(f" {shell_quote(w)}" for w in switch_words(argv)),
             stat_path=stat_path,
             zone=zone,
@@ -637,13 +637,13 @@ async def diff_generic(
     paths: list[PathSpec],
     texts: list[str],
     ctx: Context,
-    read_bytes: Callable[..., Awaitable[bytes]],
+    stream: ReadStreamFn,
     readdir_fn: Callable[..., Awaitable[list[str]]],
     stat_fn: Callable[..., Awaitable[FileStat]],
 ) -> tuple[ByteSource | None, IOResult]:
     return await diff(
         paths,
-        read_bytes=read_bytes,
+        stream=stream,
         readdir_fn=readdir_fn,
         stat_fn=stat_fn,
         flags=parse_flags(ctx.flags),

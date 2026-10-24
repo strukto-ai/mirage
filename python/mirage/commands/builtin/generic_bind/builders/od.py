@@ -21,7 +21,7 @@ async def od(
     return await generic_od(
         paths,
         ctx,
-        read_stream=files.read_stream,
+        read_stream=files.read,
     )
 
 

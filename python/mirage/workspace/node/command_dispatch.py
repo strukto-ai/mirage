@@ -434,7 +434,7 @@ async def execute_command(
             assigned=frozenset(k for k, _ in prefix_assignments),
         )
         if refused:
-            io.stderr = refused + (await materialize(io.stderr) or b"")
+            io.stderr = refused + (await materialize(io.stderr))
         return stdout, io, exec_node
     except TooManyMatches as exc:
         # The command a glob was given to does not run, as exec(2)
@@ -644,7 +644,7 @@ async def _dispatch_command_body(
             stdout = guard_io(stdout, io, bound, io.producer.command)
             exec_node.exit_code = io.exit_code
     if xtrace:
-        existing = await materialize(io.stderr) or b""
+        existing = await materialize(io.stderr)
         io.stderr = trace_command([argv.name, *argv.args]) + existing
     return stdout, io, exec_node
 

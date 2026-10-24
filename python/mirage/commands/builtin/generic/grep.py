@@ -49,7 +49,6 @@ from mirage.commands.builtin.utils.stream import (
     stdin_stream,
 )
 from mirage.commands.builtin.utils.wrap import (
-    call_read_bytes,
     call_readdir,
     call_stat,
     mount_parent_readdir,
@@ -71,10 +70,9 @@ from mirage.errors.constants import FS_ERRORS, WALK_ERRORS
 from mirage.errors.fs import fs_strerror, walk_refusal
 from mirage.errors.posix import posix_phrase
 from mirage.errors.types import FsCondition
-from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.shell.bytes import byte_view, utf8_locale
-from mirage.types import FileStat, FileType, PathSpec
+from mirage.types import FileStat, FileType, PathSpec, PolymorphicReadFn
 from mirage.utils.filetype import BINARY_EXTENSIONS, get_extension
 from mirage.utils.path import respell_one
 from mirage.view.namespace_view import followed_stat
@@ -349,13 +347,10 @@ async def grep_generic(
     *,
     readdir: Callable[..., Awaitable[list[str]]],
     stat: Callable[..., Awaitable[FileStat]],
-    read_bytes: Callable[..., Awaitable[bytes]],
-    read_stream: Callable[..., AsyncIterator[bytes]] | None,
+    read: PolymorphicReadFn,
     stdin: ByteSource | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
-    operand_stream = stdin_stream(
-        read_stream if read_stream is not None else read_bytes, stdin
-    )
+    operand_stream = stdin_stream(read, stdin)
     fl = FlagView(ctx.flags, spec=SPECS["grep"])
     # GNU refuses a bad option value in its option loop, before it looks
     # for a pattern.
@@ -437,7 +432,6 @@ async def grep_generic(
     # one leads to, and a directory it reaches again is a loop.
     follow = links if f.recursive and f.dereference else None
     walked_st = partial(followed_stat, st, follow)
-    rb = partial(call_read_bytes, read_bytes)
     failed = False
     diagnostics: list[bytes] = []
     matched = False
@@ -537,11 +531,7 @@ async def grep_generic(
         file_io = IOResult(exit_code=1)
         try:
             try:
-                source = (
-                    operand_stream(p)
-                    if is_stdin(p) or read_stream is not None
-                    else yield_bytes(await rb(p.virtual))
-                )
+                source = operand_stream(p)
                 show = not f.no_filename and (
                     f.with_filename or walked or len(paths) > 1
                 )

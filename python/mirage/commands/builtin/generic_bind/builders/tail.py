@@ -39,8 +39,8 @@ async def tail(
         list(texts),
         ctx,
         dir_aware_stat(files, ctx),
-        files.read_stream,
-        (files.read_range if files.answers("read_range") else None),
+        files.read,
+        (files.read if files.answers("read_range") else None),
         (files.last_lines if files.answers("last_lines") else None),
         (files.follow if files.answers("follow") else None),
     )

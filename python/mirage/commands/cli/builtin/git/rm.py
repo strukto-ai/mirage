@@ -58,7 +58,6 @@ from mirage.commands.cli.builtin.git.util import (
 from mirage.commands.cli.builtin.git.worktree import UNTRACKED_NO, scan
 from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
-from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import FileType, PathSpec
 from mirage.workspace.files import Files
@@ -352,4 +351,4 @@ async def rm(
     await write_index(vfs, location.gitdir, state)
     if flags.quiet:
         return None, IOResult()
-    return yield_bytes(lines.encode()), IOResult()
+    return lines.encode(), IOResult()

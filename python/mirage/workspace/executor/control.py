@@ -179,9 +179,9 @@ async def carried(
         sig.io = await io.merge(sig.io)
         return sig
     if isinstance(sig, (ReturnSignal, ExitSignal)):
-        sig.stderr = (await materialize(io.stderr) or b"") + sig.stderr
+        sig.stderr = (await materialize(io.stderr)) + sig.stderr
         sig.stdout = (
-            (await materialize(stdout) or b"") + (sig.stdout or b"")
+            (await materialize(stdout)) + (sig.stdout or b"")
             if isinstance(sig, ExitSignal)
             else _chain_streams([stdout, sig.stdout])
         )
@@ -202,7 +202,7 @@ async def trailed(sig: Exception, stdout: bytes, stderr: bytes) -> None:
     if isinstance(sig, LoopSignal):
         sig.stdout = _chain_streams([sig.stdout, stdout])
         if stderr:
-            sig.io.stderr = (await materialize(sig.io.stderr) or b"") + stderr
+            sig.io.stderr = (await materialize(sig.io.stderr)) + stderr
     elif isinstance(sig, ExitSignal):
         sig.stdout = (sig.stdout or b"") + stdout
         sig.stderr += stderr
@@ -300,7 +300,7 @@ async def take_stdout(sig: Exception) -> bytes:
     """
     if not isinstance(sig, (ExitSignal, ReturnSignal)) or not sig.unrouted:
         return b""
-    written = await materialize(sig.stdout) or b""
+    written = await materialize(sig.stdout)
     cut = len(written) - (
         len(sig.cleanup) if isinstance(sig, ExitSignal) else 0
     )
@@ -316,7 +316,7 @@ async def take_stderr(sig: Exception) -> bytes:
         sig (Exception): one of ``UNWINDING``.
     """
     if isinstance(sig, LoopSignal):
-        diagnostic = await materialize(sig.io.stderr) or b""
+        diagnostic = await materialize(sig.io.stderr)
         sig.io.stderr = None
         return diagnostic
     assert isinstance(sig, (ExitSignal, ReturnSignal))

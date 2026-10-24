@@ -22,7 +22,7 @@ import { chunks } from '../../../io/cooperative.ts'
 import type { ByteSource } from '../../../io/types.ts'
 import { cInt, strtol } from '../utils/strtol.ts'
 import { singleChunk } from '../utils/operands.ts'
-import { IOResult } from '../../../io/types.ts'
+import { IOResult, materialize } from '../../../io/types.ts'
 import type { PathSpec } from '../../../types.ts'
 import { fsErrorLine } from '../../../errors/render.ts'
 import { isEnoent, isFsError } from '../../../errors/fs.ts'
@@ -276,7 +276,7 @@ async function seeked(
 async function writeOutput(
   paths: PathSpec[],
   source: AsyncIterable<Uint8Array>,
-  readBytes: ((p: PathSpec) => Promise<Uint8Array>) | null,
+  stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
   writeBytes: ((p: PathSpec, data: ByteSource) => Promise<void>) | null,
   pwriteBytes: ((p: PathSpec, data: Uint8Array, offset: number) => Promise<void>) | null,
   render: () => Promise<AsyncIterable<Uint8Array> | null>,
@@ -323,7 +323,7 @@ async function writeOutput(
   if (dump === null) {
     let existing: Uint8Array = new Uint8Array(0)
     try {
-      if (readBytes !== null) existing = await readBytes(target)
+      existing = await materialize(stream(target))
     } catch (err) {
       if (!isFsError(err)) throw err
       if (!isEnoent(err)) return failed(target, err, OPEN_OUTPUT_EXIT)
@@ -421,24 +421,23 @@ export async function xxdGeneric(
   paths: PathSpec[],
   ctx: Context,
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
-  readBytes: ((p: PathSpec) => Promise<Uint8Array>) | null = null,
   writeBytes: ((p: PathSpec, data: ByteSource) => Promise<void>) | null = null,
   pwriteBytes: ((p: PathSpec, data: Uint8Array, offset: number) => Promise<void>) | null = null,
 ): Promise<[ByteSource | null, IOResult]> {
-  stream = stdinStream(stream, ctx.stdin, true)
+  const read = stdinStream(stream, ctx.stdin, true)
   const parsed = parseFlags(ctx.flags)
   if (paths.length > 2) throw extraOperandError(CommandName.XXD, paths[2]?.rawPath ?? '')
   const { seek, limit, uppercase, plain } = parsed
   let source: AsyncIterable<Uint8Array>
   let base = 0
   if (parsed.reverse) {
-    source = paths[0] !== undefined ? stream(paths[0]) : resolveSource(ctx.stdin)
+    source = paths[0] !== undefined ? read(paths[0]) : resolveSource(ctx.stdin)
     if (seek.offset !== 0 || (limit ?? 0) > 0) {
       const after = await past(source, Math.max(seek.offset, 0))
       source = limited(after ?? singleChunk(new Uint8Array()), limit !== 0 ? limit : null)
     }
   } else {
-    const found = await seeked(paths[0] ?? null, stream, ctx.stdin, seek, limit)
+    const found = await seeked(paths[0] ?? null, read, ctx.stdin, seek, limit)
     if (found === null) {
       return [null, new IOResult({ exitCode: CANNOT_SEEK_EXIT, stderr: ENC.encode(CANNOT_SEEK) })]
     }
@@ -451,7 +450,7 @@ export async function xxdGeneric(
   }
   const target = paths[1]
   if (target !== undefined && !isStdin(target)) {
-    return writeOutput(paths, source, readBytes, writeBytes, pwriteBytes, render, plain)
+    return writeOutput(paths, source, stream, writeBytes, pwriteBytes, render, plain)
   }
   const io = new IOResult()
   return [(await render()) ?? xxdReverseStream(source, io, plain), io]

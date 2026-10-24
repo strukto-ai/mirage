@@ -21,7 +21,7 @@ import { commandFiles, dirAwareStat, resolveOrEmpty } from '../files.ts'
 const cat: CommandFn = async (_accessor, paths, texts, ctx) => {
   const files = commandFiles(ctx, paths)
   const resolved = await resolveOrEmpty(files, paths)
-  return catGeneric(resolved, texts, ctx, dirAwareStat(files, ctx), files.readStream)
+  return catGeneric(resolved, texts, ctx, dirAwareStat(files, ctx), files.read)
 }
 
 export const BUILDER: GenericCommand = {

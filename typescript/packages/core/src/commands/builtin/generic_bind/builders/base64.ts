@@ -20,7 +20,7 @@ import { commandFiles, dirAwareStat, resolveOrEmpty } from '../files.ts'
 const base64: CommandFn = async (_accessor, paths, _texts, ctx) => {
   const files = commandFiles(ctx, paths)
   const resolved = await resolveOrEmpty(files, paths)
-  return base64Generic(resolved, ctx, files.readStream, dirAwareStat(files, ctx))
+  return base64Generic(resolved, ctx, files.read, dirAwareStat(files, ctx))
 }
 
 export const BUILDER: GenericCommand = {

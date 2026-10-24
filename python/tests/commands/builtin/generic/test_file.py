@@ -81,7 +81,7 @@ async def test_file_asks_a_ranged_read_for_the_header():
 
     async def read_range(path, *, offset, size):
         asked.append((offset, size))
-        return b"\x89PNG\r\n\x1a\n"
+        yield b"\x89PNG\r\n\x1a\n"
 
     out, _ = await file_cmd(
         [_spec("/x")],

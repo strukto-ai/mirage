@@ -82,7 +82,6 @@ from mirage.commands.cli.builtin.git.util import (
 )
 from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
-from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -292,7 +291,7 @@ async def tag(
             out.append(
                 f"Deleted tag '{name}' (was {short(sha, abbrev_for(repo))})\n"
             )
-        return yield_bytes("".join(out).encode()), IOResult(
+        return "".join(out).encode(), IOResult(
             exit_code=1 if err else 0, stderr="".join(err).encode()
         )
     if flags.listing or flags.lines is not None or filtered or not operands:
@@ -369,9 +368,10 @@ async def tag(
     await write_ref(vfs, location.commondir, ref.decode(), pointed)
     if was is None:
         return None, IOResult()
-    return yield_bytes(
-        f"Updated tag '{name}' (was {short(was, abbrev_for(repo))})\n".encode()
-    ), IOResult()
+    return (
+        f"Updated tag '{name}' (was {short(was, abbrev_for(repo))})\n".encode(),
+        IOResult(),
+    )
 
 
 def tag_read_only(

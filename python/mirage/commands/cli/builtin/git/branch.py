@@ -122,7 +122,6 @@ from mirage.commands.cli.builtin.git.util import (
 )
 from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
-from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
 from mirage.shell.bytes import decode_text
 from mirage.types import PathSpec
@@ -774,7 +773,7 @@ async def branch(
         )
         if fl.as_bool("quiet"):
             return None, IOResult()
-        return yield_bytes(deleted), IOResult()
+        return deleted, IOResult()
     if operands and not listing:
         tracking, warning = await _create(
             repo,
@@ -784,7 +783,7 @@ async def branch(
             head,
         )
         return (
-            yield_bytes(tracking.encode())
+            tracking.encode()
             if tracking and not fl.as_bool("quiet")
             else None,
             IOResult(stderr=warning.encode()),

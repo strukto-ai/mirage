@@ -81,8 +81,7 @@ export const BUILDER: GenericCommand = {
     const strategy: NativeCopy | PrimitiveCopy =
       !copies && writes
         ? {
-            readBytes: files.readBytes,
-            readStream: files.readStream,
+            read: files.read,
             write: files.write,
             mkdir: (p: PathSpec) => files.mkdir(p),
             readdir: files.readdir,

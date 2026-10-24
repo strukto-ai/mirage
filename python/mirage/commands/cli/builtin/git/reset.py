@@ -44,7 +44,6 @@ from mirage.commands.cli.builtin.git.util import (
 from mirage.commands.cli.builtin.git.worktree import UNTRACKED_NO, scan
 from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
-from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -171,6 +170,4 @@ async def reset(
     lines.extend(
         f"{letter}\t{path}" for path, letter in sorted(unstaged.items())
     )
-    return yield_bytes(
-        "".join(f"{line}\n" for line in lines).encode()
-    ), IOResult()
+    return "".join(f"{line}\n" for line in lines).encode(), IOResult()

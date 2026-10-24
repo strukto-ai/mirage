@@ -18,7 +18,6 @@ from mirage.accessor.slack import SlackAccessor
 from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
 from mirage.core.slack.pins import unpin_message as unpin_message_core
-from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -36,4 +35,4 @@ async def unpin_message(
     out = json.dumps(
         result, ensure_ascii=False, separators=(",", ":")
     ).encode()
-    return yield_bytes(out), IOResult()
+    return out, IOResult()

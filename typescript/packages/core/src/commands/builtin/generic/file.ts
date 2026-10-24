@@ -16,13 +16,13 @@ import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import type { FlagValue } from '../../spec/types.ts'
 import { operandStat } from '../utils/operands.ts'
-import { IOResult, type ByteSource } from '../../../io/types.ts'
+import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import {
   DEVICE_NUMBERS_KEY,
   FileType,
   type FileStat,
   type PathSpec,
-  type ReadRangeFn,
+  type ReadStreamFn,
 } from '../../../types.ts'
 import type { CommandFnResult, Context } from '../../config.ts'
 import { detectFileType, formatFileResult } from '../file_sniff.ts'
@@ -91,11 +91,11 @@ function specialDescription(s: FileStat, mime: boolean): string | null {
  */
 async function header(
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
-  readRange: ReadRangeFn | null,
+  readRange: ReadStreamFn<[PathSpec, number, number]> | null,
   p: PathSpec,
   signal?: AbortSignal,
 ): Promise<Uint8Array> {
-  if (readRange !== null) return readRange(p, 0, FILE_HEADER_BYTES)
+  if (readRange !== null) return materialize(readRange(p, 0, FILE_HEADER_BYTES))
   return readPrefix(stream(p), FILE_HEADER_BYTES, signal)
 }
 
@@ -104,7 +104,7 @@ export async function fileGeneric(
   ctx: Context,
   stat: (p: PathSpec) => Promise<FileStat>,
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
-  readRange: ReadRangeFn | null = null,
+  readRange: ReadStreamFn<[PathSpec, number, number]> | null = null,
 ): Promise<CommandFnResult> {
   if (paths.length === 0) {
     return [null, new IOResult({ exitCode: 1, stderr: ENC.encode('file: missing operand\n') })]

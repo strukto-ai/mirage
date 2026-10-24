@@ -122,8 +122,7 @@ async def _run(paths: list[str], *texts: str, **flags: FlagValue) -> tuple:
     source, io = await jq(
         [_path(p) for p in paths],
         *texts,
-        read_bytes=_read_bytes,
-        read_stream=_read_stream,
+        stream=_read_stream,
         **flags,
     )
     return await materialize(source) if source is not None else b"", io
@@ -453,8 +452,7 @@ async def test_a_parse_error_closes_the_input_it_stopped_in():
     source, io = await jq(
         [_path("/d/mid.json"), _path("/d/a.json")],
         ".",
-        read_bytes=_read_bytes,
-        read_stream=tracked,
+        stream=tracked,
     )
     assert await materialize(source) == b"1\n"
     assert io.exit_code == 5
@@ -477,8 +475,7 @@ async def test_a_run_reads_no_further_than_its_input_takes():
     source, io = await jq(
         [_path("/d/live.json")],
         "input",
-        read_bytes=_read_bytes,
-        read_stream=_live(b"[1 2]\n"),
+        stream=_live(b"[1 2]\n"),
         null_input=True,
     )
     assert await asyncio.wait_for(materialize(source), 5) == b""
@@ -490,8 +487,7 @@ async def test_a_run_reads_no_further_than_its_input_takes():
     source, io = await jq(
         [_path("/d/live.json")],
         "[., input]",
-        read_bytes=_read_bytes,
-        read_stream=_live(b"1\n2\n"),
+        stream=_live(b"1\n2\n"),
         compact_output=True,
     )
     assert await asyncio.wait_for(anext(source), 5) == b"[1,2]\n"
@@ -675,8 +671,7 @@ async def test_dash_flag_file_reads_the_backend_without_a_dispatcher(
     source, io = await jq(
         [],
         "$x",
-        read_bytes=_read_bytes,
-        read_stream=_read_stream,
+        stream=_read_stream,
         stdin=b"99\n",
         null_input=True,
         compact_output=True,
@@ -704,8 +699,7 @@ async def test_stdin_consumed_by_a_flag_file_is_not_replayed_as_input(
     source, io = await jq(
         paths,
         ".",
-        read_bytes=_read_bytes,
-        read_stream=_read_stream,
+        stream=_read_stream,
         stdin=yield_bytes(b"99\n") if streamed else b"99\n",
         **{option: value},
     )
@@ -719,7 +713,7 @@ async def _run_program_file(*words: str) -> tuple[bytes, IOResult]:
     bag = parse_to_kwargs(parsed)
     bag["from_file"] = _path(str(bag["from_file"]))
     source, io = await jq_generic(
-        [], parsed.texts(), Context(flags=bag), _read_bytes, _read_stream
+        [], parsed.texts(), Context(flags=bag), _read_stream
     )
     return (await materialize(source) if source is not None else b""), io
 

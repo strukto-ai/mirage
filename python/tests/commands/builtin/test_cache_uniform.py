@@ -102,8 +102,7 @@ async def test_generic_grep_reads_bytes_once_when_drained():
         Context(),
         readdir=_readdir,
         stat=_stat,
-        read_bytes=reader,
-        read_stream=None,
+        read=reader,
     )
     assert reader.calls == 0
     assert await materialize(out) == b"alpha\n"

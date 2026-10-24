@@ -64,7 +64,6 @@ from mirage.commands.cli.builtin.git.util import (
 )
 from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
-from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -195,7 +194,7 @@ async def switch_branch(
         attached = True
         if unborn:
             await set_head(vfs, location.gitdir, ref.decode())
-            return yield_bytes(b""), IOResult(
+            return b"", IOResult(
                 stderr=b""
                 if fl.as_bool("quiet")
                 else f"Switched to a new branch '{target}'\n".encode()

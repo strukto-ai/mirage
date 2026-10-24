@@ -1,6 +1,5 @@
 from collections.abc import (
     AsyncIterator,
-    Awaitable,
     Callable,
     Coroutine,
     Mapping,
@@ -38,7 +37,7 @@ from mirage.errors.posix import posix_phrase
 from mirage.errors.types import FsCondition
 from mirage.io.cooperative import chunks
 from mirage.io.spool import ByteSpool, spooled_pair
-from mirage.io.types import ByteSource, IOResult
+from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.io.writer import ByteWriter
 from mirage.runtime.types import DispatchFn, ShellFn
 from mirage.shell.bytes import (
@@ -48,7 +47,7 @@ from mirage.shell.bytes import (
     text_view,
 )
 from mirage.shell.join import shell_join
-from mirage.types import PathSpec
+from mirage.types import PathSpec, ReadStreamFn
 from mirage.workspace.files import Files
 
 STDIN_NAMES = frozenset({"-", "/dev/stdin"})
@@ -153,8 +152,7 @@ class AwkStreams:
 
     Args:
         operands (Sequence[PathSpec]): the operands as classified.
-        read_stream (Callable[..., AsyncIterator[bytes]]): the mount's
-            reader for an operand.
+        stream (ReadStreamFn): the mount's reader for an operand.
         stdin (ByteSource | None): awk's standard input.
         dispatch (DispatchFn | None): the workspace dispatcher.
         cwd (PathSpec): the directory relative names resolve against.
@@ -166,7 +164,7 @@ class AwkStreams:
     def __init__(
         self,
         operands: Sequence[PathSpec],
-        read_stream: Callable[..., AsyncIterator[bytes]],
+        stream: ReadStreamFn,
         stdin: ByteSource | None,
         dispatch: DispatchFn | None,
         cwd: PathSpec,
@@ -175,7 +173,7 @@ class AwkStreams:
     ) -> None:
         self.local = local
         self.operands = operands
-        self.read_stream = read_stream
+        self.stream = stream
         self.stdin = resolve_source(stdin)
         self.dispatch = dispatch
         self.cwd = cwd
@@ -202,7 +200,7 @@ class AwkStreams:
         path = PathSpec.from_str_path(name, cwd=self.cwd.virtual)
         await self.flush_output()
         stream = (
-            self.read_stream(path)
+            self.stream(path)
             if local or self.dispatch is None
             else caller_stream(self.dispatch, self.caller, path)
         )
@@ -374,8 +372,7 @@ async def awk_generic(
     texts: Sequence[str] = (),
     flags: Mapping[str, FlagValue] | None = None,
     *,
-    read_bytes: Callable[..., Awaitable[bytes]],
-    read_stream: Callable[..., AsyncIterator[bytes]],
+    stream: ReadStreamFn,
     stdin: ByteSource | None = None,
     dispatch: DispatchFn | None = None,
     cwd: PathSpec = ROOT_CWD,
@@ -396,10 +393,8 @@ async def awk_generic(
             -f supplied it).
         flags (Mapping[str, FlagValue] | None): raw flag kwargs from the
             dispatcher (F, v, f).
-        read_bytes (Callable[..., Awaitable[bytes]]): Whole-file reader used
-            for the -f program file.
-        read_stream (Callable[..., AsyncIterator[bytes]]): Streaming reader
-            for data files.
+        stream (ReadStreamFn): the mount's reader, for the -f program
+            files and the data files.
         stdin (ByteSource | None): Standard input.
         dispatch (DispatchFn | None): The workspace dispatcher that
             ``getline < file`` reads and output redirection writes
@@ -423,7 +418,7 @@ async def awk_generic(
         pieces: list[str] = []
         for prog in f.program_files:
             try:
-                raw = await read_bytes(prog)
+                raw = await materialize(stream(prog))
             except (FileNotFoundError, NotADirectoryError) as exc:
                 # GNU awk exits 2 when a -f program file cannot be opened.
                 raise UsageError(
@@ -446,7 +441,7 @@ async def awk_generic(
     # when the input reaches it. FILENAME reports the operand as typed.
     streams = AwkStreams(
         paths,
-        read_stream,
+        stream,
         stdin,
         dispatch,
         cwd,

@@ -18,7 +18,6 @@ from mirage.accessor.slack import SlackAccessor
 from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
 from mirage.core.slack.users import get_user_profile
-from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -32,4 +31,4 @@ async def member_info(
     fl = FlagView(ctx.flags, ctx.spec)
     user = await get_user_profile(accessor, fl.as_str("user") or "")
     out = json.dumps(user, ensure_ascii=False, separators=(",", ":")).encode()
-    return yield_bytes(out), IOResult()
+    return out, IOResult()

@@ -20,7 +20,7 @@ import { commandFiles, resolveOrEmpty } from '../files.ts'
 const jq: CommandFn = async (_accessor, paths, texts, ctx) => {
   const files = commandFiles(ctx, paths)
   const resolved = await resolveOrEmpty(files, paths)
-  return jqGeneric(resolved, texts, ctx, files.readStream)
+  return jqGeneric(resolved, texts, ctx, files.read)
 }
 
 export const BUILDER: GenericCommand = {

@@ -36,7 +36,7 @@ async def tsort(
     paths = await resolve_or_empty(files, paths)
     return await generic_tsort(
         paths,
-        read_bytes=files.read_bytes,
+        stream=files.read,
         stdin=ctx.stdin,
     )
 

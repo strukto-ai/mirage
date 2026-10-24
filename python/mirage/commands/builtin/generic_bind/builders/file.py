@@ -35,9 +35,9 @@ async def file(
         resolved,
         list(texts),
         ctx,
-        files.read_stream,
+        files.read,
         files.stat,
-        (files.read_range if files.answers("read_range") else None),
+        (files.read if files.answers("read_range") else None),
     )
 
 

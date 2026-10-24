@@ -89,7 +89,7 @@ async def split(
     )
     return await generic_split(
         paths,
-        read_stream=files.read_stream,
+        read_stream=files.read,
         write_bytes=write_bytes,
         stdin=ctx.stdin,
         lines_per_file=(

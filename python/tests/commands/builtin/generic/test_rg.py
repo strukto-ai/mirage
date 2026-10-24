@@ -47,8 +47,7 @@ async def test_rg_count_stdin_zero_exits_1_without_output():
         Context(flags={"count": True}),
         readdir=readdir,
         stat=stat,
-        read_bytes=rb,
-        read_stream=rs,
+        read=rs,
         stdin=b"bar\nbaz\n",
     )
     assert await _drain_async(output) == b""
@@ -136,8 +135,7 @@ async def test_rg_refuses_an_operand_the_walk_refused(operand, message):
             Context(),
             readdir=readdir,
             stat=stat,
-            read_bytes=rb,
-            read_stream=rs,
+            read=rs,
         )
         assert await _drain_async(output) == want
         assert io.stderr == said
@@ -161,8 +159,7 @@ async def test_rg_lone_operand_it_may_not_read_is_the_searchers_refusal():
         Context(),
         readdir=readdir,
         stat=stat,
-        read_bytes=rb,
-        read_stream=denied,
+        read=denied,
     )
     assert await _drain_async(output) == b""
     assert io.stderr == b"rg: locked.txt: Permission denied (os error 13)\n"
@@ -193,8 +190,7 @@ async def test_rg_not_a_directory_operand_keeps_the_others():
         Context(flags={"files_with_matches": True}),
         readdir=readdir_enotdir,
         stat=stat,
-        read_bytes=rb,
-        read_stream=rs,
+        read=rs,
     )
     decoded = (await _drain_async(output)).decode()
     assert decoded == "/real/b.txt\n"
@@ -235,8 +231,7 @@ async def _run(
         Context(flags=flags),
         readdir=readdir,
         stat=stat,
-        read_bytes=rb,
-        read_stream=rs,
+        read=rs,
         stdin=stdin,
     )
     return await _drain_async(output), io
@@ -426,8 +421,7 @@ async def _run_locked(paths: list[PathSpec], flags: dict):
         Context(flags=flags),
         readdir=readdir,
         stat=stat,
-        read_bytes=read_bytes,
-        read_stream=read_stream,
+        read=read_stream,
     )
     return await _drain_async(output), await _drain_async(io.stderr), io
 

@@ -14,12 +14,6 @@ def _spec(path: str) -> PathSpec:
 
 
 def _make_backend(files: dict[str, bytes]):
-    async def read_bytes(path):
-        key = path.virtual if isinstance(path, PathSpec) else path
-        if key not in files:
-            raise FileNotFoundError(key)
-        return files[key]
-
     async def read_stream(path):
         assert isinstance(path, PathSpec)
         key = path.virtual
@@ -27,7 +21,7 @@ def _make_backend(files: dict[str, bytes]):
             raise FileNotFoundError(key)
         yield files[key]
 
-    return read_bytes, read_stream
+    return read_stream
 
 
 async def _drain(stdout) -> bytes:
@@ -71,26 +65,24 @@ async def _drain(stdout) -> bytes:
 )
 @pytest.mark.asyncio
 async def test_awk_runs_the_program_files(f, files, data, expected):
-    rb, rs = _make_backend(files)
+    rs = _make_backend(files)
     output, _ = await awk_generic(
         [_spec(path) for path in data],
         (),
         {"f": f},
-        read_bytes=rb,
-        read_stream=rs,
+        stream=rs,
     )
     assert (await _drain(output)).decode() == expected
 
 
 @pytest.mark.asyncio
 async def test_awk_empty_fs_splits_characters():
-    rb, rs = _make_backend({})
+    rs = _make_backend({})
     output, _ = await awk_generic(
         [],
         ("{print $2}",),
         {"F": ""},
-        read_bytes=rb,
-        read_stream=rs,
+        stream=rs,
         stdin=b"abc\n",
     )
     assert (await _drain(output)).decode() == "b\n"
@@ -98,7 +90,7 @@ async def test_awk_empty_fs_splits_characters():
 
 @pytest.mark.asyncio
 async def test_awk_processes_all_files_with_continuous_nr():
-    rb, rs = _make_backend(
+    rs = _make_backend(
         {
             "/a.txt": b"one\ntwo\n",
             "/b.txt": b"three\n",
@@ -108,33 +100,30 @@ async def test_awk_processes_all_files_with_continuous_nr():
         [_spec("/a.txt"), _spec("/b.txt")],
         ("{print NR, $1}",),
         None,
-        read_bytes=rb,
-        read_stream=rs,
+        stream=rs,
     )
     assert (await _drain(output)).decode() == "1 one\n2 two\n3 three\n"
 
 
 @pytest.mark.asyncio
 async def test_awk_program_file_missing_raises_usage_error():
-    rb, rs = _make_backend({"/data.txt": b"x\n"})
+    rs = _make_backend({"/data.txt": b"x\n"})
     with pytest.raises(UsageError, match="No such file"):
         await awk_generic(
             [_spec("/data.txt")],
             (),
             {"f": _spec("/missing.awk")},
-            read_bytes=rb,
-            read_stream=rs,
+            stream=rs,
         )
 
 
 async def _run_stdin(program: str, stdin: bytes, flags=None) -> str:
-    rb, rs = _make_backend({})
+    rs = _make_backend({})
     output, _ = await awk_generic(
         [],
         (program,),
         flags,
-        read_bytes=rb,
-        read_stream=rs,
+        stream=rs,
         stdin=stdin,
     )
     return (await _drain(output)).decode()
@@ -154,11 +143,9 @@ async def test_awk_runs_a_program_on_stdin(program, stdin, expected):
 
 @pytest.mark.asyncio
 async def test_awk_without_a_program_raises_usage():
-    rb, rs = _make_backend({})
+    rs = _make_backend({})
     with pytest.raises(UsageError, match="usage"):
-        await awk_generic(
-            [], (), None, read_bytes=rb, read_stream=rs, stdin=b"a\n"
-        )
+        await awk_generic([], (), None, stream=rs, stdin=b"a\n")
 
 
 @pytest.mark.parametrize(
@@ -188,13 +175,12 @@ async def test_awk_syntax_errors_exit_2_naming_the_program_bytes(
 
 
 async def _run_io(program: str, stdin: bytes) -> tuple[str, int, bytes]:
-    rb, rs = _make_backend({})
+    rs = _make_backend({})
     output, io = await awk_generic(
         [],
         (program,),
         None,
-        read_bytes=rb,
-        read_stream=rs,
+        stream=rs,
         stdin=stdin,
     )
     out = (await _drain(output)).decode()
@@ -233,13 +219,12 @@ async def _chunked(parts: tuple[bytes, ...]) -> AsyncIterator[bytes]:
 )
 @pytest.mark.asyncio
 async def test_awk_rs_holds_a_record_across_chunks(parts, rs, expected):
-    rb, read_stream = _make_backend({})
+    read_stream = _make_backend({})
     output, _ = await awk_generic(
         [],
         ('{printf "%s|", $0}',),
         {"v": [f"RS={rs}"]},
-        read_bytes=rb,
-        read_stream=read_stream,
+        stream=read_stream,
         stdin=_chunked(parts),
     )
     assert (await _drain(output)).decode() == expected
@@ -247,13 +232,12 @@ async def test_awk_rs_holds_a_record_across_chunks(parts, rs, expected):
 
 @pytest.mark.asyncio
 async def test_awk_rs_paragraph_separator_is_the_whole_newline_run():
-    rb, read_stream = _make_backend({})
+    read_stream = _make_backend({})
     output, _ = await awk_generic(
         [],
         ('{printf "%s|", $0; RS="\\n"}',),
         {"v": ["RS="]},
-        read_bytes=rb,
-        read_stream=read_stream,
+        stream=read_stream,
         stdin=_chunked((b"a\n\n", b"\nb\n")),
     )
     assert (await _drain(output)).decode() == "a|b|"

@@ -61,7 +61,7 @@ from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.io.yield_budget import YieldBudget
 from mirage.runtime.types import DispatchFn
-from mirage.types import PathSpec
+from mirage.types import PathSpec, ReadStreamFn
 
 INDENT_MIN = -1
 INDENT_MAX = 7
@@ -673,8 +673,7 @@ async def jq_generic(
     paths: list[PathSpec],
     texts: list[str],
     ctx: Context,
-    read_bytes: Callable[..., Awaitable[bytes]],
-    read_stream: Callable[..., AsyncIterator[bytes]],
+    stream: ReadStreamFn,
 ) -> tuple[ByteSource | None, IOResult]:
     """Full-command jq entry; mirrors jqGeneric's (paths, texts, ctx).
 
@@ -686,8 +685,7 @@ async def jq_generic(
         paths,
         texts,
         ctx.flags,
-        read_bytes,
-        read_stream,
+        stream,
         ctx.stdin,
         dispatch_of(ctx),
     )
@@ -696,25 +694,21 @@ async def jq_generic(
 async def jq(
     paths: list[PathSpec],
     *texts: str,
-    read_bytes: Callable[..., Awaitable[bytes]],
-    read_stream: Callable[..., AsyncIterator[bytes]],
+    stream: ReadStreamFn,
     stdin: ByteSource | None = None,
     dispatch: DispatchFn | None = None,
     **flags: FlagValue,
 ) -> tuple[ByteSource | None, IOResult]:
     """jq over keyword flags, the historical shape; keywords keep no record
     of the order they were typed in (see jq_generic)."""
-    return await _jq(
-        paths, texts, flags, read_bytes, read_stream, stdin, dispatch
-    )
+    return await _jq(paths, texts, flags, stream, stdin, dispatch)
 
 
 async def _jq(
     paths: list[PathSpec],
     texts: Sequence[str],
     flags: Mapping[str, FlagValue],
-    read_bytes: Callable[..., Awaitable[bytes]],
-    read_stream: Callable[..., AsyncIterator[bytes]],
+    stream: ReadStreamFn,
     stdin: ByteSource | None,
     dispatch: DispatchFn | None,
 ) -> tuple[ByteSource | None, IOResult]:
@@ -725,14 +719,13 @@ async def _jq(
         texts (Sequence[str]): the text operands, program first unless -f
             gave it.
         flags (Mapping[str, FlagValue]): the flag bag.
-        read_bytes (Callable): byte reader for one path.
-        read_stream (Callable): chunk reader for one path.
+        stream (ReadStreamFn): chunk reader for one path.
         stdin (ByteSource | None): the invocation's stdin.
         dispatch (DispatchFn | None): the dispatcher a flag's file is read
             through.
     """
     fl = FlagView(flags, spec=SPECS["jq"])
-    read_input = stdin_stream(read_stream, stdin)
+    read_input = stdin_stream(stream, stdin)
 
     async def read_flag_file(path: PathSpec) -> bytes:
         # -f, --rawfile and --slurpfile route nothing (the executor's
@@ -743,7 +736,7 @@ async def _jq(
         if is_stdin(path, dash=False):
             return await materialize(read_input(path))
         if dispatch is None:
-            return await read_bytes(path)
+            return await materialize(stream(path))
         return await read_program_file("jq", path, dispatch)
 
     program_file = fl.raw("from_file")

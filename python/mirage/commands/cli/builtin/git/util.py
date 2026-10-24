@@ -34,7 +34,6 @@ from mirage.commands.config import Context
 from mirage.commands.spec.compile import compile_spec
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import CommandSpec
-from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 from mirage.workspace.files import Files
@@ -329,8 +328,8 @@ def fatal(exc: GitError) -> tuple[ByteSource | None, IOResult]:
     body = f"{exc}\n" if exc.prefix is None else f"{exc.prefix}: {exc}\n"
     data = body.encode()
     if exc.stream == STDOUT:
-        return yield_bytes(data), IOResult(exit_code=exc.code)
-    told = yield_bytes(exc.report.encode()) if exc.report else None
+        return data, IOResult(exit_code=exc.code)
+    told = exc.report.encode() if exc.report else None
     return told, IOResult(exit_code=exc.code, stderr=data)
 
 

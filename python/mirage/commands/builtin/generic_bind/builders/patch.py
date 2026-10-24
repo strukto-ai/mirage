@@ -21,7 +21,7 @@ from mirage.commands.builtin.generic_bind.files import (
     dir_aware_stat,
 )
 from mirage.commands.config import Context
-from mirage.io.types import ByteSource, IOResult
+from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.types import PathSpec
 
 
@@ -33,15 +33,13 @@ async def patch(
 ) -> tuple[ByteSource | None, IOResult]:
     files = command_files(ctx, paths)
     stat = dir_aware_stat(files, ctx)
-    read = files.read_bytes
 
     async def read_file(path: PathSpec) -> bytes:
         # Stat first, as GNU patch does: a directory is refused before it
         # is read, because a store whose read of a collection answers a
         # page (nextcloud) never raises for one.
         await stat(path)
-        data: bytes = await read(path)
-        return data
+        return await materialize(files.read(path))
 
     return await patch_generic(
         paths,

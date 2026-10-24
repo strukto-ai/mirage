@@ -186,7 +186,7 @@ export function stderrOf(errors: readonly string[]): Uint8Array | null {
 }
 
 function isPrimitiveCopy(strategy: CopyStrategy): strategy is PrimitiveCopy {
-  return 'readBytes' in strategy
+  return 'read' in strategy
 }
 
 // Whether an --update mode can skip or fail an individual entry. 'all'
@@ -835,12 +835,9 @@ async function duplicateForBackup(
     return true
   }
   const targetIsDir = await isDirectory(stat, target)
-  if ('readBytes' in strategy) {
+  if ('read' in strategy) {
     if (!targetIsDir) {
-      const data =
-        strategy.readStream === undefined
-          ? await strategy.readBytes(target)
-          : await primeStream(strategy.readStream(target))
+      const data = await primeStream(strategy.read(target))
       try {
         await strategy.write(backup, data)
       } finally {
@@ -1030,10 +1027,7 @@ async function copyEntry(
     await strategy.copy(src, dst)
   } catch (err) {
     if ((err as { code?: string }).code !== 'EXDEV' || copies === undefined) throw err
-    const data =
-      copies.relay.readStream === undefined
-        ? await copies.relay.readBytes(src)
-        : await primeStream(copies.relay.readStream(src))
+    const data = await primeStream(copies.relay.read(src))
     try {
       await copies.relay.write(dst, data)
     } finally {
@@ -1353,12 +1347,9 @@ export async function transferFile(
   let data: ByteSource
   const reading = { failed: false }
   try {
-    data =
-      strategy.readStream === undefined
-        ? await strategy.readBytes(src)
-        : await primeStream(strategy.readStream(src), () => {
-            reading.failed = true
-          })
+    data = await primeStream(strategy.read(src), () => {
+      reading.failed = true
+    })
   } catch (err) {
     if (!isFsError(err)) throw err
     errors.push(`${cmdName}: cannot open '${src.rawPath}' for reading: ${String(fsStrerror(err))}`)
@@ -1383,7 +1374,7 @@ export async function transferFile(
 // Copy sources to a destination, fanning out into a directory. NativeCopy
 // uses backend copy/find operations for an efficient same-store copy.
 // PrimitiveCopy handles cross-mount copies by walking via readdir/stat and
-// applying mkdir or write(readBytes(...)) to each entry. --update/--backup
+// applying mkdir or write(read(...)) to each entry. --update/--backup
 // force the per-entry native loop (a whole-tree dirCopy cannot honor
 // per-file decisions).
 export async function cpGeneric(

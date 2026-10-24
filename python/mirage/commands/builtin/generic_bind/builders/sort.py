@@ -35,7 +35,7 @@ async def sort(
     paths = await resolve_or_empty(files, paths)
     return await generic_sort(
         paths,
-        read_bytes=files.read_stream,
+        read=files.read,
         write_bytes=(files.write if files.answers("write") else None),
         stdin=ctx.stdin,
         flags=ctx.flags,

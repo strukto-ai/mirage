@@ -20,7 +20,7 @@ import type { PathSpec } from '../../../../../types.ts'
 import { refuseReveal } from '../../../generic_bind/files.ts'
 import { mvGeneric, parseFlags } from '../../mv.ts'
 import type { CrossResult, DispatchFn } from '../types.ts'
-import { flatten, readBytesOp, readdirOp, relayCopy, statOp } from '../utils.ts'
+import { flatten, readdirOp, relayCopy, statOp } from '../utils.ts'
 import type { FlagValue } from '../../../../spec/types.ts'
 import { FlagView } from '../../../../spec/flag_view.ts'
 import { specOf } from '../../../../spec/builtins.ts'
@@ -46,7 +46,6 @@ export async function runMv(
 ): Promise<CrossResult> {
   const flat = flatten(scopes)
   const stat = statOp(dispatch)
-  const readBytes = readBytesOp(dispatch)
   const readdir = readdirOp(dispatch)
   const write = async (p: PathSpec, data: ByteSource): Promise<void> => {
     await dispatch('write', p, [data])
@@ -66,8 +65,7 @@ export async function runMv(
     flat,
     stat,
     {
-      readBytes,
-      readStream: fileStreamOp(dispatch),
+      read: fileStreamOp(dispatch),
       write,
       mkdir,
       readdir,

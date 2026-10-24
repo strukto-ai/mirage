@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import AsyncIterator
+
 import pytest
 
 from mirage.commands.builtin.generic.cp import (
@@ -25,7 +27,7 @@ from mirage.commands.errors import UsageError
 from mirage.commands.spec import SPECS, parse_command, parse_to_kwargs
 from mirage.commands.spec.flag_view import FlagView
 from mirage.errors.fs import eacces, enotsup, walk_declined
-from mirage.io.types import IOResult
+from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.types import (
     LINK_TARGET_KEY,
     ContentType,
@@ -164,15 +166,15 @@ def _make_primitive(
     write_err = write_fails or {}
     readdir_err = readdir_fails or {}
 
-    async def read_bytes(p) -> bytes:
+    async def read(p) -> AsyncIterator[bytes]:
         if _key(p) in read_err:
             raise read_err[_key(p)]
-        return files[_key(p)]
+        yield files[_key(p)]
 
-    async def write(p, data: bytes) -> None:
+    async def write(p, data: ByteSource) -> None:
         if _key(p) in write_err:
             raise write_err[_key(p)]
-        files[_key(p)] = data
+        files[_key(p)] = await materialize(data)
 
     async def mkdir(p) -> None:
         dirs.add(_key(p))
@@ -189,7 +191,7 @@ def _make_primitive(
         return sorted(children)
 
     strategy = PrimitiveCopy(
-        read_bytes=read_bytes, write=write, mkdir=mkdir, readdir=readdir
+        read=read, write=write, mkdir=mkdir, readdir=readdir
     )
     return stat, strategy
 
@@ -797,17 +799,17 @@ async def test_failed_backup_restores_existing_link(native, failure, referent):
     async def read(path):
         if failure == "read" and path.virtual == "/dst":
             raise PermissionError("denied")
-        return files[path.virtual]
+        yield files[path.virtual]
 
     async def write(path, data):
         if path.virtual == "/dst~":
             if failure == "partial-write":
                 files[path.virtual] = b"partial"
             raise PermissionError("denied")
-        files[path.virtual] = data
+        files[path.virtual] = await materialize(data)
 
     async def copy(src, dst):
-        await write(dst, await read(src))
+        await write(dst, read(src))
 
     async def dispatch(op, path, **kwargs):
         if op == "unlink":
@@ -847,7 +849,7 @@ async def test_failed_backup_restores_existing_link(native, failure, referent):
         target_stat=target_stat,
     )
     primitive = PrimitiveCopy(
-        read_bytes=read, write=write, mkdir=readdir, readdir=readdir
+        read=read, write=write, mkdir=readdir, readdir=readdir
     )
     strategy = NativeCopy(copy=copy, find=find) if native else primitive
     _, io = await cp_generic(

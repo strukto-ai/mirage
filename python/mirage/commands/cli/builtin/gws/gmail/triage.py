@@ -22,7 +22,6 @@ from mirage.core.gmail.messages import (
     get_message_raw,
     list_messages,
 )
-from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -56,4 +55,4 @@ async def triage(
     out = json.dumps(
         summaries, ensure_ascii=False, separators=(",", ":")
     ).encode()
-    return yield_bytes(out), IOResult()
+    return out, IOResult()

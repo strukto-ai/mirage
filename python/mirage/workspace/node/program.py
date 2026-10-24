@@ -263,7 +263,7 @@ async def _run_program(
                 await failed_read(io, exc, last_exec)
                 stdout = None
             except Exception as exc:
-                existing = await materialize(io.stderr) or b""
+                existing = await materialize(io.stderr)
                 io.stderr = existing + encode_text(f"{exc}\n")
                 io.exit_code = 1
                 stdout = None

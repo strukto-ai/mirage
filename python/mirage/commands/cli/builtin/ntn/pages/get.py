@@ -22,7 +22,6 @@ from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
 from mirage.core.notion.normalize import extract_title
 from mirage.core.notion.pages import get_page, get_page_markdown
-from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -42,9 +41,7 @@ async def get(
     rendered = await get_page_markdown(line, page_id)
     page = await get_page(line, page_id)
     if fl.as_bool("json"):
-        return yield_bytes(
-            pretty_json({"markdown": rendered, "page": page})
-        ), IOResult()
+        return pretty_json({"markdown": rendered, "page": page}), IOResult()
     body = rendered.get("markdown", "")
     text = f"---\ntitle: {extract_title(page)}\n---\n\n{body}"
-    return yield_bytes(text.encode()), IOResult()
+    return text.encode(), IOResult()

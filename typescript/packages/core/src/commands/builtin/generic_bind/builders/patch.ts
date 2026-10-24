@@ -14,6 +14,7 @@
 
 import { patchGeneric } from '../../generic/patch.ts'
 import type { CommandFn } from '../../../config.ts'
+import { materialize } from '../../../../io/types.ts'
 import type { GenericCommand } from '../adapter.ts'
 import { commandFiles, dirAwareStat, resolveOrEmpty } from '../files.ts'
 
@@ -29,7 +30,7 @@ const patch: CommandFn = async (_accessor, paths, _texts, ctx) => {
     ctx,
     async (p) => {
       await stat(p)
-      return files.readBytes(p)
+      return materialize(files.read(p))
     },
     (p, d) => files.write(p, d),
   )

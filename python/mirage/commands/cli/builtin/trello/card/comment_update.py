@@ -23,7 +23,6 @@ from mirage.commands.spec.flag_view import FlagView
 from mirage.core.render.json import compact_json_bytes
 from mirage.core.trello.client import comment_update as update_comment
 from mirage.core.trello.normalize import normalize_comment
-from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -49,4 +48,4 @@ async def comment_update(
         accessor, card_id=card_id, comment_id=comment_id, text=text
     )
     payload = normalize_comment(updated, card_id=card_id)
-    return yield_bytes(compact_json_bytes(payload)), IOResult()
+    return compact_json_bytes(payload), IOResult()

@@ -128,7 +128,7 @@ async def test_a_stream_hook_changes_only_the_streamed_read():
     read: list[bytes] = []
 
     async def capture(accessor, paths, texts, ctx):
-        stream = command_files(ctx, paths).read_stream
+        stream = command_files(ctx, paths).read
         read.extend([chunk async for chunk in stream(paths[0])])
         return None, IOResult()
 

@@ -37,7 +37,7 @@ async def base64(
         resolved,
         list(texts),
         ctx,
-        files.read_stream,
+        files.read,
         dir_aware_stat(files, ctx),
     )
 

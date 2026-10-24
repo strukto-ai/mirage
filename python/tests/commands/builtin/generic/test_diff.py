@@ -54,7 +54,7 @@ async def test_two_stdin_operands_are_one_file():
 
     out, io = await diff(
         [DASH, DEV_STDIN],
-        read_bytes=unread,
+        stream=unread,
         readdir_fn=_readdir,
         stat_fn=_stat,
         flags=DiffFlags(),
@@ -109,7 +109,7 @@ async def test_unified_headers_carry_each_side_mtime():
     pair = [_operand("a b", "/d/a b"), _operand("c", "/d/c")]
     out, io = await diff(
         pair,
-        read_bytes=read,
+        stream=read,
         readdir_fn=_readdir,
         stat_fn=stat,
         flags=DiffFlags(unified=True),
@@ -122,7 +122,7 @@ async def test_unified_headers_carry_each_side_mtime():
     ]
     out, _ = await diff(
         [pair[1], _operand("gone", "/d/gone")],
-        read_bytes=read,
+        stream=read,
         readdir_fn=_readdir,
         stat_fn=stat,
         flags=DiffFlags(unified=True, new_file=True, new_first=True),
@@ -153,7 +153,7 @@ async def test_unified_headers_read_the_time_the_namespace_keeps():
 
     out, _ = await diff(
         [_operand("a", "/d/a"), _operand("b", "/d/b")],
-        read_bytes=read,
+        stream=read,
         readdir_fn=_readdir,
         stat_fn=stat,
         flags=DiffFlags(unified=True),
@@ -183,7 +183,7 @@ async def test_unified_headers_read_in_the_tz_zone_with_every_digit():
 
     out, _ = await diff(
         [_operand("a", "/d/a"), _operand("gone", "/d/gone")],
-        read_bytes=read,
+        stream=read,
         readdir_fn=_readdir,
         stat_fn=missing,
         flags=DiffFlags(unified=True, new_file=True, new_first=True),

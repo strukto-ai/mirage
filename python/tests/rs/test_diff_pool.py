@@ -54,7 +54,7 @@ async def _standalone_diff_cleanup():
     try:
         await diff(
             [PathSpec.from_str_path(path, "") for path in files],
-            read_bytes=read,
+            stream=read,
             readdir_fn=_unexpected_metadata,
             stat_fn=_unexpected_metadata,
             flags=DiffFlags(),

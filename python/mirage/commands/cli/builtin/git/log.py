@@ -69,7 +69,6 @@ from mirage.commands.cli.builtin.git.util import (
 )
 from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
-from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult, Rows
 from mirage.shell.bytes import encode_text
 from mirage.types import PathSpec
@@ -400,7 +399,7 @@ async def log(
                 walk.parents,
             )
         )
-        return (yield_bytes(out) if out else None), IOResult()
+        return out or None, IOResult()
     shown_commits = (
         [*(step.commit for step in walk.steps if step.shown), *walk.boundary]
         if parsed.graph
@@ -444,6 +443,6 @@ async def log(
             out = (
                 b"" if parsed.pretty.kind in TERMINATED_KINDS else b"\n"
             ).join(blocks)
-        return yield_bytes(out) if out else None
+        return out or None
 
     return None, IOResult(rows=Rows(rows, render))

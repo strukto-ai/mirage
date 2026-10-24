@@ -18,7 +18,6 @@ from mirage.accessor.email import EmailAccessor
 from mirage.commands.cli.builtin.himalaya.deliver import deliver
 from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
-from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.types import PathSpec
 
@@ -50,6 +49,4 @@ async def send(
     out = json.dumps(
         result, ensure_ascii=False, separators=(",", ":")
     ).encode()
-    return yield_bytes(out), IOResult(
-        stderr=warning.encode() if warning else None
-    )
+    return out, IOResult(stderr=warning.encode() if warning else None)

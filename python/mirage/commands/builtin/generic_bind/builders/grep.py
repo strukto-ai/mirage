@@ -33,9 +33,7 @@ async def grep(
 ) -> tuple[ByteSource | None, IOResult]:
     files = command_files(ctx, paths)
     resolved = await files.resolve_glob(paths) if paths else []
-    read_bytes, read_stream = await search_reads(
-        files, "grep", resolved, texts, ctx
-    )
+    read = await search_reads(files, "grep", resolved, texts, ctx)
     readdir, stat = tree_walk(
         (files.read_tree if files.answers("read_tree") else None),
         files.readdir,
@@ -47,8 +45,7 @@ async def grep(
         ctx,
         readdir=readdir,
         stat=stat,
-        read_bytes=read_bytes,
-        read_stream=read_stream,
+        read=read,
         stdin=ctx.stdin,
     )
 

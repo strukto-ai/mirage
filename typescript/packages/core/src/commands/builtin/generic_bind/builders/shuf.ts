@@ -27,7 +27,7 @@ export const BUILDER: GenericCommand = {
       resolved,
       texts,
       ctx,
-      files.readStream,
+      files.read,
       // Only `-o` writes, so a read-only backend still serves plain shuf.
       // Requiring the write op up front would break every read-only backend.
       (p, data) => {

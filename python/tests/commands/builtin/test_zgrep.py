@@ -329,7 +329,7 @@ async def test_zgrep_keeps_partial_matches_and_continues_after_a_read_error(
         [PathSpec.from_str_path("/bad"), PathSpec.from_str_path("/good.gz")],
         ["hello"],
         flags,
-        read_bytes=read,
+        read=read,
     )
     assert await materialize(body) == out
     assert io.exit_code == 2

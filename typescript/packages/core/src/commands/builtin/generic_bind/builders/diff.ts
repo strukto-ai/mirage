@@ -20,7 +20,7 @@ import { commandFiles, resolveOrEmpty } from '../files.ts'
 const diff: CommandFn = async (_accessor, paths, _texts, ctx) => {
   const files = commandFiles(ctx, paths)
   const resolved = await resolveOrEmpty(files, paths)
-  return diffGeneric(resolved, ctx, files.readStream, files.readdir, files.stat)
+  return diffGeneric(resolved, ctx, files.read, files.readdir, files.stat)
 }
 
 export const BUILDER: GenericCommand = {

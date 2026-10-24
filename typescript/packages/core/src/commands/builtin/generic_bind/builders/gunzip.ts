@@ -23,7 +23,7 @@ const gunzip: CommandFn = async (_accessor, paths, _texts, ctx) => {
   return gunzipGeneric(
     resolved,
     ctx,
-    files.readStream,
+    files.read,
     (p, d) => files.write(p, d),
     (p) => files.unlink(p),
     files.stat,

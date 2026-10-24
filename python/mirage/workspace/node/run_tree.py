@@ -194,8 +194,8 @@ async def run_command_tree(
     )
     if screen is not None:
         out, err = screen.drain()
-        stdout = out + (await materialize(stdout) or b"")
-        io.stderr = err + (await materialize(io.stderr) or b"") or None
+        stdout = out + (await materialize(stdout))
+        io.stderr = err + (await materialize(io.stderr)) or None
     # The boundary consultation: what pre_execute saw, the envelope's
     # producer facts, the output and each command's result become the
     # post_execute context; the built-in cap and any user policies
@@ -235,8 +235,8 @@ async def run_command_tree(
     )
     if screen is not None:
         screen.put_back(
-            await materialize(stdout) or b"",
-            await materialize(io.stderr) or b"",
+            await materialize(stdout),
+            await materialize(io.stderr),
         )
         stdout = io.stderr = None
     io.stdout = stdout

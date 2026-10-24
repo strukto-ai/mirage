@@ -32,7 +32,6 @@ from mirage.core.notion.pages import (
     get_database,
     query_data_source_page,
 )
-from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import JsonValue, PathSpec
 from mirage.workspace.files import Files
@@ -171,7 +170,7 @@ async def query(
     source_id = str(data_source.get("id", ""))
     result = await query_data_source_page(line, source_id, body)
     if fl.as_bool("json"):
-        return yield_bytes(pretty_json(result)), IOResult()
+        return pretty_json(result), IOResult()
 
     # Columns are the property names the returned rows actually carry, in
     # alphabetical order, not the data source's whole schema. Upstream
@@ -188,7 +187,7 @@ async def query(
         props = row.get("properties") or {}
         cells = [property_cell(props.get(name)) for name in columns]
         lines.append("\t".join([str(row.get("id", "")), *cells]) + "\n")
-    out = yield_bytes("".join(lines).encode())
+    out = "".join(lines).encode()
     if result.get("has_more") and result.get("next_cursor"):
         notice = (
             "\nMore results available. Use --start-cursor "

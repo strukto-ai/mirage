@@ -79,7 +79,7 @@ async def _stderr(io: IOResult) -> bytes:
 async def test_the_input_is_named_as_typed_and_quoted_when_it_needs_it():
     _, io = await sort_generic(
         [_spec("/data/no such.txt", "no such.txt")],
-        read_bytes=_reader(
+        read=_reader(
             {"/data/no such.txt": FileNotFoundError("/data/no such.txt")}
         ),
         flags={},
@@ -96,7 +96,7 @@ async def test_the_first_input_to_fail_its_access_check_ends_the_run():
     }
     _, io = await sort_generic(
         [_spec("/data/m1"), _spec("/data/m2")],
-        read_bytes=_reader(files),
+        read=_reader(files),
         flags={},
     )
     assert await _stderr(io) == (
@@ -115,7 +115,7 @@ async def test_the_first_input_to_fail_its_access_check_ends_the_run():
 async def test_a_closed_stdin_fails_where_gnu_first_touches_it(flags, verb):
     _, io = await sort_generic(
         [],
-        read_bytes=_unused_read_bytes,
+        read=_unused_read_bytes,
         stdin=unreadable_stdin(),
         flags=flags,
     )
@@ -136,7 +136,7 @@ async def test_a_closed_stdin_fails_where_gnu_first_touches_it(flags, verb):
 async def test_check_refuses_an_output_by_its_own_letter(flags, mode):
     flags = {**flags, "output": [_spec("/data/out.txt")]}
     _, io = await sort_generic(
-        [], read_bytes=_unused_read_bytes, stdin=b"b\na\n", flags=flags
+        [], read=_unused_read_bytes, stdin=b"b\na\n", flags=flags
     )
     assert await _stderr(io) == (
         f"sort: options '-{mode}o' are incompatible\n".encode()
@@ -148,7 +148,7 @@ async def test_check_refuses_an_output_by_its_own_letter(flags, mode):
 async def test_a_second_operand_outranks_the_output_and_names_the_mode():
     _, io = await sort_generic(
         [_spec("/data/a"), _spec("/data/b")],
-        read_bytes=_unused_read_bytes,
+        read=_unused_read_bytes,
         flags={"C": True, "output": [_spec("/data/out.txt")]},
     )
     assert await _stderr(io) == (
@@ -213,7 +213,7 @@ _MIXED = {"numeric_sort": True, "general_numeric_sort": True}
 async def test_the_option_loop_outranks_incompatible_orderings(flags, refusal):
     _, io = await sort_generic(
         [],
-        read_bytes=_unused_read_bytes,
+        read=_unused_read_bytes,
         stdin=b"a\n",
         flags={**_MIXED, **flags},
     )
@@ -232,9 +232,7 @@ async def test_the_option_loop_outranks_incompatible_orderings(flags, refusal):
 async def test_incompatible_orderings_outrank_the_operands(paths, flags):
     _, io = await sort_generic(
         [_spec(path) for path in paths],
-        read_bytes=_reader(
-            {"/data/missing": FileNotFoundError("/data/missing")}
-        ),
+        read=_reader({"/data/missing": FileNotFoundError("/data/missing")}),
         flags={**_MIXED, **flags},
     )
     assert await _stderr(io) == b"sort: options '-gn' are incompatible\n"
@@ -245,13 +243,13 @@ async def test_incompatible_orderings_outrank_the_operands(paths, flags):
 async def test_merge_trusts_its_inputs_and_never_reorders_one():
     stdout, _ = await sort_generic(
         [_spec("/data/in.txt")],
-        read_bytes=_reader({"/data/in.txt": b"b\na\n"}),
+        read=_reader({"/data/in.txt": b"b\na\n"}),
         flags={"merge": True},
     )
     assert await materialize(stdout) == b"b\na\n"
     stdout, _ = await sort_generic(
         [_spec("/data/s1"), _spec("/data/s2")],
-        read_bytes=_reader({"/data/s1": b"c\na\n", "/data/s2": b"b\n"}),
+        read=_reader({"/data/s1": b"c\na\n", "/data/s2": b"b\n"}),
         flags={"merge": True},
     )
     assert await materialize(stdout) == b"b\nc\na\n"
@@ -263,7 +261,7 @@ WORDS = ["b", "a", "B", "10", "9", "c x", "a y", "a x"]
 async def _sorted(lines, flags):
     stdout, result = await sort_generic(
         [_spec("/data/in.txt")],
-        read_bytes=_reader({"/data/in.txt": "\n".join(lines).encode()}),
+        read=_reader({"/data/in.txt": "\n".join(lines).encode()}),
         flags=flags,
     )
     assert result.exit_code == 0
@@ -309,13 +307,13 @@ async def test_long_records_sort_as_one_sort(monkeypatch):
 async def test_each_input_ends_its_last_record():
     stdout, _ = await sort_generic(
         [_spec("/data/a"), _spec("/data/b")],
-        read_bytes=_reader({"/data/a": b"c", "/data/b": b"b\na"}),
+        read=_reader({"/data/a": b"c", "/data/b": b"b\na"}),
         flags={},
     )
     assert await materialize(stdout) == b"a\nb\nc\n"
     stdout, _ = await sort_generic(
         [_spec("/data/a")],
-        read_bytes=_reader({"/data/a": b"b\na"}),
+        read=_reader({"/data/a": b"b\na"}),
         flags={"merge": True},
     )
     assert await materialize(stdout) == b"b\na\n"
@@ -325,7 +323,7 @@ async def test_each_input_ends_its_last_record():
 async def test_bytes_that_are_not_utf8_come_back_unchanged():
     stdout, _ = await sort_generic(
         [_spec("/data/a")],
-        read_bytes=_reader({"/data/a": b"\xff\nb\n\xc3\xa9\n"}),
+        read=_reader({"/data/a": b"\xff\nb\n\xc3\xa9\n"}),
         flags={},
     )
     assert await materialize(stdout) == b"b\n\xc3\xa9\n\xff\n"
@@ -335,7 +333,7 @@ async def test_bytes_that_are_not_utf8_come_back_unchanged():
 async def test_check_names_the_disordered_record():
     _, result = await sort_generic(
         [_spec("/data/a")],
-        read_bytes=_reader({"/data/a": b"a\nc\nb\n"}),
+        read=_reader({"/data/a": b"a\nc\nb\n"}),
         flags={"c": True},
     )
     assert result.exit_code == 1
@@ -352,7 +350,7 @@ async def test_external_sort_preserves_stability_across_spill_and_merge_levels(
     flags = {"key": ["1,1"], "stable": True}
     stdout, result = await sort_generic(
         [],
-        read_bytes=_unused_read_bytes,
+        read=_unused_read_bytes,
         stdin=("\n".join(lines) + "\n").encode(),
         flags=flags,
     )

@@ -26,7 +26,7 @@ const split: CommandFn = async (_accessor, paths, _texts, ctx) => {
   // that owns it. Mirrors the Python builder.
   const dispatch = dispatchOf(ctx)
   if (dispatch === undefined) throw new TypeError('split: no workspace files')
-  return splitGeneric(resolved, ctx, files.readStream, async (p, d) => {
+  return splitGeneric(resolved, ctx, files.read, async (p, d) => {
     await dispatch('write', p, [d])
   })
 }

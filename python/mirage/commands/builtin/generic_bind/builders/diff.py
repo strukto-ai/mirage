@@ -33,7 +33,7 @@ async def diff(
         resolved,
         list(texts),
         ctx,
-        files.read_bytes,
+        files.read,
         files.readdir,
         files.stat,
     )

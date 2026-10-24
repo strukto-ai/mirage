@@ -26,10 +26,10 @@ from mirage.io.stream import (
     prime_stream,
     yield_bytes,
 )
-from mirage.io.types import ByteSource, IOResult
+from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.rs.errors import StreamRefusal
 from mirage.rs.stream import open_stream, run_stream, stream_output_chunks
-from mirage.types import JsonValue, PathSpec, ReadBytesFn, ReadStreamFn
+from mirage.types import JsonValue, PathSpec, ReadStreamFn
 
 # xxd's exit for an OUTFILE it cannot open, for an INFILE it cannot seek
 # where -s says, and for a dump that seeks backwards on a stream (vim's
@@ -310,8 +310,7 @@ async def _seeked(
 async def xxd(
     paths: list[PathSpec],
     *,
-    read_stream: Callable[..., AsyncIterator[bytes]],
-    read_bytes: ReadBytesFn | None = None,
+    stream: ReadStreamFn,
     write_bytes: Callable[..., Awaitable[None]] | None = None,
     pwrite_bytes: Callable[..., Awaitable[None]] | None = None,
     stdin: ByteSource | None = None,
@@ -335,8 +334,7 @@ async def xxd(
 
     Args:
         paths (list[PathSpec]): INFILE and OUTFILE, either one ``-``.
-        read_stream (Callable): reads INFILE.
-        read_bytes (ReadBytesFn | None): reads OUTFILE for ``-r`` when
+        stream (ReadStreamFn): reads INFILE, and OUTFILE for ``-r`` when
             there is no ``pwrite_bytes``.
         write_bytes (Callable | None): writes OUTFILE.
         pwrite_bytes (Callable | None): writes into OUTFILE at an offset.
@@ -349,7 +347,7 @@ async def xxd(
             CommandName.XXD, paths[2].raw_path or paths[2].virtual
         )
     seek = seek or XxdSeek()
-    read = stdin_stream(read_stream, stdin, sole=True)
+    read = stdin_stream(stream, stdin, sole=True)
     base = 0
     if reverse:
         source: AsyncIterator[bytes] = (
@@ -376,7 +374,7 @@ async def xxd(
         return await _write_output(
             paths,
             source,
-            read_bytes,
+            stream,
             write_bytes,
             pwrite_bytes,
             reverse=reverse,
@@ -397,7 +395,7 @@ async def xxd(
 async def _write_output(
     paths: list[PathSpec],
     source: AsyncIterator[bytes],
-    read_bytes: ReadBytesFn | None,
+    stream: ReadStreamFn,
     write_bytes: Callable[..., Awaitable[None]] | None,
     pwrite_bytes: Callable[..., Awaitable[None]] | None,
     *,
@@ -416,7 +414,7 @@ async def _write_output(
     Args:
         paths (list[PathSpec]): INFILE and OUTFILE.
         source (AsyncIterator[bytes]): INFILE's bytes, limits applied.
-        read_bytes (ReadBytesFn | None): reads OUTFILE for ``-r``.
+        stream (ReadStreamFn): reads OUTFILE for ``-r``.
         write_bytes (Callable | None): writes OUTFILE.
         pwrite_bytes (Callable | None): writes into OUTFILE at an offset.
         reverse (bool): revert a dump instead of making one.
@@ -469,7 +467,7 @@ async def _write_output(
         return None, IOResult()
     if reverse:
         try:
-            existing = await read_bytes(target) if read_bytes else b""
+            existing = await materialize(stream(target))
         except FileNotFoundError:
             existing = b""
         except FS_ERRORS as exc:
@@ -577,16 +575,14 @@ async def xxd_generic(
     paths: list[PathSpec],
     texts: list[str],
     ctx: Context,
-    read_stream: ReadStreamFn,
-    read_bytes: ReadBytesFn | None = None,
+    stream: ReadStreamFn,
     write_bytes: Callable[..., Awaitable[None]] | None = None,
     pwrite_bytes: Callable[..., Awaitable[None]] | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     parsed = parse_flags(ctx.flags)
     return await xxd(
         paths,
-        read_stream=read_stream,
-        read_bytes=read_bytes,
+        stream=stream,
         write_bytes=write_bytes,
         pwrite_bytes=pwrite_bytes,
         stdin=ctx.stdin,

@@ -36,8 +36,7 @@ async def jq(
         paths,
         texts,
         ctx,
-        files.read_bytes,
-        files.read_stream,
+        files.read,
     )
 
 

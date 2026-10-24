@@ -1103,9 +1103,7 @@ async def _handle_redirect(
                     _redirect_failure(file.scope, exc), failed_file=file
                 )
                 if out:
-                    routed.append(
-                        (Channel.STDOUT, await materialize(out) or b"")
-                    )
+                    routed.append((Channel.STDOUT, await materialize(out)))
                 diagnostic = await error.materialize_stderr()
                 if diagnostic:
                     routed.append((Channel.STDERR, diagnostic))

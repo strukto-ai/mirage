@@ -358,7 +358,7 @@ async def _one_stdin_twice(
             "skip": [0, 0],
         },
     )
-    held = await materialize(io.stderr) if io.stderr is not None else b""
+    held = await materialize(io.stderr)
     io.stderr = held + b"cmp: -: Bad file descriptor\n"
     io.exit_code = 2
     return stdout, io

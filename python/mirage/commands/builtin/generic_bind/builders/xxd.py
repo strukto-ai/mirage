@@ -37,8 +37,7 @@ async def xxd(
         resolved,
         list(texts),
         ctx,
-        files.read_stream,
-        files.read_bytes,
+        files.read,
         files.write,
         (files.pwrite if files.answers("pwrite") else None),
     )

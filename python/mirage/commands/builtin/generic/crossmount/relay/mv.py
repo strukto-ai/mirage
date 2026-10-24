@@ -73,8 +73,7 @@ async def run_mv(
         flat_scopes(scopes),
         stat=primitives["stat"],
         strategy=PrimitiveMove(
-            read_bytes=primitives["read_bytes"],
-            read_stream=primitives["read_stream"],
+            read=primitives["read_stream"],
             write=primitives["write"],
             mkdir=primitives["mkdir"],
             readdir=primitives["readdir"],

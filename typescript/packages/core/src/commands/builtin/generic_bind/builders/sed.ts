@@ -44,7 +44,7 @@ export const BUILDER: GenericCommand = {
     const usingF = fl.asPaths('f').length > 0
     const operands = usingE || usingF ? [...positionalAsPaths(texts, ctx), ...paths] : paths
     const resolved = operands.length > 0 ? await files.resolveGlob(operands) : operands
-    return sedGeneric(resolved, texts, ctx, files.readStream, (p, d) => {
+    return sedGeneric(resolved, texts, ctx, files.read, (p, d) => {
       if (!files.answers('write')) {
         return Promise.reject(new Error('sed: -i not supported on this backend: Permission denied'))
       }

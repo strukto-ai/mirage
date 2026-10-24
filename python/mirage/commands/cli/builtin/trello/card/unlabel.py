@@ -20,7 +20,6 @@ from mirage.commands.spec.flag_view import FlagView
 from mirage.core.render.json import compact_json_bytes
 from mirage.core.trello.client import card_remove_label
 from mirage.core.trello.normalize import normalize_card
-from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -38,4 +37,4 @@ async def unlabel(
     card = await card_remove_label(
         accessor, card_id=card_id, label_id=label_id
     )
-    return yield_bytes(compact_json_bytes(normalize_card(card))), IOResult()
+    return compact_json_bytes(normalize_card(card)), IOResult()

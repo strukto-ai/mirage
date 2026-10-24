@@ -49,7 +49,7 @@ async def csplit(
         paths,
         texts,
         ctx,
-        read_bytes=files.read_stream,
+        read=files.read,
         write_bytes=(
             transfer_primitives(dispatch)["write"]
             if dispatch is not None

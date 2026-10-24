@@ -247,12 +247,13 @@ function makePrimitive(files: Map<string, Uint8Array>, dirs: Set<string>, fails:
   }
   const readErr = fails.readFails ?? new Map<string, Error>()
   const writeErr = fails.writeFails ?? new Map<string, Error>()
-  const readBytes = (p: PathSpec): Promise<Uint8Array> => {
+  const read = async function* (p: PathSpec): AsyncIterable<Uint8Array> {
+    await Promise.resolve()
     const err = readErr.get(key(p))
-    if (err !== undefined) return Promise.reject(err)
+    if (err !== undefined) throw err
     const data = files.get(key(p))
-    if (data === undefined) return Promise.reject(enoent(key(p)))
-    return Promise.resolve(data)
+    if (data === undefined) throw enoent(key(p))
+    yield data
   }
   const write = async (p: PathSpec, data: ByteSource): Promise<void> => {
     const err = writeErr.get(key(p))
@@ -272,7 +273,7 @@ function makePrimitive(files: Map<string, Uint8Array>, dirs: Set<string>, fails:
     }
     return Promise.resolve([...children].sort())
   }
-  const strategy: PrimitiveCopy = { readBytes, write, mkdir, readdir }
+  const strategy: PrimitiveCopy = { read, write, mkdir, readdir }
   return { stat, strategy }
 }
 
@@ -885,11 +886,12 @@ for (const native of [false, true]) {
         const original = new Map(files)
         const links = new Map([['/dst~', referent]])
         const { stat, find } = makeBackend(files, new Set())
-        const read = (path: PathSpec): Promise<Uint8Array> => {
+        const read = async function* (path: PathSpec): AsyncIterable<Uint8Array> {
+          await Promise.resolve()
           if (failure === 'read' && path.virtual === '/dst') throw eacces(path.virtual)
           const data = files.get(path.virtual)
           if (data === undefined) throw enoent(path.virtual)
-          return Promise.resolve(data)
+          yield data
         }
         const write = async (path: PathSpec, data: ByteSource): Promise<void> => {
           if (path.virtual === '/dst~') {
@@ -900,7 +902,7 @@ for (const native of [false, true]) {
           return Promise.resolve()
         }
         const primitive: PrimitiveCopy = {
-          readBytes: read,
+          read,
           write,
           mkdir: (path) => {
             expect(files.has(path.virtual)).toBe(false)
@@ -946,7 +948,7 @@ for (const native of [false, true]) {
           },
         }
         const strategy = native
-          ? { copy: async (src: PathSpec, dst: PathSpec) => write(dst, await read(src)), find }
+          ? { copy: (src: PathSpec, dst: PathSpec) => write(dst, read(src)), find }
           : primitive
         const [, io] = await cpGeneric(
           [spec('/src'), spec('/dst')],
