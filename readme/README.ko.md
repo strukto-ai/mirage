@@ -38,6 +38,15 @@
   <a href="./README.ko.md"><img alt="README 한국어" src="https://img.shields.io/badge/%ED%95%9C%EA%B5%AD%EC%96%B4-d9d9d9"></a>
 </p>
 
+<p align="center">
+  <a href="https://agentvfs.org">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="../assets/agentvfs-banner-dark.svg">
+      <img src="../assets/agentvfs-banner-light.svg" width="900" alt="AgentVFS: AI 에이전트를 위한 개방형, 벤더 중립 가상 파일 시스템 인터페이스" />
+    </picture>
+  </a>
+</p>
+
 Mirage는 **AI 에이전트를 위한 가상 터미널**입니다. 가상 파일 시스템은 폭넓은 데이터 컨텍스트를 제공하고, 가상화된 CLI는 에이전트에게 더 유연한 도구 사용을 주며, 동적 런타임은 기반 인프라 비용을 줄이고 토큰을 더 아낍니다. 에이전트의 동작은 물론 무엇을 볼 수 있는지까지 세밀하게 제어하여 최고의 보안을 제공합니다. 이 요소들이 함께 하나의 가상화된 터미널을 이루어 최고의 에이전트 성능과 비용 효율, 보안을 제공합니다.
 
 ```python

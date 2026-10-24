@@ -40,6 +40,15 @@
   <a href="https://github.com/strukto-ai/mirage/blob/main/readme/README.ko.md"><img alt="README 한국어" src="https://img.shields.io/badge/%ED%95%9C%EA%B5%AD%EC%96%B4-F0ECE2"></a>
 </p>
 
+<p align="center">
+  <a href="https://agentvfs.org">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/strukto-ai/mirage/main/assets/agentvfs-banner-dark.svg">
+      <img src="https://raw.githubusercontent.com/strukto-ai/mirage/main/assets/agentvfs-banner-light.svg" width="100%" alt="AgentVFS: the open, vendor-neutral virtual filesystem interface for AI agents" />
+    </picture>
+  </a>
+</p>
+
 Mirage is **a Virtual Terminal for AI Agents**. The virtual filesystem delivers broad data context, virtualized CLIs give an agent more flexibility on tool use, dynamic runtimes save underlying infrastructure cost and are more token efficient, and fine-grained control over an agent's actions and even over what it can see gives the best security. Together these parts form one virtualized terminal, giving the best agent performance, cost efficiency and security.
 
 <p align="center">

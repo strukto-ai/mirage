@@ -38,6 +38,15 @@
   <a href="./README.ko.md"><img alt="README 한국어" src="https://img.shields.io/badge/%ED%95%9C%EA%B5%AD%EC%96%B4-d9d9d9"></a>
 </p>
 
+<p align="center">
+  <a href="https://agentvfs.org">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="../assets/agentvfs-banner-dark.svg">
+      <img src="../assets/agentvfs-banner-light.svg" width="900" alt="AgentVFS：開放、廠商中立的 AI Agent 虛擬檔案系統介面" />
+    </picture>
+  </a>
+</p>
+
 Mirage 是 **面向 AI Agent 的虛擬終端機**。虛擬檔案系統提供廣泛的資料脈絡，虛擬化 CLI 讓 Agent 在工具使用上更靈活，動態執行環境降低底層基礎設施成本並且更節省 token，而對 Agent 行為乃至其可見範圍的細粒度控制帶來最好的安全性。這些部分共同構成一個虛擬化終端機，帶來最好的 Agent 效能、成本效率與安全性。
 
 ```python
