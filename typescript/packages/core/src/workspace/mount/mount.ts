@@ -226,18 +226,6 @@ function taken(name: string, kwargs: OpKwargs): void {
 }
 
 /**
- * A read, honoring a byte window when one is asked for.
- *
- * A VFS that reads ranges natively fetches only the window, which is the
- * whole point on an object store: one ranged GET instead of the whole file.
- * Every other read is whole and sliced, which is the only meaningful
- * behavior for content that is rendered rather than stored. A zero-length
- * read is answered here rather than sent anywhere, and a window starting at
- * or past EOF answers empty, the POSIX answer, where an HTTP store refuses
- * with 416: normalizing here keeps the op's contract one thing whichever
- * path answers it. Mirrors Python's `_read_window`.
- */
-/**
  * A backend read's answer as a stream: a promise awaited on the first pull,
  * a stream passed through, bytes as one chunk. Mirrors Python's `_as_stream`.
  */
@@ -285,6 +273,18 @@ async function collected(
   return data
 }
 
+/**
+ * A read, honoring a byte window when one is asked for.
+ *
+ * A VFS that reads ranges natively fetches only the window, which is the
+ * whole point on an object store: one ranged GET instead of the whole file.
+ * Every other read is whole and sliced, which is the only meaningful
+ * behavior for content that is rendered rather than stored. A zero-length
+ * read is answered here rather than sent anywhere, and a window starting at
+ * or past EOF answers empty, the POSIX answer, where an HTTP store refuses
+ * with 416: normalizing here keeps the op's contract one thing whichever
+ * path answers it. Mirrors Python's `_read_window`.
+ */
 async function readWindow(
   read: ReadFn,
   ranges: boolean,
@@ -2121,16 +2121,12 @@ export class MountEntry {
   ): Promise<void> {
     await this.use(() =>
       source.use(() =>
-        runWithMountContext(
-          () =>
-            this.runWithWriteRevisions(async () => {
-              this.requireWritable('write', PathSpec.fromStrPath(dst), [])
-              const pending = this.vfs.copyFrom(source.vfs, source.scope(src), this.scope(dst))
-              onCall?.(pending)
-              await runWithTimeout(pending, this.opTimeout('copy'), 'copy')
-            }),
-          this.mountId,
-        ),
+        this.framed('copy', () => {
+          this.requireWritable('write', PathSpec.fromStrPath(dst), [])
+          const pending = this.vfs.copyFrom(source.vfs, source.scope(src), this.scope(dst))
+          onCall?.(pending)
+          return pending
+        }),
       ),
     )
   }
@@ -2143,20 +2139,23 @@ export class MountEntry {
    */
   async readMany(paths: readonly string[], limit: number): Promise<Map<string, Uint8Array>> {
     return this.use(() =>
-      runWithMountContext(
-        () =>
-          this.runWithWriteRevisions(() =>
-            runWithTimeout(
-              this.batchRead(
-                paths.map((p) => this.scope(p)),
-                limit,
-              ),
-              this.opTimeout('read'),
-              'read',
-            ),
-          ),
-        this.mountId,
+      this.framed('read', () =>
+        this.batchRead(
+          paths.map((p) => this.scope(p)),
+          limit,
+        ),
       ),
+    )
+  }
+
+  /**
+   * Run one backend call as `call` frames its own: in this mount's recording
+   * and write contexts, under the op's timeout. Mirrors Python's `_framed`.
+   */
+  private framed<T>(op: string, work: () => Promise<T>): Promise<T> {
+    return runWithMountContext(
+      () => this.runWithWriteRevisions(() => runWithTimeout(work(), this.opTimeout(op), op)),
+      this.mountId,
     )
   }
 
@@ -2189,19 +2188,11 @@ export class MountEntry {
     query: SearchQuery,
   ): Promise<[string, string][] | null> {
     return this.use(() =>
-      runWithMountContext(
-        () =>
-          this.runWithWriteRevisions(() =>
-            runWithTimeout(
-              this.vfs.searchMany(
-                paths.map((p) => this.scope(p)),
-                query,
-              ),
-              this.opTimeout('search'),
-              'search',
-            ),
-          ),
-        this.mountId,
+      this.framed('search', () =>
+        this.vfs.searchMany(
+          paths.map((p) => this.scope(p)),
+          query,
+        ),
       ),
     )
   }

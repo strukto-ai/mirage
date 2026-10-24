@@ -24,7 +24,7 @@ from mirage.core.disk.create import create as _create
 from mirage.core.disk.exists import exists as _exists
 from mirage.core.disk.mkdir import mkdir as _mkdir
 from mirage.core.disk.pwrite import pwrite as _pwrite
-from mirage.core.disk.read import read_range as _read_range
+from mirage.core.disk.read import read as _read
 from mirage.core.disk.readdir import readdir as _readdir
 from mirage.core.disk.rename import rename as _rename
 from mirage.core.disk.rm import rm_r as _rm_r
@@ -121,7 +121,7 @@ class DiskVFS(BaseVFS):
     ) -> ByteSource:
         if not offset and size is None:
             return _read_stream(self.accessor, path)
-        return await _read_range(self.accessor, path, offset, size)
+        return await _read(self.accessor, path, offset, size)
 
     async def stat(self, path: PathSpec) -> FileStat:
         return await _stat(self.accessor, path)

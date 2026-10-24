@@ -83,9 +83,9 @@ describe('streamed disk output', () => {
           closed = true
         }
       }
-      await expect(
-        write(accessor, spec('/file'), source(), false, undefined, atomic),
-      ).rejects.toBe(error)
+      await expect(write(accessor, spec('/file'), source(), false, undefined, atomic)).rejects.toBe(
+        error,
+      )
       expect(closed).toBe(true)
       expect(await readFile(target, 'utf8')).toBe(atomic ? 'original' : 'partial')
       expect(await readdir(root)).toEqual(['file'])

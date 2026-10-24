@@ -34,8 +34,8 @@ describe('opfs/append', () => {
   it('a target that is a directory is EISDIR', async () => {
     const accessor = makeMockAccessor()
     await mkdir(accessor, spec('/a'), true)
-    await expect(
-      append(accessor, spec('/a'), new TextEncoder().encode('x')),
-    ).rejects.toMatchObject({ code: 'EISDIR' })
+    await expect(append(accessor, spec('/a'), new TextEncoder().encode('x'))).rejects.toMatchObject(
+      { code: 'EISDIR' },
+    )
   })
 })

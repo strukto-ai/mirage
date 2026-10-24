@@ -88,7 +88,7 @@ from mirage.core.generic.rewrite import (
 )
 from mirage.errors.fs import ebusy, enotdir, enotsup
 from mirage.io.stream import OutputStream, close_quietly
-from mirage.io.types import ByteSource, CommandOutput, IOResult, materialize
+from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.observe.context import (
     RecordingScope,
     active_recorder,
@@ -156,7 +156,7 @@ logger = logging.getLogger(__name__)
 
 def _wrap_mount_streams(
     result: tuple[ByteSource | None, IOResult],
-    activity: Activity | None = None,
+    activity: Activity,
 ) -> tuple[ByteSource | None, IOResult]:
     """Keep the command's caller on the stream in ``result``, so the
     lazy backend body pulled after this frame exits records under the
@@ -165,14 +165,15 @@ def _wrap_mount_streams(
     Args:
         result: ``(stream, io)`` as returned by a command handler, inside
             the mount's command scope.
-        activity (Activity | None): the mount's activity, held until the
-            stream ends.
+        activity (Activity): the mount's activity, held until the stream
+            ends.
     """
     stream, io = result
     if stream is None or isinstance(stream, (bytes, bytearray)):
         return stream, io
-    wrapped = with_caller(with_host_io(stream), current_caller())
-    return (activity.hold(wrapped) if activity is not None else wrapped), io
+    return activity.hold(
+        with_caller(with_host_io(stream), current_caller())
+    ), io
 
 
 def _wrap_stream(result: Any, mount_id: str, activity: Activity) -> Any:
@@ -1383,19 +1384,11 @@ class MountEntry:
                     if cmd.write and self._is_user_command(cmd)
                     else None
                 ),
-                scope=self._streams,
+                scope=lambda result: _wrap_mount_streams(
+                    result, self.activity
+                ),
                 vfs=ctx.vfs,
             )
-
-    def _streams(self, result: CommandOutput) -> CommandOutput:
-        """Bind the command's caller (this mount's recorder and
-        revisions) and this mount's activity to an answer's stream,
-        which runs after the handler's frame is gone.
-
-        Args:
-            result (CommandOutput): the handler's ``(stream, io)``.
-        """
-        return _wrap_mount_streams(result, self.activity)
 
     async def run_leaf(
         self,
@@ -1468,7 +1461,9 @@ class MountEntry:
                             if handler.write and self._is_user_command(root)
                             else None
                         ),
-                        scope=self._streams,
+                        scope=lambda result: _wrap_mount_streams(
+                            result, self.activity
+                        ),
                         vfs=run_ctx.vfs,
                     )
 
@@ -2280,8 +2275,7 @@ class MountEntry:
         so reading a rendered form would store the rendering over the
         file. A VFS with no ``read`` of its own (gdocs, gsheets, gslides)
         stores the rendering, so its stored bytes are the renderer's.
-        TypeScript spells the same override ``readFile(path, {raw:
-        true})``.
+        TypeScript spells the same override ``read(path, {raw: true})``.
 
         Args:
             name (str): operation name (e.g. "read", "stat").
@@ -2476,18 +2470,12 @@ class MountEntry:
         """
         async with self.use(), source.use():
             self.require_writable("write", PathSpec.from_str_path(dst), ())
-            token = bind_caller(self._on_mount(current_caller()))
-            try:
-                with host_io():
-                    await run_with_timeout(
-                        self.vfs.copy_from(
-                            source.vfs, source._scope(src), self._scope(dst)
-                        ),
-                        self.op_timeout("copy"),
-                        "copy",
-                    )
-            finally:
-                reset_caller(token)
+            await self._framed(
+                "copy",
+                lambda: self.vfs.copy_from(
+                    source.vfs, source._scope(src), self._scope(dst)
+                ),
+            )
 
     async def search_many(
         self, paths: list[str], query: SearchQuery
@@ -2503,18 +2491,12 @@ class MountEntry:
             query (SearchQuery): the query and its options.
         """
         async with self.use():
-            token = bind_caller(self._on_mount(current_caller()))
-            try:
-                with host_io():
-                    return await run_with_timeout(
-                        self.vfs.search_many(
-                            [self._scope(p) for p in paths], query
-                        ),
-                        self.op_timeout("search"),
-                        "search",
-                    )
-            finally:
-                reset_caller(token)
+            return await self._framed(
+                "search",
+                lambda: self.vfs.search_many(
+                    [self._scope(p) for p in paths], query
+                ),
+            )
 
     async def read_many(
         self, paths: list[str], limit: int
@@ -2531,18 +2513,30 @@ class MountEntry:
             limit (int): the most bytes worth fetching for one file.
         """
         async with self.use():
-            token = bind_caller(self._on_mount(current_caller()))
-            try:
-                with host_io():
-                    return await run_with_timeout(
-                        self._read_many(
-                            [self._scope(p) for p in paths], limit
-                        ),
-                        self.op_timeout("read"),
-                        "read",
-                    )
-            finally:
-                reset_caller(token)
+            return await self._framed(
+                "read",
+                lambda: self._read_many(
+                    [self._scope(p) for p in paths], limit
+                ),
+            )
+
+    async def _framed(
+        self, op: str, work: Callable[[], Awaitable[Any]]
+    ) -> Any:
+        """Run one backend call as ``call`` frames its own: as the caller
+        on this mount (``_on_mount``), past the host-I/O patch, under the
+        op's timeout.
+
+        Args:
+            op (str): the op whose timeout bounds the call.
+            work (Callable[[], Awaitable[Any]]): starts the call.
+        """
+        token = bind_caller(self._on_mount(current_caller()))
+        try:
+            with host_io():
+                return await run_with_timeout(work(), self.op_timeout(op), op)
+        finally:
+            reset_caller(token)
 
     async def _read_many(
         self, scopes: list[PathSpec], limit: int

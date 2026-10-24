@@ -15,7 +15,7 @@
 import pytest
 
 from mirage.accessor.disk import DiskAccessor
-from mirage.core.disk.read import read, read_range
+from mirage.core.disk.read import read
 from mirage.observe.context import RecordingScope
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
@@ -67,7 +67,7 @@ async def test_read_with_glob_scope_and_prefix(tmp_path):
 async def test_read_range_seeks_instead_of_reading_the_whole_file(tmp_path):
     (tmp_path / "big.bin").write_bytes(bytes(range(256)))
     accessor = DiskAccessor(tmp_path)
-    result = await read_range(
+    result = await read(
         accessor,
         PathSpec(
             vfs_path=mount_key("/big.bin", "/disk"),
@@ -84,7 +84,7 @@ async def test_read_range_seeks_instead_of_reading_the_whole_file(tmp_path):
 async def test_read_range_without_a_size_runs_to_the_end(tmp_path):
     (tmp_path / "big.bin").write_bytes(bytes(range(256)))
     accessor = DiskAccessor(tmp_path)
-    result = await read_range(
+    result = await read(
         accessor,
         PathSpec(
             vfs_path=mount_key("/big.bin", "/disk"),
@@ -100,7 +100,7 @@ async def test_read_range_without_a_size_runs_to_the_end(tmp_path):
 async def test_read_range_past_the_end_is_empty(tmp_path):
     (tmp_path / "small.bin").write_bytes(b"abc")
     accessor = DiskAccessor(tmp_path)
-    result = await read_range(
+    result = await read(
         accessor,
         PathSpec(
             vfs_path=mount_key("/small.bin", "/disk"),
@@ -117,7 +117,7 @@ async def test_read_range_past_the_end_is_empty(tmp_path):
 async def test_read_range_missing_file_raises(tmp_path):
     accessor = DiskAccessor(tmp_path)
     with pytest.raises(FileNotFoundError):
-        await read_range(
+        await read(
             accessor,
             PathSpec(
                 vfs_path="missing.bin",
@@ -139,7 +139,7 @@ async def test_read_range_records_the_virtual_path(tmp_path):
     )
     scope = RecordingScope()
     try:
-        data = await read_range(DiskAccessor(tmp_path), spec, offset=1, size=3)
+        data = await read(DiskAccessor(tmp_path), spec, offset=1, size=3)
     finally:
         scope.close()
     assert data == b"ell"

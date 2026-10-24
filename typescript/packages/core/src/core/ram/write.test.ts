@@ -244,14 +244,7 @@ describe('streamed write', () => {
     accessor.store.files.set('/f', ENC.encode('old'))
     let release = (): void => undefined
     const hold = new Promise<void>((resolve) => (release = resolve))
-    const writing = write(
-      accessor,
-      mkPath('/f'),
-      quiet(['new'], hold),
-      false,
-      undefined,
-      true,
-    )
+    const writing = write(accessor, mkPath('/f'), quiet(['new'], hold), false, undefined, true)
     await settle()
     expect(DEC.decode(accessor.store.files.get('/f'))).toBe('old')
     release()
