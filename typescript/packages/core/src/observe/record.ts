@@ -14,6 +14,7 @@
 
 import { VFSName } from '../types.ts'
 import { underPath } from '../utils/key_prefix.ts'
+import type { Clock } from '../utils/clock.ts'
 
 // Ops whose record carries a token describing the bytes it moved, split
 // by direction: the file cache stores bytes from either `IOResult.reads`
@@ -209,14 +210,16 @@ export class OpRecord {
 }
 
 /**
- * A line's recording: its records, the mount serving them, and the
- * workspace ledger the line hands its records to when it ends (null for a
- * file call's own recording, which no other call joins).
+ * A line's recording: its records, the mount serving them, the workspace
+ * ledger the line hands its records to when it ends (null for a file call's
+ * own recording, which no other call joins), and the workspace clock every
+ * op recorded here is timed and stamped on.
  */
 export interface RecordingState {
   records: OpRecord[]
   mountId: string | null
   ledger: OpRecord[] | null
+  clock: Clock
 }
 
 /**

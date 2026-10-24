@@ -14,6 +14,7 @@
 
 import type { IOResult } from '../io/types.ts'
 import { utcDateFolder } from '../utils/dates.ts'
+import { SystemClock, type Clock } from '../utils/clock.ts'
 import {
   EVENT_CLEAR,
   EVENT_COMMAND,
@@ -45,12 +46,22 @@ function parseFiles(files: Map<string, Uint8Array>): EventDict[] {
   return out
 }
 
-function nowMs(): number {
-  return Date.now()
-}
-
 function eventTimestamp(e: EventDict): number {
   return typeof e.timestamp === 'number' ? e.timestamp : 0
+}
+
+/** The latest timestamp among `events`, null when none carries one. */
+function newestStamp(events: readonly EventDict[]): number | null {
+  return events.reduce<number | null>(
+    (newest, e) =>
+      typeof e.timestamp === 'number' ? later(newest, Math.floor(e.timestamp)) : newest,
+    null,
+  )
+}
+
+/** The later of two stamps, either of which may be absent. */
+function later(a: number | null, b: number | null): number | null {
+  return a === null ? b : b === null ? a : Math.max(a, b)
 }
 
 /**
@@ -61,21 +72,57 @@ function eventTimestamp(e: EventDict): number {
  * (/.bash_history, the history builtin) render from the query methods
  * below; swapping infra (RAM, disk, opfs) means passing a different
  * store, nothing above this seam changes.
+ *
+ * Every entry is stamped, and filed under its day, on `clock`: the
+ * workspace's, which also stamps the op records the entries carry, so a
+ * workspace on a manual clock keeps one time domain in its history. No
+ * entry is stamped before the newest one its session holds: a clock that
+ * restarts behind stored history (a fresh `ManualClock` over a restored or
+ * persisted log) would otherwise file a clear or delete ahead of the
+ * commands it acts on. A session with no history sets no floor.
  */
 export class Observer {
   private readonly _store: ObserverStore
+  private readonly clock: Clock
+  private readonly newest = new Map<string, number | null>()
 
-  constructor(store?: ObserverStore) {
+  constructor(store?: ObserverStore, clock: Clock = new SystemClock()) {
     this._store = store ?? new RAMObserverStore()
+    this.clock = clock
+  }
+
+  /** The clock's wall time in epoch milliseconds, an entry's stamp. */
+  private nowMs(): number {
+    return Math.floor(this.clock.now() * 1000)
   }
 
   get store(): ObserverStore {
     return this._store
   }
 
+  /**
+   * The newest stamp `session` holds, null when it holds none. Read once per
+   * session, from that session's files only (the files its history view
+   * reads); an entry stamped while they are read is newer still and is kept.
+   */
+  private async floor(session: string): Promise<number | null> {
+    const known = this.newest.get(session)
+    if (known !== undefined) return known
+    const found = newestStamp(parseFiles(await this._store.readMatching(`/${session}.jsonl`)))
+    const floor = later(found, this.newest.get(session) ?? null)
+    this.newest.set(session, floor)
+    return floor
+  }
+
   private async log(entry: LogEntry): Promise<void> {
-    const line = new TextEncoder().encode(entry.toJsonLine() + '\n')
-    await this._store.append(`/${utcDateFolder()}/${entry.session}.jsonl`, line)
+    const floor = await this.floor(entry.session)
+    const stamped =
+      floor !== null && entry.timestamp < floor
+        ? Object.assign(Object.create(LogEntry.prototype) as LogEntry, entry, { timestamp: floor })
+        : entry
+    this.newest.set(stamped.session, stamped.timestamp)
+    const line = new TextEncoder().encode(stamped.toJsonLine() + '\n')
+    await this._store.append(`/${utcDateFolder(stamped.timestamp)}/${stamped.session}.jsonl`, line)
   }
 
   async logOp(rec: OpRecord, session: string, cwd?: string): Promise<void> {
@@ -105,7 +152,7 @@ export class Observer {
     const init: LogEntryInit = {
       type: EVENT_COMMAND,
       session,
-      timestamp: nowMs(),
+      timestamp: this.nowMs(),
       command,
       exitCode: io.exitCode,
       stdout: text,
@@ -121,7 +168,7 @@ export class Observer {
     const init: LogEntryInit = {
       type: EVENT_COMMAND,
       session,
-      timestamp: nowMs(),
+      timestamp: this.nowMs(),
       command,
       exitCode: 0,
     }
@@ -131,12 +178,12 @@ export class Observer {
 
   /** Append a clear tombstone for a session (history -c). */
   async logClear(session: string): Promise<void> {
-    await this.log(new LogEntry({ type: EVENT_CLEAR, session, timestamp: nowMs() }))
+    await this.log(new LogEntry({ type: EVENT_CLEAR, session, timestamp: this.nowMs() }))
   }
 
   /** Append a delete event for one listing entry (history -d). */
   async logDelete(session: string, offset: number): Promise<void> {
-    await this.log(new LogEntry({ type: EVENT_DELETE, session, timestamp: nowMs(), offset }))
+    await this.log(new LogEntry({ type: EVENT_DELETE, session, timestamp: this.nowMs(), offset }))
   }
 
   /**
@@ -190,7 +237,11 @@ export class Observer {
    */
   async loadEvents(events: EventDict[]): Promise<void> {
     await this._store.clear()
-    const day = utcDateFolder()
+    const written = Math.max(
+      this.nowMs(),
+      newestStamp(events.filter((e) => KNOWN_EVENTS.has(e.type as string))) ?? this.nowMs(),
+    )
+    const day = utcDateFolder(written)
     const bySession = new Map<string, string[]>()
     for (const e of events) {
       if (!KNOWN_EVENTS.has(e.type as string)) continue
@@ -199,6 +250,8 @@ export class Observer {
       lines.push(JSON.stringify(e))
       bySession.set(session, lines)
     }
+    this.newest.clear()
+    for (const session of bySession.keys()) this.newest.set(session, written)
     for (const [session, lines] of bySession) {
       await this._store.write(
         `/${day}/${session}.jsonl`,

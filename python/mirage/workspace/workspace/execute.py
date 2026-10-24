@@ -686,7 +686,9 @@ async def run_prepared_line(
     # typed line is read, never inside the evaluator). Internal
     # evaluations get an inert scope.
     is_line = record
-    scope = RecordingScope(active=is_line, ledger=ws.records)
+    scope = RecordingScope(
+        active=is_line, ledger=ws.records, clock=ws.registry.clock
+    )
     parse_scope = ParseScope()
     # A nested line keeps versions against the records added to the
     # enclosing line's since it began, its reads left out.

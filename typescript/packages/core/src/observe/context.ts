@@ -27,6 +27,9 @@ import {
   type RevisionsState,
 } from './record.ts'
 import type { PathSpec } from '../types.ts'
+import { SystemClock, type Clock } from '../utils/clock.ts'
+
+const SYSTEM_CLOCK = new SystemClock()
 
 // Where the running line records its calls, with the mount serving them,
 // and the revision pins, on the caller: added here, where their shapes
@@ -127,13 +130,15 @@ export function activeRecords(): readonly OpRecord[] | undefined {
 /**
  * Run `fn` recording its calls, and answer what it returned with what it
  * recorded. `ledger` is the workspace ledger a line hands its records to,
- * which a file call of that workspace made on the line joins.
+ * which a file call of that workspace made on the line joins; `clock` is
+ * the workspace clock its ops are timed and stamped on.
  */
 export async function runWithRecording<T>(
   fn: () => Promise<T>,
   ledger: OpRecord[] | null = null,
+  clock: Clock = SYSTEM_CLOCK,
 ): Promise<[T, OpRecord[]]> {
-  const state: RecordingState = { records: [], mountId: null, ledger }
+  const state: RecordingState = { records: [], mountId: null, ledger, clock }
   const value = await runWithCaller({ ...currentCaller(), recording: state }, fn)
   return [value, state.records]
 }
@@ -225,33 +230,36 @@ export interface RecordOptions {
  * Opened where the backend work begins and read once when the op
  * finishes, so an op module hands this around instead of reading a
  * clock of its own. The wall-clock stamp the record carries is taken at
- * finish time, not here. Mirrors python's `OpTimer`.
+ * finish time, not here, on the same clock. Mirrors python's `OpTimer`.
  */
 export class OpTimer {
   private readonly startMs: number
 
-  constructor() {
-    this.startMs = performance.now()
+  constructor(readonly clock: Clock) {
+    this.startMs = clock.monotonic() * 1000
   }
 
   /** Milliseconds elapsed since the timer was opened. */
   get elapsedMs(): number {
-    return Math.floor(performance.now() - this.startMs)
+    return Math.floor(this.clock.monotonic() * 1000 - this.startMs)
   }
 }
 
 /**
  * Open the record path's stopwatch for one op. Hand the timer to
- * {@link record} or {@link finishRecord} when the op completes.
+ * {@link record} or {@link finishRecord} when the op completes. The timer
+ * runs on the clock of the line recording the op; outside a recording
+ * nothing keeps the record, and the system clock times it.
  */
 export function startOp(): OpTimer {
-  return new OpTimer()
+  return new OpTimer(currentCaller().recording?.clock ?? SYSTEM_CLOCK)
 }
 
 /**
  * Close `timer` and build the finished record.
  *
- * The one place an op's duration and wall-clock stamp are read, shared
+ * The one place an op's duration and wall-clock stamp are read, both on the
+ * timer's clock, shared
  * by the recorder sink ({@link record}) and by the `Files` facade's own
  * ledger, so the two cannot disagree about what a duration measures.
  * `path` is stored as given.
@@ -270,7 +278,7 @@ export function finishRecord(
     path,
     source,
     bytes: nbytes,
-    timestamp: Date.now(),
+    timestamp: Math.floor(timer.clock.now() * 1000),
     durationMs: elapsed,
     fingerprint: options.fingerprint ?? null,
     revision: options.revision ?? null,
@@ -325,7 +333,7 @@ export function recordStream(
     path,
     source,
     bytes: 0,
-    timestamp: Date.now(),
+    timestamp: Math.floor(state.clock.now() * 1000),
     durationMs: 0,
     fingerprint: options.fingerprint ?? null,
     revision: options.revision ?? null,

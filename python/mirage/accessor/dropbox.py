@@ -15,6 +15,7 @@
 from typing import TYPE_CHECKING
 
 from mirage.accessor.base import Accessor
+from mirage.utils.clock import Clock
 
 if TYPE_CHECKING:
     from mirage.core.dropbox.client import DropboxTokenManager
@@ -47,3 +48,11 @@ class DropboxAccessor(Accessor):
     async def close(self) -> None:
         """Drain the token manager's connection pool. Idempotent."""
         await self.token_manager.close()
+
+    def bind_clock(self, clock: Clock) -> None:
+        """Read token expiry on the workspace's clock.
+
+        Args:
+            clock (Clock): the workspace's clock.
+        """
+        self.token_manager.bind_clock(clock)

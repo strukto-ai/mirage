@@ -41,6 +41,9 @@ class Clock:
     def now(self) -> float:
         return WALL + self.elapsed
 
+    async def sleep(self, seconds: float) -> None:
+        self.elapsed += max(seconds, 0.0)
+
 
 class Folder:
     def __init__(

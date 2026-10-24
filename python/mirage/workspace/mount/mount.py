@@ -114,6 +114,7 @@ from mirage.types import (
     WritePolicy,
 )
 from mirage.utils.activity import Activity
+from mirage.utils.clock import Clock
 from mirage.utils.filetype import get_extension
 from mirage.utils.ids import IdSource, SystemIdSource
 from mirage.utils.key_prefix import mount_key
@@ -392,6 +393,7 @@ async def _collected(
     answer: Awaitable[ByteSource] | AsyncIterator[bytes],
     path: PathSpec,
     whole: bool,
+    clock: Clock,
 ) -> bytes:
     """A backend read's answer as bytes, a stream collected.
 
@@ -407,6 +409,8 @@ async def _collected(
             calling ``read`` returned.
         path (PathSpec): the file read.
         whole (bool): whether the read is of the whole file.
+        clock (Clock): the workspace clock a read outside a line records
+            on.
     """
     found = await answer if inspect.isawaitable(answer) else answer
     if isinstance(found, bytes):
@@ -415,7 +419,7 @@ async def _collected(
         return await materialize(found)
     held = current_caller().command_sink
     outer = held[1] if held is not None and held[1] is not held[0] else None
-    scope = RecordingScope(active=active_recorder() is None)
+    scope = RecordingScope(active=active_recorder() is None, clock=clock)
     try:
         with command_records() as records:
             try:
@@ -470,13 +474,16 @@ async def _read_window(
     if ranges and not whole:
         try:
             return await _collected(
-                read(path, offset=offset, size=size, **handed), path, False
+                read(path, offset=offset, size=size, **handed),
+                path,
+                False,
+                index.clock,
             )
         except Exception as exc:
             if not is_unsatisfiable_range(exc):
                 raise
             return b""
-    data = await _collected(read(path, **handed), path, True)
+    data = await _collected(read(path, **handed), path, True, index.clock)
     if whole:
         return data
     return slice_window(data, offset, size)
@@ -1675,7 +1682,9 @@ class MountEntry:
             index (IndexCacheStore): the mount's index.
             path (PathSpec): the file, keyed below the mount.
         """
-        return await _collected(await self._answer(index, path), path, True)
+        return await _collected(
+            await self._answer(index, path), path, True, index.clock
+        )
 
     async def _answer(
         self, index: IndexCacheStore, path: PathSpec

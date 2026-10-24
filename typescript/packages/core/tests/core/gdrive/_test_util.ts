@@ -17,7 +17,7 @@ import { vi } from 'vitest'
 import { GDriveAccessor } from '../../../src/accessor/gdrive.ts'
 import { installApi } from '../google/_test_util.ts'
 import type { DriveApi } from '../../../src/core/gdrive/api.ts'
-import { GoogleApiError, type TokenManager } from '../../../src/core/google/client.ts'
+import { GoogleApiError, TokenManager } from '../../../src/core/google/client.ts'
 import { FOLDER_MIME, MIME_TO_EXT } from '../../../src/core/google/drive.ts'
 import type { DriveChange, DriveFile, SharedDrive } from '../../../src/core/google/drive.ts'
 import { ByteSpool } from '../../../src/io/spool.ts'
@@ -28,7 +28,7 @@ const FILE_MIME = 'application/octet-stream'
 const STREAM_CHUNK = 4
 export const DOC_MIME = 'application/vnd.google-apps.document'
 
-export const TOKEN_MANAGER = { config: { clientId: 'cid', refreshToken: 'rt' } } as TokenManager
+export const TOKEN_MANAGER = new TokenManager({ clientId: 'cid', refreshToken: 'rt' })
 
 interface FakeItem {
   id: string

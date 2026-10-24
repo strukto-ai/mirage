@@ -29,6 +29,7 @@ import type { MountEntry } from '../mount.ts'
 import { RAMNamespaceStore } from './ram.ts'
 import type { NamespaceStore, NodeFields } from './store.ts'
 import type { MountRegistry } from '../registry.ts'
+import type { Clock } from '../../../utils/clock.ts'
 import { NamespaceReader } from '../../dispatcher/reader.ts'
 import { encodeText } from '../../../shell/bytes.ts'
 import { getCurrentSession } from '../../../context/session_context.ts'
@@ -161,6 +162,11 @@ export class Namespace {
 
   get nodes(): Map<string, NodeMeta> {
     return this.nodeTable
+  }
+
+  /** The workspace clock, which the dispatcher records a call outside a line on. */
+  get clock(): Clock {
+    return this.registry.clock
   }
 
   // Hydrate the working copy from the store, once. A snapshot restore

@@ -22,13 +22,13 @@ from mirage.types import ContentType, FileType, PathSpec
 from mirage.utils.key_prefix import mount_key
 from mirage.vfs.gslides import GSlidesVFS
 from tests.fixtures.gdrive_api import StubDrive
-from tests.fixtures.google_api import serve
+from tests.fixtures.google_api import offline_token_manager, serve
 from tests.fixtures.mounted import Mounted
 
 
 @pytest.fixture
 def accessor():
-    return GSlidesAccessor(config=None, token_manager=None)
+    return GSlidesAccessor(config=None, token_manager=offline_token_manager())
 
 
 @pytest.mark.asyncio

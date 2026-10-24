@@ -20,7 +20,7 @@ import { runWithRecording } from '../../observe/context.ts'
 import { PathSpec, type FileStat } from '../../types.ts'
 import { GSlidesVFS } from '../../vfs/gslides/gslides.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
-import type { TokenManager } from '../google/client.ts'
+import { TokenManager } from '../google/client.ts'
 import type { SlidesApi } from './api.ts'
 import { read } from './read.ts'
 import { stubDrive, type StubDrive } from '../../../tests/core/gdrive/_test_util.ts'
@@ -37,9 +37,7 @@ beforeEach(() => {
   installApi({ drive, slides })
 })
 
-const STUB_TOKEN_MANAGER = {
-  config: { clientId: 'cid', refreshToken: 'rt' },
-} as TokenManager
+const STUB_TOKEN_MANAGER = new TokenManager({ clientId: 'cid', refreshToken: 'rt' })
 
 function makeAccessor(): GSlidesAccessor {
   return new GSlidesAccessor({ tokenManager: STUB_TOKEN_MANAGER })

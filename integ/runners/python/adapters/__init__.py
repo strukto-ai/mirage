@@ -59,6 +59,7 @@ from mirage.shell.console import JobConsole
 from mirage.shell.console.redis import RedisConsoleStore
 from mirage.shell.job_table import ConsoleFactory
 from mirage.types import JsonValue, ReadSpec, WritePolicy
+from mirage.utils.clock import ManualClock
 from mirage.vfs.airtable import AirtableConfig, AirtableVFS
 from mirage.vfs.aliyun import AliyunConfig, AliyunVFS
 from mirage.vfs.backblaze import BackblazeConfig, BackblazeVFS
@@ -3340,6 +3341,7 @@ async def open_target(
     # loader validates with.
     profiles = scripted_profiles(target.get("profiles") or None)
     default_profile = target.get("profile")
+    clock = ManualClock() if target.get("clock") == "manual" else None
     if read is not None:
         ws = Workspace(
             mounts,
@@ -3350,6 +3352,7 @@ async def open_target(
             profiles=profiles,
             profile=default_profile,
             env=env_block,
+            clock=clock,
         )
     else:
         ws = Workspace(
@@ -3360,6 +3363,7 @@ async def open_target(
             profiles=profiles,
             profile=default_profile,
             env=env_block,
+            clock=clock,
         )
     for cli_name in target.get("clis", []):
         spec, config = cli_install(service, cli_name)

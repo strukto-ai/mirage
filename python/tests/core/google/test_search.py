@@ -20,7 +20,7 @@ from mirage.core.google.search import drive_queries, files_containing
 from mirage.types import DirListing, FileStat, FileType, PathSpec
 from mirage.utils.generated.google_vocabulary import DOCS_WORDS
 from tests.fixtures.gdrive_api import StubDrive
-from tests.fixtures.google_api import install_api
+from tests.fixtures.google_api import install_api, offline_token_manager
 
 MIME = "application/vnd.google-apps.document"
 CORPORA = {
@@ -63,7 +63,9 @@ def _answer(monkeypatch, ids, complete=True, fail=None) -> list[tuple]:
 
 
 async def _ask(text: str, under: list[PathSpec]) -> list[PathSpec] | None:
-    accessor = GDocsAccessor(config=None, token_manager=None)
+    accessor = GDocsAccessor(
+        config=None, token_manager=offline_token_manager()
+    )
     return await files_containing(
         accessor, _readdir, MIME, DOCS_WORDS, text, under
     )
@@ -150,7 +152,9 @@ async def _unfinished(accessor, path: PathSpec) -> DirListing:
 @pytest.mark.asyncio
 async def test_an_unfinished_listing_reads_every_file(monkeypatch):
     _answer(monkeypatch, ["a.gdoc.json"])
-    accessor = GDocsAccessor(config=None, token_manager=None)
+    accessor = GDocsAccessor(
+        config=None, token_manager=offline_token_manager()
+    )
     out = await files_containing(
         accessor,
         _unfinished,

@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
-import time
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
@@ -61,10 +60,12 @@ from mirage.core.google.constants import (
     MAX_RETRIES,
     SHEETS_API_BASE,
     SLIDES_API_BASE,
+    TOKEN_BUFFER_SECONDS,
     TOKEN_URL,
 )
 from mirage.core.gsheets.write import append_values, update_values
 from mirage.io.spool import ByteSpool
+from mirage.utils.clock import ManualClock, SystemClock
 
 API_ERROR = (
     '{"error": {"code": 400, "message": "Unsupported request: '
@@ -84,12 +85,20 @@ def _reason(code: int, reason: str) -> str:
     )
 
 
-def _signed_in(waits: list[float]) -> TokenManager:
-    async def _record(seconds: float) -> None:
-        waits.append(seconds)
+class _WaitLog(ManualClock):
+    def __init__(self, waits: list[float]) -> None:
+        super().__init__()
+        self.waits = waits
 
+    async def sleep(self, seconds: float) -> None:
+        self.waits.append(seconds)
+        await super().sleep(seconds)
+
+
+def _signed_in(waits: list[float]) -> TokenManager:
     tm = TokenManager(
-        GoogleConfig(client_id="cid", refresh_token="rt"), sleep=_record
+        GoogleConfig(client_id="cid", refresh_token="rt"),
+        clock=_WaitLog(waits),
     )
     tm.get_token = AsyncMock(return_value="tok")
     return tm
@@ -167,16 +176,50 @@ async def test_token_manager_refreshes_once_then_caches():
     with _refresh_returning("cached-token") as refresh:
         assert await mgr.get_token() == "cached-token"
         assert await mgr.get_token() == "cached-token"
-    refresh.assert_called_once_with(mgr.config, mgr.sleep)
+    refresh.assert_called_once_with(mgr.config, mgr.clock.sleep)
 
 
 @pytest.mark.asyncio
-async def test_token_manager_refreshes_when_expired():
+async def test_token_manager_refreshes_when_expired_on_its_clock():
+    clock = ManualClock(1_000.0)
+    mgr = TokenManager(
+        GoogleConfig(client_id="cid", refresh_token="rt"), clock=clock
+    )
+    with _refresh_returning("token-1", "token-2"):
+        assert await mgr.get_token() == "token-1"
+        clock.advance(3600 - TOKEN_BUFFER_SECONDS - 1)
+        assert await mgr.get_token() == "token-1"
+        clock.advance(1)
+        assert await mgr.get_token() == "token-2"
+
+
+@pytest.mark.asyncio
+async def test_binding_another_clock_drops_a_refreshed_token():
     mgr = _manager()
     with _refresh_returning("token-1", "token-2"):
-        await mgr.get_token()
-        mgr._expires_at = time.time() - 1
+        assert await mgr.get_token() == "token-1"
+        mgr.bind_clock(mgr.clock)
+        assert await mgr.get_token() == "token-1"
+        mgr.bind_clock(ManualClock())
         assert await mgr.get_token() == "token-2"
+
+
+@pytest.mark.asyncio
+async def test_binding_another_system_clock_keeps_a_refreshed_token():
+    mgr = _manager()
+    with _refresh_returning("token-1") as refresh:
+        assert await mgr.get_token() == "token-1"
+        mgr.bind_clock(SystemClock())
+        assert await mgr.get_token() == "token-1"
+    refresh.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_binding_another_clock_keeps_a_seeded_token():
+    mgr = _manager()
+    mgr.seed("minted", float("inf"))
+    mgr.bind_clock(ManualClock())
+    assert await mgr.get_token() == "minted"
 
 
 @pytest.mark.asyncio

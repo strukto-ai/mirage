@@ -20,7 +20,7 @@ import { runWithRecording } from '../../observe/context.ts'
 import { PathSpec, type FileStat } from '../../types.ts'
 import { GSheetsVFS } from '../../vfs/gsheets/gsheets.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
-import type { TokenManager } from '../google/client.ts'
+import { TokenManager } from '../google/client.ts'
 import type { SheetsApi } from './api.ts'
 import { read } from './read.ts'
 import { stubDrive, type StubDrive } from '../../../tests/core/gdrive/_test_util.ts'
@@ -37,9 +37,7 @@ beforeEach(() => {
   installApi({ drive, sheets })
 })
 
-const STUB_TOKEN_MANAGER = {
-  config: { clientId: 'cid', refreshToken: 'rt' },
-} as TokenManager
+const STUB_TOKEN_MANAGER = new TokenManager({ clientId: 'cid', refreshToken: 'rt' })
 
 function makeAccessor(): GSheetsAccessor {
   return new GSheetsAccessor({ tokenManager: STUB_TOKEN_MANAGER })

@@ -22,8 +22,15 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from mirage.accessor.google_api import GoogleApiAccessor
+from mirage.core.google.client import TokenManager
+from mirage.core.google.config import GoogleConfig
 
 ApiCall = Callable[..., Any]
+
+
+def offline_token_manager() -> TokenManager:
+    """A token manager signing with a fixed token, which never refreshes."""
+    return TokenManager(GoogleConfig(access_token="t"))
 
 
 class StubApi:

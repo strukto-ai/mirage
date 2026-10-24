@@ -70,7 +70,14 @@ describe('ListingMemo', () => {
   let elapsed: number
   let memo: ListingMemo
   let prefix: string
-  const clock: Clock = { now: () => WALL + elapsed, monotonic: () => 1_000 + elapsed }
+  const clock: Clock = {
+    now: () => WALL + elapsed,
+    monotonic: () => 1_000 + elapsed,
+    sleep: (seconds) => {
+      elapsed += Math.max(seconds, 0)
+      return Promise.resolve()
+    },
+  }
 
   beforeEach(() => {
     elapsed = 0

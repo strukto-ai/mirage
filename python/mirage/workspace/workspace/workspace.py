@@ -510,7 +510,7 @@ class Workspace:
             else None
         )
 
-        self.observer = Observer(store=stores.observe)
+        self.observer = Observer(store=stores.observe, clock=self._clock)
         self._registry.observer = self.observer
         # The stores this workspace's state lives in, whether the state
         # store built them or the caller passed one in directly: delete
@@ -553,6 +553,7 @@ class Workspace:
             self._namespace.readers(self._facade_visibility),
             observer=self.observer,
             bind=self._bind_session,
+            clock=self._clock,
         )
         self._kernel_mounts = KernelMounts(self._files, self._session_mgr)
         self._documents = Documents(
@@ -1180,6 +1181,7 @@ class Workspace:
                         self._namespace.readers(
                             lambda _session: session.visibility
                         ),
+                        clock=self._clock,
                     ),
                     session=session_view(session, self.policies),
                     processes=self._process_view(session),

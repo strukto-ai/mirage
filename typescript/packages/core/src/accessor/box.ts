@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { Accessor } from './base.ts'
+import type { Clock } from '../utils/clock.ts'
 import type { BoxTokenManager } from '../core/box/client.ts'
 import { ALL_FILES_FOLDER_ID } from '../core/box/constants.ts'
 
@@ -25,5 +26,10 @@ export class BoxAccessor extends Accessor {
     super()
     this.tokenManager = opts.tokenManager
     this.rootFolderId = opts.rootFolderId ?? ALL_FILES_FOLDER_ID
+  }
+
+  /** Read token expiry and the upload commit's wait on the workspace's clock. */
+  override bindClock(clock: Clock): void {
+    this.tokenManager.bindClock(clock)
   }
 }

@@ -20,10 +20,13 @@ import pytest
 
 from mirage.cache.index import IndexConfig
 from mirage.cache.index.config import LookupStatus
+from mirage.commands.cli.builtin.gws import GWS
 from mirage.context import reset_current_session, set_current_session
 from mirage.types import MountMode
 from mirage.utils.clock import ManualClock
 from mirage.utils.ids import SeededIdSource, SystemIdSource
+from mirage.vfs.gdrive.config import GoogleDriveConfig
+from mirage.vfs.gdrive.gdrive import GoogleDriveVFS
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Session, Workspace
 from mirage.workspace.session import RAMSessionStore
@@ -417,6 +420,69 @@ async def test_one_clock_ages_the_file_cache_and_every_mount_index():
             ).status == LookupStatus.EXPIRED
     finally:
         await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_one_clock_reaches_every_mount_and_cli_token_manager():
+    clock = ManualClock(start=1000.0)
+    config = GoogleDriveConfig(client_id="c", refresh_token="r")
+    ws = Workspace(
+        {"/a": GoogleDriveVFS(config)}, mode=MountMode.WRITE, clock=clock
+    )
+    try:
+        ws.add_mount("/b", GoogleDriveVFS(config), MountMode.WRITE)
+        install = ws.register_cli(
+            "gws", GWS, {"client_id": "c", "refresh_token": "r"}
+        )
+        managers = [
+            ws.mount("/a").vfs.accessor.token_manager,
+            ws.mount("/b").vfs.accessor.token_manager,
+            install.accessor.token_manager,
+        ]
+        assert [m.clock for m in managers] == [clock, clock, clock]
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_manual_clock_workspace_keeps_one_time_domain_in_history():
+    clock = ManualClock(start=1_000_000.0)
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.WRITE, clock=clock)
+    try:
+        await ws.shell("echo hi > /data/a.txt")
+        clock.advance(5)
+        await ws.shell("cat /data/a.txt")
+        clock.advance(5)
+        await ws.vfs.read("/data/a.txt")
+        await ws.shell("history -c")
+        await asyncio.sleep(0)
+        events = await ws.observer.events()
+        assert {e["type"] for e in events} >= {"op", "command", "clear"}
+        assert {e["timestamp"] for e in events} == {
+            1_000_000_000,
+            1_000_005_000,
+            1_000_010_000,
+        }
+        assert {(r.timestamp, r.duration_ms) for r in ws.vfs.records} == {
+            (1_000_000_000, 0),
+            (1_000_005_000, 0),
+            (1_000_010_000, 0),
+        }
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_vfs_mounted_again_follows_the_later_workspace_clock():
+    vfs = GoogleDriveVFS(GoogleDriveConfig(client_id="c", refresh_token="r"))
+    first, second = ManualClock(), ManualClock()
+    a = Workspace({"/g": vfs}, mode=MountMode.WRITE, clock=first)
+    b = Workspace({"/g": vfs}, mode=MountMode.WRITE, clock=second)
+    try:
+        assert vfs.accessor.token_manager.clock is second
+    finally:
+        await b.close()
+        await a.close()
 
 
 async def _replay(seed: int) -> list[str]:

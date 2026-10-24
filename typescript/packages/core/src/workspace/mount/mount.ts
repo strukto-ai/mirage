@@ -52,6 +52,7 @@ import { declared, declaredCalls, methodName } from '../../vfs/call.ts'
 import { WRITE_EFFECTS } from '../../vfs/constants.ts'
 import { Effect, type Handed } from '../../vfs/types.ts'
 import { isUnsatisfiableRange, sliceWindow } from '../../utils/ranges.ts'
+import type { Clock } from '../../utils/clock.ts'
 
 import { getExtension } from '../../utils/filetype.ts'
 import { resolveLimit } from '../../policy/index.ts'
@@ -253,6 +254,7 @@ async function collected(
   answer: Promise<ByteSource> | AsyncIterable<Uint8Array>,
   path: PathSpec,
   whole: boolean,
+  clock: Clock,
 ): Promise<Uint8Array> {
   const found = await answer
   if (found instanceof Uint8Array) return found
@@ -268,7 +270,9 @@ async function collected(
       }
     })
   const [data, records] =
-    activeRecords() === undefined ? (await runWithRecording(collect))[0] : await collect()
+    activeRecords() === undefined
+      ? (await runWithRecording(collect, null, clock))[0]
+      : await collect()
   publishRead(path.virtual, data, latestFingerprint(records, path.virtual))
   return data
 }
@@ -291,6 +295,7 @@ async function readWindow(
   path: PathSpec,
   kwargs: OpKwargs,
   handed: Handed | undefined,
+  clock: Clock,
 ): Promise<Uint8Array> {
   const offset = typeof kwargs.offset === 'number' ? kwargs.offset : 0
   const size = typeof kwargs.size === 'number' ? kwargs.size : null
@@ -298,13 +303,13 @@ async function readWindow(
   const whole = offset === 0 && size === null
   if (ranges && !whole) {
     try {
-      return await collected(read(path, handed, offset, size), path, false)
+      return await collected(read(path, handed, offset, size), path, false, clock)
     } catch (err) {
       if (!isUnsatisfiableRange(err)) throw err
       return new Uint8Array(0)
     }
   }
-  const data = await collected(read(path, handed), path, true)
+  const data = await collected(read(path, handed), path, true, clock)
   return whole ? data : sliceWindow(data, offset, size)
 }
 
@@ -840,14 +845,14 @@ export class MountEntry {
           : (vfs as unknown as Record<string, ReadFn | undefined>)[renderer]
       if (render !== undefined) {
         levels.push((scope, _args, kw) =>
-          readWindow(render.bind(vfs), true, scope, kw, handedOf(kw)),
+          readWindow(render.bind(vfs), true, scope, kw, handedOf(kw), this.indexStore.clock),
         )
       }
       if (vfs.supports('read')) {
         const read: ReadFn = (path, given, offset, size) =>
           vfs.read(path, given, offset, size, callerSignal())
         levels.push((scope, _args, kw) =>
-          readWindow(read, vfs.readsRanges, scope, kw, handedOf(kw)),
+          readWindow(read, vfs.readsRanges, scope, kw, handedOf(kw), this.indexStore.clock),
         )
       }
       return levels
@@ -1035,7 +1040,7 @@ export class MountEntry {
 
   /** The VFS's read of a whole file, handed what is at its path. */
   private readAt(index: IndexCacheStore, path: PathSpec): Promise<Uint8Array> {
-    return collected(this.answer(this.vfs, index, path), path, true)
+    return collected(this.answer(this.vfs, index, path), path, true, index.clock)
   }
 
   /**

@@ -12,12 +12,16 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { sleep } from './abort.ts'
+
 /** Wall time for timestamps and monotonic time for durations, in seconds. */
 export interface Clock {
   /** Seconds since the unix epoch. */
   now(): number
   /** Seconds from an arbitrary origin that never moves backwards. */
   monotonic(): number
+  /** Wait `seconds` on this clock; zero or less returns at once. */
+  sleep(seconds: number): Promise<void>
 }
 
 /** Platform clock used when no clock is supplied. */
@@ -31,9 +35,19 @@ export class SystemClock implements Clock {
   monotonic(): number {
     return performance.now() / 1000
   }
+
+  /** Wait `seconds` of real time; zero or less returns at once. */
+  sleep(seconds: number): Promise<void> {
+    return sleep(seconds * 1000)
+  }
 }
 
-/** Clock advanced explicitly by the caller. Readings have no side effects. */
+/**
+ * Clock advanced explicitly by the caller. Readings have no side effects.
+ * A sleep advances the clock by its length and returns without waiting, so
+ * a wait costs no real time. Waits do not overlap: two tasks that each sleep
+ * 30 seconds advance it by 60.
+ */
 export class ManualClock implements Clock {
   private wall: number
   private mono = 0
@@ -63,5 +77,14 @@ export class ManualClock implements Clock {
     if (seconds < 0) throw new RangeError('cannot advance a clock backwards')
     this.wall += seconds
     this.mono += seconds
+  }
+
+  /**
+   * Advance by `seconds` and yield once. Zero, a negative or NaN advances
+   * nothing.
+   */
+  async sleep(seconds: number): Promise<void> {
+    if (seconds > 0) this.advance(seconds)
+    await Promise.resolve()
   }
 }

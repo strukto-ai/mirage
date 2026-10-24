@@ -1952,6 +1952,24 @@
       ]
     },
     {
+      "id": "gdrive-manual-clock",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "service": "gws",
+      "clock": "manual",
+      "mounts": [
+        {
+          "path": "/data",
+          "vfs": "gdrive",
+          "backend": "gdrive",
+          "root": "data",
+          "fixture": "files/v1"
+        }
+      ]
+    },
+    {
       "id": "gdrive-shared",
       "hosts": [
         "python",

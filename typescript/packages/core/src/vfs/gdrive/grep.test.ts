@@ -6,14 +6,14 @@ vi.mock('../../core/google/client.ts', async (importOriginal) => ({
 }))
 
 import { GDriveAccessor } from '../../accessor/gdrive.ts'
-import { googleGet, type TokenManager } from '../../core/google/client.ts'
+import { googleGet, TokenManager } from '../../core/google/client.ts'
 import { FileStat, FileType, MountMode } from '../../types.ts'
 import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
 import { GoogleDriveVFS } from './gdrive.ts'
 
 const DEC = new TextDecoder()
-const TM = { config: { clientId: 'test', refreshToken: 'test' } } as TokenManager
+const TM = new TokenManager({ clientId: 'test', refreshToken: 'test' })
 
 // Mirrors python's test_grep_i_keeps_rendered_google_json: an id-addressed
 // file is reached through a mount, which hands the read the row its listing

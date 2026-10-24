@@ -38,6 +38,9 @@ import {
   transient,
 } from './client.ts'
 import { appendValues, updateValues } from '../gsheets/write.ts'
+import { ManualClock, SystemClock } from '../../utils/clock.ts'
+import { TokenManager as OAuthTokenManager } from '../api/oauth.ts'
+
 import {
   DOCS_API_BASE,
   CALENDAR_API_BASE,
@@ -47,8 +50,31 @@ import {
   MAX_RETRIES,
   SHEETS_API_BASE,
   SLIDES_API_BASE,
+  TOKEN_BUFFER_SECONDS,
   TOKEN_URL,
 } from './constants.ts'
+
+class WaitLog extends ManualClock {
+  constructor(private readonly waits: number[]) {
+    super()
+  }
+
+  override async sleep(seconds: number): Promise<void> {
+    this.waits.push(seconds)
+    await super.sleep(seconds)
+  }
+}
+
+class SeededTokenManager extends OAuthTokenManager {
+  constructor() {
+    super()
+    this.seed('minted', Number.POSITIVE_INFINITY)
+  }
+
+  protected refreshPair(): Promise<[string, number]> {
+    return Promise.reject(new Error('a seeded token never refreshes'))
+  }
+}
 
 describe('refreshAccessToken — clientSecret optionality', () => {
   let originalFetch: typeof fetch
@@ -154,6 +180,48 @@ describe('TokenManager.refreshFn delegation', () => {
     await tm.getToken()
     await tm.getToken()
     expect(refreshFn).toHaveBeenCalledTimes(1)
+  })
+
+  it('refreshes when the token expires on its clock', async () => {
+    const clock = new ManualClock(1_000)
+    const refreshFn = vi
+      .fn()
+      .mockResolvedValueOnce({ accessToken: 'token-1', expiresIn: 3600 })
+      .mockResolvedValueOnce({ accessToken: 'token-2', expiresIn: 3600 })
+    const tm = new TokenManager({ clientId: 'id', refreshToken: 'rt', refreshFn }, clock)
+    expect(await tm.getToken()).toBe('token-1')
+    clock.advance(3600 - TOKEN_BUFFER_SECONDS - 1)
+    expect(await tm.getToken()).toBe('token-1')
+    clock.advance(1)
+    expect(await tm.getToken()).toBe('token-2')
+  })
+
+  it('binding another clock drops a refreshed token', async () => {
+    const refreshFn = vi
+      .fn()
+      .mockResolvedValueOnce({ accessToken: 'token-1', expiresIn: 3600 })
+      .mockResolvedValueOnce({ accessToken: 'token-2', expiresIn: 3600 })
+    const tm = new TokenManager({ clientId: 'id', refreshToken: 'rt', refreshFn })
+    expect(await tm.getToken()).toBe('token-1')
+    tm.bindClock(tm.clock)
+    expect(await tm.getToken()).toBe('token-1')
+    tm.bindClock(new ManualClock())
+    expect(await tm.getToken()).toBe('token-2')
+  })
+
+  it('binding another system clock keeps a refreshed token', async () => {
+    const refreshFn = vi.fn().mockResolvedValue({ accessToken: 'token-1', expiresIn: 3600 })
+    const tm = new TokenManager({ clientId: 'id', refreshToken: 'rt', refreshFn })
+    expect(await tm.getToken()).toBe('token-1')
+    tm.bindClock(new SystemClock())
+    expect(await tm.getToken()).toBe('token-1')
+    expect(refreshFn).toHaveBeenCalledTimes(1)
+  })
+
+  it('binding another clock keeps a seeded token', async () => {
+    const tm = new SeededTokenManager()
+    tm.bindClock(new ManualClock())
+    expect(await tm.getToken()).toBe('minted')
   })
 })
 
@@ -332,10 +400,7 @@ describe('google retry policy', () => {
   beforeEach(() => {
     previous = globalThis.fetch
     waits = []
-    tm = new TokenManager({ clientId: 'c', refreshToken: 'r' }, (seconds) => {
-      waits.push(seconds)
-      return Promise.resolve()
-    })
+    tm = new TokenManager({ clientId: 'c', refreshToken: 'r' }, new WaitLog(waits))
     vi.spyOn(tm, 'getToken').mockResolvedValue('tok')
   })
 
@@ -447,7 +512,9 @@ describe('google retry policy', () => {
   it('the token exchange and an upload start retry a body that drops', async () => {
     serve(dropped(), reply(200, '{"access_token":"t","expires_in":60}'))
     await expect(
-      refreshAccessToken({ clientId: 'c', refreshToken: 'r' }, tm.sleep),
+      refreshAccessToken({ clientId: 'c', refreshToken: 'r' }, (seconds) =>
+        tm.clock.sleep(seconds),
+      ),
     ).resolves.toEqual(['t', 60])
     const spool = new ByteSpool()
     await spool.append(new TextEncoder().encode('abc'))
