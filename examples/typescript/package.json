@@ -39,7 +39,7 @@
     "deepagents": "^1.12.4",
     "langchain": "^1.5.9",
     "openai": "^7.19.0",
-    "zod": "^4.0.0"
+    "zod": "^4.6.6"
   },
   "devDependencies": {
     "@aws-sdk/client-s3": "^3.1116.0",

@@ -44,7 +44,7 @@
   },
   "dependencies": {
     "@struktoai/mirage-core": "workspace:*",
-    "zod": "^4.0.0"
+    "zod": "^4.6.6"
   },
   "peerDependencies": {
     "@openai/agents": "^0.18.0",
