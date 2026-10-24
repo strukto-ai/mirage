@@ -4,7 +4,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from copy import copy
 from types import TracebackType
 
-from mirage.concurrency.limiter import settle
+from mirage.concurrency.limiter import owned_task, settle
 from mirage.io.output import OutputPipe
 from mirage.io.pipe import CAPACITY
 from mirage.io.types import IOResult, OutputEvent
@@ -190,7 +190,7 @@ class ShellExecution:
     async def aclose(self) -> None:
         """Discard unread output, cancel execution and join its cleanup."""
         if self._closing is None:
-            self._closing = asyncio.create_task(self._close())
+            self._closing = owned_task(self._close())
         await settle(self._closing)
 
     async def __aenter__(self) -> "ShellExecution":

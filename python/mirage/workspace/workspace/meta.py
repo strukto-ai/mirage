@@ -53,6 +53,12 @@ class WorkspaceMeta:
         self._written = False
 
     @property
+    def written(self) -> bool:
+        """Whether the record is settled for this process; it never turns
+        off."""
+        return self._written
+
+    @property
     def default_session_id(self) -> str:
         return self._default_session_id
 

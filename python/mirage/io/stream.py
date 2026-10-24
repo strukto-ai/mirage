@@ -24,7 +24,7 @@ from collections.abc import (
 from functools import partial
 from typing import Any, Generic, TypeVar, cast
 
-from mirage.concurrency.limiter import settle
+from mirage.concurrency.limiter import owned_task, settle
 from mirage.io import IOResult
 from mirage.io.async_line_iterator import SharedInput
 from mirage.io.types import ByteSource, materialize  # noqa: F401
@@ -219,7 +219,7 @@ class OutputStream:
 
     async def aclose(self) -> None:
         if self._closing is None:
-            self._closing = asyncio.create_task(self._finish())
+            self._closing = owned_task(self._finish())
         await settle(self._closing)
 
 
