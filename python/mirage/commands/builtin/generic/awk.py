@@ -1,56 +1,27 @@
-from collections.abc import (
-    AsyncIterator,
-    Callable,
-    Coroutine,
-    Mapping,
-    Sequence,
-)
+import re
+from collections.abc import AsyncIterator, Mapping, Sequence
 from contextlib import aclosing
 from functools import partial
-from typing import Any
 
 from mirage.commands.builtin.constants import AWK_USAGE
 from mirage.commands.builtin.generic.awk_types import AwkFlags
-from mirage.commands.builtin.generic_bind.dispatch import caller_stream
 from mirage.commands.builtin.utils.links import mount_view
-from mirage.commands.builtin.utils.stream import is_stdin, resolve_source
+from mirage.commands.builtin.utils.stream import is_stdin
+from mirage.commands.builtin.utils.stream_host import StreamHost
 from mirage.commands.constants import ROOT_CWD
 from mirage.commands.errors import UsageError
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
-from mirage.context.session_context import current_caller
-from mirage.core.awk import (
-    AwkIOError,
-    AwkRuntimeError,
-    AwkSyntaxError,
-    CommandRun,
-    ExitProgram,
-    Interpreter,
-    parse,
-)
-from mirage.core.awk.builtins import split_assignment, unescape
-from mirage.core.awk.value import text as text_value
-from mirage.errors.constants import FS_ERRORS, WALK_ERRORS
 from mirage.errors.fs import fs_strerror
-from mirage.errors.posix import posix_phrase
-from mirage.errors.types import FsCondition
-from mirage.io.cooperative import chunks
-from mirage.io.spool import ByteSpool, spooled_pair
 from mirage.io.types import ByteSource, IOResult, materialize
-from mirage.io.writer import ByteWriter
+from mirage.rs.stream import OpenStream, open_stream, serve_requests
 from mirage.runtime.types import DispatchFn, ShellFn
-from mirage.shell.bytes import (
-    byte_view,
-    decode_text,
-    from_byte_view,
-    text_view,
-)
-from mirage.shell.join import shell_join
+from mirage.shell.bytes import byte_view, decode_text
 from mirage.types import PathSpec, ReadStreamFn
 from mirage.workspace.files import Files
 
-STDIN_NAMES = frozenset({"-", "/dev/stdin"})
+ASSIGNMENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=")
 
 
 def parse_flags(fl: FlagView) -> AwkFlags:
@@ -73,18 +44,14 @@ def parse_flags(fl: FlagView) -> AwkFlags:
     )
 
 
-def split_assignments(raw: Sequence[str]) -> dict[str, str]:
-    """Turn -v NAME=VALUE arguments into a mapping, last one winning.
+def is_assignment(operand: str) -> bool:
+    """Whether an operand is a ``var=value`` assignment, not a file:
+    POSIX makes it one when a name comes before its ``=``.
 
     Args:
-        raw (Sequence[str]): the raw -v arguments.
+        operand (str): the operand as typed.
     """
-    out: dict[str, str] = {}
-    for item in raw:
-        if "=" in item:
-            key, value = item.split("=", 1)
-            out[key] = unescape(byte_view(value))
-    return out
+    return ASSIGNMENT.match(operand) is not None
 
 
 def home_operand(scopes: list[PathSpec]) -> PathSpec:
@@ -97,7 +64,7 @@ def home_operand(scopes: list[PathSpec]) -> PathSpec:
         if (
             scope.raw_path != ""
             and not is_stdin(scope)
-            and split_assignment(scope.raw_path) is None
+            and not is_assignment(scope.raw_path)
         ):
             return scope
     return scopes[0]
@@ -122,249 +89,24 @@ def served_here(vfs: Files | None, mount_prefix: str, path: PathSpec) -> bool:
     return mounts.root_of(path.virtual).rstrip("/") == home
 
 
-async def _guarded(source: AsyncIterator[bytes]) -> AsyncIterator[bytes]:
-    """Relay a stream, a filesystem failure becoming awk's ``AwkIOError``.
-
-    Args:
-        source (AsyncIterator[bytes]): the stream.
-    """
-    try:
-        async with aclosing(chunks(source)) as pulled:
-            async for chunk in pulled:
-                yield chunk
-    except FS_ERRORS as exc:
-        raise AwkIOError(
-            fs_strerror(exc) or posix_phrase(FsCondition.ENOENT)
-        ) from exc
-
-
-class AwkStreams:
-    """The files and commands one awk run reaches, through the workspace.
-
-    Operands still holding their command-line value read through the
-    mount's own reader, the way they were resolved, unless another mount
-    serves them (a line spanning mounts); every other name
-    (``getline < file``, an ARGV slot the program filled) reads through
-    the dispatcher, as output redirection writes through it. Every
-    stdin reader, a ``-`` operand, ``getline < "-"`` and a command's
-    inherited input alike, shares one cursor, so none replays what
-    another read.
-
-    Args:
-        operands (Sequence[PathSpec]): the operands as classified.
-        stream (ReadStreamFn): the mount's reader for an operand.
-        stdin (ByteSource | None): awk's standard input.
-        dispatch (DispatchFn | None): the workspace dispatcher.
-        cwd (PathSpec): the directory relative names resolve against.
-        shell (ShellFn | None): runs a nested line in the session.
-        local (Callable[[PathSpec], bool]): whether this mount serves an
-            operand.
-    """
-
-    def __init__(
-        self,
-        operands: Sequence[PathSpec],
-        stream: ReadStreamFn,
-        stdin: ByteSource | None,
-        dispatch: DispatchFn | None,
-        cwd: PathSpec,
-        shell: ShellFn | None,
-        local: Callable[[PathSpec], bool],
-    ) -> None:
-        self.local = local
-        self.operands = operands
-        self.stream = stream
-        self.stdin = resolve_source(stdin)
-        self.dispatch = dispatch
-        self.cwd = cwd
-        self.shell = shell
-        self.caller = current_caller()
-        self.outputs: dict[str, ByteWriter] = {}
-
-    async def stdin_view(self) -> AsyncIterator[bytes]:
-        async for chunk in self.stdin:
-            yield chunk
-
-    async def read_path(
-        self, name: str | PathSpec, local: bool = False
-    ) -> AsyncIterator[bytes]:
-        """Read a file once what awk printed is committed, so a file it
-        wrote reads back what it printed.
-
-        Args:
-            name (str | PathSpec): the file.
-            local (bool): an operand this mount's backend serves.
-        """
-        if self.dispatch is None and not local:
-            raise AwkIOError(posix_phrase(FsCondition.ENOENT))
-        path = PathSpec.from_str_path(name, cwd=self.cwd.virtual)
-        await self.flush_output()
-        stream = (
-            self.stream(path)
-            if local or self.dispatch is None
-            else caller_stream(self.dispatch, self.caller, path)
-        )
-        async with aclosing(chunks(stream)) as source:
-            async for chunk in source:
-                yield chunk
-
-    def open_input(self, name: str, index: int | None) -> AsyncIterator[bytes]:
-        """Open an input stream by name (see ``AwkHost.open_input``).
-
-        Args:
-            name (str): the file name, ``-`` or ``/dev/stdin`` for stdin.
-            index (int | None): the ARGV slot the name was read from.
-        """
-        name = text_view(name)
-        if index is not None and 0 < index <= len(self.operands):
-            operand = self.operands[index - 1]
-            if operand.raw_path == name:
-                if is_stdin(operand):
-                    return _guarded(self.stdin_view())
-                return _guarded(self.read_path(operand, self.local(operand)))
-        if name in STDIN_NAMES:
-            return _guarded(self.stdin_view())
-        return _guarded(self.read_path(name))
-
-    async def write_file(self, name: str, body: str, append: bool) -> None:
-        """Write output text through the dispatcher.
-
-        Args:
-            name (str): the file name as the program spelled it.
-            body (str): the text to write.
-            append (bool): append rather than replace the file.
-        """
-        if self.dispatch is None:
-            raise AwkRuntimeError("awk: file output requires a workspace")
-        path = PathSpec.from_str_path(text_view(name), cwd=self.cwd.virtual)
-        try:
-            if not append:
-                await self.flush_output()
-                await self.dispatch("write", path, data=b"")
-            if body:
-                writer = self.outputs.get(name)
-                if writer is None:
-                    writer = self.outputs[name] = ByteWriter(
-                        partial(self._append, path)
-                    )
-                await writer.write(from_byte_view(body))
-        except WALK_ERRORS as exc:
-            raise AwkIOError(
-                fs_strerror(exc) or "Cannot write output file"
-            ) from exc
-
-    async def _append(self, path: PathSpec, source: ByteSource) -> None:
-        assert self.dispatch is not None
-        await self.dispatch("append", path, data=source)
-
-    async def flush_output(self, name: str | None = None) -> None:
-        names = list(self.outputs) if name is None else [name]
-        for key in names:
-            writer = self.outputs.pop(key, None)
-            if writer is not None:
-                try:
-                    await writer.finish()
-                except WALK_ERRORS as exc:
-                    raise AwkRuntimeError(
-                        f'awk: cannot open "{key}" for output '
-                        f"({fs_strerror(exc) or 'Cannot write output file'})"
-                    ) from exc
-
-    async def abort_output(self) -> None:
-        writers = list(self.outputs.values())
-        self.outputs.clear()
-        for writer in writers:
-            await writer.abort()
-
-    async def run(self, command: str, stdin: ByteSource | None) -> CommandRun:
-        """Run a command line in a subshell of the session, as sh -c would.
-
-        ``eval`` takes the line whole, so an empty one, a comment or a
-        line ending in a backslash runs as ``sh -c`` would run it.
-
-        Args:
-            command (str): the command line.
-            stdin (bytes | None): its input, None for awk's own.
-        """
-        if self.shell is None:
-            raise AwkRuntimeError(
-                "awk: running a command requires a workspace"
-            )
-        await self.flush_output()
-        source: ByteSource = self.stdin_view() if stdin is None else stdin
-        io = await self.shell(
-            f"( {shell_join(['eval', text_view(command)])} )", source
-        )
-        stdout, stderr = await spooled_pair(io.stdout, io.stderr)
-        return CommandRun(stdout or b"", stderr or b"", io.exit_code)
-
-
-async def _stage(step: Coroutine[Any, Any, None], io: IOResult) -> bool:
-    """Run one phase of the program; True when it ran ``exit``.
-
-    Args:
-        step (Coroutine[Any, Any, None]): the phase.
-        io (IOResult): receives the exit status.
-    """
-    try:
-        await step
-    except ExitProgram as stop:
-        io.exit_code = stop.code & 0xFF
-        return True
-    return False
-
-
-async def _drained(interp: Interpreter, errors: ByteSpool) -> ByteSource:
-    out, err = await interp.drain()
-    await errors.fill(err)
-    return out
-
-
 async def _awk_stream(
-    interp: Interpreter, io: IOResult, host: AwkStreams
+    stream: OpenStream, host: StreamHost, io: IOResult
 ) -> AsyncIterator[bytes]:
-    """Run the program, yielding standard output as each record settles.
-
-    ``exit`` in BEGIN skips the input and in the main rules stops it,
-    and END runs after either; every awk treats a runtime error as fatal
-    at exit 2 and keeps what it had already written.
+    """Run the program, yielding standard output as it settles.
 
     Args:
-        interp (Interpreter): the interpreter.
+        stream (OpenStream): the awk engine.
+        host (StreamHost): serves the files and commands it reaches.
         io (IOResult): receives the exit status and stderr.
     """
-    errors = ByteSpool()
     try:
-        exited = await _stage(interp.run_begin(), io)
-        async with aclosing(chunks(await _drained(interp, errors))) as output:
-            async for data in output:
-                yield data
-        if not exited and interp.has_main_rules():
-            while (record := await interp.next_record()) is not None:
-                if await _stage(interp.run_record(record), io):
-                    break
-                async with aclosing(
-                    chunks(await _drained(interp, errors))
-                ) as output:
-                    async for data in output:
-                        yield data
-        await _stage(interp.run_end(), io)
-        await interp.finish()
-        async with aclosing(chunks(await _drained(interp, errors))) as output:
-            async for data in output:
-                yield data
-    except (AwkRuntimeError, AwkSyntaxError) as exc:
-        out, err = await interp.salvage(exc)
-        io.exit_code = 2
-        await errors.fill(err)
-        async with aclosing(chunks(out)) as output:
-            async for data in output:
-                yield data
+        async with aclosing(serve_requests(stream, host)) as output:
+            async for chunk in output:
+                yield chunk
+        io.exit_code = stream.status()
     finally:
-        io.stderr = await errors.output()
-        await interp.close_outputs()
-        await host.abort_output()
-        await interp.close_inputs()
+        io.stderr = await host.errors.output()
+        await host.close()
 
 
 async def awk_generic(
@@ -431,15 +173,29 @@ async def awk_generic(
     else:
         raise UsageError(AWK_USAGE)
 
-    try:
-        program = parse(source)
-    except AwkSyntaxError as exc:
-        return None, IOResult(exit_code=2, stderr=from_byte_view(f"{exc}\n"))
-
     # An empty operand names no file and mawk skips it, as it does an
     # operand ARGV no longer holds; a `var=value` operand is assigned
     # when the input reaches it. FILENAME reports the operand as typed.
-    streams = AwkStreams(
+    engine = open_stream(
+        "awk",
+        {
+            "program": byte_view(source),
+            "operands": [byte_view(p.raw_path) for p in paths],
+            "assignments": [byte_view(a) for a in f.assignments],
+            "fs": (
+                None
+                if f.field_separator is None
+                else byte_view(f.field_separator)
+            ),
+            "environ": [
+                byte_view(f"{name}={value}")
+                for name, value in (env or {}).items()
+            ],
+        },
+    )
+    if not engine.busy():
+        return None, IOResult(exit_code=2, stderr=engine.take_stderr())
+    host = StreamHost(
         paths,
         stream,
         stdin,
@@ -448,20 +204,8 @@ async def awk_generic(
         shell,
         partial(served_here, vfs, mount_prefix),
     )
-    interp = Interpreter(
-        program,
-        streams,
-        [byte_view(p.raw_path) for p in paths],
-        split_assignments(f.assignments),
-        {byte_view(k): byte_view(v) for k, v in (env or {}).items()},
-    )
-    if f.field_separator is not None:
-        interp.set_var(
-            "FS", text_value(unescape(byte_view(f.field_separator)))
-        )
-
     io = IOResult()
-    return _awk_stream(interp, io, streams), io
+    return _awk_stream(engine, host, io), io
 
 
-__all__ = ["awk_generic"]
+__all__ = ["awk_generic", "is_assignment"]

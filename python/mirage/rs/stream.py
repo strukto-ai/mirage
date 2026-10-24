@@ -15,9 +15,11 @@
 import json
 from collections.abc import AsyncGenerator, Awaitable, Callable, Mapping
 from contextlib import aclosing
+from typing import NamedTuple, Protocol
 
 from mirage._rs import Stream, StreamError
 from mirage.io.cooperative import chunks
+from mirage.io.spool import ByteSpool
 from mirage.io.types import ByteSource
 from mirage.io.yield_budget import YieldBudget
 from mirage.rs.errors import StreamRefusal
@@ -124,6 +126,95 @@ class OpenStream:
     def take_stderr(self) -> bytes:
         """What the stream wrote to stderr since the last call."""
         return self._stream.take_stderr()
+
+    def request(self) -> tuple[dict[str, JsonValue], bytes] | None:
+        """The host operation the stream waits on and the bytes it
+        carries, or None while it waits on none."""
+        taken = self._stream.request()
+        if taken is None:
+            return None
+        header, data = taken
+        return json.loads(header), data
+
+    def respond(self, reply: Mapping[str, JsonValue], data: bytes) -> bytes:
+        """Answer the request taken last.
+
+        Args:
+            reply (Mapping[str, JsonValue]): The host's answer.
+            data (bytes): The bytes it carries.
+        """
+        try:
+            return self._stream.respond(json.dumps(reply).encode(), data)
+        except StreamError as exc:
+            raise StreamRefusal(str(exc.args[0]), bytes(exc.args[1])) from exc
+
+
+class Served(NamedTuple):
+    """What a host made of one request.
+
+    Args:
+        reply (dict[str, JsonValue]): The answer the stream reads.
+        data (bytes): The bytes the answer carries.
+        output (ByteSource | None): What the host wrote to the output
+            doing it, which goes out before the stream's next output.
+    """
+
+    reply: dict[str, JsonValue]
+    data: bytes = b""
+    output: ByteSource | None = None
+
+
+class RequestHost(Protocol):
+    """Serves the requests of a stream that reaches files and commands;
+    ``errors`` gathers its stderr and theirs, in order."""
+
+    @property
+    def errors(self) -> ByteSpool: ...
+
+    async def serve(
+        self, request: Mapping[str, JsonValue], data: bytes
+    ) -> Served:
+        """Do one request.
+
+        Args:
+            request (Mapping[str, JsonValue]): What the stream asks.
+            data (bytes): The bytes it carries.
+        """
+        ...
+
+
+async def serve_requests(
+    stream: OpenStream, host: RequestHost
+) -> AsyncGenerator[bytes, None]:
+    """Run a stream until it waits on neither work nor its host, a bounded
+    call at a time, serving each request it makes.
+
+    Args:
+        stream (OpenStream): The command engine.
+        host (RequestHost): Serves its requests.
+    """
+    budget = YieldBudget()
+    while True:
+        while stream.busy():
+            await budget.run()
+            output = stream.drain()
+            await host.errors.append(stream.take_stderr())
+            if output:
+                yield output
+        taken = stream.request()
+        if taken is None:
+            break
+        await budget.run()
+        served = await host.serve(*taken)
+        if served.output is not None:
+            async with aclosing(chunks(served.output)) as pulled:
+                async for chunk in pulled:
+                    yield chunk
+        if output := stream.respond(served.reply, served.data):
+            yield output
+    if output := stream.finish():
+        yield output
+    await host.errors.append(stream.take_stderr())
 
 
 def open_stream(kind: str, config: Mapping[str, JsonValue]) -> OpenStream:

@@ -57,7 +57,9 @@ impl Posix {
             utf8: options.utf8,
             multiline: options.multiline,
             unicode_words,
-            consumed_newlines: options.dialect != Dialect::Grep && !options.multiline,
+            // awk's anchors hold at the subject's edges alone.
+            consumed_newlines: !matches!(options.dialect, Dialect::Grep | Dialect::Awk)
+                && !options.multiline,
             dot_skips_nul: options.dialect == Dialect::Posix,
         };
         // Placing groups, regexec holds every `$` of a pattern that has
@@ -178,6 +180,12 @@ impl Posix {
             }
         }
         Some(spans)
+    }
+
+    /// Where the leftmost-longest match at or after `at` lies, its groups
+    /// left unplaced.
+    pub(crate) fn find(&mut self, hay: &[u8], at: usize) -> Option<(usize, usize)> {
+        self.extent(hay, at)
     }
 
     /// Whether the pattern matches anywhere in `hay`, as sed's addresses

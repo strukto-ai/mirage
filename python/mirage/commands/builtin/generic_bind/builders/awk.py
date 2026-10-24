@@ -14,12 +14,11 @@
 
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic.awk import awk_generic as generic_awk
-from mirage.commands.builtin.generic.awk import served_here
+from mirage.commands.builtin.generic.awk import is_assignment, served_here
 from mirage.commands.builtin.generic_bind.adapter import GenericCommand
 from mirage.commands.builtin.generic_bind.files import command_files
 from mirage.commands.builtin.utils.links import dispatch_of, mount_root
 from mirage.commands.config import Context
-from mirage.core.awk.builtins import split_assignment
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 from mirage.utils.glob_walk import ResolveGlobFn
@@ -44,7 +43,7 @@ async def resolve_operands(
     out: list[PathSpec] = []
     run: list[PathSpec] = []
     for path in paths:
-        if split_assignment(path.raw_path) is None and served_here(
+        if not is_assignment(path.raw_path) and served_here(
             ctx.vfs, home, path
         ):
             run.append(path)
