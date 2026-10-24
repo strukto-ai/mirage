@@ -27,6 +27,7 @@ from mirage.commands.spec.types import CommandSpec
 from mirage.context import reset_current_session, set_current_session
 from mirage.errors.types import CommandTimeoutError
 from mirage.io import IOResult
+from mirage.io.types import materialize
 from mirage.policy import (
     Action,
     Deny,
@@ -1160,15 +1161,28 @@ class TestPerCallSession:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("stream", [False, True])
+async def test_a_stream_flag_held_in_a_bool_picks_the_answer(stream: bool):
+    ws = Workspace({"/r/": RAMVFS()}, mode=MountMode.WRITE)
+    try:
+        await ws.vfs.write("/r/a.txt", b"hi")
+        got = await ws.vfs.read("/r/a.txt", stream=stream)
+        assert isinstance(got, bytes) is not stream
+        assert await materialize(got) == b"hi"
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
 async def test_a_streamed_read_is_recorded_once_it_ends():
     ws = Workspace({"/r/": RAMVFS()}, mode=MountMode.WRITE)
     try:
         await ws.vfs.write("/r/a.txt", b"x" * 100)
         before = len(ws.vfs.records)
-        stream = await ws.vfs.read_stream("/r/a.txt")
+        stream = await ws.vfs.read("/r/a.txt", stream=True)
         assert len(ws.vfs.records) == before
         assert b"".join([chunk async for chunk in stream]) == b"x" * 100
-        stream = await ws.vfs.read_stream("/r/a.txt")
+        stream = await ws.vfs.read("/r/a.txt", stream=True)
         await stream.aclose()
         assert [(r.op, r.bytes) for r in ws.vfs.records[before:]] == [
             ("read", 100),
@@ -1184,7 +1198,7 @@ async def test_a_streamed_read_holds_one_chunk_at_a_time(tmp_path):
     ws = Workspace({"/d/": DiskVFS(root=str(tmp_path))}, mode=MountMode.READ)
     try:
         tracemalloc.start()
-        stream = await ws.vfs.read_stream("/d/big.bin")
+        stream = await ws.vfs.read("/d/big.bin", stream=True)
         total = 0
         async for chunk in stream:
             total += len(chunk)

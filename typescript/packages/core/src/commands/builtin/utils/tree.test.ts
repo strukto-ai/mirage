@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { ByteSource } from '../../../io/types.ts'
 import { describe, expect, it } from 'vitest'
 import type { Handed } from '../../../vfs/types.ts'
 import { enotdir, enotsup, walkDeclined } from '../../../errors/fs.ts'
@@ -148,14 +149,9 @@ class GuardedRAM extends RAMVFS {
     handed?: Handed,
     offset?: number,
     size?: number | null,
-  ): Promise<Uint8Array> {
+  ): Promise<ByteSource> | AsyncIterable<Uint8Array> {
     this.reads.push(path.virtual)
     return super.read(path, handed, offset, size)
-  }
-
-  override readStream(path: PathSpec): AsyncIterable<Uint8Array> {
-    this.reads.push(path.virtual)
-    return super.readStream(path)
   }
 
   override beforeFullScan(path: PathSpec, files: number | null): Promise<void> {

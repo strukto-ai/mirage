@@ -1646,7 +1646,9 @@ class AccountsAtClose(RAMVFS):
 
     caches_reads = False
 
-    def read_stream(self, path: PathSpec):
+    def read(self, path: PathSpec, offset: int = 0, size: int | None = None):
+        if offset or size is not None:
+            return super().read(path, offset, size)
         return self._chunks(
             path, self.accessor.store.files[norm(path.vfs_path)]
         )
@@ -1741,13 +1743,13 @@ async def test_a_once_nod_covers_one_streamed_read_however_far_it_is_pulled():
         await ws.vfs.write("/data/big", b"x" * 10000)
         ws.policies.add(AskBigReads())
         with pytest.raises(PolicyDenied) as held:
-            await ws.vfs.read_stream("/data/big")
+            await ws.vfs.read("/data/big", stream=True)
         await ws.decisions.answer(held.value.refusal.ask_id, Outcome.ALLOW)
-        stream = await ws.vfs.read_stream("/data/big")
+        stream = await ws.vfs.read("/data/big", stream=True)
         assert len(await anext(stream)) == 1024
         await stream.aclose()
         with pytest.raises(PolicyDenied) as again:
-            await ws.vfs.read_stream("/data/big")
+            await ws.vfs.read("/data/big", stream=True)
         assert again.value.refusal.kind == "pending"
     finally:
         await ws.close()

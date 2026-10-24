@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { materialize } from '../../io/types.ts'
 import { mountKey } from '../../utils/key_prefix.ts'
 import { describe, expect, it, vi } from 'vitest'
 import type * as ClientModule from './client.ts'
@@ -204,9 +205,9 @@ describe('dropbox read stamps content_hash', () => {
     ])
     const vfs = new DropboxVFS({ clientId: 'c', clientSecret: 's', refreshToken: 'r' })
     const written: Uint8Array[] = []
-    vfs.write = (_path, data) => {
-      written.push(data)
-      return Promise.resolve(null)
+    vfs.write = async (_path, data) => {
+      written.push(await materialize(data))
+      return null
     }
     await vfs.truncate(new PathSpec({ virtual: '/n', directory: '/', vfsPath: 'n' }), 4)
     expect(written.map((data) => new TextDecoder().decode(data))).toEqual(['abcd'])

@@ -27,6 +27,7 @@ from copy import deepcopy
 
 from mirage import (Accessor, BaseVFS, ContentType, FileStat, FileType,
                     PathSpec)
+from mirage.io.types import ByteSource, materialize
 
 PAGES = {"notes.md": "agents just speak bash\n"}
 FEED = {"status.md": "All systems go.\n"}
@@ -82,11 +83,11 @@ class PagesVFS(BaseVFS):
             raise FileNotFoundError(path.virtual)
         return _row(name, self.accessor.pages[key])
 
-    async def write(self, path: PathSpec, data: bytes) -> None:
+    async def write(self, path: PathSpec, data: ByteSource) -> None:
         key = _key(path)
         if not key or "/" in key:
             raise NotADirectoryError(path.virtual)
-        self.accessor.pages[key] = data.decode()
+        self.accessor.pages[key] = (await materialize(data)).decode()
 
 
 class WikiVFS(PagesVFS):

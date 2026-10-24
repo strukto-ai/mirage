@@ -18,7 +18,6 @@ from typing import Any
 from mirage.accessor.slack import SlackAccessor
 from mirage.core.slack.client import slack_search_available
 from mirage.core.slack.read import follow as _follow
-from mirage.core.slack.read import read as _read
 from mirage.core.slack.read import read_many as _read_many
 from mirage.core.slack.read import read_range as _read_range
 from mirage.core.slack.read import read_stream as _read_stream
@@ -26,6 +25,7 @@ from mirage.core.slack.readdir import readdir as _readdir
 from mirage.core.slack.search import files_containing as _files_containing
 from mirage.core.slack.stat import stat as _stat
 from mirage.core.time_range import TimeRange
+from mirage.io.types import ByteSource
 from mirage.types import DirListing, FileStat, PathSpec, VFSName
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.slack.config import SlackConfig
@@ -71,9 +71,9 @@ class SlackVFS(BaseVFS):
         size: int | None = None,
         entry: FileStat | None = None,
         parent: FileStat | None = None,
-    ) -> bytes:
+    ) -> ByteSource:
         if not offset and size is None:
-            return await _read(self.accessor, path, entry, parent)
+            return _read_stream(self.accessor, path, entry, parent)
         return await _read_range(
             self.accessor, path, offset, size, entry, parent
         )
@@ -89,14 +89,6 @@ class SlackVFS(BaseVFS):
         return await _read_many(
             self.accessor, paths, limit, entries or unknown, parents or unknown
         )
-
-    def read_stream(
-        self,
-        path: PathSpec,
-        entry: FileStat | None = None,
-        parent: FileStat | None = None,
-    ) -> AsyncIterator[bytes]:
-        return _read_stream(self.accessor, path, entry, parent)
 
     async def follow(
         self,

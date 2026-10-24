@@ -72,22 +72,30 @@ The driver never sees the mount it runs under. The index store and the `vfs:` re
 
 ### Add functions as the resource grows
 
-Only `readdir`, `read`, and `stat` are required. Mirage derives a stream from
-`read`, existence checks from `stat`, and treats the resource as remote and
-available. A window of a file is cut from the whole `read` unless the class
-sets `readsRanges` true; then `read(path, handed, offset, size)` receives the
-window (`size === null` means through EOF) and fetches only that, and `file`
-then reads only the first bytes it sniffs. A derived stream still fetches the
-entire file; define `readStream` for large files.
+Only `readdir`, `read`, and `stat` are required. Mirage derives existence
+checks from `stat` and treats the resource as remote and available.
 
-For large replacements, implement `writeStream(path, data, signal, atomic, handed)`;
-`data` is a `ByteSource` (a `Uint8Array` or async byte iterable). The ordinary
-`write` API still accepts a complete byte array. Streamed writes use the same
-policy, cache invalidation and conditional-write path. Their `handed` metadata
-comes from the `write` declaration, and they may return the committed
-`FileStat` to keep the index warm. Consume to EOF before an atomic replacement
-becomes visible, and abort uploads when the producer fails or is cancelled.
-`appendStream` is a separate capability; object-store append still reads and
+`read` answers with the file's bytes, or with an async iterable of them for a
+file too large to hold: resolve to either from an `async` method, or `yield`
+chunks from an `async *` one. Mirage collects a stream for a caller that needs
+the whole file and hands bytes to a streaming caller as one chunk. A window of
+a file is cut from the whole `read` unless the class sets `readsRanges` true;
+then `read(path, handed, offset, size)` receives the window (`size === null`
+means through EOF) and fetches only that, and `file` then reads only the first
+bytes it sniffs.
+
+`write(path, data, signal, handed, atomic)` and `append(path, data, handed,
+signal)` take `data` as a `Uint8Array` or an async byte iterable (a
+`ByteSource`); `await materialize(data)` collects it for a store that takes one
+body. A program's output redirected into the mount arrives as a stream: a
+`write` that lands each chunk as it comes lets a reader watch the file grow,
+and one that collects first shows it when the program ends. When `atomic` is
+true, a `write` that lands chunks as they come shows nothing until the stream
+has ended whole (`sed -i`); one that collects first already does. Abort
+uploads when the producer fails or is cancelled. A write's `handed` metadata
+comes from its `write` declaration, and it may return the committed `FileStat`
+to keep the index warm. The dispatcher keeps policy, cache invalidation and
+conditional-write checks in the same path. Object-store append still reads and
 replaces the existing object.
 
 Replayable command input and deferred output spill after 1 MiB per spool.
@@ -126,7 +134,7 @@ Every other function is optional, and each stands alone:
 | Functions | Purpose |
 | --- | --- |
 | `readdir`, `read`, `stat` | Required filesystem behavior. |
-| `readStream`, `exists`, `readTree`, `firstLines`, `lastLines`, `lineCount`, `follow`, `checksum` | Optional equivalent fast paths ([Walks](/home/integration/walks), [Lines](/home/integration/lines), [Checksums](/home/integration/checksums)). |
+| `exists`, `readTree`, `firstLines`, `lastLines`, `lineCount`, `follow`, `checksum` | Optional equivalent fast paths ([Walks](/home/integration/walks), [Lines](/home/integration/lines), [Checksums](/home/integration/checksums)). |
 | `write`, `append`, `pwrite`, `create`, `mkdir`, `unlink`, `rmdir`, `rmR`, `rename`, `copy`, `dirCopy`, `truncate`, `setattr` | Individually supported mutations. |
 | `copyFrom` | Optional: copy a file from another mount of the same kind inside the store, for `cp` and `mv` between two mounts. |
 | `search`, `searchMany` | Optional resource search. |
@@ -600,7 +608,8 @@ places:
 | --- | --- |
 | `new BaseVFS({ name, accessor, io: new VFSAdapter({ read: { readdir, readBytes, stat } }) })` | a `BaseVFS` subclass defining `readdir`, `read` and `stat` |
 | `readBytes` and `readRange` | one `read(path, handed, offset, size, signal)`; set `readsRanges` true when it fetches only the window |
-| `NativeReadOps`, `WriteOps`, `SearchOps`, `DuOps` | the same functions as methods (`readStream`, `exists`, `readTree`, `write`, ..., `search`, `searchMany`) |
+| `NativeReadOps`, `WriteOps`, `SearchOps`, `DuOps` | the same functions as methods (`exists`, `readTree`, `write`, ..., `search`, `searchMany`) |
+| `readStream`, `writeStream`, `appendStream` | `read` answering a stream, and `write` and `append` taking one; a VFS still defining one is refused when mounted |
 | `ops()`, `makeGenericOps`, `RegisteredOp`, `OPS` tables, `autoOps` | nothing to declare: the mount serves the functions; mark a custom one `@vfsCall({ effect })` |
 | `commands()` returning a builtin set, `commands/builtin/<name>/io.ts` | `registerBackendCommands(cls, ...)` in `workspace/mount/backends.ts`; `commands()` returns only the commands the VFS was handed |
 | `new DriverOps(vfs)` and `checkDriverContract(vfs, fixture)` | call the functions on the VFS directly; `checkReadContract(vfs, fixture)` |

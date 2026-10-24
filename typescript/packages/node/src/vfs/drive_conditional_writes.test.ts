@@ -186,7 +186,7 @@ describe.each(['box', 'dropbox'] as const)('conditional writes on %s', (kind) =>
     await ws.vfs.readdir(r)
     drive.put('f', 'B\n')
     const chunks: Uint8Array[] = []
-    for await (const chunk of await ws.vfs.readStream(`${r}/f`)) chunks.push(chunk)
+    for await (const chunk of await ws.vfs.read(`${r}/f`, { stream: true })) chunks.push(chunk)
     expect(chunks.map((c) => DEC.decode(c)).join('')).toBe('B\n')
     drive.put('f', 'C\n')
     await expect(ws.vfs.write(`${r}/f`, ENC.encode('mine\n'))).rejects.toMatchObject({

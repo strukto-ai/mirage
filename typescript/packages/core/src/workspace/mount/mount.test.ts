@@ -16,10 +16,17 @@ import { mountPrefixOf } from '../../utils/key_prefix.ts'
 import { describe, expect, it } from 'vitest'
 import { Command, command, type CommandFn } from '../../commands/config.ts'
 import { CommandSpec, Argument } from '../../commands/spec/types.ts'
-import { IOResult, materialize } from '../../io/types.ts'
+import { IOResult, materialize, type ByteSource } from '../../io/types.ts'
 import type { RAMAccessor } from '../../accessor/ram.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
-import { revisionFor } from '../../observe/context.ts'
+import {
+  commandRecords,
+  recordStream,
+  revisionFor,
+  runWithRecording,
+} from '../../observe/context.ts'
+import { readVersioned } from '../../cache/context.ts'
+import type { Handed } from '../../vfs/types.ts'
 import { BaseVFS } from '../../vfs/base.ts'
 import { FileStat, FileType, Limit, MountMode, PathSpec } from '../../types.ts'
 import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
@@ -71,6 +78,29 @@ describe('Mount constructor validation', () => {
     }
     expect(() => new MountEntry({ prefix: '/ram/', vfs: new MisnamedRenderer() })).toThrow(
       "'renderDoc', which is not a method",
+    )
+  })
+
+  // A method folded into read, write or append would never be called, so a
+  // VFS that still has one, on its prototype or as a field, is refused as it
+  // is mounted.
+  it.each(['readStream', 'writeStream', 'appendStream'])(
+    'rejects a VFS that defines %s',
+    (name) => {
+      class Old extends StubVFS {}
+      Object.defineProperty(Old.prototype, name, { value: () => undefined })
+      expect(() => new MountEntry({ prefix: '/ram/', vfs: new Old() })).toThrow(
+        `Old.${name}: define `,
+      )
+    },
+  )
+
+  it('rejects a VFS that sets a folded method as a field', () => {
+    class Fielded extends StubVFS {
+      writeStream = (): Promise<void> => Promise.resolve()
+    }
+    expect(() => new MountEntry({ prefix: '/ram/', vfs: new Fielded() })).toThrow(
+      'Fielded.writeStream: define write',
     )
   })
 })
@@ -868,4 +898,128 @@ describe('a user write past the dispatcher', () => {
       }
     },
   )
+})
+
+async function* versioned(data: Uint8Array, path: PathSpec): AsyncIterable<Uint8Array> {
+  const rec = recordStream('read', path.virtual, 'ram')
+  if (rec !== null) rec.fingerprint = 'v1'
+  yield await Promise.resolve(data)
+}
+
+/** Answers a whole read with a stream that records its version. */
+class VersionedStream extends RAMVFS {
+  override async read(
+    path: PathSpec,
+    handed?: Handed,
+    offset = 0,
+    size: number | null = null,
+  ): Promise<ByteSource> {
+    const data = await materialize(await super.read(path, handed, offset, size))
+    return offset === 0 && size === null ? versioned(data, path) : data
+  }
+}
+
+// A read-modify-write sends the version of the bytes it read, so a whole
+// read collected from a stream carries the version the stream recorded.
+it('a collected stream hands its version to the bytes', async () => {
+  const vfs = new VersionedStream()
+  vfs.store.files.set('/f', new TextEncoder().encode('old'))
+  const ws = new Workspace({ '/m': vfs }, { mode: MountMode.WRITE })
+  try {
+    const mount = ws.mount('/m')
+    const [data, version] = await readVersioned(PathSpec.fromStrPath('/m/f'), () =>
+      mount.call('read', '/m/f'),
+    )
+    expect([new TextDecoder().decode(data as Uint8Array), version]).toEqual(['old', 'v1'])
+  } finally {
+    await ws.close()
+  }
+})
+
+// A rewrite's write proves the copy it extends by the read before it, so a
+// read collected from a stream leaves its record in the block around it.
+it('a collected read stays in the records around it', async () => {
+  const vfs = new VersionedStream()
+  vfs.store.files.set('/f', new TextEncoder().encode('old'))
+  const ws = new Workspace({ '/m': vfs }, { mode: MountMode.WRITE })
+  try {
+    const [mine] = await runWithRecording(() =>
+      commandRecords(async (records) => {
+        await ws.mount('/m').call('read', '/m/f')
+        return records
+      }),
+    )
+    expect(mine.map((r) => [r.op, r.fingerprint])).toContainEqual(['read', 'v1'])
+  } finally {
+    await ws.close()
+  }
+})
+
+/** Numbers each whole read's version and holds the first one open until `open`. */
+class Racing extends RAMVFS {
+  calls = 0
+  #begin: () => void = () => undefined
+  #release: () => void = () => undefined
+  readonly started = new Promise<void>((resolve) => {
+    this.#begin = resolve
+  })
+  readonly gate = new Promise<void>((resolve) => {
+    this.#release = resolve
+  })
+
+  open(): void {
+    this.#release()
+  }
+
+  override async read(
+    path: PathSpec,
+    handed?: Handed,
+    offset = 0,
+    size: number | null = null,
+  ): Promise<ByteSource> {
+    if (offset !== 0 || size !== null) return super.read(path, handed, offset, size)
+    const n = ++this.calls
+    if (n === 1) this.#begin()
+    return this.numbered(path, n)
+  }
+
+  private async *numbered(path: PathSpec, n: number): AsyncIterable<Uint8Array> {
+    const rec = recordStream('read', path.virtual, 'ram')
+    if (rec !== null) rec.fingerprint = `v${String(n)}`
+    if (n === 1) await this.gate
+    yield new TextEncoder().encode(`bytes${String(n)}`)
+  }
+}
+
+// Two reads of one file in one command share its records; the one that
+// finishes last still labels its bytes with its own version.
+it('parallel collected reads keep their own versions', async () => {
+  const vfs = new Racing()
+  vfs.store.files.set('/f', new TextEncoder().encode('x'))
+  const ws = new Workspace({ '/m': vfs }, { mode: MountMode.WRITE })
+  try {
+    const mount = ws.mount('/m')
+    const read = (): Promise<[unknown, string | null]> =>
+      readVersioned(PathSpec.fromStrPath('/m/f'), () => mount.call('read', '/m/f'))
+    const [[older, newer]] = await runWithRecording(() =>
+      commandRecords(async () => {
+        const first = read()
+        await vfs.started
+        const second = await read()
+        vfs.open()
+        return [await first, second] as const
+      }),
+    )
+    expect(
+      [older, newer].map(([data, version]) => [
+        new TextDecoder().decode(data as Uint8Array),
+        version,
+      ]),
+    ).toEqual([
+      ['bytes1', 'v1'],
+      ['bytes2', 'v2'],
+    ])
+  } finally {
+    await ws.close()
+  }
 })

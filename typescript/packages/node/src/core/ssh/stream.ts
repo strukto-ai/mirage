@@ -16,6 +16,8 @@ import { rawPathOf } from '@struktoai/mirage-core/utils/key_prefix'
 import { once } from 'node:events'
 import type { PathSpec } from '@struktoai/mirage-core/types'
 import { enoent } from '@struktoai/mirage-core/errors/fs'
+import { recordStream } from '@struktoai/mirage-core/observe/context'
+import { VFSName } from '@struktoai/mirage-core/types'
 import { singleQuote } from '@struktoai/mirage-core/utils/quote'
 import type { ReadStream } from 'ssh2'
 import type { SSHAccessor } from '../../accessor/ssh.ts'
@@ -54,8 +56,12 @@ export async function* readStream(accessor: SSHAccessor, p: PathSpec): AsyncIter
   const virtual = rawPathOf(p)
   const remote = joinRoot(accessor.config.root ?? '/', virtual)
   const rs = sftp.createReadStream(remote)
+  const rec = recordStream('read', p.virtual, VFSName.SSH)
   try {
-    yield* readChunks(rs)
+    for await (const chunk of readChunks(rs)) {
+      if (rec !== null) rec.bytes += chunk.byteLength
+      yield chunk
+    }
   } catch (err) {
     if (isNoSuchFile(err)) throw enoent(p)
     throw err

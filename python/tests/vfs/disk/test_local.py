@@ -18,6 +18,7 @@ from pathlib import Path
 import pytest
 
 from mirage import MountMode, Workspace
+from mirage.io.types import materialize
 from mirage.types import PathSpec
 from mirage.vfs.disk.disk import DiskVFS
 
@@ -151,7 +152,7 @@ async def test_host_link_contract(host_tree):
         spec = PathSpec.from_str_path(path)
         assert not await vfs.exists(spec)
         with pytest.raises(FileNotFoundError):
-            await vfs.read(spec)
+            await materialize(await vfs.read(spec))
         with pytest.raises(FileNotFoundError):
             await vfs.write(spec, b"changed")
     assert (vfs.root.parent / "outside/secret.txt").read_text() == "outside\n"

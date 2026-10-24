@@ -1,4 +1,5 @@
 import { BaseVFS } from '../base.ts'
+import { type ByteSource } from '../../io/types.ts'
 import type { Handed } from '../types.ts'
 import { WandbAccessor } from '../../accessor/wandb.ts'
 
@@ -47,17 +48,14 @@ export class WandbVFS extends BaseVFS {
     _handed?: Handed,
     offset = 0,
     size: number | null = null,
-  ): Promise<Uint8Array> {
+  ): Promise<ByteSource> {
+    if (offset === 0 && size === null) return readStream(this.accessor, path)
     const data = await read(this.accessor, path)
-    return offset === 0 && size === null ? data : sliceWindow(data, offset, size)
+    return sliceWindow(data, offset, size)
   }
 
   override stat(path: PathSpec, handed?: Handed): Promise<FileStat> {
     return stat(this.accessor, path, handed?.entry)
-  }
-
-  override readStream(path: PathSpec): AsyncIterable<Uint8Array> {
-    return readStream(this.accessor, path)
   }
 
   override getState(): Promise<WandbVFSState> {

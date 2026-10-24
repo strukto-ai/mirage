@@ -148,8 +148,13 @@ class Rendering(Minimal):
         {".json": "read_json", ".gdoc.json": "read_doc"}
     )
 
-    async def read_stream(self, path: PathSpec) -> AsyncIterator[bytes]:
-        yield await ram_read(self.accessor, path)
+    async def read(
+        self,
+        path: PathSpec,
+        offset: int = 0,
+        size: int | None = None,
+    ) -> AsyncIterator[bytes]:
+        yield slice_window(await ram_read(self.accessor, path), offset, size)
 
     async def read_json(
         self,
@@ -272,13 +277,13 @@ async def test_stream_contract_rejects_oversized_chunks_and_closes_source():
     vfs = await _seeded(Minimal, CONTENT)
     closed = []
 
-    async def source(path, index):
+    async def source(path):
         try:
             yield CONTENT
         finally:
             closed.append(True)
 
-    vfs.read_stream = source
+    vfs.read = source  # type: ignore[method-assign]
     with pytest.raises(AssertionError, match="max_chunk_size"):
         await check_read_contract(
             vfs,

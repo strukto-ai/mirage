@@ -111,7 +111,9 @@ export function failure(reply: FastifyReply, err: unknown): FastifyReply {
  * Serve each `session.vfs` call at `POST /v1/workspaces/:wsId/vfs/<call>`
  * and `session.glob` at `POST /v1/workspaces/:wsId/glob`, each as the
  * session `?session_id=` names. `?explain=true` answers what a VFS call
- * would do instead of doing it.
+ * would do instead of doing it. A `read` that asks for `stream` answers its
+ * bytes as they are pulled, over HTTP only, where the body can carry them
+ * raw. Mirrors Python's `vfs_route`.
  */
 export function registerVfsRoutes(app: FastifyInstance, deps: VfsRoutesDeps): void {
   for (const call of VFS_CALLS) {
@@ -123,8 +125,29 @@ export function registerVfsRoutes(app: FastifyInstance, deps: VfsRoutesDeps): vo
         try {
           const ws = requireEntry(deps.registry, req.params.wsId, req.account).runner.ws
           const explain = queryFlag(req.query.explain, 'explain')
-          const args = await checked(call, req.body ?? {})
+          const params = (req.body ?? {}) as Record<string, unknown>
+          const asked = call.name === 'read' && params.stream !== undefined
+          const stream = asked ? params.stream : false
+          if (typeof stream !== 'boolean') throw new RouteError(400, 'stream must be a boolean')
+          const args = await checked(
+            call,
+            asked
+              ? Object.fromEntries(Object.entries(params).filter(([key]) => key !== 'stream'))
+              : params,
+          )
           const session = await sessionOf(ws, req.query.session_id)
+          if (stream && !explain) {
+            const source = await session.vfs.read(args.path as string, {
+              offset: (args.offset as number | undefined) ?? 0,
+              size: (args.size as number | null | undefined) ?? null,
+              raw: args.raw === true,
+              stream: true,
+            })
+            return await reply
+              .type('application/octet-stream')
+              .header('Cache-Control', 'no-store')
+              .send(Readable.from(source))
+          }
           body = await answered(session, call, args, explain)
         } catch (err) {
           logger.debug('vfs/%s failed', call.name, err)
@@ -134,37 +157,6 @@ export function registerVfsRoutes(app: FastifyInstance, deps: VfsRoutesDeps): vo
       },
     )
   }
-  app.post<{
-    Params: { wsId: string }
-    Querystring: CallQuery
-    Body: { path?: unknown; raw?: unknown } | null
-  }>(
-    '/v1/workspaces/:wsId/vfs/read_stream',
-    { bodyLimit: DEFAULT_MAX_REQUEST_BODY_SIZE },
-    async (req, reply) => {
-      try {
-        const ws = requireEntry(deps.registry, req.params.wsId, req.account).runner.ws
-        const body = req.body
-        if (
-          body === null ||
-          typeof body !== 'object' ||
-          Object.keys(body).some((key) => !['path', 'raw'].includes(key)) ||
-          typeof body.path !== 'string' ||
-          (body.raw !== undefined && typeof body.raw !== 'boolean')
-        )
-          throw new RouteError(400, 'expected path and optional raw boolean')
-        const session = await sessionOf(ws, req.query.session_id)
-        const source = await session.vfs.readStream(body.path, { raw: body.raw === true })
-        return await reply
-          .type('application/octet-stream')
-          .header('Cache-Control', 'no-store')
-          .send(Readable.from(source))
-      } catch (err) {
-        logger.debug('vfs/read_stream failed', err)
-        return failure(reply, err)
-      }
-    },
-  )
   app.post<{ Params: { wsId: string; name: string }; Querystring: CallQuery }>(
     '/v1/workspaces/:wsId/vfs/:name',
     { bodyLimit: DEFAULT_MAX_REQUEST_BODY_SIZE },

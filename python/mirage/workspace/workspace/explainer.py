@@ -100,7 +100,11 @@ class VfsExplainer:
         self._vfs = vfs
 
     async def read(
-        self, path: str, offset: int = 0, size: int | None = None
+        self,
+        path: str,
+        offset: int = 0,
+        size: int | None = None,
+        raw: bool = False,
     ) -> VfsExplanation:
         """Explain ``session.vfs.read``.
 
@@ -108,9 +112,10 @@ class VfsExplainer:
             path (str): the path.
             offset (int): where the read would start.
             size (int | None): how much it would read.
+            raw (bool): whether it would read the stored bytes.
         """
         return await _dry(
-            "read", (path,), lambda: self._vfs.read(path, offset, size)
+            "read", (path,), lambda: self._vfs.read(path, offset, size, raw)
         )
 
     async def write(self, path: str, data: bytes) -> VfsExplanation:

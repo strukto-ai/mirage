@@ -15,6 +15,7 @@
 import { Readable } from 'node:stream'
 import { setImmediate as nextTurn } from 'node:timers/promises'
 import { describe, expect, it } from 'vitest'
+import { runWithRecording } from '@struktoai/mirage-core/observe/context'
 import { PathSpec } from '@struktoai/mirage-core/types'
 import type { ReadStream, SFTPWrapper } from 'ssh2'
 import { SSHAccessor } from '../../accessor/ssh.ts'
@@ -100,6 +101,20 @@ describe('core/ssh/stream', () => {
     for await (const c of readStream(accessor, spec('/x'))) chunks.push(c)
     const decoded = chunks.map((c) => new TextDecoder().decode(c)).join('')
     expect(decoded).toBe('hello stream')
+  })
+
+  it('records the read and its bytes', async () => {
+    const accessor = makeFakeAccessor({
+      files: new Map([['/x', { data: new TextEncoder().encode('hello stream') }]]),
+      dirs: new Map([['/', {}]]),
+    })
+    const [chunks, records] = await runWithRecording(async () => {
+      const got: Uint8Array[] = []
+      for await (const c of readStream(accessor, spec('/x'))) got.push(c)
+      return got
+    })
+    expect(new TextDecoder().decode(Buffer.concat(chunks))).toBe('hello stream')
+    expect(records.map((r) => [r.op, r.path, r.bytes])).toEqual([['read', '/x', 12]])
   })
 
   it('throws ENOENT on missing', async () => {

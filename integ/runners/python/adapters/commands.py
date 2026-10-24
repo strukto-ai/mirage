@@ -30,7 +30,7 @@ from mirage.commands.config import (
 )
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.types import Argument, CommandSpec
-from mirage.io.types import IOResult
+from mirage.io.types import IOResult, materialize
 from mirage.types import FileStat, PathSpec
 from mirage.vfs.ram import RAMVFS
 
@@ -56,8 +56,9 @@ class CommandService(RAMVFS):
         calls: list[str] = []
         handlers: list[Command] = []
         dropped = {"grep", "rg"} if metadata_only else set()
-        # The service's own handlers read its store; every other read
-        # reaches the refusal below.
+        # The service's own handlers read its store, collecting what they
+        # answer while they own it; every other read reaches the refusal
+        # below. One with no search of its own lets any read through.
         for name in sorted({"grep", "rg", "rev"} - dropped):
             handlers.extend(self._search(generic(name), calls))
         # Without its own search it has no walk of its own either
@@ -138,7 +139,8 @@ class CommandService(RAMVFS):
                 return stream(), IOResult()
             token = _OWN.set(True)
             try:
-                return await original.fn(accessor, paths, texts, ctx)
+                out, io = await original.fn(accessor, paths, texts, ctx)
+                return (None if out is None else await materialize(out)), io
             finally:
                 _OWN.reset(token)
 
@@ -155,7 +157,7 @@ class CommandService(RAMVFS):
     async def read(
         self, path: PathSpec, offset: int = 0, size: int | None = None
     ) -> bytes:
-        if _OWN.get():
+        if _OWN.get() or self.metadata_only:
             return await super().read(path, offset, size)
         raise PermissionError(13, "service exposes search only", path.virtual)
 

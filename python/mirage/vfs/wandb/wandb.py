@@ -1,4 +1,3 @@
-from collections.abc import AsyncIterator
 from typing import Any
 
 from mirage.accessor.wandb import WandbAccessor
@@ -7,6 +6,7 @@ from mirage.core.wandb.config import WandbConfig
 from mirage.core.wandb.read import read, read_stream
 from mirage.core.wandb.readdir import readdir
 from mirage.core.wandb.stat import stat
+from mirage.io.types import ByteSource
 from mirage.types import DirListing, FileStat, PathSpec, VFSName
 from mirage.utils.ranges import slice_window
 from mirage.vfs.base import BaseVFS
@@ -31,7 +31,9 @@ class WandbVFS(BaseVFS):
 
     async def read(
         self, path: PathSpec, offset: int = 0, size: int | None = None
-    ) -> bytes:
+    ) -> ByteSource:
+        if not offset and size is None:
+            return read_stream(self.accessor, path)
         data = await read(self.accessor, path)
         return slice_window(data, offset, size)
 
@@ -39,9 +41,6 @@ class WandbVFS(BaseVFS):
         self, path: PathSpec, entry: FileStat | None = None
     ) -> FileStat:
         return await stat(self.accessor, path, entry)
-
-    def read_stream(self, path: PathSpec) -> AsyncIterator[bytes]:
-        return read_stream(self.accessor, path)
 
     def get_state(self) -> dict[str, Any]:
         return self.config_state(self.config)

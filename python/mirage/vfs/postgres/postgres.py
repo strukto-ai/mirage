@@ -59,14 +59,11 @@ class PostgresVFS(BaseVFS):
         offset: int = 0,
         size: int | None = None,
         parent: FileStat | None = None,
-    ) -> bytes:
+    ) -> ByteSource:
+        if not offset and size is None:
+            return _read_stream(self.accessor, path, parent)
         data = await _read(self.accessor, path, None, parent)
         return slice_window(data, offset, size)
-
-    def read_stream(
-        self, path: PathSpec, parent: FileStat | None = None
-    ) -> AsyncIterator[bytes]:
-        return _read_stream(self.accessor, path, parent)
 
     async def stat(
         self, path: PathSpec, entry: FileStat | None = None

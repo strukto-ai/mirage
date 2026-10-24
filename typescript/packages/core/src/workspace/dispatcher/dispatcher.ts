@@ -1808,9 +1808,10 @@ export class Dispatcher {
 
   /**
    * Whether a read is answered as it is pulled. A whole read of stored bytes
-   * streams through the VFS's own `readStream`. A window, a rendering, a VFS
-   * with no stream and a postVfs policy that may read the result each get the
-   * whole bytes instead, which are a stream of one chunk. A read a running
+   * streams as the VFS's `read` answers it, a stream as it is pulled and bytes
+   * as one chunk. A window, a rendering, a VFS with no `read` of its own and a
+   * postVfs policy that may read the result each get the whole bytes instead,
+   * which are a stream of one chunk. A read a running
    * line makes reaches no postVfs policy, so it streams either way. Mirrors
    * Python's Dispatcher._streams.
    */
@@ -1820,7 +1821,7 @@ export class Dispatcher {
       !call.stream ||
       offset !== 0 ||
       size !== null ||
-      !vfs.supports('readStream') ||
+      !vfs.supports('read') ||
       this.rendersRead(call, mount)
     ) {
       return false

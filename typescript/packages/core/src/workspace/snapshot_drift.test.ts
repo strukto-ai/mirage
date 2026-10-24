@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { ByteSource } from '../io/types.ts'
 import { ListingCheckStore } from '../cache/index/ram.ts'
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { createRequire } from 'node:module'
@@ -93,7 +94,7 @@ class FakeRemoteVFS extends BaseVFS {
     return { type: this.name, config: { token: '<REDACTED>' } }
   }
 
-  override read(scope: PathSpec): Promise<Uint8Array> {
+  override read(scope: PathSpec): Promise<ByteSource> {
     const acc = this.accessor
     const pinned = revisionFor(scope.virtual)
     const entry = acc.blobs.get(scope.virtual)
@@ -480,27 +481,29 @@ it.each([
 it('snapshot rejects fingerprints from a retired lazy op', async () => {
   const old = new FakeRemoteAccessor()
   old.put('/remote/file', new TextEncoder().encode('old'))
-  // A read that answers with a stream, recorded only as it is drained.
+  // A read that answers with a stream, recorded only once it is drained.
   class LazyRemoteVFS extends FakeRemoteVFS {
-    override read(scope: PathSpec): Promise<Uint8Array> {
+    override read(scope: PathSpec): Promise<ByteSource> {
       const accessor = this.accessor
       async function* lazy(): AsyncIterable<Uint8Array> {
         const entry = accessor.blobs.get(scope.virtual)
         if (entry === undefined) throw new Error('missing fixture')
+        yield await Promise.resolve(entry.bytes)
         record('read', scope.virtual, 'fake-remote', entry.bytes.length, startOp(), {
           fingerprint: entry.fingerprint,
           revision: entry.revision,
         })
-        yield await Promise.resolve(entry.bytes)
       }
-      return Promise.resolve(lazy() as unknown as Uint8Array)
+      return Promise.resolve(lazy())
     }
   }
   const ws = new Workspace({ '/remote': new LazyRemoteVFS(old) }, { shellParser: parser })
   try {
     const id = ws.mount('/remote').mountId
     const [, records] = await runWithRecording(async () => {
-      const stream = (await ws.dispatch('read', '/remote/file')) as AsyncIterable<Uint8Array>
+      const stream = (await ws.dispatch('read', '/remote/file', [], {
+        stream: true,
+      })) as AsyncIterable<Uint8Array>
       const removing = ws.unmount('/remote')
       await vi.waitFor(() => {
         expect(ws.registry.tryMountForPrefix('/remote')).toBeNull()

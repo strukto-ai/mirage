@@ -19,7 +19,7 @@ import hashlib
 from collections.abc import AsyncIterator, Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
-from inspect import signature
+from inspect import isawaitable, signature
 from types import ModuleType
 from typing import Any
 from unittest.mock import AsyncMock
@@ -217,7 +217,6 @@ COMMANDS = {
     "stream": "cat {v}",
     "partial": "cat {v} | head -c 1",
 }
-SLOTS = {"bytes": "bytes", "stream": "stream", "partial": "stream"}
 
 
 def _with_index(
@@ -229,9 +228,19 @@ def _with_index(
     return functools.partial(fn, index=index)
 
 
-async def _direct_read(
+async def _chunks(answer: Any) -> AsyncIterator[bytes]:
+    """What a ``read`` answered, as a stream: bytes as one chunk."""
+    found = await answer if isawaitable(answer) else answer
+    if isinstance(found, bytes):
+        yield found
+        return
+    async for chunk in found:
+        yield chunk
+
+
+async def _direct_stream(
     vfs: BaseVFS, path: PathSpec, index: IndexCacheStore | None
-) -> bytes:
+) -> AsyncIterator[bytes]:
     """A whole read straight from the VFS: its stored bytes, or the
     rendering of a VFS whose stored form is the rendering."""
     renderer = (
@@ -240,20 +249,8 @@ async def _direct_read(
         else vfs.renderers.get(get_extension(path.virtual) or "")
     )
     fn = vfs.read if renderer is None else getattr(vfs, renderer)
-    data: bytes = await _with_index(fn, index)(path)
-    return data
-
-
-async def _direct_stream(
-    vfs: BaseVFS, path: PathSpec, index: IndexCacheStore | None
-) -> AsyncIterator[bytes]:
-    """A streamed read straight from the VFS, its whole read where it has
-    no stream of its own."""
-    if vfs.supports("read_stream"):
-        async for chunk in _with_index(vfs.read_stream, index)(path):
-            yield chunk
-        return
-    yield await _direct_read(vfs, path, index)
+    async for chunk in _chunks(_with_index(fn, index)(path)):
+        yield chunk
 
 
 @dataclass(frozen=True)
@@ -264,8 +261,8 @@ class Fake:
     rewrite: Callable[[bytes], None]
     reach: list[str]
     read_mod: ModuleType
-    # None when the stream is synthesized from the whole read, which then
-    # records through read_mod's record; the slot it lands in is "bytes".
+    # None when the backend answers a whole read with its bytes, which then
+    # record through read_mod's record; the slot it lands in is "bytes".
     stream_mod: ModuleType | None
     # Passed to direct IO calls when the backend resolves through its index.
     index: IndexCacheStore | None = None
@@ -278,8 +275,8 @@ class Fake:
     # calls are handed it, as the mount hands it.
     readdir: ListFn | None = None
 
-    def slot(self, row: str) -> str:
-        return SLOTS[row] if self.stream_mod is not None else "bytes"
+    def slot(self) -> str:
+        return "stream" if self.stream_mod is not None else "bytes"
 
     async def handed(
         self, fn: Callable[..., Any], path: PathSpec
@@ -288,16 +285,10 @@ class Fake:
             return {}
         return {"entry": await entry_at(self.readdir, self.vfs.accessor, path)}
 
-    async def read_bytes(self, path: PathSpec) -> bytes:
-        if self.readdir is not None:
-            read = self.vfs.read
-            return await read(path, **await self.handed(read, path))
-        return await _direct_read(self.vfs, path, self.index)
-
     async def read_stream(self, path: PathSpec) -> AsyncIterator[bytes]:
         if self.readdir is not None:
-            read_stream = self.vfs.read_stream
-            stream = read_stream(path, **await self.handed(read_stream, path))
+            read = self.vfs.read
+            stream = _chunks(read(path, **await self.handed(read, path)))
         else:
             stream = _direct_stream(self.vfs, path, self.index)
         async for chunk in stream:
@@ -1018,7 +1009,7 @@ def test_a_read_leaves_an_entry_reconcile_calls_fresh(
         ) = asyncio.run(run())
 
     assert cached_before is False
-    assert taken == [(fake.slot(row), virtual)]
+    assert taken == [(fake.slot(), virtual)]
     assert fetched == 1
     assert first == data
     assert stat.fingerprint is not None
@@ -1047,7 +1038,7 @@ def test_early_pipe_exit_keeps_nothing(name, shape, row, monkeypatch):
                     await _line(ws, COMMANDS[row].format(v=virtual))
                     == (BIG[:1])
                 )
-                assert slots == [(fake.slot(row), virtual)]
+                assert slots == [(fake.slot(), virtual)]
                 assert fake.fetches() - before == 1
                 assert await ws.cache.get(virtual) is None
                 assert await _line(ws, f"cat {virtual}") == BIG
@@ -1123,10 +1114,7 @@ def test_an_unrecorded_read_stamps_the_stat_token(
         async def run():
             unrecorded = active_recorder() is None
             try:
-                if row == "bytes":
-                    data = await fake.read_bytes(spec)
-                else:
-                    data = b"".join([c async for c in fake.read_stream(spec)])
+                data = b"".join([c async for c in fake.read_stream(spec)])
                 stat = await fake.stat(spec)
             finally:
                 await accessor.close()
@@ -1588,36 +1576,32 @@ def test_the_contract_goes_red_on_hf_buckets_stamping_another_kind(
     assert refetched == 1
 
 
-def test_a_synthesized_stream_is_the_read_it_records_through():
-    # gdocs' stream slot is filled from its whole read, which is why its
-    # expected slot is "bytes". A native stream that forgot to record would
+def test_a_rendered_read_is_the_read_it_records_through():
+    # gdocs answers a whole read with its rendering, which is why its
+    # expected slot is "bytes". A stream that forgot to record would
     # otherwise hide behind stream_mod=None.
     vfs = vfs_over(GDocsVFS, None)
-    assert not vfs.supports("read_stream")
+    assert not vfs.supports("read")
 
 
 def test_the_contract_goes_red_on_github_stamping_another_kind(monkeypatch):
     # github forced to stamp an md5 of the bytes while stat reports the blob
-    # sha: both tokens exist and differ. A bytes read, because the override
-    # replaces only what `record` stamps.
-    record = github_read.record
+    # sha: both tokens exist and differ. A whole read streams, so the
+    # override replaces what `record_stream` stamps.
+    record_stream = github_read.record_stream
 
-    def md5_record(
-        op, path, source, nbytes, timer, fingerprint=None, revision=None
-    ):
+    def md5_record(op, path, source, fingerprint=None, revision=None):
         del fingerprint
-        return record(
+        return record_stream(
             op,
             path,
             source,
-            nbytes,
-            timer,
             fingerprint=hashlib.md5(SEED).hexdigest(),
             revision=revision,
         )
 
     with _fake("github", "root", SEED, monkeypatch) as fake:
-        monkeypatch.setitem(vars(github_read), "record", md5_record)
+        monkeypatch.setitem(vars(github_read), "record_stream", md5_record)
         virtual = "/m/" + fake.key
 
         async def run():

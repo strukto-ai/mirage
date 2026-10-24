@@ -66,14 +66,9 @@ class SearchRAM extends RAMVFS {
     handed?: Handed,
     offset?: number,
     size?: number | null,
-  ): Promise<Uint8Array> {
+  ): Promise<ByteSource> | AsyncIterable<Uint8Array> {
     this.reads.push(path.vfsPath)
     return super.read(path, handed, offset, size)
-  }
-
-  override readStream(path: PathSpec): AsyncIterable<Uint8Array> {
-    this.reads.push(path.vfsPath)
-    return super.readStream(path)
   }
 
   override filesContaining(

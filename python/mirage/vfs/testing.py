@@ -109,8 +109,32 @@ async def _rows_at(
     return found, above
 
 
+async def _bytes_of(answer: Any, max_chunk_size: int | None = None) -> bytes:
+    """What a ``read`` answered, a stream collected and each of its chunks
+    held to ``max_chunk_size``.
+
+    Args:
+        answer (Any): what calling ``read`` returned.
+        max_chunk_size (int | None): the largest chunk a stream may hand
+            out; None for any.
+    """
+    found = await answer if inspect.isawaitable(answer) else answer
+    if isinstance(found, bytes):
+        return found
+    parts: list[bytes] = []
+    try:
+        async for part in found:
+            assert max_chunk_size is None or len(part) <= max_chunk_size, (
+                "read streamed a chunk over max_chunk_size"
+            )
+            parts.append(part)
+    finally:
+        await close_quietly(found)
+    return b"".join(parts)
+
+
 async def _check_windows(
-    read: Callable[..., Awaitable[bytes]],
+    read: Callable[..., Any],
     path: PathSpec,
     store: IndexCacheStore,
     entry: FileStat | None,
@@ -120,7 +144,7 @@ async def _check_windows(
     """Check that ``read`` answers a byte window of ``data``.
 
     Args:
-        read (Callable[..., Awaitable[bytes]]): the read handed a window.
+        read (Callable[..., Any]): the read handed a window.
         path (PathSpec): the file.
         store (IndexCacheStore): the store handed to the read.
         entry (FileStat | None): what is at the file.
@@ -132,11 +156,13 @@ async def _check_windows(
     offset = min(1, len(data) - 1)
     for size in (min(3, len(data) - offset), None):
         end = None if size is None else offset + size
-        actual = await read(
-            path,
-            offset=offset,
-            size=size,
-            **_taken(read, store, entry, parent),
+        actual = await _bytes_of(
+            read(
+                path,
+                offset=offset,
+                size=size,
+                **_taken(read, store, entry, parent),
+            )
         )
         assert actual == data[offset:end], (
             "read must use offset and byte count"
@@ -149,10 +175,12 @@ async def check_read_contract(
     """Verify a VFS's reads against a caller-owned fixture, mutating nothing.
 
     A read runs the renderer of the file's filetype where the VFS renders
-    one, else ``read``; a stream is compared with what ``read`` stores. A
-    stream and an existence check are probed only where the VFS defines
-    them. A renderer is always handed a byte window, ``read`` only where
-    it takes one natively: the caller reads whole and slices otherwise.
+    one, else ``read``; a read that answers a stream is collected, each
+    chunk held to the fixture's bound, and a missing file may fail when
+    it is called or at its first pull. An existence check is probed only
+    where the VFS defines one. A renderer is always handed a byte window,
+    ``read`` only where it takes one natively: the caller reads whole and
+    slices otherwise.
 
     Args:
         vfs (BaseVFS): the VFS being validated.
@@ -167,7 +195,10 @@ async def check_read_contract(
     _, above = await _rows_at(vfs, fixture.directory)
     render = _renderer(vfs, fixture.file)
     read = render or vfs.read
-    data = await read(fixture.file, **_taken(read, store, entry, folder))
+    data = await _bytes_of(
+        read(fixture.file, **_taken(read, store, entry, folder)),
+        fixture.max_chunk_size,
+    )
     assert data == fixture.content, "read differs from fixture content"
     info = await vfs.stat(
         fixture.file, **_taken(vfs.stat, store, entry, folder)
@@ -189,26 +220,13 @@ async def check_read_contract(
         "readdir must include the child"
     )
     stored = (
-        await vfs.read(fixture.file, **_taken(vfs.read, store, entry, folder))
+        await _bytes_of(
+            vfs.read(fixture.file, **_taken(vfs.read, store, entry, folder)),
+            fixture.max_chunk_size,
+        )
         if render is not None and vfs.supports("read")
         else data
     )
-    if vfs.supports("read_stream"):
-        parts: list[bytes] = []
-        source = vfs.read_stream(
-            fixture.file, **_taken(vfs.read_stream, store, entry, folder)
-        )
-        try:
-            async for part in source:
-                assert (
-                    fixture.max_chunk_size is None
-                    or len(part) <= fixture.max_chunk_size
-                ), "read_stream exceeded max_chunk_size"
-                parts.append(part)
-        finally:
-            await close_quietly(source)
-        streamed = b"".join(parts)
-        assert streamed == stored, "read_stream differs from read"
     if render is not None:
         await _check_windows(render, fixture.file, store, entry, folder, data)
     if vfs.reads_ranges and vfs.supports("read"):
@@ -223,9 +241,20 @@ async def check_read_contract(
         assert not await exists(
             fixture.missing, **_taken(exists, store, None, folder)
         ), "exists accepted a missing file"
-    for call in (vfs.stat, _renderer(vfs, fixture.missing) or vfs.read):
-        try:
-            await call(fixture.missing, **_taken(call, store, None, folder))
-        except FileNotFoundError:
-            continue
+    try:
+        await vfs.stat(
+            fixture.missing, **_taken(vfs.stat, store, None, folder)
+        )
+    except FileNotFoundError:
+        pass
+    else:
+        raise AssertionError("missing paths must raise FileNotFoundError")
+    miss = _renderer(vfs, fixture.missing) or vfs.read
+    try:
+        await _bytes_of(
+            miss(fixture.missing, **_taken(miss, store, None, folder))
+        )
+    except FileNotFoundError:
+        pass
+    else:
         raise AssertionError("missing paths must raise FileNotFoundError")

@@ -51,7 +51,6 @@ const VFS_FUNCTIONS = new Set([
   'readdir',
   'read',
   'stat',
-  'readStream',
   'exists',
   'firstLines',
   'lastLines',

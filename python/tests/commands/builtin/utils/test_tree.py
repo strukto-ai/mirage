@@ -162,10 +162,6 @@ class GuardedRAM(RAMVFS):
         self.reads.append(path.virtual)
         return await super().read(path, offset, size)
 
-    def read_stream(self, path):
-        self.reads.append(path.virtual)
-        return super().read_stream(path)
-
     async def before_full_scan(self, path, *, files=None, index=NULL_INDEX):
         self.scans.append(path.virtual)
         raise ValueError(f"{files} files in scope, narrow the path")

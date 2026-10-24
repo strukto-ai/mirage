@@ -1,8 +1,6 @@
-from collections.abc import AsyncIterator
 from typing import Any
 
 from mirage.accessor.nextcloud import NextcloudAccessor
-from mirage.core.generic.rewrite import append_by_rewrite
 from mirage.core.nextcloud.capacity import capacity as _capacity
 from mirage.core.nextcloud.checksum import checksum as _checksum
 from mirage.core.nextcloud.copy import copy as _copy
@@ -22,6 +20,7 @@ from mirage.core.nextcloud.stream import read_stream as _read_stream
 from mirage.core.nextcloud.truncate import truncate as _truncate
 from mirage.core.nextcloud.unlink import unlink as _unlink
 from mirage.core.nextcloud.write import write as _write
+from mirage.io.types import ByteSource, materialize
 from mirage.types import CapacityResult, FileStat, PathSpec, VFSName
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.nextcloud.config import NextcloudConfig
@@ -51,9 +50,9 @@ class NextcloudVFS(BaseVFS):
 
     async def read(
         self, path: PathSpec, offset: int = 0, size: int | None = None
-    ) -> bytes:
+    ) -> ByteSource:
         if not offset and size is None:
-            return await _read(self.accessor, path)
+            return _read_stream(self.accessor, path)
         return await _read(self.accessor, path, offset, size)
 
     async def stat(self, path: PathSpec) -> FileStat:
@@ -61,9 +60,6 @@ class NextcloudVFS(BaseVFS):
 
     async def read_tree(self, path: PathSpec) -> dict[str, FileStat] | None:
         return await _tree(self.accessor, path)
-
-    def read_stream(self, path: PathSpec) -> AsyncIterator[bytes]:
-        return _read_stream(self.accessor, path)
 
     async def checksum(
         self,
@@ -75,11 +71,8 @@ class NextcloudVFS(BaseVFS):
     async def exists(self, path: PathSpec) -> bool:
         return await _exists(self.accessor, path)
 
-    async def write(self, path: PathSpec, data: bytes) -> None:
-        await _write(self.accessor, path, data)
-
-    async def append(self, path: PathSpec, data: bytes) -> None:
-        await append_by_rewrite(self.read, self.write, self.stat, path, data)
+    async def write(self, path: PathSpec, data: ByteSource) -> None:
+        await _write(self.accessor, path, await materialize(data))
 
     async def create(self, path: PathSpec) -> None:
         await _create(self.accessor, path)

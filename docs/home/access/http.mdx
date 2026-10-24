@@ -424,13 +424,20 @@ when it returns nothing. Bytes are base64 strings, both ways.
 
 | Call | Arguments | Returns |
 | --- | --- | --- |
-| `read` | `path`, `offset?`, `size?` | `string`, the bytes |
+| `read` | `path`, `offset?`, `size?`, `raw?`, `stream?` | `string`, the bytes |
 | `stat` | `path`, `nofollow?` | `FileStat` |
 | `readdir` | `path` | `string[]`, full paths |
 | `list_files` | `path` | `string[]`, file names only |
 | `exists` | `path` | `boolean` |
 | `is_dir` | `path` | `boolean` |
 | `is_file` | `path` | `boolean` |
+
+`raw` reads the stored bytes where the mount renders the file through a
+`filetype` read, as a read-modify-write needs. `stream` answers the bytes
+themselves as `application/octet-stream`, read as the response is sent. The
+server reads the whole file first when the backend answers bytes, the file is
+rendered, `offset` or `size` asks for a window, or a `post_vfs` policy applies.
+A failure before the first byte answers like any failed call.
 
 **Write**
 
@@ -477,19 +484,6 @@ refused it. The errno picks the status:
 | `404` | `ENOENT`, `NO_XATTR` |
 | `409` | `EEXIST`, `ENOTEMPTY`, `EBUSY` |
 | `500` | Anything else, such as `EIO` |
-
-### Stream a file
-
-<Badge color="green">POST</Badge> `/v1/workspaces/{id}/vfs/read_stream`
-
-<ParamField body="path" type="string" required>The file.</ParamField>
-<ParamField body="raw" type="boolean" default="false">Read the stored bytes instead of a rendered form.</ParamField>
-<ParamField query="session_id" type="string">The session. The default when absent.</ParamField>
-
-Answers the file's bytes as `application/octet-stream`, read as the response is
-sent. The server reads the whole file into memory first when the backend has
-no streaming read, when the file is rendered, or when a `post_vfs` policy
-applies. A failure before the first byte answers like a failed VFS call.
 
 ### Call a custom function
 

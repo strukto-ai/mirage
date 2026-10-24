@@ -64,22 +64,28 @@ a CLI using namespace and session views, and the filesystem and runtime APIs.
 
 ### Add functions as the resource grows
 
-Only `readdir`, `read`, and `stat` are required. Mirage derives a stream from
-`read`, existence checks from `stat`, and treats the resource as remote and
-available. A window of a file is cut from the whole `read` unless the class sets
-`reads_ranges = True`; then `read` receives the window's `offset` and `size`
-(`size=None` means through EOF) and fetches only that, and `file` then reads
-only the first bytes it sniffs. A derived stream still fetches the entire
-file; define `read_stream` for large files.
+Only `readdir`, `read`, and `stat` are required. Mirage derives existence
+checks from `stat` and treats the resource as remote and available.
 
-For large replacements, implement `write_stream(path, data, *, atomic=False)`;
-`data` is a `ByteSource` (bytes or an async byte iterator). The ordinary
-`write` API still accepts a complete byte string. The dispatcher keeps policy,
-cache invalidation and conditional-write checks in the same path. A streamed
-writer may declare `entry` and `parent` and return the committed `FileStat`,
-just as `write` does. Consume to EOF before an atomic replacement becomes
-visible, and close or abort uploads when the producer fails or is cancelled.
-`append_stream` is a separate capability; object-store append still requires
+`read` answers with the file's bytes, or with an async iterator of them for a
+file too large to hold: return either from an `async def`, or `yield` chunks
+from one. Mirage collects a stream for a caller that needs the whole file and
+hands bytes to a streaming caller as one chunk. A window of a file is cut from
+the whole `read` unless the class sets `reads_ranges = True`; then `read`
+receives the window's `offset` and `size` (`size=None` means through EOF) and
+fetches only that, and `file` then reads only the first bytes it sniffs.
+
+`write` and `append` take `data` as bytes or an async byte iterator (a
+`ByteSource`); `await materialize(data)` collects it for a store that takes one
+body. A program's output redirected into the mount arrives as a stream: a
+`write` that lands each chunk as it comes lets a reader watch the file grow,
+and one that collects first shows it when the program ends. A `write` that
+lands chunks as they come also takes `atomic: bool`, and when it is true shows
+nothing until the stream has ended whole (`sed -i`); any other `write` is
+handed the collected bytes for those. Close or abort uploads when the producer
+fails or is cancelled. A write may declare `entry` and `parent` and return the
+committed `FileStat`. The dispatcher keeps policy, cache invalidation and
+conditional-write checks in the same path. Object-store append still requires
 reading and replacing the existing object.
 
 Commands that need replay or seekable input spill through temporary files after
@@ -120,7 +126,7 @@ Every other function is optional, and each stands alone:
 | Functions | Purpose |
 | --- | --- |
 | `readdir`, `read`, `stat` | Required filesystem behavior. |
-| `read_stream`, `exists`, `read_tree`, `first_lines`, `last_lines`, `line_count`, `follow`, `checksum` | Optional equivalent fast paths ([Walks](/home/integration/walks), [Lines](/home/integration/lines), [Checksums](/home/integration/checksums)). |
+| `exists`, `read_tree`, `first_lines`, `last_lines`, `line_count`, `follow`, `checksum` | Optional equivalent fast paths ([Walks](/home/integration/walks), [Lines](/home/integration/lines), [Checksums](/home/integration/checksums)). |
 | `write`, `append`, `pwrite`, `create`, `mkdir`, `unlink`, `rmdir`, `rm_r`, `rename`, `copy`, `dir_copy`, `truncate`, `setattr` | Individually supported mutations. |
 | `copy_from` | Optional: copy a file from another mount of the same kind inside the store, for `cp` and `mv` between two mounts. |
 | `search`, `search_many` | Optional resource search. |
@@ -623,7 +629,8 @@ places:
 | --- | --- |
 | `BaseVFS(name=..., accessor=..., io=VFSAdapter(read=ReadOps(readdir=..., read_bytes=..., stat=...)))` | a `BaseVFS` subclass defining `readdir`, `read` and `stat` |
 | `read_bytes` and `read_range` | one `read(path, *, offset=0, size=None)`; set `reads_ranges = True` when it fetches only the window |
-| `NativeReadOps`, `WriteOps`, `SearchOps`, `DuOps` | the same functions as methods (`read_stream`, `exists`, `read_tree`, `write`, ..., `search`, `search_many`) |
+| `NativeReadOps`, `WriteOps`, `SearchOps`, `DuOps` | the same functions as methods (`exists`, `read_tree`, `write`, ..., `search`, `search_many`) |
+| `read_stream`, `write_stream`, `append_stream` | `read` answering a stream, and `write` and `append` taking one; a VFS still defining one is refused when mounted |
 | `ops()`, `make_generic_ops`, `RegisteredOp`, `@op` | nothing to declare: the mount serves the functions; mark a custom one `@vfs_call(effect=...)` |
 | `commands()` returning a builtin set, `commands/builtin/<name>/io.py` | the command module mapped in `workspace/mount/backends.py`; `commands()` returns only the commands the VFS was handed |
 | `DriverOps(vfs)` and `check_driver_contract(vfs, fixture)` | call the functions on the VFS directly; `check_read_contract(vfs, fixture)` |

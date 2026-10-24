@@ -21,7 +21,7 @@ class BarrierVFS extends RAMVFS {
     super()
     this.store.files.set('/source', new TextEncoder().encode('firstlast'))
   }
-  override async *readStream(_path: PathSpec): AsyncGenerator<Uint8Array> {
+  override async *read(_path: PathSpec): AsyncGenerator<Uint8Array> {
     try {
       this.started.resolve()
       yield new TextEncoder().encode('first')

@@ -618,7 +618,7 @@
     "router": "FastAPI routes are module-level handlers on a router; Fastify registers the same routes as closures in registerVfsRoutes, with typed query and error shapes. Cross-host behavior is covered by integ/access.",
     "vfs_route": "FastAPI routes are module-level handlers on a router; Fastify registers the same routes as closures in registerVfsRoutes, with typed query and error shapes. Cross-host behavior is covered by integ/access.",
     "json_body": "FastAPI hands a route the raw request, so the VFS, glob and tool routes read their JSON object through json_body, bounded by MCP's size limit; Fastify parses and bounds the body itself (bodyLimit).",
-    "read_stream": "FastAPI has module-level route handlers; the matching Fastify handler is a closure in registerVfsRoutes.",
+    "streamed_read": "FastAPI has module-level route handlers; the matching Fastify handler streams a read inline in registerVfsRoutes.",
     "custom_function": "FastAPI has module-level route handlers; the matching Fastify handler is a closure in registerVfsRoutes."
    },
    "typescript_only": {

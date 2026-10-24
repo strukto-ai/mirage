@@ -14,17 +14,24 @@
 
 import asyncio
 import errno
+from collections.abc import AsyncIterator
 from types import MappingProxyType
 
 import pytest
 
 from mirage.accessor.ram import RAMAccessor
+from mirage.cache.context import read_versioned
 from mirage.commands.builtin.generic_bind import generic
 from mirage.commands.config import Context, command
 from mirage.commands.spec import CommandSpec
 from mirage.commands.spec.types import Argument
 from mirage.errors.types import OperationNotSupportedError
-from mirage.io.types import IOResult, materialize
+from mirage.io.types import ByteSource, IOResult, materialize
+from mirage.observe.context import (
+    RecordingScope,
+    command_records,
+    record_stream,
+)
 from mirage.types import FileStat, FileType, MountMode, PathSpec
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
@@ -73,6 +80,31 @@ class MisnamedRenderer(RAMVFS):
 def test_mount_rejects_a_renderer_that_names_no_method():
     with pytest.raises(TypeError, match="'render_doc', which is not a method"):
         MountEntry("/data/", MisnamedRenderer())
+
+
+class _Stale:
+    async def write_stream(self, path, data):
+        return None
+
+
+class _Mixed(_Stale, RAMVFS):
+    pass
+
+
+# A method folded into read, write or append would never be called, so a
+# VFS that still has one, its own or a mixin's, is refused as it is mounted.
+@pytest.mark.parametrize(
+    "name", ["read_stream", "write_stream", "append_stream"]
+)
+def test_mount_rejects_a_folded_method(name):
+    old = type("Old", (RAMVFS,), {name: lambda self, path: None})
+    with pytest.raises(TypeError, match=f"Old.{name}: define "):
+        MountEntry("/data/", old())
+
+
+def test_mount_rejects_a_folded_method_from_a_mixin():
+    with pytest.raises(TypeError, match="_Mixed.write_stream: define write"):
+        MountEntry("/data/", _Mixed())
 
 
 # ── read-only enforcement ──────────────────────
@@ -598,4 +630,112 @@ async def test_a_user_write_drops_only_its_own_mounts_caches(write):
         other = (await ws.shell("cat /two/b.txt")).stdout
         assert (own, other) == (b"v2\n" if write else b"v1\n", b"v1\n")
     finally:
+        await ws.close()
+
+
+async def _versioned(data: bytes, path: PathSpec) -> AsyncIterator[bytes]:
+    rec = record_stream("read", path.virtual, "ram")
+    if rec is not None:
+        rec.fingerprint = "v1"
+    yield data
+
+
+class _VersionedStream(RAMVFS):
+    """Answers a whole read with a stream that records its version."""
+
+    async def read(
+        self, path: PathSpec, offset: int = 0, size: int | None = None
+    ) -> ByteSource:
+        if offset or size is not None:
+            return await super().read(path, offset, size)
+        return _versioned(await super().read(path), path)
+
+
+# A read-modify-write sends the version of the bytes it read, so a whole
+# read collected from a stream carries the version the stream recorded.
+@pytest.mark.asyncio
+async def test_a_collected_stream_hands_its_version_to_the_bytes():
+    vfs = _VersionedStream()
+    vfs._store.files["/f"] = b"old"
+    ws = Workspace({"/m": vfs}, mode=MountMode.WRITE)
+    try:
+        mount = ws.mount("/m")
+        data, version = await read_versioned(
+            PathSpec.from_str_path("/m/f"), lambda: mount.call("read", "/m/f")
+        )
+        assert (data, version) == (b"old", "v1")
+    finally:
+        await ws.close()
+
+
+# A rewrite's write proves the copy it extends by the read before it, so a
+# read collected from a stream leaves its record in the block around it.
+@pytest.mark.asyncio
+async def test_a_collected_read_stays_in_the_records_around_it():
+    vfs = _VersionedStream()
+    vfs._store.files["/f"] = b"old"
+    ws = Workspace({"/m": vfs}, mode=MountMode.WRITE)
+    scope = RecordingScope()
+    try:
+        with command_records() as mine:
+            await ws.mount("/m").call("read", "/m/f")
+        assert ("read", "v1") in [(r.op, r.fingerprint) for r in mine]
+    finally:
+        scope.close()
+        await ws.close()
+
+
+class _Racing(RAMVFS):
+    """Numbers each whole read's version and holds the first one open
+    until ``gate`` is set."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.calls = 0
+        self.started = asyncio.Event()
+        self.gate = asyncio.Event()
+
+    async def read(
+        self, path: PathSpec, offset: int = 0, size: int | None = None
+    ) -> ByteSource:
+        if offset or size is not None:
+            return await super().read(path, offset, size)
+        self.calls += 1
+        if self.calls == 1:
+            self.started.set()
+        return self._numbered(path, self.calls)
+
+    async def _numbered(self, path: PathSpec, n: int) -> AsyncIterator[bytes]:
+        rec = record_stream("read", path.virtual, "ram")
+        if rec is not None:
+            rec.fingerprint = f"v{n}"
+        if n == 1:
+            await self.gate.wait()
+        yield f"bytes{n}".encode()
+
+
+# Two reads of one file in one command share its records; the one that
+# finishes last still labels its bytes with its own version.
+@pytest.mark.asyncio
+async def test_parallel_collected_reads_keep_their_own_versions():
+    vfs = _Racing()
+    vfs._store.files["/f"] = b"x"
+    ws = Workspace({"/m": vfs}, mode=MountMode.WRITE)
+    mount = ws.mount("/m")
+    path = PathSpec.from_str_path("/m/f")
+    scope = RecordingScope()
+    try:
+        with command_records():
+            first = asyncio.create_task(
+                read_versioned(path, lambda: mount.call("read", "/m/f"))
+            )
+            await vfs.started.wait()
+            second = await read_versioned(
+                path, lambda: mount.call("read", "/m/f")
+            )
+            vfs.gate.set()
+            older = await first
+        assert (older, second) == ((b"bytes1", "v1"), (b"bytes2", "v2"))
+    finally:
+        scope.close()
         await ws.close()

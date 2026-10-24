@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { type ByteSource } from '../../io/types.ts'
 import { BaseVFS } from '../base.ts'
 import { DifyAccessor } from '../../accessor/dify.ts'
 
@@ -50,7 +51,6 @@ export class DifyVFS extends BaseVFS {
   override readonly handed = {
     readdir: ['entry'],
     read: ['entry'],
-    readStream: ['entry'],
     stat: ['entry'],
   } as const
   readonly config: DifyConfigResolved
@@ -89,18 +89,14 @@ export class DifyVFS extends BaseVFS {
     handed?: Handed,
     offset = 0,
     size: number | null = null,
-  ): Promise<Uint8Array> {
+  ): Promise<ByteSource> | AsyncIterable<Uint8Array> {
     const entry = handed?.entry ?? null
-    if (offset === 0 && size === null) return read(this.accessor, path, entry)
+    if (offset === 0 && size === null) return readStream(this.accessor, path, handed?.entry)
     return read(this.accessor, path, entry, size === null ? { offset } : { offset, size })
   }
 
   override stat(path: PathSpec, handed?: Handed): Promise<FileStat> {
     return stat(this.accessor, path, handed?.entry)
-  }
-
-  override readStream(path: PathSpec, handed?: Handed): AsyncIterable<Uint8Array> {
-    return readStream(this.accessor, path, handed?.entry)
   }
 
   override search(path: PathSpec, query: SearchQuery): Promise<[string, string][] | null> {

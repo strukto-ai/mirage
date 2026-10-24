@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { materialize, type ByteSource } from '@struktoai/mirage-core/io/types'
 import { BaseVFS } from '@struktoai/mirage-core/vfs/base'
 import { normalizeKeyPrefix } from '@struktoai/mirage-core/vfs/s3/config'
 import { VFSName } from '@struktoai/mirage-core/types'
@@ -92,8 +93,8 @@ export class HfBucketsVFS extends BaseVFS {
     _handed?: Handed,
     offset = 0,
     size: number | null = null,
-  ): Promise<Uint8Array> {
-    if (offset === 0 && size === null) return hfRead(this.accessor, path)
+  ): Promise<ByteSource> | AsyncIterable<Uint8Array> {
+    if (offset === 0 && size === null) return hfStream(this.accessor, path)
     return hfRead(this.accessor, path, size === null ? { offset } : { offset, size })
   }
 
@@ -101,16 +102,12 @@ export class HfBucketsVFS extends BaseVFS {
     return hfStat(this.accessor, path)
   }
 
-  override readStream(path: PathSpec): AsyncIterable<Uint8Array> {
-    return hfStream(this.accessor, path)
-  }
-
   override exists(path: PathSpec): Promise<boolean> {
     return hfExists(this.accessor, path)
   }
 
-  override write(path: PathSpec, data: Uint8Array): Promise<FileStat | null> {
-    return hfWrite(this.accessor, path, data)
+  override async write(path: PathSpec, data: ByteSource): Promise<FileStat | null> {
+    return hfWrite(this.accessor, path, await materialize(data))
   }
 
   override create(path: PathSpec): Promise<FileStat | null> {

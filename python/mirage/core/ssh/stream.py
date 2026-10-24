@@ -20,6 +20,7 @@ import asyncssh
 from mirage.accessor.ssh import SSHAccessor
 from mirage.core.ssh.utils import join_root
 from mirage.errors.fs import enoent
+from mirage.observe.context import record_stream
 from mirage.types import PathSpec
 from mirage.utils.quote import single_quote
 
@@ -39,6 +40,7 @@ async def read_stream(
     virtual = path_spec.virtual
     path = path_spec.mount_path
     config = accessor.config
+    rec = record_stream("read", virtual, "ssh")
     sftp = await accessor.sftp()
     try:
         remote_path = join_root(config.root, path)
@@ -47,6 +49,8 @@ async def read_stream(
                 chunk = await f.read(chunk_size)
                 if not chunk:
                     break
+                if rec is not None:
+                    rec.bytes += len(chunk)
                 yield chunk
     except asyncssh.SFTPNoSuchFile:
         raise enoent(virtual)

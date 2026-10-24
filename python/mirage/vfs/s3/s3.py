@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import os
-from collections.abc import AsyncIterator
 from typing import Any
 
 from mirage.accessor.s3 import S3Accessor
@@ -112,9 +111,9 @@ class S3VFS(BaseVFS):
 
     async def read(
         self, path: PathSpec, offset: int = 0, size: int | None = None
-    ) -> bytes:
+    ) -> ByteSource:
         if not offset and size is None:
-            return await _read(self.accessor, path)
+            return _read_stream(self.accessor, path)
         return await _read(self.accessor, path, offset, size)
 
     async def stat(self, path: PathSpec) -> FileStat:
@@ -133,34 +132,27 @@ class S3VFS(BaseVFS):
         aws = self.name == VFSName.S3 and not self._endpoint
         return await _checksum(self.accessor, path, algorithm, aws)
 
-    def read_stream(self, path: PathSpec) -> AsyncIterator[bytes]:
-        return _read_stream(self.accessor, path)
-
     async def exists(self, path: PathSpec) -> bool:
         return await _exists(self.accessor, path)
 
     async def read_tree(self, path: PathSpec) -> dict[str, FileStat] | None:
         return await _tree(self.accessor, path)
 
-    async def write(self, path: PathSpec, data: bytes) -> FileStat | None:
-        return await _write(self.accessor, path, data)
-
-    async def write_stream(
+    async def write(
         self, path: PathSpec, data: ByteSource, *, atomic: bool = False
     ) -> FileStat | None:
+        if isinstance(data, bytes):
+            return await _write(self.accessor, path, data)
         return await _write_stream(self.accessor, path, data)
 
-    async def append(self, path: PathSpec, data: bytes) -> FileStat | None:
-        return await self.append_stream(path, data)
-
-    async def append_stream(
+    async def append(
         self, path: PathSpec, data: ByteSource
     ) -> FileStat | None:
         return await append_by_streamed_rewrite(
             lambda p, remember: _read_stream(
                 self.accessor, p, on_version=remember
             ),
-            self.write_stream,
+            self.write,
             self.stat,
             path,
             data,

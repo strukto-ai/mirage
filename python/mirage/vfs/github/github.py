@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import AsyncIterator
 from typing import Any
 
 from mirage.accessor.github import GitHubAccessor, GitHubAccount
@@ -26,6 +25,7 @@ from mirage.core.github.search import files_containing as _files_containing
 from mirage.core.github.stat import stat as _stat
 from mirage.core.github.stat import tree as _tree
 from mirage.core.github.tree_entry import TreeEntry
+from mirage.io.types import ByteSource
 from mirage.types import (
     DirListing,
     FileStat,
@@ -164,14 +164,11 @@ class GitHubVFS(BaseVFS):
         offset: int = 0,
         size: int | None = None,
         entry: FileStat | None = None,
-    ) -> bytes:
+    ) -> ByteSource:
+        if not offset and size is None:
+            return _read_stream(self.accessor, path, entry)
         data = await _read(self.accessor, path, entry)
         return slice_window(data, offset, size)
-
-    def read_stream(
-        self, path: PathSpec, entry: FileStat | None = None
-    ) -> AsyncIterator[bytes]:
-        return _read_stream(self.accessor, path, entry)
 
     async def stat(
         self,

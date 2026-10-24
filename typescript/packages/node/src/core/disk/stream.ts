@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { DiskAccessor } from '../../accessor/disk.ts'
-import { createReadStream } from 'node:fs'
+import { open } from 'node:fs/promises'
 import { recordStream } from '@struktoai/mirage-core/observe/context'
 import { VFSName } from '@struktoai/mirage-core/types'
 import type { PathSpec } from '@struktoai/mirage-core/types'
@@ -21,24 +21,41 @@ import { enoent } from '@struktoai/mirage-core/errors/fs'
 import { diskError } from './errors.ts'
 import { resolveInside } from './utils.ts'
 
+/**
+ * A file's bytes as they are read, through `node:fs/promises`, never the
+ * CommonJS fs a JS runtime's patch may route back into the workspace this
+ * mount serves. A short read of a regular file is its end, as the kernel
+ * answers it, so a reader of a file its own pipeline appends to
+ * (`awk 1 f | tee -a f`) stops where the file ended when it read. Mirrors
+ * Python's `read_stream`.
+ */
 export async function* readStream(
   accessor: DiskAccessor,
   path: PathSpec,
 ): AsyncIterable<Uint8Array> {
   const full = await resolveInside(accessor.root, path)
   const rec = recordStream('read', path.virtual, VFSName.DISK)
-  const rs = createReadStream(full, { highWaterMark: 65536 })
+  const failed = (err: unknown): unknown =>
+    (err as NodeJS.ErrnoException).code === 'ENOENT' ? enoent(path) : diskError(err, path)
+  const handle = await open(full, 'r').catch((err: unknown) => {
+    throw failed(err)
+  })
   try {
-    for await (const chunk of rs) {
-      const buf = chunk as Buffer
-      const u8 = new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength)
-      if (rec !== null) rec.bytes += u8.byteLength
-      yield u8
+    const regular = (await handle.stat()).isFile()
+    const size = 65536
+    for (;;) {
+      const { bytesRead, buffer } = await handle
+        .read(new Uint8Array(size), 0, size, null)
+        .catch((err: unknown) => {
+          throw failed(err)
+        })
+      if (bytesRead > 0) {
+        if (rec !== null) rec.bytes += bytesRead
+        yield buffer.subarray(0, bytesRead)
+      }
+      if (bytesRead === 0 || (regular && bytesRead < size)) return
     }
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
-      throw enoent(path)
-    }
-    throw diskError(err, path)
+  } finally {
+    await handle.close()
   }
 }

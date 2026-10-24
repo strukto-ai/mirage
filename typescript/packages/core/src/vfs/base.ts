@@ -120,8 +120,7 @@ export interface VFSOptions<A extends Accessor = Accessor> {
  * A backend: an accessor, the facts about it, and its functions.
  *
  * A VFS answers `readdir`, `read` and `stat`; every other function
- * (`write`, `unlink`, `readStream`, a native `find` or `search`, ...) is
- * optional, and a VFS answers exactly the ones it defines. Every generic
+ * (`write`, `unlink`, a native `find` or `search`, ...) is optional, and a VFS answers exactly the ones it defines. Every generic
  * shell command (`ls`, `cat`, `grep`, `find`, `head`, `wc`, ...) runs on
  * the three required ones, and a line that needs a function the VFS does
  * not define answers `Operation not supported` at that call, so `gzip -c`
@@ -330,9 +329,13 @@ export class BaseVFS<A extends Accessor = Accessor> {
   }
 
   /**
-   * Read a file's bytes, or a window of them. A window reaches this only
-   * when `readsRanges` is set: the caller otherwise reads the whole file
-   * and slices it.
+   * Read a file's bytes, or a window of them. Answer with the bytes, or with
+   * an async iterable that hands them out as the caller pulls, so a large
+   * file never sits in memory: an `async` method that resolves to either, or
+   * an `async *` one that yields chunks. Mirage collects a stream for a
+   * caller that needs the bytes whole and hands bytes to a streaming caller
+   * as one chunk. A window reaches this only when `readsRanges` is set: the
+   * caller otherwise reads the whole file and slices it.
    */
   @vfsCall({ effect: Effect.READ, target: Target.FILE })
   read(
@@ -341,7 +344,7 @@ export class BaseVFS<A extends Accessor = Accessor> {
     _offset = 0,
     _size: number | null = null,
     _signal?: AbortSignal,
-  ): Promise<Uint8Array> {
+  ): Promise<ByteSource> | AsyncIterable<Uint8Array> {
     return Promise.reject(enotsup(this.name, 'read', path))
   }
 
@@ -349,14 +352,6 @@ export class BaseVFS<A extends Accessor = Accessor> {
   @vfsCall({ effect: Effect.METADATA })
   stat(path: PathSpec, _handed?: Handed): Promise<FileStat> {
     return Promise.reject(enotsup(this.name, 'stat', path))
-  }
-
-  /**
-   * Stream a file's bytes as the caller pulls them. A VFS that does not
-   * define it is read whole instead.
-   */
-  readStream(path: PathSpec, _handed?: Handed, _signal?: AbortSignal): AsyncIterable<Uint8Array> {
-    throw enotsup(this.name, 'readStream', path)
   }
 
   /** Whether anything is at `path`; derived from `stat` when not defined. */
@@ -470,42 +465,34 @@ export class BaseVFS<A extends Accessor = Accessor> {
     return Promise.reject(enotsup(this.name, 'readTree', path))
   }
 
-  /** Consume a replacement incrementally; atomic requires staging until successful EOF. */
-  writeStream(
-    path: PathSpec,
-    _data: ByteSource,
-    _signal?: AbortSignal,
-    _atomic = false,
-    _handed?: Handed,
-  ): Promise<unknown> {
-    return Promise.reject(enotsup(this.name, 'writeStream', path))
-  }
-
-  /** Consume an append incrementally, through the append dispatcher. */
-  appendStream(path: PathSpec, _data: ByteSource, _signal?: AbortSignal): Promise<unknown> {
-    return Promise.reject(enotsup(this.name, 'appendStream', path))
-  }
-
-  /** Replace a file's bytes, creating it when missing. */
+  /**
+   * Replace a file's bytes, creating it when missing. `data` is the whole
+   * content, or an async iterable that hands it over as it is produced (a
+   * program's output redirected into the file); `materialize(data)` collects
+   * it for a store that takes one body. A stream that lands as it arrives
+   * lets a reader watch the file grow, and `atomic` asks that nothing show
+   * until it has ended whole, which a write that collects first already does.
+   */
   @vfsCall({ effect: Effect.WRITE, target: Target.FILE, creates: true })
   write(
     path: PathSpec,
-    _data: Uint8Array,
+    _data: ByteSource,
     _signal?: AbortSignal,
     _handed?: Handed,
+    _atomic = false,
   ): Promise<unknown> {
     return Promise.reject(enotsup(this.name, 'write', path))
   }
 
   /**
-   * Add bytes to the end of a file, creating it when missing. A VFS that
-   * defines `write` and not this is appended to by reading the file and
-   * writing it back.
+   * Add bytes to the end of a file, creating it when missing. `data` is
+   * bytes or a stream, as `write` takes it. A VFS that defines `write` and
+   * not this is appended to by reading the file and writing it back.
    */
   @vfsCall({ effect: Effect.WRITE, target: Target.FILE, creates: true })
   append(
     path: PathSpec,
-    _data: Uint8Array,
+    _data: ByteSource,
     _handed?: Handed,
     _signal?: AbortSignal,
   ): Promise<unknown> {

@@ -1,4 +1,5 @@
 import { BaseVFS } from '@struktoai/mirage-core/vfs/base'
+import { materialize, type ByteSource } from '@struktoai/mirage-core/io/types'
 import { VFSName } from '@struktoai/mirage-core/types'
 import { NextcloudAccessor } from '../../accessor/nextcloud.ts'
 import {
@@ -14,7 +15,6 @@ import type {
   SetAttrFields,
 } from '@struktoai/mirage-core/types'
 import type { Handed } from '@struktoai/mirage-core/vfs/types'
-import { appendByRewrite } from '@struktoai/mirage-core/core/generic/rewrite'
 import { readdir } from '../../core/nextcloud/readdir.ts'
 import { read } from '../../core/nextcloud/read.ts'
 import { stat, tree } from '../../core/nextcloud/stat.ts'
@@ -68,8 +68,8 @@ export class NextcloudVFS extends BaseVFS {
     _handed?: Handed,
     offset = 0,
     size: number | null = null,
-  ): Promise<Uint8Array> {
-    if (offset === 0 && size === null) return read(this.accessor, path)
+  ): Promise<ByteSource> | AsyncIterable<Uint8Array> {
+    if (offset === 0 && size === null) return readStream(this.accessor, path)
     return read(this.accessor, path, size === null ? { offset } : { offset, size })
   }
 
@@ -81,10 +81,6 @@ export class NextcloudVFS extends BaseVFS {
     return tree(this.accessor, path)
   }
 
-  override readStream(path: PathSpec): AsyncIterable<Uint8Array> {
-    return readStream(this.accessor, path)
-  }
-
   override checksum(path: PathSpec, algorithm: string): Promise<string | null> {
     return checksum(this.accessor, path, algorithm)
   }
@@ -93,18 +89,8 @@ export class NextcloudVFS extends BaseVFS {
     return exists(this.accessor, path)
   }
 
-  override write(path: PathSpec, data: Uint8Array): Promise<void> {
-    return write(this.accessor, path, data)
-  }
-
-  override append(path: PathSpec, data: Uint8Array): Promise<void> {
-    return appendByRewrite(
-      (p) => this.read(p),
-      (p, d) => this.write(p, d),
-      (p) => this.stat(p),
-      path,
-      data,
-    )
+  override async write(path: PathSpec, data: ByteSource): Promise<void> {
+    return write(this.accessor, path, await materialize(data))
   }
 
   override create(path: PathSpec): Promise<void> {

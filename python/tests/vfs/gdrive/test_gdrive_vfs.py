@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import json
+from collections.abc import AsyncIterator, Callable
 from unittest.mock import AsyncMock
 
 import pytest
@@ -34,6 +35,23 @@ def _make_gdrive_ops() -> tuple[Files, IndexCacheStore]:
     )
     ws = Workspace({"/gdrive/": vfs}, mode=MountMode.READ)
     return ws.vfs, ws.mount("/gdrive/").index_store
+
+
+def _downloads(
+    data: bytes, calls: list[str]
+) -> Callable[[str], AsyncIterator[bytes]]:
+    """A stream download answering ``data``, each file id it is asked for
+    kept in ``calls``."""
+
+    def download(file_id: str) -> AsyncIterator[bytes]:
+        calls.append(file_id)
+        return _yielded(data)
+
+    return download
+
+
+async def _yielded(data: bytes) -> AsyncIterator[bytes]:
+    yield data
 
 
 @pytest.mark.asyncio
@@ -89,7 +107,7 @@ async def test_read_plain_file_falls_through(monkeypatch):
         monkeypatch,
         StubDrive(
             capture_file_metadata=AsyncMock(return_value=(None, None)),
-            download_file=AsyncMock(return_value=b"plain content"),
+            download_file_stream=_downloads(b"plain content", []),
         ),
     )
     result = await ops.read("/gdrive/notes.txt")

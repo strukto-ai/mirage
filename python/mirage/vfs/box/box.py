@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import AsyncIterator
 from typing import Any
 
 from mirage.accessor.box import BoxAccessor
@@ -78,7 +77,9 @@ class BoxVFS(BaseVFS):
         offset: int = 0,
         size: int | None = None,
         entry: FileStat | None = None,
-    ) -> bytes:
+    ) -> ByteSource:
+        if not offset and size is None:
+            return _stream(self.accessor, path, entry)
         return await _read(self.accessor, path, offset, size, entry)
 
     async def stat(
@@ -94,11 +95,6 @@ class BoxVFS(BaseVFS):
     ) -> str | None:
         return await _checksum(self.accessor, path, algorithm, entry)
 
-    def read_stream(
-        self, path: PathSpec, entry: FileStat | None = None
-    ) -> AsyncIterator[bytes]:
-        return _stream(self.accessor, path, entry)
-
     async def exists(
         self, path: PathSpec, entry: FileStat | None = None
     ) -> bool:
@@ -107,21 +103,14 @@ class BoxVFS(BaseVFS):
     async def write(
         self,
         path: PathSpec,
-        data: bytes,
-        entry: FileStat | None = None,
-        parent: FileStat | None = None,
-    ) -> FileStat | None:
-        return await _write(self.accessor, path, data, entry, parent)
-
-    async def write_stream(
-        self,
-        path: PathSpec,
         data: ByteSource,
         *,
         atomic: bool = False,
         entry: FileStat | None = None,
         parent: FileStat | None = None,
     ) -> FileStat | None:
+        if isinstance(data, bytes):
+            return await _write(self.accessor, path, data, entry, parent)
         return await _write_stream(self.accessor, path, data, entry, parent)
 
     async def create(

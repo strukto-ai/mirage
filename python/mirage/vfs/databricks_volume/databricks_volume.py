@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import AsyncIterator
 from typing import Any
 
 from mirage.accessor.databricks_volume import DatabricksVolumeAccessor
@@ -29,7 +28,7 @@ from mirage.core.databricks_volume.stat import stat as _stat
 from mirage.core.databricks_volume.stream import read_stream as _read_stream
 from mirage.core.databricks_volume.unlink import unlink as _unlink
 from mirage.core.databricks_volume.write import write as _write
-from mirage.core.generic.rewrite import append_by_rewrite
+from mirage.io.types import ByteSource, materialize
 from mirage.types import FileStat, PathSpec, VFSName
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.databricks_volume.config import DatabricksVolumeConfig
@@ -65,23 +64,19 @@ class DatabricksVolumeVFS(BaseVFS):
         path: PathSpec,
         offset: int = 0,
         size: int | None = None,
-    ) -> bytes:
+    ) -> ByteSource:
+        if not offset and size is None:
+            return _read_stream(self.accessor, path)
         return await _read(self.accessor, path, offset, size)
 
     async def stat(self, path: PathSpec) -> FileStat:
         return await _stat(self.accessor, path)
 
-    def read_stream(self, path: PathSpec) -> AsyncIterator[bytes]:
-        return _read_stream(self.accessor, path)
-
     async def exists(self, path: PathSpec) -> bool:
         return await _exists(self.accessor, path)
 
-    async def write(self, path: PathSpec, data: bytes) -> None:
-        await _write(self.accessor, path, data)
-
-    async def append(self, path: PathSpec, data: bytes) -> None:
-        await append_by_rewrite(self.read, self.write, self.stat, path, data)
+    async def write(self, path: PathSpec, data: ByteSource) -> None:
+        await _write(self.accessor, path, await materialize(data))
 
     async def create(self, path: PathSpec) -> None:
         await _create(self.accessor, path)

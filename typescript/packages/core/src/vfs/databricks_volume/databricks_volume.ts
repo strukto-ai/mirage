@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { materialize, type ByteSource } from '../../io/types.ts'
 import type { DatabricksVolumeAccessor } from '../../accessor/databricks_volume.ts'
 import { copy as dbxCopy } from '../../core/databricks_volume/copy.ts'
 import { create as dbxCreate } from '../../core/databricks_volume/create.ts'
@@ -26,7 +27,6 @@ import { stat as dbxStat } from '../../core/databricks_volume/stat.ts'
 import { readStream as dbxStream } from '../../core/databricks_volume/stream.ts'
 import { unlink as dbxUnlink } from '../../core/databricks_volume/unlink.ts'
 import { write as dbxWrite } from '../../core/databricks_volume/write.ts'
-import { appendByRewrite } from '../../core/generic/rewrite.ts'
 import type { FileStat, PathSpec } from '../../types.ts'
 import type { Handed } from '../types.ts'
 import { BaseVFS } from '../base.ts'
@@ -54,8 +54,8 @@ export class DatabricksVolumeVFSBase extends BaseVFS<DatabricksVolumeAccessor> {
     _handed?: Handed,
     offset = 0,
     size: number | null = null,
-  ): Promise<Uint8Array> {
-    if (offset === 0 && size === null) return dbxRead(this.accessor, path)
+  ): Promise<ByteSource> | AsyncIterable<Uint8Array> {
+    if (offset === 0 && size === null) return dbxStream(this.accessor, path)
     return dbxRead(this.accessor, path, size === null ? { offset } : { offset, size })
   }
 
@@ -63,26 +63,12 @@ export class DatabricksVolumeVFSBase extends BaseVFS<DatabricksVolumeAccessor> {
     return dbxStat(this.accessor, path)
   }
 
-  override readStream(path: PathSpec): AsyncIterable<Uint8Array> {
-    return dbxStream(this.accessor, path)
-  }
-
   override exists(path: PathSpec): Promise<boolean> {
     return dbxExists(this.accessor, path)
   }
 
-  override write(path: PathSpec, data: Uint8Array): Promise<void> {
-    return dbxWrite(this.accessor, path, data)
-  }
-
-  override append(path: PathSpec, data: Uint8Array): Promise<void> {
-    return appendByRewrite(
-      (p) => this.read(p),
-      (p, d) => this.write(p, d),
-      (p) => this.stat(p),
-      path,
-      data,
-    )
+  override async write(path: PathSpec, data: ByteSource): Promise<void> {
+    return dbxWrite(this.accessor, path, await materialize(data))
   }
 
   override create(path: PathSpec): Promise<void> {

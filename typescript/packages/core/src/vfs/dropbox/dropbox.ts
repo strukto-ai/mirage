@@ -67,7 +67,6 @@ export class DropboxVFS extends BaseVFS {
   override readonly indexTtl: number = 86_400
   override readonly handed = {
     read: ['entry'],
-    readStream: ['entry'],
     truncate: ['entry'],
   } as const
   override readonly prompt: string = PROMPT
@@ -102,9 +101,8 @@ export class DropboxVFS extends BaseVFS {
     handed?: Handed,
     offset = 0,
     size: number | null = null,
-  ): Promise<Uint8Array> {
-    if (offset === 0 && size === null)
-      return dropboxRead(this.accessor, path, undefined, handed?.entry)
+  ): Promise<ByteSource> | AsyncIterable<Uint8Array> {
+    if (offset === 0 && size === null) return dropboxStream(this.accessor, path, handed?.entry)
     return dropboxRead(
       this.accessor,
       path,
@@ -117,16 +115,13 @@ export class DropboxVFS extends BaseVFS {
     return dropboxStat(this.accessor, path)
   }
 
-  override readStream(path: PathSpec, handed?: Handed): AsyncIterable<Uint8Array> {
-    return dropboxStream(this.accessor, path, handed?.entry)
-  }
-
   override exists(path: PathSpec): Promise<boolean> {
     return dropboxExists(this.accessor, path)
   }
 
-  override write(path: PathSpec, data: Uint8Array): Promise<FileStat | null> {
-    return dropboxWrite(this.accessor, path, data)
+  override write(path: PathSpec, data: ByteSource, signal?: AbortSignal): Promise<FileStat | null> {
+    if (data instanceof Uint8Array) return dropboxWrite(this.accessor, path, data)
+    return writeStream(this.accessor, path, chunks(data, signal))
   }
 
   override truncate(
@@ -139,7 +134,7 @@ export class DropboxVFS extends BaseVFS {
       (p) =>
         handed.entry === undefined || handed.entry === null
           ? dropboxReadByPath(this.accessor, p)
-          : this.read(p, handed),
+          : dropboxRead(this.accessor, p, undefined, handed.entry),
       async (p, d) => {
         await this.write(p, d)
       },
@@ -147,15 +142,6 @@ export class DropboxVFS extends BaseVFS {
       length,
       noCreate,
     )
-  }
-
-  override async writeStream(
-    path: PathSpec,
-    data: ByteSource,
-    signal?: AbortSignal,
-    _atomic = false,
-  ): Promise<FileStat | null> {
-    return await writeStream(this.accessor, path, chunks(data, signal))
   }
 
   override create(path: PathSpec): Promise<FileStat | null> {

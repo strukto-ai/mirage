@@ -73,17 +73,13 @@ export class OneDriveVFS extends BaseVFS {
     _handed?: Handed,
     offset = 0,
     size: number | null = null,
-  ): Promise<Uint8Array> {
-    if (offset === 0 && size === null) return read(this.accessor, path)
+  ): Promise<ByteSource> | AsyncIterable<Uint8Array> {
+    if (offset === 0 && size === null) return readStream(this.accessor, path)
     return read(this.accessor, path, size === null ? { offset } : { offset, size })
   }
 
   override stat(path: PathSpec): Promise<FileStat> {
     return stat(this.accessor, path)
-  }
-
-  override readStream(path: PathSpec): AsyncIterable<Uint8Array> {
-    return readStream(this.accessor, path)
   }
 
   override exists(path: PathSpec): Promise<boolean> {
@@ -94,16 +90,8 @@ export class OneDriveVFS extends BaseVFS {
     return tree(this.accessor, path)
   }
 
-  override write(path: PathSpec, data: Uint8Array): Promise<void> {
-    return write(this.accessor, path, data)
-  }
-
-  override writeStream(
-    path: PathSpec,
-    data: ByteSource,
-    signal?: AbortSignal,
-    _atomic = false,
-  ): Promise<void> {
+  override write(path: PathSpec, data: ByteSource, signal?: AbortSignal): Promise<void> {
+    if (data instanceof Uint8Array) return write(this.accessor, path, data)
     return writeStream(this.accessor, path, chunks(data, signal))
   }
 

@@ -122,14 +122,19 @@ async def test_custom_functions_and_streams_keep_the_session_gate():
             )
             assert reply.status_code == 400, reply.text
             reply = await client.post(
-                base + "/read_stream?session_id=agent",
-                json={"path": "/data/visible"},
+                base + "/read?session_id=agent",
+                json={"path": "/data/visible", "stream": True},
             )
             assert reply.status_code == 200, reply.text[:200]
             assert reply.headers["content-type"] == "application/octet-stream"
             assert reply.content == data
             reply = await client.post(
-                base + "/read_stream?session_id=agent",
-                json={"path": "/data/secret"},
+                base + "/read?session_id=agent",
+                json={"path": "/data/secret", "stream": True},
             )
             assert reply.status_code == 404
+            reply = await client.post(
+                base + "/read?session_id=agent",
+                json={"path": "/data/visible", "stream": "yes"},
+            )
+            assert reply.status_code == 400

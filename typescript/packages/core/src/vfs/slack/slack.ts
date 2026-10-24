@@ -12,10 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { type ByteSource } from '../../io/types.ts'
 import type { SlackAccessor } from '../../accessor/slack.ts'
 import {
   follow as slackFollow,
-  read as slackRead,
   readMany as slackReadMany,
   readRange as slackReadRange,
   readStream as slackReadStream,
@@ -36,7 +36,6 @@ export class SlackVFSBase extends BaseVFS<SlackAccessor> {
   override readonly handed = {
     readdir: ['entry'],
     read: ['entry', 'parent'],
-    readStream: ['entry', 'parent'],
     follow: ['entry', 'parent'],
     readMany: ['entry', 'parent'],
     stat: ['entry', 'parent'],
@@ -57,10 +56,12 @@ export class SlackVFSBase extends BaseVFS<SlackAccessor> {
     handed?: Handed,
     offset = 0,
     size: number | null = null,
-  ): Promise<Uint8Array> {
+    signal?: AbortSignal,
+  ): Promise<ByteSource> | AsyncIterable<Uint8Array> {
     const entry = handed?.entry ?? null
     const parent = handed?.parent ?? null
-    if (offset === 0 && size === null) return slackRead(this.accessor, path, entry, parent)
+    if (offset === 0 && size === null)
+      return slackReadStream(this.accessor, path, handed?.entry, handed?.parent, signal)
     return slackReadRange(
       this.accessor,
       path,
@@ -76,14 +77,6 @@ export class SlackVFSBase extends BaseVFS<SlackAccessor> {
     handed?: readonly Handed[],
   ): Promise<Map<string, Uint8Array>> {
     return slackReadMany(this.accessor, paths, limit, handed)
-  }
-
-  override readStream(
-    path: PathSpec,
-    handed?: Handed,
-    signal?: AbortSignal,
-  ): AsyncIterable<Uint8Array> {
-    return slackReadStream(this.accessor, path, handed?.entry, handed?.parent, signal)
   }
 
   override follow(

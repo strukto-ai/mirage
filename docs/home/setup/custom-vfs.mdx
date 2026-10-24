@@ -23,10 +23,10 @@ The methods you can override, with the arguments you normally use:
 
         async def readdir(self, path: PathSpec) -> list[FileStat]: ...
         async def stat(self, path: PathSpec) -> FileStat: ...
-        async def read(self, path: PathSpec, *, offset: int = 0, size: int | None = None) -> bytes: ...
+        async def read(self, path: PathSpec, *, offset: int = 0, size: int | None = None) -> bytes | AsyncIterator[bytes]: ...
 
-        async def write(self, path: PathSpec, data: bytes) -> FileStat | None: ...
-        async def append(self, path: PathSpec, data: bytes) -> FileStat | None: ...
+        async def write(self, path: PathSpec, data: bytes | AsyncIterator[bytes]) -> FileStat | None: ...
+        async def append(self, path: PathSpec, data: bytes | AsyncIterator[bytes]) -> FileStat | None: ...
         async def copy(self, src: PathSpec, dst: PathSpec) -> FileStat | None: ...
         async def truncate(self, path: PathSpec, length: int, no_create: bool = False) -> FileStat | None: ...
         async def rename(self, src: PathSpec, dst: PathSpec) -> FileStat | None: ...
@@ -58,10 +58,10 @@ The methods you can override, with the arguments you normally use:
 
       readdir(path: PathSpec): Promise<FileStat[]>
       stat(path: PathSpec): Promise<FileStat>
-      read(path: PathSpec): Promise<Uint8Array>
+      read(path: PathSpec): Promise<Uint8Array | AsyncIterable<Uint8Array>> | AsyncIterable<Uint8Array>
 
-      write(path: PathSpec, data: Uint8Array): Promise<unknown>
-      append(path: PathSpec, data: Uint8Array): Promise<unknown>
+      write(path: PathSpec, data: Uint8Array | AsyncIterable<Uint8Array>): Promise<unknown>
+      append(path: PathSpec, data: Uint8Array | AsyncIterable<Uint8Array>): Promise<unknown>
       copy(src: PathSpec, dst: PathSpec): Promise<unknown>
       truncate(path: PathSpec, length: number, noCreate?: boolean): Promise<unknown>
       rename(src: PathSpec, dst: PathSpec): Promise<unknown>
@@ -264,13 +264,14 @@ Override `write` and `unlink`:
   <Tab title="Python" icon="/images/python-logo.svg">
     ```python
     from mirage import PathSpec
+    from mirage.io.types import ByteSource, materialize
 
     from notes import NotesVFS
 
 
     class WritableNotesVFS(NotesVFS):
-        async def write(self, path: PathSpec, data: bytes) -> None:
-            self.pages[path.vfs_path] = data.decode()
+        async def write(self, path: PathSpec, data: ByteSource) -> None:
+            self.pages[path.vfs_path] = (await materialize(data)).decode()
 
         async def unlink(self, path: PathSpec) -> None:
             del self.pages[path.vfs_path]
@@ -279,11 +280,12 @@ Override `write` and `unlink`:
   <Tab title="TypeScript" icon="/images/typescript-logo.svg">
     ```typescript
     import type { PathSpec } from '@struktoai/mirage-node'
+    import { type ByteSource, materialize } from '@struktoai/mirage-core/io/types'
     import { NotesVFS } from './notes.ts'
 
     export class WritableNotesVFS extends NotesVFS {
-      override async write(path: PathSpec, data: Uint8Array): Promise<void> {
-        this.pages[path.vfsPath] = new TextDecoder().decode(data)
+      override async write(path: PathSpec, data: ByteSource): Promise<void> {
+        this.pages[path.vfsPath] = new TextDecoder().decode(await materialize(data))
       }
 
       override async unlink(path: PathSpec): Promise<void> {

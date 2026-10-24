@@ -20,6 +20,7 @@ from typing import Any
 from mirage.accessor.base import Accessor
 from mirage.context import Caller
 from mirage.io import IOResult
+from mirage.io.types import materialize
 from mirage.types import (
     LINK_TARGET_KEY,
     FileStat,
@@ -59,7 +60,7 @@ def call_over(cls: type[BaseVFS], name: str) -> Callable[..., Awaitable[Any]]:
     front, the way a test drove a backend's table.
 
     Keywords the function does not take (an ``index`` handed to a write)
-    are dropped.
+    are dropped, and a read that answers a stream is collected.
 
     Args:
         cls (type[BaseVFS]): the backend's VFS class.
@@ -71,9 +72,13 @@ def call_over(cls: type[BaseVFS], name: str) -> Callable[..., Awaitable[Any]]:
     ) -> Any:
         method = getattr(vfs_over(cls, accessor), name)
         takes = inspect.signature(method).parameters
-        return await method(
+        answer = method(
             path, *args, **{k: v for k, v in kwargs.items() if k in takes}
         )
+        found = await answer if inspect.isawaitable(answer) else answer
+        if name == "read" and not isinstance(found, bytes):
+            return await materialize(found)
+        return found
 
     return call
 
@@ -226,10 +231,6 @@ class BatchedRAM(RAMVFS):
     async def read(self, path, offset=0, size=None):
         self.reads.append(path.virtual)
         return await super().read(path, offset, size)
-
-    def read_stream(self, path):
-        self.reads.append(path.virtual)
-        return super().read_stream(path)
 
     async def read_many(self, paths, limit):
         self.batches.append([path.virtual for path in paths])

@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import AsyncIterator, Mapping
+from collections.abc import AsyncIterator, Awaitable, Mapping
 from types import MappingProxyType
 from typing import Any
 
@@ -44,8 +44,8 @@ class BaseVFS:
     """A backend: an accessor, the facts about it, and its functions.
 
     A VFS answers ``readdir``, ``read`` and ``stat``; every other function
-    (``write``, ``unlink``, ``read_stream``, a native ``find`` or
-    ``search``, ...) is optional, and a VFS answers exactly the ones it
+    (``write``, ``unlink``, a native ``find`` or ``search``, ...) is
+    optional, and a VFS answers exactly the ones it
     defines. Every generic shell command (``ls``, ``cat``, ``grep``,
     ``find``, ``head``, ``wc``, ...) runs on the three required ones, and
     a line that needs a function the VFS does not define answers
@@ -279,17 +279,22 @@ class BaseVFS:
         raise enotsup(self.name, "readdir", path)
 
     @vfs_call(effect=Effect.READ, target=Target.FILE)
-    async def read(
+    def read(
         self,
         path: PathSpec,
         *,
         offset: int = 0,
         size: int | None = None,
-    ) -> bytes:
+    ) -> Awaitable[ByteSource] | AsyncIterator[bytes]:
         """Read a file's bytes, or a window of them.
 
-        A window reaches this only when ``reads_ranges`` is set: the
-        caller otherwise reads the whole file and slices it.
+        Answer with the bytes, or with an async iterator that hands them
+        out as the caller pulls, so a large file never sits in memory: an
+        ``async def`` that returns either, or one that yields chunks.
+        Mirage collects a stream for a caller that needs the bytes whole
+        and hands bytes to a streaming caller as one chunk. A window
+        reaches this only when ``reads_ranges`` is set: the caller
+        otherwise reads the whole file and slices it.
 
         Args:
             path (PathSpec): the file.
@@ -306,39 +311,6 @@ class BaseVFS:
             path (PathSpec): the path.
         """
         raise enotsup(self.name, "stat", path)
-
-    def read_stream(self, path: PathSpec) -> AsyncIterator[bytes]:
-        """Stream a file's bytes as the caller pulls them.
-
-        A VFS that does not define it is read whole instead.
-
-        Args:
-            path (PathSpec): the file.
-        """
-        raise enotsup(self.name, "read_stream", path)
-
-    async def write_stream(
-        self, path: PathSpec, data: ByteSource, *, atomic: bool = False
-    ) -> FileStat | None:
-        """Consume a replacement incrementally, through the write dispatcher.
-
-        Args:
-            path (PathSpec): the destination.
-            data (ByteSource): the replacement bytes, consumed once.
-            atomic (bool): stage the replacement until successful EOF.
-        """
-        raise enotsup(self.name, "write_stream", path)
-
-    async def append_stream(
-        self, path: PathSpec, data: ByteSource
-    ) -> FileStat | None:
-        """Consume an append incrementally, through the append dispatcher.
-
-        Args:
-            path (PathSpec): the destination.
-            data (ByteSource): the additional bytes, consumed once.
-        """
-        raise enotsup(self.name, "append_stream", path)
 
     async def exists(self, path: PathSpec) -> bool:
         """Whether anything is at ``path``; derived from ``stat`` when
@@ -478,25 +450,36 @@ class BaseVFS:
         raise enotsup(self.name, "read_tree", path)
 
     @vfs_call(effect=Effect.WRITE, target=Target.FILE, creates=True)
-    async def write(self, path: PathSpec, data: bytes) -> FileStat | None:
+    async def write(self, path: PathSpec, data: ByteSource) -> FileStat | None:
         """Replace a file's bytes, creating it when missing.
+
+        ``data`` is the whole content, or an async iterator that hands it
+        over as it is produced (a program's output redirected into the
+        file); ``materialize(data)`` collects it for a store that takes
+        one body. A stream that lands as it arrives lets a reader watch
+        the file grow. A write that also takes ``atomic: bool`` is asked,
+        with it, to show nothing until the stream has ended whole; any
+        other write is handed the collected bytes for that.
 
         Args:
             path (PathSpec): the file.
-            data (bytes): its new content.
+            data (ByteSource): its new content, consumed once.
         """
         raise enotsup(self.name, "write", path)
 
     @vfs_call(effect=Effect.WRITE, target=Target.FILE, creates=True)
-    async def append(self, path: PathSpec, data: bytes) -> FileStat | None:
+    async def append(
+        self, path: PathSpec, data: ByteSource
+    ) -> FileStat | None:
         """Add bytes to the end of a file, creating it when missing.
 
-        A VFS that defines ``write`` and not this is appended to by
-        reading the file and writing it back.
+        ``data`` is bytes or a stream, as ``write`` takes it. A VFS that
+        defines ``write`` and not this is appended to by reading the file
+        and writing it back.
 
         Args:
             path (PathSpec): the file.
-            data (bytes): the bytes to add.
+            data (ByteSource): the bytes to add, consumed once.
         """
         raise enotsup(self.name, "append", path)
 

@@ -1,8 +1,6 @@
 import pytest
 
 from mirage.core.dify import read, tree
-from mirage.vfs.dify import DifyVFS
-from tests.fixtures.mounted import Mounted
 
 from .conftest import list_basic_documents
 
@@ -22,8 +20,10 @@ async def test_read_bytes_uses_document_segments(
 ):
     monkeypatch.setattr(tree, "list_all_documents", list_basic_documents)
     monkeypatch.setattr(read, "get_document_segments", get_segments)
+    rows = await tree.load_tree(dify_accessor)
+    (row,) = rows["/guides"]
 
-    data = await Mounted(DifyVFS, dify_accessor, "/knowledge").read(guide_path)
+    data = await read.read(dify_accessor, guide_path, entry=row)
 
     assert data == b"first\nsecond"
 

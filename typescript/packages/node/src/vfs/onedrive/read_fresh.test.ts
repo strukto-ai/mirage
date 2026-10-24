@@ -205,7 +205,8 @@ describe('onedrive under read: fresh', () => {
     try {
       let got = ''
       if (streamed) {
-        for await (const chunk of await w.vfs.readStream('/m/a.txt')) got += DEC.decode(chunk)
+        for await (const chunk of await w.vfs.read('/m/a.txt', { stream: true }))
+          got += DEC.decode(chunk)
       } else {
         got = DEC.decode(await w.vfs.read('/m/a.txt'))
       }

@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { Handed } from '../../vfs/types.ts'
 import { EvaluationContext } from '../evaluation.ts'
 import { describe, expect, it, vi } from 'vitest'
 import { SharedInput } from '../../io/async_line_iterator.ts'
@@ -673,7 +674,8 @@ describe('handleRedirect unwritable > target', () => {
         ] as const) {
           const error = Object.assign(new Error(reason), { code })
           let failing = new Set(['/data/out', '/data/err'])
-          const write = vi.spyOn(data, 'write').mockImplementation(async (path, bytes) => {
+          const write = vi.spyOn(data, 'write').mockImplementation(async (path, source) => {
+            const bytes = await materialize(source)
             if (bytes.byteLength > 0 && failing.has(path.virtual)) throw error
             await originalWrite(path, bytes)
           })
@@ -1130,7 +1132,7 @@ class FailingVFS extends RAMVFS {
     super()
     this.store.files.set('/bad', new TextEncoder().encode('firstrest'))
   }
-  override async *readStream(path: PathSpec): AsyncGenerator<Uint8Array> {
+  override async *read(path: PathSpec): AsyncGenerator<Uint8Array> {
     yield await Promise.resolve(new TextEncoder().encode('first'))
     throw Object.assign(new Error(path.virtual), { code: 'EACCES', virtualPath: path.virtual })
   }
@@ -1168,26 +1170,27 @@ class RejectingVFS extends RAMVFS {
     if (this.stats) return Promise.reject(this.error)
     return super.stat(path)
   }
-  override readStream(path: PathSpec): AsyncIterable<Uint8Array> {
-    if (this.reads) throw this.error
-    return super.readStream(path)
+  override read(
+    path: PathSpec,
+    handed?: Handed,
+    offset = 0,
+    size: number | null = null,
+  ): Promise<ByteSource> | AsyncIterable<Uint8Array> {
+    if (this.reads) return Promise.reject(this.error)
+    return super.read(path, handed, offset, size)
   }
-  override write(path: PathSpec, data: Uint8Array): Promise<void> {
-    if (this.emptyOk && data.byteLength === 0) return super.write(path, data)
-    return Promise.reject(this.error)
+  override async write(path: PathSpec, data: ByteSource): Promise<void> {
+    const whole = await materialize(data)
+    if (this.emptyOk && whole.byteLength === 0) return super.write(path, whole)
+    throw this.error
   }
-  override append(path: PathSpec, data: Uint8Array): Promise<void> {
-    if (this.emptyOk && data.byteLength === 0) return super.append(path, data)
-    return Promise.reject(this.error)
+  override async append(path: PathSpec, data: ByteSource): Promise<void> {
+    const whole = await materialize(data)
+    if (this.emptyOk && whole.byteLength === 0) return super.append(path, whole)
+    throw this.error
   }
   override pwrite(): Promise<void> {
     return Promise.reject(this.error)
-  }
-  override async writeStream(path: PathSpec, data: ByteSource): Promise<void> {
-    await this.write(path, await materialize(data))
-  }
-  override async appendStream(path: PathSpec, data: ByteSource): Promise<void> {
-    await this.append(path, await materialize(data))
   }
 }
 

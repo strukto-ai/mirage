@@ -61,7 +61,6 @@ export class GoogleDriveVFS extends BaseVFS {
     read: ['entry'],
     stat: ['entry'],
     checksum: ['entry'],
-    readStream: ['entry'],
     exists: ['entry'],
     readTree: ['entry'],
     write: ['entry', 'parent'],
@@ -102,9 +101,9 @@ export class GoogleDriveVFS extends BaseVFS {
     handed?: Handed,
     offset = 0,
     size: number | null = null,
-  ): Promise<Uint8Array> {
+  ): Promise<ByteSource> | AsyncIterable<Uint8Array> {
     if (offset === 0 && size === null) {
-      return gdriveRead(this.accessor, path, undefined, handed?.entry)
+      return gdriveStream(this.accessor, path, handed?.entry)
     }
     return gdriveRead(
       this.accessor,
@@ -122,10 +121,6 @@ export class GoogleDriveVFS extends BaseVFS {
     return gdriveChecksum(this.accessor, path, algorithm, handed?.entry)
   }
 
-  override readStream(path: PathSpec, handed?: Handed): AsyncIterable<Uint8Array> {
-    return gdriveStream(this.accessor, path, handed?.entry)
-  }
-
   override exists(path: PathSpec, handed?: Handed): Promise<boolean> {
     return gdriveExists(this.accessor, path, handed?.entry)
   }
@@ -136,21 +131,12 @@ export class GoogleDriveVFS extends BaseVFS {
 
   override write(
     path: PathSpec,
-    data: Uint8Array,
-    _signal?: AbortSignal,
-    handed: Handed = {},
-  ): Promise<FileStat | null> {
-    return gdriveWrite(this.accessor, path, data, handed)
-  }
-
-  override async writeStream(
-    path: PathSpec,
     data: ByteSource,
     signal?: AbortSignal,
-    _atomic = false,
     handed: Handed = {},
   ): Promise<FileStat | null> {
-    return await writeStream(this.accessor, path, chunks(data, signal), handed)
+    if (data instanceof Uint8Array) return gdriveWrite(this.accessor, path, data, handed)
+    return writeStream(this.accessor, path, chunks(data, signal), handed)
   }
 
   override create(path: PathSpec, handed: Handed = {}): Promise<FileStat | null> {

@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from unittest.mock import AsyncMock
+from collections.abc import AsyncIterator, Callable
 
 import pytest
 
@@ -29,6 +29,23 @@ def _op(name: str):
 
 
 read = _op("read")
+
+
+def _downloads(
+    data: bytes, calls: list[str]
+) -> Callable[[str], AsyncIterator[bytes]]:
+    """A stream download answering ``data``, each file id it is asked for
+    kept in ``calls``."""
+
+    def download(file_id: str) -> AsyncIterator[bytes]:
+        calls.append(file_id)
+        return _yielded(data)
+
+    return download
+
+
+async def _yielded(data: bytes) -> AsyncIterator[bytes]:
+    yield data
 
 
 def _scope(path: str, prefix: str = "") -> PathSpec:
@@ -52,10 +69,13 @@ async def test_read_downloads_plain_file(accessor, monkeypatch):
         modified="2026-04-01T00:00:00Z",
         extra={"file_id": "file123", "resource_type": "gdrive/file"},
     )
-    mock = AsyncMock(return_value=b"file content")
-    install_drive(monkeypatch, StubDrive(download_file=mock))
+    calls: list[str] = []
+    install_drive(
+        monkeypatch,
+        StubDrive(download_file_stream=_downloads(b"file content", calls)),
+    )
     result = await read(accessor, _scope("/docs/readme.txt"), entry=row)
-    mock.assert_called_once_with("file123", None)
+    assert calls == ["file123"]
     assert result == b"file content"
 
 

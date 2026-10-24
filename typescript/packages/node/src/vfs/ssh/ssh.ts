@@ -101,17 +101,13 @@ export class SSHVFS extends BaseVFS {
     _handed?: Handed,
     offset = 0,
     size: number | null = null,
-  ): Promise<Uint8Array> {
-    if (offset === 0 && size === null) return sshRead(this.accessor, path)
+  ): Promise<ByteSource> | AsyncIterable<Uint8Array> {
+    if (offset === 0 && size === null) return sshStream(this.accessor, path)
     return sshRead(this.accessor, path, size === null ? { offset } : { offset, size })
   }
 
   override stat(path: PathSpec): Promise<FileStat> {
     return sshStat(this.accessor, path)
-  }
-
-  override readStream(path: PathSpec): AsyncIterable<Uint8Array> {
-    return sshStream(this.accessor, path)
   }
 
   override readTree(path: PathSpec): Promise<Map<string, FileStat> | null> {
@@ -146,25 +142,25 @@ export class SSHVFS extends BaseVFS {
     return sshFilesContaining(this.accessor, text, [path], opts.ignoreCase)
   }
 
-  override write(path: PathSpec, data: Uint8Array): Promise<void> {
-    return sshWrite(this.accessor, path, data)
-  }
-
-  override writeStream(
+  override write(
     path: PathSpec,
     data: ByteSource,
     signal?: AbortSignal,
+    _handed?: Handed,
     atomic = false,
   ): Promise<void> {
+    if (data instanceof Uint8Array) return sshWrite(this.accessor, path, data)
     return sshWriteStream(this.accessor, path, data, signal, atomic)
   }
 
-  override appendStream(path: PathSpec, data: ByteSource, signal?: AbortSignal): Promise<void> {
+  override append(
+    path: PathSpec,
+    data: ByteSource,
+    _handed?: Handed,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    if (data instanceof Uint8Array) return sshAppend(this.accessor, path, data)
     return sshAppendStream(this.accessor, path, data, signal)
-  }
-
-  override append(path: PathSpec, data: Uint8Array): Promise<void> {
-    return sshAppend(this.accessor, path, data)
   }
 
   override pwrite(path: PathSpec, data: Uint8Array, offset: number): Promise<void> {

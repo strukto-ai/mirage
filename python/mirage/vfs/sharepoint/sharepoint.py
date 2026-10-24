@@ -1,4 +1,3 @@
-from collections.abc import AsyncIterator
 from typing import Any
 
 from mirage.accessor.sharepoint import SharePointAccessor, SharePointConfig
@@ -64,16 +63,13 @@ class SharePointVFS(BaseVFS):
         path: PathSpec,
         offset: int = 0,
         size: int | None = None,
-    ) -> bytes:
+    ) -> ByteSource:
         if not offset and size is None:
-            return await _read(self.accessor, path)
+            return _read_stream(self.accessor, path)
         return await _read(self.accessor, path, offset, size)
 
     async def stat(self, path: PathSpec) -> FileStat:
         return await _stat(self.accessor, path)
-
-    def read_stream(self, path: PathSpec) -> AsyncIterator[bytes]:
-        return _read_stream(self.accessor, path)
 
     async def exists(self, path: PathSpec) -> bool:
         return await _exists(self.accessor, path)
@@ -81,13 +77,13 @@ class SharePointVFS(BaseVFS):
     async def read_tree(self, path: PathSpec) -> dict[str, FileStat] | None:
         return await _tree(self.accessor, path)
 
-    async def write(self, path: PathSpec, data: bytes) -> None:
-        await _write(self.accessor, path, data)
-
-    async def write_stream(
+    async def write(
         self, path: PathSpec, data: ByteSource, *, atomic: bool = False
     ) -> None:
-        await _write_stream(self.accessor, path, data)
+        if isinstance(data, bytes):
+            await _write(self.accessor, path, data)
+        else:
+            await _write_stream(self.accessor, path, data)
 
     async def create(self, path: PathSpec) -> None:
         await _create(self.accessor, path)

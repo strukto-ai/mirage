@@ -32,7 +32,7 @@ import { Workspace } from './workspace/workspace/workspace.ts'
 import { Files, type FilesOptions } from './workspace/files.ts'
 import { NamespaceReader } from './workspace/dispatcher/reader.ts'
 import { enotsup } from './errors/fs.ts'
-import { IOResult } from './io/types.ts'
+import { IOResult, type ByteSource } from './io/types.ts'
 import type { DispatchFn } from './runtime/types.ts'
 import { sha256Hex } from './utils/hash.ts'
 import {
@@ -368,14 +368,9 @@ export class BatchedRAM extends RAMVFS {
     handed?: Handed,
     offset = 0,
     size: number | null = null,
-  ): Promise<Uint8Array> {
+  ): Promise<ByteSource> | AsyncIterable<Uint8Array> {
     this.reads.push(path.virtual)
     return super.read(path, handed, offset, size)
-  }
-
-  override readStream(path: PathSpec): AsyncIterable<Uint8Array> {
-    this.reads.push(path.virtual)
-    return super.readStream(path)
   }
 
   override readMany(paths: PathSpec[]): Promise<Map<string, Uint8Array>> {

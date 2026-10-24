@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { ByteSource } from '../io/types.ts'
 import { describe, expect, it, vi } from 'vitest'
 import { RAMAccessor } from '../accessor/ram.ts'
 import { read as ramRead } from '../core/ram/read.ts'
@@ -54,13 +55,13 @@ class Minimal extends BaseVFS<RAMAccessor> {
     return ramReaddir(this.accessor, path)
   }
 
-  override async read(
+  override read(
     path: PathSpec,
     _handed?: Handed,
     offset = 0,
     size: number | null = null,
-  ): Promise<Uint8Array> {
-    return sliceWindow(await ramRead(this.accessor, path), offset, size)
+  ): Promise<ByteSource> | AsyncIterable<Uint8Array> {
+    return ramRead(this.accessor, path).then((data) => sliceWindow(data, offset, size))
   }
 
   override stat(path: PathSpec): Promise<FileStat> {
@@ -103,7 +104,7 @@ class RowsHanded extends Minimal {
     handed?: Handed,
     offset = 0,
     size: number | null = null,
-  ): Promise<Uint8Array> {
+  ): Promise<ByteSource> {
     if (handed?.parent == null) throw enoent(path.virtual)
     return super.read(path, handed, offset, size)
   }
@@ -148,8 +149,13 @@ class Rendering extends Minimal {
     '.gdoc.json': 'readDoc',
   }
 
-  override async *readStream(path: PathSpec): AsyncIterable<Uint8Array> {
-    yield await ramRead(this.accessor, path)
+  override async *read(
+    path: PathSpec,
+    _handed?: Handed,
+    offset = 0,
+    size: number | null = null,
+  ): AsyncIterable<Uint8Array> {
+    yield sliceWindow(await ramRead(this.accessor, path), offset, size)
   }
 
   readJson(): Promise<Uint8Array> {
@@ -268,7 +274,7 @@ it('rejects oversized chunks and closes the stream on contract failure', async (
   const vfs = new RAMVFS()
   await ramWrite(vfs.accessor, FILE, CONTENT)
   let closed = false
-  vfs.readStream = async function* () {
+  vfs.read = async function* () {
     try {
       yield await Promise.resolve(CONTENT)
     } finally {

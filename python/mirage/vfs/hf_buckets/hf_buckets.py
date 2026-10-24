@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import AsyncIterator
 from typing import Any
 
 from mirage.accessor.hf_buckets import HfBucketsAccessor
@@ -27,6 +26,7 @@ from mirage.core.hf_buckets.stat import stat as _stat
 from mirage.core.hf_buckets.stream import read_stream as _read_stream
 from mirage.core.hf_buckets.unlink import unlink as _unlink
 from mirage.core.hf_buckets.write import write as _write
+from mirage.io.types import ByteSource, materialize
 from mirage.types import FileStat, PathSpec, VFSName
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.hf_buckets.config import HfBucketsConfig
@@ -61,16 +61,13 @@ class HfBucketsVFS(BaseVFS):
 
     async def read(
         self, path: PathSpec, offset: int = 0, size: int | None = None
-    ) -> bytes:
+    ) -> ByteSource:
         if not offset and size is None:
-            return await _read(self.accessor, path)
+            return _read_stream(self.accessor, path)
         return await _read(self.accessor, path, offset, size)
 
     async def stat(self, path: PathSpec) -> FileStat:
         return await _stat(self.accessor, path)
-
-    def read_stream(self, path: PathSpec) -> AsyncIterator[bytes]:
-        return _read_stream(self.accessor, path)
 
     async def exists(self, path: PathSpec) -> bool:
         return await _exists(self.accessor, path)
@@ -78,8 +75,8 @@ class HfBucketsVFS(BaseVFS):
     async def read_tree(self, path: PathSpec) -> dict[str, FileStat] | None:
         return await _tree(self.accessor, path)
 
-    async def write(self, path: PathSpec, data: bytes) -> FileStat | None:
-        return await _write(self.accessor, path, data)
+    async def write(self, path: PathSpec, data: ByteSource) -> FileStat | None:
+        return await _write(self.accessor, path, await materialize(data))
 
     async def create(self, path: PathSpec) -> FileStat | None:
         return await _create(self.accessor, path)

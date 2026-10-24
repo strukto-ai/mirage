@@ -27,7 +27,8 @@ from mirage.core.databricks_volume.errors import (
     is_not_found,
 )
 from mirage.core.databricks_volume.read import read
-from mirage.types import PathSpec
+from mirage.io.types import materialize
+from mirage.types import MountMode, PathSpec
 from mirage.utils.ranges import ByteWindow
 from mirage.vfs.databricks_volume import (
     DatabricksVolumeConfig,
@@ -336,21 +337,26 @@ async def test_missing_credential_does_not_hide_or_replace_existing_file(
     http_files.handler = handler
     accessor = http_files.accessor(async_token if async_provider else token)
     mount = DatabricksVolumeVFS(accessor.config)
+    workspace = Workspace({"/dbx": mount}, mode=MountMode.WRITE)
     path = PathSpec.from_str_path("/existing.txt")
     try:
         with pytest.raises(RuntimeError) as error:
             if operation == "exists":
                 await mount.exists(path)
             else:
-                await mount.append(
-                    path, b"" if operation == "append_empty" else b" appended"
+                await workspace.dispatch(
+                    "append",
+                    PathSpec.from_str_path("/dbx/existing.txt"),
+                    data=b"" if operation == "append_empty" else b" appended",
                 )
         assert error.value.__cause__ is failure
         assert http_files.requests == []
         assert contents == b"original contents"
-        assert await mount.read(path) == b"original contents"
+        assert (
+            await materialize(await mount.read(path)) == b"original contents"
+        )
     finally:
-        await mount.accessor.close()
+        await workspace.close()
 
 
 @pytest.mark.asyncio

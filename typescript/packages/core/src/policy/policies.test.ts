@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { ByteSource } from '../io/types.ts'
+import type { Handed } from '../vfs/types.ts'
 import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { beforeAll, describe, expect, it } from 'vitest'
@@ -1145,7 +1147,13 @@ describe('postCommand and postSession', () => {
   class AccountsAtClose extends RAMVFS {
     override readonly cachesReads = false
 
-    override readStream(path: PathSpec): AsyncIterable<Uint8Array> {
+    override read(
+      path: PathSpec,
+      handed?: Handed,
+      offset = 0,
+      size: number | null = null,
+    ): Promise<ByteSource> | AsyncIterable<Uint8Array> {
+      if (offset !== 0 || size !== null) return super.read(path, handed, offset, size)
       const data = this.accessor.store.files.get(norm(path.mountPath)) ?? new Uint8Array()
       return chunksRecordedAtClose(path, data)
     }
@@ -1247,13 +1255,13 @@ describe('postCommand and postSession', () => {
     try {
       await ws.vfs.write('/data/big', 'x'.repeat(10000))
       ws.policies.add(new AskBigReads())
-      const held = await ws.vfs.readStream('/data/big').catch((err: unknown) => err)
+      const held = await ws.vfs.read('/data/big', { stream: true }).catch((err: unknown) => err)
       expect(held).toBeInstanceOf(PolicyDenied)
       await ws.decisions.answer((held as PolicyDenied).refusal?.askId ?? '', Outcome.ALLOW)
-      const stream = (await ws.vfs.readStream('/data/big'))[Symbol.asyncIterator]()
+      const stream = (await ws.vfs.read('/data/big', { stream: true }))[Symbol.asyncIterator]()
       expect((await stream.next()).value).toHaveLength(1024)
       await stream.return?.()
-      const again = await ws.vfs.readStream('/data/big').catch((err: unknown) => err)
+      const again = await ws.vfs.read('/data/big', { stream: true }).catch((err: unknown) => err)
       expect((again as PolicyDenied).refusal?.kind).toBe('pending')
     } finally {
       await ws.close()

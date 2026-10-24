@@ -7,6 +7,7 @@ import { DirListing, FileType, PathSpec } from '../types.ts'
 import { mountPrefixOf } from '../utils/key_prefix.ts'
 import type { BaseVFS } from './base.ts'
 import type { Handed } from './types.ts'
+import type { ByteSource } from '../io/types.ts'
 import { concat } from '../utils/bytes.ts'
 import { rstripSlash } from '../utils/slash.ts'
 
@@ -71,6 +72,27 @@ async function rowsAt(vfs: BaseVFS, path: PathSpec): Promise<[FileStat | null, F
   return [found, above]
 }
 
+/**
+ * What a `read` answered, a stream collected and each of its chunks held to
+ * `maxChunkSize`. Mirrors Python's `_bytes_of`.
+ */
+async function bytesOf(
+  answer: Promise<ByteSource> | AsyncIterable<Uint8Array>,
+  maxChunkSize?: number,
+): Promise<Uint8Array> {
+  const found = await answer
+  if (found instanceof Uint8Array) return found
+  const chunks: Uint8Array[] = []
+  for await (const chunk of found) {
+    check(
+      maxChunkSize === undefined || chunk.byteLength <= maxChunkSize,
+      'read streamed a chunk over maxChunkSize',
+    )
+    chunks.push(chunk)
+  }
+  return concat(chunks)
+}
+
 // Check that `read` answers a byte window of `data`, the whole file as
 // `read` answers it. Mirrors Python's `_check_windows`.
 async function checkWindows(
@@ -82,7 +104,7 @@ async function checkWindows(
   if (data.length === 0) return
   const offset = Math.min(1, data.length - 1)
   for (const size of [Math.min(3, data.length - offset), null]) {
-    const actual = await read(path, slot, offset, size)
+    const actual = await bytesOf(read(path, slot, offset, size))
     check(
       sameBytes(actual, data.slice(offset, size === null ? undefined : offset + size)),
       'read must use offset and byte count',
@@ -94,10 +116,11 @@ async function checkWindows(
  * Verify a VFS's reads against a caller-owned fixture, mutating nothing.
  *
  * A read runs the renderer of the file's filetype where the VFS renders
- * one, else `read`; a stream is compared with what `read` stores. A stream
- * and an existence check are probed only where the VFS defines them. A
- * renderer is always handed a byte window, `read` only where it takes one
- * natively: the caller reads whole and slices otherwise. `index` is the store every function is
+ * one, else `read`; a read that answers a stream is collected, each chunk
+ * held to the fixture's bound, and a missing file may fail when it is called
+ * or at its first pull. An existence check is probed only where the VFS
+ * defines one. A renderer is always handed a byte window, `read` only where
+ * it takes one natively: the caller reads whole and slices otherwise. `index` is the store every function is
  * handed, a RAM store at the VFS's `indexTtl` by default. Mirrors Python's
  * `check_read_contract`.
  */
@@ -112,7 +135,10 @@ export async function checkReadContract(
   const file = taken(store, entry, folderRow)
   const folder = taken(store, folderRow, above)
   const render = renderer(vfs, fixture.file)
-  const data = await (render ?? vfs.read.bind(vfs))(fixture.file, file)
+  const data = await bytesOf(
+    (render ?? vfs.read.bind(vfs))(fixture.file, file),
+    fixture.maxChunkSize,
+  )
   check(sameBytes(data, fixture.content), 'read differs from fixture content')
   const info = await vfs.stat(fixture.file, file)
   check(info.type === FileType.FILE, 'fixture must stat as a file')
@@ -130,18 +156,9 @@ export async function checkReadContract(
     'readdir must include the child',
   )
   const stored =
-    render !== undefined && vfs.supports('read') ? await vfs.read(fixture.file, file) : data
-  if (vfs.supports('readStream')) {
-    const chunks: Uint8Array[] = []
-    for await (const chunk of vfs.readStream(fixture.file, file)) {
-      check(
-        fixture.maxChunkSize === undefined || chunk.byteLength <= fixture.maxChunkSize,
-        'readStream exceeded maxChunkSize',
-      )
-      chunks.push(chunk)
-    }
-    check(sameBytes(concat(chunks), stored), 'readStream differs from read')
-  }
+    render !== undefined && vfs.supports('read')
+      ? await bytesOf(vfs.read(fixture.file, file), fixture.maxChunkSize)
+      : data
   if (render !== undefined) await checkWindows(render, fixture.file, file, data)
   if (vfs.readsRanges && vfs.supports('read')) {
     await checkWindows(vfs.read.bind(vfs), fixture.file, file, stored)
@@ -154,7 +171,7 @@ export async function checkReadContract(
   const readMissing = renderer(vfs, fixture.missing) ?? vfs.read.bind(vfs)
   for (const call of [
     (p: PathSpec) => vfs.stat(p, missing),
-    (p: PathSpec) => readMissing(p, missing),
+    (p: PathSpec) => bytesOf(readMissing(p, missing)),
   ]) {
     try {
       await call(fixture.missing)

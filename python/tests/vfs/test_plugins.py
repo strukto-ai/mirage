@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import AsyncIterator
+from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
@@ -36,6 +37,7 @@ from mirage.core.ram.readdir import readdir as ram_readdir
 from mirage.core.ram.stat import stat as ram_stat
 from mirage.core.ram.write import write as ram_write
 from mirage.io.stream import materialize
+from mirage.io.types import ByteSource
 from mirage.types import FileStat
 from mirage.utils.ranges import slice_window
 from mirage.vfs.ram import RAMVFS
@@ -84,12 +86,44 @@ class Writable(Minimal):
         await ram_write(self.accessor, path, data)
 
 
+async def _halves() -> AsyncIterator[bytes]:
+    for chunk in (b"hel", b"lo\n"):
+        yield chunk
+
+
 class Streaming(Minimal):
+    """Reads a window natively and streams a whole read."""
+
     reads_ranges = True
 
-    async def read_stream(self, path: PathSpec) -> AsyncIterator[bytes]:
-        for chunk in (b"hel", b"lo\n"):
-            yield chunk
+    def __init__(self, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self.windows: list[tuple[int, int | None]] = []
+
+    async def read(
+        self,
+        path: PathSpec,
+        offset: int = 0,
+        size: int | None = None,
+    ) -> ByteSource:
+        if not offset and size is None:
+            return _halves()
+        self.windows.append((offset, size))
+        return await super().read(path, offset, size)
+
+
+class Yielding(Minimal):
+    """Answers every read by yielding its bytes two at a time."""
+
+    async def read(
+        self,
+        path: PathSpec,
+        offset: int = 0,
+        size: int | None = None,
+    ) -> AsyncIterator[bytes]:
+        data = slice_window(await ram_read(self.accessor, path), offset, size)
+        for at in range(0, len(data), 2):
+            yield data[at : at + 2]
 
 
 class Searchable(Minimal):
@@ -158,16 +192,31 @@ async def test_existence_falls_back_to_stat_only_for_absence(accessor):
 @pytest.mark.asyncio
 async def test_native_reads_do_not_enable_writes(accessor):
     vfs = Streaming(accessor=accessor)
-    vfs.read = AsyncMock(return_value=b"ell")  # type: ignore[method-assign]
     ws = Workspace({"/nested/data": vfs})
     try:
         data, _ = await ws.dispatch("read", PATH, offset=1, size=3)
         assert data == b"ell"
-        window = vfs.read.await_args.kwargs
-        assert (window["offset"], window["size"]) == (1, 3)
+        assert vfs.windows == [(1, 3)]
         assert await _streamed(ws) == b"hello\n"
-        assert vfs.read.await_count == 1
+        assert vfs.windows == [(1, 3)]
         assert "write" not in served(vfs)
+    finally:
+        await ws.close()
+
+
+# A read written as a generator serves a command's stream and a caller
+# that wants the whole file, which gets the chunks collected.
+@pytest.mark.asyncio
+async def test_a_read_that_yields_serves_streams_and_whole_reads(accessor):
+    ws = Workspace(
+        {"/nested/data": Yielding(accessor=accessor)}, mode=MountMode.READ
+    )
+    try:
+        result = await ws.shell("cat /nested/data/a.txt")
+        assert await result.stdout_str() == "hello\n"
+        assert await ws.vfs.read(PATH.virtual) == b"hello\n"
+        stream = await ws.vfs.read(PATH.virtual, stream=True)
+        assert [chunk async for chunk in stream] == [b"he", b"ll", b"o\n"]
     finally:
         await ws.close()
 

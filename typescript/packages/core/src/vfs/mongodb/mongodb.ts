@@ -46,17 +46,14 @@ export class MongoDBVFSBase extends BaseVFS<MongoDBAccessor> {
     _handed?: Handed,
     offset = 0,
     size: number | null = null,
-  ): Promise<Uint8Array> {
+  ): Promise<ByteSource> {
+    if (offset === 0 && size === null) return mongodbStream(this.accessor, path)
     const data = await mongodbRead(this.accessor, path)
-    return offset === 0 && size === null ? data : sliceWindow(data, offset, size)
+    return sliceWindow(data, offset, size)
   }
 
   override stat(path: PathSpec, handed?: Handed): Promise<FileStat> {
     return mongodbStat(this.accessor, path, handed?.entry)
-  }
-
-  override readStream(path: PathSpec): AsyncIterable<Uint8Array> {
-    return mongodbStream(this.accessor, path)
   }
 
   override linesContaining(path: PathSpec, text: string): Promise<ByteSource | null> {

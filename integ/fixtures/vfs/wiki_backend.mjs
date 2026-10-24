@@ -17,6 +17,7 @@ import {
   FileStat,
   FileType,
 } from '@struktoai/mirage-core'
+import { materialize } from '@struktoai/mirage-core/io/types'
 import { rstripSlash, stripSlash } from '@struktoai/mirage-core/utils/slash'
 
 const PAGES = { 'notes.md': 'agents just speak bash\n' }
@@ -75,7 +76,7 @@ class PagesVFS extends BaseVFS {
   async write(path, data) {
     const name = key(path)
     if (name === '' || name.includes('/')) throw enotdir(path)
-    this.accessor.pages[name] = DEC.decode(data)
+    this.accessor.pages[name] = DEC.decode(await materialize(data))
   }
 }
 

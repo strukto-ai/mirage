@@ -11,6 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+import type { ByteSource } from '../io/types.ts'
 import { expandPattern, resolveGlobWith } from '../utils/glob_walk.ts'
 import { newStatusWriter, runWithLineAbort } from '../workspace/abort.ts'
 import { CommandSpec } from '../commands/spec/types.ts'
@@ -1481,7 +1482,7 @@ describe('overlapping file tool calls on the fallback storage', () => {
         handed?: Handed,
         offset?: number,
         size?: number | null,
-      ): Promise<Uint8Array> {
+      ): Promise<ByteSource> {
         await (path.virtual.endsWith('/a') ? heldA : heldB)
         return super.read(path, handed, offset, size)
       }

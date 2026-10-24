@@ -32,6 +32,7 @@ from mirage import (
     command,
     register_vfs,
 )
+from mirage.io.types import ByteSource, materialize
 from mirage.utils.key_prefix import mounted_path
 
 # A whole custom backend in one script: a BaseVFS whose methods answer
@@ -168,14 +169,14 @@ class WikiVFS(PagesVFS):
             supports_snapshot=True,
         )
 
-    async def write(self, path: PathSpec, data: bytes) -> None:
+    async def write(self, path: PathSpec, data: ByteSource) -> None:
         *folders, name = (p for p in path.vfs_path.split("/") if p)
         node = self.wiki.pages
         for part in folders:
             node = node.setdefault(part, {})
             if not isinstance(node, dict):
                 raise NotADirectoryError(path.virtual)
-        node[name] = data.decode()
+        node[name] = (await materialize(data)).decode()
 
     async def mkdir(self, path: PathSpec, parents: bool = False) -> None:
         parts = [p for p in path.vfs_path.split("/") if p]

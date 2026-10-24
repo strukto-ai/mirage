@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable
 from typing import Any
 
 from mirage.accessor.ram import RAMAccessor
@@ -30,7 +30,6 @@ from mirage.core.ram.rm import rm_r as _rm_r
 from mirage.core.ram.rmdir import rmdir as _rmdir
 from mirage.core.ram.set_attrs import set_attrs as _set_attrs
 from mirage.core.ram.stat import stat as _stat
-from mirage.core.ram.stream import read_stream as _read_stream
 from mirage.core.ram.truncate import truncate as _truncate
 from mirage.core.ram.unlink import unlink as _unlink
 from mirage.core.ram.write import write as _write
@@ -78,18 +77,13 @@ class RAMVFS(BaseVFS):
     async def readdir(self, path: PathSpec) -> list[FileStat]:
         return await _readdir(self.accessor, path)
 
-    async def read(
+    def read(
         self, path: PathSpec, offset: int = 0, size: int | None = None
-    ) -> bytes:
-        if not offset and size is None:
-            return await _read(self.accessor, path)
-        return await _read(self.accessor, path, offset, size)
+    ) -> Awaitable[ByteSource] | AsyncIterator[bytes]:
+        return _read(self.accessor, path, offset, size)
 
     async def stat(self, path: PathSpec) -> FileStat:
         return await _stat(self.accessor, path)
-
-    def read_stream(self, path: PathSpec) -> AsyncIterator[bytes]:
-        return _read_stream(self.accessor, path)
 
     async def exists(self, path: PathSpec) -> bool:
         return await _exists(self.accessor, path)
@@ -97,19 +91,19 @@ class RAMVFS(BaseVFS):
     async def read_tree(self, path: PathSpec) -> dict[str, FileStat] | None:
         return await _tree(self.accessor, path)
 
-    async def write(self, path: PathSpec, data: bytes) -> None:
-        await _write(self.accessor, path, data)
-
-    async def append(self, path: PathSpec, data: bytes) -> None:
-        await _append(self.accessor, path, data)
-
-    async def write_stream(
+    async def write(
         self, path: PathSpec, data: ByteSource, *, atomic: bool = False
     ) -> None:
-        await _write_stream(self.accessor, path, data, atomic=atomic)
+        if isinstance(data, bytes):
+            await _write(self.accessor, path, data)
+        else:
+            await _write_stream(self.accessor, path, data, atomic=atomic)
 
-    async def append_stream(self, path: PathSpec, data: ByteSource) -> None:
-        await _write_stream(self.accessor, path, data, append=True)
+    async def append(self, path: PathSpec, data: ByteSource) -> None:
+        if isinstance(data, bytes):
+            await _append(self.accessor, path, data)
+        else:
+            await _write_stream(self.accessor, path, data, append=True)
 
     async def pwrite(self, path: PathSpec, data: bytes, offset: int) -> None:
         await _pwrite(self.accessor, path, data, offset)

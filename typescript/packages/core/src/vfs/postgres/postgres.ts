@@ -37,7 +37,6 @@ import type { Handed } from '../types.ts'
 export class PostgresVFSBase extends BaseVFS<PostgresAccessor> {
   override readonly handed = {
     read: ['parent'],
-    readStream: ['parent'],
     stat: ['entry'],
   } as const
 
@@ -50,13 +49,11 @@ export class PostgresVFSBase extends BaseVFS<PostgresAccessor> {
     handed?: Handed,
     offset = 0,
     size: number | null = null,
-  ): Promise<Uint8Array> {
+  ): Promise<ByteSource> {
+    if (offset === 0 && size === null)
+      return postgresReadStream(this.accessor, path, handed?.entry ?? null, handed?.parent ?? null)
     const data = await postgresRead(this.accessor, path, null, handed?.parent)
-    return offset === 0 && size === null ? data : sliceWindow(data, offset, size)
-  }
-
-  override readStream(path: PathSpec, handed?: Handed): AsyncIterable<Uint8Array> {
-    return postgresReadStream(this.accessor, path, handed?.entry ?? null, handed?.parent ?? null)
+    return sliceWindow(data, offset, size)
   }
 
   override stat(path: PathSpec, handed?: Handed): Promise<FileStat> {

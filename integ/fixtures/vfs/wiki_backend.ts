@@ -14,6 +14,7 @@ import {
   FileType,
   type PathSpec,
 } from '@struktoai/mirage-core'
+import { type ByteSource, materialize } from '@struktoai/mirage-core/io/types'
 import { rstripSlash, stripSlash } from '@struktoai/mirage-core/utils/slash'
 
 type Pages = Record<string, string>
@@ -72,10 +73,10 @@ class PagesVFS extends BaseVFS<PageAccessor> {
     return row(base, this.accessor.pages[name] ?? '')
   }
 
-  override async write(path: PathSpec, data: Uint8Array): Promise<void> {
+  override async write(path: PathSpec, data: ByteSource): Promise<void> {
     const name = key(path)
     if (name === '' || name.includes('/')) throw enotdir(path)
-    this.accessor.pages[name] = DEC.decode(data)
+    this.accessor.pages[name] = DEC.decode(await materialize(data))
   }
 }
 

@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import hashlib
+from collections.abc import AsyncIterator
 from unittest.mock import AsyncMock
 
 import pytest
@@ -197,6 +198,10 @@ async def test_read_of_nothing_is_not_found(accessor):
         await read(accessor, PathSpec.from_str_path("/missing/file.txt"))
 
 
+async def _yielded(data: bytes) -> AsyncIterator[bytes]:
+    yield data
+
+
 @pytest.mark.asyncio
 async def test_a_cold_read_lists_its_parent_first(accessor, monkeypatch):
     async def fake_list_files(folder_id, drive_id=None):
@@ -218,7 +223,7 @@ async def test_a_cold_read_lists_its_parent_first(accessor, monkeypatch):
             StubDrive(
                 list_files=fake_list_files,
                 list_shared_drives=AsyncMock(return_value=[]),
-                download_file=AsyncMock(return_value=b"pdf-bytes"),
+                download_file_stream=lambda file_id: _yielded(b"pdf-bytes"),
                 capture_file_metadata=AsyncMock(return_value=(None, None)),
             ),
         )

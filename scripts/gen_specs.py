@@ -50,7 +50,6 @@ VFS_FUNCTIONS = (
     "readdir",
     "read",
     "stat",
-    "read_stream",
     "exists",
     "first_lines",
     "last_lines",

@@ -472,48 +472,50 @@ export class Files {
     return seen ?? this.sessionId ?? ''
   }
 
-  // `raw` skips the filetype cascade: an explicit null filetype stops
-  // the dispatcher from stamping the path's extension, so a rendered read op
-  // (gdoc/gsheet/gslide) is bypassed and the stored bytes come back.
-  // `offset`/`size` ride the same kwargs the generic read op already reads,
-  // so a backend with a native range fetches one window instead of the whole
-  // object. Python spells this `read(path, offset, size, raw)`.
+  /**
+   * Read file content, whole or as the caller pulls it. `raw` skips the
+   * filetype cascade: an explicit null filetype stops the dispatcher from
+   * stamping the path's extension, so a rendered read op
+   * (gdoc/gsheet/gslide) is bypassed and the stored bytes come back.
+   * `offset`/`size` ride the same kwargs the generic read op already reads,
+   * so a backend with a native range fetches one window instead of the
+   * whole object. `stream` answers with an async iterable: its first chunk
+   * is read before this returns, so a missing file fails here rather than at
+   * the first pull, a cold read fills the cache as it is pulled, and the read
+   * is recorded once the stream ends. A read the dispatcher answers whole (a
+   * window, a warm copy, a rendering, a backend answering bytes) arrives as
+   * one chunk. Python spells this `read(path, offset, size, raw, stream=)`.
+   */
   async read(
     path: string | PathSpec,
-    options: { raw?: boolean; offset?: number; size?: number | null } = {},
+    options?: { raw?: boolean; offset?: number; size?: number | null; stream?: false },
     sessionId?: string,
-  ): Promise<Uint8Array> {
+  ): Promise<Uint8Array>
+  async read(
+    path: string | PathSpec,
+    options: { raw?: boolean; offset?: number; size?: number | null; stream: true },
+    sessionId?: string,
+  ): Promise<AsyncIterable<Uint8Array>>
+  async read(
+    path: string | PathSpec,
+    options: { raw?: boolean; offset?: number; size?: number | null; stream: boolean },
+    sessionId?: string,
+  ): Promise<Uint8Array | AsyncIterable<Uint8Array>>
+  async read(
+    path: string | PathSpec,
+    options: { raw?: boolean; offset?: number; size?: number | null; stream?: boolean } = {},
+    sessionId?: string,
+  ): Promise<Uint8Array | AsyncIterable<Uint8Array>> {
     const kwargs: OpKwargs = options.raw === true ? { filetype: null } : {}
     const offset = options.offset ?? 0
     const size = options.size ?? null
-    if (offset !== 0 || size !== null) {
-      return (await this.through(
-        'read',
-        path,
-        [],
-        { ...kwargs, offset, size },
-        sessionId,
-      )) as Uint8Array
+    if (offset !== 0 || size !== null) Object.assign(kwargs, { offset, size })
+    if (options.stream !== true) {
+      return (await this.through('read', path, [], kwargs, sessionId)) as Uint8Array
     }
-    return (await this.through('read', path, [], kwargs, sessionId)) as Uint8Array
-  }
-
-  /**
-   * Read file content as the caller pulls it. The first chunk is read before
-   * this returns, so a missing file fails here rather than at the first pull.
-   * A cold read fills the cache as it is pulled, and the read is recorded once
-   * the stream ends. A read the dispatcher answers whole (a warm copy, a rendering,
-   * a backend with no stream) arrives as one chunk. Python spells this
-   * `read_stream(path, raw)`.
-   */
-  async readStream(
-    path: string | PathSpec,
-    options: { raw?: boolean } = {},
-    sessionId?: string,
-  ): Promise<AsyncIterable<Uint8Array>> {
-    const kwargs: OpKwargs =
-      options.raw === true ? { filetype: null, stream: true } : { stream: true }
-    return ensureStream((await this.through('read', path, [], kwargs, sessionId)) as ByteSource)
+    return ensureStream(
+      (await this.through('read', path, [], { ...kwargs, stream: true }, sessionId)) as ByteSource,
+    )
   }
 
   async write(
@@ -526,9 +528,8 @@ export class Files {
   }
 
   /**
-   * Append bytes or an async byte source through the dispatcher. A native
-   * appendStream consumes incrementally; other mounts collect once before
-   * their existing append or read-and-rewrite fallback.
+   * Append bytes or an async byte source through the dispatcher: a VFS's
+   * `append` takes either, and one with no `append` is read and rewritten.
    */
   async append(path: string | PathSpec, data: ByteSource, sessionId?: string): Promise<void> {
     await this.through('append', path, [data], {}, sessionId)
