@@ -69,23 +69,18 @@ def make_readdir(driver: ObjectStoreDriver[A, C]) -> ReaddirFn[A]:
         times: dict[str, str] = {}
         saw_key = False
         cut = False
-        past = ""
+        past: str | None = None
         async with driver.connect(accessor) as conn:
             async for child in driver.list_children(conn, pfx):
                 saw_key = True
                 if child.kind == "marker":
                     continue
                 key = "/" + kp.strip(kpfx, child.key)
-                if key not in names and limit is not None:
-                    if not cut and len(names) >= limit:
+                if past is not None:
+                    if (key + "/" if child.kind == "d" else key) > past:
                         cut = True
-                        past = max(
-                            (k + "/" for k in names if k not in dir_keys),
-                            default="",
-                        )
-                    if cut:
-                        if (key + "/" if child.kind == "d" else key) > past:
-                            break
+                        break
+                    if key not in names:
                         continue
                 names.add(key)
                 if child.kind == "d":
@@ -93,6 +88,11 @@ def make_readdir(driver: ObjectStoreDriver[A, C]) -> ReaddirFn[A]:
                 else:
                     sizes[key] = child.size
                     times[key] = child.modified
+                if past is None and limit is not None and len(names) >= limit:
+                    past = max(
+                        (k + "/" for k in names if k not in dir_keys),
+                        default="",
+                    )
             if not saw_key and path.strip("/"):
                 # An empty directory is a zero-byte marker object keyed at
                 # the prefix itself, so a prefix holding no key at all --

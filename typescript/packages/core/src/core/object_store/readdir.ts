@@ -59,24 +59,19 @@ export function makeReaddir<A extends Accessor, C>(driver: ObjectStoreDriver<A, 
     const times = new Map<string, string>()
     let sawKey = false
     let cut = false
-    let past = ''
+    let past: string | null = null
     const { conn, close } = await driver.connect(accessor)
     try {
       for await (const child of driver.listChildren(conn, pfx)) {
         sawKey = true
         if (child.kind === 'marker') continue
         const key = '/' + kp.strip(kpfx, child.key)
-        if (!names.has(key) && limit !== undefined) {
-          if (!cut && names.size >= limit) {
+        if (past !== null) {
+          if (compareCodePoints(child.kind === 'd' ? key + '/' : key, past) > 0) {
             cut = true
-            for (const k of names) {
-              if (!dirKeys.has(k) && compareCodePoints(k + '/', past) > 0) past = k + '/'
-            }
+            break
           }
-          if (cut) {
-            if (compareCodePoints(child.kind === 'd' ? key + '/' : key, past) > 0) break
-            continue
-          }
+          if (!names.has(key)) continue
         }
         names.add(key)
         if (child.kind === 'd') {
@@ -84,6 +79,12 @@ export function makeReaddir<A extends Accessor, C>(driver: ObjectStoreDriver<A, 
         } else {
           sizes.set(key, child.size ?? null)
           times.set(key, child.modified ?? '')
+        }
+        if (past === null && limit !== undefined && names.size >= limit) {
+          past = ''
+          for (const k of names) {
+            if (!dirKeys.has(k) && compareCodePoints(k + '/', past) > 0) past = k + '/'
+          }
         }
       }
       if (!sawKey && rstripSlash(rawPath) !== '') {

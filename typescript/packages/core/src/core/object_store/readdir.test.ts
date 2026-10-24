@@ -142,6 +142,27 @@ it('counts a name that is a key and a prefix once toward a walk limit', async ()
   expect(out.entries.map((row) => row.name)).toEqual(['a', 'b', 'c'])
 })
 
+// Twin of test_a_cut_listing_stops_at_a_kept_directorys_next_row.
+it("stops a cut listing at a kept directory's next row", async () => {
+  const keys = ['a', 'c', ...[0, 1, 2, 3, 4, 5, 6, 7, 8].map((i) => `b/${String(i)}`)]
+  const store = new FakeStore(Object.fromEntries(keys.map((k) => [k, 'x'])))
+  const pulled: string[] = []
+  const driver = makeDriver(store)
+  async function* counted(conn: FakeStore, pfx: string) {
+    for await (const child of driver.listChildren(conn, pfx)) {
+      pulled.push(child.key)
+      yield child
+    }
+  }
+  const out = (await makeReaddir({ ...driver, listChildren: counted })(
+    accessor,
+    spec('/'),
+    2,
+  )) as DirListing
+  expect(out.entries.map((row) => row.name)).toEqual(['a', 'b'])
+  expect(pulled).toEqual(['a', 'b', 'b'])
+})
+
 // Twin of test_a_cut_listing_reads_on_until_a_kept_file_proves_a_directory.
 it('reads a cut listing on until a kept file proves a directory', async () => {
   const store = new FakeStore(Object.fromEntries(['a', 'b', 'b/x', 'c'].map((k) => [k, 'x'])))

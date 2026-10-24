@@ -128,6 +128,24 @@ def test_a_walks_limit_counts_a_name_both_key_and_prefix_once(accessor):
     assert [row.name for row in out.entries] == ["a", "b", "c"]
 
 
+def test_a_cut_listing_stops_at_a_kept_directorys_next_row(accessor):
+    store = FakeStore(
+        {k: b"x" for k in ["a", "c"] + [f"b/{i}" for i in range(9)]}
+    )
+    pulled: list[str] = []
+    driver = make_driver(store)
+
+    async def counted(conn, pfx):
+        async for child in driver.list_children(conn, pfx):
+            pulled.append(child.key)
+            yield child
+
+    readdir = make_readdir(replace(driver, list_children=counted))
+    out = asyncio.run(readdir(accessor, spec("/"), 2))
+    assert [row.name for row in out.entries] == ["a", "b"]
+    assert pulled == ["a", "b", "b"]
+
+
 def test_a_cut_listing_reads_on_until_a_kept_file_proves_a_directory(
     accessor,
 ):
