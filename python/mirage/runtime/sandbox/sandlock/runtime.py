@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 import os
 import shutil
 from collections.abc import Sequence
@@ -113,8 +114,9 @@ class SandlockRuntime(
             return refusal
         # Found from this process's directory and made absolute: the
         # wrapper starts in the session's, where a relative PATH entry
-        # would otherwise find a `sandlock` the session wrote.
-        found = shutil.which("sandlock")
+        # would otherwise find a `sandlock` the session wrote. Off the
+        # loop, which a PATH entry on a mount this process serves needs.
+        found = await asyncio.to_thread(shutil.which, "sandlock")
         if found is None:
             raise RuntimeError(SANDLOCK_HINT)
         wrapper = ["run", *self.policy_argv(), "--clean-env"]

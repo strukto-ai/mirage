@@ -15,8 +15,8 @@
 import { type ChildProcess, spawn } from 'node:child_process'
 import { constants } from 'node:os'
 import { once } from 'node:events'
-import { accessSync, constants as fsConstants, statSync } from 'node:fs'
-import { stat } from 'node:fs/promises'
+import { constants as fsConstants } from 'node:fs'
+import { access, stat } from 'node:fs/promises'
 import { delimiter, resolve } from 'node:path'
 import { Readable, type Writable } from 'node:stream'
 import { setTimeout as delay } from 'node:timers/promises'
@@ -39,12 +39,13 @@ import { abortable, makeAbortError } from '@struktoai/mirage-core/utils/abort'
  * Where the host's own PATH finds a program, as Python's `shutil.which`
  * does, as an absolute path: a child's environment may carry no host PATH,
  * and a relative entry would be read against the child's directory, so the
- * lookup cannot be left to spawn. An empty entry is the
- * current directory, as for the shell. A name with a slash is taken as
- * given, and one the PATH lacks too, so spawn reports it missing. On
- * Windows a name without one of `PATHEXT`'s suffixes is tried with each.
+ * lookup cannot be left to spawn. Asynchronous, so a PATH entry on a mount
+ * this process serves never blocks the loop that answers it. An empty
+ * entry is the current directory, as for the shell. A name with a slash is
+ * taken as given, and one the PATH lacks too, so spawn reports it missing.
+ * On Windows a name without one of `PATHEXT`'s suffixes is tried with each.
  */
-export function onHostPath(name: string): string {
+export async function onHostPath(name: string): Promise<string> {
   if (name.includes('/')) return name
   const suffixes =
     process.platform === 'win32'
@@ -54,20 +55,21 @@ export function onHostPath(name: string): string {
     suffixes.length === 0 || suffixes.some((s) => name.toLowerCase().endsWith(s.toLowerCase()))
       ? [name]
       : suffixes.map((s) => name + s)
-  for (const dir of (process.env.PATH ?? '').split(delimiter)) {
-    for (const each of names) {
-      const candidate = resolve(dir, each)
-      try {
-        if (statSync(candidate, { throwIfNoEntry: false })?.isFile() !== true) continue
-        accessSync(candidate, fsConstants.X_OK)
-        return candidate
-      } catch (err) {
-        const code = (err as NodeJS.ErrnoException).code
-        if (code === undefined) throw err
-        // Not usable here (not executable, an unreadable entry): the next
-        // entry may be. Opt-in (NODE_DEBUG=mirage), on stderr.
-        debuglog('mirage')('%s is not usable: %s', candidate, code)
-      }
+  // The PATH and the directory as they are at the call.
+  const candidates = (process.env.PATH ?? '')
+    .split(delimiter)
+    .flatMap((dir) => names.map((each) => resolve(dir, each)))
+  for (const candidate of candidates) {
+    try {
+      if (!(await stat(candidate)).isFile()) continue
+      await access(candidate, fsConstants.X_OK)
+      return candidate
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code
+      if (code === undefined) throw err
+      // Not usable here (absent, not executable, an unreadable entry):
+      // the next entry may be. Opt-in (NODE_DEBUG=mirage), on stderr.
+      debuglog('mirage')('%s is not usable: %s', candidate, code)
     }
   }
   return name

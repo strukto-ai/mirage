@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 import errno
 import os
 import shutil
@@ -166,7 +167,9 @@ class LocalRuntime(PythonRuntime[None], ProcessExecutorMixin[None]):
             if refusal is not None:
                 return refusal
         else:
-            found = shutil.which(name)
+            # Off the loop, which a PATH entry on a mount this process
+            # serves needs.
+            found = await asyncio.to_thread(shutil.which, name)
             if found is None:
                 return _not_run(f"{name}: command not found\n", 127)
             # Absolute: a relative PATH entry names a file here, and the

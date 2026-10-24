@@ -91,7 +91,7 @@ export class SandlockRuntime
     // Found from this process's directory and made absolute: the wrapper
     // starts in the session's, where a relative PATH entry would otherwise
     // find a `sandlock` the session wrote.
-    const executable = onHostPath('sandlock')
+    const executable = await onHostPath('sandlock')
     if (!isAbsolute(executable)) throw new Error(SANDLOCK_HINT)
     const wrapper = ['run', ...this.policyArgv(), '--clean-env']
     for (const [key, value] of Object.entries({ ...this.config.env, ...ctx.env }))

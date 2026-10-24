@@ -109,36 +109,40 @@ export class LocalRuntime extends PythonRuntime<undefined> implements ProcessExe
   // is the base default; declared here so the claim is explicit at the
   // one builtin runtime that voids a world's sandbox claim.
   override readonly reach = 'process'
-  private readonly python: string
+  private readonly home: string | undefined
+  private readonly python: Promise<string>
   private readonly children = new Set<ChildProcess>()
 
   constructor(options: RuntimeOptions = {}) {
     super(options, LOCAL_CONFIG_KEYS)
-    const chosen = resolveHome(this.config as LocalConfig, LOCAL_HOME_ENV)
-    this.python = onHostPath(chosen ?? 'python3')
-    if (chosen !== undefined) {
+    this.home = resolveHome(this.config as LocalConfig, LOCAL_HOME_ENV)
+    // Found on the PATH as the entry is built, without blocking the loop;
+    // a run that finds nothing there says so.
+    this.python = onHostPath(this.home ?? 'python3')
+    void this.python.catch(() => undefined)
+    if (this.home?.includes('/') === true) {
       try {
-        accessSync(this.python, constants.X_OK)
+        accessSync(this.home, constants.X_OK)
       } catch (cause) {
         throw new Error(
-          `local python interpreter not found: ${chosen} (from the runtime entry's config home or ${LOCAL_HOME_ENV})`,
+          `local python interpreter not found: ${this.home} (from the runtime entry's config home or ${LOCAL_HOME_ENV})`,
           { cause },
         )
       }
     }
   }
 
-  override version(_env: Record<string, string>, signal?: AbortSignal): Promise<RunResult> {
+  override async version(_env: Record<string, string>, signal?: AbortSignal): Promise<RunResult> {
     // Session loader variables can execute code before --version is read.
-    return this.spawnProgram(this.python, ['--version'], {}, null, signal)
+    return this.spawnProgram(await this.interpreter(), ['--version'], {}, null, signal)
   }
 
-  interpret(_engine: undefined, program: Program, ctx: Context): Promise<RunResult> {
+  async interpret(_engine: undefined, program: Program, ctx: Context): Promise<RunResult> {
     // Honoring the init switches is just handing them back to the real
     // interpreter, which is why this tier gets them exactly right
     // (sys.flags included) where an in-process engine cannot.
     return this.spawnProgram(
-      this.python,
+      await this.interpreter(),
       [...initArgv(ctx.flags), '-c', prepareSource(program, ctx.cwd), ...program.args],
       ctx.env ?? {},
       program.stdin,
@@ -168,7 +172,7 @@ export class LocalRuntime extends PythonRuntime<undefined> implements ProcessExe
       const refusal = await unrunnable(name, program)
       if (refusal !== null) return refusal
     } else {
-      program = onHostPath(name)
+      program = await onHostPath(name)
       if (!(await isExecutable(program))) return notRun(`${name}: command not found\n`, 127)
     }
     // A program that cannot start (its script's interpreter missing, say)
@@ -189,6 +193,18 @@ export class LocalRuntime extends PythonRuntime<undefined> implements ProcessExe
     })
   }
 
+  /** The interpreter the host PATH found, refused when it found none. */
+  private async interpreter(): Promise<string> {
+    const name = this.home ?? 'python3'
+    const found = await this.python
+    if (!(await isExecutable(found)))
+      throw new Error(
+        `local python interpreter not found: '${name}' (set the ` +
+          `runtime entry's config home or ${LOCAL_HOME_ENV})`,
+      )
+    return found
+  }
+
   private spawnProgram(
     program: string,
     argv: string[],
@@ -199,12 +215,7 @@ export class LocalRuntime extends PythonRuntime<undefined> implements ProcessExe
     output?: OutputFn,
     errors?: OutputFn,
   ): Promise<RunResult> {
-    const missing =
-      program === this.python
-        ? `local python interpreter not found: '${this.python}' (set the ` +
-          `runtime entry's config home or ${LOCAL_HOME_ENV})`
-        : null
-    return runProgram(program, missing, argv, stdin, {
+    return runProgram(program, null, argv, stdin, {
       env: { ...(this.config as LocalConfig).env, ...env },
       children: this.children,
       direct: true,
