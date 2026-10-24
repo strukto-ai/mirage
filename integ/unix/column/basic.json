@@ -36,6 +36,40 @@
       "flags": [
         "t"
       ]
+    },
+    {
+      "id": "column_keeps_a_row_of_no_break_spaces",
+      "seq": 550,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a\\n\\302\\240\\n\\302\\240 \\nb\\n' | LC_ALL=C.UTF-8 column",
+      "expect": {
+        "exit": 0,
+        "stdout": "a\t \t  \tb\n",
+        "stderr": ""
+      }
     }
   ]
 }

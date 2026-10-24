@@ -12,6 +12,8 @@
         <img src="https://img.shields.io/badge/par-strukto.ai-0C0C0C?labelColor=FAFAFA" /></a>
     <a href="https://github.com/strukto-ai/mirage/blob/main/LICENSE" alt="Licence">
         <img src="https://img.shields.io/github/license/strukto-ai/mirage?label=licence&color=0C0C0C&labelColor=FAFAFA" /></a>
+    <a href="https://doi.org/10.5281/zenodo.23504502" alt="DOI">
+        <img src="https://img.shields.io/badge/DOI-10.5281%2Fzenodo.23504502-0C0C0C?labelColor=FAFAFA" alt="DOI 10.5281/zenodo.23504502" /></a>
     <a href="https://discord.gg/u8BPQ65KsS" alt="Communauté Discord">
         <img src="https://img.shields.io/badge/discord-rejoindre-0C0C0C?labelColor=FAFAFA&logo=discord&logoColor=0C0C0C" /></a>
     <a href="../assets/wechat-qr-code.jpg" aria-label="Communauté WeChat">
@@ -36,6 +38,17 @@
   <a href="./README.de.md"><img alt="README auf Deutsch" src="https://img.shields.io/badge/Deutsch-d9d9d9"></a>
   <a href="./README.vi.md"><img alt="README Tiếng Việt" src="https://img.shields.io/badge/Ti%E1%BA%BFng%20Vi%E1%BB%87t-d9d9d9"></a>
   <a href="./README.ko.md"><img alt="README 한국어" src="https://img.shields.io/badge/%ED%95%9C%EA%B5%AD%EC%96%B4-d9d9d9"></a>
+</p>
+
+<p align="center">
+  <a href="https://agentvfs.org">
+    <picture>
+      <source media="(max-width: 767px) and (prefers-color-scheme: dark)" srcset="../assets/agentvfs-banner-narrow-dark.svg">
+      <source media="(max-width: 767px)" srcset="../assets/agentvfs-banner-narrow-light.svg">
+      <source media="(prefers-color-scheme: dark)" srcset="../assets/agentvfs-banner-dark.svg">
+      <img src="../assets/agentvfs-banner-light.svg" width="900" alt="AgentVFS : l'interface de système de fichiers virtuel ouverte et neutre pour les agents IA" />
+    </picture>
+  </a>
 </p>
 
 Mirage est **un terminal virtuel pour les agents IA**. Le système de fichiers virtuel apporte un large contexte de données, les CLI virtualisées donnent à l'agent plus de souplesse dans l'usage des outils, les runtimes dynamiques réduisent le coût de l'infrastructure sous-jacente et consomment moins de tokens, et un contrôle fin sur les actions de l'agent et jusque sur ce qu'il peut voir apporte la meilleure sécurité. Ensemble, ces éléments forment un seul terminal virtualisé, offrant les meilleures performances d'agent, la meilleure efficacité de coût et la meilleure sécurité.

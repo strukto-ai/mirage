@@ -62,13 +62,10 @@ export const FILE_MIME_MAP: Readonly<Record<string, string>> = Object.freeze({
 // exactly-2**64 values through the too-large checks that python rejects.
 export const UINTMAX = 2n ** 64n - 1n
 export const INTMAX = 2n ** 63n - 1n
-export const INTMAX_MIN = -(2n ** 63n)
 
-// gnulib appends strerror(ERANGE) when a value parsed but fell outside the
-// option's range, and strerror(EOVERFLOW) when the value did not fit the type
-// it was scanned into. Measured under LC_ALL=C on glibc; these are the two
-// strings here most likely to read differently under another libc or locale.
-export const ERANGE_TEXT = 'Numerical result out of range'
+// gnulib appends strerror(EOVERFLOW) when a value did not fit the type it was
+// scanned into. Measured under LC_ALL=C on glibc; the string here most likely
+// to read differently under another libc or locale.
 export const EOVERFLOW_TEXT = 'Value too large for defined data type'
 
 export const OD_SIZE_UNITS = sizeSuffixes('bkKmMGTPE')

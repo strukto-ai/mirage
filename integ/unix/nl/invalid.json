@@ -3776,6 +3776,43 @@
         "stdout": "       foo\nrc=0\n       x\nrc=0\n       x\nrc=0\n       x\nrc=0\n       x\nrc=0\nnl: Invalid regular expression\nrc=1\nnl: Invalid regular expression\nrc=1\n     1\ta\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "nl_overflow_names_only_the_operands_it_reached",
+      "seq": 16100110,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a\\nb\\n' > /data/nlo && nl -v 9223372036854775807 /data/nope /data/nlo; echo rc=$?; nl -v 9223372036854775807 /data/nlo /data/nope; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "9223372036854775807\ta\nrc=1\n9223372036854775807\ta\nrc=1\n",
+        "stderr": "nl: /data/nope: No such file or directory\nnl: line number overflow\nnl: line number overflow\n"
+      },
+      "flags": [
+        "v"
+      ]
     }
   ]
 }

@@ -5,4 +5,5 @@ authors:
   - family-names: "Zhang"
     given-names: "Zecheng"
 license: Apache-2.0
+doi: "10.5281/zenodo.23504502"
 url: "https://github.com/strukto-ai/mirage"

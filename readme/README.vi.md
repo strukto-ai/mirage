@@ -12,6 +12,8 @@
         <img src="https://img.shields.io/badge/t%E1%BA%A1o%20b%E1%BB%9Fi-strukto.ai-0C0C0C?labelColor=FAFAFA" /></a>
     <a href="https://github.com/strukto-ai/mirage/blob/main/LICENSE" alt="Giấy phép">
         <img src="https://img.shields.io/github/license/strukto-ai/mirage?label=gi%E1%BA%A5y%20ph%C3%A9p&color=0C0C0C&labelColor=FAFAFA" /></a>
+    <a href="https://doi.org/10.5281/zenodo.23504502" alt="DOI">
+        <img src="https://img.shields.io/badge/DOI-10.5281%2Fzenodo.23504502-0C0C0C?labelColor=FAFAFA" alt="DOI 10.5281/zenodo.23504502" /></a>
     <a href="https://discord.gg/u8BPQ65KsS" alt="Cộng đồng Discord">
         <img src="https://img.shields.io/badge/discord-tham%20gia-0C0C0C?labelColor=FAFAFA&logo=discord&logoColor=0C0C0C" /></a>
     <a href="../assets/wechat-qr-code.jpg" aria-label="Cộng đồng WeChat">
@@ -36,6 +38,17 @@
   <a href="./README.de.md"><img alt="README auf Deutsch" src="https://img.shields.io/badge/Deutsch-d9d9d9"></a>
   <a href="./README.vi.md"><img alt="README Tiếng Việt" src="https://img.shields.io/badge/Ti%E1%BA%BFng%20Vi%E1%BB%87t-d9d9d9"></a>
   <a href="./README.ko.md"><img alt="README 한국어" src="https://img.shields.io/badge/%ED%95%9C%EA%B5%AD%EC%96%B4-d9d9d9"></a>
+</p>
+
+<p align="center">
+  <a href="https://agentvfs.org">
+    <picture>
+      <source media="(max-width: 767px) and (prefers-color-scheme: dark)" srcset="../assets/agentvfs-banner-narrow-dark.svg">
+      <source media="(max-width: 767px)" srcset="../assets/agentvfs-banner-narrow-light.svg">
+      <source media="(prefers-color-scheme: dark)" srcset="../assets/agentvfs-banner-dark.svg">
+      <img src="../assets/agentvfs-banner-light.svg" width="900" alt="AgentVFS: giao diện hệ thống tệp ảo mở, trung lập với nhà cung cấp, dành cho AI Agent" />
+    </picture>
+  </a>
 </p>
 
 Mirage là **terminal ảo cho AI Agent**. Hệ thống tệp ảo mang lại ngữ cảnh dữ liệu rộng, các CLI ảo hóa cho agent linh hoạt hơn khi dùng công cụ, runtime động giảm chi phí hạ tầng bên dưới và tiết kiệm token hơn, còn quyền kiểm soát chi tiết đối với hành động của agent và cả những gì nó nhìn thấy mang lại độ an toàn tốt nhất. Cùng nhau, các phần này tạo thành một terminal ảo hóa duy nhất, đem lại hiệu năng agent, hiệu quả chi phí và bảo mật tốt nhất.

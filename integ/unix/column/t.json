@@ -36,6 +36,117 @@
       "flags": [
         "t"
       ]
+    },
+    {
+      "id": "column_t_splits_cells_at_spaces_and_tabs_only",
+      "seq": 331,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a\\vb\\fc d\\n' | column -t | od -An -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "   a  \\v   b  \\f   c           d  \\n\n",
+        "stderr": ""
+      },
+      "flags": [
+        "t"
+      ]
+    },
+    {
+      "id": "column_t_measures_cells_by_display_width",
+      "seq": 332,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf '\\342\\230\\260 a\\nbc d\\n' | LC_ALL=C.UTF-8 column -t; printf '\\315\\270 a\\nbc d\\n' | LC_ALL=C.UTF-8 column -t",
+      "expect": {
+        "exit": 0,
+        "stdout": "☰  a\nbc  d\n͸    a\nbc  d\n",
+        "stderr": ""
+      },
+      "flags": [
+        "t"
+      ]
+    },
+    {
+      "id": "column_t_keeps_a_leading_bom_as_zero_width",
+      "seq": 333,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf '\\357\\273\\277a b\\nc d\\n' | LC_ALL=C.UTF-8 column -t | od -An -c",
+      "expect": {
+        "exit": 0,
+        "stdout": " 357 273 277   a           b  \\n   c           d  \\n\n",
+        "stderr": ""
+      },
+      "flags": [
+        "t"
+      ]
     }
   ]
 }

@@ -67,14 +67,10 @@ MAGIC_SIGNATURES: tuple[tuple[bytes, ContentType], ...] = (
 # Unicode decimal digits.
 UINTMAX = 2**64 - 1
 INTMAX = 2**63 - 1
-INTMAX_MIN = -(2**63)
 
-# gnulib appends `strerror(ERANGE)` when a value parsed but fell outside
-# the option's range, and `strerror(EOVERFLOW)` when the value did not
-# fit the type it was scanned into. Measured under LC_ALL=C on glibc;
-# these are the two strings here most likely to read differently under
-# another libc or locale.
-ERANGE_TEXT = "Numerical result out of range"
+# gnulib appends `strerror(EOVERFLOW)` when a value did not fit the type
+# it was scanned into. Measured under LC_ALL=C on glibc; the string here
+# most likely to read differently under another libc or locale.
 EOVERFLOW_TEXT = "Value too large for defined data type"
 
 OD_SIZE_UNITS = size_suffixes("bkKmMGTPE")

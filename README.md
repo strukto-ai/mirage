@@ -16,6 +16,8 @@
         <img src="https://img.shields.io/badge/made by-strukto.ai-0C0C0C?labelColor=F0ECE2" /></a>
     <a href="https://github.com/strukto-ai/mirage/blob/main/LICENSE" alt="License">
         <img src="https://img.shields.io/badge/license-Apache--2.0-0C0C0C?labelColor=F0ECE2" /></a>
+    <a href="https://doi.org/10.5281/zenodo.23504502" alt="DOI">
+        <img src="https://img.shields.io/badge/DOI-10.5281%2Fzenodo.23504502-0C0C0C?labelColor=F0ECE2" alt="DOI 10.5281/zenodo.23504502" /></a>
     <a href="https://discord.gg/u8BPQ65KsS" alt="Discord">
         <img src="https://img.shields.io/badge/discord-join-0C0C0C?labelColor=F0ECE2&logo=discord&logoColor=0C0C0C" /></a>
     <a href="assets/wechat-qr-code.jpg" aria-label="WeChat community">
@@ -40,6 +42,17 @@
   <a href="./readme/README.de.md"><img alt="README auf Deutsch" src="https://img.shields.io/badge/Deutsch-F0ECE2"></a>
   <a href="./readme/README.vi.md"><img alt="README Tiếng Việt" src="https://img.shields.io/badge/Ti%E1%BA%BFng%20Vi%E1%BB%87t-F0ECE2"></a>
   <a href="./readme/README.ko.md"><img alt="README 한국어" src="https://img.shields.io/badge/%ED%95%9C%EA%B5%AD%EC%96%B4-F0ECE2"></a>
+</p>
+
+<p align="center">
+  <a href="https://agentvfs.org">
+    <picture>
+      <source media="(max-width: 767px) and (prefers-color-scheme: dark)" srcset="assets/agentvfs-banner-narrow-dark.svg">
+      <source media="(max-width: 767px)" srcset="assets/agentvfs-banner-narrow-light.svg">
+      <source media="(prefers-color-scheme: dark)" srcset="assets/agentvfs-banner-dark.svg">
+      <img src="assets/agentvfs-banner-light.svg" width="100%" alt="AgentVFS: the open, vendor-neutral virtual filesystem interface for AI agents" />
+    </picture>
+  </a>
 </p>
 
 Mirage is **a Virtual Terminal for AI Agents**. The virtual filesystem delivers broad data context, virtualized CLIs give an agent more flexibility on tool use, dynamic runtimes save underlying infrastructure cost and are more token efficient, and fine-grained control over an agent's actions and even over what it can see gives the best security. Together these parts form one virtualized terminal, giving the best agent performance, cost efficiency and security.
