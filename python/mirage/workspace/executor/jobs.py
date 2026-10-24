@@ -446,11 +446,9 @@ async def handle_background(
         raise
     # A job killed before its runner starts never enters _run_bg, so its
     # leases also go when its task ends.
-    if job.task is not None:
-        job.task.add_done_callback(release_job)
-    bg_session.process_id = (
-        job.process.info.pid if job.process is not None else None
-    )
+    if job.process is not None:
+        job.process.task.add_done_callback(release_job)
+        bg_session.process_id = job.process.info.pid
     session.last_bg_job_id = job.pid
     waits = session.job_waits
     if waits is not None and waits.reaches(

@@ -20,14 +20,15 @@ import { registerRuntime } from '@struktoai/mirage-core/runtime/table'
 import type { OutputFn, RunResult, SandboxPipe } from '@struktoai/mirage-core/runtime/types'
 import type { RuntimeOptions } from '@struktoai/mirage-core/runtime/config'
 import { SMOLVM_CONFIG_KEYS, type SmolvmConfig } from './config.ts'
-import { RUNNING_STATE, SMOLVM_CLI_HINT, notRunningHint } from './constants.ts'
-import { type CliResult, execArgs, openCliPipe, runCli } from '../cli.ts'
+import { notRunningHint } from '@struktoai/mirage-core/runtime/sandbox/constants'
+import { RUNNING_STATE, SMOLVM_HINT, STATE_HINTS } from './constants.ts'
+import { execArgs, openProgramPipe, reportedState, runProgram } from '../program.ts'
 
 /**
  * A microVM the user runs as a whole-line runtime.
  *
  * You start the machine yourself; mirage only connects to it and
- * execs lines. The smolvm CLI is the transport, so there is no SDK
+ * execs lines. The `smolvm` program is the transport, so there is no SDK
  * dependency and no daemon socket wiring; each line is one `smolvm
  * machine exec` with the merged environment, the session cwd, real
  * stdin, and separated stderr.
@@ -47,15 +48,15 @@ export class SmolvmRuntime extends RemoteSandbox<SmolvmConfig> implements PipeTr
     requireId('smolvm', 'machine', this.config.machine)
   }
 
-  // One smolvm CLI invocation; the seam tests override.
+  // Run `smolvm` once; the seam tests override.
   protected smolvm(
     args: string[],
     stdin: ByteSource | null = null,
     output: OutputFn | null = null,
     signal?: AbortSignal,
     errors: OutputFn | null = null,
-  ): Promise<CliResult> {
-    return runCli('smolvm', SMOLVM_CLI_HINT, args, stdin, {
+  ): Promise<RunResult> {
+    return runProgram('smolvm', SMOLVM_HINT, args, stdin, {
       ...(signal !== undefined ? { signal } : {}),
       ...(output !== null ? { output } : {}),
       ...(errors !== null ? { errors } : {}),
@@ -70,22 +71,14 @@ export class SmolvmRuntime extends RemoteSandbox<SmolvmConfig> implements PipeTr
    * already running is an error rather than a boot.
    */
   async connect(): Promise<void> {
-    const result = await this.smolvm(['machine', 'status', '--name', this.config.machine, '--json'])
-    if (result.code !== 0) {
-      throw new Error(`smolvm machine status failed: ${DECODER.decode(result.stderr).trim()}`)
-    }
-    let status: { state?: unknown }
-    try {
-      status = JSON.parse(DECODER.decode(result.stdout)) as { state?: unknown }
-    } catch (error) {
-      throw new Error(`smolvm machine status returned unreadable json: ${String(error)}`)
-    }
-    if (status.state !== RUNNING_STATE) {
-      throw new Error(notRunningHint(this.config.machine, String(status.state)))
-    }
+    const machine = this.config.machine
+    const status = await this.smolvm(['machine', 'status', '--name', machine, '--json'])
+    const state = reportedState(status, 'smolvm machine status', ['state'])
+    if (state !== RUNNING_STATE)
+      throw new Error(notRunningHint('machine', machine, state, STATE_HINTS))
   }
 
-  protected override async execArgv(
+  protected override execArgv(
     argv: readonly string[],
     stdin: ByteSource | null,
     env: Record<string, string>,
@@ -94,18 +87,11 @@ export class SmolvmRuntime extends RemoteSandbox<SmolvmConfig> implements PipeTr
     errors: OutputFn | null,
     signal?: AbortSignal,
   ): Promise<RunResult> {
-    const result = await this.smolvm(
-      execArgs(this.head(), ['--'], env, cwd, argv),
-      stdin,
-      output,
-      signal,
-      errors,
-    )
-    return { stdout: result.stdout, stderr: result.stderr, exitCode: result.code }
+    return this.smolvm(execArgs(this.head(), ['--'], env, cwd, argv), stdin, output, signal, errors)
   }
 
   async openPipe(command: string): Promise<SandboxPipe> {
-    return openCliPipe(
+    return openProgramPipe(
       'smolvm',
       execArgs(this.head(), ['--'], {}, null, ['/bin/sh', '-c', command]),
     )
@@ -115,7 +101,5 @@ export class SmolvmRuntime extends RemoteSandbox<SmolvmConfig> implements PipeTr
     return ['machine', 'exec', '--name', this.config.machine, '-i']
   }
 }
-
-const DECODER = new TextDecoder()
 
 registerRuntime('smolvm', SmolvmRuntime)

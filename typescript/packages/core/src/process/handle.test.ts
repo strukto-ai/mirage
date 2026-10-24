@@ -113,6 +113,7 @@ describe('ProcessHandle', () => {
         abort.abort()
       },
       ignore,
+      ignore,
       (_id, run, process) => {
         bound.push(process)
         return run()

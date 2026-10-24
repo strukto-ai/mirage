@@ -12,8 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-export const SMOLVM_CLI_HINT =
-  'the smolvm runtime needs the smolvm CLI on PATH (https://smolmachines.com); ' +
+export const SMOLVM_HINT =
+  'the smolvm runtime needs `smolvm` on PATH (https://smolmachines.com); ' +
   'the host also needs a hypervisor: /dev/kvm on Linux, Hypervisor.framework on macOS, WHP on Windows'
 
 /**
@@ -24,21 +24,14 @@ export const SMOLVM_CLI_HINT =
  */
 export const RUNNING_STATE = 'running'
 
-const STATE_HINTS: Record<string, string> = {
+export const STATE_HINTS: Readonly<Record<string, string>> = {
   unreachable:
     'its guest agent is not answering (the VMM is alive but the agent died); ' +
-    'recover with `smolvm machine start --name {machine}`',
+    'recover with `smolvm machine start --name {name}`',
   frozen:
     'it is a frozen fork base, deliberately paused so its clones can copy-on-write from it; ' +
     'exec against a clone instead',
-  created: 'it has never been started; start it with `smolvm machine start --name {machine}`',
-  stopped: 'it is stopped; start it with `smolvm machine start --name {machine}`',
-  failed: 'it crashed; inspect with `smolvm machine status --name {machine}`',
-}
-
-/** Why this machine cannot take a line, named by its state. */
-export function notRunningHint(machine: string, state: string): string {
-  const detail = STATE_HINTS[state]
-  if (detail === undefined) return `machine ${machine} is not running (state: ${state})`
-  return `machine ${machine} is not running: ${detail.replaceAll('{machine}', machine)}`
+  created: 'it has never been started; start it with `smolvm machine start --name {name}`',
+  stopped: 'it is stopped; start it with `smolvm machine start --name {name}`',
+  failed: 'it crashed; inspect with `smolvm machine status --name {name}`',
 }

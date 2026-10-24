@@ -14,21 +14,48 @@
 
 from collections.abc import Mapping, Sequence
 
+from mirage.process.handle import ProcessHandle
 from mirage.runtime.types import MountType
 from mirage.utils.quote import single_quote
 
 
-def sdk_install_hint(name: str) -> str:
-    """The message shown when a provider SDK extra is missing.
+def not_running_hint(
+    noun: str,
+    name: str,
+    state: str,
+    hints: Mapping[str, str],
+    otherwise: str | None = None,
+) -> str:
+    """Why a sandbox cannot take a line, named by the state its status
+    command reported.
 
     Args:
-        name (str): the runtime name, which is also its pip extra
-            (daytona, e2b).
+        noun (str): what the provider calls it (container, machine,
+            sandbox).
+        name (str): the configured id or name.
+        state (str): the reported state.
+        hints (Mapping[str, str]): the provider's advice per state, with
+            ``{name}`` standing for ``name``.
+        otherwise (str | None): advice for a state ``hints`` lacks.
     """
-    return (
-        f"the {name} runtime needs the {name} SDK; install with: "
-        f"pip install mirage-ai[{name}]"
-    )
+    detail = hints.get(state)
+    if detail is not None:
+        return f"{noun} {name} is not running: {detail.format(name=name)}"
+    said = f"{noun} {name} is not running (state: {state})"
+    return said if otherwise is None else f"{said}; {otherwise}"
+
+
+def stop_signal(runner: ProcessHandle | None) -> int | None:
+    """The signal a ``kill`` stopped ``runner`` with, when a program may
+    handle it: None for KILL, or for a run no ``kill`` stopped, which is
+    killed at once.
+
+    Args:
+        runner (ProcessHandle | None): the caller's runner, if any.
+    """
+    if runner is None or runner.signal in (None, 9):
+        return None
+    return runner.signal
 
 
 MOUNT_TYPES: tuple[MountType, ...] = ("ssh", "fuse", "both")
@@ -70,7 +97,7 @@ PIPE_SERVER_HINT = (
 )
 
 # Every argv a sandbox runs goes under this POSIX sh prelude, with the
-# cwd as $1: a provider CLI's exec passes `-w /` (exec_args), and a
+# cwd as $1: a provider program's exec passes `-w /` (exec_args), and a
 # provider whose exec takes one command line dresses it (wrap_line), so
 # no provider's own cwd is used. An exec's `-e` can append to the image's
 # environment rather than replace a name it already sets, `-w` can

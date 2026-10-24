@@ -24,7 +24,7 @@ from collections.abc import (
 from functools import partial
 from typing import Any, Generic, TypeVar, cast
 
-from mirage.concurrency.limiter import settle
+from mirage.concurrency.limiter import owned_task, settle
 from mirage.io import IOResult
 from mirage.io.async_line_iterator import SharedInput
 from mirage.io.types import ByteSource, materialize  # noqa: F401
@@ -219,7 +219,7 @@ class OutputStream:
 
     async def aclose(self) -> None:
         if self._closing is None:
-            self._closing = asyncio.create_task(self._finish())
+            self._closing = owned_task(self._finish())
         await settle(self._closing)
 
 
@@ -251,6 +251,63 @@ def async_chain(streams: Iterable[ByteSource | None]) -> AsyncIterator[bytes]:
             await close_quietly(source)
 
     return OutputStream(output(), close)
+
+
+async def feed(
+    stdin: ByteSource | None,
+    write: Callable[[bytes], Awaitable[None]],
+    end: Callable[[], Awaitable[None]],
+    exited: Callable[[], bool],
+    closed: Callable[[Exception], bool] | None = None,
+) -> None:
+    """Write a program's input as it is read, then end it: a finite
+    command waits for that end. A program that ended first, or closed
+    its input (a broken pipe, or what ``closed`` says means that), has
+    taken what it wanted, so neither fails the run; an input that fails
+    as it is read does. Mirrors TypeScript's ``feed``.
+
+    Args:
+        stdin (ByteSource | None): the input; None ends it at once.
+        write (Callable[[bytes], Awaitable[None]]): sends one chunk,
+            waiting while the program is behind.
+        end (Callable[[], Awaitable[None]]): ends the input.
+        exited (Callable[[], bool]): whether the program has ended, for
+            a cancel that lands after it.
+        closed (Callable[[Exception], bool] | None): which other errors
+            mean the program closed its input.
+    """
+    try:
+        async for chunk in async_chain([stdin] if stdin is not None else []):
+            if not await _delivered(write(chunk), closed):
+                return
+        await _delivered(end(), closed)
+    except asyncio.CancelledError:
+        if not exited():
+            raise
+        logger.debug("a program ended before consuming its input")
+
+
+async def _delivered(
+    step: Awaitable[None], closed: Callable[[Exception], bool] | None
+) -> bool:
+    """Whether one step of a program's input landed; False when the
+    program had closed its input.
+
+    Args:
+        step (Awaitable[None]): a write or the end.
+        closed (Callable[[Exception], bool] | None): which other errors
+            than a broken pipe mean the program closed its input.
+    """
+    try:
+        await step
+    except Exception as exc:
+        if not isinstance(exc, (BrokenPipeError, ConnectionResetError)) and (
+            closed is None or not closed(exc)
+        ):
+            raise
+        logger.debug("a program closed its input: %s", exc)
+        return False
+    return True
 
 
 async def yield_bytes(data: bytes) -> AsyncIterator[bytes]:

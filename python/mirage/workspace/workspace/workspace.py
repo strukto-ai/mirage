@@ -1327,7 +1327,6 @@ class Workspace:
 
         def cancel() -> None:
             process.terminate()
-            self.processes.terminate_children(process.info.pid)
             input_stream.stop()
             output.stop()
 
@@ -2248,6 +2247,15 @@ class Workspace:
     @property
     def default_session_id(self) -> str:
         return self._session_mgr.default_id
+
+    @property
+    def sessions_loaded(self) -> bool:
+        """Whether sessions are hydrated and the default session settled.
+
+        Both only ever turn on, so a caller on another thread can read it
+        to skip ``ensure_sessions_loaded``, a call that would only return.
+        """
+        return self._meta.written and self._session_mgr.loaded
 
     @property
     def state_store(self) -> WorkspaceStateStore:

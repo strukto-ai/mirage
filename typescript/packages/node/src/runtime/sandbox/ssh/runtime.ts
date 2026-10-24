@@ -25,10 +25,9 @@ import type { OutputFn, RunResult, SandboxPipe } from '@struktoai/mirage-core/ru
 import type { RuntimeOptions } from '@struktoai/mirage-core/runtime/config'
 import { loadSdk, type Ssh2Sdk } from './sdk.ts'
 import { SSH_RUNTIME_CONFIG_KEYS, type SSHRuntimeConfig } from './config.ts'
-import { EXEC_ID, wrapLine } from '@struktoai/mirage-core/runtime/sandbox/constants'
-import type { CliResult } from '../cli.ts'
+import { EXEC_ID, stopSignal, wrapLine } from '@struktoai/mirage-core/runtime/sandbox/constants'
 import { makeAbortError } from '@struktoai/mirage-core/utils/abort'
-import { asyncChain } from '@struktoai/mirage-core/io/stream'
+import { feed } from '@struktoai/mirage-core/io/stream'
 import type { ByteSource } from '@struktoai/mirage-core/io/types'
 import type { Client, ClientChannel } from 'ssh2'
 
@@ -94,7 +93,7 @@ export class SSHRuntime extends RemoteSandbox<SSHRuntimeConfig> implements PipeT
     this.client = client
   }
 
-  protected override async execArgv(
+  protected override execArgv(
     argv: readonly string[],
     stdin: ByteSource | null,
     env: Record<string, string>,
@@ -103,7 +102,7 @@ export class SSHRuntime extends RemoteSandbox<SSHRuntimeConfig> implements PipeT
     errors: OutputFn | null,
     signal?: AbortSignal,
   ): Promise<RunResult> {
-    const result = await this.ssh(
+    return this.ssh(
       wrapLine(argv, env, cwd),
       stdin,
       output,
@@ -111,7 +110,6 @@ export class SSHRuntime extends RemoteSandbox<SSHRuntimeConfig> implements PipeT
       env[EXEC_ID] !== undefined,
       errors,
     )
-    return { stdout: result.stdout, stderr: result.stderr, exitCode: result.code }
   }
 
   /**
@@ -136,7 +134,7 @@ export class SSHRuntime extends RemoteSandbox<SSHRuntimeConfig> implements PipeT
     signal?: AbortSignal,
     tagged = false,
     errors: OutputFn | null = null,
-  ): Promise<CliResult> {
+  ): Promise<RunResult> {
     const client = this.client
     if (client === null) return Promise.reject(new Error('ssh runtime not connected'))
     // Read now: an abort's listener runs as the caller that aborted.
@@ -158,7 +156,7 @@ export class SSHRuntime extends RemoteSandbox<SSHRuntimeConfig> implements PipeT
         const abort = (): void => {
           // A tagged command a kill stopped with a gentler signal is left
           // to the reap, which sends it that signal first.
-          if (!state.done && (!tagged || (runner?.signal ?? 9) === 9)) stream.signal('KILL')
+          if (!state.done && (!tagged || stopSignal(runner) === null)) stream.signal('KILL')
           fail(makeAbortError(signal))
         }
         if (signal?.aborted === true) {
@@ -169,28 +167,23 @@ export class SSHRuntime extends RemoteSandbox<SSHRuntimeConfig> implements PipeT
         const out: Buffer[] = []
         const errs: Buffer[] = []
         let code: number | null = null
-        let delivering = Promise.resolve()
-        let erring = Promise.resolve()
-        stream.on('data', (chunk: Buffer) => {
-          if (output === null) {
-            out.push(chunk)
-            return
-          }
-          stream.pause()
-          delivering = output(chunk).then(() => {
-            if (!state.done) stream.resume()
-          }, fail)
-        })
-        stream.stderr.on('data', (chunk: Buffer) => {
-          if (errors === null) {
-            errs.push(chunk)
-            return
-          }
-          stream.stderr.pause()
-          erring = errors(chunk).then(() => {
-            if (!state.done) stream.stderr.resume()
-          }, fail)
-        })
+        const pending = [Promise.resolve(), Promise.resolve()]
+        // A channel's chunks go to its sink as they arrive, the channel
+        // paused until each is taken, or are kept for the result.
+        const deliver = (source: Readable, sink: OutputFn | null, kept: Buffer[], at: number) => {
+          source.on('data', (chunk: Buffer) => {
+            if (sink === null) {
+              kept.push(chunk)
+              return
+            }
+            source.pause()
+            pending[at] = sink(chunk).then(() => {
+              if (!state.done) source.resume()
+            }, fail)
+          })
+        }
+        deliver(stream, output, out, 0)
+        deliver(stream.stderr, errors, errs, 1)
         stream.on('exit', (c: number | null, signalName?: string) => {
           code =
             c ??
@@ -200,14 +193,15 @@ export class SSHRuntime extends RemoteSandbox<SSHRuntimeConfig> implements PipeT
         })
         stream.on('close', () => {
           state.closed = true
-          void Promise.all([delivering, erring]).then(() => {
+          void Promise.all(pending).then(() => {
             if (state.done) return
             state.done = true
             signal?.removeEventListener('abort', abort)
+            const stderr = Buffer.concat(errs)
             resolveFn({
               stdout: new Uint8Array(Buffer.concat(out)),
-              stderr: new Uint8Array(Buffer.concat(errs)),
-              code: code ?? 1,
+              stderr: stderr.length > 0 ? new Uint8Array(stderr) : null,
+              exitCode: code ?? 1,
             })
           })
         })
@@ -222,18 +216,13 @@ export class SSHRuntime extends RemoteSandbox<SSHRuntimeConfig> implements PipeT
             stream.on('drain', go)
             stream.on('close', go)
           })
-        void (async () => {
-          try {
-            for await (const chunk of asyncChain([stdin])) {
-              if (state.done || state.closed) return
-              if (!stream.write(chunk)) await drained()
-            }
-            if (!state.done && !state.closed) stream.end()
-          } catch (error) {
-            if (!state.done && !state.closed) fail(error)
-            else console.debug('ssh command input ended', error)
-          }
-        })()
+        const write = (chunk: Uint8Array): Promise<void> =>
+          stream.write(chunk) ? Promise.resolve() : drained()
+        const end = (): Promise<void> => {
+          stream.end()
+          return Promise.resolve()
+        }
+        feed(stdin, write, end, () => state.done || state.closed).catch(fail)
       })
     })
   }

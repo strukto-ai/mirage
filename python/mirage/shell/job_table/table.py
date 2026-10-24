@@ -55,8 +55,6 @@ def cancel_job(job: Job, signal: int = 9) -> None:
     try:
         if job.process is not None:
             job.process.terminate(signal)
-        elif job.task is not None:
-            job.task.get_loop().call_soon_threadsafe(job.task.cancel)
     except RuntimeError as exc:
         # The loop that was running this job is gone, so the job is too.
         logger.debug("job %d loop is gone: %s", job.id, exc)
@@ -70,6 +68,20 @@ async def _mark_killed(console: JobConsole) -> None:
     """
     await console.emit(Channel.STDERR, b"Killed")
     await console.finish(KILLED_OUTCOME)
+
+
+async def _stop(job: Job, signal: int = 9) -> None:
+    """Stop a running job and settle it as killed by ``signal``.
+
+    Args:
+        job (Job): the running job.
+        signal (int): the signal it is stopped with; its status is 128
+            plus it.
+    """
+    cancel_job(job, signal)
+    job.status = JobStatus.KILLED
+    job.exit_code = 128 + signal
+    await _mark_killed(job.console)
 
 
 def _stopped_status(job: Job) -> int:
@@ -295,7 +307,6 @@ class JobTable:
             job = Job(
                 id=job_id,
                 command=command,
-                task=None,
                 cwd=cwd,
                 session_id=session_id,
                 console=console,
@@ -305,7 +316,6 @@ class JobTable:
             process.terminate()
             raise
         job.process = process
-        job.task = job.process.task
         jobs[job_id] = job
         self._next_ids[session_id] = job_id + 1
         return job
@@ -385,15 +395,13 @@ class JobTable:
                 is 128 plus it, KILL's 137 by default.
         """
         job = self.get(job_id, session_id)
-        if job is None or job.status != JobStatus.RUNNING:
+        if (
+            job is None
+            or job.status != JobStatus.RUNNING
+            or job.process is None
+        ):
             return False
-        if job.task is None:
-            return False
-        cancel_job(job, signal)
-        job.status = JobStatus.KILLED
-        job.exit_code = 128 + signal
-        await job.console.emit(Channel.STDERR, b"Killed")
-        await job.console.finish(KILLED_OUTCOME)
+        await _stop(job, signal)
         return True
 
     def disown(self, job_id: int, session_id: str = "") -> bool:
@@ -444,15 +452,9 @@ class JobTable:
         leak their tasks.
         """
         running = self.all_running_jobs()
-        for job in running:
-            await self.kill(job.id, job.session_id)
-        for job in self._disowned:
-            if job.status == JobStatus.RUNNING and job.task is not None:
-                cancel_job(job)
-                job.status = JobStatus.KILLED
-                job.exit_code = KILLED_EXIT_CODE
-                await job.console.emit(Channel.STDERR, b"Killed")
-                await job.console.finish(KILLED_OUTCOME)
+        for job in [*running, *self._disowned]:
+            if job.status == JobStatus.RUNNING and job.process is not None:
+                await _stop(job)
         self._disowned = []
         return running
 
@@ -492,15 +494,14 @@ class JobTable:
             session_id (str): the session whose list names it.
         """
         job = self._jobs[session_id][job_id]
-        if job.task is None:
+        if job.process is None:
             return job
         await job.console.wait_finished()
-        if job.process is not None:
-            try:
-                async with asyncio.timeout(STOP_WAIT_SECONDS):
-                    await job.process.join()
-            except TimeoutError:
-                logger.debug("job %d still stopping after wait", job.id)
+        try:
+            async with asyncio.timeout(STOP_WAIT_SECONDS):
+                await job.process.join()
+        except TimeoutError:
+            logger.debug("job %d still stopping after wait", job.id)
         return job
 
     async def wait_all(self, session_id: str = "") -> list[Job]:

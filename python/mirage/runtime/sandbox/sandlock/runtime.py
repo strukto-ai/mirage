@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 import os
 import shutil
 from collections.abc import Sequence
@@ -21,15 +22,15 @@ from mirage.commands.config import Context
 from mirage.runtime.base import Runtime
 from mirage.runtime.constants import EXTERNAL_COMMANDS
 from mirage.runtime.mixin import LineExecutorMixin, ProcessExecutorMixin
-from mirage.runtime.sandbox.cli import (
+from mirage.runtime.sandbox.program import (
     Children,
     close_children,
     cwd_refusal,
-    run_cli,
+    run_program,
 )
 from mirage.runtime.sandbox.sandlock.config import SandlockConfig
 from mirage.runtime.sandbox.sandlock.constants import (
-    SANDLOCK_CLI_HINT,
+    SANDLOCK_HINT,
     SYSTEM_READABLE,
 )
 from mirage.runtime.types import OutputFn, RunResult
@@ -39,7 +40,7 @@ from mirage.types import PathSpec
 class SandlockRuntime(
     Runtime[None], LineExecutorMixin[None], ProcessExecutorMixin[None]
 ):
-    """Run native commands through the Linux Sandlock CLI.
+    """Run native commands through the Linux `sandlock` program.
 
     Paths are native paths. Workspace files require an existing filesystem
     mount granted through fs_readable/fs_writable.
@@ -61,6 +62,7 @@ class SandlockRuntime(
                 "sandlock: mount_type needs a remote pipe transport"
             )
         self._children: Children = {}
+        self._closed = False
 
     def policy_argv(self) -> list[str]:
         argv: list[str] = []
@@ -108,29 +110,37 @@ class SandlockRuntime(
         output: OutputFn | None,
         errors: OutputFn | None,
     ) -> RunResult:
-        refusal = cwd_refusal(argv[0], ctx.cwd.virtual)
+        refusal = await cwd_refusal(argv[0], ctx.cwd.virtual)
         if refusal is not None:
             return refusal
-        cli = shutil.which("sandlock")
-        if cli is None:
-            raise FileNotFoundError(SANDLOCK_CLI_HINT)
+        # Found from this process's directory and made absolute: the
+        # wrapper starts in the session's, where a relative PATH entry
+        # would otherwise find a `sandlock` the session wrote. Off the
+        # loop, which a PATH entry on a mount this process serves needs.
+        found = await asyncio.to_thread(shutil.which, "sandlock")
+        if found is None:
+            raise RuntimeError(SANDLOCK_HINT)
+        # A run still finding `sandlock` when the runtime closed starts
+        # nothing, so no child outlives the close.
+        if self._closed:
+            raise RuntimeError(f"{self.name}: the runtime is closed")
         wrapper = ["run", *self.policy_argv(), "--clean-env"]
         for key, value in {**self.config.env, **(ctx.env or {})}.items():
             wrapper += ["--env", f"{key}={value}"]
-        # Variables belong to the confined child, never the wrapper's loader.
-        stdout, stderr, code = await run_cli(
-            cli,
-            None,
+        # Requested variables go to the confined child.
+        return await run_program(
+            os.path.abspath(found),
+            SANDLOCK_HINT,
             [*wrapper, "--", *argv],
             ctx.stdin,
             cwd=ctx.cwd.virtual,
-            env={},
+            env={"PATH": os.environ.get("PATH", "")},
             children=self._children,
             output=output,
             errors=errors,
         )
-        return RunResult(stdout=stdout, stderr=stderr or None, exit_code=code)
 
     async def close(self) -> None:
         """Kill every child still running, so none outlives the workspace."""
+        self._closed = True
         await close_children(self._children)

@@ -30,6 +30,7 @@ export class ProcessHandle {
     run: ProcessRunner,
     private readonly cancel: (signal: number) => void,
     finished: (pid: number) => void,
+    private readonly cancelChildren: (signal: number) => void = () => undefined,
     bind: ExecutionBind = (_id, run) => run(),
   ) {
     this.current = Object.freeze(info)
@@ -75,12 +76,19 @@ export class ProcessHandle {
   }
 
   /**
-   * Request cancellation without waiting for the runner to exit.
+   * Request cancellation without waiting for the runner to exit. A runner
+   * that already exited has nothing to cancel, but what it started may
+   * still run (`sh -c 'sleep 100 &'`), so its children are stopped all the
+   * same.
    *
    * @param signal what the stop stands for, KILL (9) unless a `kill` named another.
    */
   terminate(signal = 9): boolean {
-    if (this.current.state === 'exited' || this.current.cancellationRequested) return false
+    if (this.current.state === 'exited') {
+      this.cancelChildren(signal)
+      return false
+    }
+    if (this.current.cancellationRequested) return false
     const previous = this.current
     this.current = Object.freeze({
       ...this.current,
@@ -89,6 +97,7 @@ export class ProcessHandle {
     })
     this.stopSignal = signal
     try {
+      this.cancelChildren(signal)
       this.cancel(signal)
     } catch (error) {
       this.current = previous

@@ -537,7 +537,7 @@ async def test_a_server_that_fails_says_why(monkeypatch):
 
 
 async def _refused_by_the_cli() -> str:
-    return "CLI refused: sandbox is not running"
+    return "msb refused: sandbox is not running"
 
 
 @pytest.mark.asyncio
@@ -563,6 +563,6 @@ async def test_a_failed_mount_keeps_pipe_diagnostics_when_the_guest_is_gone():
         assert result.exit_code == 1
         said = await result.stderr_str()
         assert "guest unavailable" in said
-        assert "CLI: CLI refused: sandbox is not running" in said
+        assert "helper said: msb refused: sandbox is not running" in said
     finally:
         await ws.close()

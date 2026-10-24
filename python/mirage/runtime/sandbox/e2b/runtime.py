@@ -18,12 +18,13 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 from mirage.context.session_context import current_caller
-from mirage.io.stream import async_chain
+from mirage.io.stream import feed
 from mirage.io.types import ByteSource
+from mirage.runtime.constants import sdk_install_hint
 from mirage.runtime.sandbox.base import RemoteSandbox
 from mirage.runtime.sandbox.constants import (
     EXEC_ID,
-    sdk_install_hint,
+    stop_signal,
     wrap_line,
 )
 from mirage.runtime.sandbox.e2b import sdk
@@ -158,29 +159,31 @@ class E2BRuntime(RemoteSandbox, PipeTransportMixin):
         )
         exited = asyncio.Event()
 
-        async def feed() -> None:
-            try:
-                async for chunk in async_chain(
-                    [stdin] if stdin is not None else []
-                ):
-                    if chunk:
-                        await handle.send_stdin(chunk)
-                if stdin is not None:
-                    await handle.close_stdin()
-            except asyncio.CancelledError:
-                if not exited.is_set():
-                    raise
-                logger.debug("e2b command ended before consuming its input")
-            except sdk.NotFoundException:
-                # A command may exit before the input RPC arrives. Its exit
-                # status, including nonzero exits, still determines the result.
-                logger.debug("e2b command exited before its input arrived")
-            except sdk.SandboxException as exc:
-                if BROKEN_PIPE not in str(exc):
-                    raise
-                logger.debug("e2b command closed its input")
+        async def write(chunk: bytes) -> None:
+            if chunk:
+                await handle.send_stdin(chunk)
 
-        feeding = asyncio.create_task(feed())
+        async def end() -> None:
+            if stdin is not None:
+                await handle.close_stdin()
+
+        # The command may exit before the input RPC arrives, or close its
+        # input while it runs (head): its real exit status decides.
+        feeding = asyncio.create_task(
+            feed(
+                stdin,
+                write,
+                end,
+                exited.is_set,
+                lambda exc: (
+                    isinstance(exc, sdk.NotFoundException)
+                    or (
+                        isinstance(exc, sdk.SandboxException)
+                        and BROKEN_PIPE in str(exc)
+                    )
+                ),
+            )
+        )
 
         async def reap() -> Any:
             # The command may end without reading all its input (head), so
@@ -201,12 +204,10 @@ class E2BRuntime(RemoteSandbox, PipeTransportMixin):
         except BaseException:
             # A tagged command a kill stopped with a gentler signal is left
             # to the reap, which sends it that signal first.
-            runner = current_caller().process
             try:
                 if (
                     EXEC_ID not in env
-                    or runner is None
-                    or runner.signal in (None, 9)
+                    or stop_signal(current_caller().process) is None
                 ):
                     await handle.kill()
             except Exception:

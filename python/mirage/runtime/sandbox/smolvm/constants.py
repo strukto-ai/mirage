@@ -12,8 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-SMOLVM_CLI_HINT = (
-    "the smolvm runtime needs the smolvm CLI on PATH "
+SMOLVM_HINT = (
+    "the smolvm runtime needs `smolvm` on PATH "
     "(https://smolmachines.com); the host also needs a "
     "hypervisor: /dev/kvm on Linux, Hypervisor.framework on "
     "macOS, WHP on Windows"
@@ -28,29 +28,15 @@ RUNNING_STATE = "running"
 STATE_HINTS: dict[str, str] = {
     "unreachable": (
         "its guest agent is not answering (the VMM is alive but the agent "
-        "died); recover with `smolvm machine start --name {machine}`"
+        "died); recover with `smolvm machine start --name {name}`"
     ),
     "frozen": (
         "it is a frozen fork base, deliberately paused so its clones can "
         "copy-on-write from it; exec against a clone instead"
     ),
     "created": "it has never been started; start it with "
-    "`smolvm machine start --name {machine}`",
+    "`smolvm machine start --name {name}`",
     "stopped": "it is stopped; start it with "
-    "`smolvm machine start --name {machine}`",
-    "failed": "it crashed; inspect with `smolvm machine status --name {machine}`",
+    "`smolvm machine start --name {name}`",
+    "failed": "it crashed; inspect with `smolvm machine status --name {name}`",
 }
-
-
-def not_running_hint(machine: str, state: str) -> str:
-    """Why this machine cannot take a line, named by its state.
-
-    Args:
-        machine (str): the configured machine name.
-        state (str): the state string smolvm reported.
-    """
-    detail = STATE_HINTS.get(state)
-    if detail is None:
-        return f"machine {machine} is not running (state: {state})"
-    reason = detail.format(machine=machine)
-    return f"machine {machine} is not running: {reason}"

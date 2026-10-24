@@ -25,8 +25,9 @@ per deployment: every credential over HTTP, and a good and a bad one
 through each other access. ``dev`` adds the CLI's lifecycle: spawning,
 status, restart, stop, kill, idle exit, config, the stdio relays, and a
 remote URL that must neither start a daemon nor receive the token file.
-``token`` and ``jwt`` also print how late the server's loop ran. Every
-deployment times a quiet line beside a busy one (``isolation``).
+``token`` and ``jwt`` also print how late the server's loop ran, and on
+Python check how many turns of its workspace's loop a quiet line takes.
+Every deployment times a quiet line beside a busy one (``isolation``).
 
 Three gates end a run over both hosts and every access: every HTTP
 route was hit on each host and deployment run (the two hosts' route
@@ -133,6 +134,15 @@ ISOLATION = {
         BUSY,
         "other",
         60.0,
+    ),
+}
+TURNS_LINES = 10
+TURNS = {
+    "line": ("echo", "loop-turns", 12),
+    "pipe": (
+        "echo hi | cat",
+        "loop-turns-pipe",
+        20 if sys.version_info >= (3, 12) else None,
     ),
 }
 
@@ -1218,6 +1228,83 @@ def gate_ops(report: Report) -> None:
         )
 
 
+async def quiet_lines(server: Server) -> None:
+    """Run each ``TURNS`` line ``TURNS_LINES`` times, one at a time, in a
+    workspace of its own.
+
+    Nothing else runs on that workspace's loop meanwhile, so the turns
+    ``serve.py`` counts for each are what one line costs it.
+
+    Args:
+        server (Server): the running deployment.
+    """
+    d = server.d
+    async with httpx.AsyncClient(
+        base_url=d.url,
+        timeout=30,
+        headers={"Authorization": f"Bearer {d.bearer()}"},
+        event_hooks={"request": [server.recorder.hook(server.key)]},
+    ) as http:
+        for command, wid, _ in TURNS.values():
+            created = await http.post(
+                "/v1/workspaces", json={"id": wid, "config": {"mounts": {}}}
+            )
+            created.raise_for_status()
+            for _ in range(TURNS_LINES):
+                reply = await http.post(
+                    f"/v1/workspaces/{wid}/shell",
+                    json={"command": command, "record": False},
+                )
+                reply.raise_for_status()
+                assert reply.json()["exit_code"] == 0, reply.json()
+            (await http.delete(f"/v1/workspaces/{wid}")).raise_for_status()
+
+
+def loop_turns(key: str, path: Path, report: Report) -> None:
+    """Check how many turns of its workspace's loop each quiet line took.
+
+    A line in another session of a busy workspace waits a yield of the
+    busy line per turn of the loop it shares, so turns are what a line
+    costs its neighbours. ``serve.py`` counts them per shell request and
+    writes them as the server stops; the median of each ``quiet_lines``
+    line must stay within its ``TURNS`` budget. ``echo`` took 16 before
+    the turns spent joining event waiters and on a separate session-load
+    call were cut; it takes 10 now. The pipeline also closes output and
+    activity streams, which a plain ``echo`` never opens: it took 30,
+    takes 15, 23 with its output streams' close started a turn late
+    again and 24 with no close started eagerly. Python 3.11 starts every
+    close a turn late by design, 33 turns, so that budget holds from
+    3.12; ``serve.py`` runs on this interpreter. A line that outlives
+    the yield interval (2 ms here) also yields, so a loaded runner adds
+    a few turns, up to 18 for the pipeline: the budgets leave room for
+    them. A streamed request is left out, since its output crosses to
+    the server's own loop and its turns follow that hand-off more than
+    the line.
+
+    Args:
+        key (str): the server, as ``host/deployment``.
+        path (Path): the counts the server wrote.
+        report (Report): the run's report.
+    """
+    written = json.loads(path.read_text()) if path.exists() else {}
+    for scope, (command, wid, budget) in TURNS.items():
+        counts = sorted(written.get(wid, []))
+        median = counts[len(counts) // 2] if counts else None
+        if budget is not None:
+            report.check(
+                f"{key} server.loop_turns.{scope}",
+                len(counts) == TURNS_LINES
+                and median is not None
+                and median <= budget,
+                True,
+            )
+        if counts:
+            report.note(
+                f"{key} {command!r} took {median} turns of its loop"
+                f" ({counts[0]}-{counts[-1]} over {len(counts)} lines)"
+            )
+
+
 def loop_lag(key: str, path: Path, report: Report) -> None:
     """Print how late a deployed server's loop ran over the whole run.
 
@@ -1286,9 +1373,13 @@ async def main(args: argparse.Namespace) -> int:
                     if "cli" in wanted:
                         await codex_exec(server, report)
                     await isolation(server, report)
+                    if name != "dev" and host == "python":
+                        await quiet_lines(server)
                     await server_checks(server, report)
                 if name != "dev":
                     loop_lag(server.key, d.loop_lag, report)
+                if name != "dev" and host == "python":
+                    loop_turns(server.key, d.loop_turns, report)
             if "dev" in deployments and "cli" in wanted:
                 await lifecycle(host, scratch / "lifecycle", recorder, report)
 

@@ -22,6 +22,7 @@ import {
   discardStreams,
   drain,
   ensureStream,
+  feed,
   rechunk,
   yieldBytes,
 } from './stream.ts'
@@ -190,5 +191,50 @@ describe('rechunk', () => {
       [7, 8, 9, 7],
     ])
     expect(parts[1]?.buffer).toBe(big.buffer)
+  })
+})
+
+async function* resetsAfterAChunk(): AsyncIterable<Uint8Array> {
+  await Promise.resolve()
+  yield encode('a')
+  throw Object.assign(new Error('the source went away'), { code: 'ECONNRESET' })
+}
+
+function closedInput(): Promise<void> {
+  return Promise.reject(Object.assign(new Error('write EPIPE'), { code: 'EPIPE' }))
+}
+
+const isEpipe = (error: unknown): boolean => (error as { code?: string }).code === 'EPIPE'
+
+describe('feed', () => {
+  // An input that fails as it is read fails the run, whatever its error, so
+  // the program's own error path runs rather than waiting on an end.
+  it('fails on an input that fails as it is read', async () => {
+    const written: string[] = []
+    const write = (chunk: Uint8Array): Promise<void> => {
+      written.push(new TextDecoder().decode(chunk))
+      return Promise.resolve()
+    }
+    const end = (): Promise<void> => {
+      written.push('<end>')
+      return Promise.resolve()
+    }
+    const closed = (error: unknown): boolean =>
+      isEpipe(error) || (error as { code?: string }).code === 'ECONNRESET'
+    await expect(feed(resetsAfterAChunk(), write, end, () => false, closed)).rejects.toThrow(
+      'the source went away',
+    )
+    expect(written).toEqual(['a'])
+  })
+
+  // A program that closed its input has taken what it wanted.
+  it('ends quietly once the program closed its input', async () => {
+    const ended: boolean[] = []
+    const end = (): Promise<void> => {
+      ended.push(true)
+      return Promise.resolve()
+    }
+    await feed(fromChunks([encode('a'), encode('b')]), closedInput, end, () => false, isEpipe)
+    expect(ended).toEqual([])
   })
 })

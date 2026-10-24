@@ -818,7 +818,6 @@ export class Workspace {
     child.shellPid = process.info.pid
     return new ChildProcess(process, input, output, () => {
       process.terminate()
-      this.processes.terminateChildren(process.info.pid)
     })
   }
 

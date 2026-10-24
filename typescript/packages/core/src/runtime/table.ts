@@ -70,7 +70,7 @@ const RUNTIME_HINTS: Record<string, string> = {
     "and 'quickjs' (sandboxed JavaScript)",
   sandlock:
     "runtime 'sandlock' lives in @struktoai/mirage-node; import that package " +
-    'to register it. Sandlock requires Linux and the sandlock CLI on PATH.',
+    'to register it. Sandlock requires Linux and `sandlock` on PATH.',
   e2b:
     "runtime 'e2b' registers when its module is imported: " +
     "'@struktoai/mirage-core/runtime/sandbox/e2b/runtime' in a browser, or " +

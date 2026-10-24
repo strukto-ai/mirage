@@ -15,6 +15,7 @@
 import { EXTERNAL_COMMANDS } from '@struktoai/mirage-core/runtime/constants'
 import type { ChildProcess } from 'node:child_process'
 import { existsSync } from 'node:fs'
+import { isAbsolute } from 'node:path'
 import type { PathSpec } from '@struktoai/mirage-core/types'
 import type { Context } from '@struktoai/mirage-core/commands/config'
 import { Runtime } from '@struktoai/mirage-core/runtime/base'
@@ -28,8 +29,8 @@ import { registerRuntime } from '@struktoai/mirage-core/runtime/table'
 import type { OutputFn, RunResult } from '@struktoai/mirage-core/runtime/types'
 import type { RuntimeOptions } from '@struktoai/mirage-core/runtime/config'
 import { SANDLOCK_CONFIG_KEYS, type SandlockConfig } from './config.ts'
-import { SANDLOCK_CLI_HINT, SYSTEM_READABLE } from './constants.ts'
-import { closeChildren, cwdRefusal, runCli } from '../cli.ts'
+import { SANDLOCK_HINT, SYSTEM_READABLE } from './constants.ts'
+import { closeChildren, cwdRefusal, onHostPath, runProgram } from '../program.ts'
 
 /** Native commands confined by Sandlock; workspace access needs a granted native mount. */
 export class SandlockRuntime
@@ -41,6 +42,7 @@ export class SandlockRuntime
   readonly [PROCESS_EXECUTOR] = true as const
   declare config: SandlockConfig
   private readonly children = new Set<ChildProcess>()
+  private closed = false
 
   constructor(options: RuntimeOptions<SandlockConfig> = {}) {
     super(options, [EXTERNAL_COMMANDS], SANDLOCK_CONFIG_KEYS)
@@ -87,29 +89,31 @@ export class SandlockRuntime
     const refusal = await cwdRefusal(argv[0] ?? '', ctx.cwd.virtual)
     if (refusal !== null) return refusal
     ctx.signal?.throwIfAborted()
+    // Found from this process's directory and made absolute: the wrapper
+    // starts in the session's, where a relative PATH entry would otherwise
+    // find a `sandlock` the session wrote.
+    const executable = await onHostPath('sandlock')
+    if (!isAbsolute(executable)) throw new Error(SANDLOCK_HINT)
+    // A run still finding `sandlock` when the runtime closed starts
+    // nothing, so no child outlives the close.
+    if (this.closed) throw new Error(`${this.name}: the runtime is closed`)
     const wrapper = ['run', ...this.policyArgv(), '--clean-env']
     for (const [key, value] of Object.entries({ ...this.config.env, ...ctx.env }))
       wrapper.push('--env', `${key}=${value}`)
     wrapper.push('--', ...argv)
-    // Only host PATH locates the CLI; requested variables go to the confined child.
-    const { stdout, stderr, code } = await runCli(
-      'sandlock',
-      SANDLOCK_CLI_HINT,
-      wrapper,
-      ctx.stdin,
-      {
-        cwd: ctx.cwd.virtual,
-        env: { PATH: process.env.PATH ?? '' },
-        children: this.children,
-        ...(output !== undefined ? { output } : {}),
-        ...(errors !== undefined ? { errors } : {}),
-        ...(ctx.signal !== undefined ? { signal: ctx.signal } : {}),
-      },
-    )
-    return { stdout, stderr: stderr.length > 0 ? stderr : null, exitCode: code }
+    // Requested variables go to the confined child.
+    return runProgram(executable, SANDLOCK_HINT, wrapper, ctx.stdin, {
+      cwd: ctx.cwd.virtual,
+      env: { PATH: process.env.PATH ?? '' },
+      children: this.children,
+      ...(output !== undefined ? { output } : {}),
+      ...(errors !== undefined ? { errors } : {}),
+      ...(ctx.signal !== undefined ? { signal: ctx.signal } : {}),
+    })
   }
 
   override close(): Promise<void> {
+    this.closed = true
     return closeChildren(this.children)
   }
 }

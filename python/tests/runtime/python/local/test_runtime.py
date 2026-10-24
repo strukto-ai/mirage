@@ -456,6 +456,22 @@ async def test_close_kills_an_interpreter_still_running():
     assert time.monotonic() - started < 5
 
 
+# A run still finding its program when the runtime closes starts
+# nothing, so no child outlives the close.
+@pytest.mark.asyncio
+async def test_a_program_still_being_found_at_close_never_starts(tmp_path):
+    runtime = LocalRuntime()
+    ctx = Context(cwd=PathSpec.from_str_path(str(tmp_path)))
+    run = asyncio.create_task(
+        runtime.execute([], ["sleep", "30"], ctx, kind="process")
+    )
+    await asyncio.sleep(0)
+    await runtime.close()
+    with pytest.raises(RuntimeError, match="local: the runtime is closed"):
+        await asyncio.wait_for(run, timeout=5)
+    assert not runtime._children
+
+
 def test_close_leaves_a_blocked_loops_child_to_that_loop():
     # A sync `with` block exits inside its caller's loop, which runs
     # nothing until the exit returns, while the close runs on another.

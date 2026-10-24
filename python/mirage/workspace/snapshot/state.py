@@ -952,7 +952,6 @@ def _job_from_dict(d: dict[str, Any]) -> Job:
     return Job(
         id=d[JobKey.ID],
         command=d[JobKey.COMMAND],
-        task=None,
         cwd=d.get(JobKey.CWD, "/"),
         status=status,
         exit_code=exit_code,

@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import asyncio
 import time
 from collections.abc import Callable, Coroutine
 from dataclasses import dataclass, field
@@ -43,7 +42,6 @@ class Job:
 
     id: int
     command: str
-    task: asyncio.Task[Any] | None
     cwd: str
     status: JobStatus = JobStatus.RUNNING
     exit_code: int = 0

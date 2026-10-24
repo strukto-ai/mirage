@@ -15,16 +15,19 @@
 import { type ChildProcess, spawn } from 'node:child_process'
 import { constants } from 'node:os'
 import { once } from 'node:events'
-import { stat } from 'node:fs/promises'
+import { constants as fsConstants } from 'node:fs'
+import { access, stat } from 'node:fs/promises'
+import { delimiter, resolve } from 'node:path'
 import { Readable, type Writable } from 'node:stream'
 import { setTimeout as delay } from 'node:timers/promises'
-import type { RunResult, SandboxPipe } from '@struktoai/mirage-core/runtime/types'
+import type { OutputFn, RunResult, SandboxPipe } from '@struktoai/mirage-core/runtime/types'
 import {
   EXEC_PRELUDE,
   PIPE_DIAGNOSTIC_BYTES,
   PIPE_DIAGNOSTIC_WAIT_SECONDS,
   STOP_GRACE_SECONDS,
   STOP_POLL_SECONDS,
+  stopSignal,
 } from '@struktoai/mirage-core/runtime/sandbox/constants'
 import { currentCaller } from '@struktoai/mirage-core/context/session_context'
 import { debuglog } from 'node:util'
@@ -32,14 +35,48 @@ import { asyncChain, closeQuietly } from '@struktoai/mirage-core/io/stream'
 import type { ByteSource } from '@struktoai/mirage-core/io/types'
 import { abortable, makeAbortError } from '@struktoai/mirage-core/utils/abort'
 
-export interface CliResult {
-  stdout: Uint8Array
-  stderr: Uint8Array
-  code: number
+/**
+ * Where the host's own PATH finds a program, as Python's `shutil.which`
+ * does, as an absolute path: a child's environment may carry no host PATH,
+ * and a relative entry would be read against the child's directory, so the
+ * lookup cannot be left to spawn. Asynchronous, so a PATH entry on a mount
+ * this process serves never blocks the loop that answers it. An empty
+ * entry is the current directory, as for the shell. A name with a slash is
+ * taken as given, and one the PATH lacks too, so spawn reports it missing.
+ * On Windows a name without one of `PATHEXT`'s suffixes is tried with each.
+ */
+export async function onHostPath(name: string): Promise<string> {
+  if (name.includes('/')) return name
+  const suffixes =
+    process.platform === 'win32'
+      ? (process.env.PATHEXT ?? '.COM;.EXE;.BAT;.CMD').split(';').filter((s) => s !== '')
+      : []
+  const names =
+    suffixes.length === 0 || suffixes.some((s) => name.toLowerCase().endsWith(s.toLowerCase()))
+      ? [name]
+      : suffixes.map((s) => name + s)
+  // The PATH and the directory as they are at the call.
+  const candidates = (process.env.PATH ?? '')
+    .split(delimiter)
+    .flatMap((dir) => names.map((each) => resolve(dir, each)))
+  for (const candidate of candidates) {
+    try {
+      if (!(await stat(candidate)).isFile()) continue
+      await access(candidate, fsConstants.X_OK)
+      return candidate
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code
+      if (code === undefined) throw err
+      // Not usable here (absent, not executable, an unreadable entry):
+      // the next entry may be. Opt-in (NODE_DEBUG=mirage), on stderr.
+      debuglog('mirage')('%s is not usable: %s', candidate, code)
+    }
+  }
+  return name
 }
 
-/** Where and how `runCli` starts its child. */
-export interface CliOptions {
+/** Where and how `runProgram` starts its child. */
+export interface ProgramOptions {
   // The working directory; this process's when unset.
   cwd?: string
   // The whole environment; this process's when unset.
@@ -48,9 +85,9 @@ export interface CliOptions {
   signal?: AbortSignal
   // Where the child is kept while it runs, for `closeChildren`.
   children?: Set<ChildProcess>
-  output?: (chunk: Uint8Array) => Promise<void>
+  output?: OutputFn
   // Receives stderr as it arrives instead of returning it.
-  errors?: (chunk: Uint8Array) => Promise<void>
+  errors?: OutputFn
   // The child is the program itself, not a client that runs it elsewhere
   // and exits on its own terms (`docker exec` answers a TERM with 0 and
   // leaves the program running).
@@ -84,15 +121,15 @@ async function untilInputCloses<T>(
  * spawn's own error. EPIPE means the command exited without draining its
  * stdin (`head`-like), so it is not an error. An input pull still pending
  * when the child exits is left to close on its own. Mirrors Python's
- * `run_cli`.
+ * `run_program`.
  */
-export async function runCli(
+export async function runProgram(
   executable: string,
   hint: string | null,
   args: string[],
   stdin: ByteSource | null,
-  options: CliOptions = {},
-): Promise<CliResult> {
+  options: ProgramOptions = {},
+): Promise<RunResult> {
   const { signal, children } = options
   signal?.throwIfAborted()
   // Read now: an abort's listener runs as the caller that aborted.
@@ -106,8 +143,12 @@ export async function runCli(
   // Set by the abort listener, which flow analysis does not follow.
   let stopping = null as Promise<void> | null
   const abort = (): void => {
-    const signum = runner?.signal ?? 9
-    if (signum === 9) {
+    // The input ends first, as a pipe whose writer went away does: a
+    // handler reading it to the end gets there in the grace instead of
+    // waiting on a source that never ends.
+    child.stdin.end()
+    const signum = stopSignal(runner)
+    if (signum === null) {
       stopTree(child)
       return
     }
@@ -163,12 +204,12 @@ export async function runCli(
     await pumps
     const code = await exited
     if (signal?.aborted === true) {
-      const signum = runner?.signal ?? 9
-      if (options.direct === true && signum !== 9 && child.exitCode !== null)
+      if (options.direct === true && stopSignal(runner) !== null && child.exitCode !== null)
         runner?.programExited(child.exitCode)
       throw makeAbortError(signal)
     }
-    return { stdout: Buffer.concat(out), stderr: Buffer.concat(err), code }
+    const stderr = Buffer.concat(err)
+    return { stdout: Buffer.concat(out), stderr: stderr.length > 0 ? stderr : null, exitCode: code }
   } finally {
     if (stopping !== null) await stopping
     if (child.exitCode === null && child.signalCode === null) stopTree(child)
@@ -190,7 +231,7 @@ export async function runCli(
 async function readInto(
   child: ChildProcess,
   stream: Readable,
-  sink: ((chunk: Uint8Array) => Promise<void>) | undefined,
+  sink: OutputFn | undefined,
   kept: Uint8Array[],
   signal: AbortSignal | undefined,
 ): Promise<void> {
@@ -208,8 +249,36 @@ async function readInto(
 }
 
 /**
- * A sandbox CLI's exec arguments, the same for every CLI that runs a
- * command in a box: the CLI's own words (`head`: `exec -i`, smolvm's
+ * The state a sandbox's status command printed as JSON, at `path`: the keys
+ * and indexes down to it. Throws when the command failed or its JSON holds
+ * no state. Mirrors Python's `reported_state`.
+ */
+export function reportedState(
+  result: RunResult,
+  command: string,
+  path: readonly (string | number)[],
+): string {
+  if (result.exitCode !== 0) {
+    const said = DECODER.decode(result.stderr ?? new Uint8Array()).trim()
+    throw new Error(`${command} failed: ${said}`)
+  }
+  let state: unknown
+  try {
+    state = JSON.parse(DECODER.decode(result.stdout))
+    for (const key of path) {
+      if (state === null || typeof state !== 'object' || !Object.hasOwn(state, key))
+        throw new Error(`no ${String(key)}`)
+      state = (state as Record<string | number, unknown>)[key]
+    }
+  } catch (error) {
+    throw new Error(`${command} returned unreadable json: ${String(error)}`)
+  }
+  return String(state)
+}
+
+/**
+ * A sandbox program's exec arguments, the same for every program that runs a
+ * command in a box: the program's own words (`head`: `exec -i`, smolvm's
  * `machine exec --name M`), `/` as the working directory and each
  * variable as `-e`, the target or `--` (`tail`: `--` where the command is
  * a trailing var arg, so a line starting with a dash is not read as a
@@ -344,9 +413,9 @@ export async function closeChildren(children: Set<ChildProcess>): Promise<void> 
  * can say why. Stopping ends the helper's input; one that has not closed
  * 100 ms later loses its process group and our ends of its pipes, which
  * output nobody read would otherwise hold open, exited or not. Mirrors
- * Python's `open_cli_pipe`.
+ * Python's `open_program_pipe`.
  */
-export function openCliPipe(executable: string, args: string[]): Promise<SandboxPipe> {
+export function openProgramPipe(executable: string, args: string[]): Promise<SandboxPipe> {
   const child = spawn(executable, args, {
     stdio: ['pipe', 'pipe', 'pipe'],
     detached: process.platform !== 'win32',
@@ -385,3 +454,5 @@ export function openCliPipe(executable: string, args: string[]): Promise<Sandbox
     },
   })
 }
+
+const DECODER = new TextDecoder()

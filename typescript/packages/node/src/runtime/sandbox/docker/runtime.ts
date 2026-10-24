@@ -20,14 +20,15 @@ import { registerRuntime } from '@struktoai/mirage-core/runtime/table'
 import type { OutputFn, RunResult, SandboxPipe } from '@struktoai/mirage-core/runtime/types'
 import type { RuntimeOptions } from '@struktoai/mirage-core/runtime/config'
 import { DOCKER_CONFIG_KEYS, type DockerConfig } from './config.ts'
-import { DOCKER_CLI_HINT } from './constants.ts'
-import { type CliResult, execArgs, openCliPipe, runCli } from '../cli.ts'
+import { notRunningHint } from '@struktoai/mirage-core/runtime/sandbox/constants'
+import { DOCKER_HINT, RUNNING_STATE } from './constants.ts'
+import { execArgs, openProgramPipe, reportedState, runProgram } from '../program.ts'
 
 /**
  * A container the user runs as a whole-line runtime.
  *
  * You start the container yourself; mirage only connects to it and
- * execs lines. The docker CLI is the transport (Docker Desktop,
+ * execs lines. The `docker` program is the transport (Docker Desktop,
  * colima, or a podman alias all work), so there is no SDK dependency
  * and no daemon socket wiring; each line is one `docker exec -i` with
  * the merged environment, the session cwd, real stdin, and separated
@@ -42,15 +43,15 @@ export class DockerRuntime extends RemoteSandbox<DockerConfig> implements PipeTr
     requireId('docker', 'container', this.config.container)
   }
 
-  // One docker CLI invocation; the seam tests override.
+  // Run `docker` once; the seam tests override.
   protected docker(
     args: string[],
     stdin: ByteSource | null = null,
     output: OutputFn | null = null,
     signal?: AbortSignal,
     errors: OutputFn | null = null,
-  ): Promise<CliResult> {
-    return runCli('docker', DOCKER_CLI_HINT, args, stdin, {
+  ): Promise<RunResult> {
+    return runProgram('docker', DOCKER_HINT, args, stdin, {
       ...(signal !== undefined ? { signal } : {}),
       ...(output !== null ? { output } : {}),
       ...(errors !== null ? { errors } : {}),
@@ -58,21 +59,13 @@ export class DockerRuntime extends RemoteSandbox<DockerConfig> implements PipeTr
   }
 
   async connect(): Promise<void> {
-    const result = await this.docker([
-      'inspect',
-      '--format',
-      '{{.State.Running}}',
-      this.config.container,
-    ])
-    if (result.code !== 0) {
-      throw new Error(`docker inspect failed: ${DECODER.decode(result.stderr).trim()}`)
-    }
-    if (DECODER.decode(result.stdout).trim() !== 'true') {
-      throw new Error(`container ${this.config.container} is not running`)
-    }
+    const container = this.config.container
+    const status = await this.docker(['inspect', '--format', '{{json .State}}', container])
+    const state = reportedState(status, 'docker inspect', ['Status'])
+    if (state !== RUNNING_STATE) throw new Error(notRunningHint('container', container, state, {}))
   }
 
-  protected override async execArgv(
+  protected override execArgv(
     argv: readonly string[],
     stdin: ByteSource | null,
     env: Record<string, string>,
@@ -82,18 +75,15 @@ export class DockerRuntime extends RemoteSandbox<DockerConfig> implements PipeTr
     signal?: AbortSignal,
   ): Promise<RunResult> {
     const args = execArgs(['exec', '-i'], [this.config.container], env, cwd, argv)
-    const result = await this.docker(args, stdin, output, signal, errors)
-    return { stdout: result.stdout, stderr: result.stderr, exitCode: result.code }
+    return this.docker(args, stdin, output, signal, errors)
   }
 
   openPipe(command: string): Promise<SandboxPipe> {
-    return openCliPipe(
+    return openProgramPipe(
       'docker',
       execArgs(['exec', '-i'], [this.config.container], {}, null, ['/bin/sh', '-c', command]),
     )
   }
 }
-
-const DECODER = new TextDecoder()
 
 registerRuntime('docker', DockerRuntime)

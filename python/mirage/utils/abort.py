@@ -114,6 +114,12 @@ async def run_cancellable(
     is plain asyncio: one delivery, at the await the line is in, and no
     grace for the epilogue.
 
+    The event waiters are cancelled and left to finish on their own:
+    each only waits on an event, and joining them would cost every line
+    three more turns of the loop, each a slice of whatever else is
+    running on it. A line that failed as its caller was cancelled has
+    its error read and logged here, since nothing else reads it.
+
     Args:
         coro (Coroutine): the work to run, a whole line or a subtree.
         cancel (asyncio.Event | None): the caller's abort event.
@@ -138,4 +144,5 @@ async def run_cancellable(
             waiter.cancel()
         if not task.done():
             await _cancel_and_join(task)
-        await asyncio.gather(task, *waiters, return_exceptions=True)
+        elif not task.cancelled() and task.exception() is not None:
+            logger.debug("line ended in an error", exc_info=task.exception())

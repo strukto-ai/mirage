@@ -18,18 +18,19 @@ import os
 import shlex
 import signal
 import sys
+from collections.abc import AsyncIterator
 
 import pytest
 
 from mirage.context.session_context import run_with_execution
 from mirage.process.supervisor import ProcessSupervisor
-from mirage.runtime.sandbox.cli import (
+from mirage.runtime.sandbox.constants import PIPE_DIAGNOSTIC_BYTES
+from mirage.runtime.sandbox.program import (
     Children,
     close_children,
-    open_cli_pipe,
-    run_cli,
+    open_program_pipe,
+    run_program,
 )
-from mirage.runtime.sandbox.constants import PIPE_DIAGNOSTIC_BYTES
 from mirage.types import PathSpec
 
 # A child that starts a sleep in a session of its own, so killing the
@@ -74,15 +75,20 @@ async def _ended(pid: int) -> bool:
 
 @pytest.mark.asyncio
 async def test_run_cli_returns_both_streams_and_the_status():
-    out, err, code = await run_cli(
+    ran = await run_program(
         "sh", "no sh", ["-c", "cat; echo e >&2; exit 3"], b"in"
     )
-    assert (out, err, code) == (b"in", b"e\n", 3)
+    assert (ran.stdout, ran.stderr, ran.exit_code) == (b"in", b"e\n", 3)
 
 
 async def _two_chunks():
     yield b"a"
     yield b"b"
+
+
+async def _one_then_open() -> AsyncIterator[bytes]:
+    yield b"x"
+    await asyncio.Event().wait()
 
 
 @pytest.mark.asyncio
@@ -92,10 +98,14 @@ async def test_run_cli_streams_input_and_output_and_maps_a_signal():
     async def output(chunk: bytes) -> None:
         seen.append(chunk)
 
-    out, _, code = await run_cli(
+    ran = await run_program(
         "sh", None, ["-c", "cat; kill -TERM $$"], _two_chunks(), output=output
     )
-    assert (out, b"".join(seen), code) == (b"", b"ab", 128 + signal.SIGTERM)
+    assert (ran.stdout, b"".join(seen), ran.exit_code) == (
+        b"",
+        b"ab",
+        128 + signal.SIGTERM,
+    )
 
 
 # stderr goes to its own callback as it arrives, as stdout goes to output.
@@ -106,10 +116,15 @@ async def test_run_cli_streams_stderr_to_its_callback():
     async def errors(chunk: bytes) -> None:
         seen.append(chunk)
 
-    out, err, code = await run_cli(
+    ran = await run_program(
         "sh", None, ["-c", "echo o; echo e >&2; exit 3"], None, errors=errors
     )
-    assert (out, err, b"".join(seen), code) == (b"o\n", b"", b"e\n", 3)
+    assert (ran.stdout, ran.stderr, b"".join(seen), ran.exit_code) == (
+        b"o\n",
+        None,
+        b"e\n",
+        3,
+    )
 
 
 @pytest.mark.asyncio
@@ -121,23 +136,21 @@ async def test_an_exited_command_does_not_wait_on_a_pending_input_pull():
         yield b""
 
     async with asyncio.timeout(5):
-        out, _, code = await run_cli(
-            "sh", None, ["-c", "printf done"], source()
-        )
-    assert (out, code) == (b"done", 0)
+        ran = await run_program("sh", None, ["-c", "printf done"], source())
+    assert (ran.stdout, ran.exit_code) == (b"done", 0)
 
 
 @pytest.mark.asyncio
 async def test_a_missing_cli_raises_its_hint():
     with pytest.raises(RuntimeError, match="install it"):
-        await run_cli("mirage-no-such-cli", "install it", [], None)
+        await run_program("mirage-no-such-program", "install it", [], None)
 
 
 @pytest.mark.asyncio
 async def test_cancelling_a_call_kills_the_child(tmp_path):
     pid_file = tmp_path / "pid"
     task = asyncio.create_task(
-        run_cli(
+        run_program(
             "sh", "no sh", ["-c", f"echo $$ > {pid_file}; exec sleep 30"], None
         )
     )
@@ -159,7 +172,7 @@ async def test_cancelling_a_call_kills_what_the_child_started(tmp_path):
     # alone left the wait running until the grandchild exited.
     pid_file = tmp_path / "pid"
     task = asyncio.create_task(
-        run_cli(
+        run_program(
             "sh",
             None,
             ["-c", f"sleep 30 & echo $! > {pid_file}; wait"],
@@ -178,13 +191,16 @@ async def test_cancelling_a_call_kills_what_the_child_started(tmp_path):
 
 
 def _start_runner(
-    supervisor: ProcessSupervisor, script: str, direct: bool = False
+    supervisor: ProcessSupervisor,
+    script: str,
+    direct: bool = False,
+    stdin: AsyncIterator[bytes] | None = None,
 ):
     async def run() -> int:
-        _, _, code = await run_cli(
-            "sh", None, ["-c", script], None, direct=direct
+        ran = await run_program(
+            "sh", None, ["-c", script], stdin, direct=direct
         )
-        return code
+        return ran.exit_code
 
     return supervisor.start(
         session_id="s",
@@ -372,6 +388,38 @@ async def test_a_handler_writing_its_output_finishes_in_the_grace(tmp_path):
     assert said.read_text() == "bye\n"
 
 
+# The input ends before the grace starts, as a closed pipe would: a
+# handler that reads its input to the end gets there instead of waiting
+# on a source that is still open until KILL.
+@pytest.mark.asyncio
+async def test_a_handler_reading_its_input_sees_it_end(tmp_path):
+    pid_file, said = tmp_path / "pid", tmp_path / "said"
+    program = (
+        "import os, signal, sys, time\n"
+        "def stop(*_):\n"
+        "    data = sys.stdin.buffer.read()\n"
+        f"    open({str(said)!r}, 'w').write(str(len(data)))\n"
+        "    os._exit(0)\n"
+        "signal.signal(signal.SIGTERM, stop)\n"
+        f"open({str(pid_file)!r}, 'w').write(str(os.getpid()))\n"
+        "while True:\n"
+        "    time.sleep(0.05)\n"
+    )
+
+    runner = _start_runner(
+        ProcessSupervisor(bind=run_with_execution),
+        f"exec {shlex.quote(sys.executable)} -c {shlex.quote(program)}",
+        True,
+        _one_then_open(),
+    )
+    await _wait_for_pid(pid_file)
+    assert runner.terminate(signal.SIGTERM)
+    async with asyncio.timeout(5):
+        await runner.join()
+    assert said.read_text() == "1"
+    assert runner.program_code == 0
+
+
 # A program that ignores the signal still ends: KILL follows the grace.
 @pytest.mark.asyncio
 async def test_a_child_that_ignores_the_signal_is_killed_after_the_grace(
@@ -395,7 +443,7 @@ async def test_close_children_kills_every_running_tree(tmp_path):
     children: Children = {}
     pid_file = tmp_path / "pid"
     task = asyncio.create_task(
-        run_cli(
+        run_program(
             "sh",
             None,
             ["-c", f"sleep 30 & echo $! > {pid_file}; wait"],
@@ -407,8 +455,8 @@ async def test_close_children_kills_every_running_tree(tmp_path):
         while not (pid_file.exists() and pid_file.read_text().strip()):
             await asyncio.sleep(0.01)
         await close_children(children)
-        _, _, code = await task
-    assert code != 0 and not children
+        ran = await task
+    assert ran.exit_code != 0 and not children
     assert await _ended(int(pid_file.read_text()))
 
 
@@ -424,7 +472,7 @@ async def test_a_cancelled_call_does_not_wait_on_a_descendant_that_left(
 ):
     pid_file = tmp_path / "pid"
     task = asyncio.create_task(
-        run_cli(sys.executable, None, ["-c", ESCAPE, str(pid_file)], None)
+        run_program(sys.executable, None, ["-c", ESCAPE, str(pid_file)], None)
     )
     escaped = await _wait_for_pid(pid_file)
     try:
@@ -443,7 +491,7 @@ async def test_close_children_does_not_wait_on_a_descendant_that_left(
     children: Children = {}
     pid_file = tmp_path / "pid"
     task = asyncio.create_task(
-        run_cli(
+        run_program(
             sys.executable,
             None,
             ["-c", ESCAPE, str(pid_file)],
@@ -455,15 +503,15 @@ async def test_close_children_does_not_wait_on_a_descendant_that_left(
     try:
         async with asyncio.timeout(5):
             await close_children(children)
-            _, _, code = await task
-        assert code != 0 and not children
+            ran = await task
+        assert ran.exit_code != 0 and not children
     finally:
         os.kill(escaped, signal.SIGKILL)
 
 
 @pytest.mark.asyncio
 async def test_a_pipe_keeps_the_tail_of_its_stderr():
-    pipe = await open_cli_pipe(
+    pipe = await open_program_pipe(
         sys.executable,
         [
             "-c",
@@ -488,7 +536,7 @@ async def test_a_pipe_keeps_the_tail_of_its_stderr():
     ids=["exits_once_its_input_closes", "never_exits"],
 )
 async def test_stopping_a_pipe_does_not_wait_on_output_nobody_read(script):
-    pipe = await open_cli_pipe(sys.executable, ["-c", script])
+    pipe = await open_program_pipe(sys.executable, ["-c", script])
     await asyncio.sleep(0.5)
     async with asyncio.timeout(5):
         await pipe.stop()

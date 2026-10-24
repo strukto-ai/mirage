@@ -25,19 +25,15 @@ import {
   type AppleContainerConfig,
   validateAppleContainerConfig,
 } from './config.ts'
-import {
-  APPLE_CONTAINER_CLI_HINT,
-  RUNNING_STATE,
-  noContainerHint,
-  notRunningHint,
-} from './constants.ts'
-import { type CliResult, execArgs, openCliPipe, runCli } from '../cli.ts'
+import { APPLE_CONTAINER_HINT, RUNNING_STATE, STATE_HINTS, noContainerHint } from './constants.ts'
+import { notRunningHint } from '@struktoai/mirage-core/runtime/sandbox/constants'
+import { execArgs, openProgramPipe, reportedState, runProgram } from '../program.ts'
 
 /**
  * Containers under Apple's `container` tool as a whole-line runtime.
  *
  * You start the containers yourself; mirage only connects to them and
- * execs lines. The `container` CLI is the transport, so there is no
+ * execs lines. The `container` program is the transport, so there is no
  * SDK dependency and no XPC wiring; each line is one `container exec`
  * with the merged environment, the session cwd, real stdin, and
  * separated stderr.
@@ -66,15 +62,15 @@ export class AppleContainerRuntime
     validateAppleContainerConfig(this.config)
   }
 
-  /** Run one container CLI invocation; the seam tests override. */
+  /** Run `container` once; the seam tests override. */
   protected container(
     args: string[],
     stdin: ByteSource | null = null,
     output: OutputFn | null = null,
     signal?: AbortSignal,
     errors: OutputFn | null = null,
-  ): Promise<CliResult> {
-    return runCli('container', APPLE_CONTAINER_CLI_HINT, args, stdin, {
+  ): Promise<RunResult> {
+    return runProgram('container', APPLE_CONTAINER_HINT, args, stdin, {
       ...(signal !== undefined ? { signal } : {}),
       ...(output !== null ? { output } : {}),
       ...(errors !== null ? { errors } : {}),
@@ -119,19 +115,10 @@ export class AppleContainerRuntime
    * probing up front names the state and how to recover.
    */
   private async probe(container: string): Promise<void> {
-    const result = await this.container(['inspect', container])
-    if (result.code !== 0) {
-      throw new Error(`container inspect failed: ${DECODER.decode(result.stderr).trim()}`)
-    }
-    let state: unknown
-    try {
-      state = inspectedState(JSON.parse(DECODER.decode(result.stdout)))
-    } catch (error) {
-      throw new Error(`container inspect returned unreadable json: ${String(error)}`)
-    }
-    if (state !== RUNNING_STATE) {
-      throw new Error(notRunningHint(container, String(state)))
-    }
+    const status = await this.container(['inspect', container])
+    const state = reportedState(status, 'container inspect', [0, 'status', 'state'])
+    if (state !== RUNNING_STATE)
+      throw new Error(notRunningHint('container', container, state, STATE_HINTS))
   }
 
   protected override async execArgv(
@@ -145,30 +132,16 @@ export class AppleContainerRuntime
   ): Promise<RunResult> {
     const target = [await this.target(signal)]
     const args = execArgs(['exec', '-i'], target, env, cwd, argv)
-    const result = await this.container(args, stdin, output, signal, errors)
-    return { stdout: result.stdout, stderr: result.stderr, exitCode: result.code }
+    return this.container(args, stdin, output, signal, errors)
   }
 
   async openPipe(command: string): Promise<SandboxPipe> {
     const target = [await this.target()]
-    return openCliPipe(
+    return openProgramPipe(
       'container',
       execArgs(['exec', '-i'], target, {}, null, ['/bin/sh', '-c', command]),
     )
   }
 }
-
-/** The first entry's `status.state`, throwing on any other shape. */
-function inspectedState(payload: unknown): unknown {
-  const entry: unknown = Array.isArray(payload) ? payload[0] : undefined
-  const status: unknown =
-    typeof entry === 'object' && entry !== null ? (entry as { status?: unknown }).status : undefined
-  if (typeof status !== 'object' || status === null || !('state' in status)) {
-    throw new Error('expected [{ status: { state } }]')
-  }
-  return status.state
-}
-
-const DECODER = new TextDecoder()
 
 registerRuntime('apple_container', AppleContainerRuntime)

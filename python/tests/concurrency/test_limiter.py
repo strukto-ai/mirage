@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 import asyncio
+import sys
 import threading
 from dataclasses import dataclass
 
@@ -21,7 +22,9 @@ from mirage.concurrency import ConcurrencyLimiter
 from mirage.concurrency.limiter import (
     bounded_map,
     bounded_map_stream,
+    owned_task,
     run_blocking,
+    settle,
 )
 
 
@@ -146,6 +149,31 @@ async def test_cancellation_during_handoff_returns_permit_to_next_waiter():
         await abandoned
     await asyncio.wait_for(following, 1)
     await asyncio.wait_for(_acquire_once(limiter), 1)
+
+
+async def _answer() -> int:
+    return 3
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(
+    sys.version_info < (3, 12), reason="eager tasks start in Python 3.12"
+)
+async def test_owned_work_that_never_waits_is_done_when_started() -> None:
+    # Settling it then takes no turn of the loop, which a close on every
+    # line would otherwise cost whatever else runs there.
+    task = owned_task(_answer())
+    assert task.done()
+    assert await settle(task) == 3
+
+
+@pytest.mark.asyncio
+async def test_owned_work_that_waits_goes_on_as_a_task() -> None:
+    release = asyncio.Event()
+    task = owned_task(release.wait())
+    assert not task.done()
+    release.set()
+    assert await settle(task) is True
 
 
 @pytest.mark.asyncio
