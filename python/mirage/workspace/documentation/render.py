@@ -19,6 +19,7 @@ from dataclasses import replace
 from mirage.commands.builtin.general import COMMANDS as GENERAL_COMMANDS
 from mirage.commands.builtin.generic_bind.factory import GENERIC_COMMANDS
 from mirage.commands.cli.walk import node_help, owns_argv
+from mirage.commands.spec.standard import standard_request
 from mirage.commands.spec.types import CommandSpec, UsageStyle
 from mirage.context import effective_path_mode
 from mirage.policy.match.decide import decide
@@ -99,24 +100,33 @@ def allowed(
     return decide(ctx, session.commands).outcome is not Outcome.DENY
 
 
-def runnable(session: SessionState, path: str, words: Sequence[str]) -> bool:
-    """Whether the profile lets some line of ``words`` work on a file
-    under ``path``: the words as they stand, or a longer form its allow
-    list names (``rm -f`` where the list holds only that).
+def runnable(
+    session: SessionState, mount: MountEntry, path: str, words: Sequence[str]
+) -> bool:
+    """Whether the profile lets some line of ``words`` do its work on a
+    file under ``path``: the words as they stand, or followed by what a
+    longer pattern in its allow list adds (``rm -f`` where the list holds
+    only that), unless that line only asks for ``--help`` or
+    ``--version``.
 
     Args:
         session (SessionState): the session the document is for.
+        mount (MountEntry): the mount holding ``path``.
         path (str): the path described.
         words (Sequence[str]): the command and its words.
     """
     forms = [tuple(words)]
     rules = session.commands
-    if rules is not None and rules.allow is not None:
-        forms.extend(
-            split_pattern(p)
-            for p in rules.allow
-            if len(split_pattern(p)) > len(words) and pattern_reaches(p, words)
-        )
+    if words and rules is not None and rules.allow is not None:
+        spec = mount.spec_for(words[0])
+        for pattern in rules.allow:
+            form = (*words, *split_pattern(pattern)[len(words) :])
+            if (
+                len(form) > len(words)
+                and pattern_reaches(pattern, words)
+                and standard_request(words[0], spec, list(form[1:])) is None
+            ):
+                forms.append(form)
     return any(allowed(session, path, form, True) for form in forms)
 
 
@@ -175,7 +185,9 @@ def granted(
         mode (MountMode): the mode in force at ``path``.
     """
     if mode == MountMode.WRITE and not any(
-        works(mount, c) for c in CHANGES if runnable(session, path, c.command)
+        works(mount, c)
+        for c in CHANGES
+        if runnable(session, mount, path, c.command)
     ):
         return MountMode.READ
     return mode
@@ -194,7 +206,7 @@ def supported(
     """
 
     def runs(words: Sequence[str]) -> bool:
-        return runnable(session, path, words)
+        return runnable(session, mount, path, words)
 
     reads = [code(c) for c in READS if runs((c,))]
     changes = [c for c in CHANGES if runs(c.command)]
@@ -256,7 +268,7 @@ def limitations(
     """
 
     def runs(words: Sequence[str]) -> bool:
-        return runnable(session, path, words)
+        return runnable(session, mount, path, words)
 
     parts: list[str] = []
     if mode == MountMode.READ:

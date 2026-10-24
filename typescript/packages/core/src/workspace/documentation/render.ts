@@ -14,6 +14,7 @@
 
 import { GENERAL_COMMANDS } from '../../commands/builtin/general/index.ts'
 import { GENERIC_COMMANDS } from '../../commands/builtin/generic_bind/factory.ts'
+import { standardRequest } from '../../commands/spec/standard.ts'
 import { CommandSpec } from '../../commands/spec/types.ts'
 import { nodeHelp, ownsArgv } from '../../commands/cli/walk.ts'
 import type { CommandSpecInit, UsageStyle } from '../../commands/spec/types.ts'
@@ -77,15 +78,33 @@ function allowed(
 }
 
 /**
- * Whether the profile lets some line of `words` work on a file under
- * `path`: the words as they stand, or a longer form its allow list names
- * (`rm -f` where the list holds only that).
+ * Whether the profile lets some line of `words` do its work on a file under
+ * `path`: the words as they stand, or followed by what a longer pattern in
+ * its allow list adds (`rm -f` where the list holds only that), unless that
+ * line only asks for `--help` or `--version`.
  */
-function runnable(session: SessionState, path: string, words: readonly string[]): boolean {
-  const longer = (session.commands?.allow ?? [])
-    .filter((p) => splitPattern(p).length > words.length && patternReaches(p, words))
-    .map(splitPattern)
-  return [words, ...longer].some((form) => allowed(session, path, form, true))
+function runnable(
+  session: SessionState,
+  mount: MountEntry,
+  path: string,
+  words: readonly string[],
+): boolean {
+  const forms: (readonly string[])[] = [words]
+  const [command] = words
+  const allow = session.commands?.allow ?? null
+  if (command !== undefined && allow !== null) {
+    const spec = mount.specFor(command)
+    for (const pattern of allow) {
+      const form = [...words, ...splitPattern(pattern).slice(words.length)]
+      if (
+        form.length > words.length &&
+        patternReaches(pattern, words) &&
+        standardRequest(command, spec, form.slice(1)) === null
+      )
+        forms.push(form)
+    }
+  }
+  return forms.some((form) => allowed(session, path, form, true))
 }
 
 function works(mount: MountEntry, change: Change): boolean {
@@ -142,7 +161,7 @@ function granted(
 ): MountMode {
   if (
     mode === MountMode.WRITE &&
-    !CHANGES.some((c) => runnable(session, path, c.command) && works(mount, c))
+    !CHANGES.some((c) => runnable(session, mount, path, c.command) && works(mount, c))
   )
     return MountMode.READ
   return mode
@@ -155,7 +174,7 @@ function supported(
   path: string,
   mode: MountMode,
 ): string {
-  const runs = (words: readonly string[]): boolean => runnable(session, path, words)
+  const runs = (words: readonly string[]): boolean => runnable(session, mount, path, words)
   const reads = READS.filter((c) => runs([c])).map(code)
   const changes = CHANGES.filter((c) => runs(c.command))
   const working = changes
@@ -201,7 +220,7 @@ function limitations(
   path: string,
   mode: MountMode,
 ): string {
-  const runs = (words: readonly string[]): boolean => runnable(session, path, words)
+  const runs = (words: readonly string[]): boolean => runnable(session, mount, path, words)
   const parts: string[] = []
   if (mode === MountMode.READ) {
     parts.push('Read only: no command changes files.')

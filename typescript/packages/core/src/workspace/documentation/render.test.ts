@@ -207,6 +207,34 @@ describe('vfsMd', () => {
     )
   })
 
+  it('keeps the denied words inside a longer form', async () => {
+    const ws = new Workspace(
+      { '/docs': [gdocs(), MountMode.WRITE] },
+      {
+        mode: MountMode.WRITE,
+        profiles: {
+          default: parseSessionProfile({
+            commands: { allow: ['cat', 'grep * needle'], deny: ['grep -r'] },
+          }),
+        },
+      },
+    )
+    expect(await ws.vfsMd()).not.toContain('`grep -r`')
+  })
+
+  it('counts no help request as a write', async () => {
+    const ws = new Workspace(
+      { '/docs': [gdocs(), MountMode.WRITE] },
+      {
+        mode: MountMode.WRITE,
+        profiles: { default: parseSessionProfile({ commands: { allow: ['cat', 'rm --help'] } }) },
+      },
+    )
+    const markdown = await ws.vfsMd()
+    expect(markdown).toContain('| `/docs` | `gdocs`, read |')
+    expect(row(markdown, SUPPORTED, '/docs')).not.toContain('`rm`')
+  })
+
   it('describes each path shown with its own mode', async () => {
     const ws = new Workspace(
       { '/': [new RAMVFS(), MountMode.WRITE], '/data': [new RAMVFS(), MountMode.WRITE] },

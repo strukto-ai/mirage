@@ -264,6 +264,39 @@ async def test_vfs_md_counts_a_longer_form_the_allow_list_names():
 
 
 @pytest.mark.asyncio
+async def test_vfs_md_keeps_the_denied_words_inside_a_longer_form():
+    cfg = GDocsConfig(client_id="x", client_secret="y", refresh_token="z")
+    ws = Workspace(
+        {"/docs": (GDocsVFS(config=cfg), MountMode.WRITE)},
+        mode=MountMode.WRITE,
+        profiles={
+            "default": {
+                "commands": {
+                    "allow": ["cat", "grep * needle"],
+                    "deny": ["grep -r"],
+                }
+            }
+        },
+    )
+    assert "`grep -r`" not in await ws.vfs_md()
+
+
+@pytest.mark.asyncio
+async def test_vfs_md_counts_no_help_request_as_a_write():
+    cfg = GDocsConfig(client_id="x", client_secret="y", refresh_token="z")
+    ws = Workspace(
+        {"/docs": (GDocsVFS(config=cfg), MountMode.WRITE)},
+        mode=MountMode.WRITE,
+        profiles={"default": {"commands": {"allow": ["cat", "rm --help"]}}},
+    )
+    markdown = await ws.vfs_md()
+    assert "| `/docs` | `gdocs`, read |" in markdown
+    assert "`rm`" not in row(
+        markdown, "## Supported Unix Commands for VFS", "/docs"
+    )
+
+
+@pytest.mark.asyncio
 async def test_vfs_md_describes_each_path_shown_with_its_own_mode():
     ws = Workspace(
         {
