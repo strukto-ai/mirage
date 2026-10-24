@@ -101,6 +101,43 @@
         "stdout": "",
         "stderr": ""
       }
+    },
+    {
+      "id": "paste_passes_bytes_and_reads_delimiters_by_byte",
+      "seq": 600003,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a\\377\\n' > /data/pb1 && printf '\\303\\251\\n' > /data/pb2 && paste /data/pb1 /data/pb2 | od -An -c && paste -d 'é,' /data/pb1 /data/pb2 /data/pb1 | od -An -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "   a 377  \\t 303 251  \\n\n   a 377 303 303 251 251   a 377  \\n\n",
+        "stderr": ""
+      },
+      "flags": [
+        "d"
+      ]
     }
   ]
 }

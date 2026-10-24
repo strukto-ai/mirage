@@ -12,536 +12,107 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { AsyncLineIterator } from '../../../io/async_line_iterator.ts'
-import { IOResult, type ByteSource } from '../../../io/types.ts'
-import type { PathSpec } from '../../../types.ts'
+import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
+import type { JsonValue, PathSpec } from '../../../types.ts'
 import type { CommandFnResult, Context } from '../../config.ts'
-import { RegexError } from '../../../rs/errors.ts'
-import { posixRegex, type PosixRegex } from '../../../rs/regex.ts'
-import { byteView, decodeText, encodeText, utf8Locale } from '../../../shell/bytes.ts'
-import { quoteText } from '../../quote.ts'
+import { StreamRefusal } from '../../../rs/errors.ts'
+import { chainOutput, closeStream, openStream, type OpenStream } from '../../../rs/stream.ts'
+import { byteView, utf8Locale } from '../../../shell/bytes.ts'
+import { concat } from '../../../utils/bytes.ts'
 import { stdinStream } from '../utils/stream.ts'
-import { perOperand } from '../utils/operands.ts'
+import { reportedStream } from '../utils/operands.ts'
 import { FlagView } from '../../spec/flag_view.ts'
-import { type FlagValue } from '../../spec/types.ts'
-import { usageHint } from '../../spec/usage.ts'
+import type { FlagValue } from '../../spec/types.ts'
 import { specOf } from '../../spec/builtins.ts'
-import { C_SPACE, EOVERFLOW_TEXT, ERANGE_TEXT, INTMAX, INTMAX_MIN } from '../constants.ts'
 
 const ENC = new TextEncoder()
 
-function shouldNumber(
-  line: string,
-  numbering: string,
-  pattern: PosixRegex | null,
-  utf8: boolean,
-): boolean {
-  if (numbering === 'n') return false
-  if (numbering === 'a') return true
-  if (numbering === 'p' && pattern !== null) return pattern.search(byteView(line, utf8)) !== null
-  return line.trim() !== ''
-}
-
-// The counter is a bigint, not a number. GNU counts in intmax_t, so a
-// float64 both loses digits past 2**53 (`nl -v 9223372036854775807` printed
-// 9223372036854776000 where python printed the value) and cannot tell whether
-// the next increment would overflow, which is the abort GNU performs.
-function formatNumber(value: bigint, width: number, format: string): string {
-  const raw = String(value)
-  if (format === 'ln') return raw.padEnd(width, ' ')
-  if (format === 'rz') return raw.padStart(width, '0')
-  return raw.padStart(width, ' ')
-}
-
-// Map each logical-page delimiter line to the section it opens.
-//
-// GNU pads a one-character -d with ':' as its second character, and an empty
-// -d disables delimiter matching entirely (it does not restore the default
-// `\:`).
-//
-// "One character" is glibc strlen, i.e. one BYTE, the same measure
-// blankPrefix takes off the separator. Neither JavaScript's UTF-16 units nor
-// python's code points answer it: `-d 'é'` is two bytes and is used unpadded,
-// so `ééé` opens a header while `é:é:é:` is ordinary text, and both hosts
-// padded it while only one of them padded a four-byte emoji. A longer
-// argument is used WHOLE and never truncated, so `-d xyz` looks for
-// `xyzxyzxyz`.
-function sectionDelimiters(delimiter: string): Record<string, string> {
-  if (delimiter === '') return {}
-  const pair = ENC.encode(delimiter).length > 1 ? delimiter : `${delimiter}:`
-  return { [pair.repeat(3)]: 'header', [pair.repeat(2)]: 'body', [pair]: 'footer' }
-}
-
-interface NlConfig {
-  numbering: Record<string, string>
-  patterns: Record<string, PosixRegex | null>
-  start: bigint
-  increment: bigint
-  width: number
-  separator: string
-  numberFormat: string
-  delimiters: Record<string, string>
-  joinBlankLines: number
-  noRenumber: boolean
-  utf8: boolean
-}
-
-interface NlState {
-  number: bigint
-  section: string
-  blankRun: number
-  // The advance has left intmax_t; the NEXT line that needs a number is the
-  // one that dies (NL3-F).
-  overflowed: boolean
-  // That death has happened, so a second operand must not be numbered.
-  aborted: boolean
-}
-
-// What GNU writes in place of a number on an unnumbered line.
-//
-// Not the number field plus the separator: GNU writes as many blanks as the
-// number width, then one MORE blank per byte of the separator, so the
-// separator is padded over rather than printed. The default line is
-// therefore seven spaces, not six spaces and a TAB, and the difference is
-// visible on every unnumbered line (`nl -b n`, a blank line under `-b t`, a
-// line a `-b p` pattern did not match).
-//
-// Two things the count does NOT depend on. `-n`'s format is irrelevant --
-// `ln`, `rn` and `rz` all pad to the same width -- and so is how wide the
-// number would have been, because the declared width is what is padded. What
-// it does depend on is the separator's length in BYTES, which is glibc's
-// `strlen`: `-s 'é'` pads by two, not one, so the length is taken off the
-// encoded form rather than off the UTF-16 unit count. That also keeps this
-// host and the python twin emitting the same byte count, since JavaScript
-// counts UTF-16 units and python counts code points.
-//
-// All od-verified on GNU coreutils 9.4 (ground-truth section W): `-w 3` pads
-// 4, `-w 10` pads 11, `-s ''` pads 6, `-s '::'` pads 8, `-w 3 -s '::'` pads 5.
-function blankPrefix(config: NlConfig): string {
-  return ' '.repeat(config.width + ENC.encode(config.separator).length)
-}
-
-// One input line as nl writes it, or null to abort.
-//
-// null means "this line needs a number and the counter has already
-// overflowed", which is GNU's fatal `line number overflow`. The check is here
-// rather than after the advance because the abort is DEFERRED to the next line
-// that needs a number: `nl -v 9223372036854775805` on three lines prints all
-// three and exits 0, while the same start on four lines prints three and exits
-// 1. An unnumbered line in between still prints
-// (`printf 'a\n\nb\n' | nl -v <max>` writes the numbered line and the padded
-// blank, then dies on the `b`). Measured, NL3-F.
-function renderLine(line: string, config: NlConfig, state: NlState): Uint8Array | null {
-  const section = config.delimiters[line]
-  if (section !== undefined) {
-    state.section = section
-    state.blankRun = 0
-    if (!config.noRenumber) state.number = config.start
-    // GNU writes an empty line in place of the delimiter itself.
-    return ENC.encode('\n')
-  }
-  const numbering = config.numbering[state.section] ?? 'n'
-  const pattern = config.patterns[state.section] ?? null
-  let numberLine = shouldNumber(line, numbering, pattern, config.utf8)
-  if (numbering === 'a' && line === '') {
-    state.blankRun += 1
-    numberLine = state.blankRun >= config.joinBlankLines
-    if (numberLine) state.blankRun = 0
-  } else {
-    state.blankRun = 0
-  }
-  if (numberLine) {
-    if (state.overflowed) return null
-    const prefix = formatNumber(state.number, config.width, config.numberFormat)
-    const advanced = state.number + config.increment
-    if (advanced < INTMAX_MIN || advanced > INTMAX) {
-      state.overflowed = true
-    } else {
-      state.number = advanced
-    }
-    return encodeText(`${prefix}${config.separator}${line}\n`)
-  }
-  return encodeText(`${blankPrefix(config)}${line}\n`)
-}
-
-// Number one source's lines, stopping if the counter overflows.
-//
-// GNU numbers the line, prints it, and THEN adds the increment; an addition
-// that leaves intmax_t marks the counter, and the next line that NEEDS a
-// number is the one that dies. So the line whose number was the limit is still
-// written (`nl -v 9223372036854775807` prints line 1 and exits 1), and a run
-// that ends exactly on the limit never dies at all
-// (`nl -v 9223372036854775805` exits 0 on three lines and 1 on four). The
-// counter advances only for a line nl NUMBERED, which is why
-// `nl -b n -v 9223372036854775807` never overflows.
-//
-// Reported by mutating the caller's IOResult, because the exit code is decided
-// after the handler already returned its stream. GNU's message is the bare
-// `line number overflow`, with no colon clause -- unlike every option refusal
-// in this module.
-async function* nlStream(
-  source: ByteSource,
-  config: NlConfig,
-  state: NlState,
-  io: IOResult,
-): AsyncIterable<Uint8Array> {
-  if (state.aborted) return
-  const iter = new AsyncLineIterator(source)
-  try {
-    for await (const raw of iter) {
-      // A byte that is no part of a character stays itself, for the match and
-      // the output alike.
-      const line = decodeText(raw)
-      const rendered = renderLine(line, config, state)
-      if (rendered === null) {
-        io.exitCode = 1
-        io.stderr = ENC.encode('nl: line number overflow\n')
-        state.aborted = true
-        return
-      }
-      yield rendered
-    }
-  } finally {
-    await iter.discard()
-  }
-}
-
-// The style a -b/-f/-h argument selects, as GNU reads it.
-//
-// GNU switches on the argument's FIRST character and keeps the rest only to
-// compile a `p` style's pattern, so `-b nn` is the `n` style and prints no
-// numbers rather than an unrecognized style falling through to `t`.
-// Anything but a/t/n/p was already refused by optionErrors, and so was a `p`
-// style whose BRE does not compile, so this cannot throw.
-//
-// The pattern is a POSIX BRE, not this host's dialect: `\(` groups and a bare
-// `(` is a literal -- the inverse of both JavaScript `RegExp` and python `re`.
-// Both hosts match it in mirage-rs, so they cannot answer differently, which
-// is what they did when each handed the text to its own engine (`nl -b 'p['`
-// said `Invalid regular expression: /[/: Unterminated character class` here
-// and `unterminated character set at position 0` there, and neither was GNU's
-// `Invalid regular expression`). Lines are matched by characters under a UTF-8
-// locale and by bytes in the C locale, as GNU matches them.
-function parseNumbering(raw: string, utf8: boolean): [string, PosixRegex | null] {
-  if (raw.startsWith('p'))
-    return ['p', posixRegex(byteView(raw.slice(1), utf8), false, 'posix', false, utf8)]
-  return [raw.slice(0, 1), null]
-}
-
-// One numeric option value as `strtol` reads it: a run of C whitespace, then
-// at most one sign, then decimal digits, then NOTHING.
-//
-// The leading run is real GNU behavior and easy to miss: `nl -v $'\t5'`,
-// `' 5'`, `$'\n5'` and `'  +5'` are all accepted and number from 5, while
-// `'5 '` and `'  3  '` are refused -- leading whitespace is skipped, trailing
-// whitespace is garbage. The class is spelled out rather than written `\s`
-// because it is C `isspace`: JavaScript's `\s` also matches every Unicode
-// space plus U+FEFF, so it would accept a great deal GNU refuses. No
-// whitespace may sit BETWEEN the sign and the digits (`'+ 5'` is refused), and
-// there is only ever one sign. Measured, ground truth NL3-C.
-const NUMBER = new RegExp(`^${C_SPACE}[+-]?[0-9]+$`)
-
-// The two type limits nl's four numeric options are bounded by: int here, and
-// intmax_t's INTMAX and INTMAX_MIN. Held as bigint because INTMAX is past
-// Number.MAX_SAFE_INTEGER, so a float64 comparison would accept
-// 9223372036854775808 that GNU refuses.
-const INT_MAX = 2n ** 31n - 1n
-
-// Where the sub-minimum side of -w switches from the ERANGE wording to
-// the EOVERFLOW one, measured by bisection on coreutils 9.4 / glibc 2.39 /
-// x86-64: `-w -1073741824` is ERANGE and `-w -1073741825` is EOVERFLOW,
-// deterministically and whatever else the line carries. -2**30 matches no
-// type boundary and no stated range end, so treat this as an unexplained
-// gnulib artifact of that platform rather than a rule with a reason; it is
-// the value here most likely to move elsewhere.
-//
-// It belongs to -w ALONE (GNU 9.7 reads -l unsigned). -v and -i switch at
-// the type boundary instead (`-i -9223372036854775808` numbers happily and only
-// -9223372036854775809 is refused), so they carry INTMAX_MIN here and the
-// ERANGE clause is unreachable for them.
-const WIDTH_OVERFLOW_LOW = -(2n ** 30n)
-
-// GNU nl's refusal for one of its four numeric options.
-//
-// Each option has its own wording and — unlike expand and cut — the WHOLE
-// argument is quoted. Same shape as numberFlagError in tail_counts.ts:
-// validate first, so the parse below cannot hand back a prefix or NaN.
-//
-// THREE message shapes, not two, and which one speaks depends on why the
-// value failed rather than on which option it was. A value the scanner could
-// not read at all keeps the plain two-clause form (`nl -w abc`, `nl -w ''`).
-// A value that scanned but fell below the option's minimum adds
-// `: Numerical result out of range` (`nl -w 0`, `nl -w -3`). A value too big
-// for the type it is scanned into adds `: Value too large for defined data
-// type` instead (`nl -w 2147483648`, `nl -v 99999999999999999999`) — which is
-// the clause a reimplementation is most likely to miss, because without it
-// the value is accepted and then blows up building the pad rather than being
-// refused.
-//
-// The ranges differ per option and split the four two ways. `-v` and `-i`
-// take the whole signed range, so GNU numbers from a negative start and counts
-// up, `-i -2` genuinely decrements, and zero is legal; neither ever produces
-// the ERANGE clause, because their overflowLow IS their low. `-w` must be at
-// least 1 and tops out at INT_MAX. `-l` is unsigned in GNU 9.7: any value from
-// 0 up is taken, a huge one clamped, and a negative one is out of range
-// however large. All four spell a leading `+` the way GNU does, as a
-// sign on an otherwise unsigned value.
-function numberError(
-  label: string,
-  raw: string | undefined,
-  low: bigint,
-  high: bigint | null,
-  overflowLow: bigint | null,
-): string | null {
-  if (raw === undefined) return null
-  if (!NUMBER.test(raw)) return `nl: ${label}: '${quoteText(raw)}'`
-  const value = BigInt(raw)
-  if ((high !== null && value > high) || (overflowLow !== null && value < overflowLow)) {
-    return `nl: ${label}: '${quoteText(raw)}': ${EOVERFLOW_TEXT}`
-  }
-  if (value < low) return `nl: ${label}: '${quoteText(raw)}': ${ERANGE_TEXT}`
-  return null
-}
-
-// nl's four numeric options: the dest, the option's own message text, the
-// inclusive range GNU accepts, and where the refusal switches to the
-// EOVERFLOW wording. The order here is for reading only — which option gets
-// to speak is decided by the command line, never by this table.
-// `-l` is unsigned in GNU 9.7: any value from 0 up is taken, a huge one
-// clamped, and a negative one is out of range however large.
-const NUMERIC_OPTIONS: readonly (readonly [
-  string,
-  string,
-  bigint,
-  bigint | null,
-  bigint | null,
-])[] = [
-  ['starting_line_number', 'invalid starting line number', INTMAX_MIN, INTMAX, INTMAX_MIN],
-  ['line_increment', 'invalid line number increment', INTMAX_MIN, INTMAX, INTMAX_MIN],
-  ['number_width', 'invalid line number field width', 1n, INT_MAX, WIDTH_OVERFLOW_LOW],
-  ['join_blank_lines', 'invalid line number of blank lines', 0n, null, null],
+// The options mirage-rs validates as GNU does, each occurrence in the order
+// the line typed them.
+const OPTIONS = [
+  'starting_line_number',
+  'line_increment',
+  'number_width',
+  'join_blank_lines',
+  'body_numbering',
+  'footer_numbering',
+  'header_numbering',
+  'number_format',
 ]
 
-// The three style options and the message each one words its refusal with.
-// GNU reads only the FIRST character of the argument, so `-b tt` is the `t`
-// style with a trailing byte GNU never reads again, while `-b A` and an empty
-// `-b` name no style and are refused.
-const STYLE_OPTIONS: Readonly<Record<string, string>> = {
-  body_numbering: 'invalid body numbering style',
-  footer_numbering: 'invalid footer numbering style',
-  header_numbering: 'invalid header numbering style',
-}
-const STYLE_HEADS = new Set(['a', 't', 'n', 'p'])
-
-// -n is the one that takes a whole word: GNU strcmps the argument against
-// each of the three formats, so `rnn` and `LN` are both refused where
-// `-b tt` is accepted. `-d` and `-s` are validated by neither GNU nor us —
-// `-d xyz` and `-s ''` are accepted (measured).
-const FORMAT_DEST = 'number_format'
-const FORMAT_LABEL = 'invalid line numbering format'
-const NUMBER_FORMATS = new Set(['ln', 'rn', 'rz'])
-
-// The line usage() prints after a deferred refusal. GNU's numeric options
-// never reach it: they exit where they are validated.
-const HINT = usageHint('nl')
-
-// GNU's refusal for one occurrence of a style or format option.
-function styleError(dest: string, raw: string): string | null {
-  const label = STYLE_OPTIONS[dest]
-  if (label !== undefined) {
-    if (STYLE_HEADS.has(raw.slice(0, 1))) return null
-    return `nl: ${label}: '${quoteText(raw)}'`
-  }
-  if (NUMBER_FORMATS.has(raw)) return null
-  return `nl: ${FORMAT_LABEL}: '${quoteText(raw)}'`
-}
-
-// glibc's refusal for a `p` style whose BRE will not compile.
-//
-// The style itself is already known good here, so a pattern failure prints NO
-// `invalid body numbering style` line -- only the compiler's own wording,
-// which is glibc's `regerror` string and not coreutils'. It belongs to the
-// FATAL family: `nl -b 'p[' -h bogus` prints the regex line alone, so nothing
-// to its right is scanned and the `--help` hint never arrives (section U6).
-// Only the three style options carry a pattern; `-n` never does.
-function patternError(dest: string, raw: string, utf8: boolean): string | null {
-  if (STYLE_OPTIONS[dest] === undefined || !raw.startsWith('p')) return null
-  try {
-    posixRegex(byteView(raw.slice(1), utf8), false, 'posix', false, utf8)
-  } catch (err) {
-    if (!(err instanceof RegexError)) throw err
-    return `nl: ${err.message}`
-  }
-  return null
-}
-
-// Everything GNU nl prints for the options one line carried.
-//
-// GNU validates each value the moment getopt hands it over, which decides
-// both which option speaks and how the line ends, and its two families of
-// options end it differently:
-//
-//   * A bad NUMERIC value (-v -i -w -l) is fatal on the spot, so the
-//     leftmost one wins and nothing after it is even looked at.
-//     `nl -w abc -v xyz` names the width, `nl -v xyz -w abc` names the
-//     starting line number, and neither prints the --help hint.
-//   * A bad STYLE or FORMAT value (-b -f -h -n) is reported without
-//     exiting and parsing continues, so several can accumulate and the line
-//     ends with the --help hint, exit 1, once every option is read. This
-//     is why `nl -b bogus -w abc` prints two lines and NO hint (the width
-//     killed the parse), `nl -b bogus -w 3` prints one WITH the hint, and
-//     `nl -w abc -b bogus` prints only the width (the parse died before -b
-//     was scanned). All measured on GNU coreutils 9.4.
-//   * A `p` style whose BRE will not compile is a THIRD case that behaves
-//     like the numeric one -- fatal where it stands, no hint -- but flushes
-//     the style lines already deferred to its left, and prints no style line
-//     of its own because the style was accepted. It is checked after the
-//     style test, so a bad style never reaches the regex compiler
-//     (`nl -b '['` is an invalid style, not an unterminated bracket).
-//
-// Validation is per OCCURRENCE, not per option: `nl -b bogus -b t` still
-// refuses, because GNU had already reported `bogus` when the second -b
-// overrode it. The validated options are therefore declared `multiple`
-// (argparse's `append`), so every value typed is still there to check; the
-// options are walked in the order their first occurrence was typed, each
-// value in turn. Deliberate divergence: GNU walks the line itself, so an
-// option repeated AFTER a different fatal one is checked too late here
-// (`nl -w 3 -v xyz -w abc` names the width where GNU names the starting
-// line number). Keeping that order would take a per-occurrence record
-// across options, which neither argparse nor this parser keeps.
-//
-// Returns the stderr text, one newline-terminated line per error, or null
-// when GNU accepts every value.
-function optionErrors(fl: FlagView, utf8: boolean): string | null {
-  const camps = new Map<string, readonly [string, bigint, bigint | null, bigint | null]>(
-    NUMERIC_OPTIONS.map(([dest, label, low, high, overflowLow]) => [
-      dest,
-      [label, low, high, overflowLow] as const,
-    ]),
-  )
-  const dests = [...camps.keys(), ...Object.keys(STYLE_OPTIONS), FORMAT_DEST]
-  const render = (lines: readonly string[]): string => lines.map((line) => `${line}\n`).join('')
-  const deferred: string[] = []
-  const typed = fl
-    .typedOrder(...dests)
-    .flatMap((dest) => fl.asList(dest).map((raw): [string, string] => [dest, raw]))
-  for (const [dest, raw] of typed) {
-    const camp = camps.get(dest)
-    if (camp !== undefined) {
-      const fatal = numberError(camp[0], raw, camp[1], camp[2], camp[3])
-      if (fatal !== null) return render([...deferred, fatal])
-    } else {
-      const err = styleError(dest, raw)
-      if (err !== null) {
-        deferred.push(err)
-        continue
-      }
-      // The style was accepted, so a `p` style now compiles its BRE, and a
-      // failure is fatal where it stands -- with every style line deferred
-      // before it flushed first.
-      const fatal = patternError(dest, raw, utf8)
-      if (fatal !== null) return render([...deferred, fatal])
-    }
-  }
-  if (deferred.length > 0) return render([...deferred, HINT])
-  return null
-}
-
-// nl's flags, read once, exactly as the python NlFlags holds them: the raw
-// option words, not the resolved config. Keeping the raw strings here is what
-// lets the two hosts share one validation pass and then each build its own
-// NlConfig from the same words.
-export interface NlFlags {
-  readonly bodyNumberingRaw: string | undefined
-  readonly startRaw: string | undefined
-  readonly incrementRaw: string | undefined
-  readonly widthRaw: string | undefined
-  readonly separator: string | undefined
-  readonly footerNumberingRaw: string | undefined
-  readonly headerNumberingRaw: string | undefined
-  readonly joinBlankLinesRaw: string | undefined
-  readonly numberFormat: string
+// nl's options as typed: every occurrence of the ones GNU validates, in the
+// order the line typed them, for the engine to validate and resolve. Mirrors
+// Python's NlFlags.
+interface NlFlags {
+  readonly options: readonly (readonly [string, string])[]
+  readonly separator: string
   readonly delimiter: string
   readonly noRenumber: boolean
 }
 
-// Read nl's flags once, refusing every value GNU refuses.
-//
-// Returns the stderr text instead of the struct when GNU refuses the line,
-// the shape every sibling generic's parseFlags uses.
-// The value that won for an accumulating option, GNU's last one.
-function last(fl: FlagView, name: string): string | undefined {
-  return fl.asList(name).at(-1)
-}
-
-export function parseFlags(bag: Record<string, FlagValue>, utf8 = false): NlFlags | string {
+function parseFlags(bag: Record<string, FlagValue>): NlFlags {
   const fl = new FlagView(bag, specOf('nl'))
-  const optionErr = optionErrors(fl, utf8)
-  if (optionErr !== null) return optionErr
-  const rawDelimiter = fl.asStr('section_delimiter')
   return {
-    bodyNumberingRaw: last(fl, 'body_numbering'),
-    startRaw: last(fl, 'starting_line_number'),
-    incrementRaw: last(fl, 'line_increment'),
-    widthRaw: last(fl, 'number_width'),
-    separator: fl.asStr('number_separator'),
-    footerNumberingRaw: last(fl, 'footer_numbering'),
-    headerNumberingRaw: last(fl, 'header_numbering'),
-    joinBlankLinesRaw: last(fl, 'join_blank_lines'),
-    numberFormat: last(fl, 'number_format') ?? 'rn',
-    // An empty `-d` is not an absent one: GNU disables delimiter matching
-    // entirely for it and does NOT fall back to `\:`, so the default can
-    // only be substituted for undefined.
-    delimiter: rawDelimiter ?? '\\:',
+    options: fl
+      .typedOrder(...OPTIONS)
+      .flatMap((dest) => fl.asList(dest).map((raw) => [dest, raw] as const)),
+    separator: fl.asStr('number_separator', '\t'),
+    delimiter: fl.asStr('section_delimiter', '\\:'),
     noRenumber: fl.asBool('no_renumber'),
   }
 }
 
-// Turn nl's raw option words into the config the renderer reads, the way the
-// python `nl()` entry point does. Every value here was already validated by
-// parseFlags, so no parse can fail and no style can fall through.
-function buildConfig(parsed: NlFlags, utf8: boolean): NlConfig {
-  const [bodyNumbering, bodyPattern] = parseNumbering(parsed.bodyNumberingRaw ?? 't', utf8)
-  const [footerNumbering, footerPattern] = parseNumbering(parsed.footerNumberingRaw ?? 'n', utf8)
-  const [headerNumbering, headerPattern] = parseNumbering(parsed.headerNumberingRaw ?? 'n', utf8)
-  return {
-    numbering: { body: bodyNumbering, footer: footerNumbering, header: headerNumbering },
-    patterns: { body: bodyPattern, footer: footerPattern, header: headerPattern },
-    start: parsed.startRaw === undefined ? 1n : BigInt(parsed.startRaw),
-    increment: parsed.incrementRaw === undefined ? 1n : BigInt(parsed.incrementRaw),
-    width: parsed.widthRaw === undefined ? 6 : Number.parseInt(parsed.widthRaw, 10),
-    separator: parsed.separator ?? '\t',
-    numberFormat: parsed.numberFormat,
-    delimiters: sectionDelimiters(parsed.delimiter),
-    joinBlankLines:
-      parsed.joinBlankLinesRaw === undefined ? 1 : Number.parseInt(parsed.joinBlankLinesRaw, 10),
-    noRenumber: parsed.noRenumber,
-    utf8,
+/**
+ * The inputs numbered: a refused option prints its refusal, and a counter
+ * that overflows ends the run, both exit 1. Mirrors Python's _numbered.
+ */
+async function* numbered(
+  config: Readonly<Record<string, JsonValue>>,
+  sources: readonly ByteSource[],
+  io: IOResult,
+  signal?: AbortSignal,
+): AsyncIterable<Uint8Array> {
+  let stream: OpenStream
+  try {
+    stream = await openStream('nl', config)
+  } catch (err) {
+    if (!(err instanceof StreamRefusal)) throw err
+    io.exitCode = 1
+    io.stderr = ENC.encode(`${err.message}\n`)
+    return
+  }
+  try {
+    yield* chainOutput(stream, sources, signal)
+  } finally {
+    if (stream.status() !== 0) {
+      io.exitCode = 1
+      io.stderr = concat([await materialize(io.stderr), stream.takeStderr()])
+    }
+    await closeStream(stream)
   }
 }
 
+// nl over every operand, numbering on across them. Mirrors Python's
+// nl_generic.
 export function nlGeneric(
   paths: PathSpec[],
   ctx: Context,
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
 ): CommandFnResult {
   stream = stdinStream(stream, ctx.stdin)
-  const utf8 = utf8Locale(ctx.env)
-  const parsed = parseFlags(ctx.flags, utf8)
-  if (typeof parsed === 'string') {
-    return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(parsed) })]
+  const parsed = parseFlags(ctx.flags)
+  const config = {
+    options: parsed.options.map(([dest, raw]) => [dest, byteView(raw)]),
+    separator: byteView(parsed.separator),
+    delimiter: byteView(parsed.delimiter),
+    no_renumber: parsed.noRenumber,
+    utf8: utf8Locale(ctx.env),
+    inputs: Math.max(1, paths.length),
   }
-  const config = buildConfig(parsed, utf8)
-  // The IOResult is handed back before the stream is drained, so the
-  // overflow abort reports by mutating it as it goes.
   const io = new IOResult()
-  const state: NlState = {
-    number: config.start,
-    section: 'body',
-    blankRun: 0,
-    overflowed: false,
-    aborted: false,
-  }
-  const each = (source: ByteSource) => nlStream(source, config, state, io)
-  return [perOperand(paths, stream, ctx.stdin, io, 'nl', each), io]
+  const sources =
+    paths.length === 0
+      ? [ctx.stdin ?? new Uint8Array()]
+      : paths.map((p) => reportedStream(stream(p), io, p, 'nl'))
+  return [numbered(config, sources, io, ctx.signal), io]
 }

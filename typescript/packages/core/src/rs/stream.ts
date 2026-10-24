@@ -432,6 +432,29 @@ export async function* mergeOutput(
   if (tail.byteLength > 0) yield tail
 }
 
+/**
+ * Feed a stream that reads its inputs one after another each source in turn,
+ * through mergeOutput, and close the sources. Mirrors Python's chain_output.
+ */
+export async function* chainOutput(
+  stream: OpenStream,
+  sources: readonly (Uint8Array | AsyncIterable<Uint8Array>)[],
+  signal?: AbortSignal,
+): AsyncGenerator<Uint8Array> {
+  const inputs = sources.map((source) => chunks(source, signal))
+  try {
+    yield* mergeOutput(stream, async (index) => {
+      const next = await inputs[index]?.next()
+      return next === undefined || next.done === true ? null : next.value
+    })
+  } finally {
+    for (const [index, input] of inputs.entries()) {
+      await input.return?.(undefined)
+      await (sources[index] as { return?: () => Promise<unknown> }).return?.()
+    }
+  }
+}
+
 export async function* streamOutputChunks(
   stream: OpenStream,
   source: Uint8Array | AsyncIterable<Uint8Array>,

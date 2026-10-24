@@ -17,14 +17,7 @@ import type { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, Context } from '../../config.ts'
 import { stdinStream } from '../utils/stream.ts'
 import { perOperand } from '../utils/operands.ts'
-import { mapStream } from '../utils/lines.ts'
-
-const ENC = new TextEncoder()
-const DEC = new TextDecoder('utf-8', { fatal: false, ignoreBOM: true })
-
-function reversed(line: Uint8Array): Uint8Array {
-  return ENC.encode(Array.from(DEC.decode(line)).reverse().join(''))
-}
+import { runStream } from '../../../rs/stream.ts'
 
 export function revGeneric(
   paths: PathSpec[],
@@ -33,6 +26,6 @@ export function revGeneric(
 ): CommandFnResult {
   stream = stdinStream(stream, ctx.stdin, false, false)
   const io = new IOResult()
-  const each = (source: ByteSource) => mapStream(source, reversed)
+  const each = (source: ByteSource) => runStream('rev', {}, source, ctx.signal)
   return [perOperand(paths, stream, ctx.stdin, io, 'rev', each), io]
 }
