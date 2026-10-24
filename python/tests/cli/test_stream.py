@@ -17,6 +17,10 @@ def record(**fields):
     return (json.dumps(fields) + "\n").encode()
 
 
+async def ignore(data):
+    pass
+
+
 async def test_split_records_preserve_binary_channels_and_exit_status():
     out = bytearray()
     err = bytearray()
@@ -51,8 +55,6 @@ async def test_split_records_preserve_binary_channels_and_exit_status():
         record(stream="stdout", data="YQ=="),
         record(status="done", result={}, error=None)[:-1],
         record(stream="stdout", data="???"),
-        record(status="done", result={}, error=None)
-        + record(stream="stdout", data="YQ=="),
         record(status="done", result={}, error=1),
         record(channel="stdout", data="YQ==")
         + record(status="done", result={}, error=None),
@@ -69,6 +71,21 @@ async def test_invalid_or_truncated_stream_is_not_a_success(body):
 
     with pytest.raises(ValueError):
         await consume_stream(source(), write, write)
+
+
+async def test_the_completion_record_ends_the_read():
+    pulled = []
+
+    async def source():
+        yield record(status="done", result={"exit_code": 0}, error=None)
+        pulled.append("past the completion")
+        await asyncio.Event().wait()
+
+    terminal = await asyncio.wait_for(
+        consume_stream(source(), ignore, ignore), 1
+    )
+    assert terminal["status"] == "done"
+    assert pulled == []
 
 
 async def test_output_backpressure_stops_reading_more_records():
@@ -200,6 +217,69 @@ async def test_http_output_arrives_before_stdin_eof(
             if input_write >= 0:
                 os.close(input_write)
             await runner.cleanup()
+
+
+async def test_the_line_ending_ends_the_client_while_stdin_stays_open(
+    monkeypatch, tmp_path
+):
+    hung_up = asyncio.Event()
+
+    async def handler(request):
+        response = web.StreamResponse(
+            headers={"Content-Type": "application/x-ndjson"}
+        )
+        await response.prepare(request)
+        await response.write(record(stream="stdout", data="aGkK"))
+        await response.write(
+            record(
+                status="done",
+                result={"kind": "io", "exit_code": 3},
+                error=None,
+            )
+        )
+        with pytest.raises(ConnectionResetError):
+            await request.read()
+        hung_up.set()
+        return response
+
+    app = web.Application()
+    app.router.add_post("/shell", handler)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "127.0.0.1", 0)
+    await site.start()
+    port = runner.addresses[0][1]
+    input_read, input_write = os.pipe()
+    try:
+        with (tmp_path / "stdout").open("w+b") as stdout:
+            monkeypatch.setattr(
+                stream,
+                "sys",
+                SimpleNamespace(
+                    stdin=SimpleNamespace(fileno=lambda: input_read),
+                    stdout=stdout,
+                    stderr=stdout,
+                ),
+            )
+            client = SimpleNamespace(
+                settings=SimpleNamespace(url=f"http://127.0.0.1:{port}"),
+                token=lambda: "",
+            )
+            code = await asyncio.wait_for(
+                stream.stream_shell(
+                    client, "/shell?stream=true", {"command": "x"}, True
+                ),
+                3,
+            )
+            assert code == 3
+            stdout.seek(0)
+            assert stdout.read() == b"hi\n"
+            await asyncio.wait_for(hung_up.wait(), 3)
+            assert os.get_blocking(input_read)
+    finally:
+        os.close(input_read)
+        os.close(input_write)
+        await runner.cleanup()
 
 
 async def test_json_collects_channels_and_preserves_metadata(

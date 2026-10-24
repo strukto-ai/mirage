@@ -81,6 +81,7 @@ class UploadStdin:
         self._read = 0
         self._ended = False
         self._discarding = False
+        self.error: Exception | None = None
         self._changed = asyncio.Event()
         self._lock = asyncio.Lock()
 
@@ -131,6 +132,15 @@ class UploadStdin:
         """Mark upload EOF, preserving any unread bytes."""
         self._ended = True
         self._changed.set()
+
+    async def fail(self, error: Exception) -> None:
+        """Record why the upload failed, then drop unread bytes.
+
+        Args:
+            error (Exception): the reason the upload failed.
+        """
+        self.error = error
+        await self.discard()
 
     async def discard(self) -> None:
         """Drop unread bytes and join temporary-file cleanup."""
