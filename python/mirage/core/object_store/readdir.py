@@ -57,7 +57,9 @@ def make_readdir(driver: ObjectStoreDriver[A, C]) -> ReaddirFn[A]:
         # When called from resolve_glob with a pattern (e.g. *.txt),
         # use path.directory for the listing. Direct callers (ls, ops)
         # pass pattern=None so path.virtual is used. The store lists in
-        # key order, so a walk's limit stops it at the first names.
+        # key order, so a walk's limit stops it at the first names, once
+        # it has listed past where a kept file could still prove a
+        # directory (``b`` then ``b/``) or a later revision.
         path = raw_path_of(path_spec.dir if path_spec.pattern else path_spec)
         kpfx = driver.key_prefix_of(accessor)
         pfx = kp.apply_dir(kpfx, path)
@@ -67,21 +69,30 @@ def make_readdir(driver: ObjectStoreDriver[A, C]) -> ReaddirFn[A]:
         times: dict[str, str] = {}
         saw_key = False
         cut = False
+        past = ""
         async with driver.connect(accessor) as conn:
             async for child in driver.list_children(conn, pfx):
                 saw_key = True
                 if child.kind == "marker":
                     continue
                 key = "/" + kp.strip(kpfx, child.key)
+                if key not in names and limit is not None:
+                    if not cut and len(names) >= limit:
+                        cut = True
+                        past = max(
+                            (k + "/" for k in names if k not in dir_keys),
+                            default="",
+                        )
+                    if cut:
+                        if (key + "/" if child.kind == "d" else key) > past:
+                            break
+                        continue
                 names.add(key)
                 if child.kind == "d":
                     dir_keys.add(key)
                 else:
                     sizes[key] = child.size
                     times[key] = child.modified
-                if limit is not None and len(names) >= limit:
-                    cut = True
-                    break
             if not saw_key and path.strip("/"):
                 # An empty directory is a zero-byte marker object keyed at
                 # the prefix itself, so a prefix holding no key at all --

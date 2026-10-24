@@ -117,14 +117,27 @@ def test_readdir_stops_at_a_walks_limit_and_marks_the_listing_partial(
     out = asyncio.run(readdir(accessor, spec("/"), 2))
     assert isinstance(out, DirListing) and out.partial
     assert [row.name for row in out.entries] == ["f0.txt", "f1.txt"]
-    assert pulled == ["f0.txt", "f1.txt"]
-    assert len(asyncio.run(readdir(accessor, spec("/"), 6))) == 5
+    assert pulled == ["f0.txt", "f1.txt", "f2.txt"]
+    assert len(asyncio.run(readdir(accessor, spec("/"), 5))) == 5
 
 
 def test_a_walks_limit_counts_a_name_both_key_and_prefix_once(accessor):
-    store = FakeStore({k: b"x" for k in ("a", "a/x", "b", "b/x", "c")})
+    keys = ("a", "a/x", "b", "b/x", "c", "d")
+    store = FakeStore({k: b"x" for k in keys})
     out = asyncio.run(make_readdir(make_driver(store))(accessor, spec("/"), 3))
     assert [row.name for row in out.entries] == ["a", "b", "c"]
+
+
+def test_a_cut_listing_reads_on_until_a_kept_file_proves_a_directory(
+    accessor,
+):
+    store = FakeStore({k: b"x" for k in ("a", "b", "b/x", "c")})
+    out = asyncio.run(make_readdir(make_driver(store))(accessor, spec("/"), 2))
+    assert isinstance(out, DirListing) and out.partial
+    assert [(row.name, row.type) for row in out.entries] == [
+        ("a", FileType.FILE),
+        ("b", FileType.DIRECTORY),
+    ]
 
 
 def test_tree_answers_none_past_a_walks_limit(accessor):

@@ -3347,6 +3347,28 @@ async def test_a_cut_listing_is_not_kept_as_the_whole_directory():
     assert (len(cut), len(whole)) == (2, 3)
 
 
+class KeywordRAM(RAMVFS):
+    """A RAM mount whose listing names ``limit`` beside taking any
+    keyword."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.asked: list[int | None] = []
+        self._store.dirs.add("/d")
+
+    async def readdir(self, path, limit=None, **kwargs):
+        self.asked.append(limit)
+        return await super().readdir(path)
+
+
+@pytest.mark.asyncio
+async def test_a_listing_taking_any_keyword_is_handed_the_limit_it_names():
+    vfs = KeywordRAM()
+    with Workspace({"/ram/": vfs}) as ws:
+        await ws.dispatch("readdir", _path("/ram/d"), limit=2)
+    assert vfs.asked == [2]
+
+
 @pytest.mark.asyncio
 async def test_a_hide_below_a_listing_drops_the_walks_limit():
     # The hide filters the listing after the backend answers, so a cut

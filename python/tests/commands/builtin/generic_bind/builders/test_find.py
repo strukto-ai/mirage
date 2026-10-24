@@ -17,6 +17,9 @@ from typing import Any
 import pytest
 
 from mirage.types import FileStat, FileType, PathSpec
+from mirage.vfs.base import BaseVFS
+from mirage.vfs.ram import RAMVFS
+from mirage.workspace import Workspace
 from tests.fixtures.answers import Answers, run_generic
 
 TREE = {
@@ -146,3 +149,30 @@ async def test_find_reads_the_tree_in_one_call(texts, trees):
     whole = await _lines(_mount([], read_tree), [_root()], texts)
     assert whole == await _lines(_mount([]), [_root()], texts)
     assert asked == trees
+
+
+class AskedRAM(RAMVFS):
+    """A RAM mount held to two files, with no tree read, noting the limit
+    each listing is handed."""
+
+    read_tree = BaseVFS.read_tree
+
+    def __init__(self) -> None:
+        super().__init__(walk_limit=2)
+        self.asked: list[int | None] = []
+        self._store.dirs.add("/d")
+        for name in ("a", "b", "c"):
+            self._store.files[f"/d/{name}"] = b""
+
+    async def readdir(self, path, limit=None):
+        self.asked.append(limit)
+        return await super().readdir(path)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("line", ["find /ram/d -maxdepth 1", "tree /ram/d"])
+async def test_a_walk_hands_its_listing_the_limit(line):
+    vfs = AskedRAM()
+    with Workspace({"/ram/": vfs}) as ws:
+        await ws.shell(line)
+    assert vfs.asked == [3]

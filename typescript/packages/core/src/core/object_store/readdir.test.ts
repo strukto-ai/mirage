@@ -130,15 +130,25 @@ it('stops a listing at a walk limit and marks it partial', async () => {
   const out = await readdir(accessor, spec('/'), 2)
   expect(out instanceof DirListing && out.partial).toBe(true)
   expect((out as DirListing).entries.map((row) => row.name)).toEqual(['f0.txt', 'f1.txt'])
-  expect(pulled).toEqual(['f0.txt', 'f1.txt'])
-  expect((await readdir(accessor, spec('/'), 6)) as FileStat[]).toHaveLength(5)
+  expect(pulled).toEqual(['f0.txt', 'f1.txt', 'f2.txt'])
+  expect((await readdir(accessor, spec('/'), 5)) as FileStat[]).toHaveLength(5)
 })
 
 // Twin of test_a_walks_limit_counts_a_name_both_key_and_prefix_once.
 it('counts a name that is a key and a prefix once toward a walk limit', async () => {
-  const store = new FakeStore(
-    Object.fromEntries(['a', 'a/x', 'b', 'b/x', 'c'].map((k) => [k, 'x'])),
-  )
+  const keys = ['a', 'a/x', 'b', 'b/x', 'c', 'd']
+  const store = new FakeStore(Object.fromEntries(keys.map((k) => [k, 'x'])))
   const out = (await makeReaddir(makeDriver(store))(accessor, spec('/'), 3)) as DirListing
   expect(out.entries.map((row) => row.name)).toEqual(['a', 'b', 'c'])
+})
+
+// Twin of test_a_cut_listing_reads_on_until_a_kept_file_proves_a_directory.
+it('reads a cut listing on until a kept file proves a directory', async () => {
+  const store = new FakeStore(Object.fromEntries(['a', 'b', 'b/x', 'c'].map((k) => [k, 'x'])))
+  const out = await makeReaddir(makeDriver(store))(accessor, spec('/'), 2)
+  expect(out instanceof DirListing && out.partial).toBe(true)
+  expect((out as DirListing).entries.map((row) => [row.name, row.type])).toEqual([
+    ['a', FileType.FILE],
+    ['b', FileType.DIRECTORY],
+  ])
 })

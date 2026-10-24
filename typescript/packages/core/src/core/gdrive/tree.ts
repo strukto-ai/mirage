@@ -124,7 +124,7 @@ export async function tree(
   entry?: FileStat | null,
   limit?: number,
 ): Promise<Map<string, FileStat> | null> {
-  const listed = await readdir(accessor, path, entry, limit)
+  const listed = await readdir(accessor, path, entry)
   if (listed instanceof DirListing) return null
   const found = new Map<string, FileStat>()
   let level = placed(found, '', listed, null)

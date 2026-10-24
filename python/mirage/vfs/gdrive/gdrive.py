@@ -89,12 +89,9 @@ class GoogleDriveVFS(BaseVFS):
         self.accessor = GDriveAccessor(self.config, TokenManager(config))
 
     async def readdir(
-        self,
-        path: PathSpec,
-        entry: FileStat | None = None,
-        limit: int | None = None,
+        self, path: PathSpec, entry: FileStat | None = None
     ) -> list[FileStat] | DirListing:
-        return await _readdir(self.accessor, path, entry, limit)
+        return await _readdir(self.accessor, path, entry)
 
     async def read(
         self,

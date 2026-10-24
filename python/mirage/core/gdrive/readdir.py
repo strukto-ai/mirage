@@ -162,20 +162,17 @@ async def readdir(
     accessor: GDriveAccessor,
     path_spec: PathSpec,
     entry: FileStat | None = None,
-    limit: int | None = None,
 ) -> list[FileStat] | DirListing:
     """A folder's children, each as ``stat`` answers it.
 
     The mount root lists the scoped folder, or My Drive and the Shared
     Drives the account sees; any other folder is listed by the id its
-    parent's listing named. Past a walk's ``limit`` Drive is paged no
-    further, and the listing is partial.
+    parent's listing named.
 
     Args:
         accessor (GDriveAccessor): Drive accessor.
         path_spec (PathSpec): the folder.
         entry (FileStat | None): what is at the folder.
-        limit (int | None): the most entries a walk can still keep.
     """
     target = path_spec.dir if path_spec.pattern else path_spec
     if not target.vfs_path.strip("/"):
@@ -191,13 +188,9 @@ async def readdir(
         folder_id = entry.extra["file_id"]
         drive_id = entry.extra.get("drive_id")
     drive = accessor.drive
-    files = await drive.list_files(
-        folder_id=folder_id,
-        drive_id=drive_id,
-        **({} if limit is None else {"limit": limit}),
-    )
+    files = await drive.list_files(folder_id=folder_id, drive_id=drive_id)
     rows = [stat_from_item(f) for f in files]
-    complete = limit is None or len(files) < limit
+    complete = True
     if folder_id == "root" and not target.vfs_path.strip("/"):
         # Shared Drive enumeration is best-effort: if the account can't list
         # them (missing scope, API error, network), still return My Drive
@@ -228,7 +221,7 @@ async def readdir(
     # Deterministic vfs order: glob expansion and walkers follow readdir
     # order, so sort by rendered filename (Drive returns modifiedTime desc).
     rows.sort(key=lambda row: row.name)
-    # A root whose Shared Drives could not be listed is short, as is a
-    # folder cut at a walk's limit: kept as rows, either would pin a
-    # short listing as the whole folder until it expired.
+    # A root whose Shared Drives could not be listed is short: kept as
+    # rows, it would pin a My-Drive-only root as the whole listing until
+    # it expired, hiding Shared Drives after the cause clears.
     return rows if complete else DirListing(rows, partial=True)

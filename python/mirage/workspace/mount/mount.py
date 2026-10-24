@@ -243,11 +243,17 @@ def _taken(
         fn (Callable[..., Any]): the function about to run.
         kwargs (dict[str, Any]): the call's keywords.
     """
-    target = fn.func if isinstance(fn, functools.partial) else fn
-    names = _parameters(getattr(target, "__func__", target))
+    bound = fn.func if isinstance(fn, functools.partial) else fn
+    target = getattr(bound, "__func__", bound)
+    names = _parameters(target)
     listing = name in ("readdir", "read_tree")
     if names is None:
-        return {k: v for k, v in kwargs.items() if not listing or k != "limit"}
+        named = "limit" in inspect.signature(target).parameters
+        return {
+            k: v
+            for k, v in kwargs.items()
+            if not listing or k != "limit" or named
+        }
     exempt = {"index", "limit"} if listing else {"index"}
     unknown = sorted(set(kwargs) - names - exempt)
     if unknown:

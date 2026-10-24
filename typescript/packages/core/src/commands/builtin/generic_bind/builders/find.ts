@@ -65,7 +65,7 @@ export function findWalk(
       const whole = files.answers('read_tree') && (options.maxDepth ?? null) === null
       const [readdir, stat] = treeWalk<string[], FileStat>(
         whole ? files.readTree : undefined,
-        (p) => files.readdir(p),
+        files.readdir,
         files.stat,
       )
       const home = bounded && mounts !== undefined ? landingRoot(mounts, links, root.virtual) : null

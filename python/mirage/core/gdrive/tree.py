@@ -159,7 +159,7 @@ async def tree(
         entry (FileStat | None): what is at the directory.
         limit (int | None): the most entries a walk can still keep.
     """
-    listed = await readdir(accessor, path, entry, limit)
+    listed = await readdir(accessor, path, entry)
     if isinstance(listed, DirListing):
         return None
     found: dict[str, FileStat] = {}

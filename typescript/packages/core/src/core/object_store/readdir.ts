@@ -47,7 +47,9 @@ export function makeReaddir<A extends Accessor, C>(driver: ObjectStoreDriver<A, 
     // When called from resolveGlob with a pattern (e.g. *.txt), use
     // path.directory for the listing. Direct callers (ls, ops) pass
     // pattern=null so path.virtual is used. The store lists in key order, so
-    // a walk's limit stops it at the first names.
+    // a walk's limit stops it at the first names, once it has listed past
+    // where a kept file could still prove a directory (`b` then `b/`) or a
+    // later revision.
     const rawPath = rawPathOf(path.pattern !== null ? path.dir : path)
     const kpfx = driver.keyPrefixOf(accessor)
     const pfx = kp.applyDir(kpfx, rawPath)
@@ -57,22 +59,31 @@ export function makeReaddir<A extends Accessor, C>(driver: ObjectStoreDriver<A, 
     const times = new Map<string, string>()
     let sawKey = false
     let cut = false
+    let past = ''
     const { conn, close } = await driver.connect(accessor)
     try {
       for await (const child of driver.listChildren(conn, pfx)) {
         sawKey = true
         if (child.kind === 'marker') continue
         const key = '/' + kp.strip(kpfx, child.key)
+        if (!names.has(key) && limit !== undefined) {
+          if (!cut && names.size >= limit) {
+            cut = true
+            for (const k of names) {
+              if (!dirKeys.has(k) && compareCodePoints(k + '/', past) > 0) past = k + '/'
+            }
+          }
+          if (cut) {
+            if (compareCodePoints(child.kind === 'd' ? key + '/' : key, past) > 0) break
+            continue
+          }
+        }
         names.add(key)
         if (child.kind === 'd') {
           dirKeys.add(key)
         } else {
           sizes.set(key, child.size ?? null)
           times.set(key, child.modified ?? '')
-        }
-        if (limit !== undefined && names.size >= limit) {
-          cut = true
-          break
         }
       }
       if (!sawKey && rstripSlash(rawPath) !== '') {
