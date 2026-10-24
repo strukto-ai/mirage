@@ -107,9 +107,19 @@ describe.skipIf(skip)('core/redis ops', () => {
     )
   })
 
+  // An append of bytes is one APPEND, so appends in flight at once all land,
+  // as two `>>` writers' lines do.
+  it('racing appends of bytes all land', async () => {
+    await write(acc, spec('/log'), new Uint8Array())
+    const parts = Array.from({ length: 20 }, (_, i) => `${String(i)}\n`)
+    await Promise.all(parts.map((part) => write(acc, spec('/log'), ENC.encode(part), true)))
+    const got = DEC.decode((await store.getFile('/log')) ?? new Uint8Array())
+    expect(got.split(/(?<=\n)/).sort()).toEqual([...parts].sort())
+  })
+
   // A file another appender creates after the stream found it missing keeps
   // that appender's bytes: the stream creates it with APPEND, not a SET.
-  it('writeStream keeps the bytes of a racing create', async () => {
+  it('a streamed append keeps the bytes of a racing create', async () => {
     store.hasFile = async (path: string): Promise<boolean> => {
       await store.appendFile(path, ENC.encode('theirs\n'))
       return false

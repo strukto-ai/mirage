@@ -14,7 +14,7 @@
 
 import { beforeEach, describe, expect, it } from 'vitest'
 import { commandsFor } from '@struktoai/mirage-core/workspace/mount/backends'
-import { VFSName } from '@struktoai/mirage-core/types'
+import { PathSpec, VFSName } from '@struktoai/mirage-core/types'
 import type { SSHAccessor } from '../../accessor/ssh.ts'
 import { type FakeSftp, makeFakeAccessor } from '../../../tests/core/ssh/_test_utils.ts'
 import type { SSHConfig } from './config.ts'
@@ -93,5 +93,31 @@ describe('SSHVFS storageLocation', () => {
   it("is each login's own under a relative root", () => {
     expect(location('ada', 'data')).not.toBe(location('bob', 'data'))
     expect(location('ada', 'data')).toBe(location('ada', 'data/'))
+  })
+})
+
+describe('SSHVFS write', () => {
+  // The mount asks for an atomic write of bytes as it does of a stream, and
+  // either is staged and renamed into place whole.
+  it('stages an atomic write of bytes', async () => {
+    state.dirs.set('/data', {})
+    state.files.set('/data/a', { data: new TextEncoder().encode('old'), attrs: { mode: 0o100640 } })
+    const vfs = makeVfs(state)
+    const sftp = await vfs.accessor.sftp()
+    const renamed: string[] = []
+    const rename = sftp.rename.bind(sftp)
+    sftp.ext_openssh_rename = (src: string, dst: string, cb: (err?: Error | null) => void) => {
+      renamed.push(dst)
+      rename(src, dst, cb)
+    }
+    await vfs.write(
+      PathSpec.fromStrPath('/data/a'),
+      new TextEncoder().encode('new'),
+      undefined,
+      {},
+      true,
+    )
+    expect(renamed).toEqual(['/data/a'])
+    expect(new TextDecoder().decode(state.files.get('/data/a')?.data)).toBe('new')
   })
 })

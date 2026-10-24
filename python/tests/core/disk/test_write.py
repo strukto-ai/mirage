@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import os
+
 import pytest
 
 from mirage.accessor.disk import DiskAccessor
@@ -176,3 +178,23 @@ async def test_stream_append_and_atomic_mode(tmp_path):
     assert target.stat().st_mode & 0o777 == 0o640
     await write(accessor, path, b"!", append=True)
     assert target.read_bytes() == b"oldnew!"
+
+
+# Bytes under ``atomic`` are staged and renamed over the file, as a stream
+# is, so no reader sees it half written: a link to the old file keeps the
+# old bytes, and the file keeps its mode.
+@pytest.mark.asyncio
+async def test_an_atomic_write_of_bytes_replaces_the_file_whole(tmp_path):
+    target = tmp_path / "file"
+    target.write_bytes(b"old")
+    target.chmod(0o640)
+    os.link(target, tmp_path / "held")
+    await write(
+        DiskAccessor(tmp_path),
+        PathSpec.from_str_path("/file", vfs_path="file"),
+        b"new",
+        atomic=True,
+    )
+    assert target.read_bytes() == b"new"
+    assert (tmp_path / "held").read_bytes() == b"old"
+    assert target.stat().st_mode & 0o777 == 0o640

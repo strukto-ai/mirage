@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { readFile, symlink, writeFile, readdir, chmod, stat } from 'node:fs/promises'
+import { readFile, symlink, writeFile, readdir, chmod, stat, link } from 'node:fs/promises'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { DiskAccessor } from '../../accessor/disk.ts'
@@ -106,6 +106,20 @@ describe('streamed disk output', () => {
     expect((await stat(target)).mode & 0o777).toBe(0o640)
     await write(accessor, spec('/file'), new TextEncoder().encode('!'), true)
     expect(await readFile(target, 'utf8')).toBe('oldnew!')
+  })
+
+  // Bytes under `atomic` are staged and renamed over the file, as a stream
+  // is, so no reader sees it half written: a link to the old file keeps the
+  // old bytes, and the file keeps its mode.
+  it('replaces the file whole on an atomic write of bytes', async () => {
+    const target = join(root, 'file')
+    await writeFile(target, 'old')
+    await chmod(target, 0o640)
+    await link(target, join(root, 'held'))
+    await write(accessor, spec('/file'), new TextEncoder().encode('new'), false, undefined, true)
+    expect(await readFile(target, 'utf8')).toBe('new')
+    expect(await readFile(join(root, 'held'), 'utf8')).toBe('old')
+    expect((await stat(target)).mode & 0o777).toBe(0o640)
   })
 })
 

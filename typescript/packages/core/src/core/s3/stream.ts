@@ -13,7 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { rawPathOf } from '../../utils/key_prefix.ts'
-import { concat } from '../../utils/bytes.ts'
+import { rechunk, sliceStream } from '../../io/stream.ts'
+import { materialize } from '../../io/types.ts'
 import { recordStream, revisionFor } from '../../observe/context.ts'
 import { VFSName, type PathSpec } from '../../types.ts'
 import type { S3Accessor } from '../../accessor/s3.ts'
@@ -62,19 +63,9 @@ export async function* readStream(
       | undefined
     if (body === undefined) return
     if (typeof body[Symbol.asyncIterator] === 'function') {
-      let pending: Uint8Array = new Uint8Array(0)
-      for await (const chunk of body) {
-        pending = concat([pending, chunk])
-        while (pending.byteLength >= DEFAULT_CHUNK_SIZE) {
-          const piece = pending.slice(0, DEFAULT_CHUNK_SIZE)
-          if (rec !== null) rec.bytes += piece.byteLength
-          yield piece
-          pending = pending.slice(DEFAULT_CHUNK_SIZE)
-        }
-      }
-      if (pending.byteLength > 0) {
-        if (rec !== null) rec.bytes += pending.byteLength
-        yield pending
+      for await (const piece of rechunk(body, DEFAULT_CHUNK_SIZE)) {
+        if (rec !== null) rec.bytes += piece.byteLength
+        yield piece
       }
     }
   } catch (err) {
@@ -116,30 +107,5 @@ export async function readRange(
   if (accessor.config.presignedUrlProvider === undefined) {
     return read(accessor, path, size === null ? { offset } : { offset, size })
   }
-  return windowFromStream(accessor, path, offset, size)
-}
-
-async function windowFromStream(
-  accessor: S3Accessor,
-  path: PathSpec,
-  offset: number,
-  size: number | null,
-): Promise<Uint8Array> {
-  const end = size === null ? Number.POSITIVE_INFINITY : offset + size
-  const pieces: Uint8Array[] = []
-  let seen = 0
-  for await (const chunk of readStream(accessor, path)) {
-    const chunkEnd = seen + chunk.byteLength
-    if (chunkEnd > offset) {
-      const piece = chunk.subarray(
-        Math.max(0, offset - seen),
-        Math.min(chunk.byteLength, end - seen),
-      )
-      pieces.push(piece)
-    }
-    seen = chunkEnd
-    // Breaking here returns the generator, which cancels the body reader.
-    if (seen >= end) break
-  }
-  return concat(pieces)
+  return materialize(sliceStream(readStream(accessor, path), offset, size))
 }

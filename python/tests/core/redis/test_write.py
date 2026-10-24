@@ -263,6 +263,19 @@ async def test_a_streamed_append_keeps_another_appenders_bytes(accessor):
     assert await accessor.store.get_file("/log") == b"start\nmine\ntheirs\n"
 
 
+# An append of bytes is one APPEND, so appends in flight at once all land,
+# as two `>>` writers' lines do.
+@pytest.mark.asyncio
+async def test_racing_appends_of_bytes_all_land(accessor):
+    await accessor.store.set_file("/log", b"")
+    parts = [f"{i}\n".encode() for i in range(20)]
+    await asyncio.gather(
+        *(write(accessor, _spec("log"), part, append=True) for part in parts)
+    )
+    got = await accessor.store.get_file("/log")
+    assert sorted(got.splitlines(keepends=True)) == sorted(parts)
+
+
 # A file another appender creates after the stream found it missing keeps
 # that appender's bytes: the stream creates it with APPEND, not a SET.
 @pytest.mark.asyncio
