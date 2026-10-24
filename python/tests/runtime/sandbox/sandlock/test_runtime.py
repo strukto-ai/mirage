@@ -164,6 +164,21 @@ async def test_close_reaps_an_active_cli(cli):
     assert not runtime._children
 
 
+# A run still finding `sandlock` when the runtime closes starts nothing,
+# so no child outlives the close.
+@pytest.mark.asyncio
+async def test_a_run_still_finding_sandlock_at_close_never_starts(cli):
+    runtime = SandlockRuntime()
+    task = asyncio.create_task(
+        runtime.execute([], ["wait"], _cwd(cli), kind="process")
+    )
+    await asyncio.sleep(0)
+    await runtime.close()
+    with pytest.raises(RuntimeError, match="sandlock: the runtime is closed"):
+        await asyncio.wait_for(task, timeout=5)
+    assert not runtime._children
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "profile",

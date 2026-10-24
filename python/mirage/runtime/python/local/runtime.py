@@ -121,6 +121,7 @@ class LocalRuntime(PythonRuntime[None], ProcessExecutorMixin[None]):
         else:
             self._python = sys.executable
         self._children: Children = {}
+        self._closed = False
 
     async def version(self, env: dict[str, str]) -> RunResult:
         # Session loader variables can execute code before --version is read.
@@ -207,6 +208,10 @@ class LocalRuntime(PythonRuntime[None], ProcessExecutorMixin[None]):
         output: OutputFn | None = None,
         errors: OutputFn | None = None,
     ) -> RunResult:
+        # A run still finding its program when the runtime closed starts
+        # nothing, so no child outlives the close.
+        if self._closed:
+            raise RuntimeError(f"{self.name}: the runtime is closed")
         return await run_program(
             program,
             None,
@@ -222,4 +227,5 @@ class LocalRuntime(PythonRuntime[None], ProcessExecutorMixin[None]):
 
     async def close(self) -> None:
         """Kill every child still running, so none outlives the workspace."""
+        self._closed = True
         await close_children(self._children)

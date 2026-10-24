@@ -16,7 +16,7 @@ import type { ByteSource } from '@struktoai/mirage-core/io/types'
 import type { ChildProcess } from 'node:child_process'
 import { accessSync, constants } from 'node:fs'
 import { access, stat } from 'node:fs/promises'
-import { isAbsolute } from 'node:path'
+import { isAbsolute, resolve } from 'node:path'
 import { debuglog } from 'node:util'
 import { fsStrerror } from '@struktoai/mirage-core/errors/fs'
 import { resolveHome, type RuntimeOptions } from '@struktoai/mirage-core/runtime/config'
@@ -112,20 +112,24 @@ export class LocalRuntime extends PythonRuntime<undefined> implements ProcessExe
   private readonly home: string | undefined
   private readonly python: Promise<string>
   private readonly children = new Set<ChildProcess>()
+  private closed = false
 
   constructor(options: RuntimeOptions = {}) {
     super(options, LOCAL_CONFIG_KEYS)
     this.home = resolveHome(this.config as LocalConfig, LOCAL_HOME_ENV)
-    // Found on the PATH as the entry is built, without blocking the loop;
-    // a run that finds nothing there says so.
-    this.python = onHostPath(this.home ?? 'python3')
+    // A configured path is read from the directory the entry is built in,
+    // as Python's twin makes it absolute; a name is found on the PATH as
+    // the entry is built, without blocking the loop, and a run that finds
+    // nothing there says so.
+    const home = this.home?.includes('/') === true ? resolve(this.home) : this.home
+    this.python = onHostPath(home ?? 'python3')
     void this.python.catch(() => undefined)
-    if (this.home?.includes('/') === true) {
+    if (home?.includes('/') === true) {
       try {
-        accessSync(this.home, constants.X_OK)
+        accessSync(home, constants.X_OK)
       } catch (cause) {
         throw new Error(
-          `local python interpreter not found: ${this.home} (from the runtime entry's config home or ${LOCAL_HOME_ENV})`,
+          `local python interpreter not found: ${home} (from the runtime entry's config home or ${LOCAL_HOME_ENV})`,
           { cause },
         )
       }
@@ -215,6 +219,9 @@ export class LocalRuntime extends PythonRuntime<undefined> implements ProcessExe
     output?: OutputFn,
     errors?: OutputFn,
   ): Promise<RunResult> {
+    // A run still finding its program when the runtime closed starts
+    // nothing, so no child outlives the close.
+    if (this.closed) return Promise.reject(new Error(`${this.name}: the runtime is closed`))
     return runProgram(program, null, argv, stdin, {
       env: { ...(this.config as LocalConfig).env, ...env },
       children: this.children,
@@ -227,6 +234,7 @@ export class LocalRuntime extends PythonRuntime<undefined> implements ProcessExe
   }
 
   override close(): Promise<void> {
+    this.closed = true
     return closeChildren(this.children)
   }
 }

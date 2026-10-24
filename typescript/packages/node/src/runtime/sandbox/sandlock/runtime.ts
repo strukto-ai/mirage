@@ -42,6 +42,7 @@ export class SandlockRuntime
   readonly [PROCESS_EXECUTOR] = true as const
   declare config: SandlockConfig
   private readonly children = new Set<ChildProcess>()
+  private closed = false
 
   constructor(options: RuntimeOptions<SandlockConfig> = {}) {
     super(options, [EXTERNAL_COMMANDS], SANDLOCK_CONFIG_KEYS)
@@ -93,6 +94,9 @@ export class SandlockRuntime
     // find a `sandlock` the session wrote.
     const executable = await onHostPath('sandlock')
     if (!isAbsolute(executable)) throw new Error(SANDLOCK_HINT)
+    // A run still finding `sandlock` when the runtime closed starts
+    // nothing, so no child outlives the close.
+    if (this.closed) throw new Error(`${this.name}: the runtime is closed`)
     const wrapper = ['run', ...this.policyArgv(), '--clean-env']
     for (const [key, value] of Object.entries({ ...this.config.env, ...ctx.env }))
       wrapper.push('--env', `${key}=${value}`)
@@ -109,6 +113,7 @@ export class SandlockRuntime
   }
 
   override close(): Promise<void> {
+    this.closed = true
     return closeChildren(this.children)
   }
 }

@@ -62,6 +62,7 @@ class SandlockRuntime(
                 "sandlock: mount_type needs a remote pipe transport"
             )
         self._children: Children = {}
+        self._closed = False
 
     def policy_argv(self) -> list[str]:
         argv: list[str] = []
@@ -119,6 +120,10 @@ class SandlockRuntime(
         found = await asyncio.to_thread(shutil.which, "sandlock")
         if found is None:
             raise RuntimeError(SANDLOCK_HINT)
+        # A run still finding `sandlock` when the runtime closed starts
+        # nothing, so no child outlives the close.
+        if self._closed:
+            raise RuntimeError(f"{self.name}: the runtime is closed")
         wrapper = ["run", *self.policy_argv(), "--clean-env"]
         for key, value in {**self.config.env, **(ctx.env or {})}.items():
             wrapper += ["--env", f"{key}={value}"]
@@ -137,4 +142,5 @@ class SandlockRuntime(
 
     async def close(self) -> None:
         """Kill every child still running, so none outlives the workspace."""
+        self._closed = True
         await close_children(self._children)
