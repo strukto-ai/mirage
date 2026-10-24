@@ -13,6 +13,8 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import re
+from collections.abc import AsyncIterator
+from contextlib import aclosing
 
 from mirage.commands.spec.usage import usage_hint
 from mirage.context import program_invocation
@@ -24,7 +26,10 @@ from mirage.shell.bytes import decode_text, encode_text, utf8_locale
 from mirage.shell.errors import ArithError
 from mirage.view.types import SessionView
 from mirage.workspace.executor.builtins.constants import TARGET_RE
-from mirage.workspace.executor.builtins.printf.format import run_printf
+from mirage.workspace.executor.builtins.printf.format import (
+    printf_output,
+    run_printf,
+)
 from mirage.workspace.executor.builtins.shared import fail, result
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
 from mirage.workspace.session import SessionState
@@ -195,41 +200,65 @@ async def handle_printf(
                 "printf", f"printf: missing operand\n{usage_hint('printf')}\n"
             )
         return fail("printf", _USAGE, 2)
-    output, stderr, exit_code, _stopped = await run_printf(
-        args[0],
-        args[1:],
-        program,
-        program and "POSIXLY_CORRECT" in env_snapshot(session),
-        utf8_locale(env_snapshot(session)),
+    posix = program and "POSIXLY_CORRECT" in env_snapshot(session)
+    utf8 = utf8_locale(env_snapshot(session))
+    if target is None or parsed is None:
+        return _printed(args[0], args[1:], program, posix, utf8)
+    output, stderr, exit_code = await run_printf(
+        args[0], args[1:], program, posix, utf8
     )
     errors = decode_text(stderr)
-    if target is not None and parsed is not None:
-        base, subscript = parsed.group(1), parsed.group(2)
-        text = decode_text(output).partition("\0")[0]
+    base, subscript = parsed.group(1), parsed.group(2)
+    text = decode_text(output).partition("\0")[0]
+    try:
+        status = await assign_element(session, view, base, subscript, text)
+    except PolicyDenied as exc:
+        return fail("printf", errors + f"bash: {exc.strerror}\n")
+    except ArithError as exc:
+        # The target carries `-i` and the formatted text does not
+        # evaluate, which ends the shell as any `-i` value does.
+        signal = exc.signal("printf", fatal=True)
+        signal.stderr = encode_text(errors) + signal.stderr
+        raise signal from exc
+    if status == "readonly":
+        return fail("printf", errors + f"bash: {base}: readonly variable\n")
+    if status == "denied":
+        return fail("printf", errors + f"bash: {base}: permission denied\n")
+    if status != "ok":
+        return fail(
+            "printf", errors + f"bash: {target}: bad array subscript\n"
+        )
+    return result("printf", exit_code=exit_code, stderr=errors)
+
+
+def _printed(
+    fmt: str, args: list[str], program: bool, posix: bool, utf8: bool
+) -> Result:
+    """``printf`` to stdout: the output streams as the engine drains it,
+    and the status and stderr settle once it ends.
+
+    Args:
+        fmt (str): the format.
+        args (list[str]): its arguments.
+        program (bool): run as the program, not the builtin.
+        posix (bool): ``POSIXLY_CORRECT`` is set.
+        utf8 (bool): the locale is UTF-8.
+    """
+    io = IOResult()
+    node = ExecutionNode(command="printf")
+
+    async def output() -> AsyncIterator[bytes]:
         try:
-            status = await assign_element(session, view, base, subscript, text)
-        except PolicyDenied as exc:
-            return fail("printf", errors + f"bash: {exc.strerror}\n")
-        except ArithError as exc:
-            # The target carries `-i` and the formatted text does not
-            # evaluate, which ends the shell as any `-i` value does.
-            signal = exc.signal("printf", fatal=True)
-            signal.stderr = encode_text(errors) + signal.stderr
-            raise signal from exc
-        if status == "readonly":
-            return fail(
-                "printf", errors + f"bash: {base}: readonly variable\n"
-            )
-        if status == "denied":
-            return fail(
-                "printf", errors + f"bash: {base}: permission denied\n"
-            )
-        if status != "ok":
-            return fail(
-                "printf", errors + f"bash: {target}: bad array subscript\n"
-            )
-        return result("printf", exit_code=exit_code, stderr=errors)
-    return result("printf", output, exit_code, errors)
+            async with aclosing(
+                printf_output(fmt, args, io, program, posix, utf8)
+            ) as parts:
+                async for part in parts:
+                    yield part
+        finally:
+            node.exit_code = io.exit_code
+            node.stderr = io.stderr if isinstance(io.stderr, bytes) else b""
+
+    return output(), io, node
 
 
 async def printf_builtin(call: BuiltinCall) -> Result:

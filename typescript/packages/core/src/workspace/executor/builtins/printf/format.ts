@@ -12,20 +12,29 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { IOResult } from '../../../../io/types.ts'
 import { YieldBudget } from '../../../../io/yield_budget.ts'
-import { openStream } from '../../../../rs/stream.ts'
+import { closeStream, openStream } from '../../../../rs/stream.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
 import { concat } from '../../../../utils/bytes.ts'
 
-/** Format raw shell arguments through the shared bounded engine. */
-export async function runPrintf(
+/**
+ * Format raw shell arguments through the shared bounded engine. The output
+ * comes out as the engine drains it, one bounded step at a time, so a wide
+ * field or a long reuse of the format is never held whole, and a reader that
+ * stops early stops the engine. Each step's stderr is added to `io` as it
+ * comes, after what is there, so an output limit's notice stays; the status
+ * settles once the output ends. Mirrors Python's printf_output.
+ */
+export async function* printfOutput(
   fmt: string,
   args: string[],
+  io: IOResult,
   program = false,
   posix = false,
   utf8 = false,
   signal?: AbortSignal,
-): Promise<[Uint8Array, Uint8Array, number, boolean]> {
+): AsyncGenerator<Uint8Array> {
   const stream = await openStream('printf', {
     mode: program ? 'program' : 'builtin',
     posix,
@@ -46,15 +55,43 @@ export async function runPrintf(
       stream.endInput(index)
       await budget.run()
     }
-    const output = [stream.finish()]
-    const errors = [stream.takeStderr()]
+    const output = stream.finish()
+    addStderr(io, stream.takeStderr())
+    if (output.byteLength > 0) yield output
     while (stream.busy()) {
-      output.push(stream.drain())
-      errors.push(stream.takeStderr())
+      const part = stream.drain()
+      addStderr(io, stream.takeStderr())
+      if (part.byteLength > 0) yield part
       await budget.run()
     }
-    return [concat(output), concat(errors), stream.status(), stream.done()]
+    io.exitCode = stream.status()
   } finally {
-    stream.close()
+    await closeStream(stream)
   }
+}
+
+function addStderr(io: IOResult, err: Uint8Array): void {
+  if (err.byteLength === 0) return
+  io.stderr = io.stderr instanceof Uint8Array ? concat([io.stderr, err]) : err
+}
+
+/** `printfOutput` collected whole, for `printf -v`. Mirrors Python's run_printf. */
+export async function runPrintf(
+  fmt: string,
+  args: string[],
+  program = false,
+  posix = false,
+  utf8 = false,
+  signal?: AbortSignal,
+): Promise<[Uint8Array, Uint8Array, number]> {
+  const io = new IOResult()
+  const output: Uint8Array[] = []
+  for await (const part of printfOutput(fmt, args, io, program, posix, utf8, signal)) {
+    output.push(part)
+  }
+  return [
+    concat(output),
+    io.stderr instanceof Uint8Array ? io.stderr : new Uint8Array(),
+    io.exitCode,
+  ]
 }
