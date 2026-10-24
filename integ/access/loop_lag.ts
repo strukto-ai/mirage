@@ -12,12 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-// How late a deployed server's event loop ran over an access run.
-// serve.ts runs a LoopLag when ACCESS_LOOP_LAG names a file and writes its
-// summary there as the server stops, for run.py to report; the server
-// itself neither keeps nor serves it. loop_lag.py is the Python twin.
 import { PerformanceObserver, performance } from 'node:perf_hooks'
 
+/**
+ * The file serve.ts writes a LoopLag summary to as the server stops, for
+ * run.py to report; the server itself neither keeps nor serves it.
+ */
 export const LOOP_LAG_ENV = 'ACCESS_LOOP_LAG'
 const INTERVAL_MS = 20
 const STALL_MS = 50
