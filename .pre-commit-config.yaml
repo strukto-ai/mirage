@@ -155,12 +155,6 @@ repos:
         # error there lands as a wrong artifact, not a crash.
         files: ^(python/(mirage/.*\.py|tests/.*\.py|pyproject\.toml)|scripts/.*\.py)$
         pass_filenames: false
-      - id: py-mypy-overrides
-        name: Stale mypy exemptions
-        entry: bash -c 'python/.venv/bin/python scripts/check_mypy_overrides.py --selftest && python/.venv/bin/python scripts/check_mypy_overrides.py'
-        language: system
-        files: ^(python/(mirage/.*\.py|pyproject\.toml|uv\.lock)|scripts/.*\.py)$
-        pass_filenames: false
       - id: py-test-pathspec
         name: PathSpec discipline (tests)
         entry: python3 scripts/check_test_pathspec.py

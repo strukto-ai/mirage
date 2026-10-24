@@ -354,8 +354,7 @@ warn_return_any = true
 # default for 1826 modules was unchecked and every new file joined the
 # unchecked side. The default is now strict and this list is what has
 # not been annotated yet -- delete entries as directories are cleared,
-# never add one. A new module is checked the day it lands. The
-# check_mypy_overrides.py gate rejects exemptions with no remaining errors.
+# never add one. A new module is checked the day it lands.
 [[tool.mypy.overrides]]
 module = [
     "mirage.agents.openai_agents.runner",

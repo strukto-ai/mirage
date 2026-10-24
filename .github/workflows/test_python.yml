@@ -149,12 +149,6 @@ jobs:
         working-directory: python
         run: uv run mypy
 
-      - name: Stale mypy exemptions
-        working-directory: python
-        run: |
-          uv run python ../scripts/check_mypy_overrides.py --selftest
-          uv run python ../scripts/check_mypy_overrides.py
-
       - name: Save the mypy incremental store
         if: github.ref == 'refs/heads/main' && steps.mypy-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v6

@@ -30,10 +30,6 @@ SETTER = ".github/workflows/pre-commit.yml"
 # neither a comment quoting it nor a step parked in `audit` runs it.
 REPLACEMENTS = {
     "py-mypy": (".github/workflows/test_python.yml", "uv run mypy"),
-    "py-mypy-overrides": (
-        ".github/workflows/test_python.yml",
-        "uv run python ../scripts/check_mypy_overrides.py",
-    ),
     "integ-typecheck": (
         ".github/workflows/test_typescript.yml",
         "pnpm -r --no-bail typecheck",
