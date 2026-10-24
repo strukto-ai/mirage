@@ -2,6 +2,7 @@ mod awk;
 mod base64;
 mod bc;
 mod cmp;
+mod column;
 mod comm;
 mod compress;
 mod cut;
@@ -15,11 +16,14 @@ mod grep;
 mod join;
 mod jq;
 pub mod nfs;
+mod nl;
 mod numfmt;
+mod paste;
 mod printf;
 mod records;
 mod reflow;
 mod regex;
+mod rev;
 mod rg;
 mod rg_format;
 mod rg_grapheme;
@@ -302,6 +306,7 @@ pub fn open(kind: &str, config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
         "base64" => base64::open(config),
         "bc" => bc::open(config),
         "cmp" => cmp::open(config),
+        "column" => column::open(config),
         "comm" => comm::open(config),
         "compress" => compress::open(config),
         "cut" => cut::open(config),
@@ -316,9 +321,12 @@ pub fn open(kind: &str, config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
         "jq_scan" => jq::open_scan(config),
         "jq_format" => jq::open_format(config),
         "jq_decode" => jq::open_decode(config),
+        "nl" => nl::open(config),
         "numfmt" => numfmt::open(config),
+        "paste" => paste::open(config),
         "printf" => printf::open(config),
         "regex" => regex::stream::open(config),
+        "rev" => rev::open(config),
         "rg" => rg::open(config),
         "rg_format" => rg_format::open(config),
         "seq" => seq::open(config),

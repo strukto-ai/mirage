@@ -12,10 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { AsyncLineIterator } from '../../../io/async_line_iterator.ts'
-import type { ByteSource } from '../../../io/types.ts'
-import { concat } from '../../../utils/bytes.ts'
-
 // Split text into lines (or `sep`-terminated records), dropping the
 // terminator's trailing empty entry. Mirrors Python's
 // mirage.commands.builtin.utils.lines.split_lines.
@@ -43,36 +39,4 @@ export function splitLinesKeepends(text: string): string[] {
   }
   if (start < text.length) lines.push(text.slice(start))
   return lines
-}
-
-// Several files' contents as one, each file's last line ended: a file whose
-// last record lacks its separator still ends it where the next file begins,
-// as GNU's record readers (column) see it. Mirrors Python's join_file_lines.
-export function joinFileLines(chunks: readonly Uint8Array[], sep: number): Uint8Array {
-  const parts: Uint8Array[] = []
-  chunks.forEach((chunk, index) => {
-    parts.push(chunk)
-    const last = chunk[chunk.byteLength - 1]
-    if (index < chunks.length - 1 && chunk.byteLength > 0 && last !== sep) {
-      parts.push(Uint8Array.of(sep))
-    }
-  })
-  return concat(parts)
-}
-
-export async function* mapStream(
-  source: ByteSource,
-  transform: (line: Uint8Array) => Uint8Array,
-): AsyncIterable<Uint8Array> {
-  const reader = new AsyncLineIterator(source)
-  try {
-    for (;;) {
-      const [line, ended] = await reader.readUntil(10)
-      if (line.length === 0 && !ended) return
-      const data = transform(line)
-      yield ended ? concat([data, Uint8Array.of(10)]) : data
-    }
-  } finally {
-    await reader.discard()
-  }
 }
