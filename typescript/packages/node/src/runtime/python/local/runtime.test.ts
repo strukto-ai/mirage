@@ -170,6 +170,37 @@ describe('LocalRuntime', () => {
     }
   })
 
+  // A configured path is read from the directory the entry is built in,
+  // as the Python twin makes it absolute.
+  it('runs a home configured as a relative path', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'mirage-local-relative-'))
+    const python = execFileSync('python3', ['-c', 'import sys; print(sys.executable)'], {
+      encoding: 'utf8',
+    }).trim()
+    await mkdir(join(dir, 'bin'))
+    await symlink(python, join(dir, 'bin', 'python'))
+    const cwd = vi.spyOn(process, 'cwd').mockReturnValue(dir)
+    try {
+      const rt = new LocalRuntime({ config: { home: './bin/python' } })
+      cwd.mockRestore()
+      const result = await interpret(rt, { code: 'print("relative")' })
+      expect(DEC.decode(result.stdout)).toBe('relative\n')
+      await rt.close()
+    } finally {
+      cwd.mockRestore()
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  // A run still finding its interpreter when the runtime closes starts
+  // nothing, so no child outlives the close.
+  it('starts no interpreter once the runtime has closed', async () => {
+    const rt = new LocalRuntime()
+    const run = interpret(rt, { code: 'import time; time.sleep(30)' })
+    await rt.close()
+    await expect(run).rejects.toThrow('local: the runtime is closed')
+  })
+
   it('reports versions in READ mode without running Python startup code', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'mirage-local-version-'))
     const marker = join(dir, 'startup-ran')

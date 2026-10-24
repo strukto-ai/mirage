@@ -437,7 +437,7 @@ export class SandboxMounts {
           if (diagnostic) {
             const said = error instanceof Error ? error.message : String(error)
             throw new Error(
-              `${this.runtime}: sshfs did not mount ${prefix}: ${said}; CLI: ${diagnostic}`,
+              `${this.runtime}: sshfs did not mount ${prefix}: ${said}; helper said: ${diagnostic}`,
               { cause: error },
             )
           }
@@ -449,7 +449,7 @@ export class SandboxMounts {
           try {
             const written = await this.run(`cat ${log}`, signal)
             const logText = said(written.stdout)
-            if (logText) reason = logText + (diagnostic ? `; CLI: ${diagnostic}` : '')
+            if (logText) reason = logText + (diagnostic ? `; helper said: ${diagnostic}` : '')
           } catch (error) {
             signal?.throwIfAborted()
             console.debug(`${this.runtime}: reading the sshfs log failed`, error)

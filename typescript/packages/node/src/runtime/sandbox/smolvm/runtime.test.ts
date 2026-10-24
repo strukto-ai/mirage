@@ -23,7 +23,7 @@ import { buildRuntime } from '@struktoai/mirage-core/runtime/table'
 import { EXEC_ID, EXEC_PRELUDE } from '@struktoai/mirage-core/runtime/sandbox/constants'
 import type { RuntimeOptions } from '@struktoai/mirage-core/runtime/config'
 import { materialize, type ByteSource } from '@struktoai/mirage-core/io/types'
-import type { OutputFn } from '@struktoai/mirage-core/runtime/types'
+import type { OutputFn, RunResult } from '@struktoai/mirage-core/runtime/types'
 import { isLineExecutor, isProcessExecutor } from '@struktoai/mirage-core/runtime/mixin'
 import { describe, expect, it, vi } from 'vitest'
 import type { SmolvmConfig } from './config.ts'
@@ -31,12 +31,6 @@ import { SmolvmRuntime } from './runtime.ts'
 
 const DEC = new TextDecoder()
 const ENC = new TextEncoder()
-
-interface SmolvmResult {
-  stdout: Uint8Array
-  stderr: Uint8Array
-  code: number
-}
 
 class FakeSmolvmRuntime extends SmolvmRuntime {
   state = 'running'
@@ -48,7 +42,7 @@ class FakeSmolvmRuntime extends SmolvmRuntime {
     args: string[],
     source: ByteSource | null = null,
     output: OutputFn | null = null,
-  ): Promise<SmolvmResult> {
+  ): Promise<RunResult> {
     const stdin = source === null ? null : await materialize(source)
     this.calls.push([args.slice(), stdin])
     if (args[1] === 'status') {
@@ -56,20 +50,20 @@ class FakeSmolvmRuntime extends SmolvmRuntime {
         return Promise.resolve({
           stdout: ENC.encode(this.statusStdout),
           stderr: new Uint8Array(),
-          code: this.statusCode,
+          exitCode: this.statusCode,
         })
       }
       if (this.statusCode !== 0) {
         return Promise.resolve({
           stdout: new Uint8Array(),
           stderr: ENC.encode("machine 'vm' not found"),
-          code: this.statusCode,
+          exitCode: this.statusCode,
         })
       }
       return Promise.resolve({
         stdout: ENC.encode(JSON.stringify({ name: 'vm', state: this.state })),
         stderr: new Uint8Array(),
-        code: 0,
+        exitCode: 0,
       })
     }
     const script = args[args.length - 1] ?? ''
@@ -78,7 +72,7 @@ class FakeSmolvmRuntime extends SmolvmRuntime {
     return {
       stdout: output === null ? stdout : new Uint8Array(),
       stderr: ENC.encode('warn'),
-      code: 0,
+      exitCode: 0,
     }
   }
 }
@@ -106,7 +100,7 @@ describe('SmolvmRuntime', () => {
     ['a frozen machine', { state: 'frozen' }, 'frozen fork base'],
     ['a created machine', { state: 'created' }, 'never been started'],
     ['an unknown state', { state: 'quiesced' }, 'state: quiesced'],
-    ['a CLI error', { statusCode: 1 }, "machine 'vm' not found"],
+    ['a status error', { statusCode: 1 }, "machine 'vm' not found"],
     ['unreadable json', { statusStdout: 'not json' }, 'unreadable json'],
   ])('connect names why it refuses %s', async (_name, fake, refusal) => {
     const runtime = Object.assign(makeRuntime(), fake)

@@ -106,10 +106,28 @@ def test_registry_declares_process_and_shell_without_language_or_workspace_fs():
         SandlockRuntime(config={"home": "python3"})
 
 
+# A relative PATH entry is the host's directory, never the session's: a
+# `sandlock` there must not stand in for the wrapper and run unconfined.
+@pytest.mark.asyncio
+async def test_a_sandlock_in_the_session_directory_never_runs(
+    cli, monkeypatch
+):
+    session = cli / "session"
+    session.mkdir()
+    planted = session / "sandlock"
+    planted.write_text("#!/bin/sh\necho planted\n")
+    planted.chmod(0o755)
+    monkeypatch.setenv("PATH", f".{os.pathsep}{cli}")
+    result = await SandlockRuntime().execute(
+        [], ["node"], _cwd(session), kind="process"
+    )
+    assert json.loads(result.stdout)["argv"][-2:] == ["--", "node"]
+
+
 @pytest.mark.asyncio
 async def test_missing_cli_fails_loud(tmp_path, monkeypatch):
     monkeypatch.setenv("PATH", str(tmp_path))
-    with pytest.raises(FileNotFoundError, match="sandlock CLI on PATH"):
+    with pytest.raises(RuntimeError, match="needs `sandlock` on PATH"):
         await SandlockRuntime().execute(
             [], ["node"], Context(), kind="process"
         )
@@ -143,6 +161,21 @@ async def test_close_reaps_an_active_cli(cli):
         await runtime.close()
         result = await task
     assert result.exit_code != 0
+    assert not runtime._children
+
+
+# A run still finding `sandlock` when the runtime closes starts nothing,
+# so no child outlives the close.
+@pytest.mark.asyncio
+async def test_a_run_still_finding_sandlock_at_close_never_starts(cli):
+    runtime = SandlockRuntime()
+    task = asyncio.create_task(
+        runtime.execute([], ["wait"], _cwd(cli), kind="process")
+    )
+    await asyncio.sleep(0)
+    await runtime.close()
+    with pytest.raises(RuntimeError, match="sandlock: the runtime is closed"):
+        await asyncio.wait_for(task, timeout=5)
     assert not runtime._children
 
 

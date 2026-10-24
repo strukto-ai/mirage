@@ -14,9 +14,9 @@
 
 import type { ByteSource } from '@struktoai/mirage-core/io/types'
 import type { ChildProcess } from 'node:child_process'
-import { accessSync, constants, statSync } from 'node:fs'
+import { accessSync, constants } from 'node:fs'
 import { access, stat } from 'node:fs/promises'
-import { delimiter, isAbsolute, resolve } from 'node:path'
+import { isAbsolute, resolve } from 'node:path'
 import { debuglog } from 'node:util'
 import { fsStrerror } from '@struktoai/mirage-core/errors/fs'
 import { resolveHome, type RuntimeOptions } from '@struktoai/mirage-core/runtime/config'
@@ -30,46 +30,9 @@ import type { Context } from '@struktoai/mirage-core/commands/config'
 import type { PathSpec } from '@struktoai/mirage-core/types'
 import type { OutputFn, Program, RunResult } from '@struktoai/mirage-core/runtime/types'
 import { LOCAL_CONFIG_KEYS, type LocalConfig } from './config.ts'
-import { closeChildren, cwdRefusal, runCli } from '../../sandbox/cli.ts'
+import { closeChildren, cwdRefusal, onHostPath, runProgram } from '../../sandbox/program.ts'
 
 const LOCAL_HOME_ENV = 'MIRAGE_LOCAL_HOME'
-
-/**
- * Where the host's own PATH finds an interpreter, as Python's `shutil.which`
- * finds the twin's, as an absolute path: the program's environment carries
- * no host PATH, so the lookup cannot be left to spawn. An empty entry is the
- * current directory, as for the shell. A name with a slash is taken as
- * given, and one the PATH lacks too, so spawn reports it missing. On
- * Windows a name without one of `PATHEXT`'s suffixes is tried with each.
- */
-function onHostPath(name: string): string {
-  if (name.includes('/')) return name
-  const suffixes =
-    process.platform === 'win32'
-      ? (process.env.PATHEXT ?? '.COM;.EXE;.BAT;.CMD').split(';').filter((s) => s !== '')
-      : []
-  const names =
-    suffixes.length === 0 || suffixes.some((s) => name.toLowerCase().endsWith(s.toLowerCase()))
-      ? [name]
-      : suffixes.map((s) => name + s)
-  for (const dir of (process.env.PATH ?? '').split(delimiter)) {
-    for (const each of names) {
-      const candidate = resolve(dir, each)
-      try {
-        if (statSync(candidate, { throwIfNoEntry: false })?.isFile() !== true) continue
-        accessSync(candidate, constants.X_OK)
-        return candidate
-      } catch (err) {
-        const code = (err as NodeJS.ErrnoException).code
-        if (code === undefined) throw err
-        // Not usable here (not executable, an unreadable entry): the next
-        // entry may be. Opt-in (NODE_DEBUG=mirage), on stderr.
-        debuglog('mirage')('local: %s is not usable: %s', candidate, code)
-      }
-    }
-  }
-  return name
-}
 
 /**
  * Whether a resolved program is an executable file. Asynchronous, as is
@@ -146,36 +109,44 @@ export class LocalRuntime extends PythonRuntime<undefined> implements ProcessExe
   // is the base default; declared here so the claim is explicit at the
   // one builtin runtime that voids a world's sandbox claim.
   override readonly reach = 'process'
-  private readonly python: string
+  private readonly home: string | undefined
+  private readonly python: Promise<string>
   private readonly children = new Set<ChildProcess>()
+  private closed = false
 
   constructor(options: RuntimeOptions = {}) {
     super(options, LOCAL_CONFIG_KEYS)
-    const chosen = resolveHome(this.config as LocalConfig, LOCAL_HOME_ENV)
-    this.python = onHostPath(chosen ?? 'python3')
-    if (chosen !== undefined) {
+    this.home = resolveHome(this.config as LocalConfig, LOCAL_HOME_ENV)
+    // A configured path is read from the directory the entry is built in,
+    // as Python's twin makes it absolute; a name is found on the PATH as
+    // the entry is built, without blocking the loop, and a run that finds
+    // nothing there says so.
+    const home = this.home?.includes('/') === true ? resolve(this.home) : this.home
+    this.python = onHostPath(home ?? 'python3')
+    void this.python.catch(() => undefined)
+    if (home?.includes('/') === true) {
       try {
-        accessSync(this.python, constants.X_OK)
+        accessSync(home, constants.X_OK)
       } catch (cause) {
         throw new Error(
-          `local python interpreter not found: ${chosen} (from the runtime entry's config home or ${LOCAL_HOME_ENV})`,
+          `local python interpreter not found: ${home} (from the runtime entry's config home or ${LOCAL_HOME_ENV})`,
           { cause },
         )
       }
     }
   }
 
-  override version(_env: Record<string, string>, signal?: AbortSignal): Promise<RunResult> {
+  override async version(_env: Record<string, string>, signal?: AbortSignal): Promise<RunResult> {
     // Session loader variables can execute code before --version is read.
-    return this.spawnProgram(this.python, ['--version'], {}, null, signal)
+    return this.spawnProgram(await this.interpreter(), ['--version'], {}, null, signal)
   }
 
-  interpret(_engine: undefined, program: Program, ctx: Context): Promise<RunResult> {
+  async interpret(_engine: undefined, program: Program, ctx: Context): Promise<RunResult> {
     // Honoring the init switches is just handing them back to the real
     // interpreter, which is why this tier gets them exactly right
     // (sys.flags included) where an in-process engine cannot.
     return this.spawnProgram(
-      this.python,
+      await this.interpreter(),
       [...initArgv(ctx.flags), '-c', prepareSource(program, ctx.cwd), ...program.args],
       ctx.env ?? {},
       program.stdin,
@@ -205,7 +176,7 @@ export class LocalRuntime extends PythonRuntime<undefined> implements ProcessExe
       const refusal = await unrunnable(name, program)
       if (refusal !== null) return refusal
     } else {
-      program = onHostPath(name)
+      program = await onHostPath(name)
       if (!(await isExecutable(program))) return notRun(`${name}: command not found\n`, 127)
     }
     // A program that cannot start (its script's interpreter missing, say)
@@ -226,22 +197,32 @@ export class LocalRuntime extends PythonRuntime<undefined> implements ProcessExe
     })
   }
 
-  private async spawnProgram(
+  /** The interpreter the host PATH found, refused when it found none. */
+  private async interpreter(): Promise<string> {
+    const name = this.home ?? 'python3'
+    const found = await this.python
+    if (!(await isExecutable(found)))
+      throw new Error(
+        `local python interpreter not found: '${name}' (set the ` +
+          `runtime entry's config home or ${LOCAL_HOME_ENV})`,
+      )
+    return found
+  }
+
+  private spawnProgram(
     program: string,
     argv: string[],
     env: Record<string, string>,
     stdin: ByteSource | null,
     signal?: AbortSignal,
     cwd?: string,
-    output?: (chunk: Uint8Array) => Promise<void>,
-    errors?: (chunk: Uint8Array) => Promise<void>,
+    output?: OutputFn,
+    errors?: OutputFn,
   ): Promise<RunResult> {
-    const missing =
-      program === this.python
-        ? `local python interpreter not found: '${this.python}' (set the ` +
-          `runtime entry's config home or ${LOCAL_HOME_ENV})`
-        : null
-    const { stdout, stderr, code } = await runCli(program, missing, argv, stdin, {
+    // A run still finding its program when the runtime closed starts
+    // nothing, so no child outlives the close.
+    if (this.closed) return Promise.reject(new Error(`${this.name}: the runtime is closed`))
+    return runProgram(program, null, argv, stdin, {
       env: { ...(this.config as LocalConfig).env, ...env },
       children: this.children,
       direct: true,
@@ -250,10 +231,10 @@ export class LocalRuntime extends PythonRuntime<undefined> implements ProcessExe
       ...(cwd !== undefined ? { cwd } : {}),
       ...(signal !== undefined ? { signal } : {}),
     })
-    return { stdout, stderr: stderr.length > 0 ? stderr : null, exitCode: code }
   }
 
   override close(): Promise<void> {
+    this.closed = true
     return closeChildren(this.children)
   }
 }

@@ -17,7 +17,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { buildRuntime } from '@struktoai/mirage-core/runtime/table'
 import type { RuntimeOptions } from '@struktoai/mirage-core/runtime/config'
-import type { OutputFn, SandboxPipe } from '@struktoai/mirage-core/runtime/types'
+import type { OutputFn, RunResult, SandboxPipe } from '@struktoai/mirage-core/runtime/types'
 import type { SessionProfile } from '@struktoai/mirage-core/policy/profile'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { MountMode } from '@struktoai/mirage-core/types'
@@ -30,12 +30,6 @@ import { DockerRuntime } from './runtime.ts'
 const DEC = new TextDecoder()
 const ENC = new TextEncoder()
 
-interface DockerResult {
-  stdout: Uint8Array
-  stderr: Uint8Array
-  code: number
-}
-
 class FakeDockerRuntime extends DockerRuntime {
   running = true
   readonly calls: [string[], Uint8Array | null][] = []
@@ -44,14 +38,14 @@ class FakeDockerRuntime extends DockerRuntime {
     args: string[],
     source: ByteSource | null = null,
     output: OutputFn | null = null,
-  ): Promise<DockerResult> {
+  ): Promise<RunResult> {
     const stdin = source === null ? null : await materialize(source)
     this.calls.push([args.slice(), stdin])
     if (args[0] === 'inspect') {
       return Promise.resolve({
-        stdout: ENC.encode(this.running ? 'true\n' : 'false\n'),
+        stdout: ENC.encode(`{"Status": "${this.running ? 'running' : 'exited'}"}`),
         stderr: new Uint8Array(),
-        code: 0,
+        exitCode: 0,
       })
     }
     const script = args[args.length - 1] ?? ''
@@ -60,7 +54,7 @@ class FakeDockerRuntime extends DockerRuntime {
     return {
       stdout: output === null ? stdout : new Uint8Array(),
       stderr: ENC.encode('warn'),
-      code: 0,
+      exitCode: 0,
     }
   }
 }
@@ -77,7 +71,7 @@ describe('DockerRuntime', () => {
   it('connect checks the user container is running', async () => {
     const runtime = makeRuntime()
     await runtime.connect()
-    expect(runtime.calls[0]?.[0]).toEqual(['inspect', '--format', '{{.State.Running}}', 'cid-42'])
+    expect(runtime.calls[0]?.[0]).toEqual(['inspect', '--format', '{{json .State}}', 'cid-42'])
   })
 
   it('connect fails loud on a stopped container', async () => {
@@ -212,12 +206,12 @@ class MountingDockerRuntime extends FakeDockerRuntime {
     args: string[],
     source: ByteSource | null = null,
     output: OutputFn | null = null,
-  ): Promise<DockerResult> {
+  ): Promise<RunResult> {
     if (args[args.length - 1] !== 'cat /proc/mounts') return super.docker(args, source, output)
     const stdin = source === null ? null : await materialize(source)
     this.calls.push([args.slice(), stdin])
     const rows = [...this.table].map(([p, t]) => `src ${p} ${t} rw 0 0\n`).join('')
-    return Promise.resolve({ stdout: ENC.encode(rows), stderr: new Uint8Array(), code: 0 })
+    return Promise.resolve({ stdout: ENC.encode(rows), stderr: new Uint8Array(), exitCode: 0 })
   }
 
   override openPipe(command: string): Promise<SandboxPipe> {

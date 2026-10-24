@@ -20,9 +20,9 @@ import pytest
 
 from mirage import RAMVFS, MountMode, Workspace
 from mirage.io.types import materialize
-from mirage.runtime.sandbox import cli
+from mirage.runtime.sandbox import program
 from mirage.runtime.sandbox.docker import DockerRuntime
-from mirage.runtime.types import SandboxPipe
+from mirage.runtime.types import RunResult, SandboxPipe
 
 
 class FakeDockerRuntime(DockerRuntime):
@@ -35,12 +35,13 @@ class FakeDockerRuntime(DockerRuntime):
         stdin = await materialize(stdin) if stdin is not None else None
         self.calls.append((list(args), stdin))
         if args[0] == "inspect":
-            return (b"true\n" if self.running else b"false\n"), b"", 0
+            state = b"running" if self.running else b"exited"
+            return RunResult(b'{"Status": "' + state + b'"}', None, 0)
         script = args[-1]
         if output is not None:
             await output(f"out:{script}".encode())
-            return b"", b"warn", 0
-        return f"out:{script}".encode(), b"warn", 0
+            return RunResult(b"", b"warn", 0)
+        return RunResult(f"out:{script}".encode(), b"warn", 0)
 
 
 @pytest.mark.asyncio
@@ -48,7 +49,7 @@ async def test_connect_checks_the_users_container_is_running():
     runtime = FakeDockerRuntime(config={"container": "cid-42"})
     await runtime.connect()
     args, _ = runtime.calls[0]
-    assert args == ["inspect", "--format", "{{.State.Running}}", "cid-42"]
+    assert args == ["inspect", "--format", "{{json .State}}", "cid-42"]
 
 
 @pytest.mark.asyncio
@@ -102,13 +103,13 @@ def test_mount_type_is_one_of_ssh_fuse_both():
 @pytest.mark.asyncio
 async def test_a_pipe_holds_docker_exec_open_byte_for_byte(monkeypatch):
     spawned: list[tuple[str, ...]] = []
-    spawn = cli._spawn
+    spawn = program._spawn
 
     async def as_cat(executable, args, **kwargs):
         spawned.append((executable, *args))
         return await spawn("cat", [], **kwargs)
 
-    monkeypatch.setattr(cli, "_spawn", as_cat)
+    monkeypatch.setattr(program, "_spawn", as_cat)
     runtime = DockerRuntime(config={"container": "cid-42"})
     pipe = await runtime.open_pipe("exec sshfs x y")
     assert spawned == [
@@ -143,7 +144,7 @@ class MountingDockerRuntime(FakeDockerRuntime):
             rows = "".join(
                 f"src {p} {t} rw 0 0\n" for p, t in self.table.items()
             )
-            return rows.encode(), b"", 0
+            return RunResult(rows.encode(), None, 0)
         return await super()._docker(args, stdin, output)
 
     async def open_pipe(self, command):

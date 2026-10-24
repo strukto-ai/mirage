@@ -26,6 +26,7 @@ from mirage.runtime.mixin import LineExecutorMixin, ProcessExecutorMixin
 from mirage.runtime.sandbox.apple_container import AppleContainerRuntime
 from mirage.runtime.sandbox.constants import EXEC_ID, EXEC_PRELUDE
 from mirage.runtime.table import build_runtime
+from mirage.runtime.types import RunResult
 from mirage.types import PathSpec
 from mirage.vfs.ram import RAMVFS
 
@@ -49,14 +50,14 @@ class FakeAppleContainerRuntime(AppleContainerRuntime):
         self.calls.append((list(args), stdin))
         if args[0] == "inspect":
             if self.inspect_stdout is not None:
-                return self.inspect_stdout, b"", self.inspect_code
+                return RunResult(self.inspect_stdout, b"", self.inspect_code)
             if self.inspect_code != 0:
-                return (
+                return RunResult(
                     b"",
                     f"Error: container not found: {args[1]}".encode(),
                     self.inspect_code,
                 )
-            return (
+            return RunResult(
                 json.dumps(
                     [
                         {
@@ -74,8 +75,8 @@ class FakeAppleContainerRuntime(AppleContainerRuntime):
         script = args[-1]
         if output is not None:
             await output(f"out:{script}".encode())
-            return b"", b"warn", 0
-        return f"out:{script}".encode(), b"warn", 0
+            return RunResult(b"", b"warn", 0)
+        return RunResult(f"out:{script}".encode(), b"warn", 0)
 
     def inspected(self) -> list[str]:
         return [args[1] for args, _ in self.calls if args[0] == "inspect"]

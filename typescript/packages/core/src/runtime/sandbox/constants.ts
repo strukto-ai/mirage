@@ -13,7 +13,38 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { singleQuote } from '../../utils/quote.ts'
+import type { ProcessHandle } from '../../process/handle.ts'
 import type { MountType } from '../types.ts'
+
+/**
+ * Why a sandbox cannot take a line, named by the state its status command
+ * reported. `hints` holds the provider's advice per state, with `{name}`
+ * standing for `name`; `otherwise` is the advice for a state it lacks.
+ * Mirrors Python's `not_running_hint`.
+ */
+export function notRunningHint(
+  noun: string,
+  name: string,
+  state: string,
+  hints: Readonly<Record<string, string>>,
+  otherwise: string | null = null,
+): string {
+  const detail = Object.hasOwn(hints, state) ? hints[state] : undefined
+  if (detail !== undefined)
+    return `${noun} ${name} is not running: ${detail.replaceAll('{name}', name)}`
+  const said = `${noun} ${name} is not running (state: ${state})`
+  return otherwise === null ? said : `${said}; ${otherwise}`
+}
+
+/**
+ * The signal a `kill` stopped `runner` with, when a program may handle it:
+ * null for KILL, or for a run no `kill` stopped, which is killed at once.
+ * Mirrors Python's `stop_signal`.
+ */
+export function stopSignal(runner: ProcessHandle | null): number | null {
+  const signal = runner?.signal ?? null
+  return signal === null || signal === 9 ? null : signal
+}
 
 export const MOUNT_TYPES: readonly MountType[] = ['ssh', 'fuse', 'both']
 
@@ -49,7 +80,7 @@ export const PIPE_SERVER_HINT =
 
 /**
  * Every argv a sandbox runs goes under this POSIX sh prelude, with the
- * cwd as $1: a provider CLI's exec passes `-w /` (`execArgs`), and a
+ * cwd as $1: a provider program's exec passes `-w /` (`execArgs`), and a
  * provider whose exec takes one command line dresses it (`wrapLine`), so
  * no provider's own cwd is used. An exec's `-e` can append to the image's
  * environment rather than replace a name it already sets, `-w` can

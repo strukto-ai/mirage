@@ -23,7 +23,7 @@ import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import type { RuntimeOptions } from '@struktoai/mirage-core/runtime/config'
 import { EXEC_ID, EXEC_PRELUDE } from '@struktoai/mirage-core/runtime/sandbox/constants'
 import { materialize, type ByteSource } from '@struktoai/mirage-core/io/types'
-import type { OutputFn } from '@struktoai/mirage-core/runtime/types'
+import type { OutputFn, RunResult } from '@struktoai/mirage-core/runtime/types'
 import { isLineExecutor, isProcessExecutor } from '@struktoai/mirage-core/runtime/mixin'
 import { describe, expect, it, vi } from 'vitest'
 import type { AppleContainerConfig } from './config.ts'
@@ -32,12 +32,6 @@ import { Workspace } from '../../../workspace.ts'
 
 const DEC = new TextDecoder()
 const ENC = new TextEncoder()
-
-interface ContainerResult {
-  stdout: Uint8Array
-  stderr: Uint8Array
-  code: number
-}
 
 class FakeAppleContainerRuntime extends AppleContainerRuntime {
   states: Record<string, string> = {}
@@ -49,7 +43,7 @@ class FakeAppleContainerRuntime extends AppleContainerRuntime {
     args: string[],
     source: ByteSource | null = null,
     output: OutputFn | null = null,
-  ): Promise<ContainerResult> {
+  ): Promise<RunResult> {
     const stdin = source === null ? null : await materialize(source)
     this.calls.push([args.slice(), stdin])
     if (args[0] === 'inspect') {
@@ -57,14 +51,14 @@ class FakeAppleContainerRuntime extends AppleContainerRuntime {
         return Promise.resolve({
           stdout: ENC.encode(this.inspectStdout),
           stderr: new Uint8Array(),
-          code: this.inspectCode,
+          exitCode: this.inspectCode,
         })
       }
       if (this.inspectCode !== 0) {
         return Promise.resolve({
           stdout: new Uint8Array(),
           stderr: ENC.encode(`Error: container not found: ${args[1] ?? ''}`),
-          code: this.inspectCode,
+          exitCode: this.inspectCode,
         })
       }
       return Promise.resolve({
@@ -78,7 +72,7 @@ class FakeAppleContainerRuntime extends AppleContainerRuntime {
           ]),
         ),
         stderr: new Uint8Array(),
-        code: 0,
+        exitCode: 0,
       })
     }
     const script = args[args.length - 1] ?? ''
@@ -87,7 +81,7 @@ class FakeAppleContainerRuntime extends AppleContainerRuntime {
     return {
       stdout: output === null ? stdout : new Uint8Array(),
       stderr: ENC.encode('warn'),
-      code: 0,
+      exitCode: 0,
     }
   }
 
@@ -229,7 +223,7 @@ describe.skipIf(process.platform === 'win32')('AppleContainerRuntime against a r
     expect(result.exitCode).toBe(0)
   })
 
-  it('a missing CLI names how to install it', async () => {
+  it('a missing program names how to install it', async () => {
     await withFakeCli(null, async () => {
       const runtime = new AppleContainerRuntime({ config: { container: 'box' } })
       await expect(runtime.execLine('pwd', null, {}, '/')).rejects.toThrow('brew install container')

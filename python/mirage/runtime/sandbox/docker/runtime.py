@@ -15,10 +15,16 @@
 
 from mirage.io.types import ByteSource
 from mirage.runtime.sandbox.base import RemoteSandbox
-from mirage.runtime.sandbox.cli import exec_args, open_cli_pipe, run_cli
+from mirage.runtime.sandbox.constants import not_running_hint
 from mirage.runtime.sandbox.docker.config import DockerConfig
-from mirage.runtime.sandbox.docker.constants import DOCKER_CLI_HINT
+from mirage.runtime.sandbox.docker.constants import DOCKER_HINT, RUNNING_STATE
 from mirage.runtime.sandbox.mixin import PipeTransportMixin
+from mirage.runtime.sandbox.program import (
+    exec_args,
+    open_program_pipe,
+    reported_state,
+    run_program,
+)
 from mirage.runtime.types import OutputFn, RunResult, SandboxPipe
 
 
@@ -26,7 +32,7 @@ class DockerRuntime(RemoteSandbox, PipeTransportMixin):
     """A container the user runs as a whole-line runtime.
 
     You start the container yourself; mirage only connects to it and
-    execs lines. The docker CLI is the transport (Docker Desktop,
+    execs lines. The `docker` program is the transport (Docker Desktop,
     colima, or a podman alias all work), so there is no SDK dependency
     and no daemon socket wiring; each line is one `docker exec -i`
     with the merged environment, the session cwd, real stdin, and
@@ -47,11 +53,11 @@ class DockerRuntime(RemoteSandbox, PipeTransportMixin):
         stdin: ByteSource | None = None,
         output: OutputFn | None = None,
         errors: OutputFn | None = None,
-    ) -> tuple[bytes, bytes, int]:
-        """One docker CLI invocation; the seam tests override."""
-        return await run_cli(
+    ) -> RunResult:
+        """Run `docker` once; the seam tests override."""
+        return await run_program(
             "docker",
-            DOCKER_CLI_HINT,
+            DOCKER_HINT,
             args,
             stdin,
             output=output,
@@ -59,21 +65,14 @@ class DockerRuntime(RemoteSandbox, PipeTransportMixin):
         )
 
     async def connect(self) -> None:
-        stdout, stderr, code = await self._docker(
-            [
-                "inspect",
-                "--format",
-                "{{.State.Running}}",
-                self.config.container,
-            ]
+        container = self.config.container
+        status = await self._docker(
+            ["inspect", "--format", "{{json .State}}", container]
         )
-        if code != 0:
+        state = reported_state(status, "docker inspect", ("Status",))
+        if state != RUNNING_STATE:
             raise RuntimeError(
-                f"docker inspect failed: {stderr.decode().strip()}"
-            )
-        if stdout.decode().strip() != "true":
-            raise RuntimeError(
-                f"container {self.config.container} is not running"
+                not_running_hint("container", container, state, {})
             )
 
     async def _exec_argv(
@@ -85,7 +84,7 @@ class DockerRuntime(RemoteSandbox, PipeTransportMixin):
         output: OutputFn | None,
         errors: OutputFn | None,
     ) -> RunResult:
-        stdout, stderr, code = await self._docker(
+        return await self._docker(
             exec_args(
                 ("exec", "-i"), (self.config.container,), env, cwd, argv
             ),
@@ -93,10 +92,9 @@ class DockerRuntime(RemoteSandbox, PipeTransportMixin):
             output=output,
             errors=errors,
         )
-        return RunResult(stdout=stdout, stderr=stderr, exit_code=code)
 
     async def open_pipe(self, command: str) -> SandboxPipe:
-        return await open_cli_pipe(
+        return await open_program_pipe(
             "docker",
             exec_args(
                 ("exec", "-i"),

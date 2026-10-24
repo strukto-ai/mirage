@@ -13,14 +13,17 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import json
 import logging
 import os
 import sys
-from collections.abc import Awaitable, Callable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from contextvars import Context
 
+import aiofiles.os
+
 from mirage.context.session_context import current_caller
-from mirage.io.stream import async_chain, close_quietly
+from mirage.io.stream import close_quietly, feed
 from mirage.io.types import ByteSource
 from mirage.runtime.sandbox.constants import (
     EXEC_PRELUDE,
@@ -28,8 +31,9 @@ from mirage.runtime.sandbox.constants import (
     PIPE_DIAGNOSTIC_WAIT_SECONDS,
     STOP_GRACE_SECONDS,
     STOP_POLL_SECONDS,
+    stop_signal,
 )
-from mirage.runtime.types import RunResult, SandboxPipe
+from mirage.runtime.types import OutputFn, RunResult, SandboxPipe
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +48,7 @@ Children = dict[
 STREAM_LIMIT = 2**16
 
 
-async def run_cli(
+async def run_program(
     executable: str,
     hint: str | None,
     args: list[str],
@@ -53,10 +57,10 @@ async def run_cli(
     cwd: str | None = None,
     env: dict[str, str] | None = None,
     children: Children | None = None,
-    output: Callable[[bytes], Awaitable[None]] | None = None,
-    errors: Callable[[bytes], Awaitable[None]] | None = None,
+    output: OutputFn | None = None,
+    errors: OutputFn | None = None,
     direct: bool = False,
-) -> tuple[bytes, bytes, int]:
+) -> RunResult:
     """One process run to its end: its output and its exit status.
 
     The child leads a process group of its own, and a cancelled call
@@ -83,10 +87,10 @@ async def run_cli(
             inherits this process's.
         children (Children | None): where the child is kept while it
             runs, for ``close_children``.
-        output (Callable[[bytes], Awaitable[None]] | None): receives
-            stdout as it arrives instead of returning it.
-        errors (Callable[[bytes], Awaitable[None]] | None): receives
-            stderr as it arrives instead of returning it.
+        output (OutputFn | None): receives stdout as it arrives instead
+            of returning it.
+        errors (OutputFn | None): receives stderr as it arrives instead
+            of returning it.
         direct (bool): the child is the program itself, not a client
             that runs it elsewhere and exits on its own terms (``docker
             exec`` answers a TERM with 0 and leaves the program running).
@@ -116,27 +120,20 @@ async def run_cli(
         children[process] = (transport, loop)
     assert process.stdout is not None and process.stderr is not None
 
-    async def feed() -> None:
-        if process.stdin is None:
-            return
-        try:
-            async for chunk in async_chain(
-                [stdin] if stdin is not None else []
-            ):
-                process.stdin.write(chunk)
-                await process.stdin.drain()
-        except asyncio.CancelledError:
-            if process.returncode is None:
-                raise
-            logger.debug(
-                "process %d ended before consuming stdin", process.pid
-            )
-        except (BrokenPipeError, ConnectionResetError):
-            logger.debug("process %d closed stdin", process.pid)
-        finally:
-            process.stdin.close()
+    writer = process.stdin
 
-    feeding = asyncio.create_task(feed())
+    async def write(chunk: bytes) -> None:
+        assert writer is not None
+        writer.write(chunk)
+        await writer.drain()
+
+    async def end() -> None:
+        if writer is not None:
+            writer.close()
+
+    feeding = asyncio.create_task(
+        feed(stdin, write, end, lambda: process.returncode is not None)
+    )
 
     async def reap() -> None:
         await process.wait()
@@ -144,17 +141,21 @@ async def run_cli(
             feeding.cancel()
 
     waiting = asyncio.create_task(reap())
-    reading = asyncio.create_task(_read_into(process.stdout, output))
-    erring = asyncio.create_task(_read_into(process.stderr, errors))
+    reading = asyncio.create_task(read_into(process.stdout, output))
+    erring = asyncio.create_task(read_into(process.stderr, errors))
     try:
         stdout, stderr, _, _ = await asyncio.gather(
             reading, erring, feeding, waiting
         )
     except BaseException:
         runner = current_caller().process
-        signum = runner.signal if runner is not None else None
+        signum = stop_signal(runner)
         try:
-            if signum is not None and signum != 9:
+            # The input ends first, as a pipe whose writer went away
+            # does: a handler reading it to the end gets there in the
+            # grace instead of waiting on a source that never ends.
+            await end()
+            if signum is not None:
                 for reader in (reading, erring):
                     reader.cancel()
                 await asyncio.gather(reading, erring, return_exceptions=True)
@@ -166,7 +167,7 @@ async def run_cli(
         if (
             direct
             and runner is not None
-            and signum not in (None, 9)
+            and signum is not None
             and code is not None
             and code >= 0
         ):
@@ -179,24 +180,28 @@ async def run_cli(
         await asyncio.gather(
             feeding, reading, erring, waiting, return_exceptions=True
         )
+        await end()
         await close_quietly(stdin)
         if children is not None:
             children.pop(process, None)
     code = process.returncode if process.returncode is not None else 1
-    return stdout, stderr, 128 - code if code < 0 else code
+    return RunResult(
+        stdout=stdout,
+        stderr=stderr or None,
+        exit_code=128 - code if code < 0 else code,
+    )
 
 
-async def _read_into(
-    stream: asyncio.StreamReader,
-    sink: Callable[[bytes], Awaitable[None]] | None,
+async def read_into(
+    stream: asyncio.StreamReader, sink: OutputFn | None
 ) -> bytes:
-    """Read a child's output to its end, handing each chunk to ``sink``
-    as it arrives, or keeping it all for the caller without one.
+    """Read a program's output to its end, handing each chunk to
+    ``sink`` as it arrives, or keeping it all for the caller without one.
 
     Args:
-        stream (asyncio.StreamReader): the child's stdout or stderr.
-        sink (Callable[[bytes], Awaitable[None]] | None): where each
-            chunk goes; None returns the whole output.
+        stream (asyncio.StreamReader): the program's stdout or stderr.
+        sink (OutputFn | None): where each chunk goes; None returns the
+            whole output.
     """
     parts: list[bytes] = []
     while chunk := await stream.read(STREAM_LIMIT):
@@ -246,6 +251,33 @@ async def _spawn(
     return asyncio.subprocess.Process(transport, protocol, loop), transport
 
 
+def reported_state(
+    result: RunResult, command: str, path: Sequence[str | int]
+) -> str:
+    """The state a sandbox's status command printed as JSON, at ``path``.
+
+    Args:
+        result (RunResult): the status command's run.
+        command (str): the command, for the message (``docker inspect``).
+        path (Sequence[str | int]): the keys and indexes down to the state.
+
+    Raises:
+        RuntimeError: the command failed, or its JSON holds no state.
+    """
+    if result.exit_code != 0:
+        said = (result.stderr or b"").decode().strip()
+        raise RuntimeError(f"{command} failed: {said}")
+    try:
+        state = json.loads(result.stdout)
+        for key in path:
+            state = state[key]
+    except (ValueError, LookupError, TypeError) as exc:
+        raise RuntimeError(
+            f"{command} returned unreadable json: {exc}"
+        ) from exc
+    return str(state)
+
+
 def exec_args(
     head: Sequence[str],
     tail: Sequence[str],
@@ -253,8 +285,8 @@ def exec_args(
     cwd: str | None,
     argv: Sequence[str],
 ) -> list[str]:
-    """A sandbox CLI's exec arguments, the same for every CLI that runs
-    a command in a box: the CLI's own words, ``/`` as the working
+    """A sandbox program's exec arguments, the same for every program that runs
+    a command in a box: the program's own words, ``/`` as the working
     directory and each variable as ``-e``, the target or ``--``, then
     the command.
 
@@ -265,7 +297,7 @@ def exec_args(
     given, for a helper pipe.
 
     Args:
-        head (Sequence[str]): the CLI's exec words before the working
+        head (Sequence[str]): the program's exec words before the working
             directory (``exec -i``, smolvm's ``machine exec --name M``).
         tail (Sequence[str]): what follows the flags: the target, or
             ``--`` where the command is a trailing var arg, so a line
@@ -284,7 +316,7 @@ def exec_args(
     return [*args, *argv]
 
 
-def cwd_refusal(name: str, cwd: str) -> RunResult | None:
+async def cwd_refusal(name: str, cwd: str) -> RunResult | None:
     """Refuse a host program whose working directory this host lacks.
 
     The session cwd is a workspace path; running elsewhere instead would
@@ -294,7 +326,7 @@ def cwd_refusal(name: str, cwd: str) -> RunResult | None:
         name (str): the program, for the message.
         cwd (str): the session's working directory.
     """
-    if os.path.isdir(cwd):
+    if await aiofiles.os.path.isdir(cwd):
         return None
     return RunResult(
         stdout=b"",
@@ -314,7 +346,7 @@ def kill_tree(process: asyncio.subprocess.Process, signum: int = 9) -> None:
     answers ESRCH; either way nothing in it is left to signal.
 
     Args:
-        process (asyncio.subprocess.Process): a child ``run_cli`` started.
+        process (asyncio.subprocess.Process): a child ``run_program`` started.
         signum (int): the signal, KILL (9) by default.
     """
     if sys.platform == "win32":
@@ -336,7 +368,7 @@ async def end_tree(process: asyncio.subprocess.Process, signum: int) -> None:
     caller's to kill (``stop_tree``). Mirrors TypeScript's ``endTree``.
 
     Args:
-        process (asyncio.subprocess.Process): a child ``run_cli`` started,
+        process (asyncio.subprocess.Process): a child ``run_program`` started,
             with nothing else reading its output.
         signum (int): the signal.
     """
@@ -387,7 +419,7 @@ def stop_tree(
     kill holding. Mirrors TypeScript's ``stopTree``.
 
     Args:
-        process (asyncio.subprocess.Process): a child ``run_cli`` started.
+        process (asyncio.subprocess.Process): a child ``run_program`` started.
         transport (asyncio.SubprocessTransport): the child's transport.
     """
     kill_tree(process)
@@ -421,7 +453,7 @@ async def close_children(children: Children) -> None:
     )
 
 
-async def open_cli_pipe(executable: str, args: list[str]) -> SandboxPipe:
+async def open_program_pipe(executable: str, args: list[str]) -> SandboxPipe:
     """Hold a byte transport to a sandbox helper until stopped.
 
     The tail of what the helper says on stderr is kept for
@@ -431,7 +463,7 @@ async def open_cli_pipe(executable: str, args: list[str]) -> SandboxPipe:
     would otherwise hold open.
 
     Args:
-        executable (str): the provider's CLI.
+        executable (str): the provider's program.
         args (list[str]): arguments starting a foreground helper.
     """
     child, transport = await _spawn(

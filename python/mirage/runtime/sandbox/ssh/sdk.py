@@ -14,9 +14,9 @@
 
 from typing import Any
 
-ASYNCSSH_HINT = (
-    "the ssh runtime needs asyncssh; install with: pip install mirage-ai[ssh]"
-)
+from mirage.runtime.constants import sdk_install_hint
+
+ASYNCSSH_HINT = sdk_install_hint("ssh", "asyncssh")
 
 connect: Any
 try:

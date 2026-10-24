@@ -12,17 +12,22 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import json
 
 from mirage.io.types import ByteSource
 from mirage.runtime.sandbox.base import RemoteSandbox
-from mirage.runtime.sandbox.cli import exec_args, open_cli_pipe, run_cli
+from mirage.runtime.sandbox.constants import not_running_hint
 from mirage.runtime.sandbox.mixin import PipeTransportMixin
+from mirage.runtime.sandbox.program import (
+    exec_args,
+    open_program_pipe,
+    reported_state,
+    run_program,
+)
 from mirage.runtime.sandbox.smolvm.config import SmolvmConfig
 from mirage.runtime.sandbox.smolvm.constants import (
     RUNNING_STATE,
-    SMOLVM_CLI_HINT,
-    not_running_hint,
+    SMOLVM_HINT,
+    STATE_HINTS,
 )
 from mirage.runtime.types import OutputFn, RunResult, SandboxPipe
 
@@ -31,7 +36,7 @@ class SmolvmRuntime(RemoteSandbox, PipeTransportMixin):
     """A microVM the user runs as a whole-line runtime.
 
     You start the machine yourself; mirage only connects to it and
-    execs lines. The smolvm CLI is the transport, so there is no SDK
+    execs lines. The `smolvm` program is the transport, so there is no SDK
     dependency and no daemon socket wiring; each line is one `smolvm
     machine exec` with the merged environment, the session cwd, real
     stdin, and separated stderr.
@@ -57,11 +62,11 @@ class SmolvmRuntime(RemoteSandbox, PipeTransportMixin):
         stdin: ByteSource | None = None,
         output: OutputFn | None = None,
         errors: OutputFn | None = None,
-    ) -> tuple[bytes, bytes, int]:
-        """One smolvm CLI invocation; the seam tests override."""
-        return await run_cli(
+    ) -> RunResult:
+        """Run `smolvm` once; the seam tests override."""
+        return await run_program(
             "smolvm",
-            SMOLVM_CLI_HINT,
+            SMOLVM_HINT,
             args,
             stdin,
             output=output,
@@ -75,23 +80,14 @@ class SmolvmRuntime(RemoteSandbox, PipeTransportMixin):
         this family never manages sandbox lifecycle, so a machine that
         is not already running is an error rather than a boot.
         """
-        stdout, stderr, code = await self._smolvm(
-            ["machine", "status", "--name", self.config.machine, "--json"]
+        machine = self.config.machine
+        status = await self._smolvm(
+            ["machine", "status", "--name", machine, "--json"]
         )
-        if code != 0:
-            raise RuntimeError(
-                f"smolvm machine status failed: {stderr.decode().strip()}"
-            )
-        try:
-            status = json.loads(stdout)
-        except json.JSONDecodeError as exc:
-            raise RuntimeError(
-                f"smolvm machine status returned unreadable json: {exc}"
-            ) from exc
-        state = status.get("state")
+        state = reported_state(status, "smolvm machine status", ("state",))
         if state != RUNNING_STATE:
             raise RuntimeError(
-                not_running_hint(self.config.machine, str(state))
+                not_running_hint("machine", machine, state, STATE_HINTS)
             )
 
     async def _exec_argv(
@@ -103,16 +99,15 @@ class SmolvmRuntime(RemoteSandbox, PipeTransportMixin):
         output: OutputFn | None,
         errors: OutputFn | None,
     ) -> RunResult:
-        stdout, stderr, code = await self._smolvm(
+        return await self._smolvm(
             exec_args(self._head(), ("--",), env, cwd, argv),
             stdin=stdin,
             output=output,
             errors=errors,
         )
-        return RunResult(stdout=stdout, stderr=stderr, exit_code=code)
 
     async def open_pipe(self, command: str) -> SandboxPipe:
-        return await open_cli_pipe(
+        return await open_program_pipe(
             "smolvm",
             exec_args(
                 self._head(), ("--",), {}, None, ("/bin/sh", "-c", command)

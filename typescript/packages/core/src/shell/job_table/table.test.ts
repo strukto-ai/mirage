@@ -88,17 +88,10 @@ class GatedStore implements ConsoleStore {
 }
 
 /** A live job whose console appends are parked behind the gate. */
-function gatedJob(table: JobTable, gate: Promise<void>): Job {
-  const job = new Job({
-    id: 1,
-    command: 'deaf',
-    abort: new AbortController(),
-    cwd: '/',
-    console: new JobConsole(new GatedStore(gate)),
-    task: new Promise<void>(() => undefined),
-  })
-  table.load(job)
-  return job
+function gatedJob(gate: Promise<void>): [JobTable, Job] {
+  const jt = new JobTable(() => new JobConsole(new GatedStore(gate)))
+  const abort = new AbortController()
+  return [jt, jt.submit({ command: 'deaf', run: pending(abort), abort, cwd: '/' })]
 }
 
 /** A runner that never finishes on its own; only an abort ends it. */
@@ -347,8 +340,7 @@ describe('JobTable.wait ordering', () => {
     const gate = new Promise<void>((resolve) => {
       open = resolve
     })
-    const jt = new JobTable()
-    const job = gatedJob(jt, gate)
+    const [jt, job] = gatedJob(gate)
     const killP = jt.kill(job.id)
     // kill's synchronous prefix has already flipped the status; the
     // marker appends are parked behind the gate.
@@ -373,8 +365,7 @@ describe('JobTable.wait ordering', () => {
     const gate = new Promise<void>((resolve) => {
       open = resolve
     })
-    const jt = new JobTable()
-    const job = gatedJob(jt, gate)
+    const [jt, job] = gatedJob(gate)
     const killP = jt.kill(job.id)
     expect(job.status).toBe(JobStatus.KILLED)
     let settled = false

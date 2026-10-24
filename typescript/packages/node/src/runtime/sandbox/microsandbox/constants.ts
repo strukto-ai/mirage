@@ -12,14 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-export const MICROSANDBOX_CLI_HINT =
-  'the microsandbox runtime needs the msb CLI on PATH (https://microsandbox.dev); ' +
+export const MICROSANDBOX_HINT =
+  'the microsandbox runtime needs `msb` on PATH (https://microsandbox.dev); ' +
   'start the sandbox before connecting'
 
 export const RUNNING_STATE = 'Running'
 export const INSPECT_TIMEOUT_SECONDS = 10
-
-/** Explain why the configured sandbox cannot take a command. */
-export function notRunningHint(sandbox: string, state: string): string {
-  return `sandbox ${sandbox} is not running (status: ${state}); start it with msb start`
-}

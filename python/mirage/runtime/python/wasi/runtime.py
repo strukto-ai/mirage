@@ -18,6 +18,7 @@ from typing import Any, ClassVar
 
 from mirage.commands.config import Context
 from mirage.runtime.config import RuntimeConfig, memory_limit, resolve_home
+from mirage.runtime.constants import sdk_install_hint
 from mirage.runtime.files import RuntimeFiles
 from mirage.runtime.python.base import PythonRuntime
 from mirage.runtime.python.execution import main_filename, prepare_source
@@ -113,8 +114,9 @@ class WasiRuntime(PythonRuntime[WasmExecution]):
     ) -> None:
         if wasmtime is None:
             raise ImportError(
-                "the wasi runtime requires the 'wasi' extra. Install with: "
-                "pip install mirage-ai[wasi], or select another runtime"
+                sdk_install_hint(
+                    "wasi", "the 'wasi' extra", "select another runtime"
+                )
             )
         super().__init__(captures, config)
         root = resolve_home(self.config, WASI_HOME_ENV)

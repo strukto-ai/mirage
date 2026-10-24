@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
-import json
 from collections.abc import Sequence
 from typing import Any
 
@@ -21,14 +20,20 @@ from mirage.context import get_current_session
 from mirage.io.types import ByteSource
 from mirage.runtime.sandbox.apple_container.config import AppleContainerConfig
 from mirage.runtime.sandbox.apple_container.constants import (
-    APPLE_CONTAINER_CLI_HINT,
+    APPLE_CONTAINER_HINT,
     RUNNING_STATE,
+    STATE_HINTS,
     no_container_hint,
-    not_running_hint,
 )
 from mirage.runtime.sandbox.base import RemoteSandbox
-from mirage.runtime.sandbox.cli import exec_args, open_cli_pipe, run_cli
+from mirage.runtime.sandbox.constants import not_running_hint
 from mirage.runtime.sandbox.mixin import PipeTransportMixin
+from mirage.runtime.sandbox.program import (
+    exec_args,
+    open_program_pipe,
+    reported_state,
+    run_program,
+)
 from mirage.runtime.types import OutputFn, RunResult, SandboxPipe
 
 
@@ -36,7 +41,7 @@ class AppleContainerRuntime(RemoteSandbox, PipeTransportMixin):
     """Containers under Apple's `container` tool as a whole-line runtime.
 
     You start the containers yourself; mirage only connects to them and
-    execs lines. The `container` CLI is the transport, so there is no
+    execs lines. The `container` program is the transport, so there is no
     SDK dependency and no XPC wiring; each line is one `container exec`
     with the merged environment, the session cwd, real stdin, and
     separated stderr.
@@ -78,16 +83,16 @@ class AppleContainerRuntime(RemoteSandbox, PipeTransportMixin):
         stdin: ByteSource | None = None,
         output: OutputFn | None = None,
         errors: OutputFn | None = None,
-    ) -> tuple[bytes, bytes, int]:
-        """Run one container CLI invocation.
+    ) -> RunResult:
+        """Run `container` once.
 
         Args:
-            args (list[str]): CLI arguments after the executable.
+            args (list[str]): arguments after the executable.
             stdin (bytes | None): input delivered to the guest command.
         """
-        return await run_cli(
+        return await run_program(
             "container",
-            APPLE_CONTAINER_CLI_HINT,
+            APPLE_CONTAINER_HINT,
             args,
             stdin,
             output=output,
@@ -129,19 +134,14 @@ class AppleContainerRuntime(RemoteSandbox, PipeTransportMixin):
         Args:
             container (str): the container id to inspect.
         """
-        stdout, stderr, code = await self._container(["inspect", container])
-        if code != 0:
-            raise RuntimeError(
-                f"container inspect failed: {stderr.decode().strip()}"
-            )
-        try:
-            state = json.loads(stdout)[0]["status"]["state"]
-        except (ValueError, LookupError, TypeError) as exc:
-            raise RuntimeError(
-                f"container inspect returned unreadable json: {exc}"
-            ) from exc
+        status = await self._container(["inspect", container])
+        state = reported_state(
+            status, "container inspect", (0, "status", "state")
+        )
         if state != RUNNING_STATE:
-            raise RuntimeError(not_running_hint(container, str(state)))
+            raise RuntimeError(
+                not_running_hint("container", container, state, STATE_HINTS)
+            )
 
     async def _exec_argv(
         self,
@@ -153,17 +153,16 @@ class AppleContainerRuntime(RemoteSandbox, PipeTransportMixin):
         errors: OutputFn | None,
     ) -> RunResult:
         target = (await self._target(),)
-        stdout, stderr, code = await self._container(
+        return await self._container(
             exec_args(("exec", "-i"), target, env, cwd, argv),
             stdin=stdin,
             output=output,
             errors=errors,
         )
-        return RunResult(stdout=stdout, stderr=stderr, exit_code=code)
 
     async def open_pipe(self, command: str) -> SandboxPipe:
         target = (await self._target(),)
-        return await open_cli_pipe(
+        return await open_program_pipe(
             "container",
             exec_args(
                 ("exec", "-i"), target, {}, None, ("/bin/sh", "-c", command)

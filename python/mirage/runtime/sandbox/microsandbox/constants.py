@@ -12,23 +12,10 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-MICROSANDBOX_CLI_HINT = (
-    "the microsandbox runtime needs the msb CLI on PATH "
+MICROSANDBOX_HINT = (
+    "the microsandbox runtime needs `msb` on PATH "
     "(https://microsandbox.dev); start the sandbox before connecting"
 )
 
 RUNNING_STATE = "Running"
 INSPECT_TIMEOUT_SECONDS = 10
-
-
-def not_running_hint(sandbox: str, state: str) -> str:
-    """Explain why the configured sandbox cannot take a command.
-
-    Args:
-        sandbox (str): the configured sandbox name.
-        state (str): the status reported by msb status.
-    """
-    return (
-        f"sandbox {sandbox} is not running (status: {state}); "
-        "start it with msb start"
-    )

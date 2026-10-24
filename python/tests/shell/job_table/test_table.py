@@ -187,15 +187,15 @@ async def test_settle_kill_marker_survives_second_cancel():
     table = JobTable()
     job = _submit_gated(table, gate)
     await asyncio.sleep(0)
-    assert job.task is not None
-    job.task.cancel()
+    assert job.process is not None
+    job.process.task.cancel()
     await asyncio.sleep(0.01)
     assert job.status is JobStatus.KILLED
-    job.task.cancel()
+    job.process.task.cancel()
     await asyncio.sleep(0.01)
     gate.set()
     with pytest.raises(asyncio.CancelledError):
-        await asyncio.wait_for(job.task, 2)
+        await asyncio.wait_for(job.process.task, 2)
     await asyncio.wait_for(job.console.wait_finished(), 2)
     assert await job.console.snapshot(Channel.STDERR) == b"Killed"
 
@@ -358,7 +358,6 @@ async def test_load_restores_a_job_into_its_session():
     restored = Job(
         id=3,
         command="x",
-        task=None,
         cwd="/",
         status=JobStatus.COMPLETED,
         session_id="a",

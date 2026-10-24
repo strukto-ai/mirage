@@ -25,6 +25,7 @@ from mirage.io.stream import (
     discard_streams,
     drain,
     ensure_stream,
+    feed,
 )
 
 
@@ -273,3 +274,41 @@ async def test_chain_closes_all_owned_sources_even_when_not_started(started):
         assert await anext(chain) == b"a"
     await close_quietly(chain)
     assert closed == ["first", "second"]
+
+
+async def _resets_after_a_chunk():
+    yield b"a"
+    raise ConnectionResetError("the source went away")
+
+
+async def _closed_input(chunk: bytes) -> None:
+    raise BrokenPipeError
+
+
+# An input that fails as it is read fails the run, whatever its error, so
+# the program's own error path runs rather than waiting on an end.
+@pytest.mark.asyncio
+async def test_feed_fails_on_an_input_that_fails_as_it_is_read():
+    written: list[bytes] = []
+
+    async def write(chunk: bytes) -> None:
+        written.append(chunk)
+
+    async def end() -> None:
+        written.append(b"<end>")
+
+    with pytest.raises(ConnectionResetError):
+        await feed(_resets_after_a_chunk(), write, end, lambda: False)
+    assert written == [b"a"]
+
+
+# A program that closed its input has taken what it wanted.
+@pytest.mark.asyncio
+async def test_feed_ends_quietly_once_the_program_closed_its_input():
+    ended: list[bool] = []
+
+    async def end() -> None:
+        ended.append(True)
+
+    await feed(_make_stream(b"a", b"b"), _closed_input, end, lambda: False)
+    assert ended == []

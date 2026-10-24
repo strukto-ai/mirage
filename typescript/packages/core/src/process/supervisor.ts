@@ -77,12 +77,14 @@ export class ProcessSupervisor {
         failure: null,
       },
       init.run,
-      (signal) => {
-        this.terminateChildren(pid, signal)
+      () => {
         init.cancel()
       },
       (id) => {
         this.runners.delete(id)
+      },
+      (signal) => {
+        this.terminateChildren(pid, signal)
       },
       this.bind,
     )

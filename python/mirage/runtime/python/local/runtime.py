@@ -12,11 +12,12 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 import errno
 import os
 import shutil
 import sys
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import Sequence
 from typing import Any, ClassVar
 
 from mirage.commands.config import Context
@@ -28,11 +29,11 @@ from mirage.runtime.python.base import PythonRuntime
 from mirage.runtime.python.execution import prepare_source
 from mirage.runtime.python.flags import init_argv
 from mirage.runtime.python.local.config import LocalConfig
-from mirage.runtime.sandbox.cli import (
+from mirage.runtime.sandbox.program import (
     Children,
     close_children,
     cwd_refusal,
-    run_cli,
+    run_program,
 )
 from mirage.runtime.types import OutputFn, Program, RunResult, RuntimeReach
 from mirage.shell.bytes import encode_text
@@ -120,6 +121,7 @@ class LocalRuntime(PythonRuntime[None], ProcessExecutorMixin[None]):
         else:
             self._python = sys.executable
         self._children: Children = {}
+        self._closed = False
 
     async def version(self, env: dict[str, str]) -> RunResult:
         # Session loader variables can execute code before --version is read.
@@ -154,7 +156,7 @@ class LocalRuntime(PythonRuntime[None], ProcessExecutorMixin[None]):
     ) -> RunResult:
         name = texts[0]
         cwd = ctx.cwd.virtual
-        refusal = cwd_refusal(name, cwd)
+        refusal = await cwd_refusal(name, cwd)
         if refusal is not None:
             return refusal
         if os.path.dirname(name):
@@ -166,7 +168,9 @@ class LocalRuntime(PythonRuntime[None], ProcessExecutorMixin[None]):
             if refusal is not None:
                 return refusal
         else:
-            found = shutil.which(name)
+            # Off the loop, which a PATH entry on a mount this process
+            # serves needs.
+            found = await asyncio.to_thread(shutil.which, name)
             if found is None:
                 return _not_run(f"{name}: command not found\n", 127)
             # Absolute: a relative PATH entry names a file here, and the
@@ -201,10 +205,14 @@ class LocalRuntime(PythonRuntime[None], ProcessExecutorMixin[None]):
         env: dict[str, str],
         stdin: ByteSource | None = None,
         cwd: str | None = None,
-        output: Callable[[bytes], Awaitable[None]] | None = None,
-        errors: Callable[[bytes], Awaitable[None]] | None = None,
+        output: OutputFn | None = None,
+        errors: OutputFn | None = None,
     ) -> RunResult:
-        stdout, stderr, code = await run_cli(
+        # A run still finding its program when the runtime closed starts
+        # nothing, so no child outlives the close.
+        if self._closed:
+            raise RuntimeError(f"{self.name}: the runtime is closed")
+        return await run_program(
             program,
             None,
             argv,
@@ -216,8 +224,8 @@ class LocalRuntime(PythonRuntime[None], ProcessExecutorMixin[None]):
             errors=errors,
             direct=True,
         )
-        return RunResult(stdout=stdout, stderr=stderr or None, exit_code=code)
 
     async def close(self) -> None:
         """Kill every child still running, so none outlives the workspace."""
+        self._closed = True
         await close_children(self._children)

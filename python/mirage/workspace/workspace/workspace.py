@@ -1327,7 +1327,6 @@ class Workspace:
 
         def cancel() -> None:
             process.terminate()
-            self.processes.terminate_children(process.info.pid)
             input_stream.stop()
             output.stop()
 

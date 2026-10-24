@@ -16,6 +16,25 @@ from typing import Final
 
 from mirage.errors import FsCondition
 
+
+def sdk_install_hint(
+    name: str, needs: str | None = None, otherwise: str | None = None
+) -> str:
+    """The message a runtime gives when its pip extra is missing.
+
+    Args:
+        name (str): the runtime, which is also its pip extra.
+        needs (str | None): what it is missing; None for its SDK.
+        otherwise (str | None): what the user can do instead.
+    """
+    missing = needs if needs is not None else f"the {name} SDK"
+    said = (
+        f"the {name} runtime needs {missing}; "
+        f"install with: pip install mirage-ai[{name}]"
+    )
+    return said if otherwise is None else f"{said}, or {otherwise}"
+
+
 # Capture unresolved program names without taking over the workspace shell.
 EXTERNAL_COMMANDS: Final = "@external"
 

@@ -44,8 +44,7 @@ export type ConsoleFactory = (jobId: number) => JobConsole
 export class Job {
   readonly id: number
   readonly command: string
-  // null for jobs restored from a snapshot (already finished, no live task).
-  task: Promise<void> | null
+  // null for jobs restored from a snapshot (already finished, no runner).
   process: ProcessHandle | null = null
   readonly abort: AbortController | null
   readonly cwd: string
@@ -60,7 +59,6 @@ export class Job {
   constructor(init: {
     id: number
     command: string
-    task?: Promise<void> | null
     abort?: AbortController | null
     cwd: string
     sessionId?: string
@@ -72,7 +70,6 @@ export class Job {
   }) {
     this.id = init.id
     this.command = init.command
-    this.task = init.task ?? null
     this.abort = init.abort ?? null
     this.cwd = init.cwd
     this.sessionId = init.sessionId ?? ''

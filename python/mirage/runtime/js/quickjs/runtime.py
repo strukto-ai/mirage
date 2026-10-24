@@ -19,6 +19,7 @@ from typing import Any, ClassVar
 
 from mirage.commands.config import Context
 from mirage.runtime.config import HomeConfig, RuntimeConfig, resolve_home
+from mirage.runtime.constants import sdk_install_hint
 from mirage.runtime.files import RuntimeFiles
 from mirage.runtime.js.base import JsRuntime
 from mirage.runtime.js.quickjs.execution import cwd_preamble
@@ -90,9 +91,9 @@ class QuickJsRuntime(JsRuntime[WasmExecution]):
     ) -> None:
         if wasmtime is None:
             raise ImportError(
-                "the quickjs runtime requires the 'quickjs' extra. Install "
-                "with: pip install mirage-ai[quickjs], or select another "
-                "runtime"
+                sdk_install_hint(
+                    "quickjs", "the 'quickjs' extra", "select another runtime"
+                )
             )
         super().__init__(captures, config)
         root = resolve_home(self.config, QUICKJS_HOME_ENV)
