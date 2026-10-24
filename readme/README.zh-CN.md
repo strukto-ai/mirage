@@ -41,6 +41,8 @@
 <p align="center">
   <a href="https://agentvfs.org">
     <picture>
+      <source media="(max-width: 767px) and (prefers-color-scheme: dark)" srcset="../assets/agentvfs-banner-narrow-dark.svg">
+      <source media="(max-width: 767px)" srcset="../assets/agentvfs-banner-narrow-light.svg">
       <source media="(prefers-color-scheme: dark)" srcset="../assets/agentvfs-banner-dark.svg">
       <img src="../assets/agentvfs-banner-light.svg" width="900" alt="AgentVFS：开放、厂商中立的 AI Agent 虚拟文件系统接口" />
     </picture>

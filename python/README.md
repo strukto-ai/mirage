@@ -43,6 +43,8 @@
 <p align="center">
   <a href="https://agentvfs.org">
     <picture>
+      <source media="(max-width: 767px) and (prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/strukto-ai/mirage/main/assets/agentvfs-banner-narrow-dark.svg">
+      <source media="(max-width: 767px)" srcset="https://raw.githubusercontent.com/strukto-ai/mirage/main/assets/agentvfs-banner-narrow-light.svg">
       <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/strukto-ai/mirage/main/assets/agentvfs-banner-dark.svg">
       <img src="https://raw.githubusercontent.com/strukto-ai/mirage/main/assets/agentvfs-banner-light.svg" width="100%" alt="AgentVFS: the open, vendor-neutral virtual filesystem interface for AI agents" />
     </picture>

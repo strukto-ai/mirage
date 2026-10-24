@@ -41,6 +41,8 @@
 <p align="center">
   <a href="https://agentvfs.org">
     <picture>
+      <source media="(max-width: 767px) and (prefers-color-scheme: dark)" srcset="../assets/agentvfs-banner-narrow-dark.svg">
+      <source media="(max-width: 767px)" srcset="../assets/agentvfs-banner-narrow-light.svg">
       <source media="(prefers-color-scheme: dark)" srcset="../assets/agentvfs-banner-dark.svg">
       <img src="../assets/agentvfs-banner-light.svg" width="900" alt="AgentVFS : l'interface de système de fichiers virtuel ouverte et neutre pour les agents IA" />
     </picture>
