@@ -29,8 +29,18 @@ pub(super) fn unit(text: &[u8], at: usize, utf8: bool) -> usize {
 
 /// `text` in one case: under UTF-8 each character whose other case is one
 /// character, otherwise ASCII letters only.
-pub(super) fn convert(text: &[u8], upper: bool, utf8: bool, out: &mut Vec<u8>) {
+/// It stops, false, before `out` would grow past `limit` bytes.
+pub(super) fn convert(
+    text: &[u8],
+    upper: bool,
+    utf8: bool,
+    out: &mut Vec<u8>,
+    limit: usize,
+) -> bool {
     if !utf8 || text.is_ascii() {
+        if out.len() + text.len() > limit {
+            return false;
+        }
         out.extend(text.iter().map(|c| {
             if upper {
                 c.to_ascii_uppercase()
@@ -38,7 +48,7 @@ pub(super) fn convert(text: &[u8], upper: bool, utf8: bool, out: &mut Vec<u8>) {
                 c.to_ascii_lowercase()
             }
         }));
-        return;
+        return true;
     }
     let mut at = 0;
     while at < text.len() {
@@ -55,15 +65,15 @@ pub(super) fn convert(text: &[u8], upper: bool, utf8: bool, out: &mut Vec<u8>) {
                 };
                 (other.len() == 1).then(|| other.remove(0))
             });
-        match one {
-            Some(c) => {
-                let mut buf = [0; 4];
-                out.extend_from_slice(c.encode_utf8(&mut buf).as_bytes());
-            }
-            None => out.extend_from_slice(piece),
+        let mut buf = [0; 4];
+        let piece = one.map_or(piece, |c| c.encode_utf8(&mut buf).as_bytes());
+        if out.len() + piece.len() > limit {
+            return false;
         }
+        out.extend_from_slice(piece);
         at += len;
     }
+    true
 }
 
 /// `l`'s rendering: escapes for the C controls and the backslash, octal

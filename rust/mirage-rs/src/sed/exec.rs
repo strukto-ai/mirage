@@ -287,29 +287,31 @@ fn expand(
             },
             Part::Text(text) => text,
         };
-        // A case conversion may grow a character by half.
-        let converting = mode.is_some() || pending.is_some();
-        room(
-            out.len(),
-            text.len()
-                + if converting {
-                    text.len().div_ceil(2)
-                } else {
-                    0
-                },
-        )?;
+        // A case conversion is measured unit by unit as it grows.
         let text = match mode {
             Some(upper) => {
                 converted.clear();
-                convert(text, upper, utf8, &mut converted);
+                if !convert(
+                    text,
+                    upper,
+                    utf8,
+                    &mut converted,
+                    MAX_LEN.saturating_sub(out.len()),
+                ) {
+                    return Err(exhausted());
+                }
                 converted.as_slice()
             }
             None => text,
         };
+        room(out.len(), text.len())?;
         match pending {
             Some(upper) if !text.is_empty() => {
                 let len = unit(text, 0, utf8);
-                convert(&text[..len], upper, utf8, out);
+                if !convert(&text[..len], upper, utf8, out, MAX_LEN) {
+                    return Err(exhausted());
+                }
+                room(out.len(), text.len() - len)?;
                 out.extend_from_slice(&text[len..]);
                 pending = None;
             }

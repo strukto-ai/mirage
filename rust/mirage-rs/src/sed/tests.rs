@@ -818,6 +818,11 @@ fn every_way_a_space_grows_meets_the_cap() {
     assert_eq!((run.err.as_str(), run.status), exhausted);
     let run = sed("s/a/\\U&&&&&&&&&&/g", &line);
     assert_eq!((run.err.as_str(), run.status), exhausted);
+    // A case change that fits is made, however close to the cap.
+    let wide = "a".repeat(max - max / 8);
+    let run = sed("s/.*/\\U&/", &format!("{wide}\n"));
+    assert_eq!(run.status, 0);
+    assert_eq!(run.out, format!("{}\n", wide.to_uppercase()));
     let run = run_host(
         json!({"pieces": expressions(&["y/a/\u{20ac}/"]), "utf8": true}),
         Host::with(&[], &format!("{}\n", "a".repeat(max / 2))),
