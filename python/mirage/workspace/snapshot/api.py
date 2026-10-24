@@ -14,14 +14,14 @@
 
 import io
 from pathlib import Path
-from typing import Any
+from typing import Any, BinaryIO, cast
 
 from mirage.concurrency.limiter import run_blocking
 from mirage.types import PathSpec
 from mirage.vfs.s3.config import S3Config
 from mirage.workspace.snapshot.manifest import split_manifest_and_blobs
 from mirage.workspace.snapshot.state import WorkspaceLike, to_state_dict
-from mirage.workspace.snapshot.tar_io import read_tar, write_tar
+from mirage.workspace.snapshot.tar_io import Writable, read_tar, write_tar
 
 try:
     from mirage.accessor.s3 import S3Accessor
@@ -51,16 +51,16 @@ class _Counted:
     cannot tell, such as a pipe.
     """
 
-    def __init__(self, target: Any) -> None:
+    def __init__(self, target: Writable) -> None:
         """Wrap a target.
 
         Args:
-            target (Any): a writable file-like object.
+            target (Writable): a writable file-like object.
         """
         self._target = target
         self.size = 0
 
-    def write(self, data: bytes) -> int:
+    def write(self, data: bytes | memoryview) -> int:
         """Write all of the bytes to the target and count them.
 
         A target that takes fewer bytes than offered is written again
@@ -68,7 +68,7 @@ class _Counted:
         objects without a count do.
 
         Args:
-            data (bytes): the bytes.
+            data (bytes | memoryview): the bytes.
 
         Returns:
             int: how many were written.
@@ -97,7 +97,7 @@ class _Counted:
 
 async def snapshot(
     ws: WorkspaceLike,
-    target,
+    target: str | Path | Writable,
     *,
     compress: str | None = None,
     s3: S3Config | None = None,
@@ -115,9 +115,9 @@ async def snapshot(
 
     Args:
         ws (WorkspaceLike): the workspace to snapshot.
-        target: filesystem path (str/Path) OR a writable file-like
+        target (str | Path | Writable): filesystem path OR a writable file-like
             object (BytesIO, a pipe, etc.); with ``s3``, the object key.
-        compress: None | "gz" | "bz2" | "xz".
+        compress (str | None): None | "gz" | "bz2" | "xz".
         s3 (S3Config | None): an S3-like store to put the tar in, under
             its ``key_prefix``.
 
@@ -133,7 +133,7 @@ async def snapshot(
             )
             return (await run_blocking(Path(target).stat)).st_size
         if s3 is None:
-            counted = _Counted(target)
+            counted = _Counted(cast(Writable, target))
             await run_blocking(
                 write_tar, counted, manifest, blobs, compress=compress
             )
@@ -144,19 +144,22 @@ async def snapshot(
         )
     accessor = _s3_accessor(s3)
     try:
-        await write(accessor, _key_path(target), buffer.getvalue())
+        await write(accessor, _key_path(cast(str, target)), buffer.getvalue())
     finally:
         await accessor.close()
     return buffer.tell()
 
 
 async def read_snapshot(
-    source, *, s3: S3Config | None = None, staging: Path | None = None
+    source: str | Path | BinaryIO,
+    *,
+    s3: S3Config | None = None,
+    staging: Path | None = None,
 ) -> dict[str, Any]:
     """Read a snapshot tar back into a state dict.
 
     Args:
-        source: filesystem path (str/Path) OR a readable file-like
+        source (str | Path | BinaryIO): filesystem path OR a readable file-like
             object; with ``s3``, the object key.
         s3 (S3Config | None): the S3-like store the tar is in.
         staging (Path | None): a directory disk mount files are
@@ -169,7 +172,9 @@ async def read_snapshot(
     if s3 is not None:
         accessor = _s3_accessor(s3)
         try:
-            source = io.BytesIO(await read(accessor, _key_path(source)))
+            source = io.BytesIO(
+                await read(accessor, _key_path(cast(str, source)))
+            )
         finally:
             await accessor.close()
     return await run_blocking(read_tar, source, staging)

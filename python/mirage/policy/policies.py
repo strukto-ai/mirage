@@ -21,14 +21,12 @@ from dataclasses import fields, replace
 from typing import TYPE_CHECKING, Any, TypeVar, overload
 
 from mirage.commands.spec.usage import operand_exit_code
-from mirage.context import (
-    explaining,
-    reset_explaining,
-    set_explaining,
-)
 from mirage.context.session_context import (
     Caller,
     current_caller,
+    explaining,
+    reset_explaining,
+    set_explaining,
 )
 from mirage.errors.fs import eacces, erofs
 from mirage.errors.posix import posix_errno, posix_phrase
@@ -68,10 +66,9 @@ from mirage.policy.types import (
 from mirage.types import Limit, MountMode, PathSpec, Refusal
 from mirage.utils.abort import MirageAbortError
 from mirage.vfs.types import VfsCall
-from mirage.view.types import SessionView
+from mirage.view.types import FileView, SessionView
 
 if TYPE_CHECKING:
-    from mirage.workspace.files import Files
     from mirage.workspace.session.session import SessionState
 
 logger = logging.getLogger(__name__)
@@ -639,7 +636,7 @@ class Policies:
         self.views: (
             Callable[
                 [str, "SessionState | None"],
-                tuple[SessionView, "Files", PolicyCaller] | None,
+                tuple[SessionView, FileView, PolicyCaller] | None,
             ]
             | None
         ) = None

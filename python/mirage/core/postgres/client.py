@@ -14,7 +14,7 @@
 
 import json
 from collections.abc import Sequence
-from typing import Any
+from typing import Any, cast
 
 import asyncpg
 
@@ -77,8 +77,9 @@ async def list_matviews(conn: asyncpg.Connection, schema: str) -> list[str]:
 
 
 async def count_rows(conn: asyncpg.Connection, schema: str, name: str) -> int:
-    return await conn.fetchval(
-        f"SELECT COUNT(*) FROM {qualified(schema, name)}"
+    return cast(
+        int,
+        await conn.fetchval(f"SELECT COUNT(*) FROM {qualified(schema, name)}"),
     )
 
 
@@ -324,12 +325,15 @@ async def fetch_columns(
 async def fetch_table_comment(
     conn: asyncpg.Connection, schema: str, name: str
 ) -> str | None:
-    return await conn.fetchval(
-        "SELECT obj_description(c.oid, 'pg_class') "
-        "FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace "
-        "WHERE n.nspname = $1 AND c.relname = $2",
-        schema,
-        name,
+    return cast(
+        str | None,
+        await conn.fetchval(
+            "SELECT obj_description(c.oid, 'pg_class') "
+            "FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace "
+            "WHERE n.nspname = $1 AND c.relname = $2",
+            schema,
+            name,
+        ),
     )
 
 

@@ -89,6 +89,8 @@ jobs:
             # integration runners import those fixtures, so keep them covered.
             # Formatting and stream tests consolidated under builtin/utils
             # remain in the same whole-host filters on both hosts.
+            # Fill invalidation and its tests live under cache/file on both
+            # hosts and remain covered by these whole-host filters.
             core:
               - 'integ/**'
               - 'data/**'

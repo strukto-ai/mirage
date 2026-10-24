@@ -15,7 +15,7 @@
 import base64
 from typing import Any, cast
 
-from agents import Runner, TResponseInputItem
+from agents import Agent, Runner, RunResult, TResponseInputItem
 from openai import AsyncOpenAI
 
 from mirage.types import ContentType
@@ -98,14 +98,14 @@ class MirageRunner:
 
     async def run_with_attachments(
         self,
-        agent,
+        agent: Agent[Any],
         prompt: str,
         paths: list[str],
-    ):
+    ) -> RunResult:
         """Run the agent with mirage paths as multimodal attachments.
 
         Args:
-            agent: The OpenAI Agents SDK Agent instance.
+            agent (Agent[Any]): The OpenAI Agents SDK Agent instance.
             prompt (str): User-facing instruction text.
             paths (list[str]): Mirage paths to attach.
 

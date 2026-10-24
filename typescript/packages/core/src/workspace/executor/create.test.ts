@@ -14,11 +14,12 @@
 
 import { describe, expect, it } from 'vitest'
 
+import { chunks } from '../../io/cooperative.ts'
 import { MEMORY_LIMIT } from '../../io/spool.ts'
-import { IOResult } from '../../io/types.ts'
+import { IOResult, materialize, type ByteSource } from '../../io/types.ts'
 import { FileDescription } from '../../shell/descriptors.ts'
 import type { DispatchFn } from '../../runtime/types.ts'
-import { PathSpec } from '../../types.ts'
+import { FileStat, FileType, PathSpec } from '../../types.ts'
 import { SessionState } from '../session/session.ts'
 import { createFile, writeDescription } from './create.ts'
 
@@ -82,7 +83,8 @@ async function* aBlockThenAByte(): AsyncGenerator<Uint8Array> {
 describe('writeDescription', () => {
   it('leaves the offset after what landed when a later write fails', async () => {
     const landed: [number, number][] = []
-    const dispatch: DispatchFn = async (op, _path, args) => {
+    const dispatch: DispatchFn = async (op, _path, args, kwargs) => {
+      if (kwargs?.admit_only === true) return [null, new IOResult()]
       await Promise.resolve()
       if (op === 'pwrite') {
         if (landed.length > 0) throw Object.assign(new Error('ENOSPC'), { code: 'ENOSPC' })
@@ -99,5 +101,93 @@ describe('writeDescription', () => {
     ).rejects.toThrow('ENOSPC')
     expect(landed).toEqual([[3, MEMORY_LIMIT]])
     expect(file.offset).toBe(3 + MEMORY_LIMIT)
+  })
+
+  it.each([
+    [0, ['stat', 'write']],
+    [5, ['stat', 'pwrite', 'pwrite']],
+  ])('lands a first write into a file of %i bytes as %j', async (size, ops) => {
+    const calls: string[] = []
+    const dispatch: DispatchFn = async (op, _path, args, kwargs) => {
+      if (kwargs?.admit_only === true) return [null, new IOResult()]
+      calls.push(op)
+      if (op === 'stat') {
+        return [new FileStat({ name: 'f', size, type: FileType.FILE }), new IOResult()]
+      }
+      if (op === 'write') await materialize((args as [ByteSource])[0])
+      return [null, new IOResult()]
+    }
+    const file = new FileDescription(SCOPE)
+    file.opened = true
+    await writeDescription(dispatch, new SessionState({ sessionId: 's' }), file, aBlockThenAByte())
+    expect(calls).toEqual(ops)
+    expect(file.offset).toBe(MEMORY_LIMIT + 1)
+  })
+
+  it('sends a second first write meanwhile through the windows', async () => {
+    const ops: string[] = []
+    let release = (): void => undefined
+    const released = new Promise<void>((resolve) => (release = resolve))
+    const dispatch: DispatchFn = async (op, _path, args, kwargs) => {
+      if (kwargs?.admit_only === true) return [null, new IOResult()]
+      ops.push(op)
+      if (op === 'stat') {
+        return [new FileStat({ name: 'f', size: 0, type: FileType.FILE }), new IOResult()]
+      }
+      if (op === 'write') {
+        await released
+        await materialize((args as [ByteSource])[0])
+      }
+      return [null, new IOResult()]
+    }
+    const first = new FileDescription(SCOPE)
+    first.opened = true
+    const second = new FileDescription(SCOPE)
+    second.opened = true
+    const session = new SessionState({ sessionId: 's' })
+    const writing = writeDescription(dispatch, session, first, aBlockThenAByte())
+    while (!ops.includes('write')) await Promise.resolve()
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => {
+        reject(new Error('second write waited on the first'))
+      }, 5000)
+    })
+    try {
+      await Promise.race([
+        writeDescription(dispatch, session, second, new Uint8Array([0x61, 0x62])),
+        timeout,
+      ])
+    } finally {
+      clearTimeout(timer)
+      release()
+    }
+    await writing
+    expect(ops).toEqual(['stat', 'write', 'pwrite'])
+    expect([first.offset, second.offset]).toEqual([MEMORY_LIMIT + 1, 2])
+  })
+
+  it('leaves the offset at what landed when a first write fails', async () => {
+    let landed = 0
+    const dispatch: DispatchFn = async (op, _path, args, kwargs) => {
+      if (kwargs?.admit_only === true) return [null, new IOResult()]
+      if (op === 'stat') {
+        return [new FileStat({ name: 'f', size: landed, type: FileType.FILE }), new IOResult()]
+      }
+      if (op === 'write') {
+        for await (const part of chunks((args as [ByteSource])[0])) {
+          landed += part.byteLength
+          throw Object.assign(new Error('ENOSPC'), { code: 'ENOSPC' })
+        }
+      }
+      return [null, new IOResult()]
+    }
+    const file = new FileDescription(SCOPE)
+    file.opened = true
+    await expect(
+      writeDescription(dispatch, new SessionState({ sessionId: 's' }), file, aBlockThenAByte()),
+    ).rejects.toThrow('ENOSPC')
+    expect(landed).toBeGreaterThan(0)
+    expect(file.offset).toBe(landed)
   })
 })

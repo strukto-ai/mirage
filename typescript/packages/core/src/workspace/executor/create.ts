@@ -91,9 +91,10 @@ async function reachedPipe(dispatch: DispatchFn, path: string | null): Promise<P
  *
  * A write-only description lands at its offset with one `pwrite`, so it
  * needs no read of the file, as a write to a write-only descriptor needs none
- * (`exec 3>f; echo a >&3`). A read-write one (`<>`) still reads it: that
- * description was opened to read, and its own reader resumes over what the
- * write left. Writes through one description take turns, the first one
+ * (`exec 3>f; echo a >&3`). Its first write into a file still empty lands as
+ * one stream instead (`firstWrite`). A read-write one (`<>`) still reads it:
+ * that description was opened to read, and its own reader resumes over what
+ * the write left. Writes through one description take turns, the first one
  * (which opens the file) included, as the kernel orders writes to an open
  * file: a background job writing alongside the shell neither reopens the
  * file nor lands on an offset another write has not advanced yet. A writer
@@ -127,6 +128,13 @@ export async function writeDescription(
       file.opened = true
       return
     }
+    if (
+      file.source === null &&
+      file.offset === 0 &&
+      (await firstWrite(dispatch, session, file, data))
+    ) {
+      return
+    }
     if (!file.opened) {
       await createFile(dispatch, session, file.scope, new Uint8Array(), file.append)
       file.opened = true
@@ -152,6 +160,65 @@ export async function writeDescription(
   } finally {
     done()
   }
+}
+
+const streaming = new Set<string>()
+
+/**
+ * Land an opened description's first write into a file still empty as one
+ * stream, and answer whether it did. The same bytes from offset 0 in `pwrite`
+ * windows cost a copy of the file each on a store whose `pwrite` rewrites it,
+ * so `cmd > f` would move the file's size squared. The backing file (the store
+ * and its key, alike for every workspace mounting that store) is claimed
+ * before the size is read and kept until the stream ends, so another
+ * description of it writing meanwhile takes the windows, which interleave as
+ * two descriptors do, instead of replacing what this one wrote; a file in
+ * another store never contends. A stream that fails leaves the offset at what
+ * landed. `data` is untouched when this answers false. Mirrors
+ * Python's _first_write.
+ */
+async function firstWrite(
+  dispatch: DispatchFn,
+  session: SessionState,
+  file: FileDescription,
+  data: ByteSource,
+): Promise<boolean> {
+  const report = new OpReport()
+  try {
+    await dispatch('stat', file.scope, [], { admit_only: true }, report)
+  } catch (err) {
+    if (!isFsError(err)) throw err
+    console.debug(`write target ${file.scope.rawPath} has no store: ${String(err)}`)
+    return false
+  }
+  const store = report.store ?? file.scope.virtual
+  if (streaming.has(store)) return false
+  streaming.add(store)
+  try {
+    if ((await sizeOf(dispatch, file.scope)) !== 0) return false
+    try {
+      file.offset = await createCounted(dispatch, session, file.scope, data)
+    } catch (err) {
+      file.offset = (await sizeOf(dispatch, file.scope)) ?? 0
+      throw err
+    }
+    return true
+  } finally {
+    streaming.delete(store)
+  }
+}
+
+/** The size of the file a description opened, null when unknown. Mirrors Python's _size. */
+async function sizeOf(dispatch: DispatchFn, scope: PathSpec): Promise<number | null> {
+  let stat: unknown
+  try {
+    ;[stat] = await dispatch('stat', scope)
+  } catch (err) {
+    if (!isFsError(err)) throw err
+    console.debug(`write target ${scope.rawPath} has no stat: ${String(err)}`)
+    return null
+  }
+  return stat instanceof FileStat ? stat.size : null
 }
 
 /** `createFile` that answers how many bytes it wrote. Mirrors Python's create_counted. */

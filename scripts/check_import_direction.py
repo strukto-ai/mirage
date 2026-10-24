@@ -19,6 +19,7 @@ import re
 import sys
 from collections import Counter, defaultdict
 from collections.abc import Iterable
+from functools import cache
 from pathlib import Path
 from typing import NamedTuple
 
@@ -145,7 +146,6 @@ TS_AWAITED = re.compile(
     r"""(?:const|let|var)\s+(?:(?P<module>[A-Za-z_$][\w$]*)|\{(?P<names>[^}]*)\})"""
     r"""\s*=\s*await\s+$"""
 )
-CORE_PACKAGE = "@struktoai/mirage-core/"
 
 
 class Import(NamedTuple):
@@ -313,6 +313,138 @@ def python_edges() -> dict[str, str]:
     return found
 
 
+def _type_checking(node: ast.AST) -> bool:
+    return (isinstance(node, ast.Name) and node.id == "TYPE_CHECKING") or (
+        isinstance(node, ast.Attribute) and node.attr == "TYPE_CHECKING"
+    )
+
+
+def _python_exports(
+    path: Path, tree: ast.Module
+) -> dict[str, tuple[str, str]]:
+    """The defining module and name behind a lazy barrel's exports."""
+    exports: dict[str, tuple[str, str]] = {}
+    lazy = any(
+        isinstance(node, ast.FunctionDef) and node.name == "__getattr__"
+        for node in tree.body
+    )
+    for node in tree.body:
+        target = (
+            node.target
+            if isinstance(node, ast.AnnAssign)
+            else node.targets[0]
+            if isinstance(node, ast.Assign) and len(node.targets) == 1
+            else None
+        )
+        if isinstance(target, ast.Name) and target.id == "_EXPORTS":
+            assert isinstance(node, (ast.Assign, ast.AnnAssign))
+            assert node.value is not None
+            table = ast.literal_eval(node.value)
+            for module, names in table.items():
+                if isinstance(names, str):
+                    exports[module] = names, module
+                else:
+                    exports.update({name: (module, name) for name in names})
+        if lazy and (
+            isinstance(node, ast.If)
+            and _type_checking(node.test)
+            or isinstance(node, ast.FunctionDef)
+            and node.name == "__getattr__"
+        ):
+            for imported in ast.walk(node):
+                if isinstance(imported, ast.ImportFrom):
+                    for alias in imported.names:
+                        exports.setdefault(
+                            alias.asname or alias.name,
+                            (_absolute(path, imported), alias.name),
+                        )
+    return exports
+
+
+def _python_dependencies(
+    path: Path, node: ast.AST, eager: bool = True
+) -> Iterable[tuple[str, tuple[str, ...], bool]]:
+    """Imports and literal dynamic loads, retaining deferred/type-only edges."""
+    if isinstance(node, ast.Import):
+        for alias in node.names:
+            yield alias.name, (), eager
+        return
+    if isinstance(node, ast.ImportFrom):
+        yield _absolute(path, node), tuple(a.name for a in node.names), eager
+        return
+    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+        eager = False
+    if isinstance(node, ast.If) and _type_checking(node.test):
+        for child in node.body:
+            yield from _python_dependencies(path, child, False)
+        for child in node.orelse:
+            yield from _python_dependencies(path, child, eager)
+        return
+    if (
+        isinstance(node, ast.Call)
+        and (
+            isinstance(node.func, ast.Attribute)
+            and node.func.attr == "import_module"
+            or isinstance(node.func, ast.Name)
+            and node.func.id in ("import_module", "__import__")
+        )
+        and node.args
+        and isinstance(node.args[0], ast.Constant)
+        and isinstance(node.args[0].value, str)
+    ):
+        yield node.args[0].value, (), eager
+    for item in ast.iter_child_nodes(node):
+        yield from _python_dependencies(path, item, eager)
+
+
+def python_cycles(sources: dict[Path, str]) -> tuple[set[str], set[str]]:
+    """Files on eager import cycles, and on any cycle, in the Python sources.
+
+    A from-import follows the selected lazy export to its defining module;
+    importing a sibling submodule does not import every name in its barrel.
+    """
+    modules = {
+        ".".join(
+            path.relative_to(PY_ROOT.parent).with_suffix("").parts
+        ).removesuffix(".__init__"): path
+        for path in sources
+    }
+    trees = {path: ast.parse(text) for path, text in sources.items()}
+    exports = {
+        module: _python_exports(path, trees[path])
+        for module, path in modules.items()
+    }
+    values: dict[Path, set[Path]] = defaultdict(set)
+    every: dict[Path, set[Path]] = defaultdict(set)
+    for path, tree in trees.items():
+        for module, names, eager in _python_dependencies(path, tree):
+            targets = {module} if not names else set()
+            for name in names:
+                seen: set[tuple[str, str]] = set()
+                target = module
+                while (target, name) not in seen:
+                    seen.add((target, name))
+                    exported = exports.get(target, {}).get(name)
+                    submodule = f"{target}.{name}"
+                    if exported is None and submodule in modules:
+                        targets.add(submodule)
+                        break
+                    targets.add(target)
+                    if exported is None:
+                        break
+                    target, name = exported
+            for target in targets:
+                dependency = modules.get(target)
+                if dependency is not None and dependency != path:
+                    every[path].add(dependency)
+                    if eager:
+                        values[path].add(dependency)
+    return (
+        {p.relative_to(ROOT).as_posix() for p in _cycle_files(values)},
+        {p.relative_to(ROOT).as_posix() for p in _cycle_files(every)},
+    )
+
+
 def _ts_files(src: Path) -> list[Path]:
     return sorted(
         path
@@ -322,13 +454,55 @@ def _ts_files(src: Path) -> list[Path]:
     )
 
 
-def _resolve(src: Path, path: Path, spec: str) -> Path | None:
-    """The src-relative module a specifier names, None outside `src`."""
-    if spec.startswith(CORE_PACKAGE):
-        target = TS_ROOT / "core" / "src" / spec[len(CORE_PACKAGE) :]
-    elif spec.startswith("."):
+@cache
+def _typescript_packages() -> dict[str, tuple[Path, dict[str, str]]]:
+    """Workspace source roots and package export routes, including adapters."""
+    packages: dict[str, tuple[Path, dict[str, str]]] = {}
+    for manifest in sorted(TS_ROOT.glob("*/package.json")):
+        src = manifest.parent / "src"
+        if not src.is_dir():
+            continue
+        package = json.loads(manifest.read_text())
+        exports: dict[str, str] = {}
+        for name, entry in package.get("exports", {}).items():
+            target = entry if isinstance(entry, str) else entry.get("import")
+            if isinstance(target, str) and target.startswith("./dist/"):
+                exports[name] = target.removeprefix("./dist/")
+        if "." not in exports:
+            exports["."] = package.get("main", "./dist/index.js").removeprefix(
+                "./dist/"
+            )
+        packages[package["name"]] = src, exports
+    return packages
+
+
+def _resolve(path: Path, spec: str) -> Path | None:
+    """The source module a relative or workspace package specifier names."""
+    target: Path | None
+    if spec.startswith("."):
         target = (path.parent / spec).resolve()
     else:
+        target = None
+        for name, (root, exports) in _typescript_packages().items():
+            if spec != name and not spec.startswith(f"{name}/"):
+                continue
+            key = "." + spec[len(name) :]
+            route = exports.get(key)
+            if route is None:
+                for pattern, value in exports.items():
+                    if "*" not in pattern:
+                        continue
+                    before, after = pattern.split("*", 1)
+                    if key.startswith(before) and key.endswith(after):
+                        matched = key[
+                            len(before) : len(key) - len(after) or None
+                        ]
+                        route = value.replace("*", matched)
+                        break
+            if route is not None:
+                target = root / route
+            break
+    if target is None:
         return None
     for candidate in (target, target.with_suffix(".ts"), target / "index.ts"):
         if candidate.suffix == ".ts" and candidate.is_file():
@@ -413,12 +587,11 @@ def typescript_file_edges(path: Path, text: str) -> dict[str, str]:
         path (Path): the file under ``typescript/packages/<pkg>/src``.
         text (str): its source.
     """
-    src = TS_ROOT.joinpath(*path.relative_to(TS_ROOT).parts[:2])
     source = _ts_path(path)
     shown = path.relative_to(ROOT).as_posix()
     found: dict[str, str] = {}
     for spec, _, names in _imports(text):
-        target = _resolve(src, path, spec)
+        target = _resolve(path, spec)
         if target is None:
             continue
         edge = f"{shown} -> {target.relative_to(ROOT).as_posix()}"
@@ -511,29 +684,30 @@ def _cycle_files(graph: dict[Path, set[Path]]) -> set[Path]:
     return cyclic
 
 
-def typescript_cycles() -> tuple[set[str], set[str]]:
-    """Files on a runtime import cycle, and on any cycle types included."""
-    runtime: set[str] = set()
-    typed: set[str] = set()
-    for package in TS_PACKAGES:
-        src = TS_ROOT / package / "src"
-        values: dict[Path, set[Path]] = defaultdict(set)
-        every: dict[Path, set[Path]] = defaultdict(set)
-        for path in _ts_files(src):
-            for spec, types_only, _ in _imports(path.read_text()):
-                if spec.startswith(CORE_PACKAGE):
-                    continue
-                target = _resolve(src, path, spec)
-                if target is None:
-                    continue
-                every[path].add(target)
-                if not types_only:
-                    values[path].add(target)
-        runtime |= {
-            p.relative_to(ROOT).as_posix() for p in _cycle_files(values)
+def typescript_cycles(
+    sources: dict[Path, str] | None = None,
+) -> tuple[set[str], set[str]]:
+    """Cycles across every workspace package, including cross-package imports."""
+    values: dict[Path, set[Path]] = defaultdict(set)
+    every: dict[Path, set[Path]] = defaultdict(set)
+    if sources is None:
+        sources = {
+            path: path.read_text()
+            for src, _ in _typescript_packages().values()
+            for path in _ts_files(src)
         }
-        typed |= {p.relative_to(ROOT).as_posix() for p in _cycle_files(every)}
-    return runtime, typed
+    for path, text in sources.items():
+        for spec, types_only, _ in _imports(text):
+            target = _resolve(path, spec)
+            if target is None:
+                continue
+            every[path].add(target)
+            if not types_only:
+                values[path].add(target)
+    return (
+        {p.relative_to(ROOT).as_posix() for p in _cycle_files(values)},
+        {p.relative_to(ROOT).as_posix() for p in _cycle_files(every)},
+    )
 
 
 SELFTEST_TS = [
@@ -693,10 +867,72 @@ def _targets(edges: dict[str, str]) -> list[str]:
     return sorted(edge.split(" -> ", 1)[1] for edge in edges)
 
 
+def _selftest_cycles() -> int:
+    """Plant eager, type-only, deferred, barrel and cross-package cycles."""
+    failed = 0
+    a, b = PY_ROOT / "planted/a.py", PY_ROOT / "planted/b.py"
+    pair = {p.relative_to(ROOT).as_posix() for p in (a, b)}
+    for imported, eager in (
+        ("from .b import B", True),
+        ("if TYPE_CHECKING:\n    from .b import B", False),
+        ("if typing.TYPE_CHECKING:\n    from .b import B", False),
+        ("def load():\n    from .b import B", False),
+        ("importlib.import_module('mirage.planted.b')", True),
+    ):
+        got = python_cycles({a: imported, b: "from .a import A"})
+        want = (pair if eager else set(), pair)
+        if got != want:
+            print(f"  selftest: Python cycle {imported!r}: {got}, want {want}")
+            failed += 1
+    barrel = PY_ROOT / "planted/__init__.py"
+    for exports in (
+        "_EXPORTS = {'mirage.planted.b': ('B',)}",
+        "_EXPORTS = {'B': 'mirage.planted.b'}",
+        "_EXPORTS = {'mirage.planted.b': ('B',)}\n"
+        "__getattr__ = lazy_exports(__name__, _EXPORTS)",
+        "if TYPE_CHECKING:\n    from .b import B as Exported\n"
+        "def __getattr__(name):\n    return B",
+        "def __getattr__(name):\n    from .b import B\n    return B",
+    ):
+        name = "Exported" if "Exported" in exports else "B"
+        sources = {
+            a: f"from mirage.planted import {name}",
+            b: "from .a import A",
+            barrel: exports,
+        }
+        runtime, every = python_cycles(sources)
+        if runtime != pair or not pair <= every:
+            print(f"  selftest: lazy barrel cycle lost: {exports!r}")
+            failed += 1
+    sources = {
+        a: "from mirage.planted import b",
+        b: "",
+        barrel: "from .a import A",
+    }
+    if python_cycles(sources) != (set(), set()):
+        print("  selftest: a sibling submodule was mistaken for its barrel")
+        failed += 1
+    ts_a = TS_ROOT / "core/src/index.ts"
+    ts_b = TS_ROOT / "server/src/index.ts"
+    ts_pair = {p.relative_to(ROOT).as_posix() for p in (ts_a, ts_b)}
+    for prefix in ("", "type "):
+        got = typescript_cycles(
+            {
+                ts_a: f"import {prefix}{{ B }} from '@struktoai/mirage-server'",
+                ts_b: "import { A } from '@struktoai/mirage-core'",
+            }
+        )
+        want = (set() if prefix else ts_pair, ts_pair)
+        if got != want:
+            print(f"  selftest: cross-package cycle {got}, want {want}")
+            failed += 1
+    return failed
+
+
 def selftest() -> int:
     """Check the import readers against each form they must tell apart,
     and every rule against imports planted to break it or not."""
-    failed = 0
+    failed = _selftest_cycles()
     for text, want in SELFTEST_TS:
         got = _imports(text)
         if got != want:
@@ -743,7 +979,7 @@ def main() -> int:
     # Each rule break that predates its rule is excused with its reason in
     # import_exceptions.json. --strict fails on a new break, on an excuse
     # whose edge is gone, on a CLI tree the service map misses, on any
-    # runtime import cycle, and when the files on type-only cycles move
+    # runtime import cycle, and when the files on any import cycles move
     # off their baseline in either direction.
     parser = argparse.ArgumentParser()
     parser.add_argument("--strict", action="store_true")
@@ -757,8 +993,13 @@ def main() -> int:
     unexcused = sorted(set(edges) - set(excused))
     stale = sorted(set(excused) - set(edges))
     unmapped, unused = cli_drift(cli_trees())
-    runtime, typed = typescript_cycles()
-    baseline = exceptions["type_cycle_files"]
+    py_runtime, py_every = python_cycles(
+        {path: path.read_text() for path in PY_ROOT.rglob("*.py")}
+    )
+    ts_runtime, ts_every = typescript_cycles()
+    runtime = py_runtime | ts_runtime
+    every = py_every | ts_every
+    baseline = exceptions["cycle_files"]
     for edge in unexcused:
         print(f"  {edges[edge]}: {edge}")
     for edge in stale:
@@ -769,6 +1010,8 @@ def main() -> int:
         print(f"  CLI_SERVICES entry for a tree neither host has: {name}")
     for path in sorted(runtime):
         print(f"  on a runtime import cycle: {path}")
+    for path in sorted(every - runtime):
+        print(f"  on a type-only or deferred import cycle: {path}")
     keys = {rule.title: rule.key for rule in RULES}
     held = Counter(keys[edges[edge]] for edge in edges if edge in excused)
     print()
@@ -776,16 +1019,16 @@ def main() -> int:
         print(f"rule {key}: {held[key]} excused")
     print(f"unexcused rule breaks: {len(unexcused)} (baseline 0)")
     print(f"files on runtime import cycles: {len(runtime)} (baseline 0)")
-    print(
-        f"files on type-only import cycles: {len(typed)} (baseline {baseline})"
-    )
+    print(f"Python files on any import cycles: {len(py_every)}")
+    print(f"TypeScript files on any import cycles: {len(ts_every)}")
+    print(f"files on any import cycles: {len(every)} (baseline {baseline})")
     failed = bool(
         unexcused
         or stale
         or unmapped
         or unused
         or runtime
-        or len(typed) != baseline
+        or len(every) != baseline
     )
     return 1 if args.strict and failed else 0
 

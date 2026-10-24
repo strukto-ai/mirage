@@ -67,7 +67,6 @@ import type { DryRun, EntryGate, VfsExplanation } from '../../policy/types.ts'
 import {
   activeRecords,
   commandRecords,
-  type LostPaths,
   lostPaths,
   record,
   recordIndex,
@@ -76,7 +75,7 @@ import {
   startOp,
 } from '../../observe/context.ts'
 import { wrapStream } from '../mount/mount.ts'
-import type { OpRecord } from '../../observe/record.ts'
+import type { LostPaths, OpRecord } from '../../observe/record.ts'
 import { RETRACT_FINGERPRINT_OPS, WRITE_FINGERPRINT_OPS } from '../../observe/record.ts'
 import { mergeReaddir, namespaceListing, namespaceStat } from '../../view/namespace_view.ts'
 import { ebusy, isMissingPath } from '../../errors/fs.ts'
@@ -663,7 +662,9 @@ export class Dispatcher {
   // Who makes the op, when the entry point said so; null reads the
   // async context's, which on the fallback storage folds every live one.
   private caller: Caller | null = null
-  private state = { writers: new KeyLock(), stores: new WeakMap<BaseVFS, number>(), storeCount: 0 }
+  private state = { writers: new KeyLock() }
+  private static readonly stores = new WeakMap<BaseVFS, number>()
+  private static storeCount = 0
   readonly reconciler: Reconciler
 
   constructor(
@@ -870,6 +871,10 @@ export class Dispatcher {
     if (admitOnly) {
       this.follow(call)
       if (name === 'stat') {
+        const serving = this.namespace.tryMountFor(call.path.virtual)
+        if (report && serving !== null) {
+          report.store = `${String(this.storeId(serving.vfs))}:${mountKey(call.path.virtual, rstripSlash(serving.prefix))}`
+        }
         memoryAnswered(report)
         return [null, new IOResult()]
       }
@@ -2826,13 +2831,16 @@ export class Dispatcher {
     return found
   }
 
-  /** A number naming one store object, the same for every mount of it. */
+  /**
+   * A number naming one store object, the same for every mount of it in every
+   * workspace, as Python's id() of the store is.
+   */
   private storeId(vfs: BaseVFS): number {
-    const known = this.state.stores.get(vfs)
+    const known = Dispatcher.stores.get(vfs)
     if (known !== undefined) return known
-    this.state.storeCount += 1
-    this.state.stores.set(vfs, this.state.storeCount)
-    return this.state.storeCount
+    Dispatcher.storeCount += 1
+    Dispatcher.stores.set(vfs, Dispatcher.storeCount)
+    return Dispatcher.storeCount
   }
 
   /**

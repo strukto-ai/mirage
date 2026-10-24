@@ -37,7 +37,7 @@ from mirage.shell.constants import (
     SHELL_ARGV0,
 )
 from mirage.shell.descriptors import Descriptor, StreamOwner
-from mirage.shell.job_table import JobWaits
+from mirage.shell.job_table.waits import JobWaits
 from mirage.shell.types import AliasExpansion
 from mirage.shell.variable import (
     ManagedRef,

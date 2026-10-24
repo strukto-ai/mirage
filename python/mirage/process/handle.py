@@ -1,14 +1,27 @@
+from __future__ import annotations
+
 import asyncio
 import logging
 from collections.abc import Callable
 from concurrent.futures import Future
 from dataclasses import replace
 from threading import RLock
+from typing import Protocol
 
-from mirage.context.session_context import run_with_execution
 from mirage.process.types import ProcessInfo, ProcessRunner, ProcessState
 
 logger = logging.getLogger(__name__)
+
+
+class ExecutionBind(Protocol):
+    """Run a process under the execution context its host provides."""
+
+    async def __call__(
+        self,
+        execution_id: str,
+        run: ProcessRunner,
+        process: ProcessHandle,
+    ) -> int: ...
 
 
 class ProcessHandle:
@@ -28,6 +41,7 @@ class ProcessHandle:
         run: ProcessRunner,
         finished: Callable[[int], None],
         cancel_children: Callable[[int], None] = lambda signal: None,
+        bind: ExecutionBind | None = None,
     ) -> None:
         self._info = info
         self._lock = RLock()
@@ -37,7 +51,7 @@ class ProcessHandle:
         self._program_code: int | None = None
         self._completion: Future[ProcessInfo] = Future()
         self.task = asyncio.create_task(
-            run_with_execution(info.execution_id, run, self)
+            run() if bind is None else bind(info.execution_id, run, self)
         )
         self.task.add_done_callback(self._settle)
 

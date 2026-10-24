@@ -14,7 +14,8 @@
 
 import { type ShellValue, type VarAttr } from '../shell/variable.ts'
 import type { IndexCacheStore } from '../cache/index/store.ts'
-import type { FileStat, MountMode, PathSpec, Visibility } from '../types.ts'
+import type { FileStat, MountMode, PathSpec, SetAttrFields, Visibility } from '../types.ts'
+import type { ByteSource, IOResult, OpReport } from '../io/types.ts'
 
 /**
  * The keywords an op carries through the dispatcher: the mount's index, the
@@ -253,4 +254,89 @@ export interface SessionAccess {
   readonly umask: number
   readonly shopts: Readonly<Record<string, boolean>>
   readonly mountModes: ReadonlyMap<string, MountMode> | null
+}
+
+/** The public file operations a consumer uses, independent of the dispatcher. */
+export interface FileView {
+  readonly sessionId: string | null
+  mountOf(path: string | PathSpec): string | null
+  isMount(path: string | PathSpec): boolean
+  submounts(path: string | PathSpec): string[]
+  readonly dispatch: (
+    name: string,
+    path: string | PathSpec,
+    args?: readonly unknown[],
+    kwargs?: OpKwargs,
+    report?: OpReport,
+  ) => Promise<[unknown, IOResult]>
+  read(
+    path: string | PathSpec,
+    options?: { raw?: boolean; offset?: number; size?: number | null; stream?: false },
+    sessionId?: string,
+  ): Promise<Uint8Array>
+  read(
+    path: string | PathSpec,
+    options: { raw?: boolean; offset?: number; size?: number | null; stream: true },
+    sessionId?: string,
+  ): Promise<AsyncIterable<Uint8Array>>
+  read(
+    path: string | PathSpec,
+    options: { raw?: boolean; offset?: number; size?: number | null; stream: boolean },
+    sessionId?: string,
+  ): Promise<Uint8Array | AsyncIterable<Uint8Array>>
+  write(path: string | PathSpec, data: ByteSource | string, sessionId?: string): Promise<void>
+  append(path: string | PathSpec, data: ByteSource, sessionId?: string): Promise<void>
+  pwrite(
+    path: string | PathSpec,
+    data: Uint8Array,
+    offset: number,
+    sessionId?: string,
+  ): Promise<void>
+  readdir(path: string | PathSpec, sessionId?: string): Promise<string[]>
+  stat(
+    path: string | PathSpec,
+    sessionId?: string,
+    opts?: { nofollow?: boolean; fresh?: boolean },
+  ): Promise<FileStat>
+  exists(path: string | PathSpec, sessionId?: string): Promise<boolean>
+  isDir(path: string | PathSpec, sessionId?: string): Promise<boolean>
+  isFile(path: string | PathSpec, sessionId?: string): Promise<boolean>
+  mkdir(path: string | PathSpec, sessionId?: string): Promise<void>
+  create(path: string | PathSpec, sessionId?: string): Promise<void>
+  symlink(path: string | PathSpec, target: string, sessionId?: string): Promise<void>
+  readlink(path: string | PathSpec, sessionId?: string): Promise<string>
+  setattr(
+    path: string | PathSpec,
+    attrs?: SetAttrFields,
+    sessionId?: string,
+  ): Promise<Record<string, number | string>>
+  getxattr(
+    path: string | PathSpec,
+    name: string,
+    opts?: { nofollow?: boolean },
+    sessionId?: string,
+  ): Promise<Uint8Array>
+  listxattr(
+    path: string | PathSpec,
+    opts?: { nofollow?: boolean },
+    sessionId?: string,
+  ): Promise<string[]>
+  setxattr(
+    path: string | PathSpec,
+    name: string,
+    value: Uint8Array,
+    opts?: { create?: boolean; replace?: boolean; nofollow?: boolean },
+    sessionId?: string,
+  ): Promise<void>
+  removexattr(
+    path: string | PathSpec,
+    name: string,
+    opts?: { nofollow?: boolean },
+    sessionId?: string,
+  ): Promise<void>
+  truncate(path: string | PathSpec, length: number, sessionId?: string): Promise<void>
+  unlink(path: string | PathSpec, sessionId?: string): Promise<void>
+  rmdir(path: string | PathSpec, sessionId?: string): Promise<void>
+  rename(src: string | PathSpec, dst: string | PathSpec, sessionId?: string): Promise<void>
+  listFiles(path: string | PathSpec, sessionId?: string): Promise<string[]>
 }

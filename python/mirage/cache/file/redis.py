@@ -13,11 +13,12 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from importlib.resources import files
+from typing import cast
 
 from mirage.cache.file.constants import DEFAULT_KEY_PREFIX
+from mirage.cache.file.invalidation import Invalidation, with_fill_guard
 from mirage.cache.file.mixin import FileCacheMixin, validate_max_drain_bytes
 from mirage.cache.file.utils import glob_escape, parse_limit
-from mirage.cache.invalidation import Invalidation
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import under_path
 from mirage.vfs.redis.redis import RedisVFS
@@ -78,11 +79,6 @@ class RedisFileCacheStore(RedisVFS, FileCacheMixin):
         self._meta_prefix = f"{key_prefix}meta:"
         self._entry_pattern = f"{glob_escape(key_prefix)}[dm][ae]ta:"
         self.max_drain_bytes: int | None = max_drain_bytes
-        # Local invalidation discards a fill whose key was dropped while
-        # it was in flight. Dormant on this host: nothing suspends between
-        # the stamp and the check here (see `set`), so it is the shared
-        # cross-language contract and a guard against a future await
-        # rather than a window that can currently open.
         self._invalidation = Invalidation()
         self._version = self._cache_client.register_script(VERSION_LUA)
 
@@ -93,7 +89,9 @@ class RedisFileCacheStore(RedisVFS, FileCacheMixin):
         return f"{self._meta_prefix}{key}"
 
     async def get(self, key: str) -> bytes | None:
-        return await self._cache_client.get(self._data_key(key))
+        return cast(
+            bytes | None, await self._cache_client.get(self._data_key(key))
+        )
 
     async def set(
         self,
@@ -102,9 +100,8 @@ class RedisFileCacheStore(RedisVFS, FileCacheMixin):
         fingerprint: str | None = None,
         ttl: int | None = None,
     ) -> None:
-        stamp = self._invalidation.enter(key)
-        try:
-            if self._invalidation.stale(key, stamp):
+        with with_fill_guard(self._invalidation, [key]) as is_live:
+            if not is_live(key):
                 return
             pipe = self._cache_client.pipeline()
             dk = self._data_key(key)
@@ -123,8 +120,6 @@ class RedisFileCacheStore(RedisVFS, FileCacheMixin):
                 if fingerprint:
                     pipe.expire(mk, ttl)
             await pipe.execute()
-        finally:
-            self._invalidation.leave(key)
 
     async def remove(
         self,
@@ -167,13 +162,8 @@ class RedisFileCacheStore(RedisVFS, FileCacheMixin):
         keys = list(fingerprints)
         for start in range(0, len(keys), KEY_BATCH):
             batch = keys[start : start + KEY_BATCH]
-            stamps = {key: self._invalidation.enter(key) for key in batch}
-            try:
-                live = [
-                    key
-                    for key in batch
-                    if not self._invalidation.stale(key, stamps[key])
-                ]
+            with with_fill_guard(self._invalidation, batch) as is_live:
+                live = [key for key in batch if is_live(key)]
                 # A scripted pipeline costs a SCRIPT EXISTS round trip first.
                 pipe = (
                     self._cache_client.pipeline(transaction=False)
@@ -188,9 +178,6 @@ class RedisFileCacheStore(RedisVFS, FileCacheMixin):
                     )
                 if pipe is not None:
                     await pipe.execute()
-            finally:
-                for key in batch:
-                    self._invalidation.leave(key)
 
     async def is_fresh(self, key: str, remote_fingerprint: str) -> bool:
         pipe = self._cache_client.pipeline(transaction=False)
@@ -205,7 +192,8 @@ class RedisFileCacheStore(RedisVFS, FileCacheMixin):
     async def is_unbounded(self, key: str) -> bool:
         # Redis answers this natively and distinguishes the two cases
         # that matter: -1 is present with no expiry, -2 is absent.
-        return await self._cache_client.ttl(self._data_key(key)) == -1
+        ttl = cast(int, await self._cache_client.ttl(self._data_key(key)))
+        return ttl == -1
 
     async def clear(self) -> None:
         self._invalidation.invalidate_all()

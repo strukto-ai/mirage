@@ -56,7 +56,9 @@ from mirage.policy import (
     resolve_producer,
 )
 from mirage.policy.types import Claimant, HandOff, SessionContext
+from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import decode_text, encode_text
+from mirage.shell.call_stack import CallStack
 from mirage.shell.console import Channel, JobConsole
 from mirage.shell.errors import (
     ArithError,
@@ -71,6 +73,7 @@ from mirage.shell.helpers import (
     read_row,
     split_env_prefix,
 )
+from mirage.shell.job_table import JobTable
 from mirage.shell.parse import check_syntax, syntax_error_result
 from mirage.shell.parse.scope import ParseScope
 from mirage.shell.parse.source import source_offsets
@@ -125,6 +128,7 @@ from mirage.workspace.lookup import (
     runtime_refused,
 )
 from mirage.workspace.lookup.constants import INTERPRETER_NAMES
+from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.node.admission import (
     Admitted,
@@ -165,16 +169,16 @@ async def _own_words(node: TSNodeLike, pending: Awaitable[T]) -> T:
 
 
 async def execute_command(
-    recurse,
-    dispatch,
-    registry,
-    namespace,
+    recurse: Callable[..., Awaitable[RedirectResult]],
+    dispatch: DispatchFn,
+    registry: MountRegistry,
+    namespace: Namespace,
     execute_fn: ExecuteFn,
-    node,
+    node: TSNodeLike,
     context: EvaluationContext,
-    stdin,
-    call_stack,
-    job_table,
+    stdin: ByteSource | None,
+    call_stack: CallStack | None,
+    job_table: JobTable,
     cancel: asyncio.Event | None = None,
     handed: HandOff | None = None,
     sink: JobConsole | None = None,
@@ -527,17 +531,17 @@ def _write_refused(
 
 
 async def _dispatch_command_body(
-    recurse,
-    dispatch,
-    registry,
-    namespace,
+    recurse: Callable[..., Awaitable[RedirectResult]],
+    dispatch: DispatchFn,
+    registry: MountRegistry,
+    namespace: Namespace,
     execute_fn: ExecuteFn,
-    node,
-    parts,
+    node: TSNodeLike,
+    parts: list[TSNodeLike],
     context: EvaluationContext,
-    stdin,
-    call_stack,
-    job_table,
+    stdin: ByteSource | None,
+    call_stack: CallStack | None,
+    job_table: JobTable,
     seed_prefix: Callable[[str], Awaitable[None]],
     cancel: asyncio.Event | None = None,
     handed: HandOff | None = None,
@@ -650,16 +654,16 @@ async def _dispatch_command_body(
 
 
 async def _run_argv(
-    recurse,
-    dispatch,
-    registry,
-    namespace,
+    recurse: Callable[..., Awaitable[RedirectResult]],
+    dispatch: DispatchFn,
+    registry: MountRegistry,
+    namespace: Namespace,
     execute_fn: ExecuteFn,
     argv: Argv,
     context: EvaluationContext,
-    stdin,
-    call_stack,
-    job_table,
+    stdin: ByteSource | None,
+    call_stack: CallStack | None,
+    job_table: JobTable,
     cancel: asyncio.Event | None = None,
     row: int = 0,
     redirects: tuple[PathSpec, ...] = (),
@@ -939,16 +943,16 @@ def unsaid(lines: list[str], said: bytes) -> list[str]:
 
 
 async def _route_argv(
-    recurse,
-    dispatch,
-    registry,
-    namespace,
+    recurse: Callable[..., Awaitable[RedirectResult]],
+    dispatch: DispatchFn,
+    registry: MountRegistry,
+    namespace: Namespace,
     execute_fn: ExecuteFn,
     argv: Argv,
     context: EvaluationContext,
-    stdin,
-    call_stack,
-    job_table,
+    stdin: ByteSource | None,
+    call_stack: CallStack | None,
+    job_table: JobTable,
     cancel: asyncio.Event | None,
     row: int,
     handed: HandOff | None = None,

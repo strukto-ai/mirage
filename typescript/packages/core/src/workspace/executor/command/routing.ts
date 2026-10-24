@@ -33,7 +33,7 @@ import { DeviceInput, type ByteSource } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
 import { type MountRegistry } from '../../mount/registry.ts'
 import { classifyBarePath } from '../../expand/classify/index.ts'
-import { splitAssignment } from '../../../core/awk/builtins.ts'
+import { isAssignment } from '../../../commands/builtin/generic/awk.ts'
 
 // Commands a bare invocation points at the working directory, mapped to
 // the typed spelling their synthetic operand carries. GNU find/tree/du/
@@ -259,7 +259,7 @@ export function routableScopes(cmdName: string, scopes: PathSpec[]): PathSpec[] 
     ? scopes.filter((s, index) => s.rawPath !== '-' || index >= leading)
     : scopes
   if (cmdName !== 'awk') return routed
-  return routed.filter((s) => splitAssignment(s.rawPath) === null)
+  return routed.filter((s) => !isAssignment(s.rawPath))
 }
 
 /** Combine positional and path-flag scopes, keeping operand order. */

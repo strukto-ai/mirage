@@ -16,6 +16,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, JsonValue
 
 from mirage.execution.types import ExecutionRecord
+from mirage.server.jobs import ExecutionTable
 
 router = APIRouter(prefix="/v1/jobs")
 
@@ -78,7 +79,7 @@ async def _require_job(request: Request, job_id: str) -> ExecutionRecord:
         request (Request): the request.
         job_id (str): the job asked for.
     """
-    table = request.app.state.jobs
+    table: ExecutionTable = request.app.state.jobs
     try:
         entry = table.get(job_id)
     except KeyError as exc:

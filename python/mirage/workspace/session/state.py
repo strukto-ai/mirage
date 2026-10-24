@@ -19,9 +19,9 @@ from dataclasses import replace
 from typing import ParamSpec
 
 from mirage.context.session_context import session_access
-from mirage.policy import (
+from mirage.policy.errors import PolicyDenied
+from mirage.policy.policies import (
     Policies,
-    PolicyDenied,
     post_session_gate,
     pre_session_gate,
 )

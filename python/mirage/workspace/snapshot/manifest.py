@@ -12,8 +12,9 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from mirage.types import VFSName
 from mirage.workspace.snapshot.keys import (
@@ -165,7 +166,9 @@ def _stash_blobs(
     return out
 
 
-def _history_to_manifest(records, a: _BlobAllocator):
+def _history_to_manifest(
+    records: list[dict[str, Any]] | None, a: _BlobAllocator
+) -> list[dict[str, Any]] | None:
     if records is None:
         return None
     out = []
@@ -185,7 +188,7 @@ def _history_to_manifest(records, a: _BlobAllocator):
     return out
 
 
-def _node_to_manifest(node, a: _BlobAllocator):
+def _node_to_manifest(node: Any, a: _BlobAllocator) -> Any:
     if not isinstance(node, dict):
         return node
     out = dict(node)
@@ -201,11 +204,13 @@ def _node_to_manifest(node, a: _BlobAllocator):
     return out
 
 
-def resolve_manifest(manifest: dict[str, Any], blob_reader) -> dict[str, Any]:
-    return _resolve(manifest, blob_reader)
+def resolve_manifest(
+    manifest: dict[str, Any], blob_reader: Callable[[str], bytes]
+) -> dict[str, Any]:
+    return cast(dict[str, Any], _resolve(manifest, blob_reader))
 
 
-def _resolve(node, blob_reader):
+def _resolve(node: Any, blob_reader: Callable[[str], bytes]) -> Any:
     if isinstance(node, dict):
         if set(node.keys()) == {BLOB_REF_KEY}:
             path = node[BLOB_REF_KEY]

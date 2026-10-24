@@ -21,6 +21,7 @@ import sys
 
 import pytest
 
+from mirage.context.session_context import run_with_execution
 from mirage.process.supervisor import ProcessSupervisor
 from mirage.runtime.sandbox.cli import (
     Children,
@@ -199,7 +200,7 @@ def _start_runner(
 async def test_a_runner_killed_with_term_lets_the_child_handle_it(tmp_path):
     pid_file, said = tmp_path / "pid", tmp_path / "said"
     runner = _start_runner(
-        ProcessSupervisor(),
+        ProcessSupervisor(bind=run_with_execution),
         f"trap 'echo bye > {said}; exit 0' TERM; echo $$ > {pid_file}; "
         "while :; do sleep 0.05; done",
     )
@@ -217,7 +218,7 @@ async def test_a_runner_killed_with_kill_gives_the_child_no_handler(
 ):
     pid_file, said = tmp_path / "pid", tmp_path / "said"
     runner = _start_runner(
-        ProcessSupervisor(),
+        ProcessSupervisor(bind=run_with_execution),
         f"trap 'echo bye > {said}; exit 0' TERM; echo $$ > {pid_file}; "
         "while :; do sleep 0.05; done",
     )
@@ -248,7 +249,7 @@ async def test_a_direct_child_that_handles_the_signal_leaves_its_status(
 ):
     pid_file = tmp_path / "pid"
     runner = _start_runner(
-        ProcessSupervisor(),
+        ProcessSupervisor(bind=run_with_execution),
         f"{trap}echo $$ > {pid_file}; while :; do sleep 0.05; done",
         direct,
     )
@@ -276,7 +277,7 @@ async def test_a_kill_signals_the_child_once(tmp_path):
         "    time.sleep(0.05)\n"
     )
     runner = _start_runner(
-        ProcessSupervisor(),
+        ProcessSupervisor(bind=run_with_execution),
         f"exec {shlex.quote(sys.executable)} -c {shlex.quote(program)}",
     )
     await _wait_for_pid(pid_file)
@@ -304,7 +305,7 @@ async def test_a_group_answering_eperm_is_gone(tmp_path, monkeypatch):
     monkeypatch.setattr(os, "killpg", darwin)
     pid_file = tmp_path / "pid"
     runner = _start_runner(
-        ProcessSupervisor(),
+        ProcessSupervisor(bind=run_with_execution),
         f"trap 'exit 0' TERM; echo $$ > {pid_file}; "
         "while :; do sleep 0.05; done",
     )
@@ -321,7 +322,7 @@ async def test_a_group_answering_eperm_is_gone(tmp_path, monkeypatch):
 async def test_a_descendant_keeps_the_grace_after_its_parent_exits(tmp_path):
     pid_file, said = tmp_path / "pid", tmp_path / "said"
     runner = _start_runner(
-        ProcessSupervisor(),
+        ProcessSupervisor(bind=run_with_execution),
         f'sh -c \'trap "sleep 0.3; echo bye > {said}; exit 0" TERM; '
         f"while :; do sleep 0.05; done' >/dev/null 2>&1 & "
         f"echo $$ > {pid_file}; wait",
@@ -340,7 +341,7 @@ async def test_a_descendant_keeps_the_grace_after_its_parent_exits(tmp_path):
 async def test_a_descendant_that_ignores_the_signal_is_killed(tmp_path):
     pid_file, kid_file = tmp_path / "pid", tmp_path / "kid"
     runner = _start_runner(
-        ProcessSupervisor(),
+        ProcessSupervisor(bind=run_with_execution),
         "sh -c \"trap '' TERM; while :; do sleep 0.05; done\" "
         f">/dev/null 2>&1 & echo $! > {kid_file}; echo $$ > {pid_file}; wait",
     )
@@ -359,7 +360,7 @@ async def test_a_descendant_that_ignores_the_signal_is_killed(tmp_path):
 async def test_a_handler_writing_its_output_finishes_in_the_grace(tmp_path):
     pid_file, said = tmp_path / "pid", tmp_path / "said"
     runner = _start_runner(
-        ProcessSupervisor(),
+        ProcessSupervisor(bind=run_with_execution),
         f"trap 'head -c 300000 /dev/zero; head -c 300000 /dev/zero >&2; "
         f"echo bye > {said}; exit 0' TERM; echo $$ > {pid_file}; "
         "while :; do sleep 0.05; done",
@@ -378,7 +379,7 @@ async def test_a_child_that_ignores_the_signal_is_killed_after_the_grace(
 ):
     pid_file = tmp_path / "pid"
     runner = _start_runner(
-        ProcessSupervisor(),
+        ProcessSupervisor(bind=run_with_execution),
         f"trap '' TERM; echo $$ > {pid_file}; while :; do sleep 0.05; done",
     )
     child = await _wait_for_pid(pid_file)

@@ -33,7 +33,7 @@ import {
 } from '../utils/hidden.ts'
 import { eacces, enoent, erofs } from '../errors/fs.ts'
 import { norm, parent } from '../utils/path.ts'
-import type { DryRun, VfsExplanation, EntryGate } from '../policy/types.ts'
+import type { DecisionOwner, DryRun, EntryGate, HandOff, VfsExplanation } from '../policy/types.ts'
 import type { OpRecord } from '../observe/record.ts'
 import type { PathSpec, Refusal, Visibility, WalkProbe } from '../types.ts'
 import { MOUNT_MODE_RANK, MountMode, weakerMode } from '../types.ts'
@@ -91,8 +91,8 @@ export interface LineAbortFrame {
  * `owner` is the session manager the session belongs to, one per
  * workspace; `evaluation` the evaluation running on the session, which a
  * layer bound to another session never carries. The fields whose type
- * lives in a module that reads the caller (the ledger's call, the
- * policies, the recording and the cache bindings) are
+ * lives in a module that reads the caller (the policies, the
+ * recording and the cache bindings) are
  * added in that module, so this one imports none of them. Mirrors
  * Python's Caller.
  */
@@ -101,6 +101,7 @@ export interface Caller {
   readonly session: SessionState | null
   readonly owner: SessionOwner | null
   readonly evaluation: EvaluationContext | null
+  readonly call: readonly [DecisionOwner, HandOff, string] | null
   readonly gate: EntryGate | null
   // The gate the dispatcher judges the paths of this call by: the
   // command's own calls carry it, the shell's own I/O around them does not.

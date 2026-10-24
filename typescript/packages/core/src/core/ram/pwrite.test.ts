@@ -64,3 +64,13 @@ describe('pwrite to a pipe', () => {
     expect(store.modified.has('/fd/63')).toBe(false)
   })
 })
+
+describe('pwrite to a discarding device', () => {
+  it('pads nothing up to its offset', async () => {
+    const store = new DevStore(new DevFiles('owner'))
+    const accessor = new RAMAccessor(store as unknown as RAMStore)
+    const nul = new PathSpec({ virtual: '/dev/null', directory: '/dev/', vfsPath: 'null' })
+    await pwrite(accessor, nul, ENC.encode('x'), Number.MAX_SAFE_INTEGER)
+    expect(store.files.get('/null')).toEqual(new Uint8Array())
+  })
+})

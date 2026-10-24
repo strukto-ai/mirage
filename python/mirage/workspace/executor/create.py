@@ -28,6 +28,8 @@ from mirage.workspace.session import SessionState
 
 logger = logging.getLogger(__name__)
 
+_streaming: dict[str, int] = {}
+
 
 async def create_file(
     dispatch: DispatchFn,
@@ -128,15 +130,16 @@ async def write_description(
 
     A write-only description lands at its offset with ``pwrite``, so it
     needs no read of the file, as a write to a write-only descriptor
-    needs none (``exec 3>f; echo a >&3``). A read-write one (``<>``)
-    still reads it: that description was opened to read, and its own
-    reader resumes over what the write left. Writes through one
-    description take turns, the first one (which opens the file)
-    included, as the kernel orders writes to an open file: a background
-    job writing alongside the shell neither reopens the file nor lands on
-    an offset another write has not advanced yet. A writer killed while it
-    waits for its turn writes nothing: its cancelled task leaves the
-    queue.
+    needs none (``exec 3>f; echo a >&3``). Its first write into a file
+    still empty lands as one stream instead (``_first_write``). A
+    read-write one (``<>``) still reads it: that
+    description was opened to read, and its own reader resumes over what
+    the write left. Writes through one description take turns, the first
+    one (which opens the file) included, as the kernel orders writes to
+    an open file: a background job writing alongside the shell neither
+    reopens the file nor lands on an offset another write has not
+    advanced yet. A writer killed while it waits for its turn writes
+    nothing: its cancelled task leaves the queue.
 
     Args:
         dispatch (DispatchFn): operation dispatcher.
@@ -159,6 +162,12 @@ async def write_description(
                 dispatch, session, file.scope, data, append=file.append
             )
             file.opened = True
+            return
+        if (
+            file.source is None
+            and not file.offset
+            and await _first_write(dispatch, session, file, data)
+        ):
             return
         if not file.opened:
             await create_file(
@@ -185,6 +194,73 @@ async def write_description(
                     file.source.lines = await file.source.lines.reopen(
                         slice_stream(content, offset)
                     )
+
+
+async def _first_write(
+    dispatch: DispatchFn,
+    session: SessionState,
+    file: FileDescription,
+    data: ByteSource,
+) -> bool:
+    """Land an opened description's first write into a file still empty
+    as one stream, and answer whether it did.
+
+    The same bytes from offset 0 in ``pwrite`` windows cost a copy of the
+    file each on a store whose ``pwrite`` rewrites it, so ``cmd > f``
+    would move the file's size squared. The backing file (the store and
+    its key, alike for every workspace mounting that store) is claimed
+    before the size is read and kept until the stream ends, so another
+    description of it writing meanwhile takes the windows, which
+    interleave as two descriptors do, instead of replacing what this one
+    wrote; a file in another store never contends. A stream that fails
+    leaves the offset at what landed.
+
+    Args:
+        dispatch (DispatchFn): operation dispatcher.
+        session (SessionState): file creation mode.
+        file (FileDescription): the description, at offset 0.
+        data (ByteSource): bytes emitted by the command, untouched when
+            this answers False.
+    """
+    report = OpReport()
+    try:
+        await dispatch("stat", file.scope, admit_only=True, report=report)
+    except FS_ERRORS as exc:
+        logger.debug(
+            "write target %s has no store: %s", file.scope.raw_path, exc
+        )
+        return False
+    store = report.store or file.scope.virtual
+    if _streaming.setdefault(store, id(file)) != id(file):
+        return False
+    try:
+        if await _size_of(dispatch, file.scope) != 0:
+            return False
+        try:
+            file.offset = await create_counted(
+                dispatch, session, file.scope, data
+            )
+        except BaseException:
+            file.offset = await _size_of(dispatch, file.scope) or 0
+            raise
+        return True
+    finally:
+        del _streaming[store]
+
+
+async def _size_of(dispatch: DispatchFn, scope: PathSpec) -> int | None:
+    """The size of the file a description opened, None when unknown.
+
+    Args:
+        dispatch (DispatchFn): operation dispatcher.
+        scope (PathSpec): the file.
+    """
+    try:
+        stat, _ = await dispatch("stat", scope)
+    except FS_ERRORS as exc:
+        logger.debug("write target %s has no stat: %s", scope.raw_path, exc)
+        return None
+    return stat.size if isinstance(stat, FileStat) else None
 
 
 async def create_counted(

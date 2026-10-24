@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import AsyncIterator
-from typing import Any
+from typing import Any, cast
 
 from mirage.accessor.discord import DiscordAccessor
 from mirage.core.discord.client import discord_get
@@ -21,7 +21,7 @@ from mirage.core.discord.paginate import after_id_pages
 
 
 def _member_user_id(m: dict[str, Any]) -> str:
-    return m.get("user", {}).get("id", "")
+    return cast(str, m.get("user", {}).get("id", ""))
 
 
 def list_members_stream(

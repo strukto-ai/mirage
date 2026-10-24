@@ -216,9 +216,9 @@ jobs:
       # (accessor, cache, core, utils, view, vfs) never import commands or
       # the workspace; no command or CLI module imports a VFS object (a
       # VFS module, the mount table, the caches); a CLI imports only its
-      # own service's client; and TypeScript loads no module in a loop.
-      # The excused edges and the type-only cycles are a ratchet like the
-      # two above.
+      # own service's client; and neither host has an import cycle.
+      # The excused edges and all cycles, including type-only and deferred
+      # imports, are a ratchet like the two above.
       - name: Import direction
         run: |
           ./python/.venv/bin/python scripts/check_import_direction.py --selftest

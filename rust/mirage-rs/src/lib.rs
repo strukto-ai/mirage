@@ -1,3 +1,4 @@
+mod awk;
 mod base64;
 mod bc;
 mod cmp;
@@ -117,6 +118,22 @@ pub trait Stream: Send + Sync {
     /// warnings and notices, which do not stop it.
     fn take_stderr(&mut self, err: &mut Vec<u8>) {
         let _ = err;
+    }
+
+    /// The host operation the stream waits on before it can go on, for a
+    /// stream that reaches files and commands: a JSON header naming it,
+    /// with the bytes it carries appended to `data`. None while it waits
+    /// on none; each one taken is answered by `respond`.
+    fn request(&mut self, data: &mut Vec<u8>) -> Option<Vec<u8>> {
+        let _ = data;
+        None
+    }
+
+    /// The host's answer to the request taken last: a JSON reply and the
+    /// bytes it carries.
+    fn respond(&mut self, reply: &[u8], data: &[u8], out: &mut Vec<u8>) -> Result<(), StreamError> {
+        let _ = (reply, data, out);
+        Err(StreamError::new("this stream makes no requests"))
     }
 }
 
@@ -281,6 +298,7 @@ impl std::error::Error for StreamError {}
 /// Open the stream `kind` from its JSON configuration.
 pub fn open(kind: &str, config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
     match kind {
+        "awk" => awk::open(config),
         "base64" => base64::open(config),
         "bc" => bc::open(config),
         "cmp" => cmp::open(config),

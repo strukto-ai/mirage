@@ -17,8 +17,18 @@ import json
 import os
 import shutil
 import tarfile
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Literal
+from typing import (
+    IO,
+    Any,
+    BinaryIO,
+    Literal,
+    NoReturn,
+    Protocol,
+    cast,
+    overload,
+)
 
 from mirage.core.disk.utils import open_regular
 from mirage.types import VFSName
@@ -36,8 +46,14 @@ _COMPRESS_MODES: dict[str | None, Literal["w", "w:gz", "w:bz2", "w:xz"]] = {
 }
 
 
+class Writable(Protocol):
+    """The byte sink a snapshot can stream into."""
+
+    def write(self, data: bytes | memoryview, /) -> int | None: ...
+
+
 def write_tar(
-    target,
+    target: str | Path | Writable,
     manifest: dict[str, Any],
     blobs: dict[str, bytes | Path],
     *,
@@ -49,11 +65,11 @@ def write_tar(
     never holds more than one chunk of it in memory.
 
     Args:
-        target: filesystem path (str/Path) OR a writable file-like
+        target (str | Path | Writable): filesystem path OR a writable file-like
             object with a `write` method (BytesIO, etc.).
-        manifest: JSON-serializable dict.
-        blobs: {tar_path: bytes or host path} side-files.
-        compress: None | "gz" | "bz2" | "xz".
+        manifest (dict[str, Any]): JSON-serializable dict.
+        blobs (dict[str, bytes | Path]): side-files keyed by tar path.
+        compress (str | None): None | "gz" | "bz2" | "xz".
     """
     if compress not in _COMPRESS_MODES:
         raise ValueError(
@@ -62,7 +78,7 @@ def write_tar(
         )
     mode = _COMPRESS_MODES[compress]
     if hasattr(target, "write"):
-        tar = tarfile.open(fileobj=target, mode=mode)
+        tar = tarfile.open(fileobj=cast(BinaryIO, target), mode=mode)
     else:
         tar = tarfile.open(str(target), mode)
     with tar:
@@ -74,7 +90,9 @@ def write_tar(
             _add(tar, tar_path, data)
 
 
-def read_tar(source, staging: Path | None = None) -> dict[str, Any]:
+def read_tar(
+    source: str | Path | BinaryIO, staging: Path | None = None
+) -> dict[str, Any]:
     """Read a tar produced by write_tar; return a resolved state dict.
 
     With ``staging``, each disk mount's files are extracted there in
@@ -83,12 +101,12 @@ def read_tar(source, staging: Path | None = None) -> dict[str, Any]:
     directory once the state is loaded.
 
     Args:
-        source: filesystem path (str/Path) OR a readable file-like
+        source (str | Path | BinaryIO): filesystem path OR a readable file-like
             object with a `read` method.
         staging (Path | None): a directory for disk mount files.
     """
     if hasattr(source, "read"):
-        tar = tarfile.open(fileobj=source, mode="r:*")
+        tar = tarfile.open(fileobj=cast(BinaryIO, source), mode="r:*")
     else:
         tar = tarfile.open(str(source), "r:*")
     with tar:
@@ -135,8 +153,22 @@ def _stage_disk_files(
             files[rel] = target
 
 
-def _make_reader(tar, stream: bool = False):
-    def reader(blob_path: str):
+@overload
+def _make_reader(
+    tar: tarfile.TarFile, stream: Literal[False] = False
+) -> Callable[[str], bytes]: ...
+
+
+@overload
+def _make_reader(
+    tar: tarfile.TarFile, stream: Literal[True]
+) -> Callable[[str], IO[bytes]]: ...
+
+
+def _make_reader(
+    tar: tarfile.TarFile, stream: bool = False
+) -> Callable[[str], bytes | IO[bytes]]:
+    def reader(blob_path: str) -> bytes | IO[bytes]:
         if not is_safe_blob_path(blob_path):
             raise ValueError(f"Unsafe blob path: {blob_path!r}")
         try:
@@ -165,7 +197,7 @@ def _add(tar: tarfile.TarFile, name: str, data: bytes | Path) -> None:
     tar.addfile(info, io.BytesIO(data))
 
 
-def _json_default(obj):
+def _json_default(obj: Any) -> NoReturn:
     # StrEnum members serialize as their string value (already happens
     # since StrEnum inherits from str), but bytes leftover in the
     # manifest are a programmer error — they should have been split

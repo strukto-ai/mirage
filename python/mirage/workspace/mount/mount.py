@@ -24,7 +24,7 @@ from contextlib import (
     contextmanager,
     nullcontext,
 )
-from typing import Any, Callable, cast
+from typing import Any, Callable, Literal, TypeVar, cast, overload
 
 from mirage.accessor.base import Accessor, NOOPAccessor
 from mirage.accessor.ram import RAMAccessor
@@ -152,6 +152,8 @@ from mirage.workspace.mount.write_policy import (
 )
 
 logger = logging.getLogger(__name__)
+
+T = TypeVar("T")
 
 
 def _wrap_mount_streams(
@@ -2027,9 +2029,19 @@ class MountEntry:
                 )
         return handed
 
+    @overload
+    async def _stored(
+        self, name: Literal["stat"], scope: PathSpec, index: IndexCacheStore
+    ) -> FileStat | None: ...
+
+    @overload
     async def _stored(
         self, name: str, scope: PathSpec, index: IndexCacheStore
-    ) -> Any:
+    ) -> FileStat | list[str] | dict[str, FileStat] | None: ...
+
+    async def _stored(
+        self, name: str, scope: PathSpec, index: IndexCacheStore
+    ) -> FileStat | list[str] | dict[str, FileStat] | None:
         """A listing or a stat the stored listings answer, None for one
         the backend must.
 
@@ -2254,13 +2266,43 @@ class MountEntry:
             await index.invalidate_dir(folder_of(key))
             await index.invalidate_dir(key)
 
+    @overload
+    async def call(
+        self,
+        name: Literal["stat"],
+        path: str | PathSpec,
+        /,
+        *args: Any,
+        **kwargs: Any,
+    ) -> FileStat: ...
+
+    @overload
+    async def call(
+        self,
+        name: Literal["readdir"],
+        path: str | PathSpec,
+        /,
+        *args: Any,
+        **kwargs: Any,
+    ) -> list[str]: ...
+
+    @overload
     async def call(
         self,
         name: str,
         path: str | PathSpec,
         /,
-        *args,
-        **kwargs,
+        *args: Any,
+        **kwargs: Any,
+    ) -> Any: ...
+
+    async def call(
+        self,
+        name: str,
+        path: str | PathSpec,
+        /,
+        *args: Any,
+        **kwargs: Any,
     ) -> Any:
         """Run an op on this mount's VFS.
 
@@ -2520,16 +2562,14 @@ class MountEntry:
                 ),
             )
 
-    async def _framed(
-        self, op: str, work: Callable[[], Awaitable[Any]]
-    ) -> Any:
+    async def _framed(self, op: str, work: Callable[[], Awaitable[T]]) -> T:
         """Run one backend call as ``call`` frames its own: as the caller
         on this mount (``_on_mount``), past the host-I/O patch, under the
         op's timeout.
 
         Args:
             op (str): the op whose timeout bounds the call.
-            work (Callable[[], Awaitable[Any]]): starts the call.
+            work (Callable[[], Awaitable[T]]): starts the call.
         """
         token = bind_caller(self._on_mount(current_caller()))
         try:

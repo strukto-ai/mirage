@@ -118,7 +118,8 @@ async def test_a_subtree_removal_reclaims_the_evicted_bytes():
 
 
 @pytest.mark.asyncio
-async def test_a_cancelled_write_keeps_the_previous_entry():
+@pytest.mark.parametrize("operation", ["set", "keep_fingerprints"])
+async def test_a_cancelled_write_keeps_the_previous_entry(operation):
     # Cancellation safety, not a race: the writer is cancelled while parked
     # on the lock, so `set` unwinds through its `finally` and must leave
     # both the previous entry and the writer bookkeeping untouched. Nothing
@@ -129,7 +130,7 @@ async def test_a_cancelled_write_keeps_the_previous_entry():
     await lock.acquire()
     try:
         with pytest.raises(asyncio.TimeoutError):
-            await asyncio.wait_for(cache.set("/file", b"new"), 0.02)
+            await asyncio.wait_for(_fill(cache, operation, "/file"), 0.02)
     finally:
         lock.release()
     assert await cache.get("/file") == b"old"

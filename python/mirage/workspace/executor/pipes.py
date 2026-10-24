@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from functools import partial
 from typing import Any
 
@@ -79,7 +79,9 @@ from mirage.workspace.types import ExecutionNode
 
 
 async def handle_pipe(
-    execute_node,
+    execute_node: Callable[
+        ..., Awaitable[tuple[ByteSource | None, IOResult, ExecutionNode]]
+    ],
     commands: list[TSNodeLike],
     stderr_flags: list[bool],
     context: EvaluationContext,
@@ -213,17 +215,17 @@ async def handle_pipe(
             children[i].session.process_id = process.info.pid
             tasks.append(process.task)
         last = pipes[-1].stream()
-        result = await run_with_timeout(
-            asyncio.gather(
-                materialize(last)
-                if sink is None
-                else pump(sink, Channel.STDOUT, last),
-                *tasks,
-            ),
+        output_task = asyncio.create_task(
+            materialize(last)
+            if sink is None
+            else pump(sink, Channel.STDOUT, last)
+        )
+        await run_with_timeout(
+            asyncio.gather(output_task, *tasks),
             session.pipeline_timeout_seconds,
             "pipeline",
         )
-        last_stdout = result[0]
+        last_stdout = output_task.result()
     except BaseException:
         failed = True
         raise
@@ -270,7 +272,9 @@ async def handle_pipe(
 
 
 async def handle_connection(
-    execute_node,
+    execute_node: Callable[
+        ..., Awaitable[tuple[ByteSource | None, IOResult, ExecutionNode]]
+    ],
     left: TSNodeLike,
     op: str,
     right: TSNodeLike,
@@ -403,7 +407,9 @@ async def _subshell_ended(
 
 
 async def handle_subshell(
-    execute_node,
+    execute_node: Callable[
+        ..., Awaitable[tuple[ByteSource | None, IOResult, ExecutionNode]]
+    ],
     body: list[TSNodeLike],
     context: EvaluationContext,
     stdin: ByteSource | None = None,

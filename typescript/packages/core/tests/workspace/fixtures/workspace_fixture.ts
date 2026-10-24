@@ -14,8 +14,7 @@
 
 import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
-import type { LostPaths } from '../../../src/observe/context.ts'
-import type { OpRecord } from '../../../src/observe/record.ts'
+import type { LostPaths, OpRecord } from '../../../src/observe/record.ts'
 import { RAMVFS } from '../../../src/vfs/ram/ram.ts'
 import { createShellParser, type ShellParser } from '../../../src/shell/parse/index.ts'
 import { type CacheFacts, MountMode, type Refusal } from '../../../src/types.ts'

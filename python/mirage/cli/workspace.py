@@ -15,7 +15,7 @@
 import json
 import os
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from urllib.parse import quote
 
 import typer
@@ -48,7 +48,7 @@ def resolve_config(path: Path) -> dict[str, Any]:
     compiler-set ``mount`` field, which the document grammar refuses
     as never typed).
     """
-    from mirage.config import load_config
+    from mirage.config import load_config  # noqa: PLC0415 - cold start
 
     try:
         load_config(path)
@@ -68,11 +68,16 @@ def _resolve_config_arg(path: Path) -> dict[str, Any]:
     the config module the same way so a spawn that loads no config
     never pays for it.
     """
-    from mirage.config import _absolutize_scripts, _interpolate_env
+    from mirage.config import (  # noqa: PLC0415 - cold start
+        _absolutize_scripts,
+        _interpolate_env,
+    )
 
     raw = parse_yaml(path.read_text(encoding="utf-8")) or {}
     try:
-        resolved = _interpolate_env(raw, dict(os.environ))
+        resolved = cast(
+            dict[str, Any], _interpolate_env(raw, dict(os.environ))
+        )
     except ValueError as e:
         fail(str(e), exit_code=2)
     _absolutize_scripts(resolved, path.resolve().parent)
@@ -88,7 +93,10 @@ def load_profile_argument(path: Path) -> dict[str, Any]:
     Args:
         path (Path): the profile document.
     """
-    from mirage.config import _absolutize_scripts, _interpolate_env
+    from mirage.config import (  # noqa: PLC0415 - cold start
+        _absolutize_scripts,
+        _interpolate_env,
+    )
 
     try:
         doc = parse_yaml(path.read_text(encoding="utf-8"))
@@ -101,7 +109,7 @@ def load_profile_argument(path: Path) -> dict[str, Any]:
     except ValueError as e:
         fail(str(e), exit_code=2)
     _absolutize_scripts(resolved, path.resolve().parent)
-    return resolved["profiles"][""]
+    return cast(dict[str, Any], resolved["profiles"][""])
 
 
 def _format_workspace_list(items: list[dict[str, Any]]) -> str:

@@ -1,6 +1,11 @@
 {
-  "baseline": 3142,
+  "baseline": 3103,
  "modules": {
+  "vfs/ram/store": {
+   "python_only": {
+    "_FileStore": "Python RAM and device stores share a structural mapping contract because device listings return lists rather than dict views; TypeScript uses its native Map surface."
+   }
+  },
   "utils/loader": {
    "python_only": {
     "lazy_exports": "The PEP 562 __getattr__ every Python package barrel binds; TypeScript barrels re-export statically and load nothing lazily."
@@ -410,6 +415,7 @@
   },
   "workspace/snapshot/tar_io": {
    "python_only": {
+    "Writable": "Python snapshot targets accept binary file-like writers; TypeScript uses its existing stream types.",
     "_stage_disk_files": "Each host stages a restore's disk mount files on disk: Python extracts them once the manifest is read, in _stage_disk_files; TypeScript finds their references with diskFileRefs while it streams the tar."
    },
    "typescript_only": {
@@ -535,6 +541,10 @@
    }
   },
   "config": {
+   "python_only": {
+    "RedisWorkspaceStateStore": "Python's optional imports bind a class or None; explicit annotations expose these existing bindings to the symbol checker.",
+    "S3WorkspaceStateStore": "Python's optional imports bind a class or None; explicit annotations expose these existing bindings to the symbol checker."
+   },
    "typescript_only": {
     "validateIndexValues": "Python checks an index block's values through its pydantic models (str url and key_prefix, StrictFloat ttl); the TypeScript loader has no model for the block, so it checks the values by hand at the same entry point."
    }
@@ -701,6 +711,7 @@
     "fresh_recorder": "Python's recorder is a frozen Recorder that carries the line's lost paths and version index, built in one place for a line and for a file call outside one; TypeScript's recording is a plain records array and mount id, made where it is needed."
    },
    "typescript_only": {
+    "lostPaths": "TypeScript retrieves a line's lost paths by its records array after its recording scope ends; Python reads the current Recorder through active_lost. This function was previously folded with the LostPaths class, now moved to observe/record on both hosts.",
     "lostByLine": "TypeScript keys a line's lost paths by its records array, because applyIo runs after runWithRecording returns; Python keeps them on the Recorder (active_lost).",
     "recordIndex": "TypeScript keys a line's version index by its records array, as it does the line's lost paths (lostPaths); Python keeps the index on the Recorder (Recorder.index), which push_mount_context carries.",
     "indexByLine": "The WeakMap behind recordIndex, keyed by a line's records array; Python keeps the index on the Recorder (Recorder.index)."
@@ -942,11 +953,6 @@
   "io/stream": {
    "python_only": {
     "InlineAwait": "asyncio awaits a coroutine in another context, or lets another task cancel it, only through a task of its own, which costs two turns of the event loop per stream pull; TypeScript replays its context in a closure and awaits the promise directly."
-   }
-  },
-  "process/handle": {
-   "typescript_only": {
-    "ExecutionBind": "TypeScript's process layer sits below the session the caller carries, so importing the caller's runWithExecution would close a type cycle; the workspace hands the supervisor the binder. Python's process handle imports run_with_execution directly."
    }
   }
  }

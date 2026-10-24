@@ -31,8 +31,13 @@ from mirage.policy import resolve_limit
 from mirage.runtime.base import Runtime
 from mirage.runtime.constants import EXTERNAL_COMMANDS
 from mirage.runtime.mixin import ProcessExecutorMixin
-from mirage.runtime.routing.types import RouteDecision
-from mirage.runtime.types import ExecutionKind, OutputFn, RunResult
+from mirage.runtime.types import (
+    ExecutionKind,
+    OutputFn,
+    RouteDecision,
+    RunResult,
+    RuntimeIdentity,
+)
 from mirage.shell.bytes import encode_text
 from mirage.shell.console import Channel, JobConsole
 from mirage.types import PathSpec, Producer
@@ -51,7 +56,7 @@ async def run_external(
     stdin: ByteSource | None,
     session: SessionState,
     registry: MountRegistry,
-    routing: RouteDecision[Runtime[Any]],
+    routing: RouteDecision[RuntimeIdentity],
     sink: JobConsole | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Execute one admitted program; its surrounding shell stays in Mirage.
@@ -63,9 +68,9 @@ async def run_external(
     the result.
     """
     bindings = routing.bindings
-    runtime = bindings.get(argv.name, bindings.get(EXTERNAL_COMMANDS))
+    entry = bindings.get(argv.name, bindings.get(EXTERNAL_COMMANDS))
     command = shlex.join(argv.tokens)
-    if runtime is None:
+    if entry is None:
         denied = admission_denial(argv.name)
         err = await denied.materialize_stderr()
         return (
@@ -73,6 +78,7 @@ async def run_external(
             denied,
             ExecutionNode(command=command, exit_code=126, stderr=err),
         )
+    runtime = Runtime.require(entry)
     cwd = PathSpec.from_str_path(session.cwd)
     env = env_snapshot(session)
     guard = resolve_limit(

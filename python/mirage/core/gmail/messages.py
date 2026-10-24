@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import base64
-from typing import Any
+from typing import Any, cast
 
 from mirage.core.google.client import TokenManager, gmail_base, google_get
 from mirage.core.render.json import compact_json_bytes
@@ -110,7 +110,7 @@ def _decode_body(payload: dict[str, Any]) -> str:
 def _extract_header(headers: list[dict[str, Any]], name: str) -> str:
     for h in headers:
         if h.get("name", "").lower() == name.lower():
-            return h.get("value", "")
+            return cast(str, h.get("value", ""))
     return ""
 
 

@@ -17,6 +17,7 @@ import errno
 import logging
 import sys
 import time
+from collections.abc import Callable
 from ctypes import CFUNCTYPE, POINTER, c_char_p, c_int, c_uint
 from typing import Any
 
@@ -63,6 +64,9 @@ _installed = False
 class Timespec(ctypes.Structure):
     """struct timespec on Darwin: two C longs."""
 
+    tv_sec: int
+    tv_nsec: int
+
     _fields_ = [
         ("tv_sec", ctypes.c_long),
         ("tv_nsec", ctypes.c_long),
@@ -92,11 +96,11 @@ class SetattrX(ctypes.Structure):
     ]
 
 
-def timespec_ns(ts: Any, now: int) -> int | None:
+def timespec_ns(ts: Timespec, now: int) -> int | None:
     """A C timespec as epoch nanoseconds, its utimensat markers read.
 
     Args:
-        ts (Any): a ctypes timespec (``tv_sec``, ``tv_nsec``).
+        ts (Timespec): a ctypes timespec (``tv_sec``, ``tv_nsec``).
         now (int): what UTIME_NOW stands for, epoch nanoseconds.
 
     Returns:
@@ -163,7 +167,10 @@ def rename_flags_check(new_exists: bool, flags: int) -> int | None:
 def _marshal_setattr_x(
     self: Any, path: bytes, attr: "ctypes._Pointer[SetattrX]"
 ) -> int:
-    return self.operations.setattr_x(
+    setattr_x: Callable[[str, dict[str, JsonValue]], int] = (
+        self.operations.setattr_x
+    )
+    return setattr_x(
         path.decode(self.encoding), changes_from_setattr(attr.contents)
     )
 
@@ -175,15 +182,17 @@ def _marshal_fsetattr_x(
     fip: "ctypes._Pointer[ctypes.Structure]",
 ) -> int:
     fh = fip.contents.fh if fip else None
-    return self.operations.fsetattr_x(
+    fsetattr_x: Callable[[str, dict[str, JsonValue], int | None], int] = (
+        self.operations.fsetattr_x
+    )
+    return fsetattr_x(
         path.decode(self.encoding), changes_from_setattr(attr.contents), fh
     )
 
 
 def _marshal_renamex(self: Any, old: bytes, new: bytes, flags: int) -> int:
-    return self.operations.renamex(
-        old.decode(self.encoding), new.decode(self.encoding), flags
-    )
+    renamex: Callable[[str, str, int], int] = self.operations.renamex
+    return renamex(old.decode(self.encoding), new.decode(self.encoding), flags)
 
 
 def install_macfuse_extensions(mfusepy: Any) -> None:

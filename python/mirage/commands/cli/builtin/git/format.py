@@ -15,7 +15,7 @@
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
-from typing import Protocol
+from typing import Protocol, cast
 
 from dulwich.objects import Commit
 
@@ -500,7 +500,7 @@ def _simple_placeholder(
     if marker == "h":
         return short(commit.id, length)
     if marker == "T":
-        return commit.tree.decode()
+        return cast(bytes, commit.tree).decode()
     if marker == "t":
         return short(commit.tree, length)
     shown = commit.parents if parents is None else parents

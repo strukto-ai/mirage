@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest'
 import { encodeText } from '../../../../shell/bytes.ts'
 import { YieldBudget } from '../../../../io/yield_budget.ts'
 import { openStream } from '../../../../rs/stream.ts'
-import { runPrintf } from './format.ts'
+import { IOResult } from '../../../../io/types.ts'
+import { printfOutput, runPrintf } from './format.ts'
 
 const OCTAL_PINS: [string, string, string][] = [
   ['\\0003', '00 33', '03'],
@@ -39,17 +40,10 @@ function hex(bytes: Uint8Array): string {
 
 describe('shared printf adapter', () => {
   it.each(OCTAL_PINS)('preserves the octal grammars for %s', async (escape, format, argument) => {
-    const [out, err, status, stopped] = await runPrintf(escape, [])
-    const [argOut, argErr, argStatus, argStopped] = await runPrintf('%b', [escape])
+    const [out, err, status] = await runPrintf(escape, [])
+    const [argOut, argErr, argStatus] = await runPrintf('%b', [escape])
     expect([hex(out), hex(argOut)]).toEqual([format, argument])
-    expect([hex(err), status, stopped, hex(argErr), argStatus, argStopped]).toEqual([
-      '',
-      0,
-      false,
-      '',
-      0,
-      false,
-    ])
+    expect([hex(err), status, hex(argErr), argStatus]).toEqual(['', 0, '', 0])
   })
 
   it.each(UNICODE_PINS)('preserves raw Unicode escape bytes for %s', async (escape, expected) => {
@@ -57,47 +51,50 @@ describe('shared printf adapter', () => {
       [escape, []],
       ['%b', [escape]],
     ] satisfies [string, string[]][]) {
-      const [out, err, status, stopped] = await runPrintf(fmt, args)
-      expect([hex(out), hex(err), status, stopped]).toEqual([expected, '', 0, false])
+      const [out, err, status] = await runPrintf(fmt, args)
+      expect([hex(out), hex(err), status]).toEqual([expected, '', 0])
     }
   })
 
   it.each([false, true])(
     'preserves signed special values and hex carry in program mode %s',
     async (program) => {
-      const [out, err, status, stopped] = await runPrintf(
+      const [out, err, status] = await runPrintf(
         '%+.1f|%+.1a|%.0a|%.1a|%.0f',
         ['nan', '-nan', '0x1.ffp0', '0x1.ffp0', '-0'],
         program,
       )
-      expect([new TextDecoder().decode(out), hex(err), status, stopped]).toEqual([
+      expect([new TextDecoder().decode(out), hex(err), status]).toEqual([
         '+nan|-nan|0x2p+0|0x2.0p+0|-0',
         '',
         0,
-        false,
       ])
     },
   )
 
   it('keeps diagnostics across argument stops and resets their failure status', async () => {
-    const [out, err, status, stopped] = await runPrintf('%d%b%d', ['bad', 'x\\cy', 'unread'])
-    expect([new TextDecoder().decode(out), new TextDecoder().decode(err), status, stopped]).toEqual(
-      ['0x', 'bash: printf: bad: invalid number\n', 0, true],
-    )
+    const [out, err, status] = await runPrintf('%d%b%d', ['bad', 'x\\cy', 'unread'])
+    expect([new TextDecoder().decode(out), new TextDecoder().decode(err), status]).toEqual([
+      '0x',
+      'bash: printf: bad: invalid number\n',
+      0,
+    ])
   })
 
   it('keeps failure on a format stop', async () => {
-    const [out, err, status, stopped] = await runPrintf('%d\\c%d', ['bad', 'unread'])
-    expect([new TextDecoder().decode(out), new TextDecoder().decode(err), status, stopped]).toEqual(
-      ['0', 'bash: printf: bad: invalid number\n', 1, true],
-    )
+    const [out, err, status] = await runPrintf('%d\\c%d', ['bad', 'unread'])
+    expect([new TextDecoder().decode(out), new TextDecoder().decode(err), status]).toEqual([
+      '0',
+      'bash: printf: bad: invalid number\n',
+      1,
+    ])
   })
 
   it('does not split surrogate pairs or lose raw bytes at host chunk boundaries', async () => {
     const raw = 'a'.repeat(4095) + '𐂀' + String.fromCharCode(0xdcff) + 'b'.repeat(17000)
-    const [out, err, status, stopped] = await runPrintf('%s', [raw])
+    const [out, err, status] = await runPrintf('%s', [raw])
     expect(out).toEqual(encodeText(raw))
-    expect([hex(err), status, stopped]).toEqual(['', 0, false])
+    expect([hex(err), status]).toEqual(['', 0])
   })
 
   it('cancels huge padding and precision and releases the Wasm handle', async () => {
@@ -116,6 +113,15 @@ describe('shared printf adapter', () => {
     }
     const [out] = await runPrintf('%s', ['after'])
     expect(new TextDecoder().decode(out)).toBe('after')
+  })
+
+  it('brings a wide field out in bounded steps', async () => {
+    const parts = printfOutput('%2147483647s', ['x'], new IOResult())
+    const first = (await parts.next()).value as Uint8Array
+    await parts.return(undefined)
+    expect(first.every((byte) => byte === 0x20)).toBe(true)
+    expect(first.byteLength).toBeGreaterThan(0)
+    expect(first.byteLength).toBeLessThanOrEqual(16 * 1024)
   })
 })
 

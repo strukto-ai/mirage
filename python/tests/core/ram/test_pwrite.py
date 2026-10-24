@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import tracemalloc
 
 import pytest
 
@@ -66,3 +67,17 @@ async def test_pwrite_to_a_pipe_delivers_in_write_order():
     target.pipe.end()
     assert await asyncio.wait_for(consumed, 3) == b"first second"
     assert "/fd/63" not in store.modified
+
+
+@pytest.mark.asyncio
+async def test_pwrite_into_a_discarding_device_pads_nothing():
+    store = DevStore(DevFiles("owner"))
+    null = PathSpec(vfs_path="null", virtual="/dev/null", directory="/dev/")
+    tracemalloc.start()
+    try:
+        await pwrite(RAMAccessor(store), null, b"x", 64 << 20)
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    assert peak < 1 << 20
+    assert store.files["/null"] == b""

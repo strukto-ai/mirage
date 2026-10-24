@@ -15,11 +15,13 @@
 import { enotsup, staleWrite } from '../errors/fs.ts'
 import type { FsError, StaleWriteError } from '../errors/types.ts'
 import { markLost } from '../observe/context.ts'
-import type { FileStat, PathSpec } from '../types.ts'
+import type { PathSpec } from '../types.ts'
 import { currentCaller, liveCallers, runWithCaller } from '../context/session_context.ts'
 import { keyPath, underPath } from '../utils/key_prefix.ts'
 import { rstripSlash } from '../utils/slash.ts'
 import {
+  type CacheContextState,
+  type CacheInvalidator,
   type KnownVersions,
   type LiveVersion,
   OwnRead,
@@ -27,22 +29,6 @@ import {
   type WriteContext,
   type WriteKind,
 } from './types.ts'
-
-/**
- * What this module needs from a cache manager. `CacheManager` in
- * `cache/manager.ts` satisfies this structurally; this module never
- * imports it, keeping the dependency one-way: backends ->
- * cache/context <- mount (which installs a manager).
- */
-export interface CacheInvalidator {
-  cachedSize(path: PathSpec): Promise<number | null>
-  isCached(path: PathSpec): Promise<boolean>
-  probedStat(path: PathSpec): FileStat | null
-}
-
-export interface CacheContextState {
-  manager: CacheInvalidator | null
-}
 
 /**
  * Run `fn` with `manager` active for the current async context.

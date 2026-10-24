@@ -39,6 +39,9 @@ interface Exports {
   mirage_rs_status(handle: number): number
   mirage_rs_metadata(handle: number): number
   mirage_rs_take_stderr(handle: number): number
+  mirage_rs_request(handle: number): number
+  mirage_rs_stage(handle: number, len: number): number
+  mirage_rs_respond(handle: number, replyLen: number): number
   mirage_rs_output(handle: number): number
   mirage_rs_output_len(handle: number): number
   mirage_rs_error(handle: number): number
@@ -199,6 +202,36 @@ export class OpenStream {
     return this.guard(() => this.collect(this.exports.mirage_rs_take_stderr(this.handle), []))
   }
 
+  /** The host operation the stream waits on and the bytes it carries, null while it waits on none. */
+  request(): [Record<string, util.JSONType>, Uint8Array] | null {
+    return this.guard(() => {
+      const len = this.exports.mirage_rs_request(this.handle)
+      if (len < 0) return null
+      const taken = this.collect(0, [])
+      const header = JSON.parse(decoder.decode(taken.subarray(0, len))) as Record<
+        string,
+        util.JSONType
+      >
+      return [header, taken.subarray(len)]
+    })
+  }
+
+  /** Answer the request taken last with the host's reply and the bytes it carries. */
+  respond(reply: Readonly<Record<string, util.JSONType>>, data: Uint8Array): Uint8Array {
+    const header = encoder.encode(JSON.stringify(reply))
+    return this.guard(() => {
+      for (const part of [header, data]) {
+        for (let offset = 0; offset < part.byteLength; offset += this.capacity) {
+          const piece = part.subarray(offset, offset + this.capacity)
+          const window = this.exports.mirage_rs_input(this.handle)
+          new Uint8Array(this.exports.memory.buffer, window, piece.byteLength).set(piece)
+          this.exports.mirage_rs_stage(this.handle, piece.byteLength)
+        }
+      }
+      return this.collect(this.exports.mirage_rs_respond(this.handle, header.byteLength), [])
+    })
+  }
+
   close(): void {
     if (this.handle === 0) return
     this.drop(true)
@@ -260,6 +293,49 @@ export class OpenStream {
     )
     throw new StreamRefusal(message, concat([...before, output]))
   }
+}
+
+/** What a host made of one request: the reply, the bytes it carries, and output it wrote doing it. Mirrors Python's Served. */
+export interface Served {
+  readonly reply: Record<string, util.JSONType>
+  readonly data?: Uint8Array
+  readonly output?: Uint8Array | AsyncIterable<Uint8Array> | null
+}
+
+/** Serves the requests of a stream that reaches files and commands; `errors` gathers its stderr and theirs, in order. Mirrors Python's RequestHost. */
+export interface RequestHost {
+  readonly errors: { append(data: Uint8Array): Promise<void> }
+  serve(request: Readonly<Record<string, util.JSONType>>, data: Uint8Array): Promise<Served>
+}
+
+/**
+ * Run a stream until it waits on neither work nor its host, a bounded call
+ * at a time, serving each request it makes. Mirrors Python's serve_requests.
+ */
+export async function* serveRequests(
+  stream: OpenStream,
+  host: RequestHost,
+  signal?: AbortSignal,
+): AsyncGenerator<Uint8Array> {
+  const budget = new YieldBudget(signal)
+  for (;;) {
+    while (stream.busy()) {
+      await budget.run()
+      const output = stream.drain()
+      await host.errors.append(stream.takeStderr())
+      if (output.byteLength > 0) yield output
+    }
+    const taken = stream.request()
+    if (taken === null) break
+    await budget.run()
+    const served = await host.serve(...taken)
+    if (served.output !== undefined && served.output !== null) yield* chunks(served.output, signal)
+    const output = stream.respond(served.reply, served.data ?? new Uint8Array())
+    if (output.byteLength > 0) yield output
+  }
+  const tail = stream.finish()
+  if (tail.byteLength > 0) yield tail
+  await host.errors.append(stream.takeStderr())
 }
 
 /** Open the mirage-rs stream `kind`. Mirrors Python's open_stream. */
