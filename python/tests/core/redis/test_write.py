@@ -19,8 +19,7 @@ import pytest
 import pytest_asyncio
 
 from mirage.accessor.redis import RedisAccessor
-from mirage.core.redis.append import append_bytes
-from mirage.core.redis.write import write, write_stream
+from mirage.core.redis.write import write
 from mirage.types import PathSpec
 from mirage.vfs.redis.store import RedisStore
 
@@ -239,7 +238,7 @@ async def _settle(read, want: bytes) -> bytes | None:
 async def test_a_streamed_write_shows_each_chunk_as_it_arrives(accessor):
     hold = asyncio.Event()
     writing = asyncio.create_task(
-        write_stream(accessor, _spec("log"), _quiet([b"a\n", b"b\n"], hold))
+        write(accessor, _spec("log"), _quiet([b"a\n", b"b\n"], hold))
     )
     read = lambda: accessor.store.get_file("/log")  # noqa: E731
     assert await _settle(read, b"a\nb\n") == b"a\nb\n"
@@ -254,16 +253,27 @@ async def test_a_streamed_append_keeps_another_appenders_bytes(accessor):
     await accessor.store.set_file("/log", b"start\n")
     hold = asyncio.Event()
     writing = asyncio.create_task(
-        write_stream(
-            accessor, _spec("log"), _quiet([b"mine\n"], hold), append=True
-        )
+        write(accessor, _spec("log"), _quiet([b"mine\n"], hold), append=True)
     )
     read = lambda: accessor.store.get_file("/log")  # noqa: E731
     await _settle(read, b"start\nmine\n")
-    await append_bytes(accessor, _spec("log"), b"theirs\n")
+    await write(accessor, _spec("log"), b"theirs\n", append=True)
     hold.set()
     await writing
     assert await accessor.store.get_file("/log") == b"start\nmine\ntheirs\n"
+
+
+# An append of bytes is one APPEND, so appends in flight at once all land,
+# as two `>>` writers' lines do.
+@pytest.mark.asyncio
+async def test_racing_appends_of_bytes_all_land(accessor):
+    await accessor.store.set_file("/log", b"")
+    parts = [f"{i}\n".encode() for i in range(20)]
+    await asyncio.gather(
+        *(write(accessor, _spec("log"), part, append=True) for part in parts)
+    )
+    got = await accessor.store.get_file("/log")
+    assert sorted(got.splitlines(keepends=True)) == sorted(parts)
 
 
 # A file another appender creates after the stream found it missing keeps
@@ -279,9 +289,7 @@ async def test_a_streamed_append_keeps_bytes_of_a_racing_create(
         return False
 
     monkeypatch.setattr(store, "has_file", raced)
-    await write_stream(
-        accessor, _spec("log"), _chunks_of(b"mine\n"), append=True
-    )
+    await write(accessor, _spec("log"), _chunks_of(b"mine\n"), append=True)
     assert await store.get_file("/log") == b"theirs\nmine\n"
 
 
@@ -291,7 +299,7 @@ async def test_an_atomic_streamed_write_lands_at_its_end(accessor):
     await accessor.store.set_file("/f", b"old")
     hold = asyncio.Event()
     writing = asyncio.create_task(
-        write_stream(accessor, _spec("f"), _quiet([b"new"], hold), atomic=True)
+        write(accessor, _spec("f"), _quiet([b"new"], hold), atomic=True)
     )
     await asyncio.sleep(0.05)
     assert await accessor.store.get_file("/f") == b"old"
@@ -311,7 +319,7 @@ async def test_a_streamed_replacement_keeps_its_position(accessor):
         await second.wait()
         yield b"b\n"
 
-    writing = asyncio.create_task(write_stream(accessor, _spec("f"), source()))
+    writing = asyncio.create_task(write(accessor, _spec("f"), source()))
     read = lambda: accessor.store.get_file("/f")  # noqa: E731
     assert await _settle(read, b"a\n") == b"a\n"
     await accessor.store.set_file("/f", b"")
@@ -326,8 +334,8 @@ async def test_a_streamed_replacement_keeps_its_position(accessor):
 async def test_an_empty_streamed_append_leaves_the_file_alone(accessor):
     await accessor.store.set_file("/f", b"kept")
     await accessor.store.set_modified("/f", "2020-01-01T00:00:00Z")
-    await write_stream(accessor, _spec("f"), _chunks_of(), append=True)
+    await write(accessor, _spec("f"), _chunks_of(), append=True)
     assert await accessor.store.get_file("/f") == b"kept"
     assert await accessor.store.get_modified("/f") == "2020-01-01T00:00:00Z"
-    await write_stream(accessor, _spec("new"), _chunks_of(), append=True)
+    await write(accessor, _spec("new"), _chunks_of(), append=True)
     assert await accessor.store.get_file("/new") == b""

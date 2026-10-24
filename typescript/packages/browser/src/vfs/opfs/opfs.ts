@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { chunks } from '@struktoai/mirage-core/io/cooperative'
 import type { ByteSource } from '@struktoai/mirage-core/io/types'
 import { BaseVFS, type VFSStateBase } from '@struktoai/mirage-core/vfs/base'
 import { VFSName } from '@struktoai/mirage-core/types'
@@ -28,11 +27,8 @@ import { read as opfsRead } from '../../core/opfs/read.ts'
 import { stat as opfsStat } from '../../core/opfs/stat.ts'
 import { readStream as opfsStream } from '../../core/opfs/stream.ts'
 import { exists as opfsExists } from '../../core/opfs/exists.ts'
-import { write as opfsWrite, writeStream as opfsWriteStream } from '../../core/opfs/write.ts'
-import {
-  appendBytes as opfsAppend,
-  appendStream as opfsAppendStream,
-} from '../../core/opfs/append.ts'
+import { write as opfsWrite } from '../../core/opfs/write.ts'
+import { append as opfsAppend } from '../../core/opfs/append.ts'
 import { create as opfsCreate } from '../../core/opfs/create.ts'
 import { mkdir as opfsMkdir } from '../../core/opfs/mkdir.ts'
 import { unlink as opfsUnlink } from '../../core/opfs/unlink.ts'
@@ -175,8 +171,7 @@ export class OPFSVFS extends BaseVFS {
   }
 
   override write(path: PathSpec, data: ByteSource, signal?: AbortSignal): Promise<void> {
-    if (data instanceof Uint8Array) return opfsWrite(this.accessor, path, data)
-    return opfsWriteStream(this.accessor, path, chunks(data, signal))
+    return opfsWrite(this.accessor, path, data, signal)
   }
 
   override append(
@@ -185,8 +180,7 @@ export class OPFSVFS extends BaseVFS {
     _handed?: Handed,
     signal?: AbortSignal,
   ): Promise<void> {
-    if (data instanceof Uint8Array) return opfsAppend(this.accessor, path, data)
-    return opfsAppendStream(this.accessor, path, chunks(data, signal))
+    return opfsAppend(this.accessor, path, data, signal)
   }
 
   override create(path: PathSpec): Promise<void> {

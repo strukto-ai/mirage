@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { DatabricksVolumeAccessor } from '../../accessor/databricks_volume.ts'
-import { concat } from '../../utils/bytes.ts'
+import { rechunk } from '../../io/stream.ts'
 import { recordStream } from '../../observe/context.ts'
 import { VFSName, type PathSpec } from '../../types.ts'
 import { downloadStream } from './client.ts'
@@ -30,20 +30,10 @@ export async function* readStream(
   const virtual = path.virtual
   const remotePath = backendPath(accessor.config, path)
   const rec = recordStream('read', virtual, VFSName.DATABRICKS_VOLUME)
-  let pending: Uint8Array = new Uint8Array(0)
   try {
-    for await (const value of downloadStream(accessor, remotePath)) {
-      pending = concat([pending, value])
-      while (pending.byteLength >= DEFAULT_CHUNK_SIZE) {
-        const piece = pending.slice(0, DEFAULT_CHUNK_SIZE)
-        if (rec !== null) rec.bytes += piece.byteLength
-        yield piece
-        pending = pending.slice(DEFAULT_CHUNK_SIZE)
-      }
-    }
-    if (pending.byteLength > 0) {
-      if (rec !== null) rec.bytes += pending.byteLength
-      yield pending
+    for await (const piece of rechunk(downloadStream(accessor, remotePath), DEFAULT_CHUNK_SIZE)) {
+      if (rec !== null) rec.bytes += piece.byteLength
+      yield piece
     }
   } catch (exc) {
     if (isNotFound(exc)) throw enoent(path.virtual)

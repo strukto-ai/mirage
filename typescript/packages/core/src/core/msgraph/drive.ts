@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { chunks } from '../../io/cooperative.ts'
 import { ByteSpool } from '../../io/spool.ts'
 import type { ByteSource } from '../../io/types.ts'
 import { enotsup } from '../../errors/fs.ts'
@@ -364,33 +365,39 @@ async function uploadSessionWrite(
   }
 }
 
-export async function writeItemStream(
-  config: MsGraphConfigResolved,
-  loc: DriveLoc,
-  data: ByteSource,
-): Promise<number> {
-  const spool = new ByteSpool()
-  try {
-    await spool.fill(data)
-    if (spool.size <= SIMPLE_UPLOAD_MAX)
-      await writeItem(config, loc, await spool.read(0, spool.size))
-    else await uploadSessionWrite(config, loc.item('/createUploadSession'), spool)
-    return spool.size
-  } finally {
-    await spool.close()
-  }
-}
-
+/**
+ * Replace a drive item's content, creating it and its parents, and answer how
+ * many bytes went. A small body is one `PUT`; anything past the simple-upload
+ * limit goes through an upload session. A stream is spooled first, so its size
+ * picks between the two; `signal` stops it.
+ */
 export async function writeItem(
   config: MsGraphConfigResolved,
   loc: DriveLoc,
-  data: Uint8Array,
-): Promise<void> {
-  if (data.length <= SIMPLE_UPLOAD_MAX) {
-    await graphPutBytes(config, loc.item('/content'), data)
-  } else {
-    await uploadSessionWrite(config, loc.item('/createUploadSession'), data)
+  data: ByteSource,
+  signal?: AbortSignal,
+): Promise<number> {
+  let body: Uint8Array
+  if (data instanceof Uint8Array) body = data
+  else {
+    const spool = new ByteSpool()
+    try {
+      await spool.fill(chunks(data, signal))
+      if (spool.size > SIMPLE_UPLOAD_MAX) {
+        await uploadSessionWrite(config, loc.item('/createUploadSession'), spool)
+        return spool.size
+      }
+      body = await spool.read(0, spool.size)
+    } finally {
+      await spool.close()
+    }
   }
+  if (body.length <= SIMPLE_UPLOAD_MAX) {
+    await graphPutBytes(config, loc.item('/content'), body)
+  } else {
+    await uploadSessionWrite(config, loc.item('/createUploadSession'), body)
+  }
+  return body.length
 }
 
 function entryStat(item: Record<string, unknown>): FileStat {

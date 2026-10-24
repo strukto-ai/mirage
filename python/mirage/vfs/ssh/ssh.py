@@ -16,8 +16,7 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 from mirage.accessor.ssh import SSHAccessor
-from mirage.core.ssh.append import append_bytes as _append
-from mirage.core.ssh.append import append_stream as _append_stream
+from mirage.core.ssh.append import append as _append
 from mirage.core.ssh.capacity import capacity as _capacity
 from mirage.core.ssh.checksum import checksum as _checksum
 from mirage.core.ssh.copy import copy as _copy
@@ -41,7 +40,6 @@ from mirage.core.ssh.stream import read_stream as _read_stream
 from mirage.core.ssh.truncate import truncate as _truncate
 from mirage.core.ssh.unlink import unlink as _unlink
 from mirage.core.ssh.write import write as _write
-from mirage.core.ssh.write import write_stream as _write_stream
 from mirage.io.types import ByteSource
 from mirage.types import CapacityResult, FileStat, PathSpec, VFSName
 from mirage.vfs.base import BaseVFS
@@ -124,16 +122,10 @@ class SSHVFS(BaseVFS):
     async def write(
         self, path: PathSpec, data: ByteSource, *, atomic: bool = False
     ) -> None:
-        if isinstance(data, bytes):
-            await _write(self.accessor, path, data)
-        else:
-            await _write_stream(self.accessor, path, data, atomic)
+        await _write(self.accessor, path, data, atomic)
 
     async def append(self, path: PathSpec, data: ByteSource) -> None:
-        if isinstance(data, bytes):
-            await _append(self.accessor, path, data)
-        else:
-            await _append_stream(self.accessor, path, data)
+        await _append(self.accessor, path, data)
 
     async def pwrite(
         self,

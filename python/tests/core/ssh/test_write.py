@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 
 from mirage.accessor.ssh import SSHAccessor
-from mirage.core.ssh.write import write_stream
+from mirage.core.ssh.write import write
 from mirage.types import PathSpec
 from mirage.vfs.ssh.config import SSHConfig
 
@@ -40,11 +40,11 @@ async def test_atomic_stream_commits_only_after_eof_and_removes_failed_staging(
     path = PathSpec(vfs_path="a", virtual="/m/a", directory="/m/")
     if fail:
         with pytest.raises(RuntimeError, match="producer failed"):
-            await write_stream(accessor, path, source(), atomic=True)
+            await write(accessor, path, source(), atomic=True)
         sftp.posix_rename.assert_not_called()
         sftp.remove.assert_awaited_once()
     else:
-        await write_stream(accessor, path, source(), atomic=True)
+        await write(accessor, path, source(), atomic=True)
         temporary = sftp.open.call_args.args[0]
         sftp.posix_rename.assert_awaited_once_with(temporary, "/srv/a")
         sftp.chmod.assert_awaited_once_with(temporary, 0o640)

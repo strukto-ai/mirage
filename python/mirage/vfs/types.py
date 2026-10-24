@@ -2,7 +2,6 @@ from collections.abc import Awaitable
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import (
-    TYPE_CHECKING,
     Any,
     NamedTuple,
     Protocol,
@@ -10,9 +9,6 @@ from typing import (
 )
 
 from mirage.types import PathSpec, SearchQuery
-
-if TYPE_CHECKING:
-    pass
 
 
 class Effect(StrEnum):

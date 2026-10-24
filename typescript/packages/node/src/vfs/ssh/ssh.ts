@@ -32,8 +32,8 @@ import { follow as sshFollow, readStream as sshStream } from '../../core/ssh/str
 import { checksum as sshChecksum } from '../../core/ssh/checksum.ts'
 import { exists as sshExists } from '../../core/ssh/exists.ts'
 import { filesContaining as sshFilesContaining } from '../../core/ssh/search.ts'
-import { write as sshWrite, writeStream as sshWriteStream } from '../../core/ssh/write.ts'
-import { appendBytes as sshAppend, appendStream as sshAppendStream } from '../../core/ssh/append.ts'
+import { write as sshWrite } from '../../core/ssh/write.ts'
+import { append as sshAppend } from '../../core/ssh/append.ts'
 import { pwrite as sshPwrite } from '../../core/ssh/pwrite.ts'
 import { create as sshCreate } from '../../core/ssh/create.ts'
 import { mkdir as sshMkdir } from '../../core/ssh/mkdir.ts'
@@ -149,8 +149,7 @@ export class SSHVFS extends BaseVFS {
     _handed?: Handed,
     atomic = false,
   ): Promise<void> {
-    if (data instanceof Uint8Array) return sshWrite(this.accessor, path, data)
-    return sshWriteStream(this.accessor, path, data, signal, atomic)
+    return sshWrite(this.accessor, path, data, signal, atomic)
   }
 
   override append(
@@ -159,8 +158,7 @@ export class SSHVFS extends BaseVFS {
     _handed?: Handed,
     signal?: AbortSignal,
   ): Promise<void> {
-    if (data instanceof Uint8Array) return sshAppend(this.accessor, path, data)
-    return sshAppendStream(this.accessor, path, data, signal)
+    return sshAppend(this.accessor, path, data, signal)
   }
 
   override pwrite(path: PathSpec, data: Uint8Array, offset: number): Promise<void> {

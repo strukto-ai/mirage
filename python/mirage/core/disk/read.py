@@ -24,25 +24,11 @@ from mirage.types import PathSpec
 async def read(
     accessor: DiskAccessor,
     path_spec: PathSpec,
-) -> bytes:
-    virtual = path_spec.virtual
-    root = accessor.root
-    timer = start_op()
-    p = await resolve_inside(root, path_spec)
-    with disk_errors(virtual):
-        async with aiofiles.open(p, "rb") as f:
-            data = await f.read()
-    record("read", virtual, "disk", len(data), timer)
-    return data
-
-
-async def read_range(
-    accessor: DiskAccessor,
-    path_spec: PathSpec,
     offset: int = 0,
     size: int | None = None,
 ) -> bytes:
-    """Read a byte range, seeking rather than reading the whole file.
+    """Read a file, or a byte range of it, seeking rather than reading
+    the whole file.
 
     Args:
         accessor (DiskAccessor): the mount's disk handle.

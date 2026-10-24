@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { chunks } from '../../io/cooperative.ts'
 import { ByteSpool } from '../../io/spool.ts'
 import type { ByteSource } from '../../io/types.ts'
 import type { BoxAccessor } from '../../accessor/box.ts'
@@ -59,15 +60,26 @@ async function uploadNew(
 
 /**
  * Upload a new file, or a new version of an existing one. A held version goes
- * out as the file's etag. Answers the stored file's stat, null for a reply
+ * out as the file's etag. A stream is spooled first, as an upload sends its
+ * length; `signal` stops it. Answers the stored file's stat, null for a reply
  * that names none. Mirrors Python's `write`.
  */
 export async function write(
   accessor: BoxAccessor,
   path: PathSpec,
-  data: Uint8Array | ByteSpool,
+  data: ByteSource | ByteSpool,
   handed: Handed = {},
+  signal?: AbortSignal,
 ): Promise<FileStat | null> {
+  if (!(data instanceof Uint8Array) && !(data instanceof ByteSpool)) {
+    const spool = new ByteSpool()
+    try {
+      await spool.fill(chunks(data, signal))
+      return await write(accessor, path, spool, handed)
+    } finally {
+      await spool.close()
+    }
+  }
   const parts = pathParts(path)
   if (parts.length === 0 || handed.entry?.type === FileType.DIRECTORY) throw eisdir(path.virtual)
   const tm = accessor.tokenManager
@@ -109,19 +121,4 @@ export async function write(
     fingerprint: stored?.fingerprint ?? null,
   })
   return stored
-}
-
-export async function writeStream(
-  accessor: BoxAccessor,
-  path: PathSpec,
-  data: ByteSource,
-  handed: Handed = {},
-): Promise<FileStat | null> {
-  const spool = new ByteSpool()
-  try {
-    await spool.fill(data)
-    return await write(accessor, path, spool, handed)
-  } finally {
-    await spool.close()
-  }
 }

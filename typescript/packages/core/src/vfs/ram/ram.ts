@@ -26,8 +26,7 @@ import { readdir as ramReaddir } from '../../core/ram/readdir.ts'
 import { read as devAwareRead, readRange as devAwareReadRange } from '../../core/dev/read.ts'
 import { stat as devAwareStat } from '../../core/dev/stat.ts'
 import { exists as ramExists } from '../../core/ram/exists.ts'
-import { write as ramWrite, writeStream as ramWriteStream } from '../../core/ram/write.ts'
-import { appendBytes as ramAppend } from '../../core/ram/append.ts'
+import { write as ramWrite } from '../../core/ram/write.ts'
 import { pwrite as ramPwrite } from '../../core/ram/pwrite.ts'
 import { create as ramCreate } from '../../core/ram/create.ts'
 import { mkdir as ramMkdir } from '../../core/ram/mkdir.ts'
@@ -112,8 +111,7 @@ export class RAMVFS extends BaseVFS {
     _handed?: Handed,
     atomic = false,
   ): Promise<void> {
-    if (data instanceof Uint8Array) return ramWrite(this.accessor, path, data, signal)
-    return ramWriteStream(this.accessor, path, data, false, signal, atomic)
+    return ramWrite(this.accessor, path, data, false, signal, atomic)
   }
 
   override append(
@@ -122,8 +120,7 @@ export class RAMVFS extends BaseVFS {
     _handed?: Handed,
     signal?: AbortSignal,
   ): Promise<void> {
-    if (data instanceof Uint8Array) return ramAppend(this.accessor, path, data, signal)
-    return ramWriteStream(this.accessor, path, data, true, signal)
+    return ramWrite(this.accessor, path, data, true, signal)
   }
 
   override pwrite(

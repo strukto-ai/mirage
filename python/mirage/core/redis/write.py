@@ -28,39 +28,26 @@ from mirage.utils.path import norm
 async def write(
     accessor: RedisAccessor,
     path_spec: PathSpec,
-    data: bytes,
-) -> None:
-    path = path_spec.mount_path
-    store = accessor.store
-    timer = start_op()
-    p = norm(path)
-    await check_dest_parents(store, path_spec, p)
-    await check_write_target(store, path_spec, p)
-    await store.set_file(p, data)
-    await store.set_modified(p, now_iso())
-    record("write", path_spec.virtual, "redis", len(data), timer)
-
-
-async def write_stream(
-    accessor: RedisAccessor,
-    path_spec: PathSpec,
     data: ByteSource,
     append: bool = False,
     atomic: bool = False,
 ) -> None:
-    """Write bytes as they arrive, so a reader watches the file grow: a
-    replacement at its own position (``SETRANGE``), as an open file's
-    offset keeps it, an append at the file's end (``APPEND``, which also
-    creates a missing one), so another appender's bytes stay. An append
-    that brings nothing leaves an existing file as it was (``true >> f``).
-    ``atomic`` stages the replacement until it ends.
+    """Replace a file's bytes, or add them to its end.
+
+    Bytes land at once, as does a stream under ``atomic``, staged until
+    it ends. Any other stream lands as it arrives, so a reader watches
+    the file grow: a replacement at its own position (``SETRANGE``), as
+    an open file's offset keeps it. An append goes at the file's end
+    (``APPEND``, which also creates a missing one), so another appender's
+    bytes stay, and one that brings nothing leaves an existing file as it
+    was (``true >> f``).
 
     Args:
         accessor (RedisAccessor): the Redis store.
         path_spec (PathSpec): the destination.
         data (ByteSource): bytes consumed once.
         append (bool): append instead of replacing.
-        atomic (bool): stage output until successful EOF.
+        atomic (bool): stage a stream until successful EOF.
     """
     path = path_spec.mount_path
     store = accessor.store
@@ -69,9 +56,14 @@ async def write_stream(
     await check_dest_parents(store, path_spec, p)
     await check_write_target(store, path_spec, p)
     op = "append" if append else "write"
-    if atomic:
+    if isinstance(data, bytes) or atomic:
         whole = await materialize(data)
-        await store.set_file(p, whole)
+        if not append:
+            await store.set_file(p, whole)
+        elif whole or not await store.has_file(p):
+            await store.append_file(p, whole)
+        else:
+            return
         await store.set_modified(p, now_iso())
         record(op, path_spec.virtual, "redis", len(whole), timer)
         return

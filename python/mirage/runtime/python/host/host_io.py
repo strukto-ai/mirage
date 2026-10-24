@@ -70,11 +70,11 @@ async def with_host_io(it: AsyncIterator[T]) -> AsyncIterator[T]:
     """Wrap a backend iterator so each item is produced inside `host_io`.
 
     A backend that yields is only inside its own frame while an item is
-    being pulled: the body of ``read_stream`` opens the file on the
-    first ``__anext__``, long after the op call that created it
-    returned. Mirrors ``with_mount_context``, which wraps the same
-    streams for the same reason. Generic because a walk yields entries
-    where a read yields chunks, and both are the backend's own frame.
+    being pulled: a streamed read's body opens the file on the first
+    ``__anext__``, long after the op call that created it returned.
+    Mirrors ``with_mount_context``, which wraps the same streams for the
+    same reason. Generic because a walk yields entries where a read
+    yields chunks, and both are the backend's own frame.
 
     Args:
         it (AsyncIterator[T]): the backend iterator to wrap.

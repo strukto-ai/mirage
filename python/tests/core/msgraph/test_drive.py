@@ -1,3 +1,5 @@
+from collections.abc import AsyncIterator
+
 import pytest
 from aioresponses import aioresponses
 from yarl import URL
@@ -12,10 +14,11 @@ from mirage.core.msgraph.drive import (
     copy_tree,
     iter_tree,
     rename_replace,
-    write_item_stream,
+    write_item,
 )
 from mirage.core.onedrive.read import read as onedrive_read
 from mirage.core.onedrive.stream import read_stream as onedrive_stream
+from mirage.io.types import ByteSource
 from mirage.observe.context import (
     RecordingScope,
     push_revisions,
@@ -665,13 +668,22 @@ async def test_a_missing_top_raises_what_its_listing_raises(monkeypatch):
         await drive_ops.batch_tree(_accessor(), _loc("d1", "top"), "/od/top")
 
 
+async def _streamed(data: bytes) -> AsyncIterator[bytes]:
+    yield data
+
+
 @pytest.mark.asyncio
+@pytest.mark.parametrize("streamed", [False, True])
 @pytest.mark.parametrize("fail", [False, True])
-async def test_stream_upload_has_bounded_parts_and_cancels_failed_session(
-    fail,
+async def test_an_upload_has_bounded_parts_and_cancels_failed_session(
+    fail, streamed
 ):
     upload = "https://upload.example/session"
     total = 5 * 1024 * 1024
+
+    def source() -> ByteSource:
+        return _streamed(b"x" * total) if streamed else b"x" * total
+
     with aioresponses() as m:
         m.post(
             _url("file", "/createUploadSession"), payload={"uploadUrl": upload}
@@ -690,14 +702,10 @@ async def test_stream_upload_has_bounded_parts_and_cancels_failed_session(
         m.delete(upload, status=204)
         if fail:
             with pytest.raises(GraphError):
-                await write_item_stream(
-                    _accessor(), _loc("d1", "file"), b"x" * total
-                )
+                await write_item(_accessor(), _loc("d1", "file"), source())
         else:
             assert (
-                await write_item_stream(
-                    _accessor(), _loc("d1", "file"), b"x" * total
-                )
+                await write_item(_accessor(), _loc("d1", "file"), source())
                 == total
             )
         calls = m.requests[("PUT", URL(upload))]
@@ -717,5 +725,5 @@ async def test_stream_upload_source_failure_never_starts_upload():
 
     with aioresponses() as m:
         with pytest.raises(OSError, match="source failed"):
-            await write_item_stream(_accessor(), _loc("d1", "file"), broken())
+            await write_item(_accessor(), _loc("d1", "file"), broken())
         assert not m.requests

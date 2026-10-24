@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { materialize, type ByteSource } from '@struktoai/mirage-core/io/types'
+import type { ByteSource } from '@struktoai/mirage-core/io/types'
 import { BaseVFS } from '@struktoai/mirage-core/vfs/base'
 import { normalizeKeyPrefix } from '@struktoai/mirage-core/vfs/s3/config'
 import { VFSName } from '@struktoai/mirage-core/types'
@@ -106,8 +106,8 @@ export class HfBucketsVFS extends BaseVFS {
     return hfExists(this.accessor, path)
   }
 
-  override async write(path: PathSpec, data: ByteSource): Promise<FileStat | null> {
-    return hfWrite(this.accessor, path, await materialize(data))
+  override write(path: PathSpec, data: ByteSource): Promise<FileStat | null> {
+    return hfWrite(this.accessor, path, data)
   }
 
   override create(path: PathSpec): Promise<FileStat | null> {

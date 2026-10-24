@@ -82,31 +82,6 @@ def test_mount_rejects_a_renderer_that_names_no_method():
         MountEntry("/data/", MisnamedRenderer())
 
 
-class _Stale:
-    async def write_stream(self, path, data):
-        return None
-
-
-class _Mixed(_Stale, RAMVFS):
-    pass
-
-
-# A method folded into read, write or append would never be called, so a
-# VFS that still has one, its own or a mixin's, is refused as it is mounted.
-@pytest.mark.parametrize(
-    "name", ["read_stream", "write_stream", "append_stream"]
-)
-def test_mount_rejects_a_folded_method(name):
-    old = type("Old", (RAMVFS,), {name: lambda self, path: None})
-    with pytest.raises(TypeError, match=f"Old.{name}: define "):
-        MountEntry("/data/", old())
-
-
-def test_mount_rejects_a_folded_method_from_a_mixin():
-    with pytest.raises(TypeError, match="_Mixed.write_stream: define write"):
-        MountEntry("/data/", _Mixed())
-
-
 # ── read-only enforcement ──────────────────────
 
 

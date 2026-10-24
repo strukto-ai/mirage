@@ -35,25 +35,15 @@ logger = logging.getLogger(__name__)
 
 
 async def write(
-    accessor: DiskAccessor, path_spec: PathSpec, data: bytes
-) -> None:
-    root = accessor.root
-    timer = start_op()
-    p = await resolve_inside(root, path_spec)
-    with disk_errors(path_spec.virtual):
-        async with aiofiles.open(p, "wb") as f:
-            await f.write(data)
-    record("write", path_spec.virtual, "disk", len(data), timer)
-
-
-async def write_stream(
     accessor: DiskAccessor,
     path_spec: PathSpec,
     data: ByteSource,
     append: bool = False,
     atomic: bool = False,
 ) -> None:
-    """Write with one open handle and bounded asynchronous pulls.
+    """Replace a file's bytes, or add them to its end, with one open
+    handle: bytes in one write, a stream in bounded asynchronous pulls,
+    flushed now and then so a reader watches the file grow.
 
     Args:
         accessor (DiskAccessor): the disk root.
@@ -62,8 +52,15 @@ async def write_stream(
         append (bool): append instead of replacing.
         atomic (bool): stage output until successful EOF, retaining the mode.
     """
+    op = "append" if append else "write"
     timer = start_op()
     p = await resolve_inside(accessor.root, path_spec)
+    if isinstance(data, bytes) and not atomic:
+        with disk_errors(path_spec.virtual):
+            async with aiofiles.open(p, "ab" if append else "wb") as f:
+                await f.write(data)
+        record(op, path_spec.virtual, "disk", len(data), timer)
+        return
     size = 0
     staged: list[str] = []
     mode = None
@@ -132,6 +129,4 @@ async def write_stream(
                 logger.debug(
                     "staged output already moved: %s", path_spec.virtual
                 )
-    record(
-        "append" if append else "write", path_spec.virtual, "disk", size, timer
-    )
+    record(op, path_spec.virtual, "disk", size, timer)

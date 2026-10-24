@@ -22,13 +22,7 @@ from mirage.observe.context import record, start_op
 from mirage.types import PathSpec
 
 
-async def append_bytes(
-    accessor: SSHAccessor, path_spec: PathSpec, data: bytes
-) -> None:
-    await append_stream(accessor, path_spec, data)
-
-
-async def append_stream(
+async def append(
     accessor: SSHAccessor, path: PathSpec, data: ByteSource
 ) -> None:
     config = accessor.config

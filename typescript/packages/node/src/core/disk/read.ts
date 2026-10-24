@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { DiskAccessor } from '../../accessor/disk.ts'
-import { open, readFile } from 'node:fs/promises'
+import { open } from 'node:fs/promises'
 import { record, startOp } from '@struktoai/mirage-core/observe/context'
 import { VFSName } from '@struktoai/mirage-core/types'
 import type { PathSpec } from '@struktoai/mirage-core/types'
@@ -23,24 +23,9 @@ import { resolveInside } from './utils.ts'
 
 const CHUNK = 1 << 20
 
-export async function read(accessor: DiskAccessor, path: PathSpec): Promise<Uint8Array> {
-  const timer = startOp()
-  const full = await resolveInside(accessor.root, path)
-  let data: Buffer
-  try {
-    data = await readFile(full)
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
-      throw enoent(path)
-    }
-    throw diskError(err, path)
-  }
-  record('read', path.virtual, VFSName.DISK, data.byteLength, timer)
-  return new Uint8Array(data.buffer, data.byteOffset, data.byteLength)
-}
-
 /**
- * Read a byte range, seeking rather than reading the whole file.
+ * Read a file, or a byte range of it, seeking rather than reading the whole
+ * file.
  *
  * A null size means the rest of the file, which has no length to allocate for
  * up front, so those reads accumulate fixed chunks until the handle is spent.
@@ -51,11 +36,11 @@ export async function read(accessor: DiskAccessor, path: PathSpec): Promise<Uint
  * @param offset first byte to read
  * @param size how many bytes, or null for the rest
  */
-export async function readRange(
+export async function read(
   accessor: DiskAccessor,
   path: PathSpec,
-  offset: number,
-  size: number | null,
+  offset = 0,
+  size: number | null = null,
 ): Promise<Uint8Array> {
   const timer = startOp()
   const full = await resolveInside(accessor.root, path)

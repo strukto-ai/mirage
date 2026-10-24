@@ -34,7 +34,6 @@ from mirage.core.onedrive.stream import read_stream as _read_stream
 from mirage.core.onedrive.truncate import truncate as _truncate
 from mirage.core.onedrive.unlink import unlink as _unlink
 from mirage.core.onedrive.write import write as _write
-from mirage.core.onedrive.write import write_stream as _write_stream
 from mirage.events.base import DeltaHook
 from mirage.io.types import ByteSource
 from mirage.types import CapacityResult, FileStat, PathSpec, VFSName
@@ -94,10 +93,7 @@ class OneDriveVFS(BaseVFS):
     async def write(
         self, path: PathSpec, data: ByteSource, *, atomic: bool = False
     ) -> None:
-        if isinstance(data, bytes):
-            await _write(self.accessor, path, data)
-        else:
-            await _write_stream(self.accessor, path, data)
+        await _write(self.accessor, path, data)
 
     async def create(self, path: PathSpec) -> None:
         await _create(self.accessor, path)

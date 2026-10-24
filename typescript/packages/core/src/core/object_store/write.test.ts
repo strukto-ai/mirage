@@ -17,6 +17,7 @@ import { runWithRecording, runWithRevisions } from '../../observe/context.ts'
 import type { OpRecord } from '../../observe/record.ts'
 import { enoent, errorVirtualPath } from '../../errors/fs.ts'
 import { materialize } from '../../io/types.ts'
+import { yieldBytes } from '../../io/stream.ts'
 import { FileType } from '../../types.ts'
 import type { ObjectStoreDriver } from './driver.ts'
 import type { FakeStore as Store } from '../../../tests/core/object_store/fakes.ts'
@@ -26,7 +27,7 @@ import {
   makeDriver,
   spec,
 } from '../../../tests/core/object_store/fakes.ts'
-import { makeCreate, makeMkdir, makeTruncate, makeWrite, makeWriteStream } from './write.ts'
+import { makeCreate, makeMkdir, makeTruncate, makeWrite } from './write.ts'
 
 const accessor = new FakeAccessor()
 const ENC = new TextEncoder()
@@ -79,7 +80,7 @@ describe('object_store write', () => {
         write: () => makeWrite(driver)(accessor, path, ENC.encode('hello')),
         create: () => makeCreate(driver)(accessor, path),
         truncate: () => makeTruncate(driver)(accessor, path, 2),
-        stream: () => makeWriteStream(driver)(accessor, path, ENC.encode('hello')),
+        stream: () => makeWrite(driver)(accessor, path, yieldBytes(ENC.encode('hello'))),
       }
       const [row, records] = await runWithRecording(calls[operation])
       expect(row).toMatchObject({
