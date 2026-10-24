@@ -321,7 +321,6 @@ async def test_multiple_stdout_redirects_truncate_all_write_last(monkeypatch):
                 )
                 assert io.exit_code == 0
                 assert [call.args[1:3] for call in pwrite.await_args_list] == [
-                    (b"abcdef", 0),
                     (b"XY", 0),
                     (b"GH", 6),
                     (b"Z", 2),

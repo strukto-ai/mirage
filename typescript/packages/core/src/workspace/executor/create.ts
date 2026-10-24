@@ -91,9 +91,12 @@ async function reachedPipe(dispatch: DispatchFn, path: string | null): Promise<P
  *
  * A write-only description lands at its offset with one `pwrite`, so it
  * needs no read of the file, as a write to a write-only descriptor needs none
- * (`exec 3>f; echo a >&3`). A read-write one (`<>`) still reads it: that
- * description was opened to read, and its own reader resumes over what the
- * write left. Writes through one description take turns, the first one
+ * (`exec 3>f; echo a >&3`). Its first write into a file still empty lands as
+ * one stream instead, as the same bytes from offset 0 would: `pwrite` windows
+ * cost a copy of the file each on a store whose `pwrite` rewrites it, so
+ * `cmd > f` would move the file's size squared. A read-write one (`<>`)
+ * still reads it: that description was opened to read, and its own reader
+ * resumes over what the write left. Writes through one description take turns, the first one
  * (which opens the file) included, as the kernel orders writes to an open
  * file: a background job writing alongside the shell neither reopens the
  * file nor lands on an offset another write has not advanced yet. A writer
@@ -122,7 +125,12 @@ export async function writeDescription(
     await turn
     const writer = getCurrentEvaluation()?.frame.abortSignal ?? undefined
     if (!kept && hasAborted(writer)) throw makeAbortError(writer)
-    if (file.source === null && (!file.opened || file.append || (replace && file.offset === 0))) {
+    if (
+      file.source === null &&
+      (!file.opened ||
+        file.append ||
+        (file.offset === 0 && (replace || (await stillEmpty(dispatch, file.scope)))))
+    ) {
       file.offset += await createCounted(dispatch, session, file.scope, data, file.append)
       file.opened = true
       return
@@ -152,6 +160,19 @@ export async function writeDescription(
   } finally {
     done()
   }
+}
+
+/** Whether the file a description opened holds no bytes yet. Mirrors Python's _still_empty. */
+async function stillEmpty(dispatch: DispatchFn, scope: PathSpec): Promise<boolean> {
+  let stat: unknown
+  try {
+    ;[stat] = await dispatch('stat', scope)
+  } catch (err) {
+    if (!isFsError(err)) throw err
+    console.debug(`write target ${scope.rawPath} has no stat: ${String(err)}`)
+    return false
+  }
+  return stat instanceof FileStat && stat.size === 0
 }
 
 /** `createFile` that answers how many bytes it wrote. Mirrors Python's create_counted. */

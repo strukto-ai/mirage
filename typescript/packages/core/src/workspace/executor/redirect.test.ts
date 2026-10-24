@@ -411,7 +411,6 @@ describe('fd-table routing end-to-end', () => {
               ),
             ).toBe(0)
             expect(writes.mock.calls.map(([, bytes, offset]) => [decode(bytes), offset])).toEqual([
-              ['abcdef', 0],
               ['XY', 0],
               ['GH', 6],
               ['Z', 2],

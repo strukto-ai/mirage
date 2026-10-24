@@ -128,15 +128,18 @@ async def write_description(
 
     A write-only description lands at its offset with ``pwrite``, so it
     needs no read of the file, as a write to a write-only descriptor
-    needs none (``exec 3>f; echo a >&3``). A read-write one (``<>``)
-    still reads it: that description was opened to read, and its own
-    reader resumes over what the write left. Writes through one
-    description take turns, the first one (which opens the file)
-    included, as the kernel orders writes to an open file: a background
-    job writing alongside the shell neither reopens the file nor lands on
-    an offset another write has not advanced yet. A writer killed while it
-    waits for its turn writes nothing: its cancelled task leaves the
-    queue.
+    needs none (``exec 3>f; echo a >&3``). Its first write into a file
+    still empty lands as one stream instead, as the same bytes from
+    offset 0 would: ``pwrite`` windows cost a copy of the file each on a
+    store whose ``pwrite`` rewrites it, so ``cmd > f`` would move the
+    file's size squared. A read-write one (``<>``) still reads it: that
+    description was opened to read, and its own reader resumes over what
+    the write left. Writes through one description take turns, the first
+    one (which opens the file) included, as the kernel orders writes to
+    an open file: a background job writing alongside the shell neither
+    reopens the file nor lands on an offset another write has not
+    advanced yet. A writer killed while it waits for its turn writes
+    nothing: its cancelled task leaves the queue.
 
     Args:
         dispatch (DispatchFn): operation dispatcher.
@@ -153,7 +156,12 @@ async def write_description(
         return
     async with file.writing:
         if file.source is None and (
-            not file.opened or file.append or (replace and not file.offset)
+            not file.opened
+            or file.append
+            or (
+                not file.offset
+                and (replace or await _still_empty(dispatch, file.scope))
+            )
         ):
             file.offset += await create_counted(
                 dispatch, session, file.scope, data, append=file.append
@@ -185,6 +193,21 @@ async def write_description(
                     file.source.lines = await file.source.lines.reopen(
                         slice_stream(content, offset)
                     )
+
+
+async def _still_empty(dispatch: DispatchFn, scope: PathSpec) -> bool:
+    """Whether the file a description opened holds no bytes yet.
+
+    Args:
+        dispatch (DispatchFn): operation dispatcher.
+        scope (PathSpec): the file.
+    """
+    try:
+        stat, _ = await dispatch("stat", scope)
+    except FS_ERRORS as exc:
+        logger.debug("write target %s has no stat: %s", scope.raw_path, exc)
+        return False
+    return isinstance(stat, FileStat) and stat.size == 0
 
 
 async def create_counted(

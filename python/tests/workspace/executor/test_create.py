@@ -21,8 +21,9 @@ under the default mask because a fresh file already renders as 644.
 import pytest
 
 from mirage.io.spool import MEMORY_LIMIT
+from mirage.io.types import materialize
 from mirage.shell.descriptors import FileDescription
-from mirage.types import MountMode, PathSpec
+from mirage.types import FileStat, FileType, MountMode, PathSpec
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 from mirage.workspace.executor.builtins.scope import _to_scope
@@ -110,3 +111,26 @@ async def test_a_failed_write_leaves_the_offset_after_what_landed():
         )
     assert landed == [(3, MEMORY_LIMIT)]
     assert file.offset == 3 + MEMORY_LIMIT
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "size,ops", [(0, ["stat", "write"]), (5, ["stat", "pwrite", "pwrite"])]
+)
+async def test_a_first_write_into_an_empty_file_lands_as_one_stream(size, ops):
+    calls: list[str] = []
+
+    async def dispatch(op: str, scope: PathSpec, **kwargs):
+        calls.append(op)
+        if op == "stat":
+            return FileStat(name="f", size=size, type=FileType.FILE), None
+        if op == "write":
+            await materialize(kwargs["data"])
+        return None, None
+
+    file = FileDescription(_to_scope("/data/f"), opened=True)
+    await write_description(
+        dispatch, SessionState("s"), file, _a_block_then_a_byte()
+    )
+    assert calls == ops
+    assert file.offset == MEMORY_LIMIT + 1

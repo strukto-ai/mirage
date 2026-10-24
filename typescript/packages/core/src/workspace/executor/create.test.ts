@@ -15,10 +15,10 @@
 import { describe, expect, it } from 'vitest'
 
 import { MEMORY_LIMIT } from '../../io/spool.ts'
-import { IOResult } from '../../io/types.ts'
+import { IOResult, materialize, type ByteSource } from '../../io/types.ts'
 import { FileDescription } from '../../shell/descriptors.ts'
 import type { DispatchFn } from '../../runtime/types.ts'
-import { PathSpec } from '../../types.ts'
+import { FileStat, FileType, PathSpec } from '../../types.ts'
 import { SessionState } from '../session/session.ts'
 import { createFile, writeDescription } from './create.ts'
 
@@ -99,5 +99,25 @@ describe('writeDescription', () => {
     ).rejects.toThrow('ENOSPC')
     expect(landed).toEqual([[3, MEMORY_LIMIT]])
     expect(file.offset).toBe(3 + MEMORY_LIMIT)
+  })
+
+  it.each([
+    [0, ['stat', 'write']],
+    [5, ['stat', 'pwrite', 'pwrite']],
+  ])('lands a first write into a file of %i bytes as %j', async (size, ops) => {
+    const calls: string[] = []
+    const dispatch: DispatchFn = async (op, _path, args) => {
+      calls.push(op)
+      if (op === 'stat') {
+        return [new FileStat({ name: 'f', size, type: FileType.FILE }), new IOResult()]
+      }
+      if (op === 'write') await materialize((args as [ByteSource])[0])
+      return [null, new IOResult()]
+    }
+    const file = new FileDescription(SCOPE)
+    file.opened = true
+    await writeDescription(dispatch, new SessionState({ sessionId: 's' }), file, aBlockThenAByte())
+    expect(calls).toEqual(ops)
+    expect(file.offset).toBe(MEMORY_LIMIT + 1)
   })
 })

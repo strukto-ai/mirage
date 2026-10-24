@@ -17,7 +17,7 @@ import time
 from contextlib import aclosing
 
 from mirage.accessor.ram import RAMAccessor
-from mirage.core.dev.device import active_pipe
+from mirage.core.dev.device import active_device, active_pipe
 from mirage.core.ram.constants import STREAM_PUBLISH_SECONDS
 from mirage.core.ram.dest import check_dest_parents, check_write_target
 from mirage.io.cooperative import chunks
@@ -45,7 +45,8 @@ async def write(
     end, appended to what the file holds then, so another appender's
     bytes stay. Appending nothing opens the file (``true >> f``): it
     creates a missing one and leaves an existing one as it was,
-    modification time included.
+    modification time included. A device that discards writes
+    (``/dev/null``) has its bytes counted as they arrive and kept nowhere.
 
     Args:
         accessor (RAMAccessor): the RAM store.
@@ -74,6 +75,17 @@ async def write(
         return
     check_dest_parents(store, path_spec, p)
     check_write_target(store, path_spec, p)
+    if active_device(accessor, p) is not None:
+        if isinstance(data, bytes):
+            size = len(data)
+        else:
+            async with aclosing(chunks(data)) as source:
+                async for chunk in source:
+                    size += len(chunk)
+        if size or not append:
+            store.modified[p] = now_iso()
+        record(op, path_spec.virtual, "ram", size, timer)
+        return
     if isinstance(data, bytes) or atomic:
         whole = await materialize(data)
         if append and p in store.files:
