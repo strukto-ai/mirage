@@ -13,7 +13,8 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
-from collections.abc import AsyncGenerator
+import gzip
+from collections.abc import AsyncGenerator, Iterable
 from unittest.mock import AsyncMock, MagicMock
 
 import aiohttp
@@ -22,9 +23,11 @@ import pytest_asyncio
 from aiohttp import web
 from aiohttp.test_utils import TestServer
 from aioresponses import aioresponses
+from multidict import CIMultiDict, CIMultiDictProxy
 from yarl import URL
 
 from mirage.core.api.client import (
+    MAX_BODY_BYTES,
     NO_RETRY,
     RetryPolicy,
     SessionPool,
@@ -36,6 +39,7 @@ from mirage.core.api.client import (
     resolve_session,
     status_error,
 )
+from mirage.core.api.errors import ResponseTooLargeError
 from mirage.utils.ranges import ByteWindow
 
 TARGET = "https://api.test/v1/thing"
@@ -800,3 +804,296 @@ async def test_a_body_cut_short_is_a_transport_failure(
                 sleep=_no_wait,
             )
     assert len(hits) == sent
+
+
+def _binary_session(body: Iterable[bytes], status: int = 200):
+    pulled: list[bytes] = []
+
+    async def stream(size: int):
+        for chunk in body:
+            pulled.append(chunk)
+            yield chunk
+
+    response = MagicMock(spec=aiohttp.ClientResponse)
+    response.status = status
+    response.headers = CIMultiDictProxy(CIMultiDict({"ETag": "version-1"}))
+    response.read = AsyncMock(side_effect=AssertionError("unbounded read"))
+    response.content.iter_chunked.side_effect = stream
+    session = MagicMock(spec=aiohttp.ClientSession)
+    context = session.request.return_value
+    context.__aenter__.return_value = response
+    return session, response, pulled
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["bytes", "bytes_response"])
+async def test_binary_limit_refuses_chunked_body_and_does_not_retry(mode):
+    session, _, pulled = _binary_session([b"ab", b"cd", b"ef", b"tail"])
+    retry = RetryPolicy(max_retries=2, retry_transport=True)
+    with pytest.raises(ResponseTooLargeError, match="exceeds 4 bytes") as exc:
+        await api_request(
+            "GET",
+            TARGET,
+            error_of=_error_of,
+            read=mode,
+            max_body_bytes=4,
+            session=session,
+            retry=retry,
+        )
+    assert exc.value.limit == 4
+    assert pulled == [b"ab", b"cd", b"ef"]
+    session.request.assert_called_once()
+    session.request.return_value.__aexit__.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", [200, 206])
+@pytest.mark.parametrize("mode", ["bytes", "bytes_response"])
+async def test_binary_limit_allows_exact_limit_and_preserves_metadata(
+    status, mode
+):
+    session, response, _ = _binary_session([b"ab", b"cd"], status)
+    result = await api_request(
+        "GET",
+        TARGET,
+        error_of=_error_of,
+        read=mode,
+        max_body_bytes=4,
+        session=session,
+    )
+    if mode == "bytes_response":
+        assert result.status == status
+        assert result.headers == {"etag": "version-1"}
+        result = result.data
+    assert result == b"abcd"
+    response.read.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_ignored_range_skips_prefix_without_counting_it_against_limit():
+    session, _, pulled = _binary_session([b"0000"] * 16 + [b"abcd", b"tail"])
+    result = await api_request(
+        "GET",
+        TARGET,
+        error_of=_error_of,
+        read="bytes",
+        window=ByteWindow(64, 4),
+        max_body_bytes=4,
+        session=session,
+    )
+    assert result == b"abcd"
+    assert len(pulled) == 17
+    session.request.return_value.__aexit__.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_ignored_range_stops_inside_chunk_without_reading_tail():
+    session, _, pulled = _binary_session([b"0123456789", b"tail"])
+    result = await api_request(
+        "GET",
+        TARGET,
+        error_of=_error_of,
+        read="bytes",
+        window=ByteWindow(2, 3),
+        max_body_bytes=3,
+        session=session,
+    )
+    assert result == b"234"
+    assert pulled == [b"0123456789"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", [200, 206])
+async def test_range_larger_than_limit_fails_loud(status):
+    session, _, _ = _binary_session([b"ab", b"cd"], status)
+    with pytest.raises(ResponseTooLargeError, match="exceeds 3 bytes"):
+        await api_request(
+            "GET",
+            TARGET,
+            error_of=_error_of,
+            read="bytes",
+            window=ByteWindow(0, 4),
+            max_body_bytes=3,
+            session=session,
+        )
+
+
+@pytest.mark.asyncio
+async def test_206_window_refuses_excess_body_instead_of_truncating():
+    session, _, pulled = _binary_session([b"abc", b"d", b"tail"], 206)
+    with pytest.raises(ResponseTooLargeError, match="exceeds 3 bytes"):
+        await api_request(
+            "GET",
+            TARGET,
+            error_of=_error_of,
+            read="bytes",
+            window=ByteWindow(50, 3),
+            max_body_bytes=8,
+            session=session,
+        )
+    assert pulled == [b"abc", b"d"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "body, expected", [([b"ab"], b""), ([b"abcd"], b"cd")]
+)
+async def test_ignored_range_allows_eof_before_requested_end(body, expected):
+    session, _, _ = _binary_session(body)
+    assert (
+        await api_request(
+            "GET",
+            TARGET,
+            error_of=_error_of,
+            read="bytes",
+            window=ByteWindow(2, 10),
+            max_body_bytes=8,
+            session=session,
+        )
+        == expected
+    )
+
+
+@pytest.mark.asyncio
+async def test_open_ended_range_is_still_bounded():
+    session, _, _ = _binary_session([b"skip", b"abcd", b"e"])
+    with pytest.raises(ResponseTooLargeError, match="exceeds 4 bytes"):
+        await api_request(
+            "GET",
+            TARGET,
+            error_of=_error_of,
+            read="bytes",
+            window=ByteWindow(4, None),
+            max_body_bytes=4,
+            session=session,
+        )
+
+
+@pytest.mark.asyncio
+async def test_binary_default_limit_is_enforced_without_an_override():
+    chunk = b"x" * (16 * 1024)
+    session, _, pulled = _binary_session(
+        chunk for _ in range(MAX_BODY_BYTES // len(chunk) + 2)
+    )
+    with pytest.raises(ResponseTooLargeError) as exc:
+        await api_request(
+            "GET", TARGET, error_of=_error_of, read="bytes", session=session
+        )
+    assert exc.value.limit == 64 * 1024 * 1024
+    assert len(pulled) == MAX_BODY_BYTES // len(chunk) + 1
+
+
+@pytest.mark.asyncio
+async def test_zero_binary_limit_accepts_empty_but_rejects_nonempty():
+    session, _, _ = _binary_session([])
+    assert (
+        await api_request(
+            "GET",
+            TARGET,
+            error_of=_error_of,
+            read="bytes",
+            max_body_bytes=0,
+            session=session,
+        )
+        == b""
+    )
+    session, _, _ = _binary_session([b"x"])
+    with pytest.raises(ResponseTooLargeError):
+        await api_request(
+            "GET",
+            TARGET,
+            error_of=_error_of,
+            read="bytes",
+            max_body_bytes=0,
+            session=session,
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "limit", [-1, 0.5, float("inf"), float("nan"), True, 2**53]
+)
+async def test_binary_limit_validation_precedes_network(limit):
+    session, _, _ = _binary_session([])
+    with pytest.raises(ValueError, match="non-negative safe integer"):
+        await api_request(
+            "GET",
+            TARGET,
+            error_of=_error_of,
+            read="bytes",
+            max_body_bytes=limit,
+            session=session,
+        )
+    session.request.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["none", "location"])
+async def test_ignored_body_is_never_materialized(mode):
+    session, response, pulled = _binary_session([b"unused"])
+    response.headers = {"Location": "/monitor"}
+    result = await api_request(
+        "GET", TARGET, error_of=_error_of, read=mode, session=session
+    )
+    assert result == (None if mode == "none" else "/monitor")
+    assert pulled == []
+    response.read.assert_not_awaited()
+    session.request.return_value.__aexit__.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_binary_limit_counts_decompressed_bytes():
+    compressed = gzip.compress(b"x" * 8192)
+
+    async def answer(request):
+        return web.Response(
+            body=compressed, headers={"Content-Encoding": "gzip"}
+        )
+
+    app = web.Application()
+    app.router.add_get("/compressed", answer)
+    async with TestServer(app) as server:
+        with pytest.raises(ResponseTooLargeError, match="exceeds 1024 bytes"):
+            await api_request(
+                "GET",
+                str(server.make_url("/compressed")),
+                error_of=_error_of,
+                read="bytes",
+                max_body_bytes=1024,
+            )
+    assert len(compressed) < 1024
+
+
+@pytest.mark.asyncio
+async def test_binary_limit_keeps_http_errors_and_status_retries():
+    with aioresponses() as mocked:
+        mocked.get(TARGET, status=401, body="credentials expired")
+        with pytest.raises(_Boom) as exc:
+            await api_request(
+                "GET",
+                TARGET,
+                error_of=_error_of,
+                read="bytes",
+                max_body_bytes=2,
+            )
+        assert exc.value.status == 401
+        assert exc.value.body == "credentials expired"
+    retry = RetryPolicy(statuses=frozenset({429}), max_retries=1)
+    with aioresponses() as mocked:
+        mocked.get(
+            TARGET,
+            status=429,
+            body="a long error body",
+            headers={"Retry-After": "0"},
+        )
+        mocked.get(TARGET, status=200, body=b"ok")
+        result = await api_request(
+            "GET",
+            TARGET,
+            error_of=_error_of,
+            read="bytes",
+            max_body_bytes=2,
+            retry=retry,
+        )
+        assert result == b"ok"
+        assert len(mocked.requests[("GET", URL(TARGET))]) == 2

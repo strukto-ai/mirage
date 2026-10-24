@@ -16,7 +16,7 @@ import { Octokit } from '@octokit/core'
 import { RequestError } from '@octokit/request-error'
 import { retry } from '@octokit/plugin-retry'
 import { throttling } from '@octokit/plugin-throttling'
-import { bodyChunks, loweredHeaders } from '../api/client.ts'
+import { MAX_BODY_BYTES, bodyChunks, loweredHeaders, readBytes } from '../api/client.ts'
 import { GRAPHQL_PATH, RAW_MEDIA_TYPE, SEARCH_PAGE_SIZE } from './constants.ts'
 
 export const GITHUB_API_BASE = 'https://api.github.com'
@@ -152,23 +152,24 @@ export class HttpGitHubTransport implements GitHubTransport {
     params?: Record<string, string>,
     headers?: Record<string, string>,
   ): Promise<GitHubResponse> {
-    const r = await this.send(method, path, body, params, headers, true)
-    // 204 and an empty 202 decode to '' rather than a body; the caller gets
-    // null on a call that worked. A binary body, such as a run's log
-    // archive, arrives as an ArrayBuffer and is handed on as bytes.
+    const r = await this.send(method, path, body, params, headers)
+    // Collect outside Octokit's retry policy: exceeding the byte limit
+    // is a refusal, never a reason to send the request again.
+    const source = r.data === '' ? null : (r.data as Response['body'])
+    const data = await readBytes({ body: source, status: r.status }, undefined, MAX_BODY_BYTES)
     const responseHeaders: Record<string, string> = {}
     for (const [key, value] of Object.entries(r.headers)) {
       if (value !== undefined) responseHeaders[key.toLowerCase()] = String(value)
     }
     return {
-      data: r.data === '' ? null : r.data instanceof ArrayBuffer ? new Uint8Array(r.data) : r.data,
+      data: decoded(data, responseHeaders['content-type'] ?? ''),
       status: r.status,
       headers: responseHeaders,
     }
   }
 
   async *stream(path: string): AsyncGenerator<Uint8Array, void> {
-    const r = await this.send('GET', path, undefined, undefined, { accept: RAW_MEDIA_TYPE }, false)
+    const r = await this.send('GET', path, undefined, undefined, { accept: RAW_MEDIA_TYPE })
     const body = r.data as ReadableStream<Uint8Array> | null
     if (body !== null) yield* bodyChunks(body)
   }
@@ -179,7 +180,6 @@ export class HttpGitHubTransport implements GitHubTransport {
     body: unknown,
     params: Record<string, string> | undefined,
     headers: Record<string, string> | undefined,
-    parse: boolean,
   ): Promise<Awaited<ReturnType<InstanceType<typeof Kit>['request']>>> {
     let failed: Response | undefined
     try {
@@ -204,7 +204,7 @@ export class HttpGitHubTransport implements GitHubTransport {
             if (response.status >= 400) failed = response.clone()
             return response
           },
-          parseSuccessResponseBody: parse,
+          parseSuccessResponseBody: false,
         },
         ...(body === undefined ? {} : { data: body }),
       })
@@ -276,6 +276,30 @@ export class GitHubConnectionError extends Error {
     super(message)
     this.name = 'GitHubConnectionError'
   }
+}
+
+/** Decode a bounded successful response the same way as Python's _decoded. */
+function decoded(body: Uint8Array, contentType: string): unknown {
+  if (body.length === 0) return null
+  const [type = '', ...parameters] = contentType.split(';')
+  const mime = type.trim().toLowerCase()
+  const parameter = parameters.find((part) => part.trim().toLowerCase().startsWith('charset='))
+  const charset = parameter
+    ?.slice(parameter.indexOf('=') + 1)
+    .trim()
+    .replace(/^"+|"+$/g, '')
+    .toLowerCase()
+  if (mime === '') return new TextDecoder().decode(body)
+  if (mime === 'application/json' || mime === 'application/scim+json') {
+    const text = new TextDecoder().decode(body)
+    try {
+      return JSON.parse(text) as unknown
+    } catch {
+      return text
+    }
+  }
+  if (mime.startsWith('text/') || charset === 'utf-8') return new TextDecoder().decode(body)
+  return body
 }
 
 /** A response body decoded as JSON, the text itself when it is not JSON. */

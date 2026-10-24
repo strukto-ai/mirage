@@ -13,6 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { MAX_BODY_BYTES } from '../api/client.ts'
+import { ResponseTooLargeError } from '../api/errors.ts'
 import {
   GitHubApiError,
   GitHubConnectionError,
@@ -487,5 +489,76 @@ it.each([
     body,
     data,
     url: 'https://api.example.test/search/issues?q=bad+query',
+  })
+})
+
+describe('bounded GitHub responses', () => {
+  it.each(['application/zip', 'application/json'])(
+    'bounds %s before decoding and does not replay an oversized response',
+    async (contentType) => {
+      const part = new Uint8Array(65536).fill(32)
+      const pull = vi.fn((controller: ReadableStreamDefaultController<Uint8Array>) => {
+        controller.enqueue(part)
+      })
+      const cancel = vi.fn()
+      const body = new ReadableStream<Uint8Array>({ pull, cancel }, { highWaterMark: 0 })
+      const fakeFetch = vi
+        .fn<typeof fetch>()
+        .mockResolvedValue(new Response(body, { headers: { 'content-type': contentType } }))
+      globalThis.fetch = fakeFetch
+      await expect(transport().get('/repos/o/r/actions/runs/1/logs')).rejects.toMatchObject({
+        constructor: ResponseTooLargeError,
+        limit: MAX_BODY_BYTES,
+      })
+      expect(fakeFetch).toHaveBeenCalledOnce()
+      expect(pull).toHaveBeenCalledTimes(MAX_BODY_BYTES / part.length + 1)
+      expect(cancel).toHaveBeenCalledOnce()
+      expect(body.locked).toBe(false)
+    },
+  )
+
+  it.each([
+    ['', 'plain', 'plain'],
+    ['text/plain; charset=iso-8859-1', 'plain', 'plain'],
+    ['application/json', '{"ok":true}', { ok: true }],
+    [' Application/SCIM+JSON ; charset=utf-8', '{"id":1}', { id: 1 }],
+    ['application/json', 'not json', 'not json'],
+    ['application/custom; charset="UTF-8"', 'rendered', 'rendered'],
+  ])('decodes bounded %s content', async (contentType, body, expected) => {
+    globalThis.fetch = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(
+        new Response(body, { headers: { 'content-type': contentType, etag: 'version-1' } }),
+      )
+    const response = await transport().requestWithResponse('GET', '/repos/o/r')
+    expect(response.data).toEqual(expected)
+    expect(response.status).toBe(200)
+    expect(response.headers.etag).toBe('version-1')
+  })
+
+  it.each([204, 205])('keeps a %s response empty', async (status) => {
+    globalThis.fetch = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status }))
+    expect(await transport().request('DELETE', '/repos/o/r')).toBeNull()
+  })
+
+  it('keeps a successful HEAD response empty', async () => {
+    globalThis.fetch = vi.fn<typeof fetch>().mockResolvedValue(new Response(null))
+    expect(await transport().request('HEAD', '/repos/o/r')).toBeNull()
+  })
+
+  it('propagates a failed binary body instead of silently returning an empty archive', async () => {
+    const broken = new Error('body interrupted')
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        controller.error(broken)
+      },
+    })
+    const fakeFetch = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(new Response(body, { headers: { 'content-type': 'application/zip' } }))
+    globalThis.fetch = fakeFetch
+    await expect(transport().get('/repos/o/r/actions/runs/1/logs')).rejects.toBe(broken)
+    expect(fakeFetch).toHaveBeenCalledOnce()
+    expect(body.locked).toBe(false)
   })
 })

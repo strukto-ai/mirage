@@ -14,6 +14,7 @@
 
 import { describe, expect, it, vi } from 'vitest'
 import {
+  MAX_BODY_BYTES,
   NO_RETRY,
   apiRequest,
   apiStream,
@@ -23,6 +24,7 @@ import {
   headerDelay,
   type RetryPolicy,
 } from './client.ts'
+import { ResponseTooLargeError } from './errors.ts'
 
 const TARGET = 'https://api.test/v1/thing'
 
@@ -240,28 +242,34 @@ describe('apiRequest', () => {
     ).toBe('https://api.test/monitor/1')
   })
 
-  it('drains the body on read none so the connection is released', async () => {
-    const response = jsonResponse({ ok: true })
-    const drain = vi.spyOn(response, 'arrayBuffer')
-    const fakeFetch: typeof fetch = () => Promise.resolve(response)
-    expect(
-      await apiRequest('POST', TARGET, { errorOf, fetchFn: fakeFetch, read: 'none' }),
-    ).toBeNull()
-    expect(drain).toHaveBeenCalledTimes(1)
-  })
+  it.each(['none', 'location'] as const)(
+    'cancels an unread %s body without pulling it',
+    async (read) => {
+      const pull = vi.fn((controller: ReadableStreamDefaultController<Uint8Array>) => {
+        controller.enqueue(new Uint8Array(65536))
+      })
+      const cancel = vi.fn()
+      const body = new ReadableStream<Uint8Array>({ pull, cancel }, { highWaterMark: 0 })
+      const response = new Response(body, { status: 202, headers: { Location: '/monitor/1' } })
+      const materialize = vi.spyOn(response, 'arrayBuffer')
+      const fakeFetch = vi.fn<typeof fetch>().mockResolvedValue(response)
+      expect(await apiRequest('POST', TARGET, { errorOf, fetchFn: fakeFetch, read })).toBe(
+        read === 'none' ? null : '/monitor/1',
+      )
+      expect(cancel).toHaveBeenCalledOnce()
+      expect(pull).not.toHaveBeenCalled()
+      expect(materialize).not.toHaveBeenCalled()
+      expect(body.locked).toBe(false)
+    },
+  )
 
-  it('drains the body on read location while returning the header', async () => {
-    const response = new Response('ignored', {
-      status: 202,
-      headers: { Location: 'https://api.test/monitor/1' },
-    })
-    const drain = vi.spyOn(response, 'arrayBuffer')
-    const fakeFetch: typeof fetch = () => Promise.resolve(response)
-    expect(
-      await apiRequest('POST', TARGET, { errorOf, fetchFn: fakeFetch, read: 'location' }),
-    ).toBe('https://api.test/monitor/1')
-    expect(drain).toHaveBeenCalledTimes(1)
-  })
+  it.each(['none', 'location'] as const)(
+    'accepts a null response body in %s mode',
+    async (read) => {
+      const fakeFetch = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 204 }))
+      expect(await apiRequest('POST', TARGET, { errorOf, fetchFn: fakeFetch, read })).toBeNull()
+    },
+  )
 
   it('a raw body is sent as-is', async () => {
     let sentBody: BodyInit | null | undefined
@@ -473,8 +481,7 @@ describe('bytes_response read', () => {
     expect(out.status).toBe(200)
     expect(out.headers.etag).toBe('"final-hop"')
     expect(out.headers['x-mixed-case']).toBe('kept')
-    // Read once, as bytes; a text read would have mangled binary content.
-    expect(drain).toHaveBeenCalledTimes(1)
+    expect(drain).not.toHaveBeenCalled()
   })
 })
 
@@ -659,4 +666,344 @@ describe('buildUrl', () => {
     )
     expect(buildUrl('http://h', '/api/x', {})).toBe('http://h/api/x')
   })
+})
+
+function chunkedResponse(parts: readonly Uint8Array[], init?: ResponseInit) {
+  let index = 0
+  const pull = vi.fn((controller: ReadableStreamDefaultController<Uint8Array>) => {
+    const part = parts[index++]
+    if (part === undefined) controller.close()
+    else controller.enqueue(part)
+  })
+  const cancel = vi.fn()
+  const body = new ReadableStream<Uint8Array>({ pull, cancel }, { highWaterMark: 0 })
+  return { response: new Response(body, init), body, pull, cancel }
+}
+
+describe('buffered binary limits', () => {
+  it.each(['bytes', 'bytes_response'] as const)(
+    '%s refuses an oversized chunked response and never retries it',
+    async (read) => {
+      const source = chunkedResponse([
+        new Uint8Array([1, 2]),
+        new Uint8Array([3, 4]),
+        new Uint8Array([5]),
+      ])
+      const fakeFetch = vi.fn<typeof fetch>().mockResolvedValue(source.response)
+      const retry = { ...NO_RETRY, maxRetries: 2, retryTransport: true }
+      const failure = apiRequest('GET', TARGET, {
+        errorOf,
+        read,
+        fetchFn: fakeFetch,
+        maxBodyBytes: 3,
+        retry,
+        sleep: noWait,
+      })
+      await expect(failure).rejects.toBeInstanceOf(ResponseTooLargeError)
+      await expect(failure).rejects.toMatchObject({
+        limit: 3,
+        message: 'API response body exceeds 3 bytes',
+      })
+      expect(fakeFetch).toHaveBeenCalledOnce()
+      expect(source.pull).toHaveBeenCalledTimes(2)
+      expect(source.cancel).toHaveBeenCalledOnce()
+      expect(source.body.locked).toBe(false)
+    },
+  )
+
+  it('keeps overflow non-retryable when cancel also fails', async () => {
+    const cleanup = new Error('cancel failed')
+    const body = new ReadableStream<Uint8Array>(
+      {
+        pull(controller) {
+          controller.enqueue(new Uint8Array([1, 2]))
+        },
+        cancel() {
+          return Promise.reject(cleanup)
+        },
+      },
+      { highWaterMark: 0 },
+    )
+    const fakeFetch = vi.fn<typeof fetch>().mockResolvedValue(new Response(body))
+    const failure = apiRequest('GET', TARGET, {
+      errorOf,
+      read: 'bytes',
+      fetchFn: fakeFetch,
+      maxBodyBytes: 1,
+      retry: { ...NO_RETRY, retryTransport: true, maxRetries: 2 },
+      sleep: noWait,
+    })
+    await expect(failure).rejects.toBeInstanceOf(ResponseTooLargeError)
+    await expect(failure).rejects.toMatchObject({ limit: 1 })
+    expect(fakeFetch).toHaveBeenCalledOnce()
+    expect(body.locked).toBe(false)
+  })
+
+  it.each([false, true])(
+    'a binary read retries transport failures only when enabled: %s',
+    async (retryTransport) => {
+      let pulled = false
+      const body = new ReadableStream<Uint8Array>(
+        {
+          pull(controller) {
+            if (pulled) controller.error(new TypeError('terminated'))
+            else {
+              pulled = true
+              controller.enqueue(new Uint8Array([1]))
+            }
+          },
+        },
+        { highWaterMark: 0 },
+      )
+      const fakeFetch = vi
+        .fn<typeof fetch>()
+        .mockResolvedValueOnce(new Response(body))
+        .mockResolvedValueOnce(new Response(new Uint8Array([7, 8])))
+      const result = apiRequest('GET', TARGET, {
+        errorOf,
+        read: 'bytes',
+        fetchFn: fakeFetch,
+        maxBodyBytes: 2,
+        retry: { ...NO_RETRY, retryTransport, maxRetries: 1 },
+        sleep: noWait,
+      })
+      if (retryTransport) await expect(result).resolves.toEqual(new Uint8Array([7, 8]))
+      else await expect(result).rejects.toThrow('terminated')
+      expect(fakeFetch).toHaveBeenCalledTimes(retryTransport ? 2 : 1)
+      expect(body.locked).toBe(false)
+    },
+  )
+
+  it('enforces the default ceiling when no override or Content-Length exists', async () => {
+    const part = new Uint8Array(65536)
+    const pull = vi.fn((controller: ReadableStreamDefaultController<Uint8Array>) => {
+      controller.enqueue(part)
+    })
+    const cancel = vi.fn()
+    const body = new ReadableStream<Uint8Array>({ pull, cancel }, { highWaterMark: 0 })
+    const fakeFetch = vi.fn<typeof fetch>().mockResolvedValue(new Response(body))
+    await expect(
+      apiRequest('GET', TARGET, { errorOf, read: 'bytes', fetchFn: fakeFetch }),
+    ).rejects.toMatchObject({ limit: MAX_BODY_BYTES })
+    expect(pull).toHaveBeenCalledTimes(MAX_BODY_BYTES / part.length + 1)
+    expect(cancel).toHaveBeenCalledOnce()
+    expect(body.locked).toBe(false)
+  })
+
+  it('copies byte-at-a-time chunks while growing one bounded buffer', async () => {
+    const total = 17001
+    const chunk = new Uint8Array(1)
+    let position = 0
+    const body = new ReadableStream<Uint8Array>(
+      {
+        pull(controller) {
+          if (position === total) controller.close()
+          else {
+            chunk[0] = position++ % 256
+            controller.enqueue(chunk)
+          }
+        },
+      },
+      { highWaterMark: 0 },
+    )
+    const fakeFetch = vi.fn<typeof fetch>().mockResolvedValue(new Response(body))
+    expect(
+      await apiRequest('GET', TARGET, {
+        errorOf,
+        read: 'bytes',
+        fetchFn: fakeFetch,
+        maxBodyBytes: total,
+      }),
+    ).toEqual(Uint8Array.from({ length: total }, (_value, index) => index % 256))
+    expect(body.locked).toBe(false)
+  })
+
+  it('preserves HTTP error mapping under a tiny binary cap', async () => {
+    const response = new Response('backend refused this request', { status: 403 })
+    const fakeFetch = vi.fn<typeof fetch>().mockResolvedValue(response)
+    await expect(
+      apiRequest('GET', TARGET, {
+        errorOf,
+        read: 'bytes',
+        fetchFn: fakeFetch,
+        maxBodyBytes: 0,
+      }),
+    ).rejects.toMatchObject({ status: 403, body: 'backend refused this request' })
+    expect(fakeFetch).toHaveBeenCalledOnce()
+  })
+
+  it.each([429, 503])(
+    'preserves HTTP %s retry handling before a bounded success',
+    async (status) => {
+      const fakeFetch = vi
+        .fn<typeof fetch>()
+        .mockResolvedValueOnce(
+          new Response('retry this larger error body', { status, headers: { 'Retry-After': '0' } }),
+        )
+        .mockResolvedValueOnce(new Response(new Uint8Array([7, 8])))
+      expect(
+        await apiRequest('GET', TARGET, {
+          errorOf,
+          read: 'bytes',
+          fetchFn: fakeFetch,
+          maxBodyBytes: 2,
+          retry: { ...NO_RETRY, statuses: new Set([status]), maxRetries: 2 },
+          sleep: noWait,
+        }),
+      ).toEqual(new Uint8Array([7, 8]))
+      expect(fakeFetch).toHaveBeenCalledTimes(2)
+    },
+  )
+
+  it('counts decoded chunks rather than trusting Content-Length', async () => {
+    const source = chunkedResponse([new Uint8Array([1, 2, 3])], {
+      headers: { 'Content-Length': '1' },
+    })
+    const fakeFetch = vi.fn<typeof fetch>().mockResolvedValue(source.response)
+    await expect(
+      apiRequest('GET', TARGET, { errorOf, read: 'bytes', fetchFn: fakeFetch, maxBodyBytes: 2 }),
+    ).rejects.toBeInstanceOf(ResponseTooLargeError)
+    expect(source.cancel).toHaveBeenCalledOnce()
+  })
+
+  it('keeps only the requested window when a 200 response ignores Range', async () => {
+    const source = chunkedResponse([
+      new TextEncoder().encode('prefix'),
+      new TextEncoder().encode('234tail'),
+      new TextEncoder().encode('never pulled'),
+    ])
+    const fakeFetch = vi.fn<typeof fetch>().mockResolvedValue(source.response)
+    const out = await apiRequest('GET', TARGET, {
+      errorOf,
+      read: 'bytes',
+      fetchFn: fakeFetch,
+      window: { offset: 6, size: 3 },
+      maxBodyBytes: 3,
+    })
+    expect(out).toEqual(new TextEncoder().encode('234'))
+    expect(source.pull).toHaveBeenCalledTimes(2)
+    expect(source.cancel).toHaveBeenCalledOnce()
+    expect(source.body.locked).toBe(false)
+  })
+
+  it.each([200, 206])(
+    'rejects a %s range whose retained bytes exceed the configured cap',
+    async (status) => {
+      const source = chunkedResponse([new Uint8Array([1, 2, 3, 4])], { status })
+      const fakeFetch = vi.fn<typeof fetch>().mockResolvedValue(source.response)
+      await expect(
+        apiRequest('GET', TARGET, {
+          errorOf,
+          read: 'bytes',
+          fetchFn: fakeFetch,
+          window: { offset: 0, size: 4 },
+          maxBodyBytes: 3,
+        }),
+      ).rejects.toMatchObject({ limit: 3 })
+      expect(source.cancel).toHaveBeenCalledOnce()
+    },
+  )
+
+  it.each([200, 206])(
+    'bounds an open-ended %s range without counting a skipped prefix',
+    async (status) => {
+      const prefix = status === 200 ? [new TextEncoder().encode('prefix')] : []
+      const source = chunkedResponse([...prefix, new Uint8Array([1, 2, 3, 4])], { status })
+      const fakeFetch = vi.fn<typeof fetch>().mockResolvedValue(source.response)
+      await expect(
+        apiRequest('GET', TARGET, {
+          errorOf,
+          read: 'bytes',
+          fetchFn: fakeFetch,
+          window: { offset: 6, size: null },
+          maxBodyBytes: 3,
+        }),
+      ).rejects.toMatchObject({ limit: 3 })
+      expect(source.cancel).toHaveBeenCalledOnce()
+    },
+  )
+
+  it('refuses an oversized 206 response instead of silently truncating it', async () => {
+    const source = chunkedResponse([new Uint8Array([2, 3, 4]), new Uint8Array([5])], {
+      status: 206,
+    })
+    const fakeFetch = vi.fn<typeof fetch>().mockResolvedValue(source.response)
+    await expect(
+      apiRequest('GET', TARGET, {
+        errorOf,
+        read: 'bytes',
+        fetchFn: fakeFetch,
+        window: { offset: 2, size: 3 },
+        maxBodyBytes: 10,
+      }),
+    ).rejects.toMatchObject({ limit: 3 })
+    expect(source.cancel).toHaveBeenCalledOnce()
+  })
+
+  it.each([0, 3])('accepts an exact %s-byte cap and observes EOF', async (size) => {
+    const parts = size === 0 ? [] : [new Uint8Array([1, 2, 3])]
+    const source = chunkedResponse(parts)
+    const fakeFetch = vi.fn<typeof fetch>().mockResolvedValue(source.response)
+    expect(
+      await apiRequest('GET', TARGET, {
+        errorOf,
+        read: 'bytes',
+        fetchFn: fakeFetch,
+        maxBodyBytes: size,
+      }),
+    ).toEqual(new Uint8Array(size === 0 ? [] : [1, 2, 3]))
+    expect(source.cancel).not.toHaveBeenCalled()
+    expect(source.body.locked).toBe(false)
+  })
+
+  it('accepts a short 206 response at EOF without shifting it by the offset', async () => {
+    const source = chunkedResponse([new Uint8Array([7, 8])], { status: 206 })
+    const fakeFetch = vi.fn<typeof fetch>().mockResolvedValue(source.response)
+    expect(
+      await apiRequest('GET', TARGET, {
+        errorOf,
+        read: 'bytes',
+        fetchFn: fakeFetch,
+        window: { offset: 20, size: 4 },
+        maxBodyBytes: 4,
+      }),
+    ).toEqual(new Uint8Array([7, 8]))
+    expect(source.cancel).not.toHaveBeenCalled()
+    expect(source.body.locked).toBe(false)
+  })
+
+  it('refuses a nonempty body under a zero-byte cap', async () => {
+    const source = chunkedResponse([new Uint8Array([1])])
+    const fakeFetch = vi.fn<typeof fetch>().mockResolvedValue(source.response)
+    await expect(
+      apiRequest('GET', TARGET, { errorOf, read: 'bytes', fetchFn: fakeFetch, maxBodyBytes: 0 }),
+    ).rejects.toMatchObject({ limit: 0 })
+    expect(source.cancel).toHaveBeenCalledOnce()
+  })
+
+  it('accepts EOF before an ignored Range starts', async () => {
+    const source = chunkedResponse([new Uint8Array([1, 2, 3])])
+    const fakeFetch = vi.fn<typeof fetch>().mockResolvedValue(source.response)
+    expect(
+      await apiRequest('GET', TARGET, {
+        errorOf,
+        read: 'bytes',
+        fetchFn: fakeFetch,
+        window: { offset: 9, size: 2 },
+        maxBodyBytes: 2,
+      }),
+    ).toEqual(new Uint8Array())
+    expect(source.cancel).not.toHaveBeenCalled()
+  })
+
+  it.each([-1, 0.5, Number.NaN, Number.POSITIVE_INFINITY, Number.MAX_SAFE_INTEGER + 1])(
+    'refuses invalid cap %s before fetching',
+    async (maxBodyBytes) => {
+      const fakeFetch = vi.fn<typeof fetch>()
+      await expect(
+        apiRequest('GET', TARGET, { errorOf, read: 'bytes', fetchFn: fakeFetch, maxBodyBytes }),
+      ).rejects.toThrow('max_body_bytes must be a non-negative safe integer')
+      expect(fakeFetch).not.toHaveBeenCalled()
+    },
+  )
 })

@@ -106,14 +106,7 @@ describe('BoxTokenManager client credentials grant', () => {
 const BODY = '0123456789'
 
 function bytesResponse(status: number, body: string): typeof globalThis.fetch {
-  return vi.fn(() =>
-    Promise.resolve({
-      ok: status < 400,
-      status,
-      arrayBuffer: () => Promise.resolve(new TextEncoder().encode(body).buffer),
-      text: () => Promise.resolve(''),
-    }),
-  ) as unknown as typeof globalThis.fetch
+  return vi.fn<typeof globalThis.fetch>(() => Promise.resolve(new Response(body, { status })))
 }
 
 async function getBytes(

@@ -32,11 +32,14 @@ from tenacity import (
     stop_after_attempt,
 )
 
+from mirage.core.api.errors import ResponseTooLargeError
 from mirage.io.cooperative import CHUNK_SIZE, chunks
 from mirage.types import JsonValue
-from mirage.utils.ranges import ByteWindow, range_header, window_of
+from mirage.utils.ranges import ByteWindow, range_header
 
 logger = logging.getLogger(__name__)
+
+MAX_BODY_BYTES = 64 * 1024 * 1024
 
 # How a >= 400 API response and its body text become the backend's own
 # exception; the engine here calls it, each backend supplies one.
@@ -439,6 +442,44 @@ def _merged_headers(
     return {**(headers or {}), "Range": header}
 
 
+async def _read_bytes(
+    resp: aiohttp.ClientResponse,
+    window: ByteWindow | None,
+    max_body_bytes: int,
+) -> bytes:
+    """Retain a bounded binary body, skipping an ignored range incrementally.
+
+    A finite window on a full response stops at its requested end. A 206
+    already claims to be the window, so excess bytes are a failure rather
+    than an object silently truncated to fit. The response context closes
+    unread data on early return or refusal.
+
+    Args:
+        resp (aiohttp.ClientResponse): the successful response to read.
+        window (ByteWindow | None): the requested byte range, if any.
+        max_body_bytes (int): maximum retained bytes, counted after decoding.
+    """
+    skip = 0 if window is None or resp.status == 206 else window.offset
+    size = None if window is None else window.size
+    limit = max_body_bytes if size is None else min(size, max_body_bytes)
+    data = bytearray()
+    async with aclosing(
+        chunks(resp.content.iter_chunked(CHUNK_SIZE))
+    ) as source:
+        async for chunk in source:
+            skipped = min(skip, len(chunk))
+            skip -= skipped
+            chunk = chunk[skipped:]
+            if resp.status != 206 and size is not None:
+                chunk = chunk[: size - len(data)]
+            if len(data) + len(chunk) > limit:
+                raise ResponseTooLargeError(limit)
+            data.extend(chunk)
+            if resp.status != 206 and size is not None and len(data) == size:
+                break
+    return bytes(data)
+
+
 async def _attempt(
     session: aiohttp.ClientSession,
     method: str,
@@ -452,6 +493,7 @@ async def _attempt(
     retry: RetryPolicy,
     read: ReadMode,
     window: ByteWindow | None,
+    max_body_bytes: int,
 ) -> Any:
     if json_body_present and json_body is None:
         request = session.request(
@@ -489,10 +531,10 @@ async def _attempt(
         if read == "none":
             return None
         if read == "bytes":
-            return window_of(await resp.read(), resp.status, window)
+            return await _read_bytes(resp, window, max_body_bytes)
         if read == "bytes_response":
             return ApiResponse(
-                window_of(await resp.read(), resp.status, window),
+                await _read_bytes(resp, window, max_body_bytes),
                 resp.status,
                 lowered_headers(resp.headers),
             )
@@ -532,6 +574,7 @@ async def api_request(
     retry: RetryPolicy = NO_RETRY,
     read: ReadMode = "json",
     window: ByteWindow | None = None,
+    max_body_bytes: int = MAX_BODY_BYTES,
     session: SessionArg = None,
     timeout: aiohttp.ClientTimeout | None = None,
     sleep: Callable[[float], Awaitable[None]] | None = None,
@@ -565,6 +608,11 @@ async def api_request(
             response carries.
         window (ByteWindow | None): the byte range to request; the Range
             header and the trim-if-unranged guard both come from it.
+        max_body_bytes (int): maximum decoded bytes retained by a successful
+            "bytes" or "bytes_response" read; defaults to 64 MiB. A finite
+            non-negative safe integer. Excess raises ResponseTooLargeError
+            without retrying. Ignored-range prefixes do not count; text,
+            JSON and HTTP error bodies are not covered by this binary limit.
         session (SessionArg): a live session to reuse across calls, or
             the SessionPool it should come from -- a pool materializes
             its session only here, when the request actually sends; the
@@ -575,6 +623,13 @@ async def api_request(
             between attempts, in seconds, injectable so a test or a
             simulated clock spends no real time; None is ``asyncio.sleep``.
     """
+
+    if (
+        isinstance(max_body_bytes, bool)
+        or not isinstance(max_body_bytes, int)
+        or not 0 <= max_body_bytes <= 2**53 - 1
+    ):
+        raise ValueError("max_body_bytes must be a non-negative safe integer")
 
     def wait(state: RetryCallState) -> float:
         outcome = state.outcome
@@ -616,6 +671,7 @@ async def api_request(
                 retry,
                 read,
                 window,
+                max_body_bytes,
             )
         except _RetryableStatus as exhausted:
             # retries ran dry: the final retryable response maps through

@@ -18,15 +18,7 @@ import { downloadFile, fileBlobName } from './files.ts'
 const BODY = '0123456789'
 
 function respond(status: number, body: string): typeof globalThis.fetch {
-  return vi.fn(() =>
-    Promise.resolve({
-      ok: status < 400,
-      status,
-      statusText: String(status),
-      arrayBuffer: () => Promise.resolve(new TextEncoder().encode(body).buffer),
-      text: () => Promise.resolve(body),
-    }),
-  ) as unknown as typeof globalThis.fetch
+  return vi.fn<typeof globalThis.fetch>(() => Promise.resolve(new Response(body, { status })))
 }
 
 afterEach(() => {
