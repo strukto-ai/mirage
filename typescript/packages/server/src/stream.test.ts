@@ -266,6 +266,52 @@ it('an upload that failed first fails the final record', async () => {
   await table.close()
 })
 
+it('an upload failing while its cleanup runs fails the record', async () => {
+  const held = gate()
+  const table = new ExecutionTable()
+  const job = table.submit(
+    'workspace',
+    'true',
+    async (_signal, scope) => {
+      await scope.start()
+      return { exit_code: 0 }
+    },
+    'session',
+  )
+  await table.wait(job.id)
+  let source: Readable | undefined
+  const reply = {
+    raw: new EventEmitter(),
+    log: { error: vi.fn(), debug: vi.fn() },
+    header: vi.fn().mockReturnThis(),
+    type: vi.fn().mockReturnThis(),
+    send: (body: Readable) => {
+      source = body
+      return reply
+    },
+  } as unknown as FastifyReply
+  const stdin = new UploadStdin()
+  stdin.discard = () => held.wait
+  const error = new Error('stdin part too large')
+  const failed = stdin.fail(error).then(() => error)
+  shellResponse(new ShellOutput(), table, job, reply, failed, stdin)
+  if (source === undefined) throw new Error('response did not send a stream')
+  const body = source
+  const records: string[] = []
+  const reading = (async () => {
+    for await (const chunk of body) records.push(Buffer.from(chunk as Uint8Array).toString())
+  })()
+  for (let i = 0; i < 50; i++) await new Promise((resolve) => setImmediate(resolve))
+  held.release()
+  await reading
+  expect(JSON.parse(records.join(''))).toEqual({
+    status: 'failed',
+    result: null,
+    error: 'stdin part too large',
+  })
+  await table.close()
+})
+
 it('the final record survives its eviction', async () => {
   const finish = gate()
   const table = new ExecutionTable()

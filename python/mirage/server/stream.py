@@ -130,13 +130,16 @@ class ShellResponse(Response):
                 }
             )
         job = await asyncio.shield(completed)
-        upload_error = (
-            self._upload.exception()
-            if self._upload is not None
+        upload_error: BaseException | None = (
+            self._part.error if self._part is not None else None
+        )
+        if (
+            upload_error is None
+            and self._upload is not None
             and self._upload.done()
             and not self._upload.cancelled()
-            else None
-        )
+        ):
+            upload_error = self._upload.exception()
         terminal = (
             json.dumps(
                 {

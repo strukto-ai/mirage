@@ -95,6 +95,7 @@ export function shellResponse(
     try {
       yield* output.pipe.stream()
       const result = await completed
+      if (stdin instanceof UploadStdin && stdin.error !== undefined) uploadError = stdin.error
       yield Buffer.from(
         JSON.stringify({
           status: uploadError === undefined ? result.status : 'failed',

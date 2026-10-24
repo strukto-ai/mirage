@@ -332,7 +332,7 @@ async def _read_shell_body(
                 await stdin.close()
     except Exception as exc:
         if started.done():
-            await stdin.discard()
+            await stdin.fail(exc)
             raise
         started.set_exception(exc)
         return

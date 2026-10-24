@@ -218,6 +218,55 @@ async def test_an_upload_that_failed_first_fails_the_final_record():
 
 
 @pytest.mark.asyncio
+async def test_an_upload_failing_while_its_cleanup_runs_fails_the_record():
+    held = asyncio.Event()
+    incoming = asyncio.Queue()
+    sent = []
+
+    async def receive():
+        return await incoming.get()
+
+    async def send(message):
+        sent.append(message)
+
+    async def discard():
+        await held.wait()
+
+    part = UploadStdin()
+    part.discard = discard
+    error = ValueError("stdin part too large")
+
+    async def upload():
+        await part.fail(error)
+        raise error
+
+    table = ExecutionTable()
+    job = table.submit("workspace", "true", finished, session_id="session")
+    await table.wait(job.id)
+    uploading = asyncio.create_task(upload())
+    await asyncio.sleep(0)
+    assert not uploading.done()
+    scope = {"type": "http", "method": "POST", "path": "/", "headers": []}
+    response = ShellResponse(
+        ShellOutput(), table, job, Request(scope, receive), uploading, part
+    )
+    sending = asyncio.create_task(response(scope, receive, send))
+    for _ in range(50):
+        await asyncio.sleep(0)
+    held.set()
+    await asyncio.wait_for(sending, 1)
+    bodies = b"".join(
+        m["body"] for m in sent if m["type"] == "http.response.body"
+    )
+    assert json.loads(bodies) == {
+        "status": "failed",
+        "result": None,
+        "error": "stdin part too large",
+    }
+    await table.close()
+
+
+@pytest.mark.asyncio
 async def test_the_final_record_survives_its_eviction(monkeypatch):
     monkeypatch.setattr("mirage.server.jobs.MAX_FINISHED_JOBS", 1)
     finish, headers = asyncio.Event(), asyncio.Event()
