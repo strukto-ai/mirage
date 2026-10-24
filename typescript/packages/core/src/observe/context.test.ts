@@ -30,6 +30,34 @@ import {
   withMountContext,
 } from './context.ts'
 import type { OpRecord } from './record.ts'
+import { ManualClock, SystemClock } from '../utils/clock.ts'
+
+describe('the recording clock', () => {
+  it('times and stamps a recorded op on the line clock', async () => {
+    const clock = new ManualClock(1_000)
+    const [, records] = await runWithRecording(
+      async () => {
+        const timer = startOp()
+        clock.advance(2.5)
+        record('read', '/s3/a', 's3', 1, timer)
+        await runWithMountContext(async () => {
+          clock.advance(1)
+          recordStream('read', '/s3/b', 's3')
+        }, 'mount-a')
+      },
+      null,
+      clock,
+    )
+    expect(records.map((r) => [r.timestamp, r.durationMs])).toEqual([
+      [1_002_500, 2_500],
+      [1_003_500, 0],
+    ])
+  })
+
+  it('times an op outside a recording on the system clock', () => {
+    expect(startOp().clock).toBeInstanceOf(SystemClock)
+  })
+})
 
 describe('runWithRecording / record / runWithMountContext', () => {
   it('record outside recording scope is a no-op', () => {

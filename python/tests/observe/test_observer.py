@@ -20,22 +20,24 @@ from mirage.observe import OpRecord
 from mirage.observe.log_entry import EVENT_COMMAND, LogEntry
 from mirage.observe.observer import Observer
 from mirage.observe.store import RAMObserverStore
-from mirage.utils.dates import utc_date_folder
+from mirage.utils.clock import ManualClock
+
+NEW_YEAR = 1_609_459_200.0
 
 
 def test_log_op_writes_jsonl():
     store = RAMObserverStore()
-    obs = Observer(store=store)
+    obs = Observer(store=store, clock=ManualClock(start=NEW_YEAR))
     rec = OpRecord(
         op="read",
         path="/data/f.csv",
         source="s3",
         bytes=100,
-        timestamp=1000,
+        timestamp=int(NEW_YEAR * 1000),
         duration_ms=5,
     )
     asyncio.run(obs.log_op(rec, session="sess-1"))
-    data = store.files[f"/{utc_date_folder()}/sess-1.jsonl"]
+    data = store.files["/2021-01-01/sess-1.jsonl"]
     parsed = json.loads(data.decode().strip())
     assert parsed["type"] == "op"
     assert parsed["session"] == "sess-1"
@@ -44,11 +46,12 @@ def test_log_op_writes_jsonl():
 
 def test_log_execution_writes_jsonl():
     store = RAMObserverStore()
-    obs = Observer(store=store)
+    obs = Observer(store=store, clock=ManualClock(start=NEW_YEAR + 1.5))
     io = IOResult(stdout=b"file.csv\n")
     asyncio.run(obs.log_execution("ls /data", io, [], session="sess-1"))
-    data = store.files[f"/{utc_date_folder()}/sess-1.jsonl"]
+    data = store.files["/2021-01-01/sess-1.jsonl"]
     parsed = json.loads(data.decode().strip())
+    assert parsed["timestamp"] == 1_609_459_201_500
     assert parsed["type"] == "command"
     assert parsed["session"] == "sess-1"
     assert parsed["command"] == "ls /data"
@@ -58,18 +61,18 @@ def test_log_execution_writes_jsonl():
 
 def test_multiple_entries_appended():
     store = RAMObserverStore()
-    obs = Observer(store=store)
+    obs = Observer(store=store, clock=ManualClock(start=NEW_YEAR))
     for i in range(3):
         rec = OpRecord(
             op="read",
             path=f"/f{i}",
             source="s3",
             bytes=i,
-            timestamp=1000 + i,
+            timestamp=int(NEW_YEAR * 1000) + i,
             duration_ms=1,
         )
         asyncio.run(obs.log_op(rec, session="s"))
-    data = store.files[f"/{utc_date_folder()}/s.jsonl"]
+    data = store.files["/2021-01-01/s.jsonl"]
     lines = data.decode().strip().split("\n")
     assert len(lines) == 3
 
@@ -225,3 +228,67 @@ def test_load_events_skips_foreign_format_entries():
     asyncio.run(obs.load_events([foreign, native]))
     events = asyncio.run(obs.command_events())
     assert [e["command"] for e in events] == ["echo hi"]
+
+
+def test_a_clock_behind_stored_history_does_not_reorder_it():
+    store = RAMObserverStore()
+    first = Observer(store=store, clock=ManualClock(start=NEW_YEAR))
+    asyncio.run(first.log_command_text("a", session="s"))
+    asyncio.run(first.log_command_text("b", session="s"))
+    reopened = Observer(store=store, clock=ManualClock())
+    asyncio.run(reopened.log_delete("s", 1))
+    shown = asyncio.run(reopened.session_command_events("s"))
+    assert [e["command"] for e in shown] == ["b"]
+    asyncio.run(reopened.log_clear("s"))
+    asyncio.run(reopened.log_command_text("c", session="s"))
+    shown = asyncio.run(reopened.session_command_events("s"))
+    assert [e["command"] for e in shown] == ["c"]
+    events = asyncio.run(reopened.events())
+    assert [e["type"] for e in events] == [
+        "command",
+        "command",
+        "delete",
+        "clear",
+        "command",
+    ]
+    assert list(store.files) == ["/2021-01-01/s.jsonl"]
+
+
+def test_a_clock_behind_restored_history_does_not_reorder_it():
+    snapshot = [
+        {
+            "type": "command",
+            "session": "s",
+            "timestamp": int(NEW_YEAR * 1000),
+            "command": "a",
+            "exit_code": 0,
+        }
+    ]
+    restored = Observer(clock=ManualClock())
+    asyncio.run(restored.load_events(snapshot))
+    asyncio.run(restored.log_clear("s"))
+    assert asyncio.run(restored.session_command_events("s")) == []
+
+
+class _NoScanStore(RAMObserverStore):
+    async def read_all(self) -> dict[str, bytes]:
+        raise AssertionError("read every session's history")
+
+
+def test_the_floor_reads_only_the_entry_s_session():
+    store = _NoScanStore()
+    first = Observer(store=store, clock=ManualClock(start=NEW_YEAR))
+    asyncio.run(first.log_command_text("a", session="s"))
+    asyncio.run(first.log_command_text("x", session="t"))
+    reopened = Observer(store=store, clock=ManualClock())
+    asyncio.run(reopened.log_clear("s"))
+    assert asyncio.run(reopened.session_command_events("s")) == []
+    shown = asyncio.run(reopened.session_command_events("t"))
+    assert [e["command"] for e in shown] == ["x"]
+
+
+def test_an_empty_history_sets_no_floor():
+    obs = Observer(clock=ManualClock(start=-1.0))
+    asyncio.run(obs.log_command_text("a", session="s"))
+    events = asyncio.run(obs.events())
+    assert [e["timestamp"] for e in events] == [-1000]

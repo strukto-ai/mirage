@@ -1,7 +1,7 @@
 import pytest
 
 from mirage.core.databricks_volume.readdir import readdir
-from mirage.types import FileType, PathSpec
+from mirage.types import DirListing, FileType, PathSpec
 from mirage.utils.key_prefix import mount_key
 from tests.fixtures.databricks_api import (
     directory_entry,
@@ -32,6 +32,23 @@ async def test_readdir_answers_each_child_as_its_row(
         6,
         "2023-11-14T22:13:20Z",
     )
+
+
+@pytest.mark.asyncio
+async def test_readdir_marks_a_listing_cut_at_a_limit_partial(
+    accessor, files, remote_root
+):
+    files.directories[f"{remote_root}/reports"] = [
+        file_entry(f"{remote_root}/reports/a.md", size=1),
+        file_entry(f"{remote_root}/reports/b.md", size=1),
+    ]
+    path = PathSpec.from_str_path(
+        "/volume/reports", mount_key("/volume/reports", "/volume")
+    )
+    cut = await readdir(accessor, path, 2)
+    assert isinstance(cut, DirListing) and cut.partial
+    assert [row.name for row in cut.entries] == ["a.md", "b.md"]
+    assert not isinstance(await readdir(accessor, path, 3), DirListing)
 
 
 @pytest.mark.asyncio

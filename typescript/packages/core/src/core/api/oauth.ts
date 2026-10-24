@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { SystemClock, type Clock } from '../../utils/clock.ts'
+
 /**
  * Caches a short-lived access token, refreshing before expiry.
  *
@@ -19,15 +21,35 @@
  * in-flight refresh is shared so concurrent callers cost one round-trip,
  * and `bufferSeconds` refreshes early so a token never expires
  * mid-request.
+ *
+ * Expiry is read on `clock`, which also times the waits between retries of
+ * the calls the manager signs. A mount hands it the workspace's clock
+ * through `bindClock`; absent is the system clock.
  */
 export abstract class TokenManager {
   private accessToken: string | null = null
   private expiresAt = 0
   private inflight: Promise<string> | null = null
   private readonly bufferSeconds: number
+  clock: Clock
 
-  constructor(bufferSeconds = 300) {
+  constructor(bufferSeconds = 300, clock?: Clock) {
     this.bufferSeconds = bufferSeconds
+    this.clock = clock ?? new SystemClock()
+  }
+
+  /**
+   * Read expiry and time retry waits on `clock` from now on. The manager
+   * keeps one clock: a VFS mounted in a second workspace follows that
+   * workspace's. A refreshed token's expiry was read on the clock it
+   * replaces, so it is dropped and the next call refreshes, unless both are
+   * the system clock; a seeded token that never expires is kept.
+   */
+  bindClock(clock: Clock): void {
+    const same =
+      clock === this.clock || (clock instanceof SystemClock && this.clock instanceof SystemClock)
+    this.clock = clock
+    if (!same && this.expiresAt !== Number.POSITIVE_INFINITY) this.expiresAt = 0
   }
 
   /** Fetch a fresh token as `[accessToken, expiresInSeconds]`. */
@@ -45,7 +67,7 @@ export abstract class TokenManager {
   }
 
   async getToken(): Promise<string> {
-    if (this.accessToken !== null && Date.now() / 1000 < this.expiresAt) {
+    if (this.accessToken !== null && this.clock.now() < this.expiresAt) {
       return this.accessToken
     }
     if (this.inflight !== null) return this.inflight
@@ -61,7 +83,7 @@ export abstract class TokenManager {
   private async refresh(): Promise<string> {
     const [token, expiresIn] = await this.refreshPair()
     this.accessToken = token
-    this.expiresAt = Date.now() / 1000 + expiresIn - this.bufferSeconds
+    this.expiresAt = this.clock.now() + expiresIn - this.bufferSeconds
     return token
   }
 }

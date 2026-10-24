@@ -63,6 +63,10 @@ class FailingListing extends RAMVFS {
   override readdir(): Promise<FileStat[]> {
     return Promise.reject(new Error('remote failure'))
   }
+
+  override readTree(): Promise<Map<string, FileStat> | null> {
+    return Promise.reject(new Error('remote failure'))
+  }
 }
 
 it.each(['find', 'du', 'ls -R'])('keeps nested %s failure inside the line', async (name) => {

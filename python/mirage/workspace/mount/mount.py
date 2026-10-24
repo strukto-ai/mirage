@@ -74,6 +74,7 @@ from mirage.context import (
     effective_mount_mode,
     require_paths_writable,
     reset_caller,
+    session_visibility,
     strongest_mode_under,
 )
 from mirage.context.session_context import with_caller
@@ -114,7 +115,9 @@ from mirage.types import (
     WritePolicy,
 )
 from mirage.utils.activity import Activity
+from mirage.utils.clock import Clock
 from mirage.utils.filetype import get_extension
+from mirage.utils.hidden import path_visible
 from mirage.utils.ids import IdSource, SystemIdSource
 from mirage.utils.key_prefix import mount_key
 from mirage.utils.path import norm
@@ -230,21 +233,32 @@ def _taken(
 ) -> dict[str, Any]:
     """The keywords of ``kwargs`` that ``fn`` takes.
 
-    The mount hands every function its ``index``; a function that does
-    not name it never sees it. Every other keyword is the caller's, and
-    one the function does not take is the TypeError a direct call would
-    raise, never silently dropped.
+    The mount hands every function its ``index``, and a walk hands a
+    listing its ``limit``; a function that does not name either never
+    sees it, and one that takes any keyword is handed ``limit`` only by
+    name, so a plug-in passing its keywords on to another listing is not
+    handed a hint that one refuses. Every other keyword is the caller's,
+    and one the function does not take is the TypeError a direct call
+    would raise, never silently dropped.
 
     Args:
         name (str): the function the caller named, which the error names.
         fn (Callable[..., Any]): the function about to run.
         kwargs (dict[str, Any]): the call's keywords.
     """
-    target = fn.func if isinstance(fn, functools.partial) else fn
-    names = _parameters(getattr(target, "__func__", target))
+    bound = fn.func if isinstance(fn, functools.partial) else fn
+    target = getattr(bound, "__func__", bound)
+    names = _parameters(target)
+    listing = name in ("readdir", "read_tree")
     if names is None:
-        return kwargs
-    unknown = sorted(set(kwargs) - names - {"index"})
+        named = "limit" in inspect.signature(target).parameters
+        return {
+            k: v
+            for k, v in kwargs.items()
+            if not listing or k != "limit" or named
+        }
+    exempt = {"index", "limit"} if listing else {"index"}
+    unknown = sorted(set(kwargs) - names - exempt)
     if unknown:
         raise TypeError(
             f"{name}() got an unexpected keyword argument {unknown[0]!r}"
@@ -392,6 +406,7 @@ async def _collected(
     answer: Awaitable[ByteSource] | AsyncIterator[bytes],
     path: PathSpec,
     whole: bool,
+    clock: Clock,
 ) -> bytes:
     """A backend read's answer as bytes, a stream collected.
 
@@ -407,6 +422,8 @@ async def _collected(
             calling ``read`` returned.
         path (PathSpec): the file read.
         whole (bool): whether the read is of the whole file.
+        clock (Clock): the workspace clock a read outside a line records
+            on.
     """
     found = await answer if inspect.isawaitable(answer) else answer
     if isinstance(found, bytes):
@@ -415,7 +432,7 @@ async def _collected(
         return await materialize(found)
     held = current_caller().command_sink
     outer = held[1] if held is not None and held[1] is not held[0] else None
-    scope = RecordingScope(active=active_recorder() is None)
+    scope = RecordingScope(active=active_recorder() is None, clock=clock)
     try:
         with command_records() as records:
             try:
@@ -470,13 +487,16 @@ async def _read_window(
     if ranges and not whole:
         try:
             return await _collected(
-                read(path, offset=offset, size=size, **handed), path, False
+                read(path, offset=offset, size=size, **handed),
+                path,
+                False,
+                index.clock,
             )
         except Exception as exc:
             if not is_unsatisfiable_range(exc):
                 raise
             return b""
-    data = await _collected(read(path, **handed), path, True)
+    data = await _collected(read(path, **handed), path, True, index.clock)
     if whole:
         return data
     return slice_window(data, offset, size)
@@ -1074,7 +1094,7 @@ class MountEntry:
                         if user
                         else virtual_flags(flag_kwargs)
                     )
-                    refusal = self._read_only_refusal(cmd_name, cmd, flags)
+                    refusal = self._command_refusal(cmd_name, cmd, flags)
                     if refusal is not None:
                         return None, refusal
                     result = await self._run_one(
@@ -1284,14 +1304,14 @@ class MountEntry:
         finally:
             reset_caller(token)
 
-    def _read_only_refusal(
+    def _command_refusal(
         self,
         cmd_name: str,
         cmd: Command,
         flags: dict[str, FlagValue],
         served: Command | None = None,
     ) -> IOResult | None:
-        """Refuse a user write command on a read-only mount.
+        """Refuse user handlers on hidden mounts or read-only writes.
 
         Mirage's own commands are refused where they write, by the
         dispatcher, because only the write knows whether a line writes:
@@ -1315,12 +1335,18 @@ class MountEntry:
                 under, which says whether it is a user command: a tree's
                 root for one of its leaves; None for ``cmd`` itself.
         """
+        user = self._is_user_command(served or cmd)
+        if user and not path_visible(session_visibility(), self.prefix):
+            return IOResult(
+                exit_code=127,
+                stderr=encode_text(f"{cmd_name}: command not found\n"),
+            )
         info_only = (
             flags.get("help") is True and has_injected_help(cmd.spec)
         ) or (flags.get("version") is True and has_injected_version(cmd.spec))
         if (
             cmd.write
-            and self._is_user_command(served or cmd)
+            and user
             and not info_only
             and strongest_mode_under(self.prefix, self.mode) == MountMode.READ
         ):
@@ -1440,7 +1466,7 @@ class MountEntry:
             with self._command_scope(run_ctx):
                 # No flag here is answered for the leaf: walk_leaf answered
                 # the tree's own help, and the leaf is handed the rest.
-                refusal = self._read_only_refusal(prog, leaf, {}, root)
+                refusal = self._command_refusal(prog, leaf, {}, root)
                 if refusal is not None:
                     return None, refusal
                 with host_io():
@@ -1675,7 +1701,9 @@ class MountEntry:
             index (IndexCacheStore): the mount's index.
             path (PathSpec): the file, keyed below the mount.
         """
-        return await _collected(await self._answer(index, path), path, True)
+        return await _collected(
+            await self._answer(index, path), path, True, index.clock
+        )
 
     async def _answer(
         self, index: IndexCacheStore, path: PathSpec

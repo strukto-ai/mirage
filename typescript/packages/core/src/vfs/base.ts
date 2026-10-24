@@ -327,7 +327,15 @@ export class BaseVFS<A extends Accessor = Accessor> {
     return this.#commands
   }
 
-  /** List the children of a directory. */
+  /**
+   * List the children of a directory, each as its stat answers it.
+   *
+   * On a walk, `handed.limit` is the most entries the walk can still use;
+   * a readdir may stop once it holds that many and answer them as
+   * `new DirListing({ entries, partial: true })`. A glob hands the word it
+   * matches as `path.pattern`; a backend that filters by it answers
+   * `partial: true` too. Mirrors Python's `readdir`.
+   */
   @vfsCall({ effect: Effect.READ, target: Target.DIR })
   readdir(path: PathSpec, _handed?: Handed): Promise<readonly FileStat[] | DirListing> {
     return Promise.reject(enotsup(this.name, 'readdir', path))
@@ -463,8 +471,9 @@ export class BaseVFS<A extends Accessor = Accessor> {
    * directory below `path`, keyed by its path below `path` (`a`, `a/b.txt`),
    * each with the stat `stat` gives for it. The walk lists each directory from it in name order.
    * Resolve null to have the command walk `readdir` the usual way; reject with
-   * what `readdir` of `path` rejects with otherwise. Mirrors Python's
-   * `read_tree`.
+   * what `readdir` of `path` rejects with otherwise. `handed.limit` is the
+   * most entries the walk can still use; resolve null once the tree holds
+   * more. Mirrors Python's `read_tree`.
    */
   @vfsCall({ effect: Effect.READ, target: Target.DIR, subtree: true })
   readTree(path: PathSpec, _handed?: Handed): Promise<Map<string, FileStat> | null> {

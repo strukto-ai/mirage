@@ -18,6 +18,9 @@ export interface Handed {
   // The store the call runs under, for a function that answers a fresh
   // check itself; Python's names `index`.
   readonly index?: IndexCacheStore
+  // The most entries a walk can still keep, handed to `readdir` and
+  // `readTree`; Python's names `limit`.
+  readonly limit?: number
 }
 
 /**

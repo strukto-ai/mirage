@@ -15,7 +15,8 @@
 import { type ByteSource, IOResult, OpReport } from '../io/types.ts'
 import { closeQuietly, ensureStream } from '../io/stream.ts'
 import type { OpRecord, RecordingState } from '../observe/record.ts'
-import { finishRecord, record, startOp } from '../observe/context.ts'
+import { finishRecord, OpTimer, record } from '../observe/context.ts'
+import { SystemClock, type Clock } from '../utils/clock.ts'
 import { asyncContextIsolatesTasks } from '../utils/async_context.ts'
 import type { FileStat, SetAttrFields } from '../types.ts'
 import { FileType, type MountMode, PathSpec } from '../types.ts'
@@ -54,6 +55,9 @@ export interface FilesOptions {
   // The mount whose command scope a command's files run in, null across
   // mounts; unset where nothing said one (`servedBy`).
   served?: Caller['mount']
+  // The workspace clock a ledgered op is timed and stamped on; unset is the
+  // system clock.
+  clock?: Clock
 }
 
 // TypeScript has no package-private: the class assigns these from its static
@@ -163,6 +167,7 @@ export class Files {
   protected readonly recorded: OpRecord[]
   private readonly follow: FollowOperands | null
   private readonly ledger: boolean
+  private readonly clock: Clock
   /**
    * The mount whose command scope these files run in, null for a run across
    * mounts; undefined where nothing said one, which the async context
@@ -197,6 +202,7 @@ export class Files {
     this.follow = options.follow ?? null
     this.ledger = options.ledger ?? true
     this.served = options.served
+    this.clock = options.clock ?? new SystemClock()
   }
 
   private options(): FilesOptions {
@@ -205,6 +211,7 @@ export class Files {
       dispatchAs: this.dispatchAs,
       sessionId: this.sessionId,
       records: this.recorded,
+      clock: this.clock,
     }
   }
 
@@ -368,7 +375,7 @@ export class Files {
     sessionId?: string,
   ): Promise<unknown> {
     if (!this.ledger) return (await this.dispatch(op, path, args, kwargs))[0]
-    const timer = startOp()
+    const timer = new OpTimer(this.clock)
     const report = new OpReport()
     const spelled = typeof path === 'string' ? path : path.virtual
     const outer = currentCaller()
@@ -382,7 +389,7 @@ export class Files {
     const own: RecordingState | null =
       !isolated || outer.recording?.ledger === this.recorded
         ? null
-        : { records: [], mountId: null, ledger: null }
+        : { records: [], mountId: null, ledger: null, clock: this.clock }
     // The op's own list gathers every record made below it; a command the
     // op runs in on that line (a handler reaching `ws.vfs`) is charged them
     // once the op ends.

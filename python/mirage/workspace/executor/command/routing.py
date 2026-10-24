@@ -189,7 +189,7 @@ def tree_path_scopes(
         env (Mapping[str, str] | None): session environment, which fills
             options the walk needs to reach the leaf.
     """
-    tree = command_tree(registry, name, cwd)
+    tree = command_tree(registry, name, cwd, argv)
     if tree is None:
         return []
     result = walk(name, tree.spec, list(argv), cwd, env)
@@ -343,24 +343,35 @@ def merge_scopes(
     return merged
 
 
-def command_tree(registry: MountRegistry, name: str, cwd: str) -> CLI | None:
+def command_tree(
+    registry: MountRegistry,
+    name: str,
+    cwd: str,
+    argv: Sequence[str] | None = None,
+) -> CLI | None:
     """The command tree a head word walks: an installed CLI's, else one
     the mount serving the name registered (``MountEntry.cli_for``).
 
-    A tree on a mount runs on the mount that serves its name, the working
-    directory's when it has one, else the first that does, never by
-    operand path: its walk, not a spec, says which words are paths.
+    The invocation selector chooses the mount when argv is supplied;
+    discovery without argv keeps the first registered grammar. A tree's
+    walk, not the flat parser, says which of its words are paths.
 
     Args:
         registry (MountRegistry): registry holding the CLI installs and
             the mounts.
         name (str): expanded command name.
         cwd (str): session working directory.
+        argv (Sequence[str] | None): actual words select the invocation;
+            None discovers the first registered grammar.
     """
     install = registry.clis.get(name)
     if install is not None:
         return install.cli
-    mount = registry.command_mount(name, [], cwd)
+    mount = (
+        registry.command_mount(name, [], cwd)
+        if argv is None
+        else registry.invocation_mount(name, [], cwd, argv)
+    )
     tree = mount.cli_for(name) if mount is not None else None
     return tree if isinstance(tree, CLI) else None
 
@@ -393,7 +404,7 @@ def program_tokens(
             a group option declaring ``Argument.env`` as the run's walk
             does.
     """
-    tree = command_tree(registry, name, cwd)
+    tree = command_tree(registry, name, cwd, argv)
     if tree is not None:
         result = walk(name, tree.spec, argv, cwd, env)
         if result.leaf is not None:
@@ -492,7 +503,7 @@ def command_words(
             a group option declaring ``Argument.env`` as the run's walk
             does.
     """
-    tree = command_tree(registry, name, cwd)
+    tree = command_tree(registry, name, cwd, argv)
     result = (
         walk(name, tree.spec, argv, cwd, env) if tree is not None else None
     )

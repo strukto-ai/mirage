@@ -131,6 +131,7 @@ async def list_children(
     folder_ids: list[str],
     drive_id: str | None = None,
     page_size: int = 1000,
+    limit: int | None = None,
 ) -> list[dict[str, Any]]:
     """The untrashed children of several folders of one corpus, from one
     query (``'a' in parents or 'b' in parents``), in the order a listing
@@ -141,13 +142,18 @@ async def list_children(
         folder_ids (list[str]): the folders.
         drive_id (str | None): their shared drive, None for My Drive.
         page_size (int): results per page.
+        limit (int | None): stop once this many files are in hand.
     """
     parents = " or ".join(
         f"'{escape_query_value(folder_id)}' in parents"
         for folder_id in folder_ids
     )
     return await _query_files(
-        token_manager, f"({parents}) and trashed=false", drive_id, page_size
+        token_manager,
+        f"({parents}) and trashed=false",
+        drive_id,
+        page_size,
+        limit,
     )
 
 

@@ -60,10 +60,35 @@ These list each folder instead:
 
 Every walk stops at your VFS's
 [`walk_limit`](/home/integration/search#walk_limit), whether
-`read_tree` answered or Mirage listed each folder. `read_tree` still returns the
-whole tree, and the command keeps what fits. Return `None` for a folder too
-large to send in one call: Mirage then stops calling `readdir` once the limit
-is spent.
+`read_tree` answered or Mirage listed each folder. Return `None` for a folder
+too large to send in one call: Mirage then stops calling `readdir` once the
+limit is spent.
+
+To stop paging early, take `limit` (TypeScript: `handed.limit`), how many
+entries the walk can still use:
+
+<Tabs>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    async def read_tree(self, path: PathSpec, limit: int | None = None) -> dict[str, FileStat] | None: ...
+    async def readdir(self, path: PathSpec, limit: int | None = None) -> list[FileStat] | DirListing: ...
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    readTree(path: PathSpec, handed?: Handed): Promise<Map<string, FileStat> | null>
+    readdir(path: PathSpec, handed?: Handed): Promise<readonly FileStat[] | DirListing>
+    ```
+  </Tab>
+</Tabs>
+
+| Function | Past `limit` entries |
+| --- | --- |
+| `read_tree` | Return `None`; Mirage lists each folder instead. |
+| `readdir` | Return what you hold as a `DirListing` with `partial=True`; Mirage does not keep it as the whole folder. |
+
+`limit` is `None` (TypeScript: `undefined`) when nothing caps the walk. Without
+it, `read_tree` returns the whole tree and the command keeps what fits.
 
 ## Example
 

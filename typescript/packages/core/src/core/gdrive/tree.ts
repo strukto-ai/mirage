@@ -69,11 +69,13 @@ export async function* iterTree(
  * corpus, where a walk lists each folder on its own, and each child is filed
  * under every folder asked about that its `parents` name. A folder asked about
  * alone takes every child, so `root`, the alias Drive names My Drive by, lists
- * too. Mirrors Python's `list_level`.
+ * too. Once `limit` items are in hand no page or query more is asked, so the
+ * level is then short. Mirrors Python's `list_level`.
  */
 export async function listLevel(
   accessor: GDriveAccessor,
   folders: readonly (readonly [string, string | null])[],
+  limit?: number,
 ): Promise<Map<string, DriveFile[]>> {
   const drive = accessor.drive
   const corpora = new Map<string | null, string[]>()
@@ -84,10 +86,16 @@ export async function listLevel(
     corpora.set(driveId, ids)
     children.set(folderId, [])
   }
+  let got = 0
   for (const [driveId, ids] of corpora) {
     for (let start = 0; start < ids.length; start += PARENTS_PER_QUERY) {
+      if (limit !== undefined && got >= limit) return children
       const asked = ids.slice(start, start + PARENTS_PER_QUERY)
-      for (const item of await drive.listChildren(asked, driveId)) {
+      const items = await (limit === undefined
+        ? drive.listChildren(asked, driveId)
+        : drive.listChildren(asked, driveId, limit - got))
+      got += items.length
+      for (const item of items) {
         const filed =
           asked.length === 1 ? asked : (item.parents ?? []).filter((p) => asked.includes(p))
         for (const parent of filed) children.get(parent)?.push(item)
@@ -107,21 +115,25 @@ export async function listLevel(
  * Of two items with one name in a folder, the one its listing keeps, the last,
  * stands. Null when that listing is short (Shared Drives it could not list),
  * or when a level below it fails, so the walk lists what is there and reports,
- * or skips, each folder on its own. Mirrors Python's `tree`.
+ * or skips, each folder on its own; null too once it holds more than `limit`
+ * items, which no level is paged past. Mirrors Python's `tree`.
  */
 export async function tree(
   accessor: GDriveAccessor,
   path: PathSpec,
   entry?: FileStat | null,
+  limit?: number,
 ): Promise<Map<string, FileStat> | null> {
   const listed = await readdir(accessor, path, entry)
   if (listed instanceof DirListing) return null
   const found = new Map<string, FileStat>()
   let level = placed(found, '', listed, null)
   while (level.size > 0) {
+    if (limit !== undefined && found.size > limit) return null
+    const left = limit === undefined ? undefined : limit - found.size + 1
     let children: Map<string, DriveFile[]>
     try {
-      children = await listLevel(accessor, [...level.values()])
+      children = await listLevel(accessor, [...level.values()], left)
     } catch (err) {
       const failed =
         err instanceof GoogleApiError || err instanceof TypeError || err instanceof DOMException
@@ -129,6 +141,11 @@ export async function tree(
       console.debug(`drive tree of ${path.virtual} left to the walk: ${String(err)}`)
       return null
     }
+    if (
+      left !== undefined &&
+      [...children.values()].reduce((n, rows) => n + rows.length, 0) >= left
+    )
+      return null
     const below = new Map<string, [string, string | null]>()
     for (const [rel, [folderId, driveId]] of level) {
       const rows = (children.get(folderId) ?? [])
@@ -138,6 +155,7 @@ export async function tree(
     }
     level = below
   }
+  if (limit !== undefined && found.size > limit) return null
   return found
 }
 

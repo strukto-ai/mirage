@@ -403,6 +403,23 @@ async def test_paginates_through_empty_page_and_encodes_query(http_files):
 
 
 @pytest.mark.asyncio
+async def test_listing_pages_no_further_than_a_limit(http_files):
+    async def handler(request):
+        return web.json_response(
+            {
+                "contents": [{"path": f"{REMOTE}/a", "file_size": 1}],
+                "next_page_token": "more",
+            }
+        )
+
+    http_files.handler = handler
+    async with http_files.accessor() as accessor:
+        entries = await list_directory_contents(accessor, REMOTE, 1)
+    assert [entry.path for entry in entries] == [f"{REMOTE}/a"]
+    assert len(http_files.requests) == 1
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("status", [200, 206])
 async def test_range_respects_response_status_even_when_body_is_short(
     http_files, status

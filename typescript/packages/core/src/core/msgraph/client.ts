@@ -153,10 +153,15 @@ export async function graphGet(
   >
 }
 
+/**
+ * Every item a Graph collection answers, a page at a time; no page past the
+ * one that brings `limit` items. Mirrors Python's `graph_list`.
+ */
 export async function graphList(
   config: MsGraphConfigResolved,
   url: string,
   params?: Record<string, string | number | boolean>,
+  limit?: number,
 ): Promise<Record<string, unknown>[]> {
   const items: Record<string, unknown>[] = []
   let next: string | null = url
@@ -170,6 +175,7 @@ export async function graphList(
         }
       }
     }
+    if (limit !== undefined && items.length >= limit) break
     next = typeof payload['@odata.nextLink'] === 'string' ? payload['@odata.nextLink'] : null
     nextParams = undefined
   }

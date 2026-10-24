@@ -683,6 +683,7 @@ it('keeps every link below a root it was refused to list', async () => {
   const links = {
     isLink: () => false,
     linkStatsBelow: () => [['/a/lnk', new FileStat({ name: 'lnk', type: FileType.SYMLINK })]],
+    mounts: () => undefined,
   } as unknown as Parameters<typeof walkOwned>[0]
   const { walked, owned } = await walkOwned(
     links,

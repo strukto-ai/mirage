@@ -19,7 +19,7 @@ import { VFSName } from '../../types.ts'
 import { redactBoxConfig, type BoxConfig, type BoxConfigRedacted } from './config.ts'
 import { buildDeltaHook } from '../../core/box/events.ts'
 import { type DeltaHook } from '../../events/index.ts'
-import type { CapacityResult, PathSpec, FileStat } from '../../types.ts'
+import type { CapacityResult, DirListing, PathSpec, FileStat } from '../../types.ts'
 import { capacity as boxCapacity } from '../../core/box/capacity.ts'
 import type { Handed } from '../types.ts'
 import { readdir as boxReaddir } from '../../core/box/readdir.ts'
@@ -110,8 +110,8 @@ export class BoxVFS extends BaseVFS {
 
   override readonly readsRanges: boolean = true
 
-  override readdir(path: PathSpec, handed?: Handed): Promise<FileStat[]> {
-    return boxReaddir(this.accessor, path, handed?.entry)
+  override readdir(path: PathSpec, handed?: Handed): Promise<FileStat[] | DirListing> {
+    return boxReaddir(this.accessor, path, handed?.entry, handed?.limit)
   }
 
   override read(

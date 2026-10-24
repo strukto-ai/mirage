@@ -142,7 +142,7 @@ async function readShellBody(
       ).then(
         () => undefined,
         async (error: unknown) => {
-          await stdin.discard()
+          await stdin.fail(error)
           return error
         },
       )

@@ -20,6 +20,7 @@ import { RAMSessionStore } from '../session/ram.ts'
 import { applyStateDict, toStateDict } from '../snapshot/state.ts'
 import { MountMode } from '../../types.ts'
 import { SeededIdSource, SystemIdSource } from '../../utils/ids.ts'
+import { ManualClock } from '../../utils/clock.ts'
 import { getTestParser, stdoutStr } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import type { ExecuteOptions, SessionExecuteOptions } from './types.ts'
 import { Session, Workspace } from './workspace.ts'
@@ -347,5 +348,35 @@ describe('the workspace id source', () => {
     open.push(ws)
     expect(ws.workspaceId).toBe('ws-given')
     expect(ws.defaultSessionId).toBe('sess-given')
+  })
+})
+
+describe('a manual clock workspace', () => {
+  it('keeps one time domain in its history', async () => {
+    const clock = new ManualClock(1_000_000)
+    const ws = new Workspace(
+      { '/data': new RAMVFS() },
+      { mode: MountMode.WRITE, shellParser: await getTestParser(), clock },
+    )
+    try {
+      await ws.shell('echo hi > /data/a.txt')
+      clock.advance(5)
+      await ws.shell('cat /data/a.txt')
+      clock.advance(5)
+      await ws.vfs.read('/data/a.txt')
+      await ws.shell('history -c')
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      const events = await ws.observer.events()
+      const types = new Set(events.map((e) => e.type))
+      for (const type of ['op', 'command', 'clear']) expect(types.has(type)).toBe(true)
+      expect(new Set(events.map((e) => e.timestamp))).toEqual(
+        new Set([1_000_000_000, 1_000_005_000, 1_000_010_000]),
+      )
+      expect(
+        new Set(ws.vfs.records.map((r) => `${String(r.timestamp)}:${String(r.durationMs)}`)),
+      ).toEqual(new Set(['1000000000:0', '1000005000:0', '1000010000:0']))
+    } finally {
+      await ws.close()
+    }
   })
 })

@@ -37,7 +37,7 @@ from mirage.core.s3.unlink import unlink as _unlink
 from mirage.core.s3.write import write as _write
 from mirage.errors.fs import exdev
 from mirage.io.types import ByteSource
-from mirage.types import FileStat, PathSpec, VFSName
+from mirage.types import DirListing, FileStat, PathSpec, VFSName
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.s3.config import S3Config
 
@@ -103,8 +103,10 @@ class S3VFS(BaseVFS):
             return str(client.meta.endpoint_url)
         return _declared_endpoint(self.config)
 
-    async def readdir(self, path: PathSpec) -> list[FileStat]:
-        return await _readdir(self.accessor, path)
+    async def readdir(
+        self, path: PathSpec, limit: int | None = None
+    ) -> list[FileStat] | DirListing:
+        return await _readdir(self.accessor, path, limit)
 
     async def read(
         self, path: PathSpec, offset: int = 0, size: int | None = None
@@ -132,8 +134,10 @@ class S3VFS(BaseVFS):
     async def exists(self, path: PathSpec) -> bool:
         return await _exists(self.accessor, path)
 
-    async def read_tree(self, path: PathSpec) -> dict[str, FileStat] | None:
-        return await _tree(self.accessor, path)
+    async def read_tree(
+        self, path: PathSpec, limit: int | None = None
+    ) -> dict[str, FileStat] | None:
+        return await _tree(self.accessor, path, limit)
 
     async def write(
         self, path: PathSpec, data: ByteSource, *, atomic: bool = False

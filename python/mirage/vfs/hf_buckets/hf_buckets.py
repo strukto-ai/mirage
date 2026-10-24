@@ -27,7 +27,7 @@ from mirage.core.hf_buckets.stream import read_stream as _read_stream
 from mirage.core.hf_buckets.unlink import unlink as _unlink
 from mirage.core.hf_buckets.write import write as _write
 from mirage.io.types import ByteSource
-from mirage.types import FileStat, PathSpec, VFSName
+from mirage.types import DirListing, FileStat, PathSpec, VFSName
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.hf_buckets.config import HfBucketsConfig
 
@@ -54,8 +54,10 @@ class HfBucketsVFS(BaseVFS):
         self.walk_limit = config.walk_limit
         self.accessor = HfBucketsAccessor(self.config)
 
-    async def readdir(self, path: PathSpec) -> list[FileStat]:
-        return await _readdir(self.accessor, path)
+    async def readdir(
+        self, path: PathSpec, limit: int | None = None
+    ) -> list[FileStat] | DirListing:
+        return await _readdir(self.accessor, path, limit)
 
     async def read(
         self, path: PathSpec, offset: int = 0, size: int | None = None
@@ -70,8 +72,10 @@ class HfBucketsVFS(BaseVFS):
     async def exists(self, path: PathSpec) -> bool:
         return await _exists(self.accessor, path)
 
-    async def read_tree(self, path: PathSpec) -> dict[str, FileStat] | None:
-        return await _tree(self.accessor, path)
+    async def read_tree(
+        self, path: PathSpec, limit: int | None = None
+    ) -> dict[str, FileStat] | None:
+        return await _tree(self.accessor, path, limit)
 
     async def write(self, path: PathSpec, data: ByteSource) -> FileStat | None:
         return await _write(self.accessor, path, data)

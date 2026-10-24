@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import functools
 import logging
 from collections.abc import (
     AsyncIterator,
@@ -34,10 +35,12 @@ from mirage.commands.builtin.utils.links import (
     link_location,
     links_of,
     mount_root,
+    mount_view,
     mounts_of,
     owed_names,
 )
 from mirage.commands.builtin.utils.paths import is_implicit_dir
+from mirage.commands.builtin.utils.tree import ReadTree
 from mirage.commands.config import Context
 from mirage.context import session_visibility
 from mirage.context.session_context import current_caller
@@ -59,7 +62,7 @@ from mirage.types import (
 from mirage.utils.glob_walk import ResolveGlobFn, make_resolve_glob
 from mirage.utils.hidden import move_reveals
 from mirage.utils.path import CycleError
-from mirage.view.types import SessionAccess
+from mirage.view.types import MountView, SessionAccess
 
 logger = logging.getLogger(__name__)
 
@@ -156,7 +159,7 @@ class CommandFiles:
     follow: Callable[
         [PathSpec, int, float], Awaitable[AsyncIterator[bytes] | None]
     ]
-    read_tree: Callable[[PathSpec], Awaitable[Any]]
+    read_tree: ReadTree
     files_containing: Callable[..., Awaitable[list[PathSpec] | None]]
     lines_containing: Callable[..., Awaitable[ByteSource | None]]
     resolve_glob: ResolveGlobFn
@@ -203,7 +206,8 @@ def with_reading(ctx: Context, reading: Reading) -> Iterator[Context]:
 
 
 # The writes a run across mounts makes at the dispatcher, whichever mount
-# serves the path; it takes no other function's shortcut.
+# serves the path; of the other functions it takes only ``read_tree``'s
+# shortcut, where no mount sits below the subtree.
 _CROSSING_CALLS = frozenset({"write", "pwrite", "unlink", "mkdir", "truncate"})
 
 # How many operands a whole read warms ahead of itself (``read_ahead``).
@@ -296,6 +300,71 @@ async def dispatched_call(
     """
     result, _ = await dispatch(name, path, **kwargs)
     return result
+
+
+def dispatched_read_tree(
+    dispatch: DispatchFn,
+    mounts: MountView | None,
+    landing: Callable[[str], str] | None,
+    crossing: bool,
+) -> ReadTree:
+    """The ``read_tree`` a walk through the dispatcher takes, asked only
+    where the mount a subtree lands on answers one; elsewhere None, and
+    the walk lists instead.
+
+    The serving mount's answer is no guide: a walk through the
+    dispatcher also reaches the mounts below it and those a link above
+    the subtree leads to, so a subtree on one that answers no read_tree
+    (a disk mount under the root RAM) is walked rather than refused with
+    ENOTSUP. A walk across mounts asks only where no mount sits below
+    the subtree either: the serving backend's answer holds keys a mount
+    there shadows, and lacks the mount's own. A subtree read stops at a
+    link at the final name (ENOTDIR), so a walk that follows links
+    lists them directory by directory instead.
+
+    Args:
+        dispatch (DispatchFn): the walk's dispatcher.
+        mounts (MountView | None): the mount boundaries, as a walk that
+            does not cross them sees them (``mount_view(files)``); None
+            takes no shortcut.
+        landing (Callable[[str], str] | None): where a path lands, every
+            link above its final name followed (``link_location``,
+            ``NamespaceLinks.follow_parent``); None for a walk whose
+            paths name their own place.
+        crossing (bool): the walk crosses mounts (``crosses_mounts``).
+    """
+
+    async def read_tree(
+        path: PathSpec, limit: int | None = None
+    ) -> dict[str, FileStat] | None:
+        try:
+            at = path.virtual if landing is None else landing(path.virtual)
+        except CycleError as exc:
+            logger.debug(
+                "following the links above %s failed: %s", path.virtual, exc
+            )
+            return None
+        if (
+            mounts is None
+            or (
+                mounts.answers is not None
+                and not mounts.answers(at, "read_tree")
+            )
+            or (crossing and bool(mounts.descendants(at)))
+        ):
+            return None
+        return cast(
+            dict[str, FileStat] | None,
+            await dispatched_call(
+                dispatch,
+                "read_tree",
+                path,
+                nofollow=True,
+                **({} if limit is None else {"limit": limit}),
+            ),
+        )
+
+    return read_tree
 
 
 async def _dispatched_stream(
@@ -606,9 +675,11 @@ def command_files(
             return cast(FileStat, found)
 
         async def crossing_readdir(
-            path: PathSpec, nofollow: bool = False
+            path: PathSpec, nofollow: bool = False, limit: int | None = None
         ) -> list[str]:
-            entries, _ = await dispatch("readdir", path)
+            entries, _ = await dispatch(
+                "readdir", path, **({} if limit is None else {"limit": limit})
+            )
             return cast(list[str], entries)
 
         def crossing_stream(path: PathSpec) -> AsyncIterator[bytes]:
@@ -623,13 +694,12 @@ def command_files(
             return await _dispatched_stat(dispatch, path)
 
         async def readdir_at(
-            path: PathSpec, nofollow: bool = False
+            path: PathSpec, nofollow: bool = False, limit: int | None = None
         ) -> list[str]:
+            asked: dict[str, Any] = {} if limit is None else {"limit": limit}
             if nofollow:
-                return cast(
-                    list[str], await call("readdir", path, nofollow=True)
-                )
-            return cast(list[str], await call("readdir", path))
+                asked["nofollow"] = True
+            return cast(list[str], await call("readdir", path, **asked))
 
         replaced = reading.stream if reading is not None else None
 
@@ -664,21 +734,9 @@ def command_files(
             chunks(source) if reading is not None and reading.split else source
         )
 
-    links = None if crossing else links_of(ctx)
+    table = links_of(ctx)
+    links = None if crossing else table
     access = None if crossing or ctx.session is None else ctx.session.access()
-
-    # Where a call that keeps its final name lands: every link above it
-    # followed, as the dispatcher follows them. A loop is left to the call.
-    def landing(virtual: str) -> str:
-        if links is None:
-            return virtual
-        try:
-            return link_location(links, virtual)
-        except CycleError as exc:
-            logger.debug(
-                "following the links above %s failed: %s", virtual, exc
-            )
-            return virtual
 
     async def exists(path: PathSpec) -> bool:
         return await _dispatched_exists(dispatch, path)
@@ -747,23 +805,6 @@ def command_files(
             await call("follow", path, n=n, interval=interval),
         )
 
-    # A subtree read stops at a link at the final name (ENOTDIR): it
-    # cannot pass through one, so a walk that follows links lists them
-    # directory by directory instead. ``answers`` speaks for the serving
-    # mount, but a walk through the dispatcher also reaches the mounts
-    # below it and those a link above the subtree leads to, so a subtree
-    # on one that answers no read_tree (a disk mount under the root RAM)
-    # is left to be walked rather than refused with ENOTSUP.
-    async def read_tree(path: PathSpec) -> Any:
-        if (
-            not crossing
-            and mounts is not None
-            and mounts.answers is not None
-            and not mounts.answers(landing(path.virtual), "read_tree")
-        ):
-            return None
-        return await call("read_tree", path, nofollow=True)
-
     async def files_containing(
         path: PathSpec, text: str, *, whole_word: bool, ignore_case: bool
     ) -> list[PathSpec] | None:
@@ -790,7 +831,7 @@ def command_files(
 
     def answers(name: str) -> bool:
         if crossing:
-            return name in _CROSSING_CALLS
+            return name in _CROSSING_CALLS or name == "read_tree"
         return (
             mounts is not None
             and mounts.answers is not None
@@ -825,7 +866,12 @@ def command_files(
         line_count=line_count,
         checksum=checksum,
         follow=follow,
-        read_tree=read_tree,
+        read_tree=dispatched_read_tree(
+            dispatch,
+            mount_view(vfs),
+            None if table is None else functools.partial(link_location, table),
+            crossing,
+        ),
         files_containing=files_containing,
         lines_containing=lines_containing,
         resolve_glob=make_resolve_glob(

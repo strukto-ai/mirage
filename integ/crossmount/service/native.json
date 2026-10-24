@@ -340,12 +340,26 @@
       }
     },
     {
-      "id": "xm_native_hidden_nested",
+      "id": "xm_native_hidden_nested_reset",
       "seq": 961026,
       "targets": [
         "command-service"
       ],
-      "command": "calls /a > /dev/null; calls /a/inner > /dev/null; calls /a/inner/deep > /dev/null; calls /b > /dev/null; calls /ghost/deep > /dev/null; grep -r hit /a",
+      "command": "calls /a > /dev/null && calls /a/inner > /dev/null && calls /a/inner/deep > /dev/null && calls /b > /dev/null && calls /ghost/deep > /dev/null",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "note": "Reset diagnostic counters outside the blind session: custom handlers on hidden mounts are refused."
+    },
+    {
+      "id": "xm_native_hidden_nested",
+      "seq": 961027,
+      "targets": [
+        "command-service"
+      ],
+      "command": "grep -r hit /a",
       "expect": {
         "exit": 0,
         "stdout": "/a/inner/i.txt:hit child\n/a/top.txt:hit\n/a/top.txt:hit\n",
@@ -355,8 +369,22 @@
       "explain_blind": true
     },
     {
+      "id": "xm_native_hidden_nested_no_calls",
+      "seq": 961028,
+      "targets": [
+        "command-service"
+      ],
+      "command": "calls /a/inner/deep",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      },
+      "note": "Inspect from the default session to prove the blind traversal never reached the hidden backend."
+    },
+    {
       "id": "xm_native_relative",
-      "seq": 961027,
+      "seq": 961029,
       "targets": [
         "command-service"
       ],
@@ -369,7 +397,7 @@
     },
     {
       "id": "xm_native_newline_names",
-      "seq": 961028,
+      "seq": 961030,
       "targets": [
         "command-service"
       ],
@@ -382,7 +410,7 @@
     },
     {
       "id": "xm_native_find_batch_repeated",
-      "seq": 961029,
+      "seq": 961031,
       "targets": [
         "command-service"
       ],
@@ -395,7 +423,7 @@
     },
     {
       "id": "xm_native_find_nested_depth",
-      "seq": 961030,
+      "seq": 961032,
       "targets": [
         "command-service"
       ],
@@ -408,7 +436,7 @@
     },
     {
       "id": "xm_native_find_size_rounding",
-      "seq": 961031,
+      "seq": 961033,
       "targets": [
         "command-service"
       ],
@@ -421,7 +449,7 @@
     },
     {
       "id": "xm_native_cli_once",
-      "seq": 961032,
+      "seq": 961034,
       "targets": [
         "command-service"
       ],
@@ -434,7 +462,7 @@
     },
     {
       "id": "xm_native_rg_nested",
-      "seq": 961033,
+      "seq": 961035,
       "targets": [
         "command-service"
       ],
@@ -447,7 +475,7 @@
     },
     {
       "id": "xm_native_rg_quiet",
-      "seq": 961034,
+      "seq": 961036,
       "targets": [
         "command-service"
       ],
@@ -460,7 +488,7 @@
     },
     {
       "id": "xm_native_rg_error",
-      "seq": 961035,
+      "seq": 961037,
       "targets": [
         "command-service"
       ],
@@ -473,7 +501,7 @@
     },
     {
       "id": "xm_native_rg_no_messages",
-      "seq": 961036,
+      "seq": 961038,
       "targets": [
         "command-service"
       ],
@@ -486,7 +514,7 @@
     },
     {
       "id": "xm_native_rg_context",
-      "seq": 961037,
+      "seq": 961039,
       "targets": [
         "command-service"
       ],
@@ -499,7 +527,7 @@
     },
     {
       "id": "xm_native_rg_invalid_pattern",
-      "seq": 961038,
+      "seq": 961040,
       "targets": [
         "command-service"
       ],

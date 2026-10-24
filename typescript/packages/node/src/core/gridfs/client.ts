@@ -17,6 +17,7 @@ import * as kp from '@struktoai/mirage-core/utils/key_prefix'
 import { loadOptionalPeer } from '@struktoai/mirage-core/utils/optional_peer'
 import type { GridFSAccessor } from '../../accessor/gridfs.ts'
 import type { GridFSConfig } from '../../vfs/gridfs/config.ts'
+import { TRASH_PREFIX } from './constants.ts'
 
 export interface GridFSFileDoc {
   _id: ObjectId
@@ -36,6 +37,10 @@ interface GridFSModule {
 // Newest revision of a filename wins; _id breaks uploadDate ties because
 // ObjectIds are monotonic within a process.
 const LATEST_SORT: Record<string, -1> = { uploadDate: -1, _id: -1 }
+
+// Each filename's revisions together, newest first, the order prune keeps
+// them in.
+const PRUNE_SORT: Record<string, -1> = { filename: -1, uploadDate: -1, _id: -1 }
 
 const BATCH = 1000
 
@@ -87,9 +92,18 @@ export function escapeRegex(raw: string): string {
   return out
 }
 
+/**
+ * Match the live revisions under a key prefix; `''` is the whole store,
+ * less the trash, which no mount key can reach.
+ */
 export function prefixQuery(pfx: string): Record<string, unknown> {
-  if (pfx === '') return {}
+  if (pfx === '') return { filename: { $regex: `^(?!${escapeRegex(TRASH_PREFIX)})` } }
   return { filename: { $regex: `^${escapeRegex(pfx)}` } }
+}
+
+/** The filename `rm` moves a key's revisions to. */
+export function trashed(key: string): string {
+  return TRASH_PREFIX + key
 }
 
 export async function latestFile(
@@ -142,17 +156,79 @@ export async function* iterLatest(
   }
 }
 
-/** Delete every revision (file doc + chunks) matching a query. */
-export async function deleteAll(
+/**
+ * Rename every revision matching a query, in one server-side update: each
+ * filename loses its leading `strip` and gains `prefix`. Both are sent as
+ * literals and the server measures `strip` itself, so a `$` in a name is
+ * never read as a field path and the cut counts code points, as `$substrCP`
+ * does, not UTF-16 units. Every filename the query selects starts with
+ * `strip`. The revisions keep their `_id` and chunks, so a read pinned to
+ * one still finds it under the new name. Returns how many revisions the
+ * query selected.
+ */
+export async function retag(
+  accessor: GridFSAccessor,
+  query: Record<string, unknown>,
+  prefix: string,
+  strip = '',
+): Promise<number> {
+  const files = await filesColl(accessor)
+  const rest =
+    strip === ''
+      ? '$filename'
+      : {
+          $substrCP: ['$filename', { $strLenCP: { $literal: strip } }, { $strLenCP: '$filename' }],
+        }
+  const result = await files.updateMany(query, [
+    { $set: { filename: { $concat: [{ $literal: prefix }, rest] } } },
+  ])
+  return result.matchedCount
+}
+
+/**
+ * Delete the revisions past `keepRevisions` of each matching name, newest
+ * first; an unset `keepRevisions` keeps them all. The query names the
+ * revisions to count, live or trashed.
+ */
+export async function prune(
   accessor: GridFSAccessor,
   query: Record<string, unknown>,
 ): Promise<void> {
+  const keep = accessor.config.keepRevisions
+  if (keep === undefined) return
+  // Streamed newest first within each filename and deleted in batches, so no
+  // history, however long, is ever held in one document or one array.
+  const files = await filesColl(accessor)
+  const cursor = files.find(query, {
+    projection: { _id: 1, filename: 1 },
+    sort: PRUNE_SORT,
+    allowDiskUse: true,
+  })
+  let name: string | null = null
+  let kept = 0
+  let stale: ObjectId[] = []
+  for await (const doc of cursor) {
+    if (doc.filename !== name) {
+      name = doc.filename as string
+      kept = 0
+    }
+    if (kept < keep) {
+      kept += 1
+      continue
+    }
+    stale.push(doc._id)
+    if (stale.length >= BATCH) {
+      await deleteIds(accessor, stale)
+      stale = []
+    }
+  }
+  await deleteIds(accessor, stale)
+}
+
+/** Delete revisions (file doc + chunks) by `_id`. */
+export async function deleteIds(accessor: GridFSAccessor, ids: ObjectId[]): Promise<void> {
   const files = await filesColl(accessor)
   const chunks = await chunksColl(accessor)
-  const ids: ObjectId[] = []
-  for await (const doc of files.find(query, { projection: { _id: 1 } })) {
-    ids.push(doc._id)
-  }
   for (let i = 0; i < ids.length; i += BATCH) {
     const batch = ids.slice(i, i + BATCH)
     await chunks.deleteMany({ files_id: { $in: batch } })

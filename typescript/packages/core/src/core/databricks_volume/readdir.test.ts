@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { FileType } from '../../types.ts'
+import { DirListing, type FileStat, FileType } from '../../types.ts'
 import { readdir } from './readdir.ts'
 import {
   jsonResponse,
@@ -39,7 +39,7 @@ describe('readdir', () => {
       }),
     )
     vi.stubGlobal('fetch', fetch)
-    const rows = await readdir(makeAccessor(), spec('/volume/'))
+    const rows = (await readdir(makeAccessor(), spec('/volume/'))) as FileStat[]
     expect(rows.map((row) => [row.name, row.type])).toEqual([
       ['a', FileType.DIRECTORY],
       ['b.txt', FileType.FILE],
@@ -57,9 +57,24 @@ describe('readdir', () => {
       })
     })
     vi.stubGlobal('fetch', fetch)
-    const rows = await readdir(makeAccessor(), spec('/volume/'))
+    const rows = (await readdir(makeAccessor(), spec('/volume/'))) as FileStat[]
     expect(rows.map((row) => row.name)).toEqual(['a.txt', 'b.txt'])
     expect(calls).toHaveLength(2)
+  })
+
+  it('pages no further than a limit and marks the listing partial', async () => {
+    const { fetch, calls } = routedFetch(() =>
+      jsonResponse({
+        contents: [{ path: `${TEST_ROOT}/a.txt`, file_size: 1 }],
+        next_page_token: 'next',
+      }),
+    )
+    vi.stubGlobal('fetch', fetch)
+    const cut = await readdir(makeAccessor(), spec('/volume/'), 1)
+    expect(cut).toBeInstanceOf(DirListing)
+    expect((cut as DirListing).partial).toBe(true)
+    expect((cut as DirListing).entries.map((row) => row.name)).toEqual(['a.txt'])
+    expect(calls).toHaveLength(1)
   })
 
   it('raises ENOENT for missing directories', async () => {
@@ -113,7 +128,7 @@ describe('readdir', () => {
       }),
     )
     vi.stubGlobal('fetch', fetch)
-    const [file, dir] = await readdir(makeAccessor(), spec('/volume/'))
+    const [file, dir] = (await readdir(makeAccessor(), spec('/volume/'))) as FileStat[]
     expect([file?.type, file?.size, file?.modified]).toEqual([
       FileType.FILE,
       6,
@@ -132,7 +147,7 @@ describe('readdir', () => {
       })
     })
     vi.stubGlobal('fetch', fetch)
-    const rows = await readdir(makeAccessor(), spec('/volume/'))
+    const rows = (await readdir(makeAccessor(), spec('/volume/'))) as FileStat[]
     expect(rows.map((row) => [row.name, row.size])).toEqual([
       ['a.txt', 7],
       ['b.txt', 3],
@@ -146,7 +161,7 @@ describe('readdir', () => {
       }),
     )
     vi.stubGlobal('fetch', fetch)
-    const [file] = await readdir(makeAccessor(), spec('/volume/'))
+    const [file] = (await readdir(makeAccessor(), spec('/volume/'))) as FileStat[]
     expect(file?.modified).toBe('1970-01-01T00:00:01Z')
   })
 })

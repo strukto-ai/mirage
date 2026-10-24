@@ -20,7 +20,7 @@ vi.mock('./client.ts', async () => {
   return { ...actual, iterLatest: vi.fn(), filesColl: vi.fn(), latestFile: vi.fn() }
 })
 
-import { PathSpec } from '@struktoai/mirage-core/types'
+import { type FileStat, PathSpec } from '@struktoai/mirage-core/types'
 import { GridFSAccessor } from '../../accessor/gridfs.ts'
 import type { GridFSConfig } from '../../vfs/gridfs/config.ts'
 import type { GridFSFileDoc } from './client.ts'
@@ -72,7 +72,7 @@ function spec(virtual: string): PathSpec {
 async function run(names: string[], virtual: string, keyPrefix?: string): Promise<string[]> {
   mockBucket(names)
   const config = { uri: 'mongodb://x', database: 'db', bucket: 'data', keyPrefix } as GridFSConfig
-  const rows = await readdir(new GridFSAccessor(config), spec(virtual))
+  const rows = (await readdir(new GridFSAccessor(config), spec(virtual))) as FileStat[]
   return rows.map((row) => `${virtual.replace(/\/+$/, '')}/${row.name}`)
 }
 
@@ -135,5 +135,10 @@ describe('gridfs core readdir', () => {
 
   it('still lists the children of a coexisting prefix', async () => {
     await expect(run(['a', 'a/x.txt'], '/a')).resolves.toEqual(['/a/x.txt'])
+  })
+
+  it('hides the trash from the root listing', async () => {
+    await expect(run(['a.txt', '/trash/a.txt', '/trash/d/f.txt'], '/')).resolves.toEqual(['/a.txt'])
+    await expect(codeOf(run(['a.txt', '/trash/a.txt'], '/trash'))).resolves.toBe('ENOENT')
   })
 })

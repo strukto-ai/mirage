@@ -24,7 +24,7 @@ import {
   type HfBucketsConfigRedacted,
   redactHfBucketsConfig,
 } from './config.ts'
-import type { PathSpec, FileStat } from '@struktoai/mirage-core/types'
+import type { DirListing, PathSpec, FileStat } from '@struktoai/mirage-core/types'
 import type { Handed } from '@struktoai/mirage-core/vfs/types'
 import { readdir as hfReaddir } from '../../core/hf_buckets/readdir.ts'
 import { read as hfRead } from '../../core/hf_buckets/read.ts'
@@ -78,12 +78,12 @@ export class HfBucketsVFS extends BaseVFS {
 
   override readonly readsRanges: boolean = true
 
-  override readTree(path: PathSpec): Promise<Map<string, FileStat> | null> {
-    return hfTree(this.accessor, path)
+  override readTree(path: PathSpec, handed?: Handed): Promise<Map<string, FileStat> | null> {
+    return hfTree(this.accessor, path, handed?.limit)
   }
 
-  override readdir(path: PathSpec): Promise<FileStat[]> {
-    return hfReaddir(this.accessor, path)
+  override readdir(path: PathSpec, handed?: Handed): Promise<FileStat[] | DirListing> {
+    return hfReaddir(this.accessor, path, handed?.limit)
   }
 
   override read(

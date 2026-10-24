@@ -3,13 +3,22 @@ import base64
 import json
 
 import pytest
-from starlette.requests import Request
+from starlette.requests import ClientDisconnect, Request
 
 from mirage.execution.types import ExecutionStatus
 from mirage.io.pipe import CAPACITY
 from mirage.server.jobs import ExecutionTable
 from mirage.server.stdin import UploadStdin
 from mirage.server.stream import ShellOutput, ShellResponse
+
+
+async def finished(scope):
+    await scope.start()
+    return {"exit_code": 0}
+
+
+async def bad_body():
+    raise ValueError("bad multipart body")
 
 
 @pytest.mark.asyncio
@@ -90,7 +99,7 @@ async def test_disconnect_cancels_the_job_and_joins_its_cleanup():
 
 
 @pytest.mark.asyncio
-async def test_the_final_record_waits_for_the_upload_to_end():
+async def test_the_final_record_does_not_wait_for_stdin_to_end():
     uploaded = asyncio.Event()
     incoming = asyncio.Queue()
     sent = []
@@ -101,12 +110,8 @@ async def test_the_final_record_waits_for_the_upload_to_end():
     async def send(message):
         sent.append(message)
 
-    async def run(scope):
-        await scope.start()
-        return {"exit_code": 0}
-
     table = ExecutionTable()
-    job = table.submit("workspace", "true", run, session_id="session")
+    job = table.submit("workspace", "true", finished, session_id="session")
     await table.wait(job.id)
     upload = asyncio.create_task(uploaded.wait())
     scope = {"type": "http", "method": "POST", "path": "/", "headers": []}
@@ -117,11 +122,147 @@ async def test_the_final_record_waits_for_the_upload_to_end():
     sending = asyncio.create_task(response(scope, receive, send))
     for _ in range(50):
         await asyncio.sleep(0)
+    bodies = [m for m in sent if m["type"] == "http.response.body"]
+    assert json.loads(bodies[-1]["body"])["status"] == "done"
     assert all(message.get("more_body", True) for message in sent)
     uploaded.set()
     await asyncio.wait_for(sending, 1)
-    assert sent[-1]["more_body"] is False
-    assert json.loads(sent[-1]["body"])["status"] == "done"
+    assert sent[-1] == {
+        "type": "http.response.body",
+        "body": b"",
+        "more_body": False,
+    }
+    await table.close()
+
+
+@pytest.mark.asyncio
+async def test_a_hang_up_after_the_final_record_ends_with_an_empty_body():
+    hang_up, recorded = asyncio.Event(), asyncio.Event()
+    incoming = asyncio.Queue()
+    sent = []
+
+    async def receive():
+        return await incoming.get()
+
+    async def send(message):
+        sent.append(message)
+        if message.get("body"):
+            recorded.set()
+
+    async def upload():
+        await hang_up.wait()
+        raise ClientDisconnect()
+
+    table = ExecutionTable()
+    job = table.submit("workspace", "true", finished, session_id="session")
+    await table.wait(job.id)
+    scope = {"type": "http", "method": "POST", "path": "/", "headers": []}
+    response = ShellResponse(
+        ShellOutput(),
+        table,
+        job,
+        Request(scope, receive),
+        asyncio.create_task(upload()),
+        UploadStdin(),
+    )
+    sending = asyncio.create_task(response(scope, receive, send))
+    await asyncio.wait_for(recorded.wait(), 1)
+    assert all(message.get("more_body", True) for message in sent)
+    await incoming.put({"type": "http.disconnect"})
+    hang_up.set()
+    await asyncio.wait_for(sending, 1)
+    bodies = b"".join(
+        m["body"] for m in sent if m["type"] == "http.response.body"
+    )
+    assert [json.loads(line)["status"] for line in bodies.splitlines()] == [
+        "done"
+    ]
+    assert sent[-1] == {
+        "type": "http.response.body",
+        "body": b"",
+        "more_body": False,
+    }
+    assert table.get(job.id).status == ExecutionStatus.DONE
+    await table.close()
+
+
+@pytest.mark.asyncio
+async def test_an_upload_that_failed_first_fails_the_final_record():
+    incoming = asyncio.Queue()
+    sent = []
+
+    async def receive():
+        return await incoming.get()
+
+    async def send(message):
+        sent.append(message)
+
+    table = ExecutionTable()
+    job = table.submit("workspace", "true", finished, session_id="session")
+    await table.wait(job.id)
+    upload = asyncio.create_task(bad_body())
+    await asyncio.gather(upload, return_exceptions=True)
+    scope = {"type": "http", "method": "POST", "path": "/", "headers": []}
+    response = ShellResponse(
+        ShellOutput(), table, job, Request(scope, receive), upload, None
+    )
+    await asyncio.wait_for(response(scope, receive, send), 1)
+    bodies = [m["body"] for m in sent if m["type"] == "http.response.body"]
+    terminal = json.loads(b"".join(bodies))
+    assert terminal == {
+        "status": "failed",
+        "result": None,
+        "error": "bad multipart body",
+    }
+    await table.close()
+
+
+@pytest.mark.asyncio
+async def test_an_upload_failing_while_its_cleanup_runs_fails_the_record():
+    held = asyncio.Event()
+    incoming = asyncio.Queue()
+    sent = []
+
+    async def receive():
+        return await incoming.get()
+
+    async def send(message):
+        sent.append(message)
+
+    async def discard():
+        await held.wait()
+
+    part = UploadStdin()
+    part.discard = discard
+    error = ValueError("stdin part too large")
+
+    async def upload():
+        await part.fail(error)
+        raise error
+
+    table = ExecutionTable()
+    job = table.submit("workspace", "true", finished, session_id="session")
+    await table.wait(job.id)
+    uploading = asyncio.create_task(upload())
+    await asyncio.sleep(0)
+    assert not uploading.done()
+    scope = {"type": "http", "method": "POST", "path": "/", "headers": []}
+    response = ShellResponse(
+        ShellOutput(), table, job, Request(scope, receive), uploading, part
+    )
+    sending = asyncio.create_task(response(scope, receive, send))
+    for _ in range(50):
+        await asyncio.sleep(0)
+    held.set()
+    await asyncio.wait_for(sending, 1)
+    bodies = b"".join(
+        m["body"] for m in sent if m["type"] == "http.response.body"
+    )
+    assert json.loads(bodies) == {
+        "status": "failed",
+        "result": None,
+        "error": "stdin part too large",
+    }
     await table.close()
 
 
@@ -158,5 +299,6 @@ async def test_the_final_record_survives_its_eviction(monkeypatch):
     await asyncio.wait_for(sending, 1)
     with pytest.raises(KeyError):
         table.get(job.id)
-    assert json.loads(sent[-1]["body"])["status"] == "done"
+    assert json.loads(sent[-2]["body"])["status"] == "done"
+    assert sent[-1]["more_body"] is False
     await table.close()

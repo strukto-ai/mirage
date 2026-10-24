@@ -15,7 +15,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { OneDriveAccessor } from '../../accessor/onedrive.ts'
-import { PathSpec } from '../../types.ts'
+import { type FileStat, PathSpec } from '../../types.ts'
 import { readdir } from './readdir.ts'
 import { stat, tree } from './stat.ts'
 
@@ -51,7 +51,7 @@ describe('OneDrive stat', () => {
       value: [{ id: 'dir', name: 'Docs', cTag: 'ctag-dir', folder: { childCount: 1 } }],
     })
     const accessor = new OneDriveAccessor({ accessToken: 'token' })
-    const [docs] = await readdir(accessor, PathSpec.fromStrPath('/od', ''))
+    const [docs] = (await readdir(accessor, PathSpec.fromStrPath('/od', ''))) as FileStat[]
     expect(docs?.type).toBe('directory')
     expect(docs?.fingerprint).toBeNull()
   })

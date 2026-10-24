@@ -26,7 +26,7 @@ from mirage.cache.types import KnownVersions, OwnRead, WriteCondition
 from mirage.core.object_store.errors import ConditionLostError
 from mirage.errors.types import StaleWriteError
 from mirage.io.types import ByteSource
-from mirage.types import FileStat, PathSpec
+from mirage.types import DirListing, FileStat, PathSpec
 from mirage.utils import key_prefix as kp
 
 A = TypeVar("A", bound=Accessor)
@@ -36,13 +36,16 @@ A_contra = TypeVar("A_contra", bound=Accessor, contravariant=True)
 
 class ReaddirFn(Protocol[A_contra]):
     def __call__(
-        self, accessor: A_contra, path_spec: PathSpec
-    ) -> Awaitable[list[FileStat]]: ...
+        self,
+        accessor: A_contra,
+        path_spec: PathSpec,
+        limit: int | None = None,
+    ) -> Awaitable[list[FileStat] | DirListing]: ...
 
 
 class TreeFn(Protocol[A_contra]):
     def __call__(
-        self, accessor: A_contra, path: PathSpec
+        self, accessor: A_contra, path: PathSpec, limit: int | None = None
     ) -> Awaitable[dict[str, FileStat] | None]: ...
 
 
@@ -309,6 +312,10 @@ class ObjectStoreDriver(Generic[A, C]):
             revision reads that revision.
         copy_if (Callable | None): ``copy_file`` with the destination's
             condition and the source's expected token.
+        head_revision (Callable | None): point lookup of one revision of
+            a key by the token ``head`` spells, None when it is gone; a
+            stat pinned by a snapshot asks this, so a revision the store
+            still holds under another name (a trash, a version) answers.
         delete_if (Callable | None): ``delete_file`` with a condition.
         move_file_if (Callable | None): ``move_file`` whose copy and
             delete are both conditioned on the source's version (the one
@@ -341,6 +348,9 @@ class ObjectStoreDriver(Generic[A, C]):
     move_file: Callable[[C, str, str], Awaitable[bool]] | None = None
     move_prefix: Callable[[C, str, str], Awaitable[bool]] | None = None
     copy_file: Callable[[C, str, str], Awaitable[bool]] | None = None
+    head_revision: (
+        Callable[[C, str, str], Awaitable[ObjectMeta | None]] | None
+    ) = None
     markers_supported: bool = True
     put_if: (
         Callable[[C, str, bytes, WriteCondition], Awaitable[ObjectMeta | None]]

@@ -38,6 +38,14 @@ const GridFSConfigSchema = z.object({
     .describe(
       "Chunk size in bytes for files the mount writes; unset uses the driver's default, 255 KiB.",
     ),
+  keepRevisions: z
+    .number()
+    .int()
+    .min(1)
+    .optional()
+    .describe(
+      "Revisions kept per file, newest first: a write or an `rm` deletes the rest, under the file's name and in the trash `rm` moves revisions to (`/trash/<filename>`, which no mount path reaches). Unset keeps every revision, so a snapshot pinned to any of them still reads.",
+    ),
   walkLimit: z.number().int().min(-1).optional().meta({
     description:
       'Most files one command walks under a folder: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit.',

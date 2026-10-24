@@ -581,6 +581,7 @@ async def handle_mount_cli(
     context: CLIContext = CLIContext(),
     owner: Callable[[str], MountEntry | None] | None = None,
     follow: FollowOperands | None = None,
+    prepared: LeafCall | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Execute a line whose head word names a command tree a mount serves.
 
@@ -608,8 +609,14 @@ async def handle_mount_cli(
             virtual path is on; None checks nothing.
         follow (FollowOperands | None): the router's link resolution for
             this command; None follows nothing.
+        prepared (LeafCall | None): the discovery walk when this mount
+            supplied its grammar; None walks the selected tree.
     """
-    walked = await walk_leaf(cli.spec.name, cli, parts, session, context.vfs)
+    walked = (
+        prepared
+        if prepared is not None
+        else await walk_leaf(cli.spec.name, cli, parts, session, context.vfs)
+    )
     if not isinstance(walked, LeafCall):
         return walked
     limit = resolve_limit(

@@ -13,11 +13,15 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { OneDriveAccessor } from '../../accessor/onedrive.ts'
-import type { FileStat, PathSpec } from '../../types.ts'
+import type { DirListing, FileStat, PathSpec } from '../../types.ts'
 import { directoryPath, readdirItems } from '../msgraph/drive.ts'
 import { driveLoc } from './client.ts'
 
-export async function readdir(accessor: OneDriveAccessor, path: PathSpec): Promise<FileStat[]> {
+export async function readdir(
+  accessor: OneDriveAccessor,
+  path: PathSpec,
+  limit?: number,
+): Promise<FileStat[] | DirListing> {
   const target = directoryPath(path)
-  return readdirItems(accessor.config, driveLoc(accessor.config, target.vfsPath), target)
+  return readdirItems(accessor.config, driveLoc(accessor.config, target.vfsPath), target, limit)
 }

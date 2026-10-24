@@ -119,7 +119,7 @@ function childMounts(mounts: MountView | null, directory: string): string[] {
 // link is drawn as `name -> target` and never walked; one leading to a
 // directory counts, and filters, as a directory (tree 2.2.1).
 async function walkTree(
-  readdir: (p: PathSpec) => Promise<string[]>,
+  readdir: (p: PathSpec, nofollow?: boolean, limit?: number) => Promise<string[]>,
   stat: (p: PathSpec) => Promise<FileStat>,
   path: PathSpec,
   prefix: string,
@@ -139,9 +139,10 @@ async function walkTree(
   // throws and a merge below it never runs: `tree` reported the one path
   // whose children it could name for certain as unopenable.
   const nested = childMounts(treeOpts.mounts, path.virtual)
+  const limit = treeOpts.budget?.listingLimit(path.virtual) ?? null
   let entries: string[]
   try {
-    entries = await readdir(path)
+    entries = await (limit === null ? readdir(path) : readdir(path, false, limit))
   } catch (err) {
     if (!isWalkError(err)) throw err
     // An absence only. A directory the backend refused (EACCES, ENOTSUP) is
@@ -283,7 +284,7 @@ function notCrossed(): Promise<string[]> {
 export async function treeGeneric(
   paths: PathSpec[],
   ctx: Context,
-  readdir: (p: PathSpec) => Promise<string[]>,
+  readdir: (p: PathSpec, nofollow?: boolean, limit?: number) => Promise<string[]>,
   stat: (p: PathSpec) => Promise<FileStat>,
   unbounded?: [(p: PathSpec) => Promise<string[]>, (p: PathSpec) => Promise<FileStat>],
 ): Promise<CommandFnResult> {

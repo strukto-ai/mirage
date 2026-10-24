@@ -30,6 +30,7 @@ import type { JobConsole } from '../../../shell/console/index.ts'
 import type { JobTable } from '../../../shell/job_table/index.ts'
 import { PathSpec } from '../../../types.ts'
 import { invokedEnvNames, suppliedEnvNames } from '../../../commands/cli/walk.ts'
+import type { CLI } from '../../../commands/cli/types.ts'
 import {
   PROGRAM_FILE_COMMANDS,
   prepareProgram,
@@ -41,6 +42,7 @@ import { identityFrom } from '../../../commands/builtin/utils/identity.ts'
 import type { MountEntry } from '../../mount/mount.ts'
 import type { Namespace } from '../../mount/namespace/namespace.ts'
 import { MountCommandUnsupported, type MountRegistry } from '../../mount/registry.ts'
+import { MountCommandAmbiguous } from '../../mount/errors.ts'
 import { makeCheckUnlink, makeStorageKey } from '../../mount/storage.ts'
 import { Consumer, JOB_BUILTINS, dereferences, lookup, runsAs } from '../../lookup/index.ts'
 import { EXEC_WRAPPERS } from '../../lookup/constants.ts'
@@ -78,7 +80,7 @@ import {
 } from '../jobs.ts'
 import { standardRequest } from '../../../commands/spec/standard.ts'
 
-import { handleCli, handleMountCli, reachesService } from './cli.ts'
+import { handleCli, handleMountCli, reachesService, walkLeaf, type LeafCall } from './cli.ts'
 import { pathStat } from '../../mount/namespace/probe.ts'
 import { Files } from '../../files.ts'
 import { findStartPoints, nestedShell, runOnMount, type RunOnMountCtx } from './run.ts'
@@ -221,7 +223,15 @@ export async function fillTreeEnv(
   skip: ReadonlySet<string> = new Set(),
 ): Promise<boolean> {
   if (registry.fillEnv === undefined || registry.clis.get(name) !== null) return false
-  const tree = registry.commandMount(name, [], session.cwd)?.cliFor(name) ?? null
+  const candidates = registry.invocationCandidates(
+    name,
+    [],
+    session.cwd,
+    args,
+    sessionAccess(session),
+  )
+  if (candidates.length !== 1) return false
+  const tree = candidates[0]?.cliFor(name) ?? null
   if (tree === null || lookup(name, session, registry) !== Consumer.MOUNT) return false
   const verbs = new Set(args.filter((w) => !w.startsWith('-')))
   const supplied = suppliedEnvNames(tree.spec, [...args])
@@ -403,18 +413,12 @@ export async function handleCommand(
     ]
   }
 
-  // A command tree a mount serves runs by name on that mount, like an
-  // installed CLI: its walk, not a spec parse, reads the words, so it sits
-  // ahead of the help, cross-mount and flag-parsing branches below, and of
-  // the operand a bare ls, du, tree, find or grep implies.
-  const treeMount = registry.commandMount(cmdName, [], session.cwd)
-  const tree = treeMount?.cliFor(cmdName) ?? null
-  if (treeMount !== null && tree !== null) {
-    await treeMount.ensureReady()
+  const runTree = async (mount: MountEntry, cli: CLI, prepared?: LeafCall): Promise<Result> => {
+    await mount.ensureReady()
     const treeSignal = mergeSignals(signal, context.frame.abortSignal)
     return handleMountCli(
-      treeMount,
-      tree,
+      mount,
+      cli,
       parts,
       session,
       stdin,
@@ -429,7 +433,48 @@ export async function handleCommand(
       },
       (path) => registry.tryMountFor(path),
       follow,
+      prepared,
     )
+  }
+
+  // A command tree a mount serves runs by name on that mount, like an
+  // installed CLI: its walk, not a spec parse, reads the words, so it sits
+  // ahead of the help, cross-mount and flag-parsing branches below, and of
+  // the operand a bare ls, du, tree, find or grep implies.
+  let treeMount = registry.invocationMount(
+    cmdName,
+    [],
+    session.cwd,
+    spelledWords(parts).slice(1),
+    sessionAccess(session),
+  )
+  const tree = treeMount?.cliFor(cmdName) ?? null
+  if (treeMount !== null && tree !== null) {
+    const discovered = treeMount
+    const walked = await walkLeaf(cmdName, tree, parts, session, files)
+    if (Array.isArray(walked) && walked[1].exitCode === 0) return walked
+    try {
+      treeMount = registry.executionMount(
+        cmdName,
+        [],
+        session.cwd,
+        spelledWords(parts).slice(1),
+        sessionAccess(session),
+      )
+    } catch (err) {
+      if (!(err instanceof MountCommandAmbiguous)) throw err
+      const stderr = encodeText(`${err.message}\n`)
+      return [
+        null,
+        new IOResult({ exitCode: 1, stderr }),
+        new ExecutionNode({ command: cmdStr, exitCode: 1, stderr }),
+      ]
+    }
+    if (Array.isArray(walked)) return walked
+    const selectedTree = treeMount?.cliFor(cmdName) ?? null
+    if (treeMount !== null && selectedTree !== null) {
+      return runTree(treeMount, selectedTree, treeMount === discovered ? walked : undefined)
+    }
   }
 
   // A mount may register its own command under a builtin's name. The steps
@@ -441,7 +486,13 @@ export async function handleCommand(
   const operands = operandPaths(cmdName, parts.slice(1), session.cwd).filter(
     (s) => s.walkError !== 'ENOENT',
   )
-  const ownMount = registry.commandMount(cmdName, operands, session.cwd)
+  const ownMount = registry.invocationMount(
+    cmdName,
+    operands,
+    session.cwd,
+    spelledWords(parts).slice(1),
+    sessionAccess(session),
+  )
   const ownSpec = ownMount?.specFor(cmdName) ?? null
   const borrowed =
     SPECS[cmdName] !== undefined && ownSpec !== null && !isBuiltinGrammar(cmdName, ownSpec)
@@ -807,9 +858,15 @@ export async function handleCommand(
 
   let mount: MountEntry | null
   try {
-    mount = await registry.resolveMount(cmdName, routingScopes, session.cwd)
+    mount = await registry.resolveMount(
+      cmdName,
+      routingScopes,
+      session.cwd,
+      rawArgv,
+      sessionAccess(session),
+    )
   } catch (err) {
-    if (err instanceof MountCommandUnsupported) {
+    if (err instanceof MountCommandUnsupported || err instanceof MountCommandAmbiguous) {
       const errBytes = encodeText(`${err.message}\n`)
       return [
         null,
@@ -827,6 +884,8 @@ export async function handleCommand(
       new ExecutionNode({ command: cmdStr, exitCode: 127 }),
     ]
   }
+  const selectedTree = mount.cliFor(cmdName)
+  if (selectedTree !== null) return runTree(mount, selectedTree)
   const parsedLine =
     prepared ?? parseFlags(parts.slice(1), mount.specFor(cmdName), cmdName, session.cwd)
   const { paths: parsedPaths, flagKwargs, warnings: parseWarnings } = parsedLine

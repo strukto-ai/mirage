@@ -28,7 +28,11 @@ export interface DriveApi {
     driveId?: string | null
     limit?: number
   }): Promise<DriveFile[]>
-  listChildren(folderIds: readonly string[], driveId: string | null): Promise<DriveFile[]>
+  listChildren(
+    folderIds: readonly string[],
+    driveId: string | null,
+    limit?: number,
+  ): Promise<DriveFile[]>
   listSharedDrives(): Promise<SharedDrive[]>
   listAllFiles(opts?: {
     mimeType?: string | null
@@ -76,8 +80,12 @@ export class DriveClient implements DriveApi {
     return drive.listFiles(this.tokenManager, opts)
   }
 
-  listChildren(folderIds: readonly string[], driveId: string | null): Promise<DriveFile[]> {
-    return drive.listChildren(this.tokenManager, folderIds, driveId)
+  listChildren(
+    folderIds: readonly string[],
+    driveId: string | null,
+    limit?: number,
+  ): Promise<DriveFile[]> {
+    return drive.listChildren(this.tokenManager, folderIds, driveId, undefined, limit)
   }
 
   listSharedDrives(): Promise<SharedDrive[]> {

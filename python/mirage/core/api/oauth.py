@@ -13,13 +13,14 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
-import time
+import math
 from types import TracebackType
 from typing import Self
 
 import aiohttp
 
 from mirage.core.api.client import SessionPool
+from mirage.utils.clock import Clock, SystemClock
 
 
 class TokenManager:
@@ -45,14 +46,46 @@ class TokenManager:
     install's by its accessor's. A one-shot manager is used as an async
     context manager so the pool it opened dies with the line that
     opened it.
+
+    Expiry is read on ``clock``, which also times the waits between
+    retries of the calls the manager signs. A mount hands it the
+    workspace's clock through ``bind_clock``.
+
+    Args:
+        buffer_seconds (float): how long before expiry to refresh.
+        clock (Clock | None): the clock expiry and retry waits are read
+            on; None is the system clock.
     """
 
-    def __init__(self, buffer_seconds: float = 300.0) -> None:
+    def __init__(
+        self, buffer_seconds: float = 300.0, clock: Clock | None = None
+    ) -> None:
         self._buffer_seconds = buffer_seconds
         self._access_token: str | None = None
         self._expires_at: float = 0
         self._lock = asyncio.Lock()
         self.pool = SessionPool()
+        self.clock: Clock = clock if clock is not None else SystemClock()
+
+    def bind_clock(self, clock: Clock) -> None:
+        """Read expiry and time retry waits on ``clock`` from now on.
+
+        The manager keeps one clock: a VFS mounted in a second workspace
+        follows that workspace's. A refreshed token's expiry was read on
+        the clock it replaces, so it is dropped and the next call
+        refreshes, unless both are the system clock; a seeded token that
+        never expires is kept.
+
+        Args:
+            clock (Clock): the clock of the workspace the manager serves.
+        """
+        same = clock is self.clock or (
+            isinstance(clock, SystemClock)
+            and isinstance(self.clock, SystemClock)
+        )
+        self.clock = clock
+        if not same and self._expires_at != math.inf:
+            self._expires_at = 0
 
     def session(self) -> aiohttp.ClientSession:
         """The live session, materialized from ``pool`` on first use.
@@ -100,9 +133,11 @@ class TokenManager:
 
     async def get_token(self) -> str:
         async with self._lock:
-            if self._access_token and time.time() < self._expires_at:
+            if self._access_token and self.clock.now() < self._expires_at:
                 return self._access_token
             token, expires_in = await self.refresh_pair()
             self._access_token = token
-            self._expires_at = time.time() + expires_in - self._buffer_seconds
+            self._expires_at = (
+                self.clock.now() + expires_in - self._buffer_seconds
+            )
             return token

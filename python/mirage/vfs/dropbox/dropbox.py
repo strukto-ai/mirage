@@ -39,7 +39,13 @@ from mirage.core.dropbox.write import write as _write
 from mirage.core.generic.rewrite import truncate_by_rewrite
 from mirage.events.base import DeltaHook
 from mirage.io.types import ByteSource
-from mirage.types import CapacityResult, FileStat, PathSpec, VFSName
+from mirage.types import (
+    CapacityResult,
+    DirListing,
+    FileStat,
+    PathSpec,
+    VFSName,
+)
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.dropbox.config import DropboxConfig
 
@@ -67,8 +73,10 @@ class DropboxVFS(BaseVFS):
         self.walk_limit = config.walk_limit
         self.accessor = DropboxAccessor(config, DropboxTokenManager(config))
 
-    async def readdir(self, path: PathSpec) -> list[FileStat]:
-        return await _readdir(self.accessor, path)
+    async def readdir(
+        self, path: PathSpec, limit: int | None = None
+    ) -> list[FileStat] | DirListing:
+        return await _readdir(self.accessor, path, limit)
 
     async def read(
         self,

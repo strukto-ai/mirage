@@ -50,9 +50,11 @@ export class ShellOutput {
 
 /**
  * Stream one job and retain its existing owner through disconnect cleanup.
- * The final record waits for the rest of the upload, discarded, as the
- * foreground reply does, so the caller finishes sending before the
- * connection closes.
+ * The final record goes out as soon as the job settles: stdin the line did
+ * not read never ends a line, as `ssh host cmd` returns while its input is
+ * still open. The body then ends only once the rest of the upload is
+ * discarded or the caller hangs up, so the caller finishes sending before
+ * the connection closes.
  */
 export function shellResponse(
   output: ShellOutput,
@@ -81,7 +83,9 @@ export function shellResponse(
     jobs.cancel(job.id)
   }
   reply.raw.once('close', disconnected)
+  let uploadError: unknown
   void failed.then((error) => {
+    uploadError = error
     if (error !== undefined) {
       reply.log.debug(error, 'streamed shell upload failed')
       disconnected()
@@ -91,8 +95,7 @@ export function shellResponse(
     try {
       yield* output.pipe.stream()
       const result = await completed
-      if (stdin instanceof UploadStdin) await stdin.discard()
-      const uploadError = await failed
+      if (stdin instanceof UploadStdin && stdin.error !== undefined) uploadError = stdin.error
       yield Buffer.from(
         JSON.stringify({
           status: uploadError === undefined ? result.status : 'failed',
@@ -105,6 +108,8 @@ export function shellResponse(
                 : 'Upload failed',
         }) + '\n',
       )
+      if (stdin instanceof UploadStdin) await stdin.discard()
+      await failed
     } finally {
       output.pipe.closeReader()
       if (stdin instanceof UploadStdin) await stdin.discard()

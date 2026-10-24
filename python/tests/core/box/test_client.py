@@ -35,6 +35,7 @@ from mirage.core.box.constants import (
     BOX_UPLOAD_BASE,
 )
 from mirage.io.spool import ByteSpool
+from mirage.utils.clock import ManualClock
 from mirage.utils.ranges import ByteWindow
 from mirage.vfs.box.config import BoxConfig
 
@@ -251,3 +252,41 @@ async def test_upload_session_digests_commit_condition_and_abort(fail):
             )
             assert (("DELETE", URL(base)) in mock.requests) == fail
     await tm.pool.close()
+
+
+@pytest.mark.asyncio
+async def test_upload_session_waits_out_a_pending_commit_on_its_clock():
+    clock = ManualClock()
+    tm = BoxTokenManager(BoxConfig(access_token="token"))
+    tm.bind_clock(clock)
+    base = "https://example.test/session"
+    async with ByteSpool(0) as spool:
+        await spool.append(b"abc")
+        with aioresponses() as mock:
+            mock.post(
+                base,
+                payload={
+                    "part_size": 4,
+                    "session_endpoints": {
+                        "upload_part": base + "/part",
+                        "commit": base + "/commit",
+                        "abort": base,
+                    },
+                },
+            )
+            mock.put(
+                base + "/part",
+                payload={"part": {"part_id": "1", "offset": 0, "size": 3}},
+            )
+            mock.post(
+                base + "/commit", status=202, headers={"Retry-After": "7"}
+            )
+            mock.post(
+                base + "/commit",
+                status=201,
+                payload={"entries": [{"id": "done"}]},
+            )
+            assert await box_upload_session(tm, base, {}, spool) == {
+                "entries": [{"id": "done"}]
+            }
+    assert clock.monotonic() == 7

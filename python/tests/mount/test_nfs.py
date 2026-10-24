@@ -16,6 +16,8 @@ import asyncio
 import struct
 import subprocess
 from collections.abc import AsyncIterator, Callable
+from contextlib import AsyncExitStack
+from pathlib import Path
 
 import pytest
 import pytest_asyncio
@@ -24,6 +26,7 @@ from mirage import MountMode, Workspace
 from mirage.mount import nfs
 from mirage.mount.core import MountCore
 from mirage.mount.nfs import MirageNFSServer, mount_args, unmount_args
+from mirage.vfs.disk import DiskVFS
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace.session.session import SessionState
 
@@ -153,18 +156,22 @@ class Counting(MountCore):
         await super().release(fh)
 
 
-@pytest_asyncio.fixture
-async def client() -> AsyncIterator[Client]:
-    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
-    await ws.shell("mkdir -p /docs/sub && printf 'hello\\n' > /docs/a.txt")
-    server = MirageNFSServer(MountCore(ws.vfs), secure=False)
-    port = await server.start()
-    reader, writer = await asyncio.open_connection("127.0.0.1", port)
-    try:
+@pytest_asyncio.fixture(params=["ram", "disk"])
+async def client(
+    request: pytest.FixtureRequest, tmp_path: Path
+) -> AsyncIterator[Client]:
+    backend = RAMVFS() if request.param == "ram" else DiskVFS(str(tmp_path))
+    async with AsyncExitStack() as cleanup:
+        ws = Workspace({"/": backend}, mode=MountMode.WRITE)
+        cleanup.push_async_callback(ws.close)
+        await ws.shell("mkdir -p /docs/sub && printf 'hello\\n' > /docs/a.txt")
+        server = MirageNFSServer(MountCore(ws.vfs), secure=False)
+        cleanup.push_async_callback(server.close)
+        port = await server.start()
+        reader, writer = await asyncio.open_connection("127.0.0.1", port)
+        cleanup.push_async_callback(writer.wait_closed)
+        cleanup.callback(writer.close)
         yield Client(reader, writer)
-    finally:
-        writer.close()
-        await server.close()
 
 
 @pytest.mark.asyncio

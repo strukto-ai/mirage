@@ -38,6 +38,7 @@ import {
   createFolder,
   eventsNow,
   eventsSince,
+  listFolderItems,
   realtimeServer,
   refused,
   uploadFileVersion,
@@ -48,6 +49,28 @@ const TM = { apiBase: 'https://api.box.com/2.0' } as BoxTokenManager
 
 beforeEach(() => {
   vi.clearAllMocks()
+})
+
+// Twin of test_list_folder_items_counts_no_web_link_toward_a_limit.
+it('counts no web link toward a listing limit', async () => {
+  vi.mocked(client.boxGet)
+    .mockResolvedValueOnce({
+      total_count: 4,
+      entries: [
+        { id: '1', name: 'a', type: 'web_link' },
+        { id: '2', name: 'b', type: 'web_link' },
+      ],
+    })
+    .mockResolvedValueOnce({
+      total_count: 4,
+      entries: [
+        { id: '3', name: 'c', type: 'file' },
+        { id: '4', name: 'd', type: 'file' },
+      ],
+    })
+  const items = await listFolderItems(TM, '0', { pageSize: 2, limit: 2 })
+  expect(items.map((item) => item.id)).toEqual(['1', '2', '3', '4'])
+  expect(vi.mocked(client.boxGet)).toHaveBeenCalledTimes(2)
 })
 
 describe('box events api', () => {

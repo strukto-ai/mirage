@@ -546,6 +546,7 @@ function finishNode(
   style: UsageStyle,
   bases: PathSpec[],
   env: Readonly<Record<string, string>> | null,
+  deferEnv: boolean,
 ): WalkResult | null {
   for (const [dest, variable] of cs.envByDest) {
     if (dest in flags) continue
@@ -591,7 +592,7 @@ function finishNode(
     }
   }
   for (const dest of cs.requiredDests) {
-    if (!(dest in flags)) {
+    if (!(dest in flags) && !(deferEnv && cs.envByDest.has(dest))) {
       return usageError(name, node, `error: option '${dest}' is required`, style)
     }
   }
@@ -613,7 +614,9 @@ function finishNode(
  * working directory PATH-typed group values resolve against, so a group option
  * resolves the way a leaf option does, and `env` is the session environment,
  * so a group option declaring `Argument.env` fills at its own level exactly as
- * a leaf one does in the flat parser.
+ * a leaf one does in the flat parser. `deferEnv` lets target selection reach
+ * a leaf before fetching managed values; only an absent environment-backed
+ * required option is deferred, and execution still performs the full walk.
  */
 export function walk(
   head: string,
@@ -621,6 +624,7 @@ export function walk(
   argv: readonly string[],
   cwd = '/',
   env: Readonly<Record<string, string>> | null = null,
+  deferEnv = false,
 ): WalkResult {
   let node = spec
   // Read once off the root and never off a node: a program answers in one
@@ -657,7 +661,7 @@ export function walk(
           ? findChild(node, token)
           : null
       if (alias?.aliases.includes(token)) {
-        const refused = finishNode(name, node, cs, flags, cwd, style, bases, env)
+        const refused = finishNode(name, node, cs, flags, cwd, style, bases, env, deferEnv)
         if (refused !== null) return refused
         node = alias
         path = [...path, alias.name]
@@ -815,7 +819,7 @@ export function walk(
         i += 1
         continue
       }
-      const refused = finishNode(name, node, cs, flags, cwd, style, bases, env)
+      const refused = finishNode(name, node, cs, flags, cwd, style, bases, env, deferEnv)
       if (refused !== null) return refused
       // An alias resolves to its canonical node; the path records the
       // canonical name (argparse prog attribution: errors under `gws co`
@@ -832,7 +836,7 @@ export function walk(
       break
     }
     if (descended) continue
-    const refused = finishNode(name, node, cs, flags, cwd, style, bases, env)
+    const refused = finishNode(name, node, cs, flags, cwd, style, bases, env, deferEnv)
     if (refused !== null) return refused
     return new WalkResult({
       output: encodeText(nodeHelp(name, node, style)),

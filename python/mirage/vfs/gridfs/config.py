@@ -34,6 +34,11 @@ class GridFSConfig(BaseModel):
     chunk_size_bytes: int | None = None
     """Chunk size in bytes for files the mount writes; unset uses the
     driver's default, 255 KiB."""
+    keep_revisions: int | None = Field(default=None, ge=1)
+    """Revisions kept per file, newest first: a write or an `rm` deletes
+    the rest, under the file's name and in the trash `rm` moves revisions
+    to (`/trash/<filename>`, which no mount path reaches). Unset keeps
+    every revision, so a snapshot pinned to any of them still reads."""
     walk_limit: int = Field(default=WALK_LIMIT, ge=-1)
     """Most files one command walks under a folder: `grep -r`, `find` and other
     walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is

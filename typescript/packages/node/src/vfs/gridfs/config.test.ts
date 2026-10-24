@@ -36,6 +36,23 @@ describe('normalizeGridFSConfig', () => {
     expect(config.keyPrefix).toBe('team/reports/')
   })
 
+  it('reads keep_revisions and refuses zero', () => {
+    expect(
+      normalizeGridFSConfig({ uri: 'mongodb://h', database: 'db' }).keepRevisions,
+    ).toBeUndefined()
+    expect(
+      normalizeGridFSConfig({ uri: 'mongodb://h', database: 'db', keep_revisions: 3 })
+        .keepRevisions,
+    ).toBe(3)
+    expect(() =>
+      normalizeGridFSConfig({ uri: 'mongodb://h', database: 'db', keep_revisions: 0 }),
+    ).toThrow()
+  })
+
+  it('refuses an unknown field', () => {
+    expect(() => normalizeGridFSConfig({ uri: 'mongodb://h', database: 'db', keep: 3 })).toThrow()
+  })
+
   it('drops an empty prefix', () => {
     const config = normalizeGridFSConfig({ uri: 'mongodb://h', database: 'db', key_prefix: '' })
     expect(config.keyPrefix).toBeUndefined()

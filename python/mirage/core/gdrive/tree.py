@@ -84,7 +84,9 @@ async def iter_tree(
 
 
 async def list_level(
-    accessor: GDriveAccessor, folders: list[tuple[str, str | None]]
+    accessor: GDriveAccessor,
+    folders: list[tuple[str, str | None]],
+    limit: int | None = None,
 ) -> dict[str, list[dict[str, Any]]]:
     """The children of each folder of one level of a walk, by folder id.
 
@@ -92,12 +94,15 @@ async def list_level(
     folders of one corpus, where a walk lists each folder on its own, and
     each child is filed under every folder asked about that its
     ``parents`` name. A folder asked about alone takes every child, so
-    ``root``, the alias Drive names My Drive by, lists too.
+    ``root``, the alias Drive names My Drive by, lists too. Once
+    ``limit`` items are in hand no page or query more is asked, so the
+    level is then short.
 
     Args:
         accessor (GDriveAccessor): backend accessor.
         folders (list[tuple[str, str | None]]): each folder's id and its
             shared drive.
+        limit (int | None): the most items worth fetching.
     """
     corpora: dict[str | None, list[str]] = {}
     children: dict[str, list[dict[str, Any]]] = {}
@@ -105,10 +110,19 @@ async def list_level(
         corpora.setdefault(drive_id, []).append(folder_id)
         children[folder_id] = []
     drive = accessor.drive
+    got = 0
     for drive_id, ids in corpora.items():
         for start in range(0, len(ids), PARENTS_PER_QUERY):
+            if limit is not None and got >= limit:
+                return children
             asked = ids[start : start + PARENTS_PER_QUERY]
-            for item in await drive.list_children(asked, drive_id):
+            items = await (
+                drive.list_children(asked, drive_id)
+                if limit is None
+                else drive.list_children(asked, drive_id, limit - got)
+            )
+            got += len(items)
+            for item in items:
                 filed = (
                     asked
                     if len(asked) == 1
@@ -120,7 +134,10 @@ async def list_level(
 
 
 async def tree(
-    accessor: GDriveAccessor, path: PathSpec, entry: FileStat | None = None
+    accessor: GDriveAccessor,
+    path: PathSpec,
+    entry: FileStat | None = None,
+    limit: int | None = None,
 ) -> dict[str, FileStat] | None:
     """Every item under a folder, each as its folder's listing renders it,
     read a level at a time (``list_level``): a query per level and corpus
@@ -133,11 +150,14 @@ async def tree(
     (Shared Drives it could not list), or when a level below it fails, so
     the walk lists what is there and reports, or skips, each folder on
     its own.
+    None too once it holds more than ``limit`` items, which no level
+    is paged past.
 
     Args:
         accessor (GDriveAccessor): backend accessor.
         path (PathSpec): the directory.
         entry (FileStat | None): what is at the directory.
+        limit (int | None): the most entries a walk can still keep.
     """
     listed = await readdir(accessor, path, entry)
     if isinstance(listed, DirListing):
@@ -145,12 +165,17 @@ async def tree(
     found: dict[str, FileStat] = {}
     level = _placed(found, "", listed, None)
     while level:
+        if limit is not None and len(found) > limit:
+            return None
+        left = None if limit is None else limit - len(found) + 1
         try:
-            children = await list_level(accessor, list(level.values()))
+            children = await list_level(accessor, list(level.values()), left)
         except (OSError, aiohttp.ClientError) as exc:
             logger.debug(
                 "drive tree of %s left to the walk: %s", path.virtual, exc
             )
+            return None
+        if left is not None and sum(map(len, children.values())) >= left:
             return None
         below: dict[str, tuple[str, str | None]] = {}
         for rel, (folder_id, drive_id) in level.items():
@@ -160,6 +185,8 @@ async def tree(
             )
             below.update(_placed(found, rel, rows, drive_id))
         level = below
+    if limit is not None and len(found) > limit:
+        return None
     return found
 
 

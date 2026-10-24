@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import json
-import time
+from dataclasses import replace
 from typing import Any
 
 from mirage.context.session_context import current_execution_id
@@ -28,6 +28,7 @@ from mirage.observe.log_entry import (
 )
 from mirage.observe.record import OpRecord
 from mirage.observe.store import ObserverStore, RAMObserverStore
+from mirage.utils.clock import Clock, SystemClock
 from mirage.utils.dates import utc_date_folder
 
 
@@ -42,8 +43,30 @@ def _parse_files(files: dict[str, bytes]) -> list[dict[str, Any]]:
     return out
 
 
-def _now_ms() -> int:
-    return int(time.time() * 1000)
+def _newest_stamp(events: list[dict[str, Any]]) -> int | None:
+    """The latest timestamp among ``events``, None when none carries one.
+
+    Args:
+        events (list[dict[str, Any]]): parsed LogEntry dicts.
+    """
+    return max(
+        (
+            int(stamp)
+            for e in events
+            if isinstance(stamp := e.get("timestamp"), (int, float))
+        ),
+        default=None,
+    )
+
+
+def _later(a: int | None, b: int | None) -> int | None:
+    """The later of two stamps, either of which may be absent.
+
+    Args:
+        a (int | None): a stamp, or None.
+        b (int | None): a stamp, or None.
+    """
+    return b if a is None else a if b is None else max(a, b)
 
 
 class Observer:
@@ -55,23 +78,61 @@ class Observer:
     methods below; swapping infra (RAM, Redis, disk, opfs) means
     passing a different store, nothing above this seam changes.
 
+    Every entry is stamped, and filed under its day, on ``clock``: the
+    workspace's, which also stamps the op records the entries carry, so
+    a workspace on a manual clock keeps one time domain in its history.
+    No entry is stamped before the newest one its session holds: a clock
+    that restarts behind stored history (a fresh ``ManualClock`` over a
+    restored or persisted log) would otherwise file a clear or delete
+    ahead of the commands it acts on. A session with no history sets no
+    floor.
+
     Args:
         store (ObserverStore | None): Storage backend for log files;
             defaults to an in-memory RAMObserverStore.
+        clock (Clock | None): the workspace clock; None is the system
+            clock.
     """
 
-    def __init__(self, store: ObserverStore | None = None) -> None:
+    def __init__(
+        self, store: ObserverStore | None = None, clock: Clock | None = None
+    ) -> None:
         self._store = store if store is not None else RAMObserverStore()
+        self._clock: Clock = clock if clock is not None else SystemClock()
+        self._newest: dict[str, int | None] = {}
+
+    def _now_ms(self) -> int:
+        """The clock's wall time in epoch milliseconds, an entry's stamp."""
+        return int(self._clock.now() * 1000)
 
     @property
     def store(self) -> ObserverStore:
         return self._store
 
+    async def _floor(self, session: str) -> int | None:
+        """The newest stamp ``session`` holds, None when it holds none.
+
+        Read once per session, from that session's files only (the
+        files its history view reads); an entry stamped while they are
+        read is newer still and is kept.
+
+        Args:
+            session (str): the session the next entry belongs to.
+        """
+        if session not in self._newest:
+            files = await self._store.read_matching(f"/{session}.jsonl")
+            found = _newest_stamp(_parse_files(files))
+            self._newest[session] = _later(found, self._newest.get(session))
+        return self._newest[session]
+
     async def _log(self, entry: LogEntry) -> None:
+        floor = await self._floor(entry.session)
+        if floor is not None and entry.timestamp < floor:
+            entry = replace(entry, timestamp=floor)
+        self._newest[entry.session] = entry.timestamp
         line = (entry.to_json_line() + "\n").encode()
-        await self._store.append(
-            f"/{utc_date_folder()}/{entry.session}.jsonl", line
-        )
+        day = utc_date_folder(entry.timestamp / 1000)
+        await self._store.append(f"/{day}/{entry.session}.jsonl", line)
 
     async def log_op(
         self,
@@ -118,7 +179,7 @@ class Observer:
             LogEntry(
                 type=EVENT_COMMAND,
                 session=session,
-                timestamp=_now_ms(),
+                timestamp=self._now_ms(),
                 cwd=cwd,
                 command=command,
                 exit_code=io.exit_code,
@@ -144,7 +205,7 @@ class Observer:
             LogEntry(
                 type=EVENT_COMMAND,
                 session=session,
-                timestamp=_now_ms(),
+                timestamp=self._now_ms(),
                 cwd=cwd,
                 command=command,
                 exit_code=0,
@@ -161,7 +222,7 @@ class Observer:
             LogEntry(
                 type=EVENT_CLEAR,
                 session=session,
-                timestamp=_now_ms(),
+                timestamp=self._now_ms(),
             )
         )
 
@@ -177,7 +238,7 @@ class Observer:
             LogEntry(
                 type=EVENT_DELETE,
                 session=session,
-                timestamp=_now_ms(),
+                timestamp=self._now_ms(),
                 offset=offset,
             )
         )
@@ -249,7 +310,8 @@ class Observer:
         checkout path: restoring means becoming the snapshot, so
         events from the pre-restore timeline (including sessions the
         snapshot doesn't know about) do not survive. Events are
-        rewritten per session under today's date folder, preserving
+        rewritten per session under today's date folder (or the newest
+        event's, when the clock stands behind it), preserving
         their list order as line order; original date folders are not
         preserved, which the views never depend on (they filter by
         the session field).
@@ -265,8 +327,12 @@ class Observer:
             events (list[dict]): LogEntry dicts from StateKey.HISTORY.
         """
         await self._store.clear()
-        day = utc_date_folder()
         known = (EVENT_COMMAND, EVENT_CLEAR, EVENT_DELETE, EVENT_OP)
+        newest = _newest_stamp([e for e in events if e.get("type") in known])
+        written = (
+            self._now_ms() if newest is None else max(self._now_ms(), newest)
+        )
+        day = utc_date_folder(written / 1000)
         by_session: dict[str, list[str]] = {}
         for e in events:
             if e.get("type") not in known:
@@ -275,6 +341,7 @@ class Observer:
             by_session.setdefault(session, []).append(
                 json.dumps(e, separators=(",", ":"))
             )
+        self._newest = {session: written for session in by_session}
         for session, lines in by_session.items():
             await self._store.write(
                 f"/{day}/{session}.jsonl", ("\n".join(lines) + "\n").encode()

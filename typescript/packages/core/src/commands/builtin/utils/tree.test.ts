@@ -287,15 +287,15 @@ describe('WalkBudget', () => {
   })
 
   it('cuts one listing and skips the next', async () => {
-    const asked: string[] = []
-    const readdir = (path: PathSpec): Promise<string[]> => {
-      asked.push(path.virtual)
+    const asked: [string, number | undefined][] = []
+    const readdir = (path: PathSpec, _nofollow?: boolean, limit?: number): Promise<string[]> => {
+      asked.push([path.virtual, limit])
       return Promise.resolve([0, 1, 2].map((i) => `${path.virtual}/${String(i)}`))
     }
     const budget = new WalkBudget(at('/m'), limits({ '/m/': 2 }))
     expect(await budget.listing(readdir, at('/m'))).toEqual(['/m/0', '/m/1'])
     expect(await budget.listing(readdir, at('/m/0'))).toEqual([])
-    expect(asked).toEqual(['/m'])
+    expect(asked).toEqual([['/m', 3]])
     expect(budget.stopped).toEqual([`/m: ${stop(2)}`])
   })
 })

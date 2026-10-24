@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import asyncio
 import base64
 import hashlib
 import json
@@ -464,7 +463,7 @@ async def box_upload_session(
                     f"Unexpected Box commit status: {response.status}"
                 )
             delay = float(response.headers.get("retry-after", "1"))
-            await asyncio.sleep(max(0, min(delay, 30)))
+            await tm.clock.sleep(max(0, min(delay, 30)))
         raise TimeoutError("Box upload commit did not complete")
     except BaseException:
         try:

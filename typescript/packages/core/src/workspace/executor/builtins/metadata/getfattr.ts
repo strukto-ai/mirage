@@ -13,7 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { toHex } from '../../../../utils/hex.ts'
-import { WalkBudget } from '../../../../commands/builtin/utils/tree.ts'
+import { dispatchedReadTree } from '../../../../commands/builtin/generic_bind/files.ts'
+import { readdirOp } from '../../../../commands/builtin/generic/crossmount/utils.ts'
+import { WalkBudget, treeWalk, type WalkCall } from '../../../../commands/builtin/utils/tree.ts'
 import { specOf } from '../../../../commands/spec/builtins.ts'
 import { FlagView } from '../../../../commands/spec/flag_view.ts'
 import { parseCommand, parseToKwargs } from '../../../../commands/spec/parser.ts'
@@ -67,10 +69,13 @@ export function encodeValue(value: Uint8Array, encoding: string | null): Uint8Ar
  * A subtree in pre-order, the way nftw hands it to getfattr -R. Every
  * entry is reported, links included. A link to a directory is descended
  * only when `deref` says so: for every entry under `-L`, and for an
- * operand itself unless `-P`. Mirrors Python's `_walk`.
+ * operand itself unless `-P`. `calls` are the walk's readdir and lstat,
+ * answered from a mount's `readTree` where one answers; `dispatch` follows a
+ * link. Mirrors Python's `_walk`.
  */
 async function walk(
   dispatch: DispatchFn,
+  calls: [WalkCall<string[]>, WalkCall<FileStat>],
   links: NamespaceLinks,
   path: PathSpec,
   shown: string,
@@ -78,10 +83,11 @@ async function walk(
   deref: boolean,
   budget: WalkBudget,
 ): Promise<[PathSpec, string][]> {
+  const [readdir, lstat] = calls
   const entries: [PathSpec, string][] = [[path, shown]]
   let stat: unknown
   try {
-    ;[stat] = await dispatch('stat', path, [], { nofollow: true })
+    stat = await lstat(path)
     if (stat instanceof FileStat && stat.type === FileType.SYMLINK && deref) {
       ;[stat] = await dispatch('stat', path)
     }
@@ -93,14 +99,24 @@ async function walk(
   if (!(stat instanceof FileStat) || stat.type !== FileType.DIRECTORY) return entries
   const here = links.follow(path.virtual)
   if (!budget.opens(here)) return entries
-  const [children] = (await dispatch('readdir', path)) as [string[], unknown]
+  const limit = budget.listingLimit(here)
+  const children = await (limit === null ? readdir(path) : readdir(path, false, limit))
   for (const child of children) {
     if (!budget.spend(here)) break
     const bare = rstripSlash(child)
     const name = bare.slice(bare.lastIndexOf('/') + 1)
     const below = `${rstripSlash(shown)}/${name}`
     entries.push(
-      ...(await walk(dispatch, links, PathSpec.fromStrPath(bare), below, logical, logical, budget)),
+      ...(await walk(
+        dispatch,
+        calls,
+        links,
+        PathSpec.fromStrPath(bare),
+        below,
+        logical,
+        logical,
+        budget,
+      )),
     )
   }
   return entries
@@ -226,12 +242,23 @@ export async function handleGetfattr(
   let warned = false
   const links = namespace.sessionLinks(session)
   const mounts = links.mounts(true)
+  const calls = treeWalk<string[], FileStat>(
+    dispatchedReadTree(
+      dispatch,
+      links.mounts(false),
+      (virtual) => links.followParent(virtual),
+      true,
+    ),
+    readdirOp(dispatch),
+    async (path) => (await dispatch('stat', path, [], { nofollow: true }))[0] as FileStat,
+  )
   for (const target of targets) {
     const typed = target.rawPath
     const budget = new WalkBudget(target, mounts)
     const entries = fl.asBool('recursive')
       ? await walk(
           dispatch,
+          calls,
           links,
           target,
           typed,

@@ -15,3 +15,15 @@
 
 class WritePolicyError(ValueError):
     """A write policy a mount or snapshot cannot take, refused at load."""
+
+
+class MountCommandAmbiguous(ValueError):
+    """A pathless write has more than one eligible mount."""
+
+    def __init__(self, cmd_name: str, prefixes: list[str]) -> None:
+        candidates = "\n".join(f"  {p.rstrip('/') or '/'}" for p in prefixes)
+        super().__init__(
+            f"{cmd_name}: ambiguous, registered on {len(prefixes)} writable mounts:\n"
+            f"{candidates}\n"
+            "cd into the target mount to disambiguate."
+        )

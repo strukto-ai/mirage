@@ -23,6 +23,7 @@ from mirage.commands.spec import SPECS
 from mirage.secrets.summary import error_summary
 from mirage.types import JsonValue
 from mirage.utils.abort import ABORT_JOIN_SECONDS
+from mirage.utils.clock import Clock, SystemClock
 from mirage.workspace.cli.types import CLIInstall
 from mirage.workspace.lookup.constants import (
     JOB_BUILTINS,
@@ -56,13 +57,18 @@ class CLIRegistry:
     Args:
         peers (Callable[[], Iterable[Accessor]]): the mounts' accessors,
             which a new install's accessor may share an account with.
+        clock (Clock | None): the workspace's clock, which each install's
+            accessor reads time and waits on; None is the system clock.
     """
 
     def __init__(
-        self, peers: Callable[[], Iterable[Accessor]] = tuple
+        self,
+        peers: Callable[[], Iterable[Accessor]] = tuple,
+        clock: Clock | None = None,
     ) -> None:
         self._installs: dict[str, CLIInstall] = {}
         self._peers = peers
+        self._clock: Clock = clock if clock is not None else SystemClock()
         self._retiring: dict[int, asyncio.Task[None]] = {}
         self._shutdown = asyncio.Event()
 
@@ -103,6 +109,7 @@ class CLIRegistry:
             )
         validated = self._validate_config(name, spec, config)
         accessor = spec.accessor(validated)
+        accessor.bind_clock(self._clock)
         accessor.join(
             [*self._peers(), *(i.accessor for i in self._installs.values())]
         )

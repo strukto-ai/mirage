@@ -47,6 +47,7 @@ from mirage.commands.spec.constants import STANDARD_AFTER_SCAN
 from mirage.commands.spec.flag_view import spread_operands
 from mirage.commands.spec.standard import standard_request
 from mirage.context import current_caller
+from mirage.context.session_context import session_access
 from mirage.io import IOResult
 from mirage.io.stream import materialize
 from mirage.io.types import ByteSource
@@ -63,9 +64,11 @@ from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.executor.builtins.links.links import operand_follow
 from mirage.workspace.executor.command.cli import (
     CLIContext,
+    LeafCall,
     handle_cli,
     handle_mount_cli,
     reaches_service,
+    walk_leaf,
 )
 from mirage.workspace.executor.command.flags import option_error, parse_flags
 from mirage.workspace.executor.command.functions import run_shell_function
@@ -115,7 +118,12 @@ from mirage.workspace.lookup import (
     runs_as,
 )
 from mirage.workspace.lookup.constants import EXEC_WRAPPERS
-from mirage.workspace.mount import MountCommandUnsupported, MountRegistry
+from mirage.workspace.mount import (
+    MountCommandUnsupported,
+    MountEntry,
+    MountRegistry,
+)
+from mirage.workspace.mount.errors import MountCommandAmbiguous
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.mount.namespace.probe import path_stat
 from mirage.workspace.mount.storage import make_check_unlink, make_storage_key
@@ -270,8 +278,13 @@ async def fill_tree_env(
     """
     if registry.fill_env is None or registry.clis.get(name) is not None:
         return False
-    mount = registry.command_mount(name, [], session.cwd)
-    tree = mount.cli_for(name) if mount is not None else None
+    candidates = registry.invocation_candidates(
+        name, [], session.cwd, args, session_access(session)
+    )
+    if len(candidates) != 1:
+        return False
+    mount = candidates[0]
+    tree = mount.cli_for(name)
     if not isinstance(tree, CLI):
         return False
     if lookup(name, session, registry) is not Consumer.MOUNT:
@@ -453,17 +466,13 @@ async def handle_command(
             ExecutionNode(command=cmd_str, exit_code=127, stderr=err),
         )
 
-    # A command tree a mount serves runs by name on that mount, like an
-    # installed CLI: its walk, not a spec parse, reads the words, so it
-    # sits ahead of the help, cross-mount and flag-parsing branches below,
-    # and of the operand a bare ls, du, tree, find or grep implies.
-    tree_mount = registry.command_mount(cmd_name, [], session.cwd)
-    tree = tree_mount.cli_for(cmd_name) if tree_mount is not None else None
-    if tree_mount is not None and isinstance(tree, CLI):
-        await tree_mount.ensure_ready()
+    async def run_tree(
+        mount: MountEntry, cli: CLI, prepared_leaf: LeafCall | None = None
+    ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
+        await mount.ensure_ready()
         return await handle_mount_cli(
-            tree_mount,
-            tree,
+            mount,
+            cli,
             parts,
             session,
             stdin,
@@ -489,7 +498,49 @@ async def handle_command(
             ),
             registry.try_mount_for,
             follow,
+            prepared_leaf,
         )
+
+    # A command tree a mount serves runs by name on that mount, like an
+    # installed CLI: its walk, not a spec parse, reads the words, so it
+    # sits ahead of the help, cross-mount and flag-parsing branches below,
+    # and of the operand a bare ls, du, tree, find or grep implies.
+    tree_mount = registry.invocation_mount(
+        cmd_name,
+        [],
+        session.cwd,
+        spelled_words(parts[1:]),
+        session_access(session),
+    )
+    tree = tree_mount.cli_for(cmd_name) if tree_mount is not None else None
+    prepared_leaf = None
+    if tree_mount is not None and isinstance(tree, CLI):
+        walked = await walk_leaf(cmd_name, tree, parts, session, files)
+        if not isinstance(walked, LeafCall) and walked[1].exit_code == 0:
+            return walked
+        try:
+            selected = registry.execution_mount(
+                cmd_name,
+                [],
+                session.cwd,
+                spelled_words(parts[1:]),
+                session_access(session),
+            )
+        except MountCommandAmbiguous as exc:
+            err = encode_text(f"{exc}\n")
+            return (
+                None,
+                IOResult(exit_code=1, stderr=err),
+                ExecutionNode(command=cmd_str, exit_code=1, stderr=err),
+            )
+        if selected is not None:
+            if not isinstance(walked, LeafCall):
+                return walked
+            prepared_leaf = walked if selected is tree_mount else None
+            tree_mount = selected
+            tree = tree_mount.cli_for(cmd_name)
+    if tree_mount is not None and isinstance(tree, CLI):
+        return await run_tree(tree_mount, tree, prepared_leaf)
 
     # A mount may register its own command under a builtin's name. The
     # steps below that read the line with the builtin's grammar then skip
@@ -503,7 +554,13 @@ async def handle_command(
         for s in operand_paths(cmd_name, parts[1:], session.cwd)
         if s.walk_error != "ENOENT"
     ]
-    own_mount = registry.command_mount(cmd_name, operands, session.cwd)
+    own_mount = registry.invocation_mount(
+        cmd_name,
+        operands,
+        session.cwd,
+        spelled_words(parts[1:]),
+        session_access(session),
+    )
     own_spec = own_mount.spec_for(cmd_name) if own_mount is not None else None
     borrowed = (
         cmd_name in SPECS
@@ -887,9 +944,13 @@ async def handle_command(
 
     try:
         mount = await registry.resolve_mount(
-            cmd_name, routing_scopes, session.cwd
+            cmd_name,
+            routing_scopes,
+            session.cwd,
+            spelled_words(parts[1:]),
+            session_access(session),
         )
-    except MountCommandUnsupported as exc:
+    except (MountCommandUnsupported, MountCommandAmbiguous) as exc:
         err = encode_text(f"{exc}\n")
         return (
             None,
@@ -905,6 +966,10 @@ async def handle_command(
             ),
             ExecutionNode(command=cmd_str, exit_code=127),
         )
+
+    selected_tree = mount.cli_for(cmd_name)
+    if selected_tree is not None:
+        return await run_tree(mount, selected_tree)
 
     # Parse flags upstream — mount receives clean args
     single_parsed = prepared or parse_flags(

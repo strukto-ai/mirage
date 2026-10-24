@@ -20,7 +20,7 @@ import { makeFilename } from '../../vfs/gdocs/doc_entry.ts'
 import { GDocsVFS } from '../../vfs/gdocs/gdocs.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
 import { detectScope } from '../gdocs/scope.ts'
-import { GoogleApiError, type TokenManager } from './client.ts'
+import { GoogleApiError, TokenManager } from './client.ts'
 import type { DriveFile } from './drive.ts'
 import { resolveAppEntry } from './entry.ts'
 import { stubDrive } from '../../../tests/core/gdrive/_test_util.ts'
@@ -40,7 +40,7 @@ const PATH = new PathSpec({
   directory: `/docs/owned/${NAME}`,
   vfsPath: `owned/${NAME}`,
 })
-const TM = {} as TokenManager
+const TM = new TokenManager({ accessToken: 't' })
 
 describe('a direct lookup proves the file', () => {
   it.each([

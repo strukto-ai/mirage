@@ -17,7 +17,7 @@ import { vi } from 'vitest'
 import { GDriveAccessor } from '../../../src/accessor/gdrive.ts'
 import { installApi } from '../google/_test_util.ts'
 import type { DriveApi } from '../../../src/core/gdrive/api.ts'
-import { GoogleApiError, type TokenManager } from '../../../src/core/google/client.ts'
+import { GoogleApiError, TokenManager } from '../../../src/core/google/client.ts'
 import { FOLDER_MIME, MIME_TO_EXT } from '../../../src/core/google/drive.ts'
 import type { DriveChange, DriveFile, SharedDrive } from '../../../src/core/google/drive.ts'
 import { ByteSpool } from '../../../src/io/spool.ts'
@@ -28,7 +28,7 @@ const FILE_MIME = 'application/octet-stream'
 const STREAM_CHUNK = 4
 export const DOC_MIME = 'application/vnd.google-apps.document'
 
-export const TOKEN_MANAGER = { config: { clientId: 'cid', refreshToken: 'rt' } } as TokenManager
+export const TOKEN_MANAGER = new TokenManager({ clientId: 'cid', refreshToken: 'rt' })
 
 interface FakeItem {
   id: string
@@ -86,8 +86,9 @@ export class FakeDrive implements DriveApi {
   searches: string[][] = []
   incomplete = false
   // The folder ids and shared drive of every listing of several folders at
-  // once.
+  // once, and the limit each was handed.
   childQueries: [string[], string | null][] = []
+  childLimits: (number | undefined)[] = []
   private counter = 0
 
   add(
@@ -158,13 +159,18 @@ export class FakeDrive implements DriveApi {
     return Promise.resolve(out)
   }
 
-  listChildren(folderIds: readonly string[], driveId: string | null): Promise<DriveFile[]> {
+  listChildren(
+    folderIds: readonly string[],
+    driveId: string | null,
+    limit?: number,
+  ): Promise<DriveFile[]> {
     this.childQueries.push([[...folderIds], driveId])
+    this.childLimits.push(limit)
     const out: DriveFile[] = []
     for (const item of this.items.values()) {
       if (item.parents.some((p) => folderIds.includes(p))) out.push(this.public(item.id))
     }
-    return Promise.resolve(out)
+    return Promise.resolve(limit === undefined ? out : out.slice(0, limit))
   }
 
   listAllFiles(

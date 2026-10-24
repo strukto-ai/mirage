@@ -37,7 +37,13 @@ from mirage.core.box.unlink import unlink as _unlink
 from mirage.core.box.write import write as _write
 from mirage.events.base import DeltaHook
 from mirage.io.types import ByteSource
-from mirage.types import CapacityResult, FileStat, PathSpec, VFSName
+from mirage.types import (
+    CapacityResult,
+    DirListing,
+    FileStat,
+    PathSpec,
+    VFSName,
+)
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.box.config import BoxConfig
 
@@ -79,9 +85,12 @@ class BoxVFS(BaseVFS):
         self.accessor = BoxAccessor(self.config, BoxTokenManager(config))
 
     async def readdir(
-        self, path: PathSpec, entry: FileStat | None = None
-    ) -> list[FileStat]:
-        return await _readdir(self.accessor, path, entry)
+        self,
+        path: PathSpec,
+        entry: FileStat | None = None,
+        limit: int | None = None,
+    ) -> list[FileStat] | DirListing:
+        return await _readdir(self.accessor, path, entry, limit)
 
     async def read(
         self,

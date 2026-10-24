@@ -19,14 +19,15 @@ from mirage.core.msgraph.drive import (
     virtual_key,
 )
 from mirage.core.onedrive.client import drive_loc
-from mirage.types import FileStat, PathSpec
+from mirage.types import DirListing, FileStat, PathSpec
 
 
 async def readdir(
-    accessor: OneDriveAccessor, path: PathSpec
-) -> list[FileStat]:
+    accessor: OneDriveAccessor, path: PathSpec, limit: int | None = None
+) -> list[FileStat] | DirListing:
     return await readdir_items(
         accessor,
         drive_loc(accessor.config, directory_path(path).vfs_path),
         virtual_key(path),
+        limit,
     )

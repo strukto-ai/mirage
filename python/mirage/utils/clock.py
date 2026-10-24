@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 import time
 from typing import Protocol
 
@@ -27,6 +28,15 @@ class Clock(Protocol):
         """Seconds from an arbitrary origin that never moves backwards."""
         ...
 
+    async def sleep(self, seconds: float) -> None:
+        """Wait ``seconds`` on this clock.
+
+        Args:
+            seconds (float): how long to wait; zero or less returns at
+                once.
+        """
+        ...
+
 
 class SystemClock:
     """Platform clock used when no clock is supplied."""
@@ -39,12 +49,25 @@ class SystemClock:
         """Seconds from an arbitrary origin that never moves backwards."""
         return time.monotonic()
 
+    async def sleep(self, seconds: float) -> None:
+        """Wait ``seconds`` of real time.
+
+        Args:
+            seconds (float): how long to wait; zero or less returns at
+                once.
+        """
+        await asyncio.sleep(seconds)
+
     def __repr__(self) -> str:
         return "SystemClock()"
 
 
 class ManualClock:
     """Clock advanced explicitly by the caller. Readings have no side effects.
+
+    A sleep advances the clock by its length and returns without waiting,
+    so a wait costs no real time. Waits do not overlap: two tasks that
+    each sleep 30 seconds advance it by 60.
 
     Args:
         start (float): initial wall time in seconds; monotonic starts at zero.
@@ -75,6 +98,17 @@ class ManualClock:
             raise ValueError("cannot advance a clock backwards")
         self._wall += seconds
         self._monotonic += seconds
+
+    async def sleep(self, seconds: float) -> None:
+        """Advance by ``seconds`` and yield once to the loop.
+
+        Args:
+            seconds (float): how long the wait lasts on this clock; zero,
+                a negative or NaN advances nothing.
+        """
+        if seconds > 0:
+            self.advance(seconds)
+        await asyncio.sleep(0)
 
     def __repr__(self) -> str:
         return (

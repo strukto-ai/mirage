@@ -18,19 +18,22 @@ from collections.abc import AsyncIterator
 from contextlib import aclosing, asynccontextmanager
 from typing import Any
 
+from bson import ObjectId
 from gridfs.errors import NoFile
 
 from mirage.accessor.gridfs import GridFSAccessor
 from mirage.cache.types import WriteCondition
 from mirage.core.gridfs.client import (
     bucket,
-    delete_all,
     files_coll,
     iter_latest,
     latest_file,
     prefix_query,
+    prune,
+    retag,
+    trashed,
 )
-from mirage.core.gridfs.constants import SCOPE_ERROR
+from mirage.core.gridfs.constants import SCOPE_ERROR, TRASH_PREFIX
 from mirage.core.object_store.driver import (
     ChildEntry,
     ObjectMeta,
@@ -53,7 +56,7 @@ def subtree_query(stem: str) -> dict[str, Any]:
         stem (str): backend key with no trailing slash.
     """
     if not stem:
-        return {}
+        return prefix_query("")
     return {
         "$or": [
             {"filename": stem},
@@ -111,7 +114,18 @@ async def _list_subtree(
 
 
 async def _head(conn: GridFSAccessor, key: str) -> ObjectMeta | None:
-    doc = await latest_file(conn, key)
+    return _meta_of(await latest_file(conn, key))
+
+
+async def _head_revision(
+    conn: GridFSAccessor, key: str, revision: str
+) -> ObjectMeta | None:
+    # A pinned stat: the revision by its _id, wherever rm or mv moved it.
+    doc = await files_coll(conn).find_one({"_id": ObjectId(revision)})
+    return _meta_of(doc)
+
+
+def _meta_of(doc: dict[str, Any] | None) -> ObjectMeta | None:
     if doc is None:
         return None
     revision = str(doc["_id"])
@@ -137,28 +151,27 @@ async def _get(conn: GridFSAccessor, key: str) -> bytes | None:
     return data
 
 
-async def _put(
-    conn: GridFSAccessor, key: str, data: bytes
-) -> ObjectMeta | None:
-    # Uploads a new revision; older revisions stay in fs.files, so reads
-    # pinned to an old revision _id keep working (GridFS-native
-    # versioning). The new _id wins both keys of LATEST_SORT, so it is
-    # what _head answers next, spelled the same way.
-    oid = await bucket(conn).upload_from_stream(key, data)
-    revision = str(oid)
-    return ObjectMeta(size=len(data), fingerprint=revision, revision=revision)
-
-
-async def _put_stream(
-    conn: GridFSAccessor, key: str, data: ByteSource, cond: WriteCondition
+async def _upload(
+    conn: GridFSAccessor, key: str, source: AsyncIterator[bytes]
 ) -> ObjectMeta:
+    """Upload one new revision of ``key``, then prune past retention.
+
+    Every op that adds a revision goes through here, so none can skip
+    ``keep_revisions``. Older revisions stay in fs.files, so reads pinned
+    to an old ``_id`` keep working, and the new ``_id`` wins both keys of
+    LATEST_SORT, so it is what ``_head`` answers next, spelled the same way.
+
+    Args:
+        conn (GridFSAccessor): GridFS accessor.
+        key (str): backend key the revision is uploaded under.
+        source (AsyncIterator[bytes]): the revision's bytes.
+    """
     upload = bucket(conn).open_upload_stream(key)
     size = 0
     try:
-        async with aclosing(chunks(data)) as source:
-            async for chunk in source:
-                await upload.write(chunk)
-                size += len(chunk)
+        async for chunk in source:
+            await upload.write(chunk)
+            size += len(chunk)
         await upload.close()
     except BaseException:
         try:
@@ -166,18 +179,55 @@ async def _put_stream(
         except Exception:
             logger.debug("Could not abort GridFS upload", exc_info=True)
         raise
+    # A key's revisions, live and trashed, each counted per filename.
+    await prune(conn, {"filename": {"$in": [key, trashed(key)]}})
     revision = str(upload._id)
     return ObjectMeta(size=size, fingerprint=revision, revision=revision)
 
 
+async def _remove(conn: GridFSAccessor, key: str, subtree: bool) -> None:
+    """Move every revision of ``key`` (or under it) to the trash, then
+    prune the trash past retention.
+
+    Every op that takes a name away goes through here, so none deletes a
+    revision outright or skips ``keep_revisions``. The revisions keep their
+    ``_id``, so a snapshot pinned to one still reads it.
+
+    Args:
+        conn (GridFSAccessor): GridFS accessor.
+        key (str): backend key, or a prefix with its trailing slash.
+        subtree (bool): whether ``key`` is a prefix.
+    """
+    if subtree:
+        live, gone = prefix_query(key), prefix_query(trashed(key))
+    else:
+        live, gone = {"filename": key}, {"filename": trashed(key)}
+    await retag(conn, live, TRASH_PREFIX)
+    await prune(conn, gone)
+
+
+async def _put(
+    conn: GridFSAccessor, key: str, data: bytes
+) -> ObjectMeta | None:
+    async with aclosing(chunks(data)) as source:
+        return await _upload(conn, key, source)
+
+
+async def _put_stream(
+    conn: GridFSAccessor, key: str, data: ByteSource, cond: WriteCondition
+) -> ObjectMeta:
+    async with aclosing(chunks(data)) as source:
+        return await _upload(conn, key, source)
+
+
 async def _delete_file(conn: GridFSAccessor, key: str) -> None:
-    # Removes every revision of the filename (rm semantics; mirrors S3's
-    # delete_object, which also succeeds silently on a missing key).
-    await delete_all(conn, {"filename": key})
+    # rm semantics: silent on a missing key, like S3's delete_object, and
+    # no more destructive than its delete marker.
+    await _remove(conn, key, subtree=False)
 
 
 async def _delete_prefix(conn: GridFSAccessor, pfx: str) -> None:
-    await delete_all(conn, prefix_query(pfx))
+    await _remove(conn, pfx, subtree=True)
 
 
 async def _copy_file(conn: GridFSAccessor, src_key: str, dst_key: str) -> bool:
@@ -186,18 +236,16 @@ async def _copy_file(conn: GridFSAccessor, src_key: str, dst_key: str) -> bool:
     doc = await latest_file(conn, src_key)
     if doc is None:
         return False
-    b = bucket(conn)
-    out = await b.open_download_stream(doc["_id"])
-    grid_in = b.open_upload_stream(dst_key)
+    out = await bucket(conn).open_download_stream(doc["_id"])
+
+    async def source() -> AsyncIterator[bytes]:
+        while chunk := await out.read(_COPY_CHUNK):
+            yield chunk
+
     try:
-        while True:
-            chunk = await out.read(_COPY_CHUNK)
-            if not chunk:
-                break
-            await grid_in.write(chunk)
+        await _upload(conn, dst_key, source())
     finally:
         await out.close()
-        await grid_in.close()
     return True
 
 
@@ -207,10 +255,8 @@ async def _move_file(conn: GridFSAccessor, src_key: str, dst_key: str) -> bool:
     if await latest_file(conn, src_key) is None:
         return False
     if dst_key != src_key:
-        await delete_all(conn, {"filename": dst_key})
-    await files_coll(conn).update_many(
-        {"filename": src_key}, {"$set": {"filename": dst_key}}
-    )
+        await _remove(conn, dst_key, subtree=False)
+    await retag(conn, {"filename": src_key}, dst_key, src_key)
     return True
 
 
@@ -231,29 +277,12 @@ async def _move_prefix(
     Returns:
         bool: whether any revision was found under the source prefix.
     """
-    files = files_coll(conn)
-    docs: list[dict[str, Any]] = []
-    async for doc in files.find(
-        prefix_query(src_pfx), projection={"_id": 1, "filename": 1}
-    ):
-        docs.append(doc)
-    if not docs:
-        return False
     if dst_pfx != src_pfx:
-        # Read the source docs before clearing the destination: on a
-        # self-directed move the two queries select the same revisions,
-        # and deleting first would drop what the retag is about to move.
-        await delete_all(conn, prefix_query(dst_pfx))
-    for doc in docs:
-        await files.update_one(
-            {"_id": doc["_id"]},
-            {
-                "$set": {
-                    "filename": f"{dst_pfx}{doc['filename'][len(src_pfx) :]}"
-                }
-            },
-        )
-    return True
+        if not await _probe_prefix(conn, src_pfx):
+            return False
+        await _remove(conn, dst_pfx, subtree=True)
+    moved = await retag(conn, prefix_query(src_pfx), dst_pfx, src_pfx)
+    return moved > 0
 
 
 async def _probe_prefix(conn: GridFSAccessor, pfx: str) -> bool:
@@ -275,6 +304,7 @@ DRIVER: ObjectStoreDriver[GridFSAccessor, GridFSAccessor] = ObjectStoreDriver(
     list_children=_list_children,
     list_subtree=_list_subtree,
     head=_head,
+    head_revision=_head_revision,
     get=_get,
     put=_put,
     put_stream=_put_stream,

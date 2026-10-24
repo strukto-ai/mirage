@@ -22,6 +22,7 @@ from pydantic import BaseModel
 from mirage.accessor.responses import ResponseCache
 from mirage.core.api.client import SessionPool
 from mirage.types import JsonValue, ReadSpec
+from mirage.utils.clock import Clock
 
 
 class Accessor:
@@ -65,6 +66,15 @@ class Accessor:
         caches."""
         for cache in self.caches():
             cache.clear()
+
+    def bind_clock(self, clock: Clock) -> None:
+        """Read time and wait on the clock of the workspace it serves;
+        the default reads none.
+
+        Args:
+            clock (Clock): the workspace's clock.
+        """
+        return None
 
 
 class SessionAccessor(Accessor):

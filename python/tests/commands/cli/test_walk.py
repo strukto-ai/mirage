@@ -566,6 +566,33 @@ def test_group_env_yields_to_the_typed_value():
     assert result.group_flags == {"--token": "typed"}
 
 
+def test_structural_selection_defers_only_missing_env_backed_requirements():
+    leaf = CommandSpec(name="send")
+    spec = CommandSpec(
+        name="tool",
+        arguments=(
+            Argument("--token", env="TOKEN", required=True, choices=("good",)),
+            Argument("--region", required=True),
+        ),
+        subcommands=(leaf,),
+    )
+    assert walk("tool", spec, ["--region", "west", "send"]).leaf is None
+    assert (
+        walk("tool", spec, ["--region", "west", "send"], defer_env=True).leaf
+        is leaf
+    )
+    assert walk("tool", spec, ["send"], defer_env=True).leaf is None
+    assert (
+        walk(
+            "tool",
+            spec,
+            ["--token", "bad", "--region", "west", "send"],
+            defer_env=True,
+        ).leaf
+        is None
+    )
+
+
 def _shared_env_tree() -> CommandSpec:
     return CommandSpec(
         name="tool",

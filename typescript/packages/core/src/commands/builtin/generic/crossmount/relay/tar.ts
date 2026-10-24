@@ -16,11 +16,12 @@ import { type ByteSource, IOResult } from '../../../../../io/types.ts'
 import type { PathSpec } from '../../../../../types.ts'
 import type { FlagValue } from '../../../../spec/types.ts'
 import { relayIsDirOf, relayWalkOf } from '../../../generic_bind/archive_io.ts'
+import { dispatchedReadTree } from '../../../generic_bind/files.ts'
 import { parseFlags, tarGeneric } from '../../tar/tar.ts'
 import { crossOpts, flatten, statOp, streamOp } from '../utils.ts'
 import type { CrossResult, DispatchFn } from '../types.ts'
 import type { Files } from '../../../../../workspace/files.ts'
-import { owedNames } from '../../../utils/links.ts'
+import { linkLocation, linkView, mountView, owedNames } from '../../../utils/links.ts'
 
 /**
  * Run a tar whose archive, operands and -C destination span mounts.
@@ -40,6 +41,16 @@ export async function runTar(
   vfs?: Files,
   stdin: ByteSource | null = null,
 ): Promise<CrossResult> {
+  const links = linkView(vfs)
+  const tree =
+    vfs === undefined
+      ? undefined
+      : dispatchedReadTree(
+          dispatch,
+          mountView(vfs),
+          links === undefined ? null : (virtual) => linkLocation(links, virtual),
+          true,
+        )
   const parsed = parseFlags(flagKwargs)
   const archive = parsed.archive
   const created = archive !== null && parsed.create ? scopes : []
@@ -56,7 +67,7 @@ export async function runTar(
         await dispatch('mkdir', p)
       },
       stat: statOp(dispatch),
-      walk: relayWalkOf(dispatch, (dir: string) => owedNames(vfs, dir), 'tar'),
+      walk: relayWalkOf(dispatch, (dir: string) => owedNames(vfs, dir), 'tar', tree),
       isDir: relayIsDirOf(dispatch),
     },
     true,

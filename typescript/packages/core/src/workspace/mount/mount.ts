@@ -24,10 +24,12 @@ import {
   effectiveMountMode,
   requirePathsWritable,
   runWithCaller,
+  sessionVisibility,
   strongestModeUnder,
   withCaller,
 } from '../../context/session_context.ts'
 import { mountKey } from '../../utils/key_prefix.ts'
+import { pathVisible } from '../../utils/hidden.ts'
 import { coerceReadPolicy } from './read_policy.ts'
 import { coerceWritePolicy, writeConditions } from './write_policy.ts'
 import { KeyLock } from '../../cache/lock.ts'
@@ -52,6 +54,7 @@ import { declared, declaredCalls, methodName } from '../../vfs/call.ts'
 import { WRITE_EFFECTS } from '../../vfs/constants.ts'
 import { Effect, type Handed } from '../../vfs/types.ts'
 import { isUnsatisfiableRange, sliceWindow } from '../../utils/ranges.ts'
+import type { Clock } from '../../utils/clock.ts'
 
 import { getExtension } from '../../utils/filetype.ts'
 import { resolveLimit } from '../../policy/index.ts'
@@ -190,9 +193,10 @@ function dstArg(value: unknown): PathSpec {
   return value
 }
 
-/** What rides beside the path: the handed stats. */
+/** What rides beside the path: the handed stats, and a walk's `limit`. */
 function handedOf(kw: OpKwargs): Handed | undefined {
-  return kw.handed as Handed | undefined
+  const handed = kw.handed as Handed | undefined
+  return typeof kw.limit === 'number' ? { ...handed, limit: kw.limit } : handed
 }
 
 /**
@@ -204,6 +208,8 @@ function handedOf(kw: OpKwargs): Handed | undefined {
  */
 function taken(name: string, kwargs: OpKwargs): void {
   const keywords: Readonly<Record<string, readonly string[]>> = {
+    readdir: ['limit'],
+    read_tree: ['limit'],
     read: ['offset', 'size'],
     write: ['atomic'],
     mkdir: ['parents'],
@@ -253,6 +259,7 @@ async function collected(
   answer: Promise<ByteSource> | AsyncIterable<Uint8Array>,
   path: PathSpec,
   whole: boolean,
+  clock: Clock,
 ): Promise<Uint8Array> {
   const found = await answer
   if (found instanceof Uint8Array) return found
@@ -268,7 +275,9 @@ async function collected(
       }
     })
   const [data, records] =
-    activeRecords() === undefined ? (await runWithRecording(collect))[0] : await collect()
+    activeRecords() === undefined
+      ? (await runWithRecording(collect, null, clock))[0]
+      : await collect()
   publishRead(path.virtual, data, latestFingerprint(records, path.virtual))
   return data
 }
@@ -291,6 +300,7 @@ async function readWindow(
   path: PathSpec,
   kwargs: OpKwargs,
   handed: Handed | undefined,
+  clock: Clock,
 ): Promise<Uint8Array> {
   const offset = typeof kwargs.offset === 'number' ? kwargs.offset : 0
   const size = typeof kwargs.size === 'number' ? kwargs.size : null
@@ -298,13 +308,13 @@ async function readWindow(
   const whole = offset === 0 && size === null
   if (ranges && !whole) {
     try {
-      return await collected(read(path, handed, offset, size), path, false)
+      return await collected(read(path, handed, offset, size), path, false, clock)
     } catch (err) {
       if (!isUnsatisfiableRange(err)) throw err
       return new Uint8Array(0)
     }
   }
-  const data = await collected(read(path, handed), path, true)
+  const data = await collected(read(path, handed), path, true, clock)
   return whole ? data : sliceWindow(data, offset, size)
 }
 
@@ -840,14 +850,14 @@ export class MountEntry {
           : (vfs as unknown as Record<string, ReadFn | undefined>)[renderer]
       if (render !== undefined) {
         levels.push((scope, _args, kw) =>
-          readWindow(render.bind(vfs), true, scope, kw, handedOf(kw)),
+          readWindow(render.bind(vfs), true, scope, kw, handedOf(kw), this.indexStore.clock),
         )
       }
       if (vfs.supports('read')) {
         const read: ReadFn = (path, given, offset, size) =>
           vfs.read(path, given, offset, size, callerSignal())
         levels.push((scope, _args, kw) =>
-          readWindow(read, vfs.readsRanges, scope, kw, handedOf(kw)),
+          readWindow(read, vfs.readsRanges, scope, kw, handedOf(kw), this.indexStore.clock),
         )
       }
       return levels
@@ -1035,7 +1045,7 @@ export class MountEntry {
 
   /** The VFS's read of a whole file, handed what is at its path. */
   private readAt(index: IndexCacheStore, path: PathSpec): Promise<Uint8Array> {
-    return collected(this.answer(this.vfs, index, path), path, true)
+    return collected(this.answer(this.vfs, index, path), path, true, index.clock)
   }
 
   /**
@@ -1624,7 +1634,7 @@ export class MountEntry {
           const runCtx = user
             ? this.commandCtx(this.keyedFlags(flags), ctx, this.prefix)
             : this.commandCtx(virtualFlags(flags), ctx, '')
-          const refusal = this.readOnlyRefusal(cmdName, cmd, flags, access)
+          const refusal = this.commandRefusal(cmdName, cmd, flags, access)
           if (refusal !== null) return [null, refusal]
           const result = await this.runOne(
             cmdName,
@@ -1800,7 +1810,11 @@ export class MountEntry {
   }
 
   /**
-   * Refuse a user command that writes, on a read-only mount.
+   * Refuse a user handler on a hidden mount, or a writer on a read-only one.
+   *
+   * A user handler can reach its accessor directly, so a hidden mount's
+   * handler must never run, even when an explicit operand or cwd selected it.
+   * It answers an unknown command without revealing the hidden mount's name.
    *
    * Mirage's own commands write through the dispatcher, which refuses each
    * write in the command's own GNU voice, because only the write knows
@@ -1816,15 +1830,21 @@ export class MountEntry {
    * the command this mount serves `cmd` under, which says whether it is a
    * user command: a tree's root for one of its leaves, which is built for its
    * one run and never registered. Mirrors Python's
-   * MountEntry._read_only_refusal.
+   * MountEntry._command_refusal.
    */
-  private readOnlyRefusal(
+  private commandRefusal(
     cmdName: string,
     cmd: Command,
     flags: Record<string, FlagValue>,
     access?: SessionAccess,
     served?: Command,
   ): IOResult | null {
+    if (this.isUserCommand(served ?? cmd) && !pathVisible(sessionVisibility(access), this.prefix)) {
+      return new IOResult({
+        exitCode: 127,
+        stderr: encodeText(`${cmdName}: command not found\n`),
+      })
+    }
     const infoOnly =
       (flags.help === true && hasInjectedHelp(cmd.spec)) ||
       (flags.version === true && hasInjectedVersion(cmd.spec))
@@ -1939,7 +1959,7 @@ export class MountEntry {
       return this.inCommandScope(probe, async (): Promise<CommandFnResult> => {
         // No flag here is answered for the leaf: walkLeaf answered the
         // tree's own help, and the leaf is handed the rest.
-        const refusal = this.readOnlyRefusal(prog, leaf, {}, access, root)
+        const refusal = this.commandRefusal(prog, leaf, {}, access, root)
         if (refusal !== null) return [null, refusal]
         const accessor = this.viewFor(access).accessor
         return this.runIn(

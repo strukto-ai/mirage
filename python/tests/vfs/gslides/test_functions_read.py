@@ -20,6 +20,7 @@ from mirage.accessor.gslides import GSlidesAccessor
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
 from mirage.vfs.gslides import GSlidesVFS
+from tests.fixtures.google_api import offline_token_manager
 from tests.fixtures.vfs_io import call_over
 
 
@@ -33,7 +34,7 @@ def _scope(path: str, prefix: str = "/gslides") -> PathSpec:
 
 @pytest.fixture
 def accessor():
-    return GSlidesAccessor(config=None, token_manager=None)
+    return GSlidesAccessor(config=None, token_manager=offline_token_manager())
 
 
 @pytest.mark.asyncio

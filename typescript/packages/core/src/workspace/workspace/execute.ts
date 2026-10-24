@@ -1033,7 +1033,12 @@ async function runParsedLine(
       // The runtime's file calls are the line's, recorded as a tree's are,
       // and handed over however the run ends: a call it finished before it
       // failed or was aborted still happened.
-      const recording: RecordingState = { records: [], mountId: null, ledger: env.records }
+      const recording: RecordingState = {
+        records: [],
+        mountId: null,
+        ledger: env.records,
+        clock: env.registry.clock,
+      }
       const lineRecords = recording.records
       // Joined like the tree's record: a stalled store releases the caller,
       // a fast one records before history is read.
@@ -1175,7 +1180,7 @@ async function runParsedLine(
     }
     try {
       execResult = await inLine(async () =>
-        isLine ? runWithRecording(runBody, env.records) : [await runBody(), []],
+        isLine ? runWithRecording(runBody, env.records, env.registry.clock) : [await runBody(), []],
       )
       // A record a nested line earned is the line's to report when its
       // own tree earned none (see NestedRefusal). A question a gate left

@@ -39,7 +39,10 @@ class DriveApi(Protocol):
     ) -> list[dict[str, Any]]: ...
 
     async def list_children(
-        self, folder_ids: list[str], drive_id: str | None
+        self,
+        folder_ids: list[str],
+        drive_id: str | None,
+        limit: int | None = None,
     ) -> list[dict[str, Any]]: ...
 
     async def list_shared_drives(self) -> list[dict[str, Any]]: ...
@@ -135,10 +138,13 @@ class DriveClient:
         )
 
     async def list_children(
-        self, folder_ids: list[str], drive_id: str | None
+        self,
+        folder_ids: list[str],
+        drive_id: str | None,
+        limit: int | None = None,
     ) -> list[dict[str, Any]]:
         return await drive.list_children(
-            self.token_manager, folder_ids, drive_id
+            self.token_manager, folder_ids, drive_id, limit=limit
         )
 
     async def list_shared_drives(self) -> list[dict[str, Any]]:

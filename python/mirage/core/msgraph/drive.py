@@ -53,7 +53,7 @@ from mirage.observe.context import (
     revision_for,
     start_op,
 )
-from mirage.types import FileStat, FileType, PathSpec
+from mirage.types import DirListing, FileStat, FileType, PathSpec
 from mirage.utils.filetype import content_type_for_path
 from mirage.utils.key_prefix import mount_prefix_of
 from mirage.utils.ranges import window_for
@@ -694,6 +694,7 @@ async def batch_tree(
     accessor: OneDriveAccessor | SharePointAccessor,
     loc: DriveLoc,
     virtual_key: str,
+    limit: int | None = None,
 ) -> dict[str, FileStat] | None:
     """Every item under a folder, each as its folder's listing renders it,
     from the folders' listings sent ``BATCH_LIMIT`` to a request through
@@ -708,17 +709,26 @@ async def batch_tree(
     are read as a listing reads them. None
     when Graph refuses a batch, or when a listing below the folder fails
     (a folder gone, or one the account may not open), so the walk lists
-    what is there and reports, or skips, each folder on its own.
+    what is there and reports, or skips, each folder on its own; None too
+    once it holds more than ``limit`` items, which no listing is paged
+    past.
 
     Args:
         accessor (OneDriveAccessor | SharePointAccessor): Graph accessor.
         loc (DriveLoc): the folder.
         virtual_key (str): its mount-absolute path, which an error names.
+        limit (int | None): the most entries a walk can still keep.
     """
     found: dict[str, FileStat] = {}
-    rows = await readdir_items(accessor, loc, virtual_key)
+    rows = await readdir_items(accessor, loc, virtual_key, limit)
+    if isinstance(rows, DirListing):
+        return None
     level = _filed(found, "", loc, rows)
     while level:
+        if limit is not None and len(found) > limit:
+            return None
+        left = None if limit is None else limit - len(found) + 1
+        got = 0
         below: list[tuple[str, DriveLoc]] = []
         for start in range(0, len(level), BATCH_LIMIT):
             chunk = level[start : start + BATCH_LIMIT]
@@ -731,10 +741,19 @@ async def batch_tree(
                 )
                 if pause:
                     await asyncio.sleep(pause)
-                listed = [
-                    await _batch_page(accessor, url, status, body)
-                    for url, (status, body, _) in zip(urls, answers)
-                ]
+                listed: list[list[dict[str, Any]]] = []
+                for url, (status, body, _) in zip(urls, answers):
+                    if left is not None and got >= left:
+                        return None
+                    items = await _batch_page(
+                        accessor,
+                        url,
+                        status,
+                        body,
+                        None if left is None else left - got,
+                    )
+                    got += len(items)
+                    listed.append(items)
             except (GraphError, aiohttp.ClientError, OSError) as exc:
                 logger.debug(
                     "graph tree of %s left to the walk: %s", loc.path, exc
@@ -743,7 +762,11 @@ async def batch_tree(
             for (rel, folder), items in zip(chunk, listed):
                 rows = sorted(map(entry_stat, items), key=lambda r: r.name)
                 below.extend(_filed(found, rel, folder, rows))
+        if left is not None and got >= left:
+            return None
         level = below
+    if limit is not None and len(found) > limit:
+        return None
     return found
 
 
@@ -752,19 +775,26 @@ async def _batch_page(
     url: str,
     status: int,
     body: dict[str, Any],
+    limit: int | None = None,
 ) -> list[dict[str, Any]]:
     """A folder's whole listing from its answer in a batch: the page the
     batch held and the pages after it, or the listing asked again on its
-    own when the batch did not answer it.
+    own when the batch did not answer it; no page past the one that
+    brings ``limit`` items.
 
     Args:
         accessor (OneDriveAccessor | SharePointAccessor): Graph accessor.
         url (str): the listing's URL.
         status (int): the answer's status.
         body (dict[str, Any]): the answer's body.
+        limit (int | None): stop once this many items are in hand.
     """
     if status != 200:
-        return await graph_list(accessor, url)
+        return await (
+            graph_list(accessor, url)
+            if limit is None
+            else graph_list(accessor, url, limit=limit)
+        )
     value = body.get("value")
     items = [
         item
@@ -772,8 +802,14 @@ async def _batch_page(
         if isinstance(item, dict)
     ]
     rest = body.get("@odata.nextLink")
-    if isinstance(rest, str):
+    if not isinstance(rest, str):
+        return items
+    if limit is None:
         items.extend(await graph_list(accessor, rest))
+    elif len(items) < limit:
+        items.extend(
+            await graph_list(accessor, rest, limit=limit - len(items))
+        )
     return items
 
 
@@ -906,16 +942,23 @@ async def readdir_items(
     accessor: OneDriveAccessor | SharePointAccessor,
     loc: DriveLoc,
     virtual_key: str,
-) -> list[FileStat]:
-    """A folder's children, each as ``stat`` answers it.
+    limit: int | None = None,
+) -> list[FileStat] | DirListing:
+    """A folder's children, each as ``stat`` answers it; past a walk's
+    ``limit`` Graph is paged no further, and the listing is partial.
 
     Args:
         accessor (OneDriveAccessor | SharePointAccessor): Graph accessor.
         loc (DriveLoc): the folder.
         virtual_key (str): its mount-absolute path, which an error names.
+        limit (int | None): the most entries a walk can still keep.
     """
     try:
-        children = await graph_list(accessor, loc.item("/children"))
+        children = await (
+            graph_list(accessor, loc.item("/children"))
+            if limit is None
+            else graph_list(accessor, loc.item("/children"), limit=limit)
+        )
     except GraphError as exc:
         if exc.status != 404:
             raise
@@ -931,6 +974,8 @@ async def readdir_items(
         ) from exc
     rows = [entry_stat(child) for child in children]
     rows.sort(key=lambda row: row.name)
+    if limit is not None and len(children) >= limit:
+        return DirListing(rows, partial=True)
     return rows
 
 

@@ -45,6 +45,7 @@ config files and large binaries go through the same path.
 | <code style={{ whiteSpace: 'nowrap' }}>bucket</code><br />default `'fs'` | GridFS bucket name; its collections are `<bucket>.files` and `<bucket>.chunks`. |
 | <code style={{ whiteSpace: 'nowrap' }}>key_prefix</code> | Filename prefix the mount treats as its root; files outside it are not listed. |
 | <code style={{ whiteSpace: 'nowrap' }}>chunk_size_bytes</code> | Chunk size in bytes for files the mount writes; unset uses the driver's default, 255 KiB. |
+| <code style={{ whiteSpace: 'nowrap' }}>keep_revisions</code> | Revisions kept per file, newest first: a write or an `rm` deletes the rest, under the file's name and in the trash `rm` moves revisions to (`/trash/<filename>`, which no mount path reaches). Unset keeps every revision, so a snapshot pinned to any of them still reads. |
 | <code style={{ whiteSpace: 'nowrap' }}>walk_limit</code><br />default `1000` | Most files one command walks under a folder: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit. |
 
 Fields marked secret are redacted in snapshots.
@@ -143,8 +144,24 @@ GridFS filenames are not unique: every write uploads a **new revision** and
 keeps the old ones. The VFS always reads and lists the newest revision
 per filename, and snapshot-pinned reads resolve old revisions by their file
 `_id`, so time-travel reads work natively. `mv` retags every revision's
-filename server-side (history moves with the file), while `rm` deletes all
-revisions of the file.
+filename server-side (history moves with the file).
+
+`rm` destroys nothing: it retags every revision of the file into the trash,
+`/trash/<filename>`, the same way `mv` does. A mount key never starts with a
+slash, so no path on any mount, whatever its `key_prefix`, can list, stat or
+read a trashed revision, and the name reads as gone; a snapshot pinned to one
+of those revisions still stats and reads it by its `_id`. A file `mv` overwrites goes
+to the trash the same way. The trash keeps the whole original filename, so a
+revision is traceable to the key it was written under.
+
+`keep_revisions` bounds the history. Set it, and a write or an `rm` deletes
+the revisions past that count per filename, oldest first, under the file's
+name and under its trash name alike; a snapshot pinned to a pruned revision
+then fails to read it. Unset, the default, keeps every revision.
+
+```python
+GridFSConfig(uri=..., database="app", keep_revisions=5)
+```
 
 ## Walks
 

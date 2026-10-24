@@ -25,14 +25,15 @@ from mirage.utils.key_prefix import mount_key
 from mirage.vfs.gmail import GmailVFS
 from mirage.vfs.gmail.config import GmailConfig
 from tests.fixtures.gmail_api import StubGmail
-from tests.fixtures.google_api import serve
+from tests.fixtures.google_api import offline_token_manager, serve
 from tests.fixtures.mounted import Mounted
 
 
 @pytest.fixture
 def accessor():
     return GmailAccessor(
-        config=GmailConfig(access_token="t"), token_manager=None
+        config=GmailConfig(access_token="t"),
+        token_manager=offline_token_manager(),
     )
 
 

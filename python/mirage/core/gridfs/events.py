@@ -16,6 +16,7 @@ from collections.abc import Sequence
 
 from mirage.accessor.gridfs import GridFSAccessor
 from mirage.core.gridfs.client import files_coll
+from mirage.core.gridfs.constants import TRASH_PREFIX
 from mirage.events.payload import event_at, field, text_field
 from mirage.types import FileChangeKind, FileEvent, JsonValue, PathSpec
 from mirage.utils import key_prefix as kp
@@ -38,7 +39,9 @@ class GridFSEventHook:
     so after an insert, a delete or a rename the hook counts the
     revisions left under each name it touched: none is a DELETE, one
     just made is a CREATE, and any other is an UPDATE, since the file
-    now reads another revision. A delete names its document by id only;
+    now reads another revision. ``rm`` renames revisions into the trash,
+    which no mount path reaches, so a rename there settles only the name
+    left behind. A delete names its document by id only;
     the pre-image, or the insert the hook saw, names the file, and with
     neither the whole mount is UNKNOWN. A filename ending in ``/`` is a
     directory marker. A dropped or renamed collection, a dropped
@@ -55,12 +58,14 @@ class GridFSEventHook:
 
     def _relative(self, filename: str) -> str | None:
         """The mount-relative path of a filename, or None outside the
-        mount's key prefix.
+        mount's key prefix or in the trash.
 
         Args:
             filename (str): The ``filename`` of a files document.
         """
         prefix = kp.normalize(self._accessor.config.key_prefix)
+        if filename.startswith(TRASH_PREFIX):
+            return None
         if prefix and not filename.startswith(prefix):
             return None
         return filename[len(prefix) :]

@@ -13,3 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 export const SCOPE_ERROR = 5000
+
+// Where `rm` moves a filename's revisions. A mount key never starts with a
+// slash (`key_prefix.apply` strips every leading one), so no path on any
+// mount can name a trashed revision, whatever the mount's key prefix; a
+// pinned read still reaches one by its `_id`.
+export const TRASH_PREFIX = '/trash/'

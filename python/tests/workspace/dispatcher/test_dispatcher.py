@@ -55,6 +55,7 @@ from mirage.policy import (
 from mirage.policy.builtin.permissions import PermissionsPolicy
 from mirage.policy.types import EntryGate
 from mirage.types import (
+    DirListing,
     FileStat,
     FileType,
     HiddenPaths,
@@ -2542,6 +2543,26 @@ async def test_a_subtree_read_names_the_links_on_its_own_mount():
 
 
 @pytest.mark.asyncio
+async def test_a_subtree_read_answers_a_link_over_what_the_backend_holds():
+    # A writer past mirage can put a key where a link stands; a stat of
+    # the name answers the link, so the subtree read answers it too.
+    ram = RAMVFS()
+    ws = Workspace({"/base/": ram}, mode=MountMode.WRITE)
+    await ws.shell("echo hi > /base/f.txt")
+    await ws.shell("ln -s /base/f.txt /base/d")
+    ram._store.dirs.add("/d")
+    ram._store.files["/d/x"] = b"x"
+    tree, _ = await ws.dispatch(
+        "read_tree", PathSpec.from_str_path("/base"), nofollow=True
+    )
+    row, _ = await ws.dispatch(
+        "stat", PathSpec.from_str_path("/base/d"), nofollow=True
+    )
+    assert sorted(tree) == ["d", "f.txt"]
+    assert tree["d"].type is row.type is FileType.SYMLINK
+
+
+@pytest.mark.asyncio
 async def test_a_listing_that_does_not_follow_stops_at_a_link():
     # As open(2) answers a link with O_DIRECTORY | O_NOFOLLOW. A listing
     # that follows names the children under the link it was handed.
@@ -3296,6 +3317,74 @@ async def test_a_listed_count_stops_one_file_past_the_limit():
         with pytest.raises(ValueError, match="more than 2 files"):
             await ws.dispatch("before_full_walk", _path("/ram/d"))
     assert len(vfs.listed) == 4
+
+
+class CutRAM(RAMVFS):
+    """A RAM mount whose listing stops at a walk's ``limit``."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.asked: list[int | None] = []
+        self._store.dirs.add("/d")
+        for name in ("a", "b", "sec"):
+            self._store.files[f"/d/{name}"] = b""
+
+    async def readdir(self, path, limit=None):
+        self.asked.append(limit)
+        rows = list(await super().readdir(path))
+        if limit is None or len(rows) < limit:
+            return rows
+        return DirListing(rows[:limit], partial=True)
+
+
+@pytest.mark.asyncio
+async def test_a_cut_listing_is_not_kept_as_the_whole_directory():
+    vfs = CutRAM()
+    with Workspace({"/ram/": vfs}) as ws:
+        cut, _ = await ws.dispatch("readdir", _path("/ram/d"), limit=2)
+        whole, _ = await ws.dispatch("readdir", _path("/ram/d"))
+    assert vfs.asked == [2, None]
+    assert (len(cut), len(whole)) == (2, 3)
+
+
+class KeywordRAM(RAMVFS):
+    """A RAM mount whose listing names ``limit`` beside taking any
+    keyword."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.asked: list[int | None] = []
+        self._store.dirs.add("/d")
+
+    async def readdir(self, path, limit=None, **kwargs):
+        self.asked.append(limit)
+        return await super().readdir(path)
+
+
+@pytest.mark.asyncio
+async def test_a_listing_taking_any_keyword_is_handed_the_limit_it_names():
+    vfs = KeywordRAM()
+    with Workspace({"/ram/": vfs}) as ws:
+        await ws.dispatch("readdir", _path("/ram/d"), limit=2)
+    assert vfs.asked == [2]
+
+
+@pytest.mark.asyncio
+async def test_a_hide_below_a_listing_drops_the_walks_limit():
+    # The hide filters the listing after the backend answers, so a cut
+    # one could leave nothing visible and still read as complete.
+    vfs = CutRAM()
+    with Workspace({"/ram/": vfs}) as ws:
+        sess = ws.create_session(
+            "veiled", profile={"paths": {"hide": ["/ram/d/sec"]}}
+        )
+        token = set_current_session(sess)
+        try:
+            listed, _ = await ws.dispatch("readdir", _path("/ram/d"), limit=2)
+        finally:
+            reset_current_session(token)
+    assert vfs.asked == [None]
+    assert listed == ["/ram/d/a", "/ram/d/b"]
 
 
 @pytest.mark.asyncio
