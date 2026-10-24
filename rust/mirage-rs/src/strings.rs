@@ -8,19 +8,16 @@ struct Config {
     /// `-n` as typed.
     #[serde(default, deserialize_with = "crate::latin1_opt")]
     min_len: Option<Vec<u8>>,
-    inputs: usize,
 }
 
 pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
-    let Config { min_len, inputs } = parse_config(config)?;
+    let Config { min_len } = parse_config(config)?;
     let min_len = match min_len {
         Some(text) => min_length(&text).map_err(StreamError::new)?,
         None => 4,
     };
     Ok(Box::new(Strings {
         min_len,
-        inputs,
-        input: 0,
         run: Vec::new(),
         printing: false,
     }))
@@ -73,13 +70,11 @@ fn min_length(text: &[u8]) -> Result<u64, String> {
     }
 }
 
-/// binutils 2.44 strings over each whole input in turn: every run of at
-/// least `min_len` printable bytes (ASCII's graphic ones, the space and
-/// the tab) is written with a newline after it.
+/// binutils 2.44 strings over a whole input: every run of at least
+/// `min_len` printable bytes (ASCII's graphic ones, the space and the tab)
+/// is written with a newline after it.
 struct Strings {
     min_len: u64,
-    inputs: usize,
-    input: usize,
     /// The run so far while it is shorter than `min_len`, which binutils
     /// allocates up front.
     run: Vec<u8>,
@@ -129,16 +124,6 @@ impl Stream for Strings {
 
     fn finish(&mut self, out: &mut Vec<u8>) -> Result<(), StreamError> {
         self.end_run(out);
-        Ok(())
-    }
-
-    fn wants(&self) -> Option<usize> {
-        (self.input < self.inputs).then_some(self.input)
-    }
-
-    fn end_input(&mut self, _index: usize, out: &mut Vec<u8>) -> Result<(), StreamError> {
-        self.end_run(out);
-        self.input += 1;
         Ok(())
     }
 }

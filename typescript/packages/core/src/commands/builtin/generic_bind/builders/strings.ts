@@ -18,54 +18,32 @@ import { commandFiles, dirAwareStream, resolveOrEmpty } from '../files.ts'
 import { specOf } from '../../../spec/builtins.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
 import { IOResult, type ByteSource } from '../../../../io/types.ts'
-import type { JsonValue } from '../../../../types.ts'
 import { StreamRefusal } from '../../../../rs/errors.ts'
-import { chainOutput, closeStream, openStream, type OpenStream } from '../../../../rs/stream.ts'
+import { openStream, runStream } from '../../../../rs/stream.ts'
 import { byteView } from '../../../../shell/bytes.ts'
 import { stdinStream } from '../../utils/stream.ts'
-import { reportedStream } from '../../utils/operands.ts'
+import { perOperand } from '../../utils/operands.ts'
 
 const ENC = new TextEncoder()
 
-/** Each input's printable runs; a refused -n prints its refusal, exit 1. */
-async function* scanned(
-  config: Readonly<Record<string, JsonValue>>,
-  sources: readonly ByteSource[],
-  io: IOResult,
-  signal?: AbortSignal,
-): AsyncIterable<Uint8Array> {
-  let engine: OpenStream
+const strings: CommandFn = async (_accessor, paths, _texts, ctx) => {
+  const minLen = new FlagView(ctx.flags, specOf('strings')).asText('n')
+  const config = { min_len: minLen === undefined ? null : byteView(minLen) }
+  // The engine refuses -n before any operand is touched, as binutils does.
   try {
-    engine = await openStream('strings', config)
+    const probe = await openStream('strings', config)
+    probe.close()
   } catch (err) {
     if (!(err instanceof StreamRefusal)) throw err
-    io.exitCode = 1
-    io.stderr = ENC.encode(`${err.message}\n`)
-    return
+    return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(`${err.message}\n`) })]
   }
-  try {
-    yield* chainOutput(engine, sources, signal)
-  } finally {
-    await closeStream(engine)
-  }
-}
-
-const strings: CommandFn = async (_accessor, paths, _texts, ctx) => {
   const files = commandFiles(ctx, paths)
   const resolved = await resolveOrEmpty(files, paths)
-  const minLen = new FlagView(ctx.flags, specOf('strings')).asText('n')
-  const config = {
-    min_len: minLen === undefined ? null : byteView(minLen),
-    inputs: Math.max(1, resolved.length),
-  }
   // binutils strings never reads `-` as stdin; only /dev/stdin is.
   const stream = stdinStream(dirAwareStream(files, ctx), ctx.stdin, false, false)
   const io = new IOResult()
-  const sources =
-    resolved.length > 0
-      ? resolved.map((path) => reportedStream(stream(path), io, path, 'strings'))
-      : [ctx.stdin ?? new Uint8Array()]
-  return [scanned(config, sources, io, ctx.signal), io]
+  const each = (source: ByteSource) => runStream('strings', config, source, ctx.signal)
+  return [perOperand(resolved, stream, ctx.stdin, io, 'strings', each), io]
 }
 
 export const BUILDER: GenericCommand = {

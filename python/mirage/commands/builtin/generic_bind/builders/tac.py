@@ -93,10 +93,6 @@ async def tac(
     texts: list[str],
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
-    files = command_files(ctx, paths)
-    resolved = await resolve_or_empty(files, paths)
-    stat = stdin_stat(dir_aware_stat(files, ctx))
-    readable, err = await split_readable(resolved, stat, "tac")
     fl = FlagView(ctx.flags, spec=SPECS["tac"])
     separator = fl.as_str("separator")
     try:
@@ -113,6 +109,10 @@ async def tac(
         return None, IOResult(
             exit_code=1, stderr=f"{refusal.message}\n".encode()
         )
+    files = command_files(ctx, paths)
+    resolved = await resolve_or_empty(files, paths)
+    stat = stdin_stat(dir_aware_stat(files, ctx))
+    readable, err = await split_readable(resolved, stat, "tac")
     if err and not readable:
         return None, IOResult(exit_code=1, stderr=err)
     io = IOResult()

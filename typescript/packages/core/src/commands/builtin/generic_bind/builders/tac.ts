@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { CommandFn } from '../../../config.ts'
+import type { PathSpec } from '../../../../types.ts'
 import type { GenericCommand } from '../adapter.ts'
 import { commandFiles, dirAwareStream, resolveOrEmpty } from '../files.ts'
 import { specOf } from '../../../spec/builtins.ts'
@@ -76,10 +77,6 @@ async function* reversed(
 }
 
 const tac: CommandFn = async (_accessor, paths, _texts, ctx) => {
-  // Operands resolve first: nothing may throw between opening the engine and
-  // handing it to the output that closes it.
-  const files = commandFiles(ctx, paths)
-  const resolved = await resolveOrEmpty(files, paths)
   const fl = new FlagView(ctx.flags, specOf('tac'))
   const separator = fl.asStr('separator')
   let engine: OpenStream
@@ -93,6 +90,16 @@ const tac: CommandFn = async (_accessor, paths, _texts, ctx) => {
   } catch (err) {
     if (!(err instanceof StreamRefusal)) throw err
     return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(`${err.message}\n`) })]
+  }
+  // The separator is refused before any operand is touched; the engine is
+  // closed if resolving them fails before the output takes it over.
+  const files = commandFiles(ctx, paths)
+  let resolved: PathSpec[]
+  try {
+    resolved = await resolveOrEmpty(files, paths)
+  } catch (err) {
+    await closeStream(engine)
+    throw err
   }
   const stream = stdinStream(dirAwareStream(files, ctx), ctx.stdin)
   const io = new IOResult()
