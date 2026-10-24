@@ -25,7 +25,7 @@ from mirage.types import PathSpec
 from mirage.vfs.gdocs import GDocsVFS
 from mirage.vfs.gdocs.doc_entry import make_filename
 from tests.fixtures.gdrive_api import StubDrive
-from tests.fixtures.google_api import serve
+from tests.fixtures.google_api import offline_token_manager, serve
 from tests.fixtures.mounted import Mounted
 
 ITEM = {
@@ -115,7 +115,10 @@ async def test_a_direct_lookup_proves_the_file(outcome):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("complete", [True, False])
 async def test_only_a_complete_listing_proves_absence(complete):
-    mounted = Mounted(GDocsVFS, GDocsAccessor(config=None, token_manager=None))
+    mounted = Mounted(
+        GDocsVFS,
+        GDocsAccessor(config=None, token_manager=offline_token_manager()),
+    )
     get = AsyncMock(return_value=ITEM)
     with (
         serve(

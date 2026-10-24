@@ -16,7 +16,6 @@ import type { ByteSpool } from '../../io/spool.ts'
 import { chunks } from '../../io/cooperative.ts'
 import { Sha1 } from '../../utils/hash.ts'
 import { encodeBase64 } from '../../utils/base64.ts'
-import { sleep } from '../../utils/abort.ts'
 import type { ApiResponse } from '../api/client.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import { type ByteWindow } from '../../utils/ranges.ts'
@@ -419,7 +418,7 @@ export async function boxUploadSession(
       if (response.status !== 202)
         throw new Error(`Unexpected Box commit status: ${String(response.status)}`)
       const delay = Number(response.headers['retry-after'] ?? '1')
-      await sleep(1000 * Math.max(0, Math.min(Number.isFinite(delay) ? delay : 1, 30)))
+      await tm.clock.sleep(Math.max(0, Math.min(Number.isFinite(delay) ? delay : 1, 30)))
     }
     throw new Error('Box upload commit did not complete')
   } catch (error) {

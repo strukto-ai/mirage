@@ -23,7 +23,7 @@ from mirage.core.google.rename import app_title
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.key_prefix import mount_key
 from tests.fixtures.gdrive_api import StubDrive
-from tests.fixtures.google_api import serve
+from tests.fixtures.google_api import offline_token_manager, serve
 
 MODIFIED = "2026-10-01T09:00:00.000Z"
 OLD = "2026-10-01_Old_Plan__doc1.gdoc.json"
@@ -62,7 +62,7 @@ async def renamed(dst: str) -> None:
         extra={"doc_id": "doc1", "doc_name": "Old Plan"},
     )
     await rename(
-        GDocsAccessor(config=None, token_manager=None),
+        GDocsAccessor(config=None, token_manager=offline_token_manager()),
         spec(f"/gdocs/owned/{OLD}"),
         spec(dst),
         entry,

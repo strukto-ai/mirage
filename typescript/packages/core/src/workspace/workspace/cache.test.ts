@@ -23,6 +23,9 @@ import { Workspace } from './workspace.ts'
 import { Mount } from '../mount/spec.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { buildFileCache, registerFileCacheStore } from './cache.ts'
+import type { GoogleApiAccessor } from '../../accessor/google_api.ts'
+import { GWS } from '../../commands/cli/builtin/gws/index.ts'
+import { GoogleDriveVFS } from '../../vfs/gdrive/gdrive.ts'
 
 describe('buildFileCache', () => {
   it('defaults to RAM sized by cacheLimit', () => {
@@ -130,6 +133,37 @@ describe('the workspace clock', () => {
         expect((await store.listDir('/d')).status).toBe(LookupStatus.EXPIRED)
     } finally {
       await ws.close()
+    }
+  })
+
+  it('reaches every mount and CLI install token manager', async () => {
+    const clock = new ManualClock(1000)
+    const config = { clientId: 'c', refreshToken: 'r' }
+    const ws = new Workspace({ '/a': new GoogleDriveVFS(config) }, { mode: MountMode.WRITE, clock })
+    try {
+      const late = ws.addMount('/b', new GoogleDriveVFS(config), MountMode.WRITE)
+      const install = ws.registerCli('gws', GWS, { client_id: 'c', refresh_token: 'r' })
+      const managers = [
+        (ws.mount('/a').vfs as GoogleDriveVFS).accessor.tokenManager,
+        (late.vfs as GoogleDriveVFS).accessor.tokenManager,
+        (install.accessor as GoogleApiAccessor).tokenManager,
+      ]
+      expect(managers.map((m) => m.clock)).toEqual([clock, clock, clock])
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('a VFS mounted again follows the later workspace clock', async () => {
+    const vfs = new GoogleDriveVFS({ clientId: 'c', refreshToken: 'r' })
+    const second = new ManualClock()
+    const a = new Workspace({ '/g': vfs }, { mode: MountMode.WRITE, clock: new ManualClock() })
+    const b = new Workspace({ '/g': vfs }, { mode: MountMode.WRITE, clock: second })
+    try {
+      expect(vfs.accessor.tokenManager.clock).toBe(second)
+    } finally {
+      await b.close()
+      await a.close()
     }
   })
 })

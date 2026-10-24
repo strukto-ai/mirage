@@ -118,6 +118,32 @@ def test_manual_clock_refuses_to_go_backwards():
         clock.advance(-1)
 
 
+@pytest.mark.asyncio
+async def test_system_clock_sleep_waits_real_time():
+    started = time.monotonic()
+    await SystemClock().sleep(0.02)
+    assert time.monotonic() - started >= 0.015
+
+
+@pytest.mark.asyncio
+async def test_manual_clock_sleep_advances_without_waiting():
+    clock = ManualClock(start=10.0)
+    started = time.monotonic()
+    await clock.sleep(30)
+    assert time.monotonic() - started < 1
+    assert clock.now() == 40.0
+    assert clock.monotonic() == 30.0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("seconds", [0, -1, float("nan")])
+async def test_manual_clock_sleep_of_nothing_advances_nothing(seconds):
+    clock = ManualClock(start=10.0)
+    await clock.sleep(seconds)
+    assert clock.now() == 10.0
+    assert clock.monotonic() == 0.0
+
+
 def test_manual_clock_repr_names_both_readings():
     assert (
         repr(ManualClock(start=5.0)) == "ManualClock(now=5.0, monotonic=0.0)"

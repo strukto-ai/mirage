@@ -145,6 +145,12 @@ async def run_target(
     emit: list[dict] | None,
 ) -> None:
     selected = [c for c in cases if target["id"] in c["targets"]]
+    # A manual clock is a gws-only option on both hosts, so a target that
+    # declares it elsewhere is refused here as the TypeScript runner does.
+    if target.get("clock") is not None and target.get("service") != "gws":
+        raise ValueError(
+            f"target {target['id']}: clock targets ride the gws fake"
+        )
     ws, cleanup, faults = await adapters.open_target(target)
     try:
         for mount in target["mounts"]:

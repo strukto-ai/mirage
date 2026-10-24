@@ -52,6 +52,12 @@ describe('SystemClock', () => {
     const readings = Array.from({ length: 50 }, () => clock.monotonic())
     expect(readings).toEqual([...readings].sort((a, b) => a - b))
   })
+
+  it('sleep waits real time', async () => {
+    const started = performance.now()
+    await new SystemClock().sleep(0.02)
+    expect(performance.now() - started).toBeGreaterThanOrEqual(15)
+  })
 })
 
 describe('ManualClock', () => {
@@ -98,6 +104,22 @@ describe('ManualClock', () => {
     expect(() => {
       new ManualClock().advance(-1)
     }).toThrow(RangeError)
+  })
+
+  it('sleep advances without waiting', async () => {
+    const clock = new ManualClock(10)
+    const started = performance.now()
+    await clock.sleep(30)
+    expect(performance.now() - started).toBeLessThan(1000)
+    expect(clock.now()).toBe(40)
+    expect(clock.monotonic()).toBe(30)
+  })
+
+  it.each([0, -1, Number.NaN])('sleep of %s advances nothing', async (seconds) => {
+    const clock = new ManualClock(10)
+    await clock.sleep(seconds)
+    expect(clock.now()).toBe(10)
+    expect(clock.monotonic()).toBe(0)
   })
 })
 

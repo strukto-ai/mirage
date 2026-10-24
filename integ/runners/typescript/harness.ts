@@ -120,6 +120,10 @@ export interface Target {
   // under each open's own key prefix. Only the ram opener consults it;
   // main.ts refuses it on any other VFS.
   cache?: { type?: string }
+  // 'manual' runs the workspace on a ManualClock, which a wait advances
+  // with no real time passing. Only the gws opener consults it; main.ts
+  // refuses it on any other target.
+  clock?: 'manual'
   // The env plane fixture this target declares: 'healthy' registers the
   // counting fake source and builds the managed env block, 'dead' a
   // source whose every fetch fails. Only the ram opener consults it;

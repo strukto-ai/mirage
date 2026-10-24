@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { Accessor } from './base.ts'
+import type { Clock } from '../utils/clock.ts'
 import type { DropboxTokenManager } from '../core/dropbox/client.ts'
 
 /**
@@ -36,5 +37,10 @@ export class DropboxAccessor extends Accessor {
     super()
     this.tokenManager = opts.tokenManager
     this.rootPath = normalizeDropboxRootPath(opts.rootPath)
+  }
+
+  /** Read token expiry on the workspace's clock. */
+  override bindClock(clock: Clock): void {
+    this.tokenManager.bindClock(clock)
   }
 }

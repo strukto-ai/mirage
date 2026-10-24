@@ -20,10 +20,13 @@ import pytest
 
 from mirage.cache.index import IndexConfig
 from mirage.cache.index.config import LookupStatus
+from mirage.commands.cli.builtin.gws import GWS
 from mirage.context import reset_current_session, set_current_session
 from mirage.types import MountMode
 from mirage.utils.clock import ManualClock
 from mirage.utils.ids import SeededIdSource, SystemIdSource
+from mirage.vfs.gdrive.config import GoogleDriveConfig
+from mirage.vfs.gdrive.gdrive import GoogleDriveVFS
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Session, Workspace
 from mirage.workspace.session import RAMSessionStore
@@ -415,6 +418,28 @@ async def test_one_clock_ages_the_file_cache_and_every_mount_index():
             assert (
                 await store.list_dir(prefix)
             ).status == LookupStatus.EXPIRED
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_one_clock_reaches_every_mount_and_cli_token_manager():
+    clock = ManualClock(start=1000.0)
+    config = GoogleDriveConfig(client_id="c", refresh_token="r")
+    ws = Workspace(
+        {"/a": GoogleDriveVFS(config)}, mode=MountMode.WRITE, clock=clock
+    )
+    try:
+        ws.add_mount("/b", GoogleDriveVFS(config), MountMode.WRITE)
+        install = ws.register_cli(
+            "gws", GWS, {"client_id": "c", "refresh_token": "r"}
+        )
+        managers = [
+            ws.mount("/a").vfs.accessor.token_manager,
+            ws.mount("/b").vfs.accessor.token_manager,
+            install.accessor.token_manager,
+        ]
+        assert [m.clock for m in managers] == [clock, clock, clock]
     finally:
         await ws.close()
 

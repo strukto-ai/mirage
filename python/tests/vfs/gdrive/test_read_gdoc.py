@@ -22,7 +22,7 @@ from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.key_prefix import mount_key
 from mirage.vfs.gdrive import GoogleDriveVFS
 from tests.fixtures.gdocs_api import StubDocs
-from tests.fixtures.google_api import serve
+from tests.fixtures.google_api import offline_token_manager, serve
 from tests.fixtures.vfs_io import call_over
 
 
@@ -43,7 +43,7 @@ def _scope(path: str, prefix: str = "") -> PathSpec:
 
 @pytest.fixture
 def accessor():
-    return GDriveAccessor(config=None, token_manager=None)
+    return GDriveAccessor(config=None, token_manager=offline_token_manager())
 
 
 @pytest.mark.asyncio

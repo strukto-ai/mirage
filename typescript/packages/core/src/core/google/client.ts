@@ -35,6 +35,7 @@ import {
 import { apiRequest, apiStream } from '../api/client.ts'
 import { TokenManager as OAuthTokenManager } from '../api/oauth.ts'
 import { type ByteWindow } from '../../utils/ranges.ts'
+import type { Clock } from '../../utils/clock.ts'
 
 export function tokenUrl(config: GoogleConfig): string {
   return config.apiBase !== undefined ? `${config.apiBase}/token` : TOKEN_URL
@@ -170,17 +171,17 @@ export async function refreshAccessToken(
   return [data.access_token, data.expires_in]
 }
 
+/**
+ * Manages OAuth2 access token lifecycle. `clock` is the clock token expiry
+ * and the waits between retries of every call made with this manager are
+ * read on; absent is the system clock.
+ */
 export class TokenManager extends OAuthTokenManager {
   readonly config: GoogleConfig
-  /** The wait between retries of every call made with this manager, in
-   * seconds, injectable so a test spends no real time; absent is a real
-   * timer. */
-  readonly sleep: ((seconds: number) => Promise<void>) | undefined
 
-  constructor(config: GoogleConfig, sleep?: (seconds: number) => Promise<void>) {
-    super(TOKEN_BUFFER_SECONDS)
+  constructor(config: GoogleConfig, clock?: Clock) {
+    super(TOKEN_BUFFER_SECONDS, clock)
     this.config = config
-    this.sleep = sleep
   }
 
   /**
@@ -203,7 +204,7 @@ export class TokenManager extends OAuthTokenManager {
       const result = await this.config.refreshFn(this.config.refreshToken)
       return [result.accessToken, result.expiresIn]
     }
-    return refreshAccessToken(this.config, this.sleep)
+    return refreshAccessToken(this.config, (seconds) => this.clock.sleep(seconds))
   }
 }
 
@@ -214,7 +215,7 @@ export async function googleHeaders(tm: TokenManager): Promise<Record<string, st
 
 /**
  * One Google API call: the door every request but a stream takes. It signs
- * the call, rides the manager's sleep and picks the retry policy from the
+ * the call, rides the manager's clock and picks the retry policy from the
  * method, so a new call site cannot forget any of them: absent `retry`, GET
  * and HEAD read and everything else writes. A write that is safe to repeat
  * (the start of a resumable upload) passes READ_RETRY.
@@ -239,7 +240,7 @@ export async function googleRequest(
       ((r, text) =>
         new GoogleApiError(`Google ${verb} ${url} → ${String(r.status)} ${text}`, r.status)),
     retry: options.retry ?? (verb === 'GET' || verb === 'HEAD' ? READ_RETRY : WRITE_RETRY),
-    sleep: tm.sleep,
+    sleep: (seconds) => tm.clock.sleep(seconds),
   })
 }
 
@@ -302,7 +303,7 @@ export async function* googleGetStream(
       new GoogleApiError(`Google GET ${url} → ${String(r.status)} ${text}`, r.status),
     headers: await googleHeaders(tm),
     retry: READ_RETRY,
-    sleep: tm.sleep,
+    sleep: (seconds) => tm.clock.sleep(seconds),
   })
 }
 

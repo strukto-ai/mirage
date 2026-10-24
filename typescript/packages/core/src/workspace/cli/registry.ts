@@ -22,6 +22,7 @@ import { z } from 'zod'
 
 import { ABORT_JOIN_MS, abortable } from '../../utils/abort.ts'
 import { Activity } from '../../utils/activity.ts'
+import { SystemClock, type Clock } from '../../utils/clock.ts'
 import type { CLIInstall } from './types.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 
@@ -49,8 +50,15 @@ export class CLIRegistry {
   private readonly retiring = new Map<CLIInstall, Promise<void>>()
   private shutdown = new AbortController()
 
-  /** @param peers the mounts' accessors, which an install may share an account with. */
-  constructor(private readonly peers: () => readonly Accessor[] = () => []) {}
+  /**
+   * @param peers the mounts' accessors, which an install may share an account with.
+   * @param clock the workspace's clock, which each install's accessor reads
+   *   time and waits on.
+   */
+  constructor(
+    private readonly peers: () => readonly Accessor[] = () => [],
+    private readonly clock: Clock = new SystemClock(),
+  ) {}
 
   /**
    * Install a CLI under a head word. The name must be a single word and
@@ -78,6 +86,7 @@ export class CLIRegistry {
     }
     const validated = this.validateConfig(name, spec, config)
     const accessor = spec.accessor(validated)
+    accessor.bindClock?.(this.clock)
     accessor.join?.([...this.peers(), ...[...this.installs.values()].map((i) => i.accessor)])
     const install: CLIInstall = {
       name,

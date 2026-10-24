@@ -156,7 +156,7 @@ export class MountRegistry {
   // mounts (a CLI exists because it was installed, never because
   // storage was mounted). The registry object is just the vehicle that
   // already reaches every dispatch site, same as the runtime fields.
-  readonly clis = new CLIRegistry(() => this.mountList.map((m) => m.vfs.accessor))
+  readonly clis: CLIRegistry
 
   /**
    * Drop what a write past the dispatcher may have made stale.
@@ -312,6 +312,7 @@ export class MountRegistry {
     private readonly clock: Clock = new SystemClock(),
     readonly ids: IdSource = new SystemIdSource(),
   ) {
+    this.clis = new CLIRegistry(() => this.mountList.map((m) => m.vfs.accessor), clock)
     this.indexConfig = placements.index
     this.workspaceId = placements.workspaceId
     const list: MountEntry[] = []
@@ -341,6 +342,7 @@ export class MountRegistry {
           ids: this.ids,
         },
         list,
+        this.clock,
       ),
     )
     seen.add(DEV_PREFIX)
@@ -369,6 +371,7 @@ export class MountRegistry {
             ids: this.ids,
           },
           list,
+          this.clock,
         ),
       )
     }
@@ -386,7 +389,8 @@ export class MountRegistry {
    * built it. Mirrors the Python registry, whose constructor mounts
    * through `mount()` as well.
    */
-  private static place(init: MountInit, siblings: readonly MountEntry[]): MountEntry {
+  private static place(init: MountInit, siblings: readonly MountEntry[], clock: Clock): MountEntry {
+    init.vfs.accessor.bindClock?.(clock)
     const alias = siblings.find((existing) => existing.vfs === init.vfs)
     const m = new MountEntry(
       alias === undefined ? init : { ...init, indexConfig: alias.indexConfig },
@@ -475,6 +479,7 @@ export class MountRegistry {
         ids: this.ids,
       },
       this.mountList,
+      this.clock,
     )
     this.attachManager(m)
     this.mountList.push(m)
