@@ -20,10 +20,10 @@ from typing import Any
 from mirage.context.session_context import current_caller
 from mirage.io.stream import feed
 from mirage.io.types import ByteSource
+from mirage.runtime.constants import sdk_install_hint
 from mirage.runtime.sandbox.base import RemoteSandbox
 from mirage.runtime.sandbox.constants import (
     EXEC_ID,
-    sdk_install_hint,
     stop_signal,
     wrap_line,
 )

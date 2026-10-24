@@ -13,10 +13,10 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.errors import FsCondition
+from mirage.runtime.constants import sdk_install_hint
 
-MISSING_EXTRA_HINT = (
-    "the monty runtime requires the 'monty' extra. Install with: "
-    "pip install mirage-ai[monty], or select the 'local' runtime"
+MISSING_EXTRA_HINT = sdk_install_hint(
+    "monty", "the 'monty' extra", "select the 'local' runtime"
 )
 
 # What argv[0] is when the caller has no program name of its own.
