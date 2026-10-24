@@ -68,15 +68,22 @@ describe('BytePipe', () => {
     await refused
   })
 
-  it('keeps a sealed write as written', async () => {
-    const pipe = new BytePipe()
-    const data = new Uint8Array(CHUNK_SIZE + 1)
-    SEALED.add(data.buffer)
-    await pipe.write(data)
-    pipe.end()
-    const parts: Uint8Array[] = []
-    for await (const part of pipe.stream()) parts.push(part)
-    expect(parts.map((part) => part.buffer === data.buffer)).toEqual([true, true])
+  it('keeps a sealed write no larger than its capacity as written', async () => {
+    for (const [size, kept] of [
+      [CHUNK_SIZE + 1, true],
+      [CAPACITY + 1, false],
+    ] as const) {
+      const pipe = new BytePipe()
+      const data = new Uint8Array(size)
+      SEALED.add(data.buffer)
+      const written = pipe.write(data).then(() => {
+        pipe.end()
+      })
+      const parts: Uint8Array[] = []
+      for await (const part of pipe.stream()) parts.push(part)
+      await written
+      expect(parts.map((part) => part.buffer === data.buffer)).toEqual(parts.map(() => kept))
+    }
   })
 
   it('owns buffered bytes after accepting a mutable write', async () => {
