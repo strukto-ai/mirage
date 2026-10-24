@@ -32,6 +32,7 @@ import { parseCommand, parseToKwargs } from '../../../commands/spec/parser.ts'
 import { DeviceInput, type ByteSource } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
 import { type MountRegistry } from '../../mount/registry.ts'
+import type { SessionAccess } from '../../../view/types.ts'
 import { classifyBarePath } from '../../expand/classify/index.ts'
 import { isAssignment } from '../../../commands/builtin/generic/awk.ts'
 
@@ -133,8 +134,9 @@ export function treePathScopes(
   argv: readonly string[],
   cwd: string,
   env?: Record<string, string>,
+  access?: SessionAccess,
 ): PathSpec[] {
-  const tree = commandTree(registry, name, cwd)
+  const tree = commandTree(registry, name, cwd, argv, access)
   if (tree === null) return []
   const result = walk(name, tree.spec, argv, cwd, env ?? null)
   if (result.leaf === null) return []
@@ -282,10 +284,20 @@ export function mergeScopes(positional: PathSpec[], flagScopes: PathSpec[]): Pat
  * has one, else the first that does, never by operand path: its walk, not a
  * spec, says which words are paths. Mirrors Python's `command_tree`.
  */
-export function commandTree(registry: MountRegistry, name: string, cwd: string): CLI | null {
+export function commandTree(
+  registry: MountRegistry,
+  name: string,
+  cwd: string,
+  argv?: readonly string[],
+  access?: SessionAccess,
+): CLI | null {
   const install = registry.clis.get(name)
   if (install !== null) return install.cli
-  return registry.commandMount(name, [], cwd)?.cliFor(name) ?? null
+  const mount =
+    argv === undefined
+      ? registry.commandMount(name, [], cwd, access)
+      : registry.invocationMount(name, [], cwd, argv, access)
+  return mount?.cliFor(name) ?? null
 }
 
 /**
@@ -307,8 +319,9 @@ export function programTokens(
   argv: readonly string[],
   cwd: string,
   env?: Record<string, string>,
+  access?: SessionAccess,
 ): [readonly string[], readonly string[]] {
-  const tree = commandTree(registry, name, cwd)
+  const tree = commandTree(registry, name, cwd, argv, access)
   if (tree !== null) {
     const result = walk(name, tree.spec, argv, cwd, env)
     if (result.leaf !== null) {
@@ -379,8 +392,9 @@ export function commandWords(
   redirects: readonly PathSpec[],
   cwd: string,
   env?: Record<string, string>,
+  access?: SessionAccess,
 ): CommandWord[] {
-  const tree = commandTree(registry, name, cwd)
+  const tree = commandTree(registry, name, cwd, argv, access)
   const result = tree !== null ? walk(name, tree.spec, argv, cwd, env) : null
   let kinds: WordKind[]
   if (result !== null && result.leaf !== null) {

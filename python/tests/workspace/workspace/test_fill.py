@@ -1521,6 +1521,59 @@ class _Sees(Policy):
         return None
 
 
+@pytest.mark.asyncio
+async def test_only_the_selected_fallback_tree_fetches_its_managed_env():
+    calls, fetch = counting_source({"TOKEN": "t0"})
+    register_secrets("fake-tree-fallback", FakeConfig, fetch)
+    policy = _Sees()
+    tokens = []
+
+    async def send(accessor, paths, texts, ctx):
+        tokens.append(ctx.flags["token"])
+        return None, IOResult()
+
+    ws = Workspace(
+        {"/reader": RAMVFS(), "/write": RAMVFS()},
+        mode=MountMode.WRITE,
+        env={
+            "TOKEN": {"from": "fake-tree-fallback", "ref": "selected"},
+            "UNAVAILABLE": {
+                "from": "fake-tree-fallback",
+                "ref": "must-not-fetch",
+            },
+        },
+        policies=[policy],
+    )
+    try:
+        for prefix, variable, write in (
+            ("/reader", "UNAVAILABLE", False),
+            ("/write", "TOKEN", True),
+        ):
+            ws.mount(prefix).register_commands(
+                [
+                    CLI(
+                        spec=CommandSpec(
+                            name="remote",
+                            arguments=(
+                                Argument(
+                                    "--token", env=variable, required=True
+                                ),
+                            ),
+                            subcommands=(CommandSpec(name="send"),),
+                        ),
+                        handlers={"send": CLIHandler(send, write=write)},
+                    )
+                ]
+            )
+        result = await ws.shell("remote send")
+        assert (result.exit_code, result.stderr or b"") == (0, b"")
+        assert calls == ["selected"]
+        assert tokens == ["t0"]
+        assert policy.seen == [(True, [])]
+    finally:
+        await ws.close()
+
+
 # --token is required and comes from the managed TOKEN, so the gate's walk
 # reaches a leaf (its write, its files) only once TOKEN is fetched; a TOKEN
 # the line assigns is the invocation's and fetches nothing.

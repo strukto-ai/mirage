@@ -15,7 +15,11 @@
 import pytest
 
 from mirage import RAMVFS, MountMode, Workspace
+from mirage.commands.cli.types import CLI, CLIHandler
+from mirage.commands.config import command
 from mirage.commands.spec import SPECS
+from mirage.commands.spec.types import Argument, CommandSpec
+from mirage.io import IOResult
 from mirage.utils.glob_walk import mark_globs
 from mirage.workspace.expand.spec_hints import (
     spec_for_command,
@@ -43,6 +47,50 @@ def test_spec_for_command_falls_back_to_shared_specs():
 def test_spec_for_command_unknown_name_is_none():
     ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
     assert spec_for_command("no-such-command", ws._registry, "/") is None
+
+
+@pytest.mark.asyncio
+async def test_selected_flat_writer_keeps_path_shaped_text():
+    calls = []
+
+    @command(
+        "tool",
+        vfs="ram",
+        spec=CommandSpec(arguments=(Argument("args", nargs="*"),)),
+        write=True,
+    )
+    async def writer(accessor, paths, texts, ctx):
+        calls.append((paths, texts))
+        return b"written\n", IOResult()
+
+    async def reader(accessor, paths, texts, ctx):
+        calls.append("reader")
+        return None, IOResult()
+
+    tree = CLI(
+        spec=CommandSpec(
+            name="tool",
+            subcommands=(
+                CommandSpec(
+                    name="send", arguments=(Argument("args", nargs="*"),)
+                ),
+            ),
+        ),
+        handlers={"send": CLIHandler(reader)},
+    )
+    ws = Workspace({"/longer": RAMVFS(), "/b": RAMVFS()}, mode=MountMode.WRITE)
+    try:
+        ws.mount("/longer").register_commands([tree])
+        ws.mount("/b").register_commands([writer])
+        result = await ws.shell("tool send /label")
+        assert (result.exit_code, result.stdout, result.stderr or b"") == (
+            0,
+            b"written\n",
+            b"",
+        )
+        assert calls == [([], ["send", "/label"])]
+    finally:
+        await ws.close()
 
 
 def test_basic_grep_pattern_and_path():

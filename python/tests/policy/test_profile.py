@@ -21,7 +21,7 @@ from pydantic import ValidationError
 
 from mirage.commands.cli.specs import cli_spec_for
 from mirage.commands.config import Context, command
-from mirage.commands.spec.types import CommandSpec
+from mirage.commands.spec.types import Argument, CommandSpec
 from mirage.context import reset_current_session, set_current_session
 from mirage.io.types import IOResult
 from mirage.policy import (
@@ -63,6 +63,7 @@ from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 from mirage.workspace.session.state import seed_var
 from mirage.workspace.tools.io_text import with_refusal
+from tests.fixtures.vfs_io import dispatched
 
 
 def test_profile_from_dict_regroups_paths_and_vars():
@@ -2792,7 +2793,11 @@ async def test_a_dispatched_read_through_a_link_meets_the_target_rule():
         await ws.close()
 
 
-@command("zap", vfs="ram", spec=CommandSpec())
+@command(
+    "zap",
+    vfs="ram",
+    spec=CommandSpec(arguments=(Argument("operation"),)),
+)
 async def _zap(store, paths: list[PathSpec], texts: list[str], ctx: Context):
     # A host command that removes or moves a name through the dispatcher
     # it is handed, the way a custom command reaches a mount.
@@ -2843,11 +2848,13 @@ async def test_a_dispatched_op_meets_the_rule_through_a_linked_parent():
                 "mkdir -p /data/real && echo s > /data/real/secret && "
                 "ln -s /data/real /data/alias"
             )
+            seen = dispatched(ws)
             assert await _line(ws, f"zap {op}", "g") == (
                 1,
                 "",
                 "zap: Permission denied\npolicy denied: sealed\n",
             )
+            assert (op, "/data/alias/secret") in seen
             assert (await _line(ws, "ls /data/real", "g"))[1] == "secret\n"
         finally:
             await ws.close()

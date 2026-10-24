@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { EvaluationContext } from '../evaluation.ts'
+import { sessionAccess } from '../../context/session_context.ts'
 import type { NamespaceLinks, SessionView } from '../../view/types.ts'
 import { scopesPaths } from '../../policy/match/reads.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
@@ -154,7 +155,10 @@ export async function expandArgv(
   const inProcess = consumer === Consumer.SESSION && INTERPRETER_NAMES.has(name)
   // And so does a command tree a mount serves, as the same tree installed
   // as a CLI does: no backend takes its patterns.
-  const tree = consumer === Consumer.MOUNT && commandTree(registry, name, session.cwd) !== null
+  const tree =
+    consumer === Consumer.MOUNT &&
+    commandTree(registry, name, session.cwd, lineWords.slice(consumed), sessionAccess(session)) !==
+      null
   const program = native || inProcess || tree
   let spec: CommandSpec | null = null
   let wordKinds: (ValueType | null)[] | null = null
@@ -164,7 +168,13 @@ export async function expandArgv(
   if (policy === WordPolicy.MOUNT || consumer === Consumer.EXTERNAL || inProcess) {
     // A wrapper's words are the program's it runs.
     const runs = runsAs(name, registry)
-    spec = specForCommand(runs, registry, session.cwd)
+    spec = specForCommand(
+      runs,
+      registry,
+      session.cwd,
+      lineWords.slice(consumed),
+      sessionAccess(session),
+    )
     if (spec !== null) {
       const extra: (ValueType | null)[] = new Array<ValueType | null>(consumed - 1).fill('str')
       wordKinds = [

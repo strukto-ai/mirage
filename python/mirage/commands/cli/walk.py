@@ -623,6 +623,7 @@ def _finish_node(
     style: UsageStyle,
     bases: list[PathSpec],
     env: Mapping[str, str] | None = None,
+    defer_env: bool = False,
 ) -> WalkResult | None:
     """Apply a node's declarative option rules after its scan.
 
@@ -643,6 +644,8 @@ def _finish_node(
         style (UsageStyle): the root's dialect, for any refusal.
         env (Mapping[str, str] | None): session environment for
             ``Argument.env`` fallbacks, None outside a session.
+        defer_env (bool): leave absent env-backed requirements for the
+            selected invocation's normal validation.
     """
     for dest, variable in cs.env_by_dest.items():
         if dest in flags:
@@ -700,7 +703,7 @@ def _finish_node(
                     style,
                 )
     for dest in cs.required_dests:
-        if dest not in flags:
+        if dest not in flags and not (defer_env and dest in cs.env_by_dest):
             return _usage_error(
                 name, node, f"error: option '{dest}' is required", style
             )
@@ -713,6 +716,7 @@ def walk(
     argv: Sequence[str],
     cwd: str = "/",
     env: Mapping[str, str] | None = None,
+    defer_env: bool = False,
 ) -> WalkResult:
     """Resolve one command line against a CLI tree.
 
@@ -735,6 +739,8 @@ def walk(
         env (Mapping[str, str] | None): session environment, so a group
             option declaring ``Argument.env`` fills at its own level
             exactly as a leaf one does in the flat parser.
+        defer_env (bool): identify a mount invocation before its managed
+            environment is fetched; normal execution leaves this False.
     """
     node = spec
     # Read once off the root and never off a node: a program answers in
@@ -777,7 +783,7 @@ def walk(
             )
             if alias is not None and token in alias.aliases:
                 refused = _finish_node(
-                    name, node, cs, flags, cwd, style, bases, env
+                    name, node, cs, flags, cwd, style, bases, env, defer_env
                 )
                 if refused is not None:
                     return refused
@@ -994,7 +1000,7 @@ def walk(
                 i += 1
                 continue
             refused = _finish_node(
-                name, node, cs, flags, cwd, style, bases, env
+                name, node, cs, flags, cwd, style, bases, env, defer_env
             )
             if refused is not None:
                 return refused
@@ -1012,7 +1018,9 @@ def walk(
             break
         if descended:
             continue
-        refused = _finish_node(name, node, cs, flags, cwd, style, bases, env)
+        refused = _finish_node(
+            name, node, cs, flags, cwd, style, bases, env, defer_env
+        )
         if refused is not None:
             return refused
         return WalkResult(

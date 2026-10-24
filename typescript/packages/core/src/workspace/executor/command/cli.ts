@@ -499,8 +499,9 @@ export async function handleMountCli(
   context: CLIContext = {},
   owner?: (path: string) => MountEntry | null,
   follow?: FollowOperands,
+  prepared?: LeafCall,
 ): Promise<[ByteSource | null, IOResult, ExecutionNode]> {
-  const walked = await walkLeaf(cli.spec.name, cli, parts, session, context.vfs)
+  const walked = prepared ?? (await walkLeaf(cli.spec.name, cli, parts, session, context.vfs))
   if (Array.isArray(walked)) return walked
   const limit = resolveLimit(
     walked.prog,

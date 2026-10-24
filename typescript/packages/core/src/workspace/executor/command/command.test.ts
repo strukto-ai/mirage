@@ -14,6 +14,7 @@
 import { EvaluationContext } from '../../evaluation.ts'
 import { describe, expect, it } from 'vitest'
 import { command } from '../../../commands/config.ts'
+import { CLI, CLIHandler } from '../../../commands/cli/types.ts'
 import { CommandSpec, type FlagValue, Argument } from '../../../commands/spec/types.ts'
 import { IOResult, materialize } from '../../../io/types.ts'
 import { parseSessionProfile } from '../../../policy/profile.ts'
@@ -29,6 +30,223 @@ import { handleCommand } from './command.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { getTestParser } from '../../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../workspace/workspace.ts'
+
+function treeFallbackRegistry(): MountRegistry {
+  const registry = new MountRegistry(
+    { '/longer': new RAMVFS(), '/short': new RAMVFS() },
+    MountMode.WRITE,
+  )
+  for (const prefix of ['/longer', '/short']) {
+    const answer = (): [Uint8Array, IOResult] => [
+      new TextEncoder().encode(`${prefix}\n`),
+      new IOResult(),
+    ]
+    registry.mountForPrefix(prefix).registerCommands([
+      new CLI({
+        spec: new CommandSpec({
+          name: 'remote',
+          subcommands: [new CommandSpec({ name: 'get' }), new CommandSpec({ name: 'put' })],
+        }),
+        handlers: {
+          get: new CLIHandler({ fn: answer }),
+          put: new CLIHandler({ fn: answer, write: true }),
+        },
+      }),
+    ])
+  }
+  return registry
+}
+
+describe('handleCommand — mount tree fallback', () => {
+  it.each([false, true])(
+    'keeps tree verbs and group values distinct from a flat path grammar (writes=%s)',
+    async (write) => {
+      const ws = new Workspace(
+        { '/longer': new RAMVFS(), '/b': new RAMVFS() },
+        {
+          mode: MountMode.WRITE,
+          shellParser: await getTestParser(),
+        },
+      )
+      const calls: string[] = []
+      try {
+        ws.mount('/longer').registerCommands(
+          command({
+            name: 'tool',
+            vfs: 'ram',
+            write,
+            spec: new CommandSpec({
+              arguments: [new Argument('paths', { type: 'path', nargs: '*' })],
+            }),
+            fn: () => {
+              calls.push('flat')
+              return [new TextEncoder().encode('flat\n'), new IOResult()]
+            },
+          }),
+        )
+        ws.mount('/b').registerCommands([
+          new CLI({
+            spec: new CommandSpec({
+              name: 'tool',
+              arguments: [new Argument('--account')],
+              subcommands: [new CommandSpec({ name: 'send' })],
+            }),
+            handlers: {
+              send: new CLIHandler({
+                write: true,
+                fn: () => {
+                  calls.push('tree')
+                  return [new TextEncoder().encode('tree\n'), new IOResult()]
+                },
+              }),
+            },
+          }),
+        ])
+        const ambiguity =
+          'tool: ambiguous, registered on 2 writable mounts:\n  /longer\n  /b\ncd into the target mount to disambiguate.\n'
+        for (const [line, output, unbound] of [
+          ['tool send', 'tree\n', true],
+          ['tool --account /longer send', 'tree\n', true],
+          ['tool /longer/item', 'flat\n', false],
+          ['cd /longer && tool send', 'flat\n', false],
+        ] as const) {
+          const refused = write && unbound
+          const before = calls.length
+          const result = await ws.shell(line)
+          expect([result.exitCode, result.stdoutText, result.stderrText], line).toEqual([
+            refused ? 1 : 0,
+            refused ? '' : output,
+            refused ? ambiguity : '',
+          ])
+          if (refused) expect(calls).toHaveLength(before)
+        }
+      } finally {
+        await ws.close()
+      }
+    },
+  )
+
+  it.each([false, true])(
+    'selects a later tree that recognizes the verb (writes=%s)',
+    async (write) => {
+      const registry = treeFallbackRegistry()
+      for (const [prefix, verb] of [
+        ['/longer', 'peek'],
+        ['/short', 'send'],
+      ] as const) {
+        registry.mountForPrefix(prefix).registerCommands([
+          new CLI({
+            spec: new CommandSpec({
+              name: 'remote',
+              subcommands: [new CommandSpec({ name: verb })],
+            }),
+            handlers: {
+              [verb]: new CLIHandler({
+                write,
+                fn: () => [new TextEncoder().encode(`${prefix}\n`), new IOResult()],
+              }),
+            },
+          }),
+        ])
+      }
+      const [stdout, io] = await handleCommand(
+        NEVER_EXECUTE,
+        NEVER_DISPATCH,
+        registry,
+        ['remote', 'send'],
+        routed(new EvaluationContext(new SessionState({ sessionId: 'test' }))),
+      )
+      expect(io.exitCode).toBe(0)
+      expect(decode(await materialize(stdout))).toBe('/short\n')
+    },
+  )
+  it.each(['str', 'path'] as const)(
+    'runs a selected tree when discovery found a flat %s reader first',
+    async (type) => {
+      const registry = treeFallbackRegistry()
+      registry.mount('/', new RAMVFS(), MountMode.WRITE)
+      registry.mountForPrefix('/longer').registerCommands(
+        command({
+          name: 'remote',
+          vfs: 'ram',
+          spec: new CommandSpec({ arguments: [new Argument('args', { type, nargs: '*' })] }),
+          fn: () => [null, new IOResult()],
+        }),
+      )
+      const [stdout, io] = await handleCommand(
+        NEVER_EXECUTE,
+        NEVER_DISPATCH,
+        registry,
+        ['remote', 'put'],
+        routed(new EvaluationContext(new SessionState({ sessionId: 'test' }))),
+      )
+      expect(io.exitCode).toBe(0)
+      expect(decode(await materialize(stdout))).toBe('/short\n')
+    },
+  )
+
+  it.each([
+    ['get', '/longer/'],
+    ['put', '/short/'],
+  ])('routes the %s leaf by its own write declaration', async (verb, prefix) => {
+    const registry = treeFallbackRegistry()
+    registry.mountForPrefix('/longer').mode = MountMode.READ
+    const [stdout, io] = await handleCommand(
+      NEVER_EXECUTE,
+      NEVER_DISPATCH,
+      registry,
+      ['remote', verb],
+      routed(new EvaluationContext(new SessionState({ sessionId: 'test' }))),
+    )
+    expect(io.exitCode).toBe(0)
+    expect(decode(await materialize(stdout))).toBe(`${prefix.slice(0, -1)}\n`)
+  })
+
+  it.each([['--help'], ['put', '--help'], ['put', '-h'], ['unknown']])(
+    'answers tree help or usage before ambiguous write selection: %s',
+    async (...argv) => {
+      const registry = treeFallbackRegistry()
+      const [stdout, io] = await handleCommand(
+        NEVER_EXECUTE,
+        NEVER_DISPATCH,
+        registry,
+        ['remote', ...argv],
+        routed(new EvaluationContext(new SessionState({ sessionId: 'test' }))),
+      )
+      expect(decode(io.stderr as Uint8Array)).not.toContain('ambiguous')
+      expect(decode(await materialize(stdout)) + decode(io.stderr as Uint8Array)).toContain(
+        argv[0] === 'unknown' ? "'unknown' is not a remote command" : 'usage:',
+      )
+    },
+  )
+
+  it('refuses two writable trees and keeps cwd selection authoritative', async () => {
+    const registry = treeFallbackRegistry()
+    const session = new SessionState({ sessionId: 'test' })
+    const [, refused] = await handleCommand(
+      NEVER_EXECUTE,
+      NEVER_DISPATCH,
+      registry,
+      ['remote', 'put'],
+      routed(new EvaluationContext(session)),
+    )
+    expect(refused.exitCode).toBe(1)
+    expect(decode(refused.stderr as Uint8Array)).toBe(
+      'remote: ambiguous, registered on 2 writable mounts:\n' +
+        '  /longer\n  /short\ncd into the target mount to disambiguate.\n',
+    )
+    session.cwd = '/short'
+    const [stdout, io] = await handleCommand(
+      NEVER_EXECUTE,
+      NEVER_DISPATCH,
+      registry,
+      ['remote', 'put'],
+      routed(new EvaluationContext(session)),
+    )
+    expect(io.exitCode).toBe(0)
+    expect(decode(await materialize(stdout))).toBe('/short\n')
+  })
+})
 
 class StubVFS extends BaseVFS {
   constructor(override readonly name: string) {

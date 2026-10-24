@@ -16,7 +16,11 @@ import asyncio
 
 import pytest
 
+from mirage.commands.cli.types import CLI, CLIHandler
+from mirage.commands.config import command
+from mirage.commands.spec import Argument, CommandSpec
 from mirage.errors.types import ReadOnlyError
+from mirage.io.types import IOResult
 from mirage.types import MountMode
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
@@ -42,17 +46,70 @@ def test_a_hidden_mount_reads_as_absent():
     async def run():
         ok = await ws.shell("cat /a/x.txt", session_id="agent")
         denied = await ws.shell("cat /b/secret.txt", session_id="agent")
+        hidden_dir = await ws.shell("ls /b", session_id="agent")
         listed = await ws.shell("ls /", session_id="agent")
-        return ok, denied, listed
+        return ok, denied, hidden_dir, listed
 
-    ok, denied, listed = asyncio.run(run())
+    ok, denied, hidden_dir, listed = asyncio.run(run())
     assert ok.exit_code == 0
     assert b"public" in (ok.stdout or b"")
     assert denied.exit_code != 0
     assert (denied.stderr or b"") == (
         b"cat: /b/secret.txt: No such file or directory\n"
     )
+    assert hidden_dir.exit_code == 2
+    assert (
+        hidden_dir.stderr
+        == b"ls: cannot access '/b': No such file or directory\n"
+    )
     assert b"b" not in (listed.stdout or b"").split()
+
+
+@pytest.mark.asyncio
+async def test_hidden_mounts_never_run_custom_handlers_for_bound_paths_or_cwd():
+    called = []
+    spec = CommandSpec(arguments=(Argument("paths", type="path", nargs="*"),))
+
+    @command("stamp", vfs="ram", spec=spec, write=True)
+    async def stamp(accessor, paths, texts, ctx):
+        called.append("stamp")
+        return b"stamp\n", IOResult()
+
+    async def get(accessor, paths, texts, ctx):
+        called.append("remote get")
+        return b"get\n", IOResult()
+
+    tree = CLI(
+        spec=CommandSpec(
+            name="remote",
+            subcommands=(CommandSpec(name="get", arguments=spec.arguments),),
+        ),
+        handlers={"get": CLIHandler(get)},
+    )
+    ws = Workspace(
+        {"/visible": RAMVFS(), "/hidden": RAMVFS()}, mode=MountMode.WRITE
+    )
+    for prefix in ("/visible", "/hidden"):
+        ws.mount(prefix).register_commands([stamp, tree])
+    session = ws.create_session(
+        "agent", profile={"paths": {"hide": ["/hidden"]}}
+    )
+    try:
+        named = await ws.shell("stamp /hidden/file", session_id="agent")
+        assert named.exit_code == 127
+        assert named.stderr == b"stamp: command not found\n"
+        session.cwd = "/hidden"
+        for line, name in (
+            ("stamp", "stamp"),
+            ("remote get", "remote get"),
+            ("remote get /hidden/file", "remote get"),
+        ):
+            result = await ws.shell(line, session_id="agent")
+            assert result.exit_code == 127
+            assert result.stderr == f"{name}: command not found\n".encode()
+        assert called == []
+    finally:
+        await ws.close()
 
 
 def test_a_mount_the_role_does_not_name_stays_reachable():

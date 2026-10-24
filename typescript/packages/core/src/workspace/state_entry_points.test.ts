@@ -2830,7 +2830,7 @@ describe('a dispatched op meets the rule on the path the dispatcher reaches', ()
   // is handed, the way a custom command reaches a mount.
   const zap = new Command({
     name: 'zap',
-    spec: CMD_SPEC,
+    spec: new CommandSpec({ arguments: [new Argument('operation')] }),
     vfs: VFSName.RAM,
     fn: async (_accessor, _paths, texts, opts) => {
       const target = PathSpec.fromStrPath('/data/alias/secret')
@@ -2881,9 +2881,11 @@ describe('a dispatched op meets the rule on the path the dispatcher reaches', ()
       await ws.shell(
         'mkdir -p /data/real && echo s > /data/real/secret && ln -s /data/real /data/alias',
       )
+      const seen = dispatched(ws)
       const [code, out, err] = await line(ws, `zap ${op}`)
       expect([code, out]).toEqual([1, ''])
       expect(err).toContain('sealed')
+      expect(seen).toContainEqual([op, '/data/alias/secret'])
       expect((await line(ws, 'ls /data/real'))[1]).toBe('secret\n')
     }
   })

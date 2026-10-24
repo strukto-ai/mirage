@@ -14,7 +14,8 @@
 
 import asyncio
 import errno
-from collections.abc import Awaitable, Callable
+import logging
+from collections.abc import Awaitable, Callable, Sequence
 from typing import Any, Protocol
 from weakref import WeakValueDictionary
 
@@ -27,8 +28,11 @@ from mirage.cache.index.factory import build_index
 from mirage.cache.manager import CacheManager
 from mirage.commands.builtin.general import COMMANDS as GENERAL_COMMANDS
 from mirage.commands.builtin.generic_bind.factory import GENERIC_COMMANDS
+from mirage.commands.cli.walk import walk
+from mirage.commands.spec import parse_command
 from mirage.context import (
     effective_path_mode,
+    session_visibility,
     strongest_mode_under,
 )
 from mirage.errors.fs import no_mount
@@ -48,17 +52,22 @@ from mirage.types import (
     WritePolicy,
 )
 from mirage.utils.clock import Clock, SystemClock
+from mirage.utils.hidden import path_visible
 from mirage.utils.ids import IdSource, SystemIdSource
 from mirage.utils.path import norm_dir, owner_prefix
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.dev import DevVFS
+from mirage.view.types import SessionAccess
 from mirage.workspace.cli import CLIRegistry
+from mirage.workspace.lookup.constants import changes_files
 from mirage.workspace.mount.backends import backend_commands
+from mirage.workspace.mount.errors import MountCommandAmbiguous
 from mirage.workspace.mount.mount import MountEntry
 from mirage.workspace.session.session import SessionState
 from mirage.workspace.types import MountRow
 
 DEV_PREFIX = "/dev/"
+logger = logging.getLogger(__name__)
 
 
 class ReadReconciler(Protocol):
@@ -616,17 +625,29 @@ class MountRegistry:
         like every mount, and letting it win would route pathless
         commands to the device mount (mirrors the TS scan).
         """
-        if (
-            self._root is not None
-            and self._root.resolve_command(cmd_name) is not None
-        ):
-            return self._root
-        for m in self.visible_mounts():
-            if m.prefix == DEV_PREFIX:
-                continue
-            if m.resolve_command(cmd_name) is not None:
-                return m
-        return None
+        candidates = self._fallback_candidates(cmd_name)
+        return candidates[0] if candidates else None
+
+    def _fallback_candidates(
+        self, cmd_name: str, access: SessionAccess | None = None
+    ) -> list[MountEntry]:
+        visible = self.visible_mounts(
+            access.session_id if access is not None else None
+        )
+        candidates = (
+            [self._root]
+            if self._root is not None and self._root in visible
+            else []
+        )
+        candidates.extend(m for m in visible if m is not self._root)
+        visibility = session_visibility(access)
+        return [
+            m
+            for m in candidates
+            if m.prefix != DEV_PREFIX
+            and path_visible(visibility, m.prefix)
+            and m.resolve_command(cmd_name) is not None
+        ]
 
     def match_command_prefix(self, words: list[str]) -> int:
         """How many leading words form a registered command name.
@@ -661,9 +682,9 @@ class MountRegistry:
         cmd_name: str,
         path_scopes: list[PathSpec],
         cwd: str,
+        access: SessionAccess | None = None,
     ) -> MountEntry | None:
-        """The mount a command runs on, as ``resolve_mount`` picks it,
-        without readying it.
+        """Find a command's grammar without selecting a write destination.
 
         The mount of the first path operand, else of the working
         directory, when it registers the command; else the first mount
@@ -674,21 +695,208 @@ class MountRegistry:
             cmd_name (str): command name.
             path_scopes (list[PathSpec]): path arguments.
             cwd (str): current working directory.
+            access (SessionAccess | None): owner, else the current session.
         """
-        mount = self.try_mount_for(
-            path_scopes[0].virtual if path_scopes else cwd
+        candidates = self.command_candidates(
+            cmd_name, path_scopes, cwd, access
         )
+        return candidates[0] if candidates else None
+
+    def command_candidates(
+        self,
+        cmd_name: str,
+        path_scopes: list[PathSpec],
+        cwd: str,
+        access: SessionAccess | None = None,
+    ) -> list[MountEntry]:
+        """The bound mount, or the ordered mounts a pathless run can reach.
+
+        A bound path keeps its owner so the dispatcher answers hidden
+        operands as absent; visibility filters only the fallback search.
+
+        Args:
+            cmd_name (str): command name.
+            path_scopes (list[PathSpec]): routing paths, first one binds.
+            cwd (str): working directory, binding when it serves the name.
+            access (SessionAccess | None): owner, else the current session.
+        """
+        visible = self.visible_mounts(
+            access.session_id if access is not None else None
+        )
+        owner = owner_prefix(
+            (m.prefix for m in visible),
+            path_scopes[0].virtual if path_scopes else cwd,
+        )
+        mount = next((m for m in visible if m.prefix == owner), None)
         if mount is not None and mount.resolve_command(cmd_name) is not None:
-            return mount
+            return [mount]
         if mount is not None and path_scopes:
-            return None
-        return self.mount_for_command(cmd_name)
+            return []
+        return self._fallback_candidates(cmd_name, access)
+
+    def invocation_candidates(
+        self,
+        cmd_name: str,
+        path_scopes: list[PathSpec],
+        cwd: str,
+        argv: Sequence[str] = (),
+        access: SessionAccess | None = None,
+    ) -> list[MountEntry]:
+        """The runnable choices for one invocation, before backend work.
+
+        Tree leaves are identified before fetching their environment. A
+        writable writer wins over readers; otherwise the first reader
+        wins. Keep one original candidate when none can run so its normal
+        parser or read-only refusal explains the failure.
+
+        Args:
+            cmd_name (str): command name.
+            path_scopes (list[PathSpec]): routing paths.
+            cwd (str): working directory.
+            argv (Sequence[str]): words after the command, for tree leaves.
+            access (SessionAccess | None): owner, else the current session.
+        """
+        candidates, _ = self._invocation_choices(
+            cmd_name, path_scopes, cwd, argv, access
+        )
+        return candidates
+
+    def _invocation_choices(
+        self,
+        cmd_name: str,
+        path_scopes: list[PathSpec],
+        cwd: str,
+        argv: Sequence[str],
+        access: SessionAccess | None,
+    ) -> tuple[list[MountEntry], MountEntry | None]:
+        candidates = self.command_candidates(
+            cmd_name, path_scopes, cwd, access
+        )
+        if len(candidates) < 2:
+            return candidates, candidates[0] if candidates else None
+        builtins = changes_files(cmd_name, [cmd_name, *argv])
+        writable: list[MountEntry] = []
+        readers: list[MountEntry] = []
+        named_trees: set[MountEntry] = set()
+        for mount in candidates:
+            tree = mount.cli_for(cmd_name)
+            if tree is not None:
+                result = walk(cmd_name, tree.spec, argv, cwd, defer_env=True)
+                if result.leaf is None:
+                    continue
+                writes = tree.handlers[" ".join(result.path)].write
+                if result.path:
+                    named_trees.add(mount)
+            else:
+                writes = mount.may_write(cmd_name, builtins=builtins)
+            if not writes:
+                readers.append(mount)
+            elif (
+                strongest_mode_under(mount.prefix, mount.mode, access)
+                != MountMode.READ
+            ):
+                writable.append(mount)
+        selected = writable or (readers or candidates)[:1]
+        named_tree = any(mount in named_trees for mount in selected)
+        if (
+            not path_scopes
+            and candidates[0].cli_for(cmd_name) is None
+            and not named_tree
+        ):
+            grammar = (
+                selected[0]
+                if selected[0].cli_for(cmd_name) is None
+                else candidates[0]
+            )
+            spec = grammar.spec_for(cmd_name)
+            if spec is not None:
+                parsed = parse_command(spec, list(argv), cwd, cmd_name)
+                named = [
+                    path
+                    for (path, kind), (raw, _) in zip(
+                        parsed.args, parsed.raw_operands, strict=True
+                    )
+                    if kind == "path" and raw != "-"
+                ] + parsed.path_flag_values
+                if named:
+                    bound = self.command_candidates(
+                        cmd_name,
+                        [PathSpec.from_str_path(named[0], cwd=cwd)],
+                        cwd,
+                        access,
+                    )
+                    if len(bound) < 2:
+                        return bound, bound[0] if bound else None
+        grammar = next(
+            (mount for mount in selected if mount in named_trees),
+            selected[0],
+        )
+        return selected, grammar
+
+    def invocation_mount(
+        self,
+        cmd_name: str,
+        path_scopes: list[PathSpec],
+        cwd: str,
+        argv: Sequence[str] = (),
+        access: SessionAccess | None = None,
+    ) -> MountEntry | None:
+        """The invocation's grammar, keeping ambiguity for execution.
+
+        Args:
+            cmd_name (str): command name.
+            path_scopes (list[PathSpec]): routing paths.
+            cwd (str): working directory.
+            argv (Sequence[str]): words after the command.
+            access (SessionAccess | None): owner, else the current session.
+        """
+        _, grammar = self._invocation_choices(
+            cmd_name, path_scopes, cwd, argv, access
+        )
+        return grammar
+
+    def execution_mount(
+        self,
+        cmd_name: str,
+        path_scopes: list[PathSpec],
+        cwd: str,
+        argv: Sequence[str] = (),
+        access: SessionAccess | None = None,
+    ) -> MountEntry | None:
+        """Select a destination, refusing an ambiguous pathless write.
+
+        Args:
+            cmd_name (str): command name.
+            path_scopes (list[PathSpec]): routing paths.
+            cwd (str): working directory.
+            argv (Sequence[str]): words after the command, for tree leaves.
+            access (SessionAccess | None): owner, else the current session.
+        """
+        candidates = self.invocation_candidates(
+            cmd_name, path_scopes, cwd, argv, access
+        )
+        if len(candidates) > 1:
+            raise MountCommandAmbiguous(
+                cmd_name, [m.prefix for m in candidates]
+            )
+        mount = candidates[0] if candidates else None
+        offered = self.command_candidates(cmd_name, path_scopes, cwd, access)
+        if mount is not None and len(offered) > 1:
+            logger.debug(
+                "%s: multiple mounts %s; using %s",
+                cmd_name,
+                [m.prefix for m in offered],
+                mount.prefix,
+            )
+        return mount
 
     async def resolve_mount(
         self,
         cmd_name: str,
         path_scopes: list[PathSpec],
         cwd: str,
+        argv: Sequence[str] = (),
+        access: SessionAccess | None = None,
     ) -> MountEntry | None:
         """Resolve which mount should handle a command.
 
@@ -704,8 +912,10 @@ class MountRegistry:
             cmd_name (str): command name.
             path_scopes (list[PathSpec]): path arguments.
             cwd (str): current working directory.
+            argv (Sequence[str]): words after the command, for tree leaves.
+            access (SessionAccess | None): owner, else the current session.
         """
-        mount = self.command_mount(cmd_name, path_scopes, cwd)
+        mount = self.execution_mount(cmd_name, path_scopes, cwd, argv, access)
         if mount is None and path_scopes:
             owner = self.try_mount_for(path_scopes[0].virtual)
             if owner is not None:
@@ -747,9 +957,13 @@ class MountRegistry:
     def mounts(self) -> list[MountEntry]:
         return list(self._mounts)
 
-    def visible_mounts(self) -> list[MountEntry]:
+    def visible_mounts(
+        self, session_id: str | None = None
+    ) -> list[MountEntry]:
         return [
-            m for m in self._mounts if m.visible is None or m.visible(None)
+            m
+            for m in self._mounts
+            if m.visible is None or m.visible(session_id)
         ]
 
     def rows_changed(self) -> None:
