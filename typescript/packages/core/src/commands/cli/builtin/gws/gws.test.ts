@@ -20,7 +20,7 @@ vi.mock('../../../../core/google/client.ts', async () => {
   return {
     ...actual,
     googleGet: vi.fn(),
-    googleGetBytes: vi.fn(),
+    googleGetStream: vi.fn(),
     googlePost: vi.fn(),
     googlePatch: vi.fn(),
     googleDelete: vi.fn(),
@@ -28,6 +28,8 @@ vi.mock('../../../../core/google/client.ts', async () => {
 })
 
 import * as client from '../../../../core/google/client.ts'
+import { readPrefix } from '../../../../io/cooperative.ts'
+import { materialize } from '../../../../io/types.ts'
 import type { GoogleConfig } from '../../../../core/google/config.ts'
 import { CLIRegistry } from '../../../../workspace/cli/registry.ts'
 import { cliSpecFor } from '../../specs.ts'
@@ -345,8 +347,19 @@ describe('gws api passthrough', () => {
     expect(call?.[2]).toEqual({ role: 'reader', type: 'anyone' })
   })
 
-  it('files export returns raw bytes', async () => {
-    vi.mocked(client.googleGetBytes).mockResolvedValue(new TextEncoder().encode('%PDF-1.4'))
+  it.each([null, 4])('files export streams and closes after %s bytes', async (count) => {
+    const events: string[] = []
+    async function* exported(): AsyncGenerator<Uint8Array, void> {
+      try {
+        for (const part of ['%PDF', '-1.4']) {
+          events.push('pull')
+          yield await Promise.resolve(new TextEncoder().encode(part))
+        }
+      } finally {
+        events.push('close')
+      }
+    }
+    vi.mocked(client.googleGetStream).mockReturnValue(exported())
     const result = await runGwsMethod(
       method('drive.files.export'),
       ACCESSOR,
@@ -354,9 +367,17 @@ describe('gws api passthrough', () => {
       [],
       context({ flags: { params: '{"fileId": "f1", "mimeType": "application/pdf"}' } }),
     )
-    if (result === null) throw new Error('expected result')
-    expect(DEC.decode(result[0] as Uint8Array)).toBe('%PDF-1.4')
-    const url = vi.mocked(client.googleGetBytes).mock.calls.at(-1)?.[1]
+    if (result?.[0] == null) throw new Error('expected output')
+    expect(result[1].exitCode).toBe(0)
+    expect(events).toEqual([])
+    if (count === null) {
+      expect(DEC.decode(await materialize(result[0]))).toBe('%PDF-1.4')
+      expect(events).toEqual(['pull', 'pull', 'close'])
+    } else {
+      expect(DEC.decode(await readPrefix(result[0], count))).toBe('%PDF')
+      expect(events).toEqual(['pull', 'close'])
+    }
+    const url = vi.mocked(client.googleGetStream).mock.calls.at(-1)?.[1]
     expect(url).toContain('/files/f1/export?mimeType=application/pdf')
   })
 })

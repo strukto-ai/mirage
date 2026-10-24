@@ -29,3 +29,15 @@ class PaginationStalledError(RuntimeError):
             f"pagination did not advance: cursor {cursor!r} came back twice"
         )
         self.cursor = cursor
+
+
+class ResponseTooLargeError(ValueError):
+    """A buffered binary response exceeded its retained-byte limit.
+
+    Args:
+        limit (int): the maximum bytes the read was allowed to retain.
+    """
+
+    def __init__(self, limit: int) -> None:
+        super().__init__(f"API response body exceeds {limit} bytes")
+        self.limit = limit

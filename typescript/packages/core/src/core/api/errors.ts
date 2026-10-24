@@ -27,3 +27,14 @@ export class PaginationStalledError extends Error {
     this.cursor = cursor
   }
 }
+
+/** A buffered binary response exceeded its explicit or default byte budget. */
+export class ResponseTooLargeError extends Error {
+  readonly limit: number
+
+  constructor(limit: number) {
+    super(`API response body exceeds ${String(limit)} bytes`)
+    this.name = 'ResponseTooLargeError'
+    this.limit = limit
+  }
+}

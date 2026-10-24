@@ -503,6 +503,20 @@
         "stdout": "/data/R10Doc.gdoc.json:1\n/data/Board.gsheet.json:1\n/data/Deck.gslide.json:1\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "g_doc_export_prefix",
+      "seq": 501005,
+      "targets": [
+        "gdrive"
+      ],
+      "clear_cache": true,
+      "command": "gws drive files export --params '{\"fileId\": \"doc0001\", \"mimeType\": \"text/plain\"}' | head -c 5",
+      "expect": {
+        "exit": 0,
+        "stdout": "HELLO",
+        "stderr": ""
+      }
     }
   ]
 }

@@ -40,15 +40,9 @@ function respond(
   body: string,
   headers: Record<string, string> = {},
 ): typeof globalThis.fetch {
-  return vi.fn(() =>
-    Promise.resolve({
-      ok: status < 400,
-      status,
-      headers: new Headers(headers),
-      arrayBuffer: () => Promise.resolve(new TextEncoder().encode(body).buffer),
-      text: () => Promise.resolve(''),
-    }),
-  ) as unknown as typeof globalThis.fetch
+  return vi.fn<typeof globalThis.fetch>(() =>
+    Promise.resolve(new Response(body, { status, headers })),
+  )
 }
 
 async function download(
