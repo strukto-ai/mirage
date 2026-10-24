@@ -39,7 +39,7 @@ class JiraVFS extends BaseVFS<JiraAccessor> {
     super({
       name: 'jira',
       accessor: new JiraAccessor(makeClient(config)),
-      prompt: 'Issues rendered as .json files.',
+      vfsMd: 'Issues rendered as .json files.',
     })
   }
 
@@ -429,7 +429,7 @@ typescript/packages/<core|node|browser>/src/
     <bespoke commands>.ts      # push-downs and verbs
   workspace/mount/backends.ts  # core only: the command set of each VFS class
   vfs/<name>/
-    config.ts prompt.ts
+    config.ts
     <name>.ts                  # the VFS class and its functions
 ```
 
@@ -512,7 +512,7 @@ import { BaseVFS } from '../base.ts'
 export class MyVFS extends BaseVFS<MyAccessor> {
   override readonly name: string = VFSName.MY_VFS
   override readonly cachesReads: boolean = true
-  override readonly prompt: string = MY_PROMPT
+  override vfsMd: string = VFS_MD
   private readonly config: MyConfig
   override readonly accessor: MyAccessor
   override readonly handed = { stat: ['entry'] } as const
@@ -629,6 +629,7 @@ An older spelling changes in these places:
 | `storageId()`, `statfs()` | `storageLocation()`, which may return `null`, and `capacity()` |
 | `recordVfsRef(vfs, ref)`, `vfsRefOf(vfs)` | the mount's `vfsRef` |
 | `cachesReads(vfs)`, `sizesAlwaysKnown(vfs)`, `readRevalidatable(vfs)` | read the flag off the driver |
+| `prompt`, `writePrompt` | one `vfsMd`, this VFS's part of VFS.md; usage of a CLI belongs in its help |
 
 Mount configs now reject unknown fields. Remove PostgreSQL's `default_search_limit` and MongoDB's `default_doc_limit` and `default_search_limit` from YAML (or `defaultSearchLimit` and `defaultDocLimit` from TypeScript). The remaining read ceilings are `max_read_rows` / `maxReadRows` and `max_doc_limit` / `maxDocLimit`. PostgreSQL `head`/`tail` and MongoDB `tail` report a clipped window through stderr and a nonzero status; consumers must check status before treating captured output as complete. PostgreSQL refuses whole reads over its thresholds. MongoDB streams and search no longer apply a silent result cap.
 
