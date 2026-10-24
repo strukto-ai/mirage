@@ -252,7 +252,12 @@ describe('runProgram', () => {
       yield new TextEncoder().encode('x')
       await new Promise<void>(() => undefined)
     }
-    const runner = shRunner(`exec '${process.execPath}' -e '${program}'`, undefined, true, endless())
+    const runner = shRunner(
+      `exec '${process.execPath}' -e '${program}'`,
+      undefined,
+      true,
+      endless(),
+    )
     await escapedPid(pidFile)
     expect(runner.terminate(15)).toBe(true)
     await runner.join()
