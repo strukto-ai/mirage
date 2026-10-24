@@ -382,6 +382,39 @@ async def test_cancel_group_reaches_grandchild_after_intermediate_exit():
     assert supervisor.live() == ()
 
 
+# A runner that already exited has nothing left to cancel, but stopping it
+# still stops what it left running (``sh -c 'sleep 100 &'``).
+@pytest.mark.asyncio
+async def test_stopping_an_exited_runner_stops_what_it_left_running():
+    supervisor = ProcessSupervisor()
+
+    async def run():
+        await asyncio.Event().wait()
+        return 0
+
+    async def quick():
+        return 0
+
+    parent = supervisor.start(
+        session_id="a",
+        command="sh",
+        cwd=PathSpec.from_str_path("/"),
+        run=quick,
+    )
+    left = supervisor.start(
+        session_id="a",
+        command="sleep",
+        cwd=PathSpec.from_str_path("/"),
+        run=run,
+        parent_pid=parent.info.pid,
+    )
+    await parent.join()
+    assert parent.terminate(15) is False
+    async with asyncio.timeout(5):
+        info = await left.join()
+    assert (info.exit_code, info.cancellation_requested) == (143, True)
+
+
 # A kill reaches the whole group with the signal it named, so a native
 # program a child runner started receives that signal too.
 @pytest.mark.asyncio

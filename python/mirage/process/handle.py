@@ -87,25 +87,28 @@ class ProcessHandle:
     def terminate(self, signal: int = 9) -> bool:
         """Request cancellation without waiting for the runner to exit.
 
+        A runner that already exited has nothing to cancel, but what it
+        started may still run (``sh -c 'sleep 100 &'``), so its children
+        are stopped all the same.
+
         Args:
             signal (int): what the stop stands for, KILL (9) unless a
                 ``kill`` named another.
         """
         with self._lock:
-            if (
-                self._info.state == ProcessState.EXITED
-                or self._info.cancellation_requested
-            ):
-                return False
-            self._signal = signal
-            self.task.get_loop().call_soon_threadsafe(self.task.cancel)
-            self._info = replace(
-                self._info,
-                state=ProcessState.STOPPING,
-                cancellation_requested=True,
-            )
-        self._cancel_children(signal)
-        return True
+            exited = self._info.state == ProcessState.EXITED
+            stopped = not exited and not self._info.cancellation_requested
+            if stopped:
+                self._signal = signal
+                self.task.get_loop().call_soon_threadsafe(self.task.cancel)
+                self._info = replace(
+                    self._info,
+                    state=ProcessState.STOPPING,
+                    cancellation_requested=True,
+                )
+        if stopped or exited:
+            self._cancel_children(signal)
+        return stopped
 
     def _settle(self, task: asyncio.Task[int]) -> None:
         cancelled = task.cancelled()

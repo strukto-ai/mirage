@@ -154,7 +154,7 @@ class LocalRuntime(PythonRuntime[None], ProcessExecutorMixin[None]):
     ) -> RunResult:
         name = texts[0]
         cwd = ctx.cwd.virtual
-        refusal = cwd_refusal(name, cwd)
+        refusal = await cwd_refusal(name, cwd)
         if refusal is not None:
             return refusal
         if os.path.dirname(name):

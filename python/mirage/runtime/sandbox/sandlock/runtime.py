@@ -107,7 +107,7 @@ class SandlockRuntime(
         output: OutputFn | None,
         errors: OutputFn | None,
     ) -> RunResult:
-        refusal = cwd_refusal(argv[0], ctx.cwd.virtual)
+        refusal = await cwd_refusal(argv[0], ctx.cwd.virtual)
         if refusal is not None:
             return refusal
         wrapper = ["run", *self.policy_argv(), "--clean-env"]

@@ -20,6 +20,8 @@ import sys
 from collections.abc import Mapping, Sequence
 from contextvars import Context
 
+import aiofiles.os
+
 from mirage.context.session_context import current_caller
 from mirage.io.stream import close_quietly, feed
 from mirage.io.types import ByteSource
@@ -310,7 +312,7 @@ def exec_args(
     return [*args, *argv]
 
 
-def cwd_refusal(name: str, cwd: str) -> RunResult | None:
+async def cwd_refusal(name: str, cwd: str) -> RunResult | None:
     """Refuse a host program whose working directory this host lacks.
 
     The session cwd is a workspace path; running elsewhere instead would
@@ -320,7 +322,7 @@ def cwd_refusal(name: str, cwd: str) -> RunResult | None:
         name (str): the program, for the message.
         cwd (str): the session's working directory.
     """
-    if os.path.isdir(cwd):
+    if await aiofiles.os.path.isdir(cwd):
         return None
     return RunResult(
         stdout=b"",

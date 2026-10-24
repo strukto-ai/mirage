@@ -340,6 +340,36 @@ it('group cancellation reaches grandchildren after an intermediate exits', async
   expect(supervisor.live()).toEqual([])
 })
 
+// A runner that already exited has nothing left to cancel, but stopping it
+// still stops what it left running (`sh -c 'sleep 100 &'`).
+it('stopping an exited runner stops what it left running', async () => {
+  const supervisor = new ProcessSupervisor(),
+    release = gate()
+  const init = {
+    sessionId: 'a',
+    command: 'sh',
+    cwd: PathSpec.fromStrPath('/'),
+    cancel: () => {
+      release.release()
+    },
+    run: () => Promise.resolve(0),
+  }
+  const parent = supervisor.start(init)
+  const left = supervisor.start({
+    ...init,
+    command: 'sleep',
+    parentPid: parent.info.pid,
+    run: async () => {
+      await release.promise
+      throw new DOMException('aborted', 'AbortError')
+    },
+  })
+  await parent.join()
+  expect(parent.terminate(15)).toBe(false)
+  const info = await left.join()
+  expect([info.exitCode, info.cancellationRequested]).toEqual([143, true])
+})
+
 // A kill reaches the whole group with the signal it named, so a native
 // program a child runner started receives that signal too.
 it('a group stopped with a signal passes it to every child', async () => {
