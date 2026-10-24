@@ -16,6 +16,8 @@
         <img src="https://img.shields.io/badge/made by-strukto.ai-0C0C0C?labelColor=F0ECE2" /></a>
     <a href="https://github.com/strukto-ai/mirage/blob/main/LICENSE" alt="License">
         <img src="https://img.shields.io/badge/license-Apache--2.0-0C0C0C?labelColor=F0ECE2" /></a>
+    <a href="https://doi.org/10.5281/zenodo.23504502" alt="DOI">
+        <img src="https://img.shields.io/badge/DOI-10.5281%2Fzenodo.23504502-0C0C0C?labelColor=F0ECE2" alt="DOI 10.5281/zenodo.23504502" /></a>
     <a href="https://discord.gg/u8BPQ65KsS" alt="Discord">
         <img src="https://img.shields.io/badge/discord-join-0C0C0C?labelColor=F0ECE2&logo=discord&logoColor=0C0C0C" /></a>
     <br/>

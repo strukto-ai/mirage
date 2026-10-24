@@ -12,6 +12,8 @@
         <img src="https://img.shields.io/badge/von-strukto.ai-0C0C0C?labelColor=FAFAFA" /></a>
     <a href="https://github.com/strukto-ai/mirage/blob/main/LICENSE" alt="Lizenz">
         <img src="https://img.shields.io/github/license/strukto-ai/mirage?label=lizenz&color=0C0C0C&labelColor=FAFAFA" /></a>
+    <a href="https://doi.org/10.5281/zenodo.23504502" alt="DOI">
+        <img src="https://img.shields.io/badge/DOI-10.5281%2Fzenodo.23504502-0C0C0C?labelColor=FAFAFA" alt="DOI 10.5281/zenodo.23504502" /></a>
     <a href="https://discord.gg/u8BPQ65KsS" alt="Discord-Community">
         <img src="https://img.shields.io/badge/discord-beitreten-0C0C0C?labelColor=FAFAFA&logo=discord&logoColor=0C0C0C" /></a>
     <a href="../assets/wechat-qr-code.jpg" aria-label="WeChat-Community">
