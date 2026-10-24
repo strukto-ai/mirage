@@ -152,3 +152,25 @@ async def test_get_user_profile(accessor):
 
     assert result["id"] == "U001"
     assert result["name"] == "alice"
+
+
+# A walk's limit stops the paging at the page that brings that many.
+@pytest.mark.asyncio
+async def test_list_users_pages_no_further_than_stop_at(accessor):
+    pages = [
+        {
+            "ok": True,
+            "members": [{"id": "U001", "name": "alice"}],
+            "response_metadata": {"next_cursor": "next"},
+        },
+        {"ok": True, "members": [{"id": "U002", "name": "bob"}]},
+    ]
+    with patch(
+        "mirage.core.slack.paginate.slack_get",
+        new_callable=AsyncMock,
+        side_effect=pages,
+    ) as asked:
+        result = await list_users(accessor, stop_at=1)
+
+    assert [u["name"] for u in result] == ["alice"]
+    assert asked.await_count == 1

@@ -17,7 +17,7 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 from mirage.accessor.slack import SlackAccessor
-from mirage.core.hierarchy.readdir import Listed, make_readdir
+from mirage.core.hierarchy.readdir import Listed, cut_listing, make_readdir
 from mirage.core.hierarchy.scope import ScopeMatch
 from mirage.core.render.json import jsonl_bytes
 from mirage.core.slack.channels import list_channels, list_dms
@@ -166,11 +166,12 @@ def _conversation(
 async def _list_channels_root(
     accessor: SlackAccessor, match: ScopeMatch
 ) -> Listed:
-    channels = await list_channels(accessor)
-    return [
+    channels = await list_channels(accessor, stop_at=match.limit)
+    rows = [
         _conversation(channel_dirname(ch), ch, ch.get("name", ""))
         for ch in channels
     ]
+    return cut_listing(rows, match.limit)
 
 
 async def _list_dms_root(accessor: SlackAccessor, match: ScopeMatch) -> Listed:
@@ -190,8 +191,8 @@ async def _list_dms_root(accessor: SlackAccessor, match: ScopeMatch) -> Listed:
 async def _list_users_root(
     accessor: SlackAccessor, match: ScopeMatch
 ) -> Listed:
-    users = await list_users(accessor)
-    return [
+    users = await list_users(accessor, stop_at=match.limit)
+    rows = [
         FileStat(
             name=user_filename(u),
             type=FileType.FILE,
@@ -201,6 +202,7 @@ async def _list_users_root(
         )
         for u in users
     ]
+    return cut_listing(rows, match.limit)
 
 
 async def _list_channel_days(

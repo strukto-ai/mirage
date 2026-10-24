@@ -41,6 +41,18 @@ export function semanticOptions(fl: FlagView): Record<string, JsonValue> {
 }
 
 /**
+ * `--threshold` for a store that scores a hit from 0 to 1. Mirrors Python's
+ * `unit_threshold`.
+ */
+export function unitThreshold(fl: FlagView): number {
+  const threshold = fl.asFloat('threshold') ?? 0
+  if (!(threshold >= 0 && threshold <= 1)) {
+    throw new UsageError('search: threshold must be in [0, 1]')
+  }
+  return threshold
+}
+
+/**
  * Rank `paths` for `query` at the dispatcher: one `search` over every scope,
  * which the dispatcher answers in one batch where the backend ranks several
  * scopes together (`searchMany`) and scope by scope otherwise. Each hit's
@@ -64,8 +76,9 @@ export async function searchResources(
 
 /**
  * Build `NAME QUERY [PATH...]` over a backend's native search. A missing
- * query is a usage error; the backend reads the rest of its options off the
- * flags. Mirrors `make_search` in `commands/builtin/generic/search.py`.
+ * query and a `--top-k` below 1 are usage errors; the backend reads the rest
+ * of its options off the flags, and refuses one it cannot take as a usage
+ * error too. Mirrors `make_search` in `commands/builtin/generic/search.py`.
  */
 export function makeSearch(
   vfs: VFSName,
@@ -81,6 +94,8 @@ export function makeSearch(
     const query = texts[0]
     if (query === undefined || query === '') throw new UsageError('search: query is required')
     const fl = new FlagView(ctx.flags, specOf('search'))
+    const topK = fl.asInt('top_k')
+    if (topK !== undefined && topK < 1) throw new UsageError('search: top-k must be positive')
     try {
       const scopes = defaultPaths(paths, ctx.cwd.virtual)
       const asked = { query, options: options(fl) }

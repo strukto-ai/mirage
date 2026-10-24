@@ -109,6 +109,11 @@ export class Scope {
  * listing is a window moves that window to the span the glob asks for instead
  * of filtering its own; every other consumer ignores the field, the way a
  * command ignores the `Context` facts it does not read.
+ *
+ * `limit` is the most entries a walk can still keep of the directory's
+ * listing, absent outside a walk. A lister that pages may stop once it holds
+ * that many and answer a partial `DirListing`; any other ignores it, as it
+ * does `pattern`.
  */
 export interface ScopeMatch {
   readonly kind: string
@@ -116,6 +121,7 @@ export interface ScopeMatch {
   readonly slots: Record<string, string>
   readonly scope: Scope | null
   readonly pattern: string | null
+  readonly limit?: number
 }
 
 export type DetectFn = (path: PathSpec | string) => ScopeMatch

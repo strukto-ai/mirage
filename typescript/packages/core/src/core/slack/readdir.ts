@@ -17,7 +17,7 @@ import type { SlackAccessor } from '../../accessor/slack.ts'
 import { ContentType, DirListing, FileStat, FileType } from '../../types.ts'
 import { epochToIso } from '../../utils/dates.ts'
 import { contentTypeForMime } from '../../utils/filetype.ts'
-import { makeReaddir, type Listed } from '../hierarchy/readdir.ts'
+import { cutListing, makeReaddir, type Listed } from '../hierarchy/readdir.ts'
 import type { ScopeMatch } from '../hierarchy/scope.ts'
 import { jsonlBytes } from '../render/json.ts'
 import { listChannels, listDms } from './channels.ts'
@@ -155,10 +155,13 @@ function conversation(
 
 async function listChannelsRoot(
   accessor: SlackAccessor,
-  _match: ScopeMatch,
+  match: ScopeMatch,
 ): Promise<Listed | null> {
-  const channels = await listChannels(accessor)
-  return channels.map((ch) => conversation(channelDirname(ch), ch, ch.name ?? ''))
+  const channels = await listChannels(accessor, { stopAt: match.limit })
+  return cutListing(
+    channels.map((ch) => conversation(channelDirname(ch), ch, ch.name ?? '')),
+    match.limit,
+  )
 }
 
 async function listDmsRoot(accessor: SlackAccessor, _match: ScopeMatch): Promise<Listed | null> {
@@ -172,9 +175,9 @@ async function listDmsRoot(accessor: SlackAccessor, _match: ScopeMatch): Promise
   })
 }
 
-async function listUsersRoot(accessor: SlackAccessor, _match: ScopeMatch): Promise<Listed | null> {
-  const users = await listUsers(accessor)
-  return users.map(
+async function listUsersRoot(accessor: SlackAccessor, match: ScopeMatch): Promise<Listed | null> {
+  const users = await listUsers(accessor, { stopAt: match.limit })
+  const rows = users.map(
     (u) =>
       new FileStat({
         name: userFilename(u),
@@ -184,6 +187,7 @@ async function listUsersRoot(accessor: SlackAccessor, _match: ScopeMatch): Promi
         extra: { user_id: u.id },
       }),
   )
+  return cutListing(rows, match.limit)
 }
 
 async function listChannelDays(

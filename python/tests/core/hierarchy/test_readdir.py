@@ -16,7 +16,7 @@ import asyncio
 
 import pytest
 
-from mirage.core.hierarchy.readdir import make_readdir
+from mirage.core.hierarchy.readdir import cut_listing, held_pages, make_readdir
 from mirage.core.hierarchy.scope import ScopeMatch
 from mirage.types import ContentType, DirListing, FileStat, FileType, PathSpec
 from tests.core.hierarchy.conftest import (
@@ -270,3 +270,45 @@ def test_a_pattern_kind_hands_the_glob_to_its_lister(accessor):
     asyncio.run(readdir(accessor, _globbed("/rooms/red", "2026-*")))
     asyncio.run(readdir(accessor, _globbed("/rooms/red", "*.json")))
     assert accessor.calls == ["days:2026-*", "days:None"]
+
+
+# A walk's limit rides the match to whichever lister answers, and is
+# absent outside a walk.
+@pytest.mark.asyncio
+async def test_a_walks_limit_reaches_the_lister_on_its_match(accessor):
+    seen: list[int | None] = []
+
+    async def rooms(accessor: FakeAccessor, match: ScopeMatch):
+        seen.append(match.limit)
+        return []
+
+    readdir = make_readdir(detect_scope, listers={"rooms": rooms})
+    await readdir(accessor, spec("/rooms"), limit=3)
+    await readdir(accessor, spec("/rooms"))
+    assert seen == [3, None]
+
+
+@pytest.mark.asyncio
+async def test_held_pages_stops_at_the_page_that_brings_the_limit():
+    pulled: list[int] = []
+    closed: list[bool] = []
+
+    async def pages():
+        try:
+            for page in ([1, 2], [3, 4], [5]):
+                pulled.append(page[0])
+                yield page
+        finally:
+            closed.append(True)
+
+    assert await held_pages(pages(), 3) == [1, 2, 3, 4]
+    assert (pulled, closed) == ([1, 3], [True])
+    assert await held_pages(pages(), None) == [1, 2, 3, 4, 5]
+
+
+def test_cut_listing_is_partial_once_the_rows_reach_the_limit():
+    rows = [FileStat(name=n, type=FileType.FILE) for n in ("a", "b")]
+    cut = cut_listing(rows, 2)
+    assert isinstance(cut, DirListing) and cut.partial
+    assert cut_listing(rows, 3) == rows
+    assert cut_listing(rows, None) == rows

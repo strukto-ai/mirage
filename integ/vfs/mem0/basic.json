@@ -272,6 +272,19 @@
         "stdout": "rc=2\nrc=2\nrc=2\n",
         "stderr": "search: query is required\nsearch: query is required\nsearch: only the 'semantic' method is supported\n"
       }
+    },
+    {
+      "id": "mem0_search_option_refusals",
+      "seq": 590021,
+      "targets": [
+        "mem0"
+      ],
+      "command": "search --threshold 2 planning /memories; echo rc=$?; search --top-k 0 planning /memories; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=2\nrc=2\n",
+        "stderr": "search: threshold must be in [0, 1]\nsearch: top-k must be positive\n"
+      }
     }
   ]
 }

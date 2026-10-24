@@ -31,7 +31,7 @@ from mirage.core.discord.guilds import list_guilds
 from mirage.core.discord.history import list_messages_for_day
 from mirage.core.discord.members import list_members
 from mirage.core.discord.scope import detect_scope
-from mirage.core.hierarchy.readdir import Listed, make_readdir
+from mirage.core.hierarchy.readdir import Listed, cut_listing, make_readdir
 from mirage.core.hierarchy.scope import ScopeMatch
 from mirage.core.render.json import jsonl_bytes
 from mirage.core.time_range import guard_day
@@ -113,8 +113,10 @@ async def _list_channels_dir(
 async def _list_members_dir(
     accessor: DiscordAccessor, match: ScopeMatch, own: FileStat
 ) -> Listed:
-    members = await list_members(accessor, str(own.extra["guild_id"]))
-    return [member_entry(m) for m in members]
+    members = await list_members(
+        accessor, str(own.extra["guild_id"]), stop_at=match.limit
+    )
+    return cut_listing([member_entry(m) for m in members], match.limit)
 
 
 async def _list_channel_days(

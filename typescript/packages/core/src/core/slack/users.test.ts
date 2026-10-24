@@ -158,3 +158,15 @@ describe('searchUsers', () => {
     expect(out.map((u) => (u as { id: string }).id)).toEqual(['U1'])
   })
 })
+
+// Twin of test_list_users_pages_no_further_than_stop_at.
+it('pages users no further than stopAt', async () => {
+  const t = new FakeTransport((call) => ({
+    ok: true,
+    members: [{ id: `U${String(call)}`, name: `user${String(call)}` }],
+    response_metadata: { next_cursor: 'next' },
+  }))
+  const users = await listUsers(new SlackAccessor(t), { stopAt: 1 })
+  expect(users.map((u) => u.name)).toEqual(['user1'])
+  expect(t.calls).toHaveLength(1)
+})

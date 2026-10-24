@@ -45,8 +45,8 @@ export class Mem0VFS extends BaseVFS {
     this.accessor = new Mem0Accessor(config)
   }
 
-  override readdir(path: PathSpec): Promise<FileStat[] | DirListing> {
-    return readdir(this.accessor, path)
+  override readdir(path: PathSpec, handed?: Handed): Promise<FileStat[] | DirListing> {
+    return readdir(this.accessor, path, null, null, handed?.limit)
   }
 
   // eslint-disable-next-line @typescript-eslint/require-await

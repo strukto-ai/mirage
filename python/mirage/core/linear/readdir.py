@@ -15,7 +15,7 @@
 from typing import Any
 
 from mirage.accessor.linear import LinearAccessor
-from mirage.core.hierarchy.readdir import make_readdir
+from mirage.core.hierarchy.readdir import Listed, cut_listing, make_readdir
 from mirage.core.hierarchy.scope import ScopeMatch
 from mirage.core.hierarchy.stat import entry_stat
 from mirage.core.linear.client import (
@@ -128,8 +128,10 @@ async def _list_team(
 
 async def _list_members(
     accessor: LinearAccessor, match: ScopeMatch, entry: FileStat
-) -> list[FileStat]:
-    users = await list_team_members(accessor, match.slots["team_id"])
+) -> Listed:
+    users = await list_team_members(
+        accessor, match.slots["team_id"], match.limit
+    )
     rows = []
     for user in users:
         rendered = to_json_bytes(normalize_user(user))
@@ -142,13 +144,15 @@ async def _list_members(
                 extra=kept_text(rendered),
             )
         )
-    return rows
+    return cut_listing(rows, match.limit)
 
 
 async def _list_issues(
     accessor: LinearAccessor, match: ScopeMatch, entry: FileStat
-) -> list[FileStat]:
-    issues = await list_team_issues(accessor, match.slots["team_id"])
+) -> Listed:
+    issues = await list_team_issues(
+        accessor, match.slots["team_id"], match.limit
+    )
     rows = []
     for issue in issues:
         extra: dict[str, Any] = {
@@ -165,7 +169,7 @@ async def _list_issues(
                 extra=extra,
             )
         )
-    return rows
+    return cut_listing(rows, match.limit)
 
 
 async def _list_issue(
@@ -203,9 +207,9 @@ async def _list_issue(
 
 async def _list_projects(
     accessor: LinearAccessor, match: ScopeMatch, entry: FileStat
-) -> list[FileStat]:
+) -> Listed:
     team_id = match.slots["team_id"]
-    projects = await list_team_projects(accessor, team_id)
+    projects = await list_team_projects(accessor, team_id, match.limit)
     team_issues = await list_team_issues(accessor, team_id)
     rows = []
     for project in projects:
@@ -227,14 +231,14 @@ async def _list_projects(
                 extra=kept_text(rendered),
             )
         )
-    return rows
+    return cut_listing(rows, match.limit)
 
 
 async def _list_cycles(
     accessor: LinearAccessor, match: ScopeMatch, entry: FileStat
-) -> list[FileStat]:
+) -> Listed:
     team_id = match.slots["team_id"]
-    cycles = await list_team_cycles(accessor, team_id)
+    cycles = await list_team_cycles(accessor, team_id, match.limit)
     rows = []
     for cycle in cycles:
         rendered = to_json_bytes(normalize_cycle(cycle, team_id=team_id))
@@ -247,13 +251,15 @@ async def _list_cycles(
                 extra=kept_text(rendered),
             )
         )
-    return rows
+    return cut_listing(rows, match.limit)
 
 
 async def _list_documents(
     accessor: LinearAccessor, match: ScopeMatch, entry: FileStat
-) -> list[FileStat]:
-    documents = await list_team_documents(accessor, match.slots["team_id"])
+) -> Listed:
+    documents = await list_team_documents(
+        accessor, match.slots["team_id"], match.limit
+    )
     rows = []
     for document in documents:
         rendered = to_json_bytes(normalize_document(document))
@@ -266,7 +272,7 @@ async def _list_documents(
                 extra=kept_text(rendered),
             )
         )
-    return rows
+    return cut_listing(rows, match.limit)
 
 
 readdir = make_readdir(

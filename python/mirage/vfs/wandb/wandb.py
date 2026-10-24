@@ -36,9 +36,12 @@ class WandbVFS(BaseVFS):
         self.accessor = WandbAccessor(config)
 
     async def readdir(
-        self, path: PathSpec, index: IndexCacheStore | None = None
+        self,
+        path: PathSpec,
+        index: IndexCacheStore | None = None,
+        limit: int | None = None,
     ) -> list[FileStat] | DirListing:
-        return await readdir(self.accessor, path, index)
+        return await readdir(self.accessor, path, index, limit)
 
     async def read(self, path: PathSpec) -> ByteSource:
         return read_stream(self.accessor, path)

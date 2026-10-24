@@ -30,6 +30,9 @@ export const DEFER_STATUSES: ReadonlySet<number> = new Set([404, 422])
 // its REST base. A REST path always leads with a slash, so `gh api
 // /graphql` stays a REST call, as gh's `p == "graphql"` has it.
 export const GRAPHQL_PATH = 'graphql'
+// What a batch read asks of each blob over GraphQL: its text, and whether
+// GitHub cut it short.
+export const BLOB_TEXT = '... on Blob { text isTruncated }'
 // A full commit sha, SHA-1 or SHA-256, as GitHub answers it (lowercase). A
 // mount whose ref matches is pinned to a commit that cannot move.
 export const COMMIT_SHA = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/

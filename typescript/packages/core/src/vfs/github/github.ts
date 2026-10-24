@@ -34,7 +34,7 @@ import {
 import type { DirListing, PathSpec, FileStat } from '../../types.ts'
 import type { Handed } from '../types.ts'
 import { readdir as githubReaddir } from '../../core/github/readdir.ts'
-import { readStream as githubStream } from '../../core/github/read.ts'
+import { readMany as githubReadMany, readStream as githubStream } from '../../core/github/read.ts'
 import { stat as githubStat, tree as githubTree } from '../../core/github/stat.ts'
 import { filesContaining as githubFilesContaining } from '../../core/github/search.ts'
 
@@ -121,6 +121,7 @@ export class GitHubVFS extends BaseVFS {
   override readonly handed = {
     readdir: ['entry'],
     read: ['entry'],
+    readMany: ['entry'],
     stat: ['entry', 'index'],
   } as const
 
@@ -131,6 +132,14 @@ export class GitHubVFS extends BaseVFS {
   // eslint-disable-next-line @typescript-eslint/require-await
   override async read(path: PathSpec, handed?: Handed): Promise<ByteSource> {
     return githubStream(this.accessor, path, handed?.entry)
+  }
+
+  override readMany(
+    paths: PathSpec[],
+    limit: number,
+    handed?: readonly Handed[],
+  ): Promise<Map<string, Uint8Array>> {
+    return githubReadMany(this.accessor, paths, limit, handed)
   }
 
   override stat(path: PathSpec, handed?: Handed): Promise<FileStat> {

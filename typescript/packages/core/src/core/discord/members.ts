@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { DiscordAccessor } from '../../accessor/discord.ts'
+import { heldPages } from '../hierarchy/readdir.ts'
 import { afterIdPages } from './paginate.ts'
 
 export interface DiscordMember {
@@ -39,12 +40,9 @@ export async function listMembers(
   accessor: DiscordAccessor,
   guildId: string,
   pageSize = 1000,
+  stopAt?: number,
 ): Promise<DiscordMember[]> {
-  const out: DiscordMember[] = []
-  for await (const page of listMembersStream(accessor, guildId, pageSize)) {
-    out.push(...page)
-  }
-  return out
+  return heldPages(listMembersStream(accessor, guildId, pageSize), stopAt)
 }
 
 export async function searchMembers(

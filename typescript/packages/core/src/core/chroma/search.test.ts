@@ -4,7 +4,7 @@ import { onMount, vfsOver } from '../../test-utils.ts'
 import { ChromaVFS } from '../../vfs/chroma/chroma.ts'
 import { PathSpec } from '../../types.ts'
 import { searchResources } from '../../commands/builtin/generic/search.ts'
-import { filesContaining } from './search.ts'
+import { filesContaining, searchMany, searchSegments } from './search.ts'
 
 it('ranks a batch through the dispatcher once and preserves the mount prefix', async () => {
   const query = vi.fn(() =>
@@ -98,4 +98,29 @@ it('asks only the walked pages below the mount root', async () => {
   expect(get).toHaveBeenLastCalledWith(
     expect.objectContaining({ where: { page_slug: { $in: ['api/reference'] } } }),
   )
+})
+
+// Twin of test_search_segments_drops_a_hit_scored_below_the_threshold.
+it('drops a hit scored below the threshold', async () => {
+  const query = vi.fn(() =>
+    Promise.resolve({
+      documents: [['quickstart chunk', 'api chunk']],
+      metadatas: [[{ page_slug: 'guides/quickstart' }, { page_slug: 'api/reference' }]],
+      distances: [[0.1, 0.25]],
+    }),
+  )
+  const accessor = {
+    config: { slugField: 'page_slug' },
+    getCollection: () => Promise.resolve({ query }),
+  } as unknown as ChromaAccessor
+  const result = await searchSegments(accessor, 'setup', [], 10, '/knowledge/', 0.8)
+  expect(result.map(([path]) => path)).toEqual(['/knowledge/guides/quickstart'])
+})
+
+// Twin of test_search_many_refuses_any_method_but_semantic.
+it('refuses any method but semantic', async () => {
+  const accessor = { config: { slugField: 'page_slug' } } as unknown as ChromaAccessor
+  await expect(
+    searchMany(accessor, [], { query: 'setup', options: { method: 'hybrid' } }),
+  ).rejects.toThrow("search: only the 'semantic' method is supported")
 })

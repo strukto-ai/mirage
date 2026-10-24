@@ -24,7 +24,10 @@ function records(value: unknown): Record<string, unknown>[] {
 }
 
 /** Fetch all memories for the configured scope, following pagination. */
-export async function getAllMemories(accessor: Mem0Accessor): Promise<Record<string, unknown>[]> {
+export async function getAllMemories(
+  accessor: Mem0Accessor,
+  limit?: number,
+): Promise<Record<string, unknown>[]> {
   const results: Record<string, unknown>[] = []
   let page = 1
   for (;;) {
@@ -35,6 +38,7 @@ export async function getAllMemories(accessor: Mem0Accessor): Promise<Record<str
     const batch = records(response.results)
     results.push(...batch)
     if (!response.next || batch.length === 0) return results
+    if (limit !== undefined && results.length >= limit) return results
     page += 1
   }
 }

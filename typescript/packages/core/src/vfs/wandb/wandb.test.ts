@@ -48,3 +48,26 @@ it('refuses W&B mutations and CLI dispatch even in a write workspace', async () 
     await ws.close()
   }
 })
+
+// Twin of test_find_pages_projects_no_further_than_its_walk_limit.
+it('lets find page projects no further than its walk limit', async () => {
+  const vfs = new WandbVFS(normalizeWandbConfig({ entities: ['lab'], page_size: 1, walk_limit: 2 }))
+  const request = vi
+    .spyOn(vfs.accessor.client, 'request')
+    .mockImplementation((_query, variables) => {
+      const n = Number(variables.cursor ?? 0)
+      return Promise.resolve({
+        models: {
+          edges: [{ node: { name: `p${String(n)}` } }],
+          pageInfo: { endCursor: String(n + 1), hasNextPage: true },
+        },
+      } as never)
+    })
+  const ws = new Workspace({ '/wandb': vfs }, { shellParser: await getTestParser() })
+  try {
+    await ws.shell('find /wandb/lab -maxdepth 1')
+    expect(request).toHaveBeenCalledTimes(3)
+  } finally {
+    await ws.close()
+  }
+})

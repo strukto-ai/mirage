@@ -84,24 +84,27 @@ async def readdir(
     accessor: WandbAccessor,
     path_spec: PathSpec,
     index: IndexCacheStore | None = None,
+    limit: int | None = None,
 ) -> list[FileStat] | DirListing:
     """A directory's rows. A run the stored listing of its project names
-    is not asked about again.
+    is not asked about again. Past a walk's ``limit`` an entity's projects
+    and a project's runs are paged no further, and the listing is partial.
 
     Args:
         accessor (WandbAccessor): the mount's accessor.
         path_spec (PathSpec): the directory, or a glob word in it.
         index (IndexCacheStore | None): the mount's index, whose listing
             of the project proves a run exists.
+        limit (int | None): the most entries a walk can still keep.
     """
     path = path_spec.dir if path_spec.pattern else path_spec
     ps = parts(accessor, path)
     if not ps:
         return [row(e, True) for e in dict.fromkeys(accessor.config.entities)]
     if len(ps) == 1:
-        nodes = await accessor.client.projects(ps[0])
+        nodes = await accessor.client.projects(ps[0], limit)
     elif len(ps) == 2:
-        nodes = await accessor.client.runs(*ps)
+        nodes = await accessor.client.runs(ps[0], ps[1], limit)
     elif len(ps) == 3:
         key = path.virtual.rstrip("/")
         parent = key.rsplit("/", 1)[0] or "/"
@@ -122,4 +125,6 @@ async def readdir(
         if not safe_name(name):
             raise WandbAPIError("W&B unsafe object name")
         result.append(row(name, True))
+    if limit is not None and len(result) >= limit:
+        return DirListing(result, partial=True)
     return result

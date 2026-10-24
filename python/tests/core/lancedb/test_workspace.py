@@ -89,6 +89,29 @@ async def test_grep_recursive_over_cards(ws):
             "search: only the 'semantic' method is supported\n",
         ),
         ("search dog /db", 1, "search: no table to search\n"),
+        (
+            "search --top-k 0 dog /db/animals",
+            2,
+            "search: top-k must be positive\n",
+        ),
+        (
+            "search --top-k many dog /db/animals",
+            2,
+            "search: invalid int value: 'many' for '--top-k'\n"
+            "Try 'search --help' for more information.\n",
+        ),
+        (
+            "search --threshold high dog /db/animals",
+            2,
+            "search: invalid float value: 'high' for '--threshold'\n"
+            "Try 'search --help' for more information.\n",
+        ),
+        (
+            "search --bogus dog /db/animals",
+            2,
+            "search: unrecognized option '--bogus'\n"
+            "Try 'search --help' for more information.\n",
+        ),
     ],
 )
 async def test_search_refusals(ws, cmd, exit_code, stderr):

@@ -4,6 +4,7 @@ import pytest
 
 from mirage.commands.builtin.dify import search as command_search
 from mirage.commands.config import Context
+from mirage.commands.errors import UsageError
 from mirage.core.dify import search, tree
 from mirage.io.types import materialize
 from mirage.types import PathSpec, SearchQuery
@@ -127,7 +128,18 @@ async def test_search_command_root_searches_whole_dataset(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_search_command_sends_an_explicit_empty_method(monkeypatch):
+@pytest.mark.parametrize(
+    "flags,message",
+    [
+        ({"method": ""}, "method must be one of"),
+        ({"method": "vector"}, "method must be one of"),
+        ({"threshold": "1.2"}, r"threshold must be in \[0, 1\]"),
+        ({"top_k": "0"}, "top-k must be positive"),
+    ],
+)
+async def test_search_command_refuses_an_option_dify_cannot_take(
+    monkeypatch, flags, message
+):
 
     calls: list[dict] = []
 
@@ -142,11 +154,11 @@ async def test_search_command_sends_an_explicit_empty_method(monkeypatch):
         directory="/knowledge",
     )
 
-    await command_search(
-        accessor(),
-        [root],
-        ["anything"],
-        Context(flags={"method": ""}, vfs=_files()),
-    )
-
-    assert calls[0]["method"] == ""
+    with pytest.raises(UsageError, match=message):
+        await command_search(
+            accessor(),
+            [root],
+            ["anything"],
+            Context(flags=flags, vfs=_files()),
+        )
+    assert calls == []

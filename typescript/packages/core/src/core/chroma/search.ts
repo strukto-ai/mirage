@@ -19,7 +19,7 @@ import { mountPrefixOf, mountedPath } from '../../utils/key_prefix.ts'
 import { scoreFromDistance } from '../../utils/score.ts'
 import { rstripSlash, stripSlash } from '../../utils/slash.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
-import { intOption, validateOptions } from '../../vfs/search.ts'
+import { floatOption, intOption, textOption, validateOptions } from '../../vfs/search.ts'
 import { scalarString } from '../slug_tree/rows.ts'
 import { searchScope, targetEntries, validateQuery } from '../slug_tree/search.ts'
 import { PAGE_CHUNK_BATCH_SIZE } from './client.ts'
@@ -31,6 +31,7 @@ export async function searchSegments(
   paths: readonly PathSpec[],
   topK = 10,
   mountPrefix = '',
+  threshold = 0,
 ): Promise<[string, string][]> {
   validateQuery(query, topK)
   if (mountPrefix === '' && paths.length > 0) {
@@ -53,7 +54,7 @@ export async function searchSegments(
     include: ['documents', 'metadatas', 'distances'],
     ...(where !== undefined ? { where } : {}),
   })
-  return renderRecords(response, accessor.config.slugField, mountPrefix, scopedSlugs)
+  return renderRecords(response, accessor.config.slugField, mountPrefix, scopedSlugs, threshold)
 }
 
 interface ChromaQueryResponse {
@@ -67,6 +68,7 @@ function renderRecords(
   slugField: string,
   mountPrefix: string,
   scopedSlugs: ReadonlySet<string> | null = null,
+  threshold = 0,
 ): [string, string][] {
   const documents = firstResultList(response.documents)
   const metadatas = firstResultList(response.metadatas)
@@ -81,6 +83,7 @@ function renderRecords(
     const slugValue = stripSlash(slug)
     if (scopedSlugs !== null && !scopedSlugs.has(slugValue)) continue
     const score = scoreFromDistance(distances[i])
+    if (threshold > 0 && Number(score) < threshold) continue
     let path = '/' + slugValue
     const prefix = rstripSlash(mountPrefix)
     if (prefix !== '') path = prefix + path
@@ -101,10 +104,14 @@ export async function searchMany(
   paths: PathSpec[],
   query: SearchQuery,
 ): Promise<[string, string][]> {
-  validateOptions(query, ['top_k'])
+  validateOptions(query, ['top_k', 'method', 'threshold'])
   const topK = intOption(query, 'top_k', 10)
+  const threshold = floatOption(query, 'threshold', 0)
+  if (textOption(query, 'method', 'semantic') !== 'semantic') {
+    throw new Error("search: only the 'semantic' method is supported")
+  }
   const [targets, prefix] = await searchScope(CHROMA_TREE, accessor, paths)
-  return searchSegments(accessor, query.query, targets, topK, prefix)
+  return searchSegments(accessor, query.query, targets, topK, prefix, threshold)
 }
 
 /**

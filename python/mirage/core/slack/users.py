@@ -16,6 +16,7 @@ from collections.abc import AsyncIterator
 from typing import Any, cast
 
 from mirage.accessor.slack import SlackAccessor
+from mirage.core.hierarchy.readdir import held_pages
 from mirage.core.render.json import compact_json_bytes
 from mirage.core.slack.client import slack_get
 from mirage.core.slack.paginate import cursor_pages
@@ -52,21 +53,20 @@ async def list_users_stream(
 
 
 async def list_users(
-    accessor: SlackAccessor, limit: int = 200
+    accessor: SlackAccessor, limit: int = 200, stop_at: int | None = None
 ) -> list[dict[str, Any]]:
-    """List workspace users (eager; collects all pages).
+    """List workspace users (eager; collects all pages, and none past the
+    one that brings ``stop_at``).
 
     Args:
         accessor (SlackAccessor): Slack accessor.
         limit (int): max per page.
+        stop_at (int | None): the most users a walk can still keep.
 
     Returns:
         list[dict]: user dicts.
     """
-    out: list[dict[str, Any]] = []
-    async for page in list_users_stream(accessor, limit=limit):
-        out.extend(page)
-    return out
+    return await held_pages(list_users_stream(accessor, limit=limit), stop_at)
 
 
 def user_json_bytes(user: dict[str, Any]) -> bytes:

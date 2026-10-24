@@ -62,3 +62,24 @@ describe('linear issue queries', () => {
     expect(listed).toEqual(read)
   })
 })
+
+// Twin of test_a_team_listing_pages_no_further_than_a_walks_limit.
+it('pages a team listing no further than a walk limit', async () => {
+  let asked = 0
+  const transport: LinearTransport = {
+    graphql: () => {
+      asked += 1
+      return Promise.resolve({
+        team: {
+          issues: {
+            nodes: [{ id: `i${String(asked)}` }],
+            pageInfo: { hasNextPage: true, endCursor: `c${String(asked)}` },
+          },
+        },
+      })
+    },
+  }
+  const issues = await listTeamIssues(transport, 'T1', 1)
+  expect(issues.map((issue) => issue.id)).toEqual(['i1'])
+  expect(asked).toBe(1)
+})

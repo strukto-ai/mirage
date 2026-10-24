@@ -57,6 +57,7 @@ it.each([
   [[], {}, 'search: query is required'],
   [[''], {}, 'search: query is required'],
   [['dog'], { method: 'hybrid' }, "search: only the 'semantic' method is supported"],
+  [['dog'], { top_k: '0' }, 'search: top-k must be positive'],
 ])('refuses %j %j as a usage error', async (texts, flags, message) => {
   const cmd = LANCEDB_COMMANDS.find((c) => c.name === 'search')
   if (cmd === undefined) throw new Error('search not registered')

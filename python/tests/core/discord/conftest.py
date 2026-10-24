@@ -98,7 +98,7 @@ class FakeDiscordApi:
         assert guild_id == GUILD["id"]
         return [dict(c) for c in CHANNELS]
 
-    async def list_members(self, accessor, guild_id):
+    async def list_members(self, accessor, guild_id, stop_at=None):
         assert guild_id == GUILD["id"]
         return [dict(m) for m in MEMBERS]
 

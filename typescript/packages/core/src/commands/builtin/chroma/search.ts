@@ -13,8 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { VFSName } from '../../../types.ts'
-import { makeSearch } from '../generic/search.ts'
+import { makeSearch, semanticOptions } from '../generic/search.ts'
 
-export const search = makeSearch(VFSName.CHROMA, (fl) => ({ top_k: fl.asInt('top_k') ?? 10 }), {
+export const search = makeSearch(VFSName.CHROMA, (fl) => ({ top_k: 10, ...semanticOptions(fl) }), {
   name: 'chroma-query',
 })

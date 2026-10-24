@@ -16,7 +16,7 @@ import { guardDay } from '../time_range.ts'
 import type { DiscordAccessor } from '../../accessor/discord.ts'
 import { ContentType, DirListing, FileStat, FileType } from '../../types.ts'
 import { contentTypeForMime } from '../../utils/filetype.ts'
-import { makeReaddir, type Listed } from '../hierarchy/readdir.ts'
+import { cutListing, makeReaddir, type Listed } from '../hierarchy/readdir.ts'
 import type { ScopeMatch } from '../hierarchy/scope.ts'
 import { listChannels } from './channels.ts'
 import { DiscordApiError } from './client.ts'
@@ -105,11 +105,12 @@ async function listChannelsDir(
 
 async function listMembersDir(
   accessor: DiscordAccessor,
-  _match: ScopeMatch,
+  match: ScopeMatch,
   own: FileStat,
 ): Promise<Listed> {
-  const members = await listMembers(accessor, String(own.extra.guild_id))
-  return members.filter((m) => m.user !== undefined && m.user.id !== '').map(memberEntry)
+  const members = await listMembers(accessor, String(own.extra.guild_id), 1000, match.limit)
+  const rows = members.filter((m) => m.user !== undefined && m.user.id !== '').map(memberEntry)
+  return cutListing(rows, match.limit)
 }
 
 function listChannelDays(

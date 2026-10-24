@@ -81,9 +81,12 @@ class DiscordVFS(BaseVFS):
         self.vfs_md = VFS_MD + self.accessor.time_range.vfs_md()
 
     async def readdir(
-        self, path: PathSpec, entry: FileStat | None = None
+        self,
+        path: PathSpec,
+        entry: FileStat | None = None,
+        limit: int | None = None,
     ) -> list[FileStat] | DirListing:
-        return await _readdir(self.accessor, path, entry)
+        return await _readdir(self.accessor, path, entry, limit=limit)
 
     async def read(
         self,

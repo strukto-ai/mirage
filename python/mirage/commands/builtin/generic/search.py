@@ -34,6 +34,18 @@ def semantic_options(fl: FlagView) -> dict[str, JsonValue]:
     return options
 
 
+def unit_threshold(fl: FlagView) -> float:
+    """``--threshold`` for a store that scores a hit from 0 to 1.
+
+    Args:
+        fl (FlagView): the invocation's search flags.
+    """
+    threshold = fl.as_float("threshold") or 0.0
+    if not 0 <= threshold <= 1:
+        raise UsageError("search: threshold must be in [0, 1]")
+    return threshold
+
+
 async def search_resources(
     dispatch: DispatchFn | None,
     paths: list[PathSpec],
@@ -78,8 +90,9 @@ def make_search(
 ) -> Callable[..., Any]:
     """Build ``NAME QUERY [PATH...]`` over a backend's native search.
 
-    A missing query is a usage error; the backend reads the rest of its
-    options off the flags.
+    A missing query and a ``--top-k`` below 1 are usage errors; the
+    backend reads the rest of its options off the flags, and refuses one
+    it cannot take as a usage error too.
 
     Args:
         vfs (str): VFS name the command registers under.
@@ -97,6 +110,9 @@ def make_search(
         if not texts or not texts[0]:
             raise UsageError("search: query is required")
         fl = FlagView(ctx.flags, spec=SPECS["search"])
+        top_k = fl.as_int("top_k")
+        if top_k is not None and top_k < 1:
+            raise UsageError("search: top-k must be positive")
         output = await search_resources(
             ctx.vfs.dispatch if ctx.vfs is not None else None,
             default_paths(paths, ctx.cwd),

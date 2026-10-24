@@ -376,8 +376,8 @@ export const SPECS: Record<string, CommandSpec> = {
   search: new CommandSpec({
     arguments: [
       new Argument('--method'),
-      new Argument('--top-k'),
-      new Argument('--threshold'),
+      new Argument('--top-k', { type: 'int' }),
+      new Argument('--threshold', { type: 'float' }),
       TEXT_OPERAND,
       PATHS_OPERAND,
     ],

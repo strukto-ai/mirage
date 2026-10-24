@@ -18,7 +18,15 @@ import { ContentType, DirListing, FileStat, FileType, PathSpec } from '../../typ
 import { enoent } from '../../errors/fs.ts'
 import { stripSlash } from '../../utils/slash.ts'
 import { Codec, DATE, JSON_NAME } from './codec.ts'
-import { makeReaddir, type EntryLister, type Guard, type Listed, type Lister } from './readdir.ts'
+import {
+  cutListing,
+  heldPages,
+  makeReaddir,
+  type EntryLister,
+  type Guard,
+  type Listed,
+  type Lister,
+} from './readdir.ts'
 import { Slot, Scope, makeDetectScope } from './scope.ts'
 
 const SCOPES: readonly Scope[] = [
@@ -330,4 +338,45 @@ describe('hierarchy makeReaddir listings', () => {
     await readdir(accessor, globbed('/rooms/red', '*.json'))
     expect(accessor.calls).toEqual(['days:2026-*', 'days:null'])
   })
+})
+
+// Twin of test_a_walks_limit_reaches_the_lister_on_its_match.
+it('hands a walk limit to the lister on its match', async () => {
+  const seen: (number | undefined)[] = []
+  const rooms: Lister<FakeAccessor> = (_accessor, match) => {
+    seen.push(match.limit)
+    return Promise.resolve([])
+  }
+  const readdir = makeReaddir<FakeAccessor>(detectScope, { listers: { rooms } })
+  await readdir(new FakeAccessor(), spec('/rooms'), null, null, 3)
+  await readdir(new FakeAccessor(), spec('/rooms'))
+  expect(seen).toEqual([3, undefined])
+})
+
+// Twin of test_held_pages_stops_at_the_page_that_brings_the_limit.
+it('holds no page past the one that brings the limit', async () => {
+  const pulled: number[] = []
+  const closed: boolean[] = []
+  async function* pages(): AsyncGenerator<number[]> {
+    try {
+      for (const page of [[1, 2], [3, 4], [5]]) {
+        pulled.push(page[0] ?? 0)
+        yield await Promise.resolve(page)
+      }
+    } finally {
+      closed.push(true)
+    }
+  }
+  expect(await heldPages(pages(), 3)).toEqual([1, 2, 3, 4])
+  expect([pulled, closed]).toEqual([[1, 3], [true]])
+  expect(await heldPages(pages(), undefined)).toEqual([1, 2, 3, 4, 5])
+})
+
+// Twin of test_cut_listing_is_partial_once_the_rows_reach_the_limit.
+it('cuts a listing once its rows reach the limit', () => {
+  const rows = ['a', 'b'].map((name) => new FileStat({ name, type: FileType.FILE }))
+  const cut = cutListing(rows, 2)
+  expect(cut instanceof DirListing && cut.partial).toBe(true)
+  expect(cutListing(rows, 3)).toBe(rows)
+  expect(cutListing(rows, undefined)).toBe(rows)
 })

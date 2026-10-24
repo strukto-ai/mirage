@@ -12,11 +12,15 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { METHODS } from '../../../core/dify/search.ts'
 import { VFSName } from '../../../types.ts'
-import { makeSearch } from '../generic/search.ts'
+import { UsageError } from '../../errors.ts'
+import { makeSearch, unitThreshold } from '../generic/search.ts'
 
-export const search = makeSearch(VFSName.DIFY, (fl) => ({
-  top_k: fl.asInt('top_k') ?? 10,
-  method: fl.asStr('method', 'semantic'),
-  threshold: fl.asFloat('threshold') ?? 0,
-}))
+export const search = makeSearch(VFSName.DIFY, (fl) => {
+  const method = fl.asStr('method', 'semantic')
+  if (!Object.hasOwn(METHODS, method)) {
+    throw new UsageError('search: method must be one of semantic, fulltext, hybrid, keyword')
+  }
+  return { top_k: fl.asInt('top_k') ?? 10, method, threshold: unitThreshold(fl) }
+})

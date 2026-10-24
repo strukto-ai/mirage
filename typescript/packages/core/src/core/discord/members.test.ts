@@ -89,3 +89,15 @@ describe('searchMembers', () => {
     expect(out).toEqual([])
   })
 })
+
+// Twin of test_list_members_pages_no_further_than_stop_at.
+it('pages members no further than stopAt', async () => {
+  let n = 0
+  const t = new FakeDiscordTransport(() => {
+    n += 1
+    return [{ user: { id: `U${String(n)}`, username: `user${String(n)}` } }]
+  })
+  const out = await listMembers(new DiscordAccessor(t), 'G1', 1, 1)
+  expect(out.map((m) => m.user?.username)).toEqual(['user1'])
+  expect(t.calls).toHaveLength(1)
+})

@@ -19,12 +19,19 @@ import pytest
 
 from mirage.accessor.github import GitHubAccessor, GitHubAccount
 from mirage.cache.index.ram import ListingCheckStore
-from mirage.core.github.config import GhConfig
-from mirage.core.github.read import read, read_bytes, read_stream
+from mirage.core.github.config import GhConfig, GitHubConfig
+from mirage.core.github.read import (
+    read,
+    read_bytes,
+    read_many,
+    read_stream,
+)
 from mirage.core.github.readdir import readdir
 from mirage.core.github.stat import stat
 from mirage.observe.context import RecordingScope
 from mirage.types import FileStat, FileType, PathSpec
+from mirage.vfs.github import GitHubVFS
+from mirage.workspace import Workspace
 from tests.fixtures.github_api import FakeGitHub, blob_sha, serve
 from tests.fixtures.handed import entry_at
 
@@ -161,3 +168,65 @@ async def test_a_read_stamps_the_sha_it_fetched_not_a_newer_one():
         probe = await stat(accessor, path, None, ListingCheckStore())
         assert probe.fingerprint == blob_sha(live)
         assert probe.fingerprint != scope.records[0].fingerprint
+
+
+# One GraphQL query reads the batch. A blob it cannot hand over byte for
+# byte, as text that is not UTF-8 or text cut short, is left out, and so is
+# what each file kept is recorded with: the sha its row names.
+@pytest.mark.asyncio
+async def test_read_many_reads_a_batch_in_one_query_and_records_each():
+    files = {
+        "a.txt": b"alpha\n",
+        "b.txt": b"beta\r\n",
+        "latin.txt": b"caf\xe9\n",
+        "long.txt": b"x" * 64,
+    }
+    with serve(FakeGitHub(files=files, graphql_text_limit=32)) as gh:
+        accessor = _served(gh)
+        paths = [_at(rel, "/gh") for rel in files]
+        rows = [await entry_at(readdir, accessor, p) for p in paths]
+        scope = RecordingScope()
+        try:
+            got = await read_many(accessor, paths, 1 << 20, rows)
+        finally:
+            scope.close()
+        assert got == {"/gh/a.txt": b"alpha\n", "/gh/b.txt": b"beta\r\n"}
+        assert (gh.count("graphql"), gh.count("blob")) == (1, 0)
+        assert [(r.op, r.path, r.fingerprint) for r in scope.records] == [
+            ("read", "/gh/a.txt", blob_sha(b"alpha\n")),
+            ("read", "/gh/b.txt", blob_sha(b"beta\r\n")),
+        ]
+
+
+# A file past the limit, a folder and a path with no row are left out
+# before anything is asked.
+@pytest.mark.asyncio
+async def test_read_many_asks_nothing_for_a_file_it_leaves_out():
+    with serve(FakeGitHub(files={"a.txt": b"alpha", "src/b.txt": b"b"})) as gh:
+        accessor = _served(gh)
+        a, src = _at("a.txt", "/gh"), _at("src", "/gh")
+        rows = [
+            await entry_at(readdir, accessor, a),
+            await entry_at(readdir, accessor, src),
+            None,
+        ]
+        gone = _at("gone.txt", "/gh")
+        assert await read_many(accessor, [a, src, gone], 4, rows) == {}
+        assert gh.count("graphql") == 0
+
+
+# cat reads its first operand and reads ahead the rest in one query.
+@pytest.mark.asyncio
+async def test_cat_reads_ahead_its_operands_in_one_query():
+    files = {f"{name}.txt": f"{name}\n".encode() for name in "abcd"}
+    with serve(FakeGitHub(files=files)) as gh:
+        config = GitHubConfig(token="t", base_url=gh.url, owner="o", repo="r")
+        ws = Workspace({"/gh": GitHubVFS(config)})
+        try:
+            result = await ws.shell(
+                "cat /gh/a.txt /gh/b.txt /gh/c.txt /gh/d.txt"
+            )
+            assert await result.stdout_str() == "a\nb\nc\nd\n"
+        finally:
+            await ws.close()
+        assert (gh.count("blob"), gh.count("graphql")) == (1, 1)

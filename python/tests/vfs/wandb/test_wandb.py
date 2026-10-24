@@ -45,3 +45,27 @@ async def test_write_workspace_cannot_mutate_wandb_or_invoke_a_wandb_cli() -> (
         vfs.accessor.client.request.assert_not_awaited()
     finally:
         await ws.close()
+
+
+async def _project_page(query: str, variables: dict) -> dict:
+    n = int(variables["cursor"] or 0)
+    return {
+        "models": {
+            "edges": [{"node": {"name": f"p{n}"}}],
+            "pageInfo": {"endCursor": str(n + 1), "hasNextPage": True},
+        }
+    }
+
+
+# find hands its listing the walk's limit, so an entity's projects are
+# paged no further than one past what the walk can keep.
+@pytest.mark.asyncio
+async def test_find_pages_projects_no_further_than_its_walk_limit() -> None:
+    vfs = WandbVFS(WandbConfig(entities=["lab"], page_size=1, walk_limit=2))
+    vfs.accessor.client.request = AsyncMock(side_effect=_project_page)
+    ws = Workspace({"/wandb": vfs})
+    try:
+        await ws.shell("find /wandb/lab -maxdepth 1")
+        assert vfs.accessor.client.request.await_count == 3
+    finally:
+        await ws.close()

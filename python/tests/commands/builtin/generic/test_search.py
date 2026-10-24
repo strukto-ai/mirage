@@ -19,6 +19,7 @@ import pytest
 from mirage.commands.builtin.generic.search import (
     search_resources,
     semantic_options,
+    unit_threshold,
 )
 from mirage.commands.errors import UsageError
 from mirage.commands.spec.flag_view import FlagView
@@ -34,6 +35,14 @@ def test_semantic_options_default_the_method_only_when_absent():
     }
     with pytest.raises(UsageError, match="only the 'semantic' method"):
         semantic_options(FlagView({"method": ""}))
+
+
+@pytest.mark.parametrize("value", ["-0.1", "1.5"])
+def test_a_threshold_outside_zero_to_one_is_a_usage_error(value):
+    assert unit_threshold(FlagView({})) == 0.0
+    assert unit_threshold(FlagView({"threshold": "0.4"})) == 0.4
+    with pytest.raises(UsageError, match=r"threshold must be in \[0, 1\]"):
+        unit_threshold(FlagView({"threshold": value}))
 
 
 @pytest.mark.asyncio

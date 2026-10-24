@@ -25,7 +25,7 @@ import { difyPost } from './client.ts'
 import { segmentText } from './read.ts'
 import { DIFY_TREE, SLUG_NOUN } from './tree.ts'
 
-const METHODS: Record<string, string> = {
+export const METHODS: Record<string, string> = {
   semantic: 'semantic_search',
   fulltext: 'full_text_search',
   hybrid: 'hybrid_search',

@@ -89,8 +89,8 @@ SPECS: dict[str, CommandSpec] = {
     "search": CommandSpec(
         arguments=(
             Argument("--method"),
-            Argument("--top-k"),
-            Argument("--threshold"),
+            Argument("--top-k", type="int"),
+            Argument("--threshold", type="float"),
             TEXT_OPERAND,
             PATHS_OPERAND,
         )

@@ -115,6 +115,7 @@ async def paginate_connection(
     query: str,
     variables: dict[str, Any] | None,
     path: tuple[str, ...],
+    limit: int | None = None,
 ) -> list[dict[str, Any]]:
     merged_vars = dict(variables or {})
     merged_vars.setdefault("first", 50)
@@ -129,6 +130,8 @@ async def paginate_connection(
         page_info = cursor["pageInfo"]
         if not page_info.get("hasNextPage"):
             break
+        if limit is not None and len(nodes) >= limit:
+            break
         merged_vars["after"] = page_info.get("endCursor")
     return nodes
 
@@ -140,37 +143,50 @@ async def list_teams(accessor: LinearAccessor) -> list[dict[str, Any]]:
 
 
 async def list_team_members(
-    accessor: LinearAccessor, team_id: str
+    accessor: LinearAccessor, team_id: str, limit: int | None = None
 ) -> list[dict[str, Any]]:
     return await paginate_connection(
-        accessor, TEAM_MEMBERS_QUERY, {"teamId": team_id}, ("team", "members")
+        accessor,
+        TEAM_MEMBERS_QUERY,
+        {"teamId": team_id},
+        ("team", "members"),
+        limit,
     )
 
 
 async def list_team_issues(
-    accessor: LinearAccessor, team_id: str
+    accessor: LinearAccessor, team_id: str, limit: int | None = None
 ) -> list[dict[str, Any]]:
     return await paginate_connection(
-        accessor, TEAM_ISSUES_QUERY, {"teamId": team_id}, ("team", "issues")
+        accessor,
+        TEAM_ISSUES_QUERY,
+        {"teamId": team_id},
+        ("team", "issues"),
+        limit,
     )
 
 
 async def list_team_projects(
-    accessor: LinearAccessor, team_id: str
+    accessor: LinearAccessor, team_id: str, limit: int | None = None
 ) -> list[dict[str, Any]]:
     return await paginate_connection(
         accessor,
         TEAM_PROJECTS_QUERY,
         {"teamId": team_id},
         ("team", "projects"),
+        limit,
     )
 
 
 async def list_team_cycles(
-    accessor: LinearAccessor, team_id: str
+    accessor: LinearAccessor, team_id: str, limit: int | None = None
 ) -> list[dict[str, Any]]:
     return await paginate_connection(
-        accessor, TEAM_CYCLES_QUERY, {"teamId": team_id}, ("team", "cycles")
+        accessor,
+        TEAM_CYCLES_QUERY,
+        {"teamId": team_id},
+        ("team", "cycles"),
+        limit,
     )
 
 
@@ -183,10 +199,14 @@ async def list_team_labels(
 
 
 async def list_team_documents(
-    accessor: LinearAccessor, team_id: str
+    accessor: LinearAccessor, team_id: str, limit: int | None = None
 ) -> list[dict[str, Any]]:
     return await paginate_connection(
-        accessor, TEAM_DOCUMENTS_QUERY, {"teamId": team_id}, ("documents",)
+        accessor,
+        TEAM_DOCUMENTS_QUERY,
+        {"teamId": team_id},
+        ("documents",),
+        limit,
     )
 
 
