@@ -17,14 +17,12 @@ import errno
 import logging
 import sys
 import time
+from collections.abc import Callable
 from ctypes import CFUNCTYPE, POINTER, c_char_p, c_int, c_uint
-from typing import TYPE_CHECKING, Any, cast
+from typing import Any
 
 from mirage.fuse.constants import UTIME_NOW, UTIME_OMIT
 from mirage.types import JsonValue
-
-if TYPE_CHECKING:
-    from mirage.fuse.fs import MirageFS
 
 logger = logging.getLogger(__name__)
 
@@ -169,7 +167,10 @@ def rename_flags_check(new_exists: bool, flags: int) -> int | None:
 def _marshal_setattr_x(
     self: Any, path: bytes, attr: "ctypes._Pointer[SetattrX]"
 ) -> int:
-    return cast("MirageFS", self.operations).setattr_x(
+    setattr_x: Callable[[str, dict[str, JsonValue]], int] = (
+        self.operations.setattr_x
+    )
+    return setattr_x(
         path.decode(self.encoding), changes_from_setattr(attr.contents)
     )
 
@@ -181,15 +182,17 @@ def _marshal_fsetattr_x(
     fip: "ctypes._Pointer[ctypes.Structure]",
 ) -> int:
     fh = fip.contents.fh if fip else None
-    return cast("MirageFS", self.operations).fsetattr_x(
+    fsetattr_x: Callable[[str, dict[str, JsonValue], int | None], int] = (
+        self.operations.fsetattr_x
+    )
+    return fsetattr_x(
         path.decode(self.encoding), changes_from_setattr(attr.contents), fh
     )
 
 
 def _marshal_renamex(self: Any, old: bytes, new: bytes, flags: int) -> int:
-    return cast("MirageFS", self.operations).renamex(
-        old.decode(self.encoding), new.decode(self.encoding), flags
-    )
+    renamex: Callable[[str, str, int], int] = self.operations.renamex
+    return renamex(old.decode(self.encoding), new.decode(self.encoding), flags)
 
 
 def install_macfuse_extensions(mfusepy: Any) -> None:
