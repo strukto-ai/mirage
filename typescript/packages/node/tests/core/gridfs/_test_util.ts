@@ -225,7 +225,6 @@ export function makeAccessor(store: FakeStore, config: Partial<GridFSConfig> = {
   return new FakeAccessor({ uri: 'mongodb://localhost:27017', database: 'db', ...config }, store)
 }
 
-
 export function spec(key: string): PathSpec {
   return new PathSpec({ vfsPath: key, virtual: `/mnt/${key}`, directory: '/mnt' })
 }

@@ -14,7 +14,12 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type * as ClientModule from './client.ts'
-import { FakeStore, makeAccessor, mockedClient, spec } from '../../../tests/core/gridfs/_test_util.ts'
+import {
+  FakeStore,
+  makeAccessor,
+  mockedClient,
+  spec,
+} from '../../../tests/core/gridfs/_test_util.ts'
 
 let store = new FakeStore()
 
@@ -67,7 +72,9 @@ describe('gridfs rename', () => {
 
   it('reports ENOENT for a missing source', async () => {
     store.upload('other.txt', EMPTY)
-    await expect(codeOf(rename(makeAccessor(store), spec('ghost'), spec('e')))).resolves.toBe('ENOENT')
+    await expect(codeOf(rename(makeAccessor(store), spec('ghost'), spec('e')))).resolves.toBe(
+      'ENOENT',
+    )
     expect(store.names()).toEqual(['other.txt'])
   })
 

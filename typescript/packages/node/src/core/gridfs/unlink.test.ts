@@ -14,7 +14,12 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type * as ClientModule from './client.ts'
-import { FakeStore, makeAccessor, mockedClient, spec } from '../../../tests/core/gridfs/_test_util.ts'
+import {
+  FakeStore,
+  makeAccessor,
+  mockedClient,
+  spec,
+} from '../../../tests/core/gridfs/_test_util.ts'
 
 let store = new FakeStore()
 
@@ -73,7 +78,7 @@ describe('gridfs unlink', () => {
 
   it('keeps a pinned read working after rm', async () => {
     const [first] = await seedAndRm()
-    const pins = new Map([[A_TXT.virtual, first ?? ""]])
+    const pins = new Map([[A_TXT.virtual, first ?? '']])
     const bytes = await runWithRevisions(pins, () => read(makeAccessor(store), A_TXT))
     expect(DEC.decode(bytes)).toBe('v1')
     const chunks = await runWithRevisions(pins, async () => {

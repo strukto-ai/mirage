@@ -33,9 +33,10 @@ _INTEG_ALIASES = {_INTEG_DIR, str(Path(__file__).parent), ""}
 _ON_PATH = any(p in _INTEG_ALIASES for p in sys.path)
 sys.path[:] = [p for p in sys.path if p not in _INTEG_ALIASES]
 
+from pymongo import AsyncMongoClient  # noqa: E402
+
 from mirage import MountMode, Workspace  # noqa: E402
 from mirage.vfs.gridfs import GridFSConfig, GridFSVFS  # noqa: E402
-from pymongo import AsyncMongoClient  # noqa: E402
 
 if _ON_PATH:
     sys.path.insert(0, _INTEG_DIR)

@@ -14,7 +14,12 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type * as ClientModule from './client.ts'
-import { FakeStore, makeAccessor, mockedClient, spec } from '../../../tests/core/gridfs/_test_util.ts'
+import {
+  FakeStore,
+  makeAccessor,
+  mockedClient,
+  spec,
+} from '../../../tests/core/gridfs/_test_util.ts'
 
 let store = new FakeStore()
 
@@ -35,7 +40,8 @@ describe('gridfs rm -r', () => {
   })
 
   it('trashes the subtree and its marker', async () => {
-    for (const name of ['d/', 'd/f.txt', 'd/f.txt', 'd/sub/g.txt', 'keep.txt']) store.upload(name, X)
+    for (const name of ['d/', 'd/f.txt', 'd/f.txt', 'd/sub/g.txt', 'keep.txt'])
+      store.upload(name, X)
     const f = store.ids('d/f.txt')
     const g = store.ids('d/sub/g.txt')
     const accessor = makeAccessor(store)
