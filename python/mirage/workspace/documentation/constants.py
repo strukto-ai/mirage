@@ -26,14 +26,18 @@ READS = ("ls", "cat", "grep", "find", "jq")
 # The commands that change files: each works on a mount that answers
 # every op of one alternative. A mount answers append and truncate by a
 # rewrite where it only writes whole files, and cp copies within a mount
-# through its copy.
+# through its copy, and a whole tree to a new place through its dir_copy.
 CHANGES = (
     Change("`>`", (), (("write",),)),
     Change("`>>`", (), (("append",),)),
     Change("`tee`", ("tee",), (("write",),)),
     Change("`touch` of a new file", ("touch",), (("write",),)),
     Change("`cp`", ("cp",), (("write",), ("copy",))),
-    Change("`cp -r`", ("cp", "-r"), (("write", "mkdir"), ("copy", "mkdir"))),
+    Change(
+        "`cp -r`",
+        ("cp", "-r"),
+        (("write", "mkdir"), ("copy", "mkdir"), ("copy", "dir_copy")),
+    ),
     Change("`mkdir`", ("mkdir",), (("mkdir",),)),
     Change("`mv`", ("mv",), (("rename",),)),
     Change("`rm`", ("rm",), (("unlink",),)),

@@ -14,9 +14,12 @@
 
 import { describe, expect, it } from 'vitest'
 import { CLI, CLIHandler } from '../../commands/cli/types.ts'
+import { command } from '../../commands/config.ts'
 import { CommandSpec } from '../../commands/spec/types.ts'
+import { IOResult } from '../../io/types.ts'
 import { parseSessionProfile } from '../../policy/profile.ts'
-import { MountMode } from '../../types.ts'
+import { MountMode, type PathSpec } from '../../types.ts'
+import { norm } from '../../utils/path.ts'
 import { BaseVFS } from '../../vfs/base.ts'
 import { methodName } from '../../vfs/call.ts'
 import { DifyVFS } from '../../vfs/dify/dify.ts'
@@ -29,6 +32,26 @@ import { CHANGES } from './constants.ts'
 
 const SUPPORTED = '## Supported Unix Commands for VFS'
 const LIMITS = '## Limitations of Unix Commands for VFS'
+
+const POST = command({
+  name: 'post',
+  vfs: 'dify',
+  spec: new CommandSpec(),
+  fn: () => [null, new IOResult()],
+  write: true,
+})
+
+class TreeCopyVFS extends RAMVFS {
+  override dirCopy(src: PathSpec, dst: PathSpec): Promise<void> {
+    const store = this.accessor.store
+    const [s, d] = [norm(src.mountPath), norm(dst.mountPath)]
+    for (const key of [...store.dirs].filter((k) => k === s || k.startsWith(`${s}/`)))
+      store.dirs.add(d + key.slice(s.length))
+    for (const [key, data] of [...store.files].filter(([k]) => k.startsWith(`${s}/`)))
+      store.files.set(d + key.slice(s.length), data)
+    return Promise.resolve()
+  }
+}
 
 // The text of one path's row in one of VFS.md's tables; an empty section is
 // the first table.
@@ -235,6 +258,31 @@ describe('vfsMd', () => {
     expect(row(markdown, SUPPORTED, '/docs')).not.toContain('`rm`')
   })
 
+  it('names no search whose whole-word form is denied', async () => {
+    const ws = new Workspace(
+      { '/docs': [gdocs(), MountMode.WRITE] },
+      {
+        mode: MountMode.WRITE,
+        profiles: {
+          default: parseSessionProfile({ commands: { deny: ['grep -r -w', 'rg -w'] } }),
+        },
+      },
+    )
+    const markdown = await ws.vfsMd()
+    expect(markdown).not.toContain('`gdocs` search')
+    expect(markdown).not.toContain('Without `-w`')
+  })
+
+  it("counts a writer of the mount's own", async () => {
+    const dify = new DifyVFS({ apiKey: 'k', baseUrl: 'https://dify.test', datasetId: 'd' })
+    const ws = new Workspace({ '/kb': [dify, MountMode.WRITE] }, { mode: MountMode.WRITE })
+    ws.mount('/kb').registerCommands(POST)
+    const markdown = await ws.vfsMd()
+    expect(markdown).toContain('| `/kb` | `dify`, write |')
+    expect(row(markdown, SUPPORTED, '/kb')).toContain('`post`')
+    expect(row(markdown, LIMITS, '/kb')).toMatch(/^No Unix command changes files\./)
+  })
+
   it('describes each path shown with its own mode', async () => {
     const ws = new Workspace(
       { '/': [new RAMVFS(), MountMode.WRITE], '/data': [new RAMVFS(), MountMode.WRITE] },
@@ -318,6 +366,21 @@ describe('skillMd', () => {
     expect(skill).not.toContain('delete')
   })
 
+  it('keeps a leaf its allow list names with arguments', async () => {
+    const ws = new Workspace(
+      { '/': [new RAMVFS(), MountMode.WRITE] },
+      {
+        profiles: {
+          default: parseSessionProfile({ commands: { allow: ['gws drive list --id'] } }),
+        },
+      },
+    )
+    ws.registerCli('gws', gws())
+    const skill = await ws.skillMd()
+    expect(skill).toContain('## `gws drive list`')
+    expect(skill).not.toContain('## `gws`\n')
+  })
+
   it('lists no denied subcommand', async () => {
     const ws = new Workspace(
       { '/': [new RAMVFS(), MountMode.WRITE] },
@@ -351,8 +414,7 @@ describe('skillMd', () => {
     '`sed -i`': 'sed -i s/h/j/ /m/f',
   }
 
-  async function seeded(ops: readonly string[]): Promise<Workspace> {
-    const vfs = new RAMVFS()
+  async function seeded(ops: readonly string[], vfs: RAMVFS = new RAMVFS()): Promise<Workspace> {
     const shellParser = await getTestParser()
     const seed = new Workspace({ '/m': [vfs, MountMode.WRITE] }, { shellParser })
     expect((await seed.shell(SETUP)).exitCode).toBe(0)
@@ -382,5 +444,12 @@ describe('skillMd', () => {
       const result = await (await seeded(ops)).shell(line)
       expect([label, result.exitCode === 0]).toEqual([label, !missing.includes(label)])
     }
+  })
+
+  it('says cp -r copies a whole tree in one call', async () => {
+    const ws = await seeded(['mkdir'], new TreeCopyVFS())
+    expect(row(await ws.vfsMd(), LIMITS, '/m')).toMatch(/^Not supported: `mkdir`\. /)
+    expect((await ws.shell('cp -r /m/d1 /m/d3')).exitCode).toBe(0)
+    expect((await ws.shell('cat /m/d3/a')).stdoutText).toBe('x\n')
   })
 })

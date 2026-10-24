@@ -17,9 +17,13 @@ from unittest.mock import AsyncMock
 import pytest
 
 from mirage.commands.cli.types import CLI, CLIHandler
+from mirage.commands.config import command
 from mirage.commands.spec.types import CommandSpec
-from mirage.types import MountMode
+from mirage.io.types import IOResult
+from mirage.types import MountMode, PathSpec
+from mirage.utils.path import norm
 from mirage.vfs.base import BaseVFS
+from mirage.vfs.dify import DifyConfig, DifyVFS
 from mirage.vfs.gdocs import GDocsConfig, GDocsVFS
 from mirage.vfs.qdrant import QdrantConfig, QdrantVFS
 from mirage.vfs.ram import RAMVFS
@@ -40,6 +44,21 @@ def row(markdown: str, section: str, path: str) -> str:
     """
     body = markdown.split(section, 1)[1] if section else markdown
     return body.split(f"| `{path}` | ", 1)[1].split(" |\n", 1)[0]
+
+
+@command("post", vfs="dify", spec=CommandSpec(), write=True)
+async def post(accessor, paths, texts, opts):
+    return None, IOResult()
+
+
+class TreeCopyVFS(RAMVFS):
+    async def dir_copy(self, src: PathSpec, dst: PathSpec) -> None:
+        store = self.accessor.store
+        s, d = norm(src.mount_path), norm(dst.mount_path)
+        for key in [k for k in store.dirs if k == s or k.startswith(s + "/")]:
+            store.dirs.add(d + key[len(s) :])
+        for key in [k for k in store.files if k.startswith(s + "/")]:
+            store.files[d + key[len(s) :]] = store.files[key]
 
 
 @pytest.mark.asyncio
@@ -297,6 +316,36 @@ async def test_vfs_md_counts_no_help_request_as_a_write():
 
 
 @pytest.mark.asyncio
+async def test_vfs_md_names_no_search_whose_whole_word_form_is_denied():
+    cfg = GDocsConfig(client_id="x", client_secret="y", refresh_token="z")
+    ws = Workspace(
+        {"/docs": (GDocsVFS(config=cfg), MountMode.WRITE)},
+        mode=MountMode.WRITE,
+        profiles={"default": {"commands": {"deny": ["grep -r -w", "rg -w"]}}},
+    )
+    markdown = await ws.vfs_md()
+    assert "`gdocs` search" not in markdown
+    assert "Without `-w`" not in markdown
+
+
+@pytest.mark.asyncio
+async def test_vfs_md_counts_a_writer_of_the_mounts_own():
+    dify = DifyVFS(
+        DifyConfig(api_key="k", base_url="https://dify.test", dataset_id="d")
+    )
+    ws = Workspace({"/kb": (dify, MountMode.WRITE)}, mode=MountMode.WRITE)
+    ws.mount("/kb").register_commands([post])
+    markdown = await ws.vfs_md()
+    assert "| `/kb` | `dify`, write |" in markdown
+    assert "`post`" in row(
+        markdown, "## Supported Unix Commands for VFS", "/kb"
+    )
+    assert row(
+        markdown, "## Limitations of Unix Commands for VFS", "/kb"
+    ).startswith("No Unix command changes files.")
+
+
+@pytest.mark.asyncio
 async def test_vfs_md_describes_each_path_shown_with_its_own_mode():
     ws = Workspace(
         {
@@ -388,6 +437,18 @@ async def test_skill_md_keeps_an_allowed_leaf_under_a_denied_parent():
 
 
 @pytest.mark.asyncio
+async def test_skill_md_keeps_a_leaf_its_allow_list_names_with_arguments():
+    ws = Workspace(
+        {"/": (RAMVFS(), MountMode.WRITE)},
+        profiles={"default": {"commands": {"allow": ["gws drive list --id"]}}},
+    )
+    ws.register_cli("gws", gws())
+    skill = await ws.skill_md()
+    assert "## `gws drive list`" in skill
+    assert "## `gws`\n" not in skill
+
+
+@pytest.mark.asyncio
 async def test_skill_md_lists_no_denied_subcommand():
     ws = Workspace(
         {"/": (RAMVFS(), MountMode.WRITE)},
@@ -423,12 +484,14 @@ RUNS = {
 }
 
 
-async def seeded(ops: tuple[str, ...]) -> Workspace:
+async def seeded(
+    ops: tuple[str, ...], kind: type[RAMVFS] = RAMVFS
+) -> Workspace:
     filled = RAMVFS()
     seed = Workspace({"/m": (filled, MountMode.WRITE)})
     assert (await seed.shell(SETUP)).exit_code == 0
     partial = type(
-        "Partial", (RAMVFS,), {op: getattr(BaseVFS, op) for op in ops}
+        "Partial", (kind,), {op: getattr(BaseVFS, op) for op in ops}
     )()
     partial._store = filled._store
     partial.accessor = filled.accessor
@@ -462,3 +525,14 @@ async def test_vfs_md_says_what_each_command_runs_on(ops):
     for label, line in RUNS.items():
         result = await (await seeded(ops)).shell(line)
         assert (result.exit_code == 0) == (label not in missing), (label, ops)
+
+
+@pytest.mark.asyncio
+async def test_vfs_md_says_cp_r_copies_a_whole_tree_in_one_call():
+    ws = await seeded(("mkdir",), TreeCopyVFS)
+    limits = row(
+        await ws.vfs_md(), "## Limitations of Unix Commands for VFS", "/m"
+    )
+    assert limits.startswith("Not supported: `mkdir`. ")
+    assert (await ws.shell("cp -r /m/d1 /m/d3")).exit_code == 0
+    assert (await ws.shell("cat /m/d3/a")).stdout == b"x\n"

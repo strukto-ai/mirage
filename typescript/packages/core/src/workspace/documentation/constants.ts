@@ -24,7 +24,7 @@ export const READS: readonly string[] = ['ls', 'cat', 'grep', 'find', 'jq']
 // The commands that change files: each works on a mount that answers every
 // op of one alternative. A mount answers append and truncate by a rewrite
 // where it only writes whole files, and cp copies within a mount through
-// its copy.
+// its copy, and a whole tree to a new place through its dir_copy.
 export const CHANGES: readonly Change[] = [
   { label: '`>`', command: [], needs: [['write']] },
   { label: '`>>`', command: [], needs: [['append']] },
@@ -37,6 +37,7 @@ export const CHANGES: readonly Change[] = [
     needs: [
       ['write', 'mkdir'],
       ['copy', 'mkdir'],
+      ['copy', 'dir_copy'],
     ],
   },
   { label: '`mkdir`', command: ['mkdir'], needs: [['mkdir']] },

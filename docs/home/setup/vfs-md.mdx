@@ -77,7 +77,7 @@ path. What changes files depends on what the path's VFS can do:
 | `>`, `tee`, `touch` of a new file, `sed -i` | `write` |
 | `>>` | `append`, or `write` |
 | `cp` | `write`, or `copy` |
-| `cp -r` | `mkdir`, and `write` or `copy` |
+| `cp -r` | `mkdir`, and `write` or `copy`; or `copy` and `dir_copy` |
 | `mkdir` | `mkdir` |
 | `mv` | `rename` |
 | `rm` | `unlink` |
@@ -85,8 +85,8 @@ path. What changes files depends on what the path's VFS can do:
 | `rmdir` | `rmdir` |
 | `truncate` | `truncate`, or `write` |
 
-A path where none of them works reads `read`, whatever mode it is mounted
-with. A path's layout is its VFS's [`vfs_md`](/home/setup/custom-vfs#attributes).
+A path where none of them works, and none of its VFS's own commands writes,
+reads `read`, whatever mode it is mounted with. A path's layout is its VFS's [`vfs_md`](/home/setup/custom-vfs#attributes).
 
 A path the VFS answers a search for says so: `grep -r` and `rg` use the
 service's search, some only with `-w`, and only over the files the VFS names

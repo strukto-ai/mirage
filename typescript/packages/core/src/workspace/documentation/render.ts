@@ -78,22 +78,20 @@ function allowed(
 }
 
 /**
- * Whether the profile lets some line of `words` do its work on a file under
- * `path`: the words as they stand, or followed by what a longer pattern in
- * its allow list adds (`rm -f` where the list holds only that), unless that
- * line only asks for `--help` or `--version`.
+ * The lines that stand for `words` under the session's profile: the words as
+ * they stand, and followed by what each longer pattern in its allow list adds
+ * (`rm -f` where the list holds only that), unless `spec` answers that line
+ * with `--help` or `--version`. A null `spec` counts every form.
  */
-function runnable(
+function forms(
   session: SessionState,
-  mount: MountEntry,
-  path: string,
   words: readonly string[],
-): boolean {
-  const forms: (readonly string[])[] = [words]
+  spec: CommandSpec | null,
+): (readonly string[])[] {
+  const found: (readonly string[])[] = [words]
   const [command] = words
   const allow = session.commands?.allow ?? null
   if (command !== undefined && allow !== null) {
-    const spec = mount.specFor(command)
     for (const pattern of allow) {
       const form = [...words, ...splitPattern(pattern).slice(words.length)]
       if (
@@ -101,10 +99,30 @@ function runnable(
         patternReaches(pattern, words) &&
         standardRequest(command, spec, form.slice(1)) === null
       )
-        forms.push(form)
+        found.push(form)
     }
   }
-  return forms.some((form) => allowed(session, path, form, true))
+  return found
+}
+
+/** Whether the profile lets some line of `words` do its work on a file under `path`. */
+function runnable(
+  session: SessionState,
+  mount: MountEntry,
+  path: string,
+  words: readonly string[],
+): boolean {
+  const [command] = words
+  const spec = command === undefined ? null : mount.specFor(command)
+  return forms(session, words, spec).some((form) => allowed(session, path, form, true))
+}
+
+/** The mount's own commands that change files and that the profile lets run at `path`. */
+function writers(session: SessionState, mount: MountEntry, path: string): string[] {
+  return Object.keys(mount.commands())
+    .filter((n) => !SHARED.has(n))
+    .sort(compareCodePoints)
+    .filter((n) => mount.mayWrite(n) && runnable(session, mount, path, [n]))
 }
 
 function works(mount: MountEntry, change: Change): boolean {
@@ -151,7 +169,8 @@ function table(
 
 /**
  * The mode VFS.md states for `path`: `read` where a write mode lets no
- * command the profile allows change a file there.
+ * command the profile allows change a file there, neither a Unix one nor
+ * one of the mount's own.
  */
 function granted(
   session: SessionState,
@@ -161,6 +180,7 @@ function granted(
 ): MountMode {
   if (
     mode === MountMode.WRITE &&
+    writers(session, mount, path).length === 0 &&
     !CHANGES.some((c) => runnable(session, mount, path, c.command) && works(mount, c))
   )
     return MountMode.READ
@@ -191,10 +211,11 @@ function supported(
     parts.push(text + '.')
   }
   const name = code(mount.vfs.name)
-  const searches = SEARCHES.filter((c) => runs(c.split(' '))).map(code)
+  const word = mount.vfs.wholeWordSearch ? ['-w'] : []
+  const searches = SEARCHES.filter((c) => runs([...c.split(' '), ...word])).map(code)
   if (searches.length > 0 && mount.answers('files_containing')) {
-    const word = mount.vfs.wholeWordSearch ? ' with `-w`' : ''
-    parts.push(`${listing(searches)}${word} ${agree(searches, 'use')} ${name} search.`)
+    const wordText = word.length > 0 ? ' with `-w`' : ''
+    parts.push(`${listing(searches)}${wordText} ${agree(searches, 'use')} ${name} search.`)
   }
   const finds = FINDS.filter((c) => runs([c])).map(code)
   if (finds.length > 0 && mount.answers('lines_containing'))
@@ -228,11 +249,12 @@ function limitations(
     const changes = CHANGES.filter((c) => runs(c.command))
     const missing = changes.filter((c) => !works(mount, c)).map((c) => c.label)
     if (missing.length > 0 && missing.length === changes.length)
-      parts.push('No command changes files.')
+      parts.push('No Unix command changes files.')
     else if (missing.length > 0) parts.push(`Not supported: ${missing.join(', ')}.`)
   }
   const vfs = mount.vfs
-  const searches = SEARCHES.filter((c) => runs(c.split(' '))).map(code)
+  const word = vfs.wholeWordSearch ? ['-w'] : []
+  const searches = SEARCHES.filter((c) => runs([...c.split(' '), ...word])).map(code)
   if (searches.length > 0 && mount.answers('files_containing')) {
     const reads = `${listing(searches)} ${agree(searches, 'read')}`
     if (vfs.wholeWordSearch) parts.push(`Without \`-w\`, ${reads} every file.`)
@@ -331,7 +353,8 @@ export function vfsMd(registry: MountRegistry, session: SessionState): string {
 /**
  * The help pages of one CLI node and its descendants the profile allows. A
  * denied node gets no page, but its allowed descendants still do, and a
- * page lists only the children leading to one.
+ * page lists only the children leading to one. A leaf counts a longer form
+ * its allow list names (`gws gmail read --id`).
  */
 export function cliPages(
   head: string,
@@ -344,8 +367,13 @@ export function cliPages(
     (child) => [child, cliPages(head, child, style, session, [...path, child.name])] as const,
   )
   const pages: string[] = []
-  if (allowed(session, session.cwd, [head, ...path])) {
-    const name = [head, ...path].join(' ')
+  const words = [head, ...path]
+  if (
+    (children.length === 0 ? forms(session, words, null) : [words]).some((form) =>
+      allowed(session, session.cwd, form),
+    )
+  ) {
+    const name = words.join(' ')
     const kept = children.filter(([, found]) => found.length > 0).map(([child]) => child)
     const init: CommandSpecInit = node
     const text = nodeHelp(name, new CommandSpec({ ...init, subcommands: kept }), style).trimEnd()

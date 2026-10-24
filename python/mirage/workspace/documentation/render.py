@@ -100,25 +100,23 @@ def allowed(
     return decide(ctx, session.commands).outcome is not Outcome.DENY
 
 
-def runnable(
-    session: SessionState, mount: MountEntry, path: str, words: Sequence[str]
-) -> bool:
-    """Whether the profile lets some line of ``words`` do its work on a
-    file under ``path``: the words as they stand, or followed by what a
-    longer pattern in its allow list adds (``rm -f`` where the list holds
-    only that), unless that line only asks for ``--help`` or
-    ``--version``.
+def forms(
+    session: SessionState, words: Sequence[str], spec: CommandSpec | None
+) -> list[tuple[str, ...]]:
+    """The lines that stand for ``words`` under the session's profile:
+    the words as they stand, and followed by what each longer pattern in
+    its allow list adds (``rm -f`` where the list holds only that),
+    unless ``spec`` answers that line with ``--help`` or ``--version``.
 
     Args:
         session (SessionState): the session the document is for.
-        mount (MountEntry): the mount holding ``path``.
-        path (str): the path described.
         words (Sequence[str]): the command and its words.
+        spec (CommandSpec | None): the command's grammar; None to count
+            every form.
     """
-    forms = [tuple(words)]
+    found = [tuple(words)]
     rules = session.commands
     if words and rules is not None and rules.allow is not None:
-        spec = mount.spec_for(words[0])
         for pattern in rules.allow:
             form = (*words, *split_pattern(pattern)[len(words) :])
             if (
@@ -126,8 +124,43 @@ def runnable(
                 and pattern_reaches(pattern, words)
                 and standard_request(words[0], spec, list(form[1:])) is None
             ):
-                forms.append(form)
-    return any(allowed(session, path, form, True) for form in forms)
+                found.append(form)
+    return found
+
+
+def runnable(
+    session: SessionState, mount: MountEntry, path: str, words: Sequence[str]
+) -> bool:
+    """Whether the profile lets some line of ``words`` do its work on a
+    file under ``path``.
+
+    Args:
+        session (SessionState): the session the document is for.
+        mount (MountEntry): the mount holding ``path``.
+        path (str): the path described.
+        words (Sequence[str]): the command and its words.
+    """
+    spec = mount.spec_for(words[0]) if words else None
+    return any(
+        allowed(session, path, form, True)
+        for form in forms(session, words, spec)
+    )
+
+
+def writers(session: SessionState, mount: MountEntry, path: str) -> list[str]:
+    """The mount's own commands that change files and that the profile
+    lets run at ``path``.
+
+    Args:
+        session (SessionState): the session the document is for.
+        mount (MountEntry): the mount holding ``path``.
+        path (str): the path described.
+    """
+    return [
+        name
+        for name in sorted(set(mount.commands()) - SHARED)
+        if mount.may_write(name) and runnable(session, mount, path, (name,))
+    ]
 
 
 def works(mount: MountEntry, change: Change) -> bool:
@@ -176,7 +209,8 @@ def granted(
     session: SessionState, mount: MountEntry, path: str, mode: MountMode
 ) -> MountMode:
     """The mode VFS.md states for ``path``: ``read`` where a write mode
-    lets no command the profile allows change a file there.
+    lets no command the profile allows change a file there, neither a
+    Unix one nor one of the mount's own.
 
     Args:
         session (SessionState): the session the document is for.
@@ -184,10 +218,14 @@ def granted(
         path (str): the path described.
         mode (MountMode): the mode in force at ``path``.
     """
-    if mode == MountMode.WRITE and not any(
-        works(mount, c)
-        for c in CHANGES
-        if runnable(session, mount, path, c.command)
+    if (
+        mode == MountMode.WRITE
+        and not writers(session, mount, path)
+        and not any(
+            works(mount, c)
+            for c in CHANGES
+            if runnable(session, mount, path, c.command)
+        )
     ):
         return MountMode.READ
     return mode
@@ -224,11 +262,12 @@ def supported(
             text += f", and {listing(working)}"
         parts = [text + "."]
     name = code(mount.vfs.name)
-    searches = [code(c) for c in SEARCHES if runs(c.split())]
+    word = ("-w",) if mount.vfs.whole_word_search else ()
+    searches = [code(c) for c in SEARCHES if runs((*c.split(), *word))]
     if searches and mount.answers("files_containing"):
-        word = " with `-w`" if mount.vfs.whole_word_search else ""
+        word_text = " with `-w`" if word else ""
         parts.append(
-            f"{listing(searches)}{word} {agree(searches, 'use')} "
+            f"{listing(searches)}{word_text} {agree(searches, 'use')} "
             f"{name} search."
         )
     finds = [code(c) for c in FINDS if runs((c,))]
@@ -277,11 +316,12 @@ def limitations(
         changes = [c for c in CHANGES if runs(c.command)]
         missing = [c.label for c in changes if not works(mount, c)]
         if missing and len(missing) == len(changes):
-            parts.append("No command changes files.")
+            parts.append("No Unix command changes files.")
         elif missing:
             parts.append(f"Not supported: {', '.join(missing)}.")
     vfs = mount.vfs
-    searches = [code(c) for c in SEARCHES if runs(c.split())]
+    word = ("-w",) if vfs.whole_word_search else ()
+    searches = [code(c) for c in SEARCHES if runs((*c.split(), *word))]
     if searches and mount.answers("files_containing"):
         reads = f"{listing(searches)} {agree(searches, 'read')}"
         if vfs.whole_word_search:
@@ -420,7 +460,8 @@ def cli_pages(
 ) -> list[str]:
     """The help pages of one CLI node and its descendants the profile
     allows. A denied node gets no page, but its allowed descendants
-    still do, and a page lists only the children leading to one.
+    still do, and a page lists only the children leading to one. A leaf
+    counts a longer form its allow list names (``gws gmail read --id``).
 
     Args:
         head (str): the CLI's installed name.
@@ -434,8 +475,12 @@ def cli_pages(
         for child in node.subcommands
     ]
     pages: list[str] = []
-    if allowed(session, session.cwd, (head, *path)):
-        name = " ".join((head, *path))
+    words = (head, *path)
+    if any(
+        allowed(session, session.cwd, form)
+        for form in (forms(session, words, None) if not children else [words])
+    ):
+        name = " ".join(words)
         kept = tuple(child for child, found in children if found)
         help_text = node_help(
             name, replace(node, subcommands=kept), style
