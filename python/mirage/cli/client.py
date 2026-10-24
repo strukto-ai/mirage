@@ -19,6 +19,7 @@ import subprocess
 import sys
 import threading
 import time
+from types import TracebackType
 from typing import Any
 from urllib.parse import urlparse
 
@@ -63,7 +64,12 @@ class DaemonClient:
     def __enter__(self) -> "DaemonClient":
         return self
 
-    def __exit__(self, *exc_info) -> None:
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
         self._client.close()
 
     def token(self) -> str:
@@ -105,7 +111,7 @@ class DaemonClient:
         token = self.token()
         return {"Authorization": f"Bearer {token}"} if token else {}
 
-    def request(self, method: str, path: str, **kwargs) -> httpx.Response:
+    def request(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
         headers = {**self._headers(), **kwargs.pop("headers", {})}
         return self._client.request(method, path, headers=headers, **kwargs)
 

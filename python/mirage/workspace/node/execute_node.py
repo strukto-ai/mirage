@@ -14,7 +14,7 @@
 
 import asyncio
 import time
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from contextlib import nullcontext
 from dataclasses import replace
 from functools import partial
@@ -31,7 +31,12 @@ from mirage.context import (
     set_program_invocation,
     set_redirect_paths,
 )
-from mirage.context.session_context import redirect_syntax_for
+from mirage.context.session_context import (
+    RedirectGuard,
+    RedirectResult,
+    RedirectRun,
+    redirect_syntax_for,
+)
 from mirage.execution.context import new_execution_id
 from mirage.io import IOResult
 from mirage.io.async_line_iterator import share
@@ -251,7 +256,7 @@ STREAMING_KINDS = frozenset(
 
 
 async def _recurse_reassociated(
-    recurse: Callable[..., Any],
+    recurse: Callable[..., Awaitable[RedirectResult]],
     dispatch: DispatchFn,
     execute_fn: ExecuteFn,
     registry: MountRegistry,
@@ -312,7 +317,7 @@ async def _recurse_reassociated(
 
 
 async def _recurse_lifted(
-    recurse: Callable[..., Any],
+    recurse: Callable[..., Awaitable[RedirectResult]],
     dispatch: DispatchFn,
     execute_fn: ExecuteFn,
     registry: MountRegistry,
@@ -363,7 +368,7 @@ async def _recurse_lifted(
 
 
 async def _recurse_stage(
-    recurse: Callable[..., Any],
+    recurse: Callable[..., Awaitable[RedirectResult]],
     dispatch: DispatchFn,
     execute_fn: ExecuteFn,
     registry: MountRegistry,
@@ -443,7 +448,7 @@ async def _recurse_stage(
 
 
 async def _run_pipeline(
-    recurse: Callable[..., Any],
+    recurse: Callable[..., Awaitable[RedirectResult]],
     dispatch: DispatchFn,
     execute_fn: ExecuteFn,
     registry: MountRegistry,
@@ -543,7 +548,7 @@ async def _run_pipeline(
 
 
 async def _recurse_pipe_stderr(
-    recurse: Callable[..., Any],
+    recurse: Callable[..., Awaitable[RedirectResult]],
     dispatch: DispatchFn,
     execute_fn: ExecuteFn,
     registry: MountRegistry,
@@ -620,7 +625,7 @@ async def _negated(
 
 
 async def _run_redirected(
-    recurse: Callable[..., Any],
+    recurse: Callable[..., Awaitable[RedirectResult]],
     dispatch: DispatchFn,
     execute_fn: ExecuteFn,
     registry: MountRegistry,
@@ -796,8 +801,20 @@ async def _run_redirected(
     try:
         if command is not None and command.type == NT.COMMAND:
 
-            async def under_redirects(run, guard, name, args):
-                async def prepared(node, current, given, stack, *, sink=None):
+            async def under_redirects(
+                run: RedirectRun,
+                guard: RedirectGuard | None,
+                name: str,
+                args: tuple[str, ...],
+            ) -> RedirectResult:
+                async def prepared(
+                    node: TSNodeLike,
+                    current: EvaluationContext,
+                    given: ByteSource | None,
+                    stack: CallStack | None,
+                    *,
+                    sink: JobConsole | None = None,
+                ) -> RedirectResult:
                     return await run(
                         given, sink, redirect_paths_for(command.id)
                     )
@@ -868,8 +885,8 @@ async def _run_redirected(
 
 
 async def _run_continuation(
-    recurse: Callable[..., Any],
-    run_left: Callable[..., Any],
+    recurse: Callable[..., Awaitable[RedirectResult]],
+    run_left: Callable[..., Awaitable[RedirectResult]],
     left: TSNodeLike,
     steps: tuple[tuple[str, TSNodeLike], ...],
     context: EvaluationContext,
@@ -925,8 +942,8 @@ async def _run_continuation(
 
 
 async def _recurse_continuation(
-    recurse: Callable[..., Any],
-    run_left: Callable[..., Any],
+    recurse: Callable[..., Awaitable[RedirectResult]],
+    run_left: Callable[..., Awaitable[RedirectResult]],
     left: TSNodeLike,
     steps: tuple[tuple[str, TSNodeLike], ...],
     execute_fn: ExecuteFn | None,

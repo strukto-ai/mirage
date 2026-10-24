@@ -15,7 +15,7 @@
 import json
 import os
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from urllib.parse import quote
 
 import typer
@@ -72,7 +72,9 @@ def _resolve_config_arg(path: Path) -> dict[str, Any]:
 
     raw = parse_yaml(path.read_text(encoding="utf-8")) or {}
     try:
-        resolved = _interpolate_env(raw, dict(os.environ))
+        resolved = cast(
+            dict[str, Any], _interpolate_env(raw, dict(os.environ))
+        )
     except ValueError as e:
         fail(str(e), exit_code=2)
     _absolutize_scripts(resolved, path.resolve().parent)
@@ -101,7 +103,7 @@ def load_profile_argument(path: Path) -> dict[str, Any]:
     except ValueError as e:
         fail(str(e), exit_code=2)
     _absolutize_scripts(resolved, path.resolve().parent)
-    return resolved["profiles"][""]
+    return cast(dict[str, Any], resolved["profiles"][""])
 
 
 def _format_workspace_list(items: list[dict[str, Any]]) -> str:

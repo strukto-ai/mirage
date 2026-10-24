@@ -14,6 +14,7 @@
 
 import logging
 from collections.abc import AsyncGenerator, AsyncIterator
+from typing import cast
 
 import asyncssh
 
@@ -36,7 +37,7 @@ async def read_stream(
     accessor: SSHAccessor,
     path_spec: PathSpec,
     chunk_size: int = 8192,
-):
+) -> AsyncIterator[bytes]:
     virtual = path_spec.virtual
     path = path_spec.mount_path
     config = accessor.config
@@ -46,7 +47,7 @@ async def read_stream(
         remote_path = join_root(config.root, path)
         async with sftp.open(remote_path, "rb") as f:
             while True:
-                chunk = await f.read(chunk_size)
+                chunk = cast(bytes, await f.read(chunk_size))
                 if not chunk:
                     break
                 if rec is not None:

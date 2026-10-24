@@ -1,6 +1,11 @@
 {
   "baseline": 3146,
  "modules": {
+  "vfs/ram/store": {
+   "python_only": {
+    "_FileStore": "Python RAM and device stores share a structural mapping contract because device listings return lists rather than dict views; TypeScript uses its native Map surface."
+   }
+  },
   "utils/ids": {
    "typescript_only": {
     "randomBelowBig": "Python ints are unbounded, so random_below takes every limit; TypeScript draws a limit past one word as a bigint and keeps randomBelow on number."
@@ -405,6 +410,7 @@
   },
   "workspace/snapshot/tar_io": {
    "python_only": {
+    "Writable": "Python snapshot targets accept binary file-like writers; TypeScript uses its existing stream types.",
     "_stage_disk_files": "Each host stages a restore's disk mount files on disk: Python extracts them once the manifest is read, in _stage_disk_files; TypeScript finds their references with diskFileRefs while it streams the tar."
    },
    "typescript_only": {
@@ -530,6 +536,10 @@
    }
   },
   "config": {
+   "python_only": {
+    "RedisWorkspaceStateStore": "Python's optional imports bind a class or None; explicit annotations expose these existing bindings to the symbol checker.",
+    "S3WorkspaceStateStore": "Python's optional imports bind a class or None; explicit annotations expose these existing bindings to the symbol checker."
+   },
    "typescript_only": {
     "validateIndexValues": "Python checks an index block's values through its pydantic models (str url and key_prefix, StrictFloat ttl); the TypeScript loader has no model for the block, so it checks the values by hand at the same entry point."
    }

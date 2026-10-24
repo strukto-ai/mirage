@@ -13,8 +13,9 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from email import policy
+from email.message import Message
 from email.parser import BytesParser
-from typing import Any
+from typing import Any, cast
 
 
 def parse_rfc822(raw: bytes, headers_only: bool = False) -> dict[str, Any]:
@@ -48,7 +49,7 @@ def parse_rfc822(raw: bytes, headers_only: bool = False) -> dict[str, Any]:
     }
 
 
-def _extract_parts(msg) -> tuple[str, str, list[dict[str, Any]]]:
+def _extract_parts(msg: Message) -> tuple[str, str, list[dict[str, Any]]]:
     text, html = "", ""
     attachments: list[dict[str, Any]] = []
 
@@ -58,7 +59,7 @@ def _extract_parts(msg) -> tuple[str, str, list[dict[str, Any]]]:
             disposition = str(part.get("Content-Disposition", ""))
 
             if "attachment" in disposition:
-                payload = part.get_payload(decode=True) or b""
+                payload = cast(bytes, part.get_payload(decode=True) or b"")
                 attachments.append(
                     {
                         "filename": part.get_filename() or "unnamed",
@@ -67,16 +68,20 @@ def _extract_parts(msg) -> tuple[str, str, list[dict[str, Any]]]:
                     }
                 )
             elif content_type == "text/plain" and not text:
-                text = (part.get_payload(decode=True) or b"").decode(
+                text = cast(
+                    bytes, part.get_payload(decode=True) or b""
+                ).decode(
                     part.get_content_charset() or "utf-8", errors="replace"
                 )
             elif content_type == "text/html" and not html:
-                html = (part.get_payload(decode=True) or b"").decode(
+                html = cast(
+                    bytes, part.get_payload(decode=True) or b""
+                ).decode(
                     part.get_content_charset() or "utf-8", errors="replace"
                 )
     else:
         content_type = msg.get_content_type()
-        payload = msg.get_payload(decode=True) or b""
+        payload = cast(bytes, msg.get_payload(decode=True) or b"")
         decoded = payload.decode(
             msg.get_content_charset() or "utf-8", errors="replace"
         )

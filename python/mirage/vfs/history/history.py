@@ -18,6 +18,7 @@ from mirage.accessor.history import HistoryAccessor
 from mirage.core.history.read import read as _read
 from mirage.core.history.readdir import readdir as _readdir
 from mirage.core.history.stat import stat as _stat
+from mirage.observe.observer import Observer
 from mirage.types import FileStat, PathSpec
 from mirage.utils.ranges import slice_window
 from mirage.vfs.base import BaseVFS
@@ -42,7 +43,7 @@ class HistoryViewVFS(BaseVFS):
     # rendering: cheap, no network, and never None.
     sizes_always_known: bool = True
 
-    def __init__(self, observer) -> None:
+    def __init__(self, observer: Observer) -> None:
         super().__init__()
         self.observer = observer
         self.accessor = HistoryAccessor(observer)

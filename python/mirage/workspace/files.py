@@ -15,7 +15,7 @@
 import asyncio
 from collections.abc import AsyncIterator, Callable
 from dataclasses import replace
-from typing import Any, Literal, overload
+from typing import Any, Literal, cast, overload
 
 from mirage.context import (
     Caller,
@@ -274,12 +274,79 @@ class Files:
             return await self._dispatch(name, path, **kwargs)
         return await self._call(name, path, **kwargs), IOResult()
 
+    @overload
+    async def _call(
+        self,
+        op: Literal["read", "getxattr"],
+        path: str | PathSpec,
+        session_id: str | None = None,
+        *,
+        stream: Literal[False] = False,
+        **kwargs: Any,
+    ) -> bytes: ...
+
+    @overload
+    async def _call(
+        self,
+        op: Literal["read"],
+        path: str | PathSpec,
+        session_id: str | None = None,
+        *,
+        stream: Literal[True],
+        **kwargs: Any,
+    ) -> ByteSource: ...
+
+    @overload
+    async def _call(
+        self,
+        op: Literal["stat"],
+        path: str | PathSpec,
+        session_id: str | None = None,
+        **kwargs: Any,
+    ) -> FileStat: ...
+
+    @overload
+    async def _call(
+        self,
+        op: Literal["readdir", "listxattr"],
+        path: str | PathSpec,
+        session_id: str | None = None,
+        **kwargs: Any,
+    ) -> list[str]: ...
+
+    @overload
+    async def _call(
+        self,
+        op: Literal["readlink"],
+        path: str | PathSpec,
+        session_id: str | None = None,
+        **kwargs: Any,
+    ) -> str: ...
+
+    @overload
+    async def _call(
+        self,
+        op: Literal["setattr"],
+        path: str | PathSpec,
+        session_id: str | None = None,
+        **kwargs: Any,
+    ) -> dict[str, int | str]: ...
+
+    @overload
     async def _call(
         self,
         op: str,
         path: str | PathSpec,
         session_id: str | None = None,
-        **kwargs,
+        **kwargs: Any,
+    ) -> Any: ...
+
+    async def _call(
+        self,
+        op: str,
+        path: str | PathSpec,
+        session_id: str | None = None,
+        **kwargs: Any,
     ) -> Any:
         """Run one op through the workspace dispatcher and record it.
 
@@ -562,7 +629,9 @@ class Files:
         if offset or size is not None:
             kwargs.update(offset=offset, size=size)
         if not stream:
-            return await self._call("read", path, session_id, **kwargs)
+            return cast(
+                bytes, await self._call("read", path, session_id, **kwargs)
+            )
         result = await self._call(
             "read", path, session_id, stream=True, **kwargs
         )

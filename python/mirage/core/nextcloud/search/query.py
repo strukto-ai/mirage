@@ -1,3 +1,4 @@
+from typing import cast
 from xml.etree import ElementTree
 
 import mirage.core.nextcloud.search.constants as constants
@@ -64,4 +65,7 @@ def request_body(target: SearchTarget, path: PathSpec, offset: int) -> bytes:
     count.text = str(constants.SEARCH_PAGE_SIZE)
     first = ElementTree.SubElement(limit, searchdav("firstresult"))
     first.text = str(offset)
-    return ElementTree.tostring(root, encoding="utf-8", xml_declaration=True)
+    return cast(
+        bytes,
+        ElementTree.tostring(root, encoding="utf-8", xml_declaration=True),
+    )

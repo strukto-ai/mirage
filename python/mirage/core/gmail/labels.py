@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from typing import Any
+from typing import Any, cast
 
 from mirage.core.google.client import TokenManager, gmail_base, google_get
 
@@ -28,4 +28,4 @@ async def list_labels(token_manager: TokenManager) -> list[dict[str, Any]]:
     """
     url = f"{gmail_base(token_manager)}/users/me/labels"
     data = await google_get(token_manager, url)
-    return data.get("labels", [])
+    return cast(list[dict[str, Any]], data.get("labels", []))

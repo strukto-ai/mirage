@@ -319,16 +319,16 @@ def active_recorder() -> Recorder | None:
     return current_caller().recorder
 
 
-def reset_active_recorder(token) -> None:
+def reset_active_recorder(token: CallerToken) -> None:
     """Restore the previous recorder after a :func:`push_mount_context`.
 
     Args:
-        token: The token returned by ``push_mount_context``.
+        token (CallerToken): The token returned by ``push_mount_context``.
     """
     reset_caller(token)
 
 
-def push_mount_context(mount_id: str | None):
+def push_mount_context(mount_id: str | None) -> CallerToken:
     """Bind the mount instance that owns records in this async frame.
 
     Task-isolated: replaces the Recorder for the current task via
@@ -562,7 +562,7 @@ def _set_revisions(revisions: dict[str, str] | None) -> CallerToken:
     return bind_caller(replace(current_caller(), revisions=revisions))
 
 
-def push_revisions(revisions: dict[str, str] | None):
+def push_revisions(revisions: dict[str, str] | None) -> CallerToken:
     """Set the active revision map for the current async context.
 
     Read functions consult :func:`revision_for` to look up whether a
@@ -586,11 +586,11 @@ def push_revisions(revisions: dict[str, str] | None):
     return _set_revisions(revisions)
 
 
-def reset_revisions(token) -> None:
+def reset_revisions(token: CallerToken) -> None:
     """Restore the previous revisions map after a :func:`push_revisions`.
 
     Args:
-        token: The token returned by ``push_revisions``.
+        token (CallerToken): The token returned by ``push_revisions``.
     """
     reset_caller(token)
 

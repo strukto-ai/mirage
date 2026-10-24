@@ -14,10 +14,12 @@
 
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
-from typing import Any, Protocol, runtime_checkable
+from typing import Protocol, TypeVar, runtime_checkable
 
 from mirage.shell.variable import ShellValue, VarAttr
 from mirage.types import FileStat, MountMode, PathSpec, Visibility
+
+T = TypeVar("T")
 
 # Stat one virtual path through the workspace rather than one backend, so
 # a path under another mount still answers; None when nothing is there.
@@ -350,9 +352,12 @@ class LinkView:
 # naming the workspace's default session as it is when the op runs. The
 # workspace supplies it, so the facade binds the session the way a
 # shell line does without holding the session manager itself.
-SessionBind = Callable[
-    [str | None, Callable[[], Awaitable[Any]]], Awaitable[Any]
-]
+class SessionBind(Protocol):
+    """Run work as one session without changing the type of its answer."""
+
+    def __call__(
+        self, session_id: str | None, run: Callable[[], Awaitable[T]]
+    ) -> Awaitable[T]: ...
 
 
 @dataclass(frozen=True, slots=True)

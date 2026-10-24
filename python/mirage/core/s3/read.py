@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from typing import Any
+from typing import Any, cast
 
 from mirage.accessor.s3 import S3Accessor
 from mirage.cache.context import publish_read
@@ -84,7 +84,7 @@ async def read(
     try:
         resp = await client.get_object(**kwargs)
         async with closing_body(resp["Body"]) as body:
-            data = await body.read()
+            data = cast(bytes, await body.read())
         fingerprint, revision = _fp_rev_from_s3_response(resp)
         record(
             "read",

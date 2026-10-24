@@ -14,10 +14,11 @@
 
 from collections.abc import Awaitable
 from datetime import datetime
-from typing import Any, TypeVar
+from typing import Any, TypeVar, cast
 
 from langfuse.api.client import AsyncLangfuseAPI
 from langfuse.api.core.api_error import ApiError
+from langfuse.api.core.pydantic_utilities import UniversalBaseModel
 
 from mirage.errors.fs import enoent
 
@@ -55,11 +56,11 @@ async def fetch_or_enoent(pending: Awaitable[T], virtual: str) -> T:
 # microsecond precision where the API sent milliseconds, a rendering
 # divergence from TypeScript that is documented rather than papered over with
 # string rewriting that could alter trace content.
-def _to_dict(obj) -> dict[str, Any]:
+def _to_dict(obj: UniversalBaseModel) -> dict[str, Any]:
     if hasattr(obj, "model_dump"):
-        return _wire_numbers(obj.model_dump(mode="json"))
+        return cast(dict[str, Any], _wire_numbers(obj.model_dump(mode="json")))
     if hasattr(obj, "dict"):
-        return _wire_numbers(obj.dict())
+        return cast(dict[str, Any], _wire_numbers(obj.dict()))
     return vars(obj)
 
 

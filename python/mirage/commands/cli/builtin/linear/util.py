@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import re
+from typing import cast
 
 from mirage.accessor.linear import LinearAccessor
 from mirage.core.linear.client import (
@@ -70,7 +71,7 @@ async def resolve_state_id(
     for team in teams:
         for state in (team.get("states") or {}).get("nodes", []):
             if state.get("name") == state_name:
-                return state["id"]
+                return cast(str, state["id"])
     raise FileNotFoundError(state_name)
 
 
@@ -97,7 +98,7 @@ async def resolve_label_id(
         raise ValueError("--label or --label-name is required")
     for label in await list_team_labels(accessor, team_id):
         if label.get("name") == label_name:
-            return label["id"]
+            return cast(str, label["id"])
     raise FileNotFoundError(label_name)
 
 
@@ -124,7 +125,7 @@ async def resolve_project_id(
         raise ValueError("--project or --project-name is required")
     for project in await list_team_projects(accessor, team_id):
         if project.get("name") == project_name:
-            return project["id"]
+            return cast(str, project["id"])
     raise FileNotFoundError(project_name)
 
 

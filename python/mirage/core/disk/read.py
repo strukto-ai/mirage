@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from typing import cast
+
 import aiofiles
 
 from mirage.accessor.disk import DiskAccessor
@@ -43,6 +45,8 @@ async def read(
     with disk_errors(virtual):
         async with aiofiles.open(p, "rb") as f:
             await f.seek(offset)
-            data = await (f.read() if size is None else f.read(size))
+            data = cast(
+                bytes, await (f.read() if size is None else f.read(size))
+            )
     record("read", virtual, "disk", len(data), timer)
     return data

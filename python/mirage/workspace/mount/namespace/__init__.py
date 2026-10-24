@@ -12,9 +12,14 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from typing import TYPE_CHECKING
+
 from mirage.workspace.mount.namespace.namespace import Namespace, NodeMeta
 from mirage.workspace.mount.namespace.ram import RAMNamespaceStore
 from mirage.workspace.mount.namespace.store import NamespaceStore, NodeFields
+
+if TYPE_CHECKING:
+    from mirage.workspace.mount.namespace.redis import RedisNamespaceStore
 
 __all__ = [
     "Namespace",
@@ -26,7 +31,7 @@ __all__ = [
 ]
 
 
-def __getattr__(name: str):
+def __getattr__(name: str) -> "type[RedisNamespaceStore]":
     if name == "RedisNamespaceStore":
         from mirage.workspace.mount.namespace.redis import RedisNamespaceStore
 

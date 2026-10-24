@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from importlib.resources import files
+from typing import cast
 
 from mirage.cache.file.constants import DEFAULT_KEY_PREFIX
 from mirage.cache.file.invalidation import Invalidation, with_fill_guard
@@ -88,7 +89,9 @@ class RedisFileCacheStore(RedisVFS, FileCacheMixin):
         return f"{self._meta_prefix}{key}"
 
     async def get(self, key: str) -> bytes | None:
-        return await self._cache_client.get(self._data_key(key))
+        return cast(
+            bytes | None, await self._cache_client.get(self._data_key(key))
+        )
 
     async def set(
         self,
@@ -189,7 +192,8 @@ class RedisFileCacheStore(RedisVFS, FileCacheMixin):
     async def is_unbounded(self, key: str) -> bool:
         # Redis answers this natively and distinguishes the two cases
         # that matter: -1 is present with no expiry, -2 is absent.
-        return await self._cache_client.ttl(self._data_key(key)) == -1
+        ttl = cast(int, await self._cache_client.ttl(self._data_key(key)))
+        return ttl == -1
 
     async def clear(self) -> None:
         self._invalidation.invalidate_all()

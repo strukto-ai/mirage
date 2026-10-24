@@ -14,7 +14,7 @@
 
 import logging
 from collections.abc import AsyncGenerator, AsyncIterator
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from bson import Timestamp
 from pymongo import AsyncMongoClient
@@ -266,5 +266,5 @@ async def get_validator(
     cursor = await db.list_collections(filter={"name": collection})
     async for spec in cursor:
         validator = spec.get("options", {}).get("validator", {})
-        return validator.get("$jsonSchema")
+        return cast(dict[str, Any] | None, validator.get("$jsonSchema"))
     return None

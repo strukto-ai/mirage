@@ -22,7 +22,7 @@ import tempfile
 import uuid
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Literal, cast
+from typing import BinaryIO, Literal, cast
 
 from agents.sandbox.errors import ExecTimeoutError
 from agents.sandbox.manifest import Manifest
@@ -313,7 +313,7 @@ class MirageSandboxSession(BaseSandboxSession):
             await run_blocking(tempfile.mkdtemp, prefix="mirage-restore-")
         )
         try:
-            state = await run_blocking(read_tar, data, staging)
+            state = await run_blocking(read_tar, cast(BinaryIO, data), staging)
             await apply_state_dict(self._ws, state)
         finally:
             await run_blocking(shutil.rmtree, staging, ignore_errors=True)

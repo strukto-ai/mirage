@@ -12,12 +12,15 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from typing import cast
+
 import asyncssh
 
 from mirage.accessor.ssh import SSHAccessor
 from mirage.core.ssh.utils import join_root
 from mirage.errors.fs import enoent
 from mirage.types import PathSpec
+from mirage.vfs.ssh.config import SSHConfig
 
 
 async def rm_r(accessor: SSHAccessor, path_spec: PathSpec) -> None:
@@ -30,7 +33,9 @@ async def rm_r(accessor: SSHAccessor, path_spec: PathSpec) -> None:
         raise enoent(path)
 
 
-async def _rm_r_inner(sftp, config, path: str) -> None:
+async def _rm_r_inner(
+    sftp: asyncssh.SFTPClient, config: SSHConfig, path: str
+) -> None:
     remote = join_root(config.root, path)
     # lstat, not stat: rm never follows symlinks (a link to a directory
     # must be unlinked, not recursed into), and a dangling link is still
@@ -41,7 +46,7 @@ async def _rm_r_inner(sftp, config, path: str) -> None:
         for entry in entries:
             if entry.filename in (".", ".."):
                 continue
-            child = f"{path.rstrip('/')}/{entry.filename}"
+            child = f"{path.rstrip('/')}/{cast(str, entry.filename)}"
             await _rm_r_inner(sftp, config, child)
         await sftp.rmdir(remote)
     else:
