@@ -356,12 +356,14 @@ async def du(
     tally = DuTally(mounts=mounts)
     # Kept on one filesystem, a listing leaves out the roots
     # of the mounts below it, which the walk must neither list nor stat.
+    # Those names would count toward a cut listing the walk then finds
+    # short, so such a listing is never cut.
     bound = mount_view(ctx.vfs) if fl.as_bool("one_file_system") else None
 
     async def listing(path: PathSpec, limit: int | None = None) -> list[str]:
-        entries = await files.readdir(path, limit=limit)
         if bound is None:
-            return entries
+            return await files.readdir(path, limit=limit)
+        entries = await files.readdir(path)
         owner = bound.root_of(path.virtual)
         return [e for e in entries if bound.root_of(e.rstrip("/")) == owner]
 

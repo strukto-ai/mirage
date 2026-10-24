@@ -121,11 +121,13 @@ async def list_folder_items(
         tm (BoxTokenManager): token manager.
         folder_id (str): Box folder id ("0" is All Files, the account root).
         page_size (int): items per request.
-        limit (int | None): stop once this many items are in hand and do
-            not request another page.
+        limit (int | None): stop once this many items other than web
+            links (bookmarks no listing names) are in hand and do not
+            request another page.
     """
     out: list[dict[str, Any]] = []
     offset = 0
+    named = 0
     while True:
         data = await box_get(
             tm,
@@ -139,9 +141,10 @@ async def list_folder_items(
         entries = data.get("entries", [])
         out.extend(entries)
         offset += len(entries)
+        named += sum(1 for item in entries if item.get("type") != "web_link")
         if offset >= data.get("total_count", 0) or not entries:
             break
-        if limit is not None and len(out) >= limit:
+        if limit is not None and named >= limit:
             break
     return out
 

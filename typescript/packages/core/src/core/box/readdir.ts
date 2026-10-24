@@ -88,7 +88,7 @@ export async function readdir(
   )
   const rows = items.filter((item) => item.type !== 'web_link').map(statFromItem)
   rows.sort((a, b) => compareCodePoints(a.name, b.name))
-  if (limit !== undefined && items.length >= limit)
+  if (limit !== undefined && rows.length >= limit)
     return new DirListing({ entries: rows, partial: true })
   return rows
 }

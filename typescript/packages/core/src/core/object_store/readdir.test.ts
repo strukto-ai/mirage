@@ -133,3 +133,12 @@ it('stops a listing at a walk limit and marks it partial', async () => {
   expect(pulled).toEqual(['f0.txt', 'f1.txt'])
   expect((await readdir(accessor, spec('/'), 6)) as FileStat[]).toHaveLength(5)
 })
+
+// Twin of test_a_walks_limit_counts_a_name_both_key_and_prefix_once.
+it('counts a name that is a key and a prefix once toward a walk limit', async () => {
+  const store = new FakeStore(
+    Object.fromEntries(['a', 'a/x', 'b', 'b/x', 'c'].map((k) => [k, 'x'])),
+  )
+  const out = (await makeReaddir(makeDriver(store))(accessor, spec('/'), 3)) as DirListing
+  expect(out.entries.map((row) => row.name)).toEqual(['a', 'b', 'c'])
+})

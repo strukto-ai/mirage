@@ -114,6 +114,6 @@ async def readdir(
         if item.get("type") != "web_link"
     ]
     rows.sort(key=lambda row: row.name)
-    if limit is not None and len(items) >= limit:
+    if limit is not None and len(rows) >= limit:
         return DirListing(rows, partial=True)
     return rows

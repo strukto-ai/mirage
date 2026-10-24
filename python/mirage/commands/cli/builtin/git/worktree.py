@@ -101,15 +101,14 @@ class Scanner:
         self._mounts = mount_view(vfs, crossing=True)
         self._counted: dict[str, int] = {}
         links = link_view(vfs)
+        self._read_tree = dispatched_read_tree(
+            vfs.dispatch,
+            mount_view(vfs),
+            None if links is None else partial(link_location, links),
+            True,
+        )
         self._tree_readdir, self._tree_lstat = tree_walk(
-            dispatched_read_tree(
-                vfs.dispatch,
-                mount_view(vfs),
-                None if links is None else partial(link_location, links),
-                True,
-            ),
-            vfs.readdir,
-            partial(vfs.stat, nofollow=True),
+            self._subtree, vfs.readdir, partial(vfs.stat, nofollow=True)
         )
         self.found = WorkTree()
 
@@ -153,6 +152,21 @@ class Scanner:
         if 0 <= limit <= self._counted.get(root, 0):
             raise WorkTreeLimitError(limit)
         self._counted[root] = self._counted.get(root, 0) + 1
+
+    async def _subtree(self, path: PathSpec) -> dict[str, FileStat] | None:
+        """A directory's whole subtree in one read, given up once it holds
+        more entries than files the walk may still count on its mount.
+
+        Args:
+            path (PathSpec): the directory.
+        """
+        if self._mounts is None or self._mounts.walk_limit is None:
+            return await self._read_tree(path)
+        limit = self._mounts.walk_limit(path.virtual)
+        if limit < 0:
+            return await self._read_tree(path)
+        spent = self._counted.get(self._mounts.root_of(path.virtual), 0)
+        return await self._read_tree(path, limit=max(limit - spent, 0) + 1)
 
     def _whole(self, relative: str) -> bool:
         """Whether the walk reads a directory's whole subtree, which a
@@ -208,14 +222,15 @@ class Scanner:
 
         git lists a directory only when something inside it would be
         reported, so a directory holding nothing but ignored files, or
-        nothing at all, is not mentioned. Stops at the first find.
+        nothing at all, is not mentioned. Stops at the first find, so it
+        lists one directory at a time rather than reading a subtree whole.
 
         Args:
             relative (str): repository-relative path of the directory.
             ignores (IgnoreStack): the rules governing it.
         """
         rules = await self._descend(relative, ignores)
-        for entry in await self._names(relative):
+        for entry in await read_names(self._vfs, self._absolute(relative)):
             name = entry_name(entry)
             if not name:
                 continue

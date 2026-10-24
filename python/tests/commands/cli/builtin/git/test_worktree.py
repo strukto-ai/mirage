@@ -26,6 +26,7 @@ from mirage.commands.cli.builtin.git.worktree import (
 )
 from mirage.types import LINK_TARGET_KEY, FileType, MountMode
 from mirage.vfs.disk import DiskVFS
+from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 
 from .conftest import LOCATION, MOUNT
@@ -217,3 +218,36 @@ async def test_a_work_tree_past_the_walk_limit_fails_unless_named(
         assert (repo_path / ".git" / "index").read_bytes() == index
     else:
         assert outcome == ("0\n", "")
+
+
+class TreeRAM(RAMVFS):
+    """A RAM work tree held to ten files, noting each subtree read and
+    the limit it was handed."""
+
+    def __init__(self, *dirs: str) -> None:
+        super().__init__(walk_limit=10)
+        self.trees: list[tuple[str, int | None]] = []
+        self._store.dirs.update({"/.git", *dirs})
+
+    async def read_tree(self, path, limit=None):
+        self.trees.append((path.virtual, limit))
+        return await super().read_tree(path)
+
+
+@pytest.mark.asyncio
+async def test_a_first_file_probe_lists_rather_than_reading_a_subtree():
+    vfs = TreeRAM("/new", "/new/deep")
+    vfs._store.files["/new/deep/b.txt"] = b"b\n"
+    with Workspace({MOUNT: vfs}) as ws:
+        found = await walk(ws, set())
+    assert (found.untracked, vfs.trees) == (["new/"], [])
+
+
+@pytest.mark.asyncio
+async def test_a_full_walk_hands_a_subtree_read_what_it_may_still_count():
+    vfs = TreeRAM("/new")
+    vfs._store.files.update({"/a.txt": b"a\n", "/new/b.txt": b"b\n"})
+    with Workspace({MOUNT: vfs}) as ws:
+        found = await walk(ws, set(), UNTRACKED_ALL)
+    assert found.untracked == ["a.txt", "new/b.txt"]
+    assert vfs.trees == [("/repo/new", 10)]

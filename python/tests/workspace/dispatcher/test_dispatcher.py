@@ -2543,6 +2543,26 @@ async def test_a_subtree_read_names_the_links_on_its_own_mount():
 
 
 @pytest.mark.asyncio
+async def test_a_subtree_read_answers_a_link_over_what_the_backend_holds():
+    # A writer past mirage can put a key where a link stands; a stat of
+    # the name answers the link, so the subtree read answers it too.
+    ram = RAMVFS()
+    ws = Workspace({"/base/": ram}, mode=MountMode.WRITE)
+    await ws.shell("echo hi > /base/f.txt")
+    await ws.shell("ln -s /base/f.txt /base/d")
+    ram._store.dirs.add("/d")
+    ram._store.files["/d/x"] = b"x"
+    tree, _ = await ws.dispatch(
+        "read_tree", PathSpec.from_str_path("/base"), nofollow=True
+    )
+    row, _ = await ws.dispatch(
+        "stat", PathSpec.from_str_path("/base/d"), nofollow=True
+    )
+    assert sorted(tree) == ["d", "f.txt"]
+    assert tree["d"].type is row.type is FileType.SYMLINK
+
+
+@pytest.mark.asyncio
 async def test_a_listing_that_does_not_follow_stops_at_a_link():
     # As open(2) answers a link with O_DIRECTORY | O_NOFOLLOW. A listing
     # that follows names the children under the link it was handed.

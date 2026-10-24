@@ -61,7 +61,7 @@ def make_readdir(driver: ObjectStoreDriver[A, C]) -> ReaddirFn[A]:
         path = raw_path_of(path_spec.dir if path_spec.pattern else path_spec)
         kpfx = driver.key_prefix_of(accessor)
         pfx = kp.apply_dir(kpfx, path)
-        names: list[str] = []
+        names: set[str] = set()
         dir_keys: set[str] = set()
         sizes: dict[str, int | None] = {}
         times: dict[str, str] = {}
@@ -73,13 +73,10 @@ def make_readdir(driver: ObjectStoreDriver[A, C]) -> ReaddirFn[A]:
                 if child.kind == "marker":
                     continue
                 key = "/" + kp.strip(kpfx, child.key)
+                names.add(key)
                 if child.kind == "d":
-                    if key in dir_keys:
-                        continue
-                    names.append(key)
                     dir_keys.add(key)
                 else:
-                    names.append(key)
                     sizes[key] = child.size
                     times[key] = child.modified
                 if limit is not None and len(names) >= limit:
@@ -99,17 +96,17 @@ def make_readdir(driver: ObjectStoreDriver[A, C]) -> ReaddirFn[A]:
                     partial(_probe_file, driver, conn, kpfx),
                     partial(_probe_dir, driver, conn, kpfx),
                 )
-        names = sorted(set(names))
+        listed = sorted(names)
         if len(names) > driver.scope_error:
             logger.warning(
                 "%s readdir: %s returned %d entries (limit %d)",
                 driver.vfs,
                 path_spec.virtual,
-                len(names),
+                len(listed),
                 driver.scope_error,
             )
         rows = []
-        for key in names:
+        for key in listed:
             name = key.rsplit("/", 1)[-1]
             if key in dir_keys:
                 # Store "folders" are synthetic prefixes with no object of

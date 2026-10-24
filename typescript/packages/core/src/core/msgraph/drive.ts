@@ -645,8 +645,8 @@ export async function deltaTree(
  * Graph refuses a batch, or when a
  * listing below the folder fails (a folder gone, or one the account may not
  * open), so the walk lists what is there and reports, or skips, each folder on
- * its own; null too once it holds more than `limit` items, before the next
- * level is asked. Mirrors Python's `batch_tree`.
+ * its own; null too once it holds more than `limit` items, which no listing
+ * is paged past. Mirrors Python's `batch_tree`.
  */
 export async function batchTree(
   config: MsGraphConfigResolved,
@@ -660,6 +660,8 @@ export async function batchTree(
   let level = filed(found, '', loc, top)
   while (level.length > 0) {
     if (limit !== undefined && found.size > limit) return null
+    const left = limit === undefined ? undefined : limit - found.size + 1
+    let got = 0
     const below: [string, DriveLoc][] = []
     for (let start = 0; start < level.length; start += BATCH_LIMIT) {
       const chunk = level.slice(start, start + BATCH_LIMIT)
@@ -671,8 +673,17 @@ export async function batchTree(
         for (const [status, , wait] of answers) if (status !== 200) pause = Math.max(pause, wait)
         if (pause > 0) await sleep(pause * 1000)
         for (const [i, url] of urls.entries()) {
+          if (left !== undefined && got >= left) return null
           const [status, body] = answers[i] ?? [0, {}, 0]
-          listed.push(await batchPage(config, url, status, body))
+          const items = await batchPage(
+            config,
+            url,
+            status,
+            body,
+            left === undefined ? undefined : left - got,
+          )
+          got += items.length
+          listed.push(items)
         }
       } catch (err) {
         const failed =
@@ -688,6 +699,7 @@ export async function batchTree(
         for (const pair of filed(found, rel, folder, rows)) below.push(pair)
       }
     }
+    if (left !== undefined && got >= left) return null
     level = below
   }
   if (limit !== undefined && found.size > limit) return null
@@ -697,15 +709,17 @@ export async function batchTree(
 /**
  * A folder's whole listing from its answer in a batch: the page the batch held
  * and the pages after it, or the listing asked again on its own when the batch
- * did not answer it. Mirrors Python's `_batch_page`.
+ * did not answer it; no page past the one that brings `limit` items. Mirrors
+ * Python's `_batch_page`.
  */
 async function batchPage(
   config: MsGraphConfigResolved,
   url: string,
   status: number,
   body: Record<string, unknown>,
+  limit?: number,
 ): Promise<Record<string, unknown>[]> {
-  if (status !== 200) return graphList(config, url)
+  if (status !== 200) return graphList(config, url, undefined, limit)
   const items: Record<string, unknown>[] = []
   if (Array.isArray(body.value)) {
     for (const item of body.value) {
@@ -715,8 +729,9 @@ async function batchPage(
     }
   }
   const rest = body['@odata.nextLink']
-  if (typeof rest === 'string') {
-    for (const item of await graphList(config, rest)) items.push(item)
+  if (typeof rest === 'string' && (limit === undefined || items.length < limit)) {
+    const more = limit === undefined ? undefined : limit - items.length
+    for (const item of await graphList(config, rest, undefined, more)) items.push(item)
   }
   return items
 }

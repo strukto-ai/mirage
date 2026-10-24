@@ -560,6 +560,34 @@ async def test_batch_tree_lists_a_level_per_batch(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_batch_tree_pages_a_listing_no_further_than_a_walks_limit(
+    monkeypatch,
+):
+    rest = _children("top/a") + "?page=2"
+    tree = {
+        _children("top"): [_row("A", "a", "T", folder={"childCount": 5})],
+        _children("top/a"): [],
+        rest: [
+            _row(f"x{i}", f"x{i}.txt", "A", size=1, file={}) for i in range(5)
+        ],
+    }
+    _, batch, _ = _listings(tree, pages={_children("top/a"): rest})
+    limits: list[tuple[str, int | None]] = []
+
+    async def listing(accessor, url, params=None, limit=None):
+        limits.append((url, limit))
+        return tree[url] if limit is None else tree[url][:limit]
+
+    monkeypatch.setattr(drive_ops, "graph_list", listing)
+    monkeypatch.setattr(drive_ops, "graph_batch", batch)
+    found = await drive_ops.batch_tree(
+        _accessor(), _loc("d1", "top"), "/od/top", 3
+    )
+    assert found is None
+    assert limits == [(_children("top"), 3), (rest, 3)]
+
+
+@pytest.mark.asyncio
 async def test_batch_tree_splits_a_wide_level(monkeypatch):
     names = [f"d{i:02d}" for i in range(25)]
     tree = {_children("top"): [_row(n, n, "T", folder={}) for n in names]}

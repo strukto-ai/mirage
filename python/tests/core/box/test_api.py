@@ -88,6 +88,34 @@ async def test_list_folder_items_follows_offset_pagination(tm):
 
 
 @pytest.mark.asyncio
+async def test_list_folder_items_counts_no_web_link_toward_a_limit(tm):
+    pages = [
+        {
+            "total_count": 4,
+            "entries": [
+                {"id": "1", "name": "a", "type": "web_link"},
+                {"id": "2", "name": "b", "type": "web_link"},
+            ],
+        },
+        {
+            "total_count": 4,
+            "entries": [
+                {"id": "3", "name": "c", "type": "file"},
+                {"id": "4", "name": "d", "type": "file"},
+            ],
+        },
+    ]
+    with patch(
+        "mirage.core.box.api.box_get",
+        new_callable=AsyncMock,
+        side_effect=pages,
+    ) as mock_get:
+        items = await list_folder_items(tm, "0", page_size=2, limit=2)
+    assert [it["id"] for it in items] == ["1", "2", "3", "4"]
+    assert mock_get.await_count == 2
+
+
+@pytest.mark.asyncio
 async def test_list_folder_items_stops_on_empty_page(tm):
     with patch(
         "mirage.core.box.api.box_get",

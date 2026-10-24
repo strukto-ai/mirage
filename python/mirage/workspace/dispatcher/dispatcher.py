@@ -2773,7 +2773,8 @@ class Dispatcher:
         No backend stores a link, so a walk that reads the subtree in one
         call meets them only here, as a listing meets them in ``readdir``;
         a link that leads where the session cannot see is left out, as a
-        listing leaves it out.
+        listing leaves it out. A link shadows what the backend holds at
+        its name and below it, as a stat of the name answers the link.
 
         Args:
             path (PathSpec): the directory the read answered for.
@@ -2790,7 +2791,15 @@ class Dispatcher:
                 virtual
             ) is not owner or leads_hidden(vis, virtual, links):
                 continue
-            merged.setdefault(virtual[len(base) + 1 :], row)
+            rel = virtual[len(base) + 1 :]
+            if rel in merged:
+                below = rel + "/"
+                merged = {
+                    key: st
+                    for key, st in merged.items()
+                    if not key.startswith(below)
+                }
+            merged[rel] = row
         return merged
 
     def _overlaid(

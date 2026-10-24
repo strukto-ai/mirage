@@ -121,6 +121,12 @@ def test_readdir_stops_at_a_walks_limit_and_marks_the_listing_partial(
     assert len(asyncio.run(readdir(accessor, spec("/"), 6))) == 5
 
 
+def test_a_walks_limit_counts_a_name_both_key_and_prefix_once(accessor):
+    store = FakeStore({k: b"x" for k in ("a", "a/x", "b", "b/x", "c")})
+    out = asyncio.run(make_readdir(make_driver(store))(accessor, spec("/"), 3))
+    assert [row.name for row in out.entries] == ["a", "b", "c"]
+
+
 def test_tree_answers_none_past_a_walks_limit(accessor):
     store = FakeStore({f"dir/f{i}.txt": b"x" for i in range(5)})
     tree = make_tree(make_driver(store))

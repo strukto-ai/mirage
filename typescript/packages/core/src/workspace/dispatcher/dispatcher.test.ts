@@ -2584,6 +2584,29 @@ describe('a link at the final name', () => {
     }
   })
 
+  // Twin of test_a_subtree_read_answers_a_link_over_what_the_backend_holds.
+  it('a subtree read answers a link over what the backend holds', async () => {
+    // A writer past mirage can put a key where a link stands; a stat of the
+    // name answers the link, so the subtree read answers it too.
+    const ram = new RAMVFS()
+    const ws = await linked({ '/base/': ram })
+    try {
+      await ws.shell('echo hi > /base/f.txt')
+      await ws.shell('ln -s /base/f.txt /base/d')
+      ram.store.dirs.add('/d')
+      ram.store.files.set('/d/x', new TextEncoder().encode('x'))
+      const tree = (await ws.dispatch('read_tree', '/base', [], { nofollow: true })) as Map<
+        string,
+        FileStat
+      >
+      const row = (await ws.dispatch('stat', '/base/d', [], { nofollow: true })) as FileStat
+      expect([...tree.keys()].sort()).toEqual(['d', 'f.txt'])
+      expect([tree.get('d')?.type, row.type]).toEqual([FileType.SYMLINK, FileType.SYMLINK])
+    } finally {
+      await ws.close()
+    }
+  })
+
   it('a listing that does not follow stops at a link', async () => {
     // As open(2) answers a link with O_DIRECTORY | O_NOFOLLOW. A listing
     // that follows names the children under the link it was handed.

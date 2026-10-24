@@ -48,24 +48,27 @@ UNOPENABLE_MARK = "  [error opening dir]"
 
 
 async def _cross_readdir(
-    readdir_path: ReaddirPath, path: PathSpec
+    readdir_path: ReaddirPath, path: PathSpec, limit: int | None = None
 ) -> list[str]:
     """List a directory that belongs to another mount, which indexes its
-    own listing inside the dispatched op.
+    own listing inside the dispatched op; the listing is whole, whatever
+    the walk's ``limit``.
 
     Args:
         readdir_path (ReaddirPath): dispatcher-backed readdir.
         path (PathSpec): the directory to list.
+        limit (int | None): the walk's limit, which a whole listing meets.
     """
     return await readdir_path(path.virtual)
 
 
-async def _not_crossed(path: PathSpec) -> list[str]:
+async def _not_crossed(path: PathSpec, limit: int | None = None) -> list[str]:
     """List a mount point ``-x`` keeps the walk out of: empty, the way
     GNU tree draws a directory on another filesystem.
 
     Args:
         path (PathSpec): the mount point.
+        limit (int | None): the walk's limit, which an empty listing meets.
     """
     return []
 

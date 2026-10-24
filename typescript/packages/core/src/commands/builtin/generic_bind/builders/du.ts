@@ -298,14 +298,16 @@ const du: CommandFn = async (_accessor, paths, _texts, ctx) => {
   const flags = new FlagView(ctx.flags, specOf('du'))
   const tally = new DuTally(mountsOf(ctx) ?? null)
   // Kept on one filesystem, a listing leaves out the roots of the mounts
-  // below it, which the walk must neither list nor stat.
+  // below it, which the walk must neither list nor stat. Those names would
+  // count toward a cut listing the walk then finds short, so such a listing
+  // is never cut.
   const bound = flags.asBool('one_file_system') ? mountView(ctx.vfs) : undefined
   const listing =
     bound === undefined
       ? files.readdir
-      : async (path: PathSpec, nofollow?: boolean, limit?: number): Promise<string[]> => {
+      : async (path: PathSpec, nofollow?: boolean): Promise<string[]> => {
           const owner = bound.rootOf(path.virtual)
-          return (await files.readdir(path, nofollow, limit)).filter(
+          return (await files.readdir(path, nofollow)).filter(
             (e) => bound.rootOf(rstripSlash(e)) === owner,
           )
         }

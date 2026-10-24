@@ -51,7 +51,7 @@ export function makeReaddir<A extends Accessor, C>(driver: ObjectStoreDriver<A, 
     const rawPath = rawPathOf(path.pattern !== null ? path.dir : path)
     const kpfx = driver.keyPrefixOf(accessor)
     const pfx = kp.applyDir(kpfx, rawPath)
-    const names: string[] = []
+    const names = new Set<string>()
     const dirKeys = new Set<string>()
     const sizes = new Map<string, number | null>()
     const times = new Map<string, string>()
@@ -63,16 +63,14 @@ export function makeReaddir<A extends Accessor, C>(driver: ObjectStoreDriver<A, 
         sawKey = true
         if (child.kind === 'marker') continue
         const key = '/' + kp.strip(kpfx, child.key)
+        names.add(key)
         if (child.kind === 'd') {
-          if (dirKeys.has(key)) continue
-          names.push(key)
           dirKeys.add(key)
         } else {
-          names.push(key)
           sizes.set(key, child.size ?? null)
           times.set(key, child.modified ?? '')
         }
-        if (limit !== undefined && names.length >= limit) {
+        if (limit !== undefined && names.size >= limit) {
           cut = true
           break
         }
@@ -94,7 +92,7 @@ export function makeReaddir<A extends Accessor, C>(driver: ObjectStoreDriver<A, 
     } finally {
       await close()
     }
-    const unique = [...new Set(names)].sort(compareCodePoints)
+    const unique = [...names].sort(compareCodePoints)
     if (unique.length > driver.scopeError) {
       console.warn(
         `${driver.vfs} readdir: ${path.virtual} returned ` +

@@ -710,8 +710,8 @@ async def batch_tree(
     when Graph refuses a batch, or when a listing below the folder fails
     (a folder gone, or one the account may not open), so the walk lists
     what is there and reports, or skips, each folder on its own; None too
-    once it holds more than ``limit`` items, before the next level is
-    asked.
+    once it holds more than ``limit`` items, which no listing is paged
+    past.
 
     Args:
         accessor (OneDriveAccessor | SharePointAccessor): Graph accessor.
@@ -727,6 +727,8 @@ async def batch_tree(
     while level:
         if limit is not None and len(found) > limit:
             return None
+        left = None if limit is None else limit - len(found) + 1
+        got = 0
         below: list[tuple[str, DriveLoc]] = []
         for start in range(0, len(level), BATCH_LIMIT):
             chunk = level[start : start + BATCH_LIMIT]
@@ -739,10 +741,19 @@ async def batch_tree(
                 )
                 if pause:
                     await asyncio.sleep(pause)
-                listed = [
-                    await _batch_page(accessor, url, status, body)
-                    for url, (status, body, _) in zip(urls, answers)
-                ]
+                listed: list[list[dict[str, Any]]] = []
+                for url, (status, body, _) in zip(urls, answers):
+                    if left is not None and got >= left:
+                        return None
+                    items = await _batch_page(
+                        accessor,
+                        url,
+                        status,
+                        body,
+                        None if left is None else left - got,
+                    )
+                    got += len(items)
+                    listed.append(items)
             except (GraphError, aiohttp.ClientError, OSError) as exc:
                 logger.debug(
                     "graph tree of %s left to the walk: %s", loc.path, exc
@@ -751,6 +762,8 @@ async def batch_tree(
             for (rel, folder), items in zip(chunk, listed):
                 rows = sorted(map(entry_stat, items), key=lambda r: r.name)
                 below.extend(_filed(found, rel, folder, rows))
+        if left is not None and got >= left:
+            return None
         level = below
     if limit is not None and len(found) > limit:
         return None
@@ -762,19 +775,26 @@ async def _batch_page(
     url: str,
     status: int,
     body: dict[str, Any],
+    limit: int | None = None,
 ) -> list[dict[str, Any]]:
     """A folder's whole listing from its answer in a batch: the page the
     batch held and the pages after it, or the listing asked again on its
-    own when the batch did not answer it.
+    own when the batch did not answer it; no page past the one that
+    brings ``limit`` items.
 
     Args:
         accessor (OneDriveAccessor | SharePointAccessor): Graph accessor.
         url (str): the listing's URL.
         status (int): the answer's status.
         body (dict[str, Any]): the answer's body.
+        limit (int | None): stop once this many items are in hand.
     """
     if status != 200:
-        return await graph_list(accessor, url)
+        return await (
+            graph_list(accessor, url)
+            if limit is None
+            else graph_list(accessor, url, limit=limit)
+        )
     value = body.get("value")
     items = [
         item
@@ -782,8 +802,14 @@ async def _batch_page(
         if isinstance(item, dict)
     ]
     rest = body.get("@odata.nextLink")
-    if isinstance(rest, str):
+    if not isinstance(rest, str):
+        return items
+    if limit is None:
         items.extend(await graph_list(accessor, rest))
+    elif len(items) < limit:
+        items.extend(
+            await graph_list(accessor, rest, limit=limit - len(items))
+        )
     return items
 
 

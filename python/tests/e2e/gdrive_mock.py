@@ -331,15 +331,19 @@ class FakeDriveApi:
         return children if limit is None else children[:limit]
 
     async def list_children(
-        self, folder_ids: list[str], drive_id: str | None
+        self,
+        folder_ids: list[str],
+        drive_id: str | None,
+        limit: int | None = None,
     ) -> list[dict]:
         del drive_id
         self._fake.calls["list_children"] += 1
-        return [
+        children = [
             child
             for folder_id in folder_ids
             for child in self._fake.list_children(folder_id)
         ]
+        return children if limit is None else children[:limit]
 
     async def list_shared_drives(self) -> list[dict]:
         return []

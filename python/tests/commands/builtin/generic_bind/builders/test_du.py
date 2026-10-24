@@ -24,7 +24,10 @@ from mirage.errors.fs import enotsup, walk_declined
 from mirage.errors.types import OperationNotSupportedError
 from mirage.io import IOResult
 from mirage.io.stream import materialize
-from mirage.types import FileStat, FileType, MountMode, PathSpec
+from mirage.types import DirListing, FileStat, FileType, MountMode, PathSpec
+from mirage.vfs.base import BaseVFS
+from mirage.vfs.ram import RAMVFS
+from mirage.workspace import Workspace
 from mirage.workspace.files import Files
 from mirage.workspace.types import MountRow
 from tests.fixtures.readers import readers
@@ -284,3 +287,30 @@ async def test_du_L_counts_a_link_whose_file_only_it_reaches():
         1,
         "du: cannot read directory '/db/private': Permission denied\n",
     )
+
+
+class CutRAM(RAMVFS):
+    """A RAM mount held to two files, with no tree read, whose listing
+    stops at a walk's ``limit``."""
+
+    read_tree = BaseVFS.read_tree
+
+    def __init__(self) -> None:
+        super().__init__(walk_limit=2)
+
+    async def readdir(self, path, limit=None):
+        rows = list(await super().readdir(path))
+        if limit is None or len(rows) < limit:
+            return rows
+        return DirListing(rows[:limit], partial=True)
+
+
+@pytest.mark.asyncio
+async def test_du_x_counts_a_file_listed_past_the_mounts_below():
+    vfs = CutRAM()
+    vfs._store.dirs.update({"/d", "/d/m1", "/d/m2", "/d/m3"})
+    vfs._store.files["/d/z"] = b"zz"
+    mounts = {"/ram/": vfs} | {f"/ram/d/m{i}/": RAMVFS() for i in (1, 2, 3)}
+    with Workspace(mounts) as ws:
+        out = await ws.shell("du -x -a /ram/d")
+        assert await out.stdout_str() == "2\t/ram/d/z\n2\t/ram/d\n"

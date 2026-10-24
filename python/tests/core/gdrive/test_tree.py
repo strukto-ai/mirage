@@ -204,3 +204,26 @@ async def test_a_level_that_fails_is_left_to_the_walk(
     fake_drive.folder("sub")
     monkeypatch.setattr(fake_drive, "list_children", _drive_down)
     assert await tree(gdrive_accessor, scope()) is None
+
+
+@pytest.mark.asyncio
+async def test_a_level_is_paged_no_further_than_a_walks_limit(
+    fake_drive, gdrive_accessor
+):
+    sub = fake_drive.folder("sub")
+    for i in range(5):
+        fake_drive.add(f"f{i}.txt", parent=sub, content=b"x")
+    assert await tree(gdrive_accessor, scope(), limit=3) is None
+    assert fake_drive.child_limits == [3]
+
+
+@pytest.mark.asyncio
+async def test_a_level_asks_no_query_past_a_walks_limit(
+    fake_drive, gdrive_accessor
+):
+    for i in range(PARENTS_PER_QUERY + 1):
+        folder = fake_drive.folder(f"d{i:02d}")
+        fake_drive.add("f.txt", parent=folder, content=b"x")
+    limit = PARENTS_PER_QUERY + 10
+    assert await tree(gdrive_accessor, scope(), limit=limit) is None
+    assert fake_drive.child_limits == [10]

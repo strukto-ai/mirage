@@ -2488,8 +2488,9 @@ export class Dispatcher {
    * same mount, each as the link it is. No backend stores a link, so a walk
    * that reads the subtree in one call meets them only here, as a listing
    * meets them in `readdir`; a link that leads where the session cannot see
-   * is left out, as a listing leaves it out. Mirrors Python's
-   * Dispatcher._with_links.
+   * is left out, as a listing leaves it out. A link shadows what the backend
+   * holds at its name and below it, as a stat of the name answers the link.
+   * Mirrors Python's Dispatcher._with_links.
    */
   /** A subtree read with the attributes the overlay holds for each entry, the
    * ones a stat of that entry carries. */
@@ -2515,7 +2516,10 @@ export class Dispatcher {
       if (this.namespace.tryMountFor(virtual) !== owner || leadsHidden(vis, virtual, links))
         continue
       const rel = virtual.slice(base.length + 1)
-      if (!merged.has(rel)) merged.set(rel, row)
+      if (merged.has(rel)) {
+        for (const key of [...merged.keys()]) if (key.startsWith(`${rel}/`)) merged.delete(key)
+      }
+      merged.set(rel, row)
     }
     return merged
   }
