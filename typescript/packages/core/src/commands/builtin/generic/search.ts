@@ -93,7 +93,7 @@ export function makeSearch(
   ): Promise<CommandFnResult> {
     const query = texts[0]
     if (query === undefined || query === '') throw new UsageError('search: query is required')
-    const fl = new FlagView(ctx.flags, specOf('search'))
+    const fl = new FlagView(ctx.flags, specOf(name))
     const topK = fl.asInt('top_k')
     if (topK !== undefined && topK < 1) throw new UsageError('search: top-k must be positive')
     try {
@@ -111,7 +111,7 @@ export function makeSearch(
   return command({
     name,
     vfs,
-    spec: specOf('search'),
+    spec: specOf(name),
     fn: search,
   })
 }

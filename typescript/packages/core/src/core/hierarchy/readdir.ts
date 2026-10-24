@@ -41,6 +41,33 @@ export type PatternTest = (pattern: string) => boolean
 export type ExtraFn = (match: ScopeMatch) => Record<string, string>
 
 /**
+ * What a paged listing's pages hold, and no page past the one that brings
+ * `limit` rows; the pages are closed there. Mirrors Python's `held_pages`.
+ */
+export async function heldPages<T>(
+  pages: AsyncIterable<T[]>,
+  limit: number | undefined,
+): Promise<T[]> {
+  const held: T[] = []
+  for await (const page of pages) {
+    held.push(...page)
+    if (limit !== undefined && held.length >= limit) break
+  }
+  return held
+}
+
+/**
+ * A paged listing's rows, partial once they reach a walk's `limit`: its
+ * lister stopped paging there, so a row past them may exist. Mirrors
+ * Python's `cut_listing`.
+ */
+export function cutListing(rows: FileStat[], limit: number | undefined): Listed {
+  if (limit !== undefined && rows.length >= limit)
+    return new DirListing({ entries: rows, partial: true })
+  return rows
+}
+
+/**
  * Build a hierarchy readdir: dispatch, guards, rows as stat answers.
  *
  * A lister fetches one directory kind and answers its children's stats;
@@ -80,33 +107,6 @@ export type ExtraFn = (match: ScopeMatch) => Record<string, string>
  * per-kind `FileStat.extra` payloads derived from a listed row's own slots.
  * Mirrors `make_readdir` in `mirage/core/hierarchy/readdir.py`.
  */
-/**
- * What a paged listing's pages hold, and no page past the one that brings
- * `limit` rows; the pages are closed there. Mirrors Python's `held_pages`.
- */
-export async function heldPages<T>(
-  pages: AsyncIterable<T[]>,
-  limit: number | undefined,
-): Promise<T[]> {
-  const held: T[] = []
-  for await (const page of pages) {
-    held.push(...page)
-    if (limit !== undefined && held.length >= limit) break
-  }
-  return held
-}
-
-/**
- * A paged listing's rows, partial once they reach a walk's `limit`: its
- * lister stopped paging there, so a row past them may exist. Mirrors
- * Python's `cut_listing`.
- */
-export function cutListing(rows: FileStat[], limit: number | undefined): Listed {
-  if (limit !== undefined && rows.length >= limit)
-    return new DirListing({ entries: rows, partial: true })
-  return rows
-}
-
 export function makeReaddir<A extends Accessor>(
   detect: DetectFn,
   options: {

@@ -109,7 +109,7 @@ def make_search(
     ) -> tuple[ByteSource | None, IOResult]:
         if not texts or not texts[0]:
             raise UsageError("search: query is required")
-        fl = FlagView(ctx.flags, spec=SPECS["search"])
+        fl = FlagView(ctx.flags, spec=SPECS[name])
         top_k = fl.as_int("top_k")
         if top_k is not None and top_k < 1:
             raise UsageError("search: top-k must be positive")
@@ -120,7 +120,7 @@ def make_search(
         )
         return output, IOResult()
 
-    wrapped: Callable[..., Any] = command(name, vfs=vfs, spec=SPECS["search"])(
+    wrapped: Callable[..., Any] = command(name, vfs=vfs, spec=SPECS[name])(
         search
     )
     return wrapped
