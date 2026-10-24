@@ -90,7 +90,7 @@
     "e2b": "^2.45.0",
     "eslint": "^9.0.0",
     "eslint-config-prettier": "^10.1.8",
-    "nodemailer": "^10.0.2",
+    "nodemailer": "^10.1.4",
     "oxfmt": "^0.71.0",
     "playwright-core": "^1.59.1",
     "prisma": "^6.19.3",
