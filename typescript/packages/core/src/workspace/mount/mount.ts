@@ -256,9 +256,10 @@ async function* asStream(
  * A backend read's answer as bytes, a stream collected. A whole read's
  * stream publishes the version it recorded for the bytes collected from it,
  * as a whole read answering bytes publishes its own, so a read-modify-write
- * still sends the version it read. Its record stays in the records of the
- * block around it, so the write a rewrite makes still sees the read that
- * proves the copy it extends. Mirrors Python's `_collected`.
+ * still sends the version it read. Its records are its own, so a read
+ * running beside it never lends it a version, and reach the block around it
+ * too, so the write a rewrite makes still sees the read that proves the copy
+ * it extends. Mirrors Python's `_collected`.
  */
 async function collected(
   answer: Promise<ByteSource> | AsyncIterable<Uint8Array>,
@@ -268,15 +269,16 @@ async function collected(
   const found = await answer
   if (found instanceof Uint8Array) return found
   if (!whole) return materialize(found)
-  const collect = async (): Promise<readonly [Uint8Array, OpRecord[]]> => {
-    const held = currentCaller().commandSink
-    if (held === null) {
-      return commandRecords(async (records) => [await materialize(found), records] as const)
-    }
-    const start = held[1].length
-    const data = await materialize(found)
-    return [data, held[1].slice(start)] as const
-  }
+  const held = currentCaller().commandSink
+  const outer = held !== null && held[1] !== held[0] ? held[1] : null
+  const collect = (): Promise<readonly [Uint8Array, OpRecord[]]> =>
+    commandRecords(async (records) => {
+      try {
+        return [await materialize(found), records] as const
+      } finally {
+        outer?.push(...records)
+      }
+    })
   const [data, records] =
     activeRecords() === undefined ? (await runWithRecording(collect))[0] : await collect()
   publishRead(path.virtual, data, latestFingerprint(records, path.virtual))

@@ -394,9 +394,10 @@ async def _collected(
 
     A whole read's stream publishes the version it recorded for the bytes
     collected from it, as a whole read answering bytes publishes its own,
-    so a read-modify-write still sends the version it read. Its record
-    stays in the records of the block around it, so the write a rewrite
-    makes still sees the read that proves the copy it extends.
+    so a read-modify-write still sends the version it read. Its records
+    are its own, so a read running beside it never lends it a version,
+    and reach the block around it too, so the write a rewrite makes still
+    sees the read that proves the copy it extends.
 
     Args:
         answer (Awaitable[ByteSource] | AsyncIterator[bytes]): what
@@ -409,16 +410,16 @@ async def _collected(
         return found
     if not whole:
         return await materialize(found)
+    held = current_caller().command_sink
+    outer = held[1] if held is not None and held[1] is not held[0] else None
     scope = RecordingScope(active=active_recorder() is None)
     try:
-        held = current_caller().command_sink
-        if held is None:
-            with command_records() as records:
+        with command_records() as records:
+            try:
                 data = await materialize(found)
-        else:
-            start = len(held[1])
-            data = await materialize(found)
-            records = held[1][start:]
+            finally:
+                if outer is not None:
+                    outer.extend(records)
     finally:
         scope.close()
     publish_read(path.virtual, data, latest_fingerprint(records, path.virtual))

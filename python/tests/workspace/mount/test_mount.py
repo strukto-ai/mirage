@@ -683,3 +683,59 @@ async def test_a_collected_read_stays_in_the_records_around_it():
     finally:
         scope.close()
         await ws.close()
+
+
+class _Racing(RAMVFS):
+    """Numbers each whole read's version and holds the first one open
+    until ``gate`` is set."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.calls = 0
+        self.started = asyncio.Event()
+        self.gate = asyncio.Event()
+
+    async def read(
+        self, path: PathSpec, offset: int = 0, size: int | None = None
+    ) -> ByteSource:
+        if offset or size is not None:
+            return await super().read(path, offset, size)
+        self.calls += 1
+        if self.calls == 1:
+            self.started.set()
+        return self._numbered(path, self.calls)
+
+    async def _numbered(self, path: PathSpec, n: int) -> AsyncIterator[bytes]:
+        rec = record_stream("read", path.virtual, "ram")
+        if rec is not None:
+            rec.fingerprint = f"v{n}"
+        if n == 1:
+            await self.gate.wait()
+        yield f"bytes{n}".encode()
+
+
+# Two reads of one file in one command share its records; the one that
+# finishes last still labels its bytes with its own version.
+@pytest.mark.asyncio
+async def test_parallel_collected_reads_keep_their_own_versions():
+    vfs = _Racing()
+    vfs._store.files["/f"] = b"x"
+    ws = Workspace({"/m": vfs}, mode=MountMode.WRITE)
+    mount = ws.mount("/m")
+    path = PathSpec.from_str_path("/m/f")
+    scope = RecordingScope()
+    try:
+        with command_records():
+            first = asyncio.create_task(
+                read_versioned(path, lambda: mount.call("read", "/m/f"))
+            )
+            await vfs.started.wait()
+            second = await read_versioned(
+                path, lambda: mount.call("read", "/m/f")
+            )
+            vfs.gate.set()
+            older = await first
+        assert (older, second) == ((b"bytes1", "v1"), (b"bytes2", "v2"))
+    finally:
+        scope.close()
+        await ws.close()

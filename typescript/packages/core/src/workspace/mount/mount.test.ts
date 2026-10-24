@@ -954,3 +954,72 @@ it('a collected read stays in the records around it', async () => {
     await ws.close()
   }
 })
+
+/** Numbers each whole read's version and holds the first one open until `open`. */
+class Racing extends RAMVFS {
+  calls = 0
+  #begin: () => void = () => undefined
+  #release: () => void = () => undefined
+  readonly started = new Promise<void>((resolve) => {
+    this.#begin = resolve
+  })
+  readonly gate = new Promise<void>((resolve) => {
+    this.#release = resolve
+  })
+
+  open(): void {
+    this.#release()
+  }
+
+  override async read(
+    path: PathSpec,
+    handed?: Handed,
+    offset = 0,
+    size: number | null = null,
+  ): Promise<ByteSource> {
+    if (offset !== 0 || size !== null) return super.read(path, handed, offset, size)
+    const n = ++this.calls
+    if (n === 1) this.#begin()
+    return this.numbered(path, n)
+  }
+
+  private async *numbered(path: PathSpec, n: number): AsyncIterable<Uint8Array> {
+    const rec = recordStream('read', path.virtual, 'ram')
+    if (rec !== null) rec.fingerprint = `v${String(n)}`
+    if (n === 1) await this.gate
+    yield new TextEncoder().encode(`bytes${String(n)}`)
+  }
+}
+
+// Two reads of one file in one command share its records; the one that
+// finishes last still labels its bytes with its own version.
+it('parallel collected reads keep their own versions', async () => {
+  const vfs = new Racing()
+  vfs.store.files.set('/f', new TextEncoder().encode('x'))
+  const ws = new Workspace({ '/m': vfs }, { mode: MountMode.WRITE })
+  try {
+    const mount = ws.mount('/m')
+    const read = (): Promise<[unknown, string | null]> =>
+      readVersioned(PathSpec.fromStrPath('/m/f'), () => mount.call('read', '/m/f'))
+    const [[older, newer]] = await runWithRecording(() =>
+      commandRecords(async () => {
+        const first = read()
+        await vfs.started
+        const second = await read()
+        vfs.open()
+        return [await first, second] as const
+      }),
+    )
+    expect(
+      [older, newer].map(([data, version]) => [
+        new TextDecoder().decode(data as Uint8Array),
+        version,
+      ]),
+    ).toEqual([
+      ['bytes1', 'v1'],
+      ['bytes2', 'v2'],
+    ])
+  } finally {
+    await ws.close()
+  }
+})
