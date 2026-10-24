@@ -18,10 +18,15 @@ Every setting comes from the environment, as in a deployment: auth from
 snapshot store an operator passes ``build_app`` from
 ``ACCESS_SNAPSHOT_STORE`` (an ``S3Config`` as JSON). When
 ``ACCESS_LOOP_LAG`` names a file, the server's loop is timed for the
-length of the run and the summary written there as it stops. Run as
+length of the run and the summary written there as it stops. Before it
+serves, it tunes the interpreter as the daemon does and as a host of
+``build_app`` should: startup's objects frozen out of collections, a
+young threshold of 10,000 and a 1 ms GIL switch interval, which lets a
+busy workspace yield every 2 ms. Run as
 ``python integ/access/serve.py PORT``.
 """
 
+import gc
 import json
 import os
 import sys
@@ -62,4 +67,8 @@ async def _timed(served: FastAPI) -> AsyncIterator[None]:
 
 if lag_file:
     app.router.lifespan_context = _timed
+gc.collect()
+gc.freeze()
+gc.set_threshold(10_000, *gc.get_threshold()[1:])
+sys.setswitchinterval(0.001)
 uvicorn.run(app, host="127.0.0.1", port=int(sys.argv[1]), log_level="warning")

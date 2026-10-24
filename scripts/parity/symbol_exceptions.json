@@ -959,6 +959,14 @@
    "python_only": {
     "InlineAwait": "asyncio awaits a coroutine in another context, or lets another task cancel it, only through a task of its own, which costs two turns of the event loop per stream pull; TypeScript replays its context in a closure and awaits the promise directly."
    }
+  },
+  "io/yield_budget": {
+   "python_only": {
+    "YIELD_SWITCHES": "Python yields every few GIL switch intervals, since a loop that yields more often keeps its other threads from the GIL; TypeScript runs every workspace on one thread and keeps a fixed YIELD_INTERVAL."
+   },
+   "typescript_only": {
+    "YIELD_INTERVAL": "TypeScript has no GIL and yields on a fixed interval; Python derives its interval from the GIL switch interval (YIELD_SWITCHES)."
+   }
   }
  }
 }

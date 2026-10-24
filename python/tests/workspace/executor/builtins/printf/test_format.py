@@ -107,7 +107,7 @@ async def test_large_width_and_precision_are_cancellable():
 
 
 async def test_cancels_a_preloaded_numeric_scan(monkeypatch):
-    monkeypatch.setattr("mirage.io.yield_budget.YIELD_INTERVAL", 0)
+    monkeypatch.setattr("mirage.io.yield_budget.YIELD_SWITCHES", 0)
     stream = open_stream("printf", {"mode": "builtin", "argument_count": 1})
     stream.feed_input(0, b"%d")
     stream.end_input(0)
