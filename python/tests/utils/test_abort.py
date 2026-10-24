@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import gc
 import logging
 
 import pytest
@@ -129,6 +130,36 @@ async def test_an_externally_cancelled_caller_gets_the_same_grace():
     assert steps == ["epilogue", "released"]
     assert ABORT_JOIN_SECONDS <= elapsed < ABORT_JOIN_SECONDS + 1
     assert not (asyncio.all_tasks() - before)
+
+
+async def _fail() -> None:
+    raise ValueError("lost")
+
+
+@pytest.mark.asyncio
+async def test_a_failure_its_cancelled_caller_left_is_read_and_logged(caplog):
+    # The caller is cancelled in the turn its line fails, so its wait is
+    # cut short with the failure unread. It is logged here instead of
+    # left for asyncio to report as never retrieved.
+    loop = asyncio.get_running_loop()
+    reported: list[dict] = []
+    handler = loop.get_exception_handler()
+    loop.set_exception_handler(lambda _, context: reported.append(context))
+    caller = asyncio.ensure_future(run_cancellable(_fail(), asyncio.Event()))
+    await asyncio.sleep(0)
+    caller.cancel()
+    try:
+        with caplog.at_level(logging.DEBUG, logger="mirage.utils.abort"):
+            await asyncio.wait({caller})
+        del caller
+        gc.collect()
+    finally:
+        loop.set_exception_handler(handler)
+    assert not reported
+    assert any(
+        r.exc_info and isinstance(r.exc_info[1], ValueError)
+        for r in caplog.records
+    )
 
 
 @pytest.mark.asyncio

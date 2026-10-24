@@ -16,7 +16,7 @@ import asyncio
 import logging
 from collections.abc import AsyncIterator, Callable
 
-from mirage.concurrency.limiter import settle
+from mirage.concurrency.limiter import owned_task, settle
 from mirage.io.types import ByteSource
 
 logger = logging.getLogger(__name__)
@@ -83,7 +83,7 @@ class ActivityStream:
 
     async def aclose(self) -> None:
         if self._closing is None:
-            self._closing = asyncio.create_task(self._finish())
+            self._closing = owned_task(self._finish())
         await settle(self._closing)
 
     async def _finish(self) -> None:

@@ -967,6 +967,11 @@
    "typescript_only": {
     "YIELD_INTERVAL": "TypeScript has no GIL and yields on a fixed interval; Python derives its interval from the GIL switch interval (YIELD_SWITCHES)."
    }
+  },
+  "concurrency/limiter": {
+   "python_only": {
+    "owned_task": "asyncio starts a task a turn of the loop later and settles it through shield's callbacks, so owned work that never waits would still cost turns; Python 3.12 starts it eagerly. A TypeScript promise starts at once and an await that is already settled takes no turn."
+   }
   }
  }
 }
