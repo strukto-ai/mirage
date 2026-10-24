@@ -134,6 +134,32 @@ export function asyncChain(streams: Iterable<ByteSource | null>): AsyncIterable<
   })
 }
 
+/**
+ * Write a program's input as it is read, then end it: a finite command
+ * waits for that end. Writing stops once `stopped` says the program has
+ * gone, and a program that closed its input (`closed` says which errors
+ * mean that) has taken what it wanted, so neither fails the run. Mirrors
+ * Python's `feed`.
+ */
+export async function feed(
+  stdin: ByteSource | null,
+  write: (chunk: Uint8Array) => Promise<void>,
+  end: () => Promise<void>,
+  stopped: () => boolean,
+  closed: (error: unknown) => boolean = () => false,
+): Promise<void> {
+  try {
+    for await (const chunk of asyncChain([stdin])) {
+      if (stopped()) return
+      await write(chunk)
+    }
+    if (!stopped()) await end()
+  } catch (error) {
+    if (!stopped() && !closed(error)) throw error
+    console.debug('a program ended before consuming its input:', error)
+  }
+}
+
 export async function* yieldBytes(data: Uint8Array): AsyncIterable<Uint8Array> {
   await Promise.resolve()
   yield data

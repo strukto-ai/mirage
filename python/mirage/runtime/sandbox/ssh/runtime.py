@@ -17,12 +17,12 @@ import logging
 from typing import Any
 
 from mirage.context.session_context import current_caller
-from mirage.io.stream import async_chain
+from mirage.io.stream import feed
 from mirage.io.types import ByteSource
 from mirage.runtime.sandbox.base import RemoteSandbox
-from mirage.runtime.sandbox.constants import EXEC_ID, wrap_line
+from mirage.runtime.sandbox.constants import EXEC_ID, stop_signal, wrap_line
 from mirage.runtime.sandbox.mixin import PipeTransportMixin
-from mirage.runtime.sandbox.program import STREAM_LIMIT
+from mirage.runtime.sandbox.program import read_into
 from mirage.runtime.sandbox.ssh import sdk
 from mirage.runtime.sandbox.ssh.config import SSHRuntimeConfig
 from mirage.runtime.types import OutputFn, RunResult, SandboxPipe
@@ -128,40 +128,14 @@ class SSHRuntime(RemoteSandbox, PipeTransportMixin):
         process = await self._conn.create_process(command, encoding=None)
         exited = asyncio.Event()
 
-        async def feed() -> None:
-            try:
-                async for chunk in async_chain(
-                    [stdin] if stdin is not None else []
-                ):
-                    process.stdin.write(chunk)
-                    await process.stdin.drain()
-                process.stdin.write_eof()
-            except asyncio.CancelledError:
-                if not exited.is_set():
-                    raise
-                logger.debug("ssh command ended before consuming its input")
-            except (BrokenPipeError, ConnectionResetError):
-                logger.debug("ssh command closed its input")
+        async def write(chunk: bytes) -> None:
+            process.stdin.write(chunk)
+            await process.stdin.drain()
 
-        async def read() -> bytes:
-            parts: list[bytes] = []
-            while chunk := await process.stdout.read(STREAM_LIMIT):
-                if output is None:
-                    parts.append(chunk)
-                else:
-                    await output(chunk)
-            return b"".join(parts)
+        async def end() -> None:
+            process.stdin.write_eof()
 
-        async def read_errors() -> bytes:
-            parts: list[bytes] = []
-            while chunk := await process.stderr.read(STREAM_LIMIT):
-                if errors is None:
-                    parts.append(chunk)
-                else:
-                    await errors(chunk)
-            return b"".join(parts)
-
-        feeding = asyncio.create_task(feed())
+        feeding = asyncio.create_task(feed(stdin, write, end, exited.is_set))
 
         async def reap() -> Any:
             result = await process.wait(check=False)
@@ -172,13 +146,15 @@ class SSHRuntime(RemoteSandbox, PipeTransportMixin):
 
         try:
             stdout, stderr, _, result = await asyncio.gather(
-                read(), read_errors(), feeding, reap()
+                read_into(process.stdout, output),
+                read_into(process.stderr, errors),
+                feeding,
+                reap(),
             )
         except asyncio.CancelledError:
             # A tagged command a kill stopped with a gentler signal is left
             # to the reap, which sends it that signal first.
-            runner = current_caller().process
-            if not tagged or runner is None or runner.signal in (None, 9):
+            if not tagged or stop_signal(current_caller().process) is None:
                 process.kill()
             raise
         finally:

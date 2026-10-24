@@ -17,11 +17,11 @@ import json
 import logging
 import os
 import sys
-from collections.abc import Awaitable, Callable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from contextvars import Context
 
 from mirage.context.session_context import current_caller
-from mirage.io.stream import async_chain, close_quietly
+from mirage.io.stream import close_quietly, feed
 from mirage.io.types import ByteSource
 from mirage.runtime.sandbox.constants import (
     EXEC_PRELUDE,
@@ -29,6 +29,7 @@ from mirage.runtime.sandbox.constants import (
     PIPE_DIAGNOSTIC_WAIT_SECONDS,
     STOP_GRACE_SECONDS,
     STOP_POLL_SECONDS,
+    stop_signal,
 )
 from mirage.runtime.types import OutputFn, RunResult, SandboxPipe
 
@@ -117,27 +118,20 @@ async def run_program(
         children[process] = (transport, loop)
     assert process.stdout is not None and process.stderr is not None
 
-    async def feed() -> None:
-        if process.stdin is None:
-            return
-        try:
-            async for chunk in async_chain(
-                [stdin] if stdin is not None else []
-            ):
-                process.stdin.write(chunk)
-                await process.stdin.drain()
-        except asyncio.CancelledError:
-            if process.returncode is None:
-                raise
-            logger.debug(
-                "process %d ended before consuming stdin", process.pid
-            )
-        except (BrokenPipeError, ConnectionResetError):
-            logger.debug("process %d closed stdin", process.pid)
-        finally:
-            process.stdin.close()
+    writer = process.stdin
 
-    feeding = asyncio.create_task(feed())
+    async def write(chunk: bytes) -> None:
+        assert writer is not None
+        writer.write(chunk)
+        await writer.drain()
+
+    async def end() -> None:
+        if writer is not None:
+            writer.close()
+
+    feeding = asyncio.create_task(
+        feed(stdin, write, end, lambda: process.returncode is not None)
+    )
 
     async def reap() -> None:
         await process.wait()
@@ -145,17 +139,17 @@ async def run_program(
             feeding.cancel()
 
     waiting = asyncio.create_task(reap())
-    reading = asyncio.create_task(_read_into(process.stdout, output))
-    erring = asyncio.create_task(_read_into(process.stderr, errors))
+    reading = asyncio.create_task(read_into(process.stdout, output))
+    erring = asyncio.create_task(read_into(process.stderr, errors))
     try:
         stdout, stderr, _, _ = await asyncio.gather(
             reading, erring, feeding, waiting
         )
     except BaseException:
         runner = current_caller().process
-        signum = runner.signal if runner is not None else None
+        signum = stop_signal(runner)
         try:
-            if signum is not None and signum != 9:
+            if signum is not None:
                 for reader in (reading, erring):
                     reader.cancel()
                 await asyncio.gather(reading, erring, return_exceptions=True)
@@ -167,7 +161,7 @@ async def run_program(
         if (
             direct
             and runner is not None
-            and signum not in (None, 9)
+            and signum is not None
             and code is not None
             and code >= 0
         ):
@@ -180,6 +174,7 @@ async def run_program(
         await asyncio.gather(
             feeding, reading, erring, waiting, return_exceptions=True
         )
+        await end()
         await close_quietly(stdin)
         if children is not None:
             children.pop(process, None)
@@ -191,17 +186,16 @@ async def run_program(
     )
 
 
-async def _read_into(
-    stream: asyncio.StreamReader,
-    sink: Callable[[bytes], Awaitable[None]] | None,
+async def read_into(
+    stream: asyncio.StreamReader, sink: OutputFn | None
 ) -> bytes:
-    """Read a child's output to its end, handing each chunk to ``sink``
-    as it arrives, or keeping it all for the caller without one.
+    """Read a program's output to its end, handing each chunk to
+    ``sink`` as it arrives, or keeping it all for the caller without one.
 
     Args:
-        stream (asyncio.StreamReader): the child's stdout or stderr.
-        sink (Callable[[bytes], Awaitable[None]] | None): where each
-            chunk goes; None returns the whole output.
+        stream (asyncio.StreamReader): the program's stdout or stderr.
+        sink (OutputFn | None): where each chunk goes; None returns the
+            whole output.
     """
     parts: list[bytes] = []
     while chunk := await stream.read(STREAM_LIMIT):

@@ -25,6 +25,7 @@ from mirage.io.types import materialize
 from mirage.process.supervisor import ProcessSupervisor
 from mirage.runtime.sandbox.constants import wrap_line
 from mirage.runtime.sandbox.ssh import SSHRuntime, sdk
+from mirage.runtime.types import RunResult
 from mirage.types import PathSpec
 from mirage.vfs.ssh import SSHVFS, SSHConfig
 
@@ -45,8 +46,8 @@ class FakeSSHRuntime(SSHRuntime):
         self.calls.append((command, data))
         if output is not None:
             await output(f"out:{command}".encode())
-            return b"", b"warn", 0
-        return f"out:{command}".encode(), b"warn", 0
+            return RunResult(b"", b"warn", 0)
+        return RunResult(f"out:{command}".encode(), b"warn", 0)
 
 
 class FakeConn:

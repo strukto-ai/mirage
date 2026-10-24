@@ -25,6 +25,7 @@ import {
   PIPE_DIAGNOSTIC_WAIT_SECONDS,
   STOP_GRACE_SECONDS,
   STOP_POLL_SECONDS,
+  stopSignal,
 } from '@struktoai/mirage-core/runtime/sandbox/constants'
 import { currentCaller } from '@struktoai/mirage-core/context/session_context'
 import { debuglog } from 'node:util'
@@ -100,8 +101,8 @@ export async function runProgram(
   // Set by the abort listener, which flow analysis does not follow.
   let stopping = null as Promise<void> | null
   const abort = (): void => {
-    const signum = runner?.signal ?? 9
-    if (signum === 9) {
+    const signum = stopSignal(runner)
+    if (signum === null) {
       stopTree(child)
       return
     }
@@ -157,8 +158,7 @@ export async function runProgram(
     await pumps
     const code = await exited
     if (signal?.aborted === true) {
-      const signum = runner?.signal ?? 9
-      if (options.direct === true && signum !== 9 && child.exitCode !== null)
+      if (options.direct === true && stopSignal(runner) !== null && child.exitCode !== null)
         runner?.programExited(child.exitCode)
       throw makeAbortError(signal)
     }
@@ -185,7 +185,7 @@ export async function runProgram(
 async function readInto(
   child: ChildProcess,
   stream: Readable,
-  sink: ((chunk: Uint8Array) => Promise<void>) | undefined,
+  sink: OutputFn | undefined,
   kept: Uint8Array[],
   signal: AbortSignal | undefined,
 ): Promise<void> {

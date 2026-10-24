@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { asyncChain } from '../../../io/stream.ts'
+import { feed } from '../../../io/stream.ts'
 import type { ByteSource } from '../../../io/types.ts'
 import { abortable } from '../../../utils/abort.ts'
 import { currentCaller } from '../../../context/session_context.ts'
@@ -23,7 +23,7 @@ import type { OutputFn, PipeWriter, RunResult, SandboxPipe } from '../../types.t
 import type { RuntimeOptions } from '../../config.ts'
 import { concat } from '../../../utils/bytes.ts'
 import { requireId } from '../config.ts'
-import { EXEC_ID, wrapLine } from '../constants.ts'
+import { EXEC_ID, stopSignal, wrapLine } from '../constants.ts'
 import { BROKEN_PIPE, PTY_MARK, PTY_RAW } from './constants.ts'
 import { loadSdk, type E2bSdk } from './sdk.ts'
 import { E2B_CONFIG_KEYS, type E2BConfig } from './config.ts'
@@ -158,31 +158,26 @@ export class E2BRuntime extends RemoteSandbox<E2BConfig> implements PipeTranspor
     })
     let result: Pick<CommandResult, 'stdout' | 'stderr' | 'exitCode'>
     const state = { exited: false }
-    const feed = async (): Promise<void> => {
-      if (stdin === null) return
-      try {
-        for await (const chunk of asyncChain([stdin])) {
-          if (state.exited) return
-          if (chunk.byteLength > 0) await abortable(handle.sendStdin(chunk), signal)
-        }
-        if (!state.exited) await abortable(handle.closeStdin(), signal)
-      } catch (error) {
-        // The command may exit before the input RPC arrives, or close its
-        // input while it runs (head). Wait for its real exit status rather
-        // than reporting either as I/O.
-        const closed = error instanceof sdk.SandboxError && error.message.includes(BROKEN_PIPE)
-        // Process RPCs still throw this SDK class; no process-specific replacement exists.
-        // eslint-disable-next-line @typescript-eslint/no-deprecated
-        if (!closed && !(error instanceof sdk.NotFoundError)) throw error
-        console.debug(`e2b input after the command ended: ${String(error)}`)
-      }
+    const write = async (chunk: Uint8Array): Promise<void> => {
+      if (chunk.byteLength > 0) await abortable(handle.sendStdin(chunk), signal)
     }
+    const end = async (): Promise<void> => {
+      if (stdin !== null) await abortable(handle.closeStdin(), signal)
+    }
+    // The command may exit before the input RPC arrives, or close its
+    // input while it runs (head). Wait for its real exit status rather
+    // than reporting either as I/O.
+    const closed = (error: unknown): boolean =>
+      (error instanceof sdk.SandboxError && error.message.includes(BROKEN_PIPE)) ||
+      // Process RPCs still throw this SDK class; no process-specific replacement exists.
+      // eslint-disable-next-line @typescript-eslint/no-deprecated
+      error instanceof sdk.NotFoundError
     try {
       signal?.throwIfAborted()
       // The command may end without reading all its input (head), so its
       // exit, not the end of the input, ends the line: a pull still waiting
       // on input that stays open is left to stop at its next chunk.
-      const feeding = feed()
+      const feeding = feed(stdin, write, end, () => state.exited, closed)
       feeding.catch((error: unknown) => {
         if (state.exited) console.debug(`e2b input after the command ended: ${String(error)}`)
       })
@@ -200,7 +195,7 @@ export class E2BRuntime extends RemoteSandbox<E2BConfig> implements PipeTranspor
         try {
           // A tagged command a kill stopped with a gentler signal is left
           // to the reap, which sends it that signal first.
-          if (env[EXEC_ID] === undefined || (runner?.signal ?? 9) === 9) await handle.kill()
+          if (env[EXEC_ID] === undefined || stopSignal(runner) === null) await handle.kill()
         } catch (cleanupError) {
           console.warn('Failed to stop the E2B command', cleanupError)
         }

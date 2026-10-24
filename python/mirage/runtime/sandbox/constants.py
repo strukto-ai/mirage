@@ -14,6 +14,7 @@
 
 from collections.abc import Mapping, Sequence
 
+from mirage.process.handle import ProcessHandle
 from mirage.runtime.types import MountType
 from mirage.utils.quote import single_quote
 
@@ -55,6 +56,19 @@ def not_running_hint(
         return f"{noun} {name} is not running: {detail.format(name=name)}"
     said = f"{noun} {name} is not running (state: {state})"
     return said if otherwise is None else f"{said}; {otherwise}"
+
+
+def stop_signal(runner: ProcessHandle | None) -> int | None:
+    """The signal a ``kill`` stopped ``runner`` with, when a program may
+    handle it: None for KILL, or for a run no ``kill`` stopped, which is
+    killed at once.
+
+    Args:
+        runner (ProcessHandle | None): the caller's runner, if any.
+    """
+    if runner is None or runner.signal in (None, 9):
+        return None
+    return runner.signal
 
 
 MOUNT_TYPES: tuple[MountType, ...] = ("ssh", "fuse", "both")

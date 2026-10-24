@@ -25,9 +25,9 @@ import type { OutputFn, RunResult, SandboxPipe } from '@struktoai/mirage-core/ru
 import type { RuntimeOptions } from '@struktoai/mirage-core/runtime/config'
 import { loadSdk, type Ssh2Sdk } from './sdk.ts'
 import { SSH_RUNTIME_CONFIG_KEYS, type SSHRuntimeConfig } from './config.ts'
-import { EXEC_ID, wrapLine } from '@struktoai/mirage-core/runtime/sandbox/constants'
+import { EXEC_ID, stopSignal, wrapLine } from '@struktoai/mirage-core/runtime/sandbox/constants'
 import { makeAbortError } from '@struktoai/mirage-core/utils/abort'
-import { asyncChain } from '@struktoai/mirage-core/io/stream'
+import { feed } from '@struktoai/mirage-core/io/stream'
 import type { ByteSource } from '@struktoai/mirage-core/io/types'
 import type { Client, ClientChannel } from 'ssh2'
 
@@ -156,7 +156,7 @@ export class SSHRuntime extends RemoteSandbox<SSHRuntimeConfig> implements PipeT
         const abort = (): void => {
           // A tagged command a kill stopped with a gentler signal is left
           // to the reap, which sends it that signal first.
-          if (!state.done && (!tagged || (runner?.signal ?? 9) === 9)) stream.signal('KILL')
+          if (!state.done && (!tagged || stopSignal(runner) === null)) stream.signal('KILL')
           fail(makeAbortError(signal))
         }
         if (signal?.aborted === true) {
@@ -167,28 +167,23 @@ export class SSHRuntime extends RemoteSandbox<SSHRuntimeConfig> implements PipeT
         const out: Buffer[] = []
         const errs: Buffer[] = []
         let code: number | null = null
-        let delivering = Promise.resolve()
-        let erring = Promise.resolve()
-        stream.on('data', (chunk: Buffer) => {
-          if (output === null) {
-            out.push(chunk)
-            return
-          }
-          stream.pause()
-          delivering = output(chunk).then(() => {
-            if (!state.done) stream.resume()
-          }, fail)
-        })
-        stream.stderr.on('data', (chunk: Buffer) => {
-          if (errors === null) {
-            errs.push(chunk)
-            return
-          }
-          stream.stderr.pause()
-          erring = errors(chunk).then(() => {
-            if (!state.done) stream.stderr.resume()
-          }, fail)
-        })
+        const pending = [Promise.resolve(), Promise.resolve()]
+        // A channel's chunks go to its sink as they arrive, the channel
+        // paused until each is taken, or are kept for the result.
+        const deliver = (source: Readable, sink: OutputFn | null, kept: Buffer[], at: number) => {
+          source.on('data', (chunk: Buffer) => {
+            if (sink === null) {
+              kept.push(chunk)
+              return
+            }
+            source.pause()
+            pending[at] = sink(chunk).then(() => {
+              if (!state.done) source.resume()
+            }, fail)
+          })
+        }
+        deliver(stream, output, out, 0)
+        deliver(stream.stderr, errors, errs, 1)
         stream.on('exit', (c: number | null, signalName?: string) => {
           code =
             c ??
@@ -198,7 +193,7 @@ export class SSHRuntime extends RemoteSandbox<SSHRuntimeConfig> implements PipeT
         })
         stream.on('close', () => {
           state.closed = true
-          void Promise.all([delivering, erring]).then(() => {
+          void Promise.all(pending).then(() => {
             if (state.done) return
             state.done = true
             signal?.removeEventListener('abort', abort)
@@ -221,18 +216,13 @@ export class SSHRuntime extends RemoteSandbox<SSHRuntimeConfig> implements PipeT
             stream.on('drain', go)
             stream.on('close', go)
           })
-        void (async () => {
-          try {
-            for await (const chunk of asyncChain([stdin])) {
-              if (state.done || state.closed) return
-              if (!stream.write(chunk)) await drained()
-            }
-            if (!state.done && !state.closed) stream.end()
-          } catch (error) {
-            if (!state.done && !state.closed) fail(error)
-            else console.debug('ssh command input ended', error)
-          }
-        })()
+        const write = (chunk: Uint8Array): Promise<void> =>
+          stream.write(chunk) ? Promise.resolve() : drained()
+        const end = (): Promise<void> => {
+          stream.end()
+          return Promise.resolve()
+        }
+        feed(stdin, write, end, () => state.done || state.closed).catch(fail)
       })
     })
   }

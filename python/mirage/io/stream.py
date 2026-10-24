@@ -253,6 +253,45 @@ def async_chain(streams: Iterable[ByteSource | None]) -> AsyncIterator[bytes]:
     return OutputStream(output(), close)
 
 
+async def feed(
+    stdin: ByteSource | None,
+    write: Callable[[bytes], Awaitable[None]],
+    end: Callable[[], Awaitable[None]],
+    exited: Callable[[], bool],
+    closed: Callable[[Exception], bool] | None = None,
+) -> None:
+    """Write a program's input as it is read, then end it: a finite
+    command waits for that end. A program that ended first, or closed
+    its input (a broken pipe, or what ``closed`` says means that), has
+    taken what it wanted, so neither fails the run. Mirrors TypeScript's
+    ``feed``.
+
+    Args:
+        stdin (ByteSource | None): the input; None ends it at once.
+        write (Callable[[bytes], Awaitable[None]]): sends one chunk,
+            waiting while the program is behind.
+        end (Callable[[], Awaitable[None]]): ends the input.
+        exited (Callable[[], bool]): whether the program has ended, for
+            a cancel that lands after it.
+        closed (Callable[[Exception], bool] | None): which other errors
+            mean the program closed its input.
+    """
+    try:
+        async for chunk in async_chain([stdin] if stdin is not None else []):
+            await write(chunk)
+        await end()
+    except asyncio.CancelledError:
+        if not exited():
+            raise
+        logger.debug("a program ended before consuming its input")
+    except Exception as exc:
+        if not isinstance(exc, (BrokenPipeError, ConnectionResetError)) and (
+            closed is None or not closed(exc)
+        ):
+            raise
+        logger.debug("a program closed its input: %s", exc)
+
+
 async def yield_bytes(data: bytes) -> AsyncIterator[bytes]:
     yield data
 

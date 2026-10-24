@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { singleQuote } from '../../utils/quote.ts'
+import type { ProcessHandle } from '../../process/handle.ts'
 import type { MountType } from '../types.ts'
 
 /**
@@ -33,6 +34,16 @@ export function notRunningHint(
     return `${noun} ${name} is not running: ${detail.replaceAll('{name}', name)}`
   const said = `${noun} ${name} is not running (state: ${state})`
   return otherwise === null ? said : `${said}; ${otherwise}`
+}
+
+/**
+ * The signal a `kill` stopped `runner` with, when a program may handle it:
+ * null for KILL, or for a run no `kill` stopped, which is killed at once.
+ * Mirrors Python's `stop_signal`.
+ */
+export function stopSignal(runner: ProcessHandle | null): number | null {
+  const signal = runner?.signal ?? null
+  return signal === null || signal === 9 ? null : signal
 }
 
 export const MOUNT_TYPES: readonly MountType[] = ['ssh', 'fuse', 'both']
