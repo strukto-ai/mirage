@@ -67,7 +67,10 @@ export class LoopLag {
   /** Stop sampling and summarize the run. */
   stop(): LoopLagSummary {
     if (this.timer !== null) clearTimeout(this.timer)
-    this.observer?.disconnect()
+    if (this.observer !== null) {
+      for (const entry of this.observer.takeRecords()) this.gcMs += entry.duration
+      this.observer.disconnect()
+    }
     const lags = [...this.lags].sort((a, b) => a - b)
     return {
       samples: lags.length,
