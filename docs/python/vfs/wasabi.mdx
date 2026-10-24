@@ -62,39 +62,68 @@ Fields marked secret are redacted in snapshots.
 
 ## VFS.md
 
-What `ws.vfs_md()` answers with Wasabi mounted at `/<path>` in place of wherever you mount it. [VFS.md and SKILL.md](/home/setup/vfs-md) explains both files.
+The [VFS.md](/home/setup/vfs-md) an agent reads with Wasabi mounted at `/<path>`.
 
 {/* generated: vfs-md wasabi start */}
-```markdown
----
-name: workspace-filesystem
-description: The virtual filesystem layout of this workspace.
----
+<Tabs>
+  <Tab title="Rendered">
+    ### Virtual Filesystem
 
-# Virtual Filesystem
+    | Path | Description |
+    | --- | --- |
+    | `/<path>` | `wasabi`, write |
 
-| Path | Description |
-| --- | --- |
-| `/<path>` | `wasabi`, write |
+    #### Supported Unix Commands for VFS
 
-## Supported Unix Commands for VFS
+    Unix commands work on each path as on a local filesystem, as far as the path supports them:
 
-Unix commands work on each path as on a local filesystem, as far as the path supports them:
+    | Path | Supported |
+    | --- | --- |
+    | `/<path>` | Almost all Unix commands. |
 
-| Path | Supported |
-| --- | --- |
-| `/<path>` | Almost all Unix commands. |
+    #### Limitations of Unix Commands for VFS
 
-## Limitations of Unix Commands for VFS
+    Where a path differs from a local filesystem:
 
-Where a path differs from a local filesystem:
+    | Path | Limitations |
+    | --- | --- |
+    | `/<path>` | `grep -r`, `find` and `du` stop after 1000 files; a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. |
 
-| Path | Limitations |
-| --- | --- |
-| `/<path>` | `grep -r`, `find` and `du` stop after 1000 files; a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. |
+    Run `man` to list every command, and `man <cmd>` or `<cmd> --help` for one command's usage.
+  </Tab>
+  <Tab title="Raw">
+    ```markdown
+    ---
+    name: workspace-filesystem
+    description: The virtual filesystem layout of this workspace.
+    ---
 
-Run `man` to list every command, and `man <cmd>` or `<cmd> --help` for one command's usage.
-```
+    # Virtual Filesystem
+
+    | Path | Description |
+    | --- | --- |
+    | `/<path>` | `wasabi`, write |
+
+    ## Supported Unix Commands for VFS
+
+    Unix commands work on each path as on a local filesystem, as far as the path supports them:
+
+    | Path | Supported |
+    | --- | --- |
+    | `/<path>` | Almost all Unix commands. |
+
+    ## Limitations of Unix Commands for VFS
+
+    Where a path differs from a local filesystem:
+
+    | Path | Limitations |
+    | --- | --- |
+    | `/<path>` | `grep -r`, `find` and `du` stop after 1000 files; a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. |
+
+    Run `man` to list every command, and `man <cmd>` or `<cmd> --help` for one command's usage.
+    ```
+  </Tab>
+</Tabs>
 {/* generated: vfs-md wasabi end */}
 
 ## Example

@@ -34,6 +34,8 @@ const MARKER =
   /^\{\/\* generated: (?<kind>[a-z-]+) (?<key>[\w/.-]+)(?: omit=(?<omit>[\w,]+))? start \*\/\}\n(?<body>[\s\S]*?)^\{\/\* generated: \k<kind> \k<key> end \*\/\}$/gm
 const TOKEN = /\{\/\* generated: ([a-z-]+) ([\w/.-]+)(?: omit=[\w,]+)? (start|end) \*\/\}/g
 const CODE_SPAN = /(`+)(.+?)\1/g
+const FRONTMATTER = /^---\n[\s\S]*?\n---\n+/
+const FENCE = /^`{3,}/
 const NOT_ADAPTERS = new Set(['browser', 'cli', 'core', 'node', 'server'])
 // The path a docs page mounts its VFS at: a mount goes wherever its
 // workspace puts it.
@@ -417,6 +419,34 @@ function fenced(text: string, info: string): string {
   return `${'`'.repeat(Math.max(3, ...runs))}${info}\n${text}\n${'`'.repeat(Math.max(3, ...runs))}`
 }
 
+// A VFS.md as a docs page shows it: no frontmatter, and every heading two
+// levels down, below the page's own.
+function rendered(markdown: string): string {
+  const lines: string[] = []
+  let fence = 0
+  for (let line of markdown.replace(FRONTMATTER, '').split('\n')) {
+    const run = FENCE.exec(line)
+    const bare = line.trim()
+    if (fence === 0 && run !== null) fence = run[0].length
+    else if (fence > 0 && /^`+$/.test(bare) && bare.length >= fence) fence = 0
+    else if (fence === 0 && line.startsWith('#')) line = `##${line}`
+    lines.push(line)
+  }
+  return lines.join('\n')
+}
+
+function indent(text: string): string {
+  return text.replace(/^(?=.*\S)/gm, '    ')
+}
+
+// A VFS.md rendered in one tab and as its source in another.
+function tabs(markdown: string): string {
+  return (
+    `<Tabs>\n  <Tab title="Rendered">\n${indent(rendered(markdown))}\n  </Tab>\n` +
+    `  <Tab title="Raw">\n${indent(fenced(markdown, 'markdown'))}\n  </Tab>\n</Tabs>`
+  )
+}
+
 // The VFS.md a workspace with each VFS mounted writable at `PLACEHOLDER`
 // answers, by registry name. Rendered before the pages are, as a document
 // comes back asynchronously.
@@ -428,7 +458,7 @@ async function documents(): Promise<Map<string, Renderer>> {
   try {
     for (const name of knownVfsNames().sort(compareCodePoints)) {
       if (ONLINE.has(name)) continue
-      const body = fenced(await vfsMd(name, shapes[name]?.fields ?? {}), 'markdown')
+      const body = tabs(await vfsMd(name, shapes[name]?.fields ?? {}))
       out.set(name, (omit) => ({ body, bare: [], unknown: [...omit] }))
     }
   } finally {
@@ -530,6 +560,9 @@ function selftest(): void {
   ]) {
     assert.ok(!markersPaired(broken), broken)
   }
+  const document = '---\nname: x\n---\n\n# T\n\n```text\n# kept\n```\n\n## S'
+  assert.equal(rendered(document), '### T\n\n```text\n# kept\n```\n\n#### S')
+  assert.equal(tabs(document).split('    # kept').length, 3)
   console.log('gen-doc-tables selftest: ok')
 }
 

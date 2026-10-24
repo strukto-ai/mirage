@@ -48,65 +48,120 @@ Fields marked secret are redacted in snapshots.
 
 ## VFS.md
 
-What `ws.vfs_md()` answers with Dify mounted at `/<path>` in place of wherever you mount it. [VFS.md and SKILL.md](/home/setup/vfs-md) explains both files.
+The [VFS.md](/home/setup/vfs-md) an agent reads with Dify mounted at `/<path>`.
 
 {/* generated: vfs-md dify start */}
-````markdown
----
-name: workspace-filesystem
-description: The virtual filesystem layout of this workspace.
----
+<Tabs>
+  <Tab title="Rendered">
+    ### Virtual Filesystem
 
-# Virtual Filesystem
+    | Path | Description |
+    | --- | --- |
+    | `/<path>` | `dify`, read |
 
-| Path | Description |
-| --- | --- |
-| `/<path>` | `dify`, read |
+    #### `/<path>` layout
 
-## `/<path>` layout
+    ```text
+    This is a Dify Knowledge Base mounted as a read-only filesystem.
 
-```text
-This is a Dify Knowledge Base mounted as a read-only filesystem.
+    All files are plain text assembled from Dify document segments, regardless of
+    their original extension. You can use cat, head, tail, grep, find, ls, wc, and
+    search on these files.
 
-All files are plain text assembled from Dify document segments, regardless of
-their original extension. You can use cat, head, tail, grep, find, ls, wc, and
-search on these files.
+    For semantic or relevance-based queries, use:
 
-For semantic or relevance-based queries, use:
+    search "<query>" [path ...] [--method semantic|fulltext|hybrid|keyword]
+        [--top-k N] [--threshold F]
 
-search "<query>" [path ...] [--method semantic|fulltext|hybrid|keyword]
-    [--top-k N] [--threshold F]
+    Use grep for exact pattern or regex matching; use search when meaning matters.
+    Search can target multiple files, folders, or globs. Each result is returned as
+    an absolute workspace path, optionally followed by the Dify relevance score,
+    then the matched chunk content. Multiple hits from the same document stay as
+    separate results.
 
-Use grep for exact pattern or regex matching; use search when meaning matters.
-Search can target multiple files, folders, or globs. Each result is returned as
-an absolute workspace path, optionally followed by the Dify relevance score,
-then the matched chunk content. Multiple hits from the same document stay as
-separate results.
+    Scoped search requires documents with the configured slug metadata field
+    (default: slug) or Dify Built-in Fields enabled for name-based documents.
+    Otherwise, scoped searches against name-based paths may return empty
+    results.
+    ```
 
-Scoped search requires documents with the configured slug metadata field
-(default: slug) or Dify Built-in Fields enabled for name-based documents.
-Otherwise, scoped searches against name-based paths may return empty
-results.
-```
+    #### Supported Unix Commands for VFS
 
-## Supported Unix Commands for VFS
+    Unix commands work on each path as on a local filesystem, as far as the path supports them:
 
-Unix commands work on each path as on a local filesystem, as far as the path supports them:
+    | Path | Supported |
+    | --- | --- |
+    | `/<path>` | Commands that read files (`ls`, `cat`, `grep`, `find`, `jq` and the rest). Also `search`. |
 
-| Path | Supported |
-| --- | --- |
-| `/<path>` | Commands that read files (`ls`, `cat`, `grep`, `find`, `jq` and the rest). Also `search`. |
+    #### Limitations of Unix Commands for VFS
 
-## Limitations of Unix Commands for VFS
+    Where a path differs from a local filesystem:
 
-Where a path differs from a local filesystem:
+    | Path | Limitations |
+    | --- | --- |
+    | `/<path>` | Read only: no command changes files. `grep -r`, `find` and `du` stop after 1000 files; a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. |
 
-| Path | Limitations |
-| --- | --- |
-| `/<path>` | Read only: no command changes files. `grep -r`, `find` and `du` stop after 1000 files; a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. |
+    Run `man` to list every command, and `man <cmd>` or `<cmd> --help` for one command's usage.
+  </Tab>
+  <Tab title="Raw">
+    ````markdown
+    ---
+    name: workspace-filesystem
+    description: The virtual filesystem layout of this workspace.
+    ---
 
-Run `man` to list every command, and `man <cmd>` or `<cmd> --help` for one command's usage.
-````
+    # Virtual Filesystem
+
+    | Path | Description |
+    | --- | --- |
+    | `/<path>` | `dify`, read |
+
+    ## `/<path>` layout
+
+    ```text
+    This is a Dify Knowledge Base mounted as a read-only filesystem.
+
+    All files are plain text assembled from Dify document segments, regardless of
+    their original extension. You can use cat, head, tail, grep, find, ls, wc, and
+    search on these files.
+
+    For semantic or relevance-based queries, use:
+
+    search "<query>" [path ...] [--method semantic|fulltext|hybrid|keyword]
+        [--top-k N] [--threshold F]
+
+    Use grep for exact pattern or regex matching; use search when meaning matters.
+    Search can target multiple files, folders, or globs. Each result is returned as
+    an absolute workspace path, optionally followed by the Dify relevance score,
+    then the matched chunk content. Multiple hits from the same document stay as
+    separate results.
+
+    Scoped search requires documents with the configured slug metadata field
+    (default: slug) or Dify Built-in Fields enabled for name-based documents.
+    Otherwise, scoped searches against name-based paths may return empty
+    results.
+    ```
+
+    ## Supported Unix Commands for VFS
+
+    Unix commands work on each path as on a local filesystem, as far as the path supports them:
+
+    | Path | Supported |
+    | --- | --- |
+    | `/<path>` | Commands that read files (`ls`, `cat`, `grep`, `find`, `jq` and the rest). Also `search`. |
+
+    ## Limitations of Unix Commands for VFS
+
+    Where a path differs from a local filesystem:
+
+    | Path | Limitations |
+    | --- | --- |
+    | `/<path>` | Read only: no command changes files. `grep -r`, `find` and `du` stop after 1000 files; a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. |
+
+    Run `man` to list every command, and `man <cmd>` or `<cmd> --help` for one command's usage.
+    ````
+  </Tab>
+</Tabs>
 {/* generated: vfs-md dify end */}
 
 Dify documents are mapped to paths using the configured slug metadata field.

@@ -40,108 +40,206 @@ Fields marked secret are redacted in snapshots.
 
 ## VFS.md
 
-What `ws.vfs_md()` answers with Google Slides mounted at `/<path>` in place of wherever you mount it. [VFS.md and SKILL.md](/home/setup/vfs-md) explains both files.
+The [VFS.md](/home/setup/vfs-md) an agent reads with Google Slides mounted at `/<path>`.
 
 {/* generated: vfs-md gslides start */}
-````markdown
----
-name: workspace-filesystem
-description: The virtual filesystem layout of this workspace.
----
+<Tabs>
+  <Tab title="Rendered">
+    ### Virtual Filesystem
 
-# Virtual Filesystem
+    | Path | Description |
+    | --- | --- |
+    | `/<path>` | `gslides`, write |
 
-| Path | Description |
-| --- | --- |
-| `/<path>` | `gslides`, write |
+    #### `/<path>` layout
 
-## `/<path>` layout
+    ```text
+    /<path>
+      owned/
+        <date>_<title>__<presentation-id>.gslide.json
+      shared/
+        <date>_<title>__<presentation-id>.gslide.json
 
-```text
-/<path>
-  owned/
-    <date>_<title>__<presentation-id>.gslide.json
-  shared/
-    <date>_<title>__<presentation-id>.gslide.json
+      Filename: <YYYY-MM-DD>_<title>__<presentation-id>.gslide.json
+        <YYYY-MM-DD>       modifiedTime, used for date-glob (e.g. 2026-05-*)
+        <title>            sanitized: spaces->_, non-[A-Za-z0-9_.-]->_, <=100 chars
+        <presentation-id>  Google Slides presentation ID
 
-  Filename: <YYYY-MM-DD>_<title>__<presentation-id>.gslide.json
-    <YYYY-MM-DD>       modifiedTime, used for date-glob (e.g. 2026-05-*)
-    <title>            sanitized: spaces->_, non-[A-Za-z0-9_.-]->_, <=100 chars
-    <presentation-id>  Google Slides presentation ID
+      Buckets:
+        owned/   presentations you created
+        shared/  presentations shared with you by others
+                 - does NOT include presentations you own and shared with others;
+                   those are still in owned/.
 
-  Buckets:
-    owned/   presentations you created
-    shared/  presentations shared with you by others
-             - does NOT include presentations you own and shared with others;
-               those are still in owned/.
-
-  gslide.json structure (matches the Google Slides API presentations.get response):
-    {
-      "presentationId": "...",
-      "title": "...",
-      "pageSize": { "width": {...}, "height": {...} },
-      "slides": [
-        {                                      # one element per slide
-          "objectId": "...",
-          "pageElements": [
-            {
+      gslide.json structure (matches the Google Slides API presentations.get response):
+        {
+          "presentationId": "...",
+          "title": "...",
+          "pageSize": { "width": {...}, "height": {...} },
+          "slides": [
+            {                                      # one element per slide
               "objectId": "...",
-              "shape": {
-                "shapeType": "TEXT_BOX",
-                "text": {
-                  "textElements": [
-                    { "textRun": { "content": "the actual text\n",
-                                   "style": {...} } }
-                  ]
-                }
-              }
-            },
-            { "image": {...} },
-            { "table": {...} }
-          ]
+              "pageElements": [
+                {
+                  "objectId": "...",
+                  "shape": {
+                    "shapeType": "TEXT_BOX",
+                    "text": {
+                      "textElements": [
+                        { "textRun": { "content": "the actual text\n",
+                                       "style": {...} } }
+                      ]
+                    }
+                  }
+                },
+                { "image": {...} },
+                { "table": {...} }
+              ]
+            }
+          ],
+          "masters": [...],
+          "layouts": [...]
         }
-      ],
-      "masters": [...],
-      "layouts": [...]
-    }
 
-  Useful jq paths:
-    .title
-    .slides | length                                                    # slide count
-    .slides[].pageElements[].shape.text.textElements[].textRun.content  # all text
-    .slides[0].objectId
+      Useful jq paths:
+        .title
+        .slides | length                                                    # slide count
+        .slides[].pageElements[].shape.text.textElements[].textRun.content  # all text
+        .slides[0].objectId
 
-  Delete, on a `write` path:
-    rm /<path>/owned/<file>.gslide.json     # permanent delete from Drive
-    rm -f <path>                             # ignore if missing
-    Only operates on .gslide.json files; owned/ and shared/ themselves
-    cannot be removed.
+      Delete, on a `write` path:
+        rm /<path>/owned/<file>.gslide.json     # permanent delete from Drive
+        rm -f <path>                             # ignore if missing
+        Only operates on .gslide.json files; owned/ and shared/ themselves
+        cannot be removed.
 
-  Rename to a new title, on a `write` path:
-    mv /<path>/owned/<date>_<old>__<id>.gslide.json \
-       /<path>/owned/<date>_<new>__<id>.gslide.json
-    Keep the folder, the date and the id, and spell the title the way
-    the listing does (spaces->_); any other name is refused.
-```
+      Rename to a new title, on a `write` path:
+        mv /<path>/owned/<date>_<old>__<id>.gslide.json \
+           /<path>/owned/<date>_<new>__<id>.gslide.json
+        Keep the folder, the date and the id, and spell the title the way
+        the listing does (spaces->_); any other name is refused.
+    ```
 
-## Supported Unix Commands for VFS
+    #### Supported Unix Commands for VFS
 
-Unix commands work on each path as on a local filesystem, as far as the path supports them:
+    Unix commands work on each path as on a local filesystem, as far as the path supports them:
 
-| Path | Supported |
-| --- | --- |
-| `/<path>` | Commands that read files (`ls`, `cat`, `grep`, `find`, `jq` and the rest), and `mv`, `rm` and `unlink`. `grep -r` and `rg` with `-w` use `gslides` search. |
+    | Path | Supported |
+    | --- | --- |
+    | `/<path>` | Commands that read files (`ls`, `cat`, `grep`, `find`, `jq` and the rest), and `mv`, `rm` and `unlink`. `grep -r` and `rg` with `-w` use `gslides` search. |
 
-## Limitations of Unix Commands for VFS
+    #### Limitations of Unix Commands for VFS
 
-Where a path differs from a local filesystem:
+    Where a path differs from a local filesystem:
 
-| Path | Limitations |
-| --- | --- |
-| `/<path>` | Not supported: `>`, `>>`, `tee`, `tee -a`, `touch` of a new file, `cp`, `cp -r`, `mkdir`, `rm -r`, `rmdir`, `truncate`, `sed -i`. Without `-w`, `grep -r` and `rg` read every file. `grep -r`, `find` and `du` stop after 1000 files; a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. |
+    | Path | Limitations |
+    | --- | --- |
+    | `/<path>` | Not supported: `>`, `>>`, `tee`, `tee -a`, `touch` of a new file, `cp`, `cp -r`, `mkdir`, `rm -r`, `rmdir`, `truncate`, `sed -i`. Without `-w`, `grep -r` and `rg` read every file. `grep -r`, `find` and `du` stop after 1000 files; a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. |
 
-Run `man` to list every command, and `man <cmd>` or `<cmd> --help` for one command's usage.
-````
+    Run `man` to list every command, and `man <cmd>` or `<cmd> --help` for one command's usage.
+  </Tab>
+  <Tab title="Raw">
+    ````markdown
+    ---
+    name: workspace-filesystem
+    description: The virtual filesystem layout of this workspace.
+    ---
+
+    # Virtual Filesystem
+
+    | Path | Description |
+    | --- | --- |
+    | `/<path>` | `gslides`, write |
+
+    ## `/<path>` layout
+
+    ```text
+    /<path>
+      owned/
+        <date>_<title>__<presentation-id>.gslide.json
+      shared/
+        <date>_<title>__<presentation-id>.gslide.json
+
+      Filename: <YYYY-MM-DD>_<title>__<presentation-id>.gslide.json
+        <YYYY-MM-DD>       modifiedTime, used for date-glob (e.g. 2026-05-*)
+        <title>            sanitized: spaces->_, non-[A-Za-z0-9_.-]->_, <=100 chars
+        <presentation-id>  Google Slides presentation ID
+
+      Buckets:
+        owned/   presentations you created
+        shared/  presentations shared with you by others
+                 - does NOT include presentations you own and shared with others;
+                   those are still in owned/.
+
+      gslide.json structure (matches the Google Slides API presentations.get response):
+        {
+          "presentationId": "...",
+          "title": "...",
+          "pageSize": { "width": {...}, "height": {...} },
+          "slides": [
+            {                                      # one element per slide
+              "objectId": "...",
+              "pageElements": [
+                {
+                  "objectId": "...",
+                  "shape": {
+                    "shapeType": "TEXT_BOX",
+                    "text": {
+                      "textElements": [
+                        { "textRun": { "content": "the actual text\n",
+                                       "style": {...} } }
+                      ]
+                    }
+                  }
+                },
+                { "image": {...} },
+                { "table": {...} }
+              ]
+            }
+          ],
+          "masters": [...],
+          "layouts": [...]
+        }
+
+      Useful jq paths:
+        .title
+        .slides | length                                                    # slide count
+        .slides[].pageElements[].shape.text.textElements[].textRun.content  # all text
+        .slides[0].objectId
+
+      Delete, on a `write` path:
+        rm /<path>/owned/<file>.gslide.json     # permanent delete from Drive
+        rm -f <path>                             # ignore if missing
+        Only operates on .gslide.json files; owned/ and shared/ themselves
+        cannot be removed.
+
+      Rename to a new title, on a `write` path:
+        mv /<path>/owned/<date>_<old>__<id>.gslide.json \
+           /<path>/owned/<date>_<new>__<id>.gslide.json
+        Keep the folder, the date and the id, and spell the title the way
+        the listing does (spaces->_); any other name is refused.
+    ```
+
+    ## Supported Unix Commands for VFS
+
+    Unix commands work on each path as on a local filesystem, as far as the path supports them:
+
+    | Path | Supported |
+    | --- | --- |
+    | `/<path>` | Commands that read files (`ls`, `cat`, `grep`, `find`, `jq` and the rest), and `mv`, `rm` and `unlink`. `grep -r` and `rg` with `-w` use `gslides` search. |
+
+    ## Limitations of Unix Commands for VFS
+
+    Where a path differs from a local filesystem:
+
+    | Path | Limitations |
+    | --- | --- |
+    | `/<path>` | Not supported: `>`, `>>`, `tee`, `tee -a`, `touch` of a new file, `cp`, `cp -r`, `mkdir`, `rm -r`, `rmdir`, `truncate`, `sed -i`. Without `-w`, `grep -r` and `rg` read every file. `grep -r`, `find` and `du` stop after 1000 files; a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. |
+
+    Run `man` to list every command, and `man <cmd>` or `<cmd> --help` for one command's usage.
+    ````
+  </Tab>
+</Tabs>
 {/* generated: vfs-md gslides end */}
 
 ```text
