@@ -468,6 +468,7 @@ async def work_entries(
     repo: BaseRepo,
     location: RepoLocation,
     state: IndexState,
+    roots: tuple[str, ...] | None = None,
 ) -> dict[bytes, tuple[int, bytes]]:
     """The working tree as entries, for the side ``git diff`` compares.
 
@@ -485,12 +486,15 @@ async def work_entries(
             hashed blobs.
         location (RepoLocation): the discovered repository.
         state (IndexState): the index as read.
+        roots (tuple[str, ...] | None): the paths the pathspecs reach
+            (``pattern_roots``); an entry outside them reads as gone,
+            for the caller to drop. None walks the whole tree.
     """
     tracked = {
         path.decode("utf-8", errors="replace")
         for path in (set(state.entries) | set(state.conflicts))
     }
-    found = await scan(vfs, location, tracked, UNTRACKED_NO)
+    found = await scan(vfs, location, tracked, UNTRACKED_NO, roots=roots)
     changes = await work_changes(vfs, location.worktree, state.entries, found)
     entries = staged_entries(state)
     store = repo.object_store

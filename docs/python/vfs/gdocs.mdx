@@ -187,13 +187,11 @@ Standard commands available on the mounted Google Docs tree:
 
 ## Integration
 
-What Google Docs answers through its own API, so fewer files are read, and the most files one command reads. [Integration](/home/integration/overview) explains each command.
+What Google Docs answers through its own API, so fewer files are read. [Integration](/home/integration/overview) explains each command.
 
 | Command | On Google Docs |
 | --- | --- |
-| `grep -r`, `rg` | Drive full-text search, for whole words |
-| Can miss | Words only in non-text values (fonts, links, ids) or split by styling |
-| Full scan | `grep -r`, `find`, `du` and other walks stop after [`full_scan_limit`](/home/integration/search#full_scan_limit) files (default 1000); a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. `-1` reads every file without Drive search |
+| `grep -r`, `rg` | Drive full-text search, for whole words. It can miss words only in non-text values (fonts, links and ids) or split by styling. |
 
 `grep -rw` and
 `rg -w` read only the documents Drive full-text search names; every one is read

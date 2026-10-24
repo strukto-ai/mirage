@@ -113,14 +113,14 @@ export async function reset(
     else staged.set(name, restored(recorded.oid, Number.parseInt(recorded.mode, 8)))
   }
   if (texts.length === 0) removed.push(...visibleEntries(repo.location, state.conflicts).keys())
+  // The tree is walked before the index is written, so a work tree past its
+  // full_scan_limit leaves the index as it was.
+  const tracked = new Set(visibleEntries(repo.location, state.entries).keys())
+  for (const name of removed) tracked.delete(name)
+  for (const name of staged.keys()) tracked.add(name)
+  const found = await scan(vfs, repo.location, tracked, UNTRACKED_NO)
   await updateIndex(repo, staged, removed)
   const after = await readIndex(repo, vfs)
-  const found = await scan(
-    vfs,
-    repo.location,
-    new Set(visibleEntries(repo.location, after.entries).keys()),
-    UNTRACKED_NO,
-  )
   const unstaged = await workChanges(
     repo,
     vfs,

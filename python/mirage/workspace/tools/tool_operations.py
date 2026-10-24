@@ -25,6 +25,7 @@ from mirage.io.types import IOResult
 from mirage.policy.decisions import Decisions
 from mirage.policy.match import head_allowed
 from mirage.policy.match.pattern import pattern_matches
+from mirage.shell.errors import TooManyMatches
 from mirage.types import MOUNT_MODE_RANK, MountMode
 from mirage.utils.hidden import path_visible
 from mirage.utils.path import gnu_dirname
@@ -539,6 +540,8 @@ class MirageToolOperations:
         except PermissionError as exc:
             logger.debug("glob refused for %s: %s", pattern, exc)
             matches = []
+        except TooManyMatches as exc:
+            return ToolResult(exc.reason, True)
         files: list[str] = []
         for match in matches:
             try:

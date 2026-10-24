@@ -155,6 +155,34 @@ def pathspec_selects(
     return any(_selects(path, pattern, directory) for pattern in patterns)
 
 
+def pattern_roots(
+    patterns: Iterable[str], literal: bool = False
+) -> tuple[str, ...] | None:
+    """Where a walk has to go to see every path some patterns name.
+
+    Each pattern's leading literal part: the path it spells, or the
+    directory above its first wildcard. None when one of them names the
+    whole tree (``.``, ``*.c``), or when there are none.
+
+    Args:
+        patterns (Iterable[str]): repository-relative patterns or paths.
+        literal (bool): the operands are paths, as ``git add`` and
+            ``git rm`` take them, so a wildcard is part of a name.
+    """
+    roots = []
+    for pattern in patterns:
+        stem = pattern.removesuffix(SLASH)
+        wild = [
+            stem.find(mark) for mark in "*?[\\" if not literal and mark in stem
+        ]
+        if wild:
+            stem = stem[: min(wild)].rpartition(SLASH)[0]
+        if not stem:
+            return None
+        roots.append(stem)
+    return tuple(roots) or None
+
+
 def _selects(path: str, pattern: str, directory: bool) -> bool:
     """Whether one pattern names a path; see ``pathspec_selects``.
 

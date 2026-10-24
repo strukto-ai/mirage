@@ -66,12 +66,11 @@ and the reading rules see the [Python Airtable docs](/python/vfs/airtable).
 
 ## Integration
 
-What Airtable answers through its own API, so fewer files are read, and the most files one command reads. [Integration](/home/integration/overview) explains each command.
+What Airtable answers through its own API, so fewer files are read. [Integration](/home/integration/overview) explains each command.
 
 | Command | On Airtable |
 | --- | --- |
 | `grep`, `rg` on one file | A `filterByFormula` fetches only the records that may match |
-| Full scan | `grep -r`, `find`, `du` and other walks stop after [`fullScanLimit`](/home/integration/search#full_scan_limit) files (default 1000); a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. `-1` for no limit |
 | `head -n N` | Fetches N records |
 
 The [Python Airtable docs](/python/vfs/airtable#integration) list when each search answers and what it can miss.

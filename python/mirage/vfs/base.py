@@ -167,10 +167,12 @@ class BaseVFS:
     searchable: tuple[str, ...] | None = None
 
     # The most files one command walks under a directory of this mount:
-    # grep -r, rg and git grep stop reading there, find, ls -R, tree and
-    # du stop listing, a glob matching more is refused, and so are tar -c,
-    # zip -r, cp -r, rm -r, mv to another mount and diff -r of a directory
-    # holding more (``before_full_scan``); -1 for no cap.
+    # grep -r, rg and git grep stop reading there, find, ls -R, tree, du
+    # and getfattr -R stop listing, git status and the other verbs that
+    # scan a work tree fail, a glob matching more is refused, and so are
+    # tar -c, zip -r, cp -r, rm -r, chmod -R, chown -R, chgrp -R, mv to
+    # another mount and diff -r of a directory holding more
+    # (``before_full_scan``); -1 for no cap.
     full_scan_limit: int = FULL_SCAN_LIMIT
 
     # Extensions whose ``read`` is a rendering rather than the stored
@@ -773,13 +775,13 @@ class BaseVFS:
     ) -> None:
         """Called before a command acts on every file under ``path``.
 
-        Once per directory a command copies, compares or removes whole,
-        before the first file it touches there: tar -c, zip -r, cp -r,
-        mv across mounts, diff -r and rm -r. Return to let the scan run;
-        raise to refuse it, and the error's message is what the command
-        prints. The default refuses more than ``full_scan_limit`` files.
-        Searches and listings are never refused: they stop after
-        ``full_scan_limit`` files.
+        Once per directory a command copies, compares, changes or removes
+        whole, before the first file it touches there: tar -c, zip -r,
+        cp -r, mv across mounts, diff -r, rm -r, chmod -R, chown -R and
+        chgrp -R. Return to let the scan run; raise to refuse it, and the
+        error's message is what the command prints. The default refuses
+        more than ``full_scan_limit`` files. Searches and listings are
+        never refused: they stop after ``full_scan_limit`` files.
 
         Args:
             path (PathSpec): the directory about to be walked.

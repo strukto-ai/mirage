@@ -89,13 +89,11 @@ For the mounted layout (refs, paths, blob caching) see the [Python GitHub docs](
 
 ## Integration
 
-What GitHub answers through its own API, so fewer files are read, and the most files one command reads. [Integration](/home/integration/overview) explains each command.
+What GitHub answers through its own API, so fewer files are read. [Integration](/home/integration/overview) explains each command.
 
 | Command | On GitHub |
 | --- | --- |
-| `grep -r`, `rg` | GitHub code search, for whole words, on the default branch, under a path with more than 100 files |
-| Can miss | Recent pushes |
-| Full scan | `grep -r`, `find`, `du` and other walks stop after [`fullScanLimit`](/home/integration/search#full_scan_limit) files (default 5000); a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. `-1` reads every file without code search |
+| `grep -r`, `rg` | GitHub code search, for whole words, on the default branch, under a path with more than 100 files. It can miss recent pushes. |
 | `find`, `du`, `ls -R`, `tree` | One recursive tree listing |
 
 The [Python GitHub docs](/python/vfs/github#integration) list when each search answers and what it can miss.

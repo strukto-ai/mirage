@@ -120,14 +120,6 @@ server-side rename.
 during a snapshot. Loading the snapshot requires a live VFS override with
 fresh credentials.
 
-## Integration
-
-The most files one command reads on Databricks volumes. [Integration](/home/integration/overview) explains each command.
-
-| Command | On Databricks volumes |
-| --- | --- |
-| Full scan | `grep -r`, `find`, `du` and other walks stop after [`fullScanLimit`](/home/integration/search#full_scan_limit) files (default 1000); a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. `-1` for no limit |
-
 ## Example
 
 See `examples/typescript/vfs/databricks_volume/databricks_volume.ts`, which

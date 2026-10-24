@@ -13,9 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { PathSpec } from '../../../../types.ts'
-import { expect, it } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { EmptyPathspecError, OutsideRepositoryError, UnsupportedPathspecError } from './errors.ts'
-import { pathspecPatterns, pathspecSelects } from './pathspec.ts'
+import { pathspecPatterns, pathspecSelects, patternRoots } from './pathspec.ts'
 import type { RepoLocation } from './types.ts'
 
 const LOCATION: RepoLocation = {
@@ -44,4 +44,24 @@ it.each([
   ['/elsewhere/a.txt', OutsideRepositoryError],
 ])('refuses %j', (operand, error) => {
   expect(() => pathspecPatterns(LOCATION, '/repo', [operand])).toThrow(error)
+})
+
+// Twin of test_pattern_roots_are_the_literal_paths_a_walk_must_reach.
+describe('patternRoots', () => {
+  it.each([
+    [
+      ['a.txt', 'docs/'],
+      ['a.txt', 'docs'],
+    ],
+    [
+      ['src/*.py', 'lib/x?/y'],
+      ['src', 'lib'],
+    ],
+    [['src/[ab].c'], ['src']],
+    [['*.c'], null],
+    [['a.txt', ''], null],
+    [[], null],
+  ] as [string[], string[] | null][])('%j reaches %j', (patterns, roots) => {
+    expect(patternRoots(patterns)).toEqual(roots)
+  })
 })

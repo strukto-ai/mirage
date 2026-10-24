@@ -30,6 +30,7 @@ await ws.shell('echo persistent | tee /data/note.txt')
 | Field | Default | Notes |
 | --- | --- | --- |
 | `root` | `''` | Subdirectory under the OPFS root. Useful to namespace multiple workspaces. |
+| `fullScanLimit` | `10000` | Most files one command walks under a folder: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit. |
 
 ## Mount mode
 
@@ -51,11 +52,3 @@ await navigator.storage.persist()
 ```
 
 See [TypeScript Limitations: Browser](/typescript/limitations#browser) for the full set of browser constraints.
-
-## Integration
-
-The most files one command reads on OPFS. [Integration](/home/integration/overview) explains each command.
-
-| Command | On OPFS |
-| --- | --- |
-| Full scan | `grep -r`, `find`, `du` and other walks stop after [`fullScanLimit`](/home/integration/search#full_scan_limit) files (default 10000); a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. `-1` for no limit |

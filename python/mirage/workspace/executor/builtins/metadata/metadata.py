@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import logging
 import re
 from datetime import datetime, timezone
 from functools import partial
@@ -22,6 +23,8 @@ from mirage.commands.builtin.utils.identity import (
     owner_name,
 )
 from mirage.commands.builtin.utils.paths import dispatch_stat, dot_refusal
+from mirage.commands.builtin.utils.tree import before_full_scan
+from mirage.commands.errors import UsageError
 from mirage.commands.spec.flag_view import FlagView
 from mirage.errors.fs import fs_strerror, walk_refusal
 from mirage.errors.render import fs_error_line
@@ -31,11 +34,13 @@ from mirage.shell.bytes import encode_text
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.path import CycleError, ancestors
 from mirage.utils.quote import shell_quote_always
-from mirage.view.types import NamespaceLinks
+from mirage.view.types import MountView, NamespaceLinks
 from mirage.workspace.executor.builtins.shared import expand_operands, result
 from mirage.workspace.executor.builtins.types import Result
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.session import SessionState
+
+logger = logging.getLogger(__name__)
 
 # GNU's phrase for a refused attribute write, per command
 # (`chmod: changing permissions of 'f': Read-only file system`); `touch`
@@ -362,6 +367,38 @@ async def apply_attrs(
 WalkEntry = tuple[PathSpec, FileStat, PermissionError | None]
 
 
+async def before_recursive_change(
+    mounts: MountView,
+    dispatch: DispatchFn,
+    root: PathSpec,
+    cmd: str,
+) -> None:
+    """Ask the mount of ``root``, and every mount below it, before ``-R``
+    changes anything, as for rm -r: a change cut short would leave a
+    tree that looks done. The walk crosses into each mount below, so
+    each one may refuse. A folder the session is refused is not asked:
+    the walk does not enter it either, and reports it itself.
+
+    Args:
+        mounts (MountView): the mount boundaries (``mounts(False)`` of
+            the session's link table).
+        dispatch (DispatchFn): op dispatcher.
+        root (PathSpec): subtree root (already link-resolved).
+        cmd (str): command name for the refusal.
+
+    Raises:
+        UsageError: a mount refused the walk.
+    """
+    below = mounts.visible_descendants(root.virtual)
+    for virtual in [root.virtual, *below]:
+        try:
+            await before_full_scan(
+                dispatch, PathSpec.from_str_path(virtual), cmd
+            )
+        except PermissionError as exc:
+            logger.debug("scan guard skipped at %s: %s", virtual, exc)
+
+
 async def walk_stats(
     links: NamespaceLinks,
     dispatch: DispatchFn,
@@ -620,6 +657,13 @@ async def change_owner(
             continue
         resolved, stat = found
         if fl.as_bool("recursive"):
+            try:
+                await before_recursive_change(
+                    links.mounts(False), dispatch, resolved, cmd
+                )
+            except UsageError as exc:
+                errors.append(f"{exc}\n")
+                continue
             walked, owned = await walk_owned(links, dispatch, resolved, stat)
         else:
             walked, owned = [(resolved, stat, None)], []

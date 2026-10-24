@@ -41,7 +41,10 @@ from mirage.commands.cli.builtin.git.index_file import (
     read_index,
     refuse_unresolved,
 )
-from mirage.commands.cli.builtin.git.pathspec import pathspec_patterns
+from mirage.commands.cli.builtin.git.pathspec import (
+    pathspec_patterns,
+    pattern_roots,
+)
 from mirage.commands.cli.builtin.git.repo import config_bool
 from mirage.commands.cli.builtin.git.revparse import (
     merge_bases,
@@ -215,6 +218,7 @@ async def diff(
         ),
     )
     warning = b""
+    patterns = pathspec_patterns(location, start_point(fl).virtual, pathspecs)
     if cached:
         state = await read_index(vfs, location.gitdir)
         refuse_unresolved(state)
@@ -224,7 +228,9 @@ async def diff(
         old, new, warning = await asyncio.to_thread(_sides, repo, revisions)
         if new is None:
             state = await read_index(vfs, location.gitdir)
-            after = await work_entries(vfs, repo, location, state)
+            after = await work_entries(
+                vfs, repo, location, state, pattern_roots(patterns)
+            )
             if old is None:
                 for path in state.conflicts:
                     after.pop(path, None)
@@ -235,7 +241,6 @@ async def diff(
             )
         else:
             before, after = old or {}, new
-    patterns = pathspec_patterns(location, start_point(fl).virtual, pathspecs)
     parsed = replace(parsed, pathspecs=patterns)
     rows = deltas(
         location, [(limited(before, patterns), limited(after, patterns))]

@@ -97,13 +97,16 @@ async def test_metadata_commands_respect_read_only_mount():
         )
 
 
-async def _sealed_ws() -> Workspace:
+async def _sealed_ws(mounted: bool = False) -> Workspace:
     # The rule lives on a profile so the tree is seeded under the
     # unrestricted default session; every probe runs as "g". A deny
     # rule lets a stat through and refuses the attribute write and the
-    # listing.
+    # listing. With ``mounted``, the sealed folder is a mount of its own.
+    mounts = {"/data/": (RAMVFS(), MountMode.WRITE)}
+    if mounted:
+        mounts["/data/t/sealed/"] = (RAMVFS(), MountMode.WRITE)
     ws = Workspace(
-        {"/data/": (RAMVFS(), MountMode.WRITE)},
+        mounts,
         mode=MountMode.WRITE,
         profiles={
             "guarded": {
@@ -168,20 +171,24 @@ async def test_a_denied_write_through_a_link_names_the_operand(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("mounted", [False, True])
 @pytest.mark.parametrize("cmd", ["chmod -R 600", "chown -R 7", "chgrp -R 7"])
-async def test_a_denied_listing_is_reported_and_not_descended(cmd):
+async def test_a_denied_listing_is_reported_and_not_descended(cmd, mounted):
     # fts's unreadable directory: its own change is still tried (and
     # refused here), its line follows, its subtree (the link in it
     # included) is left alone, and the walk goes on with its siblings.
-    ws = await _sealed_ws()
+    # A denied mount below is skipped the same way, not asked first; it
+    # lists after the folder's own entries.
+    ws = await _sealed_ws(mounted)
     name = cmd.split()[0]
     code, out, err = await _guarded(ws, f"cd /data && {cmd} t; echo rc=$?")
     assert (code, out) == (0, "rc=1\n")
-    assert err == (
+    sealed = (
         f"{name}: t/sealed: Permission denied\n"
         f"{name}: cannot read directory 't/sealed': Permission denied\n"
-        f"{name}: t/secret.txt: Permission denied\n"
     )
+    secret = f"{name}: t/secret.txt: Permission denied\n"
+    assert err == (secret + sealed if mounted else sealed + secret)
     fmt = {"chmod": "%a", "chown": "%u", "chgrp": "%g"}[name]
     _, out, _ = await _guarded(ws, f"stat -c {fmt} /data/t/box/pub.txt")
     assert out == f"{cmd.split()[-1]}\n"

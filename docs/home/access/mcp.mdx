@@ -209,7 +209,9 @@ Finding nothing is not an error.
 ### glob
 
 Finds files whose path matches a pattern, sorted. `**` matches any number of
-directories.
+directories. A pattern that matches more files than a mount's
+[`full_scan_limit`](/home/integration/search#full_scan_limit) is an error that
+names the limit.
 
 <ParamField body="pattern" type="string" required>The pattern, such as `**/*.py`. A relative one is matched under `path`.</ParamField>
 <ParamField body="path" type="string" default="/">The directory a relative pattern is matched under.</ParamField>

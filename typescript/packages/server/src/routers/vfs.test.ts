@@ -46,6 +46,44 @@ describe.each(['vfs/read', 'glob'])('%s failure responses', (route) => {
   })
 })
 
+// Twin of test_a_glob_past_the_full_scan_limit_answers_why.
+describe('glob past the full_scan_limit', () => {
+  it('answers 400 and says why', async () => {
+    const app = buildApp()
+    try {
+      const created = await app.inject({
+        method: 'POST',
+        url: '/v1/workspaces',
+        payload: {
+          config: {
+            mode: 'write',
+            mounts: { '/': { vfs: 'ram', config: { full_scan_limit: 2 } } },
+          },
+        },
+      })
+      const wid = created.json<{ id: string }>().id
+      for (const name of ['a', 'b', 'c']) {
+        await app.inject({
+          method: 'POST',
+          url: `/v1/workspaces/${wid}/vfs/write`,
+          payload: { path: `/${name}.txt`, data: 'eA==' },
+        })
+      }
+      const response = await app.inject({
+        method: 'POST',
+        url: `/v1/workspaces/${wid}/glob`,
+        payload: { pattern: '/*.txt' },
+      })
+      expect([response.statusCode, response.json()]).toEqual([
+        400,
+        { detail: '/*.txt: matches more than 2 files (full_scan_limit); narrow the path' },
+      ])
+    } finally {
+      await app.close()
+    }
+  })
+})
+
 class PeekVFS extends RAMVFS {
   calls = 0
   @vfsCall({ effect: Effect.WRITE })

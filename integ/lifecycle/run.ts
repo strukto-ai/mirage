@@ -62,6 +62,7 @@ import { Session } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import { PolicyDenied } from '@struktoai/mirage-core/policy/errors'
 import { answered as answeredCall, checked } from '@struktoai/mirage-server/io_serde'
 import { VFS_CALL_BY_NAME } from '@struktoai/mirage-server/vfs_calls'
+import { cliSpecFor } from '@struktoai/mirage-core/commands/cli/specs'
 import { CLI, CLIHandler } from '@struktoai/mirage-core/commands/cli/types'
 import { command, type Context } from '@struktoai/mirage-core/commands/config'
 import { CommandSpec } from '@struktoai/mirage-core/commands/spec/types'
@@ -85,6 +86,7 @@ interface Case {
     mode: MountMode
     profiles?: Record<string, unknown>
     runtimes?: string[]
+    clis?: Record<string, { cli: string }>
   }
   steps: Step[]
 }
@@ -857,6 +859,9 @@ async function run(host: Host, testCase: Case): Promise<number> {
     profiles,
     ...(testCase.settings.runtimes !== undefined ? { runtimes: testCase.settings.runtimes } : {}),
   })
+  for (const [name, block] of Object.entries(testCase.settings.clis ?? {})) {
+    ws.registerCli(name, cliSpecFor(block.cli))
+  }
   const policies = new Map<string, Policy>()
   const held: Held = {}
   try {

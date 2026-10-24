@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { toHex } from '../../../../utils/hex.ts'
+import { ScanBudget } from '../../../../commands/builtin/utils/tree.ts'
 import { specOf } from '../../../../commands/spec/builtins.ts'
 import { FlagView } from '../../../../commands/spec/flag_view.ts'
 import { parseCommand, parseToKwargs } from '../../../../commands/spec/parser.ts'
@@ -20,6 +21,8 @@ import { classify } from '../../../../errors/index.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
 import { FileStat, FileType, PathSpec, wordText } from '../../../../types.ts'
 import { encodeBase64 } from '../../../../utils/base64.ts'
+import type { Namespace } from '../../../mount/namespace/namespace.ts'
+import type { NamespaceLinks } from '../../../../view/types.ts'
 import type { SessionState } from '../../../session/session.ts'
 import { result } from '../shared.ts'
 import type { Result } from '../types.ts'
@@ -68,10 +71,12 @@ export function encodeValue(value: Uint8Array, encoding: string | null): Uint8Ar
  */
 async function walk(
   dispatch: DispatchFn,
+  links: NamespaceLinks,
   path: PathSpec,
   shown: string,
   logical: boolean,
   deref: boolean,
+  budget: ScanBudget,
 ): Promise<[PathSpec, string][]> {
   const entries: [PathSpec, string][] = [[path, shown]]
   let stat: unknown
@@ -86,12 +91,17 @@ async function walk(
     throw err
   }
   if (!(stat instanceof FileStat) || stat.type !== FileType.DIRECTORY) return entries
+  const here = links.follow(path.virtual)
+  if (!budget.opens(here)) return entries
   const [children] = (await dispatch('readdir', path)) as [string[], unknown]
   for (const child of children) {
+    if (!budget.spend(here)) break
     const bare = rstripSlash(child)
     const name = bare.slice(bare.lastIndexOf('/') + 1)
     const below = `${rstripSlash(shown)}/${name}`
-    entries.push(...(await walk(dispatch, PathSpec.fromStrPath(bare), below, logical, logical)))
+    entries.push(
+      ...(await walk(dispatch, links, PathSpec.fromStrPath(bare), below, logical, logical, budget)),
+    )
   }
   return entries
 }
@@ -163,10 +173,12 @@ async function fileBlock(
  * has a matching attribute, names sorted, a blank line after each block,
  * `-d`/`-n` adding `="value"`, and the default match `^user\.` (`-m -`
  * matches every name). The attributes are the dispatcher's: what was set on
- * the path. `-h` reads a link's own attributes. Mirrors Python's
- * `handle_getfattr`.
+ * the path. `-h` reads a link's own attributes. `-R` stops after
+ * `fullScanLimit` entries of a mount, as `ls -R` does, and exits 1.
+ * Mirrors Python's `handle_getfattr`.
  */
 export async function handleGetfattr(
+  namespace: Namespace,
   dispatch: DispatchFn,
   session: SessionState,
   args: (string | PathSpec)[],
@@ -212,10 +224,21 @@ export async function handleGetfattr(
   const errors: string[] = []
   let failed = false
   let warned = false
+  const links = namespace.sessionLinks(session)
+  const mounts = links.mounts(true)
   for (const target of targets) {
     const typed = target.rawPath
+    const budget = new ScanBudget(target, mounts)
     const entries = fl.asBool('recursive')
-      ? await walk(dispatch, target, typed, fl.asBool('logical'), !fl.asBool('physical'))
+      ? await walk(
+          dispatch,
+          links,
+          target,
+          typed,
+          fl.asBool('logical'),
+          !fl.asBool('physical'),
+          budget,
+        )
       : ([[target, typed]] as [PathSpec, string][])
     for (const [path, label] of entries) {
       const header = !absolute && label.startsWith('/') ? label.replace(/^\/+/, '') || '.' : label
@@ -235,6 +258,8 @@ export async function handleGetfattr(
       out.push(...block)
       failed = failed || missing
     }
+    for (const line of budget.stopped) errors.push(`getfattr: ${line}\n`)
+    failed = failed || budget.stopped.length > 0
   }
   return result('getfattr', {
     out: out.length > 0 ? Uint8Array.from(out) : null,

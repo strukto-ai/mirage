@@ -189,3 +189,20 @@ async def test_serve_answers_lines_and_cancels_a_running_request():
     assert by_id[1]["error"]["code"] == -32800
     assert by_id[None]["error"]["code"] == -32700
     assert 2 in by_id
+
+
+@pytest.mark.asyncio
+async def test_a_glob_past_the_full_scan_limit_is_invalid_params():
+    rpc = MirageRpcServer(
+        Workspace({"/": RAMVFS(full_scan_limit=2)}, mode=MountMode.WRITE)
+    )
+    for name in "abc":
+        await call(
+            rpc, "vfs/write", {"path": f"/{name}.txt", "data": b64("x")}
+        )
+    result = await call(rpc, "glob", {"pattern": "/*.txt"})
+    assert result["error"] == {
+        "code": -32602,
+        "message": "/*.txt: matches more than 2 files (full_scan_limit); "
+        "narrow the path",
+    }

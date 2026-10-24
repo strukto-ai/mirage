@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { NOOPAccessor } from '../../../../accessor/base.ts'
-import { visibleEntries, matched, repoRelative } from './pathspec.ts'
+import { visibleEntries, matched, patternRoots, repoRelative } from './pathspec.ts'
 import { type PathSpec, FileType } from '../../../../types.ts'
 import { IOResult } from '../../../../io/types.ts'
 import type { CommandFnResult, Context } from '../../../config.ts'
@@ -248,10 +248,15 @@ export async function rm(
     ...visibleEntries(repo.location, state.entries).keys(),
     ...visibleEntries(repo.location, state.conflicts).keys(),
   ])
-  const selected = select(repo.location, startPoint(fl).virtual, texts, tracked, flags)
+  const start = startPoint(fl).virtual
+  const selected = select(repo.location, start, texts, tracked, flags)
   if (!flags.force) {
     const checkable = selected.filter((path) => state.entries.has(path))
-    const found = await scan(vfs, repo.location, tracked, UNTRACKED_NO)
+    const roots = patternRoots(
+      texts.map((text) => repoRelative(repo.location, start, text)),
+      true,
+    )
+    const found = await scan(vfs, repo.location, tracked, UNTRACKED_NO, false, roots)
     const tree = (await headEntries(repo)) ?? new Map<string, TreeEntry>()
     await refuseLostWork(repo, vfs, tree, state.entries, found, checkable, flags.cached)
   }

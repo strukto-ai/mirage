@@ -15,8 +15,10 @@
 import { Buffer } from 'node:buffer'
 import { constants as fsConstants } from 'node:fs'
 import { posix } from 'node:path'
+import { linkView, mountView } from '@struktoai/mirage-core/commands/builtin/utils/links'
+import { ScanBudget } from '@struktoai/mirage-core/commands/builtin/utils/tree'
 import { classify, failureText } from '@struktoai/mirage-core/errors/classify'
-import type { JsonValue } from '@struktoai/mirage-core/types'
+import { PathSpec, type JsonValue } from '@struktoai/mirage-core/types'
 import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
 import { MountCore, type MountAttrs } from '@struktoai/mirage-node'
 import { eexist, enoent } from '@struktoai/mirage-core/errors/fs'
@@ -313,7 +315,8 @@ async function walkKind(core: MountCore, path: string, follow: boolean): Promise
  * `fs/walk`: the tree breadth first, each directory's entries in name
  * order, within the request's limits. Depth 0 is the root's own entries.
  * A directory that cannot be read is reported under `errors` and the walk
- * goes on.
+ * goes on. Each mount lists at most its `fullScanLimit` entries, counted
+ * where a link leads, as a shell walk does, and the walk is truncated there.
  */
 async function walk(core: MountCore, root: string, options: Message): Promise<Message> {
   const maxDepth = arg(options, 'maxDepth', 'number')
@@ -327,12 +330,20 @@ async function walk(core: MountCore, root: string, options: Message): Promise<Me
   const errors: JsonValue[] = []
   const result = (truncated: boolean): Message => ({ entries, errors, truncated })
   if (!isDir((await followed(core, root)).mode)) return result(false)
+  const budget = new ScanBudget(
+    PathSpec.fromStrPath(core.resolve(root)),
+    mountView(core.files, true) ?? null,
+  )
+  const links = linkView(core.files)
   const pending: [string, number][] = [[root, 0]]
   let read = 0
   for (let next = pending.shift(); next !== undefined; next = pending.shift()) {
     if (read >= maxDirectories) return result(true)
     const [path, depth] = next
     read += 1
+    let directory = core.resolve(path)
+    if (links !== undefined) directory = links.resolve(directory)
+    if (!budget.opens(directory)) return result(true)
     let names: string[]
     try {
       names = (await children(core, path)).sort(compareCodePoints)
@@ -344,7 +355,7 @@ async function walk(core: MountCore, root: string, options: Message): Promise<Me
       const child = posix.join(path, name)
       const kind = await walkKind(core, child, follow)
       if (kind === null) continue
-      if (entries.length >= maxEntries) return result(true)
+      if (entries.length >= maxEntries || !budget.spend(directory)) return result(true)
       entries.push({ path: toUri(child), kind })
       if (kind === 'directory' && depth < maxDepth) pending.push([child, depth + 1])
     }

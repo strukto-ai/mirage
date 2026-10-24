@@ -223,6 +223,22 @@ class NotAWorkTreeError(GitError):
         super().__init__("this operation must be run in a work tree")
 
 
+class WorkTreeLimitError(GitError):
+    """A work tree holding more files than its mount's ``full_scan_limit``.
+
+    The scan stops there, and a status or an add over part of the tree
+    would read as one over all of it, so the verb fails instead.
+
+    Args:
+        limit (int): the mount's ``full_scan_limit``.
+    """
+
+    def __init__(self, limit: int) -> None:
+        super().__init__(
+            f"more than {limit} files in the work tree (full_scan_limit)"
+        )
+
+
 class SingleRevisionError(GitError):
     """``rev-parse --verify`` without exactly one revision naming an object.
 

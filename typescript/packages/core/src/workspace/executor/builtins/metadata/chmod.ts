@@ -17,6 +17,7 @@ import { FileType } from '../../../../types.ts'
 import { DEFAULT_DIR_MODE, DEFAULT_FILE_MODE, parseChmod } from '../../../../utils/mode.ts'
 import { lsModeString } from '../../../../commands/builtin/utils/formatting.ts'
 import { missingOperandError } from '../../../../commands/spec/usage.ts'
+import { UsageError } from '../../../../commands/errors.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
 import { shellQuoteAlways } from '../../../../utils/quote.ts'
 import type { Namespace } from '../../../mount/namespace/namespace.ts'
@@ -24,6 +25,7 @@ import type { SessionState } from '../../../session/session.ts'
 import { expandOperands, fail, parseLine, result } from '../shared.ts'
 import {
   type WalkEntry,
+  beforeRecursiveChange,
   isRefusal,
   permissionError,
   resolveOperand,
@@ -86,6 +88,15 @@ export async function handleChmod(
       continue
     }
     const [resolved, stat] = found
+    if (fl.asBool('recursive')) {
+      try {
+        await beforeRecursiveChange(links.mounts(false), dispatch, resolved, 'chmod')
+      } catch (err) {
+        if (!(err instanceof UsageError)) throw err
+        errors.push(`${err.message}\n`)
+        continue
+      }
+    }
     const entries: WalkEntry[] = fl.asBool('recursive')
       ? await walkStats(links, dispatch, resolved, stat)
       : [[resolved, stat, null]]

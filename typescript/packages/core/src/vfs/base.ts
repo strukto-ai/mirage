@@ -258,10 +258,11 @@ export class BaseVFS<A extends Accessor = Accessor> {
   readonly searchable: readonly string[] | null = null
   /**
    * The most files one command walks under a directory of this mount: grep
-   * -r, rg and git grep stop reading there, find, ls -R, tree and du stop
-   * listing, a glob matching more is refused, and so are tar -c, zip -r, cp
-   * -r, rm -r, mv to another mount and diff -r of a directory holding more
-   * (`beforeFullScan`); -1 for no cap.
+   * -r, rg and git grep stop reading there, find, ls -R, tree, du and
+   * getfattr -R stop listing, git status and the other verbs that scan a
+   * work tree fail, a glob matching more is refused, and so are tar -c, zip
+   * -r, cp -r, rm -r, chmod -R, chown -R, chgrp -R, mv to another mount and
+   * diff -r of a directory holding more (`beforeFullScan`); -1 for no cap.
    */
   readonly fullScanLimit: number = FULL_SCAN_LIMIT
   /**
@@ -714,12 +715,13 @@ export class BaseVFS<A extends Accessor = Accessor> {
 
   /**
    * Called before a command acts on every file under `path`, once per
-   * directory a command copies, compares or removes whole, before the first
-   * file it touches there: tar -c, zip -r, cp -r, mv across mounts, diff -r
-   * and rm -r. Resolve to let the scan run; reject to refuse it, and the
-   * error's message is what the command prints. The default refuses more
-   * than `fullScanLimit` files. Searches and listings are never refused: they
-   * stop after `fullScanLimit` files.
+   * directory a command copies, compares, changes or removes whole, before
+   * the first file it touches there: tar -c, zip -r, cp -r, mv across
+   * mounts, diff -r, rm -r, chmod -R, chown -R and chgrp -R. Resolve to let
+   * the scan run; reject to refuse it, and the error's message is what the
+   * command prints. The default refuses more than `fullScanLimit` files.
+   * Searches and listings are never refused: they stop after `fullScanLimit`
+   * files.
    *
    * @param path the directory about to be walked.
    * @param files how many files the session sees under `path`, with every

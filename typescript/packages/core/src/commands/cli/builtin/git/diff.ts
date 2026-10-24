@@ -24,7 +24,7 @@ import type { PathSpec } from '../../../../types.ts'
 import type { CommandFnResult, Context } from '../../../config.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
 import { GitError, InvalidOptionError, NoMergeBaseError, UsageError } from './errors.ts'
-import { pathspecPatterns } from './pathspec.ts'
+import { pathspecPatterns, patternRoots } from './pathspec.ts'
 import { configBool, type Repo } from './repo.ts'
 import { deltas, shownSides, type Delta } from './rows.ts'
 import { shownEntries } from './seen.ts'
@@ -111,6 +111,7 @@ export async function diff(
   )
   let before: Tree, after: Tree
   let warning = ''
+  const pathspecs = pathspecPatterns(repo.location, startPoint(fl).virtual, marked)
   if (cached) {
     if (revisions.length > 1) throw new GitError('--cached accepts at most one revision')
     const state = await readIndex(repo, repo.vfs)
@@ -127,7 +128,7 @@ export async function diff(
     warning = note
     if (fresh === null) {
       const state = await readIndex(repo, repo.vfs)
-      after = await workEntries(repo, vfs, state)
+      after = await workEntries(repo, vfs, state, patternRoots(pathspecs))
       if (old === null) for (const path of state.conflicts.keys()) after.delete(path)
       before = old ?? shownEntries(repo, stagedEntries(state))
     } else {
@@ -135,7 +136,6 @@ export async function diff(
       after = fresh
     }
   }
-  const pathspecs = pathspecPatterns(repo.location, startPoint(fl).virtual, marked)
   const flags = { ...parsed, pathspecs }
   const rows = deltas(repo.location, [[limited(before, pathspecs), limited(after, pathspecs)]])
   const render = async (shown: Delta[]): Promise<ByteSource | null> => {

@@ -150,13 +150,15 @@ async def reset(
     if not texts:
         for key in visible_entries(location, state.conflicts):
             state.conflicts.pop(key)
-    await write_index(vfs, location.gitdir, state)
+    # The tree is walked before the index is written, so a work tree past
+    # its full_scan_limit leaves the index as it was.
     found = await scan(
         vfs,
         location,
         decoded(state.entries),
         UNTRACKED_NO,
     )
+    await write_index(vfs, location.gitdir, state)
     unstaged = await work_changes(
         vfs,
         location.worktree,

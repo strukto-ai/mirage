@@ -19,6 +19,7 @@ import { DEFAULT_MAX_REQUEST_BODY_SIZE } from '@modelcontextprotocol/server'
 import type { FastifyInstance, FastifyReply } from 'fastify'
 import { classify } from '@struktoai/mirage-core/errors/classify'
 import type { FsCondition } from '@struktoai/mirage-core/errors/types'
+import { TooManyMatches } from '@struktoai/mirage-core/shell/errors'
 import type { JsonValue } from '@struktoai/mirage-core/types'
 import { Session } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import type { Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
@@ -102,6 +103,9 @@ export function queryFlag(value: string | undefined, name: string): boolean {
 export function failure(reply: FastifyReply, err: unknown): FastifyReply {
   if (err instanceof RouteError) return reply.status(err.status).send({ detail: err.message })
   if (err instanceof CallArgsError) return reply.status(400).send({ detail: err.message })
+  // A glob past its mount's full_scan_limit says so in words that carry
+  // nothing private, so the caller learns why.
+  if (err instanceof TooManyMatches) return reply.status(400).send({ detail: err.reason })
   const condition = classify(err)
   const status = condition === null ? 500 : (STATUS[condition] ?? 500)
   return reply.status(status).send(failureToDict(err))

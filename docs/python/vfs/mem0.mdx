@@ -127,14 +127,6 @@ read commands reuse the cached metadata and rendered bytes until the cache
 expires or the workspace is recreated. `search` always calls the Mem0 API
 directly and is not cached.
 
-## Integration
-
-The most files one command reads on Mem0. [Integration](/home/integration/overview) explains each command.
-
-| Command | On Mem0 |
-| --- | --- |
-| Full scan | `grep -r`, `find`, `du` and other walks stop after [`full_scan_limit`](/home/integration/search#full_scan_limit) files (default 1000); a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. `-1` for no limit |
-
 ## Example
 
 ```python

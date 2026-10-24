@@ -15,6 +15,7 @@
 import base64
 import re
 
+from mirage.commands.builtin.utils.tree import ScanBudget
 from mirage.commands.spec import SPECS, parse_command
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.parser import parse_to_kwargs
@@ -22,6 +23,7 @@ from mirage.errors import FsCondition, classify
 from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import encode_text
 from mirage.types import FileType, PathSpec, word_text
+from mirage.view.types import NamespaceLinks
 from mirage.workspace.executor.builtins.metadata.xattr import (
     GETFATTR_USAGE,
     attr_error,
@@ -30,6 +32,7 @@ from mirage.workspace.executor.builtins.metadata.xattr import (
 )
 from mirage.workspace.executor.builtins.shared import result
 from mirage.workspace.executor.builtins.types import Result
+from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.session import SessionState
 
 _ENCODINGS = ("text", "hex", "base64")
@@ -71,10 +74,12 @@ def encode_value(value: bytes, encoding: str | None) -> bytes:
 
 async def _walk(
     dispatch: DispatchFn,
+    links: NamespaceLinks,
     path: PathSpec,
     shown: str,
     logical: bool,
     deref: bool,
+    budget: ScanBudget,
 ) -> list[tuple[PathSpec, str]]:
     """A subtree in pre-order, the way nftw hands it to getfattr -R.
 
@@ -84,10 +89,13 @@ async def _walk(
 
     Args:
         dispatch (DispatchFn): op dispatcher.
+        links (NamespaceLinks): the session's link table, which names
+            the directory a listing comes from.
         path (PathSpec): the entry to report and maybe descend into.
         shown (str): its spelling in the ``# file:`` header.
         logical (bool): ``-L``, which descends every link below.
         deref (bool): whether this entry, if a link, is descended.
+        budget (ScanBudget): the entries the operand's walk may still list.
     """
     entries = [(path, shown)]
     try:
@@ -98,22 +106,30 @@ async def _walk(
         return entries
     if stat.type != FileType.DIRECTORY:
         return entries
+    here = links.follow(path.virtual)
+    if not budget.opens(here):
+        return entries
     children, _ = await dispatch("readdir", path)
     for child in children:
+        if not budget.spend(here):
+            break
         name = child.rstrip("/").rsplit("/", 1)[-1]
         entries.extend(
             await _walk(
                 dispatch,
+                links,
                 PathSpec.from_str_path(child.rstrip("/")),
                 f"{shown.rstrip('/')}/{name}",
                 logical,
                 logical,
+                budget,
             )
         )
     return entries
 
 
 async def handle_getfattr(
+    namespace: Namespace,
     dispatch: DispatchFn,
     session: SessionState,
     args: list[str | PathSpec],
@@ -125,9 +141,12 @@ async def handle_getfattr(
     each block, ``-d``/``-n`` adding ``="value"``, and the default match
     ``^user\\.`` (``-m -`` matches every name). The attributes are the
     dispatcher's: what was set on the path. ``-h`` reads a link's own
-    attributes.
+    attributes. ``-R`` stops after ``full_scan_limit`` entries of a
+    mount, as ``ls -R`` does, and exits 1.
 
     Args:
+        namespace (Namespace): addressing authority, for the mount table
+            a walk is counted against.
         dispatch (DispatchFn): op dispatcher.
         session (SessionState): session whose cwd resolves operands.
         args (list[str | PathSpec]): the words after the command name.
@@ -164,16 +183,21 @@ async def handle_getfattr(
     errors: list[str] = []
     failed = False
     warned = False
+    links = namespace.session_links(session)
+    mounts = links.mounts(True)
     for target in targets:
         typed = target.raw_path or target.virtual
         entries = [(target, typed)]
+        budget = ScanBudget(target, mounts)
         if fl.as_bool("recursive"):
             entries = await _walk(
                 dispatch,
+                links,
                 target,
                 typed,
                 fl.as_bool("logical"),
                 not fl.as_bool("physical"),
+                budget,
             )
         for path, label in entries:
             header = label
@@ -204,6 +228,8 @@ async def handle_getfattr(
                 warned = True
             out += block
             failed = failed or missing
+        errors.extend(f"getfattr: {line}\n" for line in budget.stopped)
+        failed = failed or bool(budget.stopped)
     return result(
         "getfattr",
         out=bytes(out) or None,

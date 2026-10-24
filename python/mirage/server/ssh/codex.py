@@ -32,6 +32,8 @@ from fastapi import WebSocket, WebSocketDisconnect
 from starlette.status import WS_1011_INTERNAL_ERROR
 
 from mirage import Workspace
+from mirage.commands.builtin.utils.links import link_view, mount_view
+from mirage.commands.builtin.utils.tree import ScanBudget
 from mirage.errors import FsCondition, classify
 from mirage.errors.classify import failure_text
 from mirage.errors.fs import eexist, enoent
@@ -64,7 +66,7 @@ from mirage.server.ssh.stream import (
     deliver,
     encode,
 )
-from mirage.types import JsonValue
+from mirage.types import JsonValue, PathSpec
 from mirage.utils.abort import MirageAbortError
 
 logger = logging.getLogger(__name__)
@@ -349,7 +351,9 @@ async def walk(core: MountCore, root: str, options: Message) -> Message:
     name order, within the request's limits.
 
     Depth 0 is the root's own entries. A directory that cannot be read
-    is reported under ``errors`` and the walk goes on.
+    is reported under ``errors`` and the walk goes on. Each mount lists
+    at most its ``full_scan_limit`` entries, counted where a link
+    leads, as a shell walk does, and the walk is truncated there.
 
     Args:
         core (MountCore): the channel's mount core.
@@ -371,6 +375,11 @@ async def walk(core: MountCore, root: str, options: Message) -> Message:
     result: Message = {"entries": entries, "errors": errors}
     if not stat.S_ISDIR((await followed(core, root)).mode):
         return {**result, "truncated": False}
+    budget = ScanBudget(
+        PathSpec.from_str_path(core.resolve(root)),
+        mount_view(core.files, crossing=True),
+    )
+    links = link_view(core.files)
     pending = deque([(root, 0)])
     read = 0
     while pending:
@@ -378,6 +387,11 @@ async def walk(core: MountCore, root: str, options: Message) -> Message:
             return {**result, "truncated": True}
         path, depth = pending.popleft()
         read += 1
+        directory = core.resolve(path)
+        if links is not None:
+            directory = links.resolve(directory)
+        if not budget.opens(directory):
+            return {**result, "truncated": True}
         try:
             names = sorted(await children(core, path))
         except Exception as err:
@@ -390,7 +404,7 @@ async def walk(core: MountCore, root: str, options: Message) -> Message:
             kind = await walk_kind(core, child, follow)
             if kind is None:
                 continue
-            if len(entries) >= max_entries:
+            if len(entries) >= max_entries or not budget.spend(directory):
                 return {**result, "truncated": True}
             entries.append({"path": to_uri(child), "kind": kind})
             if kind == "directory" and depth < max_depth:

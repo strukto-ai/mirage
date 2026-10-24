@@ -208,13 +208,11 @@ All commands delegate to Mirage's shared implementations.
 
 ## Integration
 
-What Qdrant answers through its own API, so fewer files are read, and the most files one command reads. [Integration](/home/integration/overview) explains each command.
+What Qdrant answers through its own API, so fewer files are read. [Integration](/home/integration/overview) explains each command.
 
 | Command | On Qdrant |
 | --- | --- |
-| `grep -r`, `rg` | The payload text the listing keeps, for ASCII text |
-| Can miss | No |
-| Full scan | `grep -r`, `find`, `du` and other walks stop after [`full_scan_limit`](/home/integration/search#full_scan_limit) files (default 1000); a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. `-1` for no limit |
+| `grep -r`, `rg` | The payload text the listing keeps, for ASCII text. It misses nothing. |
 
 A folder listing scrolls every point's payload anyway, so `grep -r` and `rg`
 scroll each folder once more, as a listing does, and read only the `.json` and

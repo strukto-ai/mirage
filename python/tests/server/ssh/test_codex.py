@@ -23,6 +23,7 @@ from typing import Any
 import asyncssh
 import pytest
 
+from mirage import RAMVFS, MountMode, Workspace
 from mirage.server.rpc.constants import (
     RPC_INTERNAL_ERROR,
     RPC_INVALID_PARAMS,
@@ -422,6 +423,39 @@ async def test_walk_goes_breadth_first_within_its_limits(ssh):
     assert (paths(rooted), rooted["truncated"]) == (["/a.txt", "/sub"], True)
     assert of_file == {"entries": [], "errors": [], "truncated": False}
     assert zero["code"] == RPC_INVALID_REQUEST
+
+
+@pytest.mark.asyncio
+async def test_walk_stops_at_the_limit_of_the_mount_it_lists(tmp_path):
+    harness = await start_harness(
+        tmp_path,
+        Workspace(
+            {
+                "/": (RAMVFS(full_scan_limit=-1), MountMode.WRITE),
+                "/w/": (RAMVFS(full_scan_limit=2), MountMode.WRITE),
+            }
+        ),
+    )
+    try:
+        async with codex(harness) as client:
+            await client.run(
+                "seed",
+                "echo > /w/a.txt && echo > /w/b.txt && echo > /w/c.txt && "
+                "ln -s /w /alias",
+            )
+            walked = await client.result(
+                "fs/walk", {"path": "file:///alias", "options": WALK}
+            )
+    finally:
+        await stop_harness(harness)
+    assert walked == {
+        "entries": [
+            {"path": "file:///alias/a.txt", "kind": "file"},
+            {"path": "file:///alias/b.txt", "kind": "file"},
+        ],
+        "errors": [],
+        "truncated": True,
+    }
 
 
 @pytest.mark.asyncio

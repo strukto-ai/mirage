@@ -13,12 +13,16 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { type PathSpec, FileType, type FileStat } from '../../../../types.ts'
+import { mountView } from '../../../builtin/utils/links.ts'
 import { GIT_DIR } from './constants.ts'
+import { WorkTreeLimitError } from './errors.ts'
+import { under } from './pathspec.ts'
 import { type IgnoreStack, loadIgnores } from './ignore.ts'
 import { lstat, readNames, readOptional } from './io.ts'
 import { entryName } from '../../../../utils/remnants.ts'
 
 import type { RepoLocation, WorkTree } from './types.ts'
+import type { MountView } from '../../../../view/types.ts'
 import type { Files } from '../../../../workspace/files.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 
@@ -59,6 +63,8 @@ class Scanner {
     ignored: [],
   }
   private readonly directories: Set<string>
+  private readonly mounts: MountView | undefined
+  private readonly counted = new Map<string, number>()
 
   constructor(
     private readonly vfs: Files,
@@ -66,8 +72,37 @@ class Scanner {
     private readonly tracked: ReadonlySet<string>,
     private readonly mode: string,
     private readonly showIgnored = false,
+    private readonly roots: readonly string[] | null = null,
   ) {
     this.directories = trackedDirectories(tracked)
+    this.mounts = mountView(vfs, true)
+  }
+
+  /**
+   * Whether the walk goes to a path: one a root names or holds, or a
+   * directory above a root.
+   */
+  private reaches(relative: string): boolean {
+    return (
+      this.roots === null ||
+      this.roots.some((root) => relative === root || under(relative, root) || under(root, relative))
+    )
+  }
+
+  /**
+   * Count one file against the mount serving it; past that mount's
+   * `fullScanLimit` the scan fails with `WorkTreeLimitError`. A file a root
+   * names costs nothing, as a file handed to grep does.
+   */
+  private count(relative: string): void {
+    if (this.roots?.includes(relative) === true) return
+    if (this.mounts?.fullScanLimit === undefined) return
+    const virtual = this.absolute(relative).virtual
+    const limit = this.mounts.fullScanLimit(virtual)
+    const root = this.mounts.rootOf(virtual)
+    const seen = this.counted.get(root) ?? 0
+    if (limit >= 0 && seen >= limit) throw new WorkTreeLimitError(limit)
+    this.counted.set(root, seen + 1)
   }
 
   /** The virtual path a repository-relative path names. */
@@ -102,6 +137,7 @@ class Scanner {
       const info = await this.entryStat(child)
       if (info === null) continue
       const directory = info.type === FileType.DIRECTORY
+      if (!directory) this.count(child)
       if (!includeIgnored && rules.isIgnored(child, directory)) continue
       if (!directory) return true
       if (await this.holdsAFile(child, rules, includeIgnored)) return true
@@ -175,12 +211,14 @@ class Scanner {
       const name = entryName(entry)
       if (name === '' || (relative === '' && name === GIT_DIR)) continue
       const child = relative === '' ? name : `${relative}/${name}`
+      if (!this.reaches(child)) continue
       const info = await this.entryStat(child)
       if (info === null) continue
       if (info.type === FileType.DIRECTORY) {
         await this.visitDirectory(child, ignored || rules.isIgnored(child, true), rules)
         continue
       }
+      this.count(child)
       this.found.files.set(child, info)
       if (this.tracked.has(child) || this.mode === UNTRACKED_NO) continue
       if (!ignored && !rules.isIgnored(child, false)) this.found.untracked.push(child)
@@ -201,6 +239,10 @@ class Scanner {
  * @param location the discovered repository
  * @param tracked repository-relative paths the index holds
  * @param mode which untracked files to report
+ * @param showIgnored whether to report ignored files too
+ * @param roots narrow the walk to these repository-relative paths and what
+ *   lies under them, for a verb whose pathspecs say what it reads; null walks
+ *   it all
  */
 export async function scan(
   vfs: Files,
@@ -208,9 +250,10 @@ export async function scan(
   tracked: ReadonlySet<string>,
   mode: string,
   showIgnored = false,
+  roots: readonly string[] | null = null,
 ): Promise<WorkTree> {
   const ignores = await loadIgnores(vfs, location.commondir, location.worktree)
-  const scanner = new Scanner(vfs, location.worktree, tracked, mode, showIgnored)
+  const scanner = new Scanner(vfs, location.worktree, tracked, mode, showIgnored, roots)
   await scanner.walk('', false, ignores)
   return scanner.found
 }

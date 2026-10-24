@@ -142,14 +142,6 @@ rg -l "classify" "/langfuse/prompts/"
 The Langfuse VFS uses `IndexCacheStore` (same as other mounts).
 Index entries store trace IDs, session IDs, and prompt names.
 
-## Integration
-
-The most files one command reads on Langfuse. [Integration](/home/integration/overview) explains each command.
-
-| Command | On Langfuse |
-| --- | --- |
-| Full scan | `grep -r`, `find`, `du` and other walks stop after [`full_scan_limit`](/home/integration/search#full_scan_limit) files (default 1000); a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. `-1` for no limit |
-
 ## Example
 
 ```python

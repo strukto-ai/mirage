@@ -183,13 +183,11 @@ Label JSON includes `label_id`, `label_name`, `color`, and `board_id`.
 
 ## Integration
 
-What Trello answers through its own API, so fewer files are read, and the most files one command reads. [Integration](/home/integration/overview) explains each command.
+What Trello answers through its own API, so fewer files are read. [Integration](/home/integration/overview) explains each command.
 
 | Command | On Trello |
 | --- | --- |
-| `grep -r`, `rg` | Trello search and the text the listing keeps, for whole words |
-| Can miss | Recent writes |
-| Full scan | `grep -r`, `find`, `du` and other walks stop after [`full_scan_limit`](/home/integration/search#full_scan_limit) files (default 1000); a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. `-1` reads every file without Trello search |
+| `grep -r`, `rg` | Trello search and the text the listing keeps, for whole words. It can miss recent writes. |
 
 `grep -rw` and
 `rg -w` ask Trello search for each word and read only the cards that hold every

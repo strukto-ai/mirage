@@ -24,6 +24,7 @@ from mirage.commands.cli.builtin.git.pathspec import (
     matched,
     pathspec_patterns,
     pathspec_selects,
+    pattern_roots,
     repo_relative,
     under,
 )
@@ -124,3 +125,20 @@ def test_a_pathspec_names_a_path_a_directory_or_a_glob(
 def test_a_pathspec_git_refuses_or_this_build_lacks_is_refused(operand, error):
     with pytest.raises(error):
         pathspec_patterns(LOCATION, "/repo", [operand])
+
+
+@pytest.mark.parametrize(
+    "patterns, roots",
+    [
+        (["a.txt", "docs/"], ("a.txt", "docs")),
+        (["src/*.py", "lib/x?/y"], ("src", "lib")),
+        (["src/[ab].c"], ("src",)),
+        (["*.c"], None),
+        (["a.txt", ""], None),
+        ([], None),
+    ],
+)
+def test_pattern_roots_are_the_literal_paths_a_walk_must_reach(
+    patterns: list[str], roots: tuple[str, ...] | None
+):
+    assert pattern_roots(patterns) == roots

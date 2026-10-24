@@ -504,7 +504,10 @@ checks, and answers its result as JSON.
 <ParamField body="pattern" type="string" required>A pathname pattern, such as `/src/**/*.py`.</ParamField>
 <ParamField query="session_id" type="string">The session. The default when absent.</ParamField>
 
-Answers a list of every path the session sees that matches.
+Answers a list of every path the session sees that matches. A pattern that
+matches more files than a mount's
+[`full_scan_limit`](/home/integration/search#full_scan_limit) answers `400`,
+and `detail` names the limit.
 
 ### Call a tool
 

@@ -241,12 +241,11 @@ rather than replaying cached bytes.
 
 ## Integration
 
-What MongoDB answers through its own API, so fewer files are read, and the most files one command reads. [Integration](/home/integration/overview) explains each command.
+What MongoDB answers through its own API, so fewer files are read. [Integration](/home/integration/overview) explains each command.
 
 | Command | On MongoDB |
 | --- | --- |
 | `grep`, `rg` on one file | A filter on the server sends only the documents that may match |
-| Full scan | `grep -r`, `find`, `du` and other walks stop after [`full_scan_limit`](/home/integration/search#full_scan_limit) files (default 1000); a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. `-1` for no limit |
 | `tail -n N` | The last N documents by `_id` |
 | `wc -l` | `countDocuments()` on the server |
 | `tail -f` | A change stream yields each new insert |

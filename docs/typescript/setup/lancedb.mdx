@@ -98,13 +98,11 @@ const fashion = new LanceDBVFS({
 
 ## Integration
 
-What LanceDB answers through its own API, so fewer files are read, and the most files one command reads. [Integration](/home/integration/overview) explains each command.
+What LanceDB answers through its own API, so fewer files are read. [Integration](/home/integration/overview) explains each command.
 
 | Command | On LanceDB |
 | --- | --- |
-| `grep -r`, `rg` | The string columns of each row, for any text; a table with list, struct or bytes columns reads every card |
-| Can miss | No |
-| Full scan | `grep -r`, `find`, `du` and other walks stop after [`fullScanLimit`](/home/integration/search#full_scan_limit) files (default 1000); a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. `-1` for no limit |
+| `grep -r`, `rg` | The string columns of each row, for any text; a table with list, struct or bytes columns reads every card. It misses nothing. |
 
 The [Python LanceDB docs](/python/vfs/lancedb#integration) list when each search answers and what it can miss.
 

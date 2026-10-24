@@ -266,13 +266,11 @@ through the [gws CLI](/python/cli/gws) when installed.
 
 ## Integration
 
-What Gmail answers through its own API, so fewer files are read, and the most files one command reads. [Integration](/home/integration/overview) explains each command.
+What Gmail answers through its own API, so fewer files are read. [Integration](/home/integration/overview) explains each command.
 
 | Command | On Gmail |
 | --- | --- |
-| `grep -r`, `rg` | The message text the listing keeps, for ASCII text |
-| Can miss | No |
-| Full scan | `grep -r`, `find`, `du` and other walks stop after [`full_scan_limit`](/home/integration/search#full_scan_limit) files (default 1000); a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. `-1` reads every file, and the listing keeps no message text |
+| `grep -r`, `rg` | The message text the listing keeps, for ASCII text. It misses nothing. |
 
 The listing keeps
 each message's text, and `grep -r` and `rg` read only the messages whose text
