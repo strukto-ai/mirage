@@ -12,8 +12,9 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from importlib import import_module
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
+
+from mirage.utils.loader import lazy_exports
 
 if TYPE_CHECKING:
     from mirage.io.async_line_iterator import (
@@ -22,17 +23,10 @@ if TYPE_CHECKING:
     from mirage.io.types import IOResult as IOResult
     from mirage.io.types import OpReport as OpReport
 
-_EXPORTS = {
-    "AsyncLineIterator": "mirage.io.async_line_iterator",
-    "IOResult": "mirage.io.types",
-    "OpReport": "mirage.io.types",
+_EXPORTS: dict[str, tuple[str, ...]] = {
+    "mirage.io.async_line_iterator": ("AsyncLineIterator",),
+    "mirage.io.types": ("IOResult", "OpReport"),
 }
-__all__ = list(_EXPORTS)
+__all__ = ["AsyncLineIterator", "IOResult", "OpReport"]
 
-
-def __getattr__(name: str) -> Any:
-    if name not in _EXPORTS:
-        raise AttributeError(name)
-    value = getattr(import_module(_EXPORTS[name]), name)
-    globals()[name] = value
-    return value
+__getattr__ = lazy_exports(__name__, _EXPORTS)

@@ -13,8 +13,10 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { defineConfig } from 'tsup'
+import { BASE } from '../../tsup.base.config.ts'
 
 export default defineConfig({
+  ...BASE,
   entry: [
     'src/index.ts',
     'src/bin/daemon.ts',
@@ -33,14 +35,5 @@ export default defineConfig({
     'src/mcp/index.ts',
     'src/rpc/index.ts',
   ],
-  format: ['esm'],
-  dts: {
-    compilerOptions: {
-      ignoreDeprecations: '6.0',
-    },
-  },
-  sourcemap: true,
-  clean: true,
-  target: 'es2022',
   platform: 'node',
 })

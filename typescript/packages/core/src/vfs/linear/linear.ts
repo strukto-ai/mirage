@@ -22,7 +22,6 @@ import { redactLinearConfig } from '../../core/linear/config.ts'
 import type { LinearConfig, LinearConfigRedacted } from '../../core/linear/config.ts'
 import { type DirListing, VFSName } from '../../types.ts'
 import type { PathSpec, FileStat } from '../../types.ts'
-import { sliceWindow } from '../../utils/ranges.ts'
 import { readdir as linearReaddir } from '../../core/linear/readdir.ts'
 import { read as linearRead } from '../../core/linear/read.ts'
 import { stat as linearStat } from '../../core/linear/stat.ts'
@@ -197,14 +196,8 @@ export class LinearVFS extends BaseVFS {
     return linearReaddir(this.accessor, path, handed?.entry)
   }
 
-  override async read(
-    path: PathSpec,
-    handed?: Handed,
-    offset = 0,
-    size: number | null = null,
-  ): Promise<Uint8Array> {
-    const data = await linearRead(this.accessor, path, null, handed?.parent)
-    return offset === 0 && size === null ? data : sliceWindow(data, offset, size)
+  override async read(path: PathSpec, handed?: Handed): Promise<Uint8Array> {
+    return linearRead(this.accessor, path, null, handed?.parent)
   }
 
   override stat(path: PathSpec, handed?: Handed): Promise<FileStat> {

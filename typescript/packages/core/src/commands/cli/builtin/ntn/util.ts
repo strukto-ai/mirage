@@ -126,7 +126,7 @@ export async function contentOrStdin(
   return new TextDecoder().decode(joined)
 }
 
-function asObject(value: unknown): Record<string, unknown> {
+export function asObject(value: unknown): Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : {}
@@ -142,7 +142,7 @@ export function plainTextOf(fragments: unknown): string {
   return out
 }
 
-function strOf(record: Record<string, unknown>, key: string): string {
+export function strOf(record: Record<string, unknown>, key: string): string {
   const value = record[key]
   return typeof value === 'string' ? value : ''
 }

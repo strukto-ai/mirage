@@ -25,10 +25,9 @@ import {
   type ChromaConfigResolved,
 } from './config.ts'
 import type { DirListing, PathSpec, FileStat, SearchQuery } from '../../types.ts'
-import { sliceWindow } from '../../utils/ranges.ts'
 import type { Handed } from '../types.ts'
 import { CHROMA_TREE } from '../../core/chroma/tree.ts'
-import { read, readStream } from '../../core/chroma/read.ts'
+import { readStream } from '../../core/chroma/read.ts'
 import { stat } from '../../core/chroma/stat.ts'
 import { filesContaining, searchMany } from '../../core/chroma/search.ts'
 import { WALK_LIMIT } from '../constants.ts'
@@ -93,15 +92,9 @@ export class ChromaVFS extends BaseVFS {
     return CHROMA_TREE.readdir(this.accessor, path, handed?.entry)
   }
 
-  override async read(
-    path: PathSpec,
-    handed?: Handed,
-    offset = 0,
-    size: number | null = null,
-  ): Promise<ByteSource> {
-    if (offset === 0 && size === null) return readStream(this.accessor, path, handed?.entry)
-    const data = await read(this.accessor, path, handed?.entry)
-    return sliceWindow(data, offset, size)
+  // eslint-disable-next-line @typescript-eslint/require-await
+  override async read(path: PathSpec, handed?: Handed): Promise<ByteSource> {
+    return readStream(this.accessor, path, handed?.entry)
   }
 
   override stat(path: PathSpec, handed?: Handed): Promise<FileStat> {

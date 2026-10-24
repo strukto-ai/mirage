@@ -12,11 +12,10 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import json
-
 from mirage.accessor.slack import SlackAccessor
 from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
+from mirage.core.render.json import compact_json_bytes
 from mirage.core.slack.history import fetch_recent_messages
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
@@ -32,7 +31,5 @@ async def read_messages(
     channel = fl.as_str("channel") or ""
     limit = fl.as_int("limit", 20)
     messages = await fetch_recent_messages(accessor, channel, limit)
-    out = json.dumps(
-        messages, ensure_ascii=False, separators=(",", ":")
-    ).encode()
+    out = compact_json_bytes(messages)
     return out, IOResult()

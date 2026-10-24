@@ -14,6 +14,7 @@
 
 from typing import TYPE_CHECKING
 
+from mirage.utils.loader import lazy_exports
 from mirage.vfs.gsheets.config import GSheetsConfig
 from mirage.vfs.gsheets.sheet_entry import SheetEntry
 
@@ -22,10 +23,8 @@ if TYPE_CHECKING:
 
 __all__ = ["GSheetsConfig", "SheetEntry", "GSheetsVFS"]
 
+_EXPORTS: dict[str, tuple[str, ...]] = {
+    "mirage.vfs.gsheets.gsheets": ("GSheetsVFS",),
+}
 
-def __getattr__(name: str) -> "type[GSheetsVFS]":
-    if name == "GSheetsVFS":
-        from mirage.vfs.gsheets.gsheets import GSheetsVFS
-
-        return GSheetsVFS
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+__getattr__ = lazy_exports(__name__, _EXPORTS)

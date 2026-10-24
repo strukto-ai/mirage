@@ -283,26 +283,21 @@ class BaseVFS:
 
     @vfs_call(effect=Effect.READ, target=Target.FILE)
     def read(
-        self,
-        path: PathSpec,
-        *,
-        offset: int = 0,
-        size: int | None = None,
+        self, path: PathSpec
     ) -> Awaitable[ByteSource] | AsyncIterator[bytes]:
-        """Read a file's bytes, or a window of them.
+        """Read a file's bytes.
 
         Answer with the bytes, or with an async iterator that hands them
         out as the caller pulls, so a large file never sits in memory: an
         ``async def`` that returns either, or one that yields chunks.
         Mirage collects a stream for a caller that needs the bytes whole
-        and hands bytes to a streaming caller as one chunk. A window
-        reaches this only when ``reads_ranges`` is set: the caller
-        otherwise reads the whole file and slices it.
+        and hands bytes to a streaming caller as one chunk. A VFS that
+        sets ``reads_ranges`` also takes ``offset`` (the window's first
+        byte) and ``size`` (its length, None through the end) keywords;
+        the caller reads every other file whole and slices it.
 
         Args:
             path (PathSpec): the file.
-            offset (int): the first byte of the window.
-            size (int | None): the window's length, None through the end.
         """
         raise enotsup(self.name, "read", path)
 

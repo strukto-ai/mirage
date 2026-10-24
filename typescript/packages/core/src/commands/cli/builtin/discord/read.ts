@@ -18,8 +18,7 @@ import { IOResult, type ByteSource } from '../../../../io/types.ts'
 import type { CommandFnResult, Context } from '../../../config.ts'
 import type { PathSpec } from '../../../../types.ts'
 import type { DiscordAccessor } from '../../../../accessor/discord.ts'
-
-const ENC = new TextEncoder()
+import { compactJsonBytes } from '../../../../core/render/json.ts'
 
 export async function read(
   accessor: DiscordAccessor,
@@ -33,6 +32,6 @@ export async function read(
     fl.asStr('channel') ?? '',
     fl.asInt('limit', 20),
   )
-  const out: ByteSource = ENC.encode(JSON.stringify(messages))
+  const out: ByteSource = compactJsonBytes(messages)
   return [out, new IOResult()]
 }

@@ -14,6 +14,8 @@
 
 import importlib
 import importlib.util
+import sys
+from collections.abc import Callable, Mapping
 from typing import Any
 
 # The module name a class loaded from a script file runs under. A snapshot
@@ -76,3 +78,32 @@ def load_backend_class(spec: str) -> type[Any]:
         type: The loaded class.
     """
     return load_attr(spec)
+
+
+def lazy_exports(
+    package: str, exports: Mapping[str, tuple[str, ...]]
+) -> Callable[[str], Any]:
+    """A package barrel's PEP 562 ``__getattr__``: each exported name is
+    imported from its module on first use and kept on the package, so
+    importing a leaf never loads its siblings.
+
+    Args:
+        package (str): the barrel's ``__name__``.
+        exports (Mapping[str, tuple[str, ...]]): each module to the names
+            the barrel takes from it.
+    """
+    module_of = {
+        name: module for module, names in exports.items() for name in names
+    }
+
+    def resolve(name: str) -> Any:
+        module = module_of.get(name)
+        if module is None:
+            raise AttributeError(
+                f"module {package!r} has no attribute {name!r}"
+            )
+        value = getattr(importlib.import_module(module), name)
+        setattr(sys.modules[package], name, value)
+        return value
+
+    return resolve

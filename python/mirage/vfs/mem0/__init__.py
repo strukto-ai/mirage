@@ -14,6 +14,7 @@
 
 from typing import TYPE_CHECKING
 
+from mirage.utils.loader import lazy_exports
 from mirage.vfs.mem0.config import Mem0Config
 
 if TYPE_CHECKING:
@@ -21,10 +22,8 @@ if TYPE_CHECKING:
 
 __all__ = ["Mem0Config", "Mem0VFS"]
 
+_EXPORTS: dict[str, tuple[str, ...]] = {
+    "mirage.vfs.mem0.mem0": ("Mem0VFS",),
+}
 
-def __getattr__(name: str) -> "type[Mem0VFS]":
-    if name == "Mem0VFS":
-        from mirage.vfs.mem0.mem0 import Mem0VFS
-
-        return Mem0VFS
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+__getattr__ = lazy_exports(__name__, _EXPORTS)

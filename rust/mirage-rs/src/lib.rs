@@ -176,23 +176,7 @@ pub(crate) fn saturating_u64_opt<'de, D: serde::Deserializer<'de>>(
 pub(crate) fn saturating_usize_opt<'de, D: serde::Deserializer<'de>>(
     deserializer: D,
 ) -> Result<Option<usize>, D::Error> {
-    struct Visitor;
-    impl<'de> serde::de::Visitor<'de> for Visitor {
-        type Value = Option<usize>;
-        fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-            f.write_str("a non-negative count or null")
-        }
-        fn visit_none<E>(self) -> Result<Self::Value, E> {
-            Ok(None)
-        }
-        fn visit_unit<E>(self) -> Result<Self::Value, E> {
-            Ok(None)
-        }
-        fn visit_some<D: serde::Deserializer<'de>>(self, d: D) -> Result<Self::Value, D::Error> {
-            saturating_usize(d).map(Some)
-        }
-    }
-    deserializer.deserialize_option(Visitor)
+    Ok(saturating_u64_opt(deserializer)?.map(|value| usize::try_from(value).unwrap_or(usize::MAX)))
 }
 
 /// A count from a host's configuration as a `usize`, a value past what this
@@ -201,30 +185,7 @@ pub(crate) fn saturating_usize_opt<'de, D: serde::Deserializer<'de>>(
 pub(crate) fn saturating_usize<'de, D: serde::Deserializer<'de>>(
     deserializer: D,
 ) -> Result<usize, D::Error> {
-    struct Visitor;
-    impl serde::de::Visitor<'_> for Visitor {
-        type Value = usize;
-        fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-            f.write_str("a non-negative count")
-        }
-        fn visit_u64<E>(self, value: u64) -> Result<usize, E> {
-            Ok(usize::try_from(value).unwrap_or(usize::MAX))
-        }
-        fn visit_i64<E: serde::de::Error>(self, value: i64) -> Result<usize, E> {
-            u64::try_from(value)
-                .map(|value| usize::try_from(value).unwrap_or(usize::MAX))
-                .map_err(|_| E::custom("a count cannot be negative"))
-        }
-        // JSON integers past u64 arrive as doubles; the cast saturates.
-        fn visit_f64<E: serde::de::Error>(self, value: f64) -> Result<usize, E> {
-            if value >= 0.0 {
-                Ok(value as usize)
-            } else {
-                Err(E::custom("a count cannot be negative"))
-            }
-        }
-    }
-    deserializer.deserialize_any(Visitor)
+    saturating_u64(deserializer).map(|value| usize::try_from(value).unwrap_or(usize::MAX))
 }
 
 /// Bytes a host sends as a string of one character per byte, each below

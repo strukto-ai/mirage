@@ -16,13 +16,11 @@ import { type ByteSource } from '../../io/types.ts'
 import type { NotionAccessor } from '../../accessor/notion.ts'
 import {
   firstLines as notionFirstLines,
-  read as notionRead,
   readStream as notionStream,
 } from '../../core/notion/read.ts'
 import { readdir as notionReaddir } from '../../core/notion/readdir.ts'
 import { stat as notionStat } from '../../core/notion/stat.ts'
 import type { DirListing, FileStat, PathSpec } from '../../types.ts'
-import { sliceWindow } from '../../utils/ranges.ts'
 import { BaseVFS } from '../base.ts'
 import type { Handed } from '../types.ts'
 
@@ -69,15 +67,9 @@ export class NotionVFSBase extends BaseVFS<NotionAccessor> {
     return notionReaddir(this.accessor, path, handed?.entry, handed?.parent)
   }
 
-  override async read(
-    path: PathSpec,
-    handed?: Handed,
-    offset = 0,
-    size: number | null = null,
-  ): Promise<ByteSource> {
-    if (offset === 0 && size === null) return notionStream(this.accessor, path, handed?.parent)
-    const data = await notionRead(this.accessor, path, null, handed?.parent)
-    return sliceWindow(data, offset, size)
+  // eslint-disable-next-line @typescript-eslint/require-await
+  override async read(path: PathSpec, handed?: Handed): Promise<ByteSource> {
+    return notionStream(this.accessor, path, handed?.parent)
   }
 
   override firstLines(path: PathSpec, n: number, handed?: Handed): Promise<Uint8Array | null> {

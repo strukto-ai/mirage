@@ -66,12 +66,7 @@ class NotesVFS(BaseVFS):
             for name, page in sorted(self.accessor.pages.items())
         ]
 
-    async def read(
-        self,
-        path: PathSpec,
-        offset: int = 0,
-        size: int | None = None,
-    ) -> bytes:
+    async def read(self, path: PathSpec) -> bytes:
         self.accessor.read_calls += 1
         return page_bytes(self.accessor, path)
 

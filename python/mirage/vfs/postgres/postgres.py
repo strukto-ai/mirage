@@ -20,7 +20,6 @@ from mirage.core.postgres.read import first_lines as _first_lines
 from mirage.core.postgres.read import follow as _follow
 from mirage.core.postgres.read import last_lines as _last_lines
 from mirage.core.postgres.read import line_count as _line_count
-from mirage.core.postgres.read import read as _read
 from mirage.core.postgres.read import read_stream as _read_stream
 from mirage.core.postgres.readdir import readdir as _readdir
 from mirage.core.postgres.search import (
@@ -29,7 +28,6 @@ from mirage.core.postgres.search import (
 from mirage.core.postgres.stat import stat as _stat
 from mirage.io.types import ByteSource
 from mirage.types import DirListing, FileStat, PathSpec, VFSName
-from mirage.utils.ranges import slice_window
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.postgres.config import PostgresConfig
 
@@ -73,16 +71,9 @@ class PostgresVFS(BaseVFS):
         return await _readdir(self.accessor, path)
 
     async def read(
-        self,
-        path: PathSpec,
-        offset: int = 0,
-        size: int | None = None,
-        parent: FileStat | None = None,
+        self, path: PathSpec, parent: FileStat | None = None
     ) -> ByteSource:
-        if not offset and size is None:
-            return _read_stream(self.accessor, path, parent)
-        data = await _read(self.accessor, path, None, parent)
-        return slice_window(data, offset, size)
+        return _read_stream(self.accessor, path, parent)
 
     async def stat(
         self, path: PathSpec, entry: FileStat | None = None

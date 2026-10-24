@@ -32,17 +32,13 @@ class CountingGmail(GmailVFS):
         self.reads: list[str] = []
 
     async def read(
-        self,
-        path: PathSpec,
-        offset: int = 0,
-        size: int | None = None,
-        entry: FileStat | None = None,
+        self, path: PathSpec, entry: FileStat | None = None
     ) -> bytes:
         if path.vfs_path.endswith(".gmail.json"):
             self.reads.append(
                 path.vfs_path.rsplit("__", 1)[-1].removesuffix(".gmail.json")
             )
-        return await super().read(path, offset, size, entry)
+        return await super().read(path, entry)
 
 
 @pytest.fixture

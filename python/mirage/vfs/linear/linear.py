@@ -21,7 +21,6 @@ from mirage.core.linear.readdir import readdir as _readdir
 from mirage.core.linear.search import files_containing as _files_containing
 from mirage.core.linear.stat import stat as _stat
 from mirage.types import DirListing, FileStat, PathSpec, VFSName
-from mirage.utils.ranges import slice_window
 from mirage.vfs.base import BaseVFS
 
 VFS_MD = """\
@@ -184,14 +183,9 @@ class LinearVFS(BaseVFS):
         return await _readdir(self.accessor, path, entry)
 
     async def read(
-        self,
-        path: PathSpec,
-        offset: int = 0,
-        size: int | None = None,
-        parent: FileStat | None = None,
+        self, path: PathSpec, parent: FileStat | None = None
     ) -> bytes:
-        data = await _read(self.accessor, path, None, parent)
-        return slice_window(data, offset, size)
+        return await _read(self.accessor, path, None, parent)
 
     async def stat(
         self, path: PathSpec, entry: FileStat | None = None

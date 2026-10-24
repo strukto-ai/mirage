@@ -12,12 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import json
-
 from mirage.accessor.discord import DiscordAccessor
 from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
 from mirage.core.discord.post import send_poll
+from mirage.core.render.json import compact_json_bytes
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -38,7 +37,5 @@ async def poll(
         duration_hours=fl.as_int("duration", 24),
         multiselect=fl.as_bool("multiselect"),
     )
-    out = json.dumps(
-        result, ensure_ascii=False, separators=(",", ":")
-    ).encode()
+    out = compact_json_bytes(result)
     return out, IOResult()

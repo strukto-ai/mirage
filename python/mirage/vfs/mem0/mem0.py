@@ -15,14 +15,12 @@
 from typing import Any
 
 from mirage.accessor.mem0 import Mem0Accessor
-from mirage.core.mem0.read import read as _read
 from mirage.core.mem0.read import read_stream as _read_stream
 from mirage.core.mem0.readdir import readdir as _readdir
 from mirage.core.mem0.search import search_many
 from mirage.core.mem0.stat import stat as _stat
 from mirage.io.types import ByteSource
 from mirage.types import DirListing, FileStat, PathSpec, SearchQuery, VFSName
-from mirage.utils.ranges import slice_window
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.mem0.config import Mem0Config
 
@@ -51,16 +49,9 @@ class Mem0VFS(BaseVFS):
         return await _readdir(self.accessor, path)
 
     async def read(
-        self,
-        path: PathSpec,
-        offset: int = 0,
-        size: int | None = None,
-        entry: FileStat | None = None,
+        self, path: PathSpec, entry: FileStat | None = None
     ) -> ByteSource:
-        if not offset and size is None:
-            return _read_stream(self.accessor, path, entry)
-        data = await _read(self.accessor, path, entry)
-        return slice_window(data, offset, size)
+        return _read_stream(self.accessor, path, entry)
 
     async def stat(
         self, path: PathSpec, entry: FileStat | None = None

@@ -14,6 +14,7 @@
 
 from typing import TYPE_CHECKING
 
+from mirage.utils.loader import lazy_exports
 from mirage.vfs.mongodb.config import MongoDBConfig
 
 if TYPE_CHECKING:
@@ -21,10 +22,8 @@ if TYPE_CHECKING:
 
 __all__ = ["MongoDBConfig", "MongoDBVFS"]
 
+_EXPORTS: dict[str, tuple[str, ...]] = {
+    "mirage.vfs.mongodb.mongodb": ("MongoDBVFS",),
+}
 
-def __getattr__(name: str) -> "type[MongoDBVFS]":
-    if name == "MongoDBVFS":
-        from mirage.vfs.mongodb.mongodb import MongoDBVFS
-
-        return MongoDBVFS
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+__getattr__ = lazy_exports(__name__, _EXPORTS)

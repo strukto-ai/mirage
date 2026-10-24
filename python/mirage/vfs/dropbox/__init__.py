@@ -14,6 +14,7 @@
 
 from typing import TYPE_CHECKING
 
+from mirage.utils.loader import lazy_exports
 from mirage.vfs.dropbox.config import DropboxConfig
 
 if TYPE_CHECKING:
@@ -21,10 +22,8 @@ if TYPE_CHECKING:
 
 __all__ = ["DropboxConfig", "DropboxVFS"]
 
+_EXPORTS: dict[str, tuple[str, ...]] = {
+    "mirage.vfs.dropbox.dropbox": ("DropboxVFS",),
+}
 
-def __getattr__(name: str) -> "type[DropboxVFS]":
-    if name == "DropboxVFS":
-        from mirage.vfs.dropbox.dropbox import DropboxVFS
-
-        return DropboxVFS
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+__getattr__ = lazy_exports(__name__, _EXPORTS)

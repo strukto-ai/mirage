@@ -18,7 +18,6 @@ from mirage.accessor.airtable import AirtableAccessor
 from mirage.core.airtable.config import AirtableConfig
 from mirage.core.airtable.events import build_delta_hook
 from mirage.core.airtable.read import first_lines as _first_lines
-from mirage.core.airtable.read import read as _read
 from mirage.core.airtable.read import read_stream as _read_stream
 from mirage.core.airtable.readdir import readdir as _readdir
 from mirage.core.airtable.search import (
@@ -28,7 +27,6 @@ from mirage.core.airtable.stat import stat as _stat
 from mirage.events.base import DeltaHook
 from mirage.io.types import ByteSource
 from mirage.types import DirListing, FileStat, PathSpec, VFSName
-from mirage.utils.ranges import slice_window
 from mirage.vfs.base import BaseVFS
 
 VFS_MD = """\
@@ -90,15 +88,10 @@ class AirtableVFS(BaseVFS):
     async def read(
         self,
         path: PathSpec,
-        offset: int = 0,
-        size: int | None = None,
         entry: FileStat | None = None,
         parent: FileStat | None = None,
     ) -> ByteSource:
-        if not offset and size is None:
-            return _read_stream(self.accessor, path, entry, parent)
-        data = await _read(self.accessor, path, entry, parent)
-        return slice_window(data, offset, size)
+        return _read_stream(self.accessor, path, entry, parent)
 
     async def stat(
         self, path: PathSpec, entry: FileStat | None = None

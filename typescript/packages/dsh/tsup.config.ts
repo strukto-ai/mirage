@@ -13,8 +13,10 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { defineConfig } from 'tsup'
+import { BASE } from '../../tsup.base.config.ts'
 
 export default defineConfig({
+  ...BASE,
   entry: [
     'src/index.ts',
     'src/plugin/service.ts',
@@ -23,15 +25,6 @@ export default defineConfig({
     'src/plugin/subprocess.ts',
     'src/plugin/spill-store.ts',
   ],
-  format: ['esm'],
-  dts: {
-    compilerOptions: {
-      ignoreDeprecations: '6.0',
-    },
-  },
-  sourcemap: true,
-  clean: true,
-  target: 'es2022',
   external: [
     '@deepseek-ai/cordis',
     '@deepseek-ai/dsh-fs',

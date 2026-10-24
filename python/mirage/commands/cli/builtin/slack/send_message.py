@@ -12,11 +12,10 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import json
-
 from mirage.accessor.slack import SlackAccessor
 from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
+from mirage.core.render.json import compact_json_bytes
 from mirage.core.slack.post import post_message, reply_to_thread
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
@@ -36,7 +35,5 @@ async def send_message(
         result = await reply_to_thread(accessor, channel, thread_ts, text)
     else:
         result = await post_message(accessor, channel, text)
-    out = json.dumps(
-        result, ensure_ascii=False, separators=(",", ":")
-    ).encode()
+    out = compact_json_bytes(result)
     return out, IOResult()

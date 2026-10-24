@@ -14,6 +14,7 @@
 
 from typing import TYPE_CHECKING
 
+from mirage.utils.loader import lazy_exports
 from mirage.vfs.discord.config import DiscordConfig
 
 if TYPE_CHECKING:
@@ -21,10 +22,8 @@ if TYPE_CHECKING:
 
 __all__ = ["DiscordConfig", "DiscordVFS"]
 
+_EXPORTS: dict[str, tuple[str, ...]] = {
+    "mirage.vfs.discord.discord": ("DiscordVFS",),
+}
 
-def __getattr__(name: str) -> "type[DiscordVFS]":
-    if name == "DiscordVFS":
-        from mirage.vfs.discord.discord import DiscordVFS
-
-        return DiscordVFS
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+__getattr__ = lazy_exports(__name__, _EXPORTS)

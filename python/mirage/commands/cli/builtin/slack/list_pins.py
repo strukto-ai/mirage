@@ -12,11 +12,10 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import json
-
 from mirage.accessor.slack import SlackAccessor
 from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
+from mirage.core.render.json import compact_json_bytes
 from mirage.core.slack.pins import list_pins as list_pins_core
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
@@ -30,5 +29,5 @@ async def list_pins(
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(ctx.flags, ctx.spec)
     items = await list_pins_core(accessor, fl.as_str("channel") or "")
-    out = json.dumps(items, ensure_ascii=False, separators=(",", ":")).encode()
+    out = compact_json_bytes(items)
     return out, IOResult()

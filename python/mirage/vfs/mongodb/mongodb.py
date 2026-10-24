@@ -16,7 +16,6 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 from mirage.accessor.mongodb import MongoDBAccessor
-from mirage.core.mongodb.read import read as _read
 from mirage.core.mongodb.read import stream_any as _read_stream
 from mirage.core.mongodb.readdir import readdir as _readdir
 from mirage.core.mongodb.search import (
@@ -28,7 +27,6 @@ from mirage.core.mongodb.stream import last_lines as _last_lines
 from mirage.core.mongodb.stream import line_count as _line_count
 from mirage.io.types import ByteSource
 from mirage.types import DirListing, FileStat, PathSpec, VFSName
-from mirage.utils.ranges import slice_window
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.mongodb.config import MongoDBConfig
 
@@ -67,13 +65,8 @@ class MongoDBVFS(BaseVFS):
     async def readdir(self, path: PathSpec) -> list[FileStat] | DirListing:
         return await _readdir(self.accessor, path)
 
-    async def read(
-        self, path: PathSpec, offset: int = 0, size: int | None = None
-    ) -> ByteSource:
-        if not offset and size is None:
-            return _read_stream(self.accessor, path)
-        data = await _read(self.accessor, path)
-        return slice_window(data, offset, size)
+    async def read(self, path: PathSpec) -> ByteSource:
+        return _read_stream(self.accessor, path)
 
     async def stat(
         self, path: PathSpec, entry: FileStat | None = None

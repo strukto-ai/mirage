@@ -14,6 +14,7 @@
 
 from typing import TYPE_CHECKING
 
+from mirage.utils.loader import lazy_exports
 from mirage.vfs.databricks_volume.config import DatabricksVolumeConfig
 
 if TYPE_CHECKING:
@@ -23,12 +24,8 @@ if TYPE_CHECKING:
 
 __all__ = ["DatabricksVolumeConfig", "DatabricksVolumeVFS"]
 
+_EXPORTS: dict[str, tuple[str, ...]] = {
+    "mirage.vfs.databricks_volume.databricks_volume": ("DatabricksVolumeVFS",),
+}
 
-def __getattr__(name: str) -> "type[DatabricksVolumeVFS]":
-    if name == "DatabricksVolumeVFS":
-        from mirage.vfs.databricks_volume.databricks_volume import (
-            DatabricksVolumeVFS,
-        )
-
-        return DatabricksVolumeVFS
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+__getattr__ = lazy_exports(__name__, _EXPORTS)

@@ -22,11 +22,9 @@ import { VFSName } from '../../types.ts'
 import { BaseVFS } from '../base.ts'
 import type { Handed } from '../types.ts'
 import type { DirListing, PathSpec, FileStat } from '../../types.ts'
-import { sliceWindow } from '../../utils/ranges.ts'
 import { readdir as airtableReaddir } from '../../core/airtable/readdir.ts'
 import {
   firstLines as airtableFirstLines,
-  read as airtableRead,
   readStream as airtableStream,
 } from '../../core/airtable/read.ts'
 import { stat as airtableStat } from '../../core/airtable/stat.ts'
@@ -105,16 +103,9 @@ export class AirtableVFS extends BaseVFS {
     return airtableReaddir(this.accessor, path, handed?.entry)
   }
 
-  override async read(
-    path: PathSpec,
-    handed?: Handed,
-    offset = 0,
-    size: number | null = null,
-  ): Promise<ByteSource> {
-    if (offset === 0 && size === null)
-      return airtableStream(this.accessor, path, handed?.entry, handed?.parent)
-    const data = await airtableRead(this.accessor, path, handed?.entry, handed?.parent)
-    return sliceWindow(data, offset, size)
+  // eslint-disable-next-line @typescript-eslint/require-await
+  override async read(path: PathSpec, handed?: Handed): Promise<ByteSource> {
+    return airtableStream(this.accessor, path, handed?.entry, handed?.parent)
   }
 
   override stat(path: PathSpec, handed?: Handed): Promise<FileStat> {

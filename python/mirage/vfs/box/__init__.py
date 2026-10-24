@@ -14,6 +14,7 @@
 
 from typing import TYPE_CHECKING
 
+from mirage.utils.loader import lazy_exports
 from mirage.vfs.box.config import BoxConfig
 
 if TYPE_CHECKING:
@@ -21,10 +22,8 @@ if TYPE_CHECKING:
 
 __all__ = ["BoxConfig", "BoxVFS"]
 
+_EXPORTS: dict[str, tuple[str, ...]] = {
+    "mirage.vfs.box.box": ("BoxVFS",),
+}
 
-def __getattr__(name: str) -> "type[BoxVFS]":
-    if name == "BoxVFS":
-        from mirage.vfs.box.box import BoxVFS
-
-        return BoxVFS
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+__getattr__ = lazy_exports(__name__, _EXPORTS)

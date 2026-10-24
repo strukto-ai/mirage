@@ -306,13 +306,11 @@ def check_splitting() -> list[str]:
     Returns:
         list[str]: one line per place splitting is disabled.
     """
-    problems: list[str] = []
-    if re.search(
-        r"splitting:\s*false", (SERVER / "tsup.config.ts").read_text()
-    ):
-        problems.append(
-            "packages/server/tsup.config.ts sets `splitting: false`"
-        )
+    problems: list[str] = [
+        f"{config.relative_to(TS)} sets `splitting: false`"
+        for config in (SERVER / "tsup.config.ts", TS / "tsup.base.config.ts")
+        if re.search(r"splitting:\s*false", config.read_text())
+    ]
     manifest = json.loads((SERVER / "package.json").read_text())
     if "--no-splitting" in manifest.get("scripts", {}).get("build", ""):
         problems.append("packages/server build script passes `--no-splitting`")

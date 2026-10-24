@@ -18,8 +18,7 @@ import { IOResult, type ByteSource } from '../../../../io/types.ts'
 import type { CommandFnResult, Context } from '../../../config.ts'
 import type { PathSpec } from '../../../../types.ts'
 import type { SlackAccessor } from '../../../../accessor/slack.ts'
-
-const ENC = new TextEncoder()
+import { compactJsonBytes } from '../../../../core/render/json.ts'
 
 export async function memberInfo(
   accessor: SlackAccessor,
@@ -29,6 +28,6 @@ export async function memberInfo(
 ): Promise<CommandFnResult> {
   const fl = new FlagView(ctx.flags, ctx.spec)
   const user = await getUserProfile(accessor, fl.asStr('user') ?? '')
-  const out: ByteSource = ENC.encode(JSON.stringify(user))
+  const out: ByteSource = compactJsonBytes(user)
   return [out, new IOResult()]
 }

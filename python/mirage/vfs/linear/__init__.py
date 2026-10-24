@@ -15,16 +15,15 @@
 from typing import TYPE_CHECKING
 
 from mirage.core.linear.config import LinearConfig
+from mirage.utils.loader import lazy_exports
 
 if TYPE_CHECKING:
     from mirage.vfs.linear.linear import LinearVFS
 
 __all__ = ["LinearConfig", "LinearVFS"]
 
+_EXPORTS: dict[str, tuple[str, ...]] = {
+    "mirage.vfs.linear.linear": ("LinearVFS",),
+}
 
-def __getattr__(name: str) -> "type[LinearVFS]":
-    if name == "LinearVFS":
-        from mirage.vfs.linear.linear import LinearVFS
-
-        return LinearVFS
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+__getattr__ = lazy_exports(__name__, _EXPORTS)

@@ -38,7 +38,7 @@
     "dist"
   ],
   "scripts": {
-    "build": "tsup",
+    "build": "tsup --config ../../tsup.base.config.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },

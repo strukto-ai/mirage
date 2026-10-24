@@ -23,7 +23,6 @@ from mirage.core.gmail.stat import stat as _stat
 from mirage.core.google.client import TokenManager
 from mirage.events.base import DeltaHook
 from mirage.types import DirListing, FileStat, PathSpec, VFSName
-from mirage.utils.ranges import slice_window
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.gmail.config import GmailConfig
 
@@ -116,14 +115,9 @@ class GmailVFS(BaseVFS):
         return await _readdir(self.accessor, path, entry)
 
     async def read(
-        self,
-        path: PathSpec,
-        offset: int = 0,
-        size: int | None = None,
-        entry: FileStat | None = None,
+        self, path: PathSpec, entry: FileStat | None = None
     ) -> bytes:
-        data = await _read(self.accessor, path, entry)
-        return slice_window(data, offset, size)
+        return await _read(self.accessor, path, entry)
 
     def delta_hook(self) -> DeltaHook:
         return build_delta_hook(self.accessor)

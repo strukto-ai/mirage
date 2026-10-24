@@ -14,6 +14,7 @@
 
 from typing import TYPE_CHECKING
 
+from mirage.utils.loader import lazy_exports
 from mirage.vfs.lancedb.config import LanceDBConfig
 
 if TYPE_CHECKING:
@@ -21,10 +22,8 @@ if TYPE_CHECKING:
 
 __all__ = ["LanceDBConfig", "LanceDBVFS"]
 
+_EXPORTS: dict[str, tuple[str, ...]] = {
+    "mirage.vfs.lancedb.lancedb": ("LanceDBVFS",),
+}
 
-def __getattr__(name: str) -> "type[LanceDBVFS]":
-    if name == "LanceDBVFS":
-        from mirage.vfs.lancedb.lancedb import LanceDBVFS
-
-        return LanceDBVFS
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+__getattr__ = lazy_exports(__name__, _EXPORTS)

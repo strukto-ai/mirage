@@ -14,6 +14,7 @@
 
 from typing import TYPE_CHECKING
 
+from mirage.utils.loader import lazy_exports
 from mirage.vfs.gridfs.config import GridFSConfig
 
 if TYPE_CHECKING:
@@ -21,10 +22,8 @@ if TYPE_CHECKING:
 
 __all__ = ["GridFSConfig", "GridFSVFS"]
 
+_EXPORTS: dict[str, tuple[str, ...]] = {
+    "mirage.vfs.gridfs.gridfs": ("GridFSVFS",),
+}
 
-def __getattr__(name: str) -> "type[GridFSVFS]":
-    if name == "GridFSVFS":
-        from mirage.vfs.gridfs.gridfs import GridFSVFS
-
-        return GridFSVFS
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+__getattr__ = lazy_exports(__name__, _EXPORTS)

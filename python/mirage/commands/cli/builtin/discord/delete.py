@@ -12,12 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import json
-
 from mirage.accessor.discord import DiscordAccessor
 from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
 from mirage.core.discord.post import delete_message
+from mirage.core.render.json import compact_json_bytes
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -32,7 +31,5 @@ async def delete(
     await delete_message(
         accessor, fl.as_str("channel") or "", fl.as_str("message") or ""
     )
-    out = json.dumps(
-        {"ok": True}, ensure_ascii=False, separators=(",", ":")
-    ).encode()
+    out = compact_json_bytes({"ok": True})
     return out, IOResult()

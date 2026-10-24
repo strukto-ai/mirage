@@ -17,13 +17,11 @@ from typing import Any
 from mirage.accessor.notion import NotionAccessor
 from mirage.core.notion.config import NotionConfig
 from mirage.core.notion.read import first_lines as _first_lines
-from mirage.core.notion.read import read as _read
 from mirage.core.notion.read import read_stream as _read_stream
 from mirage.core.notion.readdir import readdir as _readdir
 from mirage.core.notion.stat import stat as _stat
 from mirage.io.types import ByteSource
 from mirage.types import DirListing, FileStat, PathSpec, VFSName
-from mirage.utils.ranges import slice_window
 from mirage.vfs.base import BaseVFS
 
 VFS_MD = """\
@@ -76,16 +74,9 @@ class NotionVFS(BaseVFS):
         return await _readdir(self.accessor, path, entry, parent)
 
     async def read(
-        self,
-        path: PathSpec,
-        offset: int = 0,
-        size: int | None = None,
-        parent: FileStat | None = None,
+        self, path: PathSpec, parent: FileStat | None = None
     ) -> ByteSource:
-        if not offset and size is None:
-            return _read_stream(self.accessor, path, parent)
-        data = await _read(self.accessor, path, None, parent)
-        return slice_window(data, offset, size)
+        return _read_stream(self.accessor, path, parent)
 
     async def first_lines(
         self, path: PathSpec, n: int, parent: FileStat | None = None

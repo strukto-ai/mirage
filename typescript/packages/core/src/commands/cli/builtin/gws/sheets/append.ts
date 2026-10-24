@@ -19,8 +19,7 @@ import { IOResult, type ByteSource } from '../../../../../io/types.ts'
 import type { CommandFnResult, Context } from '../../../../../commands/config.ts'
 import type { PathSpec } from '../../../../../types.ts'
 import { valuesJsonFromFlags } from './write.ts'
-
-const ENC = new TextEncoder()
+import { compactJsonBytes } from '../../../../../core/render/json.ts'
 
 export async function append(
   accessor: GoogleApiAccessor,
@@ -35,6 +34,6 @@ export async function append(
     fl.asStr('range', 'A1'),
     valuesJsonFromFlags(fl),
   )
-  const out: ByteSource = ENC.encode(JSON.stringify(result))
+  const out: ByteSource = compactJsonBytes(result)
   return [out, new IOResult()]
 }

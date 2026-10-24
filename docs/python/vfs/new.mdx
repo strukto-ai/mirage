@@ -47,9 +47,7 @@ class JiraVFS(BaseVFS):
 
     async def readdir(self, path: PathSpec) -> list[FileStat]: ...
 
-    async def read(
-        self, path: PathSpec, *, offset: int = 0, size: int | None = None
-    ) -> bytes: ...
+    async def read(self, path: PathSpec) -> bytes: ...
 
     async def stat(self, path: PathSpec) -> FileStat: ...
 ```
@@ -72,7 +70,7 @@ file too large to hold: return either from an `async def`, or `yield` chunks
 from one. Mirage collects a stream for a caller that needs the whole file and
 hands bytes to a streaming caller as one chunk. A window of a file is cut from
 the whole `read` unless the class sets `reads_ranges = True`; then `read`
-receives the window's `offset` and `size` (`size=None` means through EOF) and
+also takes the window's `offset` and `size` (`size=None` means through EOF) and
 fetches only that, and `file` then reads only the first bytes it sniffs.
 
 `write` and `append` take `data` as bytes or an async byte iterator (a
@@ -548,9 +546,7 @@ class MyVFS(BaseVFS):
     async def readdir(self, path: PathSpec) -> list[FileStat]:
         return await _readdir(self.accessor, path)
 
-    async def read(
-        self, path: PathSpec, *, offset: int = 0, size: int | None = None
-    ) -> bytes:
+    async def read(self, path: PathSpec) -> bytes:
         return await _read(self.accessor, path)
 
     async def stat(
@@ -628,7 +624,7 @@ places:
 | Before | Now |
 | --- | --- |
 | `BaseVFS(name=..., accessor=..., io=VFSAdapter(read=ReadOps(readdir=..., read_bytes=..., stat=...)))` | a `BaseVFS` subclass defining `readdir`, `read` and `stat` |
-| `read_bytes` and `read_range` | one `read(path, *, offset=0, size=None)`; set `reads_ranges = True` when it fetches only the window |
+| `read_bytes` and `read_range` | one `read(path)`; with `reads_ranges = True` it also takes `offset` and `size` and fetches only the window |
 | `NativeReadOps`, `WriteOps`, `SearchOps`, `DuOps` | the same functions as methods (`exists`, `read_tree`, `write`, ..., `search`, `search_many`) |
 | `read_stream`, `write_stream`, `append_stream` | `read` answering a stream, and `write` and `append` taking one |
 | `ops()`, `make_generic_ops`, `RegisteredOp`, `@op` | nothing to declare: the mount serves the functions; mark a custom one `@vfs_call(effect=...)` |

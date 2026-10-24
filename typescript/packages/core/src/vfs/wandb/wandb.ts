@@ -8,9 +8,8 @@ import type { WandbConfig, WandbConfigRedacted } from '../../core/wandb/config.t
 
 import { type DirListing, VFSName } from '../../types.ts'
 import type { PathSpec, FileStat } from '../../types.ts'
-import { sliceWindow } from '../../utils/ranges.ts'
 import { readdir } from '../../core/wandb/readdir.ts'
-import { read, readStream } from '../../core/wandb/read.ts'
+import { readStream } from '../../core/wandb/read.ts'
 import { stat } from '../../core/wandb/stat.ts'
 import { WALK_LIMIT } from '../constants.ts'
 
@@ -55,15 +54,9 @@ export class WandbVFS extends BaseVFS {
     return readdir(this.accessor, path, handed?.index)
   }
 
-  override async read(
-    path: PathSpec,
-    _handed?: Handed,
-    offset = 0,
-    size: number | null = null,
-  ): Promise<ByteSource> {
-    if (offset === 0 && size === null) return readStream(this.accessor, path)
-    const data = await read(this.accessor, path)
-    return sliceWindow(data, offset, size)
+  // eslint-disable-next-line @typescript-eslint/require-await
+  override async read(path: PathSpec): Promise<ByteSource> {
+    return readStream(this.accessor, path)
   }
 
   override stat(path: PathSpec, handed?: Handed): Promise<FileStat> {

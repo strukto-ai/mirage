@@ -18,8 +18,7 @@ import type { GoogleApiAccessor } from '../../../../../accessor/google_api.ts'
 import { IOResult, type ByteSource } from '../../../../../io/types.ts'
 import type { CommandFnResult, Context } from '../../../../../commands/config.ts'
 import type { PathSpec } from '../../../../../types.ts'
-
-const ENC = new TextEncoder()
+import { compactJsonBytes } from '../../../../../core/render/json.ts'
 
 export async function read(
   accessor: GoogleApiAccessor,
@@ -29,6 +28,6 @@ export async function read(
 ): Promise<CommandFnResult> {
   const fl = new FlagView(ctx.flags)
   const processed = await getMessageProcessed(accessor.tokenManager, fl.asStr('id') ?? '')
-  const out: ByteSource = ENC.encode(JSON.stringify(processed))
+  const out: ByteSource = compactJsonBytes(processed)
   return [out, new IOResult()]
 }

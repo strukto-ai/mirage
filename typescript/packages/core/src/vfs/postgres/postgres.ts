@@ -18,7 +18,6 @@ import {
   follow as postgresFollow,
   lastLines as postgresLastLines,
   lineCount as postgresLineCount,
-  read as postgresRead,
   readStream as postgresReadStream,
 } from '../../core/postgres/read.ts'
 import { readdir as postgresReaddir } from '../../core/postgres/readdir.ts'
@@ -26,7 +25,6 @@ import { linesContaining as postgresLinesContaining } from '../../core/postgres/
 import { stat as postgresStat } from '../../core/postgres/stat.ts'
 import type { ByteSource } from '../../io/types.ts'
 import type { DirListing, FileStat, PathSpec } from '../../types.ts'
-import { sliceWindow } from '../../utils/ranges.ts'
 import { BaseVFS } from '../base.ts'
 import type { Handed } from '../types.ts'
 
@@ -63,16 +61,9 @@ export class PostgresVFSBase extends BaseVFS<PostgresAccessor> {
     return postgresReaddir(this.accessor, path)
   }
 
-  override async read(
-    path: PathSpec,
-    handed?: Handed,
-    offset = 0,
-    size: number | null = null,
-  ): Promise<ByteSource> {
-    if (offset === 0 && size === null)
-      return postgresReadStream(this.accessor, path, handed?.entry ?? null, handed?.parent ?? null)
-    const data = await postgresRead(this.accessor, path, null, handed?.parent)
-    return sliceWindow(data, offset, size)
+  // eslint-disable-next-line @typescript-eslint/require-await
+  override async read(path: PathSpec, handed?: Handed): Promise<ByteSource> {
+    return postgresReadStream(this.accessor, path, handed?.entry ?? null, handed?.parent ?? null)
   }
 
   override stat(path: PathSpec, handed?: Handed): Promise<FileStat> {

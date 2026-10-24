@@ -22,7 +22,6 @@ import { type DirListing, VFSName } from '../../types.ts'
 
 import { redactGCalConfig, type GCalConfig, type GCalConfigRedacted } from './config.ts'
 import type { PathSpec, FileStat } from '../../types.ts'
-import { sliceWindow } from '../../utils/ranges.ts'
 import { readdir as gcalReaddir } from '../../core/gcal/readdir.ts'
 import { filesContaining as gcalFilesContaining } from '../../core/gcal/search.ts'
 import { read as gcalRead, readMany as gcalReadMany } from '../../core/gcal/read.ts'
@@ -136,14 +135,8 @@ export class GCalVFS extends BaseVFS {
     return gcalReaddir(this.accessor, path)
   }
 
-  override async read(
-    path: PathSpec,
-    _handed?: Handed,
-    offset = 0,
-    size: number | null = null,
-  ): Promise<Uint8Array> {
-    const data = await gcalRead(this.accessor, path)
-    return offset === 0 && size === null ? data : sliceWindow(data, offset, size)
+  override async read(path: PathSpec): Promise<Uint8Array> {
+    return gcalRead(this.accessor, path)
   }
 
   override readMany(paths: PathSpec[], limit: number): Promise<Map<string, Uint8Array>> {

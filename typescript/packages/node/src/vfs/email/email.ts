@@ -25,7 +25,6 @@ import {
 } from '../../core/email/config.ts'
 import type { DirListing, PathSpec, FileStat } from '@struktoai/mirage-core/types'
 import type { Handed } from '@struktoai/mirage-core/vfs/types'
-import { sliceWindow } from '@struktoai/mirage-core/utils/ranges'
 import { readdir as emailReaddir } from '../../core/email/readdir.ts'
 import { read as emailRead, readMany as emailReadMany } from '../../core/email/read.ts'
 import { stat as emailStat } from '../../core/email/stat.ts'
@@ -87,14 +86,8 @@ export class EmailVFS extends BaseVFS {
     return emailReaddir(this.accessor, path, handed?.entry)
   }
 
-  override async read(
-    path: PathSpec,
-    handed?: Handed,
-    offset = 0,
-    size: number | null = null,
-  ): Promise<Uint8Array> {
-    const data = await emailRead(this.accessor, path, handed?.entry)
-    return offset === 0 && size === null ? data : sliceWindow(data, offset, size)
+  override async read(path: PathSpec, handed?: Handed): Promise<Uint8Array> {
+    return emailRead(this.accessor, path, handed?.entry)
   }
 
   override readMany(
