@@ -40,40 +40,15 @@ import { write } from './write.ts'
 const ENC = new TextEncoder()
 const A_TXT = spec('a.txt')
 
-function fakeBucket(keys: string[]): unknown {
-  return {
-    openUploadStream: (key: string) => {
-      keys.push(key)
-      const handlers: Record<string, () => void> = {}
-      return {
-        // The new revision's _id, which put reports as the object's
-        // token the way a real GridFSBucketWriteStream does.
-        id: `oid-${String(keys.length)}`,
-        on: (event: string, handler: () => void) => {
-          handlers[event] = handler
-        },
-        end: () => {
-          handlers.finish?.()
-        },
-      }
-    },
-  }
-}
-
 describe('gridfs put token', () => {
   it('reports the new revision as the object token', async () => {
     // gridfs spells a token as the uploaded revision's _id, the same
     // string `head` answers for the latest revision.
-    const keys: string[] = []
-    vi.mocked(clientMod.bucket).mockResolvedValue(fakeBucket(keys) as never)
-    const accessor = new GridFSAccessor({
-      uri: 'mongodb://localhost:27017',
-      database: 'db',
-    } as GridFSConfig)
-    const meta = await DRIVER.put(accessor, 'a/b.txt', new TextEncoder().encode('hi'))
-    expect(meta?.fingerprint).toBe('oid-1')
-    expect(meta?.revision).toBe('oid-1')
-    expect(meta?.size).toBe(2)
+    store = new FakeStore()
+    vi.mocked(clientMod.bucket).mockResolvedValue(store as never)
+    const meta = await DRIVER.put(makeAccessor(store), 'a/b.txt', new TextEncoder().encode('hi'))
+    const [oid] = store.ids('a/b.txt')
+    expect([meta?.fingerprint, meta?.revision, meta?.size]).toEqual([oid, oid, 2])
   })
 })
 

@@ -186,18 +186,6 @@ export async function retag(
 }
 
 /**
- * Move every revision matching a query into the trash: what `rm` and an
- * overwriting `mv` do instead of deleting. The name reads as gone, and the
- * revisions stay for pinned reads until `keepRevisions` prunes them.
- */
-export async function trash(
-  accessor: GridFSAccessor,
-  query: Record<string, unknown>,
-): Promise<void> {
-  await retag(accessor, query, TRASH_PREFIX)
-}
-
-/**
  * Delete the revisions past `keepRevisions` of each matching name, newest
  * first; an unset `keepRevisions` keeps them all. The query names the
  * revisions to count, live or trashed.

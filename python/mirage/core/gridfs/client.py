@@ -168,20 +168,6 @@ async def retag(
     return result.matched_count
 
 
-async def trash(accessor: GridFSAccessor, query: dict[str, Any]) -> None:
-    """Move every revision matching a query into the trash.
-
-    What ``rm`` and an overwriting ``mv`` do instead of deleting: the
-    name reads as gone, and the revisions stay for pinned reads until
-    ``keep_revisions`` prunes them.
-
-    Args:
-        accessor (GridFSAccessor): GridFS accessor.
-        query (dict[str, Any]): fs.files filter selecting live revisions.
-    """
-    await retag(accessor, query, TRASH_PREFIX)
-
-
 async def prune(accessor: GridFSAccessor, query: dict[str, Any]) -> None:
     """Delete the revisions past ``keep_revisions`` of each matching name.
 

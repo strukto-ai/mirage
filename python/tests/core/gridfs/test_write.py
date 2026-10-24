@@ -11,7 +11,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
-import asyncio
 from unittest.mock import AsyncMock, Mock
 
 import pytest
@@ -29,36 +28,16 @@ from tests.fixtures.gridfs_store import FakeStore, make_accessor
 A_TXT = PathSpec(vfs_path="a.txt", virtual="/mnt/a.txt", directory="/mnt")
 
 
-class _FakeBucket:
-    def __init__(self, uploads: list[tuple[str, bytes]]) -> None:
-        self._uploads = uploads
-
-    async def upload_from_stream(self, key: str, data: bytes) -> str:
-        self._uploads.append((key, data))
-        # pymongo answers the new revision's ObjectId; _put spells it as
-        # the object's token, so the fake has to answer one too.
-        return f"oid-{len(self._uploads)}"
-
-
-def test_write_reports_the_new_revision_as_the_object_token(monkeypatch):
+@pytest.mark.asyncio
+async def test_write_reports_the_new_revision_as_the_object_token(
+    store: FakeStore,
+):
     """gridfs spells a token as the uploaded revision's _id, the same
     string ``_head`` answers for the latest revision."""
-    uploads: list[tuple[str, bytes]] = []
-    monkeypatch.setattr(
-        gridfs_driver, "bucket", lambda accessor: _FakeBucket(uploads)
-    )
-    meta = asyncio.run(
-        gridfs_driver.DRIVER.put(
-            GridFSAccessor(
-                GridFSConfig(uri="mongodb://localhost:27017", database="db")
-            ),
-            "a/b.txt",
-            b"hi",
-        )
-    )
+    meta = await gridfs_driver.DRIVER.put(make_accessor(), "a/b.txt", b"hi")
     assert meta is not None
-    assert meta.fingerprint == "oid-1"
-    assert meta.revision == "oid-1"
+    (oid,) = store.ids("a/b.txt")
+    assert meta.fingerprint == meta.revision == str(oid)
     assert meta.size == 2
 
 
