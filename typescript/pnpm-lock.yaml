@@ -97,9 +97,6 @@ importers:
       '@types/node':
         specifier: ^22.0.0
         version: 22.19.17
-      aws-sdk-client-mock:
-        specifier: ^4.1.0
-        version: 4.1.0
       eslint:
         specifier: ^9.0.0
         version: 9.39.4(jiti@2.7.0)
@@ -822,6 +819,9 @@ importers:
       '@zkochan/fuse-native':
         specifier: ^0.1.0
         version: 0.1.0(patch_hash=99469ae5d18239b8df5dca4b9b2a3a292198afc2e16f229263342359c3e68ee7)
+      aws-sdk-client-mock:
+        specifier: ^4.1.0
+        version: 4.1.0
       e2b:
         specifier: ^2.45.0
         version: 2.45.0

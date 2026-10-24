@@ -100,7 +100,8 @@ def mcp_cmd(
         fail("pass a config or --workspace, not both", exit_code=2)
     else:
         path = None
-    from mirage.server.mcp.relay import relay_stdio
+    # Load the protocol server only for this CLI verb.
+    from mirage.server.mcp.relay import relay_stdio  # noqa: PLC0415
 
     relay_workspace(
         path, workspace_id, session_id, "mcp", relay_stdio, all_calls

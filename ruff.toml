@@ -20,7 +20,7 @@ exclude = ["python/mirage/utils/generated/*"]
 # longer suppresses anything is removed instead of piling up. Syntax upgrades
 # stay with pyupgrade: Ruff's UP rules produce broader source changes under
 # this repository's configuration.
-select = ["E", "W", "F", "I", "RUF100"]
+select = ["E", "W", "F", "I", "PLC0415", "RUF100"]
 # Match autoflake's unused-variable cleanup without enabling every unsafe Ruff
 # fix. F601 duplicate keys remain errors but are corrected manually.
 extend-safe-fixes = ["F841"]
@@ -35,6 +35,9 @@ known-first-party = ["mirage", "tests"]
 max-line-length = 88
 
 [lint.per-file-ignores]
+# Import placement is a production-layer contract; tests, integration runners
+# and examples may load optional services inside the scenario that uses them.
+"!python/mirage/**" = ["PLC0415"]
 # Ruff measures E501 in display columns, so East Asian characters count as two.
 # These CJK prose fixtures passed flake8's character-based measurement.
 "python/tests/utils/test_sanitize.py" = ["E501"]
