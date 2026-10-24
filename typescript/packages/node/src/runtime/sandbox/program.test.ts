@@ -63,6 +63,7 @@ function shRunner(
   script: string,
   output?: (chunk: Uint8Array) => Promise<void>,
   direct = false,
+  stdin: AsyncIterable<Uint8Array> | null = null,
 ): ProcessHandle {
   const abort = new AbortController()
   return new ProcessSupervisor(runWithExecution).start({
@@ -74,7 +75,7 @@ function shRunner(
     },
     run: async () =>
       (
-        await runProgram('sh', null, ['-c', script], null, {
+        await runProgram('sh', null, ['-c', script], stdin, {
           signal: abort.signal,
           direct,
           ...(output === undefined ? {} : { output }),
@@ -232,6 +233,30 @@ describe('runProgram', () => {
     expect(runner.terminate(15)).toBe(true)
     await runner.join()
     expect(readFileSync(said, 'utf8')).toBe('bye\n')
+  })
+
+  // The input ends before the grace starts, as a closed pipe would: a
+  // handler that reads its input to the end gets there instead of waiting
+  // on a source that is still open until KILL.
+  it('ends the input of a child whose handler reads it to the end', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mirage-program-'))
+    const [pidFile, said] = [join(dir, 'pid'), join(dir, 'said')]
+    const program = [
+      'const fs = require("node:fs")',
+      'process.on("SIGTERM", () => { let n = 0; process.stdin.on("data", (c) => { n += c.length }); ' +
+        `process.stdin.on("end", () => { fs.writeFileSync("${said}", String(n)); process.exit(0) }) })`,
+      `fs.writeFileSync("${pidFile}", String(process.pid))`,
+      'setInterval(() => undefined, 1000)',
+    ].join('\n')
+    async function* endless(): AsyncIterable<Uint8Array> {
+      yield new TextEncoder().encode('x')
+      await new Promise<void>(() => undefined)
+    }
+    const runner = shRunner(`exec '${process.execPath}' -e '${program}'`, undefined, true, endless())
+    await escapedPid(pidFile)
+    expect(runner.terminate(15)).toBe(true)
+    await runner.join()
+    expect(readFileSync(said, 'utf8')).toBe('1')
   })
 
   // A program that ignores the signal still ends: KILL follows the grace.

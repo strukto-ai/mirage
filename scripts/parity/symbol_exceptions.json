@@ -201,6 +201,7 @@
     "_spawn": "run_program and open_program_pipe share one loop.subprocess_exec spawn that keeps the transport stop_tree closes; Node's spawn hands back a ChildProcess whose streams close themselves."
    },
    "typescript_only": {
+    "onHostPath": "Finds a program on the host PATH before the child starts in another directory with a clean env; Python uses shutil.which, and node's standard library has no PATH lookup.",
     "untilInputCloses": "Node waits on Writable close events with removable listeners; Python cancels the feeding asyncio task when process.wait completes."
    }
   },
@@ -807,7 +808,6 @@
   },
   "runtime/python/local/runtime": {
    "typescript_only": {
-    "onHostPath": "Finds the interpreter on the host PATH before the child gets a clean env; Python uses shutil.which, and node's standard library has no PATH lookup.",
     "isExecutable": "Checks that the program found on PATH is an executable file; Python's shutil.which already checks that."
    }
   },

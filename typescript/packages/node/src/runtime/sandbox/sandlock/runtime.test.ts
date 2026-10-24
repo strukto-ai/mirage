@@ -12,9 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { mkdtemp, realpath, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { delimiter, join } from 'node:path'
 import { MountMode, PathSpec } from '@struktoai/mirage-core/types'
 import type { SessionProfile } from '@struktoai/mirage-core/policy/profile'
 import { buildRuntime } from '@struktoai/mirage-core/runtime/table'
@@ -126,6 +126,18 @@ else {
     expect(runtime).not.toBeInstanceOf(LanguageRuntime)
     expect([runtime.filesystem, runtime.reach]).toEqual([[], 'process'])
     expect(() => buildRuntime('sandlock', { config: { home: 'python3' } })).toThrow('home')
+  })
+
+  // A relative PATH entry is the host's directory, never the session's: a
+  // `sandlock` there must not stand in for the wrapper and run unconfined.
+  it('never runs a sandlock in the session directory', async () => {
+    const session = join(dir, 'session')
+    await mkdir(session)
+    await writeFile(join(session, 'sandlock'), '#!/bin/sh\necho planted\n', { mode: 0o755 })
+    vi.stubEnv('PATH', `.${delimiter}${dir}`)
+    const result = await execute(new SandlockRuntime(), ['node'], session)
+    const data = JSON.parse(DEC.decode(result.stdout)) as Capture
+    expect(data.argv.slice(-2)).toEqual(['--', 'node'])
   })
 
   it('reports an absent sandlock', async () => {

@@ -18,6 +18,7 @@ import os
 import shlex
 import signal
 import sys
+from collections.abc import AsyncIterator
 
 import pytest
 
@@ -185,11 +186,14 @@ async def test_cancelling_a_call_kills_what_the_child_started(tmp_path):
 
 
 def _start_runner(
-    supervisor: ProcessSupervisor, script: str, direct: bool = False
+    supervisor: ProcessSupervisor,
+    script: str,
+    direct: bool = False,
+    stdin: AsyncIterator[bytes] | None = None,
 ):
     async def run() -> int:
         ran = await run_program(
-            "sh", None, ["-c", script], None, direct=direct
+            "sh", None, ["-c", script], stdin, direct=direct
         )
         return ran.exit_code
 
@@ -377,6 +381,42 @@ async def test_a_handler_writing_its_output_finishes_in_the_grace(tmp_path):
     async with asyncio.timeout(5):
         await runner.join()
     assert said.read_text() == "bye\n"
+
+
+# The input ends before the grace starts, as a closed pipe would: a
+# handler that reads its input to the end gets there instead of waiting
+# on a source that is still open until KILL.
+@pytest.mark.asyncio
+async def test_a_handler_reading_its_input_sees_it_end(tmp_path):
+    pid_file, said = tmp_path / "pid", tmp_path / "said"
+    program = (
+        "import os, signal, sys, time\n"
+        "def stop(*_):\n"
+        "    data = sys.stdin.buffer.read()\n"
+        f"    open({str(said)!r}, 'w').write(str(len(data)))\n"
+        "    os._exit(0)\n"
+        "signal.signal(signal.SIGTERM, stop)\n"
+        f"open({str(pid_file)!r}, 'w').write(str(os.getpid()))\n"
+        "while True:\n"
+        "    time.sleep(0.05)\n"
+    )
+
+    async def endless() -> AsyncIterator[bytes]:
+        yield b"x"
+        await asyncio.Event().wait()
+
+    runner = _start_runner(
+        ProcessSupervisor(bind=run_with_execution),
+        f"exec {shlex.quote(sys.executable)} -c {shlex.quote(program)}",
+        True,
+        endless(),
+    )
+    await _wait_for_pid(pid_file)
+    assert runner.terminate(signal.SIGTERM)
+    async with asyncio.timeout(5):
+        await runner.join()
+    assert said.read_text() == "1"
+    assert runner.program_code == 0
 
 
 # A program that ignores the signal still ends: KILL follows the grace.

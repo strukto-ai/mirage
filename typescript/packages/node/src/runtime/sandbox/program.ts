@@ -15,7 +15,9 @@
 import { type ChildProcess, spawn } from 'node:child_process'
 import { constants } from 'node:os'
 import { once } from 'node:events'
+import { accessSync, constants as fsConstants, statSync } from 'node:fs'
 import { stat } from 'node:fs/promises'
+import { delimiter, resolve } from 'node:path'
 import { Readable, type Writable } from 'node:stream'
 import { setTimeout as delay } from 'node:timers/promises'
 import type { OutputFn, RunResult, SandboxPipe } from '@struktoai/mirage-core/runtime/types'
@@ -32,6 +34,44 @@ import { debuglog } from 'node:util'
 import { asyncChain, closeQuietly } from '@struktoai/mirage-core/io/stream'
 import type { ByteSource } from '@struktoai/mirage-core/io/types'
 import { abortable, makeAbortError } from '@struktoai/mirage-core/utils/abort'
+
+/**
+ * Where the host's own PATH finds a program, as Python's `shutil.which`
+ * does, as an absolute path: a child's environment may carry no host PATH,
+ * and a relative entry would be read against the child's directory, so the
+ * lookup cannot be left to spawn. An empty entry is the
+ * current directory, as for the shell. A name with a slash is taken as
+ * given, and one the PATH lacks too, so spawn reports it missing. On
+ * Windows a name without one of `PATHEXT`'s suffixes is tried with each.
+ */
+export function onHostPath(name: string): string {
+  if (name.includes('/')) return name
+  const suffixes =
+    process.platform === 'win32'
+      ? (process.env.PATHEXT ?? '.COM;.EXE;.BAT;.CMD').split(';').filter((s) => s !== '')
+      : []
+  const names =
+    suffixes.length === 0 || suffixes.some((s) => name.toLowerCase().endsWith(s.toLowerCase()))
+      ? [name]
+      : suffixes.map((s) => name + s)
+  for (const dir of (process.env.PATH ?? '').split(delimiter)) {
+    for (const each of names) {
+      const candidate = resolve(dir, each)
+      try {
+        if (statSync(candidate, { throwIfNoEntry: false })?.isFile() !== true) continue
+        accessSync(candidate, fsConstants.X_OK)
+        return candidate
+      } catch (err) {
+        const code = (err as NodeJS.ErrnoException).code
+        if (code === undefined) throw err
+        // Not usable here (not executable, an unreadable entry): the next
+        // entry may be. Opt-in (NODE_DEBUG=mirage), on stderr.
+        debuglog('mirage')('%s is not usable: %s', candidate, code)
+      }
+    }
+  }
+  return name
+}
 
 /** Where and how `runProgram` starts its child. */
 export interface ProgramOptions {
@@ -101,6 +141,10 @@ export async function runProgram(
   // Set by the abort listener, which flow analysis does not follow.
   let stopping = null as Promise<void> | null
   const abort = (): void => {
+    // The input ends first, as a pipe whose writer went away does: a
+    // handler reading it to the end gets there in the grace instead of
+    // waiting on a source that never ends.
+    child.stdin.end()
     const signum = stopSignal(runner)
     if (signum === null) {
       stopTree(child)

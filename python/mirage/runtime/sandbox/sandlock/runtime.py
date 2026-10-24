@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import os
+import shutil
 from collections.abc import Sequence
 from typing import Any
 
@@ -110,13 +111,18 @@ class SandlockRuntime(
         refusal = await cwd_refusal(argv[0], ctx.cwd.virtual)
         if refusal is not None:
             return refusal
+        # Found from this process's directory and made absolute: the
+        # wrapper starts in the session's, where a relative PATH entry
+        # would otherwise find a `sandlock` the session wrote.
+        found = shutil.which("sandlock")
+        if found is None:
+            raise RuntimeError(SANDLOCK_HINT)
         wrapper = ["run", *self.policy_argv(), "--clean-env"]
         for key, value in {**self.config.env, **(ctx.env or {})}.items():
             wrapper += ["--env", f"{key}={value}"]
-        # Only host PATH locates `sandlock`; requested variables go to the
-        # confined child.
+        # Requested variables go to the confined child.
         return await run_program(
-            "sandlock",
+            os.path.abspath(found),
             SANDLOCK_HINT,
             [*wrapper, "--", *argv],
             ctx.stdin,

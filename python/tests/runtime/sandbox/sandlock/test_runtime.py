@@ -106,6 +106,24 @@ def test_registry_declares_process_and_shell_without_language_or_workspace_fs():
         SandlockRuntime(config={"home": "python3"})
 
 
+# A relative PATH entry is the host's directory, never the session's: a
+# `sandlock` there must not stand in for the wrapper and run unconfined.
+@pytest.mark.asyncio
+async def test_a_sandlock_in_the_session_directory_never_runs(
+    cli, monkeypatch
+):
+    session = cli / "session"
+    session.mkdir()
+    planted = session / "sandlock"
+    planted.write_text("#!/bin/sh\necho planted\n")
+    planted.chmod(0o755)
+    monkeypatch.setenv("PATH", f".{os.pathsep}{cli}")
+    result = await SandlockRuntime().execute(
+        [], ["node"], _cwd(session), kind="process"
+    )
+    assert json.loads(result.stdout)["argv"][-2:] == ["--", "node"]
+
+
 @pytest.mark.asyncio
 async def test_missing_cli_fails_loud(tmp_path, monkeypatch):
     monkeypatch.setenv("PATH", str(tmp_path))

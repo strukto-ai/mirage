@@ -151,6 +151,10 @@ async def run_program(
         runner = current_caller().process
         signum = stop_signal(runner)
         try:
+            # The input ends first, as a pipe whose writer went away
+            # does: a handler reading it to the end gets there in the
+            # grace instead of waiting on a source that never ends.
+            await end()
             if signum is not None:
                 for reader in (reading, erring):
                     reader.cancel()

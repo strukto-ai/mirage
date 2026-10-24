@@ -14,9 +14,9 @@
 
 import type { ByteSource } from '@struktoai/mirage-core/io/types'
 import type { ChildProcess } from 'node:child_process'
-import { accessSync, constants, statSync } from 'node:fs'
+import { accessSync, constants } from 'node:fs'
 import { access, stat } from 'node:fs/promises'
-import { delimiter, isAbsolute, resolve } from 'node:path'
+import { isAbsolute } from 'node:path'
 import { debuglog } from 'node:util'
 import { fsStrerror } from '@struktoai/mirage-core/errors/fs'
 import { resolveHome, type RuntimeOptions } from '@struktoai/mirage-core/runtime/config'
@@ -30,46 +30,9 @@ import type { Context } from '@struktoai/mirage-core/commands/config'
 import type { PathSpec } from '@struktoai/mirage-core/types'
 import type { OutputFn, Program, RunResult } from '@struktoai/mirage-core/runtime/types'
 import { LOCAL_CONFIG_KEYS, type LocalConfig } from './config.ts'
-import { closeChildren, cwdRefusal, runProgram } from '../../sandbox/program.ts'
+import { closeChildren, cwdRefusal, onHostPath, runProgram } from '../../sandbox/program.ts'
 
 const LOCAL_HOME_ENV = 'MIRAGE_LOCAL_HOME'
-
-/**
- * Where the host's own PATH finds an interpreter, as Python's `shutil.which`
- * finds the twin's, as an absolute path: the program's environment carries
- * no host PATH, so the lookup cannot be left to spawn. An empty entry is the
- * current directory, as for the shell. A name with a slash is taken as
- * given, and one the PATH lacks too, so spawn reports it missing. On
- * Windows a name without one of `PATHEXT`'s suffixes is tried with each.
- */
-function onHostPath(name: string): string {
-  if (name.includes('/')) return name
-  const suffixes =
-    process.platform === 'win32'
-      ? (process.env.PATHEXT ?? '.COM;.EXE;.BAT;.CMD').split(';').filter((s) => s !== '')
-      : []
-  const names =
-    suffixes.length === 0 || suffixes.some((s) => name.toLowerCase().endsWith(s.toLowerCase()))
-      ? [name]
-      : suffixes.map((s) => name + s)
-  for (const dir of (process.env.PATH ?? '').split(delimiter)) {
-    for (const each of names) {
-      const candidate = resolve(dir, each)
-      try {
-        if (statSync(candidate, { throwIfNoEntry: false })?.isFile() !== true) continue
-        accessSync(candidate, constants.X_OK)
-        return candidate
-      } catch (err) {
-        const code = (err as NodeJS.ErrnoException).code
-        if (code === undefined) throw err
-        // Not usable here (not executable, an unreadable entry): the next
-        // entry may be. Opt-in (NODE_DEBUG=mirage), on stderr.
-        debuglog('mirage')('local: %s is not usable: %s', candidate, code)
-      }
-    }
-  }
-  return name
-}
 
 /**
  * Whether a resolved program is an executable file. Asynchronous, as is
