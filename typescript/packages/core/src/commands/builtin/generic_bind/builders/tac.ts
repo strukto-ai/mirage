@@ -76,6 +76,10 @@ async function* reversed(
 }
 
 const tac: CommandFn = async (_accessor, paths, _texts, ctx) => {
+  // Operands resolve first: nothing may throw between opening the engine and
+  // handing it to the output that closes it.
+  const files = commandFiles(ctx, paths)
+  const resolved = await resolveOrEmpty(files, paths)
   const fl = new FlagView(ctx.flags, specOf('tac'))
   const separator = fl.asStr('separator')
   let engine: OpenStream
@@ -90,8 +94,6 @@ const tac: CommandFn = async (_accessor, paths, _texts, ctx) => {
     if (!(err instanceof StreamRefusal)) throw err
     return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(`${err.message}\n`) })]
   }
-  const files = commandFiles(ctx, paths)
-  const resolved = await resolveOrEmpty(files, paths)
   const stream = stdinStream(dirAwareStream(files, ctx), ctx.stdin)
   const io = new IOResult()
   const sources =

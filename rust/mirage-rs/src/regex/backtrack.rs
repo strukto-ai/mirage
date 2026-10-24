@@ -764,18 +764,20 @@ impl Program {
 
     /// Where the longest match that starts at `start` ends, the subject
     /// being `hay` whole.
+    /// A search that runs out of `budget` resumes when called again with
+    /// `resume`.
     pub(crate) fn longest_from(
         &self,
         hay: &[u8],
         start: usize,
+        resume: bool,
         scratch: &mut Scratch,
-    ) -> Option<usize> {
-        self.fresh(hay.len(), start, scratch);
-        let mut budget = u64::MAX;
-        match self.run(hay, 0, hay.len(), start, true, scratch, &mut budget, false) {
-            Step::Done(found) => found,
-            Step::Paused => None,
+        budget: &mut u64,
+    ) -> Step<Option<usize>> {
+        if !resume {
+            self.fresh(hay.len(), start, scratch);
         }
+        self.run(hay, 0, hay.len(), start, true, scratch, budget, resume)
     }
 
     /// Forget the states an earlier search failed from, for one starting

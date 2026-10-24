@@ -7,8 +7,9 @@ use crate::{Stream, StreamError, parse_config};
 
 /// The fewest input bytes one request reads.
 const BLOCK: u64 = 1 << 16;
-/// The most places a regular expression is tried at per call.
-const STEPS: usize = 1 << 14;
+/// The most places a regular expression is tried at, and steps a
+/// backtracked attempt takes, per call.
+const STEPS: u64 = 1 << 16;
 /// The most of one record a regular expression is searched in: GNU holds
 /// the record it searches and runs out of memory past what it can get.
 #[cfg(not(test))]
@@ -144,7 +145,7 @@ impl Tac {
     }
 
     /// The latest separator below `limit` in what is held.
-    fn find(&mut self, budget: &mut usize) -> Result<Option<(u64, u64)>, ()> {
+    fn find(&mut self, budget: &mut u64) -> Result<Option<(u64, u64)>, ()> {
         let start = self.start;
         let span = |at: usize, len: usize| (start + at as u64, start + (at + len) as u64);
         let top = usize::try_from(self.limit - start).unwrap_or(usize::MAX);
@@ -312,5 +313,27 @@ mod tests {
         stream.take_stderr(&mut err);
         assert_eq!((out.len(), stream.status()), (0, 1));
         assert_eq!(err, b"tac: memory exhausted\n");
+    }
+
+    #[test]
+    fn a_backtracked_attempt_goes_on_over_calls() {
+        let separator = r#""\\(a+\\)+\\1b\\|x""#;
+        let config =
+            format!(r#"{{"separator":{separator},"before":false,"regex":true,"utf8":false}}"#);
+        let mut stream = open(config.as_bytes()).expect("opens");
+        let mut input = b"x".to_vec();
+        input.extend([b'a'; 20]);
+        stream.begin(br#"{"size":21}"#).expect("begins");
+        let mut out = Vec::new();
+        stream.drain(&mut out).expect("drains");
+        stream.request(&mut Vec::new()).expect("reads");
+        stream.respond(b"{}", &input, &mut out).expect("reads");
+        let mut calls = 0;
+        while stream.busy() {
+            stream.drain(&mut out).expect("drains");
+            calls += 1;
+        }
+        assert!(calls > 1, "{calls}");
+        assert_eq!(out, [&input[1..], b"x"].concat());
     }
 }

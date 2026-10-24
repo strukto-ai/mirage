@@ -47,6 +47,8 @@ pub(crate) struct Posix {
     /// The bytes a match can start with, which a backward search alone
     /// tries; found on its first call.
     starts: Option<[bool; 256]>,
+    /// The place whose backtracked attempt ran out of steps.
+    suspended: Option<usize>,
 }
 
 impl Posix {
@@ -119,6 +121,7 @@ impl Posix {
             scratch: Scratch::default(),
             utf8: options.utf8,
             starts: None,
+            suspended: None,
         })
     }
 
@@ -196,14 +199,16 @@ impl Posix {
 
     /// The latest place in `from..to` a match starts, tried from `to`
     /// down, and where the longest match there ends, `hay` being the
-    /// whole subject: tac's backward search. At most `budget` places are
-    /// tried; `Err` holds the place below which none has been.
+    /// whole subject: tac's backward search. Each place tried and each
+    /// step of a backtracked attempt spends `budget`; out of it, `Err`
+    /// holds the place below which none has been, and an attempt cut short
+    /// goes on where it stopped on the next call.
     pub(crate) fn latest(
         &mut self,
         hay: &[u8],
         from: usize,
         to: usize,
-        budget: &mut usize,
+        budget: &mut u64,
     ) -> Result<Option<(usize, usize)>, usize> {
         if let Some(literal) = &self.literal {
             let stop = (to + literal.len() - 1).min(hay.len());
@@ -222,26 +227,41 @@ impl Posix {
                 return Err(below);
             }
             *budget -= 1;
-            below = from + at;
-            if self.utf8 && super::splits_char(hay, below) {
+            let place = from + at;
+            if self.utf8 && super::splits_char(hay, place) {
+                below = place;
                 continue;
             }
-            if let Some(stop) = self.anchored(hay, below) {
-                return Ok(Some((below, stop)));
+            let resume = self.suspended.take() == Some(place);
+            match self.anchored(hay, place, resume, budget) {
+                Step::Paused => {
+                    self.suspended = Some(place);
+                    return Err(place + 1);
+                }
+                Step::Done(Some(stop)) => return Ok(Some((place, stop))),
+                Step::Done(None) => below = place,
             }
         }
         Ok(None)
     }
 
     /// Where the longest match that starts at `at` ends.
-    fn anchored(&mut self, hay: &[u8], at: usize) -> Option<usize> {
-        if let Some((dfa, cache)) = self.automata.as_mut().and_then(|a| a.longest.as_mut()) {
+    fn anchored(
+        &mut self,
+        hay: &[u8],
+        at: usize,
+        resume: bool,
+        budget: &mut u64,
+    ) -> Step<Option<usize>> {
+        let automaton = self.automata.as_mut().and_then(|a| a.longest.as_mut());
+        if let Some((dfa, cache)) = automaton.filter(|_| !resume) {
             let input = Input::new(hay).span(at..hay.len()).anchored(Anchored::Yes);
             if let Ok(found) = dfa.try_search_fwd(cache, &input) {
-                return found.map(|end| end.offset());
+                return Step::Done(found.map(|end| end.offset()));
             }
         }
-        self.program.longest_from(hay, at, &mut self.scratch)
+        self.program
+            .longest_from(hay, at, resume, &mut self.scratch, budget)
     }
 
     /// Whether the pattern matches anywhere in `hay`, as sed's addresses

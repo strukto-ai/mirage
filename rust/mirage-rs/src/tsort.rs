@@ -39,6 +39,7 @@ enum Phase {
     /// Numbering the names in byte order.
     Rank(btree_map::IntoIter<Box<[u8]>, u32>),
     Link(usize),
+    Seed(usize),
     Order,
     Done,
 }
@@ -74,6 +75,13 @@ struct Tsort {
     leaders: Vec<BTreeMap<u32, u32>>,
     waiting: Vec<u32>,
     ready: VecDeque<u32>,
+    /// The name being placed, and its followers left to release, newest
+    /// last.
+    placing: u32,
+    after: Vec<u32>,
+    /// A loop's walk back so far, each name and where it was met.
+    trail: Vec<u32>,
+    met: HashMap<u32, usize>,
     /// No name below this rank is left: with none ready, a name waiting
     /// on none is out.
     lowest: usize,
@@ -118,70 +126,65 @@ impl Tsort {
         }
     }
 
-    fn closing_loop(&self, start: u32) -> Vec<u32> {
-        let mut trail = Vec::new();
-        let mut met = HashMap::new();
-        let mut here = start;
-        loop {
-            let before = &self.leaders[here as usize];
-            let next = before
-                .range(here + 1..)
-                .next()
-                .or_else(|| before.iter().next());
-            let Some((&step, _)) = next else {
-                return trail;
-            };
-            if let Some(&at) = met.get(&step) {
-                let mut found = trail.split_off(at);
-                found.reverse();
-                return found;
-            }
-            met.insert(step, trail.len());
-            trail.push(step);
-            here = step;
+    /// One step back along a loop from `here`, or the loop's report and
+    /// cut once a name is met twice.
+    fn walk(&mut self, here: u32) {
+        let before = &self.leaders[here as usize];
+        let next = before
+            .range(here + 1..)
+            .next()
+            .or_else(|| before.iter().next());
+        let Some((&step, _)) = next else {
+            self.phase = Phase::Done;
+            return;
+        };
+        let Some(&at) = self.met.get(&step) else {
+            self.met.insert(step, self.trail.len());
+            self.trail.push(step);
+            return;
+        };
+        let mut found = self.trail.split_off(at);
+        found.reverse();
+        self.stderr.extend_from_slice(b"tsort: ");
+        self.stderr.extend_from_slice(&self.name);
+        self.stderr.extend_from_slice(b": input contains a loop:\n");
+        for &member in &found {
+            self.stderr.extend_from_slice(b"tsort: ");
+            self.stderr.extend_from_slice(&self.names[member as usize]);
+            self.stderr.push(b'\n');
         }
+        self.status = 1;
+        self.trail.clear();
+        self.met.clear();
+        self.release(found[found.len() - 1], found[0]);
     }
 
     /// Place names until none is ready, reporting and cutting a loop when
-    /// every name left waits.
+    /// every name left waits, a step at a time.
     fn order(&mut self, out: &mut Vec<u8>) {
-        let mut budget = STEPS;
-        while budget > 0 {
-            if let Some(name) = self.ready.pop_front() {
+        for _ in 0..STEPS {
+            if let Some(then) = self.after.pop() {
+                if self.leaders[then as usize].contains_key(&self.placing) {
+                    self.release(self.placing, then);
+                }
+            } else if let Some(&here) = self.trail.last() {
+                self.walk(here);
+            } else if let Some(name) = self.ready.pop_front() {
                 out.extend_from_slice(&self.names[name as usize]);
                 out.push(b'\n');
-                let after = std::mem::take(&mut self.followers[name as usize]);
-                budget = budget.saturating_sub(after.len() + 1);
-                for &then in after.iter().rev() {
-                    if self.leaders[then as usize].contains_key(&name) {
-                        self.release(name, then);
-                    }
-                }
-                continue;
-            }
-            while self.waiting.get(self.lowest) == Some(&0) {
+                self.placing = name;
+                self.after = std::mem::take(&mut self.followers[name as usize]);
+            } else if self.waiting.get(self.lowest) == Some(&0) {
                 self.lowest += 1;
-            }
-            if self.lowest == self.names.len() {
+            } else if self.lowest == self.names.len() {
                 self.phase = Phase::Done;
+            } else {
+                let start = self.lowest as u32;
+                self.walk(start);
+            }
+            if matches!(self.phase, Phase::Done) {
                 return;
             }
-            let found = self.closing_loop(self.lowest as u32);
-            let (Some(&first), Some(&last)) = (found.first(), found.last()) else {
-                self.phase = Phase::Done;
-                return;
-            };
-            self.stderr.extend_from_slice(b"tsort: ");
-            self.stderr.extend_from_slice(&self.name);
-            self.stderr.extend_from_slice(b": input contains a loop:\n");
-            for &member in &found {
-                self.stderr.extend_from_slice(b"tsort: ");
-                self.stderr.extend_from_slice(&self.names[member as usize]);
-                self.stderr.push(b'\n');
-            }
-            self.status = 1;
-            budget = budget.saturating_sub(found.len());
-            self.release(last, first);
         }
     }
 }
@@ -281,8 +284,15 @@ impl Stream for Tsort {
                 if to == self.pairs.len() {
                     self.pairs = Vec::new();
                     self.rank = Vec::new();
-                    let free = (0..self.names.len()).filter(|&name| self.waiting[name] == 0);
-                    self.ready.extend(free.map(|name| name as u32));
+                    self.phase = Phase::Seed(0);
+                }
+            }
+            Phase::Seed(at) => {
+                let to = (*at + STEPS).min(self.names.len());
+                let free = (*at..to).filter(|&name| self.waiting[name] == 0);
+                self.ready.extend(free.map(|name| name as u32));
+                *at = to;
+                if to == self.names.len() {
                     self.phase = Phase::Order;
                 }
             }
