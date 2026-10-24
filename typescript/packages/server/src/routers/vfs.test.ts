@@ -46,8 +46,8 @@ describe.each(['vfs/read', 'glob'])('%s failure responses', (route) => {
   })
 })
 
-// Twin of test_a_glob_past_the_full_scan_limit_answers_why.
-describe('glob past the full_scan_limit', () => {
+// Twin of test_a_glob_past_the_walk_limit_answers_why.
+describe('glob past the walk_limit', () => {
   it('answers 400 and says why', async () => {
     const app = buildApp()
     try {
@@ -57,7 +57,7 @@ describe('glob past the full_scan_limit', () => {
         payload: {
           config: {
             mode: 'write',
-            mounts: { '/': { vfs: 'ram', config: { full_scan_limit: 2 } } },
+            mounts: { '/': { vfs: 'ram', config: { walk_limit: 2 } } },
           },
         },
       })
@@ -76,7 +76,7 @@ describe('glob past the full_scan_limit', () => {
       })
       expect([response.statusCode, response.json()]).toEqual([
         400,
-        { detail: '/*.txt: matches more than 2 files (full_scan_limit); narrow the path' },
+        { detail: '/*.txt: matches more than 2 files (walk_limit); narrow the path' },
       ])
     } finally {
       await app.close()

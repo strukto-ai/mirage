@@ -4,7 +4,7 @@ from pydantic import Field, field_validator
 from mirage.accessor.base import SessionAccessor
 from mirage.core.msgraph.config import MsGraphConfig
 from mirage.utils import key_prefix as kp
-from mirage.vfs.constants import FULL_SCAN_LIMIT
+from mirage.vfs.constants import WALK_LIMIT
 
 
 class SharePointConfig(MsGraphConfig):
@@ -22,7 +22,7 @@ class SharePointConfig(MsGraphConfig):
     """Folder path inside the scoped library that the mount uses as its
     root; takes effect only with `site` and `drive` set. `..` segments are
     rejected."""
-    full_scan_limit: int = Field(default=FULL_SCAN_LIMIT, ge=-1)
+    walk_limit: int = Field(default=WALK_LIMIT, ge=-1)
     """Most files one command walks under a folder: `grep -r`, `find` and other
     walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is
     refused. `-1` lifts the limit and reads every file without asking Graph

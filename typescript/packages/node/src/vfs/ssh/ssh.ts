@@ -46,7 +46,7 @@ import { capacity as sshCapacity } from '../../core/ssh/capacity.ts'
 import { truncate as sshTruncate } from '../../core/ssh/truncate.ts'
 import { setAttrs as sshSetAttrs } from '../../core/ssh/set_attrs.ts'
 import { rstripSlash } from '@struktoai/mirage-core/utils/slash'
-import { FULL_SCAN_LIMIT } from '@struktoai/mirage-core/vfs/constants'
+import { WALK_LIMIT } from '@struktoai/mirage-core/vfs/constants'
 
 const mkdirOp = (accessor: SSHAccessor, path: PathSpec, parents?: boolean): Promise<void> =>
   sshMkdir(accessor, path, parents === true)
@@ -67,11 +67,11 @@ export class SSHVFS extends BaseVFS {
   readonly config: SSHConfig
   override readonly accessor: SSHAccessor
 
-  override readonly fullScanLimit: number
+  override readonly walkLimit: number
   constructor(config: SSHConfig) {
     super()
     this.config = config
-    this.fullScanLimit = config.fullScanLimit ?? FULL_SCAN_LIMIT
+    this.walkLimit = config.walkLimit ?? WALK_LIMIT
     this.accessor = new SSHAccessor(config)
   }
 

@@ -3027,7 +3027,7 @@ describe('a whole write keeps its bytes', () => {
   })
 })
 
-// A RAM mount whose searches answer every file it holds and whose scan guard
+// A RAM mount whose searches answer every file it holds and whose walk guard
 // keeps the count it is handed. Twin of Python's SearchedRAM.
 class SearchedRAM extends RAMVFS {
   readonly counted: (number | null)[] = []
@@ -3052,19 +3052,19 @@ class SearchedRAM extends RAMVFS {
     return first === undefined ? Promise.resolve([]) : this.search(first)
   }
 
-  override beforeFullScan(_path: PathSpec, files: number | null): Promise<void> {
+  override beforeFullWalk(_path: PathSpec, files: number | null): Promise<void> {
     this.counted.push(files)
     return Promise.resolve()
   }
 }
 
-// A RAM mount with no scan guard that counts its tree reads. Twin of
+// A RAM mount with no walk guard that counts its tree reads. Twin of
 // Python's TreeCountingRAM.
 class TreeCountingRAM extends RAMVFS {
   trees = 0
 
   constructor() {
-    super({ fullScanLimit: -1 })
+    super({ walkLimit: -1 })
   }
 
   override readTree(path: PathSpec): Promise<Map<string, FileStat> | null> {
@@ -3073,15 +3073,15 @@ class TreeCountingRAM extends RAMVFS {
   }
 }
 
-// A RAM mount held to a `fullScanLimit` with no guard of its own. Twin of
+// A RAM mount held to a `walkLimit` with no guard of its own. Twin of
 // Python's LimitedRAM.
 class LimitedRAM extends RAMVFS {
   constructor() {
-    super({ fullScanLimit: 2 })
+    super({ walkLimit: 2 })
   }
 }
 
-// The same mount with no tree read, so a scan is counted by listing each
+// The same mount with no tree read, so a walk is counted by listing each
 // directory. Twin of Python's ListedRAM.
 class ListedRAM extends LimitedRAM {
   readonly listed: string[] = []
@@ -3328,11 +3328,11 @@ describe('a hide filters a one-call read', () => {
   })
 
   // Twin of test_a_scan_guard_counts_only_the_files_the_session_sees.
-  it('hands a scan guard only the files the session sees', async () => {
+  it('hands a walk guard only the files the session sees', async () => {
     const vfs = searched()
     const ws = new Workspace({ '/ram': vfs })
     try {
-      await runWithSession(secretHidden(), () => ws.dispatch('before_full_scan', '/ram/d'))
+      await runWithSession(secretHidden(), () => ws.dispatch('before_full_walk', '/ram/d'))
       expect(vfs.counted).toEqual([1])
     } finally {
       await ws.close()
@@ -3359,26 +3359,26 @@ describe('a hide filters a one-call read', () => {
   })
 
   // Twin of test_a_mount_with_no_scan_guard_is_not_counted.
-  it('counts nothing for a mount with no scan guard', async () => {
+  it('counts nothing for a mount with no walk guard', async () => {
     const vfs = new TreeCountingRAM()
     vfs.store.dirs.add('/d')
     const ws = new Workspace({ '/ram': vfs })
     try {
-      const answer = await ws.dispatch('before_full_scan', '/ram/d')
+      const answer = await ws.dispatch('before_full_walk', '/ram/d')
       expect([answer, vfs.trees]).toEqual([null, 0])
     } finally {
       await ws.close()
     }
   })
 
-  // Twin of test_a_search_past_the_full_scan_limit_stops_there.
-  it.each([LimitedRAM, ListedRAM])('stops a search past the full scan limit (%o)', async (cls) => {
+  // Twin of test_a_search_past_the_walk_limit_stops_there.
+  it.each([LimitedRAM, ListedRAM])('stops a search past the walk limit (%o)', async (cls) => {
     const ws = new Workspace({ '/ram': limited(cls, 3) }, { shellParser: await getTestParser() })
     try {
       const out = await ws.shell('grep -r a /ram/d')
       expect([out.stdoutText, new TextDecoder().decode(out.stderr), out.exitCode]).toEqual([
         '/ram/d/a0.txt:a\n/ram/d/a1.txt:a\n',
-        'grep: /ram/d: stopped after 2 files (full_scan_limit); narrow the path\n',
+        'grep: /ram/d: stopped after 2 files (walk_limit); narrow the path\n',
         2,
       ])
     } finally {
@@ -3386,7 +3386,7 @@ describe('a hide filters a one-call read', () => {
     }
   })
 
-  // Twin of test_a_listing_past_the_full_scan_limit_stops_there.
+  // Twin of test_a_listing_past_the_walk_limit_stops_there.
   it.each(
     [LimitedRAM, ListedRAM].flatMap((cls) =>
       (
@@ -3398,13 +3398,13 @@ describe('a hide filters a one-call read', () => {
         ] as const
       ).map(([line, out, code]) => [cls, line, out, code] as const),
     ),
-  )('stops a listing past the full scan limit (%o, %s)', async (cls, line, out, code) => {
+  )('stops a listing past the walk limit (%o, %s)', async (cls, line, out, code) => {
     const ws = new Workspace({ '/ram': limited(cls, 3) }, { shellParser: await getTestParser() })
     try {
       const result = await ws.shell(line)
       const name = line.split(' ')[0] ?? ''
       expect([result.stdoutText, new TextDecoder().decode(result.stderr), result.exitCode]).toEqual(
-        [out, `${name}: /ram/d: stopped after 2 files (full_scan_limit); narrow the path\n`, code],
+        [out, `${name}: /ram/d: stopped after 2 files (walk_limit); narrow the path\n`, code],
       )
     } finally {
       await ws.close()
@@ -3422,8 +3422,8 @@ describe('a hide filters a one-call read', () => {
       expect([result.stdoutText, new TextDecoder().decode(result.stderr), result.exitCode]).toEqual(
         [
           '/a/d:\na0.txt\na1.txt\n\n/b/d:\na0.txt\na1.txt\n',
-          'ls: /a/d: stopped after 2 files (full_scan_limit); narrow the path\n' +
-            'ls: /b/d: stopped after 2 files (full_scan_limit); narrow the path\n',
+          'ls: /a/d: stopped after 2 files (walk_limit); narrow the path\n' +
+            'ls: /b/d: stopped after 2 files (walk_limit); narrow the path\n',
           1,
         ],
       )
@@ -3432,15 +3432,15 @@ describe('a hide filters a one-call read', () => {
     }
   })
 
-  // Twin of test_a_glob_past_the_full_scan_limit_is_refused.
-  const refused = '/ram/d/*: matches more than 2 files (full_scan_limit); narrow the path'
+  // Twin of test_a_glob_past_the_walk_limit_is_refused.
+  const refused = '/ram/d/*: matches more than 2 files (walk_limit); narrow the path'
   it.each([
     ['cat /ram/d/*; echo $?', '126\n', `cat: Argument list too long\ncat: ${refused}\n`],
     ['echo /ram/d/*; echo $?', '126\n', `echo: Argument list too long\necho: ${refused}\n`],
     ['for f in /ram/d/*; do echo $f; done; echo after', '', `bash: ${refused}\n`],
     ['cat /ram/d/a*', 'a\na\n', ''],
     ['echo /ram/d/*/b.txt', '/ram/d/secret/b.txt\n', ''],
-  ])('refuses a glob past the full scan limit: %s', async (line, out, err) => {
+  ])('refuses a glob past the walk limit: %s', async (line, out, err) => {
     const ws = new Workspace(
       { '/ram': limited(LimitedRAM, 3) },
       { shellParser: await getTestParser() },
@@ -3485,7 +3485,7 @@ describe('a hide filters a one-call read', () => {
       const out = await ws.shell('grep -r hello /ram/d')
       expect([out.stdoutText, new TextDecoder().decode(out.stderr), out.exitCode]).toEqual([
         '/ram/d/f0.txt:hello\n/ram/d/f1.txt:hello\n',
-        'grep: /ram/d: stopped after 2 files (full_scan_limit); narrow the path\n',
+        'grep: /ram/d: stopped after 2 files (walk_limit); narrow the path\n',
         2,
       ])
     } finally {
@@ -3498,9 +3498,9 @@ describe('a hide filters a one-call read', () => {
   it.each(['path', 'modified'])(
     'counts each file of a planned rg against its own mount (--sort %s)',
     async (sort) => {
-      const top = new RAMVFS({ fullScanLimit: -1 })
+      const top = new RAMVFS({ walkLimit: -1 })
       top.store.files.set('/t.txt', new TextEncoder().encode('hello\n'))
-      const remote = new RAMVFS({ fullScanLimit: 2 })
+      const remote = new RAMVFS({ walkLimit: 2 })
       for (let i = 0; i < 4; i++) {
         remote.store.files.set(`/r${String(i)}.txt`, new TextEncoder().encode('hello\n'))
       }
@@ -3516,7 +3516,7 @@ describe('a hide filters a one-call read', () => {
           out.exitCode,
         ]).toEqual([
           ['/a/remote/r0.txt', '/a/remote/r1.txt', '/a/t.txt'],
-          'rg: /a/remote: stopped after 2 files (full_scan_limit); narrow the path\n',
+          'rg: /a/remote: stopped after 2 files (walk_limit); narrow the path\n',
           2,
         ])
       } finally {
@@ -3527,10 +3527,10 @@ describe('a hide filters a one-call read', () => {
 
   // Twin of test_a_glob_counts_each_match_against_its_own_mount.
   it.each(['cat', 'echo'])('counts each glob match against its own mount (%s)', async (command) => {
-    const top = new RAMVFS({ fullScanLimit: -1 })
+    const top = new RAMVFS({ walkLimit: -1 })
     top.store.dirs.add('/b')
     top.store.files.set('/b/t.txt', new TextEncoder().encode('t\n'))
-    const remote = new RAMVFS({ fullScanLimit: 2 })
+    const remote = new RAMVFS({ walkLimit: 2 })
     for (let i = 0; i < 3; i++) {
       remote.store.files.set(`/r${String(i)}.txt`, new TextEncoder().encode('r\n'))
     }
@@ -3538,7 +3538,7 @@ describe('a hide filters a one-call read', () => {
       { '/a': top, '/a/remote': remote },
       { shellParser: await getTestParser() },
     )
-    const refused = '/a/*/*.txt: matches more than 2 files (full_scan_limit); narrow the path'
+    const refused = '/a/*/*.txt: matches more than 2 files (walk_limit); narrow the path'
     try {
       const out = await ws.shell(`${command} /a/*/*.txt; echo $?`)
       expect([out.stdoutText, new TextDecoder().decode(out.stderr)]).toEqual([
@@ -3551,13 +3551,13 @@ describe('a hide filters a one-call read', () => {
   })
 
   it('counts a glob through a link against the target mount', async () => {
-    const top = new RAMVFS({ fullScanLimit: -1 })
+    const top = new RAMVFS({ walkLimit: -1 })
     top.store.dirs.add('/data')
     for (let i = 0; i < 3; i++) {
       top.store.files.set(`/data/t${String(i)}.txt`, new TextEncoder().encode('t\n'))
     }
     const ws = new Workspace(
-      { '/a': top, '/a/remote': new RAMVFS({ fullScanLimit: 2 }) },
+      { '/a': top, '/a/remote': new RAMVFS({ walkLimit: 2 }) },
       { mode: MountMode.WRITE, shellParser: await getTestParser() },
     )
     try {
@@ -3604,8 +3604,8 @@ describe('a hide filters a one-call read', () => {
     },
   )
 
-  // Twin of test_a_copy_past_the_full_scan_limit_is_refused.
-  it.each([LimitedRAM, ListedRAM])('refuses a copy past the full scan limit (%o)', async (cls) => {
+  // Twin of test_a_copy_past_the_walk_limit_is_refused.
+  it.each([LimitedRAM, ListedRAM])('refuses a copy past the walk limit (%o)', async (cls) => {
     const ws = new Workspace(
       { '/ram': limited(cls, 3) },
       { mode: MountMode.WRITE, shellParser: await getTestParser() },
@@ -3614,7 +3614,7 @@ describe('a hide filters a one-call read', () => {
       const out = await ws.shell('tar -cf /ram/d.tar /ram/d')
       expect([out.stdoutText, new TextDecoder().decode(out.stderr), out.exitCode]).toEqual([
         '',
-        'tar: more than 2 files in scope (full_scan_limit); narrow the path\n',
+        'tar: more than 2 files in scope (walk_limit); narrow the path\n',
         1,
       ])
     } finally {
@@ -3643,8 +3643,8 @@ describe('a hide filters a one-call read', () => {
     }
   })
 
-  // Twin of test_a_scan_within_the_full_scan_limit_runs.
-  it.each([LimitedRAM, ListedRAM])('runs a scan within the full scan limit (%o)', async (cls) => {
+  // Twin of test_a_walk_within_the_walk_limit_runs.
+  it.each([LimitedRAM, ListedRAM])('runs a walk within the walk limit (%o)', async (cls) => {
     const ws = new Workspace({ '/ram': limited(cls, 2) }, { shellParser: await getTestParser() })
     try {
       const out = await ws.shell('grep -rl a /ram/d')
@@ -3654,14 +3654,14 @@ describe('a hide filters a one-call read', () => {
     }
   })
 
-  // Twin of test_a_hidden_file_does_not_count_to_the_full_scan_limit.
+  // Twin of test_a_hidden_file_does_not_count_to_the_walk_limit.
   it.each([LimitedRAM, ListedRAM])(
-    'does not count a hidden file toward the full scan limit (%o)',
+    'does not count a hidden file toward the walk limit (%o)',
     async (cls) => {
       const ws = new Workspace({ '/ram': limited(cls, 3) })
       try {
         const answer = await runWithSession(secretHidden(), () =>
-          ws.dispatch('before_full_scan', '/ram/d'),
+          ws.dispatch('before_full_walk', '/ram/d'),
         )
         expect(answer).toBeNull()
       } finally {
@@ -3680,7 +3680,7 @@ describe('a hide filters a one-call read', () => {
     }
     const ws = new Workspace({ '/ram': vfs })
     try {
-      await expect(ws.dispatch('before_full_scan', '/ram/d')).rejects.toThrow('more than 2 files')
+      await expect(ws.dispatch('before_full_walk', '/ram/d')).rejects.toThrow('more than 2 files')
       expect(vfs.listed).toHaveLength(4)
     } finally {
       await ws.close()

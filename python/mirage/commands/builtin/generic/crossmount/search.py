@@ -71,7 +71,7 @@ from mirage.commands.builtin.utils.links import (
 )
 from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.builtin.utils.stream import is_stdin, resolve_source
-from mirage.commands.builtin.utils.tree import ScanBudget
+from mirage.commands.builtin.utils.tree import WalkBudget
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagBag, FlagView
 from mirage.commands.spec.types import FlagValue
@@ -238,7 +238,7 @@ async def run_search(
             assert rg is not None and walk is not None
             warnings: list[str] = []
             stopped: set[str] = set()
-            budgets = {p.virtual: ScanBudget(p, mounts) for p in paths}
+            budgets = {p.virtual: WalkBudget(p, mounts) for p in paths}
             reported: set[str] = set()
 
             def charged(h: Haystack) -> bool:
@@ -260,12 +260,12 @@ async def run_search(
                 budget = budgets[root.virtual]
                 if budget.spend(h.virtual):
                     return True
+                if not budget.opens(root.virtual):
+                    stopped.add(root.virtual)
                 for line in budget.stopped:
                     if line not in reported:
                         reported.add(line)
                         warnings.append(f"rg: {line}")
-                if not budget.opens(root.virtual):
-                    stopped.add(root.virtual)
                 return False
 
             resolver = (

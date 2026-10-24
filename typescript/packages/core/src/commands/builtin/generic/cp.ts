@@ -32,7 +32,7 @@ import {
   type StatFn,
 } from '../../../types.ts'
 import { UsageError } from '../../errors.ts'
-import { beforeFullScan } from '../utils/tree.ts'
+import { beforeFullWalk } from '../utils/tree.ts'
 import { wordRefusalError, extraOperandError, usageHint } from '../../spec/usage.ts'
 import { matchWord } from '../../spec/word_choice.ts'
 import type { FlagView } from '../../spec/flag_view.ts'
@@ -1598,7 +1598,7 @@ export async function cpGeneric(
         !perEntryNative &&
         !intoItself &&
         !targetExists
-      if (!wholeTree) await beforeFullScan(dispatch, src, 'cp')
+      if (!wholeTree) await beforeFullWalk(dispatch, src, 'cp')
       if (targetExists && !targetIsDir) {
         const freed = await clearForDirectory(
           policy,
@@ -1684,7 +1684,7 @@ export async function cpGeneric(
       // dispatcher declines or the backend cannot make in one call, so the
       // tree's directories are recreated here: a files-only pass would drop
       // every directory that holds no files (GNU keeps them).
-      if (wholeTree) await beforeFullScan(dispatch, src, 'cp')
+      if (wholeTree) await beforeFullWalk(dispatch, src, 'cp')
       // A directory the walk may not open is GNU's line; it is made at the
       // destination and the rest of the tree still copies.
       const unreadable: string[] = []

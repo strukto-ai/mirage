@@ -28,7 +28,7 @@ import type {
 import { CapacityState, ListingVersion } from '../types.ts'
 import type { DeltaHook } from '../events/base.ts'
 import { methodName, vfsCall } from './call.ts'
-import { FULL_SCAN_LIMIT } from './constants.ts'
+import { WALK_LIMIT } from './constants.ts'
 import { Effect, type Handed, Target } from './types.ts'
 
 /**
@@ -259,12 +259,12 @@ export class BaseVFS<A extends Accessor = Accessor> {
   /**
    * The most files one command walks under a directory of this mount: grep
    * -r, rg and git grep stop reading there, find, ls -R, tree, du and
-   * getfattr -R stop listing, git status and the other verbs that scan a
+   * getfattr -R stop listing, git status and the other verbs that walk a
    * work tree fail, a glob matching more is refused, and so are tar -c, zip
    * -r, cp -r, rm -r, chmod -R, chown -R, chgrp -R, mv to another mount and
-   * diff -r of a directory holding more (`beforeFullScan`); -1 for no cap.
+   * diff -r of a directory holding more (`beforeFullWalk`); -1 for no cap.
    */
-  readonly fullScanLimit: number = FULL_SCAN_LIMIT
+  readonly walkLimit: number = WALK_LIMIT
   /**
    * Extensions whose `read` is a rendering rather than the stored bytes,
    * each to the name of the method that renders it, which takes `read`'s
@@ -673,7 +673,6 @@ export class BaseVFS<A extends Accessor = Accessor> {
    *   otherwise, where it may sit inside a word. `ignoreCase` is true under
    *   -i, and under rg -S with a lowercase pattern; folding case when false
    *   is fine.
-   * @param index the mount's index.
    */
   @vfsCall({ effect: Effect.READ, target: Target.DIR, subtree: true })
   filesContaining(
@@ -701,7 +700,6 @@ export class BaseVFS<A extends Accessor = Accessor> {
    * @param text plain text every match holds, as `filesContaining` gets it.
    * @param opts `ignoreCase` is true under -i, and under rg -S with a
    *   lowercase pattern.
-   * @param index the mount's index.
    */
   @vfsCall({ effect: Effect.READ, target: Target.FILE })
   linesContaining(
@@ -718,24 +716,23 @@ export class BaseVFS<A extends Accessor = Accessor> {
    * directory a command copies, compares, changes or removes whole, before
    * the first file it touches there: tar -c, zip -r, cp -r, mv across
    * mounts, diff -r, rm -r, chmod -R, chown -R and chgrp -R. Resolve to let
-   * the scan run; reject to refuse it, and the error's message is what the
-   * command prints. The default refuses more than `fullScanLimit` files.
-   * Searches and listings are never refused: they stop after `fullScanLimit`
+   * the walk run; reject to refuse it, and the error's message is what the
+   * command prints. The default refuses more than `walkLimit` files.
+   * Searches and listings are never refused: they stop after `walkLimit`
    * files.
    *
    * @param path the directory about to be walked.
    * @param files how many files the session sees under `path`, with every
    *   hidden file dropped: the mount's `readTree`, or under a
-   *   `fullScanLimit` a walk of its listings that stops one file past it;
+   *   `walkLimit` a walk of its listings that stops one file past it;
    *   null when neither counts, and the guard counts them itself.
-   * @param index the mount's index.
    */
   @vfsCall({ effect: Effect.READ, target: Target.DIR })
-  beforeFullScan(_path: PathSpec, files: number | null, _handed?: Handed): Promise<void> {
-    const limit = this.fullScanLimit
+  beforeFullWalk(_path: PathSpec, files: number | null, _handed?: Handed): Promise<void> {
+    const limit = this.walkLimit
     if (limit >= 0 && files !== null && files > limit) {
       return Promise.reject(
-        new Error(`more than ${String(limit)} files in scope (full_scan_limit); narrow the path`),
+        new Error(`more than ${String(limit)} files in scope (walk_limit); narrow the path`),
       )
     }
     return Promise.resolve()

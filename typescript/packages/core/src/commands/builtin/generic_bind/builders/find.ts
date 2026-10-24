@@ -17,7 +17,7 @@ import { specOf } from '../../../spec/builtins.ts'
 import { walkFind } from '../../../../core/generic/find.ts'
 import { findGeneric } from '../../generic/find.ts'
 import { landingRoot, linksOf, mountsOf } from '../../utils/links.ts'
-import { ScanBudget, treeWalk } from '../../utils/tree.ts'
+import { WalkBudget, treeWalk } from '../../utils/tree.ts'
 import type { FileStat, PathSpec } from '../../../../types.ts'
 import type { CommandFnResult, Context } from '../../../config.ts'
 import { type GenericCommand } from '../adapter.ts'
@@ -69,7 +69,7 @@ export function findWalk(
         files.stat,
       )
       const home = bounded && mounts !== undefined ? landingRoot(mounts, links, root.virtual) : null
-      const budget = new ScanBudget(root, mounts ?? null)
+      const budget = new WalkBudget(root, mounts ?? null)
       const keys = await walkFind(
         root,
         {

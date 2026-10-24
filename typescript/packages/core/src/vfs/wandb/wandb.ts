@@ -13,7 +13,7 @@ import { sliceWindow } from '../../utils/ranges.ts'
 import { readdir } from '../../core/wandb/readdir.ts'
 import { read, readStream } from '../../core/wandb/read.ts'
 import { stat } from '../../core/wandb/stat.ts'
-import { FULL_SCAN_LIMIT } from '../constants.ts'
+import { WALK_LIMIT } from '../constants.ts'
 
 export interface WandbVFSState {
   type: string
@@ -31,11 +31,11 @@ export class WandbVFS extends BaseVFS {
   readonly config: WandbConfig
   override readonly accessor: WandbAccessor
 
-  override readonly fullScanLimit: number
+  override readonly walkLimit: number
   constructor(config: WandbConfig) {
     super()
     this.config = config
-    this.fullScanLimit = config.fullScanLimit ?? FULL_SCAN_LIMIT
+    this.walkLimit = config.walkLimit ?? WALK_LIMIT
     this.accessor = new WandbAccessor(config)
   }
 

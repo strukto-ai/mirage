@@ -31,7 +31,7 @@ ws = Workspace({"/github": vfs}, mode=MountMode.READ)
 | <code style={{ whiteSpace: 'nowrap' }}>repo</code> | Repository name. Required unless the `GitHubVFS` constructor is given `repo`. |
 | <code style={{ whiteSpace: 'nowrap' }}>ref</code> | Branch, tag or commit SHA the mount reads. Unset follows the repository's default branch, resolved on the first read. |
 | <code style={{ whiteSpace: 'nowrap' }}>base_url</code> | GitHub API root. Unset uses `https://api.github.com`; set it for GitHub Enterprise. |
-| <code style={{ whiteSpace: 'nowrap' }}>full_scan_limit</code><br />default `5000` | Most files one command walks under a folder, each file read one blob request: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit and reads every file without asking code search. |
+| <code style={{ whiteSpace: 'nowrap' }}>walk_limit</code><br />default `5000` | Most files one command walks under a folder, each file read one blob request: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit and reads every file without asking code search. |
 
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table github end */}
@@ -207,12 +207,12 @@ What GitHub answers through its own API, so fewer files are read. [Integration](
 Every file is read otherwise. Files code search never indexes are always read.
 
 Each file is one request, so `grep -r`, `git grep`, `find` and the other walks
-stop after `full_scan_limit` files (default 5000) and keep what they printed,
-and a glob matching more, `tar -c`, `zip -r`, `cp -r`, `rm -r`, `mv` to another
-mount and `diff -r` are refused above it:
+stop after `walk_limit` files (default 5000) and keep what they printed,
+and a glob matching more, `tar -c`, `cp -r`, `rm -r` and the [other whole-tree
+commands](/home/integration/search#walk_limit) are refused above it:
 
 ```bash
 $ grep -r TODO /github/
 /github/src/main.py:# TODO: retry
-grep: /github/: stopped after 5000 files (full_scan_limit); narrow the path
+grep: /github/: stopped after 5000 files (walk_limit); narrow the path
 ```

@@ -120,6 +120,7 @@ describe('OPFSVFS — getState / loadState round-trip', () => {
 
     const state = await res.getState()
     expect(Object.keys(state.files).sort()).toEqual(['a', 'd/b'])
+    expect(state.config).toEqual({ walk_limit: res.walkLimit })
 
     const root2 = makeMockRoot()
     restoreNav()

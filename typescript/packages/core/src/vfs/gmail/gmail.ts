@@ -30,7 +30,7 @@ import type { DeltaHook } from '../../events/base.ts'
 import { filesContaining as gmailFilesContaining } from '../../core/gmail/search.ts'
 import { read as gmailRead } from '../../core/gmail/read.ts'
 import { stat as gmailStat } from '../../core/gmail/stat.ts'
-import { FULL_SCAN_LIMIT } from '../constants.ts'
+import { WALK_LIMIT } from '../constants.ts'
 
 export interface GmailVFSState {
   type: string
@@ -57,12 +57,12 @@ export class GmailVFS extends BaseVFS {
   readonly config: GmailConfig
   override readonly accessor: GmailAccessor
 
-  override readonly fullScanLimit: number
+  override readonly walkLimit: number
 
   constructor(config: GmailConfig) {
     super()
     this.config = config
-    this.fullScanLimit = config.fullScanLimit ?? FULL_SCAN_LIMIT
+    this.walkLimit = config.walkLimit ?? WALK_LIMIT
     const tm = new TokenManager(config)
     this.accessor = new GmailAccessor({ tokenManager: tm, config })
   }
@@ -94,7 +94,7 @@ export class GmailVFS extends BaseVFS {
     text: string,
     _opts: { wholeWord: boolean; ignoreCase: boolean },
   ): Promise<PathSpec[] | null> {
-    if (this.fullScanLimit < 0) return Promise.resolve(null)
+    if (this.walkLimit < 0) return Promise.resolve(null)
     return gmailFilesContaining(this.accessor, text, [path])
   }
 

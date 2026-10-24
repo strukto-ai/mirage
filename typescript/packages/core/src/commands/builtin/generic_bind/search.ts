@@ -25,7 +25,7 @@ import { isFsError } from '../../../errors/fs.ts'
 import { revisionFor } from '../../../observe/context.ts'
 import { FileType, type FileStat, type PathSpec } from '../../../types.ts'
 import type { Context } from '../../config.ts'
-import { ScanLimitError } from '../../errors.ts'
+import { WalkLimitError } from '../../errors.ts'
 import type { LinkView, MountView } from '../../../view/types.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
@@ -278,9 +278,9 @@ function linked(links: LinkView | undefined, virtual: string): boolean {
 }
 
 /**
- * Reads that stop each walk at its mount's `fullScanLimit`. A file counts
+ * Reads that stop each walk at its mount's `walkLimit`. A file counts
  * once against the deepest walked operand above it, so a file named as an
- * operand counts nothing; the one past the limit throws ScanLimitError in its
+ * operand counts nothing; the one past the limit throws WalkLimitError in its
  * place, and grep or rg stops walking the directory. The charge is returned
  * too, for a file whose matching lines the mount's search hands over in place
  * of a read; a file the search rules out is never read, so it costs nothing.
@@ -292,7 +292,7 @@ export function cappedReads(
   mounts: MountView | undefined,
 ): [Reads, (p: PathSpec) => void] {
   const limits = new Map<string, number>()
-  for (const d of operands) limits.set(d.virtual, mounts?.fullScanLimit?.(d.virtual) ?? -1)
+  for (const d of operands) limits.set(d.virtual, mounts?.walkLimit?.(d.virtual) ?? -1)
   const capped = operands
     .filter((d) => (limits.get(d.virtual) ?? -1) >= 0)
     .sort((a, b) => rstripSlash(b.virtual).length - rstripSlash(a.virtual).length)
@@ -305,7 +305,7 @@ export function cappedReads(
       if (!p.virtual.startsWith(`${rstripSlash(d.virtual)}/`)) continue
       const limit = limits.get(d.virtual) ?? -1
       const count = taken.get(d.virtual) ?? 0
-      if (count >= limit) throw new ScanLimitError(d, limit)
+      if (count >= limit) throw new WalkLimitError(d, limit)
       taken.set(d.virtual, count + 1)
       charged.add(p.virtual)
       return
@@ -338,7 +338,7 @@ export function cappedReads(
  * `isWarm` call), so a file a path rule refuses reports `Permission denied`,
  * and answers null where a coded preVfs policy reaches below a directory, so
  * every file is read and judged.
- * Each walk stops at its mount's `fullScanLimit` (`cappedReads`).
+ * Each walk stops at its mount's `walkLimit` (`cappedReads`).
  * Mirrors Python's `search_reads`.
  */
 export async function searchReads(

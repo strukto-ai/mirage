@@ -101,9 +101,9 @@ export interface MountView {
   // The globs its search covers; null for every file.
   searchable(path: string): readonly string[] | null
   // The most files one command walks under a directory of the mount serving
-  // a path (its VFS's `fullScanLimit`), -1 for no cap, so a walk that crosses
+  // a path (its VFS's `walkLimit`), -1 for no cap, so a walk that crosses
   // mounts charges each entry to its own backend.
-  fullScanLimit?(path: string): number
+  walkLimit?(path: string): number
 }
 
 // The session-plane facts a command may consult, as one injected object.

@@ -17,7 +17,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
 
-from mirage.commands.errors import ScanLimitError, UsageError
+from mirage.commands.errors import UsageError, WalkLimitError
 from mirage.errors.classify import classify
 from mirage.errors.types import FsCondition, WalkDeclinedError
 from mirage.runtime.types import DispatchFn
@@ -26,14 +26,14 @@ from mirage.view.types import MountView
 
 logger = logging.getLogger(__name__)
 
-# The conditions under which a guard's path reaches no directory to scan.
+# The conditions under which a guard's path reaches no directory to walk.
 _NO_DIRECTORY = (FsCondition.ENOENT, FsCondition.ENOTDIR, FsCondition.ELOOP)
 
 ReadTree = Callable[..., Awaitable[dict[str, FileStat] | None]]
 WalkCall = Callable[..., Awaitable[Any]]
 
 
-async def before_full_scan(
+async def before_full_walk(
     dispatch: DispatchFn | None, path: PathSpec, command: str
 ) -> None:
     """Let the mount that owns ``path`` refuse a command about to read
@@ -52,13 +52,13 @@ async def before_full_scan(
         command (str): the command that walks it.
 
     Raises:
-        UsageError: the mount refused the scan.
+        UsageError: the mount refused the walk.
     """
     if dispatch is None:
         return
     try:
         await dispatch(
-            "before_full_scan", PathSpec.from_str_path(path.virtual)
+            "before_full_walk", PathSpec.from_str_path(path.virtual)
         )
     except UsageError:
         raise
@@ -67,14 +67,14 @@ async def before_full_scan(
     except OSError as exc:
         if classify(exc) not in _NO_DIRECTORY:
             raise
-        logger.debug("scan guard at %s: %s", path.virtual, exc)
+        logger.debug("walk guard at %s: %s", path.virtual, exc)
 
 
 @dataclass(slots=True)
-class ScanBudget:
+class WalkBudget:
     """The entries one walk of an operand may still list.
 
-    A walk lists at most ``full_scan_limit`` entries of each mount it
+    A walk lists at most ``walk_limit`` entries of each mount it
     crosses: an entry is charged to the mount serving the directory that
     lists it, counted under the operand, or under the mount's root where
     that mount starts below the operand. Once a count runs out the walk
@@ -95,9 +95,9 @@ class ScanBudget:
     stopped: list[str] = field(default_factory=list)
 
     def _limit(self, directory: str) -> int:
-        if self.mounts is None or self.mounts.full_scan_limit is None:
+        if self.mounts is None or self.mounts.walk_limit is None:
             return -1
-        return self.mounts.full_scan_limit(directory)
+        return self.mounts.walk_limit(directory)
 
     def _folder(self, directory: str) -> str:
         assert self.mounts is not None
@@ -108,7 +108,7 @@ class ScanBudget:
     def _stop(self, folder: str, limit: int) -> None:
         top = self.operand.virtual.rstrip("/") or "/"
         line = str(
-            ScanLimitError(
+            WalkLimitError(
                 self.operand
                 if folder == top
                 else PathSpec.from_str_path(folder),
@@ -119,10 +119,12 @@ class ScanBudget:
             self.stopped.append(line)
 
     def spend(self, directory: str) -> bool:
-        """Charge one entry ``directory`` lists.
+        """Charge one entry ``directory`` lists, or the one file a search
+        reads when ``directory`` is that file.
 
         Args:
-            directory (str): virtual path of the listed directory.
+            directory (str): virtual path of the listed directory, or of
+                the file read.
 
         Returns:
             bool: True if the walk may keep the entry, False once its

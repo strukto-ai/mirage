@@ -86,8 +86,8 @@ the VFS does not define answers `Operation not supported`:
 - `files_containing` / `filesContaining` and `lines_containing` /
   `linesContaining` let grep and rg skip reads: the files under a directory,
   or the lines of one file, that may hold a plain text. Answer every match or
-  return `None` / `null`; a missed hit is a wrong answer. `before_full_scan` /
-  `beforeFullScan` may raise to refuse a scan no search could narrow.
+  return `None` / `null`; a missed hit is a wrong answer. `before_full_walk` /
+  `beforeFullWalk` may raise to refuse a scan no search could narrow.
 - `write`, `append`, `pwrite`, `create`, `mkdir`, `unlink`, `rmdir`, `rm_r` /
   `rmR`, `rename`, `copy`, `truncate`, and `setattr` are individual mutations.
   `write` and `append` take bytes or an async iterator of them; `materialize`

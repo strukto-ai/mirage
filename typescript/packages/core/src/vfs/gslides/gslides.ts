@@ -35,7 +35,7 @@ import { makeFilename } from './slide_entry.ts'
 import type { DeltaHook } from '../../events/base.ts'
 import { unlink as gslidesUnlink } from '../../core/gslides/unlink.ts'
 import { rename as gslidesRename } from '../../core/gslides/rename.ts'
-import { FULL_SCAN_LIMIT } from '../constants.ts'
+import { WALK_LIMIT } from '../constants.ts'
 
 export interface GSlidesVFSState {
   type: string
@@ -53,12 +53,12 @@ export class GSlidesVFS extends BaseVFS {
   readonly config: GSlidesConfig
   override readonly accessor: GSlidesAccessor
 
-  override readonly fullScanLimit: number
+  override readonly walkLimit: number
 
   constructor(config: GSlidesConfig) {
     super()
     this.config = config
-    this.fullScanLimit = config.fullScanLimit ?? FULL_SCAN_LIMIT
+    this.walkLimit = config.walkLimit ?? WALK_LIMIT
     const tm = new TokenManager(config)
     this.accessor = new GSlidesAccessor({ tokenManager: tm })
   }
@@ -75,7 +75,7 @@ export class GSlidesVFS extends BaseVFS {
     text: string,
     opts: { wholeWord: boolean; ignoreCase: boolean },
   ): Promise<PathSpec[] | null> {
-    if (!opts.wholeWord || this.fullScanLimit < 0) return Promise.resolve(null)
+    if (!opts.wholeWord || this.walkLimit < 0) return Promise.resolve(null)
     return googleFilesContaining(this.accessor, gslidesReaddir, MIME, SLIDES_WORDS, text, [path])
   }
 

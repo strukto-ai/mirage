@@ -38,7 +38,7 @@ import { rename as boxRename } from '../../core/box/rename.ts'
 import { copy as boxCopy } from '../../core/box/copy.ts'
 import { truncate as boxTruncate } from '../../core/box/truncate.ts'
 import { filesContaining as boxFilesContaining } from '../../core/box/search.ts'
-import { FULL_SCAN_LIMIT } from '../constants.ts'
+import { WALK_LIMIT } from '../constants.ts'
 
 export interface BoxVFSState {
   type: string
@@ -78,12 +78,12 @@ export class BoxVFS extends BaseVFS {
   readonly config: BoxConfig
   override readonly accessor: BoxAccessor
 
-  override readonly fullScanLimit: number
+  override readonly walkLimit: number
 
   constructor(config: BoxConfig) {
     super()
     this.config = config
-    this.fullScanLimit = config.fullScanLimit ?? FULL_SCAN_LIMIT
+    this.walkLimit = config.walkLimit ?? WALK_LIMIT
     // The whole config goes to the token manager, never a hand-picked
     // subset: a field added to BoxConfig would silently stop reaching it
     // (that is how gdrive lost apiBase and kept refreshing at the real
@@ -189,7 +189,7 @@ export class BoxVFS extends BaseVFS {
     opts: { wholeWord: boolean; ignoreCase: boolean },
     handed?: Handed,
   ): Promise<PathSpec[] | null> {
-    if (!opts.wholeWord || this.fullScanLimit < 0) return Promise.resolve(null)
+    if (!opts.wholeWord || this.walkLimit < 0) return Promise.resolve(null)
     return boxFilesContaining(this.accessor, text, path, handed?.entry)
   }
 

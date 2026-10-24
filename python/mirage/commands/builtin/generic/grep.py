@@ -56,7 +56,7 @@ from mirage.commands.builtin.utils.wrap import (
     mount_parent_stat,
 )
 from mirage.commands.config import Context
-from mirage.commands.errors import ScanLimitError, UsageError
+from mirage.commands.errors import UsageError, WalkLimitError
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.synopsis import SYNOPSES
@@ -574,7 +574,7 @@ async def grep_generic(
                     async with aclosing(scan(path)) as output:
                         async for chunk in output:
                             yield chunk
-                except ScanLimitError as exc:
+                except WalkLimitError as exc:
                     warn(f"grep: {exc}")
                 if f.quiet and matched:
                     break

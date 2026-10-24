@@ -106,7 +106,7 @@ function aborted(err: unknown): boolean {
 }
 
 /**
- * What a command given a glob past its mount's `fullScanLimit` says: exec(2)'s
+ * What a command given a glob past its mount's `walkLimit` says: exec(2)'s
  * refusal of an argument list too long, which bash reports with exit 126, then
  * the limit's own line. Mirrors Python's `argument_list_too_long`.
  */

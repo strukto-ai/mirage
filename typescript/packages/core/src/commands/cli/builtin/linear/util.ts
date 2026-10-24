@@ -36,7 +36,6 @@ export function linearAccessor(config: unknown): LinearAccessor {
   })
   return new LinearAccessor(transport, {
     ...(cfg.teamIds !== undefined ? { teamIds: cfg.teamIds } : {}),
-    ...(cfg.fullScanLimit !== undefined ? { fullScanLimit: cfg.fullScanLimit } : {}),
   })
 }
 

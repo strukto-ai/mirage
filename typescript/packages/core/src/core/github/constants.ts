@@ -17,7 +17,8 @@ export const SCOPE_WARN = 100
 export const CODE_SEARCH_SIZE_LIMIT = 384 * 1024
 // The largest page code search serves.
 export const SEARCH_PAGE_SIZE = 100
-export const SCOPE_ERROR = 5000
+// Each file is one request, so a walk may cost thousands of them.
+export const WALK_LIMIT = 5000
 // A point request answering these did not see the parent directory: it is
 // missing, the ref is gone, the repository is hidden (GitHub answers 404 for
 // all three) or a component of the path is a file (422). None of them is an

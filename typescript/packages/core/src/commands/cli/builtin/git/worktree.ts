@@ -91,14 +91,14 @@ class Scanner {
 
   /**
    * Count one file against the mount serving it; past that mount's
-   * `fullScanLimit` the scan fails with `WorkTreeLimitError`. A file a root
+   * `walkLimit` the scan fails with `WorkTreeLimitError`. A file a root
    * names costs nothing, as a file handed to grep does.
    */
   private count(relative: string): void {
     if (this.roots?.includes(relative) === true) return
-    if (this.mounts?.fullScanLimit === undefined) return
+    if (this.mounts?.walkLimit === undefined) return
     const virtual = this.absolute(relative).virtual
-    const limit = this.mounts.fullScanLimit(virtual)
+    const limit = this.mounts.walkLimit(virtual)
     const root = this.mounts.rootOf(virtual)
     const seen = this.counted.get(root) ?? 0
     if (limit >= 0 && seen >= limit) throw new WorkTreeLimitError(limit)

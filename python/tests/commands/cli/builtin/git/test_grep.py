@@ -23,9 +23,7 @@ from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 from tests.commands.cli.builtin.git.conftest import MOUNT, commit_file, run
 
-STOPPED = (
-    b"fatal: stopped after 2 files (full_scan_limit); narrow the pathspec\n"
-)
+STOPPED = b"fatal: stopped after 2 files (walk_limit); narrow the pathspec\n"
 
 
 @pytest.mark.asyncio
@@ -38,11 +36,11 @@ STOPPED = (
         ("grep -q -e one", (0, b"", b"")),
     ],
 )
-async def test_a_search_past_the_full_scan_limit_stops_with_a_fatal(
+async def test_a_search_past_the_walk_limit_stops_with_a_fatal(
     repo_path: Path, line: str, answer: tuple[int, bytes, bytes]
 ):
     commit_file(repo_path, "c.txt", "three\n", "fourth")
-    vfs = DiskVFS(root=str(repo_path), full_scan_limit=2)
+    vfs = DiskVFS(root=str(repo_path), walk_limit=2)
     with Workspace({MOUNT: vfs}) as ws:
         ws.register_cli("git", GIT)
         assert await run(ws, line) == answer
@@ -61,8 +59,8 @@ async def test_a_work_tree_counts_against_the_mount_serving_it(
 ):
     with Workspace(
         {
-            "/meta/": RAMVFS(full_scan_limit=-1),
-            "/data/": RAMVFS(full_scan_limit=2),
+            "/meta/": RAMVFS(walk_limit=-1),
+            "/data/": RAMVFS(walk_limit=2),
         },
         mode=MountMode.WRITE,
     ) as ws:

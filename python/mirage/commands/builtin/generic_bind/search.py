@@ -44,7 +44,7 @@ from mirage.commands.builtin.utils.links import (
     mounts_of,
 )
 from mirage.commands.config import Context
-from mirage.commands.errors import ScanLimitError, UsageError
+from mirage.commands.errors import UsageError, WalkLimitError
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.stream import close_quietly, ensure_stream
@@ -280,11 +280,11 @@ def capped_reads(
     Callable[[PathSpec], AsyncIterator[bytes]] | None,
     Callable[[PathSpec], None],
 ]:
-    """Reads that stop each walk at its mount's ``full_scan_limit``.
+    """Reads that stop each walk at its mount's ``walk_limit``.
 
     A file counts once against the deepest walked operand above it, so a
     file named as an operand counts nothing; the one past the limit
-    raises ScanLimitError in its place, and grep or rg stops walking the
+    raises WalkLimitError in its place, and grep or rg stops walking the
     directory. The charge is returned too, for a file whose matching
     lines the mount's search hands over in place of a read; a file the
     search rules out is never read, so it costs nothing.
@@ -299,9 +299,9 @@ def capped_reads(
             operand's limit.
     """
     limits = {
-        d.virtual: mounts.full_scan_limit(d.virtual)
+        d.virtual: mounts.walk_limit(d.virtual)
         for d in operands
-        if mounts is not None and mounts.full_scan_limit is not None
+        if mounts is not None and mounts.walk_limit is not None
     }
     capped = sorted(
         (d for d in operands if limits.get(d.virtual, -1) >= 0),
@@ -319,7 +319,7 @@ def capped_reads(
             if path.virtual.startswith(d.virtual.rstrip("/") + "/"):
                 count = taken.get(d.virtual, 0)
                 if count >= limits[d.virtual]:
-                    raise ScanLimitError(d, limits[d.virtual])
+                    raise WalkLimitError(d, limits[d.virtual])
                 taken[d.virtual] = count + 1
                 charged.add(path.virtual)
                 return
@@ -448,7 +448,7 @@ async def search_reads(
     stands in for (the ``is_warm`` call), so a file a path rule refuses
     reports ``Permission denied``, and answers None where a coded pre_vfs
     policy reaches below a directory, so every file is read and judged.
-    Each walk stops at its mount's ``full_scan_limit`` (``capped_reads``).
+    Each walk stops at its mount's ``walk_limit`` (``capped_reads``).
 
     Args:
         files (CommandFiles): the command's files.

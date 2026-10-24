@@ -27,7 +27,7 @@ ws = Workspace({"/notion": vfs}, mode=MountMode.READ)
 | <code style={{ whiteSpace: 'nowrap' }}>api_key</code><br />required, secret | Notion integration token. |
 | <code style={{ whiteSpace: 'nowrap' }}>base_url</code><br />default `'https://api.notion.com/v1'` | Notion API root; override to point at a fake or proxy. |
 | <code style={{ whiteSpace: 'nowrap' }}>api_version</code> | `Notion-Version` header sent with every request. Unset sends `2025-09-03`; `ntn --notion-version` overrides it per line. |
-| <code style={{ whiteSpace: 'nowrap' }}>full_scan_limit</code><br />default `1000` | Most files one command walks under a folder: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit. |
+| <code style={{ whiteSpace: 'nowrap' }}>walk_limit</code><br />default `1000` | Most files one command walks under a folder: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit. |
 
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table notion end */}

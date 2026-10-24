@@ -35,7 +35,7 @@ export interface SupabaseConfig {
   keyPrefix?: string
   timeoutMs?: number
   proxy?: string
-  fullScanLimit?: number
+  walkLimit?: number
 }
 
 const SupabaseConfigSchema = z.object({
@@ -86,7 +86,7 @@ export function supabaseToS3Config(config: SupabaseConfig): S3Config {
     ...(config.keyPrefix !== undefined ? { keyPrefix: config.keyPrefix } : {}),
     ...(config.timeoutMs !== undefined ? { timeoutMs: config.timeoutMs } : {}),
     ...(config.proxy !== undefined ? { proxy: config.proxy } : {}),
-    ...(config.fullScanLimit !== undefined ? { fullScanLimit: config.fullScanLimit } : {}),
+    ...(config.walkLimit !== undefined ? { walkLimit: config.walkLimit } : {}),
   }
 }
 

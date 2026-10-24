@@ -26,7 +26,7 @@ from mirage.commands.builtin.utils.links import (
     mount_view,
     mounts_of,
 )
-from mirage.commands.builtin.utils.tree import ScanBudget, WalkCall, tree_walk
+from mirage.commands.builtin.utils.tree import WalkBudget, WalkCall, tree_walk
 from mirage.commands.config import Context
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
@@ -40,11 +40,11 @@ from mirage.view.types import LinkView, MountView
 
 
 @dataclass(slots=True)
-class WalkBudget:
+class DuTally:
     """What the walks of one ``du`` invocation met.
 
-    Each operand's walk lists at most ``full_scan_limit`` entries of each
-    mount it crosses (``ScanBudget``): a walk the mount's ``read_tree``
+    Each operand's walk lists at most ``walk_limit`` entries of each
+    mount it crosses (``WalkBudget``): a walk the mount's ``read_tree``
     does not answer takes one ``readdir`` per directory, which on an
     API-backed tree is one request per directory. Slack, for instance,
     exposes a directory per channel per day, so an unbounded walk of a
@@ -59,7 +59,6 @@ class WalkBudget:
 
     Args:
         mounts (MountView | None): the mount table the limits come from.
-        scan (ScanBudget | None): the current operand's allowance.
         stopped (list[str]): where a walk ran out, in the order met.
         unreadable (list[str]): virtual paths of the directories the
             walk could not open, in the order it met them.
@@ -72,7 +71,6 @@ class WalkBudget:
     """
 
     mounts: MountView | None = None
-    scan: ScanBudget | None = None
     stopped: list[str] = field(default_factory=list)
     unreadable: list[str] = field(default_factory=list)
     directories: list[str] = field(default_factory=list)
@@ -80,7 +78,7 @@ class WalkBudget:
 
 
 def _account_for_walk_error(
-    exc: Exception, path: PathSpec, budget: WalkBudget
+    exc: Exception, path: PathSpec, tally: DuTally
 ) -> None:
     """Account for an error the walk met at ``path``, or re-raise it.
 
@@ -102,10 +100,10 @@ def _account_for_walk_error(
     Args:
         exc (Exception): what the stat or readdir raised.
         path (PathSpec): where the walk met it.
-        budget (WalkBudget): records the refused directories.
+        tally (DuTally): records the refused directories.
     """
     if isinstance(exc, PermissionError):
-        budget.unreadable.append(path.virtual)
+        tally.unreadable.append(path.virtual)
         return
     if not isinstance(
         exc, (FileNotFoundError, NotADirectoryError, ValueError)
@@ -168,7 +166,7 @@ class Dereference:
 
 
 async def _counted(
-    follow: Dereference, path: PathSpec, info: FileStat, budget: WalkBudget
+    follow: Dereference, path: PathSpec, info: FileStat, tally: DuTally
 ) -> FileStat | None:
     """What ``du -L`` counts an entry as, None when it counts nothing.
 
@@ -176,7 +174,7 @@ async def _counted(
         follow (Dereference): the walk's dereference state.
         path (PathSpec): the entry.
         info (FileStat): its own stat, a link's row for a link.
-        budget (WalkBudget): records a link it cannot follow.
+        tally (DuTally): records a link it cannot follow.
     """
     try:
         real = follow.links.resolve(path.virtual)
@@ -186,10 +184,10 @@ async def _counted(
             else info
         )
     except FS_ERRORS + (CycleError,) as exc:
-        budget.inaccessible.append((path.virtual, fs_strerror(exc)))
+        tally.inaccessible.append((path.virtual, fs_strerror(exc)))
         return None
     if target is None:
-        budget.inaccessible.append((path.virtual, None))
+        tally.inaccessible.append((path.virtual, None))
         return None
     if (
         follow.home is not None
@@ -223,17 +221,18 @@ class Walk:
 async def _du_walk(
     walk: Walk,
     path: PathSpec,
-    budget: WalkBudget,
+    tally: DuTally,
+    scan: WalkBudget,
     entries: list[tuple[str, int]] | None,
     follow: Dereference | None = None,
 ) -> int:
     try:
         info = await walk.stat(path)
     except Exception as exc:
-        _account_for_walk_error(exc, path, budget)
+        _account_for_walk_error(exc, path, tally)
         return 0
     if follow is not None:
-        counted = await _counted(follow, path, info, budget)
+        counted = await _counted(follow, path, info, tally)
         if counted is None:
             return 0
         info = counted
@@ -242,18 +241,17 @@ async def _du_walk(
         if entries is not None:
             entries.append(("/" + path.virtual.strip("/"), size))
         return size
-    budget.directories.append(path.virtual)
-    scan = budget.scan
-    if scan is not None and not scan.opens(path.virtual):
+    tally.directories.append(path.virtual)
+    if not scan.opens(path.virtual):
         return 0
     try:
         children = await walk.readdir(path)
     except Exception as exc:
-        _account_for_walk_error(exc, path, budget)
+        _account_for_walk_error(exc, path, tally)
         return 0
     total = 0
     for child in children:
-        if scan is not None and not scan.spend(path.virtual):
+        if not scan.spend(path.virtual):
             break
         child_spec = PathSpec(
             virtual=child,
@@ -261,7 +259,7 @@ async def _du_walk(
             resolved=False,
             vfs_path=child.strip("/"),
         )
-        total += await _du_walk(walk, child_spec, budget, entries, follow)
+        total += await _du_walk(walk, child_spec, tally, scan, entries, follow)
     return total
 
 
@@ -283,7 +281,7 @@ def _tree_of(files: CommandFiles, listing: ReaddirFn) -> Walk:
 
 async def _walk_operand(
     walk: Walk,
-    budget: WalkBudget,
+    tally: DuTally,
     follow: Dereference | None,
     path: PathSpec,
     entries: list[tuple[str, int]] | None = None,
@@ -293,49 +291,50 @@ async def _walk_operand(
 
     Args:
         walk (Walk): the walk's calls.
-        budget (WalkBudget): the invocation's allowance and records.
+        tally (DuTally): what the invocation's walks met.
         follow (Dereference | None): the invocation's ``-L`` state.
         path (PathSpec): the operand.
         entries (list[tuple[str, int]] | None): collects each file's
             size under its name; None for a total alone.
     """
-    budget.directories.clear()
-    budget.scan = ScanBudget(path, budget.mounts)
+    tally.directories.clear()
+    scan = WalkBudget(path, tally.mounts)
     state = follow.operand(path) if follow is not None else None
-    total = await _du_walk(walk, path, budget, entries, state)
+    total = await _du_walk(walk, path, tally, scan, entries, state)
     if state is not None:
         for link, real in state.waiting:
             if real not in state.counted:
                 total += await _du_walk(
                     walk,
                     link,
-                    budget,
+                    tally,
+                    scan,
                     entries,
                     replace(state, tree=link.virtual),
                 )
-    budget.stopped.extend(
-        line for line in budget.scan.stopped if line not in budget.stopped
+    tally.stopped.extend(
+        line for line in scan.stopped if line not in tally.stopped
     )
     return total
 
 
 async def walk_size(
     walk: Walk,
-    budget: WalkBudget,
+    tally: DuTally,
     follow: Dereference | None,
     path: PathSpec,
 ) -> int:
-    return await _walk_operand(walk, budget, follow, path)
+    return await _walk_operand(walk, tally, follow, path)
 
 
 async def walk_entries(
     walk: Walk,
-    budget: WalkBudget,
+    tally: DuTally,
     follow: Dereference | None,
     path: PathSpec,
 ) -> DuEntries:
     entries: list[tuple[str, int]] = []
-    total = await _walk_operand(walk, budget, follow, path, entries)
+    total = await _walk_operand(walk, tally, follow, path, entries)
     entries.sort()
     return entries, total
 
@@ -349,7 +348,7 @@ async def du(
     files = command_files(ctx, paths)
     fl = FlagView(ctx.flags, spec=SPECS["du"])
     mounts = mounts_of(ctx)
-    budget = WalkBudget(mounts=mounts)
+    tally = DuTally(mounts=mounts)
     # Kept on one filesystem, a listing leaves out the roots
     # of the mounts below it, which the walk must neither list nor stat.
     bound = mount_view(ctx.vfs) if fl.as_bool("one_file_system") else None
@@ -369,11 +368,11 @@ async def du(
     )
 
     async def compute_size(path: PathSpec) -> int:
-        return await walk_size(_tree_of(files, listing), budget, follow, path)
+        return await walk_size(_tree_of(files, listing), tally, follow, path)
 
     async def compute_entries(path: PathSpec) -> DuEntries:
         return await walk_entries(
-            _tree_of(files, listing), budget, follow, path
+            _tree_of(files, listing), tally, follow, path
         )
 
     return await du_generic(
@@ -384,10 +383,10 @@ async def du(
         files.stat,
         compute_size,
         compute_entries,
-        stopped=lambda: budget.stopped,
-        unreadable=lambda: budget.unreadable,
-        directories=lambda: budget.directories,
-        inaccessible=lambda: budget.inaccessible,
+        stopped=lambda: tally.stopped,
+        unreadable=lambda: tally.unreadable,
+        directories=lambda: tally.directories,
+        inaccessible=lambda: tally.inaccessible,
         repeated=follow.repeated if follow is not None else None,
     )
 

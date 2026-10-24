@@ -446,11 +446,9 @@ async def test_rest_search_paginates_and_clips_the_final_page(monkeypatch):
     assert requests[0]["order"] == "asc"
 
 
-REFUSED_AT_4 = (
-    b"more than 4 files in scope (full_scan_limit); narrow the path\n"
-)
+REFUSED_AT_4 = b"more than 4 files in scope (walk_limit); narrow the path\n"
 
-STOPPED_AT_4 = b"stopped after 4 files (full_scan_limit); narrow the path\n"
+STOPPED_AT_4 = b"stopped after 4 files (walk_limit); narrow the path\n"
 
 REPO = {
     "src/a.py": b"import os\nx = 1\n",
@@ -472,7 +470,7 @@ async def _run(vfs, line: str) -> tuple[bytes, bytes, int]:
 
 
 def _ram(limit: int = 10000) -> RAMVFS:
-    vfs = RAMVFS(full_scan_limit=limit)
+    vfs = RAMVFS(walk_limit=limit)
     for key, data in REPO.items():
         parts = key.split("/")
         for depth in range(1, len(parts)):
@@ -495,7 +493,7 @@ async def _on_github(
             "owner": "o",
             "repo": "r",
             "base_url": hub.url,
-            "full_scan_limit": limit,
+            "walk_limit": limit,
         }
         if pinned:
             config["ref"] = hub.head()
@@ -635,7 +633,7 @@ async def test_an_archive_past_the_scope_cap_is_refused(monkeypatch):
     )
     assert (out, err, code) == (
         b"",
-        b"tar: more than 1 files in scope (full_scan_limit); narrow the path\n",
+        b"tar: more than 1 files in scope (walk_limit); narrow the path\n",
         1,
     )
     assert hub.count("blob") == 0
@@ -664,8 +662,7 @@ async def test_a_narrowed_search_past_the_scope_cap_stops_there(monkeypatch):
     )
     assert (out, err, code) == (
         b"/gh/big.txt:import\n",
-        b"grep: /gh: stopped after 2 files (full_scan_limit); "
-        b"narrow the path\n",
+        b"grep: /gh: stopped after 2 files (walk_limit); narrow the path\n",
         2,
     )
     assert _read(hub) == ["big.txt", "docs/c.md"]
@@ -686,7 +683,7 @@ async def test_a_binary_the_walk_skips_does_not_count_to_the_cap(monkeypatch):
                 "owner": "o",
                 "repo": "r",
                 "base_url": hub.url,
-                "full_scan_limit": 3,
+                "walk_limit": 3,
             },
         )
         assert await _run(vfs, line) == await _run(_ram(), line)
@@ -726,7 +723,7 @@ async def test_the_scope_count_after_an_expiry_counts_the_refetched_tree(
     prefix, scope, count, monkeypatch
 ):
     # One under the refetched count: a count off the expired tree is
-    # smaller, and would let the scan run.
+    # smaller, and would let the walk run.
     files = {"docs/a.txt": b"a", "docs/b.txt": b"b", "top.txt": b"t"}
     with serve(FakeGitHub(files=files)) as hub:
         vfs = build_vfs(
@@ -737,7 +734,7 @@ async def test_the_scope_count_after_an_expiry_counts_the_refetched_tree(
                 "repo": "r",
                 "ref": "main",
                 "base_url": hub.url,
-                "full_scan_limit": count - 1,
+                "walk_limit": count - 1,
             },
         )
         ws = Workspace(
@@ -759,7 +756,7 @@ async def test_the_scope_count_after_an_expiry_counts_the_refetched_tree(
                 result.stderr
                 == (
                     f"diff: more than {count - 1} files in scope "
-                    "(full_scan_limit); narrow the path\n"
+                    "(walk_limit); narrow the path\n"
                 ).encode()
             )
             assert hub.counts() == (0, 1, 0)

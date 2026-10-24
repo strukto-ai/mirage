@@ -274,7 +274,7 @@ export class NamespaceReader implements NamespaceLinks {
    * walk through the dispatcher (`crossing`) descends into each mount itself,
    * so it has no boundary to stop at: no mount below a path, and no mount
    * root; and it takes no mount's shortcut, so no mount answers a function
-   * for it, caps its globs or narrows its search.
+   * for it or narrows its search.
    */
   mounts(crossing: boolean): MountView {
     const below = (path: string): string[] => {
@@ -305,7 +305,7 @@ export class NamespaceReader implements NamespaceLinks {
       answers: (path: string, name: string) =>
         !crossing && (owner(path)?.calls?.has(name) ?? false),
       searchable: (path: string) => (crossing ? null : (owner(path)?.searchable ?? null)),
-      fullScanLimit: (path: string) => owner(path)?.fullScanLimit ?? -1,
+      walkLimit: (path: string) => owner(path)?.walkLimit ?? -1,
     }
   }
 }

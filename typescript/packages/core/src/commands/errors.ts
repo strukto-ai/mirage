@@ -32,17 +32,19 @@ export class UsageError extends Error {
 // Mirrors Python's mirage.commands.errors.FindParseError.
 export class FindParseError extends Error {}
 
-// A walk's read past its mount's `fullScanLimit`: grep and rg keep what they
-// printed, stop walking the directory and exit 2.
-// Mirrors Python's mirage.commands.errors.ScanLimitError.
-export class ScanLimitError extends Error {
+// A walk past its mount's `walkLimit`. The message is the line the command
+// prints where it stopped (`directory` is the operand, or the mount root
+// below it); grep and rg throw it to stop reading a directory, keep what
+// they printed and exit 2.
+// Mirrors Python's mirage.commands.errors.WalkLimitError.
+export class WalkLimitError extends Error {
   readonly directory: PathSpec
   constructor(directory: PathSpec, limit: number) {
     super(
       `${directory.rawPath === '' ? '.' : directory.rawPath}: stopped after ${String(limit)} files ` +
-        '(full_scan_limit); narrow the path',
+        '(walk_limit); narrow the path',
     )
-    this.name = 'ScanLimitError'
+    this.name = 'WalkLimitError'
     this.directory = directory
   }
 }

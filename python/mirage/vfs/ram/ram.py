@@ -35,7 +35,7 @@ from mirage.core.ram.write import write as _write
 from mirage.io.types import ByteSource
 from mirage.types import FileStat, PathSpec, VFSName
 from mirage.vfs.base import BaseVFS
-from mirage.vfs.constants import LOCAL_FULL_SCAN_LIMIT
+from mirage.vfs.constants import LOCAL_WALK_LIMIT
 from mirage.vfs.errors import VFSConfigError
 from mirage.vfs.ram.prompt import PROMPT
 from mirage.vfs.ram.store import RAMStore
@@ -52,23 +52,23 @@ class RAMVFS(BaseVFS):
     reads_ranges: bool = True
     local: bool = True
 
-    def __init__(self, full_scan_limit: int = LOCAL_FULL_SCAN_LIMIT) -> None:
+    def __init__(self, walk_limit: int = LOCAL_WALK_LIMIT) -> None:
         """Args:
-        full_scan_limit (int): the most files one command walks under a
+        walk_limit (int): the most files one command walks under a
             directory: searches and listings stop there, and a glob
             matching more, tar -c, cp -r, rm -r and the like are
             refused; -1 for no cap.
         """
         if (
-            isinstance(full_scan_limit, bool)
-            or not isinstance(full_scan_limit, int)
-            or full_scan_limit < -1
+            isinstance(walk_limit, bool)
+            or not isinstance(walk_limit, int)
+            or walk_limit < -1
         ):
             raise VFSConfigError(
-                "ram: full_scan_limit: must be an integer of -1 or more"
+                "ram: walk_limit: must be an integer of -1 or more"
             )
         super().__init__()
-        self.full_scan_limit = full_scan_limit
+        self.walk_limit = walk_limit
         self._store = RAMStore()
         self.accessor = RAMAccessor(self._store)
 
@@ -149,7 +149,7 @@ class RAMVFS(BaseVFS):
     def get_state(self) -> dict[str, Any]:
         return {
             "type": self.name,
-            "config": {"full_scan_limit": self.full_scan_limit},
+            "config": {"walk_limit": self.walk_limit},
             "files": dict(self._store.files),
             "dirs": list(self._store.dirs),
             "modified": dict(self._store.modified),

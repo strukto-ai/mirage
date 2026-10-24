@@ -153,8 +153,8 @@ export function patternRoots(patterns: Iterable<string>, literal = false): strin
       ? []
       : ['*', '?', '[', '\\'].map((mark) => stem.indexOf(mark)).filter((at) => at >= 0)
     if (wild.length > 0) {
-      const literal = stem.slice(0, Math.min(...wild))
-      stem = literal.slice(0, Math.max(literal.lastIndexOf(SLASH), 0))
+      const head = stem.slice(0, Math.min(...wild))
+      stem = head.slice(0, Math.max(head.lastIndexOf(SLASH), 0))
     }
     if (stem === '') return null
     roots.push(stem)

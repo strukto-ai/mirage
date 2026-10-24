@@ -653,7 +653,7 @@ async def test_copy_carries_a_directly_installed_spec():
 
 
 class _MountCliCfg(_CliCfg):
-    full_scan_limit: int = 1000
+    walk_limit: int = 1000
 
 
 @pytest.mark.asyncio

@@ -33,8 +33,8 @@ class Answers:
     """A dispatcher for one mount, each function it serves answered by a
     path-first callable; one it has no callable for is refused with
     ENOTSUP, as one the mount does not answer is, except
-    ``before_full_scan``, which passes as it does on a mount with no
-    ``full_scan_limit``. The mount's row names every function but
+    ``before_full_walk``, which passes as it does on a mount with no
+    ``walk_limit``. The mount's row names every function but
     ``stat``, ``readdir`` and ``read``, so a builder asks for it.
 
     Args:
@@ -60,7 +60,7 @@ class Answers:
     ) -> tuple[Any, IOResult]:
         self.calls.append((name, path.virtual, kwargs))
         answer = self.answers.get(name)
-        if answer is None and name == "before_full_scan":
+        if answer is None and name == "before_full_walk":
             return None, IOResult()
         if answer is None:
             raise enotsup("ram", name, path)

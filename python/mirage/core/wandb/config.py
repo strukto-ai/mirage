@@ -2,7 +2,7 @@ from typing import Annotated
 
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, SecretStr
 
-from mirage.vfs.constants import FULL_SCAN_LIMIT
+from mirage.vfs.constants import WALK_LIMIT
 
 
 def entity_name(value: str) -> str:
@@ -34,7 +34,7 @@ class WandbConfig(BaseModel):
     max_pages: int = Field(default=10000, ge=1)
     """The most pages one listing or history read fetches. Past it the
     read fails rather than return a partial result."""
-    full_scan_limit: int = Field(default=FULL_SCAN_LIMIT, ge=-1)
+    walk_limit: int = Field(default=WALK_LIMIT, ge=-1)
     """Most files one command walks under a folder: `grep -r`, `find` and other
     walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is
     refused. `-1` lifts the limit."""

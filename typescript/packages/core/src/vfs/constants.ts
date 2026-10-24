@@ -14,9 +14,9 @@
 
 import { Effect } from './types.ts'
 
-export const FULL_SCAN_LIMIT = 1000
+export const WALK_LIMIT = 1000
 
-export const LOCAL_FULL_SCAN_LIMIT = 10000
+export const LOCAL_WALK_LIMIT = 10000
 
 // Every effect that changes the mount: a read-only mount refuses these and
 // admission judges them as writes.

@@ -33,7 +33,6 @@ export function trelloAccessor(config: unknown): TrelloAccessor {
   return new TrelloAccessor(transport, {
     ...(cfg.workspaceId !== undefined ? { workspaceId: cfg.workspaceId } : {}),
     ...(cfg.boardIds !== undefined ? { boardIds: cfg.boardIds } : {}),
-    ...(cfg.fullScanLimit !== undefined ? { fullScanLimit: cfg.fullScanLimit } : {}),
   })
 }
 

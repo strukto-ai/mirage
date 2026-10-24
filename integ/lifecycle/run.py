@@ -115,12 +115,12 @@ register_vfs("listed-ram", ListedRAMVFS)
 
 
 class LimitedRAMVFS(RAMVFS):
-    """A local fixture holding a full scan to ``full_scan_limit`` files."""
+    """A local fixture holding each walk to ``walk_limit`` files."""
 
     def __init__(
-        self, files: dict[str, str] | None = None, full_scan_limit: int = -1
+        self, files: dict[str, str] | None = None, walk_limit: int = -1
     ) -> None:
-        super().__init__(full_scan_limit=full_scan_limit)
+        super().__init__(walk_limit=walk_limit)
         files = files or {}
         self.load_state(
             {

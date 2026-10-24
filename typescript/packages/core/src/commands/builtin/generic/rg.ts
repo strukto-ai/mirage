@@ -21,7 +21,7 @@ import type { MountView } from '../../../view/types.ts'
 import { FileStat, FileType, type PathSpec } from '../../../types.ts'
 import { enoent, isFsError, isWalkError, walkRefusal } from '../../../errors/fs.ts'
 import type { CommandFnResult, Context } from '../../config.ts'
-import { ScanLimitError, UsageError } from '../../errors.ts'
+import { UsageError, WalkLimitError } from '../../errors.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView, flagOccurrences } from '../../spec/flag_view.ts'
 import type { FlagValue, ParsedFlagValue } from '../../spec/types.ts'
@@ -1159,7 +1159,7 @@ function lead(
 // mounts --one-file-system keeps each walk to its operand's own, null when
 // the walk may enter any directory; `resolver` the namespace's links and the
 // dispatcher past them, which -L walks through; `stopped` the directories a
-// search stopped at their mount's `fullScanLimit`, whose walk ends there.
+// search stopped at their mount's `walkLimit`, whose walk ends there.
 export async function* haystacks(
   paths: readonly PathSpec[],
   rd: (path: string) => Promise<string[]>,
@@ -1170,7 +1170,7 @@ export async function* haystacks(
   warnings: string[],
   boundary: MountView | null,
   resolver: LinkResolver | null,
-  stopped: ReadonlySet<string> | null = null,
+  stopped: ReadonlySet<string>,
 ): AsyncGenerator<Haystack> {
   // ripgrep holds one path that is not a directory to one thread, as it
   // does -j1 and a sort; every other line runs its parallel walker.
@@ -1233,7 +1233,7 @@ export async function* haystacks(
       parallel,
     )) {
       yield found
-      if (stopped?.has(p.virtual) === true) break
+      if (stopped.has(p.virtual)) break
     }
   }
 }
@@ -1309,7 +1309,7 @@ async function* searchAll(
   // Receives the exit status and the warnings, however the output ends.
   io: IOResult,
   // Collects each directory whose walk a read stopped at its mount's
-  // `fullScanLimit`.
+  // `walkLimit`.
   stopped: Set<string>,
   signal?: AbortSignal,
   // Runs --pre's command in the session.
@@ -1408,7 +1408,7 @@ async function* searchAll(
           warnings.push(`rg: ${name}: \n${GZIP_RULE}\n${err.render(name).trimStart()}${GZIP_RULE}`)
           damaged = true
           if (f.countOnly || f.countMatches || f.filesWithoutMatch) chunks.length = 0
-        } else if (err instanceof ScanLimitError) {
+        } else if (err instanceof WalkLimitError) {
           if (!stopped.has(err.directory.virtual)) {
             stopped.add(err.directory.virtual)
             warnings.push(`rg: ${err.message}`)

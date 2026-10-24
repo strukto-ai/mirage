@@ -27,7 +27,7 @@ import { compareCodePoints } from '../../../utils/sort.ts'
 import { linksOf, mountsOf } from '../utils/links.ts'
 import { vfsReaddirPath, vfsStatPath } from '../utils/paths.ts'
 import { cInt, strtoul } from '../utils/strtol.ts'
-import { ScanBudget } from '../utils/tree.ts'
+import { WalkBudget } from '../utils/tree.ts'
 
 const UNOPENABLE_MARK = '  [error opening dir]'
 
@@ -90,7 +90,7 @@ interface TreeOpts {
   targetStat: ((path: string) => Promise<FileStat | null>) | null
   // The entries this operand's walk may still list; a directory past it is
   // drawn but not opened.
-  budget?: ScanBudget
+  budget?: WalkBudget
 }
 
 // The mount roots mounted directly on this directory. A mount point need
@@ -364,7 +364,7 @@ export async function treeGeneric(
         continue
       }
     }
-    const budget = new ScanBudget(p, treeOpts.mounts)
+    const budget = new WalkBudget(p, treeOpts.mounts)
     const counts = await walkTree(readdir, stat, p, '', lines, { ...treeOpts, budget }, 0)
     for (const line of budget.stopped) stopped.push(`tree: ${line}`)
     if (counts.failed && lines.length === before + 1) {
@@ -382,7 +382,7 @@ export async function treeGeneric(
   }
   lines.push('', summary(totalDirs, totalFiles, treeOpts.dirsOnly))
   const out: ByteSource = formatRecords(lines)
-  // A walk past fullScanLimit draws what it listed and says where it
+  // A walk past walkLimit draws what it listed and says where it
   // stopped, exiting 2 as for a directory it could not open.
   return [
     out,

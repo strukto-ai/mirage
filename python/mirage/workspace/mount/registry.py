@@ -772,7 +772,7 @@ class MountRegistry:
                 anchor=m is self._anchor,
                 visible=m.visible,
                 searchable=m.vfs.searchable,
-                full_scan_limit=m.vfs.full_scan_limit,
+                walk_limit=m.vfs.walk_limit,
                 calls=m.calls,
             )
             for m in self._mounts

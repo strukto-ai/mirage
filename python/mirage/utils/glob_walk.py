@@ -565,7 +565,7 @@ def make_resolve_glob(
     Args:
         readdir (Callable): readdir ``readdir(path)``.
         limit (int): the most matches one pattern may have (the mount's
-            ``full_scan_limit``); -1 for no cap.
+            ``walk_limit``); -1 for no cap.
         stat (Callable | None): stat ``stat(path)``, which is what lets a
             trailing slash keep directories only.
         target_stat (LinkTargetStat | None): the namespace's stat of what
@@ -672,8 +672,9 @@ async def resolve_glob_with(
     Resolved specs pass through, pattern specs expand segment-by-segment
     via :func:`expand_pattern` (mid-path aware, spelled as typed), an
     unmatched glob word stays the literal (bash with nullglob off: the
-    command then errors on it like GNU), and matches cap at ``cap`` when
-    given. Per-backend glob modules bind their own readdir.
+    command then errors on it like GNU), and a pattern matching more than
+    ``limit`` paths is refused (``GlobLimitError``), not cut short; -1 for
+    no limit. Per-backend glob modules bind their own readdir.
 
     The spec shape is how a caller chooses between the two answers, and
     the choice matters because the literal is not distinguishable from a

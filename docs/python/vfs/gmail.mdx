@@ -33,7 +33,7 @@ ws = Workspace({"/gmail": vfs}, mode=MountMode.READ)
 | <code style={{ whiteSpace: 'nowrap' }}>client_secret</code><br />secret | Google OAuth client secret, sent with the refresh-token grant. Omit it for a PKCE client. |
 | <code style={{ whiteSpace: 'nowrap' }}>refresh_token</code><br />secret | User's OAuth refresh token. Required with `client_id` when `access_token` is unset. |
 | <code style={{ whiteSpace: 'nowrap' }}>api_base</code> | One base URL that replaces every Google API host and the OAuth token endpoint, such as a test server. Unset uses Google's hosts. |
-| <code style={{ whiteSpace: 'nowrap' }}>full_scan_limit</code><br />default `1000` | Most files one command walks under a folder: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit, and the listing then keeps no message text. |
+| <code style={{ whiteSpace: 'nowrap' }}>walk_limit</code><br />default `1000` | Most files one command walks under a folder: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit, and the listing then keeps no message text. |
 
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table gmail end */}
@@ -280,4 +280,4 @@ nothing more and saves the second fetch of each message it rules out. Gmail's
 own search is not used: it reads the HTML part of a message and can miss a word
 of the plain-text body a `.gmail.json` holds, such as one inside a link.
 Attachments are always read, and so is every message for a text that is not
-ASCII. With `full_scan_limit: -1` the listing keeps no message text, and every message is read.
+ASCII. With `walk_limit: -1` the listing keeps no message text, and every message is read.

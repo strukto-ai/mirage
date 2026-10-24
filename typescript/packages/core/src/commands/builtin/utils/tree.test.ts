@@ -21,7 +21,7 @@ import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { getTestParser } from '../../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../../workspace/workspace/workspace.ts'
 import type { MountView } from '../../../view/types.ts'
-import { ScanBudget, treeWalk } from './tree.ts'
+import { WalkBudget, treeWalk } from './tree.ts'
 
 const FILE = FileType.FILE
 const DIR = FileType.DIRECTORY
@@ -138,7 +138,7 @@ describe('treeWalk', () => {
   })
 })
 
-// A RAM mount that refuses every full scan, keeping its reads. Twin of
+// A RAM mount that refuses every full walk, keeping its reads. Twin of
 // Python's GuardedRAM.
 class GuardedRAM extends RAMVFS {
   readonly scans: string[] = []
@@ -154,7 +154,7 @@ class GuardedRAM extends RAMVFS {
     return super.read(path, handed, offset, size)
   }
 
-  override beforeFullScan(path: PathSpec, files: number | null): Promise<void> {
+  override beforeFullWalk(path: PathSpec, files: number | null): Promise<void> {
     this.scans.push(path.virtual)
     return Promise.reject(new Error(`${String(files)} files in scope, narrow the path`))
   }
@@ -235,7 +235,7 @@ describe('a whole-directory read asks the mount first', () => {
   )
 })
 
-// The mounts a scan budget charges, each root to its full_scan_limit.
+// The mounts a scan budget charges, each root to its walk_limit.
 function limits(table: Record<string, number>): MountView {
   const rootOf = (path: string): string =>
     Object.keys(table)
@@ -248,24 +248,23 @@ function limits(table: Record<string, number>): MountView {
     rootOf,
     answers: () => false,
     searchable: () => null,
-    fullScanLimit: (path) => table[rootOf(path)] ?? -1,
+    walkLimit: (path) => table[rootOf(path)] ?? -1,
   }
 }
 
-const stop = (n: number): string =>
-  `stopped after ${String(n)} files (full_scan_limit); narrow the path`
+const stop = (n: number): string => `stopped after ${String(n)} files (walk_limit); narrow the path`
 
 // Twins of the scan budget tests in test_tree.py.
-describe('ScanBudget', () => {
+describe('WalkBudget', () => {
   it('stops once spent and opens nothing more', () => {
-    const budget = new ScanBudget(at('/m/d'), limits({ '/m/': 2 }))
+    const budget = new WalkBudget(at('/m/d'), limits({ '/m/': 2 }))
     expect([0, 1, 2].map(() => budget.spend('/m/d'))).toEqual([true, true, false])
     expect(budget.opens('/m/d/sub')).toBe(false)
     expect(budget.stopped).toEqual([`/m/d: ${stop(2)}`])
   })
 
   it('charges each mount under its own root', () => {
-    const budget = new ScanBudget(at('/'), limits({ '/': -1, '/m/': 2, '/n/': 3 }))
+    const budget = new WalkBudget(at('/'), limits({ '/': -1, '/m/': 2, '/n/': 3 }))
     expect(Array.from({ length: 50 }, () => budget.spend('/')).every(Boolean)).toBe(true)
     expect([0, 1, 2].map(() => budget.spend('/m/d'))).toEqual([true, true, false])
     expect([0, 1, 2].map(() => budget.spend('/n')).every(Boolean)).toBe(true)
@@ -282,7 +281,7 @@ describe('ScanBudget', () => {
       vfsPath: 'm/d',
       rawPath: raw,
     })
-    const budget = new ScanBudget(operand, limits({ '/m/': 0 }))
+    const budget = new WalkBudget(operand, limits({ '/m/': 0 }))
     expect(budget.spend('/m/d')).toBe(false)
     expect(budget.stopped).toEqual([`${shown}: ${stop(0)}`])
   })
@@ -293,7 +292,7 @@ describe('ScanBudget', () => {
       asked.push(path.virtual)
       return Promise.resolve([0, 1, 2].map((i) => `${path.virtual}/${String(i)}`))
     }
-    const budget = new ScanBudget(at('/m'), limits({ '/m/': 2 }))
+    const budget = new WalkBudget(at('/m'), limits({ '/m/': 2 }))
     expect(await budget.listing(readdir, at('/m'))).toEqual(['/m/0', '/m/1'])
     expect(await budget.listing(readdir, at('/m/0'))).toEqual([])
     expect(asked).toEqual(['/m'])

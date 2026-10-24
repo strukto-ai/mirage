@@ -244,7 +244,7 @@ async function listCards(
       modified: pickString(card, 'dateLastActivity'),
       extra: {
         json_size: toJsonBytes(normalizeCard(card)).byteLength,
-        ...(accessor.fullScanLimit >= 0 ? { unsearched: unsearchedText(card) } : {}),
+        ...(accessor.walkLimit >= 0 ? { unsearched: unsearchedText(card) } : {}),
       },
     }),
   )

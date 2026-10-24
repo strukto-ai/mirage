@@ -83,7 +83,7 @@ def _leaf_message(exc: BaseException) -> str:
 
 
 def argument_list_too_long(command: str, reason: str) -> bytes:
-    """What a command given a glob past its mount's ``full_scan_limit``
+    """What a command given a glob past its mount's ``walk_limit``
     says: exec(2)'s refusal of an argument list too long, which bash
     reports with exit 126, then the limit's own line.
 

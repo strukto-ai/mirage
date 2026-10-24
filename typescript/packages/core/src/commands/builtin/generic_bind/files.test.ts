@@ -148,8 +148,8 @@ describe('commandFiles', () => {
   // Mirrors test_a_glob_past_its_mounts_limit_is_refused_and_none_is_stdin.
   it('refuses a glob past its mount limit, on a mount or across, none as stdin', async () => {
     const dispatch = keyed({ stored: { '/f0.txt': '', '/f1.txt': '', '/f2.txt': '' } })
-    const row = { prefix: '/', kind: 'ram', mode: MountMode.WRITE, fullScanLimit: 2 }
-    const roomyRow = { ...row, fullScanLimit: 3 }
+    const row = { prefix: '/', kind: 'ram', mode: MountMode.WRITE, walkLimit: 2 }
+    const roomyRow = { ...row, walkLimit: 3 }
     const word = new PathSpec({
       virtual: '/*.txt',
       directory: '/',

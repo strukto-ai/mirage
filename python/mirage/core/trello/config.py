@@ -14,7 +14,7 @@
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr
 
-from mirage.vfs.constants import FULL_SCAN_LIMIT
+from mirage.vfs.constants import WALK_LIMIT
 
 
 class TrelloConfig(BaseModel):
@@ -32,7 +32,7 @@ class TrelloConfig(BaseModel):
     board of the shown workspaces."""
     base_url: str = "https://api.trello.com/1"
     """Trello API root; override to point at a fake or proxy."""
-    full_scan_limit: int = Field(default=FULL_SCAN_LIMIT, ge=-1)
+    walk_limit: int = Field(default=WALK_LIMIT, ge=-1)
     """Most files one command walks under a folder: `grep -r`, `find` and other
     walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is
     refused. `-1` lifts the limit and reads every file without asking Trello's

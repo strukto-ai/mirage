@@ -45,7 +45,7 @@ config files and large binaries go through the same path.
 | <code style={{ whiteSpace: 'nowrap' }}>bucket</code><br />default `'fs'` | GridFS bucket name; its collections are `<bucket>.files` and `<bucket>.chunks`. |
 | <code style={{ whiteSpace: 'nowrap' }}>key_prefix</code> | Filename prefix the mount treats as its root; files outside it are not listed. |
 | <code style={{ whiteSpace: 'nowrap' }}>chunk_size_bytes</code> | Chunk size in bytes for files the mount writes; unset uses the driver's default, 255 KiB. |
-| <code style={{ whiteSpace: 'nowrap' }}>full_scan_limit</code><br />default `1000` | Most files one command walks under a folder: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit. |
+| <code style={{ whiteSpace: 'nowrap' }}>walk_limit</code><br />default `1000` | Most files one command walks under a folder: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit. |
 
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table gridfs end */}

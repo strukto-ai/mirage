@@ -45,7 +45,7 @@ except ImportError as _err:
 from mirage.accessor.redis import RedisAccessor
 from mirage.types import VFSName
 from mirage.vfs.base import BaseVFS
-from mirage.vfs.constants import FULL_SCAN_LIMIT
+from mirage.vfs.constants import WALK_LIMIT
 from mirage.vfs.errors import VFSConfigError
 from mirage.vfs.redis.prompt import PROMPT
 from mirage.vfs.redis.store import RedisStore, escape_glob
@@ -67,26 +67,26 @@ class RedisVFS(BaseVFS):
         self,
         url: str = "redis://localhost:6379/0",
         key_prefix: str = "mirage:fs:",
-        full_scan_limit: int = FULL_SCAN_LIMIT,
+        walk_limit: int = WALK_LIMIT,
     ) -> None:
         """Args:
         url (str): the Redis server.
         key_prefix (str): the prefix every key of the mount starts with.
-        full_scan_limit (int): the most files one command walks under a
+        walk_limit (int): the most files one command walks under a
             directory: searches and listings stop there, and a glob
             matching more, tar -c, cp -r, rm -r and the like are
             refused; -1 for no cap.
         """
         if (
-            isinstance(full_scan_limit, bool)
-            or not isinstance(full_scan_limit, int)
-            or full_scan_limit < -1
+            isinstance(walk_limit, bool)
+            or not isinstance(walk_limit, int)
+            or walk_limit < -1
         ):
             raise VFSConfigError(
-                "redis: full_scan_limit: must be an integer of -1 or more"
+                "redis: walk_limit: must be an integer of -1 or more"
             )
         super().__init__()
-        self.full_scan_limit = full_scan_limit
+        self.walk_limit = walk_limit
         self.url = url
         self.key_prefix = key_prefix
         self._store = RedisStore(url=url, key_prefix=key_prefix)

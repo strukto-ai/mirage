@@ -453,7 +453,7 @@ describe('codex-exec', () => {
   // Twin of test_walk_stops_at_the_limit_of_the_mount_it_lists.
   it('stops a walk at the limit of the mount it lists', async () => {
     const ws = new Workspace(
-      { '/': new RAMVFS({ fullScanLimit: -1 }), '/w': new RAMVFS({ fullScanLimit: 2 }) },
+      { '/': new RAMVFS({ walkLimit: -1 }), '/w': new RAMVFS({ walkLimit: 2 }) },
       { mode: MountMode.WRITE },
     )
     const client = await codex(await startHarness(MountMode.WRITE, ws))

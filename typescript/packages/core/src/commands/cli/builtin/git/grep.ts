@@ -253,11 +253,11 @@ export async function grep(
       )
         continue
       const target = repo.location.worktree.join(path)
-      if (mounts?.fullScanLimit !== undefined) {
+      if (mounts?.walkLimit !== undefined) {
         // A blob is read from the repository, a working-tree file from the
         // mount serving it, and each mount counts its own.
         const source = (revision || cached ? repo.location.gitdir : target).virtual
-        const limit = mounts.fullScanLimit(source)
+        const limit = mounts.walkLimit(source)
         const root = mounts.rootOf(source)
         const used = read.get(root) ?? 0
         if (limit >= 0 && used >= limit) {
@@ -268,7 +268,7 @@ export async function grep(
             new IOResult({
               exitCode: FATAL_EXIT,
               stderr: encodeText(
-                `fatal: stopped after ${String(limit)} files (full_scan_limit); narrow the pathspec\n`,
+                `fatal: stopped after ${String(limit)} files (walk_limit); narrow the pathspec\n`,
               ),
             }),
           ]

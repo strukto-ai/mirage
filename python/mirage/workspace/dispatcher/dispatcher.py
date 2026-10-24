@@ -365,15 +365,15 @@ def _visible_answer(
     return [hit for hit in result if path_visible(vis, hit[0])]
 
 
-def _guards_scans(vfs: BaseVFS) -> bool:
+def _guards_walks(vfs: BaseVFS) -> bool:
     """Whether a VFS may refuse a command that reads every file under a
-    directory: it defines ``before_full_scan``, or sets a
-    ``full_scan_limit`` the default one holds it to.
+    directory: it defines ``before_full_walk``, or sets a
+    ``walk_limit`` the default one holds it to.
 
     Args:
         vfs (BaseVFS): the mount's VFS.
     """
-    return vfs.supports("before_full_scan") or vfs.full_scan_limit >= 0
+    return vfs.supports("before_full_walk") or vfs.walk_limit >= 0
 
 
 def _answer_paths(result: Any) -> list[str] | None:
@@ -432,8 +432,8 @@ async def _answered(
 
 
 async def _is_directory(mount: MountEntry, path: PathSpec) -> bool:
-    """Whether a scan guard's path is a directory: a file or a missing
-    name has nothing below it to scan.
+    """Whether a walk guard's path is a directory: a file or a missing
+    name has nothing below it to walk.
 
     Args:
         mount (MountEntry): the mount serving the path.
@@ -442,7 +442,7 @@ async def _is_directory(mount: MountEntry, path: PathSpec) -> bool:
     try:
         found = await mount.call("stat", path.virtual)
     except (FileNotFoundError, NotADirectoryError) as exc:
-        logger.debug("scan guard at %s: %s", path.virtual, exc)
+        logger.debug("walk guard at %s: %s", path.virtual, exc)
         return False
     return found is not None and found.type is FileType.DIRECTORY
 
@@ -1157,14 +1157,14 @@ class Dispatcher:
         fresh = name == "stat" and bool(kwargs.pop("fresh", False))
         # The command's gate judges its own calls; a metadata call passes,
         # as its guards let stat pass, unless it only asks admission, and a
-        # scan guard reads nothing: the rule judges each read it guards. A
+        # walk guard reads nothing: the rule judges each read it guards. A
         # warm read is judged in the cache stage, held or not: its answer
         # stands in for the read (a search's ruled-out file is read as
         # empty), so it meets the rule the read would.
         rule_gate = (
             None
             if (name in METADATA_OPS and not admit_only)
-            or name == "before_full_scan"
+            or name == "before_full_walk"
             or warm
             else caller.rule_gate
         )
@@ -1178,9 +1178,9 @@ class Dispatcher:
             )
             return hits, IOResult()
         await self._prepare(caller)
-        # With no scan guard on any mount, no path reaches one to ask.
-        if name == "before_full_scan" and not any(
-            _guards_scans(m.vfs) for m in self._namespace.registry.mounts()
+        # With no walk guard on any mount, no path reaches one to ask.
+        if name == "before_full_walk" and not any(
+            _guards_walks(m.vfs) for m in self._namespace.registry.mounts()
         ):
             return None, IOResult()
         call = await self._walk(
@@ -1229,10 +1229,10 @@ class Dispatcher:
         if name == "statfs":
             return await self._statfs(call.path, caller), IOResult()
         mount = self._namespace.try_mount_for(call.path.virtual)
-        # A mount with no scan guard has nothing to refuse, so a command
+        # A mount with no walk guard has nothing to refuse, so a command
         # asks every mount it walks and only a guard costs a call.
-        if name == "before_full_scan" and (
-            mount is None or not _guards_scans(mount.vfs)
+        if name == "before_full_walk" and (
+            mount is None or not _guards_walks(mount.vfs)
         ):
             return None, IOResult()
         # The cache stage answers first where the file cache decides: a
@@ -2175,19 +2175,19 @@ class Dispatcher:
                 )
             elif call.name in SERIAL_WRITE_OPS:
                 result = await self._serial_write(call, mount)
-            elif call.name == "before_full_scan" and not await _is_directory(
+            elif call.name == "before_full_walk" and not await _is_directory(
                 mount, call.path
             ):
                 result = None
-            elif call.name == "before_full_scan" and not mount.vfs.supports(
+            elif call.name == "before_full_walk" and not mount.vfs.supports(
                 call.name
             ):
-                await mount.vfs.before_full_scan(
+                await mount.vfs.before_full_walk(
                     call.path, files=await self._visible_files(mount, call)
                 )
                 result = None
             else:
-                if call.name == "before_full_scan":
+                if call.name == "before_full_walk":
                     kwargs["files"] = await self._visible_files(mount, call)
                 if call.fresh:
                     kwargs["index"] = ListingCheckStore(hints=mount.index)
@@ -2276,13 +2276,13 @@ class Dispatcher:
     async def _visible_files(
         self, mount: MountEntry, call: _Call
     ) -> int | None:
-        """How many files the session sees under a scan guard's path.
+        """How many files the session sees under a walk guard's path.
 
         Counted off the mount's ``read_tree`` with every hidden file
         dropped, and every file a nested mount covers, so a guard's
         refusal never counts what the command would not read. Without
         one, or where it cannot read the whole tree,
-        a mount with a ``full_scan_limit`` is walked listing by listing,
+        a mount with a ``walk_limit`` is walked listing by listing,
         hidden entries skipped, until one file past the limit; a folder
         below the path it cannot open counts nothing, as the command
         reports it itself. None otherwise.
@@ -2311,7 +2311,7 @@ class Dispatcher:
             try:
                 found = await mount.call("read_tree", root)
             except OSError as exc:
-                logger.debug("scan count of %s walks instead: %s", root, exc)
+                logger.debug("walk count of %s lists instead: %s", root, exc)
                 found = None
             if found is not None:
                 base = root.rstrip("/")
@@ -2320,7 +2320,7 @@ class Dispatcher:
                     for key, st in found.items()
                     if counted(f"{base}/{key}")
                 )
-        limit = mount.vfs.full_scan_limit
+        limit = mount.vfs.walk_limit
         if limit < 0:
             return None
         count = 0
@@ -2332,7 +2332,7 @@ class Dispatcher:
             except OSError as exc:
                 if directory == root:
                     raise
-                logger.debug("scan count skips %s: %s", directory, exc)
+                logger.debug("walk count skips %s: %s", directory, exc)
                 continue
             for entry in entries:
                 child = entry.rstrip("/")
@@ -2341,7 +2341,7 @@ class Dispatcher:
                 try:
                     row = await mount.call("stat", child)
                 except OSError as exc:
-                    logger.debug("scan count skips %s: %s", child, exc)
+                    logger.debug("walk count skips %s: %s", child, exc)
                     continue
                 if row.type is FileType.DIRECTORY:
                     pending.append(child)

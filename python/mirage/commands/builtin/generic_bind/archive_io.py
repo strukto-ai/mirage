@@ -5,7 +5,7 @@ from mirage.commands.builtin.generic.archive.types import Walked
 from mirage.commands.builtin.generic.archive.walk import DirProbe, WalkFn
 from mirage.commands.builtin.generic.find import parse_find_args
 from mirage.commands.builtin.generic_bind.files import CommandFiles
-from mirage.commands.builtin.utils.tree import before_full_scan
+from mirage.commands.builtin.utils.tree import before_full_walk
 from mirage.core.generic.find import walk_find
 from mirage.runtime.types import DispatchFn
 from mirage.types import FileStat, FileType, PathSpec, ReaddirFn, StatFn
@@ -31,19 +31,19 @@ async def _walk_with(
     walk could not open rides along, so the archiver can report it the
     way GNU does instead of silently leaving its contents out. The
     files listed are every file the archiver reads, so the mount that
-    owns ``path`` may refuse the scan before they are listed.
+    owns ``path`` may refuse the walk before they are listed.
 
     Args:
         readdir (ReaddirFn): the walk's readdir.
         stat (StatFn): the walk's stat.
         dispatch (DispatchFn | None): the command's dispatcher, which
-            asks the mount's ``before_full_scan``.
+            asks the mount's ``before_full_walk``.
         command (str): tar or zip.
         path (PathSpec): the operand to walk.
         find_type (str): "d" or "f".
     """
     if find_type == "f":
-        await before_full_scan(dispatch, path, command)
+        await before_full_walk(dispatch, path, command)
     unreadable: list[str] = []
     paths = await walk_find(
         path,
@@ -93,7 +93,7 @@ def walk_of(
     Args:
         files (CommandFiles): the command's files.
         dispatch (DispatchFn | None): the command's dispatcher, which
-            asks the mount's ``before_full_scan``.
+            asks the mount's ``before_full_walk``.
         command (str): tar or zip.
     """
     return partial(_walk_with, files.readdir, files.stat, dispatch, command)

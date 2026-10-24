@@ -32,9 +32,7 @@ def _accessor():
 async def _expanded(acc: Mem0Accessor, p: PathSpec) -> list[PathSpec]:
     ws = Workspace({"/mem/": vfs_over(Mem0VFS, acc)})
     mount = ws._registry.mount_for("/mem/")
-    return await expand_glob(
-        ws.dispatch, mount, [p], mount.vfs.full_scan_limit
-    )
+    return await expand_glob(ws.dispatch, mount, [p], mount.vfs.walk_limit)
 
 
 @pytest.mark.asyncio

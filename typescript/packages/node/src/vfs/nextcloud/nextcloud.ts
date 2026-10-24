@@ -33,7 +33,7 @@ import { capacity } from '../../core/nextcloud/capacity.ts'
 import { checksum } from '../../core/nextcloud/checksum.ts'
 import { setAttrs } from '../../core/nextcloud/set_attrs.ts'
 import { rstripSlash } from '@struktoai/mirage-core/utils/slash'
-import { FULL_SCAN_LIMIT } from '@struktoai/mirage-core/vfs/constants'
+import { WALK_LIMIT } from '@struktoai/mirage-core/vfs/constants'
 
 export interface NextcloudVFSState {
   type: string
@@ -50,10 +50,10 @@ export class NextcloudVFS extends BaseVFS {
   override readonly prompt = PROMPT
   override readonly accessor: NextcloudAccessor
 
-  override readonly fullScanLimit: number
+  override readonly walkLimit: number
   constructor(readonly config: NextcloudConfig) {
     super()
-    this.fullScanLimit = config.fullScanLimit ?? FULL_SCAN_LIMIT
+    this.walkLimit = config.walkLimit ?? WALK_LIMIT
     this.accessor = new NextcloudAccessor(config)
   }
 

@@ -17,9 +17,9 @@ import { UpstashRedisStore, type UpstashRedisStoreOptions } from './store.ts'
 
 export type { RedisVFSState } from '@struktoai/mirage-core/vfs/redis/redis'
 
-// `fullScanLimit`: the most files one command walks under a directory: searches and listings stop
+// `walkLimit`: the most files one command walks under a directory: searches and listings stop
 // there, and a glob matching more, tar -c, cp -r, rm -r and the like are refused; -1 for no cap.
-export type RedisVFSOptions = UpstashRedisStoreOptions & { fullScanLimit?: number }
+export type RedisVFSOptions = UpstashRedisStoreOptions & { walkLimit?: number }
 
 /**
  * The browser redis mount: the shared VFS over Upstash's REST api.
@@ -33,7 +33,7 @@ export class RedisVFS extends CoreRedisVFS {
   declare readonly store: UpstashRedisStore
 
   constructor(options: RedisVFSOptions) {
-    const { fullScanLimit, ...store } = options
-    super(new UpstashRedisStore(store), fullScanLimit)
+    const { walkLimit, ...store } = options
+    super(new UpstashRedisStore(store), walkLimit)
   }
 }

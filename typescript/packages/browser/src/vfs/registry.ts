@@ -41,21 +41,21 @@ export type VFSFactory = (config: Record<string, unknown>) => Promise<BaseVFS>
 // The backends that take their options without a schema, and the option
 // names each takes, so a key outside these is refused rather than ignored,
 // the way python refuses a constructor keyword its class does not take.
-const OPFS_OPTIONS: readonly (keyof OPFSVFSOptions)[] = ['root', 'fullScanLimit']
+const OPFS_OPTIONS: readonly (keyof OPFSVFSOptions)[] = ['root', 'walkLimit']
 const REDIS_OPTIONS: readonly (keyof RedisVFSOptions)[] = [
   'url',
   'token',
   'keyPrefix',
   'fetchImpl',
   'maxRequestBytes',
-  'fullScanLimit',
+  'walkLimit',
 ]
 
 const REGISTRY: Record<string, VFSFactory> = {
   ram: async (config) => {
-    refuseUnknownKeys(config, ['fullScanLimit'])
+    refuseUnknownKeys(config, ['walkLimit'])
     const { RAMVFS } = await import('@struktoai/mirage-core/vfs/ram/ram')
-    return new RAMVFS(normalizeFields(config) as { fullScanLimit?: number })
+    return new RAMVFS(normalizeFields(config) as { walkLimit?: number })
   },
   opfs: async (config) => {
     refuseUnknownKeys(config, OPFS_OPTIONS)

@@ -2689,7 +2689,7 @@ async def test_a_command_reads_at_the_dispatcher(line):
 
 class SearchedRAM(RAMVFS):
     """A RAM mount whose searches answer every file it holds and whose
-    scan guard keeps the count it is handed."""
+    walk guard keeps the count it is handed."""
 
     def __init__(self) -> None:
         super().__init__()
@@ -2712,7 +2712,7 @@ class SearchedRAM(RAMVFS):
         self.batches.append([path.virtual for path in paths])
         return await self.search(paths[0], query, index)
 
-    async def before_full_scan(self, path, *, files=None, index=NULL_INDEX):
+    async def before_full_walk(self, path, *, files=None, index=NULL_INDEX):
         self.counted.append(files)
 
 
@@ -2942,15 +2942,15 @@ async def test_a_scan_guard_counts_only_the_files_the_session_sees(
 ):
     vfs = _searched()
     with Workspace({"/ram/": vfs}) as ws:
-        await ws.dispatch("before_full_scan", _path("/ram/d"))
+        await ws.dispatch("before_full_walk", _path("/ram/d"))
         assert vfs.counted == [1]
 
 
 class TreeCountingRAM(RAMVFS):
-    """A RAM mount with no scan guard that counts its tree reads."""
+    """A RAM mount with no walk guard that counts its tree reads."""
 
     def __init__(self) -> None:
-        super().__init__(full_scan_limit=-1)
+        super().__init__(walk_limit=-1)
         self.trees = 0
 
     async def read_tree(self, path):
@@ -2963,19 +2963,19 @@ async def test_a_mount_with_no_scan_guard_is_not_counted():
     vfs = TreeCountingRAM()
     vfs._store.dirs.add("/d")
     with Workspace({"/ram/": vfs}) as ws:
-        answer, _ = await ws.dispatch("before_full_scan", _path("/ram/d"))
+        answer, _ = await ws.dispatch("before_full_walk", _path("/ram/d"))
     assert (answer, vfs.trees) == (None, 0)
 
 
 class LimitedRAM(RAMVFS):
-    """A RAM mount held to a ``full_scan_limit`` with no guard of its own."""
+    """A RAM mount held to a ``walk_limit`` with no guard of its own."""
 
     def __init__(self) -> None:
-        super().__init__(full_scan_limit=2)
+        super().__init__(walk_limit=2)
 
 
 class ListedRAM(LimitedRAM):
-    """The same mount with no tree read, so a scan is counted by listing
+    """The same mount with no tree read, so a walk is counted by listing
     each directory."""
 
     read_tree = BaseVFS.read_tree
@@ -3017,12 +3017,12 @@ def _limited(cls: type[LimitedRAM], files: int) -> LimitedRAM:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("cls", [LimitedRAM, ListedRAM])
-async def test_a_search_past_the_full_scan_limit_stops_there(cls):
+async def test_a_search_past_the_walk_limit_stops_there(cls):
     with Workspace({"/ram/": _limited(cls, 3)}) as ws:
         out = await ws.shell("grep -r a /ram/d")
         assert (await out.stdout_str(), out.stderr, out.exit_code) == (
             "/ram/d/a0.txt:a\n/ram/d/a1.txt:a\n",
-            b"grep: /ram/d: stopped after 2 files (full_scan_limit); "
+            b"grep: /ram/d: stopped after 2 files (walk_limit); "
             b"narrow the path\n",
             2,
         )
@@ -3043,9 +3043,7 @@ async def test_a_search_past_the_full_scan_limit_stops_there(cls):
         ("du -a /ram/d", "2\t/ram/d/a0.txt\n2\t/ram/d/a1.txt\n4\t/ram/d\n", 1),
     ],
 )
-async def test_a_listing_past_the_full_scan_limit_stops_there(
-    cls, line, out, code
-):
+async def test_a_listing_past_the_walk_limit_stops_there(cls, line, out, code):
     with Workspace({"/ram/": _limited(cls, 3)}) as ws:
         result = await ws.shell(line)
         name = line.split()[0]
@@ -3055,8 +3053,7 @@ async def test_a_listing_past_the_full_scan_limit_stops_there(
             result.exit_code,
         ) == (
             out,
-            name.encode()
-            + b": /ram/d: stopped after 2 files (full_scan_limit); "
+            name.encode() + b": /ram/d: stopped after 2 files (walk_limit); "
             b"narrow the path\n",
             code,
         )
@@ -3074,16 +3071,16 @@ async def test_a_listing_across_mounts_stops_at_each_mounts_limit():
             result.exit_code,
         ) == (
             "/a/d:\na0.txt\na1.txt\n\n/b/d:\na0.txt\na1.txt\n",
-            b"ls: /a/d: stopped after 2 files (full_scan_limit); "
+            b"ls: /a/d: stopped after 2 files (walk_limit); "
             b"narrow the path\n"
-            b"ls: /b/d: stopped after 2 files (full_scan_limit); "
+            b"ls: /b/d: stopped after 2 files (walk_limit); "
             b"narrow the path\n",
             1,
         )
 
 
 GLOB_REFUSED = (
-    "/ram/d/*: matches more than 2 files (full_scan_limit); narrow the path"
+    "/ram/d/*: matches more than 2 files (walk_limit); narrow the path"
 )
 
 
@@ -3110,7 +3107,7 @@ GLOB_REFUSED = (
         ("echo /ram/d/*/b.txt", "/ram/d/secret/b.txt\n", ""),
     ],
 )
-async def test_a_glob_past_the_full_scan_limit_is_refused(line, out, err):
+async def test_a_glob_past_the_walk_limit_is_refused(line, out, err):
     with Workspace({"/ram/": _limited(LimitedRAM, 3)}) as ws:
         result = await ws.shell(line)
         assert (await result.stdout_str(), await result.stderr_str()) == (
@@ -3144,7 +3141,7 @@ async def test_lines_a_search_hands_over_count_against_the_limit():
         out = await ws.shell("grep -r hello /ram/d")
         assert (await out.stdout_str(), out.stderr, out.exit_code) == (
             "/ram/d/f0.txt:hello\n/ram/d/f1.txt:hello\n",
-            b"grep: /ram/d: stopped after 2 files (full_scan_limit); "
+            b"grep: /ram/d: stopped after 2 files (walk_limit); "
             b"narrow the path\n",
             2,
         )
@@ -3154,9 +3151,9 @@ async def test_lines_a_search_hands_over_count_against_the_limit():
 @pytest.mark.asyncio
 @pytest.mark.parametrize("sort", ["path", "modified"])
 async def test_a_planned_rg_counts_each_file_against_its_own_mount(sort):
-    top = RAMVFS(full_scan_limit=-1)
+    top = RAMVFS(walk_limit=-1)
     top._store.files["/t.txt"] = b"hello\n"
-    remote = RAMVFS(full_scan_limit=2)
+    remote = RAMVFS(walk_limit=2)
     for i in range(4):
         remote._store.files[f"/r{i}.txt"] = b"hello\n"
     with Workspace({"/a/": top, "/a/remote/": remote}) as ws:
@@ -3167,24 +3164,24 @@ async def test_a_planned_rg_counts_each_file_against_its_own_mount(sort):
             out.exit_code,
         ) == (
             ["/a/remote/r0.txt", "/a/remote/r1.txt", "/a/t.txt"],
-            b"rg: /a/remote: stopped after 2 files (full_scan_limit); "
+            b"rg: /a/remote: stopped after 2 files (walk_limit); "
             b"narrow the path\n",
             2,
         )
 
 
 NESTED_REFUSED = (
-    "/a/*/*.txt: matches more than 2 files (full_scan_limit); narrow the path"
+    "/a/*/*.txt: matches more than 2 files (walk_limit); narrow the path"
 )
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("command", ["cat", "echo"])
 async def test_a_glob_counts_each_match_against_its_own_mount(command):
-    top = RAMVFS(full_scan_limit=-1)
+    top = RAMVFS(walk_limit=-1)
     top._store.dirs.add("/b")
     top._store.files["/b/t.txt"] = b"t\n"
-    remote = RAMVFS(full_scan_limit=2)
+    remote = RAMVFS(walk_limit=2)
     for i in range(3):
         remote._store.files[f"/r{i}.txt"] = b"r\n"
     with Workspace({"/a/": top, "/a/remote/": remote}) as ws:
@@ -3198,11 +3195,11 @@ async def test_a_glob_counts_each_match_against_its_own_mount(command):
 
 @pytest.mark.asyncio
 async def test_a_glob_through_a_link_counts_against_the_target_mount():
-    top = RAMVFS(full_scan_limit=-1)
+    top = RAMVFS(walk_limit=-1)
     top._store.dirs.add("/data")
     for i in range(3):
         top._store.files[f"/data/t{i}.txt"] = b"t\n"
-    remote = RAMVFS(full_scan_limit=2)
+    remote = RAMVFS(walk_limit=2)
     with Workspace(
         {"/a/": top, "/a/remote/": remote}, mode=MountMode.WRITE
     ) as ws:
@@ -3240,13 +3237,12 @@ async def test_rm_r_leaves_the_files_a_nested_mount_covers(cls):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("cls", [LimitedRAM, ListedRAM])
-async def test_a_copy_past_the_full_scan_limit_is_refused(cls):
+async def test_a_copy_past_the_walk_limit_is_refused(cls):
     with Workspace({"/ram/": _limited(cls, 3)}, mode=MountMode.WRITE) as ws:
         out = await ws.shell("tar -cf /ram/d.tar /ram/d")
         assert (await out.stdout_str(), out.stderr, out.exit_code) == (
             "",
-            b"tar: more than 2 files in scope (full_scan_limit); "
-            b"narrow the path\n",
+            b"tar: more than 2 files in scope (walk_limit); narrow the path\n",
             1,
         )
 
@@ -3271,7 +3267,7 @@ async def test_a_copy_counts_no_file_a_nested_mount_covers(cls):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("cls", [LimitedRAM, ListedRAM])
-async def test_a_scan_within_the_full_scan_limit_runs(cls):
+async def test_a_walk_within_the_walk_limit_runs(cls):
     with Workspace({"/ram/": _limited(cls, 2)}) as ws:
         out = await ws.shell("grep -rl a /ram/d")
         assert await out.stdout_str() == "/ram/d/a0.txt\n"
@@ -3280,12 +3276,12 @@ async def test_a_scan_within_the_full_scan_limit_runs(cls):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("cls", [LimitedRAM, ListedRAM])
-async def test_a_hidden_file_does_not_count_to_the_full_scan_limit(
+async def test_a_hidden_file_does_not_count_to_the_walk_limit(
     cls, secret_hidden
 ):
     vfs = _limited(cls, 3)
     with Workspace({"/ram/": vfs}) as ws:
-        answer, _ = await ws.dispatch("before_full_scan", _path("/ram/d"))
+        answer, _ = await ws.dispatch("before_full_walk", _path("/ram/d"))
     assert answer is None
 
 
@@ -3298,7 +3294,7 @@ async def test_a_listed_count_stops_one_file_past_the_limit():
     vfs._store.dirs.add("/d")
     with Workspace({"/ram/": vfs}) as ws:
         with pytest.raises(ValueError, match="more than 2 files"):
-            await ws.dispatch("before_full_scan", _path("/ram/d"))
+            await ws.dispatch("before_full_walk", _path("/ram/d"))
     assert len(vfs.listed) == 4
 
 

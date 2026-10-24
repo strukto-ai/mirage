@@ -185,18 +185,18 @@ describe('MirageRpcServer', () => {
   })
 })
 
-// Twin of test_a_glob_past_the_full_scan_limit_is_invalid_params.
-describe('glob past the full_scan_limit', () => {
+// Twin of test_a_glob_past_the_walk_limit_is_invalid_params.
+describe('glob past the walk_limit', () => {
   it('is invalid params, with the reason', async () => {
     const rpc = new MirageRpcServer(
-      new Workspace({ '/': new RAMVFS({ fullScanLimit: 2 }) }, { mode: MountMode.WRITE }),
+      new Workspace({ '/': new RAMVFS({ walkLimit: 2 }) }, { mode: MountMode.WRITE }),
     )
     for (const name of ['a', 'b', 'c']) {
       await call(rpc, 'vfs/write', { path: `/${name}.txt`, data: b64('x') })
     }
     expect((await call(rpc, 'glob', { pattern: '/*.txt' })).error).toEqual({
       code: -32602,
-      message: '/*.txt: matches more than 2 files (full_scan_limit); narrow the path',
+      message: '/*.txt: matches more than 2 files (walk_limit); narrow the path',
     })
   })
 })

@@ -141,7 +141,7 @@ async def test_custom_functions_and_streams_keep_the_session_gate():
 
 
 @pytest.mark.asyncio
-async def test_a_glob_past_the_full_scan_limit_answers_why():
+async def test_a_glob_past_the_walk_limit_answers_why():
     app = build_app()
     async with app.router.lifespan_context(app):
         async with AsyncClient(
@@ -155,7 +155,7 @@ async def test_a_glob_past_the_full_scan_limit_answers_why():
                         "mounts": {
                             "/": {
                                 "vfs": "ram",
-                                "config": {"full_scan_limit": 2},
+                                "config": {"walk_limit": 2},
                             }
                         },
                     }
@@ -174,6 +174,6 @@ async def test_a_glob_past_the_full_scan_limit_answers_why():
                 400,
                 {
                     "detail": "/*.txt: matches more than 2 files "
-                    "(full_scan_limit); narrow the path"
+                    "(walk_limit); narrow the path"
                 },
             )

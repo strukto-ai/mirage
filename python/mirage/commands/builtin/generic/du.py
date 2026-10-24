@@ -647,7 +647,7 @@ async def du(
             read, as
             typed. GNU reports each and exits 1 but still prints the rest.
         stopped (Callable[[], Sequence[str]] | None): read after the
-            walks for where one ran past ``full_scan_limit``, each line
+            walks for where one ran past ``walk_limit``, each line
             without the command's name.
         mounts (MountView | None): where the mount boundaries are; leaves
             under a descendant mount's root are shadowed and dropped from
@@ -777,7 +777,7 @@ async def du_generic(
         compute_size (ComputeSize): Recursive byte size of one operand.
         compute_entries (ComputeEntries): Per-file breakdown.
         stopped (Callable[[], Sequence[str]] | None): Where a walk ran
-            past ``full_scan_limit``.
+            past ``walk_limit``.
         unreadable (Callable[[], Sequence[str]] | None): The directories
             the walk could not open, read after the walks.
         directories (Callable[[], Sequence[str]] | None): Every directory

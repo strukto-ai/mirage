@@ -33,15 +33,15 @@ const TREE: Record<string, { dir: boolean; size?: number; children?: string[] }>
 }
 
 // A mount the dispatcher answers for: its listing, its stat, its subtree
-// read where it has one, and its full_scan_limit (-1 for none).
+// read where it has one, and its walk_limit (-1 for none).
 interface Table {
   readdir: (p: PathSpec) => Promise<string[]>
   stat: (p: PathSpec) => Promise<FileStat>
   readTree?: (p: PathSpec) => Promise<Map<string, FileStat> | null>
-  fullScanLimit?: number
+  walkLimit?: number
 }
 
-const STOPPED_AT_2 = 'du: /db: stopped after 2 files (full_scan_limit); narrow the path\n'
+const STOPPED_AT_2 = 'du: /db: stopped after 2 files (walk_limit); narrow the path\n'
 
 // A mount with no subtree read, so the builder must walk.
 const OPS: Table = {
@@ -82,7 +82,7 @@ async function du(
         prefix: '/',
         kind: 'fake',
         mode: MountMode.WRITE,
-        fullScanLimit: table.fullScanLimit ?? -1,
+        walkLimit: table.walkLimit ?? -1,
         calls: new Set(table.readTree === undefined ? [] : ['read_tree']),
       },
     ],
@@ -102,7 +102,7 @@ async function du(
 describe('du walk fallback (no native du op)', () => {
   // Mirrors test_a_walk_past_the_limit_reports_partial_output_and_exits_one.
   it('reports partial output past the limit and exits 1', async () => {
-    const [out, io] = await runScoped({ ...OPS, fullScanLimit: 2 }, [PathSpec.fromStrPath('/db')])
+    const [out, io] = await runScoped({ ...OPS, walkLimit: 2 }, [PathSpec.fromStrPath('/db')])
     expect([DEC.decode(out), io.exitCode, DEC.decode(io.stderr ?? new Uint8Array())]).toEqual([
       '0\t/db/sub\n3\t/db\n',
       1,
@@ -112,7 +112,7 @@ describe('du walk fallback (no native du op)', () => {
 
   // Mirrors test_each_operand_walks_under_its_own_limit.
   it('walks each operand under its own limit', async () => {
-    const [out, io] = await runScoped({ ...OPS, fullScanLimit: 2 }, [
+    const [out, io] = await runScoped({ ...OPS, walkLimit: 2 }, [
       PathSpec.fromStrPath('/db'),
       PathSpec.fromStrPath('/db/sub'),
     ])
@@ -173,7 +173,7 @@ describe('du walk fallback under a path rule', () => {
   // A tree read in one call is still a walk of every entry in it. Mirrors
   // test_a_tree_answer_counts_against_the_limit.
   it('counts a tree answer against the limit', async () => {
-    const [out, io] = await runScoped({ ...TREED, fullScanLimit: 2 } as Table, [
+    const [out, io] = await runScoped({ ...TREED, walkLimit: 2 } as Table, [
       PathSpec.fromStrPath('/db'),
     ])
     expect([DEC.decode(out), io.exitCode, DEC.decode(io.stderr ?? new Uint8Array())]).toEqual([
@@ -187,7 +187,7 @@ describe('du walk fallback under a path rule', () => {
   it('names the root where a walk of it stops', async () => {
     const rooted: Table = {
       ...TREED,
-      fullScanLimit: 2,
+      walkLimit: 2,
       stat: (p) =>
         p.virtual === '/'
           ? Promise.resolve(new FileStat({ name: '/', type: FileType.DIRECTORY }))

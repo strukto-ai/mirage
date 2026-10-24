@@ -114,7 +114,7 @@ export async function reset(
   }
   if (texts.length === 0) removed.push(...visibleEntries(repo.location, state.conflicts).keys())
   // The tree is walked before the index is written, so a work tree past its
-  // full_scan_limit leaves the index as it was.
+  // walk_limit leaves the index as it was.
   const tracked = new Set(visibleEntries(repo.location, state.entries).keys())
   for (const name of removed) tracked.delete(name)
   for (const name of staged.keys()) tracked.add(name)

@@ -19,7 +19,7 @@ from mirage.commands.builtin.utils.paths import (
     stat_or_enoent,
     vfs_stat_path,
 )
-from mirage.commands.builtin.utils.tree import ScanBudget
+from mirage.commands.builtin.utils.tree import WalkBudget
 from mirage.commands.config import Context
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
@@ -535,7 +535,7 @@ async def find_walk_generic(
                         or landing_root(mounts, links, virtual) == home
                     )
 
-                budget = ScanBudget(search, mounts)
+                budget = WalkBudget(search, mounts)
                 walked = await walk_find(
                     search,
                     readdir=readdir,

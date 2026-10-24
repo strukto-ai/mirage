@@ -241,21 +241,21 @@ This example extends the same `NotesVFS`:
 nothing. `grep -n mirage /notes/todo.txt` reads the page, since it holds a
 match.
 
-## `before_full_scan`
+## `before_full_walk`
 
 Whether a command may copy, compare, change or remove every file under a folder.
 
 <Tabs>
   <Tab title="Python" icon="/images/python-logo.svg">
     ```python
-    async def before_full_scan(
+    async def before_full_walk(
         self, path: PathSpec, *, files: int | None = None
     ) -> None: ...
     ```
   </Tab>
   <Tab title="TypeScript" icon="/images/typescript-logo.svg">
     ```typescript
-    beforeFullScan(path: PathSpec, files: number | null): Promise<void>
+    beforeFullWalk(path: PathSpec, files: number | null): Promise<void>
     ```
   </Tab>
 </Tabs>
@@ -270,22 +270,22 @@ Whether a command may copy, compare, change or remove every file under a folder.
 | Nothing | Runs the command. |
 | Raises `ValueError` (TypeScript: rejects) | Refuses the command before it touches anything. It prints `<command>: <message>` and exits 1. |
 
-These commands call `before_full_scan`: `tar -c`, `zip -r`, `cp -r`, `rm -r`,
+These commands call `before_full_walk`: `tar -c`, `zip -r`, `cp -r`, `rm -r`,
 `chmod -R`, `chown -R`, `chgrp -R`, `mv` to another mount and `diff -r`. The
-default refuses more than `full_scan_limit` files.
+default refuses more than `walk_limit` files.
 
-## `full_scan_limit`
+## `walk_limit`
 
-The most files one command walks under a folder (TypeScript: `fullScanLimit`).
+The most files one command walks under a folder (TypeScript: `walkLimit`).
 
 | Command | Past the limit |
 | --- | --- |
-| `grep -r`, `rg` | Stops. It keeps what it printed, prints `grep: <folder>: stopped after <N> files (full_scan_limit); narrow the path` and exits 2. |
-| `git grep` | Stops. It keeps what it printed, prints `fatal: stopped after <N> files (full_scan_limit); narrow the pathspec` and exits 128. |
+| `grep -r`, `rg` | Stops. It keeps what it printed, prints `grep: <folder>: stopped after <N> files (walk_limit); narrow the path` and exits 2. |
+| `git grep` | Stops. It keeps what it printed, prints `fatal: stopped after <N> files (walk_limit); narrow the pathspec` and exits 128. |
 | `find`, `ls -R`, `du`, `tree`, `getfattr -R` | Stops listing. It keeps what it printed, prints the same `stopped after` line and exits 1 (`tree`: 2). |
-| `git status`, `git add`, `git commit -a`, `git diff`, `git checkout`, `git reset`, `git rm` | Refused before it changes anything. It prints `fatal: more than <N> files in the work tree (full_scan_limit)` and exits 128. `git add`, `git diff` and `git rm` given paths walk only those, and a file named outright costs nothing. |
-| A glob, such as `cat /notes/*` | Refused, so the command does not run. It prints `cat: Argument list too long` and `cat: /notes/*: matches more than <N> files (full_scan_limit); narrow the path`, and exits 126. |
-| `tar -c`, `zip -r`, `cp -r`, `rm -r`, `chmod -R`, `chown -R`, `chgrp -R`, `mv` to another mount, `diff -r` | Refused before it touches anything (`before_full_scan`). It prints `tar: more than <N> files in scope (full_scan_limit); narrow the path` and exits 1. |
+| `git status`, `git add`, `git commit -a`, `git diff`, `git checkout`, `git reset`, `git rm` | Refused before it changes anything. It prints `fatal: more than <N> files in the work tree (walk_limit)` and exits 128. `git add`, `git diff` and `git rm` given paths walk only those, and a file named outright costs nothing. |
+| A glob, such as `cat /notes/*` | Refused, so the command does not run. It prints `cat: Argument list too long` and `cat: /notes/*: matches more than <N> files (walk_limit); narrow the path`, and exits 126. |
+| `tar -c`, `zip -r`, `cp -r`, `rm -r`, `chmod -R`, `chown -R`, `chgrp -R`, `mv` to another mount, `diff -r` | Refused before it touches anything (`before_full_walk`). It prints `tar: more than <N> files in scope (walk_limit); narrow the path` and exits 1. |
 
 A search counts only the files it reads, so a file `files_containing` rules out
 costs nothing. A listing counts every entry it lists, folders included. Each
@@ -293,7 +293,7 @@ command exits as it does when some files could not be read, so a script treats
 a walk cut short as one with an error. A glob, a copy and a removal are refused
 instead of cut short, since running on part of what they name would look
 complete later. A glob in a `for` list stops the line with
-`bash: /notes/*: matches more than <N> files (full_scan_limit); narrow the path`.
+`bash: /notes/*: matches more than <N> files (walk_limit); narrow the path`.
 
 A walk that crosses into another mount counts that mount's files against its
 own limit, and names that mount's folder where it stops. Codex's `fs/walk`
@@ -312,13 +312,13 @@ It is 1000 unless your VFS sets it:
   <Tab title="Python" icon="/images/python-logo.svg">
     ```python
     class SearchableNotesVFS(NotesVFS):
-        full_scan_limit = 500
+        walk_limit = 500
     ```
   </Tab>
   <Tab title="TypeScript" icon="/images/typescript-logo.svg">
     ```typescript
     export class SearchableNotesVFS extends NotesVFS {
-      override readonly fullScanLimit: number = 500
+      override readonly walkLimit: number = 500
     }
     ```
   </Tab>
@@ -328,7 +328,7 @@ It is 1000 unless your VFS sets it:
 cannot narrow then prints the matches in the first 500 pages, and:
 
 ```text
-grep: /notes: stopped after 500 files (full_scan_limit); narrow the path
+grep: /notes: stopped after 500 files (walk_limit); narrow the path
 ```
 
 ## Built-in VFSs
@@ -358,8 +358,8 @@ it.
 | [SSH](/python/vfs/ssh#integration) | Any text, on servers that run commands | No |
 | [PostgreSQL](/python/vfs/postgres#integration), [MongoDB](/python/vfs/mongodb#integration), [Airtable](/python/vfs/airtable#integration) | Any text, as lines of one file | No |
 
-Every built-in VFS sets `full_scan_limit` in its config: 1000, or 5000 on
-GitHub, where each file is one request, and 10000 on disk and RAM. On the
+Every built-in VFS sets `walk_limit` in its config: 1000, or 5000 on
+GitHub, where each file is one request, and 10000 on disk, RAM and OPFS. On the
 VFSs above from Google Drive to GitHub, `-1` also turns the service's search
 off, so every file is read and no match is missed:
 
@@ -375,7 +375,7 @@ off, so every file is read and no match is missed:
         config=SlackConfig(
             token=os.environ["SLACK_BOT_TOKEN"],
             search_token=os.environ["SLACK_USER_TOKEN"],
-            full_scan_limit=5000,
+            walk_limit=5000,
         )
     )
     ws = Workspace({"/slack": slack}, mode=MountMode.READ)
@@ -388,7 +388,7 @@ off, so every file is read and no match is missed:
     const slack = new SlackVFS({
       token: process.env.SLACK_BOT_TOKEN!,
       searchToken: process.env.SLACK_USER_TOKEN,
-      fullScanLimit: 5000,
+      walkLimit: 5000,
     })
     const ws = new Workspace({ '/slack': slack }, { mode: MountMode.READ })
     ```
@@ -402,7 +402,7 @@ off, so every file is read and no match is missed:
         config:
           token: ${SLACK_BOT_TOKEN}
           search_token: ${SLACK_USER_TOKEN}
-          full_scan_limit: 5000
+          walk_limit: 5000
     ```
   </Tab>
 </Tabs>

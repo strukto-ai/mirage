@@ -62,7 +62,7 @@ class BoxVFS(BaseVFS):
     def __init__(self, config: BoxConfig) -> None:
         super().__init__()
         self.config = config
-        self.full_scan_limit = config.full_scan_limit
+        self.walk_limit = config.walk_limit
         self.accessor = BoxAccessor(self.config, BoxTokenManager(config))
 
     async def readdir(
@@ -194,7 +194,7 @@ class BoxVFS(BaseVFS):
         ignore_case: bool,
         entry: FileStat | None = None,
     ) -> list[PathSpec] | None:
-        if not whole_word or self.full_scan_limit < 0:
+        if not whole_word or self.walk_limit < 0:
             return None
         return await _files_containing(self.accessor, text, path, entry)
 

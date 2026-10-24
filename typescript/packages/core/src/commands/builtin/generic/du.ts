@@ -538,7 +538,7 @@ async function duOne(
  * `computeEntries` reports mount-relative (path, size) pairs plus the total.
  * `missing` names the operands that could not be read: GNU reports each and
  * exits 1 but still prints the rest. `stopped` is read after the walks for
- * where one ran past `fullScanLimit`, each line without the command's name.
+ * where one ran past `walkLimit`, each line without the command's name.
  * `mounts` marks the descendant
  * boundaries: leaves under one are shadowed and dropped from every row and
  * total (see `dropShadowed`). `unreadable` is read after the walks for the

@@ -93,7 +93,7 @@ async def run_ls(
             nested mount itself, as nothing runs behind a relay to
             contribute that group the way the fan-out does for a
             single-mount run; ``-R`` charges each entry to the mount
-            serving it, at that mount's ``full_scan_limit``.
+            serving it, at that mount's ``walk_limit``.
         session_view (SessionView | None): The session view,
             for the profile the group column renders.
     """

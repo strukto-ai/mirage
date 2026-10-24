@@ -56,10 +56,10 @@ These list each folder instead:
 - `ls` without `-R`
 - `cp -r` to another mount
 
-## `full_scan_limit`
+## `walk_limit`
 
 Every walk stops at your VFS's
-[`full_scan_limit`](/home/integration/search#full_scan_limit), whether
+[`walk_limit`](/home/integration/search#walk_limit), whether
 `read_tree` answered or Mirage listed each folder. `read_tree` still returns the
 whole tree, and the command keeps what fits. Return `None` for a folder too
 large to send in one call: Mirage then stops calling `readdir` once the limit

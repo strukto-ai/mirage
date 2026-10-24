@@ -35,7 +35,7 @@ import { makeFilename } from './sheet_entry.ts'
 import type { DeltaHook } from '../../events/base.ts'
 import { unlink as gsheetsUnlink } from '../../core/gsheets/unlink.ts'
 import { rename as gsheetsRename } from '../../core/gsheets/rename.ts'
-import { FULL_SCAN_LIMIT } from '../constants.ts'
+import { WALK_LIMIT } from '../constants.ts'
 
 export interface GSheetsVFSState {
   type: string
@@ -53,12 +53,12 @@ export class GSheetsVFS extends BaseVFS {
   readonly config: GSheetsConfig
   override readonly accessor: GSheetsAccessor
 
-  override readonly fullScanLimit: number
+  override readonly walkLimit: number
 
   constructor(config: GSheetsConfig) {
     super()
     this.config = config
-    this.fullScanLimit = config.fullScanLimit ?? FULL_SCAN_LIMIT
+    this.walkLimit = config.walkLimit ?? WALK_LIMIT
     const tm = new TokenManager(config)
     this.accessor = new GSheetsAccessor({ tokenManager: tm })
   }
@@ -75,7 +75,7 @@ export class GSheetsVFS extends BaseVFS {
     text: string,
     opts: { wholeWord: boolean; ignoreCase: boolean },
   ): Promise<PathSpec[] | null> {
-    if (!opts.wholeWord || this.fullScanLimit < 0) return Promise.resolve(null)
+    if (!opts.wholeWord || this.walkLimit < 0) return Promise.resolve(null)
     return googleFilesContaining(this.accessor, gsheetsReaddir, MIME, SHEETS_WORDS, text, [path])
   }
 

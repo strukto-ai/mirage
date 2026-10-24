@@ -32,8 +32,8 @@ config = DropboxConfig(
     root_path=os.environ.get("DROPBOX_ROOT_PATH") or "/",
     # grep -rw and rg -w narrow recursive scans via /2/files/search_v2.
     # On a plan without full-text search (below Professional), set
-    # DROPBOX_FULL_SCAN_LIMIT=-1 to read every file instead.
-    full_scan_limit=int(os.environ.get("DROPBOX_FULL_SCAN_LIMIT", "1000")),
+    # DROPBOX_WALK_LIMIT=-1 to read every file instead.
+    walk_limit=int(os.environ.get("DROPBOX_WALK_LIMIT", "1000")),
 )
 backend = DropboxVFS(config)
 ws = Workspace({"/dropbox": backend}, mode=MountMode.WRITE)

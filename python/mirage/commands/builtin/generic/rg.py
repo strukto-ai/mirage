@@ -77,7 +77,7 @@ from mirage.commands.builtin.utils.wrap import (
     to_pathspec,
 )
 from mirage.commands.config import Context
-from mirage.commands.errors import ScanLimitError, UsageError
+from mirage.commands.errors import UsageError, WalkLimitError
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagBag, FlagView
 from mirage.commands.spec.types import FlagValue
@@ -1536,7 +1536,7 @@ async def haystacks(
     warnings: list[str],
     boundary: MountView | None,
     resolver: LinkResolver | None,
-    stopped: set[str] | None = None,
+    stopped: set[str],
 ) -> AsyncIterator[Haystack]:
     """Every input the line searches, in order: a stdin operand, a named
     file as itself whatever the filters say, and a directory walked.
@@ -1554,8 +1554,8 @@ async def haystacks(
             any directory.
         resolver (LinkResolver | None): the namespace's links and the
             dispatcher past them, which -L walks through.
-        stopped (set[str] | None): the directories a search stopped at
-            their mount's ``full_scan_limit``, whose walk ends there.
+        stopped (set[str]): the directories a search stopped at their
+            mount's ``walk_limit``, whose walk ends there.
     """
     # ripgrep holds one path that is not a directory to one thread, as it
     # does -j1 and a sort; every other line runs its parallel walker.
@@ -1613,7 +1613,7 @@ async def haystacks(
         try:
             async for found in walked:
                 yield found
-                if stopped and p.virtual in stopped:
+                if p.virtual in stopped:
                     break
         finally:
             await close_quietly(walked)
@@ -1715,7 +1715,7 @@ async def _search_all(
         io (IOResult): receives the exit status and the warnings, however
             the output ends.
         stopped (set[str]): collects each directory whose walk a read
-            stopped at its mount's ``full_scan_limit``.
+            stopped at its mount's ``walk_limit``.
         shell (ShellFn | None): runs --pre's command in the session.
     """
     multi = len(paths) > 1
@@ -1802,7 +1802,7 @@ async def _search_all(
                     await close_quietly(matches)
                 if faults:
                     raise faults[0]
-            except ScanLimitError as exc:
+            except WalkLimitError as exc:
                 if exc.directory.virtual not in stopped:
                     stopped.add(exc.directory.virtual)
                     warnings.append(f"rg: {exc}")

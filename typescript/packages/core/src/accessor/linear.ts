@@ -14,7 +14,7 @@
 
 import { Accessor } from './base.ts'
 import type { LinearTransport } from '../core/linear/client.ts'
-import { FULL_SCAN_LIMIT } from '../vfs/constants.ts'
+import { WALK_LIMIT } from '../vfs/constants.ts'
 
 /**
  * The mount's handle: the transport plus the configured team filter. The
@@ -26,15 +26,15 @@ import { FULL_SCAN_LIMIT } from '../vfs/constants.ts'
 export class LinearAccessor extends Accessor {
   readonly transport: LinearTransport
   readonly teamIds: readonly string[] | null
-  readonly fullScanLimit: number
+  readonly walkLimit: number
 
   constructor(
     transport: LinearTransport,
-    options: { teamIds?: readonly string[]; fullScanLimit?: number } = {},
+    options: { teamIds?: readonly string[]; walkLimit?: number } = {},
   ) {
     super()
     this.transport = transport
     this.teamIds = options.teamIds ?? null
-    this.fullScanLimit = options.fullScanLimit ?? FULL_SCAN_LIMIT
+    this.walkLimit = options.walkLimit ?? WALK_LIMIT
   }
 }

@@ -50,18 +50,20 @@ class PartialOutputError(Exception):
         self.stdout = stdout
 
 
-class ScanLimitError(Exception):
-    """A walk's read past its mount's ``full_scan_limit``: grep and rg
-    keep what they printed, stop walking the directory and exit 2.
+class WalkLimitError(Exception):
+    """A walk past its mount's ``walk_limit``. The message is the line
+    the command prints where it stopped; grep and rg raise it to stop
+    reading a directory, keep what they printed and exit 2.
 
     Args:
-        directory (PathSpec): the walked operand.
-        limit (int): how many files it read.
+        directory (PathSpec): the operand, or the mount root below it,
+            where the walk stopped.
+        limit (int): the mount's ``walk_limit``.
     """
 
     def __init__(self, directory: PathSpec, limit: int) -> None:
         super().__init__(
             f"{directory.raw_path or '.'}: stopped after {limit} files "
-            "(full_scan_limit); narrow the path"
+            "(walk_limit); narrow the path"
         )
         self.directory = directory

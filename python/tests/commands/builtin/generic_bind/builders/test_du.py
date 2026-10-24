@@ -34,9 +34,7 @@ TREE = {
     "/db/sub": ["/db/sub/b.txt"],
 }
 SIZES = {"/db/a.txt": 3, "/db/sub/b.txt": 2}
-STOPPED_AT_2 = (
-    "du: /db: stopped after 2 files (full_scan_limit); narrow the path\n"
-)
+STOPPED_AT_2 = "du: /db: stopped after 2 files (walk_limit); narrow the path\n"
 
 
 async def _readdir(path: PathSpec) -> list[str]:
@@ -60,7 +58,7 @@ class _Mount:
         readdir (Any): ``readdir(path)``.
         stat (Any): ``stat(path)``, a link's own row.
         read_tree (Any): ``read_tree(path)``, or None for none.
-        full_scan_limit (int): the mount's limit, -1 for none.
+        walk_limit (int): the mount's limit, -1 for none.
         followed (Any): ``stat(path)`` with links followed, for the
             namespace's own probes.
     """
@@ -70,7 +68,7 @@ class _Mount:
         readdir: Any = _readdir,
         stat: Any = _stat,
         read_tree: Any = None,
-        full_scan_limit: int = -1,
+        walk_limit: int = -1,
         followed: Any = None,
     ) -> None:
         self.readdir = readdir
@@ -81,7 +79,7 @@ class _Mount:
             prefix="/",
             resource_type="ram",
             mode=MountMode.WRITE,
-            full_scan_limit=full_scan_limit,
+            walk_limit=walk_limit,
             calls=frozenset({"read_tree"} if read_tree is not None else ()),
         )
 
@@ -155,7 +153,7 @@ async def test_a_backends_own_refusal_is_not_walked():
 @pytest.mark.asyncio
 async def test_a_tree_answer_counts_against_the_limit():
     """A tree read in one call is still a walk of every entry in it."""
-    mount = _Mount(read_tree=_tree(), full_scan_limit=2)
+    mount = _Mount(read_tree=_tree(), walk_limit=2)
     out, code, err = await _du(mount, ["/db"])
     assert (out, code, err) == ("0\t/db/sub\n3\t/db\n", 1, STOPPED_AT_2)
 
@@ -168,7 +166,7 @@ async def _root_stat(path: PathSpec) -> FileStat:
 
 @pytest.mark.asyncio
 async def test_a_walk_of_the_root_names_the_root_where_it_stops():
-    mount = _Mount(stat=_root_stat, read_tree=_tree(), full_scan_limit=2)
+    mount = _Mount(stat=_root_stat, read_tree=_tree(), walk_limit=2)
     out, code, err = await _du(mount, ["/"])
     assert (out, code) == ("0\t/sub\n3\t/\n", 1)
     assert err == STOPPED_AT_2.replace("/db:", "/:")
@@ -177,13 +175,13 @@ async def test_a_walk_of_the_root_names_the_root_where_it_stops():
 @pytest.mark.asyncio
 async def test_a_walk_past_the_limit_reports_partial_output_and_exits_one():
     """A tree bigger than the limit must not report a wrong size silently."""
-    out, code, err = await _du(_Mount(full_scan_limit=2), ["/db"])
+    out, code, err = await _du(_Mount(walk_limit=2), ["/db"])
     assert (out, code, err) == ("0\t/db/sub\n3\t/db\n", 1, STOPPED_AT_2)
 
 
 @pytest.mark.asyncio
 async def test_each_operand_walks_under_its_own_limit():
-    out, code, err = await _du(_Mount(full_scan_limit=2), ["/db", "/db/sub"])
+    out, code, err = await _du(_Mount(walk_limit=2), ["/db", "/db/sub"])
     assert (out, code, err) == (
         "0\t/db/sub\n3\t/db\n2\t/db/sub\n",
         1,

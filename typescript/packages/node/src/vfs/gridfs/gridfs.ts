@@ -38,7 +38,7 @@ import { copy as gridfsCopy } from '../../core/gridfs/copy.ts'
 import { truncate as gridfsTruncate } from '../../core/gridfs/truncate.ts'
 import { tree as gridfsTree } from '../../core/gridfs/readdir.ts'
 import { stripSlash } from '@struktoai/mirage-core/utils/slash'
-import { FULL_SCAN_LIMIT } from '@struktoai/mirage-core/vfs/constants'
+import { WALK_LIMIT } from '@struktoai/mirage-core/vfs/constants'
 
 export interface GridFSVFSState {
   type: string
@@ -58,10 +58,10 @@ export class GridFSVFS extends BaseVFS {
   readonly config: GridFSConfig
   override readonly accessor: GridFSAccessor
 
-  override readonly fullScanLimit: number
+  override readonly walkLimit: number
   constructor(config: GridFSConfig) {
     super()
-    this.fullScanLimit = config.fullScanLimit ?? FULL_SCAN_LIMIT
+    this.walkLimit = config.walkLimit ?? WALK_LIMIT
     const normalized = normalizeKeyPrefix(config.keyPrefix)
     const cfg: GridFSConfig = { ...config }
     if (normalized !== undefined) {

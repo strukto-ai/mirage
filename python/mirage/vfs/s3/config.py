@@ -16,7 +16,7 @@ from pydantic import ConfigDict, Field, SecretStr, field_validator
 
 from mirage.secrets.config import AWSAuth
 from mirage.utils import key_prefix as kp
-from mirage.vfs.constants import FULL_SCAN_LIMIT
+from mirage.vfs.constants import WALK_LIMIT
 
 
 class S3Config(AWSAuth):
@@ -44,7 +44,7 @@ class S3Config(AWSAuth):
     default_content_type: str | None = None
     """`Content-Type` stored with every object the mount writes. Unset
     sends none, so the store applies its own default."""
-    full_scan_limit: int = Field(default=FULL_SCAN_LIMIT, ge=-1)
+    walk_limit: int = Field(default=WALK_LIMIT, ge=-1)
     """Most files one command walks under a folder: `grep -r`, `find` and other
     walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is
     refused. `-1` lifts the limit."""

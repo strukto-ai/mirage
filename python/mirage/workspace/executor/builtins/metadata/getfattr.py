@@ -15,7 +15,7 @@
 import base64
 import re
 
-from mirage.commands.builtin.utils.tree import ScanBudget
+from mirage.commands.builtin.utils.tree import WalkBudget
 from mirage.commands.spec import SPECS, parse_command
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.parser import parse_to_kwargs
@@ -79,7 +79,7 @@ async def _walk(
     shown: str,
     logical: bool,
     deref: bool,
-    budget: ScanBudget,
+    budget: WalkBudget,
 ) -> list[tuple[PathSpec, str]]:
     """A subtree in pre-order, the way nftw hands it to getfattr -R.
 
@@ -95,7 +95,7 @@ async def _walk(
         shown (str): its spelling in the ``# file:`` header.
         logical (bool): ``-L``, which descends every link below.
         deref (bool): whether this entry, if a link, is descended.
-        budget (ScanBudget): the entries the operand's walk may still list.
+        budget (WalkBudget): the entries the operand's walk may still list.
     """
     entries = [(path, shown)]
     try:
@@ -141,7 +141,7 @@ async def handle_getfattr(
     each block, ``-d``/``-n`` adding ``="value"``, and the default match
     ``^user\\.`` (``-m -`` matches every name). The attributes are the
     dispatcher's: what was set on the path. ``-h`` reads a link's own
-    attributes. ``-R`` stops after ``full_scan_limit`` entries of a
+    attributes. ``-R`` stops after ``walk_limit`` entries of a
     mount, as ``ls -R`` does, and exits 1.
 
     Args:
@@ -188,7 +188,7 @@ async def handle_getfattr(
     for target in targets:
         typed = target.raw_path or target.virtual
         entries = [(target, typed)]
-        budget = ScanBudget(target, mounts)
+        budget = WalkBudget(target, mounts)
         if fl.as_bool("recursive"):
             entries = await _walk(
                 dispatch,

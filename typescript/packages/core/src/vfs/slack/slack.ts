@@ -99,7 +99,7 @@ export class SlackVFSBase extends BaseVFS<SlackAccessor> {
   ): Promise<PathSpec[] | null> {
     if (
       !opts.wholeWord ||
-      this.fullScanLimit < 0 ||
+      this.walkLimit < 0 ||
       !(this.accessor.transport.searchAvailable?.() ?? true)
     )
       return Promise.resolve(null)

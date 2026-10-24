@@ -21,7 +21,7 @@ export type { RedisVFSState } from '@struktoai/mirage-core/vfs/redis/redis'
 export interface RedisVFSOptions {
   url?: string
   keyPrefix?: string
-  fullScanLimit?: number
+  walkLimit?: number
 }
 
 export interface RedisModule {
@@ -45,7 +45,7 @@ export class RedisVFS extends CoreRedisVFS {
         url: options.url ?? 'redis://localhost:6379/0',
         keyPrefix: options.keyPrefix ?? 'mirage:fs:',
       }),
-      options.fullScanLimit,
+      options.walkLimit,
     )
   }
 

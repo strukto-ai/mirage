@@ -37,16 +37,17 @@ import { rmR as opfsRmR } from '../../core/opfs/rm.ts'
 import { rename as opfsRename } from '../../core/opfs/rename.ts'
 import { copy as opfsCopy } from '../../core/opfs/copy.ts'
 import { truncate as opfsTruncate } from '../../core/opfs/truncate.ts'
-import { LOCAL_FULL_SCAN_LIMIT } from '@struktoai/mirage-core/vfs/constants'
+import { LOCAL_WALK_LIMIT } from '@struktoai/mirage-core/vfs/constants'
 import { VFSConfigError } from '@struktoai/mirage-core/vfs/errors'
 
 export interface OPFSVFSOptions {
   root?: string
-  fullScanLimit?: number
+  walkLimit?: number
 }
 
 export interface OPFSVFSState {
   type: string
+  config: { walk_limit: number }
   files: Record<string, Uint8Array>
   dirs: string[]
 }
@@ -106,15 +107,16 @@ export class OPFSVFS extends BaseVFS {
   private rootHandle: FileSystemDirectoryHandle | null = null
   private openPromise: Promise<FileSystemDirectoryHandle> | null = null
 
-  override readonly fullScanLimit: number
+  override readonly walkLimit: number
 
   constructor(options: OPFSVFSOptions = {}) {
-    const limit = options.fullScanLimit ?? LOCAL_FULL_SCAN_LIMIT
-    if (!Number.isInteger(limit) || limit < -1) {
-      throw new VFSConfigError('opfs: full_scan_limit: must be an integer of -1 or more')
+    let limit: unknown = options.walkLimit
+    if (limit === undefined) limit = LOCAL_WALK_LIMIT
+    if (typeof limit !== 'number' || !Number.isInteger(limit) || limit < -1) {
+      throw new VFSConfigError('opfs: walk_limit: must be an integer of -1 or more')
     }
     super()
-    this.fullScanLimit = limit
+    this.walkLimit = limit
     this.rootName = options.root ?? ''
     this.accessor = new OPFSAccessor(this)
   }
@@ -224,6 +226,7 @@ export class OPFSVFS extends BaseVFS {
     dirs.sort(compareCodePoints)
     return {
       type: this.name,
+      config: { walk_limit: this.walkLimit },
       files,
       dirs,
     }

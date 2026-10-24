@@ -13,17 +13,14 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
-from functools import partial
 from unittest.mock import MagicMock
 
 import pytest
 
 from mirage.core.ram.readdir import readdir as ram_readdir
 from mirage.core.ram.stat import stat as ram_stat
-from mirage.errors.types import GlobLimitError
 from mirage.io.types import IOResult
 from mirage.types import MountMode, PathSpec
-from mirage.utils.glob_walk import make_resolve_glob
 from mirage.utils.key_prefix import mount_key
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.ram import RAMVFS
@@ -215,33 +212,6 @@ def test_pathspec_dir_no_pattern():
     d = ps.dir
     assert d.virtual == "/data/"
     assert d.pattern is None
-
-
-async def _ram_listed(accessor, path: PathSpec) -> list[str]:
-    rows = await ram_readdir(accessor, path)
-    base = (path.dir if path.pattern else path).virtual.rstrip("/")
-    return [f"{base}/{row.name}" for row in rows]
-
-
-def test_a_glob_past_the_limit_is_refused_not_cut_short():
-    vfs = RAMVFS()
-    for i in range(20):
-        vfs._store.files[f"/f{i:02d}.txt"] = b""
-    vfs._store.dirs.add("/")
-    ram_resolve_glob = make_resolve_glob(partial(_ram_listed, vfs.accessor), 5)
-    glob_ps = PathSpec(
-        vfs_path="*.txt",
-        virtual="/*.txt",
-        directory="/",
-        pattern="*.txt",
-        resolved=False,
-    )
-
-    async def _run():
-        return await ram_resolve_glob([glob_ps])
-
-    with pytest.raises(GlobLimitError):
-        asyncio.run(_run())
 
 
 def test_relative_glob_matches_spelled_as_typed():

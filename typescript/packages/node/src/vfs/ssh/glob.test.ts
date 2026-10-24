@@ -17,7 +17,6 @@ import { PathSpec } from '@struktoai/mirage-core/types'
 import { mountKey } from '@struktoai/mirage-core/utils/key_prefix'
 import { describe, expect, it } from 'vitest'
 import { makeFakeAccessor } from '../../../tests/core/ssh/_test_utils.ts'
-import { SCOPE_ERROR } from '../../core/ssh/constants.ts'
 import { readdir } from '../../core/ssh/readdir.ts'
 import type { SSHAccessor } from '../../accessor/ssh.ts'
 
@@ -28,7 +27,7 @@ async function listed(accessor: SSHAccessor, path: PathSpec): Promise<string[]> 
 }
 
 const resolveGlob = (accessor: SSHAccessor, paths: PathSpec[]): Promise<PathSpec[]> =>
-  makeResolveGlob((path) => listed(accessor, path), SCOPE_ERROR)(paths)
+  makeResolveGlob((path) => listed(accessor, path))(paths)
 
 describe('vfs/ssh resolveGlob binding', () => {
   it('expands a glob pattern into matching paths', async () => {

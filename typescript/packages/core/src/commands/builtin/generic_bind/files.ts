@@ -605,7 +605,7 @@ export function commandFiles(ctx: Context, paths: readonly PathSpec[] = []): Com
       })) as ByteSource | null,
     resolveGlob: makeResolveGlob(
       readdir,
-      mounts?.fullScanLimit?.(anchor) ?? -1,
+      mounts?.walkLimit?.(anchor) ?? -1,
       stat,
       links === undefined ? undefined : (virtual: string) => links.targetStat(virtual),
       access,

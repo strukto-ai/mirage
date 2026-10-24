@@ -35,7 +35,7 @@ from mirage.commands.builtin.utils.slash_links import (
     is_slashed_link,
     rm_link_refusal,
 )
-from mirage.commands.builtin.utils.tree import before_full_scan
+from mirage.commands.builtin.utils.tree import before_full_walk
 from mirage.commands.builtin.utils.verbose import removal_lines
 from mirage.commands.config import Context
 from mirage.commands.spec import SPECS
@@ -98,7 +98,7 @@ async def rm(
                     # The mount is asked before anything goes, as for
                     # cp -r: a removal cut short would leave a tree that
                     # looks untouched.
-                    await before_full_scan(dispatch_of(ctx), p, "rm")
+                    await before_full_walk(dispatch_of(ctx), p, "rm")
                     # -v names each entry before the tree goes in one
                     # call; a tree it cannot list whole goes entry by
                     # entry, as does one on a mount without rm_r, one

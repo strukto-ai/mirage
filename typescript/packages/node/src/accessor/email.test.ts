@@ -57,7 +57,7 @@ it('drops an IMAP client whose socket the server reset and connects afresh', asy
     username: 'u',
     password: 'p',
     maxMessages: 200,
-    fullScanLimit: -1,
+    walkLimit: -1,
     saveCopy: true,
     sentFolder: null,
   })

@@ -210,7 +210,7 @@ function taken(name: string, kwargs: OpKwargs): void {
     truncate: ['no_create'],
     files_containing: ['whole_word', 'ignore_case'],
     lines_containing: ['ignore_case'],
-    before_full_scan: ['files'],
+    before_full_walk: ['files'],
     setattr: ['mode', 'uid', 'gid', 'atime', 'mtime'],
   }
   const known = Object.hasOwn(keywords, name) ? (keywords[name] ?? []) : []
@@ -945,10 +945,10 @@ export class MountEntry {
               handedOf(kw),
             ),
         ]
-      case 'before_full_scan':
+      case 'before_full_walk':
         return [
           (scope, _args, kw) =>
-            vfs.beforeFullScan(scope, typeof kw.files === 'number' ? kw.files : null, handedOf(kw)),
+            vfs.beforeFullWalk(scope, typeof kw.files === 'number' ? kw.files : null, handedOf(kw)),
         ]
       case 'truncate':
         return [

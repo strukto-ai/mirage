@@ -21,7 +21,7 @@ import type { MountView, NamespaceLinks } from '../../../../view/types.ts'
 import type { SessionState } from '../../../session/session.ts'
 import { groupName, ownerName } from '../../../../commands/builtin/utils/identity.ts'
 import { dispatchStat, dotRefusal } from '../../../../commands/builtin/utils/paths.ts'
-import { beforeFullScan } from '../../../../commands/builtin/utils/tree.ts'
+import { beforeFullWalk } from '../../../../commands/builtin/utils/tree.ts'
 import { UsageError } from '../../../../commands/errors.ts'
 import type { FlagView } from '../../../../commands/spec/flag_view.ts'
 import {
@@ -248,10 +248,10 @@ export async function beforeRecursiveChange(
 ): Promise<void> {
   for (const virtual of [root.virtual, ...mounts.visibleDescendants(root.virtual)]) {
     try {
-      await beforeFullScan(dispatch, PathSpec.fromStrPath(virtual), cmd)
+      await beforeFullWalk(dispatch, PathSpec.fromStrPath(virtual), cmd)
     } catch (err) {
       if (!isEacces(err)) throw err
-      console.debug(`scan guard skipped at ${virtual}: ${String(err)}`)
+      console.debug(`walk guard skipped at ${virtual}: ${String(err)}`)
     }
   }
 }

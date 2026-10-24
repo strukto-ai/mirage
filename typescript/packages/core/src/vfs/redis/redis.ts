@@ -18,7 +18,7 @@ import { VFSName } from '../../types.ts'
 import { stripSlash } from '../../utils/slash.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 import { BaseVFS, type VFSStateBase } from '../base.ts'
-import { FULL_SCAN_LIMIT } from '../constants.ts'
+import { WALK_LIMIT } from '../constants.ts'
 import { VFSConfigError } from '../errors.ts'
 import { REDACTED_SECRET } from '../secrets.ts'
 import { PROMPT } from './prompt.ts'
@@ -73,14 +73,14 @@ export class RedisVFS extends BaseVFS {
   override readonly prompt: string = PROMPT
   readonly store: RedisStoreLike
   override readonly accessor: RedisAccessor
-  override readonly fullScanLimit: number
+  override readonly walkLimit: number
 
-  constructor(store: RedisStoreLike, fullScanLimit: number = FULL_SCAN_LIMIT) {
-    if (!Number.isInteger(fullScanLimit) || fullScanLimit < -1) {
-      throw new VFSConfigError('redis: full_scan_limit: must be an integer of -1 or more')
+  constructor(store: RedisStoreLike, walkLimit: number = WALK_LIMIT) {
+    if (!Number.isInteger(walkLimit) || walkLimit < -1) {
+      throw new VFSConfigError('redis: walk_limit: must be an integer of -1 or more')
     }
     super()
-    this.fullScanLimit = fullScanLimit
+    this.walkLimit = walkLimit
     this.store = store
     this.accessor = new RedisAccessor(store)
   }

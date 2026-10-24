@@ -42,7 +42,7 @@ import type { FlagValue } from '../../../spec/types.ts'
 import { IOResult, materialize, type ByteSource } from '../../../../io/types.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
 import { FileType, PathSpec, type FileStat } from '../../../../types.ts'
-import { ScanBudget } from '../../utils/tree.ts'
+import { WalkBudget } from '../../utils/tree.ts'
 import { rstripSlash } from '../../../../utils/slash.ts'
 import { walkErrorLine, type Haystack } from '../../rg_scan.ts'
 import { Totals, splitFooter, type RgFlags } from '../../rg_search.ts'
@@ -153,7 +153,7 @@ export async function runSearch(
       const warnings: string[] = []
       const stopped = new Set<string>()
       const mounts = mountView(vfs) ?? null
-      const budgets = new Map(paths.map((p) => [p.virtual, new ScanBudget(p, mounts)]))
+      const budgets = new Map(paths.map((p) => [p.virtual, new WalkBudget(p, mounts)]))
       const reported = new Set<string>()
       const listing = rg.listFiles
       // The plan hands each file over alone, which no search narrows, so
@@ -164,12 +164,12 @@ export async function runSearch(
         const top = paths.find((p) => h.virtual.startsWith(`${rstripSlash(p.virtual)}/`))
         const budget = top === undefined ? undefined : budgets.get(top.virtual)
         if (top === undefined || budget === undefined || budget.spend(h.virtual)) return true
+        if (!budget.opens(top.virtual)) stopped.add(top.virtual)
         for (const line of budget.stopped) {
           if (reported.has(line)) continue
           reported.add(line)
           warnings.push(`rg: ${line}`)
         }
-        if (!budget.opens(top.virtual)) stopped.add(top.virtual)
         return false
       }
       const links = linkView(vfs)

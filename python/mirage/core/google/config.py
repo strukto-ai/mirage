@@ -16,7 +16,7 @@ from collections.abc import Callable
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, model_validator
 
-from mirage.vfs.constants import FULL_SCAN_LIMIT
+from mirage.vfs.constants import WALK_LIMIT
 
 
 class GoogleConfig(BaseModel):
@@ -83,7 +83,7 @@ class GoogleConfig(BaseModel):
 
 
 class GoogleAppConfig(GoogleConfig):
-    full_scan_limit: int = Field(default=FULL_SCAN_LIMIT, ge=-1)
+    walk_limit: int = Field(default=WALK_LIMIT, ge=-1)
     """Most files one command walks under a folder: `grep -r`, `find` and other
     walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is
     refused. `-1` lifts the limit and reads every file without asking Drive
