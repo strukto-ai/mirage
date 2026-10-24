@@ -6,6 +6,17 @@
 </p>
 
 <p align="center">
+  <a href="https://agentvfs.org">
+    <picture>
+      <source media="(max-width: 767px) and (prefers-color-scheme: dark)" srcset="../assets/agentvfs-banner-narrow-dark.svg">
+      <source media="(max-width: 767px)" srcset="../assets/agentvfs-banner-narrow-light.svg">
+      <source media="(prefers-color-scheme: dark)" srcset="../assets/agentvfs-banner-dark.svg">
+      <img src="../assets/agentvfs-banner-light.svg" width="900" alt="AgentVFS: die offene, herstellerneutrale Dateisystem-Schnittstelle für KI-Agenten" />
+    </picture>
+  </a>
+</p>
+
+<p align="center">
     <a href="https://docs.mirage.strukto.ai" alt="Dokumentation">
         <img src="https://img.shields.io/badge/mirage-dokumentation-0C0C0C?labelColor=FAFAFA" /></a>
     <a href="https://www.strukto.ai" alt="Website">
@@ -38,17 +49,6 @@
   <a href="./README.de.md"><img alt="README auf Deutsch" src="https://img.shields.io/badge/Deutsch-d9d9d9"></a>
   <a href="./README.vi.md"><img alt="README Tiếng Việt" src="https://img.shields.io/badge/Ti%E1%BA%BFng%20Vi%E1%BB%87t-d9d9d9"></a>
   <a href="./README.ko.md"><img alt="README 한국어" src="https://img.shields.io/badge/%ED%95%9C%EA%B5%AD%EC%96%B4-d9d9d9"></a>
-</p>
-
-<p align="center">
-  <a href="https://agentvfs.org">
-    <picture>
-      <source media="(max-width: 767px) and (prefers-color-scheme: dark)" srcset="../assets/agentvfs-banner-narrow-dark.svg">
-      <source media="(max-width: 767px)" srcset="../assets/agentvfs-banner-narrow-light.svg">
-      <source media="(prefers-color-scheme: dark)" srcset="../assets/agentvfs-banner-dark.svg">
-      <img src="../assets/agentvfs-banner-light.svg" width="900" alt="AgentVFS: die offene, herstellerneutrale Dateisystem-Schnittstelle für KI-Agenten" />
-    </picture>
-  </a>
 </p>
 
 Mirage ist **ein virtuelles Terminal für KI-Agenten**. Das virtuelle Dateisystem liefert breiten Datenkontext, virtualisierte CLIs geben einem Agenten mehr Spielraum beim Werkzeugeinsatz, dynamische Laufzeitumgebungen senken die Kosten der darunterliegenden Infrastruktur und sparen Tokens, und eine feingranulare Kontrolle über die Aktionen eines Agenten und sogar darüber, was er sehen darf, sorgt für die beste Sicherheit. Zusammen bilden diese Teile ein einziges virtualisiertes Terminal, das die beste Agentenleistung, Kosteneffizienz und Sicherheit bietet.

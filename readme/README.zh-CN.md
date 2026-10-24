@@ -6,6 +6,17 @@
 </p>
 
 <p align="center">
+  <a href="https://agentvfs.org">
+    <picture>
+      <source media="(max-width: 767px) and (prefers-color-scheme: dark)" srcset="../assets/agentvfs-banner-narrow-dark.svg">
+      <source media="(max-width: 767px)" srcset="../assets/agentvfs-banner-narrow-light.svg">
+      <source media="(prefers-color-scheme: dark)" srcset="../assets/agentvfs-banner-dark.svg">
+      <img src="../assets/agentvfs-banner-light.svg" width="900" alt="AgentVFS：开放、厂商中立的 AI Agent 虚拟文件系统接口" />
+    </picture>
+  </a>
+</p>
+
+<p align="center">
     <a href="https://docs.mirage.strukto.ai" alt="文档">
         <img src="https://img.shields.io/badge/mirage-%E6%96%87%E6%A1%A3-0C0C0C?labelColor=FAFAFA" /></a>
     <a href="https://www.strukto.ai" alt="官网">
@@ -38,17 +49,6 @@
   <a href="./README.de.md"><img alt="README auf Deutsch" src="https://img.shields.io/badge/Deutsch-d9d9d9"></a>
   <a href="./README.vi.md"><img alt="README Tiếng Việt" src="https://img.shields.io/badge/Ti%E1%BA%BFng%20Vi%E1%BB%87t-d9d9d9"></a>
   <a href="./README.ko.md"><img alt="README 한국어" src="https://img.shields.io/badge/%ED%95%9C%EA%B5%AD%EC%96%B4-d9d9d9"></a>
-</p>
-
-<p align="center">
-  <a href="https://agentvfs.org">
-    <picture>
-      <source media="(max-width: 767px) and (prefers-color-scheme: dark)" srcset="../assets/agentvfs-banner-narrow-dark.svg">
-      <source media="(max-width: 767px)" srcset="../assets/agentvfs-banner-narrow-light.svg">
-      <source media="(prefers-color-scheme: dark)" srcset="../assets/agentvfs-banner-dark.svg">
-      <img src="../assets/agentvfs-banner-light.svg" width="900" alt="AgentVFS：开放、厂商中立的 AI Agent 虚拟文件系统接口" />
-    </picture>
-  </a>
 </p>
 
 Mirage 是 **面向 AI Agent 的虚拟终端**。虚拟文件系统提供广泛的数据上下文，虚拟化 CLI 让 Agent 在工具使用上更灵活，动态运行时降低底层基础设施成本并且更节省 token，而对 Agent 行为乃至其可见范围的细粒度控制带来最好的安全性。这些部分共同构成一个虚拟化终端，带来最好的 Agent 性能、成本效率和安全性。
