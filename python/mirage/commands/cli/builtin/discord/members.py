@@ -12,12 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import json
-
 from mirage.accessor.discord import DiscordAccessor
 from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
 from mirage.core.discord.members import list_members, search_members
+from mirage.core.render.json import compact_json_bytes
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -35,7 +34,5 @@ async def members(
         result = await search_members(accessor, guild, query)
     else:
         result = await list_members(accessor, guild)
-    out = json.dumps(
-        result, ensure_ascii=False, separators=(",", ":")
-    ).encode()
+    out = compact_json_bytes(result)
     return out, IOResult()

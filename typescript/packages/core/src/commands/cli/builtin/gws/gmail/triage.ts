@@ -18,8 +18,7 @@ import type { GoogleApiAccessor } from '../../../../../accessor/google_api.ts'
 import { IOResult, type ByteSource } from '../../../../../io/types.ts'
 import type { CommandFnResult, Context } from '../../../../../commands/config.ts'
 import type { PathSpec } from '../../../../../types.ts'
-
-const ENC = new TextEncoder()
+import { compactJsonBytes } from '../../../../../core/render/json.ts'
 
 export async function triage(
   accessor: GoogleApiAccessor,
@@ -51,6 +50,6 @@ export async function triage(
       snippet: raw.snippet ?? '',
     })
   }
-  const out: ByteSource = ENC.encode(JSON.stringify(summaries))
+  const out: ByteSource = compactJsonBytes(summaries)
   return [out, new IOResult()]
 }

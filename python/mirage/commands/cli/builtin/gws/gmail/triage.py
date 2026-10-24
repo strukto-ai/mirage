@@ -12,8 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import json
-
 from mirage.accessor.google_api import GoogleApiAccessor
 from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
@@ -22,6 +20,7 @@ from mirage.core.gmail.messages import (
     get_message_raw,
     list_messages,
 )
+from mirage.core.render.json import compact_json_bytes
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -52,7 +51,5 @@ async def triage(
                 "snippet": raw.get("snippet", ""),
             }
         )
-    out = json.dumps(
-        summaries, ensure_ascii=False, separators=(",", ":")
-    ).encode()
+    out = compact_json_bytes(summaries)
     return out, IOResult()

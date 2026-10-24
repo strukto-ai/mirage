@@ -31,6 +31,7 @@ from mirage.commands.spec.flag_view import FlagView
 from mirage.core.github.client import GitHubApiError, github_request_response
 from mirage.core.github.constants import GRAPHQL_PATH
 from mirage.core.github.placeholder import expand
+from mirage.core.render.json import compact_json_text
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import JsonValue, PathSpec
 
@@ -202,7 +203,7 @@ async def _input_body(ctx: Context, fl: FlagView) -> "JsonValue | None":
 
 def _query_value(value: Any) -> str:
     if isinstance(value, (dict, list)):
-        return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+        return compact_json_text(value)
     if value is True:
         return "true"
     if value is False:
@@ -425,7 +426,7 @@ def _body_text(page: Any) -> str | bytes:
         return ""
     if isinstance(page, (str, bytes)):
         return page
-    return json.dumps(page, ensure_ascii=False, separators=(",", ":"))
+    return compact_json_text(page)
 
 
 def _bytes_of(parts: list[str | bytes]) -> bytes:

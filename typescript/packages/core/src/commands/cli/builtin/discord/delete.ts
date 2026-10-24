@@ -18,8 +18,7 @@ import { IOResult, type ByteSource } from '../../../../io/types.ts'
 import type { CommandFnResult, Context } from '../../../config.ts'
 import type { PathSpec } from '../../../../types.ts'
 import type { DiscordAccessor } from '../../../../accessor/discord.ts'
-
-const ENC = new TextEncoder()
+import { compactJsonBytes } from '../../../../core/render/json.ts'
 
 export async function deleteVerb(
   accessor: DiscordAccessor,
@@ -29,6 +28,6 @@ export async function deleteVerb(
 ): Promise<CommandFnResult> {
   const fl = new FlagView(ctx.flags, ctx.spec)
   await deleteMessage(accessor, fl.asStr('channel') ?? '', fl.asStr('message') ?? '')
-  const out: ByteSource = ENC.encode(JSON.stringify({ ok: true }))
+  const out: ByteSource = compactJsonBytes({ ok: true })
   return [out, new IOResult()]
 }

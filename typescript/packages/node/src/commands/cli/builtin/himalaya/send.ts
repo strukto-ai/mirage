@@ -19,6 +19,7 @@ import { IOResult, materialize } from '@struktoai/mirage-core/io/types'
 import type { ByteSource } from '@struktoai/mirage-core/io/types'
 import type { EmailAccessor } from '../../../../accessor/email.ts'
 import { deliver } from './deliver.ts'
+import { compactJsonBytes } from '@struktoai/mirage-core/core/render/json'
 
 const ENC = new TextEncoder()
 
@@ -50,6 +51,6 @@ export async function send(
       .join(', '),
     subject: parsed.subject,
   }
-  const out: ByteSource = ENC.encode(JSON.stringify(result))
+  const out: ByteSource = compactJsonBytes(result)
   return [out, new IOResult({ stderr: warning === '' ? null : ENC.encode(warning) })]
 }

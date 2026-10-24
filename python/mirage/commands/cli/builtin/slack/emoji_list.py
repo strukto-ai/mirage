@@ -12,10 +12,9 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import json
-
 from mirage.accessor.slack import SlackAccessor
 from mirage.commands.config import Context
+from mirage.core.render.json import compact_json_bytes
 from mirage.core.slack.emoji import list_emoji
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
@@ -28,5 +27,5 @@ async def emoji_list(
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
     emoji = await list_emoji(accessor)
-    out = json.dumps(emoji, ensure_ascii=False, separators=(",", ":")).encode()
+    out = compact_json_bytes(emoji)
     return out, IOResult()

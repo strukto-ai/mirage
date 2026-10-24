@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import json
 import logging
 from collections.abc import Coroutine, Mapping
 from typing import Any, TypeVar
@@ -32,6 +31,7 @@ from mcp.types import (
 )
 
 from mirage import __version__
+from mirage.core.render.json import compact_json_text
 from mirage.server.io_serde import (
     answered,
     checked,
@@ -152,7 +152,7 @@ def _to_mcp(result: ToolResult) -> CallToolResult:
 
 
 def _json(value: JsonValue, is_error: bool = False) -> CallToolResult:
-    text = json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+    text = compact_json_text(value)
     return _to_mcp(ToolResult(text, is_error))
 
 

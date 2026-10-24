@@ -25,6 +25,7 @@ import { deliver, saveSentCopy } from './deliver.ts'
 import { rstripSlash } from '@struktoai/mirage-core/utils/slash'
 import { posixPhrase } from '@struktoai/mirage-core/errors/posix'
 import type { Files } from '@struktoai/mirage-core/workspace/files'
+import { compactJsonBytes } from '@struktoai/mirage-core/core/render/json'
 
 const ENC = new TextEncoder()
 
@@ -122,7 +123,7 @@ export async function route(
       to: addressList(filed.to),
       subject: filed.subject,
     }
-    return [ENC.encode(JSON.stringify(saved)) as ByteSource, new IOResult()]
+    return [compactJsonBytes(saved), new IOResult()]
   }
   const { parsed, warning } = await deliver(accessor, raw, save)
   const result = {
@@ -131,7 +132,7 @@ export async function route(
     subject: parsed.subject,
   }
   return [
-    ENC.encode(JSON.stringify(result)) as ByteSource,
+    compactJsonBytes(result),
     new IOResult({ stderr: warning === '' ? null : ENC.encode(warning) }),
   ]
 }

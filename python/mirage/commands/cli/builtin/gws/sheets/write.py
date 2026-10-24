@@ -18,6 +18,7 @@ from mirage.accessor.google_api import GoogleApiAccessor
 from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
 from mirage.core.gsheets.write import update_values
+from mirage.core.render.json import compact_json_bytes
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -50,7 +51,5 @@ async def write(
         fl.as_str("range") or "",
         values_json_from_flags(fl),
     )
-    out = json.dumps(
-        result, ensure_ascii=False, separators=(",", ":")
-    ).encode()
+    out = compact_json_bytes(result)
     return out, IOResult()
