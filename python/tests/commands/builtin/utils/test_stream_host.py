@@ -136,7 +136,21 @@ async def test_a_replacement_lands_whole_once_flushed() -> None:
     assert files["/out"] == b"old"
     assert (await host.serve({"op": "flush", "path": "/out"}, b"")).reply == {}
     assert files["/out"] == b"new tail"
-    await host.serve({"op": "write", "path": "/ro", "atomic": True}, b"")
+    refused: dict[str, JsonValue] = {
+        "op": "write",
+        "path": "/ro",
+        "atomic": True,
+    }
+    assert (await host.serve(refused, b"")).reply == {
+        "error": "Permission denied",
+        "errno": "EACCES",
+    }
+    append: dict[str, JsonValue] = {
+        "op": "write",
+        "path": "/ro",
+        "append": True,
+    }
+    assert (await host.serve(append, b"x")).reply == {}
     failed = await host.serve({"op": "flush"}, b"")
     assert failed.reply == {
         "error": "Permission denied",

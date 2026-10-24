@@ -29,7 +29,7 @@ import type { CommandFnResult, Context } from '../../config.ts'
 import { SED_MISSING_SCRIPT } from '../constants.ts'
 import { byteView, encodeText, utf8Locale } from '../../../shell/bytes.ts'
 import { posixPhrase } from '../../../errors/posix.ts'
-import { openStream, openStreamSync, serveRequests, type OpenStream } from '../../../rs/stream.ts'
+import { openStream, openStreamSync, serveRequests } from '../../../rs/stream.ts'
 
 const SED_LINE_LENGTH = 70
 
@@ -62,11 +62,14 @@ function failed(stderr: string, exitCode: number): CommandFnResult {
  * `_sed_stream`.
  */
 async function* sedStream(
-  engine: OpenStream,
+  config: Readonly<Record<string, util.JSONType>>,
   host: StreamHost,
   io: IOResult,
   signal?: AbortSignal,
 ): AsyncIterable<Uint8Array> {
+  // The engine opens on the first pull, so output closed before one holds
+  // no Wasm handle.
+  const engine = await openStream('sed', config)
   let closed = true
   try {
     yield* serveRequests(engine, host, signal)
@@ -210,7 +213,7 @@ export async function sedGeneric(
   // -i edits `-` as a file; otherwise an operand naming stdin is `-` to F
   // and to sed's messages.
   const names = paths.map((p) => (!parsed.inPlace && isStdin(p) ? '-' : p.rawPath))
-  const engine = await openStream('sed', {
+  const config = {
     pieces,
     extended: parsed.extended,
     utf8: utf8Locale(ctx.env),
@@ -221,10 +224,10 @@ export async function sedGeneric(
     inputs: names.map((name) => byteView(name)),
     paths: paths.map((p) => byteView(p.virtual)),
     cwd: byteView(ctx.cwd.virtual),
-  })
+  }
   const host = new StreamHost(paths, stream, ctx, servedHere, !parsed.inPlace)
   const io = new IOResult()
-  return [sedStream(engine, host, io, ctx.signal), io]
+  return [sedStream(config, host, io, ctx.signal), io]
 }
 
 /**

@@ -228,12 +228,19 @@ export class StreamHost {
     try {
       if (request.atomic === true) {
         await this.outputs.get(name)?.abort()
-        this.outputs.set(
-          name,
-          new ByteWriter(async (source) => {
-            await dispatch('write', path, [source], { atomic: true })
-          }),
-        )
+        this.outputs.delete(name)
+        // The replacement opens now, so a refusal is reported before the
+        // stream reads on.
+        const replacement = new ByteWriter(async (source) => {
+          await dispatch('write', path, [source], { atomic: true })
+        })
+        try {
+          await replacement.opened()
+        } catch (error) {
+          await replacement.abort()
+          throw error
+        }
+        this.outputs.set(name, replacement)
       } else if (request.append !== true) {
         const failed = await this.flushOutput()
         if (failed !== null) return { reply: failed }

@@ -26,7 +26,7 @@ from mirage.errors.posix import posix_phrase
 from mirage.errors.types import FsCondition
 from mirage.io.stream import drain
 from mirage.io.types import ByteSource, IOResult, materialize
-from mirage.rs.stream import OpenStream, open_stream, serve_requests
+from mirage.rs.stream import open_stream, serve_requests
 from mirage.shell.bytes import byte_view, encode_text, utf8_locale
 from mirage.types import JsonValue, PathSpec, PolymorphicReadFn
 
@@ -69,16 +69,18 @@ def _failed(stderr: str, exit_code: int) -> tuple[None, IOResult]:
 
 
 async def _sed_stream(
-    engine: OpenStream, host: StreamHost, io: IOResult
+    config: Mapping[str, JsonValue], host: StreamHost, io: IOResult
 ) -> AsyncIterator[bytes]:
     """Run the script, yielding its output as it settles; output closed
-    early still lets what the script wrote to its files land.
+    early still lets what the script wrote to its files land. The engine
+    opens on the first pull, so output closed before one holds none.
 
     Args:
-        engine (OpenStream): the sed engine.
+        config (Mapping[str, JsonValue]): the sed engine's configuration.
         host (StreamHost): serves the inputs and files it reaches.
         io (IOResult): receives the exit status and stderr.
     """
+    engine = open_stream("sed", config)
     try:
         async with aclosing(serve_requests(engine, host)) as output:
             async for chunk in output:
@@ -296,21 +298,18 @@ async def sed_generic(
         "-" if not parsed.in_place and is_stdin(p) else p.raw_path
         for p in operands
     ]
-    engine = open_stream(
-        "sed",
-        {
-            "pieces": pieces,
-            "extended": parsed.extended,
-            "utf8": utf8_locale(ctx.env),
-            "quiet": parsed.suppress,
-            "separate": parsed.separate,
-            "in_place": parsed.in_place,
-            "line_length": parsed.line_length,
-            "inputs": [byte_view(name) for name in names],
-            "paths": [byte_view(p.virtual) for p in operands],
-            "cwd": byte_view(ctx.cwd.virtual),
-        },
-    )
+    config: dict[str, JsonValue] = {
+        "pieces": pieces,
+        "extended": parsed.extended,
+        "utf8": utf8_locale(ctx.env),
+        "quiet": parsed.suppress,
+        "separate": parsed.separate,
+        "in_place": parsed.in_place,
+        "line_length": parsed.line_length,
+        "inputs": [byte_view(name) for name in names],
+        "paths": [byte_view(p.virtual) for p in operands],
+        "cwd": byte_view(ctx.cwd.virtual),
+    }
     host = StreamHost(
         operands,
         read,
@@ -322,7 +321,7 @@ async def sed_generic(
         dash=not parsed.in_place,
     )
     io = IOResult()
-    return _sed_stream(engine, host, io), io
+    return _sed_stream(config, host, io), io
 
 
 __all__ = ["sed_generic", "sed_writes"]

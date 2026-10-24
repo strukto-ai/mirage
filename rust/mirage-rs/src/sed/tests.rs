@@ -850,3 +850,51 @@ fn a_later_spelling_waits_in_a_host_spool() {
     want.extend_from_slice(&lines.as_bytes()[2..]);
     assert_eq!(run.files["/o"], want);
 }
+
+#[test]
+fn an_edit_opens_its_replacement_first_and_l_meets_the_cap() {
+    let mut host = Host::with(&[("/denied/f", "a\nb\n")], "");
+    host.faults.insert(
+        "/denied/f".into(),
+        Fault {
+            after: 2,
+            errno: "EIO",
+            text: "Input/output error",
+        },
+    );
+    let config = json!({
+        "pieces": expressions(&["d"]),
+        "inputs": ["/denied/f"],
+        "paths": ["/denied/f"],
+        "in_place": true,
+    });
+    let run = run_host(config, host);
+    assert_eq!(
+        (run.err.as_str(), run.status),
+        ("sed: can't read /denied/f: Permission denied\n", 1)
+    );
+    let mut host = Host::with(&[], "");
+    host.faults.insert(
+        "/f".into(),
+        Fault {
+            after: 0,
+            errno: "EIO",
+            text: "Input/output error",
+        },
+    );
+    let config =
+        json!({"pieces": expressions(&["p"]), "inputs": ["/f"], "paths": ["/f"], "in_place": true});
+    let run = run_host(config, host);
+    assert_eq!(
+        (run.err.as_str(), run.status),
+        ("sed: Input/output error\n", 1)
+    );
+    let run = sed(
+        "l",
+        &format!("{}\n", "\u{1}".repeat(super::io::MAX_LEN / 2)),
+    );
+    assert_eq!(
+        (run.err.as_str(), run.status),
+        ("sed: memory exhausted\n", 1)
+    );
+}

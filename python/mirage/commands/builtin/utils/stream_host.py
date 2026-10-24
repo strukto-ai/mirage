@@ -262,7 +262,15 @@ class StreamHost:
             if request.get("atomic"):
                 if (held := self.outputs.pop(name, None)) is not None:
                     await held.abort()
-                self.outputs[name] = ByteWriter(partial(self._replace, path))
+                # The replacement opens now, so a refusal is reported
+                # before the stream reads on.
+                replacement = ByteWriter(partial(self._replace, path))
+                try:
+                    await replacement.opened()
+                except BaseException:
+                    await replacement.abort()
+                    raise
+                self.outputs[name] = replacement
             elif not request.get("append"):
                 if failure := await self.flush_output():
                     return Served(failure)

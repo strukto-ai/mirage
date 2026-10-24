@@ -826,6 +826,15 @@ impl Machine {
             Poll::Pending => self.edit_reader = Some(reader),
             Poll::Ready(Err(failure)) => {
                 let name = &self.feed.inputs[index].name;
+                if !failure.names(&OPERAND_CONDITIONS) {
+                    // A failure that is no operand's own ends the run, as
+                    // the edit's write does.
+                    let line = operand_failure(name, &failure, &failure.text);
+                    self.refused = Some(Refusal::new(line, failure_code(&failure)));
+                    self.io.requests.clear();
+                    self.phase = Phase::Done;
+                    return;
+                }
                 let line = operand_failure(name, &failure, name);
                 self.edit_err.extend_from_slice(&line);
                 self.edit_code = self.edit_code.max(failure_code(&failure));
@@ -841,6 +850,9 @@ impl Machine {
                 self.edit_path = Some(path);
                 self.edit_started = false;
                 self.edit.clear();
+                // The replacement opens before the edit reads on, so a
+                // refused one is reported first.
+                self.send_edit();
                 self.main_missing = false;
                 self.source = None;
                 self.restart();
@@ -1468,7 +1480,7 @@ impl Machine {
             }
             b'l' => {
                 let width = self.commands[pc].number.unwrap_or(self.opts.line_length);
-                let text = list(&self.ps, width);
+                let text = list(&self.ps, width, MAX_LEN).ok_or_else(exhausted)?;
                 self.print(&text);
             }
             b'q' => {

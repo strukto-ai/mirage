@@ -139,12 +139,6 @@ impl Host {
         if path.starts_with("/denied/") {
             return failure("EACCES", "Permission denied");
         }
-        if path.starts_with("/stale/") {
-            return failure(
-                "STALE_WRITE",
-                "changed since it was read; read it again before writing",
-            );
-        }
         if request["atomic"] == json!(true) {
             self.writers.insert(path, Writer::Replace(data));
             return json!({});
@@ -184,7 +178,17 @@ impl Host {
             }
             "write" => (self.write(&request, data), Vec::new()),
             "flush" => {
-                self.commit(request["path"].as_str());
+                let path = request["path"].as_str();
+                // A conditional write finds the file changed at its commit.
+                if path.is_some_and(|path| path.starts_with("/stale/")) {
+                    self.writers.remove(path.unwrap_or_default());
+                    let reply = failure(
+                        "STALE_WRITE",
+                        "changed since it was read; read it again before writing",
+                    );
+                    return (reply, Vec::new());
+                }
+                self.commit(path);
                 (json!({}), Vec::new())
             }
             "spool" => {

@@ -78,8 +78,9 @@ pub(super) fn convert(
 
 /// `l`'s rendering: escapes for the C controls and the backslash, octal
 /// for every other byte outside printable ASCII, lines folded at `width`
-/// without splitting an escape, and `$` at the end.
-pub(super) fn list(ps: &[u8], width: i64) -> Vec<u8> {
+/// without splitting an escape, and `$` at the end; None once it would
+/// pass `limit` bytes.
+pub(super) fn list(ps: &[u8], width: i64, limit: usize) -> Option<Vec<u8>> {
     let mut out = Vec::with_capacity(ps.len() + 2);
     let mut used: i64 = 0;
     let mut piece = Vec::with_capacity(4);
@@ -97,6 +98,9 @@ pub(super) fn list(ps: &[u8], width: i64) -> Vec<u8> {
             0x20..=0x7E => piece.push(byte),
             _ => piece.extend_from_slice(format!("\\{byte:03o}").as_bytes()),
         }
+        if out.len() + piece.len() + 4 > limit {
+            return None;
+        }
         let len = piece.len() as i64;
         if width > 0 && used + len > width - 1 {
             out.extend_from_slice(b"\\\n");
@@ -106,7 +110,7 @@ pub(super) fn list(ps: &[u8], width: i64) -> Vec<u8> {
         used += len;
     }
     out.extend_from_slice(b"$\n");
-    out
+    Some(out)
 }
 
 /// What a name resolves to against `cwd`, as the host resolves a path:

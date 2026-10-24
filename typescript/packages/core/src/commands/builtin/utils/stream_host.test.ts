@@ -103,9 +103,9 @@ describe('StreamHost', () => {
     expect(files.get('/out')).toEqual(ENC.encode('old'))
     expect((await h.serve({ op: 'flush', path: '/out' }, new Uint8Array())).reply).toEqual({})
     expect(files.get('/out')).toEqual(ENC.encode('new tail'))
-    await h.serve({ op: 'write', path: '/ro', atomic: true }, new Uint8Array())
-    const failed = await h.serve({ op: 'flush' }, new Uint8Array())
-    expect(failed.reply).toEqual({ error: 'Permission denied', errno: 'EACCES', path: '/ro' })
+    const refused = await h.serve({ op: 'write', path: '/ro', atomic: true }, new Uint8Array())
+    expect(refused.reply).toEqual({ error: 'Permission denied', errno: 'EACCES' })
+    expect((await h.serve({ op: 'flush' }, new Uint8Array())).reply).toEqual({})
     await h.close()
   })
 
