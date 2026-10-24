@@ -22,6 +22,7 @@ from mirage.commands.cli.walk import node_help, owns_argv
 from mirage.commands.spec.types import CommandSpec, UsageStyle
 from mirage.context import effective_path_mode
 from mirage.policy.match.decide import decide
+from mirage.policy.match.pattern import pattern_reaches, split_pattern
 from mirage.policy.types import CommandContext, Outcome
 from mirage.types import MountMode, PathSpec
 from mirage.utils.hidden import is_glob, path_visible
@@ -98,6 +99,27 @@ def allowed(
     return decide(ctx, session.commands).outcome is not Outcome.DENY
 
 
+def runnable(session: SessionState, path: str, words: Sequence[str]) -> bool:
+    """Whether the profile lets some line of ``words`` work on a file
+    under ``path``: the words as they stand, or a longer form its allow
+    list names (``rm -f`` where the list holds only that).
+
+    Args:
+        session (SessionState): the session the document is for.
+        path (str): the path described.
+        words (Sequence[str]): the command and its words.
+    """
+    forms = [tuple(words)]
+    rules = session.commands
+    if rules is not None and rules.allow is not None:
+        forms.extend(
+            split_pattern(p)
+            for p in rules.allow
+            if len(split_pattern(p)) > len(words) and pattern_reaches(p, words)
+        )
+    return any(allowed(session, path, form, True) for form in forms)
+
+
 def works(mount: MountEntry, change: Change) -> bool:
     return any(all(mount.answers(op) for op in ops) for ops in change.needs)
 
@@ -153,9 +175,7 @@ def granted(
         mode (MountMode): the mode in force at ``path``.
     """
     if mode == MountMode.WRITE and not any(
-        works(mount, c)
-        for c in CHANGES
-        if allowed(session, path, c.command, True)
+        works(mount, c) for c in CHANGES if runnable(session, path, c.command)
     ):
         return MountMode.READ
     return mode
@@ -174,7 +194,7 @@ def supported(
     """
 
     def runs(words: Sequence[str]) -> bool:
-        return allowed(session, path, words, True)
+        return runnable(session, path, words)
 
     reads = [code(c) for c in READS if runs((c,))]
     changes = [c for c in CHANGES if runs(c.command)]
@@ -236,7 +256,7 @@ def limitations(
     """
 
     def runs(words: Sequence[str]) -> bool:
-        return allowed(session, path, words, True)
+        return runnable(session, path, words)
 
     parts: list[str] = []
     if mode == MountMode.READ:

@@ -24,13 +24,14 @@ describe('VFS_MD', () => {
     expect(rendered).toContain('still in owned/')
     expect(rendered).toContain('gsheet.json structure')
     expect(rendered).toContain('.sheets[].properties.title')
-    expect(rendered).toContain('gws sheets read')
   })
 })
 
 describe('VFS_MD file commands', () => {
-  it('documents rm and mv', () => {
+  it('documents rm and mv for a write path', () => {
     expect(VFS_MD).toContain('rm {prefix}/owned/<file>.gsheet.json')
     expect(VFS_MD).toContain('mv {prefix}/owned/<date>_<old>__<id>.gsheet.json')
+    expect(VFS_MD).toContain('Delete, on a `write` path:')
+    expect(VFS_MD).toContain('Rename to a new title, on a `write` path:')
   })
 })

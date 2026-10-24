@@ -111,13 +111,13 @@ VFS_MD = """\
   .paragraph, so a path through .paragraph needs the `?` or it fails with
   "Cannot iterate over null".
 
-  Delete:
+  Delete, on a `write` path:
     rm {prefix}/owned/<file>.gdoc.json      # permanent delete from Drive
     rm -f <path>                            # ignore if missing
     Only operates on .gdoc.json files; owned/ and shared/ themselves
     cannot be removed.
 
-  Rename (a new title):
+  Rename to a new title, on a `write` path:
     mv {prefix}/owned/<date>_<old>__<id>.gdoc.json \\
        {prefix}/owned/<date>_<new>__<id>.gdoc.json
     Keep the folder, the date and the id, and spell the title the way

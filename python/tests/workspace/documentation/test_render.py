@@ -249,6 +249,21 @@ async def test_vfs_md_summarizes_nothing_for_an_allow_list():
 
 
 @pytest.mark.asyncio
+async def test_vfs_md_counts_a_longer_form_the_allow_list_names():
+    cfg = GDocsConfig(client_id="x", client_secret="y", refresh_token="z")
+    ws = Workspace(
+        {"/docs": (GDocsVFS(config=cfg), MountMode.WRITE)},
+        mode=MountMode.WRITE,
+        profiles={"default": {"commands": {"allow": ["cat", "rm -f"]}}},
+    )
+    markdown = await ws.vfs_md()
+    assert "| `/docs` | `gdocs`, write |" in markdown
+    assert row(markdown, "## Supported Unix Commands for VFS", "/docs") == (
+        "Commands that read files (`cat` and the rest), and `rm`."
+    )
+
+
+@pytest.mark.asyncio
 async def test_vfs_md_describes_each_path_shown_with_its_own_mode():
     ws = Workspace(
         {

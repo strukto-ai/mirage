@@ -156,6 +156,8 @@ def test_first_tab_recipe_survives_the_leading_section_break():
     assert jq_eval(_doc(), FIRST_TAB) == ["first tab\n"]
 
 
-def test_vfs_md_documents_rm_and_mv():
+def test_vfs_md_documents_rm_and_mv_for_a_write_path():
     assert "rm {prefix}/owned/<file>.gdoc.json" in VFS_MD
     assert "mv {prefix}/owned/<date>_<old>__<id>.gdoc.json" in VFS_MD
+    assert "Delete, on a `write` path:" in VFS_MD
+    assert "Rename to a new title, on a `write` path:" in VFS_MD

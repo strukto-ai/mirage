@@ -58,7 +58,8 @@ Reading the tree:
 
 Acting on it:
 
-- `rm` an event file to delete that event for every attendee.
+- On a `write` path, `rm` an event file to delete that event for every
+  attendee.
 - Everything else goes through the `gws calendar` CLI, which takes the ids
   the tree renders.
 - A written event must carry an explicit UTC offset or timeZone; an

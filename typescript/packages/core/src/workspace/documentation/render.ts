@@ -19,6 +19,7 @@ import { nodeHelp, ownsArgv } from '../../commands/cli/walk.ts'
 import type { CommandSpecInit, UsageStyle } from '../../commands/spec/types.ts'
 import { effectivePathMode } from '../../context/session_context.ts'
 import { decide } from '../../policy/match/decide.ts'
+import { patternReaches, splitPattern } from '../../policy/match/pattern.ts'
 import { Outcome } from '../../policy/types.ts'
 import { MountMode, PathSpec } from '../../types.ts'
 import { isGlob, pathVisible } from '../../utils/hidden.ts'
@@ -75,6 +76,18 @@ function allowed(
   return decide({ command, paths, argv, cwd }, session.commands).outcome !== Outcome.DENY
 }
 
+/**
+ * Whether the profile lets some line of `words` work on a file under
+ * `path`: the words as they stand, or a longer form its allow list names
+ * (`rm -f` where the list holds only that).
+ */
+function runnable(session: SessionState, path: string, words: readonly string[]): boolean {
+  const longer = (session.commands?.allow ?? [])
+    .filter((p) => splitPattern(p).length > words.length && patternReaches(p, words))
+    .map(splitPattern)
+  return [words, ...longer].some((form) => allowed(session, path, form, true))
+}
+
 function works(mount: MountEntry, change: Change): boolean {
   return change.needs.some((ops) => ops.every((op) => mount.answers(op)))
 }
@@ -129,7 +142,7 @@ function granted(
 ): MountMode {
   if (
     mode === MountMode.WRITE &&
-    !CHANGES.some((c) => allowed(session, path, c.command, true) && works(mount, c))
+    !CHANGES.some((c) => runnable(session, path, c.command) && works(mount, c))
   )
     return MountMode.READ
   return mode
@@ -142,7 +155,7 @@ function supported(
   path: string,
   mode: MountMode,
 ): string {
-  const runs = (words: readonly string[]): boolean => allowed(session, path, words, true)
+  const runs = (words: readonly string[]): boolean => runnable(session, path, words)
   const reads = READS.filter((c) => runs([c])).map(code)
   const changes = CHANGES.filter((c) => runs(c.command))
   const working = changes
@@ -188,7 +201,7 @@ function limitations(
   path: string,
   mode: MountMode,
 ): string {
-  const runs = (words: readonly string[]): boolean => allowed(session, path, words, true)
+  const runs = (words: readonly string[]): boolean => runnable(session, path, words)
   const parts: string[] = []
   if (mode === MountMode.READ) {
     parts.push('Read only: no command changes files.')

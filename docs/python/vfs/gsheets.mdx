@@ -108,16 +108,13 @@ description: The virtual filesystem layout of this workspace.
     .sheets[0].data[0].rowData[].values[].formattedValue    # cell strings
     .namedRanges[]
 
-  For range-scoped reads and writes, use the gws CLI if installed:
-    gws sheets read --spreadsheet <id> --range Sheet1!A1:C10
-
-  Delete:
+  Delete, on a `write` path:
     rm /<path>/owned/<file>.gsheet.json     # permanent delete from Drive
     rm -f <path>                             # ignore if missing
     Only operates on .gsheet.json files; owned/ and shared/ themselves
     cannot be removed.
 
-  Rename (a new title):
+  Rename to a new title, on a `write` path:
     mv /<path>/owned/<date>_<old>__<id>.gsheet.json \
        /<path>/owned/<date>_<new>__<id>.gsheet.json
     Keep the folder, the date and the id, and spell the title the way

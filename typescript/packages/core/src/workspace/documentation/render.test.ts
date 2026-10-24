@@ -192,6 +192,21 @@ describe('vfsMd', () => {
     )
   })
 
+  it('counts a longer form the allow list names', async () => {
+    const ws = new Workspace(
+      { '/docs': [gdocs(), MountMode.WRITE] },
+      {
+        mode: MountMode.WRITE,
+        profiles: { default: parseSessionProfile({ commands: { allow: ['cat', 'rm -f'] } }) },
+      },
+    )
+    const markdown = await ws.vfsMd()
+    expect(markdown).toContain('| `/docs` | `gdocs`, write |')
+    expect(row(markdown, SUPPORTED, '/docs')).toBe(
+      'Commands that read files (`cat` and the rest), and `rm`.',
+    )
+  })
+
   it('describes each path shown with its own mode', async () => {
     const ws = new Workspace(
       { '/': [new RAMVFS(), MountMode.WRITE], '/data': [new RAMVFS(), MountMode.WRITE] },

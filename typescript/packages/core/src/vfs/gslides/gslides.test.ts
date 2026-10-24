@@ -28,8 +28,10 @@ describe('VFS_MD', () => {
 })
 
 describe('VFS_MD file commands', () => {
-  it('documents rm and mv', () => {
+  it('documents rm and mv for a write path', () => {
     expect(VFS_MD).toContain('rm {prefix}/owned/<file>.gslide.json')
     expect(VFS_MD).toContain('mv {prefix}/owned/<date>_<old>__<id>.gslide.json')
+    expect(VFS_MD).toContain('Delete, on a `write` path:')
+    expect(VFS_MD).toContain('Rename to a new title, on a `write` path:')
   })
 })

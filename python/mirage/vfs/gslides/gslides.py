@@ -88,13 +88,13 @@ VFS_MD = """\
     .slides[].pageElements[].shape.text.textElements[].textRun.content  # all text
     .slides[0].objectId
 
-  Delete:
+  Delete, on a `write` path:
     rm {prefix}/owned/<file>.gslide.json     # permanent delete from Drive
     rm -f <path>                             # ignore if missing
     Only operates on .gslide.json files; owned/ and shared/ themselves
     cannot be removed.
 
-  Rename (a new title):
+  Rename to a new title, on a `write` path:
     mv {prefix}/owned/<date>_<old>__<id>.gslide.json \\
        {prefix}/owned/<date>_<new>__<id>.gslide.json
     Keep the folder, the date and the id, and spell the title the way
