@@ -202,6 +202,16 @@ the tenant disarms them too. A case's `faults` field arms its plans for the
 length of its command and fails the case when one is left unspent; only gws
 targets wire it today (`vfs/google/retry.json`).
 
+`gridfs_trash.py` and `gridfs_trash.ts` probe what the battery cannot: a
+GridFS `rm` moves the file's revisions to the trash instead of deleting
+them, so a workspace restored from a snapshot taken before the `rm` still
+reads the revision it pinned, past the restored cache. `integ-shared-py` and
+`integ-shared-ts` run them on shard 0, against the MongoDB they already
+start, and `check_json.py` holds each to `truth_gridfs_trash.json`. The
+observable shell side, the name reading as gone to `cat`, `stat`, `test` and
+`ls`, a rewrite starting fresh and `mv` not resurrecting trashed revisions,
+is `vfs/gridfs/trash.json` in the battery.
+
 Stores the fakes do not own are namespaced per run by the runner's adapters
 and torn down after: S3 buckets `mirage-integ-<run>-...` (moto in-process by
 default), a Mongo database `mirage_integ_<run>`, redis key prefixes, and temp

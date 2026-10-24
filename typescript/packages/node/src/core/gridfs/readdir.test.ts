@@ -136,4 +136,9 @@ describe('gridfs core readdir', () => {
   it('still lists the children of a coexisting prefix', async () => {
     await expect(run(['a', 'a/x.txt'], '/a')).resolves.toEqual(['/a/x.txt'])
   })
+
+  it('hides the trash from the root listing', async () => {
+    await expect(run(['a.txt', '/trash/a.txt', '/trash/d/f.txt'], '/')).resolves.toEqual(['/a.txt'])
+    await expect(codeOf(run(['a.txt', '/trash/a.txt'], '/trash'))).resolves.toBe('ENOENT')
+  })
 })

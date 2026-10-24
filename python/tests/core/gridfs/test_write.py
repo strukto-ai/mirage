@@ -19,7 +19,13 @@ import pytest
 from mirage.accessor.gridfs import GridFSAccessor
 from mirage.cache.types import WriteCondition
 from mirage.core.gridfs import driver as gridfs_driver
+from mirage.core.gridfs.unlink import unlink
+from mirage.core.gridfs.write import write
+from mirage.types import PathSpec
 from mirage.vfs.gridfs.config import GridFSConfig
+from tests.fixtures.gridfs_store import FakeStore, make_accessor
+
+A_TXT = PathSpec(vfs_path="a.txt", virtual="/mnt/a.txt", directory="/mnt")
 
 
 class _FakeBucket:
@@ -98,3 +104,46 @@ async def test_stream_upload_commits_or_aborts_and_closes_source(
         upload.close.assert_awaited_once()
         upload.abort.assert_not_awaited()
     assert closed == [True]
+
+
+@pytest.mark.asyncio
+async def test_retention_prunes_the_oldest_revisions_on_write(
+    store: FakeStore,
+):
+    accessor = make_accessor(keep_revisions=2)
+    for data in (b"v1", b"v2"):
+        await write(accessor, A_TXT, data)
+    kept = store.ids("a.txt")
+    # Two revisions never fall below the two kept.
+    await write(accessor, A_TXT, b"v3")
+    ids = store.ids("a.txt")
+    assert ids[:1] == kept[1:]
+    assert len(ids) == 2
+    assert kept[0] not in store.chunks
+    assert store.chunks[ids[-1]] == b"v3"
+
+
+@pytest.mark.asyncio
+async def test_retention_counts_live_and_trashed_revisions_apart(
+    store: FakeStore,
+):
+    accessor = make_accessor(keep_revisions=1)
+    await write(accessor, A_TXT, b"v1")
+    await write(accessor, A_TXT, b"v2")
+    await unlink(accessor, A_TXT)
+    assert len(store.ids("/trash/a.txt")) == 1
+    await write(accessor, A_TXT, b"v3")
+    assert len(store.ids("a.txt")) == 1
+    assert len(store.ids("/trash/a.txt")) == 1
+    assert store.chunks[store.ids("/trash/a.txt")[0]] == b"v2"
+
+
+@pytest.mark.asyncio
+async def test_no_retention_keeps_every_revision(store: FakeStore):
+    accessor = make_accessor()
+    for data in (b"v1", b"v2", b"v3"):
+        await write(accessor, A_TXT, data)
+    await unlink(accessor, A_TXT)
+    await write(accessor, A_TXT, b"v4")
+    assert len(store.ids("/trash/a.txt")) == 3
+    assert len(store.chunks) == 4

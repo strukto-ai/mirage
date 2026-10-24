@@ -707,6 +707,13 @@ jobs:
           --allow-skip chroma,lancedb,nextcloud,notion,postgres,qdrant
           --emit-dir "$GITHUB_WORKSPACE/emit/python"
           -- ./python/.venv/bin/python integ/runners/python/main.py --strict
+      # The battery cannot snapshot a workspace, so the GridFS trash under a
+      # restore is probed here, where MongoDB already runs.
+      - name: Probe the GridFS trash under a snapshot restore (python)
+        if: matrix.shard == 0
+        run: >-
+          ./python/.venv/bin/python integ/gridfs_trash.py 2>&1
+          | python3 integ/check_json.py integ/truth_gridfs_trash.json
       # integ-shared-parity diffs these against the typescript shards'
       # instead of running both hosts over the same targets a second time.
       - name: Keep the battery outputs for the parity diff
@@ -924,6 +931,10 @@ jobs:
           --allow-skip chroma,lancedb,nextcloud,notion,postgres,qdrant
           --emit-dir "$GITHUB_WORKSPACE/emit/typescript"
           -- pnpm exec tsx runners/typescript/main.ts --strict
+      - name: Probe the GridFS trash under a snapshot restore (typescript)
+        if: matrix.shard == 0
+        working-directory: integ
+        run: pnpm exec tsx gridfs_trash.ts 2>&1 | python3 check_json.py truth_gridfs_trash.json
       - name: Keep the battery outputs for the parity diff
         uses: actions/upload-artifact@v7
         with:

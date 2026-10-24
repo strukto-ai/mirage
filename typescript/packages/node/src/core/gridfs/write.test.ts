@@ -13,18 +13,31 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { Writable } from 'node:stream'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type * as ClientModule from './client.ts'
+import {
+  FakeStore,
+  makeAccessor,
+  mockedClient,
+  spec,
+} from '../../../tests/core/gridfs/_test_util.ts'
+
+let store = new FakeStore()
 
 vi.mock('./client.ts', async () => {
   const actual = await vi.importActual<typeof ClientModule>('./client.ts')
-  return { ...actual, bucket: vi.fn() }
+  return { ...mockedClient(actual, () => store), bucket: vi.fn() }
 })
 
 import { GridFSAccessor } from '../../accessor/gridfs.ts'
 import type { GridFSConfig } from '../../vfs/gridfs/config.ts'
 import * as clientMod from './client.ts'
 import { DRIVER } from './driver.ts'
+import { unlink } from './unlink.ts'
+import { write } from './write.ts'
+
+const ENC = new TextEncoder()
+const A_TXT = spec('a.txt')
 
 function fakeBucket(keys: string[]): unknown {
   return {
@@ -102,4 +115,46 @@ it.each([false, true])('streams a GridFS upload and aborts failures: %s', async 
     expect(abort).not.toHaveBeenCalled()
   }
   expect(closed).toBe(true)
+})
+
+// Twins of the retention tests in tests/core/gridfs/test_write.py.
+describe('gridfs retention', () => {
+  beforeEach(() => {
+    store = new FakeStore()
+    vi.mocked(clientMod.bucket).mockImplementation(() => Promise.resolve(store as never))
+  })
+
+  it('prunes the oldest revisions on write', async () => {
+    const accessor = makeAccessor(store, { keepRevisions: 2 })
+    for (const data of ['v1', 'v2']) await write(accessor, A_TXT, ENC.encode(data))
+    const kept = store.ids('a.txt')
+    // Two revisions never fall below the two kept.
+    await write(accessor, A_TXT, ENC.encode('v3'))
+    const ids = store.ids('a.txt')
+    expect(ids.slice(0, 1)).toEqual(kept.slice(1))
+    expect(ids).toHaveLength(2)
+    expect(store.chunks.has(String(kept[0]))).toBe(false)
+    expect(new TextDecoder().decode(store.chunks.get(String(ids[1])))).toBe('v3')
+  })
+
+  it('counts live and trashed revisions apart', async () => {
+    const accessor = makeAccessor(store, { keepRevisions: 1 })
+    await write(accessor, A_TXT, ENC.encode('v1'))
+    await write(accessor, A_TXT, ENC.encode('v2'))
+    await unlink(accessor, A_TXT)
+    expect(store.ids('/trash/a.txt')).toHaveLength(1)
+    await write(accessor, A_TXT, ENC.encode('v3'))
+    expect(store.ids('a.txt')).toHaveLength(1)
+    const [trashed] = store.ids('/trash/a.txt')
+    expect(new TextDecoder().decode(store.chunks.get(String(trashed)))).toBe('v2')
+  })
+
+  it('keeps every revision without retention', async () => {
+    const accessor = makeAccessor(store)
+    for (const data of ['v1', 'v2', 'v3']) await write(accessor, A_TXT, ENC.encode(data))
+    await unlink(accessor, A_TXT)
+    await write(accessor, A_TXT, ENC.encode('v4'))
+    expect(store.ids('/trash/a.txt')).toHaveLength(3)
+    expect(store.chunks.size).toBe(4)
+  })
 })

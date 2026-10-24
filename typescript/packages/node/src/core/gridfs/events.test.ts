@@ -96,4 +96,25 @@ describe('GridFSEventHook', () => {
       [FileChangeKind.UNKNOWN, '/g'],
     ])
   })
+
+  // Twin of test_a_rename_into_the_trash_settles_only_the_name_left: rm
+  // retags a.txt to /trash/a.txt, so the name left behind reads as deleted
+  // and the trash, which no path reaches, raises nothing.
+  it('settles only the name a trash rename leaves behind', async () => {
+    const hook = new GridFSEventHook(
+      new GridFSAccessor({ uri: 'mongodb://x', database: 'lib' } as GridFSConfig),
+    )
+    counts.set('a.txt', 0)
+    counts.set('/trash/a.txt', 2)
+    const rename = event('update', 1, {
+      fullDocumentBeforeChange: { filename: 'a.txt' },
+      updateDescription: { updatedFields: { filename: '/trash/a.txt' } },
+    })
+    const changes = await hook.toEvents(ROOT, 'update', rename)
+    expect(changes.map((c) => [c.kind, c.path.virtual])).toEqual([
+      [FileChangeKind.DELETE, '/g/a.txt'],
+    ])
+    const insert = event('insert', 2, { fullDocument: { filename: '/trash/b.txt' } })
+    expect(await hook.toEvents(ROOT, 'insert', insert)).toEqual([])
+  })
 })

@@ -17,6 +17,7 @@ import * as kp from '@struktoai/mirage-core/utils/key_prefix'
 import { loadOptionalPeer } from '@struktoai/mirage-core/utils/optional_peer'
 import type { GridFSAccessor } from '../../accessor/gridfs.ts'
 import type { GridFSConfig } from '../../vfs/gridfs/config.ts'
+import { TRASH_PREFIX } from './constants.ts'
 
 export interface GridFSFileDoc {
   _id: ObjectId
@@ -87,9 +88,18 @@ export function escapeRegex(raw: string): string {
   return out
 }
 
+/**
+ * Match the live revisions under a key prefix; `''` is the whole store,
+ * less the trash, which no mount key can reach.
+ */
 export function prefixQuery(pfx: string): Record<string, unknown> {
-  if (pfx === '') return {}
+  if (pfx === '') return { filename: { $regex: `^(?!${escapeRegex(TRASH_PREFIX)})` } }
   return { filename: { $regex: `^${escapeRegex(pfx)}` } }
+}
+
+/** The filename `rm` moves a key's revisions to. */
+export function trashed(key: string): string {
+  return TRASH_PREFIX + key
 }
 
 export async function latestFile(
@@ -142,17 +152,67 @@ export async function* iterLatest(
   }
 }
 
-/** Delete every revision (file doc + chunks) matching a query. */
-export async function deleteAll(
+/**
+ * Rename every revision matching a query, server-side. The revisions keep
+ * their `_id` and chunks, so a read pinned to one still finds it under the
+ * new name. Returns how many revisions the query selected.
+ */
+export async function retag(
+  accessor: GridFSAccessor,
+  query: Record<string, unknown>,
+  rename: (filename: string) => string,
+): Promise<number> {
+  const files = await filesColl(accessor)
+  const docs: { _id: ObjectId; filename: string }[] = []
+  for await (const doc of files.find(query, { projection: { _id: 1, filename: 1 } })) {
+    docs.push({ _id: doc._id, filename: doc.filename as string })
+  }
+  for (const doc of docs) {
+    await files.updateOne({ _id: doc._id }, { $set: { filename: rename(doc.filename) } })
+  }
+  return docs.length
+}
+
+/**
+ * Move every revision matching a query into the trash: what `rm` and an
+ * overwriting `mv` do instead of deleting. The name reads as gone, and the
+ * revisions stay for pinned reads until `keepRevisions` prunes them.
+ */
+export async function trash(
   accessor: GridFSAccessor,
   query: Record<string, unknown>,
 ): Promise<void> {
+  await retag(accessor, query, trashed)
+}
+
+/**
+ * Delete the revisions past `keepRevisions` of each matching name, newest
+ * first; an unset `keepRevisions` keeps them all. The query names the
+ * revisions to count, live or trashed.
+ */
+export async function prune(
+  accessor: GridFSAccessor,
+  query: Record<string, unknown>,
+): Promise<void> {
+  const keep = accessor.config.keepRevisions
+  if (keep === undefined) return
+  const files = await filesColl(accessor)
+  const pipeline: Document[] = [
+    { $match: query },
+    { $sort: { filename: 1, uploadDate: -1, _id: -1 } },
+    { $group: { _id: '$filename', ids: { $push: '$_id' } } },
+  ]
+  const ids: ObjectId[] = []
+  for await (const doc of files.aggregate(pipeline)) {
+    ids.push(...(doc.ids as ObjectId[]).slice(keep))
+  }
+  await deleteIds(accessor, ids)
+}
+
+/** Delete revisions (file doc + chunks) by `_id`. */
+export async function deleteIds(accessor: GridFSAccessor, ids: ObjectId[]): Promise<void> {
   const files = await filesColl(accessor)
   const chunks = await chunksColl(accessor)
-  const ids: ObjectId[] = []
-  for await (const doc of files.find(query, { projection: { _id: 1 } })) {
-    ids.push(doc._id)
-  }
   for (let i = 0; i < ids.length; i += BATCH) {
     const batch = ids.slice(i, i + BATCH)
     await chunks.deleteMany({ files_id: { $in: batch } })

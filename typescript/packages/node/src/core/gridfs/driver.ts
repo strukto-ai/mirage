@@ -26,23 +26,25 @@ import type {
 } from '@struktoai/mirage-core/core/object_store/driver'
 import { VFSName } from '@struktoai/mirage-core/types'
 import { toIsoZ } from '@struktoai/mirage-core/utils/dates'
-import type { ObjectId } from 'mongodb'
 import type { GridFSAccessor } from '../../accessor/gridfs.ts'
 import {
   bucket,
-  deleteAll,
   escapeRegex,
   filesColl,
   iterLatest,
   latestFile,
   prefixQuery,
+  prune,
+  retag,
+  trash,
+  trashed,
 } from './client.ts'
 import { SCOPE_ERROR } from './constants.ts'
 import { isNoFileError } from './read.ts'
 
 /** Match the file at `stem` plus everything beneath it. */
 function subtreeQuery(stem: string): Record<string, unknown> {
-  if (stem === '') return {}
+  if (stem === '') return prefixQuery('')
   return {
     $or: [{ filename: stem }, { filename: { $regex: `^${escapeRegex(stem + '/')}` } }],
   }
@@ -131,8 +133,14 @@ async function put(
     })
     upload.end(data)
   })
+  await prune(conn, revisionsQuery(key))
   const revision = upload.id.toString()
   return { size: data.byteLength, fingerprint: revision, revision }
+}
+
+// A key's revisions, live and trashed: what a write's retention counts.
+function revisionsQuery(key: string): Record<string, unknown> {
+  return { filename: { $in: [key, trashed(key)] } }
 }
 
 async function putStream(conn: GridFSAccessor, key: string, data: ByteSource): Promise<ObjectMeta> {
@@ -154,18 +162,23 @@ async function putStream(conn: GridFSAccessor, key: string, data: ByteSource): P
     }
     throw error
   }
+  await prune(conn, revisionsQuery(key))
   const revision = upload.id.toString()
   return { size, fingerprint: revision, revision }
 }
 
 async function deleteFile(conn: GridFSAccessor, key: string): Promise<void> {
-  // Removes every revision of the filename (rm semantics; mirrors S3's
-  // DeleteObject, which also succeeds silently on a missing key).
-  await deleteAll(conn, { filename: key })
+  // Moves every revision of the filename to the trash (rm semantics:
+  // silent on a missing key, like S3's DeleteObject, and no more
+  // destructive than its delete marker). The revisions keep their _id, so
+  // a snapshot pinned to one still reads it.
+  await trash(conn, { filename: key })
+  await prune(conn, { filename: trashed(key) })
 }
 
 async function deletePrefix(conn: GridFSAccessor, pfx: string): Promise<void> {
-  await deleteAll(conn, prefixQuery(pfx))
+  await trash(conn, prefixQuery(pfx))
+  await prune(conn, prefixQuery(trashed(pfx)))
 }
 
 async function copyFile(conn: GridFSAccessor, srcKey: string, dstKey: string): Promise<boolean> {
@@ -192,7 +205,8 @@ async function moveFile(conn: GridFSAccessor, srcKey: string, dstKey: string): P
   // bytes, so the whole revision history moves with the file.
   if ((await latestFile(conn, srcKey)) === null) return false
   if (dstKey !== srcKey) {
-    await deleteAll(conn, { filename: dstKey })
+    await trash(conn, { filename: dstKey })
+    await prune(conn, { filename: trashed(dstKey) })
   }
   const files = await filesColl(conn)
   await files.updateMany({ filename: srcKey }, { $set: { filename: dstKey } })
@@ -208,27 +222,17 @@ async function moveFile(conn: GridFSAccessor, srcKey: string, dstKey: string): P
  * was found under the source prefix.
  */
 async function movePrefix(conn: GridFSAccessor, srcPfx: string, dstPfx: string): Promise<boolean> {
-  const files = await filesColl(conn)
-  const docs: { _id: ObjectId; filename: string }[] = []
-  for await (const doc of files.find(prefixQuery(srcPfx), {
-    projection: { _id: 1, filename: 1 },
-  })) {
-    docs.push({ _id: doc._id, filename: doc.filename as string })
-  }
-  if (docs.length === 0) return false
   if (dstPfx !== srcPfx) {
-    // Read the source docs before clearing the destination: on a
-    // self-directed move the two queries select the same revisions, and
-    // deleting first would drop what the retag is about to move.
-    await deleteAll(conn, prefixQuery(dstPfx))
+    if (!(await probePrefix(conn, srcPfx))) return false
+    await trash(conn, prefixQuery(dstPfx))
+    await prune(conn, prefixQuery(trashed(dstPfx)))
   }
-  for (const doc of docs) {
-    await files.updateOne(
-      { _id: doc._id },
-      { $set: { filename: `${dstPfx}${doc.filename.slice(srcPfx.length)}` } },
-    )
-  }
-  return true
+  const moved = await retag(
+    conn,
+    prefixQuery(srcPfx),
+    (name) => `${dstPfx}${name.slice(srcPfx.length)}`,
+  )
+  return moved > 0
 }
 
 async function probePrefix(conn: GridFSAccessor, pfx: string): Promise<boolean> {

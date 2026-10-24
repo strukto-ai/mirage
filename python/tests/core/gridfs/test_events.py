@@ -102,3 +102,27 @@ async def test_revisions_left_decide_each_change():
         (FileChangeKind.UNKNOWN, "/g"),
         (FileChangeKind.UNKNOWN, "/g"),
     ]
+
+
+@pytest.mark.asyncio
+async def test_a_rename_into_the_trash_settles_only_the_name_left():
+    # rm retags a.txt to /trash/a.txt: the name left behind reads as
+    # deleted, and the trash, which no path reaches, raises nothing.
+    files = Revisions()
+    hook = GridFSEventHook(
+        GridFSAccessor(GridFSConfig(uri="mongodb://x", database="lib"))
+    )
+    files.count.update({"a.txt": 0, "/trash/a.txt": 2})
+    rename = _event(
+        "update",
+        1,
+        fullDocumentBeforeChange={"filename": "a.txt"},
+        updateDescription={"updatedFields": {"filename": "/trash/a.txt"}},
+    )
+    insert = _event("insert", 2, fullDocument={"filename": "/trash/b.txt"})
+    with patch("mirage.core.gridfs.events.files_coll", return_value=files):
+        changes = await hook.to_events(ROOT, "update", rename)
+        assert await hook.to_events(ROOT, "insert", insert) == ()
+    assert [(c.kind, c.path.virtual) for c in changes] == [
+        (FileChangeKind.DELETE, "/g/a.txt")
+    ]
