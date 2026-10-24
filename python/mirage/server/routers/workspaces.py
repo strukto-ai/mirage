@@ -336,9 +336,12 @@ async def list_workspaces(request: Request) -> list[WorkspaceBrief]:
 async def get_workspace(
     workspace_id: str, request: Request, verbose: bool = Query(False)
 ) -> WorkspaceDetail:
-    return await make_detail(
-        require_entry(request, workspace_id), verbose=verbose
-    )
+    entry = require_entry(request, workspace_id)
+    # A workspace being deleted keeps its id until the deletion is done,
+    # but its runner has stopped answering: it is gone to a reader.
+    if request.app.state.registry.removing(workspace_id):
+        raise HTTPException(status_code=404, detail="workspace not found")
+    return await make_detail(entry, verbose=verbose)
 
 
 @router.delete("/{workspace_id}", response_model=DeleteWorkspaceResponse)

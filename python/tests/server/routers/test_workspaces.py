@@ -376,6 +376,32 @@ async def test_create_refuses_an_id_whose_deletion_is_in_flight():
 
 
 @pytest.mark.asyncio
+async def test_get_answers_404_while_the_workspace_is_deleted():
+    app, _ = _make_app_with_short_grace(grace=10.0)
+    body = {"config": {**_minimal_config()["config"], "workspace_id": "going"}}
+    release = asyncio.Event()
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        await client.post("/v1/workspaces", json=body)
+        runner = app.state.registry.get("going").runner
+        stop = runner.stop
+
+        async def held_stop(*, delete: bool = False) -> None:
+            await stop(delete=delete)
+            await release.wait()
+
+        runner.stop = held_stop
+        removal = asyncio.create_task(app.state.registry.remove("going"))
+        await asyncio.sleep(0)
+        during = await client.get("/v1/workspaces/going")
+        release.set()
+        await removal
+    assert during.status_code == 404
+
+
+@pytest.mark.asyncio
 async def test_get_verbose_includes_internals():
     app, _ = _make_app_with_short_grace(grace=10.0)
     transport = ASGITransport(app=app)

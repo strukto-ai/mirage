@@ -81,22 +81,23 @@ def test_a_changed_caller_keeps_the_rest_and_refuses_a_stranger():
         base.changed({"no_such_field": 1})
 
 
-def test_bindings_undone_in_any_order_restore_only_their_own_fields():
-    def undo() -> None:
-        before = current_caller()
-        first = bind_caller(before.changed({"execution": "a"}))
-        second = bind_caller(current_caller().changed({"command_started": 7}))
-        reset_caller(first)
-        now = current_caller()
-        assert (now.execution, now.command_started) == (None, 7)
-        reset_caller(second)
-        now = current_caller()
-        assert (now.execution, now.command_started) == (None, None)
-        third = bind_caller(now.changed({"execution": "b"}))
-        reset_caller(third)
-        assert current_caller() is now
+def _undo_bindings() -> None:
+    before = current_caller()
+    first = bind_caller(before.changed({"execution": "a"}))
+    second = bind_caller(current_caller().changed({"command_started": 7}))
+    reset_caller(first)
+    now = current_caller()
+    assert (now.execution, now.command_started) == (None, 7)
+    reset_caller(second)
+    now = current_caller()
+    assert (now.execution, now.command_started) == (None, None)
+    third = bind_caller(now.changed({"execution": "b"}))
+    reset_caller(third)
+    assert current_caller() is now
 
-    contextvars.copy_context().run(undo)
+
+def test_bindings_undone_in_any_order_restore_only_their_own_fields():
+    contextvars.copy_context().run(_undo_bindings)
 
 
 def test_weaker_mode_lattice():
