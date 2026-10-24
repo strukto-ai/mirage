@@ -5,9 +5,6 @@
       <img src="assets/mirage-header-light.svg" width="100%" alt="Mirage: A Virtual Terminal for AI Agents" />
     </picture>
   </a>
-</h1>
-
-<p align="center">
   <a href="https://agentvfs.org">
     <picture>
       <source media="(max-width: 767px) and (prefers-color-scheme: dark)" srcset="assets/agentvfs-banner-narrow-dark.svg">
@@ -16,7 +13,7 @@
       <img src="assets/agentvfs-banner-light.svg" width="100%" alt="AgentVFS: the open, vendor-neutral virtual filesystem interface for AI agents" />
     </picture>
   </a>
-</p>
+</h1>
 
 <p align="center">
     <a href="https://docs.mirage.strukto.ai" alt="Documentation">
