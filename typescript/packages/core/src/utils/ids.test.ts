@@ -294,11 +294,17 @@ function directDraws(source: string): Set<string> {
       ts.isObjectBindingPattern(node.name) &&
       node.initializer !== undefined
     ) {
-      const owner = globalOwner(node.initializer)
+      const global = globalOwner(node.initializer)
+      const owner: DrawOwner | undefined =
+        global !== undefined
+          ? { draws: GLOBAL_DRAWS[global] ?? new Set(), report: (name) => `${global}.${name}` }
+          : ts.isIdentifier(node.initializer)
+            ? namespaces.get(node.initializer.text)
+            : undefined
       for (const element of node.name.elements) {
         const key = element.propertyName ?? element.name
-        if (owner !== undefined && ts.isIdentifier(key) && GLOBAL_DRAWS[owner]?.has(key.text)) {
-          found.add(`${owner}.${key.text}`)
+        if (owner !== undefined && ts.isIdentifier(key) && owner.draws.has(key.text)) {
+          found.add(owner.report(key.text))
         }
       }
     }
@@ -338,6 +344,9 @@ describe('the IdSource seam', () => {
     ['const draw = Math.random', 'Math.random'],
     ['const { random } = Math', 'Math.random'],
     ['const { randomUUID: mint } = globalThis.crypto', 'crypto.randomUUID'],
+    ["import * as ids from '../../utils/ids.ts'\nconst { uuid7: mint } = ids\nmint()", 'uuid7'],
+    ["import * as nc from 'node:crypto'\nconst { randomBytes } = nc", 'crypto.randomBytes'],
+    ["import * as uuid from 'uuid'\nconst { v4 } = uuid\nv4()", 'uuid.v4'],
     ["import { randomUUID } from 'node:crypto'\nrandomUUID()", 'crypto.randomUUID'],
     ["import { randomBytes as bytes } from 'crypto'\nbytes(16)", 'crypto.randomBytes'],
     ["import * as nc from 'node:crypto'\nnc.randomInt(6)", 'crypto.randomInt'],
@@ -361,6 +370,8 @@ describe('the IdSource seam', () => {
     "import * as ids from '../../utils/ids.ts'\nids.randomBelow(source, 10)",
     "await crypto.subtle.digest('SHA-256', bytes)",
     'Math.floor(value)',
+    "import * as ids from '../../utils/ids.ts'\nconst { randomBelow } = ids",
+    'const { floor } = Math',
     "import { createHash } from 'node:crypto'\ncreateHash('sha256')",
     "import { v5, validate } from 'uuid'\nv5(name, namespace)",
     "import { uuid7 } from './other.ts'\nuuid7()",
