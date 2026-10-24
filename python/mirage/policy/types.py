@@ -15,7 +15,7 @@
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import TYPE_CHECKING, Any, ClassVar, Literal, Protocol
+from typing import Any, ClassVar, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, model_validator
 
@@ -23,11 +23,7 @@ from mirage.commands.spec.types import WordKind
 from mirage.runtime.types import ScriptSource
 from mirage.types import Limit, MountMode, PathSpec, Producer, Refusal
 from mirage.vfs.types import VfsCall
-from mirage.view.types import SessionView
-
-if TYPE_CHECKING:
-    from mirage.workspace.files import Files
-    from mirage.workspace.session.session import SessionState
+from mirage.view.types import FileView, SessionView
 
 
 class MountRootQuery(Protocol):
@@ -399,6 +395,12 @@ class Claim:
     decision: Decision
 
 
+class DecisionOwner:
+    """The ledger owning a hand-off, compared only by identity."""
+
+    __slots__ = ()
+
+
 @dataclass(eq=False, slots=True)
 class HandOff:
     """The ONCE grants a line's readers matched to its commands, for the
@@ -704,11 +706,21 @@ class PolicyCaller:
     session: CallerSession | None = None
 
 
-def policy_caller(session: "SessionState | None") -> PolicyCaller:
+class CallerSessionQuery(Protocol):
+    """The session identity a policy may read, without owning its state."""
+
+    @property
+    def session_id(self) -> str: ...
+
+    @property
+    def cwd(self) -> str: ...
+
+
+def policy_caller(session: CallerSessionQuery | None) -> PolicyCaller:
     """``session`` as a method's ``ctx.caller`` reads it.
 
     Args:
-        session (SessionState | None): the session the call is made as.
+        session (CallerSessionQuery | None): the session the call is made as.
     """
     if session is None:
         return PolicyCaller()
@@ -768,7 +780,7 @@ class CommandContext:
             program and an unknown name.
         session (SessionView | None): the session, read only: a write
             through it is refused. Filled when a method is asked.
-        vfs (Files | None): the session's files, read only: a write is
+        vfs (FileView | None): the session's files, read only: a write is
             refused and no method runs again for a read. Filled when a
             method is asked.
         caller (PolicyCaller | None): who makes the call, read only: its
@@ -789,7 +801,7 @@ class CommandContext:
     walks: bool = False
     write: bool = False
     session: SessionView | None = None
-    vfs: "Files | None" = None
+    vfs: FileView | None = None
     caller: PolicyCaller | None = None
 
 
@@ -838,7 +850,7 @@ class RouteContext:
         session_id (str): the session hosting the line.
         session (SessionView | None): the session, read only: a write
             through it is refused.
-        vfs (Files | None): the session's files, read only.
+        vfs (FileView | None): the session's files, read only.
         caller (PolicyCaller | None): who makes the call, read only: its
             ``session`` is the session above.
     """
@@ -847,7 +859,7 @@ class RouteContext:
     commands: tuple[CommandContext, ...]
     session_id: str
     session: SessionView | None = None
-    vfs: "Files | None" = None
+    vfs: FileView | None = None
     caller: PolicyCaller | None = None
 
 
@@ -874,7 +886,7 @@ class VfsContext:
         mode (MountMode | None): the owning mount's authorization ceiling,
             None at an entry point that judges the mode itself.
         session (SessionView | None): the session, read only.
-        vfs (Files | None): the session's files, read only.
+        vfs (FileView | None): the session's files, read only.
         caller (PolicyCaller | None): who makes the call, read only: its
             ``session`` is the session above.
     """
@@ -886,7 +898,7 @@ class VfsContext:
     session_id: str = ""
     mode: MountMode | None = None
     session: SessionView | None = None
-    vfs: "Files | None" = None
+    vfs: FileView | None = None
     caller: PolicyCaller | None = None
 
 
@@ -946,7 +958,7 @@ class SessionContext:
         session_id (str): which session is writing, so a policy can
             scope a rule to one agent (deny ``set`` for session X).
         session (SessionView | None): the session, read only.
-        vfs (Files | None): the session's files, read only.
+        vfs (FileView | None): the session's files, read only.
         caller (PolicyCaller | None): who makes the call, read only: its
             ``session`` is the session above.
     """
@@ -956,7 +968,7 @@ class SessionContext:
     value: str | None
     session_id: str = ""
     session: SessionView | None = None
-    vfs: "Files | None" = None
+    vfs: FileView | None = None
     caller: PolicyCaller | None = None
 
 

@@ -31,7 +31,7 @@ from functools import partial
 from pathlib import Path
 from shlex import join as shell_join
 from types import TracebackType
-from typing import Any, Literal, TypeVar, overload
+from typing import Any, BinaryIO, Literal, TypeVar, overload
 
 from pydantic import BaseModel
 
@@ -60,6 +60,7 @@ from mirage.context import (
     set_program_invocation,
     set_refusal_sink,
 )
+from mirage.context.session_context import run_with_execution
 from mirage.errors.fs import enoent
 from mirage.events.base import EventRuntime
 from mirage.execution.context import new_execution_id
@@ -100,8 +101,9 @@ from mirage.runtime.binding import (
     restricted_mounts_for,
 )
 from mirage.runtime.resolver import PrefixResolver
-from mirage.runtime.routing import RouteDecision, RoutePolicy
+from mirage.runtime.routing import RoutePolicy
 from mirage.runtime.table import whole_line_runtime
+from mirage.runtime.types import RouteDecision, RuntimeIdentity
 from mirage.secrets.config import EnvVar, SecretSource
 from mirage.secrets.errors import SecretsError
 from mirage.secrets.registry import source_for
@@ -190,6 +192,7 @@ from mirage.workspace.snapshot.state import (
     reusable_clis,
     reusable_mounts,
 )
+from mirage.workspace.snapshot.tar_io import Writable
 from mirage.workspace.snapshot.utils import QUIESCE_SECONDS
 from mirage.workspace.store import WorkspaceStateStore
 from mirage.workspace.tools.file_version import FileVersionTracker
@@ -323,7 +326,7 @@ class Workspace:
         # VFS overrides) stay open here; their origin closes them.
         self._shared_mounts: set[int] = set()
         self._drift = DriftQueue()
-        self.processes = ProcessSupervisor(self._ids)
+        self.processes = ProcessSupervisor(self._ids, bind=run_with_execution)
         self.job_table = JobTable(console_factory, self.processes)
         self._lines: dict[asyncio.Event, tuple[str | None, asyncio.Event]] = {}
         self._shell_executions: set[ShellExecution] = set()
@@ -924,7 +927,7 @@ class Workspace:
                 out.update(m.revisions)
         return out
 
-    def mount(self, prefix: str):
+    def mount(self, prefix: str) -> MountEntry:
         return self._registry.mount_for(prefix)
 
     @property
@@ -1666,7 +1669,7 @@ class Workspace:
 
     async def snapshot(
         self,
-        target,
+        target: str | Path | Writable,
         *,
         compress: str | None = None,
         s3: S3Config | None = None,
@@ -1695,8 +1698,8 @@ class Workspace:
         ``supports_snapshot`` mount.
 
         Args:
-            target: filesystem path OR a writable file-like object; with
-                ``s3``, the object key.
+            target (str | Path | Writable): filesystem path OR a writable
+                file-like object; with ``s3``, the object key.
             compress: None | "gz" | "bz2" | "xz".
             s3 (S3Config | None): an S3-like store to put the tar in.
 
@@ -1708,7 +1711,7 @@ class Workspace:
     @classmethod
     async def load(
         cls,
-        source,
+        source: str | Path | BinaryIO,
         *,
         mounts: dict[str, Any] | None = None,
         clis: CLIOverrides | None = None,
@@ -1744,8 +1747,8 @@ class Workspace:
         execute), so downstream code can rely on consistent state.
 
         Args:
-            source: filesystem path OR a readable file-like object; with
-                ``s3``, the object key.
+            source (str | Path | BinaryIO): filesystem path OR a readable
+                file-like object; with ``s3``, the object key.
             mounts: {prefix: VFS} overrides for mounts saved
                 with redacted creds.
             clis: {name: config} overrides for CLIs saved with
@@ -1987,7 +1990,7 @@ class Workspace:
         )
         return ws
 
-    def __deepcopy__(self, memo) -> "Workspace":
+    def __deepcopy__(self, memo: dict[int, Any]) -> "Workspace":
         raise NotImplementedError(
             "Workspace.copy is async (it captures fingerprints for replay). "
             "Call `await ws.copy()` directly instead of `copy.deepcopy(ws)`."
@@ -2460,8 +2463,8 @@ class Workspace:
         return default.visibility if default is not None else None
 
     async def _bind_session(
-        self, session_id: str | None, run: Callable[[], Awaitable[Any]]
-    ) -> Any:
+        self, session_id: str | None, run: Callable[[], Awaitable[T]]
+    ) -> T:
         """Run one dispatcher call as ``session_id``.
 
         A session already bound in this context is kept: a command's
@@ -2477,7 +2480,7 @@ class Workspace:
         Args:
             session_id (str | None): the session to run as when none is
                 bound; None for the default session as it is now.
-            run (Callable[[], Awaitable[Any]]): the dispatcher call.
+            run (Callable[[], Awaitable[T]]): the dispatcher call.
         """
         self._sync_bridge.observe()
         if get_current_session_unless_foreign(self._session_mgr) is not None:
@@ -2529,6 +2532,7 @@ class Workspace:
         scope = PathSpec(
             virtual=path, directory=path, vfs_path="", resolved=True
         )
+        result: FileStat
         result, _ = await self.dispatch("stat", scope)
         return result
 
@@ -2536,6 +2540,7 @@ class Workspace:
         scope = PathSpec(
             virtual=path, directory=path, vfs_path="", resolved=False
         )
+        raw: list[str]
         raw, _ = await self.dispatch("readdir", scope)
         return raw
 
@@ -2657,7 +2662,7 @@ class Workspace:
         cancel: asyncio.Event | None = None,
         record: bool = True,
         runtime: str | None = None,
-        routing_decision: RouteDecision[Runtime[Any]] | None = None,
+        routing_decision: RouteDecision[RuntimeIdentity] | None = None,
         handed: HandOff | None = None,
         sink: JobConsole | None = None,
         call_stack: CallStack | None = None,
@@ -2678,7 +2683,7 @@ class Workspace:
         cancel: asyncio.Event | None = None,
         record: bool = True,
         runtime: str | None = None,
-        routing_decision: RouteDecision[Runtime[Any]] | None = None,
+        routing_decision: RouteDecision[RuntimeIdentity] | None = None,
         handed: HandOff | None = None,
         sink: JobConsole | None = None,
         call_stack: CallStack | None = None,
@@ -2699,7 +2704,7 @@ class Workspace:
         cancel: asyncio.Event | None = None,
         record: bool = True,
         runtime: str | None = None,
-        routing_decision: RouteDecision[Runtime[Any]] | None = None,
+        routing_decision: RouteDecision[RuntimeIdentity] | None = None,
         handed: HandOff | None = None,
         sink: JobConsole | None = None,
         call_stack: CallStack | None = None,
@@ -2719,7 +2724,7 @@ class Workspace:
         cancel: asyncio.Event | None = None,
         record: bool = True,
         runtime: str | None = None,
-        routing_decision: RouteDecision[Runtime[Any]] | None = None,
+        routing_decision: RouteDecision[RuntimeIdentity] | None = None,
         handed: HandOff | None = None,
         sink: JobConsole | None = None,
         call_stack: CallStack | None = None,
@@ -2870,7 +2875,7 @@ class Workspace:
         cancel: asyncio.Event | None = None,
         record: bool = True,
         runtime: str | None = None,
-        routing_decision: RouteDecision[Runtime[Any]] | None = None,
+        routing_decision: RouteDecision[RuntimeIdentity] | None = None,
         handed: HandOff | None = None,
         sink: JobConsole | None = None,
         call_stack: CallStack | None = None,

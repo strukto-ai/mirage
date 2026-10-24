@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import logging
-from typing import Any
+from typing import Any, cast
 
 from mirage.accessor.box import BoxAccessor
 from mirage.core.box.api import (
@@ -126,7 +126,7 @@ def parent_folder(
         raise enoent(path.virtual)
     if parent.type is not FileType.DIRECTORY:
         raise enotdir(path.virtual)
-    return parent.extra["box_id"]
+    return cast(str, parent.extra["box_id"])
 
 
 def mount_relative_key(

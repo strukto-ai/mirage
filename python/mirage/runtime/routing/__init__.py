@@ -19,12 +19,14 @@ from mirage.utils.loader import lazy_exports
 if TYPE_CHECKING:
     from mirage.runtime.routing.decide import runtime_for_language
     from mirage.runtime.routing.errors import RouteError
-    from mirage.runtime.routing.types import RouteDecision, RoutePolicy
+    from mirage.runtime.routing.types import RoutePolicy
+    from mirage.runtime.types import RouteDecision
 
 _EXPORTS: dict[str, tuple[str, ...]] = {
     "mirage.runtime.routing.decide": ("runtime_for_language",),
     "mirage.runtime.routing.errors": ("RouteError",),
-    "mirage.runtime.routing.types": ("RouteDecision", "RoutePolicy"),
+    "mirage.runtime.routing.types": ("RoutePolicy",),
+    "mirage.runtime.types": ("RouteDecision",),
 }
 
 __all__ = [

@@ -26,8 +26,12 @@ from mirage.io import IOResult
 from mirage.io.errors import PipeClosed
 from mirage.io.types import ByteSource
 from mirage.runtime.base import Runtime
-from mirage.runtime.routing import RouteDecision
-from mirage.runtime.types import CommandRuntime, DispatchFn
+from mirage.runtime.types import (
+    CommandRuntime,
+    DispatchFn,
+    RouteDecision,
+    RuntimeIdentity,
+)
 from mirage.runtime.workspace import WorkspaceRuntime
 from mirage.shell.bytes import encode_text
 from mirage.types import PathSpec
@@ -82,7 +86,7 @@ def admission_denial(cmd_name: str) -> IOResult:
 
 def line_runtime_for(
     cmd_name: str,
-    routing: RouteDecision[Runtime[Any]],
+    routing: RouteDecision[RuntimeIdentity],
 ) -> tuple[Runtime[Any] | None, IOResult | None]:
     """Resolve a command against the line's routing decision.
 
@@ -101,7 +105,7 @@ def line_runtime_for(
         return None, admission_denial(cmd_name)
     if isinstance(runtime, WorkspaceRuntime):
         return None, None
-    return runtime, None
+    return Runtime.require(runtime), None
 
 
 def find_start_points(

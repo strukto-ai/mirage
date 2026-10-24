@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from agents import ShellCommandRequest
+
 from mirage.workspace.tools.io_text import io_to_str
 from mirage.workspace.workspace import Workspace
 
@@ -26,7 +28,7 @@ class MirageShellExecutor:
     def __init__(self, workspace: Workspace) -> None:
         self._ws = workspace
 
-    async def __call__(self, request) -> str:
+    async def __call__(self, request: ShellCommandRequest) -> str:
         commands = request.data.action.commands
         outputs: list[str] = []
         for cmd in commands:

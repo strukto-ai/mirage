@@ -13,9 +13,54 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { Invalidation } from './invalidation.ts'
+import { Invalidation, withFillGuard } from './invalidation.ts'
 
 describe('Invalidation', () => {
+  it('starts a guarded batch without yielding and releases duplicate keys once', async () => {
+    const inv = new Invalidation()
+    const before = inv.enter('/a')
+    inv.leave('/a')
+    let started = false
+    const fill = withFillGuard(inv, ['/a', '/b', '/a'], async (isLive) => {
+      started = true
+      expect(isLive('/a')).toBe(true)
+      expect(isLive('/b')).toBe(true)
+      expect(isLive('/unknown')).toBe(false)
+      await withFillGuard(inv, ['/a'], (innerLive) => {
+        inv.invalidate('/a')
+        expect(innerLive('/a')).toBe(false)
+        return Promise.resolve()
+      })
+      expect(isLive('/a')).toBe(false)
+      expect(isLive('/b')).toBe(true)
+    })
+    expect(started).toBe(true)
+    await fill
+    inv.invalidate('/b')
+    expect(inv.enter('/a')).toEqual(before)
+    expect(inv.enter('/b')).toEqual(before)
+    inv.leave('/a')
+    inv.leave('/b')
+  })
+
+  it.each(['throw', 'reject'])('releases every key and preserves a %s', async (mode) => {
+    const inv = new Invalidation()
+    const before = inv.enter('/a')
+    inv.leave('/a')
+    const error = new Error('fill failed')
+    const fill = withFillGuard(inv, ['/a', '/b'], () => {
+      inv.invalidate('/a')
+      if (mode === 'throw') throw error
+      return Promise.reject(error)
+    })
+    await expect(fill).rejects.toBe(error)
+    inv.invalidate('/b')
+    expect(inv.enter('/a')).toEqual(before)
+    expect(inv.enter('/b')).toEqual(before)
+    inv.leave('/a')
+    inv.leave('/b')
+  })
+
   it('a removal of the key makes the stamp stale', () => {
     const inv = new Invalidation()
     const stamp = inv.enter('/a')

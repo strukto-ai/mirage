@@ -14,6 +14,7 @@
 
 import asyncio
 import errno
+import tracemalloc
 
 import pytest
 
@@ -304,3 +305,22 @@ async def test_a_write_into_an_input_pipe_is_refused_even_empty(data):
     with pytest.raises(OSError) as caught:
         await write(accessor, PathSpec.from_str_path(path[4:]), data)
     assert caught.value.errno == errno.EBADF
+
+
+async def _blocks(count: int):
+    for _ in range(count):
+        yield b"a" * 16384
+
+
+@pytest.mark.asyncio
+async def test_a_stream_into_a_discarding_device_keeps_nothing():
+    store = DevStore(DevFiles("owner"))
+    null = PathSpec(vfs_path="null", virtual="/dev/null", directory="/dev/")
+    tracemalloc.start()
+    try:
+        await write(RAMAccessor(store), null, _blocks(256))
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+    assert peak < 1 << 20
+    assert store.files["/null"] == b""

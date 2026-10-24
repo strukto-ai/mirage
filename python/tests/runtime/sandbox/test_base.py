@@ -21,6 +21,7 @@ import pytest
 from mirage import RAMVFS, MountMode, Workspace
 from mirage.cache.index.config import LookupStatus
 from mirage.commands.config import Context
+from mirage.context.session_context import run_with_execution
 from mirage.io.types import materialize
 from mirage.process.supervisor import ProcessSupervisor
 from mirage.runtime.errors import UnsupportedExecutionError
@@ -238,7 +239,7 @@ async def test_a_killed_run_is_stopped_in_the_box_with_its_signal():
     async def run() -> int:
         return (await box.run_line(None, [], [], ctx)).exit_code
 
-    runner = ProcessSupervisor().start(
+    runner = ProcessSupervisor(bind=run_with_execution).start(
         session_id="s", command="yes", cwd=ctx.cwd, run=run
     )
     while not box.execs:

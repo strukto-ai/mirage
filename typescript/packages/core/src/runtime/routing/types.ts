@@ -14,7 +14,6 @@
 
 import type { ProfilePolicySpec } from '../../policy/profile.ts'
 import type { RouteContext } from '../../policy/types.ts'
-import type { RuntimeIdentity } from '../types.ts'
 
 /**
  * What a route policy function answers: a runtime name places the line,
@@ -41,26 +40,3 @@ export type RouteVerdict = string | null
 export type RoutePolicy =
   | ((ctx: RouteContext) => RouteVerdict | Promise<RouteVerdict>)
   | ProfilePolicySpec
-
-/**
- * The one-line placement decision the dispatcher consults.
- *
- * Both fields hold runtimes: the decision IS "which runtime runs which
- * command". The workspace runtime is a legal value in either; a command
- * placed on it is served by the workspace executor itself.
- */
-export interface RouteDecision<R extends RuntimeIdentity> {
-  /**
-   * Every command some entry captures, resolved for this line: the
-   * runtime it runs on, or null when a route to the workspace keeps the
-   * line off its only capturer, a `*` line executor (exit 126, never a
-   * silent fallback to the workspace).
-   */
-  bindings: Record<string, R | null>
-  /**
-   * Where commands no entry captures run: the catch-all workspace runtime,
-   * or null when the workspace runtime declares captures; unbound commands
-   * then exit 126.
-   */
-  fallback: R | null
-}

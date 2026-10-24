@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 import json
 import sys
 from typing import IO, Any
@@ -94,9 +95,8 @@ def shell_cmd(
     with make_client() as client:
         client.ensure_running(allow_spawn=False)
         if not background:
-            import asyncio
-
-            from mirage.cli.stream import stream_shell
+            # Only foreground shell calls need the stream implementation.
+            from mirage.cli.stream import stream_shell  # noqa: PLC0415
 
             try:
                 with asyncio.Runner() as runner:

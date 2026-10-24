@@ -28,7 +28,7 @@ from mirage.context.session_context import (
     current_caller,
     reset_caller,
 )
-from mirage.io import IOResult, OpReport
+from mirage.io.types import IOResult, OpReport
 from mirage.policy.base import Policy
 from mirage.policy.constants import (
     CTX_ENV,

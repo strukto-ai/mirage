@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 import { invokedEnvNames, suppliedEnvNames } from '../../commands/cli/walk.ts'
 import type { Runtime } from '../../runtime/base.ts'
-import type { RouteDecision } from '../../runtime/routing/index.ts'
+import type { RouteDecision } from '../../runtime/types.ts'
 import { WorkspaceRuntime } from '../../runtime/workspace.ts'
 import { SecretsError } from '../../secrets/errors.ts'
 import { fieldSummary } from '../../secrets/summary.ts'

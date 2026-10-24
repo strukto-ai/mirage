@@ -2,14 +2,13 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Protocol
 
 from mirage.shell.types import TSNodeLike
 
 if TYPE_CHECKING:
     from mirage.io.types import ByteSource, IOResult
-    from mirage.runtime.base import Runtime
-    from mirage.runtime.routing import RouteDecision
+    from mirage.runtime.types import RouteDecision, RuntimeIdentity
     from mirage.shell.console import JobConsole
 
 
@@ -33,7 +32,7 @@ class ExecutionFrame:
     process_sub: (
         Callable[[TSNodeLike, ProcessSubLine], Awaitable[str]] | None
     ) = None
-    routing: RouteDecision[Runtime[Any]] | None = None
+    routing: RouteDecision[RuntimeIdentity] | None = None
 
     def fork(self) -> ExecutionFrame:
         """A child evaluation's frame, which starts empty but for the

@@ -16,7 +16,7 @@ import importlib.metadata
 import inspect
 import logging
 from collections.abc import Mapping
-from typing import Any, NamedTuple
+from typing import Any, NamedTuple, cast
 
 from pydantic import ValidationError
 
@@ -434,4 +434,4 @@ def build_vfs(name: str, config: dict[str, Any] | None = None) -> BaseVFS:
         defect = _vfs_defect(built)
         if defect is not None:
             raise TypeError(f"VFS ref {name!r} {defect}")
-    return built
+    return cast(BaseVFS, built)

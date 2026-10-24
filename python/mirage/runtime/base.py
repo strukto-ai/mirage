@@ -30,6 +30,7 @@ from mirage.runtime.types import (
     FilesystemOperation,
     OutputFn,
     RunResult,
+    RuntimeIdentity,
     RuntimeReach,
 )
 from mirage.types import PathSpec
@@ -79,6 +80,17 @@ class Runtime(ABC, Generic[E]):
     _retired: bool = False
     _engine_task: "asyncio.Future[E] | None" = None
     _closing: "asyncio.Task[None] | None" = None
+
+    @staticmethod
+    def require(entry: RuntimeIdentity) -> "Runtime[Any]":
+        """Require an executable runtime at the boundary from route metadata.
+
+        Args:
+            entry (RuntimeIdentity): the exact instance retained by the route.
+        """
+        if not isinstance(entry, Runtime):
+            raise TypeError(f"{entry.name}: routed entry is not a Runtime")
+        return entry
 
     def __init__(
         self,

@@ -17,7 +17,7 @@ import os
 import re
 import uuid
 from pathlib import Path
-from typing import Annotated, Any, Literal
+from typing import TYPE_CHECKING, Annotated, Any, Literal
 
 from pydantic import (
     BaseModel,
@@ -72,15 +72,32 @@ from mirage.workspace.store import (
     WorkspaceStateStore,
 )
 
-try:
-    from mirage.workspace.store import RedisWorkspaceStateStore
-except ImportError:
-    RedisWorkspaceStateStore = None
+if TYPE_CHECKING:
+    from mirage.workspace.store.redis import (
+        RedisWorkspaceStateStore as _RedisStore,
+    )
+    from mirage.workspace.store.s3 import S3WorkspaceStateStore as _S3Store
+
+RedisWorkspaceStateStore: "type[_RedisStore] | None"
+S3WorkspaceStateStore: "type[_S3Store] | None"
 
 try:
-    from mirage.workspace.store import S3WorkspaceStateStore
+    from mirage.workspace.store import (
+        RedisWorkspaceStateStore as _RedisWorkspaceStateStore,
+    )
+except ImportError:
+    RedisWorkspaceStateStore = None
+else:
+    RedisWorkspaceStateStore = _RedisWorkspaceStateStore
+
+try:
+    from mirage.workspace.store import (
+        S3WorkspaceStateStore as _S3WorkspaceStateStore,
+    )
 except ImportError:
     S3WorkspaceStateStore = None
+else:
+    S3WorkspaceStateStore = _S3WorkspaceStateStore
 
 try:
     from mirage.shell.console.redis import RedisConsoleStore
@@ -88,7 +105,7 @@ except ImportError:
     RedisConsoleStore = None  # type: ignore[assignment,misc]
 
 
-def _coerce_mount_mode(value):
+def _coerce_mount_mode(value: Any) -> Any:
     if isinstance(value, MountMode):
         return value
     if isinstance(value, str):
@@ -370,28 +387,28 @@ class MountBlock(BaseModel):
 
     @field_validator("mode", mode="before")
     @classmethod
-    def _v_mode(cls, v):
+    def _v_mode(cls, v: Any) -> Any:
         if v is None:
             return v
         return _coerce_mount_mode(v)
 
     @field_validator("read", mode="before")
     @classmethod
-    def _v_read(cls, v):
+    def _v_read(cls, v: Any) -> ReadPolicy | None:
         if v is None:
             return v
         return coerce_read_policy(v)
 
     @field_validator("write", mode="before")
     @classmethod
-    def _v_write(cls, v):
+    def _v_write(cls, v: Any) -> WritePolicy | None:
         if v is None:
             return v
         return coerce_write_policy(v)
 
     @field_validator("ttl", mode="before")
     @classmethod
-    def _v_ttl(cls, v):
+    def _v_ttl(cls, v: Any) -> int | None:
         # Ahead of pydantic's own coercion, which is lax where this key
         # cannot afford to be: `ttl: "30"` arrives as 30 and `ttl: true`
         # as 1, so a document TypeScript refuses outright would load
@@ -729,19 +746,19 @@ class WorkspaceConfig(BaseModel):
 
     @field_validator("mode", mode="before")
     @classmethod
-    def _v_mode(cls, v):
+    def _v_mode(cls, v: Any) -> Any:
         return _coerce_mount_mode(v)
 
     @field_validator("read", mode="before")
     @classmethod
-    def _v_read_default(cls, v):
+    def _v_read_default(cls, v: Any) -> ReadPolicy | None:
         if v is None:
             return v
         return coerce_read_policy(v)
 
     @field_validator("write", mode="before")
     @classmethod
-    def _v_write_default(cls, v):
+    def _v_write_default(cls, v: Any) -> WritePolicy | None:
         if v is None:
             return v
         return coerce_write_policy(v)

@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import re
+from typing import cast
 
 import pyarrow as pa
 from lancedb.query import AsyncQuery
@@ -193,7 +194,7 @@ async def rows_matching(
     clause = _predicate(id_column, filters, prefix)
     if clause:
         query = query.where(clause)
-    return await query.to_list()
+    return cast(list[LanceRow], await query.to_list())
 
 
 async def row_record(
@@ -210,7 +211,7 @@ async def search_rows(
     async def fetch() -> list[LanceRow]:
         tbl = await accessor.table(table)
         builder = await tbl.search(query_text)
-        return await builder.limit(limit).to_list()
+        return cast(list[LanceRow], await builder.limit(limit).to_list())
 
     return await accessor.searches.get((table, query_text, limit), fetch)
 

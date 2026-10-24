@@ -35,6 +35,7 @@ from mirage.core.mongodb.types import PRIMARY_KEY, EntityKind
 from mirage.errors.fs import efbig, enoent
 from mirage.types import PathSpec
 from mirage.utils.json_canonical import canonicalize_value
+from mirage.vfs.mongodb.config import MongoDBConfig
 
 
 def render_doc(doc: dict[str, Any]) -> str:
@@ -61,7 +62,9 @@ def _apply_elision(value: dict[str, Any], paths: set[str]) -> dict[str, Any]:
     return out
 
 
-def _elision_paths(config, database: str, name: str) -> set[str]:
+def _elision_paths(
+    config: MongoDBConfig, database: str, name: str
+) -> set[str]:
     key = f"{database}.{name}"
     return set(config.elide_fields.get(key, []))
 

@@ -12,7 +12,18 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { PathSpec } from '../types.ts'
+import type { FileStat, PathSpec } from '../types.ts'
+
+/** The active cache operations a backend needs from its cache manager. */
+export interface CacheInvalidator {
+  cachedSize(path: PathSpec): Promise<number | null>
+  isCached(path: PathSpec): Promise<boolean>
+  probedStat(path: PathSpec): FileStat | null
+}
+
+export interface CacheContextState {
+  manager: CacheInvalidator | null
+}
 
 /**
  * The precondition one write carries; empty when mirage holds no version of

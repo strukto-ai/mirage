@@ -23,6 +23,7 @@ from e2b import CommandExitException, NotFoundException, SandboxException
 
 from mirage import RAMVFS, MountMode, Workspace
 from mirage.commands.config import Context
+from mirage.context.session_context import run_with_execution
 from mirage.io.types import materialize
 from mirage.process.supervisor import ProcessSupervisor
 from mirage.runtime.sandbox.constants import EXEC_ID, wrap_line
@@ -343,7 +344,7 @@ async def test_a_term_kill_leaves_only_a_tagged_command_to_the_reap(
         )
         return result.exit_code
 
-    runner = ProcessSupervisor().start(
+    runner = ProcessSupervisor(bind=run_with_execution).start(
         session_id="s",
         command="sleep",
         cwd=PathSpec.from_str_path("/"),

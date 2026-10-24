@@ -36,10 +36,9 @@ from mirage.observe.record import OpRecord
 from mirage.policy import Deny, HandOff, Pending
 from mirage.policy.decisions import is_pending
 from mirage.process.supervisor import ProcessSupervisor
-from mirage.runtime.base import Runtime
-from mirage.runtime.routing import RouteDecision, RouteError
+from mirage.runtime.routing import RouteError
 from mirage.runtime.table import whole_line_runtime
-from mirage.runtime.types import DispatchFn
+from mirage.runtime.types import DispatchFn, RouteDecision, RuntimeIdentity
 from mirage.secrets.types import ResolvedSource
 from mirage.shell.call_stack import CallStack
 from mirage.shell.console import Channel, JobConsole, Terminal
@@ -185,7 +184,7 @@ async def recurse(
     handed: HandOff | None = None,
     *,
     cancel: asyncio.Event | None,
-    routing_decision: RouteDecision[Runtime[Any]] | None,
+    routing_decision: RouteDecision[RuntimeIdentity] | None,
     nested: NestedRefusal,
     execution_scope: ExecutionScope,
     substitution: bool = False,
@@ -459,7 +458,7 @@ async def execute_line(
     cancel: asyncio.Event | None,
     record: bool,
     runtime: str | None,
-    routing_decision: RouteDecision[Runtime[Any]] | None,
+    routing_decision: RouteDecision[RuntimeIdentity] | None,
     handed: HandOff | None = None,
     frame: LineFrame | None = None,
     argv: tuple[str, ...] | None = None,
@@ -652,7 +651,7 @@ async def run_prepared_line(
     cancel: asyncio.Event | None,
     record: bool,
     runtime: str | None,
-    routing_decision: RouteDecision[Runtime[Any]] | None,
+    routing_decision: RouteDecision[RuntimeIdentity] | None,
     handed: HandOff | None,
     frame: LineFrame | None,
     argv: tuple[str, ...] | None,

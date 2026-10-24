@@ -74,6 +74,7 @@ from mirage.vfs.secrets import (
     redacted_config_dump,
     revealed_config_dump,
 )
+from mirage.workspace.cli.types import CLIInstall
 from mirage.workspace.documentation.documents import Documents
 from mirage.workspace.files import WorkspaceFiles
 from mirage.workspace.mount.errors import WritePolicyError
@@ -198,7 +199,7 @@ def cli_config_dump(
     return dict(config)
 
 
-def cli_snapshot(name: str, install) -> dict[str, Any]:
+def cli_snapshot(name: str, install: CLIInstall) -> dict[str, Any]:
     """One installed CLI as snapshot state.
 
     A registry-resolvable program is persisted by name, because the
@@ -877,7 +878,7 @@ def _restore_jobs(ws: WorkspaceLike, state: dict[str, Any]) -> None:
         ws.job_table.load(_job_from_dict(job_d))
 
 
-async def _job_to_dict(job) -> dict[str, Any]:
+async def _job_to_dict(job: Job) -> dict[str, Any]:
     """Serialize one finished job.
 
     Output is stored per channel rather than chunk by chunk: the manifest
@@ -945,7 +946,7 @@ def _restored_console(
     return console
 
 
-def _job_from_dict(d: dict[str, Any]):
+def _job_from_dict(d: dict[str, Any]) -> Job:
     status = JobStatus(d.get(JobKey.STATUS, JobStatus.COMPLETED.value))
     exit_code = d.get(JobKey.EXIT_CODE, 0)
     return Job(
@@ -961,7 +962,7 @@ def _job_from_dict(d: dict[str, Any]):
     )
 
 
-def _construct_vfs(mount_state: dict[str, Any]):
+def _construct_vfs(mount_state: dict[str, Any]) -> BaseVFS:
     """Rebuild a saved mount's VFS the way ``build_vfs`` would.
 
     Args:
@@ -1004,7 +1005,7 @@ def _construct_vfs(mount_state: dict[str, Any]):
             built = cls(config_cls(**config))
         else:
             built = cls(**config)
-    return built
+    return cast(BaseVFS, built)
 
 
 def requires_vfs_override(mount_state: dict[str, Any]) -> bool:

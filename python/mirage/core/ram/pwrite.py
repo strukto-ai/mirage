@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.ram import RAMAccessor
-from mirage.core.dev.device import active_pipe
+from mirage.core.dev.device import active_device, active_pipe
 from mirage.core.ram.dest import check_dest_parents, check_write_target
 from mirage.observe.context import record, start_op
 from mirage.types import PathSpec
@@ -29,7 +29,9 @@ async def pwrite(
 
     A live pipe has no offset: its bytes go into the pipe, in the order
     they are written, which is how an open descriptor delivers to a FIFO
-    (``exec >"$1"`` and a link to a substitution write through here).
+    (``exec >"$1"`` and a link to a substitution write through here). A
+    device that discards writes (``/dev/null``) keeps nothing, so windows
+    written into it pad nothing up to their offset.
 
     Args:
         accessor (RAMAccessor): the RAM accessor.
@@ -48,6 +50,7 @@ async def pwrite(
         return
     check_dest_parents(store, path_spec, p)
     check_write_target(store, path_spec, p)
-    store.files[p] = splice_window(store.files.get(p, b""), offset, data)
+    if active_device(accessor, p) is None:
+        store.files[p] = splice_window(store.files.get(p, b""), offset, data)
     store.modified[p] = now_iso()
     record("pwrite", path_spec.virtual, "ram", len(data), timer)

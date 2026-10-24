@@ -12,10 +12,15 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from typing import TYPE_CHECKING
+
 from mirage.utils.loader import lazy_exports
 from mirage.workspace.mount.namespace.namespace import Namespace, NodeMeta
 from mirage.workspace.mount.namespace.ram import RAMNamespaceStore
 from mirage.workspace.mount.namespace.store import NamespaceStore, NodeFields
+
+if TYPE_CHECKING:
+    from mirage.workspace.mount.namespace.redis import RedisNamespaceStore
 
 __all__ = [
     "Namespace",

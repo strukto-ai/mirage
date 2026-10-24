@@ -120,7 +120,7 @@ def _stamp(
 
 
 def _call_guarded(
-    fn: Callable[..., Any], caller: "wasmtime.Caller", *args: int
+    fn: Callable[..., int], caller: "wasmtime.Caller", *args: int
 ) -> int:
     """Run a preview1 host function, mapping every failure to a guest errno.
 

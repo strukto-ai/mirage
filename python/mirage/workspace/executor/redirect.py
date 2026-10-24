@@ -497,8 +497,8 @@ def _stdin_dest(context: EvaluationContext) -> _Fd | str:
 
 
 async def handle_redirect(
-    execute_node,
-    dispatch,
+    execute_node: Callable[..., Awaitable[RedirectResult]],
+    dispatch: DispatchFn,
     command: TSNodeLike | None,
     redirects: list[Redirect],
     context: EvaluationContext,
@@ -572,8 +572,8 @@ async def handle_redirect(
 
 async def _handle_redirect(
     owned: list[SharedInput],
-    execute_node,
-    dispatch,
+    execute_node: Callable[..., Awaitable[RedirectResult]],
+    dispatch: DispatchFn,
     command: TSNodeLike | None,
     redirects: list[Redirect],
     context: EvaluationContext,
@@ -1543,7 +1543,7 @@ async def _open_refusal(
     return None
 
 
-def _ensure_scope(target):
+def _ensure_scope(target: str | int | PathSpec) -> PathSpec:
     if isinstance(target, PathSpec):
         return target
     if isinstance(target, str):

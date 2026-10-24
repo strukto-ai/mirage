@@ -29,9 +29,10 @@ from collections.abc import (
 from contextlib import AbstractAsyncContextManager, AsyncExitStack
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal, cast, overload
 
 from mirage.cache.file import io as cache_io
+from mirage.cache.file.mixin import FileCacheMixin
 from mirage.cache.index.ram import ListingCheckStore
 from mirage.cache.lock import KeyLock
 from mirage.cache.manager import CacheManager
@@ -836,7 +837,7 @@ class Dispatcher:
     def __init__(
         self,
         namespace: Namespace,
-        cache,
+        cache: FileCacheMixin,
         drift: DriftQueue | None = None,
         admit_write: Callable[[Caller], AbstractAsyncContextManager[Caller]]
         | None = None,
@@ -1196,6 +1197,12 @@ class Dispatcher:
         if admit_only:
             self._follow(call)
             if name == "stat":
+                serving = self._namespace.try_mount_for(call.path.virtual)
+                if report is not None and serving is not None:
+                    key = mount_key(
+                        call.path.virtual, serving.prefix.rstrip("/")
+                    )
+                    report.store = f"{id(serving.vfs)}:{key}"
                 _memory_answered(report)
                 return None, IOResult()
             mount = self._namespace.try_mount_for(call.path.virtual)
@@ -2160,11 +2167,14 @@ class Dispatcher:
                 offset, size = call.window
                 kept = await filler.fill(
                     call.path,
-                    functools.partial(
-                        mount.call,
-                        call.name,
-                        call.path.virtual,
-                        **_whole_read(kwargs),
+                    cast(
+                        Callable[[], Awaitable[bytes]],
+                        functools.partial(
+                            mount.call,
+                            call.name,
+                            call.path.virtual,
+                            **_whole_read(kwargs),
+                        ),
                     ),
                     keep=lambda: not call.renders_read(mount),
                 )
@@ -3137,7 +3147,7 @@ class Dispatcher:
         row, _ = await self.dispatch("stat", path, caller=caller, fresh=fresh)
         if row is None:
             raise enoent(path)
-        return row
+        return cast(FileStat, row)
 
     def _walked(
         self, path: PathSpec, create: bool, vis: Visibility | None
@@ -3508,9 +3518,27 @@ class Dispatcher:
             "readdir", mount, PathSpec.from_str_path(above or "/"), caller
         )
 
+    @overload
+    async def _probe_read(
+        self,
+        name: Literal["stat"],
+        mount: MountEntry,
+        path: PathSpec,
+        caller: Caller,
+    ) -> FileStat | None: ...
+
+    @overload
+    async def _probe_read(
+        self,
+        name: Literal["readdir"],
+        mount: MountEntry,
+        path: PathSpec,
+        caller: Caller,
+    ) -> list[str] | None: ...
+
     async def _probe_read(
         self, name: str, mount: MountEntry, path: PathSpec, caller: Caller
-    ) -> Any:
+    ) -> FileStat | list[str] | None:
         """Run one read op for a probe, or None when it found nothing.
 
         The probe reads on the caller's behalf but not at its request, so
@@ -3538,7 +3566,7 @@ class Dispatcher:
         boundary = self._boundary(mount, caller)
         await boundary.admit(CALLS[name], path, False)
         try:
-            result = await mount.call(name, path.virtual)
+            result: FileStat | list[str] = await mount.call(name, path.virtual)
             return await boundary.complete(CALLS[name], path, False, result)
         except NotADirectoryError:
             # Final on every channel: a plain file above the path means

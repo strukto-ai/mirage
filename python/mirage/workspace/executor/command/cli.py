@@ -46,8 +46,13 @@ from mirage.policy import resolve_limit
 from mirage.process.view import ProcessView
 from mirage.runtime.base import Runtime
 from mirage.runtime.language import LanguageRuntime
-from mirage.runtime.routing import RouteDecision, runtime_for_language
-from mirage.runtime.types import ScriptSource, ShellFn
+from mirage.runtime.routing import runtime_for_language
+from mirage.runtime.types import (
+    RouteDecision,
+    RuntimeIdentity,
+    ScriptSource,
+    ShellFn,
+)
 from mirage.runtime.workspace import WorkspaceRuntime
 from mirage.shell.bytes import encode_text
 from mirage.types import FileType, Limit, PathSpec, Producer, word_text
@@ -108,7 +113,7 @@ def _select_runtime(
     prog: str,
     leaf: CLI,
     entries: list[Runtime[Any]],
-    routing: RouteDecision[Runtime[Any]] | None,
+    routing: RouteDecision[RuntimeIdentity] | None,
 ) -> tuple[LanguageRuntime[Any] | None, IOResult | None]:
     """Pick the workspace entry that runs a script leaf.
 
@@ -139,7 +144,7 @@ def _select_runtime(
             f"selecting a runtime for {prog!r} without a script"
         )
     known = ", ".join(repr(entry.name) for entry in entries) or "none"
-    chosen: Runtime[Any] | None
+    chosen: RuntimeIdentity | None
     if leaf.runtime is not None:
         chosen = next(
             (entry for entry in entries if entry.name == leaf.runtime), None
@@ -279,7 +284,7 @@ class CLIContext:
     vfs: Files | None = None
     session: SessionView | None = None
     processes: ProcessView | None = None
-    routing: RouteDecision[Runtime[Any]] | None = None
+    routing: RouteDecision[RuntimeIdentity] | None = None
     settle: Callable[[Runtime[Any]], Awaitable[None]] | None = None
     ids: IdSource = field(default_factory=SystemIdSource)
 

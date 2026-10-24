@@ -115,7 +115,7 @@ async def test_remove_waits_for_a_running_line_before_closing():
 
 
 @pytest.mark.asyncio
-async def test_a_line_routed_before_removal_is_refused_after_it():
+async def test_a_line_keeps_its_runtime_when_a_same_named_one_replaces_it():
     alpha, gate = Engine("alpha"), Gate()
     ws = workspace(gate, alpha)
     try:
@@ -124,12 +124,16 @@ async def test_a_line_routed_before_removal_is_refused_after_it():
         )
         await gate.entered.wait()
         await ws.remove_runtime("alpha")
+        replacement = Engine("alpha")
+        ws.add_runtime(replacement)
         gate.release.set()
         io = await line
         assert io.exit_code == 1
         assert await materialize(io.stderr) == (
             b"python3: alpha: runtime was removed from the workspace\n"
         )
+        assert not replacement.entered.is_set()
+        assert await python3(ws) == (0, b"alpha\n", b"")
     finally:
         await ws.close()
 

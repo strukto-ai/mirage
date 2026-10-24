@@ -141,7 +141,7 @@ class Command:
 
 
 def _answer_standard_options(
-    name: str, spec: CommandSpec, fn: Callable[..., Any]
+    name: str, spec: CommandSpec, fn: Callable[..., Awaitable[CommandFnResult]]
 ) -> tuple[CommandSpec, CommandFn]:
     """Add ``--help`` and ``--version`` to a command, as GNU tools have.
 
@@ -153,7 +153,7 @@ def _answer_standard_options(
     Args:
         name (str): The command name.
         spec (CommandSpec): The declared grammar.
-        fn (Callable[..., Any]): The handler.
+        fn (Callable[..., Awaitable[CommandFnResult]]): The handler.
 
     Returns:
         tuple[CommandSpec, CommandFn]: The grammar with both options,
@@ -209,7 +209,9 @@ def command(
         limit (Limit | None): Its output limit.
     """
 
-    def decorator(fn: Callable[..., Any]) -> Callable[..., Any]:
+    def decorator(
+        fn: Callable[..., Awaitable[CommandFnResult]],
+    ) -> CommandFn:
         full_spec, wrapped = _answer_standard_options(name, spec, fn)
         # functools.wraps shares the wrapped function's attribute list,
         # so copy it: wrapping a builtin must not add to its registrations.

@@ -12,7 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { RouteError, type RouteDecision } from '../../runtime/routing/index.ts'
+import { RouteError } from '../../runtime/routing/index.ts'
+import type { RouteDecision } from '../../runtime/types.ts'
 import type {
   Ask,
   Claimant,
