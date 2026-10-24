@@ -25,7 +25,8 @@ per deployment: every credential over HTTP, and a good and a bad one
 through each other access. ``dev`` adds the CLI's lifecycle: spawning,
 status, restart, stop, kill, idle exit, config, the stdio relays, and a
 remote URL that must neither start a daemon nor receive the token file.
-``token`` and ``jwt`` also print how late the server's loop ran.
+``token`` and ``jwt`` also print how late the server's loop ran. Every
+deployment times a quiet line beside a busy one (``isolation``).
 
 Three gates end a run over both hosts and every access: every HTTP
 route was hit on each host and deployment run (the two hosts' route
@@ -45,6 +46,7 @@ import base64
 import json
 import re
 import shlex
+import statistics
 import subprocess
 import sys
 import tempfile
@@ -116,6 +118,23 @@ ACCESSES = (
     "ssh",
     "ssh_proxy",
 )
+BUSY = "isolation-busy"
+ISOLATION_WINDOW = 1.5
+ISOLATION_PAUSE = 0.1
+ISOLATION = {
+    "workspace": (
+        "awk 'BEGIN { for (i = 0; i < 3000000; i++) s += i }'",
+        "isolation-quiet",
+        None,
+        25.0,
+    ),
+    "session": (
+        "for ((i = 0; i < 20000; i++)); do :; done",
+        BUSY,
+        "other",
+        60.0,
+    ),
+}
 
 
 class Report:
@@ -551,6 +570,87 @@ async def codex_exec(server: Server, report: Report) -> None:
         )
     for key, want in CASES["codex_exec"].items():
         report.check(f"{server.key} codex_exec.{key}", got.get(key), want)
+
+
+async def isolation(server: Server, report: Report) -> None:
+    """Time a quiet line beside a busy one, in another workspace and in
+    another session of the busy workspace.
+
+    ``echo`` is timed alone, then ``ISOLATION_PAUSE`` apart while the busy
+    workspace loops one CPU-bound line for ``ISOLATION_WINDOW`` seconds,
+    which keeps the TypeScript server's request limit far off. The bound
+    is on the wait the busy line adds, the median beside it less the
+    median alone, so what every request costs a deployment (its auth)
+    drops out. Beside awk, whose steps run in mirage-rs, another
+    workspace's line waits on none of them: Python releases the GIL for
+    each step, TypeScript yields between them. Beside a shell loop,
+    another session's line waits on the loop's yields, a few per line,
+    so it stays within a few yield intervals. Both bounds are wall-clock,
+    a hand-off and a yield interval: Python adds about 1 and 35 ms, and
+    40 and 100 ms with the GIL held and a 10 ms interval; TypeScript, one
+    thread for every workspace, adds up to a turn of its own 10 ms budget.
+
+    Args:
+        server (Server): the running deployment.
+        report (Report): the run's report.
+    """
+    d = server.d
+    async with httpx.AsyncClient(
+        base_url=d.url,
+        timeout=60,
+        headers={"Authorization": f"Bearer {d.bearer()}"},
+        event_hooks={"request": [server.recorder.hook(server.key)]},
+    ) as http:
+
+        async def line(wid: str, session: str | None, command: str) -> float:
+            began = time.monotonic()
+            reply = await http.post(
+                f"/v1/workspaces/{wid}/shell",
+                params={} if session is None else {"session_id": session},
+                json={"command": command, "record": False},
+            )
+            reply.raise_for_status()
+            return (time.monotonic() - began) * 1000
+
+        wids = sorted({BUSY, *(wid for _, wid, _, _ in ISOLATION.values())})
+        for wid in wids:
+            created = await http.post(
+                "/v1/workspaces", json={"id": wid, "config": {"mounts": {}}}
+            )
+            created.raise_for_status()
+        opened = await http.post(
+            f"/v1/workspaces/{BUSY}/sessions", json={"session_id": "other"}
+        )
+        opened.raise_for_status()
+        for scope, (command, wid, session, bound) in ISOLATION.items():
+            await line(wid, session, "true")
+            alone = statistics.median(
+                [await line(wid, session, "echo") for _ in range(10)]
+            )
+            end = time.monotonic() + ISOLATION_WINDOW
+
+            async def busy() -> None:
+                while time.monotonic() < end:
+                    await line(BUSY, None, command)
+
+            looping = asyncio.create_task(busy())
+            waits: list[float] = []
+            while time.monotonic() < end:
+                waits.append(await line(wid, session, "echo"))
+                await asyncio.sleep(ISOLATION_PAUSE)
+            await looping
+            beside = statistics.median(waits)
+            report.check(
+                f"{server.key} server.isolation.{scope}",
+                beside - alone < bound,
+                True,
+            )
+            report.note(
+                f"{server.key} echo beside a busy {scope}: median"
+                f" {beside:.1f} ms over {len(waits)} lines, {alone:.1f} alone"
+            )
+        for wid in wids:
+            (await http.delete(f"/v1/workspaces/{wid}")).raise_for_status()
 
 
 async def server_checks(server: Server, report: Report) -> None:
@@ -1161,6 +1261,7 @@ async def main(args: argparse.Namespace) -> int:
                         await cross_host(server, recorder, report)
                     if "cli" in wanted:
                         await codex_exec(server, report)
+                    await isolation(server, report)
                     await server_checks(server, report)
                 if name != "dev":
                     loop_lag(server.key, d.loop_lag, report)

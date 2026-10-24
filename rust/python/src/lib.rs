@@ -7,7 +7,9 @@ create_exception!(mirage._rs, StreamError, PyException);
 
 /// One open stream: `feed` takes a chunk and returns the bytes it produced;
 /// a refusal raises `StreamError(message, output)` with the output written
-/// before it.
+/// before it. Opening a stream and each step of its work run with the GIL
+/// released, so a stream working on one thread never stalls Python on
+/// another (a workspace's loop beside the server's).
 #[pyclass(module = "mirage._rs")]
 struct Stream {
     inner: Box<dyn streams::Stream>,
@@ -15,13 +17,18 @@ struct Stream {
 }
 
 impl Stream {
-    fn deliver<'py>(
+    /// Run one step of the stream's work with the GIL released and hand
+    /// back what it wrote.
+    fn step<'py>(
         &mut self,
         py: Python<'py>,
-        result: Result<(), streams::StreamError>,
+        work: impl Send
+        + FnOnce(&mut dyn streams::Stream, &mut Vec<u8>) -> Result<(), streams::StreamError>,
     ) -> PyResult<Bound<'py, PyBytes>> {
-        let output = PyBytes::new(py, &self.out);
-        self.out.clear();
+        let Self { inner, out } = self;
+        let result = py.detach(|| work(inner.as_mut(), out));
+        let output = PyBytes::new(py, out);
+        out.clear();
         match result {
             Ok(()) => Ok(output),
             Err(err) => Err(StreamError::new_err((err.message, output.unbind()))),
@@ -32,9 +39,10 @@ impl Stream {
 #[pymethods]
 impl Stream {
     #[new]
-    fn new(kind: &str, config: &[u8]) -> PyResult<Self> {
-        let inner =
-            streams::open(kind, config).map_err(|err| StreamError::new_err((err.message,)))?;
+    fn new(py: Python<'_>, kind: &str, config: &[u8]) -> PyResult<Self> {
+        let inner = py
+            .detach(|| streams::open(kind, config))
+            .map_err(|err| StreamError::new_err((err.message,)))?;
         Ok(Self {
             inner,
             out: Vec::new(),
@@ -42,13 +50,11 @@ impl Stream {
     }
 
     fn feed<'py>(&mut self, py: Python<'py>, data: &[u8]) -> PyResult<Bound<'py, PyBytes>> {
-        let result = self.inner.feed(data, &mut self.out);
-        self.deliver(py, result)
+        self.step(py, |stream, out| stream.feed(data, out))
     }
 
     fn finish<'py>(&mut self, py: Python<'py>) -> PyResult<Bound<'py, PyBytes>> {
-        let result = self.inner.finish(&mut self.out);
-        self.deliver(py, result)
+        self.step(py, |stream, out| stream.finish(out))
     }
 
     /// The input a multi-input stream needs next, or `None` when it can go
@@ -63,8 +69,7 @@ impl Stream {
         index: usize,
         data: &[u8],
     ) -> PyResult<Bound<'py, PyBytes>> {
-        let result = self.inner.feed_input(index, data, &mut self.out);
-        self.deliver(py, result)
+        self.step(py, |stream, out| stream.feed_input(index, data, out))
     }
 
     /// Whether `drain` has work or output left.
@@ -78,13 +83,11 @@ impl Stream {
 
     /// One bounded step of the work `busy` reports, and its output.
     fn drain<'py>(&mut self, py: Python<'py>) -> PyResult<Bound<'py, PyBytes>> {
-        let result = self.inner.drain(&mut self.out);
-        self.deliver(py, result)
+        self.step(py, |stream, out| stream.drain(out))
     }
 
     fn end_input<'py>(&mut self, py: Python<'py>, index: usize) -> PyResult<Bound<'py, PyBytes>> {
-        let result = self.inner.end_input(index, &mut self.out);
-        self.deliver(py, result)
+        self.step(py, |stream, out| stream.end_input(index, out))
     }
 
     /// Start the next input of a stream that reads one after another.
@@ -136,8 +139,7 @@ impl Stream {
         reply: &[u8],
         data: &[u8],
     ) -> PyResult<Bound<'py, PyBytes>> {
-        let result = self.inner.respond(reply, data, &mut self.out);
-        self.deliver(py, result)
+        self.step(py, |stream, out| stream.respond(reply, data, out))
     }
 }
 

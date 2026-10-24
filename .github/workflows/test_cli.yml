@@ -12,6 +12,7 @@ permissions:
     paths:
       - python/**
       - typescript/**
+      - rust/python/**
       - integ/cross.sh
       - integ/cross.yaml
       - integ/cross_cache.yaml
@@ -75,6 +76,7 @@ jobs:
             hit:
               - 'python/**'
               - 'typescript/**'
+              - 'rust/python/**'
               - 'integ/cross.sh'
               - 'integ/cross.yaml'
               - 'integ/cross_cache.yaml'
