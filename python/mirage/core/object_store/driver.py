@@ -78,12 +78,6 @@ class PairFn(Protocol[A_contra]):
 
 class WriteFn(Protocol[A_contra]):
     def __call__(
-        self, accessor: A_contra, path_spec: PathSpec, data: bytes
-    ) -> Awaitable[FileStat | None]: ...
-
-
-class WriteStreamFn(Protocol[A_contra]):
-    def __call__(
         self, accessor: A_contra, path_spec: PathSpec, data: ByteSource
     ) -> Awaitable[FileStat | None]: ...
 

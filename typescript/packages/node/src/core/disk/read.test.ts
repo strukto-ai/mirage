@@ -19,7 +19,7 @@ import { runWithRecording } from '@struktoai/mirage-core/observe/context'
 import { PathSpec } from '@struktoai/mirage-core/types'
 import type { DiskAccessor } from '../../accessor/disk.ts'
 import { spec, tmpRoot } from '../../../tests/test-utils.ts'
-import { read, readRange } from './read.ts'
+import { read } from './read.ts'
 
 let root: string
 let accessor: DiskAccessor
@@ -44,40 +44,40 @@ describe('core/disk/read', () => {
   })
 })
 
-describe('core/disk/readRange', () => {
+describe('core/disk/read window', () => {
   it('returns a bounded window', async () => {
     await writeFile(join(root, 'a.txt'), '0123456789')
-    const data = await readRange(accessor, spec('/a.txt'), 2, 4)
+    const data = await read(accessor, spec('/a.txt'), 2, 4)
     expect(new TextDecoder().decode(data)).toBe('2345')
   })
 
   it('runs to the end of the file without a size', async () => {
     await writeFile(join(root, 'a.txt'), '0123456789')
-    const data = await readRange(accessor, spec('/a.txt'), 7, null)
+    const data = await read(accessor, spec('/a.txt'), 7, null)
     expect(new TextDecoder().decode(data)).toBe('789')
   })
 
   it('stops at the end when the window runs past it', async () => {
     await writeFile(join(root, 'a.txt'), '0123456789')
-    const data = await readRange(accessor, spec('/a.txt'), 8, 99)
+    const data = await read(accessor, spec('/a.txt'), 8, 99)
     expect(new TextDecoder().decode(data)).toBe('89')
   })
 
   it('is empty from past the end', async () => {
     await writeFile(join(root, 'a.txt'), '0123456789')
-    const data = await readRange(accessor, spec('/a.txt'), 99, 4)
+    const data = await read(accessor, spec('/a.txt'), 99, 4)
     expect(data.byteLength).toBe(0)
   })
 
   it('throws "file not found" on ENOENT', async () => {
-    await expect(readRange(accessor, spec('/missing'), 0, 4)).rejects.toMatchObject({
+    await expect(read(accessor, spec('/missing'), 0, 4)).rejects.toMatchObject({
       code: 'ENOENT',
     })
   })
 })
 
 // A key named like its mount: neither `m/k.txt` nor `/m/k.txt` is virtual.
-describe('core/disk/readRange record path', () => {
+describe('core/disk/read window record path', () => {
   const path = new PathSpec({ virtual: '/m/m/k.txt', vfsPath: 'm/k.txt', directory: '/m/m/' })
 
   beforeEach(async () => {
@@ -86,13 +86,13 @@ describe('core/disk/readRange record path', () => {
   })
 
   it('a sized window records the virtual path', async () => {
-    const [data, records] = await runWithRecording(() => readRange(accessor, path, 0, 1))
+    const [data, records] = await runWithRecording(() => read(accessor, path, 0, 1))
     expect(new TextDecoder().decode(data)).toBe('0')
     expect(records.map((r) => r.path)).toEqual(['/m/m/k.txt'])
   })
 
   it('a rest-of-file window records the virtual path', async () => {
-    const [data, records] = await runWithRecording(() => readRange(accessor, path, 0, null))
+    const [data, records] = await runWithRecording(() => read(accessor, path, 0, null))
     expect(new TextDecoder().decode(data)).toBe('0123456789')
     expect(records.map((r) => r.path)).toEqual(['/m/m/k.txt'])
   })

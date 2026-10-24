@@ -3451,7 +3451,7 @@
               {
                 "script": {
                   "language": "python",
-                  "source": "import json\nimport os\n\nctx = json.loads(os.environ['MIRAGE_POLICY_CTX'])\nREADS = ('read', 'read_bytes', 'read_stream', 'read_range')\nname = ctx['call']['name']\nby = ctx['profile']\nreason = None\nif ctx['write'] and ctx['path'].startswith('/scratch/cold/'):\n    reason = 'cold by ' + by\nelif name in READS and ctx['path'].startswith('/scratch/drop/'):\n    reason = 'drop box by ' + by\nelif name == 'readdir' and ctx['path'].startswith('/scratch/vault'):\n    reason = 'vault by ' + by\nif reason is not None:\n    print(json.dumps({'kind': 'deny', 'reason': reason}))\n"
+                  "source": "import json\nimport os\n\nctx = json.loads(os.environ['MIRAGE_POLICY_CTX'])\nname = ctx['call']['name']\nby = ctx['profile']\nreason = None\nif ctx['write'] and ctx['path'].startswith('/scratch/cold/'):\n    reason = 'cold by ' + by\nelif name == 'read' and ctx['path'].startswith('/scratch/drop/'):\n    reason = 'drop box by ' + by\nelif name == 'readdir' and ctx['path'].startswith('/scratch/vault'):\n    reason = 'vault by ' + by\nif reason is not None:\n    print(json.dumps({'kind': 'deny', 'reason': reason}))\n"
                 },
                 "runtime": "monty"
               }
@@ -3655,7 +3655,7 @@
               {
                 "script": {
                   "language": "python",
-                  "source": "import json\nimport os\n\nctx = json.loads(os.environ['MIRAGE_POLICY_CTX'])\nREADS = ('read', 'read_bytes', 'read_stream', 'read_range')\nname = ctx['call']['name']\nby = ctx['profile']\nreason = None\nif ctx['write'] and ctx['path'].startswith('/scratch/cold/'):\n    reason = 'cold by ' + by\nelif name in READS and ctx['path'].startswith('/scratch/drop/'):\n    reason = 'drop box by ' + by\nelif name == 'readdir' and ctx['path'].startswith('/scratch/vault'):\n    reason = 'vault by ' + by\nif reason is not None:\n    print(json.dumps({'kind': 'deny', 'reason': reason}))\n"
+                  "source": "import json\nimport os\n\nctx = json.loads(os.environ['MIRAGE_POLICY_CTX'])\nname = ctx['call']['name']\nby = ctx['profile']\nreason = None\nif ctx['write'] and ctx['path'].startswith('/scratch/cold/'):\n    reason = 'cold by ' + by\nelif name == 'read' and ctx['path'].startswith('/scratch/drop/'):\n    reason = 'drop box by ' + by\nelif name == 'readdir' and ctx['path'].startswith('/scratch/vault'):\n    reason = 'vault by ' + by\nif reason is not None:\n    print(json.dumps({'kind': 'deny', 'reason': reason}))\n"
                 },
                 "runtime": "wasi"
               }
@@ -3728,7 +3728,7 @@
               {
                 "script": {
                   "language": "python",
-                  "source": "import json\nimport os\n\nctx = json.loads(os.environ['MIRAGE_POLICY_CTX'])\nREADS = ('read', 'read_bytes', 'read_stream', 'read_range')\nname = ctx['call']['name']\nby = ctx['profile']\nreason = None\nif ctx['write'] and ctx['path'].startswith('/scratch/cold/'):\n    reason = 'cold by ' + by\nelif name in READS and ctx['path'].startswith('/scratch/drop/'):\n    reason = 'drop box by ' + by\nelif name == 'readdir' and ctx['path'].startswith('/scratch/vault'):\n    reason = 'vault by ' + by\nif reason is not None:\n    print(json.dumps({'kind': 'deny', 'reason': reason}))\n"
+                  "source": "import json\nimport os\n\nctx = json.loads(os.environ['MIRAGE_POLICY_CTX'])\nname = ctx['call']['name']\nby = ctx['profile']\nreason = None\nif ctx['write'] and ctx['path'].startswith('/scratch/cold/'):\n    reason = 'cold by ' + by\nelif name == 'read' and ctx['path'].startswith('/scratch/drop/'):\n    reason = 'drop box by ' + by\nelif name == 'readdir' and ctx['path'].startswith('/scratch/vault'):\n    reason = 'vault by ' + by\nif reason is not None:\n    print(json.dumps({'kind': 'deny', 'reason': reason}))\n"
                 },
                 "runtime": "pyodide"
               }

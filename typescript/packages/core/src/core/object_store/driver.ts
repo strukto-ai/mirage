@@ -45,12 +45,6 @@ export type PairFn<A extends Accessor> = (
 export type WriteFn<A extends Accessor> = (
   accessor: A,
   path: PathSpec,
-  data: Uint8Array,
-) => Promise<FileStat | null>
-
-export type WriteStreamFn<A extends Accessor> = (
-  accessor: A,
-  path: PathSpec,
   data: ByteSource,
   signal?: AbortSignal,
 ) => Promise<FileStat | null>

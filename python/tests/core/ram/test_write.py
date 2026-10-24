@@ -13,14 +13,16 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import errno
 
 import pytest
 
 from mirage.accessor.ram import RAMAccessor
-from mirage.core.ram.append import append_bytes
+from mirage.core.dev.pipe import DevicePipe
 from mirage.core.ram.constants import STREAM_PUBLISH_SECONDS
-from mirage.core.ram.write import write, write_stream
+from mirage.core.ram.write import write
 from mirage.types import PathSpec
+from mirage.vfs.dev.store import DevFiles, DevStore
 from mirage.vfs.ram.store import RAMStore
 
 
@@ -133,9 +135,11 @@ async def test_write_bytes_onto_a_directory_is_a_directory(store):
 
 
 @pytest.mark.asyncio
-async def test_append_bytes_onto_a_directory_is_a_directory(store):
+async def test_an_append_onto_a_directory_is_a_directory(store):
     with pytest.raises(IsADirectoryError):
-        await append_bytes(store, PathSpec.from_str_path("/sub"), b"data")
+        await write(
+            store, PathSpec.from_str_path("/sub"), b"data", append=True
+        )
     assert "/sub" not in store.store.files
 
 
@@ -208,7 +212,7 @@ async def _broken():
 async def test_a_streamed_write_shows_a_quiet_writers_bytes(store):
     hold = asyncio.Event()
     writing = asyncio.create_task(
-        write_stream(store, _spec("log"), _quiet([b"a\n", b"b\n"], hold))
+        write(store, _spec("log"), _quiet([b"a\n", b"b\n"], hold))
     )
     await asyncio.sleep(STREAM_PUBLISH_SECONDS * 3)
     assert store.store.files["/log"] == b"a\nb\n"
@@ -223,12 +227,10 @@ async def test_a_streamed_append_keeps_another_appenders_bytes(store):
     store.store.files["/log"] = b"start\n"
     hold = asyncio.Event()
     writing = asyncio.create_task(
-        write_stream(
-            store, _spec("log"), _quiet([b"mine\n"], hold), append=True
-        )
+        write(store, _spec("log"), _quiet([b"mine\n"], hold), append=True)
     )
     await asyncio.sleep(STREAM_PUBLISH_SECONDS * 3)
-    await append_bytes(store, _spec("log"), b"theirs\n")
+    await write(store, _spec("log"), b"theirs\n", append=True)
     hold.set()
     await writing
     assert store.store.files["/log"] == b"start\nmine\ntheirs\n"
@@ -240,7 +242,7 @@ async def test_an_atomic_streamed_write_lands_at_its_end(store):
     store.store.files["/f"] = b"old"
     hold = asyncio.Event()
     writing = asyncio.create_task(
-        write_stream(store, _spec("f"), _quiet([b"new"], hold), atomic=True)
+        write(store, _spec("f"), _quiet([b"new"], hold), atomic=True)
     )
     await asyncio.sleep(STREAM_PUBLISH_SECONDS * 3)
     assert store.store.files["/f"] == b"old"
@@ -253,7 +255,7 @@ async def test_an_atomic_streamed_write_lands_at_its_end(store):
 @pytest.mark.asyncio
 async def test_a_failed_streamed_write_keeps_what_arrived(store):
     with pytest.raises(OSError):
-        await write_stream(store, _spec("f"), _broken())
+        await write(store, _spec("f"), _broken())
     assert store.store.files["/f"] == b"kept\n"
 
 
@@ -270,7 +272,7 @@ async def test_a_streamed_replacement_keeps_its_position(store):
         yield b"b\n"
         await hold.wait()
 
-    writing = asyncio.create_task(write_stream(store, _spec("f"), source()))
+    writing = asyncio.create_task(write(store, _spec("f"), source()))
     await asyncio.sleep(STREAM_PUBLISH_SECONDS * 3)
     assert store.store.files["/f"] == b"a\n"
     store.store.files["/f"] = b""
@@ -286,8 +288,19 @@ async def test_a_streamed_replacement_keeps_its_position(store):
 async def test_an_empty_streamed_append_leaves_the_file_alone(store):
     store.store.files["/f"] = b"kept"
     store.store.modified["/f"] = "2020-01-01T00:00:00Z"
-    await write_stream(store, _spec("f"), _chunks_of(), append=True)
+    await write(store, _spec("f"), _chunks_of(), append=True)
     assert store.store.files["/f"] == b"kept"
     assert store.store.modified["/f"] == "2020-01-01T00:00:00Z"
-    await write_stream(store, _spec("new"), _chunks_of(), append=True)
+    await write(store, _spec("new"), _chunks_of(), append=True)
     assert store.store.files["/new"] == b""
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("data", [b"", b"x"])
+async def test_a_write_into_an_input_pipe_is_refused_even_empty(data):
+    files = DevFiles("owner")
+    path, _ = files.allocate_input(DevicePipe(True))
+    accessor = RAMAccessor(DevStore(files))
+    with pytest.raises(OSError) as caught:
+        await write(accessor, PathSpec.from_str_path(path[4:]), data)
+    assert caught.value.errno == errno.EBADF

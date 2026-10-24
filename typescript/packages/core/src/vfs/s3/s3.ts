@@ -29,7 +29,7 @@ import { readRange as s3ReadRange, readStream as s3Stream } from '../../core/s3/
 import { truncate as s3Truncate } from '../../core/s3/truncate.ts'
 import { unlink as s3Unlink } from '../../core/s3/unlink.ts'
 import type { ByteSource } from '../../io/types.ts'
-import { write as s3Write, writeStream as s3WriteStream } from '../../core/s3/write.ts'
+import { write as s3Write } from '../../core/s3/write.ts'
 import type { FileStat, PathSpec } from '../../types.ts'
 import { BaseVFS } from '../base.ts'
 import type { Handed } from '../types.ts'
@@ -95,8 +95,7 @@ export class S3VFSBase extends BaseVFS<S3Accessor> {
   }
 
   override write(path: PathSpec, data: ByteSource, signal?: AbortSignal): Promise<FileStat | null> {
-    if (data instanceof Uint8Array) return s3Write(this.accessor, path, data)
-    return s3WriteStream(this.accessor, path, data, signal)
+    return s3Write(this.accessor, path, data, signal)
   }
 
   override append(path: PathSpec, data: ByteSource): Promise<FileStat | null | undefined> {

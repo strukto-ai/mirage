@@ -30,8 +30,7 @@ import { read as redisRead } from '../../core/redis/read.ts'
 import { stat as redisStat } from '../../core/redis/stat.ts'
 import { readStream as redisStream } from '../../core/redis/stream.ts'
 import { exists as redisExists } from '../../core/redis/exists.ts'
-import { write as redisWrite, writeStream as redisWriteStream } from '../../core/redis/write.ts'
-import { appendBytes as redisAppend } from '../../core/redis/append.ts'
+import { write as redisWrite } from '../../core/redis/write.ts'
 import { create as redisCreate } from '../../core/redis/create.ts'
 import { mkdir as redisMkdir } from '../../core/redis/mkdir.ts'
 import { unlink as redisUnlink } from '../../core/redis/unlink.ts'
@@ -144,13 +143,11 @@ export class RedisVFS extends BaseVFS {
     _handed?: Handed,
     atomic = false,
   ): Promise<void> {
-    if (data instanceof Uint8Array) return redisWrite(this.accessor, path, data)
-    return redisWriteStream(this.accessor, path, data, false, atomic)
+    return redisWrite(this.accessor, path, data, false, atomic)
   }
 
   override append(path: PathSpec, data: ByteSource): Promise<void> {
-    if (data instanceof Uint8Array) return redisAppend(this.accessor, path, data)
-    return redisWriteStream(this.accessor, path, data, true)
+    return redisWrite(this.accessor, path, data, true)
   }
 
   override create(path: PathSpec): Promise<void> {

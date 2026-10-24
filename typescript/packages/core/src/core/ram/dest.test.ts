@@ -24,7 +24,6 @@ import { rename } from './rename.ts'
 import { rmdir } from './rmdir.ts'
 import { setAttrs } from './set_attrs.ts'
 import { stat } from './stat.ts'
-import { readStream } from './stream.ts'
 import { unlink } from './unlink.ts'
 
 function mkPath(virtual: string): PathSpec {
@@ -38,10 +37,6 @@ function mkAccessor(): RAMAccessor {
   store.dirs.add('/d')
   store.files.set('/orphan/a.txt', enc.encode('o'))
   return new RAMAccessor(store)
-}
-
-async function drain(accessor: RAMAccessor, path: PathSpec): Promise<void> {
-  for await (const chunk of readStream(accessor, path)) void chunk
 }
 
 async function codeOf(fn: () => Promise<unknown>): Promise<string | undefined> {
@@ -76,7 +71,6 @@ describe('lookupError', () => {
 describe('every lookup names a plain-file parent', () => {
   const ops: Record<string, (a: RAMAccessor, p: PathSpec) => Promise<unknown>> = {
     read: (a, p) => read(a, p),
-    stream: drain,
     stat: (a, p) => stat(a, p),
     setAttrs: (a, p) => Promise.resolve().then(() => setAttrs(a, p, { mode: 0o644 })),
     unlink: (a, p) => unlink(a, p),

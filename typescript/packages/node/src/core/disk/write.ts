@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { DiskAccessor } from '../../accessor/disk.ts'
-import { chmod, mkdtemp, open, rename, rm, stat, writeFile } from 'node:fs/promises'
+import { appendFile, chmod, mkdtemp, open, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { chunks } from '@struktoai/mirage-core/io/cooperative'
 import type { ByteSource } from '@struktoai/mirage-core/io/types'
@@ -23,21 +23,13 @@ import type { PathSpec } from '@struktoai/mirage-core/types'
 import { diskError } from './errors.ts'
 import { resolveInside } from './utils.ts'
 
-export async function write(accessor: DiskAccessor, p: PathSpec, data: Uint8Array): Promise<void> {
-  const timer = startOp()
-  const full = await resolveInside(accessor.root, p)
-  // A write is not `mkdir -p`: GNU reports ENOENT on a missing parent
-  // rather than building the chain, and the store-backed backends refuse
-  // the same way. Only the virtual path may reach a stderr line.
-  try {
-    await writeFile(full, data)
-  } catch (err) {
-    throw diskError(err, p)
-  }
-  record('write', p.virtual, VFSName.DISK, data.byteLength, timer)
-}
-
-export async function writeStream(
+/**
+ * Replace a file's bytes, or add them to its end, with one open handle: bytes
+ * in one write, a stream in bounded pulls, so a reader watches the file grow.
+ * `atomic` stages the output until it ends, keeping the file's mode. Mirrors
+ * Python's `write`.
+ */
+export async function write(
   accessor: DiskAccessor,
   p: PathSpec,
   data: ByteSource,
@@ -45,8 +37,21 @@ export async function writeStream(
   signal?: AbortSignal,
   atomic = false,
 ): Promise<void> {
+  const op = append ? 'append' : 'write'
   const timer = startOp()
   const full = await resolveInside(accessor.root, p)
+  if (data instanceof Uint8Array && !atomic) {
+    // A write is not `mkdir -p`: GNU reports ENOENT on a missing parent
+    // rather than building the chain, and the store-backed backends refuse
+    // the same way. Only the virtual path may reach a stderr line.
+    try {
+      await (append ? appendFile(full, data) : writeFile(full, data))
+    } catch (err) {
+      throw diskError(err, p)
+    }
+    record(op, p.virtual, VFSName.DISK, data.byteLength, timer)
+    return
+  }
   let size = 0
   let staged: string | null = null
   let reading = false
@@ -90,5 +95,5 @@ export async function writeStream(
   } finally {
     if (staged !== null) await rm(staged, { recursive: true, force: true })
   }
-  record(append ? 'append' : 'write', p.virtual, VFSName.DISK, size, timer)
+  record(op, p.virtual, VFSName.DISK, size, timer)
 }

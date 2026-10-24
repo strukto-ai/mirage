@@ -16,7 +16,7 @@ import asyncio
 
 import pytest
 
-from mirage.core.ram.stream import read_stream
+from mirage.core.ram.read import read
 from mirage.types import PathSpec
 from mirage.utils.loader import load_backend_class
 from tests.fixtures.driver_ops import ops
@@ -26,7 +26,7 @@ _ps = PathSpec.from_str_path
 
 def _cat_sync(backend, path):
     async def _collect():
-        return b"".join([c async for c in read_stream(backend.accessor, path)])
+        return await read(backend.accessor, path)
 
     return asyncio.run(_collect())
 

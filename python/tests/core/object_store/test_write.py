@@ -23,7 +23,6 @@ from mirage.core.object_store.write import (
     make_mkdir,
     make_truncate,
     make_write,
-    make_write_stream,
 )
 from mirage.errors.fs import enoent
 from mirage.io.cooperative import chunks
@@ -34,6 +33,10 @@ from tests.core.object_store.conftest import (
     make_driver,
     spec,
 )
+
+
+async def _stream(data):
+    yield data
 
 
 async def _reject_lookup(conn, key):
@@ -98,7 +101,9 @@ def test_mutation_returns_confirmed_metadata_without_a_lookup(
         "write": lambda: make_write(driver)(accessor, path, b"hello"),
         "create": lambda: make_create(driver)(accessor, path),
         "truncate": lambda: make_truncate(driver)(accessor, path, 2),
-        "stream": lambda: make_write_stream(driver)(accessor, path, b"hello"),
+        "stream": lambda: make_write(driver)(
+            accessor, path, _stream(b"hello")
+        ),
     }
     scope = RecordingScope()
     try:

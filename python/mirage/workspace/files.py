@@ -544,7 +544,7 @@ class Files:
         write is what needs it: the merged buffer goes back through
         ``write``, which stores, so reading the rendering would store
         the rendering over the file. TypeScript spells the same thing
-        ``readFile(path, {raw: true})``.
+        ``read(path, {raw: true})``.
 
         Args:
             path (str | PathSpec): Virtual path.

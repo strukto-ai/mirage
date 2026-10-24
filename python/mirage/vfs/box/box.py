@@ -35,7 +35,6 @@ from mirage.core.box.stat import stat as _stat
 from mirage.core.box.truncate import truncate as _truncate
 from mirage.core.box.unlink import unlink as _unlink
 from mirage.core.box.write import write as _write
-from mirage.core.box.write import write_stream as _write_stream
 from mirage.events.base import DeltaHook
 from mirage.io.types import ByteSource
 from mirage.types import CapacityResult, FileStat, PathSpec, VFSName
@@ -109,9 +108,7 @@ class BoxVFS(BaseVFS):
         entry: FileStat | None = None,
         parent: FileStat | None = None,
     ) -> FileStat | None:
-        if isinstance(data, bytes):
-            return await _write(self.accessor, path, data, entry, parent)
-        return await _write_stream(self.accessor, path, data, entry, parent)
+        return await _write(self.accessor, path, data, entry, parent)
 
     async def create(
         self,

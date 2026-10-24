@@ -33,8 +33,6 @@ import { stat as dropboxStat, tree as dropboxTree } from '../../core/dropbox/sta
 import { exists as dropboxExists } from '../../core/dropbox/exists.ts'
 import { truncateByRewrite } from '../../core/generic/rewrite.ts'
 import type { ByteSource } from '../../io/types.ts'
-import { chunks } from '../../io/cooperative.ts'
-import { writeStream } from '../../core/dropbox/write.ts'
 import { write as dropboxWrite } from '../../core/dropbox/write.ts'
 import { create as dropboxCreate } from '../../core/dropbox/create.ts'
 import { mkdir as dropboxMkdir } from '../../core/dropbox/mkdir.ts'
@@ -120,8 +118,7 @@ export class DropboxVFS extends BaseVFS {
   }
 
   override write(path: PathSpec, data: ByteSource, signal?: AbortSignal): Promise<FileStat | null> {
-    if (data instanceof Uint8Array) return dropboxWrite(this.accessor, path, data)
-    return writeStream(this.accessor, path, chunks(data, signal))
+    return dropboxWrite(this.accessor, path, data, signal)
   }
 
   override truncate(

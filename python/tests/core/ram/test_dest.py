@@ -8,7 +8,6 @@ from mirage.core.ram.rename import rename
 from mirage.core.ram.rmdir import rmdir
 from mirage.core.ram.set_attrs import set_attrs
 from mirage.core.ram.stat import stat
-from mirage.core.ram.stream import read_stream
 from mirage.core.ram.unlink import unlink
 from mirage.types import PathSpec
 from mirage.vfs.ram.store import RAMStore
@@ -50,14 +49,8 @@ def test_lookup_error_stops_at_the_first_non_directory(accessor, key, kind):
     assert error.filename == key
 
 
-async def _drain(accessor: RAMAccessor, spec: PathSpec) -> None:
-    async for _ in read_stream(accessor, spec):
-        pass
-
-
 _OPS = {
     "read": lambda a, p: read(a, p),
-    "stream": _drain,
     "stat": lambda a, p: stat(a, p),
     "set_attrs": lambda a, p: set_attrs(a, p, mode=0o644),
     "unlink": lambda a, p: unlink(a, p),

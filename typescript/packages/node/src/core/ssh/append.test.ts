@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { PathSpec } from '@struktoai/mirage-core/types'
-import { appendBytes } from './append.ts'
+import { append } from './append.ts'
 import { makeFakeAccessor } from '../../../tests/core/ssh/_test_utils.ts'
 import { read } from './read.ts'
 
@@ -31,7 +31,7 @@ describe('core/ssh/append', () => {
         ['/data', {}],
       ]),
     })
-    await appendBytes(accessor, spec('/data/a.txt'), new TextEncoder().encode('hi'))
+    await append(accessor, spec('/data/a.txt'), new TextEncoder().encode('hi'))
     const out = await read(accessor, spec('/data/a.txt'))
     expect(new TextDecoder().decode(out)).toBe('hi')
   })
@@ -44,7 +44,7 @@ describe('core/ssh/append', () => {
         ['/data', {}],
       ]),
     })
-    await appendBytes(accessor, spec('/data/a.txt'), new TextEncoder().encode('world'))
+    await append(accessor, spec('/data/a.txt'), new TextEncoder().encode('world'))
     const out = await read(accessor, spec('/data/a.txt'))
     expect(new TextDecoder().decode(out)).toBe('hello world')
   })

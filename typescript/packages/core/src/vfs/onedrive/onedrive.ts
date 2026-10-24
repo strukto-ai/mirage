@@ -18,8 +18,7 @@ import { stat, tree } from '../../core/onedrive/stat.ts'
 import { readStream } from '../../core/onedrive/stream.ts'
 import { exists } from '../../core/onedrive/exists.ts'
 import type { ByteSource } from '../../io/types.ts'
-import { chunks } from '../../io/cooperative.ts'
-import { write, writeStream } from '../../core/onedrive/write.ts'
+import { write } from '../../core/onedrive/write.ts'
 import { create } from '../../core/onedrive/create.ts'
 import { mkdir } from '../../core/onedrive/mkdir.ts'
 import { unlink } from '../../core/onedrive/unlink.ts'
@@ -91,8 +90,7 @@ export class OneDriveVFS extends BaseVFS {
   }
 
   override write(path: PathSpec, data: ByteSource, signal?: AbortSignal): Promise<void> {
-    if (data instanceof Uint8Array) return write(this.accessor, path, data)
-    return writeStream(this.accessor, path, chunks(data, signal))
+    return write(this.accessor, path, data, signal)
   }
 
   override create(path: PathSpec): Promise<void> {

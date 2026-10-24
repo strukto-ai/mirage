@@ -27,7 +27,7 @@ import { read as gridfsRead } from '../../core/gridfs/read.ts'
 import { stat as gridfsStat } from '../../core/gridfs/stat.ts'
 import { readStream as gridfsStream } from '../../core/gridfs/stream.ts'
 import { exists as gridfsExists } from '../../core/gridfs/exists.ts'
-import { write as gridfsWrite, writeStream as gridfsWriteStream } from '../../core/gridfs/write.ts'
+import { write as gridfsWrite } from '../../core/gridfs/write.ts'
 import { create as gridfsCreate } from '../../core/gridfs/create.ts'
 import { mkdir as gridfsMkdir } from '../../core/gridfs/mkdir.ts'
 import { unlink as gridfsUnlink } from '../../core/gridfs/unlink.ts'
@@ -107,8 +107,7 @@ export class GridFSVFS extends BaseVFS {
   }
 
   override write(path: PathSpec, data: ByteSource, signal?: AbortSignal): Promise<FileStat | null> {
-    if (data instanceof Uint8Array) return gridfsWrite(this.accessor, path, data)
-    return gridfsWriteStream(this.accessor, path, data, signal)
+    return gridfsWrite(this.accessor, path, data, signal)
   }
 
   override append(path: PathSpec, data: ByteSource): Promise<FileStat | null | undefined> {

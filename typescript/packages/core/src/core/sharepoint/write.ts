@@ -17,31 +17,22 @@ import type { SharePointAccessor } from '../../accessor/sharepoint.ts'
 import { record, startOp } from '../../observe/context.ts'
 import type { PathSpec } from '../../types.ts'
 import type { ByteSource } from '../../io/types.ts'
-import { writeItem, writeItemStream } from '../msgraph/drive.ts'
+import { writeItem } from '../msgraph/drive.ts'
 import { driveLoc, resolveItem } from './resolve.ts'
 
 export async function write(
   accessor: SharePointAccessor,
   path: PathSpec,
-  data: Uint8Array,
-): Promise<void> {
-  const resolved = await resolveItem(accessor, path)
-  const timer = startOp()
-  await writeItem(accessor.config, driveLoc(accessor.config, resolved, path.vfsPath), data)
-  record('write', path.virtual, 'sharepoint', data.length, timer)
-}
-
-export async function writeStream(
-  accessor: SharePointAccessor,
-  path: PathSpec,
   data: ByteSource,
+  signal?: AbortSignal,
 ): Promise<void> {
   const resolved = await resolveItem(accessor, path)
   const timer = startOp()
-  const size = await writeItemStream(
+  const size = await writeItem(
     accessor.config,
     driveLoc(accessor.config, resolved, path.vfsPath),
     data,
+    signal,
   )
   record('write', path.virtual, 'sharepoint', size, timer)
 }

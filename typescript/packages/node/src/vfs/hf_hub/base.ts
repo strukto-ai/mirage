@@ -85,9 +85,12 @@ export abstract class HfHubVFS extends BaseVFS {
     size: number | null = null,
   ): Promise<ByteSource> | AsyncIterable<Uint8Array> {
     if (offset === 0 && size === null) return hubStream(this.accessor, path, handed?.entry)
-    const window =
-      offset === 0 && size === null ? {} : size === null ? { offset } : { offset, size }
-    return hubRead(this.accessor, path, window, handed?.entry)
+    return hubRead(
+      this.accessor,
+      path,
+      size === null ? { offset } : { offset, size },
+      handed?.entry,
+    )
   }
 
   override stat(path: PathSpec, handed?: Handed): Promise<FileStat> {

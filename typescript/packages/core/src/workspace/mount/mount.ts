@@ -49,7 +49,7 @@ import {
   refuseTaken,
 } from '../../core/generic/rewrite.ts'
 import { declared, declaredCalls, methodName } from '../../vfs/call.ts'
-import { FOLDED_METHODS, WRITE_EFFECTS } from '../../vfs/constants.ts'
+import { WRITE_EFFECTS } from '../../vfs/constants.ts'
 import { Effect, type Handed } from '../../vfs/types.ts'
 import { isUnsatisfiableRange, sliceWindow } from '../../utils/ranges.ts'
 
@@ -226,18 +226,6 @@ function taken(name: string, kwargs: OpKwargs): void {
 }
 
 /**
- * A read, honoring a byte window when one is asked for.
- *
- * A VFS that reads ranges natively fetches only the window, which is the
- * whole point on an object store: one ranged GET instead of the whole file.
- * Every other read is whole and sliced, which is the only meaningful
- * behavior for content that is rendered rather than stored. A zero-length
- * read is answered here rather than sent anywhere, and a window starting at
- * or past EOF answers empty, the POSIX answer, where an HTTP store refuses
- * with 416: normalizing here keeps the op's contract one thing whichever
- * path answers it. Mirrors Python's `_read_window`.
- */
-/**
  * A backend read's answer as a stream: a promise awaited on the first pull,
  * a stream passed through, bytes as one chunk. Mirrors Python's `_as_stream`.
  */
@@ -285,6 +273,18 @@ async function collected(
   return data
 }
 
+/**
+ * A read, honoring a byte window when one is asked for.
+ *
+ * A VFS that reads ranges natively fetches only the window, which is the
+ * whole point on an object store: one ranged GET instead of the whole file.
+ * Every other read is whole and sliced, which is the only meaningful
+ * behavior for content that is rendered rather than stored. A zero-length
+ * read is answered here rather than sent anywhere, and a window starting at
+ * or past EOF answers empty, the POSIX answer, where an HTTP store refuses
+ * with 416: normalizing here keeps the op's contract one thing whichever
+ * path answers it. Mirrors Python's `_read_window`.
+ */
 async function readWindow(
   read: ReadFn,
   ranges: boolean,
@@ -451,13 +451,6 @@ export class MountEntry {
       if (typeof (init.vfs as unknown as Record<string, unknown>)[renderer] !== 'function') {
         throw new TypeError(
           `${init.vfs.constructor.name}.renderers maps '${filetype}' to '${renderer}', which is not a method`,
-        )
-      }
-    }
-    for (const [name, into] of Object.entries(FOLDED_METHODS)) {
-      if (name in init.vfs) {
-        throw new TypeError(
-          `${init.vfs.constructor.name}.${name}: define ${into} instead, which answers or takes bytes or a stream`,
         )
       }
     }
@@ -872,14 +865,12 @@ export class MountEntry {
           this.truncateByRewrite(scope, lengthArg(args[0]), kw.no_create === true, kw.index),
       ]
     }
-    if ((name === 'append' || name === 'pwrite') && !vfs.supports(name)) {
+    if (name === 'pwrite' && !vfs.supports(name)) {
       if (!vfs.supports('write')) return []
-      return name === 'append'
-        ? [(scope, args, kw) => this.appendByRewrite(scope, writeData(args), kw.index)]
-        : [
-            (scope, args, kw) =>
-              this.pwriteByRewrite(scope, writeData(args), offsetArg(args[1], scope), kw.index),
-          ]
+      return [
+        (scope, args, kw) =>
+          this.pwriteByRewrite(scope, writeData(args), offsetArg(args[1], scope), kw.index),
+      ]
     }
     if (declared(vfs.constructor, name) === null) return []
     if (!vfs.supports(name)) return []
@@ -888,14 +879,6 @@ export class MountEntry {
         return [(scope, _args, kw) => vfs.readdir(scope, handedOf(kw))]
       case 'stat':
         return [(scope, _args, kw) => vfs.stat(scope, handedOf(kw))]
-      case 'write':
-        return [
-          (scope, args, kw) => vfs.write(scope, writeData(args), callerSignal(), handedOf(kw)),
-        ]
-      case 'append':
-        return [
-          (scope, args, kw) => vfs.append(scope, writeData(args), handedOf(kw), callerSignal()),
-        ]
       case 'pwrite':
         return [
           (scope, args, kw) =>
@@ -1268,8 +1251,7 @@ export class MountEntry {
 
   /** A stat of `path` on this mount, as `callKeyed` answers one. Mirrors Python's `_stat`. */
   private async statAt(index: IndexCacheStore, path: PathSpec): Promise<FileStat> {
-    const key = indexKey(this.prefix, path)
-    const stored = key === this.rootKey ? null : await this.storedRow(index, key)
+    const stored = (await this.stored('stat', path, index)) as FileStat | null
     if (stored !== null) return stored
     return this.vfs.stat(path, await this.handedFor('stat', path, null, index))
   }
@@ -2139,16 +2121,12 @@ export class MountEntry {
   ): Promise<void> {
     await this.use(() =>
       source.use(() =>
-        runWithMountContext(
-          () =>
-            this.runWithWriteRevisions(async () => {
-              this.requireWritable('write', PathSpec.fromStrPath(dst), [])
-              const pending = this.vfs.copyFrom(source.vfs, source.scope(src), this.scope(dst))
-              onCall?.(pending)
-              await runWithTimeout(pending, this.opTimeout('copy'), 'copy')
-            }),
-          this.mountId,
-        ),
+        this.framed('copy', () => {
+          this.requireWritable('write', PathSpec.fromStrPath(dst), [])
+          const pending = this.vfs.copyFrom(source.vfs, source.scope(src), this.scope(dst))
+          onCall?.(pending)
+          return pending
+        }),
       ),
     )
   }
@@ -2161,20 +2139,23 @@ export class MountEntry {
    */
   async readMany(paths: readonly string[], limit: number): Promise<Map<string, Uint8Array>> {
     return this.use(() =>
-      runWithMountContext(
-        () =>
-          this.runWithWriteRevisions(() =>
-            runWithTimeout(
-              this.batchRead(
-                paths.map((p) => this.scope(p)),
-                limit,
-              ),
-              this.opTimeout('read'),
-              'read',
-            ),
-          ),
-        this.mountId,
+      this.framed('read', () =>
+        this.batchRead(
+          paths.map((p) => this.scope(p)),
+          limit,
+        ),
       ),
+    )
+  }
+
+  /**
+   * Run one backend call as `call` frames its own: in this mount's recording
+   * and write contexts, under the op's timeout. Mirrors Python's `_framed`.
+   */
+  private framed<T>(op: string, work: () => Promise<T>): Promise<T> {
+    return runWithMountContext(
+      () => this.runWithWriteRevisions(() => runWithTimeout(work(), this.opTimeout(op), op)),
+      this.mountId,
     )
   }
 
@@ -2207,19 +2188,11 @@ export class MountEntry {
     query: SearchQuery,
   ): Promise<[string, string][] | null> {
     return this.use(() =>
-      runWithMountContext(
-        () =>
-          this.runWithWriteRevisions(() =>
-            runWithTimeout(
-              this.vfs.searchMany(
-                paths.map((p) => this.scope(p)),
-                query,
-              ),
-              this.opTimeout('search'),
-              'search',
-            ),
-          ),
-        this.mountId,
+      this.framed('search', () =>
+        this.vfs.searchMany(
+          paths.map((p) => this.scope(p)),
+          query,
+        ),
       ),
     )
   }

@@ -30,8 +30,6 @@ import { setAttrs as gdriveSetAttrs } from '../../core/gdrive/set_attrs.ts'
 import { stat as gdriveStat } from '../../core/gdrive/stat.ts'
 import { exists as gdriveExists } from '../../core/gdrive/exists.ts'
 import type { ByteSource } from '../../io/types.ts'
-import { chunks } from '../../io/cooperative.ts'
-import { writeStream } from '../../core/gdrive/write.ts'
 import { write as gdriveWrite } from '../../core/gdrive/write.ts'
 import { create as gdriveCreate } from '../../core/gdrive/create.ts'
 import { mkdir as gdriveMkdir } from '../../core/gdrive/mkdir.ts'
@@ -135,8 +133,7 @@ export class GoogleDriveVFS extends BaseVFS {
     signal?: AbortSignal,
     handed: Handed = {},
   ): Promise<FileStat | null> {
-    if (data instanceof Uint8Array) return gdriveWrite(this.accessor, path, data, handed)
-    return writeStream(this.accessor, path, chunks(data, signal), handed)
+    return gdriveWrite(this.accessor, path, data, handed, signal)
   }
 
   override create(path: PathSpec, handed: Handed = {}): Promise<FileStat | null> {

@@ -36,7 +36,7 @@ def check_dest_parents(store: RAMStore, dst_spec: PathSpec, d: str) -> None:
     and its real parent unlistable.
 
     Shared by every op that places a key at a caller-supplied path
-    (``rename``, ``copy``, ``create``, ``write_bytes``): none of them
+    (``rename``, ``copy``, ``create``, ``write``): none of them
     creates parents (that is ``mkdir -p``), so all owe the destination the
     same probe. The real-filesystem backends get this from the kernel.
 

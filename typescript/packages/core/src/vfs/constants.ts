@@ -28,12 +28,3 @@ export const WRITE_EFFECTS: readonly Effect[] = [
   Effect.COPY,
   Effect.ATTR,
 ]
-
-// Methods a VFS once defined beside `read`, `write` and `append`, which now
-// answer or take a stream themselves, to the one each folded into: a class
-// still defining one is refused rather than left uncalled.
-export const FOLDED_METHODS: Readonly<Record<string, string>> = {
-  readStream: 'read',
-  writeStream: 'write',
-  appendStream: 'append',
-}

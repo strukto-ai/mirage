@@ -26,7 +26,7 @@ from mirage.core.hf_buckets.stat import stat as _stat
 from mirage.core.hf_buckets.stream import read_stream as _read_stream
 from mirage.core.hf_buckets.unlink import unlink as _unlink
 from mirage.core.hf_buckets.write import write as _write
-from mirage.io.types import ByteSource, materialize
+from mirage.io.types import ByteSource
 from mirage.types import FileStat, PathSpec, VFSName
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.hf_buckets.config import HfBucketsConfig
@@ -76,7 +76,7 @@ class HfBucketsVFS(BaseVFS):
         return await _tree(self.accessor, path)
 
     async def write(self, path: PathSpec, data: ByteSource) -> FileStat | None:
-        return await _write(self.accessor, path, await materialize(data))
+        return await _write(self.accessor, path, data)
 
     async def create(self, path: PathSpec) -> FileStat | None:
         return await _create(self.accessor, path)

@@ -26,13 +26,12 @@ import { PROMPT } from './prompt.ts'
 import type { DirListing, FileStat, SetAttrFields } from '@struktoai/mirage-core/types'
 import type { Handed } from '@struktoai/mirage-core/vfs/types'
 import { readdir as diskReaddir } from '../../core/disk/readdir.ts'
-import { readRange as diskReadRange } from '../../core/disk/read.ts'
+import { read as diskRead } from '../../core/disk/read.ts'
 import { stat as diskStat } from '../../core/disk/stat.ts'
 import { readStream as diskStream } from '../../core/disk/stream.ts'
 import { exists as diskExists } from '../../core/disk/exists.ts'
 import type { ByteSource } from '@struktoai/mirage-core/io/types'
-import { write as diskWrite, writeStream as diskWriteStream } from '../../core/disk/write.ts'
-import { appendBytes as diskAppend } from '../../core/disk/append.ts'
+import { write as diskWrite } from '../../core/disk/write.ts'
 import { pwrite as diskPwrite } from '../../core/disk/pwrite.ts'
 import { create as diskCreate } from '../../core/disk/create.ts'
 import { mkdir as diskMkdir } from '../../core/disk/mkdir.ts'
@@ -152,7 +151,7 @@ export class DiskVFS extends BaseVFS {
     size: number | null = null,
   ): Promise<ByteSource> | AsyncIterable<Uint8Array> {
     if (offset === 0 && size === null) return diskStream(this.accessor, path)
-    return diskReadRange(this.accessor, path, offset, size)
+    return diskRead(this.accessor, path, offset, size)
   }
 
   override stat(path: PathSpec): Promise<FileStat> {
@@ -170,8 +169,7 @@ export class DiskVFS extends BaseVFS {
     _handed?: Handed,
     atomic = false,
   ): Promise<void> {
-    if (data instanceof Uint8Array) return diskWrite(this.accessor, path, data)
-    return diskWriteStream(this.accessor, path, data, false, signal, atomic)
+    return diskWrite(this.accessor, path, data, false, signal, atomic)
   }
 
   override append(
@@ -180,8 +178,7 @@ export class DiskVFS extends BaseVFS {
     _handed?: Handed,
     signal?: AbortSignal,
   ): Promise<void> {
-    if (data instanceof Uint8Array) return diskAppend(this.accessor, path, data)
-    return diskWriteStream(this.accessor, path, data, true, signal)
+    return diskWrite(this.accessor, path, data, true, signal)
   }
 
   override pwrite(path: PathSpec, data: Uint8Array, offset: number): Promise<void> {

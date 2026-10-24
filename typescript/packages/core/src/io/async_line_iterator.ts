@@ -94,7 +94,7 @@ export class AsyncLineIterator implements AsyncIterableIterator<Uint8Array> {
   }
 
   unread(data: Uint8Array): void {
-    this.buf = concat2(data, this.buf)
+    this.buf = concat([data, this.buf])
   }
 
   get loaded(): number {
@@ -267,7 +267,7 @@ export class AsyncLineIterator implements AsyncIterableIterator<Uint8Array> {
         if (pending !== undefined) await pending
         const result = await this.pull()
         if (result.done === true) this.exhausted = true
-        else this.buf = concat2(this.buf, result.value)
+        else this.buf = concat([this.buf, result.value])
       }
     } catch (error) {
       await this.failed(error)
@@ -352,7 +352,7 @@ export class AsyncLineIterator implements AsyncIterableIterator<Uint8Array> {
         // to the read's own signal, or the reader outlives the caller.
         const result = await this.pull(signal)
         if (result.done === true) this.exhausted = true
-        else this.buf = concat2(this.buf, result.value)
+        else this.buf = concat([this.buf, result.value])
       }
     } catch (error) {
       await this.failed(error, parts)
@@ -446,7 +446,7 @@ export class AsyncLineIterator implements AsyncIterableIterator<Uint8Array> {
         if (this.buf.byteLength < 4 && !this.exhausted) {
           const result = await this.pull(signal)
           if (result.done === true) this.exhausted = true
-          else this.buf = concat2(this.buf, result.value)
+          else this.buf = concat([this.buf, result.value])
           continue
         }
         if (this.buf.byteLength === 0) return [copyOf(out), false]
@@ -455,7 +455,7 @@ export class AsyncLineIterator implements AsyncIterableIterator<Uint8Array> {
           return [copyOf(out), true]
         }
         const width = charWidth(this.buf)
-        out = concat2(out, this.buf.subarray(0, width))
+        out = concat([out, this.buf.subarray(0, width)])
         this.buf = this.buf.subarray(width)
         taken++
       }
@@ -560,15 +560,6 @@ export function charWidth(data: Uint8Array): number {
     if (byte < 0x80 || byte >= 0xc0) return i
   }
   return limit
-}
-
-function concat2(a: Uint8Array, b: Uint8Array): Uint8Array<ArrayBuffer> {
-  if (a.byteLength === 0) return copyOf(b)
-  if (b.byteLength === 0) return copyOf(a)
-  const out = new Uint8Array(a.byteLength + b.byteLength)
-  out.set(a, 0)
-  out.set(b, a.byteLength)
-  return out
 }
 
 function copyOf(buf: Uint8Array): Uint8Array<ArrayBuffer> {

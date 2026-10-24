@@ -80,29 +80,6 @@ describe('Mount constructor validation', () => {
       "'renderDoc', which is not a method",
     )
   })
-
-  // A method folded into read, write or append would never be called, so a
-  // VFS that still has one, on its prototype or as a field, is refused as it
-  // is mounted.
-  it.each(['readStream', 'writeStream', 'appendStream'])(
-    'rejects a VFS that defines %s',
-    (name) => {
-      class Old extends StubVFS {}
-      Object.defineProperty(Old.prototype, name, { value: () => undefined })
-      expect(() => new MountEntry({ prefix: '/ram/', vfs: new Old() })).toThrow(
-        `Old.${name}: define `,
-      )
-    },
-  )
-
-  it('rejects a VFS that sets a folded method as a field', () => {
-    class Fielded extends StubVFS {
-      writeStream = (): Promise<void> => Promise.resolve()
-    }
-    expect(() => new MountEntry({ prefix: '/ram/', vfs: new Fielded() })).toThrow(
-      'Fielded.writeStream: define write',
-    )
-  })
 })
 
 describe('Mount.resolveCommand fallback chain', () => {

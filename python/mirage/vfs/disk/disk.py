@@ -19,13 +19,12 @@ from pathlib import Path
 from typing import Any
 
 from mirage.accessor.disk import DiskAccessor
-from mirage.core.disk.append import append_bytes as _append
 from mirage.core.disk.copy import copy as _copy
 from mirage.core.disk.create import create as _create
 from mirage.core.disk.exists import exists as _exists
 from mirage.core.disk.mkdir import mkdir as _mkdir
 from mirage.core.disk.pwrite import pwrite as _pwrite
-from mirage.core.disk.read import read_range as _read_range
+from mirage.core.disk.read import read as _read
 from mirage.core.disk.readdir import readdir as _readdir
 from mirage.core.disk.rename import rename as _rename
 from mirage.core.disk.rm import rm_r as _rm_r
@@ -41,7 +40,6 @@ from mirage.core.disk.utils import (
     walk_entries,
 )
 from mirage.core.disk.write import write as _write
-from mirage.core.disk.write import write_stream as _write_stream
 from mirage.io.types import ByteSource
 from mirage.types import (
     CapacityResult,
@@ -123,7 +121,7 @@ class DiskVFS(BaseVFS):
     ) -> ByteSource:
         if not offset and size is None:
             return _read_stream(self.accessor, path)
-        return await _read_range(self.accessor, path, offset, size)
+        return await _read(self.accessor, path, offset, size)
 
     async def stat(self, path: PathSpec) -> FileStat:
         return await _stat(self.accessor, path)
@@ -134,16 +132,10 @@ class DiskVFS(BaseVFS):
     async def write(
         self, path: PathSpec, data: ByteSource, *, atomic: bool = False
     ) -> None:
-        if isinstance(data, bytes):
-            await _write(self.accessor, path, data)
-        else:
-            await _write_stream(self.accessor, path, data, atomic=atomic)
+        await _write(self.accessor, path, data, atomic=atomic)
 
     async def append(self, path: PathSpec, data: ByteSource) -> None:
-        if isinstance(data, bytes):
-            await _append(self.accessor, path, data)
-        else:
-            await _write_stream(self.accessor, path, data, append=True)
+        await _write(self.accessor, path, data, append=True)
 
     async def pwrite(self, path: PathSpec, data: bytes, offset: int) -> None:
         await _pwrite(self.accessor, path, data, offset)

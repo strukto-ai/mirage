@@ -14,6 +14,7 @@
 
 import { chunks } from '../../io/cooperative.ts'
 import { closeQuietly } from '../../io/stream.ts'
+import { materialize } from '../../io/types.ts'
 import type { Accessor } from '../../accessor/base.ts'
 import { runWithOwnVersion, writeCondition } from '../../cache/context.ts'
 import { OwnRead, type WriteCondition } from '../../cache/types.ts'
@@ -32,7 +33,6 @@ import {
   type StatFn,
   type TruncateFn,
   type WriteFn,
-  type WriteStreamFn,
   refused,
   requireHook,
 } from './driver.ts'
@@ -82,20 +82,46 @@ async function put<A extends Accessor, C>(
   }
 }
 
-/** Build the whole-object write over one driver. */
+/**
+ * Build the object write over one driver: bytes go up in one put, a stream as
+ * it is produced where the store takes one, collected first where it does not.
+ */
 export function makeWrite<A extends Accessor, C>(driver: ObjectStoreDriver<A, C>): WriteFn<A> {
-  return async function write(accessor, path, data) {
+  return async function write(accessor, path, data, signal) {
+    const body = driver.putStream === undefined ? await materialize(data) : data
     const key = kp.apply(driver.keyPrefixOf(accessor), path.mountPath)
     const cond = await writeCondition(path, 'put')
     const timer = startOp()
-    const { conn, close } = await driver.connect(accessor)
     let meta: ObjectMeta | null
-    try {
-      meta = await put(driver, conn, key, data, path, cond)
-    } finally {
-      await close()
+    let size: number
+    if (body instanceof Uint8Array) {
+      const { conn, close } = await driver.connect(accessor)
+      try {
+        meta = await put(driver, conn, key, body, path, cond)
+      } finally {
+        await close()
+      }
+      size = body.byteLength
+    } else {
+      const source = chunks(body, signal)
+      try {
+        const { conn, close } = await driver.connect(accessor)
+        try {
+          meta = await requireHook(driver.putStream)(conn, key, source, cond ?? {})
+        } finally {
+          await close()
+        }
+      } catch (error) {
+        if (error instanceof ConditionLostError) throw await refused(path, error, cond)
+        if (driver.isNotFound(error)) throw enoent(path)
+        throw error
+      } finally {
+        await closeQuietly(source)
+        await closeQuietly(body)
+      }
+      size = meta.size ?? 0
     }
-    record('write', path.virtual, driver.vfs, data.byteLength, timer, {
+    record('write', path.virtual, driver.vfs, size, timer, {
       fingerprint: meta?.fingerprint ?? null,
     })
     return writtenStat(path, meta)
@@ -270,37 +296,5 @@ export function makeMkdir<A extends Accessor, C>(driver: ObjectStoreDriver<A, C>
     } finally {
       await close()
     }
-  }
-}
-
-/** Build one streamed object replacement with the normal write condition. */
-export function makeWriteStream<A extends Accessor, C>(
-  driver: ObjectStoreDriver<A, C>,
-): WriteStreamFn<A> {
-  return async function writeStream(accessor, path, data, signal) {
-    const key = kp.apply(driver.keyPrefixOf(accessor), path.mountPath)
-    const cond = await writeCondition(path, 'put')
-    const timer = startOp()
-    const source = chunks(data, signal)
-    let meta: ObjectMeta
-    try {
-      const { conn, close } = await driver.connect(accessor)
-      try {
-        meta = await requireHook(driver.putStream)(conn, key, source, cond ?? {})
-      } finally {
-        await close()
-      }
-    } catch (error) {
-      if (error instanceof ConditionLostError) throw await refused(path, error, cond)
-      if (driver.isNotFound(error)) throw enoent(path)
-      throw error
-    } finally {
-      await closeQuietly(source)
-      await closeQuietly(data)
-    }
-    record('write', path.virtual, driver.vfs, meta.size ?? 0, timer, {
-      fingerprint: meta.fingerprint ?? null,
-    })
-    return writtenStat(path, meta)
   }
 }

@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.sharepoint import SharePointAccessor
-from mirage.core.msgraph.drive import write_item, write_item_stream
+from mirage.core.msgraph.drive import write_item
 from mirage.core.sharepoint.resolve import drive_loc, resolve_item
 from mirage.io.types import ByteSource
 from mirage.observe.context import record, start_op
@@ -21,22 +21,11 @@ from mirage.types import PathSpec
 
 
 async def write(
-    accessor: SharePointAccessor, path: PathSpec, data: bytes
-) -> None:
-    resolved = await resolve_item(accessor, path)
-    timer = start_op()
-    await write_item(
-        accessor, drive_loc(accessor.config, resolved, path.vfs_path), data
-    )
-    record("write", path.virtual, "sharepoint", len(data), timer)
-
-
-async def write_stream(
     accessor: SharePointAccessor, path: PathSpec, data: ByteSource
 ) -> None:
     resolved = await resolve_item(accessor, path)
     timer = start_op()
-    size = await write_item_stream(
+    size = await write_item(
         accessor, drive_loc(accessor.config, resolved, path.vfs_path), data
     )
     record("write", path.virtual, "sharepoint", size, timer)

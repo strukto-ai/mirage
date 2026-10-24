@@ -36,7 +36,6 @@ from mirage.core.dropbox.stat import stat as _stat
 from mirage.core.dropbox.stat import tree as _tree
 from mirage.core.dropbox.unlink import unlink as _unlink
 from mirage.core.dropbox.write import write as _write
-from mirage.core.dropbox.write import write_stream as _write_stream
 from mirage.core.generic.rewrite import truncate_by_rewrite
 from mirage.events.base import DeltaHook
 from mirage.io.types import ByteSource
@@ -95,9 +94,7 @@ class DropboxVFS(BaseVFS):
     async def write(
         self, path: PathSpec, data: ByteSource, *, atomic: bool = False
     ) -> FileStat | None:
-        if isinstance(data, bytes):
-            return await _write(self.accessor, path, data)
-        return await _write_stream(self.accessor, path, data)
+        return await _write(self.accessor, path, data)
 
     async def create(self, path: PathSpec) -> FileStat | None:
         return await _create(self.accessor, path)

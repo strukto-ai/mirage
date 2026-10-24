@@ -24,14 +24,13 @@ from mirage.core.object_store.driver import (
     StatFn,
     TruncateFn,
     WriteFn,
-    WriteStreamFn,
     refused,
 )
 from mirage.core.object_store.errors import ConditionLostError
 from mirage.core.object_store.stat import make_stat
 from mirage.errors.fs import eexist, enoent, enotdir, enotsup
 from mirage.io.stream import close_quietly
-from mirage.io.types import ByteSource
+from mirage.io.types import ByteSource, materialize
 from mirage.observe.context import record, revision_for, start_op
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils import key_prefix as kp
@@ -113,72 +112,53 @@ async def _put(
 
 
 def make_write(driver: ObjectStoreDriver[A, C]) -> WriteFn[A]:
-    """Build the whole-object write over one driver.
+    """Build the object write over one driver: bytes go up in one put, a
+    stream as it is produced where the store takes one, collected first
+    where it does not.
 
     Args:
         driver (ObjectStoreDriver): the store's native surface.
     """
 
     async def write(
-        accessor: A, path_spec: PathSpec, data: bytes
+        accessor: A, path_spec: PathSpec, data: ByteSource
     ) -> FileStat | None:
-        path = path_spec.mount_path
-        key = kp.apply(driver.key_prefix_of(accessor), path)
+        if driver.put_stream is None:
+            data = await materialize(data)
+        key = kp.apply(driver.key_prefix_of(accessor), path_spec.mount_path)
         cond = await write_condition(path_spec, "put")
         timer = start_op()
-        async with driver.connect(accessor) as conn:
-            meta = await _put(driver, conn, key, data, path_spec, cond)
+        if isinstance(data, bytes):
+            async with driver.connect(accessor) as conn:
+                meta = await _put(driver, conn, key, data, path_spec, cond)
+            size = len(data)
+        else:
+            assert driver.put_stream is not None
+            try:
+                async with driver.connect(accessor) as conn:
+                    meta = await driver.put_stream(
+                        conn, key, data, cond or WriteCondition()
+                    )
+            except ConditionLostError as exc:
+                raise await refused(path_spec, exc, cond) from exc
+            except Exception as exc:
+                if driver.is_not_found(exc):
+                    raise enoent(path_spec) from exc
+                raise
+            finally:
+                await close_quietly(data)
+            size = meta.size
         record(
             "write",
             path_spec.virtual,
             driver.vfs,
-            len(data),
+            size,
             timer,
             fingerprint=meta.fingerprint if meta else None,
         )
         return written_stat(path_spec, meta)
 
     return write
-
-
-def make_write_stream(driver: ObjectStoreDriver[A, C]) -> WriteStreamFn[A]:
-    """Build one streamed object replacement with the normal write condition.
-
-    Args:
-        driver (ObjectStoreDriver): the store's native surface.
-    """
-
-    async def write_stream(
-        accessor: A, path_spec: PathSpec, data: ByteSource
-    ) -> FileStat | None:
-        key = kp.apply(driver.key_prefix_of(accessor), path_spec.mount_path)
-        cond = await write_condition(path_spec, "put")
-        timer = start_op()
-        assert driver.put_stream is not None
-        try:
-            async with driver.connect(accessor) as conn:
-                meta = await driver.put_stream(
-                    conn, key, data, cond or WriteCondition()
-                )
-        except ConditionLostError as exc:
-            raise await refused(path_spec, exc, cond) from exc
-        except Exception as exc:
-            if driver.is_not_found(exc):
-                raise enoent(path_spec) from exc
-            raise
-        finally:
-            await close_quietly(data)
-        record(
-            "write",
-            path_spec.virtual,
-            driver.vfs,
-            meta.size,
-            timer,
-            fingerprint=meta.fingerprint,
-        )
-        return written_stat(path_spec, meta)
-
-    return write_stream
 
 
 def make_create(driver: ObjectStoreDriver[A, C]) -> CreateFn[A]:
