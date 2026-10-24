@@ -14,6 +14,7 @@
 
 import type { IOResult } from '../io/types.ts'
 import { utcDateFolder } from '../utils/dates.ts'
+import { SystemClock, type Clock } from '../utils/clock.ts'
 import {
   EVENT_CLEAR,
   EVENT_COMMAND,
@@ -45,10 +46,6 @@ function parseFiles(files: Map<string, Uint8Array>): EventDict[] {
   return out
 }
 
-function nowMs(): number {
-  return Date.now()
-}
-
 function eventTimestamp(e: EventDict): number {
   return typeof e.timestamp === 'number' ? e.timestamp : 0
 }
@@ -61,12 +58,23 @@ function eventTimestamp(e: EventDict): number {
  * (/.bash_history, the history builtin) render from the query methods
  * below; swapping infra (RAM, disk, opfs) means passing a different
  * store, nothing above this seam changes.
+ *
+ * Every entry is stamped, and filed under its day, on `clock`: the
+ * workspace's, which also stamps the op records the entries carry, so a
+ * workspace on a manual clock keeps one time domain in its history.
  */
 export class Observer {
   private readonly _store: ObserverStore
+  private readonly clock: Clock
 
-  constructor(store?: ObserverStore) {
+  constructor(store?: ObserverStore, clock: Clock = new SystemClock()) {
     this._store = store ?? new RAMObserverStore()
+    this.clock = clock
+  }
+
+  /** The clock's wall time in epoch milliseconds, an entry's stamp. */
+  private nowMs(): number {
+    return Math.floor(this.clock.now() * 1000)
   }
 
   get store(): ObserverStore {
@@ -75,7 +83,7 @@ export class Observer {
 
   private async log(entry: LogEntry): Promise<void> {
     const line = new TextEncoder().encode(entry.toJsonLine() + '\n')
-    await this._store.append(`/${utcDateFolder()}/${entry.session}.jsonl`, line)
+    await this._store.append(`/${utcDateFolder(this.nowMs())}/${entry.session}.jsonl`, line)
   }
 
   async logOp(rec: OpRecord, session: string, cwd?: string): Promise<void> {
@@ -105,7 +113,7 @@ export class Observer {
     const init: LogEntryInit = {
       type: EVENT_COMMAND,
       session,
-      timestamp: nowMs(),
+      timestamp: this.nowMs(),
       command,
       exitCode: io.exitCode,
       stdout: text,
@@ -121,7 +129,7 @@ export class Observer {
     const init: LogEntryInit = {
       type: EVENT_COMMAND,
       session,
-      timestamp: nowMs(),
+      timestamp: this.nowMs(),
       command,
       exitCode: 0,
     }
@@ -131,12 +139,12 @@ export class Observer {
 
   /** Append a clear tombstone for a session (history -c). */
   async logClear(session: string): Promise<void> {
-    await this.log(new LogEntry({ type: EVENT_CLEAR, session, timestamp: nowMs() }))
+    await this.log(new LogEntry({ type: EVENT_CLEAR, session, timestamp: this.nowMs() }))
   }
 
   /** Append a delete event for one listing entry (history -d). */
   async logDelete(session: string, offset: number): Promise<void> {
-    await this.log(new LogEntry({ type: EVENT_DELETE, session, timestamp: nowMs(), offset }))
+    await this.log(new LogEntry({ type: EVENT_DELETE, session, timestamp: this.nowMs(), offset }))
   }
 
   /**
@@ -190,7 +198,7 @@ export class Observer {
    */
   async loadEvents(events: EventDict[]): Promise<void> {
     await this._store.clear()
-    const day = utcDateFolder()
+    const day = utcDateFolder(this.nowMs())
     const bySession = new Map<string, string[]>()
     for (const e of events) {
       if (!KNOWN_EVENTS.has(e.type as string)) continue

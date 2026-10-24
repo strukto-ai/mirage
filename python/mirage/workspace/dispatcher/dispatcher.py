@@ -1485,7 +1485,10 @@ class Dispatcher:
             batches.setdefault(mount.prefix, (mount, manager, []))[2].append(
                 call.path
             )
-        scope = RecordingScope(active=active_recorder() is None)
+        scope = RecordingScope(
+            active=active_recorder() is None,
+            clock=self._namespace.registry.clock,
+        )
         try:
             for mount, manager, paths in batches.values():
                 await mount.ensure_ready()
@@ -2154,7 +2157,8 @@ class Dispatcher:
         # read outside a line (FUSE, ws.vfs) records into a scope of its
         # own for that.
         scope = RecordingScope(
-            active=filler is not None and active_recorder() is None
+            active=filler is not None and active_recorder() is None,
+            clock=self._namespace.registry.clock,
         )
         try:
             if call.name == "setattr":
@@ -2468,7 +2472,10 @@ class Dispatcher:
             if payload is not None:
                 await self._invalidate_stream(mount, call.path)
                 kwargs = {**kwargs, "data": payload.chunks()}
-            scope = RecordingScope(active=active_recorder() is None)
+            scope = RecordingScope(
+                active=active_recorder() is None,
+                clock=self._namespace.registry.clock,
+            )
             try:
                 with command_records() as mine:
                     result = await mount.call(

@@ -14,6 +14,7 @@
 
 from dataclasses import dataclass, field
 
+from mirage.utils.clock import Clock, SystemClock
 from mirage.utils.key_prefix import under_path
 
 # Ops whose record carries a token describing the bytes it moved, split
@@ -293,6 +294,8 @@ class Recorder:
         ledger (list[OpRecord] | None): the workspace ledger a line hands
             its records to when it ends; None for a file call's own
             recorder, which no other call joins.
+        clock (Clock): the workspace clock every op recorded here is
+            timed and stamped on.
     """
 
     sink: list[OpRecord]
@@ -300,3 +303,4 @@ class Recorder:
     index: RecordIndex
     mount_id: str | None = None
     ledger: list[OpRecord] | None = None
+    clock: Clock = field(default_factory=SystemClock)

@@ -1354,7 +1354,7 @@ export class Dispatcher {
         }
       }
     }
-    if (activeRecords() === undefined) await runWithRecording(warm)
+    if (activeRecords() === undefined) await runWithRecording(warm, null, this.namespace.clock)
     else await warm()
   }
 
@@ -2116,7 +2116,7 @@ export class Dispatcher {
     // outside a line (FUSE, ws.vfs) records into a scope of its own for that.
     const recorded = <T>(fill: () => Promise<T>): Promise<T> =>
       filler !== null && activeRecords() === undefined
-        ? runWithRecording(fill).then(([value]) => value)
+        ? runWithRecording(fill, null, this.namespace.clock).then(([value]) => value)
         : fill()
     let result
     try {
@@ -2207,7 +2207,9 @@ export class Dispatcher {
             `${name} ${p.virtual}`,
             (onCall, holds) =>
               activeRecords() === undefined
-                ? runWithRecording(() => own(onCall, holds)).then(([value]) => value)
+                ? runWithRecording(() => own(onCall, holds), null, this.namespace.clock).then(
+                    ([value]) => value,
+                  )
                 : own(onCall, holds),
             async (value) => {
               served(report, value, payload?.moved ?? null)

@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import json
-import time
 from typing import Any
 
 from mirage.context.session_context import current_execution_id
@@ -28,6 +27,7 @@ from mirage.observe.log_entry import (
 )
 from mirage.observe.record import OpRecord
 from mirage.observe.store import ObserverStore, RAMObserverStore
+from mirage.utils.clock import Clock, SystemClock
 from mirage.utils.dates import utc_date_folder
 
 
@@ -42,10 +42,6 @@ def _parse_files(files: dict[str, bytes]) -> list[dict[str, Any]]:
     return out
 
 
-def _now_ms() -> int:
-    return int(time.time() * 1000)
-
-
 class Observer:
     """Persists LogEntry records to an ObserverStore as JSONL files.
 
@@ -55,13 +51,26 @@ class Observer:
     methods below; swapping infra (RAM, Redis, disk, opfs) means
     passing a different store, nothing above this seam changes.
 
+    Every entry is stamped, and filed under its day, on ``clock``: the
+    workspace's, which also stamps the op records the entries carry, so
+    a workspace on a manual clock keeps one time domain in its history.
+
     Args:
         store (ObserverStore | None): Storage backend for log files;
             defaults to an in-memory RAMObserverStore.
+        clock (Clock | None): the workspace clock; None is the system
+            clock.
     """
 
-    def __init__(self, store: ObserverStore | None = None) -> None:
+    def __init__(
+        self, store: ObserverStore | None = None, clock: Clock | None = None
+    ) -> None:
         self._store = store if store is not None else RAMObserverStore()
+        self._clock: Clock = clock if clock is not None else SystemClock()
+
+    def _now_ms(self) -> int:
+        """The clock's wall time in epoch milliseconds, an entry's stamp."""
+        return int(self._clock.now() * 1000)
 
     @property
     def store(self) -> ObserverStore:
@@ -70,7 +79,8 @@ class Observer:
     async def _log(self, entry: LogEntry) -> None:
         line = (entry.to_json_line() + "\n").encode()
         await self._store.append(
-            f"/{utc_date_folder()}/{entry.session}.jsonl", line
+            f"/{utc_date_folder(self._clock.now())}/{entry.session}.jsonl",
+            line,
         )
 
     async def log_op(
@@ -118,7 +128,7 @@ class Observer:
             LogEntry(
                 type=EVENT_COMMAND,
                 session=session,
-                timestamp=_now_ms(),
+                timestamp=self._now_ms(),
                 cwd=cwd,
                 command=command,
                 exit_code=io.exit_code,
@@ -144,7 +154,7 @@ class Observer:
             LogEntry(
                 type=EVENT_COMMAND,
                 session=session,
-                timestamp=_now_ms(),
+                timestamp=self._now_ms(),
                 cwd=cwd,
                 command=command,
                 exit_code=0,
@@ -161,7 +171,7 @@ class Observer:
             LogEntry(
                 type=EVENT_CLEAR,
                 session=session,
-                timestamp=_now_ms(),
+                timestamp=self._now_ms(),
             )
         )
 
@@ -177,7 +187,7 @@ class Observer:
             LogEntry(
                 type=EVENT_DELETE,
                 session=session,
-                timestamp=_now_ms(),
+                timestamp=self._now_ms(),
                 offset=offset,
             )
         )
@@ -265,7 +275,7 @@ class Observer:
             events (list[dict]): LogEntry dicts from StateKey.HISTORY.
         """
         await self._store.clear()
-        day = utc_date_folder()
+        day = utc_date_folder(self._clock.now())
         known = (EVENT_COMMAND, EVENT_CLEAR, EVENT_DELETE, EVENT_OP)
         by_session: dict[str, list[str]] = {}
         for e in events:
