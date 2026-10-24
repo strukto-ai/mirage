@@ -24,7 +24,7 @@ import { ArithError } from '../../../../shell/errors.ts'
 import { assignElement } from '../../../session/elements.ts'
 import type { SessionState } from '../../../session/session.ts'
 import { ExecutionNode } from '../../../types.ts'
-import { runPrintf } from './format.ts'
+import { printfOutput, runPrintf } from './format.ts'
 import type { BuiltinCall, Result } from '../types.ts'
 import { envSnapshot, sessionView } from '../../../session/state.ts'
 import { TARGET_RE } from '../constants.ts'
@@ -165,38 +165,65 @@ export async function handlePrintf(
     if (program) return fail('printf', `printf: missing operand\n${usageHint('printf')}\n`)
     return fail('printf', USAGE, 2)
   }
+  const posix = program && Object.hasOwn(envSnapshot(session), 'POSIXLY_CORRECT')
+  const utf8 = utf8Locale(envSnapshot(session))
+  if (target === null || parsed === null) {
+    return printed(args[0] ?? '', args.slice(1), program, posix, utf8, signal)
+  }
   const [output, stderr, exitCode] = await runPrintf(
     args[0] ?? '',
     args.slice(1),
     program,
-    program && Object.hasOwn(envSnapshot(session), 'POSIXLY_CORRECT'),
-    utf8Locale(envSnapshot(session)),
+    posix,
+    utf8,
     signal,
   )
   const errors = decodeText(stderr)
-  if (target !== null && parsed !== null) {
-    const base = parsed[1] ?? ''
-    const text = decodeText(output).split('\0', 1)[0] ?? ''
-    let status: 'ok' | 'denied' | 'readonly' | 'subscript'
-    try {
-      status = await assignElement(session, view ?? null, base, parsed[2] ?? null, text)
-    } catch (err) {
-      if (err instanceof ArithError) {
-        // The target carries `-i` and the formatted text does not
-        // evaluate, which ends the shell as any `-i` value does.
-        const signal = err.signal('printf', true)
-        signal.stderr = concat([encodeText(errors), signal.stderr])
-        throw signal
-      }
-      if (!(err instanceof PolicyDenied)) throw err
-      return fail('printf', errors + `bash: ${err.message}\n`)
+  const base = parsed[1] ?? ''
+  const text = decodeText(output).split('\0', 1)[0] ?? ''
+  let status: 'ok' | 'denied' | 'readonly' | 'subscript'
+  try {
+    status = await assignElement(session, view ?? null, base, parsed[2] ?? null, text)
+  } catch (err) {
+    if (err instanceof ArithError) {
+      // The target carries `-i` and the formatted text does not
+      // evaluate, which ends the shell as any `-i` value does.
+      const signal = err.signal('printf', true)
+      signal.stderr = concat([encodeText(errors), signal.stderr])
+      throw signal
     }
-    if (status === 'readonly') return fail('printf', errors + `bash: ${base}: readonly variable\n`)
-    if (status === 'denied') return fail('printf', errors + `bash: ${base}: permission denied\n`)
-    if (status !== 'ok') return fail('printf', errors + `bash: ${target}: bad array subscript\n`)
-    return result('printf', { exitCode, stderr: errors })
+    if (!(err instanceof PolicyDenied)) throw err
+    return fail('printf', errors + `bash: ${err.message}\n`)
   }
-  return result('printf', { out: output, exitCode, stderr: errors })
+  if (status === 'readonly') return fail('printf', errors + `bash: ${base}: readonly variable\n`)
+  if (status === 'denied') return fail('printf', errors + `bash: ${base}: permission denied\n`)
+  if (status !== 'ok') return fail('printf', errors + `bash: ${target}: bad array subscript\n`)
+  return result('printf', { exitCode, stderr: errors })
+}
+
+/**
+ * `printf` to stdout: the output streams as the engine drains it, and the
+ * status and stderr settle once it ends. Mirrors Python's _printed.
+ */
+function printed(
+  fmt: string,
+  args: string[],
+  program: boolean,
+  posix: boolean,
+  utf8: boolean,
+  signal?: AbortSignal,
+): Result {
+  const io = new IOResult()
+  const node = new ExecutionNode({ command: 'printf' })
+  async function* output(): AsyncGenerator<Uint8Array> {
+    try {
+      yield* printfOutput(fmt, args, io, program, posix, utf8, signal)
+    } finally {
+      node.exitCode = io.exitCode
+      node.stderr = io.stderr instanceof Uint8Array ? io.stderr : new Uint8Array()
+    }
+  }
+  return [output(), io, node]
 }
 
 /** The `printf` arm. */

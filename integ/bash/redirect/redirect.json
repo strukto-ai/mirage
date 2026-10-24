@@ -1616,6 +1616,35 @@
         "stdout": "empty=1\nsplit=1\nbrace=1\nquoted\n",
         "stderr": "$empty: ambiguous redirect\n$names: ambiguous redirect\n{a,b}: ambiguous redirect\n"
       }
+    },
+    {
+      "id": "redirect_multi_mib_output_lands_whole",
+      "seq": 501174,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "(mkdir -p /data/big-redirect && cd /data/big-redirect; seq 1 300000 > out; wc -c < out; tail -n 1 out; seq 1 3 > out; cat out; exec 3> d; seq 1 300000 >&3; echo x >&3; exec 3>&-; wc -c < d; tail -n 2 d; seq 1 300000 > /dev/null; echo null=$?; head -c 3000000 /dev/zero > /dev/null; echo zero=$?); rm -r /data/big-redirect",
+      "expect": {
+        "exit": 0,
+        "stdout": "1988895\n300000\n1\n2\n3\n1988897\n300000\nx\nnull=0\nzero=0\n",
+        "stderr": ""
+      }
     }
   ]
 }

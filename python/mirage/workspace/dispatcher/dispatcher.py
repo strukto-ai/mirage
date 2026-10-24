@@ -1197,6 +1197,12 @@ class Dispatcher:
         if admit_only:
             self._follow(call)
             if name == "stat":
+                serving = self._namespace.try_mount_for(call.path.virtual)
+                if report is not None and serving is not None:
+                    key = mount_key(
+                        call.path.virtual, serving.prefix.rstrip("/")
+                    )
+                    report.store = f"{id(serving.vfs)}:{key}"
                 _memory_answered(report)
                 return None, IOResult()
             mount = self._namespace.try_mount_for(call.path.virtual)

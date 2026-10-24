@@ -12,23 +12,36 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import AsyncGenerator
+from contextlib import aclosing
+
+from mirage.io.types import IOResult
 from mirage.io.yield_budget import YieldBudget
-from mirage.rs.stream import open_stream
+from mirage.rs.stream import close_stream, open_stream
 from mirage.shell.bytes import encode_text
 
 
-async def run_printf(
+async def printf_output(
     fmt: str,
     args: list[str],
+    io: IOResult,
     program: bool = False,
     posix: bool = False,
     utf8: bool = False,
-) -> tuple[bytes, bytes, int, bool]:
+) -> AsyncGenerator[bytes, None]:
     """Format raw shell arguments through the shared bounded engine.
+
+    The output comes out as the engine drains it, one bounded step at a
+    time, so a wide field or a long reuse of the format is never held
+    whole, and a reader that stops early stops the engine. The status and
+    stderr settle on ``io`` as the output ends, or as its reader stops:
+    the status the format reached, unless an output limit set one first,
+    and the stderr ahead of that limit's notice.
 
     Args:
         fmt (str): Format text, including shell byte escapes.
         args (list[str]): Raw argument text.
+        io (IOResult): where the status and stderr settle.
         program (bool): Use the program's numeric diagnostics.
         posix (bool): Suppress program character-constant warnings.
         utf8 (bool): Read quoted numeric constants as UTF-8 characters.
@@ -43,16 +56,55 @@ async def run_printf(
         },
     )
     budget = YieldBudget()
-    for index, text in enumerate([fmt, *args]):
-        for at in range(0, len(text), 4096):
-            stream.feed_input(index, encode_text(text[at : at + 4096]))
+    errors: list[bytes] = []
+    try:
+        for index, text in enumerate([fmt, *args]):
+            for at in range(0, len(text), 4096):
+                stream.feed_input(index, encode_text(text[at : at + 4096]))
+                await budget.run()
+            stream.end_input(index)
             await budget.run()
-        stream.end_input(index)
-        await budget.run()
-    output = [stream.finish()]
-    errors = [stream.take_stderr()]
-    while stream.busy():
-        output.append(stream.drain())
-        errors.append(stream.take_stderr())
-        await budget.run()
-    return b"".join(output), b"".join(errors), stream.status(), stream.done()
+        output = stream.finish()
+        if err := stream.take_stderr():
+            errors.append(err)
+        if output:
+            yield output
+        while stream.busy():
+            output = stream.drain()
+            if err := stream.take_stderr():
+                errors.append(err)
+            if output:
+                yield output
+            await budget.run()
+    finally:
+        if not io.exit_code:
+            io.exit_code = stream.status()
+        if err := b"".join(errors):
+            later = io.stderr if isinstance(io.stderr, bytes) else b""
+            io.stderr = err + later
+        await close_stream(stream)
+
+
+async def run_printf(
+    fmt: str,
+    args: list[str],
+    program: bool = False,
+    posix: bool = False,
+    utf8: bool = False,
+) -> tuple[bytes, bytes, int]:
+    """``printf_output`` collected whole, for ``printf -v``.
+
+    Args:
+        fmt (str): Format text, including shell byte escapes.
+        args (list[str]): Raw argument text.
+        program (bool): Use the program's numeric diagnostics.
+        posix (bool): Suppress program character-constant warnings.
+        utf8 (bool): Read quoted numeric constants as UTF-8 characters.
+    """
+    io = IOResult()
+    async with aclosing(
+        printf_output(fmt, args, io, program, posix, utf8)
+    ) as parts:
+        output = b"".join([part async for part in parts])
+    stderr = io.stderr if isinstance(io.stderr, bytes) else b""
+    return output, stderr, io.exit_code

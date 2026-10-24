@@ -109,6 +109,12 @@ export class OpReport {
   source: string | null = null
   bytes: number | null = null
   path: string | null = null
+  /**
+   * The backing file a stat resolved to without running (`admit_only`): its
+   * store and the key in it, alike for every workspace that mounts that store.
+   * Null when no mount answers.
+   */
+  store: string | null = null
 
   /** Stamp the report at the moment an op completes. */
   served(source: string | null = null, moved: number | null = null): void {

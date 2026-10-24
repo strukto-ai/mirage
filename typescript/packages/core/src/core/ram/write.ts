@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { activePipe } from '../dev/device.ts'
+import { activeDevice, activePipe } from '../dev/device.ts'
 import { chunks } from '../../io/cooperative.ts'
 import { materialize, type ByteSource } from '../../io/types.ts'
 import { concat } from '../../utils/bytes.ts'
@@ -33,8 +33,9 @@ import { checkDestParents, checkWriteTarget } from './dest.ts'
  * replacement at its own position, as an open file's offset keeps it, an
  * append at the file's end then, so another appender's bytes stay. Appending
  * nothing opens the file (`true >> f`): it creates a missing one and leaves an
- * existing one as it was, modification time included. Mirrors Python's
- * `write`.
+ * existing one as it was, modification time included. A device that discards
+ * writes (`/dev/null`) has its bytes counted as they arrive and kept nowhere.
+ * Mirrors Python's `write`.
  */
 export async function write(
   accessor: RAMAccessor,
@@ -65,6 +66,13 @@ export async function write(
   checkDestParents(accessor, path, p)
   checkWriteTarget(accessor, path, p)
   const { files, modified } = accessor.store
+  if (activeDevice(accessor, p) !== null) {
+    if (data instanceof Uint8Array) size = data.byteLength
+    else for await (const chunk of chunks(data)) size += chunk.byteLength
+    if (size > 0 || !append) modified.set(p, nowIso())
+    record(op, path.virtual, VFSName.RAM, size, timer)
+    return
+  }
   if (data instanceof Uint8Array || atomic) {
     const whole = data instanceof Uint8Array ? data : await materialize(data)
     const current = append ? files.get(p) : undefined

@@ -206,12 +206,17 @@ class OpReport:
         path (str | None): the path the op ran on once the dispatcher
             followed its links, which is what a record names. None until
             the walk is done.
+        store (str | None): the backing file a stat resolved to without
+            running (``admit_only``): its store and the key in it, alike
+            for every workspace that mounts that store. None when no
+            mount answers.
     """
 
     completed: bool = False
     source: str | None = None
     bytes: int | None = None
     path: str | None = None
+    store: str | None = None
 
     def served(
         self, source: str | None = None, moved: int | None = None
