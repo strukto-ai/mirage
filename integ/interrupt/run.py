@@ -314,8 +314,8 @@ async def disconnected(client, port, stream, explicit=False):
         assert result["exit_code"] == 1, result
 
 
-async def response_body(reader):
-    raw = await asyncio.wait_for(reader.read(), 3)
+async def response_body(reader, head=b""):
+    raw = head + await asyncio.wait_for(reader.read(), 3)
     headers, _, body = raw.partition(b"\r\n\r\n")
     if b"transfer-encoding: chunked" in headers.lower():
         parts = []
@@ -330,23 +330,30 @@ async def response_body(reader):
     return headers, body
 
 
-async def malformed(client, port, stream):
-    command = f"echo early-{stream}"
+async def malformed(client, port, stream, running=False):
+    command = ("cat; " if running else "") + f"echo early-{stream}-{running}"
     prefix = multipart(command) + b"hello"
     async with raw_request(port, prefix, len(prefix) + 1, stream) as (
         reader,
         writer,
     ):
         job_id = await find_job(client, command)
-        await settled(client, job_id, False)
+        head = b""
+        if not running:
+            await settled(client, job_id, False)
+        if stream and not running:
+            head = await asyncio.wait_for(reader.readuntil(b'"status"'), 3)
         writer.write(b"Z")
         await writer.drain()
-        headers, body = await response_body(reader)
+        headers, body = await response_body(reader, head)
         if stream:
             terminal = json.loads(body.splitlines()[-1])
-            assert terminal["status"] == "failed" and terminal["error"], (
-                terminal
-            )
+            if running:
+                assert terminal["status"] == "failed" and terminal["error"], (
+                    terminal
+                )
+            else:
+                assert terminal["status"] == "done", terminal
         else:
             assert b" 400 " in headers, (headers, body)
 
@@ -443,6 +450,11 @@ async def run(hosts, selected):
                         (client, port, stream, True),
                     ),
                     (f"malformed-{stream}", malformed, (client, port, stream)),
+                    (
+                        f"malformed-running-{stream}",
+                        malformed,
+                        (client, port, stream, True),
+                    ),
                     (f"oversized-{stream}", oversized, (client, port, stream)),
                 ]
             runs += [("unread-output", unread, (client, port))]
