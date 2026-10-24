@@ -25,6 +25,8 @@ import { PipeClosed } from '../../../io/errors.ts'
 import { CommandTimeoutError } from '../../../errors/types.ts'
 import { IOResult, materialize } from '../../../io/types.ts'
 import type { DiffComputer, PairOutcome } from '../../../rs/diff_types.ts'
+import { DiffPool } from '../../../rs/diff_pool.ts'
+import { eacces } from '../../../errors/fs.ts'
 
 const ENC = new TextEncoder()
 
@@ -185,6 +187,37 @@ describe('diff headers', () => {
       '+++ gone\t1970-01-01 00:00:00.000000000 +0000',
     )
   })
+})
+
+it('reports a read failing mid-stream as trouble and closes its input', async () => {
+  const closed: string[] = []
+  async function* read(p: PathSpec): AsyncIterable<Uint8Array> {
+    try {
+      yield ENC.encode('x\n')
+      await Promise.resolve()
+      if (p.virtual === '/d/a') throw eacces(p)
+      yield ENC.encode('y\n')
+    } finally {
+      closed.push(p.virtual)
+    }
+  }
+  const pool = new DiffPool()
+  const ctx: Context = { flags: {}, stdin: null, cwd: PathSpec.fromStrPath('/'), diff: pool }
+  try {
+    const failed = [operand('a', '/d/a'), operand('b', '/d/b')]
+    const [out, io] = await diffGeneric(failed, ctx, read, readdir, stat)
+    expect([out, io.exitCode]).toEqual([null, 2])
+    expect(new TextDecoder().decode(await materialize(io.stderr))).toBe(
+      'diff: a: Permission denied\n',
+    )
+    expect(closed).toEqual(['/d/a'])
+    const same = [operand('b', '/d/b'), operand('c', '/d/c')]
+    const [, again] = await diffGeneric(same, ctx, read, readdir, stat)
+    expect(again.exitCode).toBe(0)
+    expect(closed).toEqual(['/d/a', '/d/b', '/d/c'])
+  } finally {
+    await pool.close()
+  }
 })
 
 it.each([

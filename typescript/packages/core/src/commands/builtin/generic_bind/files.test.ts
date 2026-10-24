@@ -212,6 +212,8 @@ describe('the abort guard', () => {
     const p = at('/t')
     for (const call of [
       () => files.write(p, new Uint8Array()),
+      () => materialize(files.read(p)),
+      () => materialize(files.read(p, 0, 1)),
       () => files.readdir(p),
       () => files.stat(p),
       () => files.exists(p),
