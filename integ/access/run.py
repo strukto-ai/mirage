@@ -25,6 +25,7 @@ per deployment: every credential over HTTP, and a good and a bad one
 through each other access. ``dev`` adds the CLI's lifecycle: spawning,
 status, restart, stop, kill, idle exit, config, the stdio relays, and a
 remote URL that must neither start a daemon nor receive the token file.
+``token`` and ``jwt`` also print how late the server's loop ran.
 
 Three gates end a run over both hosts and every access: every HTTP
 route was hit on each host and deployment run (the two hosts' route
@@ -1093,6 +1094,28 @@ def gate_ops(report: Report) -> None:
         )
 
 
+def loop_lag(key: str, path: Path, report: Report) -> None:
+    """Print how late a deployed server's loop ran over the whole run.
+
+    ``serve.py`` and ``serve.ts`` write the summary as the server stops;
+    no file, or no samples, means the timer never ran or the server did
+    not stop cleanly.
+
+    Args:
+        key (str): the server, as ``host/deployment``.
+        path (Path): the summary the server wrote.
+        report (Report): the run's report.
+    """
+    lag = json.loads(path.read_text()) if path.exists() else {}
+    report.check(f"{key} server.loop_lag", lag.get("samples", 0) > 0, True)
+    if lag:
+        report.note(
+            f"{key} loop lag p50 {lag['p50_ms']} ms, p99 {lag['p99_ms']} ms,"
+            f" max {lag['max_ms']} ms, {lag['stalls']} stalls,"
+            f" gc {lag['gc_ms']} ms over {lag['samples']} samples"
+        )
+
+
 async def main(args: argparse.Namespace) -> int:
     report = Report()
     hosts = args.host or list(HOSTS)
@@ -1139,6 +1162,8 @@ async def main(args: argparse.Namespace) -> int:
                     if "cli" in wanted:
                         await codex_exec(server, report)
                     await server_checks(server, report)
+                if name != "dev":
+                    loop_lag(server.key, d.loop_lag, report)
             if "dev" in deployments and "cli" in wanted:
                 await lifecycle(host, scratch / "lifecycle", recorder, report)
 

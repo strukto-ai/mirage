@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import contextvars
 import errno
 from dataclasses import replace
 
@@ -69,6 +70,34 @@ def bound_session():
     token = set_current_session(sess)
     yield sess
     reset_current_session(token)
+
+
+def test_a_changed_caller_keeps_the_rest_and_refuses_a_stranger():
+    base = Caller(execution="e", command_started=1)
+    moved = base.changed({"command_started": 2})
+    assert (moved.execution, moved.command_started) == ("e", 2)
+    assert base.command_started == 1
+    with pytest.raises(AttributeError):
+        base.changed({"no_such_field": 1})
+
+
+def _undo_bindings() -> None:
+    before = current_caller()
+    first = bind_caller(before.changed({"execution": "a"}))
+    second = bind_caller(current_caller().changed({"command_started": 7}))
+    reset_caller(first)
+    now = current_caller()
+    assert (now.execution, now.command_started) == (None, 7)
+    reset_caller(second)
+    now = current_caller()
+    assert (now.execution, now.command_started) == (None, None)
+    third = bind_caller(now.changed({"execution": "b"}))
+    reset_caller(third)
+    assert current_caller() is now
+
+
+def test_bindings_undone_in_any_order_restore_only_their_own_fields():
+    contextvars.copy_context().run(_undo_bindings)
 
 
 def test_weaker_mode_lattice():

@@ -63,6 +63,30 @@ async def test_create_list_delete_session_round_trip():
 
 
 @pytest.mark.asyncio
+async def test_a_session_is_created_on_the_workspace_loop(monkeypatch):
+    app = build_app(idle_grace_seconds=10.0)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(
+        transport=transport, base_url="http://test"
+    ) as client:
+        wid = await _create_workspace(client)
+        runner = app.state.registry.get(wid).runner
+        create = runner.ws.create_session
+        loops = []
+
+        def recording(*args, **kwargs):
+            loops.append(asyncio.get_running_loop())
+            return create(*args, **kwargs)
+
+        monkeypatch.setattr(runner.ws, "create_session", recording)
+        r = await client.post(
+            f"/v1/workspaces/{wid}/sessions", json={"session_id": "agent_a"}
+        )
+        assert r.status_code == 201, r.text
+        assert loops == [runner.loop]
+
+
+@pytest.mark.asyncio
 async def test_create_session_without_id_auto_assigns():
     app = build_app(idle_grace_seconds=10.0)
     transport = ASGITransport(app=app)

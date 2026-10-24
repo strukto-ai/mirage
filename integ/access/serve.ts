@@ -15,12 +15,17 @@
 // The deployed TypeScript server: buildApp() listening, every setting
 // from the environment as in a deployment, and the snapshot store an
 // operator passes buildApp from ACCESS_SNAPSHOT_STORE (an S3Config as
-// JSON). Run from integ/ as `node --import tsx access/serve.ts PORT`;
+// JSON). When ACCESS_LOOP_LAG names a file, the server's loop is timed
+// for the length of the run and the summary written there on SIGTERM.
+// Run from integ/ as `node --import tsx access/serve.ts PORT`;
 // `--routes` prints the route table as JSON instead.
+import { writeFileSync } from 'node:fs'
 import type { S3Config } from '@struktoai/mirage-core/vfs/s3/config'
 import { buildApp } from '../../typescript/packages/server/src/app.ts'
+import { LOOP_LAG_ENV, LoopLag } from './loop_lag.ts'
 
 const store = process.env.ACCESS_SNAPSHOT_STORE
+const lagFile = process.env[LOOP_LAG_ENV]
 const app = buildApp(
   store !== undefined && store !== '' ? { snapshotStore: JSON.parse(store) as S3Config } : {},
 )
@@ -32,4 +37,12 @@ if (process.argv[2] === '--routes') {
   await app.close()
 } else {
   await app.listen({ host: '127.0.0.1', port: Number(process.argv[2]) })
+  if (lagFile !== undefined && lagFile !== '') {
+    const lag = new LoopLag()
+    lag.start()
+    process.once('SIGTERM', () => {
+      writeFileSync(lagFile, JSON.stringify(lag.stop()))
+      process.exit(0)
+    })
+  }
 }

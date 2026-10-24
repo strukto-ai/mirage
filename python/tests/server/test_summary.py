@@ -70,3 +70,23 @@ async def test_in_flight_jobs_counts_only_running_jobs():
         assert detail.internals.in_flight_jobs == 1
     finally:
         await registry.remove(entry.id)
+
+
+@pytest.mark.asyncio
+async def test_the_detail_is_read_on_the_workspace_loop(monkeypatch):
+    registry = WorkspaceRegistry()
+    entry = registry.add(Workspace({"/data": RAMVFS()}, mode=MountMode.WRITE))
+    runner = entry.runner
+    history = runner.ws.history
+    loops = []
+
+    async def recording():
+        loops.append(asyncio.get_running_loop())
+        return await history()
+
+    monkeypatch.setattr(runner.ws, "history", recording)
+    try:
+        await make_detail(entry, verbose=True)
+        assert loops == [runner.loop]
+    finally:
+        await registry.remove(entry.id)

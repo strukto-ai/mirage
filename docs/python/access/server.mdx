@@ -45,11 +45,11 @@ uvicorn.run(app, host="127.0.0.1", port=8765)
 
 ## Started by the CLI
 
-The CLI runs the same app as a daemon, `mirage.server.daemon:app`, on `127.0.0.1:8765` in local auth mode, logging to `~/.mirage/daemon.log`. That entry adds the two daemon behaviors: it writes `$MIRAGE_HOME/daemon.pid` for `mirage daemon stop` and `kill`, and exits 30 seconds (`MIRAGE_IDLE_GRACE_SECONDS`) after its last workspace is deleted. Its settings are on the [CLI page](/home/access/cli#config).
+The CLI runs the same app as a daemon, `mirage.server.daemon:app`, on `127.0.0.1:8765` in local auth mode, logging to `~/.mirage/daemon.log`. That entry adds the daemon behaviors: it writes `$MIRAGE_HOME/daemon.pid` for `mirage daemon stop` and `kill`, exits 30 seconds (`MIRAGE_IDLE_GRACE_SECONDS`) after its last workspace is deleted, and tunes the interpreter as it starts. It collects and freezes what startup made, so a full collection no longer scans it, raises the young collection threshold to 10,000, and sets the GIL switch interval to 1 ms. These settings are process-wide, so an app you run with `build_app` keeps its own. Its settings are on the [CLI page](/home/access/cli#config).
 
 ## Beside your own event loop
 
-`WorkspaceRunner` pins a [workspace](/python/access/in-app) to a thread and event loop of its own. A slow line then never stalls your app's loop, and workspaces in one process never hold each other up. The Mirage server hosts every workspace this way.
+`WorkspaceRunner` pins a [workspace](/python/access/in-app) to a thread and event loop of its own. A line waiting on I/O then never stalls your app's loop, and workspaces in one process never wait on each other's I/O. CPU-bound work still shares the GIL with every other thread in the process. The Mirage server hosts every workspace this way.
 
 ```python
 from mirage.workspace.runner import WorkspaceRunner

@@ -431,7 +431,11 @@ export function registerWorkspacesRoutes(app: FastifyInstance, deps: WorkspaceRo
     '/v1/workspaces/:id',
     async (req, reply) => {
       const entry = deps.registry.visible(req.params.id, req.account)
-      if (entry === null) return reply.status(404).send({ detail: 'workspace not found' })
+      // A workspace being deleted keeps its id until the deletion is done,
+      // but its runner has stopped answering: it is gone to a reader.
+      if (entry === null || deps.registry.removing(req.params.id)) {
+        return reply.status(404).send({ detail: 'workspace not found' })
+      }
       const verbose = req.query.verbose === 'true'
       return await makeDetail(entry, verbose)
     },

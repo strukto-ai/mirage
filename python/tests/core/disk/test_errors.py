@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import errno
+import gc
 
 import pytest
 
@@ -50,3 +51,19 @@ def test_disk_errors_leaves_non_os_errors_alone():
     with pytest.raises(ValueError, match="boom"):
         with disk_errors("/data/a.txt"):
             raise ValueError("boom")
+
+
+def test_a_restamped_error_is_freed_without_the_collector(tmp_path):
+    gc.collect()
+    gc.set_debug(gc.DEBUG_SAVEALL)
+    try:
+        try:
+            with disk_errors("/data/nope.txt"):
+                (tmp_path / "nope.txt").stat()
+        except FileNotFoundError:
+            pass
+        gc.collect()
+        assert [e for e in gc.garbage if isinstance(e, OSError)] == []
+    finally:
+        gc.set_debug(0)
+        gc.garbage.clear()

@@ -12,7 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import gc
 import importlib
+import sys
+
+import pytest
 
 from mirage.server import daemon
 from mirage.server.env import ENV_HOME, ENV_IDLE_GRACE_SECONDS
@@ -27,3 +31,20 @@ def test_the_daemon_writes_a_pid_file_and_exits_when_idle(
     assert module.app.state.pid_file == tmp_path / "daemon.pid"
     assert module.app.state.on_idle_exit is module._exit
     assert module.app.state.registry.idle_grace_seconds == 7.0
+
+
+@pytest.mark.asyncio
+async def test_the_daemon_tunes_the_interpreter_before_it_serves(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setenv(ENV_HOME, str(tmp_path))
+    tuned = []
+    young = (daemon.GC_YOUNG_THRESHOLD, *gc.get_threshold()[1:])
+    monkeypatch.setattr(gc, "freeze", lambda: tuned.append("freeze"))
+    monkeypatch.setattr(gc, "set_threshold", lambda *t: tuned.append(t))
+    monkeypatch.setattr(sys, "setswitchinterval", tuned.append)
+    module = importlib.reload(daemon)
+    assert tuned == []
+    async with module.app.router.lifespan_context(module.app):
+        assert tuned == ["freeze", young, daemon.SWITCH_INTERVAL]
+        assert module.app.state.pid_file.exists()
