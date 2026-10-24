@@ -270,12 +270,13 @@ def tree_walk(
                 return root, virtual[len(base) :]
         return None
 
-    async def tree_readdir(path: PathSpec, *args: Any, **kwargs: Any) -> Any:
+    async def tree_readdir(
+        path: PathSpec, *args: Any, limit: int | None = None, **kwargs: Any
+    ) -> Any:
         virtual = path.virtual.rstrip("/") or "/"
         hit = covering(virtual) if _answerable(path) else None
         if hit is None and virtual not in asked and not path.pattern:
             asked.add(virtual)
-            limit = kwargs.get("limit")
             try:
                 found = await (
                     read_tree(path)
@@ -294,7 +295,11 @@ def tree_walk(
             if listing is not None:
                 base = root.rstrip("/") + "/"
                 return [base + name for name in listing]
-        return await readdir(path, *args, **kwargs)
+        return await (
+            readdir(path, *args, **kwargs)
+            if limit is None
+            else readdir(path, *args, limit=limit, **kwargs)
+        )
 
     async def tree_stat(path: PathSpec, *args: Any, **kwargs: Any) -> Any:
         virtual = path.virtual.rstrip("/") or "/"
