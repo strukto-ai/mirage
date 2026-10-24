@@ -16,11 +16,10 @@ from collections.abc import Mapping, Sequence
 
 from mirage.commands.builtin.find_parse import exec_spans
 from mirage.commands.cli.walk import walk
-from mirage.commands.spec import SPECS
+from mirage.commands.spec import SPECS, constants
 from mirage.commands.spec.parser import parse_command
 from mirage.commands.spec.types import CommandSpec, ValueType
 from mirage.utils.glob_walk import unmark_globs
-from mirage.workspace.executor.command.routing import command_tree
 from mirage.workspace.mount import MountRegistry
 
 
@@ -32,13 +31,11 @@ def spec_for_command(
 ) -> CommandSpec | None:
     """Find the spec that classifies a mount command's words.
 
-    A command tree a mount serves is classified by its tree, which
-    ``spec_word_kinds`` walks, wherever the line is typed: the tree runs
-    on the mount serving its name. Otherwise the cwd mount's spec wins;
-    the shared SPECS table fills in when that mount does not register the
-    command. Every absolute path has a mount (the workspace roots an
-    implicit RAM mount), so mount_for never fails here; if it ever does,
-    the registry is broken and the error should propagate.
+    Installed CLIs own their grammar. A mount command uses the selected
+    invocation's spec, whether flat or a tree, so the same registration
+    classifies the words and runs the command. A fallback flat command
+    without declared arguments leaves path inference to the cwd/shared
+    grammar; injected help/version options do not declare operand roles.
 
     Args:
         name (str): expanded command name.
@@ -46,9 +43,25 @@ def spec_for_command(
         cwd (str): current working directory.
         argv (Sequence[str] | None): actual invocation words, None for discovery.
     """
-    tree = command_tree(registry, name, cwd, argv)
-    if tree is not None:
-        return tree.spec
+    install = registry.clis.get(name)
+    if install is not None:
+        return install.cli.spec
+    mount = (
+        registry.command_mount(name, [], cwd)
+        if argv is None
+        else registry.invocation_mount(name, [], cwd, argv)
+    )
+    if mount is not None:
+        spec = mount.spec_for(name)
+        if spec is not None and (
+            mount.cli_for(name) is not None
+            or any(
+                arg is not constants.HELP_OPTION
+                and arg is not constants.VERSION_OPTION
+                for arg in spec.arguments
+            )
+        ):
+            return spec
     spec = registry.mount_for(cwd).spec_for(name)
     if spec is not None:
         return spec

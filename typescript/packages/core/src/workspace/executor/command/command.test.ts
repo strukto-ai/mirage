@@ -59,6 +59,74 @@ function treeFallbackRegistry(): MountRegistry {
 
 describe('handleCommand — mount tree fallback', () => {
   it.each([false, true])(
+    'keeps tree verbs and group values distinct from a flat path grammar (writes=%s)',
+    async (write) => {
+      const ws = new Workspace(
+        { '/longer': new RAMVFS(), '/b': new RAMVFS() },
+        {
+          mode: MountMode.WRITE,
+          shellParser: await getTestParser(),
+        },
+      )
+      const calls: string[] = []
+      try {
+        ws.mount('/longer').registerCommands(
+          command({
+            name: 'tool',
+            vfs: 'ram',
+            write,
+            spec: new CommandSpec({
+              arguments: [new Argument('paths', { type: 'path', nargs: '*' })],
+            }),
+            fn: () => {
+              calls.push('flat')
+              return [new TextEncoder().encode('flat\n'), new IOResult()]
+            },
+          }),
+        )
+        ws.mount('/b').registerCommands([
+          new CLI({
+            spec: new CommandSpec({
+              name: 'tool',
+              arguments: [new Argument('--account')],
+              subcommands: [new CommandSpec({ name: 'send' })],
+            }),
+            handlers: {
+              send: new CLIHandler({
+                write: true,
+                fn: () => {
+                  calls.push('tree')
+                  return [new TextEncoder().encode('tree\n'), new IOResult()]
+                },
+              }),
+            },
+          }),
+        ])
+        const ambiguity =
+          'tool: ambiguous, registered on 2 writable mounts:\n  /longer\n  /b\ncd into the target mount to disambiguate.\n'
+        for (const [line, output, unbound] of [
+          ['tool send', 'tree\n', true],
+          ['tool --account /longer send', 'tree\n', true],
+          ['tool /longer/item', 'flat\n', false],
+          ['cd /longer && tool send', 'flat\n', false],
+        ] as const) {
+          const refused = write && unbound
+          const before = calls.length
+          const result = await ws.shell(line)
+          expect([result.exitCode, result.stdoutText, result.stderrText], line).toEqual([
+            refused ? 1 : 0,
+            refused ? '' : output,
+            refused ? ambiguity : '',
+          ])
+          if (refused) expect(calls).toHaveLength(before)
+        }
+      } finally {
+        await ws.close()
+      }
+    },
+  )
+
+  it.each([false, true])(
     'selects a later tree that recognizes the verb (writes=%s)',
     async (write) => {
       const registry = treeFallbackRegistry()
@@ -92,26 +160,30 @@ describe('handleCommand — mount tree fallback', () => {
       expect(decode(await materialize(stdout))).toBe('/short\n')
     },
   )
-  it('runs a selected tree even when discovery found a flat reader first', async () => {
-    const registry = treeFallbackRegistry()
-    registry.mountForPrefix('/longer').registerCommands(
-      command({
-        name: 'remote',
-        vfs: 'ram',
-        spec: new CommandSpec({ arguments: [new Argument('args', { nargs: '*' })] }),
-        fn: () => [null, new IOResult()],
-      }),
-    )
-    const [stdout, io] = await handleCommand(
-      NEVER_EXECUTE,
-      NEVER_DISPATCH,
-      registry,
-      ['remote', 'put'],
-      routed(new EvaluationContext(new SessionState({ sessionId: 'test' }))),
-    )
-    expect(io.exitCode).toBe(0)
-    expect(decode(await materialize(stdout))).toBe('/short\n')
-  })
+  it.each(['str', 'path'] as const)(
+    'runs a selected tree when discovery found a flat %s reader first',
+    async (type) => {
+      const registry = treeFallbackRegistry()
+      registry.mount('/', new RAMVFS(), MountMode.WRITE)
+      registry.mountForPrefix('/longer').registerCommands(
+        command({
+          name: 'remote',
+          vfs: 'ram',
+          spec: new CommandSpec({ arguments: [new Argument('args', { type, nargs: '*' })] }),
+          fn: () => [null, new IOResult()],
+        }),
+      )
+      const [stdout, io] = await handleCommand(
+        NEVER_EXECUTE,
+        NEVER_DISPATCH,
+        registry,
+        ['remote', 'put'],
+        routed(new EvaluationContext(new SessionState({ sessionId: 'test' }))),
+      )
+      expect(io.exitCode).toBe(0)
+      expect(decode(await materialize(stdout))).toBe('/short\n')
+    },
+  )
 
   it.each([
     ['get', '/longer/'],

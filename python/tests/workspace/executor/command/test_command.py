@@ -147,6 +147,70 @@ async def test_fallback_selects_the_tree_that_recognizes_the_verb(write):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("flat_write", [False, True])
+async def test_named_tree_grammar_precedes_fallback_flat_path_inference(
+    flat_write,
+):
+    calls = []
+
+    @command(
+        "tool",
+        vfs="ram",
+        spec=CommandSpec(
+            arguments=(Argument("paths", type="path", nargs="*"),)
+        ),
+        write=flat_write,
+    )
+    async def flat(accessor, paths, texts, ctx):
+        calls.append("flat")
+        return b"flat\n", IOResult()
+
+    async def send(accessor, paths, texts, ctx):
+        calls.append("tree")
+        return b"tree\n", IOResult()
+
+    tree = CLI(
+        spec=CommandSpec(
+            name="tool",
+            arguments=(Argument("--account"),),
+            subcommands=(CommandSpec(name="send"),),
+        ),
+        handlers={"send": CLIHandler(send, write=True)},
+    )
+    ws = Workspace({"/longer": RAMVFS(), "/b": RAMVFS()}, mode=MountMode.WRITE)
+    ws.mount("/longer").register_commands([flat])
+    ws.mount("/b").register_commands([tree])
+    try:
+        for line in ("tool send", "tool --account /longer send"):
+            result = await ws.shell(line)
+            if flat_write:
+                assert result.exit_code == 1
+                assert result.stderr == (
+                    b"tool: ambiguous, registered on 2 writable mounts:\n"
+                    b"  /longer\n  /b\n"
+                    b"cd into the target mount to disambiguate.\n"
+                )
+                assert calls == []
+            else:
+                assert (result.exit_code, result.stdout) == (0, b"tree\n")
+        for line, output in (
+            ("tool /longer/item", b"flat\n"),
+            ("cd /longer && tool send", b"flat\n"),
+        ):
+            result = await ws.shell(line)
+            assert (result.exit_code, result.stdout, result.stderr or b"") == (
+                0,
+                output,
+                b"",
+            )
+        assert calls == (
+            ["flat", "flat"] if flat_write else ["tree"] * 2 + ["flat"] * 2
+        )
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
 async def test_the_empty_name_routes_nowhere():
     # Its `virtual` is the working directory, here the root mount, which
     # used to make the line span mounts it never names.

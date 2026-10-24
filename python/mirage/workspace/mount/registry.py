@@ -753,15 +753,59 @@ class MountRegistry:
             argv (Sequence[str]): words after the command, for tree leaves.
             access (SessionAccess | None): owner, else the current session.
         """
+        candidates, _ = self._invocation_choices(
+            cmd_name, path_scopes, cwd, argv, access
+        )
+        return candidates
+
+    def _invocation_choices(
+        self,
+        cmd_name: str,
+        path_scopes: list[PathSpec],
+        cwd: str,
+        argv: Sequence[str],
+        access: SessionAccess | None,
+    ) -> tuple[list[MountEntry], MountEntry | None]:
         candidates = self.command_candidates(
             cmd_name, path_scopes, cwd, access
         )
+        if len(candidates) < 2:
+            return candidates, candidates[0] if candidates else None
+        builtins = changes_files(cmd_name, [cmd_name, *argv])
+        writable: list[MountEntry] = []
+        readers: list[MountEntry] = []
+        named_trees: set[MountEntry] = set()
+        for mount in candidates:
+            tree = mount.cli_for(cmd_name)
+            if tree is not None:
+                result = walk(cmd_name, tree.spec, argv, cwd, defer_env=True)
+                if result.leaf is None:
+                    continue
+                writes = tree.handlers[" ".join(result.path)].write
+                if result.path:
+                    named_trees.add(mount)
+            else:
+                writes = mount.may_write(cmd_name, builtins=builtins)
+            if not writes:
+                readers.append(mount)
+            elif (
+                strongest_mode_under(mount.prefix, mount.mode, access)
+                != MountMode.READ
+            ):
+                writable.append(mount)
+        selected = writable or (readers or candidates)[:1]
+        named_tree = any(mount in named_trees for mount in selected)
         if (
             not path_scopes
-            and len(candidates) > 1
             and candidates[0].cli_for(cmd_name) is None
+            and not named_tree
         ):
-            spec = candidates[0].spec_for(cmd_name)
+            grammar = (
+                selected[0]
+                if selected[0].cli_for(cmd_name) is None
+                else candidates[0]
+            )
+            spec = grammar.spec_for(cmd_name)
             if spec is not None:
                 parsed = parse_command(spec, list(argv), cwd, cmd_name)
                 named = [
@@ -772,36 +816,19 @@ class MountRegistry:
                     if kind == "path" and raw != "-"
                 ] + parsed.path_flag_values
                 if named:
-                    candidates = self.command_candidates(
+                    bound = self.command_candidates(
                         cmd_name,
                         [PathSpec.from_str_path(named[0], cwd=cwd)],
                         cwd,
                         access,
                     )
-        if len(candidates) < 2:
-            return candidates
-        writable: list[MountEntry] = []
-        readers: list[MountEntry] = []
-        builtins = changes_files(cmd_name, [cmd_name, *argv])
-        for mount in candidates:
-            tree = mount.cli_for(cmd_name)
-            if tree is not None:
-                result = walk(cmd_name, tree.spec, argv, cwd, defer_env=True)
-                if result.leaf is None:
-                    continue
-                writes = tree.handlers[" ".join(result.path)].write
-            else:
-                writes = mount.may_write(cmd_name, builtins=builtins)
-            if not writes:
-                readers.append(mount)
-            elif (
-                strongest_mode_under(mount.prefix, mount.mode, access)
-                != MountMode.READ
-            ):
-                writable.append(mount)
-        if writable:
-            return writable
-        return (readers or candidates)[:1]
+                    if len(bound) < 2:
+                        return bound, bound[0] if bound else None
+        grammar = next(
+            (mount for mount in selected if mount in named_trees),
+            selected[0],
+        )
+        return selected, grammar
 
     def invocation_mount(
         self,
@@ -820,10 +847,10 @@ class MountRegistry:
             argv (Sequence[str]): words after the command.
             access (SessionAccess | None): owner, else the current session.
         """
-        candidates = self.invocation_candidates(
+        _, grammar = self._invocation_choices(
             cmd_name, path_scopes, cwd, argv, access
         )
-        return candidates[0] if candidates else None
+        return grammar
 
     def execution_mount(
         self,

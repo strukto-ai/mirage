@@ -756,23 +756,43 @@ export class MountRegistry {
     return this.commandCandidates(cmdName, pathScopes, cwd, access)[0] ?? null
   }
 
-  /** The targets this invocation can run, before fetching its environment. */
-  invocationCandidates(
+  /** The ordered execution candidates and grammar for the same invocation. */
+  private invocationChoices(
     cmdName: string,
     pathScopes: readonly PathSpec[],
     cwd: string,
     argv: readonly string[] = [],
     access?: SessionAccess,
-  ): MountEntry[] {
-    let candidates = this.commandCandidates(cmdName, pathScopes, cwd, access)
-    let first = candidates[0] ?? null
-    if (
-      candidates.length > 1 &&
-      pathScopes.length === 0 &&
-      first !== null &&
-      first.cliFor(cmdName) === null
-    ) {
-      const spec = first.specFor(cmdName)
+  ): [MountEntry[], MountEntry | null] {
+    const candidates = this.commandCandidates(cmdName, pathScopes, cwd, access)
+    const first = candidates[0] ?? null
+    if (candidates.length < 2 || first === null) return [candidates, first]
+    const builtins = changesFiles(cmdName, [cmdName, ...argv])
+    const readers: MountEntry[] = []
+    const writable: MountEntry[] = []
+    const subcommands = new Set<MountEntry>()
+    for (const mount of candidates) {
+      const tree = mount.cliFor(cmdName)
+      let writes: boolean
+      if (tree === null) {
+        writes = mount.mayWrite(cmdName, null, builtins)
+      } else {
+        const result = walk(cmdName, tree.spec, argv, cwd, undefined, true)
+        if (result.leaf === null) continue
+        if (result.path.length > 0) subcommands.add(mount)
+        writes = tree.handlers[result.path.join(' ')]?.write === true
+      }
+      if (!writes) readers.push(mount)
+      else if (strongestModeUnder(mount.prefix, mount.mode, access) !== MountMode.READ)
+        writable.push(mount)
+    }
+    const reader = readers[0]
+    const selected = writable.length > 0 ? writable : [reader ?? first]
+    const grammar = selected.find((mount) => subcommands.has(mount)) ?? selected[0] ?? first
+    // A selected tree's named verb owns its words. A root-only leaf has no
+    // verb to distinguish it from a flat command's explicit path operands.
+    if (pathScopes.length === 0 && first.cliFor(cmdName) === null && !subcommands.has(grammar)) {
+      const spec = (grammar.cliFor(cmdName) === null ? grammar : first).specFor(cmdName)
       if (spec !== null) {
         const parsed = parseCommand(spec, [...argv], cwd, cmdName)
         const operands = parsed.args
@@ -782,38 +802,26 @@ export class MountRegistry {
           .filter((path) => path !== '-')
           .map((path) => PathSpec.fromStrPath(path, undefined, cwd))
         if (inferred.length > 0) {
-          candidates = this.commandCandidates(cmdName, inferred, cwd, access)
-          first = candidates[0] ?? null
+          const bound = this.commandCandidates(cmdName, inferred, cwd, access)
+          if (bound.length < 2) return [bound, bound[0] ?? null]
         }
       }
     }
-    if (candidates.length < 2 || first === null) return candidates
-    const builtins = changesFiles(cmdName, [cmdName, ...argv])
-    const readers: MountEntry[] = []
-    const writable: MountEntry[] = []
-    for (const mount of candidates) {
-      const tree = mount.cliFor(cmdName)
-      let writes: boolean
-      if (tree === null) {
-        writes = mount.mayWrite(cmdName, null, builtins)
-      } else {
-        const result = walk(cmdName, tree.spec, argv, cwd, undefined, true)
-        if (result.leaf === null) continue
-        writes = tree.handlers[result.path.join(' ')]?.write === true
-      }
-      if (!writes) readers.push(mount)
-      else if (strongestModeUnder(mount.prefix, mount.mode, access) !== MountMode.READ)
-        writable.push(mount)
-    }
-    if (writable.length > 0) return writable
-    const reader = readers[0]
-    if (reader !== undefined) {
-      return [reader]
-    }
-    return [first]
+    return [selected, grammar]
   }
 
-  /** The invocation's grammar and owner, without an ambiguity refusal. */
+  /** The targets this invocation can run, before fetching its environment. */
+  invocationCandidates(
+    cmdName: string,
+    pathScopes: readonly PathSpec[],
+    cwd: string,
+    argv: readonly string[] = [],
+    access?: SessionAccess,
+  ): MountEntry[] {
+    return this.invocationChoices(cmdName, pathScopes, cwd, argv, access)[0]
+  }
+
+  /** The grammar used to classify this invocation, without refusing ambiguity. */
   invocationMount(
     cmdName: string,
     pathScopes: readonly PathSpec[],
@@ -821,7 +829,7 @@ export class MountRegistry {
     argv: readonly string[] = [],
     access?: SessionAccess,
   ): MountEntry | null {
-    return this.invocationCandidates(cmdName, pathScopes, cwd, argv, access)[0] ?? null
+    return this.invocationChoices(cmdName, pathScopes, cwd, argv, access)[1]
   }
 
   /** Select an unambiguous write target without starting a backend. */

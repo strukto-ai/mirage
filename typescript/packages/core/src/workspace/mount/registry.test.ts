@@ -457,6 +457,70 @@ describe('MountRegistry.executionMount: ambiguous fallback', () => {
     )
     expect(registry.invocationMount('stream', [], '/', ['/-'])).toBeNull()
   })
+
+  it('lets a selected subcommand tree own its words before inferring flat paths', () => {
+    const registry = new MountRegistry(
+      { '/': new RAMStubVFS(), '/longer': new RAMStubVFS(), '/b': new RAMStubVFS() },
+      MountMode.WRITE,
+    )
+    const spec = new CommandSpec({
+      arguments: [new Argument('paths', { type: 'path', nargs: '*' })],
+    })
+    const flat = registry.mountForPrefix('/longer')
+    flat.registerCommands(command({ name: 'tool', vfs: 'ram', spec, fn: NOOP_CMD }))
+    const tree = registry.mountForPrefix('/b')
+    tree.registerCommands([
+      new CLI({
+        spec: new CommandSpec({ name: 'tool', subcommands: [new CommandSpec({ name: 'send' })] }),
+        handlers: { send: new CLIHandler({ fn: NOOP_CMD, write: true }) },
+      }),
+    ])
+    expect(registry.invocationMount('tool', [], '/', ['send'])).toBe(tree)
+    expect(
+      registry.invocationMount('tool', [PathSpec.fromStrPath('/longer/item')], '/', ['send']),
+    ).toBe(flat)
+    expect(registry.invocationMount('tool', [], '/longer', ['send'])).toBe(flat)
+    expect(registry.invocationMount('tool', [], '/', ['/longer/item'])).toBe(flat)
+    tree.mode = MountMode.READ
+    expect(registry.invocationMount('tool', [], '/', ['send'])).toBeNull()
+    tree.mode = MountMode.WRITE
+    flat.registerCommands(command({ name: 'tool', vfs: 'ram', spec, fn: NOOP_CMD, write: true }))
+    expect(registry.invocationMount('tool', [], '/', ['send'])?.prefix).toBe('/b/')
+    expect(
+      registry.invocationCandidates('tool', [], '/', ['send']).map((mount) => mount.prefix),
+    ).toEqual(['/longer/', '/b/'])
+    expect(() => registry.executionMount('tool', [], '/', ['send'])).toThrow(MountCommandAmbiguous)
+    tree.registerCommands([
+      new CLI({
+        spec: new CommandSpec({ name: 'tool', arguments: [new Argument('args', { nargs: '*' })] }),
+        handlers: { '': new CLIHandler({ fn: NOOP_CMD, write: true }) },
+      }),
+    ])
+    expect(registry.invocationMount('tool', [], '/', ['/longer/item'])).toBe(flat)
+  })
+
+  it('uses the selected flat writer grammar for a path-shaped text operand', () => {
+    const registry = fallbackRegistry()
+    registry.mount('/', new RAMStubVFS(), MountMode.WRITE)
+    registry.mountForPrefix('/longer').registerCommands(
+      command({
+        name: 'remote',
+        vfs: 'ram',
+        fn: NOOP_CMD,
+        spec: new CommandSpec({ arguments: [new Argument('paths', { type: 'path', nargs: '*' })] }),
+      }),
+    )
+    registry.mountForPrefix('/short').registerCommands(
+      command({
+        name: 'remote',
+        vfs: 'ram',
+        fn: NOOP_CMD,
+        write: true,
+        spec: new CommandSpec({ arguments: [new Argument('texts', { nargs: '*' })] }),
+      }),
+    )
+    expect(registry.invocationMount('remote', [], '/', ['/label'])?.prefix).toBe('/short/')
+  })
 })
 
 class LimitedVFS extends BaseVFS {

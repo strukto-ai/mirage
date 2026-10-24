@@ -13,8 +13,13 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
+import { CLI, CLIHandler } from '../../commands/cli/types.ts'
+import { command } from '../../commands/config.ts'
 import { BUILTIN_SPECS, specOf } from '../../commands/spec/builtins.ts'
+import { Argument, CommandSpec } from '../../commands/spec/types.ts'
+import { IOResult } from '../../io/types.ts'
 import { BaseVFS } from '../../vfs/base.ts'
+import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { MountMode } from '../../types.ts'
 import { markGlobs } from '../../utils/glob_walk.ts'
 import {
@@ -23,6 +28,8 @@ import {
   runResult,
 } from '../../../tests/workspace/fixtures/integration_fixture.ts'
 import { MountRegistry } from '../mount/registry.ts'
+import { Workspace } from '../workspace/workspace.ts'
+import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { specForCommand, specWordKinds } from './spec_hints.ts'
 
 class StubVFS extends BaseVFS {
@@ -137,6 +144,51 @@ describe('an attached path value reaches the command', () => {
 })
 
 describe('specForCommand', () => {
+  it('keeps path-shaped text on the selected flat writer', async () => {
+    const calls: unknown[] = []
+    const writer = command({
+      name: 'tool',
+      vfs: 'ram',
+      spec: new CommandSpec({ arguments: [new Argument('args', { nargs: '*' })] }),
+      write: true,
+      fn: (_accessor, paths, texts) => {
+        calls.push([paths, texts])
+        return [new TextEncoder().encode('written\n'), new IOResult()]
+      },
+    })
+    const tree = new CLI({
+      spec: new CommandSpec({
+        name: 'tool',
+        subcommands: [
+          new CommandSpec({
+            name: 'send',
+            arguments: [new Argument('args', { nargs: '*' })],
+          }),
+        ],
+      }),
+      handlers: {
+        send: new CLIHandler({
+          fn: () => {
+            calls.push('reader')
+            return [null, new IOResult()]
+          },
+        }),
+      },
+    })
+    const ws = new Workspace(
+      { '/longer': new RAMVFS(), '/b': new RAMVFS() },
+      { mode: MountMode.WRITE, shellParser: await getTestParser() },
+    )
+    try {
+      ws.mount('/longer').registerCommands([tree])
+      ws.mount('/b').registerCommands(writer)
+      expect(await runResult(ws, 'tool send /label')).toEqual([0, 'written\n', ''])
+      expect(calls).toEqual([[[], ['send', '/label']]])
+    } finally {
+      await ws.close()
+    }
+  })
+
   it('falls back to the shared specs when the mount lacks the command', () => {
     const reg = new MountRegistry({ '/ram': new StubVFS() }, MountMode.WRITE)
     const mount = reg.mountFor('/ram')

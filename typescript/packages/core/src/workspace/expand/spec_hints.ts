@@ -15,22 +15,19 @@
 import { execSpans } from '../../commands/builtin/find_parse.ts'
 import { walk } from '../../commands/cli/walk.ts'
 import { BUILTIN_SPECS } from '../../commands/spec/builtins.ts'
+import * as constants from '../../commands/spec/constants.ts'
 import { parseCommand } from '../../commands/spec/parser.ts'
 import type { ValueType } from '../../commands/spec/types.ts'
 import { type CommandSpec } from '../../commands/spec/types.ts'
 import { unmarkGlobs } from '../../utils/glob_walk.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import type { SessionAccess } from '../../view/types.ts'
-import { commandTree } from '../executor/command/routing.ts'
 
-// Find the spec that classifies a mount command's words. A command tree
-// a mount serves is classified by its tree, which specWordKinds walks,
-// wherever the line is typed: the tree runs on the mount serving its name.
-// Otherwise the cwd mount's spec wins; the shared BUILTIN_SPECS table fills
-// in when that mount does not register the command. Every session cwd sits
-// under a mount (the workspace roots an implicit RAM mount), so mountFor
-// never fails here; if it ever does, the registry is broken and the error
-// should propagate (mirrors the Python docstring).
+// Installed CLIs own their grammar. A mount command uses the selected
+// invocation's spec, whether flat or a tree, so the same registration
+// classifies the words and runs the command. A fallback flat command
+// without declared arguments leaves path inference to the cwd/shared
+// grammar; injected help/version options do not declare operand roles.
 export function specForCommand(
   name: string,
   registry: MountRegistry,
@@ -38,8 +35,24 @@ export function specForCommand(
   argv?: readonly string[],
   access?: SessionAccess,
 ): CommandSpec | null {
-  const tree = commandTree(registry, name, cwd, argv, access)
-  if (tree !== null) return tree.spec
+  const install = registry.clis.get(name)
+  if (install !== null) return install.cli.spec
+  const mount =
+    argv === undefined
+      ? registry.commandMount(name, [], cwd, access)
+      : registry.invocationMount(name, [], cwd, argv, access)
+  if (mount !== null) {
+    const selected = mount.specFor(name)
+    if (
+      selected !== null &&
+      (mount.cliFor(name) !== null ||
+        selected.arguments.some(
+          (arg) => arg !== constants.HELP_OPTION && arg !== constants.VERSION_OPTION,
+        ))
+    ) {
+      return selected
+    }
+  }
   const spec = registry.mountFor(cwd).specFor(name)
   if (spec !== null) return spec
   return BUILTIN_SPECS[name] ?? null

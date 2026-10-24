@@ -88,8 +88,8 @@ def test_nested_prefix_outer(nested_registry):
 # ── nested command name resolution ─────────────
 
 
-def _register_cmd(mount, name, *, write=False):
-    @command(name, vfs="ram", spec=CommandSpec(), write=write)
+def _register_cmd(mount, name, *, write=False, spec=None):
+    @command(name, vfs="ram", spec=spec or CommandSpec(), write=write)
     async def _fn(accessor, paths, *texts, **flags):
         return None, IOResult()
 
@@ -479,6 +479,74 @@ def test_stdin_operand_does_not_bind_fallback_to_its_resolved_path():
         is reader
     )
     assert reg.invocation_mount("stream", [], "/", ["/-"]) is None
+
+
+def test_selected_named_tree_owns_its_words_before_flat_path_inference():
+    reg = MountRegistry()
+    reg.mount("/", RAMVFS(), MountMode.WRITE)
+    flat = reg.mount("/longer", RAMVFS(), MountMode.WRITE)
+    tree = reg.mount("/b", RAMVFS(), MountMode.WRITE)
+    spec = CommandSpec(arguments=(Argument("paths", type="path", nargs="*"),))
+    _register_cmd(flat, "tool", spec=spec)
+    tree.register_commands(
+        [
+            CLI(
+                spec=CommandSpec(
+                    name="tool", subcommands=(CommandSpec(name="send"),)
+                ),
+                handlers={"send": CLIHandler(_noop_cli, write=True)},
+            ),
+        ]
+    )
+    assert reg.invocation_mount("tool", [], "/", ["send"]) is tree
+    assert (
+        reg.invocation_mount(
+            "tool", [PathSpec.from_str_path("/longer/item")], "/", ["send"]
+        )
+        is flat
+    )
+    assert reg.invocation_mount("tool", [], "/longer", ["send"]) is flat
+    assert reg.invocation_mount("tool", [], "/", ["/longer/item"]) is flat
+    tree.mode = MountMode.READ
+    assert reg.invocation_mount("tool", [], "/", ["send"]) is None
+    tree.mode = MountMode.WRITE
+    _register_cmd(flat, "tool", spec=spec, write=True)
+    assert reg.invocation_candidates("tool", [], "/", ["send"]) == [flat, tree]
+    assert reg.invocation_mount("tool", [], "/", ["send"]) is tree
+    with pytest.raises(MountCommandAmbiguous):
+        reg.execution_mount("tool", [], "/", ["send"])
+    tree.register_commands(
+        [
+            CLI(
+                spec=CommandSpec(
+                    name="tool", arguments=(Argument("args", nargs="*"),)
+                ),
+                handlers={"": CLIHandler(_noop_cli, write=True)},
+            ),
+        ]
+    )
+    assert reg.invocation_mount("tool", [], "/", ["/longer/item"]) is flat
+
+
+def test_selected_flat_writer_uses_its_own_text_operand_grammar():
+    reg = MountRegistry()
+    reg.mount("/", RAMVFS(), MountMode.WRITE)
+    reader = reg.mount("/longer", RAMVFS(), MountMode.WRITE)
+    writer = reg.mount("/b", RAMVFS(), MountMode.WRITE)
+    _register_cmd(
+        reader,
+        "tool",
+        spec=CommandSpec(
+            arguments=(Argument("paths", type="path", nargs="*"),)
+        ),
+    )
+    _register_cmd(
+        writer,
+        "tool",
+        write=True,
+        spec=CommandSpec(arguments=(Argument("texts", nargs="*"),)),
+    )
+    assert reg.invocation_mount("tool", [], "/", ["/label"]) is writer
 
 
 # ── resolve_mount cache redirect ───────────────
