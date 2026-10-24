@@ -28,7 +28,10 @@ implementations cannot drift apart.
   operation, the matrix on `docs/home/access/overview.mdx`); every case pins
   the in-app answer, and every other access must give it. `run.py` also
   checks auth per deployment, the CLI's daemon lifecycle and config, and
-  gates that every HTTP route and CLI command was exercised. `inapp.ts` is
+  gates that every HTTP route and CLI command was exercised. `serve.py` and
+  `serve.ts` time the server's event loop for the whole run (`loop_lag.py`,
+  `loop_lag.ts`) and write the summary to a file as they stop; `run.py`
+  prints it per host and deployment. No route serves it. `inapp.ts` is
   the in-app access on TypeScript. CI uses `--host-jobs 2` to overlap both
   hosts on one runner; each host keeps its own home, ports and snapshot
   prefix, and the route and command gates still cover both hosts. Shell and
