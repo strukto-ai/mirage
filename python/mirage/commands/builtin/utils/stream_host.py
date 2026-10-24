@@ -18,6 +18,7 @@ from functools import partial
 
 from mirage.commands.builtin.generic_bind.dispatch import caller_stream
 from mirage.commands.builtin.utils.stream import is_stdin, resolve_source
+from mirage.commands.quote import quote_text
 from mirage.context.session_context import current_caller
 from mirage.errors.classify import classify, failure_text
 from mirage.errors.constants import FS_ERRORS, WALK_ERRORS
@@ -42,16 +43,6 @@ async def _spooled(spool: ByteSpool) -> AsyncIterator[bytes]:
     async with spool:
         async for chunk in spool.stream():
             yield chunk
-
-
-def own_mount(path: PathSpec) -> bool:
-    """Every operand reads through the mount the command runs on, which
-    resolved it.
-
-    Args:
-        path (PathSpec): the operand.
-    """
-    return True
 
 
 def _failure(exc: BaseException) -> dict[str, JsonValue]:
@@ -83,12 +74,12 @@ class StreamHost:
         dispatch (DispatchFn | None): The workspace dispatcher.
         cwd (PathSpec): What relative names resolve against.
         shell (ShellFn | None): Runs a nested line in the session.
-        local (Callable[[PathSpec], bool]): Whether the mount serves an
-            operand.
         dash (bool): an operand ``-`` names stdin (see ``is_stdin``).
         command (str): The command a failed operand's line names, worded
-            as ``fs_error_line`` words it; empty leaves the wording to
-            the stream.
+            as ``fs_error_line`` words it, and that may create no file
+            one of its operands names; empty leaves both to the stream.
+        local (Callable[[PathSpec], bool] | None): Whether the mount
+            serves an operand; None for every one, as it resolved them.
     """
 
     def __init__(
@@ -98,10 +89,10 @@ class StreamHost:
         stdin: ByteSource | None,
         dispatch: DispatchFn | None,
         cwd: PathSpec,
-        shell: ShellFn | None,
-        local: Callable[[PathSpec], bool],
+        shell: ShellFn | None = None,
         dash: bool = True,
         command: str = "",
+        local: Callable[[PathSpec], bool] | None = None,
     ) -> None:
         self.operands = operands
         self.dash = dash
@@ -161,7 +152,7 @@ class StreamHost:
         if path is not None:
             if is_stdin(path, self.dash):
                 return self.stdin_view()
-            return self.read_path(path, self.local(path))
+            return self.read_path(path, self.local is None or self.local(path))
         if name in STDIN_NAMES:
             return self.stdin_view()
         return self.read_path(name)
@@ -342,6 +333,13 @@ class StreamHost:
             return Served({"fatal": "file output requires a workspace"})
         name = str(request["path"])
         path = PathSpec.from_str_path(text_view(name), cwd=self.cwd.virtual)
+        # GNU split refuses an output that is its input before it empties
+        # it; csplit is refused alike, where GNU's empties its input.
+        if request.get("create") and self.command:
+            if any(path.virtual == spec.virtual for spec in self.operands):
+                line = f"'{quote_text(text_view(name))}' would overwrite input"
+                refused = byte_view(f"{self.command}: {line}; aborting\n")
+                return Served({"error": refused, "line": refused})
         spool_fd = request.get("spool")
         size, skip = request.get("size"), request.get("skip")
         offset = skip if isinstance(skip, int) else 0
@@ -479,4 +477,4 @@ async def _close(source: AsyncIterator[bytes]) -> None:
         await close()
 
 
-__all__ = ["StreamHost", "hosted_stream", "own_mount"]
+__all__ = ["StreamHost", "hosted_stream"]

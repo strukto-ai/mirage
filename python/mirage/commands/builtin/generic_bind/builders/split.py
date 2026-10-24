@@ -24,7 +24,6 @@ from mirage.commands.builtin.utils.operands import normalized_read
 from mirage.commands.builtin.utils.stream_host import (
     StreamHost,
     hosted_stream,
-    own_mount,
 )
 from mirage.commands.config import Context
 from mirage.commands.spec import SPECS
@@ -70,8 +69,6 @@ async def split(
         ctx.stdin,
         dispatch_of(ctx),
         ctx.cwd,
-        None,
-        own_mount,
         command="split",
     )
     io = IOResult()

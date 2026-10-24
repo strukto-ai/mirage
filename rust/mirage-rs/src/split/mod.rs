@@ -16,7 +16,7 @@ use serde_json::Value as Json;
 use crate::request::{Io, Opening, Reply, Request, WriteMode, bytes};
 use crate::{Stream, StreamError, parse_config, quoted};
 
-use self::pieces::{Input, Piece, Refused, STEPS, read_failure, write_failure};
+use self::pieces::{Input, MAX_SUFFIX, Piece, Refused, STEPS, read_failure, write_failure};
 
 const ALPHA: &[u8] = b"abcdefghijklmnopqrstuvwxyz";
 const DECIMAL: &[u8] = b"0123456789";
@@ -81,9 +81,14 @@ enum Kind {
 /// The output names' suffixes in GNU's order: with no width and no start
 /// given they widen as they run out, the alphabet's last character a
 /// reserved prefix (aa..yz, zaaa..zyzz, zzaaaa..); a width or a start
-/// pins the width, and running past it is the suffixes' exhaustion.
+/// pins the width, and running past it is the suffixes' exhaustion. The
+/// digits are laid out by the first name, as GNU allocates its name then.
+#[derive(Clone)]
 struct Suffixes {
     alphabet: &'static [u8],
+    /// The start's digits in the alphabet's base, until the first name.
+    start: Vec<u8>,
+    width: usize,
     digits: Vec<u8>,
     widen: bool,
     band: usize,
@@ -91,9 +96,17 @@ struct Suffixes {
 }
 
 impl Suffixes {
-    fn next(&mut self) -> Option<Vec<u8>> {
+    fn next(&mut self) -> Result<Vec<u8>, &'static [u8]> {
+        if self.digits.is_empty() && !self.exhausted {
+            if self.width > MAX_SUFFIX {
+                return Err(b"split: memory exhausted\n");
+            }
+            self.exhausted = self.start.len() > self.width;
+            self.digits = vec![0; self.width.saturating_sub(self.start.len())];
+            self.digits.append(&mut self.start);
+        }
         if self.exhausted {
-            return None;
+            return Err(b"split: output file suffixes exhausted\n");
         }
         let last = self.alphabet[self.alphabet.len() - 1];
         let mut name = vec![last; self.band];
@@ -115,7 +128,7 @@ impl Suffixes {
         } else if carry {
             self.exhausted = true;
         }
-        Some(name)
+        Ok(name)
     }
 }
 
@@ -226,40 +239,23 @@ fn chunks(value: &[u8]) -> Result<Mode, Vec<u8>> {
     Ok(Mode::Chunks { kind, count, only })
 }
 
-/// -a: past 2**64 - 1 GNU refuses the width as it reads the option,
-/// where a count saturates, since a width that size would be built into
-/// a name.
+/// -a: past 2**63 - 1 GNU refuses the width as it reads the option, where
+/// a count saturates, since a width that size would be built into a name.
 fn suffix_length(value: &[u8]) -> Result<usize, Vec<u8>> {
     let length = count(value).ok_or_else(|| refusal("suffix length", value))?;
-    if length > u128::from(u64::MAX) {
-        let mut refused = refusal("suffix length", value);
-        refused.extend_from_slice(b": Value too large for defined data type");
-        return Err(refused);
+    if length > i64::MAX as u128 {
+        let refused = refusal("suffix length", value);
+        return Err([
+            &refused,
+            b": Value too large for defined data type".as_slice(),
+        ]
+        .concat());
     }
     Ok(usize::try_from(length).unwrap_or(usize::MAX))
 }
 
-/// The digits of `digits` (in `from`) in base `to`, most significant first.
-fn rebase(digits: &[u8], from: u32, to: u32) -> Vec<u8> {
-    let mut out: Vec<u8> = Vec::new();
-    for &digit in digits {
-        let mut carry = u32::from(digit);
-        for place in out.iter_mut() {
-            let value = u32::from(*place) * from + carry;
-            *place = (value % to) as u8;
-            carry = value / to;
-        }
-        while carry > 0 {
-            out.push((carry % to) as u8);
-            carry /= to;
-        }
-    }
-    out.reverse();
-    out
-}
-
-/// A `--numeric-suffixes=`/`--hex-suffixes=` start, as digit values of
-/// its own base. The refused value comes first in its clause; hex digits
+/// A `--numeric-suffixes=`/`--hex-suffixes=` start, as its significant
+/// digits' values. The refused value comes first in its clause; hex digits
 /// are lower case only, as GNU's own suffixes are; an empty value is a
 /// start of 0 that still pins the width.
 fn suffix_start(value: &[u8], hex: bool, width: usize) -> Result<Vec<u8>, Vec<u8>> {
@@ -274,23 +270,19 @@ fn suffix_start(value: &[u8], hex: bool, width: usize) -> Result<Vec<u8>, Vec<u8
         _ if value.is_empty() => return Ok(Vec::new()),
         _ => {
             let kind = if hex { "hexadecimal" } else { "numerical" };
-            let mut refused = format!(
+            let refused = format!(
                 "split: '{}': invalid start value for {kind} suffix",
                 quoted(value)
-            )
-            .into_bytes();
-            refused.extend_from_slice(HINT);
-            return Err(refused);
+            );
+            return Err([refused.as_bytes(), HINT].concat());
         }
     };
-    let significant = digits.iter().skip_while(|&&d| d == 0).count().max(1);
-    if significant > width {
-        let mut refused =
-            b"split: numerical suffix start value is too large for the suffix length".to_vec();
-        refused.extend_from_slice(HINT);
-        return Err(refused);
+    let zeros = digits.iter().take_while(|&&d| d == 0).count();
+    if (digits.len() - zeros).max(1) > width {
+        let refused = b"split: numerical suffix start value is too large for the suffix length";
+        return Err([refused.as_slice(), HINT].concat());
     }
-    Ok(digits)
+    Ok(digits[zeros..].to_vec())
 }
 
 fn start_text(value: &Json) -> Option<Vec<u8>> {
@@ -307,9 +299,11 @@ fn plan(config: Config) -> Result<Plan, Vec<u8>> {
     let width = length.filter(|&n| n > 0).unwrap_or(2);
     let numeric = config.numeric_suffixes.as_ref();
     let hex = config.hex_suffixes.as_ref();
+    // The start's digits are the first suffix's, as GNU takes them, in
+    // whichever alphabet the line picks.
     let start = match (numeric.and_then(start_text), hex.and_then(start_text)) {
-        (Some(start), _) => Some((suffix_start(&start, false, width)?, 10)),
-        (None, Some(start)) => Some((suffix_start(&start, true, width)?, 16)),
+        (Some(start), _) => Some(suffix_start(&start, false, width)?),
+        (None, Some(start)) => Some(suffix_start(&start, true, width)?),
         (None, None) => None,
     };
     let lines = config
@@ -331,11 +325,7 @@ fn plan(config: Config) -> Result<Plan, Vec<u8>> {
         }
     };
     if let Some(extra) = config.operands.get(2) {
-        let mut refused = b"split: extra operand '".to_vec();
-        refused.extend_from_slice(extra);
-        refused.push(b'\'');
-        refused.extend_from_slice(HINT);
-        return Err(refused);
+        return Err([b"split: extra operand '".as_slice(), extra, b"'", HINT].concat());
     }
     let mode = match (number, byte_limit, lines) {
         (Some(mode), ..) => mode,
@@ -354,25 +344,18 @@ fn plan(config: Config) -> Result<Plan, Vec<u8>> {
         _ => ALPHA,
     };
     let widen = length.unwrap_or(0) == 0 && start.is_none();
-    let base = u32::try_from(alphabet.len()).unwrap_or(26);
-    let mut digits = match start {
-        Some((digits, from)) => rebase(&digits, from, base),
-        None => Vec::new(),
-    };
-    let exhausted = digits.len() > width;
-    if !exhausted {
-        digits.splice(0..0, std::iter::repeat_n(0, width - digits.len()));
-    }
     let mut operands = config.operands.into_iter();
     Ok(Plan {
         mode,
         separator,
         suffixes: Suffixes {
             alphabet,
-            digits,
+            start: start.unwrap_or_default(),
+            width,
+            digits: Vec::new(),
             widen,
             band: 0,
-            exhausted,
+            exhausted: false,
         },
         input: operands.next().unwrap_or_else(|| b"-".to_vec()),
         prefix: operands.next().unwrap_or_else(|| b"x".to_vec()),
@@ -403,8 +386,11 @@ struct Split {
     plan: Plan,
     input: Input,
     sink: Option<Sink>,
-    /// The pieces r/N writes this pass, from piece `index`.
+    /// The pieces r/N writes this pass, from piece `index`; the names it
+    /// checked before any pass, and those names again for the passes.
     group: Vec<Sink>,
+    checked: u64,
+    names: Option<Suffixes>,
     phase: Phase,
     /// The lines or bytes in the piece being cut.
     filled: u64,
@@ -442,6 +428,8 @@ pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
         input,
         sink: None,
         group: Vec::new(),
+        checked: 0,
+        names: None,
         phase,
         filled: 0,
         spool,
@@ -475,20 +463,17 @@ impl Split {
 
     /// The next piece's file, named by the next suffix.
     fn name(&mut self) -> Option<Vec<u8>> {
-        let Some(suffix) = self.plan.suffixes.next() else {
-            self.fail(b"split: output file suffixes exhausted\n");
-            return None;
-        };
-        Some([self.plan.prefix.as_slice(), &suffix, &self.plan.additional].concat())
+        match self.plan.suffixes.next() {
+            Ok(suffix) => Some(self.named(&suffix)),
+            Err(refused) => {
+                self.fail(refused);
+                None
+            }
+        }
     }
 
-    /// Start the next piece's file.
-    fn start(&mut self) -> bool {
-        let Some(name) = self.name() else {
-            return false;
-        };
-        self.sink = Some(Sink::File(Piece::new(name)));
-        true
+    fn named(&self, suffix: &[u8]) -> Vec<u8> {
+        [self.plan.prefix.as_slice(), suffix, &self.plan.additional].concat()
     }
 
     fn put(&mut self, from: usize, to: usize, out: &mut Vec<u8>) {
@@ -536,11 +521,7 @@ impl Split {
             }
             Mode::Chunks { kind, count, only } => (kind, count, only),
         };
-        let done = match only {
-            Some(k) => self.index >= k,
-            None => self.index >= count,
-        };
-        if done {
+        if self.index >= only.unwrap_or(count) {
             self.phase = Phase::Done;
             if !self.input.ended {
                 self.io.push(Request::Close { fd: self.input.fd });
@@ -549,10 +530,8 @@ impl Split {
         }
         match kind {
             Kind::Bytes => {
-                let (start, end) = (
-                    chunk_end(self.index, self.size, count),
-                    chunk_end(self.index + 1, self.size, count),
-                );
+                let start = chunk_end(self.index, self.size, count);
+                let end = chunk_end(self.index + 1, self.size, count);
                 self.range(start, end - start, only);
             }
             Kind::Lines => self.line_chunk(count, only),
@@ -569,8 +548,11 @@ impl Split {
             self.phase = Phase::Done;
             return;
         }
-        if self.sink.is_none() && !self.start() {
-            return;
+        if self.sink.is_none() {
+            let Some(name) = self.name() else {
+                return;
+            };
+            self.sink = Some(Sink::File(Piece::new(name)));
         }
         let need = limit - self.filled;
         let (take, full) = if lines {
@@ -603,13 +585,11 @@ impl Split {
     /// the host writes to its file, or to the output under K/N.
     fn range(&mut self, start: u64, size: u64, only: Option<u64>) {
         match only {
-            Some(k) if self.index + 1 == k => {
-                if size > 0 {
-                    self.io.push(Request::Emit {
-                        fd: self.spool,
-                        window: Some((start, size)),
-                    });
-                }
+            Some(k) if self.index + 1 == k && size > 0 => {
+                self.io.push(Request::Emit {
+                    fd: self.spool,
+                    window: Some((start, size)),
+                });
             }
             Some(_) => {}
             None => {
@@ -687,24 +667,30 @@ impl Split {
         self.line = 0;
     }
 
-    /// -n r/N: line J goes to piece J mod N. A pass over the spool writes
-    /// up to GROUP pieces from piece `index`, their files created in order
-    /// before it reads; r/K/N writes piece K to the output.
+    /// -n r/N: line J goes to piece J mod N. Every name is checked first,
+    /// a step each, as GNU names them all before it opens one, so suffixes
+    /// that run out leave no file; then a pass over the spool writes up to
+    /// GROUP pieces from piece `index`, their files created first, so one
+    /// the host refuses leaves the group's earlier pieces empty where GNU's
+    /// hold the lines before it. r/K/N writes piece K to the output.
     fn round_robin(&mut self, count: u64, only: Option<u64>, out: &mut Vec<u8>) {
-        let want = if only.is_some() {
-            1
-        } else {
-            GROUP.min(count - self.index)
-        };
+        if only.is_none() && self.checked < count {
+            if self.checked == 0 {
+                self.names = Some(self.plan.suffixes.clone());
+            }
+            if self.name().is_some() {
+                self.checked += 1;
+            }
+            return;
+        }
+        let want = only.map_or(GROUP.min(count - self.index), |_| 1);
         if (self.group.len() as u64) < want {
             let sink = match only {
                 Some(_) => Sink::Out,
                 None => {
-                    let Some(name) = self.name() else {
-                        return;
-                    };
+                    let suffix = self.names.as_mut().and_then(|names| names.next().ok());
                     // The group holds what one piece would.
-                    let mut piece = Piece::new(name);
+                    let mut piece = Piece::new(self.named(&suffix.unwrap_or_default()));
                     piece.limit /= usize::try_from(want).unwrap_or(1);
                     piece.create(&mut self.io);
                     Sink::File(piece)
@@ -746,44 +732,6 @@ impl Split {
             self.line += 1;
         }
     }
-
-    fn answer(&mut self, reply: &[u8], data: &[u8]) -> Result<(), StreamError> {
-        let reply = Reply::decode(reply).map_err(StreamError::new)?;
-        let Some(request) = self.io.in_flight.take() else {
-            return Err(StreamError::new("no request is waiting"));
-        };
-        if let Some(fatal) = &reply.fatal {
-            self.fail(&[b"split: ", bytes(fatal).as_slice(), b"\n"].concat());
-            return Ok(());
-        }
-        match request {
-            Request::Read { .. } | Request::Fill { .. } if reply.error.is_some() => {
-                let line = read_failure(b"split", &self.plan.input, &reply);
-                self.fail(&line);
-            }
-            Request::Read { .. } => {
-                self.input.answer(reply, data);
-            }
-            Request::Fill { .. } => {
-                self.size = reply.size;
-                self.phase = Phase::Pass;
-                self.index = match self.plan.mode {
-                    Mode::Chunks {
-                        kind: Kind::Bytes | Kind::RoundRobin,
-                        only: Some(k),
-                        ..
-                    } => k - 1,
-                    _ => 0,
-                };
-            }
-            _ => {
-                if let Some((name, text)) = write_failure(&request, &reply) {
-                    self.fail(&[b"split: ".as_slice(), &name, b": ", &text, b"\n"].concat());
-                }
-            }
-        }
-        Ok(())
-    }
 }
 
 impl Stream for Split {
@@ -821,12 +769,40 @@ impl Stream for Split {
         self.io.take(data)
     }
 
-    fn respond(
-        &mut self,
-        reply: &[u8],
-        data: &[u8],
-        _out: &mut Vec<u8>,
-    ) -> Result<(), StreamError> {
-        self.answer(reply, data)
+    fn respond(&mut self, reply: &[u8], data: &[u8], _: &mut Vec<u8>) -> Result<(), StreamError> {
+        let reply = Reply::decode(reply).map_err(StreamError::new)?;
+        let Some(request) = self.io.in_flight.take() else {
+            return Err(StreamError::new("no request is waiting"));
+        };
+        if let Some(fatal) = &reply.fatal {
+            self.fail(&[b"split: ", bytes(fatal).as_slice(), b"\n"].concat());
+            return Ok(());
+        }
+        match request {
+            Request::Read { .. } | Request::Fill { .. } if reply.error.is_some() => {
+                self.fail(&read_failure(b"split", &self.plan.input, &reply));
+            }
+            Request::Read { .. } => {
+                self.input.answer(reply, data);
+            }
+            Request::Fill { .. } => {
+                self.size = reply.size;
+                self.phase = Phase::Pass;
+                self.index = match self.plan.mode {
+                    Mode::Chunks {
+                        kind: Kind::Bytes | Kind::RoundRobin,
+                        only: Some(k),
+                        ..
+                    } => k - 1,
+                    _ => 0,
+                };
+            }
+            _ => {
+                if let Some(line) = write_failure(b"split", &request, &reply) {
+                    self.fail(&line);
+                }
+            }
+        }
+        Ok(())
     }
 }

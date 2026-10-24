@@ -16,7 +16,6 @@ from mirage.commands.builtin.utils.stream import is_stdin
 from mirage.commands.builtin.utils.stream_host import (
     StreamHost,
     hosted_stream,
-    own_mount,
 )
 from mirage.commands.config import Context
 from mirage.commands.spec import SPECS
@@ -280,8 +279,6 @@ async def sed_generic(
         ctx.stdin,
         dispatch_of(ctx),
         ctx.cwd,
-        None,
-        own_mount,
         dash=not parsed.in_place,
     )
     io = IOResult()

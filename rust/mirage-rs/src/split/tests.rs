@@ -104,6 +104,20 @@ fn a_failed_read_or_write_ends_the_run() {
         "a\n",
     );
     assert_eq!(host.err, b"csplit: /denied/p00: Permission denied\n");
+    // The piece a read fails in is committed, then removed with the rest.
+    let mut host = Host::with(&[("in", "a\nb\nc\nd\n")], "");
+    let fault = Fault {
+        after: 5,
+        errno: "EIO",
+        text: "Input/output error",
+    };
+    host.faults.insert("in".into(), fault);
+    let mut stream = crate::open("csplit", br#"{"operands":["in","3"]}"#).expect("opens");
+    assert_eq!(host.drive(stream.as_mut()), 1);
+    assert_eq!(
+        (host.out.as_slice(), host.files.len()),
+        (b"4\n1\n".as_slice(), 1)
+    );
 }
 
 #[test]
@@ -141,6 +155,10 @@ fn csplit_holds_no_line_past_its_limit() {
         (host.err.as_slice(), status),
         (b"csplit: memory exhausted\n".as_slice(), 1)
     );
+    let lines = "a line of sixteen\n".repeat(super::csplit::MAX_LEN / 8);
+    let (host, _) = run("csplit", json!({}), &["in", "/b/-100000"], &lines);
+    assert_eq!(host.err, b"csplit: memory exhausted\n");
+    assert_eq!(host.files.len(), 1);
     let (host, _) = run("csplit", json!({}), &["in", "2"], &format!("{line}\nb\n"));
     assert_eq!(host.out, format!("{}\n2\n", line.len() + 1).into_bytes());
 }

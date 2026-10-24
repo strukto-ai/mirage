@@ -15,7 +15,7 @@
 import { type util } from 'zod'
 
 import { isStdin, stdinStream } from '../utils/stream.ts'
-import { StreamHost, hostedStream, ownMount } from '../utils/stream_host.ts'
+import { StreamHost, hostedStream } from '../utils/stream_host.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import type { FlagValue } from '../../spec/types.ts'
@@ -186,7 +186,7 @@ export async function sedGeneric(
     paths: paths.map((p) => byteView(p.virtual)),
     cwd: byteView(ctx.cwd.virtual),
   }
-  const host = new StreamHost(paths, stream, ctx, ownMount, !parsed.inPlace)
+  const host = new StreamHost(paths, stream, ctx, !parsed.inPlace)
   const io = new IOResult()
   return [hostedStream('sed', config, host, io, ctx.signal), io]
 }

@@ -27,6 +27,7 @@ import { byteView, textView } from '../../../shell/bytes.ts'
 import { shellJoin } from '../../../shell/join.ts'
 import { PathSpec } from '../../../types.ts'
 import type { Context } from '../../config.ts'
+import { quoteText } from '../../quote.ts'
 import { callerStream } from '../generic_bind/dispatch.ts'
 import { dispatchOf } from './links.ts'
 import { isStdin, resolveSource } from './stream.ts'
@@ -43,11 +44,6 @@ async function* spooled(spool: ByteSpool): AsyncIterable<Uint8Array> {
 
 async function close(source: AsyncIterator<Uint8Array>): Promise<void> {
   await source.return?.()
-}
-
-/** Every operand reads through the mount the command runs on, which resolved it. */
-export function ownMount(): boolean {
-  return true
 }
 
 /** A failed request's reply: the failure's words and the condition it names, when the vocabulary names one. */
@@ -67,8 +63,10 @@ function failure(err: unknown): Record<string, util.JSONType> {
  * cursor, so none replays what another read. A write is held until the
  * stream flushes it. `dash`: an operand `-` names stdin (see `isStdin`);
  * `command`: the command a failed operand's line names, worded as
- * `fsErrorLine` words it, empty leaving the wording to the stream.
- * Mirrors Python's StreamHost.
+ * `fsErrorLine` words it, and that may create no file one of its operands
+ * names, empty leaving both to the stream;
+ * `local`: whether the mount serves an operand, every one by default, as it
+ * resolved them. Mirrors Python's StreamHost.
  */
 export class StreamHost {
   readonly errors = new ByteSpool()
@@ -83,9 +81,9 @@ export class StreamHost {
     private readonly operands: readonly PathSpec[],
     private readonly stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
     private readonly ctx: Context,
-    private readonly local: (path: PathSpec) => boolean,
     private readonly dash = true,
     private readonly command = '',
+    private readonly local: (path: PathSpec) => boolean = () => true,
   ) {
     this.stdin = resolveSource(ctx.stdin)[Symbol.asyncIterator]()
   }
@@ -298,6 +296,15 @@ export class StreamHost {
     if (dispatch === undefined) return { reply: { fatal: 'file output requires a workspace' } }
     const name = typeof request.path === 'string' ? request.path : ''
     const path = PathSpec.fromStrPath(textView(name), undefined, this.ctx.cwd)
+    // GNU split refuses an output that is its input before it empties it;
+    // csplit is refused alike, where GNU's empties its input.
+    if (request.create === true && this.command !== '') {
+      if (this.operands.some((spec) => spec.virtual === path.virtual)) {
+        const line = `'${quoteText(textView(name))}' would overwrite input`
+        const refused = byteView(`${this.command}: ${line}; aborting\n`)
+        return { reply: { error: refused, line: refused } }
+      }
+    }
     const skip = typeof request.skip === 'number' ? request.skip : 0
     if (typeof request.spool === 'number' && typeof request.size === 'number') {
       // A window of a spool is the whole file, written as one call.

@@ -99,7 +99,7 @@ export async function awkGeneric(
   stream: Stream,
 ): Promise<CommandFnResult> {
   const f = parseFlags(ctx)
-  const host = new StreamHost(paths, stream, ctx, (path) => servedHere(ctx, path))
+  const host = new StreamHost(paths, stream, ctx, true, '', (path) => servedHere(ctx, path))
   let program: string
   if (f.programFiles.length > 0) {
     const pieces: string[] = []

@@ -24,7 +24,7 @@
     {
       "id": "csplit_reads_patterns_as_basic_regexes",
       "seq": 910040,
-      "command": "mkdir -p /data/cbre && cd /data/cbre && printf 'aa\\na+\\nb\\naab\\n' > in && csplit in '/a+/' && cat xx01 && csplit in '/a\\{2\\}b/' && cat xx01 && csplit in '/^b$/' && cat xx00; cd / && rm -r /data/cbre",
+      "command": "mkdir -p /data/cbre && printf 'aa\\na+\\nb\\naab\\n' > /data/cbre/in && cd /data/cbre && csplit in '/a+/' && cat xx01 && csplit in '/a\\{2\\}b/' && cat xx01 && csplit in '/^b$/' && cat xx00; cd / && rm -r /data/cbre",
       "expect": {
         "exit": 0,
         "stdout": "3\n9\na+\nb\naab\n8\n4\naab\n6\n6\naa\na+\n",
@@ -34,7 +34,7 @@
     {
       "id": "csplit_skips_repeats_and_offsets",
       "seq": 910041,
-      "command": "mkdir -p /data/crep && cd /data/crep && seq 10 > in && csplit in '/2/' '%5%' '/8/' && cat xx01 && csplit in 3 '{2}' && csplit in '/[13579]/' '{*}' && ls | tr '\\n' ' ' && echo && rm xx* && csplit in '/5/-2' '/6/' && csplit in '/5/+2' && csplit --suppress-matched in 3 '{2}' && cat xx03 && csplit in '%[0-9]%' '{*}'; echo rc=$?; ls; cd / && rm -r /data/crep",
+      "command": "mkdir -p /data/crep && seq 10 > /data/crep/in && cd /data/crep && csplit in '/2/' '%5%' '/8/' && cat xx01 && csplit in 3 '{2}' && csplit in '/[13579]/' '{*}' && ls | tr '\\n' ' ' && echo && rm xx* && csplit in '/5/-2' '/6/' && csplit in '/5/+2' && csplit --suppress-matched in 3 '{2}' && cat xx03 && csplit in '%[0-9]%' '{*}'; echo rc=$?; ls; cd / && rm -r /data/crep",
       "expect": {
         "exit": 0,
         "stdout": "2\n6\n7\n5\n6\n7\n4\n6\n6\n5\n0\n4\n4\n4\n4\n2\n3\nin xx00 xx01 xx02 xx03 xx04 xx05 xx06 \n4\n6\n11\n12\n9\n4\n4\n4\n3\n10\nrc=0\nin\nxx00\nxx01\nxx02\nxx03\n",
@@ -44,7 +44,7 @@
     {
       "id": "csplit_refuses_patterns_in_gnus_words",
       "seq": 910042,
-      "command": "mkdir -p /data/cref && cd /data/cref && seq 3 > in; for p in x /a /a/x %a '/a\\(/' '{2}' 0 '99999999999999999999'; do csplit in \"$p\"; echo rc=$?; done; csplit in /a/ '{x}'; csplit in /a/ '{2'; csplit in 3 1; csplit in 2 2; csplit nosuch x; csplit -b %s in; echo rc=$?; ls; cd / && rm -r /data/cref",
+      "command": "mkdir -p /data/cref && seq 3 > /data/cref/in && cd /data/cref; for p in x /a /a/x %a '/a\\(/' '{2}' 0 '99999999999999999999'; do csplit in \"$p\"; echo rc=$?; done; csplit in /a/ '{x}'; csplit in /a/ '{2'; csplit in 3 1; csplit in 2 2; csplit nosuch x; csplit -b %s in; echo rc=$?; ls; cd / && rm -r /data/cref",
       "expect": {
         "exit": 0,
         "stdout": "rc=1\nrc=1\nrc=1\nrc=1\nrc=1\nrc=1\nrc=1\nrc=1\n2\n0\n4\nrc=1\nin\nxx00\nxx01\nxx02\n",
@@ -54,7 +54,7 @@
     {
       "id": "csplit_names_the_failed_repetition_and_removes_its_pieces",
       "seq": 910043,
-      "command": "mkdir -p /data/cfail && cd /data/cfail && seq 10 > in; csplit in 3 '{*}'; echo rc=$?; csplit in /1/ '{2}'; echo rc=$?; csplit in '/1/+4' '{*}'; echo rc=$?; csplit in '/5/-20'; echo rc=$?; csplit -k in '/[0-9]/+3' '{5}'; echo rc=$?; ls | tr '\\n' ' '; cd / && rm -r /data/cfail",
+      "command": "mkdir -p /data/cfail && seq 10 > /data/cfail/in && cd /data/cfail; csplit in 3 '{*}'; echo rc=$?; csplit in /1/ '{2}'; echo rc=$?; csplit in '/1/+4' '{*}'; echo rc=$?; csplit in '/5/-20'; echo rc=$?; csplit -k in '/[0-9]/+3' '{5}'; echo rc=$?; ls | tr '\\n' ' '; cd / && rm -r /data/cfail",
       "expect": {
         "exit": 0,
         "stdout": "4\n6\n6\n5\nrc=1\n0\n18\n3\nrc=1\n8\n13\nrc=1\n0\nrc=1\n6\n8\n7\nrc=1\nin xx00 xx01 xx02 ",
@@ -64,7 +64,7 @@
     {
       "id": "csplit_formats_suffixes_as_printf_does",
       "seq": 910044,
-      "command": "mkdir -p /data/cfmt && cd /data/cfmt && seq 4 > in; for b in '%-3d|' '%#x' '%#o' '%5.3d' '%0#5x' 'a%%%d' '%+d' '% d' '%' '%d%d' 'z' '%ld'; do csplit -s -b \"$b\" in 2 3 4; echo rc=$?; ls | grep -v '^in$' | tr '\\n' ,; echo; rm -f xx*; done; cd / && rm -r /data/cfmt",
+      "command": "mkdir -p /data/cfmt && seq 4 > /data/cfmt/in && cd /data/cfmt; for b in '%-3d|' '%#x' '%#o' '%5.3d' '%0#5x' 'a%%%d' '%+d' '% d' '%' '%d%d' 'z' '%ld'; do csplit -s -b \"$b\" in 2 3 4; echo rc=$?; ls | grep -v '^in$' | tr '\\n' ,; echo; rm -f xx*; done; cd / && rm -r /data/cfmt",
       "expect": {
         "exit": 0,
         "stdout": "rc=0\nxx0  |,xx1  |,xx2  |,xx3  |,\nrc=0\nxx0,xx0x1,xx0x2,xx0x3,\nrc=0\nxx0,xx01,xx02,xx03,\nrc=0\nxx  000,xx  001,xx  002,xx  003,\nrc=0\nxx00000,xx0x001,xx0x002,xx0x003,\nrc=0\nxxa%0,xxa%1,xxa%2,xxa%3,\nrc=1\n\nrc=1\n\nrc=1\n\nrc=1\n\nrc=1\n\nrc=1\n\n",
@@ -74,11 +74,41 @@
     {
       "id": "split_and_csplit_read_dev_stdin_as_stdin",
       "seq": 910045,
-      "command": "mkdir -p /data/cstd && cd /data/cstd && printf 'a\\nb\\n' | split -l 1 /dev/stdin p && ls && cat pab && printf 'a\\nb\\n' | csplit /dev/stdin 2 && cat xx01; cd / && rm -r /data/cstd",
+      "command": "mkdir -p /data/cstd && printf 'a\\nb\\n' | split -l 1 /dev/stdin /data/cstd/p && cd /data/cstd && ls && cat pab && printf 'a\\nb\\n' | csplit /dev/stdin 2 && cat xx01; cd / && rm -r /data/cstd",
       "expect": {
         "exit": 0,
         "stdout": "paa\npab\nb\n2\n2\nb\n",
         "stderr": ""
+      }
+    },
+    {
+      "id": "split_and_csplit_refuse_names_past_memory",
+      "seq": 910046,
+      "command": "mkdir -p /data/cbig && seq 9 > /data/cbig/in && cd /data/cbig; split -a 9223372036854775808 in; echo rc=$?; split -a 9223372036854775807 in; echo rc=$?; : | split -a 9223372036854775807; echo rc=$?; csplit -b %.2147483648d in 2; echo rc=$?; split -n r/3 -a 1 --numeric-suffixes=8 in; echo rc=$?; wc -c x8 x9; ls; cd / && rm -r /data/cbig",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\nrc=1\nrc=0\nrc=1\nrc=1\n0 total\nin\n",
+        "stderr": "split: invalid suffix length: '9223372036854775808': Value too large for defined data type\nsplit: memory exhausted\ncsplit: memory exhausted\nsplit: output file suffixes exhausted\nwc: x8: No such file or directory\nwc: x9: No such file or directory\n"
+      }
+    },
+    {
+      "id": "split_takes_a_start_as_its_first_suffix_digits",
+      "seq": 910047,
+      "command": "mkdir -p /data/cdig && printf abc > /data/cdig/in && cd /data/cdig && split -b 1 --numeric-suffixes=12 -x in && split -b 1 --numeric-suffixes=007 in n && split -b 1 -a 3 --hex-suffixes=9 in q && ls | tr '\\n' ' ' && cat x14 q00b; cd / && rm -r /data/cdig",
+      "expect": {
+        "exit": 0,
+        "stdout": "in n07 n08 n09 q009 q00a q00b x12 x13 x14 cc",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "split_and_csplit_refuse_to_overwrite_their_input",
+      "seq": 910048,
+      "command": "mkdir -p /data/cover && seq 3 > /data/cover/p01 && cd /data/cover && split -l 1 -d p01 p; echo rc=$?; split -n 2 -d p01 p; echo rc=$?; cat p00; seq 3 > p00 && split -n r/2 -d p00 p; echo rc=$?; seq 3 > xx00 && csplit xx00 2; echo rc=$?; ls | tr '\\n' ' '; cat p00 p01 xx00 | wc -l; cd / && rm -r /data/cover",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\nrc=1\n1\n2rc=1\nrc=1\np00 p01 xx00 9\n",
+        "stderr": "split: 'p01' would overwrite input; aborting\nsplit: 'p01' would overwrite input; aborting\nsplit: 'p00' would overwrite input; aborting\ncsplit: 'xx00' would overwrite input; aborting\n"
       }
     }
   ]

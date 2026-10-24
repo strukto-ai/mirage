@@ -9,12 +9,13 @@ use std::task::Poll;
 
 use serde::Deserialize;
 
+use crate::printf::number::render_integer;
 use crate::regex::parse::Dialect;
 use crate::regex::posix::{Options, Posix};
-use crate::request::{Io, Opening, Reply, Request, bytes};
+use crate::request::{Io, Opening, Reply, Request, WriteMode, bytes};
 use crate::{Stream, StreamError, parse_config, quoted};
 
-use super::pieces::{Input, Piece, Refused, STEPS, read_failure, write_failure};
+use super::pieces::{Input, MAX_SUFFIX, Piece, Refused, STEPS, read_failure, write_failure};
 
 /// The longest line csplit holds to test or look back over: past it the
 /// run ends as GNU's does once memory runs out.
@@ -28,8 +29,9 @@ pub(super) const MAX_LEN: usize = 1 << 12;
 struct Config {
     #[serde(default = "prefix", deserialize_with = "crate::latin1")]
     prefix: Vec<u8>,
-    #[serde(default = "digits")]
-    digits: usize,
+    /// -n as typed.
+    #[serde(default, deserialize_with = "crate::latin1_opt")]
+    digits: Option<Vec<u8>>,
     #[serde(default, deserialize_with = "crate::latin1_opt")]
     suffix_format: Option<Vec<u8>>,
     #[serde(default)]
@@ -51,18 +53,13 @@ fn prefix() -> Vec<u8> {
     b"xx".to_vec()
 }
 
-fn digits() -> usize {
-    2
-}
-
-/// A suffix format: one integer conversion between literal text.
+/// A suffix format: one integer conversion between literal text, which
+/// printf's renderer renders.
 #[derive(Default)]
 struct Format {
     before: Vec<u8>,
     after: Vec<u8>,
-    left: bool,
-    zero: bool,
-    alternate: bool,
+    flags: Vec<u8>,
     width: usize,
     precision: Option<usize>,
     conversion: u8,
@@ -106,12 +103,7 @@ impl Format {
                 return Err(b"csplit: too many % conversion specifications in suffix".to_vec());
             }
             while let Some(&flag) = raw.get(at).filter(|b| b"-0#'".contains(b)) {
-                match flag {
-                    b'-' => format.left = true,
-                    b'0' => format.zero = true,
-                    b'#' => format.alternate = true,
-                    _ => {}
-                }
+                format.flags.push(flag);
                 at += 1;
             }
             format.width = number(raw, &mut at);
@@ -139,41 +131,19 @@ impl Format {
     }
 
     fn render(&self, value: usize) -> Vec<u8> {
-        let mut digits = match self.conversion {
-            b'o' => format!("{value:o}"),
-            b'x' => format!("{value:x}"),
-            b'X' => format!("{value:X}"),
-            _ => value.to_string(),
-        };
-        if let Some(precision) = self.precision {
-            if precision == 0 && value == 0 {
-                digits.clear();
-            }
-            while digits.len() < precision {
-                digits.insert(0, '0');
-            }
-        }
-        let prefix = match self.conversion {
-            b'o' if self.alternate && !digits.starts_with('0') => "0",
-            b'x' if self.alternate && value != 0 => "0x",
-            b'X' if self.alternate && value != 0 => "0X",
-            _ => "",
-        };
-        let pad = self.width.saturating_sub(prefix.len() + digits.len());
+        let precision = self.precision.map(|p| p as u64);
+        let rendered = render_integer(value as i128, self.conversion, &self.flags, precision);
+        let pad = self.width.saturating_sub(rendered.byte_len() as usize);
+        let left = self.flags.contains(&b'-');
+        let zero = rendered.allow_zero && self.flags.contains(&b'0') && !left;
         let mut out = self.before.clone();
-        if self.left {
-            out.extend_from_slice(prefix.as_bytes());
-            out.extend_from_slice(digits.as_bytes());
-            out.resize(out.len() + pad, b' ');
-        } else if self.zero && self.precision.is_none() {
-            out.extend_from_slice(prefix.as_bytes());
-            out.resize(out.len() + pad, b'0');
-            out.extend_from_slice(digits.as_bytes());
-        } else {
-            out.resize(out.len() + pad, b' ');
-            out.extend_from_slice(prefix.as_bytes());
-            out.extend_from_slice(digits.as_bytes());
-        }
+        out.resize(out.len() + if left || zero { 0 } else { pad }, b' ');
+        out.extend_from_slice(&rendered.prefix);
+        out.resize(out.len() + if zero { pad } else { 0 }, b'0');
+        out.extend_from_slice(&rendered.body);
+        out.resize(out.len() + rendered.zero_tail as usize, b'0');
+        out.extend_from_slice(&rendered.suffix);
+        out.resize(out.len() + if left { pad } else { 0 }, b' ');
         out.extend_from_slice(&self.after);
         out
     }
@@ -197,9 +167,9 @@ struct Pattern {
     repeat: u64,
 }
 
-/// A number as strtoumax reads it in base 10: C blanks, a sign, digits,
-/// and nothing after; None for anything else or past u64.
-fn decimal(raw: &[u8]) -> Option<(bool, u64)> {
+/// A number as GNU's decimal scans read it: C blanks, a sign, digits, and
+/// nothing after, a value past u128 saturating; None for anything else.
+fn decimal(raw: &[u8]) -> Option<(bool, u128)> {
     let start = raw
         .iter()
         .position(|b| !b" \t\n\x0b\x0c\r".contains(b))
@@ -212,12 +182,9 @@ fn decimal(raw: &[u8]) -> Option<(bool, u64)> {
     if digits.is_empty() || !digits.iter().all(u8::is_ascii_digit) {
         return None;
     }
-    let mut value = 0u64;
-    for digit in digits {
-        value = value
-            .checked_mul(10)?
-            .checked_add(u64::from(digit - b'0'))?;
-    }
+    let value = digits.iter().fold(0u128, |n, d| {
+        n.saturating_mul(10).saturating_add(u128::from(d - b'0'))
+    });
     Some((negative, value))
 }
 
@@ -245,7 +212,7 @@ fn patterns(
             };
             previous.repeat = match decimal(inner) {
                 _ if inner == b"*" => u64::MAX,
-                Some((false, count)) => count,
+                Some((false, count)) if count <= u128::from(u64::MAX) => count as u64,
                 _ => {
                     let head = quoted(&text[..text.len() - 1]);
                     let what = "}: integer required between '{' and '}'";
@@ -294,7 +261,8 @@ fn patterns(
                 }
             }
             _ => {
-                let Some((false, value)) = decimal(text) else {
+                let value = decimal(text).filter(|&(negative, _)| !negative);
+                let Some(value) = value.and_then(|(_, value)| u64::try_from(value).ok()) else {
                     return Err(says(text, "invalid pattern"));
                 };
                 if value == 0 {
@@ -439,15 +407,23 @@ impl Lines {
         }
     }
 
-    /// Whether line `index` exists, reading lines ahead up to it.
+    /// Whether line `index` exists: the lines before it read ahead, then
+    /// a byte of it looked for, so the line itself still streams.
     fn exists(&mut self, index: u64, io: &mut Io) -> Result<bool, Short> {
-        while self.taken <= index {
+        while self.taken < index {
             match self.fetch(io)? {
                 Some(line) => self.ahead.push_back(line),
                 None => return Ok(false),
             }
         }
-        Ok(true)
+        if self.taken > index || !self.input.rest().is_empty() {
+            return Ok(true);
+        }
+        if self.input.ended {
+            return Ok(false);
+        }
+        self.input.pull(io);
+        Err(Short::Pending)
     }
 }
 
@@ -526,8 +502,9 @@ struct Csplit {
     head: u64,
     seen: u64,
     /// Under a negative offset, the lines read since the last that is
-    /// surely the piece's.
+    /// surely the piece's, and the bytes they hold.
     window: VecDeque<Vec<u8>>,
+    looked_back: usize,
     current: Current,
     state: State,
     /// The piece a flush commits, and its size.
@@ -541,19 +518,34 @@ struct Csplit {
 
 pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
     let config: Config = parse_config(config)?;
+    // getopt reads -n, a decimal from 0 to INT_MAX, before any operand.
+    let digits = match config.digits.as_deref().map(|raw| (raw, decimal(raw))) {
+        None => 2,
+        Some((_, Some((negative, n)))) if (!negative || n == 0) && n <= i32::MAX as u128 => {
+            n as usize
+        }
+        Some((raw, scanned)) => {
+            let reason = scanned.map_or("", |_| ": Value too large for defined data type");
+            let refused = format!("csplit: invalid number: '{}'{reason}", quoted(raw));
+            return Ok(Box::new(Refused::new(refused.into_bytes())));
+        }
+    };
     if config.operands.len() < 2 {
         return Ok(Box::new(Refused::new(missing(config.operands.first()))));
     }
     let format = match &config.suffix_format {
         Some(raw) => Format::parse(raw),
         None => Ok(Format {
-            zero: true,
-            width: config.digits,
+            flags: b"0".to_vec(),
+            width: digits,
             conversion: b'd',
             ..Format::default()
         }),
     };
     let format = match format {
+        Ok(format) if format.width.max(format.precision.unwrap_or(0)) > MAX_SUFFIX => {
+            return Ok(Box::new(Refused::new(b"csplit: memory exhausted".to_vec())));
+        }
         Ok(format) => format,
         Err(refused) => return Ok(Box::new(Refused::new(refused))),
     };
@@ -588,6 +580,7 @@ pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
         head: 0,
         seen: 0,
         window: VecDeque::new(),
+        looked_back: 0,
         current: Current::default(),
         state: State::Open,
         closing: None,
@@ -655,7 +648,16 @@ impl Csplit {
 
     fn short(&mut self, short: Short) {
         if let Short::Memory = short {
+            self.settle();
             self.fail(b"csplit: memory exhausted\n".to_vec());
+        }
+    }
+
+    /// Commit the piece a failing run was writing, so the cleanup that
+    /// follows finds it whole, or keeps it under -k.
+    fn settle(&mut self) {
+        if self.current.piece.is_some() {
+            self.close();
         }
     }
 
@@ -810,6 +812,7 @@ impl Csplit {
                 let skip = *skip;
                 self.begin(skip);
                 self.window.clear();
+                self.looked_back = 0;
                 self.state = State::Search;
             }
         }
@@ -840,11 +843,16 @@ impl Csplit {
                 self.run.put(To::Piece(&mut self.current), &line);
                 return;
             }
+            self.looked_back += line.len();
             self.window.push_back(line);
             if self.window.len() as u64 > offset.unsigned_abs() {
                 if let Some(old) = self.window.pop_front() {
+                    self.looked_back -= old.len();
                     self.run.put(To::Piece(&mut self.current), &old);
                 }
+            }
+            if self.looked_back > MAX_LEN {
+                self.short(Short::Memory);
             }
             return;
         }
@@ -899,13 +907,13 @@ impl Csplit {
         if let Request::Read { .. } = request {
             if let Some(failed) = self.lines.input.answer(reply, data) {
                 self.run.io.requests.clear();
+                self.settle();
                 let line = read_failure(b"csplit", b"-", &failed);
                 self.fail(line);
             }
             return Ok(());
         }
-        if let Some((name, text)) = write_failure(&request, &reply) {
-            let line = [b"csplit: ".as_slice(), &name, b": ", &text, b"\n"].concat();
+        if let Some(line) = write_failure(b"csplit", &request, &reply) {
             if let Request::Unlink { .. } = request {
                 self.stderr.extend_from_slice(&line);
             } else {
@@ -915,13 +923,20 @@ impl Csplit {
             }
             return Ok(());
         }
-        if let Request::Flush { path: Some(path) } = &request {
-            if let Some((name, size)) = self.closing.take_if(|(name, _)| name == path) {
-                if !self.silent {
+        match &request {
+            // A piece is the run's to remove once its file exists.
+            Request::Write {
+                path,
+                mode: WriteMode::Create,
+                ..
+            } => self.created.push(path.clone()),
+            Request::Flush { path: Some(path) } => {
+                let closed = self.closing.take_if(|(name, _)| name == path);
+                if let Some((_, size)) = closed.filter(|_| !self.silent) {
                     out.extend_from_slice(format!("{size}\n").as_bytes());
                 }
-                self.created.push(name);
             }
+            _ => {}
         }
         Ok(())
     }
@@ -948,6 +963,12 @@ impl Stream for Csplit {
             self.step();
         }
         Ok(())
+    }
+
+    /// Output closed early: the run goes on to its end, its sizes unread,
+    /// so a failure still reports and removes its pieces.
+    fn cancel(&mut self) -> bool {
+        true
     }
 
     fn status(&self) -> i32 {

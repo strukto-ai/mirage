@@ -202,7 +202,7 @@ async def awk_generic(
         dispatch,
         cwd,
         shell,
-        partial(served_here, vfs, mount_prefix),
+        local=partial(served_here, vfs, mount_prefix),
     )
     io = IOResult()
     return _awk_stream(engine, host, io), io

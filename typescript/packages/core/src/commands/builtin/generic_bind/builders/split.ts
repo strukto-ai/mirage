@@ -19,7 +19,7 @@ import { specOf } from '../../../spec/builtins.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
 import { IOResult } from '../../../../io/types.ts'
 import { byteView } from '../../../../shell/bytes.ts'
-import { StreamHost, hostedStream, ownMount } from '../../utils/stream_host.ts'
+import { StreamHost, hostedStream } from '../../utils/stream_host.ts'
 import type { GenericCommand } from '../adapter.ts'
 import { commandFiles, resolveOrEmpty } from '../files.ts'
 
@@ -50,7 +50,7 @@ const split: CommandFn = async (_accessor, paths, _texts, ctx) => {
   config.operands = resolved.map((path) => byteView(path.rawPath))
   // The pieces go to the prefix, or `x` in the working directory, which need
   // not be this mount, so the dispatcher routes each write.
-  const host = new StreamHost(resolved, files.read, ctx, ownMount, true, 'split')
+  const host = new StreamHost(resolved, files.read, ctx, true, 'split')
   const io = new IOResult()
   return [hostedStream('split', config, host, io, ctx.signal), io]
 }

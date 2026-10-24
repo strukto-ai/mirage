@@ -8,6 +8,11 @@ use crate::{Stream, StreamError};
 /// How much of a piece waits before it goes to the host.
 pub(super) const LIMIT: usize = 64 * 1024;
 
+/// The longest suffix a piece's name takes: past it the run ends as GNU's
+/// does once memory runs out (GNU allocates up to the address space, then
+/// fails the open on the name's length).
+pub(super) const MAX_SUFFIX: usize = 1 << 16;
+
 /// The steps one `drain` runs before the host may yield.
 pub(super) const STEPS: usize = 20_000;
 
@@ -132,14 +137,14 @@ impl Piece {
     }
 }
 
-/// A run's last word on a request it made: the file a failed write
-/// names, the words of the failure.
-pub(super) fn write_failure(request: &Request, reply: &Reply) -> Option<(Vec<u8>, Vec<u8>)> {
-    let error = reply.error.as_deref()?;
+/// A failed write or removal as the run reports it: the host's own line
+/// for a file it refused, else `NAME: TEXT`.
+pub(super) fn write_failure(command: &[u8], request: &Request, reply: &Reply) -> Option<Vec<u8>> {
+    reply.error.as_ref()?;
     match request {
         Request::Write { path, .. }
         | Request::Flush { path: Some(path) }
-        | Request::Unlink { path } => Some((path.clone(), bytes(error))),
+        | Request::Unlink { path } => Some(read_failure(command, path, reply)),
         _ => None,
     }
 }
