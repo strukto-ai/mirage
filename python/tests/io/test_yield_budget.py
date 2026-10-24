@@ -1,4 +1,5 @@
 import asyncio
+import sys
 from types import SimpleNamespace
 
 import pytest
@@ -20,7 +21,7 @@ async def test_run_yields_only_after_budget(monkeypatch):
     await point.run()
     assert ran == []
 
-    clock[0] += budget_mod.YIELD_INTERVAL * 2
+    clock[0] += budget_mod.YIELD_SWITCHES * sys.getswitchinterval() * 2
     await point.run()
     assert ran == [1]
 

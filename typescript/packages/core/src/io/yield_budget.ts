@@ -16,9 +16,9 @@ export const YIELD_INTERVAL = 10
 /**
  * A per-consumer time budget between opportunities for timers and
  * cancellation. `check` runs beside the signal, for a deadline it does not
- * carry. Python's twin keeps a shorter interval: its awaits each wait for a
- * loop turn where these settle as microtasks within one, and its yield costs
- * microseconds where `setTimeout` waits at least a millisecond.
+ * carry. Python's twin yields every two GIL switch intervals instead, as a
+ * loop that yields more often keeps its other threads from the GIL; this one
+ * runs every workspace on one thread.
  */
 export class YieldBudget {
   private nextYield = performance.now() + YIELD_INTERVAL

@@ -397,7 +397,7 @@ async def test_gzip_stream_produces_output_before_eof_and_closes_its_source():
 async def test_output_only_draining_yields_to_cancellation_and_closes_source(
     monkeypatch,
 ):
-    monkeypatch.setattr(yield_budget, "YIELD_INTERVAL", 0)
+    monkeypatch.setattr(yield_budget, "YIELD_SWITCHES", 0)
     size = GZIP_CHUNK_SIZE * 20
     archive = gzip.compress(b"x" * size)
     first_output = asyncio.Event()

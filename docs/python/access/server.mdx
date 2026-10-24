@@ -45,7 +45,19 @@ uvicorn.run(app, host="127.0.0.1", port=8765)
 
 ## Started by the CLI
 
-The CLI runs the same app as a daemon, `mirage.server.daemon:app`, on `127.0.0.1:8765` in local auth mode, logging to `~/.mirage/daemon.log`. That entry adds the daemon behaviors: it writes `$MIRAGE_HOME/daemon.pid` for `mirage daemon stop` and `kill`, exits 30 seconds (`MIRAGE_IDLE_GRACE_SECONDS`) after its last workspace is deleted, and tunes the interpreter as it starts. It collects and freezes what startup made, so a full collection no longer scans it, raises the young collection threshold to 10,000, and sets the GIL switch interval to 1 ms. These settings are process-wide, so an app you run with `build_app` keeps its own. Its settings are on the [CLI page](/home/access/cli#config).
+The CLI runs the same app as a daemon, `mirage.server.daemon:app`, on `127.0.0.1:8765` in local auth mode, logging to `~/.mirage/daemon.log`. That entry adds the daemon behaviors: it writes `$MIRAGE_HOME/daemon.pid` for `mirage daemon stop` and `kill`, exits 30 seconds (`MIRAGE_IDLE_GRACE_SECONDS`) after its last workspace is deleted, and tunes the interpreter as it starts. It collects and freezes what startup made, so a full collection no longer scans it, raises the young collection threshold to 10,000, and sets the GIL switch interval to 1 ms. These settings are process-wide, so an app you run with `build_app` keeps its own. Make them yourself to get the same fairness: a busy line yields its workspace's loop every two GIL switch intervals, so under Python's default 5 ms a line in another session waits on 10 ms turns, and under 1 ms on 2 ms turns.
+
+```python
+import gc
+import sys
+
+gc.collect()
+gc.freeze()
+gc.set_threshold(10_000, *gc.get_threshold()[1:])
+sys.setswitchinterval(0.001)
+```
+
+Its other settings are on the [CLI page](/home/access/cli#config).
 
 ## Beside your own event loop
 

@@ -590,9 +590,35 @@ async def isolation(server: Server, report: Report) -> None:
     40 and 100 ms with the GIL held and a 10 ms interval; TypeScript, one
     thread for every workspace, adds up to a turn of its own 10 ms budget.
 
+    The timing runs on a thread and loop of its own, so a sibling host
+    starting or stopping a deployment on the run's loop never counts as
+    this server's wait.
+
     Args:
         server (Server): the running deployment.
         report (Report): the run's report.
+    """
+    timed = await asyncio.to_thread(asyncio.run, waits_beside_busy(server))
+    for scope, (alone, beside, lines) in timed.items():
+        report.check(
+            f"{server.key} server.isolation.{scope}",
+            beside - alone < ISOLATION[scope][3],
+            True,
+        )
+        report.note(
+            f"{server.key} echo beside a busy {scope}: median"
+            f" {beside:.1f} ms over {lines} lines, {alone:.1f} alone"
+        )
+
+
+async def waits_beside_busy(
+    server: Server,
+) -> dict[str, tuple[float, float, int]]:
+    """Each scope's median ``echo`` alone and beside its busy line, and
+    how many ran beside it.
+
+    Args:
+        server (Server): the running deployment.
     """
     d = server.d
     async with httpx.AsyncClient(
@@ -610,6 +636,8 @@ async def isolation(server: Server, report: Report) -> None:
                 json={"command": command, "record": False},
             )
             reply.raise_for_status()
+            result = reply.json()
+            assert result["exit_code"] == 0, (command, result["stderr"])
             return (time.monotonic() - began) * 1000
 
         wids = sorted({BUSY, *(wid for _, wid, _, _ in ISOLATION.values())})
@@ -622,35 +650,31 @@ async def isolation(server: Server, report: Report) -> None:
             f"/v1/workspaces/{BUSY}/sessions", json={"session_id": "other"}
         )
         opened.raise_for_status()
-        for scope, (command, wid, session, bound) in ISOLATION.items():
+        timed = {}
+        for scope, (command, wid, session, _) in ISOLATION.items():
             await line(wid, session, "true")
             alone = statistics.median(
                 [await line(wid, session, "echo") for _ in range(10)]
             )
             end = time.monotonic() + ISOLATION_WINDOW
+            waits: list[float] = []
 
             async def busy() -> None:
                 while time.monotonic() < end:
                     await line(BUSY, None, command)
 
-            looping = asyncio.create_task(busy())
-            waits: list[float] = []
-            while time.monotonic() < end:
-                waits.append(await line(wid, session, "echo"))
-                await asyncio.sleep(ISOLATION_PAUSE)
-            await looping
-            beside = statistics.median(waits)
-            report.check(
-                f"{server.key} server.isolation.{scope}",
-                beside - alone < bound,
-                True,
-            )
-            report.note(
-                f"{server.key} echo beside a busy {scope}: median"
-                f" {beside:.1f} ms over {len(waits)} lines, {alone:.1f} alone"
-            )
+            async def quiet() -> None:
+                while time.monotonic() < end:
+                    waits.append(await line(wid, session, "echo"))
+                    await asyncio.sleep(ISOLATION_PAUSE)
+
+            async with asyncio.TaskGroup() as group:
+                group.create_task(busy())
+                group.create_task(quiet())
+            timed[scope] = (alone, statistics.median(waits), len(waits))
         for wid in wids:
             (await http.delete(f"/v1/workspaces/{wid}")).raise_for_status()
+    return timed
 
 
 async def server_checks(server: Server, report: Report) -> None:
