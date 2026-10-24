@@ -89,6 +89,18 @@ describe('gridfs unlink', () => {
     expect(DEC.decode(Buffer.concat(chunks))).toBe('v1')
   })
 
+  it('keeps a pinned stat finding the trashed revision', async () => {
+    // cat stats before it reads, so a restore of a file that is still
+    // deleted needs the pinned stat to reach the trash too.
+    const [first] = await seedAndRm()
+    const pins = new Map([[A_TXT.virtual, String(first)]])
+    const found = await runWithRevisions(pins, () => stat(makeAccessor(store), A_TXT))
+    expect([found.size, found.fingerprint]).toEqual([2, first])
+    await expect(runWithRevisions(pins, () => exists(makeAccessor(store), A_TXT))).resolves.toBe(
+      true,
+    )
+  })
+
   it('reads the name as gone after rm', async () => {
     await seedAndRm()
     const accessor = makeAccessor(store)

@@ -33,6 +33,7 @@ import { GridFSAccessor } from '../../accessor/gridfs.ts'
 import type { GridFSConfig } from '../../vfs/gridfs/config.ts'
 import * as clientMod from './client.ts'
 import { DRIVER } from './driver.ts'
+import { read } from './read.ts'
 import { unlink } from './unlink.ts'
 import { write } from './write.ts'
 
@@ -147,6 +148,17 @@ describe('gridfs retention', () => {
     expect(store.ids('a.txt')).toHaveLength(1)
     const [trashed] = store.ids('/trash/a.txt')
     expect(new TextDecoder().decode(store.chunks.get(String(trashed)))).toBe('v2')
+  })
+
+  it('breaks upload date ties by the newest id', async () => {
+    // Two uploads in one clock tick: the later _id is the newer revision,
+    // for reads and for what retention keeps.
+    store.upload('a.txt', ENC.encode('older'))
+    const newer = store.upload('a.txt', ENC.encode('newer'), true)
+    const accessor = makeAccessor(store, { keepRevisions: 1 })
+    expect(new TextDecoder().decode(await read(accessor, A_TXT))).toBe('newer')
+    await unlink(accessor, A_TXT)
+    expect(store.ids('/trash/a.txt')).toEqual([newer])
   })
 
   it('keeps every revision without retention', async () => {

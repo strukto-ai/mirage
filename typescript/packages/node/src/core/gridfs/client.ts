@@ -153,24 +153,24 @@ export async function* iterLatest(
 }
 
 /**
- * Rename every revision matching a query, server-side. The revisions keep
- * their `_id` and chunks, so a read pinned to one still finds it under the
- * new name. Returns how many revisions the query selected.
+ * Rename every revision matching a query, in one server-side update: each
+ * filename loses its first `strip` characters and gains `prefix`. The
+ * revisions keep their `_id` and chunks, so a read pinned to one still finds
+ * it under the new name. Returns how many revisions the query selected.
  */
 export async function retag(
   accessor: GridFSAccessor,
   query: Record<string, unknown>,
-  rename: (filename: string) => string,
+  prefix: string,
+  strip = 0,
 ): Promise<number> {
   const files = await filesColl(accessor)
-  const docs: { _id: ObjectId; filename: string }[] = []
-  for await (const doc of files.find(query, { projection: { _id: 1, filename: 1 } })) {
-    docs.push({ _id: doc._id, filename: doc.filename as string })
-  }
-  for (const doc of docs) {
-    await files.updateOne({ _id: doc._id }, { $set: { filename: rename(doc.filename) } })
-  }
-  return docs.length
+  const rest =
+    strip === 0 ? '$filename' : { $substrCP: ['$filename', strip, { $strLenCP: '$filename' }] }
+  const result = await files.updateMany(query, [
+    { $set: { filename: { $concat: [prefix, rest] } } },
+  ])
+  return result.matchedCount
 }
 
 /**
@@ -182,7 +182,7 @@ export async function trash(
   accessor: GridFSAccessor,
   query: Record<string, unknown>,
 ): Promise<void> {
-  await retag(accessor, query, trashed)
+  await retag(accessor, query, TRASH_PREFIX)
 }
 
 /**
@@ -204,7 +204,7 @@ export async function prune(
   ]
   const ids: ObjectId[] = []
   for await (const doc of files.aggregate(pipeline)) {
-    ids.push(...(doc.ids as ObjectId[]).slice(keep))
+    for (const id of (doc.ids as ObjectId[]).slice(keep)) ids.push(id)
   }
   await deleteIds(accessor, ids)
 }

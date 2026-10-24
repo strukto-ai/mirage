@@ -3,7 +3,9 @@
   "after_rm_exit": 1,
   "after_rm_stderr": "cat: /data/f.txt: No such file or directory\n",
   "after_rm_ls": "",
-  "after_rewrite": "v3",
   "restored_pinned": true,
+  "restored_deleted_size": "2\n",
+  "restored_deleted": "v1",
+  "after_rewrite": "v3",
   "restored": "v1"
 }

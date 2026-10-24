@@ -18,6 +18,7 @@ from collections.abc import AsyncIterator
 from contextlib import aclosing, asynccontextmanager
 from typing import Any
 
+from bson import ObjectId
 from gridfs.errors import NoFile
 
 from mirage.accessor.gridfs import GridFSAccessor
@@ -114,7 +115,18 @@ async def _list_subtree(
 
 
 async def _head(conn: GridFSAccessor, key: str) -> ObjectMeta | None:
-    doc = await latest_file(conn, key)
+    return _meta_of(await latest_file(conn, key))
+
+
+async def _head_revision(
+    conn: GridFSAccessor, key: str, revision: str
+) -> ObjectMeta | None:
+    # A pinned stat: the revision by its _id, wherever rm or mv moved it.
+    doc = await files_coll(conn).find_one({"_id": ObjectId(revision)})
+    return _meta_of(doc)
+
+
+def _meta_of(doc: dict[str, Any] | None) -> ObjectMeta | None:
     if doc is None:
         return None
     revision = str(doc["_id"])
@@ -213,6 +225,7 @@ async def _copy_file(conn: GridFSAccessor, src_key: str, dst_key: str) -> bool:
     finally:
         await out.close()
         await grid_in.close()
+    await prune(conn, _revisions_query(dst_key))
     return True
 
 
@@ -252,11 +265,7 @@ async def _move_prefix(
             return False
         await trash(conn, prefix_query(dst_pfx))
         await prune(conn, prefix_query(trashed(dst_pfx)))
-    moved = await retag(
-        conn,
-        prefix_query(src_pfx),
-        lambda name: f"{dst_pfx}{name[len(src_pfx) :]}",
-    )
+    moved = await retag(conn, prefix_query(src_pfx), dst_pfx, len(src_pfx))
     return moved > 0
 
 
@@ -279,6 +288,7 @@ DRIVER: ObjectStoreDriver[GridFSAccessor, GridFSAccessor] = ObjectStoreDriver(
     list_children=_list_children,
     list_subtree=_list_subtree,
     head=_head,
+    head_revision=_head_revision,
     get=_get,
     put=_put,
     put_stream=_put_stream,

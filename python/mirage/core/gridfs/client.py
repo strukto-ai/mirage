@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import re
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator
 from typing import Any
 
 from gridfs import AsyncGridFSBucket
@@ -127,31 +127,31 @@ async def iter_latest(
 async def retag(
     accessor: GridFSAccessor,
     query: dict[str, Any],
-    rename: Callable[[str], str],
+    prefix: str,
+    strip: int = 0,
 ) -> int:
-    """Rename every revision matching a query, server-side.
+    """Rename every revision matching a query, in one server-side update.
 
-    The revisions keep their ``_id`` and chunks, so a read pinned to one
-    still finds it under the new name.
+    Each filename loses its first ``strip`` characters and gains
+    ``prefix``. The revisions keep their ``_id`` and chunks, so a read
+    pinned to one still finds it under the new name.
 
     Args:
         accessor (GridFSAccessor): GridFS accessor.
         query (dict[str, Any]): fs.files filter selecting the revisions.
-        rename (Callable[[str], str]): the new filename of each.
+        prefix (str): what the new filename starts with.
+        strip (int): how many leading characters the old filename loses.
 
     Returns:
         int: how many revisions the query selected.
     """
-    files = files_coll(accessor)
-    docs: list[dict[str, Any]] = []
-    async for doc in files.find(query, projection={"_id": 1, "filename": 1}):
-        docs.append(doc)
-    for doc in docs:
-        await files.update_one(
-            {"_id": doc["_id"]},
-            {"$set": {"filename": rename(doc["filename"])}},
-        )
-    return len(docs)
+    rest: Any = "$filename"
+    if strip:
+        rest = {"$substrCP": ["$filename", strip, {"$strLenCP": "$filename"}]}
+    result = await files_coll(accessor).update_many(
+        query, [{"$set": {"filename": {"$concat": [prefix, rest]}}}]
+    )
+    return result.matched_count
 
 
 async def trash(accessor: GridFSAccessor, query: dict[str, Any]) -> None:
@@ -165,7 +165,7 @@ async def trash(accessor: GridFSAccessor, query: dict[str, Any]) -> None:
         accessor (GridFSAccessor): GridFS accessor.
         query (dict[str, Any]): fs.files filter selecting live revisions.
     """
-    await retag(accessor, query, trashed)
+    await retag(accessor, query, TRASH_PREFIX)
 
 
 async def prune(accessor: GridFSAccessor, query: dict[str, Any]) -> None:

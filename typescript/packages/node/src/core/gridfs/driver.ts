@@ -30,9 +30,12 @@ import type { GridFSAccessor } from '../../accessor/gridfs.ts'
 import {
   bucket,
   escapeRegex,
+  fileById,
   filesColl,
+  type GridFSFileDoc,
   iterLatest,
   latestFile,
+  loadGridFSModule,
   prefixQuery,
   prune,
   retag,
@@ -91,7 +94,20 @@ async function* listSubtree(conn: GridFSAccessor, stem: string): AsyncIterable<T
 }
 
 async function head(conn: GridFSAccessor, key: string): Promise<ObjectMeta | null> {
-  const doc = await latestFile(conn, key)
+  return metaOf(await latestFile(conn, key))
+}
+
+async function headRevision(
+  conn: GridFSAccessor,
+  _key: string,
+  revision: string,
+): Promise<ObjectMeta | null> {
+  // A pinned stat: the revision by its _id, wherever rm or mv moved it.
+  const mod = await loadGridFSModule()
+  return metaOf(await fileById(conn, new mod.ObjectId(revision)))
+}
+
+function metaOf(doc: GridFSFileDoc | null): ObjectMeta | null {
   if (doc === null) return null
   const revision = doc._id.toString()
   return {
@@ -197,6 +213,7 @@ async function copyFile(conn: GridFSAccessor, srcKey: string, dstKey: string): P
     })
     readable.pipe(upload)
   })
+  await prune(conn, revisionsQuery(dstKey))
   return true
 }
 
@@ -227,11 +244,7 @@ async function movePrefix(conn: GridFSAccessor, srcPfx: string, dstPfx: string):
     await trash(conn, prefixQuery(dstPfx))
     await prune(conn, prefixQuery(trashed(dstPfx)))
   }
-  const moved = await retag(
-    conn,
-    prefixQuery(srcPfx),
-    (name) => `${dstPfx}${name.slice(srcPfx.length)}`,
-  )
+  const moved = await retag(conn, prefixQuery(srcPfx), dstPfx, srcPfx.length)
   return moved > 0
 }
 
@@ -249,6 +262,7 @@ export const DRIVER: ObjectStoreDriver<GridFSAccessor, GridFSAccessor> = {
   listChildren,
   listSubtree,
   head,
+  headRevision,
   get,
   put,
   putStream,

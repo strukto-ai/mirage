@@ -15,6 +15,7 @@
 import type { Accessor } from '../../accessor/base.ts'
 import { FileStat, FileType } from '../../types.ts'
 import { enoent } from '../../errors/fs.ts'
+import { revisionFor } from '../../observe/context.ts'
 import { contentTypeForPath } from '../../utils/filetype.ts'
 import * as kp from '../../utils/key_prefix.ts'
 import { rawPathOf } from '../../utils/key_prefix.ts'
@@ -47,7 +48,11 @@ export function makeStat<A extends Accessor, C>(driver: ObjectStoreDriver<A, C>)
       // a directory (trailing slash), so a coexisting object of the same
       // name does not shadow the prefix.
       if (!hintsDirectory) {
-        const meta = await driver.head(conn, key)
+        const pinned = revisionFor(path.virtual)
+        const meta =
+          pinned !== null && driver.headRevision !== undefined
+            ? await driver.headRevision(conn, key, pinned)
+            : await driver.head(conn, key)
         if (meta !== null) {
           return new FileStat({
             name: gnuBasename(rawPath),

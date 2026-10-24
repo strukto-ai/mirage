@@ -64,6 +64,29 @@ function selects(query: Query, doc: FakeDoc): boolean {
   return true
 }
 
+/** The value of the aggregation expressions `retag` sends. */
+function evaluate(expr: unknown, doc: FakeDoc): unknown {
+  if (typeof expr === 'string') {
+    return expr.startsWith('$') ? doc[expr.slice(1) as keyof FakeDoc] : expr
+  }
+  if (typeof expr === 'number') return expr
+  const [[op, args]] = Object.entries(expr as Record<string, unknown>) as [[string, unknown]]
+  if (op === '$concat') return (args as unknown[]).map((arg) => evaluate(arg, doc)).join('')
+  if (op === '$strLenCP') return Array.from(evaluate(args, doc) as string).length
+  if (op === '$substrCP') {
+    const [text, start, count] = (args as unknown[]).map((arg) => evaluate(arg, doc)) as [
+      string,
+      number,
+      number,
+    ]
+    return Array.from(text)
+      .slice(start, start + count)
+      .join('')
+  }
+  throw new Error(`unsupported expression ${op}`)
+}
+
+// LATEST_SORT: uploadDate descending, then _id descending.
 function latestFirst(a: FakeDoc, b: FakeDoc): number {
   const byDate = b.uploadDate.getTime() - a.uploadDate.getTime()
   return byDate !== 0 ? byDate : b._id.localeCompare(a._id)
@@ -78,15 +101,20 @@ export class FakeStore {
   docs: FakeDoc[] = []
   readonly chunks = new Map<string, Uint8Array>()
   private uploads = 0
+  private minted = 0
 
   constructor(names: string[] = []) {
     for (const name of names) this.upload(name, new Uint8Array(0))
   }
 
-  /** Add one revision of `filename` holding `data`. */
-  upload(filename: string, data: Uint8Array): string {
-    this.uploads += 1
-    const id = `oid-${String(this.uploads).padStart(4, '0')}`
+  /**
+   * Add one revision of `filename` holding `data`. `sameTime` reuses the
+   * previous upload's `uploadDate`, so only the `_id` tells the two apart.
+   */
+  upload(filename: string, data: Uint8Array, sameTime = false): string {
+    if (!sameTime) this.uploads += 1
+    this.minted += 1
+    const id = `oid-${String(this.minted).padStart(4, '0')}`
     this.docs.push({
       _id: id,
       filename,
@@ -133,9 +161,23 @@ export class FakeStore {
     return Promise.resolve()
   }
 
-  updateMany(query: Query, update: { $set: Partial<FakeDoc> }): Promise<void> {
-    for (const doc of this.match(query)) Object.assign(doc, update.$set)
-    return Promise.resolve()
+  updateMany(
+    query: Query,
+    update: { $set: Partial<FakeDoc> } | { $set: Record<string, unknown> }[],
+  ): Promise<{ matchedCount: number }> {
+    const found = this.match(query)
+    for (const doc of found) {
+      if (Array.isArray(update)) {
+        for (const stage of update) {
+          for (const [field, expr] of Object.entries(stage.$set)) {
+            Object.assign(doc, { [field]: evaluate(expr, doc) })
+          }
+        }
+      } else {
+        Object.assign(doc, update.$set)
+      }
+    }
+    return Promise.resolve({ matchedCount: found.length })
   }
 
   deleteMany(query: Query): Promise<void> {

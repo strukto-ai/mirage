@@ -54,8 +54,39 @@ def _selects(query: dict[str, Any], doc: dict[str, Any]) -> bool:
     return True
 
 
-def _latest_first(doc: dict[str, Any]) -> tuple[Any, ...]:
-    return (-doc["uploadDate"].timestamp(), str(doc["_id"]))
+def _newest_first(docs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    # LATEST_SORT: uploadDate descending, then _id descending.
+    return sorted(
+        docs, key=lambda d: (d["uploadDate"], d["_id"]), reverse=True
+    )
+
+
+def _evaluate(expr: Any, doc: dict[str, Any]) -> Any:
+    """The value of the aggregation expressions ``retag`` sends.
+
+    Args:
+        expr (Any): ``$concat``, ``$substrCP``, ``$strLenCP``, a field
+            path or a literal.
+        doc (dict[str, Any]): the document it reads.
+    """
+    if isinstance(expr, str):
+        return doc[expr[1:]] if expr.startswith("$") else expr
+    if isinstance(expr, int):
+        return expr
+    (op, args), *_ = expr.items()
+    if op == "$concat":
+        return "".join(_evaluate(arg, doc) for arg in args)
+    if op == "$strLenCP":
+        return len(_evaluate(args, doc))
+    if op == "$substrCP":
+        text, start, count = (_evaluate(arg, doc) for arg in args)
+        return text[start : start + count]
+    raise NotImplementedError(op)
+
+
+class _Updated:
+    def __init__(self, matched_count: int) -> None:
+        self.matched_count = matched_count
 
 
 class FakeStore:
@@ -76,14 +107,19 @@ class FakeStore:
         for name in names or []:
             self.upload(name, b"")
 
-    def upload(self, filename: str, data: bytes) -> ObjectId:
+    def upload(
+        self, filename: str, data: bytes, same_time: bool = False
+    ) -> ObjectId:
         """Add one revision of ``filename`` holding ``data``.
 
         Args:
             filename (str): the backend key.
             data (bytes): the revision's content.
+            same_time (bool): reuse the previous upload's ``uploadDate``,
+                so only the ``_id`` tells the two apart.
         """
-        self._uploads += 1
+        if not same_time:
+            self._uploads += 1
         oid = ObjectId()
         self.docs.append(
             {
@@ -125,7 +161,7 @@ class FakeStore:
     ) -> dict[str, Any] | None:
         found = self._match(query)
         if sort is not None:
-            found.sort(key=_latest_first)
+            found = _newest_first(found)
         return dict(found[0]) if found else None
 
     async def count_documents(self, query: dict[str, Any], limit: int) -> int:
@@ -138,10 +174,17 @@ class FakeStore:
             doc.update(update["$set"])
 
     async def update_many(
-        self, query: dict[str, Any], update: dict[str, Any]
-    ) -> None:
-        for doc in self._match(query):
-            doc.update(update["$set"])
+        self, query: dict[str, Any], update: Any
+    ) -> _Updated:
+        found = self._match(query)
+        for doc in found:
+            if isinstance(update, list):
+                for stage in update:
+                    for field, expr in stage["$set"].items():
+                        doc[field] = _evaluate(expr, doc)
+            else:
+                doc.update(update["$set"])
+        return _Updated(len(found))
 
     async def delete_many(self, query: dict[str, Any]) -> None:
         if "files_id" in query:
@@ -154,13 +197,10 @@ class FakeStore:
     async def aggregate(self, pipeline: list[dict[str, Any]]) -> Any:
         # The two pipelines the client builds: newest per filename
         # (iter_latest) and every _id per filename, newest first (prune).
-        docs = sorted(
-            self._match(pipeline[0]["$match"]),
-            key=lambda d: (d["filename"], *_latest_first(d)),
-        )
         grouped: dict[str, list[dict[str, Any]]] = {}
-        for doc in docs:
+        for doc in self._match(pipeline[0]["$match"]):
             grouped.setdefault(doc["filename"], []).append(doc)
+        grouped = {name: _newest_first(docs) for name, docs in grouped.items()}
         fields = pipeline[2]["$group"]
         out = []
         for name, revisions in sorted(grouped.items()):

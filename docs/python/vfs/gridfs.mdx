@@ -150,7 +150,7 @@ filename server-side (history moves with the file).
 `/trash/<filename>`, the same way `mv` does. A mount key never starts with a
 slash, so no path on any mount, whatever its `key_prefix`, can list, stat or
 read a trashed revision, and the name reads as gone; a snapshot pinned to one
-of those revisions still reads it by its `_id`. A file `mv` overwrites goes
+of those revisions still stats and reads it by its `_id`. A file `mv` overwrites goes
 to the trash the same way. The trash keeps the whole original filename, so a
 revision is traceable to the key it was written under.
 

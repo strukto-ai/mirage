@@ -62,6 +62,22 @@ async def test_rm_then_pinned_read_still_works(store: FakeStore):
 
 
 @pytest.mark.asyncio
+async def test_rm_then_pinned_stat_finds_the_trashed_revision(
+    store: FakeStore,
+):
+    # cat stats before it reads, so a restore of a file that is still
+    # deleted needs the pinned stat to reach the trash too.
+    first, _ = await _seed_and_rm(store)
+    token = push_revisions({A_TXT.virtual: str(first)})
+    try:
+        found = await stat(make_accessor(), A_TXT)
+        assert await exists(make_accessor(), A_TXT) is True
+    finally:
+        reset_revisions(token)
+    assert (found.size, found.fingerprint) == (2, str(first))
+
+
+@pytest.mark.asyncio
 async def test_rm_then_the_name_reads_as_gone(store: FakeStore):
     await _seed_and_rm(store)
     accessor = make_accessor()

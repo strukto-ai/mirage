@@ -12,14 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-// The GridFS trash under a snapshot: rm retags revisions instead of
-// deleting them, so a workspace restored from a snapshot taken before the
-// rm still reads the revision it pinned. The declarative battery cannot
-// snapshot a workspace or reload it onto a fresh VFS, so this probe does,
-// against the MongoDB the shared battery jobs already run. Emits one JSON
-// line for integ/check_json.py against integ/truth_gridfs_trash.json, the
-// same truth file the Python twin is checked against.
-
 import { randomUUID } from 'node:crypto'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -45,10 +37,41 @@ async function shell(
   }
 }
 
+/**
+ * What a workspace restored from `snap` reads at `/data/f.txt`, past the
+ * restored cache, so the pinned stat and read reach the trashed revision
+ * itself.
+ */
+async function restoredReads(
+  snap: string,
+  config: GridFSConfig,
+): Promise<{ pinned: boolean; size: string; cat: string }> {
+  // A load leaves the override to its caller, open MongoDB client and all.
+  const fresh = new GridFSVFS(config)
+  const restored = await Workspace.load(snap, {}, { '/data': fresh })
+  try {
+    await restored.cache.remove('/data/f.txt')
+    return {
+      pinned: '/data/f.txt' in restored.revisions,
+      size: (await shell(restored, 'stat -c %s /data/f.txt')).stdout,
+      cat: (await shell(restored, 'cat /data/f.txt')).stdout,
+    }
+  } finally {
+    await restored.close()
+    await fresh.close()
+  }
+}
+
+/**
+ * Snapshot a read, rm the file, and restore: once while the file is still
+ * deleted, once after a rewrite. The battery cannot snapshot a workspace or
+ * reload it onto a fresh VFS, so this runs here, against the MongoDB the
+ * shared battery jobs already start. Twin of `gridfs_trash.py`.
+ */
 async function probe(config: GridFSConfig): Promise<Probe> {
-  // The file is written by one workspace and read by another, so the read
-  // reaches the backend and records the revision the snapshot pins; a read
-  // served from the writer's cache records nothing.
+  // Written by one workspace and read by another, so the read reaches the
+  // backend and records the revision the snapshot pins; a read served from
+  // the writer's cache records nothing.
   const writer = new Workspace({ '/data': new GridFSVFS(config) }, { mode: MountMode.WRITE })
   try {
     await shell(writer, 'printf v1 > /data/f.txt')
@@ -68,22 +91,13 @@ async function probe(config: GridFSConfig): Promise<Probe> {
     out.after_rm_exit = gone.exit
     out.after_rm_stderr = gone.stderr
     out.after_rm_ls = (await shell(ws, 'ls /data')).stdout
+    const deleted = await restoredReads(snap, config)
+    out.restored_pinned = deleted.pinned
+    out.restored_deleted_size = deleted.size
+    out.restored_deleted = deleted.cat
     await shell(ws, 'printf v3 > /data/f.txt')
     out.after_rewrite = (await shell(ws, 'cat /data/f.txt')).stdout
-    // The override stays the caller's: closing the restored workspace does
-    // not close it, and an open MongoDB client keeps the process alive.
-    const fresh = new GridFSVFS(config)
-    const restored = await Workspace.load(snap, {}, { '/data': fresh })
-    try {
-      out.restored_pinned = '/data/f.txt' in restored.revisions
-      // Past the restored cache: the pinned read has to reach the trashed
-      // revision itself.
-      await restored.cache.remove('/data/f.txt')
-      out.restored = (await shell(restored, 'cat /data/f.txt')).stdout
-    } finally {
-      await restored.close()
-      await fresh.close()
-    }
+    out.restored = (await restoredReads(snap, config)).cat
   } finally {
     await ws.close()
     rmSync(dir, { recursive: true, force: true })

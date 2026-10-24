@@ -19,6 +19,7 @@ import pytest
 from mirage.accessor.gridfs import GridFSAccessor
 from mirage.cache.types import WriteCondition
 from mirage.core.gridfs import driver as gridfs_driver
+from mirage.core.gridfs.read import read
 from mirage.core.gridfs.unlink import unlink
 from mirage.core.gridfs.write import write
 from mirage.types import PathSpec
@@ -136,6 +137,20 @@ async def test_retention_counts_live_and_trashed_revisions_apart(
     assert len(store.ids("a.txt")) == 1
     assert len(store.ids("/trash/a.txt")) == 1
     assert store.chunks[store.ids("/trash/a.txt")[0]] == b"v2"
+
+
+@pytest.mark.asyncio
+async def test_retention_breaks_upload_date_ties_by_the_newest_id(
+    store: FakeStore,
+):
+    # Two uploads in one clock tick: the later _id is the newer revision,
+    # for reads and for what retention keeps.
+    store.upload("a.txt", b"older")
+    newer = store.upload("a.txt", b"newer", same_time=True)
+    accessor = make_accessor(keep_revisions=1)
+    assert await read(accessor, A_TXT) == b"newer"
+    await unlink(accessor, A_TXT)
+    assert store.ids("/trash/a.txt") == [newer]
 
 
 @pytest.mark.asyncio
