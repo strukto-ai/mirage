@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 import { concat } from '../utils/bytes.ts'
-import { abortable } from '../utils/abort.ts'
+import { abortable, hasAborted, makeAbortError } from '../utils/abort.ts'
 import { YieldBudget } from './yield_budget.ts'
 
 export const CHUNK_SIZE = 16 * 1024
@@ -46,6 +46,9 @@ export async function* chunks(
   let pulling = false
   try {
     for (;;) {
+      // Before the pull, not only around it: a lazy source starts its
+      // request on the first `next()`, which an abort must never reach.
+      if (hasAborted(signal)) throw makeAbortError(signal)
       pulling = true
       const result = await abortable(iterator.next(), signal)
       pulling = false

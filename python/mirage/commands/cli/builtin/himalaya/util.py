@@ -31,7 +31,6 @@ from mirage.commands.cli.builtin.himalaya.deliver import (
 )
 from mirage.commands.spec.flag_view import FlagView
 from mirage.errors.fs import fs_strerror
-from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 from mirage.utils.filetype import mime_type_for
@@ -133,7 +132,7 @@ async def route(
     save = fl.as_str("save")
     if not fl.as_bool("send"):
         if save is None:
-            return yield_bytes(raw), IOResult()
+            return raw, IOResult()
         # --save without --send files the message and sends nothing, so
         # a refused APPEND means nothing happened at all and may fail
         # loudly: there is no delivered message a retry could duplicate.
@@ -148,7 +147,7 @@ async def route(
             ensure_ascii=False,
             separators=(",", ":"),
         ).encode()
-        return yield_bytes(out), IOResult()
+        return out, IOResult()
     _, warning = await deliver(accessor, raw, save)
     result = {
         "status": "sent",
@@ -158,6 +157,4 @@ async def route(
     out = json.dumps(
         result, ensure_ascii=False, separators=(",", ":")
     ).encode()
-    return yield_bytes(out), IOResult(
-        stderr=warning.encode() if warning else None
-    )
+    return out, IOResult(stderr=warning.encode() if warning else None)

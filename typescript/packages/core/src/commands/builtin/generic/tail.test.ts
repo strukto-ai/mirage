@@ -90,8 +90,15 @@ class Growing {
     await Promise.resolve()
     yield bytesOf(this.data.get(p.virtual))
   }.bind(this)
-  readRange = (p: PathSpec, offset: number, size: number): Promise<Uint8Array> =>
-    Promise.resolve(bytesOf(this.data.get(p.virtual)).slice(offset, offset + size))
+  readRange = async function* (
+    this: Growing,
+    p: PathSpec,
+    offset: number,
+    size: number,
+  ): AsyncIterable<Uint8Array> {
+    await Promise.resolve()
+    yield bytesOf(this.data.get(p.virtual)).slice(offset, offset + size)
+  }.bind(this)
   set(path: string, text: string): void {
     this.data.set(path, ENC.encode(text))
   }
@@ -470,9 +477,13 @@ describe('tail -f', () => {
         tripped()
         yield* fs.stream(p)
       }
-      const readRange = (p: PathSpec, offset: number, size: number): Promise<Uint8Array> => {
+      const readRange = async function* (
+        p: PathSpec,
+        offset: number,
+        size: number,
+      ): AsyncIterable<Uint8Array> {
         tripped()
-        return fs.readRange(p, offset, size)
+        yield* fs.readRange(p, offset, size)
       }
       const abort = new AbortController()
       const [out, io] = (await tailGeneric(
@@ -562,12 +573,19 @@ describe('tail -f', () => {
   it('--follow=name gives up on a read that finds nothing', async () => {
     const fs = new Growing(new Map([['/d/f', ENC.encode('a\n')]]))
     let trip = false
-    const readRange = (p: PathSpec, offset: number, size: number): Promise<Uint8Array> => {
-      if (!trip) return fs.readRange(p, offset, size)
+    const readRange = async function* (
+      p: PathSpec,
+      offset: number,
+      size: number,
+    ): AsyncIterable<Uint8Array> {
+      if (!trip) {
+        yield* fs.readRange(p, offset, size)
+        return
+      }
       trip = false
       const err = new Error('ENOENT') as Error & { code: string }
       err.code = 'ENOENT'
-      return Promise.reject(err)
+      throw err
     }
     const abort = new AbortController()
     const [stream, io] = (await tailGeneric(

@@ -892,9 +892,6 @@ export type ReadStreamFn<Args extends unknown[] = [path: PathSpec]> = (
   ...args: Args
 ) => AsyncIterable<Uint8Array>
 
-/** A bound byte-window reader, called as `readRange(path, offset, size)`. */
-export type ReadRangeFn = (path: PathSpec, offset: number, size: number) => Promise<Uint8Array>
-
 export type CopyFn<Args extends unknown[] = [src: PathSpec, target: PathSpec]> = (
   ...args: Args
 ) => Promise<void>
@@ -944,8 +941,7 @@ export interface NativeCopy {
 }
 
 export interface PrimitiveCopy {
-  readBytes: ReadBytesFn
-  readStream?: ReadStreamFn
+  read: ReadStreamFn
   write: CopyFn<[target: PathSpec, data: Uint8Array | AsyncIterable<Uint8Array>]>
   mkdir: CopyFn<[path: PathSpec]>
   readdir: ReaddirFn
@@ -961,8 +957,7 @@ export interface NativeMove {
 }
 
 export interface PrimitiveMove {
-  readBytes: ReadBytesFn
-  readStream?: ReadStreamFn
+  read: ReadStreamFn
   write: MoveFn<[target: PathSpec, data: Uint8Array | AsyncIterable<Uint8Array>]>
   mkdir: MoveFn<[path: PathSpec]>
   readdir: ReaddirFn

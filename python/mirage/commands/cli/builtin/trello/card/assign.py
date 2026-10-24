@@ -20,7 +20,6 @@ from mirage.commands.spec.flag_view import FlagView
 from mirage.core.render.json import compact_json_bytes
 from mirage.core.trello.client import card_assign
 from mirage.core.trello.normalize import normalize_card
-from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -36,4 +35,4 @@ async def assign(
     member_id = required_flag(fl, "member_id")
     await require_card(accessor, card_id)
     card = await card_assign(accessor, card_id=card_id, member_id=member_id)
-    return yield_bytes(compact_json_bytes(normalize_card(card))), IOResult()
+    return compact_json_bytes(normalize_card(card)), IOResult()

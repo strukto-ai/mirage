@@ -18,7 +18,6 @@ from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
 from mirage.core.email.client import fetch_message, fetch_raw_message
 from mirage.core.email.render import message_json_bytes
-from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -33,11 +32,9 @@ async def read(
     uid = first_text(texts, "message id")
     mailbox = fl.as_str("mailbox", "INBOX")
     if fl.as_bool("raw"):
-        return yield_bytes(
-            await fetch_raw_message(accessor, mailbox, uid)
-        ), IOResult()
+        return await fetch_raw_message(accessor, mailbox, uid), IOResult()
     processed = await fetch_message(accessor, mailbox, uid)
     # The same renderer the mount serves, so `message read` and `cat` of
     # the .email.json cannot drift apart.
     out = message_json_bytes(processed)
-    return yield_bytes(out), IOResult()
+    return out, IOResult()

@@ -39,7 +39,7 @@ async def paste(
     paths = await resolve_or_empty(files, paths)
     return await generic_paste(
         paths,
-        read_stream=files.read_stream,
+        read_stream=files.read,
         stdin=ctx.stdin,
         delimiters=fl.as_str("delimiters", "\t"),
         serial=fl.as_bool("serial"),

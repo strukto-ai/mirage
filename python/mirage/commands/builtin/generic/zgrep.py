@@ -42,10 +42,10 @@ ZGREP_NO_PATTERN = "zgrep: missing pattern; try `zgrep --help' for help"
 
 
 async def _read_plain(
-    read_bytes: PolymorphicReadFn,
+    read: PolymorphicReadFn,
     path: PathSpec,
 ) -> bytes:
-    return await materialize(normalized_read(read_bytes)(path))
+    return await materialize(normalized_read(read)(path))
 
 
 @dataclass(frozen=True, slots=True)
@@ -107,7 +107,7 @@ async def zgrep_generic(
     texts: Sequence[str] = (),
     flags: Mapping[str, FlagValue] | None = None,
     *,
-    read_bytes: PolymorphicReadFn,
+    read: PolymorphicReadFn,
     stdin: ByteSource | None = None,
     stat: StatFn | None = None,
     resolver: LinkResolver | None = None,
@@ -117,7 +117,7 @@ async def zgrep_generic(
     pattern, never_match = await resolve_pattern(
         texts,
         fl,
-        partial(_read_plain, read_bytes),
+        partial(_read_plain, read),
         ZGREP_NO_PATTERN,
     )
     f = parse_flags(fl, never_match)
@@ -150,7 +150,7 @@ async def zgrep_generic(
         for p in paths or [STDIN_OPERAND]:
             body, io = await decompress_inputs(
                 [p],
-                read=read_bytes,
+                read=read,
                 stdin=stdin,
                 to_stdout=True,
                 force=True,

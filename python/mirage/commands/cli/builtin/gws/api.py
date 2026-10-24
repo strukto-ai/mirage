@@ -41,7 +41,6 @@ from mirage.core.google.client import (
     google_post,
 )
 from mirage.core.google.config import GoogleConfig
-from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import JsonValue, PathSpec
 
@@ -265,7 +264,7 @@ async def run_gws_method(
         data = await google_get_bytes(
             token_manager, _with_query(url, query_params)
         )
-        return yield_bytes(data), IOResult()
+        return data, IOResult()
     if method.http == "GET":
         # Deliberate divergence from the official gws CLI, which stops
         # at one page unless --page-all is passed: a truncated listing
@@ -279,7 +278,7 @@ async def run_gws_method(
             query_params,
             _parse_page_limit(fl.as_str("page_limit")),
         )
-        return yield_bytes(out), IOResult()
+        return out, IOResult()
     result = await _CALLERS[method.http](
         token_manager, url, body, query_params
     )
@@ -290,7 +289,7 @@ async def run_gws_method(
     out = json_lib.dumps(
         result, ensure_ascii=False, separators=(",", ":")
     ).encode()
-    return yield_bytes(out), IOResult()
+    return out, IOResult()
 
 
 def _parse_page_limit(raw: str | None) -> int | None:

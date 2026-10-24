@@ -20,7 +20,7 @@ import { commandFiles, resolveOrEmpty } from '../files.ts'
 const iconv: CommandFn = async (_accessor, paths, _texts, ctx) => {
   const files = commandFiles(ctx, paths)
   const resolved = await resolveOrEmpty(files, paths)
-  return iconvGeneric(resolved, ctx, files.readStream, (p, d) => files.write(p, d))
+  return iconvGeneric(resolved, ctx, files.read, (p, d) => files.write(p, d))
 }
 
 export const BUILDER: GenericCommand = {

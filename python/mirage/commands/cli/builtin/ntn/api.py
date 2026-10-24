@@ -34,7 +34,6 @@ from mirage.core.notion.client import (
     notion_post,
     notion_put,
 )
-from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.types import JsonValue, PathSpec
 
@@ -234,7 +233,7 @@ async def api(
     # then complains that more than one was given, so a malformed pipe
     # outranks a malformed --data, and both outrank the conflict. Probed
     # against ntn 0.21.9; the order is observable and worth keeping.
-    piped = await materialize(ctx.stdin) if ctx.stdin is not None else b""
+    piped = await materialize(ctx.stdin)
     stdin_text = piped.decode("utf-8", "replace")
     has_stdin = stdin_text.strip() != ""
     stdin_body: JsonValue = None
@@ -314,4 +313,4 @@ async def api(
             extra_headers=headers or None,
             params=params or None,
         )
-    return yield_bytes(compact_json(result)), IOResult()
+    return compact_json(result), IOResult()

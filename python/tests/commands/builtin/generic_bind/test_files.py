@@ -33,6 +33,7 @@ from mirage.commands.config import Context
 from mirage.context import reset_mount_gate, set_mount_gate
 from mirage.errors.types import GlobLimitError
 from mirage.io import IOResult
+from mirage.io.types import materialize
 from mirage.observe.context import push_revisions, reset_revisions
 from mirage.types import FileStat, FileType, MountMode, PathSpec
 from mirage.workspace import Workspace
@@ -183,14 +184,17 @@ async def test_a_mount_reads_the_stored_bytes_and_a_run_across_renders():
     with _on_mount():
         on_mount = _files(_ctx(backend))
     across = _files(_ctx(backend))
-    assert await on_mount.read_bytes(_path("/f")) == b"x"
-    assert await across.read_bytes(_path("/f")) == b"x"
+    assert await materialize(on_mount.read(_path("/f"))) == b"x"
+    assert await materialize(across.read(_path("/f"))) == b"x"
     with pytest.raises(IsADirectoryError):
-        await across.read_bytes(_path("/d"))
+        await materialize(across.read(_path("/d")))
     assert [(name, kwargs) for name, _, kwargs in backend.calls] == [
-        ("read", {"filetype": None, "offset": 0, "size": None}),
+        (
+            "read",
+            {"stream": True, "filetype": None, "offset": 0, "size": None},
+        ),
         ("stat", {}),
-        ("read", {}),
+        ("read", {"stream": True}),
         ("stat", {}),
     ]
 

@@ -89,7 +89,7 @@ from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.runtime.types import DispatchFn, ShellFn
 from mirage.shell.bytes import decode_text, encode_text
 from mirage.shell.join import shell_join
-from mirage.types import FileStat, FileType, PathSpec
+from mirage.types import FileStat, FileType, PathSpec, PolymorphicReadFn
 from mirage.utils.compress import GzipDataError, gunzip_stream
 from mirage.utils.encoding import encoding_for
 from mirage.view.types import MountView
@@ -1106,8 +1106,7 @@ async def rg_generic(
     *,
     readdir: Callable[..., Awaitable[list[str]]],
     stat: Callable[..., Awaitable[FileStat]],
-    read_bytes: Callable[..., Awaitable[bytes]],
-    read_stream: Callable[..., AsyncIterator[bytes]] | None,
+    read: PolymorphicReadFn,
     stdin: ByteSource | None = None,
     unbounded: tuple[
         Callable[..., Awaitable[list[str]]],
@@ -1135,9 +1134,7 @@ async def rg_generic(
             always taken ``ctx`` and read the boundaries off it.
         readdir (Callable[..., Awaitable[list[str]]]): Directory reader.
         stat (Callable[[PathSpec], Awaitable[FileStat]]): Backend stat reader.
-        read_bytes (Callable[..., Awaitable[bytes]]): Whole-file reader.
-        read_stream (Callable[..., AsyncIterator[bytes]] | None): Optional
-            stream reader.
+        read (PolymorphicReadFn): the file reader.
         stdin (ByteSource | None): the invocation's input, which a ``-``
             operand reads, as does a line with no operand at all.
         unbounded (tuple[Callable, Callable] | None): the walk to take
@@ -1150,11 +1147,7 @@ async def rg_generic(
     # Every `-` operand reads stdin through one cursor, as grep's do. With
     # no operand typed, the implicit one below is stdin's sole reader, so a
     # search that stops early closes the input.
-    operand_stream = stdin_stream(
-        read_stream if read_stream is not None else read_bytes,
-        stdin,
-        sole=not paths,
-    )
+    operand_stream = stdin_stream(read, stdin, sole=not paths)
     fl = FlagView(ctx.flags, spec=SPECS["rg"])
     f = parse_flags(fl)
     if unbounded is not None and f.max_depth is None:
@@ -1279,9 +1272,7 @@ async def _noted(
     """
     out, io = result
     if notes and not f.no_messages:
-        io.stderr = format_records(notes) + (
-            await materialize(io.stderr) if io.stderr is not None else b""
-        )
+        io.stderr = format_records(notes) + (await materialize(io.stderr))
     return out, io
 
 

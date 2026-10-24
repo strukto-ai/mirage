@@ -128,8 +128,7 @@ async def test_grep_recursive_files_only_mount_prefix():
         Context(flags={"recursive": True, "files_with_matches": True}),
         readdir=readdir,
         stat=stat,
-        read_bytes=rb,
-        read_stream=None,
+        read=rb,
     )
     decoded = (await _drain_async(output)).decode().strip()
     assert decoded == "/s3/dir/a.txt"
@@ -168,8 +167,7 @@ async def test_grep_recursive_not_a_directory_operand_keeps_the_others():
         Context(flags={"recursive": True, "files_with_matches": True}),
         readdir=readdir_enotdir,
         stat=stat_enoent,
-        read_bytes=rb,
-        read_stream=rs,
+        read=rs,
     )
     decoded = (await _drain_async(output)).decode()
     assert decoded == "/real/b.txt\n"
@@ -212,8 +210,7 @@ async def test_grep_reads_the_mount_boundaries_off_the_bag():
         _on_a_mount("/ghost/deep"),
         readdir=readdir,
         stat=stat,
-        read_bytes=rb,
-        read_stream=rs,
+        read=rs,
     )
     # No hits and no error: the primary backend owns nothing under the
     # parent, and the fan-out searches the mount below it separately.
@@ -230,8 +227,7 @@ async def test_grep_still_reports_a_path_with_no_mount_below_it():
         _on_a_mount("/ghost/deep"),
         readdir=readdir,
         stat=stat,
-        read_bytes=rb,
-        read_stream=rs,
+        read=rs,
     )
     await _drain_async(out)
     assert io.exit_code == 2
@@ -256,8 +252,7 @@ async def test_excluded_entry_that_fails_stat_does_not_stop_the_walk():
         Context(flags={"recursive": True, "exclude_dir": ["0ghost"]}),
         readdir=listing,
         stat=stat,
-        read_bytes=rb,
-        read_stream=rs,
+        read=rs,
     )
     assert (
         await _drain_async(output)
@@ -280,8 +275,7 @@ async def test_grep_recursive_separates_context_groups_between_files():
         Context(flags={"recursive": True, "after_context": "1"}),
         readdir=readdir,
         stat=stat,
-        read_bytes=rb,
-        read_stream=rs,
+        read=rs,
     )
     assert (
         await _drain_async(output)
@@ -316,8 +310,7 @@ async def test_recursive_grep_stops_reading_and_closes_stream(quiet):
         Context(flags={"recursive": True, "quiet": quiet}),
         readdir=readdir,
         stat=stat,
-        read_bytes=rb,
-        read_stream=stream,
+        read=stream,
     )
     assert opened == []  # Opening the command is lazy too.
     if quiet:
@@ -345,8 +338,7 @@ async def test_recursive_quiet_no_match_visits_every_file():
         Context(flags={"recursive": True, "quiet": True}),
         readdir=readdir,
         stat=stat,
-        read_bytes=rb,
-        read_stream=stream,
+        read=stream,
     )
     assert await _drain_async(output) == b""
     assert io.exit_code == 1
@@ -390,8 +382,7 @@ async def test_grep_no_messages_keeps_operand_failures(
         Context(flags={"no_messages": True, **flags}),
         readdir=readdir,
         stat=stat,
-        read_bytes=read_bytes,
-        read_stream=read_stream if streamed else None,
+        read=read_stream if streamed else read_bytes,
     )
     assert await _drain_async(output) == expected
     assert await _drain_async(io.stderr) == b""
@@ -441,8 +432,7 @@ async def test_grep_propagates_non_filesystem_read_failures(
         Context(flags={"no_messages": no_messages, "recursive": recursive}),
         readdir=readdir,
         stat=stat,
-        read_bytes=read_bytes,
-        read_stream=read_stream if streamed else None,
+        read=read_stream if streamed else read_bytes,
     )
     with pytest.raises(type(error)) as raised:
         await _drain_async(output)
@@ -479,8 +469,7 @@ async def test_grep_publishes_status_before_output_and_on_close(
         Context(flags=flags),
         readdir=readdir,
         stat=stat,
-        read_bytes=rb,
-        read_stream=read_stream,
+        read=read_stream,
     )
     expected = 2 if missing else 0
     assert b"alice" in await anext(output)
@@ -509,8 +498,7 @@ async def test_grep_preserves_binary_notice_before_read_failure(no_messages):
         Context(flags={"no_messages": no_messages}, env={"LC_ALL": "C.UTF-8"}),
         readdir=readdir,
         stat=stat,
-        read_bytes=rb,
-        read_stream=read_stream,
+        read=read_stream,
     )
     assert await _drain_async(output) == b""
     assert io.exit_code == 2
@@ -529,8 +517,7 @@ async def test_grep_preserves_stderr_added_before_drain():
         Context(flags={"extended_regexp": True}),
         readdir=readdir,
         stat=stat,
-        read_bytes=rb,
-        read_stream=rs,
+        read=rs,
     )
     io.stderr = b"backend: scan fallback\n" + (io.stderr or b"")
     assert await _drain_async(output) == b"/data/a.txt:alice\n"
@@ -556,8 +543,7 @@ async def test_grep_settles_late_binary_detection_after_a_match():
         Context(flags={"args_I": True}),
         readdir=readdir,
         stat=stat,
-        read_bytes=rb,
-        read_stream=read_stream,
+        read=read_stream,
     )
     assert await anext(output) == b"alice\n"
     assert io.exit_code == 0
@@ -579,8 +565,7 @@ async def test_grep_flushes_binary_notice_on_early_close():
         Context(env={"LC_ALL": "C.UTF-8"}),
         readdir=readdir,
         stat=stat,
-        read_bytes=rb,
-        read_stream=read_stream,
+        read=read_stream,
     )
     assert await anext(output) == b"alice\n"
     await output.aclose()
@@ -597,8 +582,7 @@ async def test_false_flags_turn_nothing_on():
         Context(flags={"ignore_case": False, "recursive": False}),
         readdir=readdir,
         stat=stat,
-        read_bytes=rb,
-        read_stream=rs,
+        read=rs,
     )
     assert await _drain_async(output) == b""
     assert await _drain_async(io.stderr) == b"grep: /data: Is a directory\n"

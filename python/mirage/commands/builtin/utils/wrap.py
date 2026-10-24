@@ -154,10 +154,3 @@ async def call_stat(
     path: str | PathSpec,
 ) -> FileStat:
     return await stat_fn(to_pathspec(path))
-
-
-async def call_read_bytes(
-    read_fn: Callable[[PathSpec], Awaitable[bytes]],
-    path: str | PathSpec,
-) -> bytes:
-    return await read_fn(to_pathspec(path))

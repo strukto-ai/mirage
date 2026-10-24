@@ -1134,11 +1134,7 @@ async def _duplicate_for_backup(
     target_is_dir = await is_directory(stat, target)
     if isinstance(strategy, (PrimitiveCopy, PrimitiveMove)):
         if not target_is_dir:
-            data = (
-                await prime_stream(strategy.read_stream(target))
-                if strategy.read_stream is not None
-                else await strategy.read_bytes(target)
-            )
+            data = await prime_stream(strategy.read(target))
             try:
                 await strategy.write(backup, data=data)
             finally:
@@ -1424,11 +1420,7 @@ async def _copy_entry(
     except OSError as exc:
         if exc.errno != errno.EXDEV or copies is None:
             raise
-        data = (
-            await prime_stream(copies.relay.read_stream(src))
-            if copies.relay.read_stream is not None
-            else await copies.relay.read_bytes(src)
-        )
+        data = await prime_stream(copies.relay.read(src))
         try:
             await copies.relay.write(dst, data=data)
         finally:
@@ -1485,11 +1477,7 @@ async def transfer_file(
         read_failed = True
 
     try:
-        data = (
-            await prime_stream(strategy.read_stream(src), failed)
-            if strategy.read_stream is not None
-            else await strategy.read_bytes(src)
-        )
+        data = await prime_stream(strategy.read(src), failed)
     except FS_ERRORS as exc:
         errors.append(
             f"{cmd_name}: cannot open '{src.raw_path}' "
@@ -1880,7 +1868,7 @@ async def cp_generic(
     ``NativeCopy`` uses backend ``copy``/``find`` operations for an efficient
     same-store copy. ``PrimitiveCopy`` handles cross-mount copies by walking
     via ``readdir``/``stat`` and applying ``mkdir`` or
-    ``write(read_bytes(...))`` to each entry. ``--update``/``--backup``
+    ``write(read(...))`` to each entry. ``--update``/``--backup``
     force the per-entry native loop (a whole-tree ``dir_copy`` cannot
     honor per-file decisions).
 

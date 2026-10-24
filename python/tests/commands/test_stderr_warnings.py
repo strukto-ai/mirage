@@ -82,8 +82,7 @@ async def test_rg_scan_collects_warnings_on_unreadable_file():
         Context(),
         readdir=async_readdir,
         stat=async_stat,
-        read_bytes=read_bytes,
-        read_stream=None,
+        read=read_bytes,
     )
     results = (await materialize(out)).decode().splitlines()
     warnings = (await materialize(io.stderr)).decode().splitlines()

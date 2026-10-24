@@ -39,7 +39,7 @@ async def cat(
         list(texts),
         ctx,
         dir_aware_stat(files, ctx),
-        files.read_stream,
+        files.read,
     )
 
 

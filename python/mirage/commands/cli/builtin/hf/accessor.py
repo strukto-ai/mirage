@@ -16,7 +16,6 @@ from mirage.accessor.hf_hub import HfAccountAccessor
 from mirage.commands.errors import UsageError
 from mirage.commands.spec.flag_view import FlagView
 from mirage.core.hf_hub.constants import API_SEGMENTS
-from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
 
 DEFAULT_REPO_TYPE = "model"
@@ -64,7 +63,7 @@ def require_operands(texts: list[str], names: list[str]) -> None:
 def text_out(
     text: str, stderr: str = ""
 ) -> tuple[ByteSource | None, IOResult]:
-    return yield_bytes(text.encode()), IOResult(stderr=stderr.encode() or None)
+    return text.encode(), IOResult(stderr=stderr.encode() or None)
 
 
 def require_token(account: HfAccountAccessor, what: str) -> None:

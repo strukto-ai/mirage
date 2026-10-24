@@ -11,6 +11,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+from collections.abc import AsyncIterator
+
 import pytest
 
 from mirage.commands.builtin.generic.diff import (
@@ -20,6 +22,7 @@ from mirage.commands.builtin.generic.diff import (
     switch_words,
 )
 from mirage.io.types import materialize
+from mirage.rs.diff_pool import DiffPool
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.timezone import resolve_tz
 
@@ -54,13 +57,55 @@ async def test_two_stdin_operands_are_one_file():
 
     out, io = await diff(
         [DASH, DEV_STDIN],
-        read_bytes=unread,
+        stream=unread,
         readdir_fn=_readdir,
         stat_fn=_stat,
         flags=DiffFlags(),
         stdin=b"abc",
     )
     assert (out, io.exit_code) == (None, 0)
+
+
+@pytest.mark.asyncio
+async def test_a_read_failing_mid_stream_is_trouble_and_closes_its_input():
+    closed: list[str] = []
+
+    async def read(path: PathSpec) -> AsyncIterator[bytes]:
+        try:
+            yield b"x\n"
+            if path.virtual == "/d/a":
+                raise PermissionError(13, "Permission denied", path.virtual)
+            yield b"y\n"
+        finally:
+            closed.append(path.virtual)
+
+    pool = DiffPool()
+    try:
+        failed = [_operand("a", "/d/a"), _operand("b", "/d/b")]
+        out, io = await diff(
+            failed,
+            stream=read,
+            readdir_fn=_readdir,
+            stat_fn=_stat,
+            flags=DiffFlags(),
+            computer=pool,
+        )
+        assert (out, io.exit_code) == (None, 2)
+        assert await materialize(io.stderr) == b"diff: a: Permission denied\n"
+        assert closed == ["/d/a"]
+        same = [_operand("b", "/d/b"), _operand("c", "/d/c")]
+        out, io = await diff(
+            same,
+            stream=read,
+            readdir_fn=_readdir,
+            stat_fn=_stat,
+            flags=DiffFlags(),
+            computer=pool,
+        )
+        assert io.exit_code == 0
+        assert closed == ["/d/a", "/d/b", "/d/c"]
+    finally:
+        await pool.close()
 
 
 def test_switch_words_keep_the_option_words_as_typed():
@@ -109,7 +154,7 @@ async def test_unified_headers_carry_each_side_mtime():
     pair = [_operand("a b", "/d/a b"), _operand("c", "/d/c")]
     out, io = await diff(
         pair,
-        read_bytes=read,
+        stream=read,
         readdir_fn=_readdir,
         stat_fn=stat,
         flags=DiffFlags(unified=True),
@@ -122,7 +167,7 @@ async def test_unified_headers_carry_each_side_mtime():
     ]
     out, _ = await diff(
         [pair[1], _operand("gone", "/d/gone")],
-        read_bytes=read,
+        stream=read,
         readdir_fn=_readdir,
         stat_fn=stat,
         flags=DiffFlags(unified=True, new_file=True, new_first=True),
@@ -153,7 +198,7 @@ async def test_unified_headers_read_the_time_the_namespace_keeps():
 
     out, _ = await diff(
         [_operand("a", "/d/a"), _operand("b", "/d/b")],
-        read_bytes=read,
+        stream=read,
         readdir_fn=_readdir,
         stat_fn=stat,
         flags=DiffFlags(unified=True),
@@ -183,7 +228,7 @@ async def test_unified_headers_read_in_the_tz_zone_with_every_digit():
 
     out, _ = await diff(
         [_operand("a", "/d/a"), _operand("gone", "/d/gone")],
-        read_bytes=read,
+        stream=read,
         readdir_fn=_readdir,
         stat_fn=missing,
         flags=DiffFlags(unified=True, new_file=True, new_first=True),

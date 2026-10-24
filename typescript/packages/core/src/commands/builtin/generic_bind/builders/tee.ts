@@ -26,7 +26,7 @@ const tee: CommandFn = async (_accessor, paths, texts, ctx) => {
     resolved,
     texts,
     ctx,
-    files.readStream,
+    files.read,
     (p, d) => files.write(p, d),
     files.answers('append') ? files.append : undefined,
     files.stat,

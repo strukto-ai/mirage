@@ -50,7 +50,7 @@ const awk: CommandFn = async (_accessor, paths, texts, ctx) => {
   const files = commandFiles(ctx, paths)
   const resolve = (run: PathSpec[]): Promise<PathSpec[]> => files.resolveGlob(run)
   const resolved = await resolveOperands(resolve, paths, ctx)
-  return awkGeneric(resolved, texts, ctx, files.readStream)
+  return awkGeneric(resolved, texts, ctx, files.read)
 }
 
 export const BUILDER: GenericCommand = {

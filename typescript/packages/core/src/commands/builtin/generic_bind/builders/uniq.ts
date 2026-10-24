@@ -23,7 +23,7 @@ const uniq: CommandFn = async (_accessor, paths, _texts, ctx) => {
   return uniqGeneric(
     resolved,
     ctx,
-    files.readStream,
+    files.read,
     files.answers('write') ? files.write : undefined,
     dirAwareStat(files, ctx),
   )

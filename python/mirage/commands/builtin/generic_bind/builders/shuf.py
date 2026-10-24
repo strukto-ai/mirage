@@ -74,7 +74,7 @@ async def _shuf(
     return await generic_shuf(
         paths,
         texts,
-        read_bytes=files.read_stream,
+        read=files.read,
         stdin=ctx.stdin,
         count=parsed.count,
         echo=parsed.echo,

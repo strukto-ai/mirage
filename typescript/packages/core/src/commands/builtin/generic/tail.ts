@@ -20,7 +20,7 @@ import type { FlagValue } from '../../spec/types.ts'
 import { closeQuietly } from '../../../io/stream.ts'
 import { abortable } from '../../../utils/abort.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
-import { FileType, type FileStat, type PathSpec, type ReadRangeFn } from '../../../types.ts'
+import { FileType, type FileStat, type PathSpec, type ReadStreamFn } from '../../../types.ts'
 import { wordRefusalError } from '../../spec/usage.ts'
 import { matchWord } from '../../spec/word_choice.ts'
 import type { CommandFnResult, Context } from '../../config.ts'
@@ -153,7 +153,7 @@ async function pause(seconds: number, signal: AbortSignal | undefined): Promise<
 // start.
 async function catchUp(
   stream: Stream,
-  readRange: ReadRangeFn | null,
+  readRange: ReadStreamFn<[PathSpec, number, number]> | null,
   io: IOResult,
   p: PathSpec,
   size: number | null,
@@ -188,19 +188,19 @@ async function polledStat(dispatch: DispatchFn, p: PathSpec): Promise<FileStat> 
 }
 
 /**
- * A follow poll's read: what the backend holds now, at the dispatcher. A direct
- * read, never served from the file cache nor kept in it: the poll looks for
- * exactly the bytes a cached copy does not have yet. Mirrors Python's
- * `_polled_window`.
+ * A follow poll's read, whole or a window: what the backend holds now, at the
+ * dispatcher. A direct read, never served from the file cache nor kept in it:
+ * the poll looks for exactly the bytes a cached copy does not have yet. Mirrors
+ * Python's `_polled_window`.
  */
-async function polledWindow(
+async function* polledWindow(
   dispatch: DispatchFn,
   p: PathSpec,
   offset = 0,
   size: number | null = null,
-): Promise<Uint8Array> {
+): AsyncIterable<Uint8Array> {
   const [data] = await dispatch('read', p, [], { filetype: null, offset, size, direct: true })
-  return materialize(data as ByteSource)
+  yield await materialize(data as ByteSource)
 }
 
 // `stream`, answered by the mount's `lastLines(p, n)` where it can: the last
@@ -331,19 +331,14 @@ async function* tailMulti(
   }
 }
 
-/** A follow poll's whole-file read, for a stat that carries no size. */
-async function* polledFile(dispatch: DispatchFn, p: PathSpec): AsyncIterable<Uint8Array> {
-  yield await polledWindow(dispatch, p)
-}
-
 async function window(
   stream: Stream,
-  readRange: ReadRangeFn | null,
+  readRange: ReadStreamFn<[PathSpec, number, number]> | null,
   p: PathSpec,
   offset: number,
   size: number,
 ): Promise<Uint8Array> {
-  if (readRange !== null) return await readRange(p, offset, size)
+  if (readRange !== null) return await materialize(readRange(p, offset, size))
   const whole = await materialize(stream(p))
   return whole.slice(offset, offset + size)
 }
@@ -382,7 +377,7 @@ async function* follow(
   stream: Stream,
   pollStream: Stream,
   stat: Stat,
-  readRange: ReadRangeFn | null,
+  readRange: ReadStreamFn<[PathSpec, number, number]> | null,
   counts: TailCounts,
   showHeaders: boolean,
   flags: FollowFlags,
@@ -642,7 +637,7 @@ export async function tailGeneric(
   ctx: Context,
   stream: Stream,
   stat: Stat,
-  readRange: ReadRangeFn | null = null,
+  readRange: ReadStreamFn<[PathSpec, number, number]> | null = null,
   lastLines?: (p: PathSpec, n: number) => Promise<Uint8Array | null>,
   followOp?: (
     p: PathSpec,
@@ -719,7 +714,7 @@ export async function tailGeneric(
       dispatch === undefined
         ? { stream: first, stat, readRange }
         : {
-            stream: (p: PathSpec) => polledFile(dispatch, p),
+            stream: (p: PathSpec) => polledWindow(dispatch, p),
             stat: (p: PathSpec) => polledStat(dispatch, p),
             readRange: (p: PathSpec, offset: number, size: number) =>
               polledWindow(dispatch, p, offset, size),

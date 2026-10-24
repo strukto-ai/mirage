@@ -15,7 +15,7 @@
 import { currentCaller, sessionVisibility } from '../../../context/session_context.ts'
 import { eacces, eisdir, enoent, isDotWalkError, isEnoent } from '../../../errors/fs.ts'
 import { ensureStream } from '../../../io/stream.ts'
-import { materialize, type ByteSource } from '../../../io/types.ts'
+import type { ByteSource } from '../../../io/types.ts'
 import { revisionFor } from '../../../observe/context.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
 import type { PathSpec } from '../../../types.ts'
@@ -60,11 +60,15 @@ export interface CommandFiles {
   readonly stat: (path: PathSpec) => Promise<FileStat>
   readonly exists: (path: PathSpec) => Promise<boolean>
   readonly readdir: (path: PathSpec, nofollow?: boolean) => Promise<string[]>
-  /** The stored bytes, whole. */
-  readonly readBytes: (path: PathSpec) => Promise<Uint8Array>
-  readonly readRange: (path: PathSpec, offset: number, size: number | null) => Promise<Uint8Array>
-  /** The stored bytes, opened at the first pull. */
-  readonly readStream: (path: PathSpec) => AsyncIterable<Uint8Array>
+  /**
+   * `read(path, offset?, size?)`: the stored bytes or a window of them,
+   * opened at the first pull; `materialize` collects them.
+   */
+  readonly read: (
+    path: PathSpec,
+    offset?: number,
+    size?: number | null,
+  ) => AsyncIterable<Uint8Array>
   /**
    * Whether the read cache holds a copy a read would be served from; it
    * fetches neither the copy nor anything from the backend.
@@ -235,28 +239,17 @@ export async function dispatchedCall(
   return result
 }
 
-/** A command's whole or ranged read of the stored bytes, at the dispatcher. */
-async function dispatchedBytes(
-  dispatch: DispatchFn,
-  path: PathSpec,
-  offset = 0,
-  size: number | null = null,
-  ahead?: (path: PathSpec) => Promise<void>,
-): Promise<Uint8Array> {
-  if (ahead !== undefined && offset === 0 && size === null) await ahead(path)
-  const [data] = await dispatch('read', path, [], { filetype: null, offset, size })
-  return materialize(data as ByteSource)
-}
-
-/** A command's streamed read of the stored bytes, at the dispatcher, opened at
- * the first pull as a backend stream is. */
+/** A command's streamed read of the stored bytes, or a window of them, at the
+ * dispatcher, opened at the first pull as a backend stream is. */
 async function* dispatchedStream(
   dispatch: DispatchFn,
   path: PathSpec,
   ahead?: (path: PathSpec) => Promise<void>,
+  offset = 0,
+  size: number | null = null,
 ): AsyncIterable<Uint8Array> {
   if (ahead !== undefined) await ahead(path)
-  const [data] = await dispatch('read', path, [], { stream: true, filetype: null })
+  const [data] = await dispatch('read', path, [], { stream: true, filetype: null, offset, size })
   yield* ensureStream(data as ByteSource)
 }
 
@@ -385,7 +378,7 @@ async function* streamRefusingDirs(
   p: PathSpec,
 ): AsyncIterable<Uint8Array> {
   await statRefusingDirs(files, ctx, p)
-  yield* files.readStream(p)
+  yield* files.read(p)
 }
 
 // The per-operand read stream, `read(path)`, the read family takes:
@@ -470,36 +463,32 @@ export function commandFiles(ctx: Context, paths: readonly PathSpec[] = []): Com
 
   let rawStat: (path: PathSpec) => Promise<FileStat>
   let rawReaddir: (path: PathSpec, nofollow?: boolean) => Promise<string[]>
-  let rawBytes: (path: PathSpec) => Promise<Uint8Array>
   let rawStream: (path: PathSpec) => AsyncIterable<Uint8Array>
   if (crossing) {
     rawStat = async (path) => (await dispatch('stat', path, [], { nofollow: true }))[0] as FileStat
     rawReaddir = async (path) => (await dispatch('readdir', path))[0] as string[]
-    rawBytes = async (path) => {
-      if (((await dispatch('stat', path))[0] as FileStat).type === FileType.DIRECTORY)
-        throw eisdir(path)
-      await ahead(path)
-      return materialize((await dispatch('read', path))[0] as ByteSource)
-    }
     rawStream = (path) => callerStream(dispatch, currentCaller(), path, ahead)
   } else {
     rawStat = (path) => dispatchedStat(dispatch, path)
     rawReaddir = async (path, nofollow) =>
       (await call('readdir', path, [], nofollow === true ? { nofollow } : {})) as string[]
-    rawBytes = (path) => dispatchedBytes(dispatch, path, 0, null, ahead)
     const stream = reading?.stream ?? null
     rawStream =
       stream === null
         ? (path) => dispatchedStream(dispatch, path, ahead)
         : (path) => stream(ctx, path) ?? dispatchedStream(dispatch, path, ahead)
   }
-  const rawRange = (path: PathSpec, offset: number, size: number | null): Promise<Uint8Array> =>
-    dispatchedBytes(dispatch, path, offset, size)
-
-  const readStream =
-    reading === undefined
-      ? rawStream
-      : (path: PathSpec) => guardInput(rawStream(path), ctx, reading.split)
+  const read = (
+    path: PathSpec,
+    offset = 0,
+    size: number | null = null,
+  ): AsyncIterable<Uint8Array> => {
+    const source =
+      offset === 0 && size === null
+        ? rawStream(path)
+        : dispatchedStream(dispatch, path, undefined, offset, size)
+    return reading === undefined ? source : guardInput(source, ctx, reading.split)
+  }
   // A run across mounts runs in no mount's cache scope: it takes an operand's
   // size from its stat, warm or not.
   const isWarm = async (path: PathSpec): Promise<boolean> =>
@@ -524,9 +513,7 @@ export function commandFiles(ctx: Context, paths: readonly PathSpec[] = []): Com
     stat,
     exists: guard((path: PathSpec) => dispatchedExists(dispatch, path)),
     readdir,
-    readBytes: guard(rawBytes),
-    readRange: guard(rawRange),
-    readStream,
+    read,
     isWarm: guard(isWarm),
     write: guard(async (path: PathSpec, data: ByteSource) => {
       await call('write', path, [data])

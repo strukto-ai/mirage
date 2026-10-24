@@ -18,7 +18,7 @@ import { runWithMountGate } from '../../../context/session_context.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
 import { FileStat, FileType, MountMode, PathSpec, type FileStatInit } from '../../../types.ts'
 import { eacces, enoent } from '../../../errors/fs.ts'
-import { IOResult } from '../../../io/types.ts'
+import { IOResult, materialize } from '../../../io/types.ts'
 import { Files } from '../../../workspace/files.ts'
 import type { MountRow } from '../../../workspace/types.ts'
 import { stripSlash } from '../../../utils/slash.ts'
@@ -32,6 +32,7 @@ import {
   resolveOrEmpty,
   withReading,
 } from './files.ts'
+import { singleChunk } from '../utils/operands.ts'
 import { runWithRevisions } from '../../../observe/context.ts'
 import { BatchedRAM, readers } from '../../../test-utils.ts'
 import { getTestParser } from '../../../../tests/workspace/fixtures/workspace_fixture.ts'
@@ -84,7 +85,7 @@ function keyed(backend: Backend, calls: string[] = []): DispatchFn {
     if (name === 'stat') return done(hit === undefined ? null : stat({ size: hit.length }))
     if (name !== 'read') return done(null)
     if (kwargs.stream === true)
-      return done(hit === undefined ? throwing(enoent(p)) : [ENC.encode(hit)])
+      return done(hit === undefined ? throwing(enoent(p)) : singleChunk(ENC.encode(hit)))
     return hit === undefined ? Promise.reject(enoent(p)) : done(ENC.encode(hit))
   }
 }
@@ -134,13 +135,13 @@ describe('commandFiles', () => {
     }
     const onMount = await guarded(contextFor(dispatch))
     const across = commandFiles(contextFor(dispatch))
-    expect(DEC.decode(await onMount.readBytes(at('/f')))).toBe('x')
-    expect(DEC.decode(await across.readBytes(at('/f')))).toBe('x')
-    await expect(across.readBytes(at('/d'))).rejects.toMatchObject({ code: 'EISDIR' })
+    expect(DEC.decode(await materialize(onMount.read(at('/f'))))).toBe('x')
+    expect(DEC.decode(await materialize(across.read(at('/f'))))).toBe('x')
+    await expect(materialize(across.read(at('/d')))).rejects.toMatchObject({ code: 'EISDIR' })
     expect(calls).toEqual([
-      ['read', { filetype: null, offset: 0, size: null }],
+      ['read', { stream: true, filetype: null, offset: 0, size: null }],
       ['stat', {}],
-      ['read', {}],
+      ['read', { stream: true }],
       ['stat', {}],
     ])
   })
@@ -200,7 +201,7 @@ describe('the abort guard', () => {
     const dispatch = keyed({ stored: { '/data/a': 'x' } }, calls)
     const files = await guarded(contextFor(dispatch, { signal: controller.signal }))
     await files.unlink(at('/data/a'))
-    await files.readBytes(at('/data/a'))
+    await materialize(files.read(at('/data/a')))
     expect(calls).toEqual(['unlink /data/a', 'read /data/a'])
     controller.abort(new Error('released'))
     await expect(files.unlink(at('/data/b'))).rejects.toMatchObject({
@@ -211,6 +212,8 @@ describe('the abort guard', () => {
     const p = at('/t')
     for (const call of [
       () => files.write(p, new Uint8Array()),
+      () => materialize(files.read(p)),
+      () => materialize(files.read(p, 0, 1)),
       () => files.readdir(p),
       () => files.stat(p),
       () => files.exists(p),

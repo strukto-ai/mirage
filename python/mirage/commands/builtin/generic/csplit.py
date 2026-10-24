@@ -176,7 +176,7 @@ async def csplit_generic(
     patterns: list[str],
     ctx: Context,
     *,
-    read_bytes: PolymorphicReadFn,
+    read: PolymorphicReadFn,
     write_bytes: Callable[..., Awaitable[None]],
     unlink: Callable[..., Awaitable[None]],
 ) -> tuple[ByteSource | None, IOResult]:
@@ -197,7 +197,7 @@ async def csplit_generic(
     # `-` is stdin. /dev/stdin would run csplit on the /dev mount, which
     # is where its pieces would land, so it stays a path.
     source = (
-        normalized_read(read_bytes)(paths[0])
+        normalized_read(read)(paths[0])
         if paths and paths[0].raw_path != "-"
         else (ctx.stdin or b"")
     )

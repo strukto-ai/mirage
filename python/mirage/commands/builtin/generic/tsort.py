@@ -1,11 +1,10 @@
 from collections import Counter, deque
-from collections.abc import Awaitable, Callable
 
-from mirage.commands.builtin.utils.stream import read_stdin_async, stdin_bytes
+from mirage.commands.builtin.utils.stream import read_stdin_async, stdin_stream
 from mirage.commands.spec.types import CommandName
 from mirage.commands.spec.usage import extra_operand_error
-from mirage.io.types import ByteSource, IOResult
-from mirage.types import PathSpec
+from mirage.io.types import ByteSource, IOResult, materialize
+from mirage.types import PathSpec, ReadStreamFn
 
 # GNU 9.7's order, measured on 10,000 random inputs: the names nothing has
 # to precede go first, in byte order, then each name as soon as every name
@@ -77,7 +76,7 @@ def _order_with_loops(
 async def tsort_generic(
     paths: list[PathSpec],
     *,
-    read_bytes: Callable[..., Awaitable[bytes]],
+    stream: ReadStreamFn,
     stdin: ByteSource | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     if len(paths) > 1:
@@ -85,7 +84,7 @@ async def tsort_generic(
             CommandName.TSORT, paths[1].raw_path or paths[1].virtual
         )
     if paths:
-        raw = await stdin_bytes(read_bytes, stdin)(paths[0])
+        raw = await materialize(stdin_stream(stream, stdin)(paths[0]))
     else:
         stdin_raw = await read_stdin_async(stdin)
         raw = stdin_raw if stdin_raw is not None else b""

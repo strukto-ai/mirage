@@ -175,7 +175,7 @@ async function readAt(
   silent: boolean,
 ): Promise<Uint8Array> {
   try {
-    if (name === '-') return await materialize(ctx.stdin ?? null)
+    if (name === '-') return await materialize(ctx.stdin)
     if (ctx.vfs === undefined) throw enotsup('unavailable', 'read', name)
     const [content] = await ctx.vfs.dispatch('read', resolveTarget(name, ctx.cwd.virtual), [])
     return await materialize(content as ByteSource)
@@ -407,7 +407,7 @@ async function curl(
   let prompt: Uint8Array = new Uint8Array()
   const user = fl.asStr('user') ?? null
   if (user !== null && !named.has('authorization')) {
-    const stdin = user.includes(':') ? new Uint8Array() : await materialize(ctx.stdin ?? null)
+    const stdin = user.includes(':') ? new Uint8Array() : await materialize(ctx.stdin)
     const [token, asked] = basicAuth(user, stdin)
     prompt = asked
     auth.push(['Authorization', token])

@@ -24,7 +24,6 @@ from mirage.commands.spec.flag_view import FlagView
 from mirage.core.render.json import compact_json_bytes
 from mirage.core.trello.client import card_create
 from mirage.core.trello.normalize import normalize_card
-from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -53,4 +52,4 @@ async def create(
         )
     await require_list(accessor, list_id)
     card = await card_create(accessor, list_id=list_id, name=name, desc=desc)
-    return yield_bytes(compact_json_bytes(normalize_card(card))), IOResult()
+    return compact_json_bytes(normalize_card(card)), IOResult()

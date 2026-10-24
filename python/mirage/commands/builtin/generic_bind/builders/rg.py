@@ -33,9 +33,7 @@ async def rg(
     files = command_files(ctx, paths)
     if paths:
         paths = await files.resolve_glob(paths)
-    read_bytes, read_stream = await search_reads(
-        files, "rg", paths, texts, ctx
-    )
+    read = await search_reads(files, "rg", paths, texts, ctx)
     readdir = files.readdir
     stat = files.stat
     return await rg_generic(
@@ -44,8 +42,7 @@ async def rg(
         ctx,
         readdir=readdir,
         stat=stat,
-        read_bytes=read_bytes,
-        read_stream=read_stream,
+        read=read,
         stdin=ctx.stdin,
         unbounded=tree_walk(
             (files.read_tree if files.answers("read_tree") else None),

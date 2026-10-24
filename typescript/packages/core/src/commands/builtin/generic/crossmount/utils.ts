@@ -149,13 +149,6 @@ export function readdirOp(
   }
 }
 
-export function readBytesOp(dispatch: DispatchFn): (p: PathSpec) => Promise<Uint8Array> {
-  return async (p: PathSpec) => {
-    const [data] = await dispatch('read', p)
-    return (data as Uint8Array | null) ?? new Uint8Array()
-  }
-}
-
 /** A directory-aware streamed reader. Mirrors Python's `file_stream_op`. */
 export function fileStreamOp(dispatch: DispatchFn): (p: PathSpec) => AsyncIterable<Uint8Array> {
   const stat = statOp(dispatch)
@@ -168,9 +161,9 @@ export function fileStreamOp(dispatch: DispatchFn): (p: PathSpec) => AsyncIterab
 }
 
 export function streamOp(dispatch: DispatchFn): (p: PathSpec) => AsyncIterable<Uint8Array> {
-  const readBytes = readBytesOp(dispatch)
   async function* gen(p: PathSpec): AsyncIterable<Uint8Array> {
-    yield await readBytes(p)
+    const [data] = await dispatch('read', p)
+    yield (data as Uint8Array | null) ?? new Uint8Array()
   }
   return gen
 }
@@ -198,8 +191,7 @@ export function transferLinksOf(
     cwd,
     ...(owns !== undefined ? { owns } : {}),
     relay: {
-      readBytes: readBytesOp(dispatch),
-      readStream: fileStreamOp(dispatch),
+      read: fileStreamOp(dispatch),
       write: async (p: PathSpec, data: ByteSource) => {
         await dispatch('write', p, [data])
       },

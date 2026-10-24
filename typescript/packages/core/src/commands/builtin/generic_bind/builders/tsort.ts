@@ -20,7 +20,7 @@ import { commandFiles, resolveOrEmpty } from '../files.ts'
 const tsort: CommandFn = async (_accessor, paths, _texts, ctx) => {
   const files = commandFiles(ctx, paths)
   const resolved = await resolveOrEmpty(files, paths)
-  return tsortGeneric(resolved, ctx, files.readStream)
+  return tsortGeneric(resolved, ctx, files.read)
 }
 
 export const BUILDER: GenericCommand = {

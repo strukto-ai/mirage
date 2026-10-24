@@ -55,7 +55,7 @@ const tar: CommandFn = async (_accessor, paths, texts, ctx) => {
     )
   }
   return tarGeneric(resolved, texts, ctx, {
-    stream: files.readStream,
+    stream: files.read,
     // Archive output follows links even when the member scan preserves them.
     write: async (p, data) => {
       await dispatch('write', p, [data])

@@ -33,7 +33,7 @@ async def sed(
         list(texts),
         ctx,
         files.resolve_glob,
-        files.read_stream,
+        files.read,
         (files.write if files.answers("write") else None),
     )
 

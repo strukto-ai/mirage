@@ -145,17 +145,6 @@ def stdin_stream(
     return stream
 
 
-def stdin_bytes(
-    read: Callable[..., Awaitable[bytes]], stdin: ByteSource | None
-) -> Callable[[PathSpec], Awaitable[bytes]]:
-    stream = stdin_stream(read, stdin)
-
-    async def read_bytes(path: PathSpec) -> bytes:
-        return await materialize(stream(path))
-
-    return read_bytes
-
-
 def stdin_stat(
     stat: Callable[..., Awaitable[FileStat]],
     dash: bool = True,

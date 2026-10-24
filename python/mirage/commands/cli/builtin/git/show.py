@@ -87,7 +87,6 @@ from mirage.commands.cli.builtin.git.util import (
 )
 from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
-from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult, Rows
 from mirage.shell.bytes import encode_text
 from mirage.types import PathSpec
@@ -365,7 +364,7 @@ async def show(
         rendered = await asyncio.to_thread(
             _render, repo, objects, parsed, commit_shown(shown, spans)
         )
-        return yield_bytes(rendered)
+        return rendered
 
     return None, IOResult(rows=Rows(rows, render))
 

@@ -58,7 +58,6 @@ from mirage.commands.cli.builtin.git.util import (
 )
 from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
-from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult, Rows
 from mirage.types import PathSpec
 from mirage.view.types import SessionView
@@ -257,7 +256,7 @@ async def commit(
         body = report(
             written, head.branch, changes, abbrev_for(repo), before is None
         )
-        return yield_bytes(body)
+        return body
 
     rows = deltas(location, [(before or {}, after)])
     return None, IOResult(rows=Rows(rows, render))

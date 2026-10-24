@@ -67,7 +67,7 @@ async def _stream(path):
 )
 async def test_a_dump_starts_its_addresses_at_the_seek(seek, limit, out):
     stdout, io = await xxd(
-        [F], read_stream=_stream, seek=parse_seek(seek), limit=limit
+        [F], stream=_stream, seek=parse_seek(seek), limit=limit
     )
     assert (await materialize(stdout)).decode() == out
     assert io.exit_code == 0
@@ -76,7 +76,7 @@ async def test_a_dump_starts_its_addresses_at_the_seek(seek, limit, out):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("seek", ["-10", "+-2"])
 async def test_a_seek_before_the_start_cannot_seek(seek):
-    stdout, io = await xxd([F], read_stream=_stream, seek=parse_seek(seek))
+    stdout, io = await xxd([F], stream=_stream, seek=parse_seek(seek))
     assert (stdout, io.exit_code, io.stderr) == (
         None,
         4,
@@ -99,7 +99,7 @@ async def _empty(path):
 )
 async def test_stdin_is_read_off_and_cannot_seek_back(seek, code, out):
     stdout, io = await xxd(
-        [], read_stream=_empty, stdin=DATA, seek=parse_seek(seek)
+        [], stream=_empty, stdin=DATA, seek=parse_seek(seek)
     )
     got = b"" if stdout is None else await materialize(stdout)
     assert (got.decode(), io.exit_code) == (out, code)

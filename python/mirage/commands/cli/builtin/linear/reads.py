@@ -43,7 +43,6 @@ from mirage.core.linear.normalize import (
     normalize_user,
     to_json_bytes,
 )
-from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import JsonValue, PathSpec
 
@@ -290,7 +289,7 @@ async def _dispatch(
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(ctx.flags)
     data = await runner(accessor, texts, fl)
-    return yield_bytes(data), IOResult()
+    return data, IOResult()
 
 
 team_list = functools.partial(_dispatch, _team_list)

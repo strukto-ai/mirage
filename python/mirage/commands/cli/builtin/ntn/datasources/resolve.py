@@ -21,7 +21,6 @@ from mirage.commands.cli.builtin.ntn.util import (
 from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
 from mirage.core.notion.pages import get_database
-from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import JsonValue, PathSpec
 
@@ -41,10 +40,10 @@ async def resolve(
             "database_id": database_id,
             "data_sources": stubs,
         }
-        return yield_bytes(pretty_json(payload)), IOResult()
+        return pretty_json(payload), IOResult()
     lines = [
         f"{one.get('id', '')}\t{one.get('name', '')}\n"
         for one in stubs
         if isinstance(one, dict)
     ]
-    return yield_bytes("".join(lines).encode()), IOResult()
+    return "".join(lines).encode(), IOResult()

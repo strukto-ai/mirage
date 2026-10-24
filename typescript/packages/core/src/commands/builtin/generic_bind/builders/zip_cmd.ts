@@ -24,7 +24,7 @@ const zipCmd: CommandFn = async (_accessor, paths, _texts, ctx) => {
   const files = commandFiles(ctx, paths)
   const resolved = await resolveOrEmpty(files, paths)
   return zipGeneric(resolved, ctx, {
-    stream: files.readStream,
+    stream: files.read,
     write: (p, data) => files.write(p, data),
     stat: async (p: PathSpec): Promise<FileStat> => files.stat(p),
     walk: walkOf(files, dispatchOf(ctx), 'zip'),

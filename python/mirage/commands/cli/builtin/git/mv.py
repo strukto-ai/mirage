@@ -49,7 +49,6 @@ from mirage.commands.spec.flag_view import FlagView
 from mirage.errors.constants import MISS_ERRORS
 from mirage.errors.posix import posix_phrase
 from mirage.errors.types import FsCondition
-from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import FileType, PathSpec
 from mirage.workspace.files import Files
@@ -488,6 +487,4 @@ async def mv(
         await write_index(vfs, location.gitdir, state)
     if not lines:
         return None, IOResult()
-    return yield_bytes(
-        "".join(f"{line}\n" for line in lines).encode()
-    ), IOResult()
+    return "".join(f"{line}\n" for line in lines).encode(), IOResult()

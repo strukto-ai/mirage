@@ -200,12 +200,13 @@ function makePrimitive(files: Map<string, Uint8Array>, dirs: Set<string>, fails:
   const writeErr = fails.writeFails ?? new Map<string, Error>()
   const unlinkErr = fails.unlinkFails ?? new Map<string, Error>()
   const rmdirErr = fails.rmdirFails ?? new Map<string, Error>()
-  const readBytes = (p: PathSpec): Promise<Uint8Array> => {
+  const read = async function* (p: PathSpec): AsyncIterable<Uint8Array> {
+    await Promise.resolve()
     const err = readErr.get(key(p))
-    if (err !== undefined) return Promise.reject(err)
+    if (err !== undefined) throw err
     const data = files.get(key(p))
-    if (data === undefined) return Promise.reject(enoent(key(p)))
-    return Promise.resolve(data)
+    if (data === undefined) throw enoent(key(p))
+    yield data
   }
   const write = async (p: PathSpec, data: ByteSource): Promise<void> => {
     const err = writeErr.get(key(p))
@@ -237,7 +238,7 @@ function makePrimitive(files: Map<string, Uint8Array>, dirs: Set<string>, fails:
     dirs.delete(key(p))
     return Promise.resolve()
   }
-  const strategy: PrimitiveMove = { readBytes, write, mkdir, readdir, unlink, rmdir }
+  const strategy: PrimitiveMove = { read, write, mkdir, readdir, unlink, rmdir }
   return { stat, strategy }
 }
 

@@ -24,8 +24,8 @@ const file: CommandFn = async (_accessor, paths, _texts, ctx) => {
     resolved,
     ctx,
     files.stat,
-    files.readStream,
-    files.answers('read_range') ? files.readRange : null,
+    files.read,
+    files.answers('read_range') ? files.read : null,
   )
 }
 

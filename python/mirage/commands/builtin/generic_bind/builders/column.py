@@ -36,7 +36,7 @@ async def column(
         resolved,
         list(texts),
         ctx,
-        files.read_bytes,
+        files.read,
     )
 
 

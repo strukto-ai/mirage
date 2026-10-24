@@ -39,7 +39,7 @@ async def head(
         list(texts),
         ctx,
         dir_aware_stat(files, ctx),
-        files.read_stream,
+        files.read,
         (files.first_lines if files.answers("first_lines") else None),
     )
 

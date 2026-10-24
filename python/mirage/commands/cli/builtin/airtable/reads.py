@@ -41,7 +41,6 @@ from mirage.core.airtable.normalize import (
     records_jsonl,
     to_json_bytes,
 )
-from mirage.io.stream import yield_bytes
 from mirage.io.types import IOResult
 
 
@@ -54,7 +53,7 @@ async def _base_list(
     no_operands(texts)
     bases = await list_bases(accessor)
     payload = [normalize_base_summary(base) for base in bases]
-    return yield_bytes(to_json_bytes(payload)), IOResult()
+    return to_json_bytes(payload), IOResult()
 
 
 async def _base_get(
@@ -68,7 +67,7 @@ async def _base_get(
         if base.get("id") == base_id:
             tables = await list_tables(accessor, base_id)
             data = to_json_bytes(normalize_base(base, tables))
-            return yield_bytes(data), IOResult()
+            return data, IOResult()
     raise LookupError(f"{base_id}: no such base")
 
 
@@ -83,9 +82,7 @@ async def _table_get(
     table = find_table(await list_tables(accessor, base_id), ref)
     if table is None:
         raise LookupError(f"{ref}: no such table in {base_id}")
-    return yield_bytes(
-        to_json_bytes(normalize_table(table, base_id))
-    ), IOResult()
+    return to_json_bytes(normalize_table(table, base_id)), IOResult()
 
 
 async def _record_list(
@@ -114,7 +111,7 @@ async def _record_list(
             " narrow them with --formula or --view, or take the"
             " first N with --max-records N"
         )
-    return yield_bytes(records_jsonl(records)), IOResult()
+    return records_jsonl(records), IOResult()
 
 
 async def _record_get(
@@ -128,7 +125,7 @@ async def _record_get(
     record = await get_record(
         accessor, base_id, fl.as_str("table") or "", record_id
     )
-    return yield_bytes(records_jsonl([record])), IOResult()
+    return records_jsonl([record]), IOResult()
 
 
 async def _comment_list(
@@ -143,7 +140,7 @@ async def _comment_list(
         accessor, base_id, fl.as_str("table") or "", record_id
     )
     payload = [normalize_comment(comment) for comment in comments]
-    return yield_bytes(to_json_bytes(payload)), IOResult()
+    return to_json_bytes(payload), IOResult()
 
 
 base_list = functools.partial(run, _base_list)

@@ -22,7 +22,6 @@ from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
 from mirage.core.linear.client import comment_create
 from mirage.core.linear.normalize import normalize_comment, to_json_bytes
-from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -40,4 +39,4 @@ async def add(
     )
     comment = await comment_create(accessor, issue_id=issue_id, body=body)
     payload = normalize_comment(comment, issue_id=issue_id, issue_key=None)
-    return yield_bytes(to_json_bytes(payload)), IOResult()
+    return to_json_bytes(payload), IOResult()

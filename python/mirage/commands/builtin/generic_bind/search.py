@@ -48,10 +48,10 @@ from mirage.commands.errors import UsageError, WalkLimitError
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.stream import close_quietly, ensure_stream
-from mirage.io.types import ByteSource, materialize
+from mirage.io.types import ByteSource
 from mirage.observe.context import revision_for
 from mirage.shell.bytes import byte_view, utf8_locale
-from mirage.types import FileType, PathSpec
+from mirage.types import FileType, PathSpec, ReadStreamFn
 from mirage.utils.encoding import bom_of
 from mirage.utils.filetype import BINARY_EXTENSIONS, get_extension
 from mirage.utils.key_prefix import mount_key
@@ -223,14 +223,10 @@ def _linked(links: LinkView | None, virtual: str) -> bool:
 
 
 def candidate_reads(
-    read_bytes: Callable[[PathSpec], Awaitable[bytes]],
-    read_stream: Callable[[PathSpec], AsyncIterator[bytes]] | None,
+    stream: ReadStreamFn,
     narrowed: Callable[[PathSpec], Awaitable[ByteSource | None]],
-) -> tuple[
-    Callable[[PathSpec], Awaitable[bytes]],
-    Callable[[PathSpec], AsyncIterator[bytes]] | None,
-]:
-    """Reads that search what ``narrowed`` answers for a file.
+) -> ReadStreamFn:
+    """A read that searches what ``narrowed`` answers for a file.
 
     The walk still lists, filters, orders and labels every file; a file
     ``narrowed`` answers empty prints exactly what one with no match
@@ -238,28 +234,15 @@ def candidate_reads(
     searched over them, and None reads the file.
 
     Args:
-        read_bytes (Callable[[PathSpec], Awaitable[bytes]]): the bound
-            whole-read op.
-        read_stream (Callable[[PathSpec], AsyncIterator[bytes]] | None):
-            the bound stream op, or None when the backend reads whole.
+        stream (ReadStreamFn): the bound read op.
         narrowed (Callable[[PathSpec], Awaitable[ByteSource | None]]):
             what to search in place of a file, or None for the file
             itself.
     """
 
-    async def read(path: PathSpec) -> bytes:
+    async def read(path: PathSpec) -> AsyncIterator[bytes]:
         data = await narrowed(path)
-        return (
-            await read_bytes(path) if data is None else await materialize(data)
-        )
-
-    if read_stream is None:
-        return read, None
-    source = read_stream
-
-    async def stream(path: PathSpec) -> AsyncIterator[bytes]:
-        data = await narrowed(path)
-        chunks = source(path) if data is None else ensure_stream(data)
+        chunks = stream(path) if data is None else ensure_stream(data)
         try:
             async for chunk in chunks:
                 if chunk:
@@ -267,20 +250,15 @@ def candidate_reads(
         finally:
             await close_quietly(chunks)
 
-    return read, stream
+    return read
 
 
 def capped_reads(
-    read_bytes: Callable[[PathSpec], Awaitable[bytes]],
-    read_stream: Callable[[PathSpec], AsyncIterator[bytes]] | None,
+    stream: ReadStreamFn,
     operands: list[PathSpec],
     mounts: MountView | None,
-) -> tuple[
-    Callable[[PathSpec], Awaitable[bytes]],
-    Callable[[PathSpec], AsyncIterator[bytes]] | None,
-    Callable[[PathSpec], None],
-]:
-    """Reads that stop each walk at its mount's ``walk_limit``.
+) -> tuple[ReadStreamFn, Callable[[PathSpec], None]]:
+    """A read that stops each walk at its mount's ``walk_limit``.
 
     A file counts once against the deepest walked operand above it, so a
     file named as an operand counts nothing; the one past the limit
@@ -290,10 +268,7 @@ def capped_reads(
     search rules out is never read, so it costs nothing.
 
     Args:
-        read_bytes (Callable[[PathSpec], Awaitable[bytes]]): the bound
-            whole-read op.
-        read_stream (Callable[[PathSpec], AsyncIterator[bytes]] | None):
-            the bound stream op, or None when the backend reads whole.
+        stream (ReadStreamFn): the bound read op.
         operands (list[PathSpec]): the operands walked.
         mounts (MountView | None): the mount boundaries, which name each
             operand's limit.
@@ -325,26 +300,18 @@ def capped_reads(
                 return
 
     if not capped:
-        return read_bytes, read_stream, charge
+        return stream, charge
 
-    async def read(path: PathSpec) -> bytes:
+    async def read(path: PathSpec) -> AsyncIterator[bytes]:
         charge(path)
-        return await read_bytes(path)
-
-    if read_stream is None:
-        return read, None, charge
-    source = read_stream
-
-    async def stream(path: PathSpec) -> AsyncIterator[bytes]:
-        charge(path)
-        chunks = source(path)
+        chunks = stream(path)
         try:
             async for chunk in chunks:
                 yield chunk
         finally:
             await close_quietly(chunks)
 
-    return read, stream, charge
+    return read, charge
 
 
 async def _unmarked(found: ByteSource) -> ByteSource | None:
@@ -427,11 +394,8 @@ async def search_reads(
     paths: list[PathSpec],
     texts: list[str],
     ctx: Context,
-) -> tuple[
-    Callable[[PathSpec], Awaitable[bytes]],
-    Callable[[PathSpec], AsyncIterator[bytes]] | None,
-]:
-    """grep's or rg's reads, narrowed by the mount's search where it can.
+) -> ReadStreamFn:
+    """grep's or rg's read, narrowed by the mount's search where it can.
 
     ``files_containing`` rules out walked files no match can be in, of
     those the mount's ``searchable`` names, and
@@ -461,12 +425,10 @@ async def search_reads(
     if not paths or (
         name == "rg" and (fl.as_bool("files") or fl.as_bool("type_list"))
     ):
-        return files.read_bytes, files.read_stream
+        return files.read
     walked = name == "rg" or directories_action(fl) == "recurse"
     mounts = mounts_of(ctx)
-    read_bytes, read_stream, charge = capped_reads(
-        files.read_bytes, files.read_stream, paths if walked else [], mounts
-    )
+    read, charge = capped_reads(files.read, paths if walked else [], mounts)
     containing = (
         files.files_containing if files.answers("files_containing") else None
     )
@@ -474,7 +436,7 @@ async def search_reads(
         files.lines_containing if files.answers("lines_containing") else None
     )
     if containing is None and lines is None:
-        return read_bytes, read_stream
+        return read
     searchable = (
         mounts.searchable(paths[0].virtual)
         if mounts is not None and mounts.searchable is not None
@@ -490,10 +452,10 @@ async def search_reads(
         )
     except UsageError as exc:
         logger.debug("%s search left to the scan: %s", name, exc)
-        return read_bytes, read_stream
+        return read
     dirs = await _directories(files, paths) if walked else []
     if terms is None:
-        return read_bytes, read_stream
+        return read
     drops_mark = name == "rg" and encoding_flag(fl) != "none"
     hits: set[str] | None = None
     if containing is not None and dirs:
@@ -517,7 +479,7 @@ async def search_reads(
                 for hit in answer
             }
     if hits is None and lines is None:
-        return read_bytes, read_stream
+        return read
     named = {p.virtual for p in paths} - {p.virtual for p in dirs}
 
     async def narrowed(path: PathSpec) -> ByteSource | None:
@@ -560,4 +522,4 @@ async def search_reads(
                 return None
         return b""
 
-    return candidate_reads(read_bytes, read_stream, narrowed)
+    return candidate_reads(read, narrowed)

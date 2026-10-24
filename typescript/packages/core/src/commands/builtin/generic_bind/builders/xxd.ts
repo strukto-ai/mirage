@@ -23,8 +23,7 @@ const xxd: CommandFn = async (_accessor, paths, _texts, ctx) => {
   return xxdGeneric(
     resolved,
     ctx,
-    files.readStream,
-    files.readBytes,
+    files.read,
     (p, d) => files.write(p, d),
     files.answers('pwrite') ? files.pwrite : null,
   )

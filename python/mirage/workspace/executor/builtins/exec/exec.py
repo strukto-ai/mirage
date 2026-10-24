@@ -150,8 +150,8 @@ async def handle_exec_command(
         )
     finally:
         reset_program_invocation(token)
-    stdout = await materialize(io.stdout) or b""
-    stderr = await materialize(io.stderr) or b""
+    stdout = await materialize(io.stdout)
+    stderr = await materialize(io.stderr)
     replaced = ExitSignal(io.exit_code, stderr=stderr, stdout=stdout)
     replaced.replaced, replaced.unrouted = head, True
     raise replaced

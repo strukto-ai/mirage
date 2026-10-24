@@ -271,8 +271,6 @@ PageFetch: TypeAlias = Callable[[str | None], Awaitable[dict[str, Any]]]
 
 ReadBytesFn: TypeAlias = Callable[..., Awaitable[bytes]]
 ReadStreamFn: TypeAlias = Callable[..., AsyncIterator[bytes]]
-# A bound byte-window reader, called as ``read_range(path, offset=, size=)``.
-ReadRangeFn: TypeAlias = Callable[..., Awaitable[bytes]]
 # A "polymorphic" reader is the loose `read` contract head/tail/wc
 # accept: a backend may hand back materialized bytes, an awaitable of
 # bytes, or an async byte stream; ensure_stream normalizes downstream.
@@ -378,14 +376,13 @@ class NativeCopy:
 
 @dataclass(frozen=True, slots=True)
 class PrimitiveCopy:
-    read_bytes: ReadBytesFn
+    read: ReadStreamFn
     write: CopyFn
     mkdir: CopyFn
     readdir: ReaddirFn
     # A store-to-store copy between two mounts, tried before the bytes
     # move; EXDEV from it says the stores cannot.
     copy: CopyFn | None = None
-    read_stream: ReadStreamFn | None = None
 
 
 CopyStrategy: TypeAlias = NativeCopy | PrimitiveCopy
@@ -398,7 +395,7 @@ class NativeMove:
 
 @dataclass(frozen=True, slots=True)
 class PrimitiveMove:
-    read_bytes: ReadBytesFn
+    read: ReadStreamFn
     write: MoveFn
     mkdir: MoveFn
     readdir: ReaddirFn
@@ -406,7 +403,6 @@ class PrimitiveMove:
     rmdir: MoveFn
     check_unlink: "CheckFn | None" = None
     copy: CopyFn | None = None
-    read_stream: ReadStreamFn | None = None
 
 
 MoveStrategy: TypeAlias = NativeMove | PrimitiveMove

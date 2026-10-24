@@ -48,7 +48,7 @@ from mirage.types import (
     FileType,
     PathSpec,
     PolymorphicReadFn,
-    ReadRangeFn,
+    ReadStreamFn,
     StatFn,
 )
 from mirage.utils.quote import shell_quote
@@ -361,7 +361,7 @@ async def _counted(source: Any, box: list[int]) -> AsyncIterator[bytes]:
 
 async def _window(
     read: Callable[..., Any],
-    read_range: ReadRangeFn | None,
+    read_range: ReadStreamFn | None,
     path: PathSpec,
     offset: int,
     size: int,
@@ -370,17 +370,14 @@ async def _window(
 
     Args:
         read (Callable[..., Any]): whole-file reader, the fallback.
-        read_range (ReadRangeFn | None): the backend's byte window, if
+        read_range (ReadStreamFn | None): the backend's byte window, if
             it has one.
         path (PathSpec): the file.
         offset (int): where the last poll ended.
         size (int): how many bytes appeared.
     """
     if read_range is not None:
-        # The bound op takes its window by keyword: the accessor and index
-        # are already bound, and the protocol names the rest.
-        data = await read_range(path, offset=offset, size=size)
-        return bytes(data)
+        return await materialize(read_range(path, offset=offset, size=size))
     return (await _whole(read, path))[offset : offset + size]
 
 
@@ -441,8 +438,9 @@ async def _polled_window(
     path: PathSpec,
     offset: int = 0,
     size: int | None = None,
-) -> bytes:
-    """A follow poll's read: what the backend holds now, at the dispatcher.
+) -> AsyncIterator[bytes]:
+    """A follow poll's read, whole or a window: what the backend holds
+    now, at the dispatcher.
 
     A direct read, never served from the file cache nor kept in it: the
     poll looks for exactly the bytes a cached copy does not have yet.
@@ -456,24 +454,12 @@ async def _polled_window(
     data, _ = await dispatch(
         "read", path, filetype=None, offset=offset, size=size, direct=True
     )
-    return await materialize(data) or b""
-
-
-async def _polled_file(
-    dispatch: DispatchFn, path: PathSpec
-) -> AsyncIterator[bytes]:
-    """A follow poll's whole-file read, for a stat that carries no size.
-
-    Args:
-        dispatch (DispatchFn): the command's dispatcher.
-        path (PathSpec): the followed file.
-    """
-    yield await _polled_window(dispatch, path)
+    yield await materialize(data)
 
 
 async def _catch_up(
     read: Callable[..., Any],
-    read_range: ReadRangeFn | None,
+    read_range: ReadStreamFn | None,
     io: IOResult,
     p: PathSpec,
     size: int | None,
@@ -486,7 +472,7 @@ async def _catch_up(
 
     Args:
         read (Callable[..., Any]): bound whole-file reader.
-        read_range (ReadRangeFn | None): the backend's byte window, if
+        read_range (ReadStreamFn | None): the backend's byte window, if
             it has one.
         io (IOResult): the result a truncation notice lands on.
         p (PathSpec): the file.
@@ -516,7 +502,7 @@ async def _follow(
     *,
     read: Callable[..., Any],
     poll_read: Callable[..., Any],
-    read_range: ReadRangeFn | None,
+    read_range: ReadStreamFn | None,
     stat: StatFn,
     counts: TailCounts,
     show_headers: bool,
@@ -589,7 +575,7 @@ async def _follow(
         read (Callable[..., Any]): bound whole-file reader, for the
             first print.
         poll_read (Callable[..., Any]): the polls' whole-file reader.
-        read_range (ReadRangeFn | None): the polls' byte-window reader.
+        read_range (ReadStreamFn | None): the polls' byte-window reader.
         stat (StatFn): the polls' stat.
         counts (TailCounts): what the first print shows.
         show_headers (bool): the ``==> name <==`` rule.
@@ -817,7 +803,7 @@ async def tail_generic(
     ctx: Context,
     stat: StatFn,
     stream: PolymorphicReadFn,
-    read_range: ReadRangeFn | None = None,
+    read_range: ReadStreamFn | None = None,
     last_lines: Callable[[PathSpec, int], Awaitable[bytes | None]]
     | None = None,
     follow: Callable[
@@ -842,7 +828,7 @@ async def tail_generic(
         stat (StatFn): Bound stat called as ``stat(path)``.
         stream (PolymorphicReadFn): Bound reader called as
             ``stream(path)``.
-        read_range (ReadRangeFn | None): Bound byte-window reader
+        read_range (ReadStreamFn | None): Bound byte-window reader
             called as ``read_range(path, offset, size)``, for a follow
             that only wants what the file gained; None reads whole.
         last_lines (Callable[[PathSpec, int], Awaitable[bytes | None]]
@@ -921,8 +907,8 @@ async def tail_generic(
             poll_stat, poll_read, poll_range = stat, stream, read_range
             if (dispatch := dispatch_of(ctx)) is not None:
                 poll_stat = functools.partial(_polled_stat, dispatch)
-                poll_read = functools.partial(_polled_file, dispatch)
-                poll_range = functools.partial(_polled_window, dispatch)
+                poll_read = functools.partial(_polled_window, dispatch)
+                poll_range = poll_read
             return _follow(
                 opened,
                 pending,

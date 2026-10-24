@@ -122,7 +122,6 @@ from mirage.commands.cli.builtin.git.util import (
 from mirage.commands.cli.builtin.git.worktree import UNTRACKED_ALL, scan
 from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
-from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import FileType, PathSpec
 from mirage.workspace.files import Files
@@ -657,7 +656,7 @@ async def move_head(
         note += f"HEAD is now at {oneline(commit, abbrev_for(repo))}\n"
     if quiet:
         return None, IOResult(stderr=(warnings + warning).encode())
-    return yield_bytes(out.encode()), IOResult(stderr=note.encode())
+    return out.encode(), IOResult(stderr=note.encode())
 
 
 async def _carry_across(

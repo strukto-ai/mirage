@@ -55,7 +55,7 @@ async def test_shuf_draws_from_the_id_source(options, texts, expected):
         out, io = await shuf_generic(
             [],
             texts,
-            read_bytes=_read_operand,
+            read=_read_operand,
             ids=SeededIdSource(5),
             **options,
         )
@@ -75,7 +75,7 @@ async def test_shuf_draws_records_from_the_id_source(options, expected):
     out, io = await shuf_generic(
         [],
         [],
-        read_bytes=_read_operand,
+        read=_read_operand,
         stdin=STDIN,
         ids=SeededIdSource(5),
         **options,
@@ -127,7 +127,7 @@ async def test_shuf_replays_past_the_memory_limit(
     out, io = await shuf_generic(
         [],
         [],
-        read_bytes=_read_operand,
+        read=_read_operand,
         stdin=_chunks(LARGE, chunk),
         ids=ids,
         **options,

@@ -22,7 +22,6 @@ from mirage.commands.config import Context
 from mirage.commands.errors import UsageError
 from mirage.commands.spec.flag_view import FlagView
 from mirage.core.notion.pages import create_page
-from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import JsonValue, PathSpec
 
@@ -67,5 +66,5 @@ async def create(
         body["parent"] = parse_parent(parent)
     page = await create_page(notion_transport(accessor, ctx), body)
     if fl.as_bool("json"):
-        return yield_bytes(pretty_json(page)), IOResult()
-    return yield_bytes(f"{page.get('id', '')}\n".encode()), IOResult()
+        return pretty_json(page), IOResult()
+    return f"{page.get('id', '')}\n".encode(), IOResult()

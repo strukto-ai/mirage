@@ -20,7 +20,7 @@ import { commandFiles, fileSize, resolveOrEmpty } from '../files.ts'
 const cmpCmd: CommandFn = async (_accessor, paths, texts, ctx) => {
   const files = commandFiles(ctx, paths)
   const resolved = await resolveOrEmpty(files, paths)
-  return cmpGeneric(resolved, texts, ctx, files.readStream, fileSize(files, ctx))
+  return cmpGeneric(resolved, texts, ctx, files.read, fileSize(files, ctx))
 }
 
 export const BUILDER: GenericCommand = {

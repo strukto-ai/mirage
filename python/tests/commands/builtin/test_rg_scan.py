@@ -110,8 +110,7 @@ async def rg(backend, path, pattern, **kwargs):
         Context(flags=flags),
         readdir=partial(_listed, accessor),
         stat=partial(stat, accessor),
-        read_bytes=partial(read, accessor),
-        read_stream=None,
+        read=partial(read, accessor),
     )
     data = await materialize(out) if out is not None else b""
     if kwargs.get("warnings") is not None and io.stderr:

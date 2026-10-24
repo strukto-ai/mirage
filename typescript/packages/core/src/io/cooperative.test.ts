@@ -29,16 +29,19 @@ describe('cooperative processing', () => {
   it('aborts wc and closes its producer before returning', async () => {
     const controller = new AbortController()
     let closed = false
+    let timer: ReturnType<typeof setTimeout> | undefined
+    // The abort is armed once the producer opens, so it lands mid-run: an
+    // abort before the first pull never opens the producer at all.
     async function* source(): AsyncIterable<Uint8Array> {
+      timer = setTimeout(() => {
+        controller.abort()
+      }, 1)
       try {
         yield ENC.encode('line\n'.repeat(500_000))
       } finally {
         closed = true
       }
     }
-    const timer = setTimeout(() => {
-      controller.abort()
-    }, 1)
     try {
       await expect(
         wcGeneric(

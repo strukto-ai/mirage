@@ -54,7 +54,7 @@ async def unzip(
         resolved,
         list(texts),
         ctx,
-        files.read_stream,
+        files.read,
         files.write,
         files.mkdir,
         stat=files.stat,

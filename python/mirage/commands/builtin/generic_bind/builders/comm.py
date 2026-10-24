@@ -33,7 +33,7 @@ async def comm(
         resolved,
         list(texts),
         ctx,
-        files.read_stream,
+        files.read,
     )
 
 

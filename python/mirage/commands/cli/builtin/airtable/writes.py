@@ -49,7 +49,6 @@ from mirage.core.airtable.normalize import (
     to_json_bytes,
 )
 from mirage.core.render.json import compact_json_text
-from mirage.io.stream import yield_bytes
 from mirage.io.types import IOResult
 
 Rows = list[dict[str, Any]]
@@ -141,10 +140,8 @@ async def landed(
     except Exception as exc:
         if not done:
             raise
-        return yield_bytes(render(done)), IOResult(
-            exit_code=1, stderr=f"{exc}\n".encode()
-        )
-    return yield_bytes(render(done)), IOResult()
+        return render(done), IOResult(exit_code=1, stderr=f"{exc}\n".encode())
+    return render(done), IOResult()
 
 
 async def _record_create(
@@ -254,7 +251,7 @@ async def _comment_add(
     comment = await create_comment(
         accessor, base_id, fl.as_str("table") or "", record_id, text
     )
-    return yield_bytes(to_json_bytes(normalize_comment(comment))), IOResult()
+    return to_json_bytes(normalize_comment(comment)), IOResult()
 
 
 record_create = functools.partial(run, _record_create)

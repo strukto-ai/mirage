@@ -19,7 +19,7 @@ import { commandFiles } from '../files.ts'
 
 const join: CommandFn = async (_accessor, paths, _texts, ctx) => {
   const files = commandFiles(ctx, paths)
-  return joinGeneric(paths, ctx, files.resolveGlob, files.readStream)
+  return joinGeneric(paths, ctx, files.resolveGlob, files.read)
 }
 
 export const BUILDER: GenericCommand = {

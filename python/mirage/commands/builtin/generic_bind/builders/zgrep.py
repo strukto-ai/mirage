@@ -36,7 +36,7 @@ async def zgrep(
         resolved,
         texts,
         ctx.flags,
-        read_bytes=files.read_stream,
+        read=files.read,
         stdin=ctx.stdin,
         stat=files.stat,
         resolver=link_resolver(ctx),

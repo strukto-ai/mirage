@@ -455,7 +455,7 @@ async def _rb(_path):
 
 
 async def _run_sort(data: bytes, **kwargs) -> list[str]:
-    output, _ = await sort_generic([], read_bytes=_rb, stdin=data, **kwargs)
+    output, _ = await sort_generic([], read=_rb, stdin=data, **kwargs)
     return (await materialize(output)).decode().splitlines()
 
 

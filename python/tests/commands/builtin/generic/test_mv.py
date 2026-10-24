@@ -12,10 +12,13 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import AsyncIterator
+
 import pytest
 
 from mirage.commands.builtin.generic.mv import MvFlags, mv_generic
 from mirage.errors.fs import enoent, enotdir, enotsup
+from mirage.io.types import ByteSource, materialize
 from mirage.types import (
     ContentType,
     FileStat,
@@ -191,15 +194,15 @@ def _make_primitive(
     unlink_err = unlink_fails or {}
     rmdir_err = rmdir_fails or {}
 
-    async def read_bytes(p) -> bytes:
+    async def read(p) -> AsyncIterator[bytes]:
         if _key(p) in read_err:
             raise read_err[_key(p)]
-        return files[_key(p)]
+        yield files[_key(p)]
 
-    async def write(p, data: bytes) -> None:
+    async def write(p, data: ByteSource) -> None:
         if _key(p) in write_err:
             raise write_err[_key(p)]
-        files[_key(p)] = data
+        files[_key(p)] = await materialize(data)
 
     async def mkdir(p) -> None:
         dirs.add(_key(p))
@@ -224,7 +227,7 @@ def _make_primitive(
         dirs.discard(_key(p))
 
     strategy = PrimitiveMove(
-        read_bytes=read_bytes,
+        read=read,
         write=write,
         mkdir=mkdir,
         readdir=readdir,

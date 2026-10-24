@@ -18,7 +18,6 @@ from mirage.accessor.slack import SlackAccessor
 from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
 from mirage.core.slack.pins import list_pins as list_pins_core
-from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -32,4 +31,4 @@ async def list_pins(
     fl = FlagView(ctx.flags, ctx.spec)
     items = await list_pins_core(accessor, fl.as_str("channel") or "")
     out = json.dumps(items, ensure_ascii=False, separators=(",", ":")).encode()
-    return yield_bytes(out), IOResult()
+    return out, IOResult()

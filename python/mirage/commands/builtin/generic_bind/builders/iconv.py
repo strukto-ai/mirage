@@ -37,7 +37,7 @@ async def iconv(
         resolved,
         list(texts),
         ctx,
-        files.read_stream,
+        files.read,
         files.write,
     )
 

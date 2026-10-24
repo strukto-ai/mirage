@@ -291,7 +291,7 @@ async def _run_action(
     finally:
         session.errexit_immune = immune
     stdout = await materialize(io.stdout)
-    stderr = await materialize(io.stderr) or b""
+    stderr = await materialize(io.stderr)
     if session.errexit_exiting:
         ended = ExitSignal(io.exit_code, stderr=stderr, stdout=stdout)
         ended.unrouted = True
@@ -355,8 +355,8 @@ async def run_exit_trap(
             stdin=stdin,
             call_stack=call_stack if call_stack is not None else CallStack(),
         )
-        stdout = await materialize(io.stdout) or b""
-        stderr = await materialize(io.stderr) or b""
+        stdout = await materialize(io.stdout)
+        stderr = await materialize(io.stderr)
         if (
             io.exit_code != 0
             and session.shell_options.get("errexit")
@@ -366,7 +366,7 @@ async def run_exit_trap(
     except ExitSignal as sig:
         stdout, stderr, final = sig.stdout or b"", sig.stderr, sig.exit_code
     except ReturnSignal as sig:
-        stdout = await materialize(sig.stdout) or b""
+        stdout = await materialize(sig.stdout)
         stderr = sig.stderr
     finally:
         session._trap_status = saved

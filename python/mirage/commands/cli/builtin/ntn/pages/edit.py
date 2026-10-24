@@ -22,7 +22,6 @@ from mirage.commands.cli.builtin.ntn.util import (
 from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
 from mirage.core.notion.pages import replace_page_markdown
-from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -43,5 +42,5 @@ async def edit(
         notion_transport(accessor, ctx), page_id, markdown
     )
     if fl.as_bool("json"):
-        return yield_bytes(pretty_json(edited)), IOResult()
-    return yield_bytes(f"{page_id}\n".encode()), IOResult()
+        return pretty_json(edited), IOResult()
+    return f"{page_id}\n".encode(), IOResult()

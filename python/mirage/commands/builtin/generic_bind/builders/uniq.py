@@ -36,7 +36,7 @@ async def uniq(
     paths = await resolve_or_empty(files, paths)
     return await generic_uniq(
         paths,
-        read_stream=files.read_stream,
+        read_stream=files.read,
         write_bytes=(files.write if files.answers("write") else None),
         stdin=ctx.stdin,
         flags=ctx.flags,

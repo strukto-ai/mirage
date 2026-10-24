@@ -36,7 +36,7 @@ async def look(
         resolved,
         list(texts),
         ctx,
-        files.read_stream,
+        files.read,
     )
 
 

@@ -7,6 +7,6 @@ export const BUILDER: GenericCommand = {
   read: true,
   fn: async (_accessor, paths, _texts, ctx) => {
     const files = commandFiles(ctx, paths)
-    return odGeneric(await resolveOrEmpty(files, paths), ctx, files.readStream)
+    return odGeneric(await resolveOrEmpty(files, paths), ctx, files.read)
   },
 }

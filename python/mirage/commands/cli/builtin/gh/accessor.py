@@ -38,7 +38,7 @@ from mirage.core.github.constants import API_BASE
 from mirage.core.github.repo import RepoRef, parse_repo, repo_host
 from mirage.core.jq import JqHalt, JqRun, jq_raised, jq_run
 from mirage.errors.fs import fs_strerror
-from mirage.io.stream import materialize, yield_bytes
+from mirage.io.stream import materialize
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import JsonValue, PathSpec
 
@@ -138,11 +138,11 @@ def json_out(value: JsonValue) -> tuple[ByteSource | None, IOResult]:
         value (JsonValue): the selected fields.
     """
     text = "" if value is None else f"{_go_json(value)}\n"
-    return yield_bytes(text.encode()), IOResult()
+    return text.encode(), IOResult()
 
 
 def text_out(text: str) -> tuple[ByteSource | None, IOResult]:
-    return yield_bytes(text.encode()), IOResult()
+    return text.encode(), IOResult()
 
 
 def gh_bool(fl: FlagView, name: str) -> bool:

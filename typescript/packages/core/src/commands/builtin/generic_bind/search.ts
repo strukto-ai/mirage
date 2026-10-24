@@ -351,11 +351,11 @@ export async function searchReads(
   const fl = new FlagView(ctx.flags, specOf(name))
   const [first] = paths
   if (first === undefined || (name === 'rg' && (fl.asBool('files') || fl.asBool('type_list')))) {
-    return files.readStream
+    return files.read
   }
   const walked = name === 'rg' || directoriesAction(fl) === 'recurse'
   const mounts = mountsOf(ctx)
-  const [stream, charge] = cappedReads(files.readStream, walked ? paths : [], mounts)
+  const [stream, charge] = cappedReads(files.read, walked ? paths : [], mounts)
   const narrows = files.answers('files_containing')
   const lines = files.answers('lines_containing') ? files.linesContaining : undefined
   if (!narrows && lines === undefined) return stream

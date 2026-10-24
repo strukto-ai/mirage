@@ -65,7 +65,7 @@ async def tar(
         resolved,
         list(texts),
         ctx,
-        files.read_stream,
+        files.read,
         # Archive output follows links even when the member scan
         # preserves them.
         transfer_primitives(dispatch)["write"]

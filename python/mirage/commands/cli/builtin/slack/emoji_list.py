@@ -17,7 +17,6 @@ import json
 from mirage.accessor.slack import SlackAccessor
 from mirage.commands.config import Context
 from mirage.core.slack.emoji import list_emoji
-from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -30,4 +29,4 @@ async def emoji_list(
 ) -> tuple[ByteSource | None, IOResult]:
     emoji = await list_emoji(accessor)
     out = json.dumps(emoji, ensure_ascii=False, separators=(",", ":")).encode()
-    return yield_bytes(out), IOResult()
+    return out, IOResult()

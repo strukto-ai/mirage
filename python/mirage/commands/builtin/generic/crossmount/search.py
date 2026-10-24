@@ -421,9 +421,7 @@ async def run_search(
             err = await materialize(r.io.stderr)
             r.io.stderr = err.removeprefix(noted) or None
     io = await merge_operand_ios(results, code)
-    io.stderr = noted + (
-        await materialize(io.stderr) if io.stderr is not None else b""
-    )
+    io.stderr = noted + (await materialize(io.stderr))
     return body, io
 
 

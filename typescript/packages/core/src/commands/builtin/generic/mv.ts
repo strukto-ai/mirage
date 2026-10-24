@@ -115,7 +115,7 @@ export function mvFlags(init: Partial<MvFlags> = {}): MvFlags {
 }
 
 function isPrimitiveMove(strategy: MoveStrategy): strategy is PrimitiveMove {
-  return 'readBytes' in strategy
+  return 'read' in strategy
 }
 
 // Parse the mv flag bag once into a frozen struct. The last of -f, -i and

@@ -78,7 +78,7 @@ async def test_stdin_outputs_are_named_on_the_executing_mount(
         [],
         ["2"],
         ctx,
-        read_bytes=_no_read,
+        read=_no_read,
         write_bytes=write_bytes,
         unlink=_no_unlink,
     )

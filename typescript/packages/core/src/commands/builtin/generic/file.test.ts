@@ -48,9 +48,14 @@ describe('file reads only the first bytes', () => {
     const stream = (): AsyncIterable<Uint8Array> => {
       throw new Error('streamed')
     }
-    const readRange = (_p: PathSpec, offset: number, size: number | null): Promise<Uint8Array> => {
+    const readRange = async function* (
+      _p: PathSpec,
+      offset: number,
+      size: number | null,
+    ): AsyncIterable<Uint8Array> {
       asked.push([offset, size])
-      return Promise.resolve(Uint8Array.of(0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a))
+      await Promise.resolve()
+      yield Uint8Array.of(0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a)
     }
     const [out] = (await fileGeneric([X], OPTS, stat, stream, readRange)) ?? [null]
     expect(DEC.decode(await materialize(out))).toBe('/x: image/png\n')

@@ -23,7 +23,7 @@ const gzip: CommandFn = async (_accessor, paths, _texts, ctx) => {
   return gzipGeneric(
     resolved,
     ctx,
-    files.readStream,
+    files.read,
     (p, d) => files.write(p, d),
     (p) => files.unlink(p),
     files.stat,

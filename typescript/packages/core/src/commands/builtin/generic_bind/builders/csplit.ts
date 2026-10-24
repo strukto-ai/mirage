@@ -31,7 +31,7 @@ const csplit: CommandFn = async (_accessor, paths, texts, ctx) => {
     resolved,
     texts,
     ctx,
-    files.readStream,
+    files.read,
     async (p, d) => {
       await dispatch('write', p, [d])
     },

@@ -20,12 +20,7 @@ import { commandFiles, resolveOrEmpty } from '../files.ts'
 const sort: CommandFn = async (_accessor, paths, _texts, ctx) => {
   const files = commandFiles(ctx, paths)
   const resolved = await resolveOrEmpty(files, paths)
-  return sortGeneric(
-    resolved,
-    ctx,
-    files.readStream,
-    files.answers('write') ? files.write : undefined,
-  )
+  return sortGeneric(resolved, ctx, files.read, files.answers('write') ? files.write : undefined)
 }
 
 export const BUILDER: GenericCommand = {

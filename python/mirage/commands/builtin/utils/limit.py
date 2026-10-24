@@ -212,9 +212,7 @@ async def truncate_stream(
         if remaining > 0:
             yield chunk[:remaining]
         notice = _build_notice(limit)
-        existing = (
-            await materialize(io.stderr) if io.stderr is not None else b""
-        )
+        existing = await materialize(io.stderr)
         io.stderr = existing + notice
         if limit.on_exceed is OnExceed.ERROR:
             io.exit_code = 1

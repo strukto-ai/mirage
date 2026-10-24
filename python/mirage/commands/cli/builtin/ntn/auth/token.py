@@ -14,7 +14,6 @@
 
 from mirage.accessor.notion import NotionAccessor
 from mirage.commands.config import Context
-from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -26,4 +25,4 @@ async def token(
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
     secret = accessor.config.api_key.get_secret_value()
-    return yield_bytes(f"{secret}\n".encode()), IOResult()
+    return f"{secret}\n".encode(), IOResult()

@@ -20,7 +20,6 @@ from mirage.commands.spec.flag_view import FlagView
 from mirage.core.render.json import compact_json_bytes
 from mirage.core.trello.client import card_move
 from mirage.core.trello.normalize import normalize_card
-from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -37,4 +36,4 @@ async def move(
     await require_card(accessor, card_id)
     await require_list(accessor, list_id)
     card = await card_move(accessor, card_id=card_id, list_id=list_id)
-    return yield_bytes(compact_json_bytes(normalize_card(card))), IOResult()
+    return compact_json_bytes(normalize_card(card)), IOResult()

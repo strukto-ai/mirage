@@ -19,7 +19,6 @@ from mirage.commands.cli.builtin.gws.sheets.write import values_json_from_flags
 from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
 from mirage.core.gsheets.write import append_values
-from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -40,4 +39,4 @@ async def append(
     out = json.dumps(
         result, ensure_ascii=False, separators=(",", ":")
     ).encode()
-    return yield_bytes(out), IOResult()
+    return out, IOResult()

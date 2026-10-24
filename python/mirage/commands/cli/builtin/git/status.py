@@ -43,7 +43,6 @@ from mirage.commands.cli.builtin.git.worktree import (
 )
 from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
-from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult, Rows
 from mirage.types import PathSpec
 from mirage.workspace.files import Files
@@ -163,7 +162,7 @@ async def report_rows(
             fully,
             upstream,
         )
-        return yield_bytes(body.encode())
+        return body.encode()
 
     return Rows(rows, render)
 
@@ -234,6 +233,6 @@ async def status(
                 fully,
                 upstream,
             )
-        return yield_bytes(body.encode())
+        return body.encode()
 
     return None, IOResult(rows=Rows(rows, render))

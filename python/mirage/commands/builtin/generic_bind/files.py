@@ -44,7 +44,7 @@ from mirage.context.session_context import current_caller
 from mirage.errors.fs import eacces, eisdir, enoent
 from mirage.errors.types import DotWalkError
 from mirage.io.cooperative import chunks
-from mirage.io.stream import close_quietly, ensure_stream, materialize
+from mirage.io.stream import close_quietly, ensure_stream
 from mirage.io.types import ByteSource
 from mirage.observe.context import revision_for
 from mirage.runtime.types import DispatchFn
@@ -52,7 +52,6 @@ from mirage.types import (
     FileStat,
     FileType,
     PathSpec,
-    ReadBytesFn,
     ReaddirFn,
     ReadStreamFn,
     StatFn,
@@ -86,10 +85,9 @@ class CommandFiles:
         stat (StatFn): the entry at a path itself, as lstat answers.
         exists (Callable): whether an entry is at a path.
         readdir (ReaddirFn): ``readdir(path, nofollow=False)``.
-        read_bytes (ReadBytesFn): the stored bytes, whole.
-        read_range (ReadBytesFn): ``read_range(path, offset, size)``.
-        read_stream (ReadStreamFn): the stored bytes, opened at the
-            first pull.
+        read (ReadStreamFn): ``read(path, offset=0, size=None)``, the
+            stored bytes or a window of them, opened at the first pull;
+            ``materialize`` collects them.
         is_warm (Callable): whether the read cache holds a copy a read
             would be served from; it fetches neither the copy nor
             anything from the backend.
@@ -135,9 +133,7 @@ class CommandFiles:
     stat: StatFn
     exists: Callable[[PathSpec], Awaitable[bool]]
     readdir: ReaddirFn
-    read_bytes: ReadBytesFn
-    read_range: ReadBytesFn
-    read_stream: ReadStreamFn
+    read: ReadStreamFn
     is_warm: Callable[[PathSpec], Awaitable[bool]]
     write: Callable[[PathSpec, ByteSource], Awaitable[None]]
     append: Callable[[PathSpec, ByteSource], Awaitable[None]]
@@ -302,49 +298,30 @@ async def dispatched_call(
     return result
 
 
-async def _dispatched_bytes(
-    dispatch: DispatchFn,
-    path: PathSpec,
-    offset: int = 0,
-    size: int | None = None,
-    ahead: Callable[[PathSpec], Awaitable[None]] | None = None,
-) -> bytes:
-    """A command's whole or ranged read of the stored bytes, at the
-    dispatcher.
-
-    Args:
-        dispatch (DispatchFn): the command's dispatcher.
-        path (PathSpec): the file.
-        offset (int): first byte of the window.
-        size (int | None): window length, None for the rest.
-        ahead (Callable[[PathSpec], Awaitable[None]] | None): what a
-            whole read awaits first (``read_ahead``).
-    """
-    if ahead is not None and offset == 0 and size is None:
-        await ahead(path)
-    data, _ = await dispatch(
-        "read", path, filetype=None, offset=offset, size=size
-    )
-    return await materialize(data) or b""
-
-
 async def _dispatched_stream(
     dispatch: DispatchFn,
     path: PathSpec,
     ahead: Callable[[PathSpec], Awaitable[None]] | None = None,
+    offset: int = 0,
+    size: int | None = None,
 ) -> AsyncIterator[bytes]:
-    """A command's streamed read of the stored bytes, at the dispatcher,
-    opened at the first pull, as a backend stream is.
+    """A command's streamed read of the stored bytes, or a window of
+    them, at the dispatcher, opened at the first pull, as a backend
+    stream is.
 
     Args:
         dispatch (DispatchFn): the command's dispatcher.
         path (PathSpec): the file.
         ahead (Callable[[PathSpec], Awaitable[None]] | None): what the
             read awaits first (``read_ahead``).
+        offset (int): first byte of the window.
+        size (int | None): window length, None for the rest.
     """
     if ahead is not None:
         await ahead(path)
-    data, _ = await dispatch("read", path, stream=True, filetype=None)
+    data, _ = await dispatch(
+        "read", path, stream=True, filetype=None, offset=offset, size=size
+    )
     source = ensure_stream(data)
     try:
         async for chunk in source:
@@ -512,7 +489,7 @@ async def _stream_refusing_dirs(
     files: CommandFiles, ctx: Context, path: PathSpec
 ) -> AsyncIterator[bytes]:
     await _stat_refusing_dirs(files, ctx, path)
-    async for chunk in files.read_stream(path):
+    async for chunk in files.read(path):
         yield chunk
 
 
@@ -621,7 +598,6 @@ def command_files(
 
     raw_stat: StatFn
     raw_readdir: ReaddirFn
-    raw_bytes: ReadBytesFn
     raw_stream: ReadStreamFn
     if crossing:
 
@@ -635,20 +611,11 @@ def command_files(
             entries, _ = await dispatch("readdir", path)
             return cast(list[str], entries)
 
-        async def rendered_bytes(path: PathSpec) -> bytes:
-            info, _ = await dispatch("stat", path)
-            if cast(FileStat, info).type == FileType.DIRECTORY:
-                raise eisdir(path)
-            await ahead(path)
-            data, _ = await dispatch("read", path)
-            return await materialize(data) or b""
-
         def crossing_stream(path: PathSpec) -> AsyncIterator[bytes]:
             return caller_stream(dispatch, current_caller(), path, ahead)
 
         raw_stat = crossing_stat
         raw_readdir = crossing_readdir
-        raw_bytes = rendered_bytes
         raw_stream = crossing_stream
     else:
 
@@ -664,9 +631,6 @@ def command_files(
                 )
             return cast(list[str], await call("readdir", path))
 
-        async def bytes_at(path: PathSpec) -> bytes:
-            return await _dispatched_bytes(dispatch, path, ahead=ahead)
-
         replaced = reading.stream if reading is not None else None
 
         def stream_at(path: PathSpec) -> AsyncIterator[bytes]:
@@ -678,13 +642,7 @@ def command_files(
 
         raw_stat = stat_at
         raw_readdir = readdir_at
-        raw_bytes = bytes_at
         raw_stream = stream_at
-
-    async def raw_range(
-        path: PathSpec, offset: int = 0, size: int | None = None
-    ) -> bytes:
-        return await _dispatched_bytes(dispatch, path, offset, size)
 
     async def is_warm(path: PathSpec) -> bool:
         # A run across mounts runs in no mount's cache scope: it takes an
@@ -694,13 +652,18 @@ def command_files(
         held, _ = await dispatch("read", path, filetype=None, warm=True)
         return held is True
 
-    read_stream: ReadStreamFn = raw_stream
-    if reading is not None and reading.split:
+    def read(
+        path: PathSpec, offset: int = 0, size: int | None = None
+    ) -> AsyncIterator[bytes]:
+        source = (
+            raw_stream(path)
+            if not offset and size is None
+            else _dispatched_stream(dispatch, path, offset=offset, size=size)
+        )
+        return (
+            chunks(source) if reading is not None and reading.split else source
+        )
 
-        def split_stream(path: PathSpec) -> AsyncIterator[bytes]:
-            return chunks(raw_stream(path))
-
-        read_stream = split_stream
     links = None if crossing else links_of(ctx)
     access = None if crossing or ctx.session is None else ctx.session.access()
 
@@ -843,9 +806,7 @@ def command_files(
         stat=raw_stat,
         exists=exists,
         readdir=raw_readdir,
-        read_bytes=raw_bytes,
-        read_range=raw_range,
-        read_stream=read_stream,
+        read=read,
         is_warm=is_warm,
         write=write,
         append=append,

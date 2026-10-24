@@ -138,8 +138,7 @@ async def cp(
         # (the cross-mount relay's own path), which is also where GNU's
         # per-entry refusals are worded.
         strategy = PrimitiveCopy(
-            read_bytes=files.read_bytes,
-            read_stream=files.read_stream,
+            read=files.read,
             write=partial(_write, write),
             mkdir=files.mkdir,
             readdir=files.readdir,

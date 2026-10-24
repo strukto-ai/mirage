@@ -35,7 +35,7 @@ async def tr(
     return await generic_tr(
         paths,
         texts,
-        read_stream=files.read_stream,
+        read_stream=files.read,
         stdin=ctx.stdin,
         flags=ctx.flags,
     )

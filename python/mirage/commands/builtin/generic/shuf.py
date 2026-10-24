@@ -559,7 +559,7 @@ async def shuf_generic(
     paths: list[PathSpec],
     texts: list[str],
     *,
-    read_bytes: PolymorphicReadFn,
+    read: PolymorphicReadFn,
     stdin: ByteSource | None = None,
     count: int | None = None,
     echo: bool = False,
@@ -602,7 +602,7 @@ async def shuf_generic(
         rendered = _render(result, sep)
     else:
         rendered = await _sample_records(
-            ids, paths, read_bytes, stdin, sep, count, with_replacement
+            ids, paths, read, stdin, sep, count, with_replacement
         )
     if output is not None:
         if write_bytes is None:

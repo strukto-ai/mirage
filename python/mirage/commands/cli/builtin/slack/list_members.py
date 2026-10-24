@@ -18,7 +18,6 @@ from mirage.accessor.slack import SlackAccessor
 from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
 from mirage.core.slack.users import list_users, search_users
-from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -36,4 +35,4 @@ async def list_members(
     else:
         users = await list_users(accessor)
     out = json.dumps(users, ensure_ascii=False, separators=(",", ":")).encode()
-    return yield_bytes(out), IOResult()
+    return out, IOResult()

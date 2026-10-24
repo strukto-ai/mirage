@@ -34,7 +34,7 @@ async def gunzip(
         resolved,
         list(texts),
         ctx,
-        files.read_stream,
+        files.read,
         files.write,
         files.unlink,
         files.stat,

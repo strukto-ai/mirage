@@ -22,7 +22,6 @@ from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
 from mirage.core.linear.client import get_issue, issue_update
 from mirage.core.linear.normalize import normalize_issue, to_json_bytes
-from mirage.io.stream import yield_bytes
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
@@ -49,4 +48,4 @@ async def set_project(
         description=None,
         project_id=project_id,
     )
-    return yield_bytes(to_json_bytes(normalize_issue(updated))), IOResult()
+    return to_json_bytes(normalize_issue(updated)), IOResult()

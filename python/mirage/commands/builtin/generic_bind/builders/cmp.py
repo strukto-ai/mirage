@@ -36,7 +36,7 @@ async def cmp_cmd(
         resolved,
         list(texts),
         ctx,
-        files.read_stream,
+        files.read,
         file_size(files, ctx),
     )
 
