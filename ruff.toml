@@ -35,9 +35,6 @@ known-first-party = ["mirage", "tests"]
 max-line-length = 88
 
 [lint.per-file-ignores]
-# Command lines inside a VFS.md text, which a wrap would break.
-"python/mirage/vfs/dify/dify.py" = ["E501"]
-"python/mirage/vfs/gcal/gcal.py" = ["E501"]
 # Ruff measures E501 in display columns, so East Asian characters count as two.
 # These CJK prose fixtures passed flake8's character-based measurement.
 "python/tests/utils/test_sanitize.py" = ["E501"]

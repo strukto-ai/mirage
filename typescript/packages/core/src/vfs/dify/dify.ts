@@ -40,7 +40,8 @@ search on these files.
 
 For semantic or relevance-based queries, use:
 
-search "<query>" [path ...] [--method semantic|fulltext|hybrid|keyword] [--top-k N] [--threshold F]
+search "<query>" [path ...] [--method semantic|fulltext|hybrid|keyword]
+    [--top-k N] [--threshold F]
 
 Use grep for exact pattern or regex matching; use search when meaning matters.
 Search can target multiple files, folders, or globs. Each result is returned as
@@ -50,7 +51,8 @@ separate results.
 
 Scoped search requires documents with the configured slug metadata field
 (default: slug) or Dify Built-in Fields enabled for name-based documents.
-Otherwise, scoped searches against name-based paths may return empty results.`
+Otherwise, scoped searches against name-based paths may return empty
+results.`
 
 export interface DifyVFSOptions {
   config: DifyConfig

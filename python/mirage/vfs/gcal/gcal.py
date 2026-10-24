@@ -60,10 +60,7 @@ Acting on it:
 
 - `rm` an event file to delete that event for every attendee.
 - Everything else goes through the `gws calendar` CLI, which takes the ids
-  the tree renders:
-  `gws calendar events insert --params '{"calendarId":"primary"}' --json ...`
-  `gws calendar events patch --params '{"calendarId":"primary","eventId":"..."}'`
-  `gws calendar freebusy query --json '{"timeMin":...,"timeMax":...,"items":[{"id":"primary"}]}'`
+  the tree renders.
 - A written event must carry an explicit UTC offset or timeZone; an
   ambiguous local time is not interpreted for you.
 """
@@ -76,7 +73,8 @@ DAY_VFS_MD = """\
   clamped to that day, so an event running through it reads `0000-2400`.
   A multi-day event appears under every day it covers."""
 
-BUCKET_VFS_MD = """- A bucket is {days} local days, named by its first and last day on a
+BUCKET_VFS_MD = """\
+- A bucket is {days} local days, named by its first and last day on a
   fixed grid where 7-day buckets run Monday to Sunday. A bucket on the grid
   inside the configured scope is a directory even when it holds no events;
   a bare date, a span off the grid and a bucket outside the scope are

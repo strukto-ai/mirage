@@ -60,10 +60,7 @@ Acting on it:
 
 - \`rm\` an event file to delete that event for every attendee.
 - Everything else goes through the \`gws calendar\` CLI, which takes the ids
-  the tree renders:
-  \`gws calendar events insert --params '{"calendarId":"primary"}' --json ...\`
-  \`gws calendar events patch --params '{"calendarId":"primary","eventId":"..."}'\`
-  \`gws calendar freebusy query --json '{"timeMin":...,"timeMax":...,"items":[{"id":"primary"}]}'\`
+  the tree renders.
 - A written event must carry an explicit UTC offset or timeZone; an
   ambiguous local time is not interpreted for you.
 `

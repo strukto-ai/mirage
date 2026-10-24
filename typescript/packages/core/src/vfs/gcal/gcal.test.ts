@@ -51,6 +51,5 @@ describe('gcal VFS', () => {
     const [, bucket = '', name = ''] = /\/primary\/([^/]+)\/<eventId>__(\S+)/.exec(text) ?? []
     expect(parseBucket(bucket, size)).not.toBeNull()
     expect(name.startsWith('2026-08-11_')).toBe(size > 1)
-    expect(text).toContain(`--params '{"calendarId":"primary"}'`)
   })
 })
