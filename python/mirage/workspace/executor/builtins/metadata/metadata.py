@@ -22,6 +22,8 @@ from mirage.commands.builtin.utils.identity import (
     owner_name,
 )
 from mirage.commands.builtin.utils.paths import dispatch_stat, dot_refusal
+from mirage.commands.builtin.utils.tree import before_full_scan
+from mirage.commands.errors import UsageError
 from mirage.commands.spec.flag_view import FlagView
 from mirage.errors.fs import fs_strerror, walk_refusal
 from mirage.errors.render import fs_error_line
@@ -620,6 +622,13 @@ async def change_owner(
             continue
         resolved, stat = found
         if fl.as_bool("recursive"):
+            # The mount is asked before anything changes, as for rm -r:
+            # a change cut short would leave a tree that looks done.
+            try:
+                await before_full_scan(dispatch, resolved, cmd)
+            except UsageError as exc:
+                errors.append(f"{exc}\n")
+                continue
             walked, owned = await walk_owned(links, dispatch, resolved, stat)
         else:
             walked, owned = [(resolved, stat, None)], []

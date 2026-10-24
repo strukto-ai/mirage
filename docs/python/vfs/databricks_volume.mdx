@@ -194,14 +194,6 @@ Your application's OAuth or SDK integration can supply a token callback. This
 does not require FUSE. The agent accesses the mounted workspace through Mirage's
 backend adapters or `Workspace.shell(...)`.
 
-## Integration
-
-The most files one command reads on Databricks volumes. [Integration](/home/integration/overview) explains each command.
-
-| Command | On Databricks volumes |
-| --- | --- |
-| Full scan | `grep -r`, `find`, `du` and other walks stop after [`full_scan_limit`](/home/integration/search#full_scan_limit) files (default 1000); a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. `-1` for no limit |
-
 ## Example
 
 ```python

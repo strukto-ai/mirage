@@ -1006,7 +1006,7 @@ async function routeArgv(
   // Extended attributes: the dispatcher's node table and the backend's own
   // facts; they read -h themselves.
   if (name === 'getfattr') {
-    return await handleGetfattr(made, session, operands)
+    return await handleGetfattr(namespace, made, session, operands)
   }
   if (name === 'setfattr') {
     return await handleSetfattr(made, session, operands)

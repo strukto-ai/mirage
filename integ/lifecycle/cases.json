@@ -6660,6 +6660,11 @@
             "vfs": "ram",
             "config": {}
           }
+        },
+        "clis": {
+          "git": {
+            "cli": "git"
+          }
         }
       },
       "steps": [
@@ -6803,6 +6808,50 @@
               "exit_code": 0,
               "stdout": "rc=1\na.txt\nb.txt\nsub\n",
               "stderr": "rm: more than 2 files in scope (full_scan_limit); narrow the path\n"
+            }
+          }
+        },
+        {
+          "op": "exec",
+          "command": "chmod -R 700 /data/d; echo $?; chown -R 7 /data/d; echo $?; chgrp -R 7 /data/d; echo $?",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "1\n1\n1\n",
+              "stderr": "chmod: more than 2 files in scope (full_scan_limit); narrow the path\nchown: more than 2 files in scope (full_scan_limit); narrow the path\nchgrp: more than 2 files in scope (full_scan_limit); narrow the path\n"
+            }
+          }
+        },
+        {
+          "op": "exec",
+          "command": "getfattr -R /data/d",
+          "expect": {
+            "value": {
+              "exit_code": 1,
+              "stdout": "",
+              "stderr": "getfattr: /data/d: stopped after 2 files (full_scan_limit); narrow the path\n"
+            }
+          }
+        },
+        {
+          "op": "exec",
+          "command": "git init -q /data/d && git -C /data/d status -uall",
+          "expect": {
+            "value": {
+              "exit_code": 128,
+              "stdout": "",
+              "stderr": "fatal: more than 2 files in the work tree (full_scan_limit)\n"
+            }
+          }
+        },
+        {
+          "op": "exec",
+          "command": "git -C /data/d add a.txt; echo rc=$?; git -C /data/d diff --cached --name-only",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "rc=0\na.txt\n",
+              "stderr": ""
             }
           }
         }

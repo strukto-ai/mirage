@@ -19,6 +19,7 @@ import { PolicyDenied } from '../../policy/errors.ts'
 import { patternMatches } from '../../policy/match/pattern.ts'
 import { MOUNT_MODE_RANK, MountMode } from '../../types.ts'
 import { isEacces } from '../../errors/fs.ts'
+import { TooManyMatches } from '../../shell/errors.ts'
 import { pathVisible } from '../../utils/hidden.ts'
 import { gnuDirname } from '../../utils/path.ts'
 import { rstripSlash } from '../../utils/slash.ts'
@@ -457,6 +458,7 @@ export class MirageToolOperations {
       try {
         matches = await this.session.glob(full)
       } catch (err) {
+        if (err instanceof TooManyMatches) return errorResult(err.reason)
         if (!isEacces(err)) throw err
         matches = []
       }

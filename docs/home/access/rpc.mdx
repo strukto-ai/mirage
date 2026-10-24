@@ -78,6 +78,9 @@ the header itself.
 - Bytes, `stdin` included, are base64 strings. A message is at most 4 MiB, so
   send larger stdin over [HTTP](/home/access/http#run-a-shell-line) or SSH.
 - A line that exits non-zero is a result, not an error.
+- A `glob` that matches more files than a mount's
+  [`full_scan_limit`](/home/integration/search#full_scan_limit) is the error
+  `-32602`, and its message names the limit.
 
 ## Sessions
 

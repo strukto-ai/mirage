@@ -181,6 +181,17 @@ export class NotAWorkTreeError extends GitError {
 }
 
 /**
+ * A work tree holding more files than its mount's `fullScanLimit`. The scan
+ * stops there, and a status or an add over part of the tree would read as
+ * one over all of it, so the verb fails instead.
+ */
+export class WorkTreeLimitError extends GitError {
+  constructor(limit: number) {
+    super(`more than ${String(limit)} files in the work tree (full_scan_limit)`)
+  }
+}
+
+/**
  * A verb that writes the index refused by a read-only mount: git takes the
  * index lock before anything else and dies naming it (pinned against git
  * 2.47.3).

@@ -138,3 +138,42 @@ async def test_custom_functions_and_streams_keep_the_session_gate():
                 json={"path": "/data/visible", "stream": "yes"},
             )
             assert reply.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_a_glob_past_the_full_scan_limit_answers_why():
+    app = build_app()
+    async with app.router.lifespan_context(app):
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            created = await client.post(
+                "/v1/workspaces",
+                json={
+                    "config": {
+                        "mode": "write",
+                        "mounts": {
+                            "/": {
+                                "vfs": "ram",
+                                "config": {"full_scan_limit": 2},
+                            }
+                        },
+                    }
+                },
+            )
+            wid = created.json()["id"]
+            for name in "abc":
+                await client.post(
+                    f"/v1/workspaces/{wid}/vfs/write",
+                    json={"path": f"/{name}.txt", "data": "eA=="},
+                )
+            response = await client.post(
+                f"/v1/workspaces/{wid}/glob", json={"pattern": "/*.txt"}
+            )
+            assert (response.status_code, response.json()) == (
+                400,
+                {
+                    "detail": "/*.txt: matches more than 2 files "
+                    "(full_scan_limit); narrow the path"
+                },
+            )

@@ -16,6 +16,7 @@ from pathlib import Path
 
 import pytest
 
+from mirage.commands.cli.builtin.git import GIT
 from mirage.commands.cli.builtin.git.worktree import (
     UNTRACKED_ALL,
     UNTRACKED_NO,
@@ -23,9 +24,11 @@ from mirage.commands.cli.builtin.git.worktree import (
     scan,
     tracked_directories,
 )
-from mirage.types import LINK_TARGET_KEY, FileType
+from mirage.types import LINK_TARGET_KEY, FileType, MountMode
+from mirage.vfs.disk import DiskVFS
+from mirage.workspace import Workspace
 
-from .conftest import LOCATION
+from .conftest import LOCATION, MOUNT
 
 TRACKED = {"a.txt", "b.txt"}
 
@@ -175,3 +178,41 @@ async def test_a_symlink_to_a_directory_is_not_descended(
     found = await walk(git_rw, TRACKED)
     assert found.files["dirlink"].type is FileType.SYMLINK
     assert not any(path.startswith("dirlink/") for path in found.files)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line, refused",
+    [
+        ("status", True),
+        ("add -A", True),
+        ("diff", True),
+        ("reset", True),
+        ("add sub", True),
+        ("add fresh.txt", False),
+        ("diff -- a.txt", False),
+        ("rm -q --cached b.txt", False),
+    ],
+)
+async def test_a_work_tree_past_the_full_scan_limit_fails_unless_named(
+    repo_path: Path, line: str, refused: bool
+):
+    (repo_path / "sub").mkdir()
+    for name in ("fresh.txt", "sub/x.txt", "sub/y.txt", "sub/z.txt"):
+        (repo_path / name).write_text("x\n", encoding="utf-8")
+    index = (repo_path / ".git" / "index").read_bytes()
+    with Workspace(
+        {MOUNT: DiskVFS(root=str(repo_path), full_scan_limit=2)},
+        mode=MountMode.WRITE,
+    ) as ws:
+        ws.register_cli("git", GIT)
+        result = await ws.shell(f"git -C /repo {line} >/dev/null; echo $?")
+        outcome = (await result.stdout_str(), await result.stderr_str())
+    if refused:
+        assert outcome == (
+            "128\n",
+            "fatal: more than 2 files in the work tree (full_scan_limit)\n",
+        )
+        assert (repo_path / ".git" / "index").read_bytes() == index
+    else:
+        assert outcome == ("0\n", "")

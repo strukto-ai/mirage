@@ -231,13 +231,11 @@ range reads to avoid downloading entire items.
 
 ## Integration
 
-What OneDrive answers through its own API, so fewer files are read, and the most files one command reads. [Integration](/home/integration/overview) explains each command.
+What OneDrive answers through its own API, so fewer files are read. [Integration](/home/integration/overview) explains each command.
 
 | Command | On OneDrive |
 | --- | --- |
-| `grep -r`, `rg` | Microsoft Graph search, for whole words |
-| Can miss | Office files, PDFs, archives, the end of large files, words Graph splits differently (`foo.bar`), recent writes |
-| Full scan | `grep -r`, `find`, `du` and other walks stop after [`full_scan_limit`](/home/integration/search#full_scan_limit) files (default 1000); a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. `-1` reads every file without Graph search |
+| `grep -r`, `rg` | Microsoft Graph search, for whole words. It can miss Office files, PDFs, archives, the end of large files, words Graph splits differently (`foo.bar`) and recent writes. |
 | `find`, `du`, `ls -R`, `tree` | One recursive listing |
 
 `grep -rw` and

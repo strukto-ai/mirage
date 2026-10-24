@@ -71,12 +71,10 @@ For the JSON shape see the [Python Google Docs docs](/python/vfs/gdocs).
 
 ## Integration
 
-What Google Docs answers through its own API, so fewer files are read, and the most files one command reads. [Integration](/home/integration/overview) explains each command.
+What Google Docs answers through its own API, so fewer files are read. [Integration](/home/integration/overview) explains each command.
 
 | Command | On Google Docs |
 | --- | --- |
-| `grep -r`, `rg` | Drive full-text search, for whole words |
-| Can miss | Words only in non-text values (fonts, links, ids) or split by styling |
-| Full scan | `grep -r`, `find`, `du` and other walks stop after [`fullScanLimit`](/home/integration/search#full_scan_limit) files (default 1000); a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. `-1` reads every file without Drive search |
+| `grep -r`, `rg` | Drive full-text search, for whole words. It can miss words only in non-text values (fonts, links and ids) or split by styling. |
 
 The [Python Google Docs docs](/python/vfs/gdocs#integration) list when each search answers and what it can miss.

@@ -1059,7 +1059,7 @@ async def _route_argv(
     # ── extended attributes (the namespace's node table and the backend's
     #    own facts; they read -h themselves) ──
     if name == "getfattr":
-        return await handle_getfattr(made, session, operands)
+        return await handle_getfattr(namespace, made, session, operands)
     if name == "setfattr":
         return await handle_setfattr(made, session, operands)
 

@@ -13,6 +13,8 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.commands.builtin.utils.formatting import ls_mode_string
+from mirage.commands.builtin.utils.tree import before_full_scan
+from mirage.commands.errors import UsageError
 from mirage.commands.spec.usage import missing_operand_error
 from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import encode_text
@@ -110,6 +112,13 @@ async def handle_chmod(
             continue
         resolved, stat = found
         if fl.as_bool("recursive"):
+            # The mount is asked before anything changes, as for rm -r:
+            # a change cut short would leave a tree that looks done.
+            try:
+                await before_full_scan(dispatch, resolved, "chmod")
+            except UsageError as exc:
+                errors.append(f"{exc}\n")
+                continue
             entries = await walk_stats(links, dispatch, resolved, stat)
         else:
             entries = [(resolved, stat, None)]

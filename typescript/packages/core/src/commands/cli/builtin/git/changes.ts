@@ -407,15 +407,18 @@ export function stagedEntries(state: IndexState): Map<string, TreeEntry> {
  * nothing on a diff. Untracked files are not part of it. A path the index holds
  * only as conflict stages is the file standing there, if any: what a revision
  * is compared with, while the index side leaves it out (git shows a combined
- * diff there, which is not offered). Mirrors Python's work_entries.
+ * diff there, which is not offered). `roots` (`patternRoots`) narrows the
+ * walk to what the pathspecs reach; an entry outside them reads as gone, for
+ * the caller to drop. Mirrors Python's work_entries.
  */
 export async function workEntries(
   repo: Repo,
   vfs: Files,
   state: IndexState,
+  roots: readonly string[] | null = null,
 ): Promise<Map<string, TreeEntry>> {
   const tracked = new Set([...state.entries.keys(), ...state.conflicts.keys()])
-  const found = await scan(vfs, repo.location, tracked, UNTRACKED_NO)
+  const found = await scan(vfs, repo.location, tracked, UNTRACKED_NO, false, roots)
   const changes = await workChanges(repo, vfs, repo.location.worktree, state.entries, found)
   const entries = stagedEntries(state)
   for (const path of state.conflicts.keys()) {

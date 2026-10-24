@@ -41,11 +41,3 @@ Fields marked secret are redacted in snapshots.
 {/* generated: config-table mem0 end */}
 
 The TypeScript VFS mirrors the [Python Mem0 VFS](/python/vfs/mem0), including pagination, JSON rendering, score formatting, path-limited search, and `--threshold`.
-
-## Integration
-
-The most files one command reads on Mem0. [Integration](/home/integration/overview) explains each command.
-
-| Command | On Mem0 |
-| --- | --- |
-| Full scan | `grep -r`, `find`, `du` and other walks stop after [`fullScanLimit`](/home/integration/search#full_scan_limit) files (default 1000); a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. `-1` for no limit |

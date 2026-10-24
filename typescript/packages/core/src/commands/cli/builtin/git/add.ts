@@ -15,7 +15,7 @@
 import git from 'isomorphic-git'
 
 import type { NOOPAccessor } from '../../../../accessor/base.ts'
-import { visibleEntries, matched, repoRelative } from './pathspec.ts'
+import { visibleEntries, matched, patternRoots, repoRelative } from './pathspec.ts'
 
 import { fsStrerror, isEacces } from '../../../../errors/fs.ts'
 import { IOResult } from '../../../../io/types.ts'
@@ -276,7 +276,9 @@ export async function add(
   const repo: Repo = await opened(ctx, fl, true)
   const state = await readIndex(repo, vfs)
   const tracked = new Set(visibleEntries(repo.location, state.entries).keys())
-  const found = await scan(vfs, repo.location, tracked, UNTRACKED_ALL)
+  const start = startPoint(fl).virtual
+  const roots = patternRoots(texts.map((text) => repoRelative(repo.location, start, text)))
+  const found = await scan(vfs, repo.location, tracked, UNTRACKED_ALL, false, roots)
   const ignores = await loadIgnores(vfs, repo.location.commondir, repo.location.worktree)
   const present = new Set(found.files.keys())
   let stage: Set<string>

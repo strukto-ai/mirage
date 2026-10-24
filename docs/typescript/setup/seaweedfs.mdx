@@ -159,9 +159,8 @@ See the [SeaweedFS VFS](/python/vfs/seaweedfs) docs for the equivalent Python wi
 
 ## Integration
 
-What SeaweedFS answers through its own API, so fewer files are read, and the most files one command reads. [Integration](/home/integration/overview) explains each command.
+What SeaweedFS answers through its own API, so fewer files are read. [Integration](/home/integration/overview) explains each command.
 
 | Command | On SeaweedFS |
 | --- | --- |
-| Full scan | `grep -r`, `find`, `du` and other walks stop after [`fullScanLimit`](/home/integration/search#full_scan_limit) files (default 1000); a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. `-1` for no limit |
 | `find`, `du`, `ls -R`, `tree` | One recursive listing |

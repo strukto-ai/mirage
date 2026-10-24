@@ -137,6 +137,27 @@ export function pathspecSelects(
   return patterns.some((pattern) => selects(path, pattern, directory))
 }
 
+/**
+ * Where a walk has to go to see every path some patterns name: each
+ * pattern's leading literal part, the path it spells or the directory above
+ * its first wildcard. Null when one of them names the whole tree (`.`,
+ * `*.c`), or when there are none. Mirrors Python's `pattern_roots`.
+ */
+export function patternRoots(patterns: Iterable<string>): string[] | null {
+  const roots: string[] = []
+  for (const pattern of patterns) {
+    let stem = pattern.endsWith(SLASH) ? pattern.slice(0, -1) : pattern
+    const wild = ['*', '?', '[', '\\'].map((mark) => stem.indexOf(mark)).filter((at) => at >= 0)
+    if (wild.length > 0) {
+      const literal = stem.slice(0, Math.min(...wild))
+      stem = literal.slice(0, Math.max(literal.lastIndexOf(SLASH), 0))
+    }
+    if (stem === '') return null
+    roots.push(stem)
+  }
+  return roots.length > 0 ? roots : null
+}
+
 /** Whether one pattern names a path; see `pathspecSelects`. */
 function selects(path: string, pattern: string, directory: boolean): boolean {
   const stem = pattern.endsWith(SLASH) ? pattern.slice(0, -1) : pattern

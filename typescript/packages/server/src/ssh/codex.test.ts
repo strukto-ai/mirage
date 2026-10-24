@@ -450,6 +450,21 @@ describe('codex-exec', () => {
     expect(zero.code).toBe(RPC_INVALID_REQUEST)
   })
 
+  // Twin of test_walk_stops_at_the_mounts_full_scan_limit.
+  it("stops a walk at the mount's full_scan_limit", async () => {
+    const ws = new Workspace({ '/': new RAMVFS({ fullScanLimit: 2 }) }, { mode: MountMode.WRITE })
+    const client = await codex(await startHarness(MountMode.WRITE, ws))
+    await client.run('seed', 'mkdir /w && echo > /w/a.txt && echo > /w/b.txt && echo > /w/c.txt')
+    expect(await client.result('fs/walk', { path: 'file:///w', options: WALK })).toEqual({
+      entries: [
+        { path: 'file:///w/a.txt', kind: 'file' },
+        { path: 'file:///w/b.txt', kind: 'file' },
+      ],
+      errors: [],
+      truncated: true,
+    })
+  })
+
   it('reads a file in blocks through a handle', async () => {
     const client = await codex(await startHarness())
     await client.result('fs/writeFile', { path: 'file:///f', dataBase64: b64('hello\nworld\n') })

@@ -355,3 +355,42 @@ describe('status under a hide', () => {
     expect(DEC.decode((await ws.shell(line)).stdout)).toBe(git(repo, ['status', '--porcelain']))
   })
 })
+
+// Twin of test_a_work_tree_past_the_full_scan_limit_fails_unless_named.
+describe('a work tree past the full_scan_limit', () => {
+  it.each([
+    ['status', true],
+    ['add -A', true],
+    ['diff', true],
+    ['reset', true],
+    ['add sub', true],
+    ['add fresh.txt', false],
+    ['diff -- a.txt', false],
+    ['rm -q --cached b.txt', false],
+  ])('git %s refused: %s', async (line, refused) => {
+    const ws = new Workspace(
+      { '/repo': new RAMVFS({ fullScanLimit: 2 }) },
+      { mode: MountMode.WRITE, shellParser: parser },
+    )
+    ws.registerCli('git', GIT)
+    try {
+      await ws.shell(
+        'git init -q /repo && touch /repo/a.txt /repo/b.txt && git -C /repo add -A && ' +
+          'mkdir /repo/sub && touch /repo/fresh.txt /repo/sub/x /repo/sub/y /repo/sub/z',
+      )
+      const result = await ws.shell(`git -C /repo ${line} >/dev/null; echo $?`)
+      const outcome = [DEC.decode(result.stdout), DEC.decode(result.stderr)]
+      if (refused) {
+        expect(outcome).toEqual([
+          '128\n',
+          'fatal: more than 2 files in the work tree (full_scan_limit)\n',
+        ])
+        expect((await ws.shell('git -C /repo ls-files')).stdoutText).toBe('a.txt\nb.txt\n')
+      } else {
+        expect(outcome).toEqual(['0\n', ''])
+      }
+    } finally {
+      await ws.close()
+    }
+  })
+})

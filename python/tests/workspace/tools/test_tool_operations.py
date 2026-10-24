@@ -631,3 +631,17 @@ async def test_a_path_ask_waits_on_the_host_outside_a_line():
     # to ask about, at command admission.
     io = await ws.shell("echo hi > /data/out/b.txt", session_id="agent")
     assert io.exit_code != 0
+
+
+@pytest.mark.asyncio
+async def test_glob_past_the_full_scan_limit_says_why():
+    ops = Workspace(
+        {"/": RAMVFS(full_scan_limit=2)}, mode=MountMode.WRITE
+    ).tools
+    for name in "abc":
+        await ops.write(f"/{name}.py", "x")
+    result = await ops.glob("*.py", "/")
+    assert (result.text, result.is_error) == (
+        "/*.py: matches more than 2 files (full_scan_limit); narrow the path",
+        True,
+    )

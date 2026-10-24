@@ -191,13 +191,11 @@ mounted tree stays read-oriented.
 
 ## Integration
 
-What Slack answers through its own API, so fewer files are read, and the most files one command reads. [Integration](/home/integration/overview) explains each command.
+What Slack answers through its own API, so fewer files are read. [Integration](/home/integration/overview) explains each command.
 
 | Command | On Slack |
 | --- | --- |
-| `grep -r`, `rg` | Slack search, for whole words, with a user token |
-| Can miss | Recent messages, words only in other fields (bot names, link previews) |
-| Full scan | `grep -r`, `find`, `du` and other walks stop after [`fullScanLimit`](/home/integration/search#full_scan_limit) files (default 1000); a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. `-1` reads every file without Slack search |
+| `grep -r`, `rg` | Slack search, for whole words, with a user token. It can miss recent messages, words only in other fields (bot names and link previews). |
 | `tail -f` | Each new message as it is posted |
 
 The [Python Slack docs](/python/vfs/slack#integration) list when each search answers and what it can miss.

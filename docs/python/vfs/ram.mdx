@@ -18,7 +18,11 @@ vfs = RAMVFS()
 ws = Workspace({"/data": vfs}, mode=MountMode.WRITE)
 ```
 
-No configuration object needed - `RAMVFS()` takes no arguments.
+`RAMVFS()` needs no configuration object.
+
+| Field | Default | Notes |
+| --- | --- | --- |
+| `full_scan_limit` | `10000` | Most files one command walks under a folder: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit. |
 
 ## Filesystem Layout
 
@@ -47,11 +51,10 @@ it. A workspace or mount `index:` block still applies its `ttl` to this mount.
 
 ## Integration
 
-What RAM answers through its own API, so fewer files are read, and the most files one command reads. [Integration](/home/integration/overview) explains each command.
+What RAM answers through its own API, so fewer files are read. [Integration](/home/integration/overview) explains each command.
 
 | Command | On RAM |
 | --- | --- |
-| Full scan | `grep -r`, `find`, `du` and other walks stop after [`full_scan_limit`](/home/integration/search#full_scan_limit) files (default 10000); a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. `-1` for no limit |
 | `find`, `du`, `ls -R`, `tree` | One recursive listing |
 
 ## Example

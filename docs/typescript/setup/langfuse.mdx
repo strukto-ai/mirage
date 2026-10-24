@@ -62,11 +62,3 @@ Fields marked secret are redacted in snapshots.
 `read`.
 
 For the layout and search behavior see the [Python Langfuse docs](/python/vfs/langfuse).
-
-## Integration
-
-The most files one command reads on Langfuse. [Integration](/home/integration/overview) explains each command.
-
-| Command | On Langfuse |
-| --- | --- |
-| Full scan | `grep -r`, `find`, `du` and other walks stop after [`fullScanLimit`](/home/integration/search#full_scan_limit) files (default 1000); a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. `-1` for no limit |

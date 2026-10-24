@@ -34,6 +34,7 @@ from mirage.server.io_serde import (
 )
 from mirage.server.registry import WorkspaceEntry, WorkspaceRegistry
 from mirage.server.vfs_calls import VFS_CALLS, VfsCall
+from mirage.shell.errors import TooManyMatches
 from mirage.types import JsonValue
 from mirage.workspace.workspace.workspace import Session
 
@@ -132,6 +133,10 @@ def failure(exc: Exception) -> JSONResponse:
     Args:
         exc (Exception): what the call raised.
     """
+    if isinstance(exc, TooManyMatches):
+        # A glob past its mount's full_scan_limit says so in words that
+        # carry nothing private, so the caller learns why.
+        return JSONResponse(status_code=400, content={"detail": exc.reason})
     condition = classify(exc)
     status = 500 if condition is None else STATUS.get(condition, 500)
     return JSONResponse(status_code=status, content=failure_to_dict(exc))

@@ -42,6 +42,7 @@ from mirage.commands.cli.builtin.git.objects import store_blob
 from mirage.commands.cli.builtin.git.pathspec import (
     decoded,
     matched,
+    pattern_roots,
     repo_relative,
     visible_entries,
 )
@@ -360,18 +361,22 @@ async def add(
     _repo, location = await opened(ctx, fl, work_tree=True)
     state = await read_index(vfs, location.gitdir)
     tracked = decoded(visible_entries(location, state.entries))
+    start = start_point(fl).virtual
     found = await scan(
         vfs,
         location,
         tracked,
         UNTRACKED_ALL,
+        roots=pattern_roots(
+            repo_relative(location, start, text) for text in texts
+        ),
     )
     ignores = await load_ignores(vfs, location.commondir, location.worktree)
     if parsed.update:
         scope = (
             _update_scope(
                 location,
-                start_point(fl).virtual,
+                start,
                 tracked,
                 set(found.files),
                 texts,
@@ -388,7 +393,7 @@ async def add(
         stage, remove = await _resolve(
             vfs,
             location,
-            start_point(fl).virtual,
+            start,
             texts,
             found,
             tracked,

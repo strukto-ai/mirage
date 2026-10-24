@@ -32,6 +32,7 @@ await ws.shell('cat /disk/note.txt')
 | --- | --- | --- |
 | `root` | required | Absolute path on the host. Reads and writes are scoped to this directory. |
 | `folderVersions` | `true` | Store each listing at its folder's version (device, inode, change and modified time), so a `read: fresh` mount re-lists only folders that changed. Must be a boolean. Set `false` for a network or FUSE root (NFS, SMB, rclone, s3fs, mirage's own FUSE), whose change time may not move with its entries. In YAML: `folder_versions`. |
+| `fullScanLimit` | `10000` | Most files one command walks under a folder: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit. In YAML: `full_scan_limit`. |
 
 A folder changed in the last 2 seconds gets no version and is re-listed until it has been quiet that long.
 
@@ -44,11 +45,3 @@ A folder changed in the last 2 seconds gets no version and is re-listed until it
 A snapshot carries the mount's files, and loading it restores them.
 
 For behavior shared with Python (filesystem layout, supported shell commands), see the [Python Disk docs](/python/vfs/disk).
-
-## Integration
-
-The most files one command reads on Disk. [Integration](/home/integration/overview) explains each command.
-
-| Command | On Disk |
-| --- | --- |
-| Full scan | `grep -r`, `find`, `du` and other walks stop after [`fullScanLimit`](/home/integration/search#full_scan_limit) files (default 10000); a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. `-1` for no limit |

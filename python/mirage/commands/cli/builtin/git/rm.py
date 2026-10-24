@@ -44,6 +44,7 @@ from mirage.commands.cli.builtin.git.io import (
 from mirage.commands.cli.builtin.git.pathspec import (
     decoded,
     matched,
+    pattern_roots,
     repo_relative,
     visible_entries,
 )
@@ -305,7 +306,8 @@ async def rm(
         set(visible_entries(location, state.entries))
         | set(visible_entries(location, state.conflicts))
     )
-    selected = select(location, start_point(fl).virtual, texts, tracked, flags)
+    start = start_point(fl).virtual
+    selected = select(location, start, texts, tracked, flags)
     if not flags.force:
         checkable = [
             path for path in selected if path.encode() in state.entries
@@ -315,6 +317,9 @@ async def rm(
             location,
             tracked,
             UNTRACKED_NO,
+            roots=pattern_roots(
+                repo_relative(location, start, text) for text in texts
+            ),
         )
         tree = await asyncio.to_thread(head_entries, repo) or {}
         await refuse_lost_work(

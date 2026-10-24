@@ -21,6 +21,8 @@ import type { NamespaceLinks } from '../../../../view/types.ts'
 import type { SessionState } from '../../../session/session.ts'
 import { groupName, ownerName } from '../../../../commands/builtin/utils/identity.ts'
 import { dispatchStat, dotRefusal } from '../../../../commands/builtin/utils/paths.ts'
+import { beforeFullScan } from '../../../../commands/builtin/utils/tree.ts'
+import { UsageError } from '../../../../commands/errors.ts'
 import type { FlagView } from '../../../../commands/spec/flag_view.ts'
 import {
   fsStrerror,
@@ -432,6 +434,17 @@ export async function changeOwner(
       continue
     }
     const [resolved, stat] = found
+    if (fl.asBool('recursive')) {
+      // The mount is asked before anything changes, as for rm -r: a
+      // change cut short would leave a tree that looks done.
+      try {
+        await beforeFullScan(dispatch, resolved, cmd)
+      } catch (err) {
+        if (!(err instanceof UsageError)) throw err
+        errors.push(`${err.message}\n`)
+        continue
+      }
+    }
     const { walked, owned } = fl.asBool('recursive')
       ? await walkOwned(links, dispatch, resolved, stat)
       : { walked: [[resolved, stat, null]] as WalkEntry[], owned: [] as string[] }

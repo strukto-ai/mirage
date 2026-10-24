@@ -207,11 +207,10 @@ file cache.
 
 ## Integration
 
-What Notion answers through its own API, so fewer files are read, and the most files one command reads. [Integration](/home/integration/overview) explains each command.
+What Notion answers through its own API, so fewer files are read. [Integration](/home/integration/overview) explains each command.
 
 | Command | On Notion |
 | --- | --- |
-| Full scan | `grep -r`, `find`, `du` and other walks stop after [`full_scan_limit`](/home/integration/search#full_scan_limit) files (default 1000); a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. `-1` for no limit |
 | `head -n N` | Renders only the first N rows |
 
 ## Example

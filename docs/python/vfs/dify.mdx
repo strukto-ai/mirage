@@ -194,14 +194,6 @@ operations can temporarily see cached paths and metadata.
 
 Document content is still read from Dify when commands materialize file data.
 
-## Integration
-
-The most files one command reads on Dify. [Integration](/home/integration/overview) explains each command.
-
-| Command | On Dify |
-| --- | --- |
-| Full scan | `grep -r`, `find`, `du` and other walks stop after [`full_scan_limit`](/home/integration/search#full_scan_limit) files (default 1000); a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. `-1` for no limit |
-
 ## Example
 
 ```python

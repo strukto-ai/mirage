@@ -17,6 +17,7 @@ import { Console } from 'node:console'
 import { stderr } from 'node:process'
 import { fromJsonSchema } from '@modelcontextprotocol/server'
 import type { MirageToolOperations } from '@struktoai/mirage-core/workspace/tools/tool_operations'
+import { TooManyMatches } from '@struktoai/mirage-core/shell/errors'
 import type { JsonValue } from '@struktoai/mirage-core/types'
 import { VERSION } from '@struktoai/mirage-core/version'
 import { Session } from '@struktoai/mirage-core/workspace/workspace/workspace'
@@ -141,7 +142,14 @@ export class MirageRpcServer {
           methods: this.methods,
         }),
       shell: (params, signal) => this.shell(params, signal),
-      glob: async (params) => await this.session.glob(text(params, 'pattern')),
+      glob: async (params) => {
+        try {
+          return await this.session.glob(text(params, 'pattern'))
+        } catch (err) {
+          if (err instanceof TooManyMatches) throw new RpcError(RPC_INVALID_PARAMS, err.reason)
+          throw err
+        }
+      },
       ...Object.fromEntries(
         VFS_CALLS.map((call) => [`vfs/${call.name}`, (params: Params) => this.vfs(call, params)]),
       ),

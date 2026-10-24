@@ -174,13 +174,11 @@ file check still uses one metadata request.
 
 ## Integration
 
-What Box answers through its own API, so fewer files are read, and the most files one command reads. [Integration](/home/integration/overview) explains each command.
+What Box answers through its own API, so fewer files are read. [Integration](/home/integration/overview) explains each command.
 
 | Command | On Box |
 | --- | --- |
-| `grep -r`, `rg` | Box search, for whole words |
-| Can miss | Office files, PDFs, archives, the end of large files, words Box splits differently (`foo.bar`), recent writes |
-| Full scan | `grep -r`, `find`, `du` and other walks stop after [`full_scan_limit`](/home/integration/search#full_scan_limit) files (default 1000); a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. `-1` reads every file without Box search |
+| `grep -r`, `rg` | Box search, for whole words. It can miss Office files, PDFs, archives, the end of large files, words Box splits differently (`foo.bar`) and recent writes. |
 | `sha1sum` | The SHA-1 Box keeps, asked live |
 
 `grep -rw` and

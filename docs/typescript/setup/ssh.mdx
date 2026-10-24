@@ -58,13 +58,11 @@ For the full set of supported shell commands see the [Python SSH docs](/python/v
 
 ## Integration
 
-What SSH answers through its own API, so fewer files are read, and the most files one command reads. [Integration](/home/integration/overview) explains each command.
+What SSH answers through its own API, so fewer files are read. [Integration](/home/integration/overview) explains each command.
 
 | Command | On SSH |
 | --- | --- |
-| `grep -r`, `rg` | `grep` on the server, for any text |
-| Can miss | No |
-| Full scan | `grep -r`, `find`, `du` and other walks stop after [`fullScanLimit`](/home/integration/search#full_scan_limit) files (default 1000); a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. `-1` for no limit |
+| `grep -r`, `rg` | `grep` on the server, for any text. It misses nothing. |
 | `wc -l` | `wc -l` on the server |
 | `tail -f` | `tail -f` on the server |
 | `md5sum`, `sha256sum` and the other hash commands | The matching sum tool on the server |

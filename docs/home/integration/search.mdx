@@ -243,7 +243,7 @@ match.
 
 ## `before_full_scan`
 
-Whether a command may copy, compare or remove every file under a folder.
+Whether a command may copy, compare, change or remove every file under a folder.
 
 <Tabs>
   <Tab title="Python" icon="/images/python-logo.svg">
@@ -262,7 +262,7 @@ Whether a command may copy, compare or remove every file under a folder.
 
 | Argument | Meaning |
 | --- | --- |
-| `path` | The folder a command is about to read or remove in full. |
+| `path` | The folder a command is about to read, change or remove in full. |
 | `files` | How many files the session sees under `path`; `None` when Mirage could not count them. |
 
 | Return | Mirage then |
@@ -271,8 +271,8 @@ Whether a command may copy, compare or remove every file under a folder.
 | Raises `ValueError` (TypeScript: rejects) | Refuses the command before it touches anything. It prints `<command>: <message>` and exits 1. |
 
 These commands call `before_full_scan`: `tar -c`, `zip -r`, `cp -r`, `rm -r`,
-`mv` to another mount and `diff -r`. The default refuses more than
-`full_scan_limit` files.
+`chmod -R`, `chown -R`, `chgrp -R`, `mv` to another mount and `diff -r`. The
+default refuses more than `full_scan_limit` files.
 
 ## `full_scan_limit`
 
@@ -282,9 +282,10 @@ The most files one command walks under a folder (TypeScript: `fullScanLimit`).
 | --- | --- |
 | `grep -r`, `rg` | Stops. It keeps what it printed, prints `grep: <folder>: stopped after <N> files (full_scan_limit); narrow the path` and exits 2. |
 | `git grep` | Stops. It keeps what it printed, prints `fatal: stopped after <N> files (full_scan_limit); narrow the pathspec` and exits 128. |
-| `find`, `ls -R`, `du`, `tree` | Stops listing. It keeps what it printed, prints the same `stopped after` line and exits 1 (`tree`: 2). |
+| `find`, `ls -R`, `du`, `tree`, `getfattr -R` | Stops listing. It keeps what it printed, prints the same `stopped after` line and exits 1 (`tree`: 2). |
+| `git status`, `git add`, `git commit -a`, `git diff`, `git checkout`, `git reset`, `git rm` | Refused before it changes anything. It prints `fatal: more than <N> files in the work tree (full_scan_limit)` and exits 128. `git add`, `git diff` and `git rm` given paths walk only those, and a file named outright costs nothing. |
 | A glob, such as `cat /notes/*` | Refused, so the command does not run. It prints `cat: Argument list too long` and `cat: /notes/*: matches more than <N> files (full_scan_limit); narrow the path`, and exits 126. |
-| `tar -c`, `zip -r`, `cp -r`, `rm -r`, `mv` to another mount, `diff -r` | Refused before it touches anything (`before_full_scan`). It prints `tar: more than <N> files in scope (full_scan_limit); narrow the path` and exits 1. |
+| `tar -c`, `zip -r`, `cp -r`, `rm -r`, `chmod -R`, `chown -R`, `chgrp -R`, `mv` to another mount, `diff -r` | Refused before it touches anything (`before_full_scan`). It prints `tar: more than <N> files in scope (full_scan_limit); narrow the path` and exits 1. |
 
 A search counts only the files it reads, so a file `files_containing` rules out
 costs nothing. A listing counts every entry it lists, folders included. Each
@@ -295,7 +296,9 @@ complete later. A glob in a `for` list stops the line with
 `bash: /notes/*: matches more than <N> files (full_scan_limit); narrow the path`.
 
 A walk that crosses into another mount counts that mount's files against its
-own limit, and names that mount's folder where it stops.
+own limit, and names that mount's folder where it stops. Codex's `fs/walk`
+([exec-server](/python/agents/codex#exec-server-forward)) lists the same way
+and returns `truncated: true` where it stops.
 
 | Value | Searches and listings | Globs, copies and removals |
 | --- | --- | --- |

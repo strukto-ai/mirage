@@ -17,6 +17,8 @@ import { FileType } from '../../../../types.ts'
 import { DEFAULT_DIR_MODE, DEFAULT_FILE_MODE, parseChmod } from '../../../../utils/mode.ts'
 import { lsModeString } from '../../../../commands/builtin/utils/formatting.ts'
 import { missingOperandError } from '../../../../commands/spec/usage.ts'
+import { beforeFullScan } from '../../../../commands/builtin/utils/tree.ts'
+import { UsageError } from '../../../../commands/errors.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
 import { shellQuoteAlways } from '../../../../utils/quote.ts'
 import type { Namespace } from '../../../mount/namespace/namespace.ts'
@@ -86,6 +88,17 @@ export async function handleChmod(
       continue
     }
     const [resolved, stat] = found
+    if (fl.asBool('recursive')) {
+      // The mount is asked before anything changes, as for rm -r: a
+      // change cut short would leave a tree that looks done.
+      try {
+        await beforeFullScan(dispatch, resolved, 'chmod')
+      } catch (err) {
+        if (!(err instanceof UsageError)) throw err
+        errors.push(`${err.message}\n`)
+        continue
+      }
+    }
     const entries: WalkEntry[] = fl.asBool('recursive')
       ? await walkStats(links, dispatch, resolved, stat)
       : [[resolved, stat, null]]

@@ -55,6 +55,48 @@ This prints `1:hello mirage`. Keep `demo` for the [MCP](/home/access/mcp) or
 [RPC](/home/access/rpc) examples, then remove it with `mirage workspace delete demo`.
 See [Workspace configuration](/home/configuration) for YAML settings and defaults.
 
+## Write a config
+
+A config is a YAML file listing what the workspace mounts. Each key under
+`mounts` is a path in the workspace: `vfs` names the backend, and `config`
+holds the fields its [VFS guide](/home/setup/vfs) lists.
+
+```yaml workspace.yaml
+mode: read
+mounts:
+  /data:
+    vfs: s3
+    config:
+      bucket: my-bucket
+      region: us-east-1
+      aws_access_key_id: ${AWS_ACCESS_KEY_ID}
+      aws_secret_access_key: ${AWS_SECRET_ACCESS_KEY}
+  /repo:
+    vfs: github
+    config:
+      token: ${GITHUB_TOKEN}
+      owner: strukto-ai
+      repo: mirage
+      full_scan_limit: 2000
+  /scratch:
+    vfs: ram
+    mode: write
+```
+
+- `mode: read` makes every mount read-only unless it sets its own `mode`, as
+  `/scratch` does.
+- `${NAME}` is read from the environment when the config loads, so keys stay
+  out of the file. A missing variable is an error.
+- `full_scan_limit` is the most files one command walks on that mount.
+
+```bash
+mirage workspace create workspace.yaml --id work
+mirage shell -w work -c 'ls /repo && echo draft > /scratch/notes.txt'
+```
+
+`clis`, `runtimes`, `profiles` and the other top-level keys are in
+[Workspace configuration](/home/configuration).
+
 ## Exit codes
 
 | Code | Means |

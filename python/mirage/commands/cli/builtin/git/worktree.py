@@ -13,7 +13,9 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 
+from mirage.commands.builtin.utils.links import mount_view
 from mirage.commands.cli.builtin.git.constants import GIT_DIR
+from mirage.commands.cli.builtin.git.errors import WorkTreeLimitError
 from mirage.commands.cli.builtin.git.ignore import (
     GITIGNORE,
     IgnoreStack,
@@ -24,6 +26,7 @@ from mirage.commands.cli.builtin.git.io import (
     read_names,
     read_optional,
 )
+from mirage.commands.cli.builtin.git.pathspec import under
 from mirage.commands.cli.builtin.git.types import RepoLocation, WorkTree
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.remnants import entry_name
@@ -66,6 +69,8 @@ class Scanner:
         tracked (set[str]): repository-relative paths the index holds.
         mode (str): which untracked files to report, one of
             ``UNTRACKED_NO`` / ``UNTRACKED_NORMAL`` / ``UNTRACKED_ALL``.
+        roots (tuple[str, ...] | None): the repository-relative paths
+            the walk is narrowed to; None for the whole tree.
     """
 
     def __init__(
@@ -75,6 +80,7 @@ class Scanner:
         tracked: set[str],
         mode: str,
         show_ignored: bool = False,
+        roots: tuple[str, ...] | None = None,
     ) -> None:
         self._vfs = vfs
         self._worktree = worktree
@@ -82,6 +88,9 @@ class Scanner:
         self._directories = tracked_directories(tracked)
         self._mode = mode
         self._show_ignored = show_ignored
+        self._roots = roots
+        self._mounts = mount_view(vfs, crossing=True)
+        self._counted: dict[str, int] = {}
         self.found = WorkTree()
 
     def _absolute(self, relative: str) -> PathSpec:
@@ -91,6 +100,39 @@ class Scanner:
             relative (str): repository-relative path, empty at the root.
         """
         return self._worktree.join(relative) if relative else self._worktree
+
+    def _reaches(self, relative: str) -> bool:
+        """Whether the walk goes to a path: one a root names or holds,
+        or a directory above a root.
+
+        Args:
+            relative (str): repository-relative path of the entry.
+        """
+        return self._roots is None or any(
+            relative == root or under(relative, root) or under(root, relative)
+            for root in self._roots
+        )
+
+    def _count(self, relative: str) -> None:
+        """Count one file against the mount serving it; a file a root
+        names costs nothing, as a file handed to grep does.
+
+        Args:
+            relative (str): repository-relative path of the file.
+
+        Raises:
+            WorkTreeLimitError: the mount's ``full_scan_limit`` is spent.
+        """
+        if self._roots is not None and relative in self._roots:
+            return
+        if self._mounts is None or self._mounts.full_scan_limit is None:
+            return
+        virtual = self._absolute(relative).virtual
+        limit = self._mounts.full_scan_limit(virtual)
+        root = self._mounts.root_of(virtual)
+        if 0 <= limit <= self._counted.get(root, 0):
+            raise WorkTreeLimitError(limit)
+        self._counted[root] = self._counted.get(root, 0) + 1
 
     async def _entry_stat(self, relative: str) -> FileStat | None:
         """What the walk sees at one path, without following a link.
@@ -214,6 +256,8 @@ class Scanner:
             if not name or (not relative and name == GIT_DIR):
                 continue
             child = f"{relative}/{name}" if relative else name
+            if not self._reaches(child):
+                continue
             info = await self._entry_stat(child)
             if info is None:
                 continue
@@ -222,6 +266,7 @@ class Scanner:
                     child, ignored or rules.is_ignored(child, True), rules
                 )
                 continue
+            self._count(child)
             self.found.files[child] = info
             if child in self._tracked or self._mode == UNTRACKED_NO:
                 continue
@@ -237,6 +282,7 @@ async def scan(
     tracked: set[str],
     mode: str,
     show_ignored: bool = False,
+    roots: tuple[str, ...] | None = None,
 ) -> WorkTree:
     """Walk a working tree once, for both halves of a status report.
 
@@ -252,6 +298,10 @@ async def scan(
         tracked (set[str]): repository-relative paths the index holds.
         mode (str): which untracked files to report, one of
             ``UNTRACKED_NO`` / ``UNTRACKED_NORMAL`` / ``UNTRACKED_ALL``.
+        show_ignored (bool): whether to report ignored files too.
+        roots (tuple[str, ...] | None): narrow the walk to these
+            repository-relative paths and what lies under them, for a
+            verb whose pathspecs say what it reads; None walks it all.
     """
     ignores = await load_ignores(vfs, location.commondir, location.worktree)
     scanner = Scanner(
@@ -260,6 +310,7 @@ async def scan(
         tracked,
         mode,
         show_ignored,
+        roots,
     )
     await scanner.walk("", False, ignores)
     return scanner.found
