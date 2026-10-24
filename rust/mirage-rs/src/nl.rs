@@ -1,5 +1,3 @@
-use std::io::Write;
-
 use serde::Deserialize;
 
 use crate::regex::parse::Dialect;
@@ -11,6 +9,8 @@ const INTMAX_MIN: i128 = i64::MIN as i128;
 const ERANGE: &str = "Numerical result out of range";
 const EOVERFLOW: &str = "Value too large for defined data type";
 const HINT: &str = "Try 'nl --help' for more information.";
+/// The most a call writes past the line it starts.
+const OUTPUT: usize = 64 * 1024;
 
 type Bounds = (&'static str, &'static str, i128, Option<i128>, Option<i128>);
 
@@ -141,7 +141,13 @@ pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
         blank_run: 0,
         overflowed: false,
         aborted: false,
-        held: Vec::new(),
+        pending: Vec::new(),
+        at: 0,
+        ended: false,
+        pad: 0,
+        fill: b' ',
+        tail: Vec::new(),
+        more: false,
         stderr: Vec::new(),
     }))
 }
@@ -251,7 +257,9 @@ fn style_refusal(name: &str, raw: &[u8]) -> Option<String> {
 /// is padded with `:` and an empty one matches nothing. An unnumbered line
 /// is padded over the number and the separator alike. The counter advances
 /// after each numbered line, and the next line that needs a number after
-/// it leaves intmax_t ends the run: `line number overflow`, exit 1.
+/// it leaves intmax_t ends the run: `line number overflow`, exit 1. A call
+/// writes at most `OUTPUT` bytes past the line it starts, and owes the rest
+/// of a wide field's padding to `drain`.
 struct Nl {
     styles: Vec<Style>,
     start: i64,
@@ -269,16 +277,70 @@ struct Nl {
     blank_run: u64,
     overflowed: bool,
     aborted: bool,
-    /// The start of a line the input has not ended yet.
-    held: Vec<u8>,
+    /// The current input's bytes from `at` on, not yet numbered.
+    pending: Vec<u8>,
+    at: usize,
+    /// The current input has ended.
+    ended: bool,
+    /// Padding still owed for the last line, then the rest of that line.
+    pad: u64,
+    fill: u8,
+    tail: Vec<u8>,
+    /// A call stopped at its window with work left.
+    more: bool,
     stderr: Vec<u8>,
 }
 
 impl Nl {
-    fn line(&mut self, line: &[u8], out: &mut Vec<u8>) {
-        if self.aborted {
-            return;
+    /// Number lines until the window is full or the input runs out; an
+    /// input that has ended is numbered to its last line and left.
+    fn step(&mut self, out: &mut Vec<u8>) {
+        let limit = out.len() + OUTPUT;
+        let pending = std::mem::take(&mut self.pending);
+        self.more = false;
+        loop {
+            if self.pad > 0 {
+                let room = limit.saturating_sub(out.len()) as u64;
+                let written = room.min(self.pad);
+                out.resize(out.len() + written as usize, self.fill);
+                self.pad -= written;
+                if self.pad > 0 {
+                    self.more = true;
+                    break;
+                }
+                out.append(&mut self.tail);
+            }
+            if self.aborted {
+                break;
+            }
+            let rest = &pending[self.at..];
+            let (line, next) = match memchr::memchr(b'\n', rest) {
+                Some(end) => (&rest[..end], self.at + end + 1),
+                None if self.ended && !rest.is_empty() => (rest, pending.len()),
+                None => {
+                    if self.ended {
+                        self.ended = false;
+                        self.input += 1;
+                        self.at = pending.len();
+                    }
+                    break;
+                }
+            };
+            if out.len() >= limit {
+                self.more = true;
+                break;
+            }
+            self.at = next;
+            self.line(line, limit, out);
         }
+        self.pending = pending;
+        if !self.more {
+            self.pending.drain(..self.at);
+            self.at = 0;
+        }
+    }
+
+    fn line(&mut self, line: &[u8], limit: usize, out: &mut Vec<u8>) {
         if let Some(section) = self
             .sections
             .iter()
@@ -306,29 +368,51 @@ impl Nl {
             Style::Pattern(regex) => regex.test(line),
         };
         if !numbered {
-            out.resize(out.len() + self.width + self.separator.len(), b' ');
-        } else if self.overflowed {
+            let pad = (self.width + self.separator.len()) as u64;
+            return self.padded(b' ', pad, &[line, b"\n"], limit, out);
+        }
+        if self.overflowed {
             self.aborted = true;
             self.stderr.extend_from_slice(b"nl: line number overflow\n");
             return;
-        } else {
-            if blank {
-                self.blank_run = 0;
+        }
+        if blank {
+            self.blank_run = 0;
+        }
+        let digits = self.number.to_string().into_bytes();
+        let pad = self.width.saturating_sub(digits.len()) as u64;
+        let separator = std::mem::take(&mut self.separator);
+        match self.format {
+            Format::Left => {
+                out.extend_from_slice(&digits);
+                self.padded(b' ', pad, &[&separator, line, b"\n"], limit, out);
             }
-            let (number, width) = (self.number, self.width);
-            let _ = match self.format {
-                Format::Left => write!(out, "{number:<width$}"),
-                Format::Right => write!(out, "{number:>width$}"),
-                Format::Zeros => write!(out, "{number:0width$}"),
-            };
-            out.extend_from_slice(&self.separator);
-            match self.number.checked_add(self.increment) {
-                Some(next) => self.number = next,
-                None => self.overflowed = true,
+            Format::Right => {
+                self.padded(b' ', pad, &[&digits, &separator, line, b"\n"], limit, out);
+            }
+            Format::Zeros => {
+                let sign = usize::from(self.number < 0);
+                out.extend_from_slice(&digits[..sign]);
+                let tail: [&[u8]; 4] = [&digits[sign..], &separator, line, b"\n"];
+                self.padded(b'0', pad, &tail, limit, out);
             }
         }
-        out.extend_from_slice(line);
-        out.push(b'\n');
+        self.separator = separator;
+        match self.number.checked_add(self.increment) {
+            Some(next) => self.number = next,
+            None => self.overflowed = true,
+        }
+    }
+
+    /// `pad` bytes of `fill` and then `tail`, owing what passes `limit`.
+    fn padded(&mut self, fill: u8, pad: u64, tail: &[&[u8]], limit: usize, out: &mut Vec<u8>) {
+        let written = (limit.saturating_sub(out.len()) as u64).min(pad);
+        out.resize(out.len() + written as usize, fill);
+        if written < pad {
+            (self.fill, self.pad, self.tail) = (fill, pad - written, tail.concat());
+        } else {
+            tail.iter().for_each(|part| out.extend_from_slice(part));
+        }
     }
 }
 
@@ -338,40 +422,33 @@ impl Stream for Nl {
     }
 
     fn finish(&mut self, out: &mut Vec<u8>) -> Result<(), StreamError> {
-        if !self.held.is_empty() {
-            let held = std::mem::take(&mut self.held);
-            self.line(&held, out);
-        }
+        self.ended = self.input < self.inputs;
+        self.step(out);
         Ok(())
     }
 
     fn wants(&self) -> Option<usize> {
-        (!self.aborted && self.input < self.inputs).then_some(self.input)
+        (!self.aborted && !self.more && self.input < self.inputs).then_some(self.input)
     }
 
     fn feed_input(&mut self, _: usize, input: &[u8], out: &mut Vec<u8>) -> Result<(), StreamError> {
-        let mut rest = input;
-        while let Some(at) = memchr::memchr(b'\n', rest) {
-            if self.held.is_empty() {
-                self.line(&rest[..at], out);
-            } else {
-                let mut held = std::mem::take(&mut self.held);
-                held.extend_from_slice(&rest[..at]);
-                self.line(&held, out);
-                held.clear();
-                self.held = held;
-            }
-            rest = &rest[at + 1..];
-        }
-        if !self.aborted {
-            self.held.extend_from_slice(rest);
-        }
+        self.pending.extend_from_slice(input);
+        self.step(out);
         Ok(())
     }
 
     fn end_input(&mut self, _: usize, out: &mut Vec<u8>) -> Result<(), StreamError> {
-        self.finish(out)?;
-        self.input += 1;
+        self.ended = true;
+        self.step(out);
+        Ok(())
+    }
+
+    fn busy(&self) -> bool {
+        self.more
+    }
+
+    fn drain(&mut self, out: &mut Vec<u8>) -> Result<(), StreamError> {
+        self.step(out);
         Ok(())
     }
 
@@ -387,7 +464,7 @@ impl Stream for Nl {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config;
+    use crate::{config, drain_all};
 
     const DEFAULTS: &str = r#"{"options":[],"separator":"\t","delimiter":"\\:","no_renumber":false,"utf8":false,"inputs":1}"#;
 
@@ -400,8 +477,10 @@ mod tests {
         while let Some(index) = stream.wants() {
             for byte in inputs[index] {
                 stream.feed_input(index, &[*byte], &mut out).unwrap();
+                drain_all(stream.as_mut(), &mut out);
             }
             stream.end_input(index, &mut out).unwrap();
+            drain_all(stream.as_mut(), &mut out);
         }
         stream.finish(&mut out).unwrap();
         let mut err = Vec::new();
@@ -427,6 +506,23 @@ mod tests {
         let left =
             r#"{"options":[["number_format","ln"],["line_increment","-2"]],"separator":"\u00e9"}"#;
         assert_eq!(nl(left, &[b"x\ny\n"]).0, b"1     \xe9x\n-1    \xe9y\n");
+    }
+
+    #[test]
+    fn a_wide_field_is_written_a_window_per_call() {
+        let wide = r#"{"options":[["body_numbering","a"],["number_width","1048576"]]}"#;
+        let mut stream = open(config(DEFAULTS, wide).as_bytes()).unwrap();
+        let mut out = Vec::new();
+        stream.feed_input(0, &[b'\n'; 16], &mut out).unwrap();
+        assert!(out.len() <= OUTPUT && stream.busy() && stream.wants().is_none());
+        let mut total = out.len();
+        while stream.busy() {
+            let mut window = Vec::new();
+            stream.drain(&mut window).unwrap();
+            assert!(window.len() <= OUTPUT + 2);
+            total += window.len();
+        }
+        assert_eq!(total, 16 * (1_048_576 + 2));
     }
 
     #[test]

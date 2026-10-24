@@ -3,6 +3,9 @@ use serde::Deserialize;
 use crate::records::{Records, Take};
 use crate::{Stream, StreamError, parse_config};
 
+/// The most a call writes past the line it starts.
+const OUTPUT: usize = 64 * 1024;
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Config {
@@ -28,6 +31,7 @@ pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
         row: Vec::new(),
         any: false,
         done: false,
+        more: false,
     }))
 }
 
@@ -80,11 +84,19 @@ struct Paste {
     row: Vec<u8>,
     any: bool,
     done: bool,
+    /// A call stopped at its window with records left.
+    more: bool,
 }
 
 impl Paste {
     fn pump(&mut self, out: &mut Vec<u8>) {
+        let limit = out.len() + OUTPUT;
+        self.more = false;
         while !self.done {
+            if out.len() >= limit {
+                self.more = true;
+                return;
+            }
             let Some(&source) = self.operands.get(self.at) else {
                 self.done = true;
                 return;
@@ -146,7 +158,16 @@ impl Stream for Paste {
 
     fn wants(&self) -> Option<usize> {
         let source = self.operands.get(self.at).copied();
-        source.filter(|_| !self.done)
+        source.filter(|_| !self.done && !self.more)
+    }
+
+    fn busy(&self) -> bool {
+        self.more
+    }
+
+    fn drain(&mut self, out: &mut Vec<u8>) -> Result<(), StreamError> {
+        self.pump(out);
+        Ok(())
     }
 
     fn feed_input(
@@ -182,7 +203,13 @@ mod tests {
         let mut stream = open(config(defaults, options).as_bytes()).unwrap();
         let mut at = vec![0; inputs.len()];
         let mut out = Vec::new();
-        while let Some(source) = stream.wants() {
+        loop {
+            while stream.busy() {
+                stream.drain(&mut out).unwrap();
+            }
+            let Some(source) = stream.wants() else {
+                break;
+            };
             if at[source] == inputs[source].len() {
                 stream.end_input(source, &mut out).unwrap();
             } else {
@@ -208,6 +235,35 @@ mod tests {
         let zero = r#"{"delimiters":",","zero_terminated":true}"#;
         assert_eq!(paste(zero, &[b"a\0b\0", b"1\0"]), b"a,1\0b,\0");
         assert_eq!(paste(r#"{"inputs":[0]}"#, &[b""]), b"");
+    }
+
+    #[test]
+    fn many_ended_operands_write_a_window_per_call() {
+        let inputs: Vec<usize> = (0..1_000).collect();
+        let config = format!(
+            r#"{{"delimiters":"\t","serial":false,"zero_terminated":false,"inputs":{inputs:?}}}"#
+        );
+        let mut stream = open(config.as_bytes()).unwrap();
+        let mut total = 0;
+        let mut fed = false;
+        loop {
+            let mut window = Vec::new();
+            if stream.busy() {
+                stream.drain(&mut window).unwrap();
+            } else if let Some(source) = stream.wants() {
+                if source == 0 && !fed {
+                    stream.feed_input(0, &[b'\n'; 1_000], &mut window).unwrap();
+                    fed = true;
+                } else {
+                    stream.end_input(source, &mut window).unwrap();
+                }
+            } else {
+                break;
+            }
+            assert!(window.len() <= OUTPUT + 1_000);
+            total += window.len();
+        }
+        assert_eq!(total, 1_000 * 1_000);
     }
 
     #[test]
