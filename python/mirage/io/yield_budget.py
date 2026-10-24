@@ -14,11 +14,19 @@
 import asyncio
 import time
 
-YIELD_INTERVAL = 0.01
+YIELD_INTERVAL = 0.002
 
 
 class YieldBudget:
-    """A per-consumer time budget; small reads do not schedule a timer."""
+    """A per-consumer time budget; small reads do not schedule a timer.
+
+    Each await of another task on the loop waits for a yield, and a line
+    run in another session of the workspace takes several, so the
+    interval bounds how long a busy command holds it back per step. A
+    yield costs microseconds here; the TypeScript twin keeps a longer
+    interval, as its yield waits a whole timer turn and its awaits settle
+    as microtasks within one.
+    """
 
     def __init__(self) -> None:
         self._next_yield = time.monotonic() + YIELD_INTERVAL
