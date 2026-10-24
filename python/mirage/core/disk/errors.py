@@ -12,8 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import AbstractContextManager
+from types import TracebackType
 
 
 def disk_error(exc: OSError, virtual: str) -> OSError:
@@ -30,8 +30,7 @@ def disk_error(exc: OSError, virtual: str) -> OSError:
     return type(exc)(exc.errno, exc.strerror, virtual)
 
 
-@contextmanager
-def disk_errors(virtual: str) -> Iterator[None]:
+class disk_errors(AbstractContextManager[None]):
     """Re-raise an OSError from the real filesystem against the mount path.
 
     The disk backend operates on a resolved host path, so a raw OSError
@@ -41,10 +40,23 @@ def disk_errors(virtual: str) -> Iterator[None]:
     discloses the server's directory layout. The errno and strerror are
     preserved, so the GNU wording at the command boundary is unchanged.
 
+    A class, as ``contextlib.suppress`` is, not a ``@contextmanager``
+    generator: the error thrown into a generator keeps its frame, whose
+    caller still holds the error, a cycle only the collector frees, and
+    every missing path a disk mount stats raised one.
+
     Args:
         virtual (str): The operand's virtual path, stamped as ``filename``.
     """
-    try:
-        yield
-    except OSError as exc:
-        raise disk_error(exc, virtual) from exc
+
+    def __init__(self, virtual: str) -> None:
+        self.virtual = virtual
+
+    def __exit__(
+        self,
+        typ: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+    ) -> None:
+        if isinstance(exc, OSError):
+            raise disk_error(exc, self.virtual) from exc
