@@ -15,21 +15,20 @@
 import { type util } from 'zod'
 
 import { isStdin, stdinStream } from '../utils/stream.ts'
-import { StreamHost } from '../utils/stream_host.ts'
+import { StreamHost, hostedStream, ownMount } from '../utils/stream_host.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import type { FlagValue } from '../../spec/types.ts'
 import { stripSlash } from '../../../utils/slash.ts'
 import { fsStrerror, isFsError } from '../../../errors/fs.ts'
 import { resolvePath } from '../../../utils/path.ts'
-import { drain } from '../../../io/stream.ts'
 import { IOResult, materialize } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, Context } from '../../config.ts'
 import { SED_MISSING_SCRIPT } from '../constants.ts'
 import { byteView, encodeText, utf8Locale } from '../../../shell/bytes.ts'
 import { posixPhrase } from '../../../errors/posix.ts'
-import { openStream, openStreamSync, serveRequests } from '../../../rs/stream.ts'
+import { openStreamSync } from '../../../rs/stream.ts'
 
 const SED_LINE_LENGTH = 70
 
@@ -47,46 +46,8 @@ function lineLength(raw: string | undefined): number {
   return Math.max(Number(BigInt.asIntN(32, value > longMax ? longMax : value)), 0)
 }
 
-/** Every operand reads through the mount sed runs on, which resolved it. */
-function servedHere(): boolean {
-  return true
-}
-
 function failed(stderr: string, exitCode: number): CommandFnResult {
   return [null, new IOResult({ exitCode, stderr: encodeText(stderr) })]
-}
-
-/**
- * Run the script, yielding its output as it settles; output closed early
- * still lets what the script wrote to its files land. Mirrors Python's
- * `_sed_stream`.
- */
-async function* sedStream(
-  config: Readonly<Record<string, util.JSONType>>,
-  host: StreamHost,
-  io: IOResult,
-  signal?: AbortSignal,
-): AsyncIterable<Uint8Array> {
-  // The engine opens on the first pull, so output closed before one holds
-  // no Wasm handle.
-  const engine = await openStream('sed', config)
-  let closed = true
-  try {
-    yield* serveRequests(engine, host, signal)
-    closed = false
-  } catch (err) {
-    closed = false
-    throw err
-  } finally {
-    try {
-      if (closed && engine.cancel()) await drain(serveRequests(engine, host, signal))
-      io.exitCode = engine.status()
-    } finally {
-      io.stderr = await host.errors.output()
-      await host.close()
-      engine.close()
-    }
-  }
 }
 
 /**
@@ -225,9 +186,9 @@ export async function sedGeneric(
     paths: paths.map((p) => byteView(p.virtual)),
     cwd: byteView(ctx.cwd.virtual),
   }
-  const host = new StreamHost(paths, stream, ctx, servedHere, !parsed.inPlace)
+  const host = new StreamHost(paths, stream, ctx, ownMount, !parsed.inPlace)
   const io = new IOResult()
-  return [sedStream(config, host, io, ctx.signal), io]
+  return [hostedStream('sed', config, host, io, ctx.signal), io]
 }
 
 /**

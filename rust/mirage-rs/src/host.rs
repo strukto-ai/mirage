@@ -86,8 +86,16 @@ impl Host {
         }
     }
 
-    fn read(&mut self, fd: u64, path: Option<&str>, file: bool) -> (Json, Vec<u8>) {
+    fn read(&mut self, fd: u64, request: &Json) -> (Json, Vec<u8>) {
+        let path = request["path"].as_str();
+        if let Some(spool) = request["spool"].as_u64() {
+            let skip = request["skip"].as_u64().unwrap_or(0) as usize;
+            let held = self.spools.get(&spool).cloned().unwrap_or_default();
+            let held = held.get(skip..).unwrap_or_default().to_vec();
+            self.inputs.insert(fd, (held, None));
+        }
         if let Some(path) = path {
+            let file = request["file"] == json!(true);
             if self.directories.iter().any(|dir| dir == path) {
                 return (failure("EISDIR", "Is a directory"), Vec::new());
             }
@@ -139,7 +147,13 @@ impl Host {
         if path.starts_with("/denied/") {
             return failure("EACCES", "Permission denied");
         }
-        if request["atomic"] == json!(true) {
+        if let (Some(fd), Some(size)) = (request["spool"].as_u64(), request["size"].as_u64()) {
+            let skip = request["skip"].as_u64().unwrap_or(0) as usize;
+            let window = self.spools[&fd][skip..skip + size as usize].to_vec();
+            self.files.insert(path, window);
+            return json!({});
+        }
+        if request["atomic"] == json!(true) || request["create"] == json!(true) {
             self.writers.insert(path, Writer::Replace(data));
             return json!({});
         }
@@ -149,8 +163,8 @@ impl Host {
         }
         let data = match request["spool"].as_u64() {
             Some(fd) => {
-                let spool = self.spools.remove(&fd).unwrap_or_default();
                 let skip = request["skip"].as_u64().unwrap_or(0) as usize;
+                let spool = self.spools.remove(&fd).unwrap_or_default();
                 spool.get(skip..).unwrap_or_default().to_vec()
             }
             None => data,
@@ -171,12 +185,16 @@ impl Host {
         let request: Json = serde_json::from_slice(header).expect("a JSON request");
         let fd = request["fd"].as_u64().unwrap_or(0);
         match request["op"].as_str().unwrap_or_default() {
-            "read" => self.read(fd, request["path"].as_str(), request["file"] == json!(true)),
+            "read" => self.read(fd, &request),
             "close" => {
                 self.inputs.remove(&fd);
                 (json!({}), Vec::new())
             }
             "write" => (self.write(&request, data), Vec::new()),
+            "unlink" => match self.files.remove(&text(&request["path"])) {
+                Some(_) => (json!({}), Vec::new()),
+                None => (failure("ENOENT", "No such file or directory"), Vec::new()),
+            },
             "flush" => {
                 let path = request["path"].as_str();
                 // A conditional write finds the file changed at its commit.
@@ -196,9 +214,30 @@ impl Host {
                 (json!({}), Vec::new())
             }
             "emit" => {
-                let spool = self.spools.remove(&fd).unwrap_or_default();
-                self.out.extend(spool);
+                match (request["skip"].as_u64(), request["size"].as_u64()) {
+                    (Some(skip), Some(size)) => {
+                        let held = &self.spools[&fd];
+                        self.out
+                            .extend_from_slice(&held[skip as usize..(skip + size) as usize]);
+                    }
+                    _ => self.out.extend(self.spools.remove(&fd).unwrap_or_default()),
+                }
                 (json!({}), Vec::new())
+            }
+            "fill" => {
+                let into = request["into"].as_u64().unwrap_or(0);
+                let mut held = Vec::new();
+                let (mut reply, mut chunk) = self.read(into, &request);
+                while reply.get("end").is_none() {
+                    if reply.get("error").is_some() {
+                        return (reply, Vec::new());
+                    }
+                    held.append(&mut chunk);
+                    (reply, chunk) = self.read(into, &json!({}));
+                }
+                let size = held.len();
+                self.spools.insert(into, held);
+                (json!({"size": size}), Vec::new())
             }
             "run" => {
                 let stdin = request["stdin"]

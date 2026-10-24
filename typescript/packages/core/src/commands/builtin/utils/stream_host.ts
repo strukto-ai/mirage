@@ -16,11 +16,13 @@ import type { util } from 'zod'
 import { currentCaller } from '../../../context/session_context.ts'
 import { classify, failureText } from '../../../errors/classify.ts'
 import { enoent, isWalkError } from '../../../errors/fs.ts'
+import { fsErrorLine } from '../../../errors/render.ts'
 import { chunks } from '../../../io/cooperative.ts'
 import { ByteSpool, spooledPair } from '../../../io/spool.ts'
-import type { ByteSource } from '../../../io/types.ts'
+import { drain } from '../../../io/stream.ts'
+import type { ByteSource, IOResult } from '../../../io/types.ts'
 import { ByteWriter } from '../../../io/writer.ts'
-import type { Served } from '../../../rs/stream.ts'
+import { openStream, serveRequests, type Served } from '../../../rs/stream.ts'
 import { byteView, textView } from '../../../shell/bytes.ts'
 import { shellJoin } from '../../../shell/join.ts'
 import { PathSpec } from '../../../types.ts'
@@ -43,6 +45,11 @@ async function close(source: AsyncIterator<Uint8Array>): Promise<void> {
   await source.return?.()
 }
 
+/** Every operand reads through the mount the command runs on, which resolved it. */
+export function ownMount(): boolean {
+  return true
+}
+
 /** A failed request's reply: the failure's words and the condition it names, when the vocabulary names one. */
 function failure(err: unknown): Record<string, util.JSONType> {
   const errno = classify(err)
@@ -58,7 +65,9 @@ function failure(err: unknown): Record<string, util.JSONType> {
  * through the dispatcher, as writes go through it. Every stdin reader (`-`,
  * `/dev/stdin` and a command run without input of its own) shares one
  * cursor, so none replays what another read. A write is held until the
- * stream flushes it. `dash`: an operand `-` names stdin (see `isStdin`).
+ * stream flushes it. `dash`: an operand `-` names stdin (see `isStdin`);
+ * `command`: the command a failed operand's line names, worded as
+ * `fsErrorLine` words it, empty leaving the wording to the stream.
  * Mirrors Python's StreamHost.
  */
 export class StreamHost {
@@ -66,6 +75,7 @@ export class StreamHost {
   private readonly stdin: AsyncIterator<Uint8Array>
   private readonly caller = currentCaller()
   private readonly inputs = new Map<number, AsyncIterator<Uint8Array>>()
+  private readonly named = new Map<number, PathSpec>()
   private readonly spools = new Map<number, ByteSpool>()
   private readonly outputs = new Map<string, ByteWriter>()
 
@@ -75,6 +85,7 @@ export class StreamHost {
     private readonly ctx: Context,
     private readonly local: (path: PathSpec) => boolean,
     private readonly dash = true,
+    private readonly command = '',
   ) {
     this.stdin = resolveSource(ctx.stdin)[Symbol.asyncIterator]()
   }
@@ -104,15 +115,20 @@ export class StreamHost {
    */
   openInput(name: string, operand: number | null, file = false): AsyncIterable<Uint8Array> {
     if (file) return this.readPath(name)
-    if (operand !== null && operand > 0 && operand <= this.operands.length) {
-      const path = this.operands[operand - 1]
-      if (path?.rawPath === name) {
-        if (isStdin(path, this.dash)) return this.stdinView()
-        return this.readPath(path, this.local(path))
-      }
+    const path = this.operand(name, operand)
+    if (path !== undefined) {
+      if (isStdin(path, this.dash)) return this.stdinView()
+      return this.readPath(path, this.local(path))
     }
     if (STDIN_NAMES.has(name)) return this.stdinView()
     return this.readPath(name)
+  }
+
+  /** The operand a name is, when it still holds its spelling. */
+  private operand(name: string, operand: number | null): PathSpec | undefined {
+    if (operand === null || operand <= 0 || operand > this.operands.length) return undefined
+    const path = this.operands[operand - 1]
+    return path?.rawPath === name ? path : undefined
   }
 
   /** Commit one file's writes, or every file's; the first failure stops it, and its reply, naming the file, is returned. */
@@ -147,6 +163,11 @@ export class StreamHost {
       }
       case 'write':
         return this.write(request, data)
+      case 'unlink':
+        return this.unlink(typeof request.path === 'string' ? request.path : '')
+      case 'fill':
+        if (typeof request.into === 'number') return this.fill(request.into, request)
+        break
       case 'flush': {
         const failed = await this.flushOutput(
           typeof request.path === 'string' ? request.path : undefined,
@@ -165,6 +186,10 @@ export class StreamHost {
         }
         break
       case 'emit':
+        if (fd !== null && typeof request.skip === 'number' && typeof request.size === 'number') {
+          const held = this.spools.get(fd)
+          return { reply: {}, output: held?.stream(request.skip, request.size) ?? null }
+        }
         if (fd !== null) {
           const spool = this.spools.get(fd)
           this.spools.delete(fd)
@@ -177,21 +202,69 @@ export class StreamHost {
     throw new Error(`unknown stream request: ${JSON.stringify(request.op)}`)
   }
 
+  /**
+   * The input a read or a fill opens: an operand, a name, or a spool past its
+   * first `skip` bytes, where nothing spooled reads as empty.
+   */
+  private open(
+    fd: number,
+    request: Readonly<Record<string, util.JSONType>>,
+  ): AsyncIterableIterator<Uint8Array> | undefined {
+    if (typeof request.spool === 'number') {
+      const skip = typeof request.skip === 'number' ? request.skip : 0
+      return this.spools.get(request.spool)?.stream(skip)
+    }
+    if (typeof request.path !== 'string') return undefined
+    const operand = typeof request.operand === 'number' ? request.operand : null
+    const name = textView(request.path)
+    const named = this.command === '' ? undefined : this.operand(name, operand)
+    if (named !== undefined) this.named.set(fd, named)
+    // Each pull loses to the abort, and a producer left mid-pull is closed
+    // without a wait.
+    return chunks(this.openInput(name, operand, request.file === true), this.ctx.signal, false)
+  }
+
+  /**
+   * A failed input's reply, or a throw for what is not the file's own: the
+   * failure's words, and the line the command words for an operand.
+   */
+  private failed(fd: number, err: unknown): Served {
+    if (classify(err) === null) throw err
+    const reply = failure(err)
+    const named = this.named.get(fd)
+    this.named.delete(fd)
+    if (named !== undefined) reply.line = byteView(fsErrorLine(this.command, named, err))
+    return { reply }
+  }
+
+  /** Read an input whole into spool `into` and answer its length. */
+  private async fill(
+    into: number,
+    request: Readonly<Record<string, util.JSONType>>,
+  ): Promise<Served> {
+    let spool = this.spools.get(into)
+    if (spool === undefined) {
+      spool = new ByteSpool()
+      this.spools.set(into, spool)
+    }
+    const source = this.open(into, request)
+    try {
+      if (source !== undefined) await spool.fill(source)
+    } catch (err) {
+      return this.failed(into, err)
+    }
+    this.named.delete(into)
+    return { reply: { size: spool.size } }
+  }
+
   private async read(
     fd: number,
     request: Readonly<Record<string, util.JSONType>>,
   ): Promise<Served> {
     let source = this.inputs.get(fd)
-    if (source === undefined && typeof request.path === 'string') {
-      const operand = typeof request.operand === 'number' ? request.operand : null
-      // Each pull loses to the abort, and a producer left mid-pull is
-      // closed without a wait.
-      source = chunks(
-        this.openInput(textView(request.path), operand, request.file === true),
-        this.ctx.signal,
-        false,
-      )
-      this.inputs.set(fd, source)
+    if (source === undefined) {
+      source = this.open(fd, request)
+      if (source !== undefined) this.inputs.set(fd, source)
     }
     if (source === undefined) return { reply: { end: true } }
     let next: IteratorResult<Uint8Array>
@@ -199,11 +272,11 @@ export class StreamHost {
       next = await source.next()
     } catch (err) {
       this.inputs.delete(fd)
-      if (classify(err) === null) throw err
-      return { reply: failure(err) }
+      return this.failed(fd, err)
     }
     if (next.done === true) {
       this.inputs.delete(fd)
+      this.named.delete(fd)
       return { reply: { end: true } }
     }
     return { reply: {}, data: next.value }
@@ -212,8 +285,10 @@ export class StreamHost {
   /**
    * Write to a file: `append` adds to it, otherwise it is emptied first,
    * every held write committed before; `atomic` replaces it whole, once
-   * flushed, with what this and later writes carry; `spool` writes that
-   * spool's bytes past its first `skip` and drops it.
+   * flushed, with what this and later writes carry, and `create` writes it
+   * whole as they carry it; `spool` writes that spool's bytes past its
+   * first `skip` and drops it, or, with `size`, writes the file whole from
+   * that many and keeps it.
    */
   private async write(
     request: Readonly<Record<string, util.JSONType>>,
@@ -223,16 +298,29 @@ export class StreamHost {
     if (dispatch === undefined) return { reply: { fatal: 'file output requires a workspace' } }
     const name = typeof request.path === 'string' ? request.path : ''
     const path = PathSpec.fromStrPath(textView(name), undefined, this.ctx.cwd)
+    const skip = typeof request.skip === 'number' ? request.skip : 0
+    if (typeof request.spool === 'number' && typeof request.size === 'number') {
+      // A window of a spool is the whole file, written as one call.
+      const held = this.spools.get(request.spool)
+      try {
+        await dispatch('write', path, [held?.stream(skip, request.size) ?? new Uint8Array()])
+      } catch (error) {
+        if (!isWalkError(error)) throw error
+        return { reply: failure(error) }
+      }
+      return { reply: {} }
+    }
     const spool = typeof request.spool === 'number' ? this.spools.get(request.spool) : undefined
     if (typeof request.spool === 'number') this.spools.delete(request.spool)
     try {
-      if (request.atomic === true) {
+      const atomic = request.atomic === true
+      if (atomic || request.create === true) {
         await this.outputs.get(name)?.abort()
         this.outputs.delete(name)
         // The replacement opens now, so a refusal is reported before the
         // stream reads on.
         const replacement = new ByteWriter(async (source) => {
-          await dispatch('write', path, [source], { atomic: true })
+          await dispatch('write', path, [source], atomic ? { atomic } : {})
         })
         try {
           await replacement.opened()
@@ -255,7 +343,6 @@ export class StreamHost {
       }
       if (writer !== undefined && data.byteLength > 0) await writer.write(data)
       if (writer !== undefined && spool !== undefined) {
-        const skip = typeof request.skip === 'number' ? request.skip : 0
         for await (const chunk of spool.stream(skip)) await writer.write(chunk)
       }
     } catch (error) {
@@ -263,6 +350,18 @@ export class StreamHost {
       return { reply: failure(error) }
     } finally {
       await spool?.close()
+    }
+    return { reply: {} }
+  }
+
+  private async unlink(name: string): Promise<Served> {
+    const dispatch = dispatchOf(this.ctx)
+    if (dispatch === undefined) return { reply: { fatal: 'file output requires a workspace' } }
+    try {
+      await dispatch('unlink', PathSpec.fromStrPath(textView(name), undefined, this.ctx.cwd))
+    } catch (error) {
+      if (!isWalkError(error)) throw error
+      return { reply: failure(error) }
     }
     return { reply: {} }
   }
@@ -312,5 +411,39 @@ export class StreamHost {
     const spools = [...this.spools.values()]
     this.spools.clear()
     for (const spool of spools) await spool.close()
+  }
+}
+
+/**
+ * Run a stream that reaches files through `host`, yielding its output as it
+ * settles; output closed early still lets what it wrote to its files land.
+ * Mirrors Python's `hosted_stream`.
+ */
+export async function* hostedStream(
+  kind: string,
+  config: Readonly<Record<string, util.JSONType>>,
+  host: StreamHost,
+  io: IOResult,
+  signal?: AbortSignal,
+): AsyncIterable<Uint8Array> {
+  // The engine opens on the first pull, so output closed before one holds
+  // no Wasm handle.
+  const engine = await openStream(kind, config)
+  let closed = true
+  try {
+    yield* serveRequests(engine, host, signal)
+    closed = false
+  } catch (err) {
+    closed = false
+    throw err
+  } finally {
+    try {
+      if (closed && engine.cancel()) await drain(serveRequests(engine, host, signal))
+      io.exitCode = engine.status()
+    } finally {
+      io.stderr = await host.errors.output()
+      await host.close()
+      engine.close()
+    }
   }
 }

@@ -35,6 +35,7 @@ mod rg_matcher;
 mod sed;
 mod seq;
 mod sort;
+mod split;
 mod strings;
 mod tac;
 mod tr;
@@ -317,6 +318,7 @@ pub fn open(kind: &str, config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
         "column" => column::open(config),
         "comm" => comm::open(config),
         "compress" => compress::open(config),
+        "csplit" => split::csplit::open(config),
         "cut" => cut::open(config),
         "digest" => digest::open(config),
         "expand" => expand::open_expand(config),
@@ -341,6 +343,7 @@ pub fn open(kind: &str, config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
         "sed" => sed::open(config),
         "seq" => seq::open(config),
         "sort" => sort::open(config),
+        "split" => split::open(config),
         "strings" => strings::open(config),
         "tac" => tac::open(config),
         "tr" => tr::open(config),

@@ -1,0 +1,85 @@
+{
+  "targets": [
+    "ram",
+    "opfs",
+    "disk",
+    "redis",
+    "s3",
+    "gridfs",
+    "s3-prefix",
+    "gridfs-prefix",
+    "hf",
+    "hf-prefix",
+    "dropbox",
+    "dropbox-root",
+    "onedrive",
+    "sharepoint",
+    "ssh",
+    "nextcloud",
+    "gdrive",
+    "gdrive-folder",
+    "box"
+  ],
+  "cases": [
+    {
+      "id": "csplit_reads_patterns_as_basic_regexes",
+      "seq": 910040,
+      "command": "mkdir -p /data/cbre && cd /data/cbre && printf 'aa\\na+\\nb\\naab\\n' > in && csplit in '/a+/' && cat xx01 && csplit in '/a\\{2\\}b/' && cat xx01 && csplit in '/^b$/' && cat xx00; cd / && rm -r /data/cbre",
+      "expect": {
+        "exit": 0,
+        "stdout": "3\n9\na+\nb\naab\n8\n4\naab\n6\n6\naa\na+\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "csplit_skips_repeats_and_offsets",
+      "seq": 910041,
+      "command": "mkdir -p /data/crep && cd /data/crep && seq 10 > in && csplit in '/2/' '%5%' '/8/' && cat xx01 && csplit in 3 '{2}' && csplit in '/[13579]/' '{*}' && ls | tr '\\n' ' ' && echo && rm xx* && csplit in '/5/-2' '/6/' && csplit in '/5/+2' && csplit --suppress-matched in 3 '{2}' && cat xx03 && csplit in '%[0-9]%' '{*}'; echo rc=$?; ls; cd / && rm -r /data/crep",
+      "expect": {
+        "exit": 0,
+        "stdout": "2\n6\n7\n5\n6\n7\n4\n6\n6\n5\n0\n4\n4\n4\n4\n2\n3\nin xx00 xx01 xx02 xx03 xx04 xx05 xx06 \n4\n6\n11\n12\n9\n4\n4\n4\n3\n10\nrc=0\nin\nxx00\nxx01\nxx02\nxx03\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "csplit_refuses_patterns_in_gnus_words",
+      "seq": 910042,
+      "command": "mkdir -p /data/cref && cd /data/cref && seq 3 > in; for p in x /a /a/x %a '/a\\(/' '{2}' 0 '99999999999999999999'; do csplit in \"$p\"; echo rc=$?; done; csplit in /a/ '{x}'; csplit in /a/ '{2'; csplit in 3 1; csplit in 2 2; csplit nosuch x; csplit -b %s in; echo rc=$?; ls; cd / && rm -r /data/cref",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\nrc=1\nrc=1\nrc=1\nrc=1\nrc=1\nrc=1\nrc=1\n2\n0\n4\nrc=1\nin\nxx00\nxx01\nxx02\n",
+        "stderr": "csplit: 'x': invalid pattern\ncsplit: /a: closing delimiter '/' missing\ncsplit: '/a/x': integer expected after delimiter\ncsplit: %a: closing delimiter '%' missing\ncsplit: '/a\\\\(/': invalid regular expression: Unmatched ( or \\(\ncsplit: '{2}': invalid pattern\ncsplit: 0: line number must be greater than zero\ncsplit: '99999999999999999999': invalid pattern\ncsplit: '{x'}: integer required between '{' and '}'\ncsplit: '{2': '}' is required in repeat count\ncsplit: line number '1' is smaller than preceding line number, 3\ncsplit: warning: line number '2' is the same as preceding line number\ncsplit: cannot open 'nosuch' for reading: No such file or directory\ncsplit: missing operand after 'in'\nTry 'csplit --help' for more information.\n"
+      }
+    },
+    {
+      "id": "csplit_names_the_failed_repetition_and_removes_its_pieces",
+      "seq": 910043,
+      "command": "mkdir -p /data/cfail && cd /data/cfail && seq 10 > in; csplit in 3 '{*}'; echo rc=$?; csplit in /1/ '{2}'; echo rc=$?; csplit in '/1/+4' '{*}'; echo rc=$?; csplit in '/5/-20'; echo rc=$?; csplit -k in '/[0-9]/+3' '{5}'; echo rc=$?; ls | tr '\\n' ' '; cd / && rm -r /data/cfail",
+      "expect": {
+        "exit": 0,
+        "stdout": "4\n6\n6\n5\nrc=1\n0\n18\n3\nrc=1\n8\n13\nrc=1\n0\nrc=1\n6\n8\n7\nrc=1\nin xx00 xx01 xx02 ",
+        "stderr": "csplit: '3': line number out of range on repetition 3\ncsplit: '/1/': match not found on repetition 2\ncsplit: '/1/+4': line number out of range\ncsplit: '/5/-20': line number out of range\ncsplit: '/[0-9]/+3': line number out of range\n"
+      }
+    },
+    {
+      "id": "csplit_formats_suffixes_as_printf_does",
+      "seq": 910044,
+      "command": "mkdir -p /data/cfmt && cd /data/cfmt && seq 4 > in; for b in '%-3d|' '%#x' '%#o' '%5.3d' '%0#5x' 'a%%%d' '%+d' '% d' '%' '%d%d' 'z' '%ld'; do csplit -s -b \"$b\" in 2 3 4; echo rc=$?; ls | grep -v '^in$' | tr '\\n' ,; echo; rm -f xx*; done; cd / && rm -r /data/cfmt",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=0\nxx0  |,xx1  |,xx2  |,xx3  |,\nrc=0\nxx0,xx0x1,xx0x2,xx0x3,\nrc=0\nxx0,xx01,xx02,xx03,\nrc=0\nxx  000,xx  001,xx  002,xx  003,\nrc=0\nxx00000,xx0x001,xx0x002,xx0x003,\nrc=0\nxxa%0,xxa%1,xxa%2,xxa%3,\nrc=1\n\nrc=1\n\nrc=1\n\nrc=1\n\nrc=1\n\nrc=1\n\n",
+        "stderr": "csplit: invalid conversion specifier in suffix: +\ncsplit: invalid conversion specifier in suffix:  \ncsplit: missing conversion specifier in suffix\ncsplit: too many % conversion specifications in suffix\ncsplit: missing % conversion specification in suffix\ncsplit: invalid conversion specifier in suffix: l\n"
+      }
+    },
+    {
+      "id": "split_and_csplit_read_dev_stdin_as_stdin",
+      "seq": 910045,
+      "command": "mkdir -p /data/cstd && cd /data/cstd && printf 'a\\nb\\n' | split -l 1 /dev/stdin p && ls && cat pab && printf 'a\\nb\\n' | csplit /dev/stdin 2 && cat xx01; cd / && rm -r /data/cstd",
+      "expect": {
+        "exit": 0,
+        "stdout": "paa\npab\nb\n2\n2\nb\n",
+        "stderr": ""
+      }
+    }
+  ]
+}

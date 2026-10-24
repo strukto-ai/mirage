@@ -22,12 +22,14 @@ from mirage.context.session_context import current_caller
 from mirage.errors.classify import classify, failure_text
 from mirage.errors.constants import FS_ERRORS, WALK_ERRORS
 from mirage.errors.posix import posix_phrase
+from mirage.errors.render import fs_error_line
 from mirage.errors.types import FsCondition
 from mirage.io.cooperative import chunks
 from mirage.io.spool import ByteSpool, spooled_pair
-from mirage.io.types import ByteSource
+from mirage.io.stream import drain
+from mirage.io.types import ByteSource, IOResult
 from mirage.io.writer import ByteWriter
-from mirage.rs.stream import Served
+from mirage.rs.stream import Served, open_stream, serve_requests
 from mirage.runtime.types import DispatchFn, ShellFn
 from mirage.shell.bytes import byte_view, text_view
 from mirage.shell.join import shell_join
@@ -40,6 +42,16 @@ async def _spooled(spool: ByteSpool) -> AsyncIterator[bytes]:
     async with spool:
         async for chunk in spool.stream():
             yield chunk
+
+
+def own_mount(path: PathSpec) -> bool:
+    """Every operand reads through the mount the command runs on, which
+    resolved it.
+
+    Args:
+        path (PathSpec): the operand.
+    """
+    return True
 
 
 def _failure(exc: BaseException) -> dict[str, JsonValue]:
@@ -74,6 +86,9 @@ class StreamHost:
         local (Callable[[PathSpec], bool]): Whether the mount serves an
             operand.
         dash (bool): an operand ``-`` names stdin (see ``is_stdin``).
+        command (str): The command a failed operand's line names, worded
+            as ``fs_error_line`` words it; empty leaves the wording to
+            the stream.
     """
 
     def __init__(
@@ -86,9 +101,11 @@ class StreamHost:
         shell: ShellFn | None,
         local: Callable[[PathSpec], bool],
         dash: bool = True,
+        command: str = "",
     ) -> None:
         self.operands = operands
         self.dash = dash
+        self.command = command
         self.stream = stream
         self.stdin = resolve_source(stdin)
         self.dispatch = dispatch
@@ -97,6 +114,7 @@ class StreamHost:
         self.local = local
         self.caller = current_caller()
         self.inputs: dict[int, AsyncIterator[bytes]] = {}
+        self.named: dict[int, PathSpec] = {}
         self.spools: dict[int, ByteSpool] = {}
         self.outputs: dict[str, ByteWriter] = {}
         self.errors = ByteSpool()
@@ -139,15 +157,22 @@ class StreamHost:
         """
         if file:
             return self.read_path(name)
-        if operand is not None and 0 < operand <= len(self.operands):
-            path = self.operands[operand - 1]
-            if path.raw_path == name:
-                if is_stdin(path, self.dash):
-                    return self.stdin_view()
-                return self.read_path(path, self.local(path))
+        path = self._operand(name, operand)
+        if path is not None:
+            if is_stdin(path, self.dash):
+                return self.stdin_view()
+            return self.read_path(path, self.local(path))
         if name in STDIN_NAMES:
             return self.stdin_view()
         return self.read_path(name)
+
+    def _operand(self, name: str, operand: int | None) -> PathSpec | None:
+        """The operand a name is, when it still holds its spelling."""
+        if operand is not None and 0 < operand <= len(self.operands):
+            path = self.operands[operand - 1]
+            if path.raw_path == name:
+                return path
+        return None
 
     async def flush_output(
         self, name: str | None = None
@@ -192,6 +217,10 @@ class StreamHost:
             return Served({})
         if op == "write":
             return await self._write(request, data)
+        if op == "unlink":
+            return await self._unlink(str(request["path"]))
+        if op == "fill" and isinstance(into := request.get("into"), int):
+            return await self._fill(into, request)
         if op == "flush":
             path = request.get("path")
             failure = await self.flush_output(
@@ -202,6 +231,13 @@ class StreamHost:
             await self.spools.setdefault(fd, ByteSpool()).append(data)
             return Served({})
         if op == "emit" and isinstance(fd, int):
+            skip, size = request.get("skip"), request.get("size")
+            if isinstance(skip, int) and isinstance(size, int):
+                held = self.spools.get(fd)
+                return Served(
+                    {},
+                    output=None if held is None else held.stream(skip, size),
+                )
             spool = self.spools.pop(fd, None)
             return Served(
                 {}, output=None if spool is None else _spooled(spool)
@@ -210,61 +246,127 @@ class StreamHost:
             return await self._run(request)
         raise ValueError(f"unknown stream request: {op}")
 
+    def _open(
+        self, fd: int, request: Mapping[str, JsonValue]
+    ) -> AsyncIterator[bytes] | None:
+        """The input a read or a fill opens: an operand, a name, or a spool
+        past its first ``skip`` bytes, where nothing spooled reads as
+        empty."""
+        path = request.get("path")
+        spool = request.get("spool")
+        if isinstance(spool, int):
+            skip = request.get("skip")
+            held = self.spools.get(spool)
+            return (
+                held.stream(skip if isinstance(skip, int) else 0)
+                if held
+                else None
+            )
+        if not isinstance(path, str):
+            return None
+        operand = request.get("operand")
+        name = text_view(path)
+        index = operand if isinstance(operand, int) else None
+        if self.command and (named := self._operand(name, index)):
+            self.named[fd] = named
+        return self.open_input(name, index, request.get("file") is True)
+
+    def _failed(self, fd: int, exc: Exception) -> Served:
+        """A failed input's reply, or raise what is not the file's own: the
+        failure's words, and the line the command words for an operand."""
+        if not isinstance(exc, FS_ERRORS) and classify(exc) is None:
+            raise exc
+        reply = _failure(exc)
+        if (named := self.named.pop(fd, None)) is not None:
+            reply["line"] = byte_view(fs_error_line(self.command, named, exc))
+        return Served(reply)
+
+    async def _fill(
+        self, into: int, request: Mapping[str, JsonValue]
+    ) -> Served:
+        """Read an input whole into spool ``into`` and answer its length."""
+        spool = self.spools.setdefault(into, ByteSpool())
+        source = self._open(into, request)
+        try:
+            await spool.fill(source if source is not None else b"")
+        except Exception as exc:
+            return self._failed(into, exc)
+        self.named.pop(into, None)
+        return Served({"size": spool.size})
+
     async def _read(self, fd: int, request: Mapping[str, JsonValue]) -> Served:
         source = self.inputs.get(fd)
-        path = request.get("path")
-        if source is None and isinstance(path, str):
-            operand = request.get("operand")
-            source = self.open_input(
-                text_view(path),
-                operand if isinstance(operand, int) else None,
-                request.get("file") is True,
-            )
-            self.inputs[fd] = source
+        if source is None:
+            source = self._open(fd, request)
+            if source is not None:
+                self.inputs[fd] = source
         if source is None:
             return Served({"end": True})
         try:
             chunk = await anext(source, None)
         except Exception as exc:
-            # A failure the error vocabulary names is the file's own.
-            if not isinstance(exc, FS_ERRORS) and classify(exc) is None:
-                raise
             del self.inputs[fd]
-            return Served(_failure(exc))
+            return self._failed(fd, exc)
         if chunk is None:
             del self.inputs[fd]
+            self.named.pop(fd, None)
             return Served({"end": True})
         return Served({}, bytes(chunk))
 
-    async def _replace(self, path: PathSpec, source: ByteSource) -> None:
+    async def _replace(
+        self, path: PathSpec, atomic: bool, source: ByteSource
+    ) -> None:
         assert self.dispatch is not None
-        await self.dispatch("write", path, data=source, atomic=True)
+        await self.dispatch("write", path, data=source, atomic=atomic)
+
+    async def _unlink(self, name: str) -> Served:
+        if self.dispatch is None:
+            return Served({"fatal": "file output requires a workspace"})
+        path = PathSpec.from_str_path(text_view(name), cwd=self.cwd.virtual)
+        try:
+            await self.dispatch("unlink", path)
+        except WALK_ERRORS as exc:
+            return Served(_failure(exc))
+        return Served({})
 
     async def _write(
         self, request: Mapping[str, JsonValue], data: bytes
     ) -> Served:
         """Write to a file: ``append`` adds to it, otherwise it is emptied
         first, every held write committed before; ``atomic`` replaces it
-        whole, once flushed, with what this and later writes carry;
-        ``spool`` writes that spool's bytes past its first ``skip`` and
-        drops it."""
+        whole, once flushed, with what this and later writes carry, and
+        ``create`` writes it whole as they carry it; ``spool`` writes that
+        spool's bytes past its first ``skip`` and drops it, or, with
+        ``size``, writes the file whole from that many and keeps it."""
         if self.dispatch is None:
             return Served({"fatal": "file output requires a workspace"})
         name = str(request["path"])
         path = PathSpec.from_str_path(text_view(name), cwd=self.cwd.virtual)
         spool_fd = request.get("spool")
+        size, skip = request.get("size"), request.get("skip")
+        offset = skip if isinstance(skip, int) else 0
+        if isinstance(size, int) and isinstance(spool_fd, int):
+            # A window of a spool is the whole file, written as one call.
+            whole = self.spools.get(spool_fd)
+            window = b"" if whole is None else whole.stream(offset, size)
+            try:
+                await self.dispatch("write", path, data=window)
+            except WALK_ERRORS as exc:
+                return Served(_failure(exc))
+            return Served({})
         spool = (
             self.spools.pop(spool_fd, None)
             if isinstance(spool_fd, int)
             else None
         )
         try:
-            if request.get("atomic"):
+            atomic = request.get("atomic") is True
+            if atomic or request.get("create"):
                 if (held := self.outputs.pop(name, None)) is not None:
                     await held.abort()
                 # The replacement opens now, so a refusal is reported
                 # before the stream reads on.
-                replacement = ByteWriter(partial(self._replace, path))
+                replacement = ByteWriter(partial(self._replace, path, atomic))
                 try:
                     await replacement.opened()
                 except BaseException:
@@ -283,8 +385,6 @@ class StreamHost:
             if writer is not None and data:
                 await writer.write(data)
             if writer is not None and spool is not None:
-                skip = request.get("skip")
-                offset = skip if isinstance(skip, int) else 0
                 async for chunk in spool.stream(offset):
                     await writer.write(chunk)
         except WALK_ERRORS as exc:
@@ -344,10 +444,39 @@ class StreamHost:
             await spool.close()
 
 
+async def hosted_stream(
+    kind: str, config: Mapping[str, JsonValue], host: StreamHost, io: IOResult
+) -> AsyncIterator[bytes]:
+    """Run a stream that reaches files through ``host``, yielding its
+    output as it settles; output closed early still lets what it wrote to
+    its files land. The engine opens on the first pull, so output closed
+    before one holds none.
+
+    Args:
+        kind (str): the mirage-rs stream.
+        config (Mapping[str, JsonValue]): its configuration.
+        host (StreamHost): serves the inputs and files it reaches.
+        io (IOResult): receives the exit status and stderr.
+    """
+    engine = open_stream(kind, config)
+    try:
+        async with aclosing(serve_requests(engine, host)) as output:
+            async for chunk in output:
+                yield chunk
+    except GeneratorExit:
+        if engine.cancel():
+            await drain(serve_requests(engine, host))
+        raise
+    finally:
+        io.exit_code = engine.status()
+        io.stderr = await host.errors.output()
+        await host.close()
+
+
 async def _close(source: AsyncIterator[bytes]) -> None:
     close = getattr(source, "aclose", None)
     if close is not None:
         await close()
 
 
-__all__ = ["StreamHost"]
+__all__ = ["StreamHost", "hosted_stream", "own_mount"]
