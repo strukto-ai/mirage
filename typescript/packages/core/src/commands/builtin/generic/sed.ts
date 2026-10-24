@@ -12,98 +12,26 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { ByteSpool } from '../../../io/spool.ts'
-import { ByteWriter } from '../../../io/writer.ts'
+import { type util } from 'zod'
 
 import { isStdin, stdinStream } from '../utils/stream.ts'
+import { StreamHost } from '../utils/stream_host.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import type { FlagValue } from '../../spec/types.ts'
 import { stripSlash } from '../../../utils/slash.ts'
-import { fsStrerror, isFsError, isStaleWrite } from '../../../errors/fs.ts'
-import { fsErrorLine } from '../../../errors/render.ts'
-import { callerStream } from '../generic_bind/dispatch.ts'
-import { currentCaller } from '../../../context/session_context.ts'
+import { fsStrerror, isFsError } from '../../../errors/fs.ts'
 import { resolvePath } from '../../../utils/path.ts'
-import { readFailExitCode } from '../../spec/usage.ts'
-import { closeQuietly, ensureStream, primeStream } from '../../../io/stream.ts'
-import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
+import { drain } from '../../../io/stream.ts'
+import { IOResult, materialize } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
 import type { CommandFnResult, Context } from '../../config.ts'
-import { SED_MISSING_SCRIPT, SED_NO_INPUT_EXIT, SED_NO_INPUT_FILES } from '../constants.ts'
-import {
-  SED_STDERR,
-  SED_STDOUT,
-  SedError,
-  compileScript,
-  type SedProgram,
-  type SedScriptPiece,
-} from '../sed_script.ts'
-import {
-  SED_LINE_LENGTH,
-  SedMachine,
-  readFailed,
-  unreadableFile,
-  type SedFileContent,
-  type SedInput,
-} from '../sed_exec.ts'
-import { byteView, decodeText, encodeText, fromByteView, utf8Locale } from '../../../shell/bytes.ts'
+import { SED_MISSING_SCRIPT } from '../constants.ts'
+import { byteView, encodeText, utf8Locale } from '../../../shell/bytes.ts'
 import { posixPhrase } from '../../../errors/posix.ts'
-import { dispatchOf } from '../utils/links.ts'
+import { openStream, openStreamSync, serveRequests, type OpenStream } from '../../../rs/stream.ts'
 
-type Stream = (p: PathSpec) => AsyncIterable<Uint8Array>
-type WriteBytes = (p: PathSpec, data: ByteSource) => Promise<void>
-
-/**
- * How sed reaches the files its script names (`r`, `R`, `w`, `W`,
- * `s///w`): through the workspace dispatcher when there is one, so a name
- * on another mount works as it does for awk's redirections, and through
- * this mount's own read and write otherwise.
- */
-interface ScriptFiles {
-  virtual(name: string): string
-  read(name: string): Promise<Uint8Array>
-  stream(name: string): AsyncIterable<Uint8Array>
-  write(name: string, data: ByteSource, atomic?: boolean, append?: boolean): Promise<void>
-}
-
-function scriptFiles(ctx: Context, stream: Stream, write: WriteBytes): ScriptFiles {
-  const spec = (name: string): PathSpec => {
-    const resolved = resolvePath(name, ctx.cwd.virtual)
-    if (ctx.vfs !== undefined) return PathSpec.fromStrPath(name, undefined, ctx.cwd)
-    const slash = resolved.lastIndexOf('/')
-    return new PathSpec({
-      virtual: resolved,
-      directory: slash >= 0 ? resolved.slice(0, slash + 1) : '/',
-      resolved: true,
-      vfsPath: stripSlash(resolved),
-    })
-  }
-  const dispatch = dispatchOf(ctx)
-  const caller = currentCaller()
-  const open = (name: string): AsyncIterable<Uint8Array> =>
-    dispatch === undefined ? stream(spec(name)) : callerStream(dispatch, caller, spec(name))
-  const access: ScriptFiles = {
-    virtual: (name) => resolvePath(name, ctx.cwd.virtual),
-    read: (name) => materialize(open(name)),
-    stream: open,
-    async write(name, data, atomic = false, append = false) {
-      if (dispatch === undefined) {
-        const spool = new ByteSpool()
-        try {
-          if (append) await spool.fill(open(name))
-          await spool.fill(data)
-          await write(spec(name), spool.stream())
-        } finally {
-          await spool.close()
-        }
-        return
-      }
-      await dispatch(append ? 'append' : 'write', spec(name), [data], atomic ? { atomic } : {})
-    },
-  }
-  return access
-}
+const SED_LINE_LENGTH = 70
 
 // GNU's atoi over -l: leading blanks, a sign, digits. The value stops at the
 // largest long and keeps its low 32 bits as an int, so `-l 4294967297` is 1.
@@ -119,183 +47,43 @@ function lineLength(raw: string | undefined): number {
   return Math.max(Number(BigInt.asIntN(32, value > longMax ? longMax : value)), 0)
 }
 
-function openFailure(name: string, err: unknown): string {
-  return `sed: couldn't open file ${name}: ${fsStrerror(err) ?? posixPhrase('EACCES')}\n`
-}
-
-function editFailure(name: string, err: unknown): string {
-  return `sed: couldn't edit ${name}: ${fsStrerror(err) ?? String(err)}\n`
-}
-
-// Truncate the `w` files as GNU opens them when it compiles the script,
-// in order; the first that cannot be opened ends the run with GNU's
-// `couldn't open file` line, exit 4.
-async function openWriteFiles(
-  names: readonly string[],
-  access: ScriptFiles,
-): Promise<string | null> {
-  for (const name of names) {
-    if (name === SED_STDOUT || name === SED_STDERR) continue
-    try {
-      await access.write(name, new Uint8Array())
-    } catch (err) {
-      if (!isFsError(err)) throw err
-      return openFailure(name, err)
-    }
-  }
-  return null
-}
-
-// Read the files `r` or `R` names: a file that cannot be opened reads as
-// empty, as POSIX asks; any other failure, a directory's included, is a read
-// error GNU reports and exits 4 on when it gets there, whether the file
-// streams or is read here. `utf8` reads them as text, under a UTF-8 locale.
-async function readScriptFiles(
-  names: readonly string[],
-  access: ScriptFiles,
-  utf8: boolean,
-  streamed = false,
-): Promise<Map<string, SedFileContent>> {
-  const files = new Map<string, SedFileContent>()
-  for (const name of names) {
-    if (streamed) {
-      files.set(name, { read: () => access.stream(name) })
-      continue
-    }
-    try {
-      files.set(name, { text: byteView(await access.read(name), utf8) })
-    } catch (err) {
-      if (!readFailed(err)) throw err
-      files.set(name, unreadableFile(name, err))
-    }
-  }
-  return files
-}
-
-/**
- * Drain sed's named outputs, one bounded writer per file for the run. A writer
- * stays open until the run ends: finishing one at each switch between files
- * would make every switch an append, which a store without native appends
- * rewrites whole. A `w` file that -i then edited keeps the edit: GNU's stream
- * still points at the file -i renamed over. GNU opens each spelling of a file
- * (`w out`, `w ./out`) as its own buffered stream from offset 0, and the first
- * opened is flushed last: its bytes win, and a later spelling's show only past
- * its end. The first spelling writes here; the others keep only the bytes past
- * what it has written so far, for that tail. Mirrors Python's `_ScriptWrites`.
- */
-class ScriptWrites {
-  private writers = new Map<string, ByteWriter>()
-  private readonly failedNames = new Set<string>()
-  readonly edited = new Set<string>()
-  errors = ''
-
-  private readonly first = new Map<string, string>()
-  private readonly later = new Map<string, ByteSpool>()
-  private readonly deferred = new Map<string, ByteSpool>()
-  private readonly sent = new Map<string, number>()
-
-  constructor(
-    private readonly machine: SedMachine,
-    private readonly access: ScriptFiles,
-    private readonly utf8: boolean,
-    private readonly defer: boolean,
-  ) {
-    for (const name of machine.wfiles.keys()) {
-      const path = access.virtual(name)
-      if (!this.first.has(path)) this.first.set(path, name)
-      else this.later.set(name, new ByteSpool())
-    }
-  }
-
-  async flush(final = false): Promise<void> {
-    for (const [name, out] of this.machine.wfiles) {
-      if (out.chunks.length === 0) continue
-      const data = fromByteView(out.chunks.join(''), this.utf8)
-      out.chunks.length = 0
-      if (this.failedNames.has(name) || this.edited.has(this.access.virtual(name))) continue
-      const kept = this.later.get(name)
-      if (kept !== undefined) await kept.append(data)
-      else if (this.defer) {
-        let spool = this.deferred.get(name)
-        if (spool === undefined) {
-          spool = new ByteSpool()
-          this.deferred.set(name, spool)
-        }
-        await spool.append(data)
-      } else await this.send(name, data)
-    }
-    if (final) {
-      for (const [name, spool] of this.deferred) {
-        try {
-          if (!this.edited.has(this.access.virtual(name))) {
-            for await (const data of spool.stream()) await this.send(name, data)
-          }
-        } finally {
-          await spool.close()
-        }
-      }
-      this.deferred.clear()
-    }
-  }
-
-  private async send(name: string, data: Uint8Array): Promise<void> {
-    let writer = this.writers.get(name)
-    if (writer === undefined) {
-      writer = new ByteWriter((source) => this.access.write(name, source, false, true))
-      this.writers.set(name, writer)
-    }
-    try {
-      await writer.write(data)
-      this.sent.set(name, (this.sent.get(name) ?? 0) + data.byteLength)
-    } catch (error) {
-      if (!isFsError(error)) throw error
-      this.failed(name, error)
-      this.writers.delete(name)
-      await writer.abort()
-    }
-  }
-
-  async finish(): Promise<void> {
-    for (const [name, spool] of this.later) {
-      const path = this.access.virtual(name)
-      const first = this.first.get(path) ?? ''
-      if (!this.failedNames.has(first) && !this.edited.has(path)) {
-        for await (const data of spool.stream(this.sent.get(first) ?? 0))
-          await this.send(first, data)
-      }
-    }
-    const writers = this.writers
-    this.writers = new Map()
-    for (const [name, writer] of writers) {
-      try {
-        await writer.finish()
-      } catch (error) {
-        if (!isFsError(error)) throw error
-        this.failed(name, error)
-      }
-    }
-  }
-
-  async abort(): Promise<void> {
-    const writers = this.writers
-    this.writers = new Map()
-    try {
-      for (const writer of writers.values()) await writer.abort()
-    } finally {
-      for (const spool of [...this.later.values(), ...this.deferred.values()]) await spool.close()
-      this.later.clear()
-      this.deferred.clear()
-    }
-  }
-
-  private failed(name: string, error: unknown): void {
-    this.failedNames.add(name)
-    this.errors += openFailure(name, error)
-  }
+/** Every operand reads through the mount sed runs on, which resolved it. */
+function servedHere(): boolean {
+  return true
 }
 
 function failed(stderr: string, exitCode: number): CommandFnResult {
   return [null, new IOResult({ exitCode, stderr: encodeText(stderr) })]
+}
+
+/**
+ * Run the script, yielding its output as it settles; output closed early
+ * still lets what the script wrote to its files land. Mirrors Python's
+ * `_sed_stream`.
+ */
+async function* sedStream(
+  engine: OpenStream,
+  host: StreamHost,
+  io: IOResult,
+  signal?: AbortSignal,
+): AsyncIterable<Uint8Array> {
+  let closed = true
+  try {
+    yield* serveRequests(engine, host, signal)
+    closed = false
+  } catch (err) {
+    closed = false
+    throw err
+  } finally {
+    try {
+      if (closed && engine.cancel()) await drain(serveRequests(engine, host, signal))
+      io.exitCode = engine.status()
+    } finally {
+      io.stderr = await host.errors.output()
+      await host.close()
+      engine.close()
+    }
+  }
 }
 
 /**
@@ -371,174 +159,72 @@ export function sedWrites(bag: Record<string, FlagValue>, texts: readonly string
   const expressions = fl.asList('e')
   const scripts = expressions.length > 0 ? expressions : texts.slice(0, 1)
   if (scripts.length === 0) return false
-  const pieces = scripts.map((text): SedScriptPiece => ({ kind: 'expr', text }))
+  const engine = openStreamSync('sed', {
+    pieces: scripts.map((text) => ({ text: byteView(text) })),
+    extended: fl.asBool('E') || fl.asBool('r'),
+  })
   try {
-    return compileScript(pieces, fl.asBool('E') || fl.asBool('r')).wfiles.length > 0
-  } catch (err) {
-    if (err instanceof SedError) return err.wfiles.length > 0
-    throw err
+    return (JSON.parse(new TextDecoder().decode(engine.metadata())) as { writes: boolean }).writes
+  } finally {
+    engine.close()
   }
 }
 
+/**
+ * Run sed over the resolved operands, as GNU sed 4.9. The script comes from
+ * -e expressions and -f script files, compiled in option order, when any
+ * were given, otherwise from the first positional operand. mirage-rs
+ * compiles and runs it; every operand and every file the script names is a
+ * request the host serves. Mirrors Python's sed_generic.
+ */
 export async function sedGeneric(
   paths: PathSpec[],
   texts: string[],
   ctx: Context,
-  stream: Stream,
-  write: WriteBytes,
+  stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
 ): Promise<CommandFnResult> {
   const parsed = parseFlags(ctx.flags)
-  const inPlace = parsed.inPlace
-  if (!inPlace) stream = stdinStream(stream, ctx.stdin)
-  const pieces: SedScriptPiece[] = []
+  const scriptStream = parsed.inPlace ? stream : stdinStream(stream, ctx.stdin)
+  const pieces: Record<string, util.JSONType>[] = []
   const origins = scriptOrigins(ctx.argv, parsed.scripts.length)
   for (const [index, [name, text]] of parsed.scripts.entries()) {
     const shown = origins?.[index] ?? null
     if (name === 'e') {
-      pieces.push(shown === null ? { kind: 'expr', text } : { kind: 'file', text, name: shown })
+      pieces.push(
+        shown === null ? { text: byteView(text) } : { text: byteView(text), file: byteView(shown) },
+      )
       continue
     }
-    const spec = PathSpec.fromStrPath(text)
-    let body: string
+    let body: Uint8Array
     try {
-      body = decodeText(await materialize(stream(spec)))
+      body = await materialize(scriptStream(PathSpec.fromStrPath(text)))
     } catch (err) {
       if (!isFsError(err)) throw err
-      return failed(openFailure(shown ?? text, err), 4)
+      const strerror = fsStrerror(err) ?? posixPhrase('EACCES')
+      return failed(`sed: couldn't open file ${shown ?? text}: ${strerror}\n`, 4)
     }
-    pieces.push({ kind: 'file', text: body, name: shown ?? text })
+    pieces.push({ text: byteView(body), file: byteView(shown ?? text) })
   }
-  if (pieces.length === 0 && texts[0] !== undefined) pieces.push({ kind: 'expr', text: texts[0] })
+  if (pieces.length === 0 && texts[0] !== undefined) pieces.push({ text: byteView(texts[0]) })
   if (pieces.length === 0) return failed(`${SED_MISSING_SCRIPT}\n`, 1)
-
-  const access = scriptFiles(ctx, stream, write)
-  const utf8 = utf8Locale(ctx.env)
-  let program: SedProgram
-  try {
-    // -E / -r select Extended Regular Expressions; without them sed is BRE.
-    program = compileScript(pieces, parsed.extended, utf8)
-  } catch (err) {
-    if (!(err instanceof SedError)) throw err
-    const refused = await openWriteFiles(err.wfiles, access)
-    return failed(refused ?? `${err.message}\n`, refused === null ? err.exitCode : 4)
-  }
-  const refused = await openWriteFiles(program.wfiles, access)
-  if (refused !== null) return failed(refused, 4)
-  const machine = new SedMachine(program, {
-    suppress: parsed.suppress,
-    separate: inPlace || parsed.separate,
-    lineLength: parsed.lineLength,
-    files: await readScriptFiles(program.rfiles, access, utf8, !parsed.inPlace),
-    readerFiles: await readScriptFiles(
-      program.readerFiles,
-      access,
-      utf8,
-      !(parsed.inPlace || parsed.separate),
-    ),
-    utf8,
+  // -i edits `-` as a file; otherwise an operand naming stdin is `-` to F
+  // and to sed's messages.
+  const names = paths.map((p) => (!parsed.inPlace && isStdin(p) ? '-' : p.rawPath))
+  const engine = await openStream('sed', {
+    pieces,
+    extended: parsed.extended,
+    utf8: utf8Locale(ctx.env),
+    quiet: parsed.suppress,
+    separate: parsed.separate,
+    in_place: parsed.inPlace,
+    line_length: parsed.lineLength,
+    inputs: names.map((name) => byteView(name)),
+    paths: paths.map((p) => byteView(p.virtual)),
+    cwd: byteView(ctx.cwd.virtual),
   })
-
-  const writes = new ScriptWrites(
-    machine,
-    access,
-    utf8,
-    inPlace || program.rfiles.length > 0 || program.readerFiles.length > 0,
-  )
-  if (inPlace) {
-    try {
-      return await runInPlace(paths, program, machine, access, stream, utf8, writes, ctx.signal)
-    } finally {
-      await writes.abort()
-    }
-  }
-
-  const stdinSource = ensureStream(ctx.stdin ?? new Uint8Array())
-  const inputs: SedInput[] = paths.map((p) =>
-    isStdin(p) ? { name: '-', source: stdinSource } : { name: p.rawPath, source: stream(p) },
-  )
-  if (inputs.length === 0) inputs.push({ name: '-', source: stdinSource })
+  const host = new StreamHost(paths, stream, ctx, servedHere, !parsed.inPlace)
   const io = new IOResult()
-  async function* output(): AsyncGenerator<Uint8Array> {
-    try {
-      for await (const chunk of machine.process(inputs, true, ctx.signal, () => writes.flush()))
-        yield fromByteView(chunk, utf8)
-    } finally {
-      try {
-        await writes.flush(true)
-        await writes.finish()
-      } finally {
-        await writes.abort()
-      }
-      const writeErr = writes.errors
-      const stderr = machine.stderr() + writeErr
-      io.exitCode = writeErr === '' ? machine.exitCode() : 4
-      io.stderr = stderr === '' ? null : encodeText(stderr)
-    }
-  }
-  return [output(), io]
-}
-
-// GNU -i: each file is its own run (line numbers, `$`, the hold space
-// and ranges restart) and the whole output of that run replaces the file:
-// `p` doubles lines in place, `q` truncates, `a`/`i`/`c` land their text.
-// The `w` files, `R` readers and /dev/stdout span the files. A `q` stops
-// before the next file; a panic leaves the file it hit untouched.
-async function runInPlace(
-  paths: PathSpec[],
-  program: SedProgram,
-  machine: SedMachine,
-  access: ScriptFiles,
-  stream: Stream,
-  utf8: boolean,
-  writes: ScriptWrites,
-  signal?: AbortSignal,
-): Promise<CommandFnResult> {
-  if (paths.length === 0) return failed(`${SED_NO_INPUT_FILES}\n`, SED_NO_INPUT_EXIT)
-  const editedVirtual = new Set<string>()
-  let err = ''
-  let code = 0
-  for (const p of paths) {
-    if (machine.stopped()) break
-    let data: ByteSource
-    try {
-      data = await primeStream(stream(p))
-    } catch (e) {
-      if (!isFsError(e)) throw e
-      err += fsErrorLine('sed', p, e)
-      code = Math.max(code, readFailExitCode('sed', e))
-      if ((e as { code?: string }).code === 'EISDIR') break
-      continue
-    }
-    try {
-      // An `r` file edited by an earlier file of this command reads new.
-      if (editedVirtual.size > 0)
-        machine.setFiles(await readScriptFiles(program.rfiles, access, utf8))
-      try {
-        writes.edited.add(access.virtual(p.virtual))
-        await access.write(p.virtual, editOutput(machine, p, data, utf8, writes, signal), true)
-      } catch (e) {
-        if (e instanceof EditAborted) break
-        if (!isStaleWrite(e)) throw e
-        err += editFailure(p.rawPath, e)
-        code = 4
-        break
-      }
-    } finally {
-      await closeQuietly(data)
-    }
-    editedVirtual.add(p.virtual)
-  }
-  await writes.flush(true)
-  await writes.finish()
-  const writeErr = writes.errors
-  const stderr = err + machine.stderr() + writeErr
-  const exitCode =
-    machine.panicCode ?? (writeErr !== '' ? 4 : code === 4 ? 4 : code || machine.exitCode())
-  const stdout = machine.stdout.chunks.join('')
-  return [
-    stdout === '' ? null : fromByteView(stdout, utf8),
-    new IOResult({ exitCode, stderr: stderr === '' ? null : encodeText(stderr) }),
-  ]
+  return [sedStream(engine, host, io, ctx.signal), io]
 }
 
 /**
@@ -557,22 +243,4 @@ export function positionalAsPaths(texts: string[], ctx: Context): PathSpec[] {
       vfsPath: stripSlash(resolved),
     })
   })
-}
-
-class EditAborted extends Error {}
-
-async function* editOutput(
-  machine: SedMachine,
-  path: PathSpec,
-  source: ByteSource,
-  utf8: boolean,
-  writes: ScriptWrites,
-  signal?: AbortSignal,
-): AsyncGenerator<Uint8Array> {
-  for await (const chunk of machine.process([{ name: path.rawPath, source }], false, signal, () =>
-    writes.flush(),
-  )) {
-    yield fromByteView(chunk, utf8)
-  }
-  if (machine.panicCode !== null) throw new EditAborted()
 }

@@ -1,130 +1,8 @@
 use std::collections::HashMap;
 
-use serde_json::{Value as Json, json};
+use serde_json::json;
 
-/// A host serving a run's requests from memory, its reads three bytes at
-/// a time so records cross chunks.
-#[derive(Default)]
-struct Host {
-    files: HashMap<String, Vec<u8>>,
-    stdin: Vec<u8>,
-    inputs: HashMap<u64, Vec<u8>>,
-    spools: HashMap<u64, Vec<u8>>,
-    writers: HashMap<String, Vec<u8>>,
-    out: Vec<u8>,
-    err: Vec<u8>,
-}
-
-fn text(value: &Json) -> String {
-    value.as_str().unwrap_or_default().to_owned()
-}
-
-impl Host {
-    fn commit(&mut self, path: Option<&str>) {
-        let names: Vec<String> = match path {
-            Some(path) => vec![path.to_owned()],
-            None => self.writers.keys().cloned().collect(),
-        };
-        for name in names {
-            if let Some(data) = self.writers.remove(&name) {
-                self.files.entry(name).or_default().extend(data);
-            }
-        }
-    }
-
-    /// A command line of the few forms the tests run.
-    fn shell(&mut self, command: &str, stdin: Option<Vec<u8>>) -> (Vec<u8>, i64) {
-        let input = stdin.unwrap_or_else(|| std::mem::take(&mut self.stdin));
-        match command {
-            "cat" => (input, 0),
-            "sort" => {
-                let mut lines: Vec<&[u8]> = input.split_inclusive(|&c| c == b'\n').collect();
-                lines.sort();
-                (lines.concat(), 0)
-            }
-            _ if command.starts_with("echo ") => (format!("{}\n", &command[5..]).into_bytes(), 0),
-            _ if command.starts_with("exit ") => (Vec::new(), command[5..].parse().unwrap_or(0)),
-            _ => (Vec::new(), 127),
-        }
-    }
-
-    fn serve(&mut self, header: &[u8], data: Vec<u8>) -> (Json, Vec<u8>) {
-        let request: Json = serde_json::from_slice(header).expect("a JSON request");
-        let fd = request["fd"].as_u64().unwrap_or(0);
-        match request["op"].as_str().unwrap_or_default() {
-            "read" => {
-                if let Some(path) = request["path"].as_str() {
-                    let source = match path {
-                        "-" | "/dev/stdin" => Some(std::mem::take(&mut self.stdin)),
-                        _ => {
-                            self.commit(None);
-                            self.files.get(path).cloned()
-                        }
-                    };
-                    match source {
-                        Some(source) => {
-                            self.inputs.insert(fd, source);
-                        }
-                        None => return (json!({"error": "No such file or directory"}), Vec::new()),
-                    }
-                }
-                let Some(input) = self.inputs.get_mut(&fd) else {
-                    return (json!({"end": true}), Vec::new());
-                };
-                if input.is_empty() {
-                    self.inputs.remove(&fd);
-                    return (json!({"end": true}), Vec::new());
-                }
-                let chunk: Vec<u8> = input.drain(..input.len().min(3)).collect();
-                (json!({}), chunk)
-            }
-            "close" => {
-                self.inputs.remove(&fd);
-                (json!({}), Vec::new())
-            }
-            "write" => {
-                let path = text(&request["path"]);
-                if path.starts_with("/missing/") {
-                    return (json!({"error": "No such file or directory"}), Vec::new());
-                }
-                if request["append"] == json!(false) {
-                    self.commit(None);
-                    self.files.insert(path.clone(), Vec::new());
-                }
-                self.writers.entry(path).or_default().extend(data);
-                (json!({}), Vec::new())
-            }
-            "flush" => {
-                self.commit(request["path"].as_str());
-                (json!({}), Vec::new())
-            }
-            "spool" => {
-                self.spools.entry(fd).or_default().extend(data);
-                (json!({}), Vec::new())
-            }
-            "emit" => {
-                let spool = self.spools.remove(&fd).unwrap_or_default();
-                self.out.extend(spool);
-                (json!({}), Vec::new())
-            }
-            "run" => {
-                self.commit(None);
-                let stdin = request["stdin"]
-                    .as_u64()
-                    .map(|fd| self.spools.remove(&fd).unwrap_or_default());
-                let (output, status) = self.shell(&text(&request["command"]), stdin);
-                match request["stdout"].as_u64() {
-                    Some(fd) => {
-                        self.inputs.insert(fd, output);
-                    }
-                    None => self.out.extend(output),
-                }
-                (json!({"status": status}), Vec::new())
-            }
-            op => panic!("unknown request {op}"),
-        }
-    }
-}
+use crate::host::Host;
 
 struct Run {
     out: String,
@@ -136,35 +14,13 @@ struct Run {
 fn run_with(program: &str, operands: &[&str], stdin: &str, files: &[(&str, &str)]) -> Run {
     let config = json!({"program": program, "operands": operands});
     let mut stream = super::open(config.to_string().as_bytes()).expect("opens");
-    let mut host = Host {
-        stdin: stdin.as_bytes().to_vec(),
-        files: files
-            .iter()
-            .map(|(name, body)| (name.to_string(), body.as_bytes().to_vec()))
-            .collect(),
-        ..Host::default()
-    };
-    loop {
-        while stream.busy() {
-            stream.drain(&mut host.out).expect("drains");
-        }
-        stream.take_stderr(&mut host.err);
-        let mut data = Vec::new();
-        let Some(header) = stream.request(&mut data) else {
-            break;
-        };
-        let (reply, data) = host.serve(&header, data);
-        stream
-            .respond(reply.to_string().as_bytes(), &data, &mut host.out)
-            .expect("answers");
-    }
-    stream.finish(&mut host.out).expect("finishes");
-    stream.take_stderr(&mut host.err);
+    let mut host = Host::with(files, stdin);
+    let status = host.drive(stream.as_mut());
     host.commit(None);
     Run {
         out: String::from_utf8_lossy(&host.out).into_owned(),
         err: String::from_utf8_lossy(&host.err).into_owned(),
-        status: stream.status(),
+        status,
         files: host.files,
     }
 }

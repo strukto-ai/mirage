@@ -1,11 +1,9 @@
 use std::collections::{HashMap, VecDeque};
 
-use serde::Deserialize;
-use serde_json::{Map, Value as Json};
-
 use super::text::{Regexes, take_record};
 use super::value::MAX_LEN;
 use super::vm::no_memory;
+use crate::request::{Reply, Request, WriteMode, bytes};
 
 /// How much output, or what one file or pipe holds, waits before it goes
 /// to the host.
@@ -126,141 +124,6 @@ fn slot_keys(index: &HashMap<Vec<u8>, usize>, len: usize) -> Vec<Option<&[u8]>> 
         keys[at] = Some(key.as_slice());
     }
     keys
-}
-
-/// What the host is asked to do, in the order the run asks.
-#[derive(Debug)]
-pub(super) enum Request {
-    /// The next chunk of input `fd`; the first read of a named input says
-    /// which file, and which operand when it is one still as typed.
-    Read {
-        fd: u32,
-        open: Option<(Vec<u8>, Option<usize>)>,
-    },
-    Close {
-        fd: u32,
-    },
-    /// Append to a file, emptying it first unless `append`.
-    Write {
-        path: Vec<u8>,
-        append: bool,
-        data: Vec<u8>,
-    },
-    /// Commit one file's writes, or every file's.
-    Flush {
-        path: Option<Vec<u8>>,
-    },
-    Spool {
-        fd: u32,
-        data: Vec<u8>,
-    },
-    /// Send a spool to the output and drop it.
-    Emit {
-        fd: u32,
-    },
-    /// Run a command line: its input a spool or the run's own, its output
-    /// input `stdout` or the run's own.
-    Run {
-        command: Vec<u8>,
-        stdin: Option<u32>,
-        stdout: Option<u32>,
-    },
-}
-
-fn latin1(bytes: &[u8]) -> Json {
-    Json::String(bytes.iter().map(|&b| char::from(b)).collect())
-}
-
-impl Request {
-    /// The request as the host reads it: its JSON header, its payload
-    /// moved to `data`.
-    pub(super) fn encode(&mut self, data: &mut Vec<u8>) -> Vec<u8> {
-        let mut header = Map::new();
-        let mut put = |key: &str, value: Json| {
-            header.insert(key.to_owned(), value);
-        };
-        match self {
-            Request::Read { fd, open } => {
-                put("op", "read".into());
-                put("fd", (*fd).into());
-                if let Some((path, operand)) = open {
-                    put("path", latin1(path));
-                    if let Some(operand) = operand {
-                        put("operand", (*operand).into());
-                    }
-                }
-            }
-            Request::Close { fd } => {
-                put("op", "close".into());
-                put("fd", (*fd).into());
-            }
-            Request::Write {
-                path,
-                append,
-                data: payload,
-            } => {
-                put("op", "write".into());
-                put("path", latin1(path));
-                put("append", (*append).into());
-                data.append(payload);
-            }
-            Request::Flush { path } => {
-                put("op", "flush".into());
-                if let Some(path) = path {
-                    put("path", latin1(path));
-                }
-            }
-            Request::Spool { fd, data: payload } => {
-                put("op", "spool".into());
-                put("fd", (*fd).into());
-                data.append(payload);
-            }
-            Request::Emit { fd } => {
-                put("op", "emit".into());
-                put("fd", (*fd).into());
-            }
-            Request::Run {
-                command,
-                stdin,
-                stdout,
-            } => {
-                put("op", "run".into());
-                put("command", latin1(command));
-                if let Some(stdin) = stdin {
-                    put("stdin", (*stdin).into());
-                }
-                if let Some(stdout) = stdout {
-                    put("stdout", (*stdout).into());
-                }
-            }
-        }
-        serde_json::to_vec(&Json::Object(header)).unwrap_or_default()
-    }
-
-    /// Whether the host writes to the output while doing it.
-    pub(super) fn emits(&self) -> bool {
-        matches!(
-            self,
-            Request::Emit { .. } | Request::Run { stdout: None, .. }
-        )
-    }
-}
-
-/// The host's answer to a request; its text is bytes, one character
-/// each.
-#[derive(Deserialize, Default)]
-#[serde(default)]
-pub(super) struct Reply {
-    pub(super) end: bool,
-    /// Why an input or a write failed, as strerror words it.
-    pub(super) error: Option<String>,
-    /// Why the host refused outright, which ends the run.
-    pub(super) fatal: Option<String>,
-    pub(super) status: Option<f64>,
-}
-
-fn bytes(text: &str) -> Vec<u8> {
-    text.chars().map(|c| c as u8).collect()
 }
 
 pub(super) enum Next {
@@ -413,9 +276,24 @@ impl Io {
         if let Some((request, opens)) = request {
             if opens {
                 self.send_settled();
+                self.commit();
             }
             self.push(request);
         }
+    }
+
+    /// Commit what every file was sent, as a file opened for reading and
+    /// a command about to run must see it.
+    fn commit(&mut self) {
+        if !self.files_out.is_empty() {
+            self.push(Request::Flush { path: None });
+        }
+    }
+
+    /// Run a command once the files hold what was sent to them.
+    pub(super) fn run(&mut self, request: Request) {
+        self.commit();
+        self.push(request);
     }
 
     pub(super) fn send_settled(&mut self) {
@@ -426,7 +304,7 @@ impl Io {
                 file.settled = 0;
                 writes.push(Request::Write {
                     path: path.to_vec(),
-                    append: true,
+                    mode: WriteMode::Append,
                     data,
                 });
             }
@@ -442,7 +320,7 @@ impl Io {
                 file.settled = 0;
                 writes.push(Request::Write {
                     path: path.to_vec(),
-                    append: true,
+                    mode: WriteMode::Append,
                     data: std::mem::take(&mut file.buf),
                 });
             }
@@ -457,7 +335,7 @@ impl Io {
                 let data = std::mem::take(&mut file.buf);
                 self.push(Request::Write {
                     path: path.to_vec(),
-                    append: true,
+                    mode: WriteMode::Append,
                     data,
                 });
             }
@@ -532,8 +410,7 @@ impl Io {
 
     /// Take the host's answer to the request in flight.
     pub(super) fn answer(&mut self, reply: &[u8], data: &[u8]) -> Result<(), String> {
-        let reply: Reply =
-            serde_json::from_slice(reply).map_err(|err| format!("bad stream reply: {err}"))?;
+        let reply = Reply::decode(reply)?;
         let Some(request) = self.in_flight.take() else {
             return Err("no request is waiting".into());
         };
@@ -547,9 +424,15 @@ impl Io {
                     reader.answer(&reply, data);
                 }
             }
-            Request::Write { path, .. } => {
+            Request::Write { path, .. } | Request::Flush { path: Some(path) } => {
                 if let Some(error) = &reply.error {
+                    let path = reply.path.as_deref().map_or(path, bytes);
                     self.fail(output_error(&path, &bytes(error)));
+                }
+            }
+            Request::Flush { path: None } => {
+                if let (Some(error), Some(path)) = (&reply.error, &reply.path) {
+                    self.fail(output_error(&bytes(path), &bytes(error)));
                 }
             }
             Request::Run { .. } => self.run_status = Some(reply.status.unwrap_or(0.0)),

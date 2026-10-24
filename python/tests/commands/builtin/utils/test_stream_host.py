@@ -1,10 +1,12 @@
+import errno
 from collections.abc import AsyncIterator
+from typing import Any
 
 import pytest
 
 from mirage.commands.builtin.utils.stream_host import StreamHost
 from mirage.commands.constants import ROOT_CWD
-from mirage.io.types import materialize
+from mirage.io.types import IOResult, OpReport, materialize
 from mirage.types import JsonValue, PathSpec
 
 
@@ -51,7 +53,7 @@ async def test_an_operand_as_typed_reads_through_the_mount() -> None:
     }
     missing: dict[str, JsonValue] = {"op": "read", "fd": 2, "path": "/b.txt"}
     reply = (await host.serve(missing, b"")).reply
-    assert reply == {"error": "No such file or directory"}
+    assert reply == {"error": "No such file or directory", "errno": "ENOENT"}
 
 
 @pytest.mark.asyncio
@@ -88,5 +90,57 @@ async def test_what_needs_a_workspace_is_refused_outside_one() -> None:
     }
     assert (await host.serve(run, b"")).reply == {
         "fatal": "running a command requires a workspace"
+    }
+    await host.close()
+
+
+@pytest.mark.asyncio
+async def test_a_replacement_lands_whole_once_flushed() -> None:
+    files: dict[str, bytes] = {"/out": b"old"}
+
+    async def dispatch(
+        name: str,
+        path: PathSpec,
+        /,
+        *,
+        report: OpReport | None = None,
+        **kwargs: Any,
+    ) -> tuple[None, IOResult]:
+        if path.virtual == "/ro":
+            raise PermissionError(errno.EACCES, "Permission denied")
+        body = await materialize(kwargs.get("data", b""))
+        kept = files.get(path.virtual, b"") if name == "append" else b""
+        files[path.virtual] = kept + body
+        return None, IOResult()
+
+    async def stream(path: PathSpec) -> AsyncIterator[bytes]:
+        yield files[path.virtual]
+
+    host = StreamHost(
+        [], stream, None, dispatch, ROOT_CWD, None, lambda path: True
+    )
+    replace: dict[str, JsonValue] = {
+        "op": "write",
+        "path": "/out",
+        "atomic": True,
+    }
+    spooled: dict[str, JsonValue] = {
+        "op": "write",
+        "path": "/out",
+        "append": True,
+        "spool": 4,
+    }
+    await host.serve(replace, b"new ")
+    await host.serve({"op": "spool", "fd": 4}, b"tail")
+    await host.serve(spooled, b"")
+    assert files["/out"] == b"old"
+    assert (await host.serve({"op": "flush", "path": "/out"}, b"")).reply == {}
+    assert files["/out"] == b"new tail"
+    await host.serve({"op": "write", "path": "/ro", "atomic": True}, b"")
+    failed = await host.serve({"op": "flush"}, b"")
+    assert failed.reply == {
+        "error": "Permission denied",
+        "errno": "EACCES",
+        "path": "/ro",
     }
     await host.close()

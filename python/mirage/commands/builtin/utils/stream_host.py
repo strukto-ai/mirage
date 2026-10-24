@@ -19,8 +19,8 @@ from functools import partial
 from mirage.commands.builtin.generic_bind.dispatch import caller_stream
 from mirage.commands.builtin.utils.stream import is_stdin, resolve_source
 from mirage.context.session_context import current_caller
+from mirage.errors.classify import classify, failure_text
 from mirage.errors.constants import FS_ERRORS, WALK_ERRORS
-from mirage.errors.fs import fs_strerror
 from mirage.errors.posix import posix_phrase
 from mirage.errors.types import FsCondition
 from mirage.io.cooperative import chunks
@@ -42,6 +42,16 @@ async def _spooled(spool: ByteSpool) -> AsyncIterator[bytes]:
             yield chunk
 
 
+def _failure(exc: BaseException) -> dict[str, JsonValue]:
+    """A failed request's reply: the failure's words and the condition it
+    names, when the vocabulary names one."""
+    reply: dict[str, JsonValue] = {"error": failure_text(exc)}
+    condition = classify(exc)
+    if condition is not None:
+        reply["errno"] = condition.name
+    return reply
+
+
 class StreamHost:
     """The files and commands a mirage-rs stream reaches, through the
     workspace.
@@ -51,8 +61,8 @@ class StreamHost:
     it was resolved, unless another mount serves it; every other name
     reads through the dispatcher, as writes go through it. Every stdin
     reader (``-``, ``/dev/stdin`` and a command run without input of its
-    own) shares one cursor, so none replays what another read. A file
-    opened for reading, and a command, see every write made before it.
+    own) shares one cursor, so none replays what another read. A write is
+    held until the stream flushes it.
 
     Args:
         operands (Sequence[PathSpec]): The operands as classified.
@@ -63,6 +73,7 @@ class StreamHost:
         shell (ShellFn | None): Runs a nested line in the session.
         local (Callable[[PathSpec], bool]): Whether the mount serves an
             operand.
+        dash (bool): an operand ``-`` names stdin (see ``is_stdin``).
     """
 
     def __init__(
@@ -74,8 +85,10 @@ class StreamHost:
         cwd: PathSpec,
         shell: ShellFn | None,
         local: Callable[[PathSpec], bool],
+        dash: bool = True,
     ) -> None:
         self.operands = operands
+        self.dash = dash
         self.stream = stream
         self.stdin = resolve_source(stdin)
         self.dispatch = dispatch
@@ -125,16 +138,18 @@ class StreamHost:
         if operand is not None and 0 < operand <= len(self.operands):
             path = self.operands[operand - 1]
             if path.raw_path == name:
-                if is_stdin(path):
+                if is_stdin(path, self.dash):
                     return self.stdin_view()
                 return self.read_path(path, self.local(path))
         if name in STDIN_NAMES:
             return self.stdin_view()
         return self.read_path(name)
 
-    async def flush_output(self, name: str | None = None) -> str | None:
+    async def flush_output(
+        self, name: str | None = None
+    ) -> dict[str, JsonValue] | None:
         """Commit one file's writes, or every file's; the first failure
-        stops it, and its message is returned.
+        stops it, and its reply, naming the file, is returned.
 
         Args:
             name (str | None): The file as the stream named it.
@@ -146,8 +161,7 @@ class StreamHost:
             try:
                 await writer.finish()
             except WALK_ERRORS as exc:
-                detail = fs_strerror(exc) or "Cannot write output file"
-                return f'cannot open "{key}" for output ({detail})'
+                return {**_failure(exc), "path": key}
         return None
 
     async def _append(self, path: PathSpec, source: ByteSource) -> None:
@@ -179,7 +193,7 @@ class StreamHost:
             failure = await self.flush_output(
                 path if isinstance(path, str) else None
             )
-            return Served({} if failure is None else {"fatal": failure})
+            return Served(failure or {})
         if op == "spool" and isinstance(fd, int):
             await self.spools.setdefault(fd, ByteSpool()).append(data)
             return Served({})
@@ -196,8 +210,6 @@ class StreamHost:
         source = self.inputs.get(fd)
         path = request.get("path")
         if source is None and isinstance(path, str):
-            if failure := await self.flush_output():
-                return Served({"fatal": failure})
             operand = request.get("operand")
             source = self.open_input(
                 text_view(path), operand if isinstance(operand, int) else None
@@ -207,38 +219,62 @@ class StreamHost:
             return Served({"end": True})
         try:
             chunk = await anext(source, None)
-        except FS_ERRORS as exc:
+        except Exception as exc:
+            # A failure the error vocabulary names is the file's own.
+            if not isinstance(exc, FS_ERRORS) and classify(exc) is None:
+                raise
             del self.inputs[fd]
-            detail = fs_strerror(exc) or posix_phrase(FsCondition.ENOENT)
-            return Served({"error": detail})
+            return Served(_failure(exc))
         if chunk is None:
             del self.inputs[fd]
             return Served({"end": True})
         return Served({}, bytes(chunk))
 
+    async def _replace(self, path: PathSpec, source: ByteSource) -> None:
+        assert self.dispatch is not None
+        await self.dispatch("write", path, data=source, atomic=True)
+
     async def _write(
         self, request: Mapping[str, JsonValue], data: bytes
     ) -> Served:
+        """Write to a file: ``append`` adds to it, otherwise it is emptied
+        first, every held write committed before; ``atomic`` replaces it
+        whole, once flushed, with what this and later writes carry;
+        ``spool`` writes that spool's bytes and drops it."""
         if self.dispatch is None:
             return Served({"fatal": "file output requires a workspace"})
         name = str(request["path"])
         path = PathSpec.from_str_path(text_view(name), cwd=self.cwd.virtual)
+        spool_fd = request.get("spool")
+        spool = (
+            self.spools.pop(spool_fd, None)
+            if isinstance(spool_fd, int)
+            else None
+        )
         try:
-            if not request.get("append"):
+            if request.get("atomic"):
+                if (held := self.outputs.pop(name, None)) is not None:
+                    await held.abort()
+                self.outputs[name] = ByteWriter(partial(self._replace, path))
+            elif not request.get("append"):
                 if failure := await self.flush_output():
-                    return Served({"fatal": failure})
+                    return Served(failure)
                 await self.dispatch("write", path, data=b"")
-            if data:
-                writer = self.outputs.get(name)
-                if writer is None:
-                    writer = self.outputs[name] = ByteWriter(
-                        partial(self._append, path)
-                    )
+            writer = self.outputs.get(name)
+            if writer is None and (data or spool is not None):
+                writer = self.outputs[name] = ByteWriter(
+                    partial(self._append, path)
+                )
+            if writer is not None and data:
                 await writer.write(data)
+            if writer is not None and spool is not None:
+                async for chunk in spool.stream():
+                    await writer.write(chunk)
         except WALK_ERRORS as exc:
-            return Served(
-                {"error": fs_strerror(exc) or "Cannot write output file"}
-            )
+            return Served(_failure(exc))
+        finally:
+            if spool is not None:
+                await spool.close()
         return Served({})
 
     async def _run(self, request: Mapping[str, JsonValue]) -> Served:
@@ -247,8 +283,6 @@ class StreamHost:
         ending in a backslash runs as ``sh -c`` would run it."""
         if self.shell is None:
             return Served({"fatal": "running a command requires a workspace"})
-        if failure := await self.flush_output():
-            return Served({"fatal": failure})
         stdin_fd = request.get("stdin")
         # A pipe nothing was printed to has no spool, and is still its
         # command's whole input.

@@ -14,8 +14,8 @@
 
 import type { util } from 'zod'
 import { currentCaller } from '../../../context/session_context.ts'
-import { enoent, fsStrerror, isFsError, isWalkError } from '../../../errors/fs.ts'
-import { posixPhrase } from '../../../errors/posix.ts'
+import { classify, failureText } from '../../../errors/classify.ts'
+import { enoent, isWalkError } from '../../../errors/fs.ts'
 import { chunks } from '../../../io/cooperative.ts'
 import { ByteSpool, spooledPair } from '../../../io/spool.ts'
 import type { ByteSource } from '../../../io/types.ts'
@@ -43,6 +43,12 @@ async function close(source: AsyncIterator<Uint8Array>): Promise<void> {
   await source.return?.()
 }
 
+/** A failed request's reply: the failure's words and the condition it names, when the vocabulary names one. */
+function failure(err: unknown): Record<string, util.JSONType> {
+  const errno = classify(err)
+  return errno === null ? { error: failureText(err) } : { error: failureText(err), errno }
+}
+
 /**
  * The files and commands a mirage-rs stream reaches, through the workspace.
  * An input opens on its first read. An operand still holding its
@@ -50,9 +56,9 @@ async function close(source: AsyncIterator<Uint8Array>): Promise<void> {
  * was resolved, unless another mount serves it; every other name reads
  * through the dispatcher, as writes go through it. Every stdin reader (`-`,
  * `/dev/stdin` and a command run without input of its own) shares one
- * cursor, so none replays what another read. A file opened for reading,
- * and a command, see every write made before it. Mirrors Python's
- * StreamHost.
+ * cursor, so none replays what another read. A write is held until the
+ * stream flushes it. `dash`: an operand `-` names stdin (see `isStdin`).
+ * Mirrors Python's StreamHost.
  */
 export class StreamHost {
   readonly errors = new ByteSpool()
@@ -67,6 +73,7 @@ export class StreamHost {
     private readonly stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
     private readonly ctx: Context,
     private readonly local: (path: PathSpec) => boolean,
+    private readonly dash = true,
   ) {
     this.stdin = resolveSource(ctx.stdin)[Symbol.asyncIterator]()
   }
@@ -94,7 +101,7 @@ export class StreamHost {
     if (operand !== null && operand > 0 && operand <= this.operands.length) {
       const path = this.operands[operand - 1]
       if (path?.rawPath === name) {
-        if (isStdin(path)) return this.stdinView()
+        if (isStdin(path, this.dash)) return this.stdinView()
         return this.readPath(path, this.local(path))
       }
     }
@@ -102,8 +109,8 @@ export class StreamHost {
     return this.readPath(name)
   }
 
-  /** Commit one file's writes, or every file's; the first failure stops it, and its message is returned. */
-  async flushOutput(name?: string): Promise<string | null> {
+  /** Commit one file's writes, or every file's; the first failure stops it, and its reply, naming the file, is returned. */
+  async flushOutput(name?: string): Promise<Record<string, util.JSONType> | null> {
     const names = name === undefined ? [...this.outputs.keys()] : [name]
     for (const key of names) {
       const writer = this.outputs.get(key)
@@ -113,8 +120,7 @@ export class StreamHost {
         await writer.finish()
       } catch (error) {
         if (!isWalkError(error)) throw error
-        const detail = fsStrerror(error) ?? 'Cannot write output file'
-        return `cannot open "${key}" for output (${detail})`
+        return { ...failure(error), path: key }
       }
     }
     return null
@@ -136,10 +142,10 @@ export class StreamHost {
       case 'write':
         return this.write(request, data)
       case 'flush': {
-        const failure = await this.flushOutput(
+        const failed = await this.flushOutput(
           typeof request.path === 'string' ? request.path : undefined,
         )
-        return { reply: failure === null ? {} : { fatal: failure } }
+        return { reply: failed ?? {} }
       }
       case 'spool':
         if (fd !== null) {
@@ -171,8 +177,6 @@ export class StreamHost {
   ): Promise<Served> {
     let source = this.inputs.get(fd)
     if (source === undefined && typeof request.path === 'string') {
-      const failure = await this.flushOutput()
-      if (failure !== null) return { reply: { fatal: failure } }
       const operand = typeof request.operand === 'number' ? request.operand : null
       source = this.openInput(textView(request.path), operand)[Symbol.asyncIterator]()
       this.inputs.set(fd, source)
@@ -183,8 +187,8 @@ export class StreamHost {
       next = await source.next()
     } catch (err) {
       this.inputs.delete(fd)
-      if (!isFsError(err)) throw err
-      return { reply: { error: fsStrerror(err) ?? posixPhrase('ENOENT') } }
+      if (classify(err) === null) throw err
+      return { reply: failure(err) }
     }
     if (next.done === true) {
       this.inputs.delete(fd)
@@ -193,6 +197,12 @@ export class StreamHost {
     return { reply: {}, data: next.value }
   }
 
+  /**
+   * Write to a file: `append` adds to it, otherwise it is emptied first,
+   * every held write committed before; `atomic` replaces it whole, once
+   * flushed, with what this and later writes carry; `spool` writes that
+   * spool's bytes and drops it.
+   */
   private async write(
     request: Readonly<Record<string, util.JSONType>>,
     data: Uint8Array,
@@ -201,25 +211,38 @@ export class StreamHost {
     if (dispatch === undefined) return { reply: { fatal: 'file output requires a workspace' } }
     const name = typeof request.path === 'string' ? request.path : ''
     const path = PathSpec.fromStrPath(textView(name), undefined, this.ctx.cwd)
+    const spool = typeof request.spool === 'number' ? this.spools.get(request.spool) : undefined
+    if (typeof request.spool === 'number') this.spools.delete(request.spool)
     try {
-      if (request.append !== true) {
-        const failure = await this.flushOutput()
-        if (failure !== null) return { reply: { fatal: failure } }
+      if (request.atomic === true) {
+        await this.outputs.get(name)?.abort()
+        this.outputs.set(
+          name,
+          new ByteWriter(async (source) => {
+            await dispatch('write', path, [source], { atomic: true })
+          }),
+        )
+      } else if (request.append !== true) {
+        const failed = await this.flushOutput()
+        if (failed !== null) return { reply: failed }
         await dispatch('write', path, [new Uint8Array()])
       }
-      if (data.byteLength > 0) {
-        let writer = this.outputs.get(name)
-        if (writer === undefined) {
-          writer = new ByteWriter(async (source) => {
-            await dispatch('append', path, [source])
-          })
-          this.outputs.set(name, writer)
-        }
-        await writer.write(data)
+      let writer = this.outputs.get(name)
+      if (writer === undefined && (data.byteLength > 0 || spool !== undefined)) {
+        writer = new ByteWriter(async (source) => {
+          await dispatch('append', path, [source])
+        })
+        this.outputs.set(name, writer)
+      }
+      if (writer !== undefined && data.byteLength > 0) await writer.write(data)
+      if (writer !== undefined && spool !== undefined) {
+        for await (const chunk of spool.stream()) await writer.write(chunk)
       }
     } catch (error) {
       if (!isWalkError(error)) throw error
-      return { reply: { error: fsStrerror(error) ?? 'Cannot write output file' } }
+      return { reply: failure(error) }
+    } finally {
+      await spool?.close()
     }
     return { reply: {} }
   }
@@ -232,8 +255,6 @@ export class StreamHost {
   private async run(request: Readonly<Record<string, util.JSONType>>): Promise<Served> {
     const shell = this.ctx.shell
     if (shell === undefined) return { reply: { fatal: 'running a command requires a workspace' } }
-    const failure = await this.flushOutput()
-    if (failure !== null) return { reply: { fatal: failure } }
     // A pipe nothing was printed to has no spool, and is still its command's whole input.
     const spool =
       typeof request.stdin === 'number'
