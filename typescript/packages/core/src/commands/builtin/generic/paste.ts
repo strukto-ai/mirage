@@ -21,7 +21,7 @@ import { isFsError } from '../../../errors/fs.ts'
 import { fsErrorLine } from '../../../errors/render.ts'
 import type { CommandFnResult, Context } from '../../config.ts'
 import { AsyncLineIterator } from '../../../io/async_line_iterator.ts'
-import { closeStream, mergeOutput, openStream } from '../../../rs/stream.ts'
+import { closeStream, mergeOutput, openStream, runStream } from '../../../rs/stream.ts'
 import { byteView } from '../../../shell/bytes.ts'
 
 const ENC = new TextEncoder()
@@ -47,10 +47,11 @@ export function pasteGeneric(
 }
 
 /**
- * Open every operand, as GNU does before it reads, then paste them. A failed
- * read is reported, exit 1, and its operand reads as ended; one that never
- * opened ends the run before any line is written, and under -s is left out.
- * Mirrors Python's _paste_stream.
+ * Paste the operands. In rows every operand opens before any is read, as GNU
+ * opens them, and one that never opened ends the run before any line is
+ * written; under -s each opens when its turn comes, and one that never opened
+ * is left out. A failed read is reported, exit 1, and its operand reads as
+ * ended. Mirrors Python's _paste_stream.
  */
 async function* pasteStream(
   inputs: readonly (readonly [PathSpec, AsyncLineIterator])[],
@@ -64,36 +65,47 @@ async function* pasteStream(
     io.stderr = ENC.encode(errors.join(''))
     io.exitCode = 1
   }
-  try {
-    const opened: (readonly [PathSpec, AsyncLineIterator])[] = []
-    for (const [path, reader] of inputs) {
-      try {
-        if (!isStdin(path)) await reader.peek()
-      } catch (error) {
-        report(path, error)
-        if (neverOpened(reader, path, error)) {
-          if (config.serial !== true) return
-          continue
-        }
-      }
-      opened.push([path, reader])
+  const opened = async (path: PathSpec, reader: AsyncLineIterator): Promise<boolean> => {
+    try {
+      if (!isStdin(path)) await reader.peek()
+      return true
+    } catch (error) {
+      report(path, error)
+      return !neverOpened(reader, path, error)
     }
-    const sources = [...new Set(opened.map(([, reader]) => reader))]
-    const names = new Map([...opened].reverse().map(([path, reader]) => [reader, path]))
-    config.inputs = opened.map(([, reader]) => sources.indexOf(reader))
-    const pull = async (index: number): Promise<Uint8Array | null> => {
-      const reader = sources[index]
-      if (reader === undefined) return null
-      try {
-        return await reader.readChunk()
-      } catch (error) {
-        report(names.get(reader) ?? PathSpec.fromStrPath('-'), error)
-        return null
+  }
+  const pull = async (path: PathSpec, reader: AsyncLineIterator): Promise<Uint8Array | null> => {
+    try {
+      return await reader.readChunk()
+    } catch (error) {
+      report(path, error)
+      return null
+    }
+  }
+  async function* records(path: PathSpec, reader: AsyncLineIterator): AsyncIterable<Uint8Array> {
+    for (let chunk = await pull(path, reader); chunk !== null; chunk = await pull(path, reader))
+      yield chunk
+  }
+  try {
+    if (config.serial === true) {
+      for (const [path, reader] of inputs) {
+        if (await opened(path, reader))
+          yield* runStream('paste', { ...config, inputs: [0] }, records(path, reader))
       }
+      return
+    }
+    for (const [path, reader] of inputs) if (!(await opened(path, reader))) return
+    const sources = [...new Set(inputs.map(([, reader]) => reader))]
+    const names = new Map([...inputs].reverse().map(([path, reader]) => [reader, path]))
+    config.inputs = inputs.map(([, reader]) => sources.indexOf(reader))
+    const read = async (index: number): Promise<Uint8Array | null> => {
+      const reader = sources[index]
+      const path = reader === undefined ? undefined : names.get(reader)
+      return reader === undefined || path === undefined ? null : pull(path, reader)
     }
     const stream = await openStream('paste', config)
     try {
-      yield* mergeOutput(stream, pull)
+      yield* mergeOutput(stream, read)
     } finally {
       await closeStream(stream)
     }

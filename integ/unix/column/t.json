@@ -73,6 +73,43 @@
       "flags": [
         "t"
       ]
+    },
+    {
+      "id": "column_t_measures_cells_by_display_width",
+      "seq": 332,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf '\\342\\230\\260 a\\nbc d\\n' | LC_ALL=C.UTF-8 column -t; printf '\\315\\270 a\\nbc d\\n' | LC_ALL=C.UTF-8 column -t",
+      "expect": {
+        "exit": 0,
+        "stdout": "☰  a\nbc  d\n͸    a\nbc  d\n",
+        "stderr": ""
+      },
+      "flags": [
+        "t"
+      ]
     }
   ]
 }

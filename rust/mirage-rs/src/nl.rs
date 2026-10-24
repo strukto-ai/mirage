@@ -143,6 +143,7 @@ pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
         aborted: false,
         pending: Vec::new(),
         at: 0,
+        searched: 0,
         ended: false,
         pad: 0,
         fill: b' ',
@@ -280,6 +281,8 @@ struct Nl {
     /// The current input's bytes from `at` on, not yet numbered.
     pending: Vec<u8>,
     at: usize,
+    /// How far `pending` has been searched for a newline.
+    searched: usize,
     /// The current input has ended.
     ended: bool,
     /// Padding still owed for the last line, then the rest of that line.
@@ -313,11 +316,14 @@ impl Nl {
             if self.aborted {
                 break;
             }
-            let rest = &pending[self.at..];
-            let (line, next) = match memchr::memchr(b'\n', rest) {
-                Some(end) => (&rest[..end], self.at + end + 1),
-                None if self.ended && !rest.is_empty() => (rest, pending.len()),
+            let from = self.searched.max(self.at);
+            let (line, next) = match memchr::memchr(b'\n', &pending[from..]) {
+                Some(end) => (&pending[self.at..from + end], from + end + 1),
+                None if self.ended && self.at < pending.len() => {
+                    (&pending[self.at..], pending.len())
+                }
                 None => {
+                    self.searched = pending.len();
                     if self.ended {
                         self.ended = false;
                         self.input += 1;
@@ -336,6 +342,7 @@ impl Nl {
         self.pending = pending;
         if !self.more {
             self.pending.drain(..self.at);
+            self.searched -= self.at.min(self.searched);
             self.at = 0;
         }
     }

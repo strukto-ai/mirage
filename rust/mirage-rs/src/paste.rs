@@ -69,7 +69,8 @@ fn delimiters(raw: &[u8]) -> Vec<Option<u8>> {
 /// GNU paste, byte for byte: each output line joins one record from every
 /// operand, an ended one giving an empty field, until all have ended; with
 /// `serial` one operand's records make one line. The delimiters cycle and
-/// start over on each line.
+/// start over on each line. A lone input can come through `feed` and
+/// `finish`, as one `-s` operand does.
 struct Paste {
     delimiters: Vec<Option<u8>>,
     terminator: u8,
@@ -147,13 +148,12 @@ impl Paste {
 }
 
 impl Stream for Paste {
-    fn feed(&mut self, _: &[u8], _: &mut Vec<u8>) -> Result<(), StreamError> {
-        Err(StreamError::new("paste reads its inputs by index"))
+    fn feed(&mut self, input: &[u8], out: &mut Vec<u8>) -> Result<(), StreamError> {
+        self.feed_input(0, input, out)
     }
 
     fn finish(&mut self, out: &mut Vec<u8>) -> Result<(), StreamError> {
-        self.pump(out);
-        Ok(())
+        self.end_input(0, out)
     }
 
     fn wants(&self) -> Option<usize> {
@@ -271,5 +271,7 @@ mod tests {
         let serial = r#"{"serial":true,"delimiters":"\\n:","inputs":[0,1,0]}"#;
         assert_eq!(paste(serial, &[b"a\nb\nc\nd", b""]), b"a\nb:c\nd\n\n\n");
         assert_eq!(paste(r#"{"serial":true,"inputs":[]}"#, &[]), b"");
+        let one = r#"{"delimiters":",","serial":true,"zero_terminated":false,"inputs":[0]}"#;
+        assert_eq!(crate::run("paste", one, &[b"a\nb", b"\nc"]).0, b"a,b,c\n");
     }
 }
