@@ -382,30 +382,31 @@ async def test_cancel_group_reaches_grandchild_after_intermediate_exit():
     assert supervisor.live() == ()
 
 
+async def _hangs() -> int:
+    await asyncio.Event().wait()
+    return 0
+
+
+async def _exits() -> int:
+    return 0
+
+
 # A runner that already exited has nothing left to cancel, but stopping it
 # still stops what it left running (``sh -c 'sleep 100 &'``).
 @pytest.mark.asyncio
 async def test_stopping_an_exited_runner_stops_what_it_left_running():
     supervisor = ProcessSupervisor()
-
-    async def run():
-        await asyncio.Event().wait()
-        return 0
-
-    async def quick():
-        return 0
-
     parent = supervisor.start(
         session_id="a",
         command="sh",
         cwd=PathSpec.from_str_path("/"),
-        run=quick,
+        run=_exits,
     )
     left = supervisor.start(
         session_id="a",
         command="sleep",
         cwd=PathSpec.from_str_path("/"),
-        run=run,
+        run=_hangs,
         parent_pid=parent.info.pid,
     )
     await parent.join()

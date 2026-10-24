@@ -138,8 +138,8 @@ export function asyncChain(streams: Iterable<ByteSource | null>): AsyncIterable<
  * Write a program's input as it is read, then end it: a finite command
  * waits for that end. Writing stops once `stopped` says the program has
  * gone, and a program that closed its input (`closed` says which errors
- * mean that) has taken what it wanted, so neither fails the run. Mirrors
- * Python's `feed`.
+ * mean that) has taken what it wanted, so neither fails the run; an input
+ * that fails as it is read does. Mirrors Python's `feed`.
  */
 export async function feed(
   stdin: ByteSource | null,
@@ -151,12 +151,30 @@ export async function feed(
   try {
     for await (const chunk of asyncChain([stdin])) {
       if (stopped()) return
-      await write(chunk)
+      if (!(await delivered(write(chunk), closed))) return
     }
-    if (!stopped()) await end()
+    if (!stopped()) await delivered(end(), closed)
   } catch (error) {
-    if (!stopped() && !closed(error)) throw error
+    if (!stopped()) throw error
     console.debug('a program ended before consuming its input:', error)
+  }
+}
+
+/**
+ * Whether one step of a program's input landed; false when the program had
+ * closed its input. Mirrors Python's `_delivered`.
+ */
+async function delivered(
+  step: Promise<void>,
+  closed: (error: unknown) => boolean,
+): Promise<boolean> {
+  try {
+    await step
+    return true
+  } catch (error) {
+    if (!closed(error)) throw error
+    console.debug('a program closed its input:', error)
+    return false
   }
 }
 

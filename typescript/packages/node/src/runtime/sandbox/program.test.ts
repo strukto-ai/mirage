@@ -51,6 +51,11 @@ const ESCAPE = [
   'setTimeout(() => undefined, 30000)',
 ].join('\n')
 
+async function* oneThenOpen(): AsyncIterable<Uint8Array> {
+  yield new TextEncoder().encode('x')
+  await new Promise<void>(() => undefined)
+}
+
 async function escapedPid(pidFile: string): Promise<number> {
   while (!existsSync(pidFile) || readFileSync(pidFile, 'utf8').trim() === '') {
     await new Promise((resolve) => setTimeout(resolve, 10))
@@ -248,15 +253,11 @@ describe('runProgram', () => {
       `fs.writeFileSync("${pidFile}", String(process.pid))`,
       'setInterval(() => undefined, 1000)',
     ].join('\n')
-    async function* endless(): AsyncIterable<Uint8Array> {
-      yield new TextEncoder().encode('x')
-      await new Promise<void>(() => undefined)
-    }
     const runner = shRunner(
       `exec '${process.execPath}' -e '${program}'`,
       undefined,
       true,
-      endless(),
+      oneThenOpen(),
     )
     await escapedPid(pidFile)
     expect(runner.terminate(15)).toBe(true)

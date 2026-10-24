@@ -86,6 +86,11 @@ async def _two_chunks():
     yield b"b"
 
 
+async def _one_then_open() -> AsyncIterator[bytes]:
+    yield b"x"
+    await asyncio.Event().wait()
+
+
 @pytest.mark.asyncio
 async def test_run_cli_streams_input_and_output_and_maps_a_signal():
     seen: list[bytes] = []
@@ -401,15 +406,11 @@ async def test_a_handler_reading_its_input_sees_it_end(tmp_path):
         "    time.sleep(0.05)\n"
     )
 
-    async def endless() -> AsyncIterator[bytes]:
-        yield b"x"
-        await asyncio.Event().wait()
-
     runner = _start_runner(
         ProcessSupervisor(bind=run_with_execution),
         f"exec {shlex.quote(sys.executable)} -c {shlex.quote(program)}",
         True,
-        endless(),
+        _one_then_open(),
     )
     await _wait_for_pid(pid_file)
     assert runner.terminate(signal.SIGTERM)
