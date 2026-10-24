@@ -4,6 +4,13 @@ import { PipeClosed } from './errors.ts'
 
 export const CAPACITY = 4 * CHUNK_SIZE
 
+/**
+ * Buffers their producer never writes again, such as mirage-rs output copied
+ * out of linear memory: a pipe keeps a chunk of one as written, where it
+ * copies any other in case the writer reuses it.
+ */
+export const SEALED = new WeakSet<ArrayBufferLike>()
+
 /** One reader and bounded asynchronous writes. Closing either endpoint wakes writers. */
 export class BytePipe {
   constructor(private readonly capacity = CAPACITY) {
@@ -58,7 +65,8 @@ export class BytePipe {
         await this.changed(signal)
       if (signal?.aborted === true) throw makeAbortError(signal)
       if (this.readerClosed || this.ended) throw new PipeClosed()
-      const chunk = new Uint8Array(data.subarray(start, start + length))
+      const piece = data.subarray(start, start + length)
+      const chunk = SEALED.has(data.buffer) ? piece : new Uint8Array(piece)
       this.chunks.push(chunk)
       this.bytes += length
       this.delivered += 1

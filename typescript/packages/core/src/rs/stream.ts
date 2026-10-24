@@ -14,6 +14,7 @@
 
 import MIRAGE_RS_WASM from '../generated/mirage_rs.ts'
 import { chunks } from '../io/cooperative.ts'
+import { SEALED } from '../io/pipe.ts'
 import type { util } from 'zod'
 import { YieldBudget } from '../io/yield_budget.ts'
 import { concat } from '../utils/bytes.ts'
@@ -96,7 +97,9 @@ async function instance(): Promise<Exports> {
 }
 
 function bytesAt(exports: Exports, ptr: number, len: number): Uint8Array {
-  return new Uint8Array(exports.memory.buffer, ptr, len).slice()
+  const bytes = new Uint8Array(exports.memory.buffer, ptr, len).slice()
+  SEALED.add(bytes.buffer)
+  return bytes
 }
 
 /** One mirage-rs stream: chunks go in, the bytes they produce come out. Mirrors Python's OpenStream. */
