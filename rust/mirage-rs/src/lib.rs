@@ -12,6 +12,8 @@ mod fold;
 mod generated;
 mod glob;
 mod grep;
+#[cfg(test)]
+mod host;
 mod join;
 mod jq;
 pub mod nfs;
@@ -20,10 +22,12 @@ mod printf;
 mod records;
 mod reflow;
 mod regex;
+mod request;
 mod rg;
 mod rg_format;
 mod rg_grapheme;
 mod rg_matcher;
+mod sed;
 mod seq;
 mod sort;
 mod tr;
@@ -321,6 +325,7 @@ pub fn open(kind: &str, config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
         "regex" => regex::stream::open(config),
         "rg" => rg::open(config),
         "rg_format" => rg_format::open(config),
+        "sed" => sed::open(config),
         "seq" => seq::open(config),
         "sort" => sort::open(config),
         "tr" => tr::open(config),

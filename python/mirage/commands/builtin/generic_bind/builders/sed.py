@@ -34,7 +34,7 @@ async def sed(
         ctx,
         files.resolve_glob,
         files.read,
-        (files.write if files.answers("write") else None),
+        files.answers("write"),
     )
 
 

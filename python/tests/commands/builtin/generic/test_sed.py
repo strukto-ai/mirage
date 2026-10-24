@@ -1,132 +1,81 @@
 import errno
+from collections.abc import AsyncGenerator, AsyncIterator
 
 import pytest
 
-from mirage.commands.builtin.generic.sed import sed
+from mirage.commands.builtin.generic.sed import (
+    _line_length,
+    _script_origins,
+    sed_generic,
+    sed_writes,
+)
+from mirage.commands.config import Context
+from mirage.commands.spec.types import FlagValue
 from mirage.io.types import materialize
-from mirage.types import PathSpec
+from mirage.types import MountMode, PathSpec
+from mirage.vfs.ram import RAMVFS
+from mirage.workspace import Workspace
+from mirage.workspace.files import Files
 
 
 def _spec(path: str) -> PathSpec:
     return PathSpec(
-        vfs_path=(path).strip("/"), virtual=path, directory=path, resolved=True
+        vfs_path=(path).strip("/"),
+        virtual=path,
+        directory=path,
+        resolved=True,
+        raw_path=path,
     )
 
 
-def _make_backend(files: dict[str, bytes]):
-    store = dict(files)
-
-    async def read_bytes(path):
-        spec = (
-            path
-            if isinstance(path, PathSpec)
-            else PathSpec(
-                vfs_path=(path).strip("/"), virtual=path, directory=path
-            )
-        )
-        if spec.virtual not in store:
-            raise FileNotFoundError(spec.virtual)
-        return store[spec.virtual]
-
-    async def write_bytes(path, data):
-        spec = (
-            path
-            if isinstance(path, PathSpec)
-            else PathSpec(
-                vfs_path=(path).strip("/"), virtual=path, directory=path
-            )
-        )
-        store[spec.virtual] = await materialize(data)
-
-    return read_bytes, write_bytes, store
+async def _resolved(paths: list[PathSpec]) -> list[PathSpec]:
+    return paths
 
 
-@pytest.mark.asyncio
+async def _no_read(path: PathSpec) -> AsyncIterator[bytes]:
+    raise AssertionError(f"read {path.virtual}")
+    yield b""
+
+
 @pytest.mark.parametrize(
-    "script,stdin,out",
+    "raw,width",
     [
-        ("s/hi/HI/p", b"hi\nbye\n", b"HI\nHI\nbye\n"),
-        ("s/a+/X/", b"a+b\n", b"Xb\n"),
-        (r"/a\+b/d", b"x\na+b\naab\ny\n", b"x\na+b\ny\n"),
-        (r"/a\/b/,/c\/d/d", b"x\na/b\nmid\nc/d\ny\n", b"x\ny\n"),
+        (None, 70),
+        ("  +12", 12),
+        ("-3", 0),
+        ("x", 0),
+        ("4294967297", 1),
+        ("2147483648", 0),
+        ("9" * 40, 0),
     ],
 )
-async def test_sed_scripts_over_stdin(script, stdin, out):
-    # s///p prints a substituted line twice, a BRE `+` is literal, and an
-    # address keeps its escapes, delimiters included.
-    rb, wb, _ = _make_backend({})
-    output, _ = await sed(
-        [], script, read_stream=rb, write_bytes=wb, stdin=stdin
-    )
-    assert await materialize(output) == out
+def test_line_length_reads_as_gnus_atoi(raw: str | None, width: int) -> None:
+    assert _line_length(raw) == width
 
 
-@pytest.mark.asyncio
+def test_script_origins_name_the_script_files() -> None:
+    argv = ["-n", "-e", "p", "-f", "s.sed", "-fx.sed", "--line-length", "5"]
+    assert _script_origins(argv, 3) == [None, "s.sed", "x.sed"]
+    assert _script_origins(argv, 2) is None
+    assert _script_origins([], 1) is None
+
+
 @pytest.mark.parametrize(
-    "script,message",
+    "flags,texts,writes",
     [
-        (
-            "y/ab/x/",
-            b"sed: -e expression #1, char 7: strings for `y' "
-            b"command are different lengths\n",
-        ),
-        (
-            "/a\\/b",
-            b"sed: -e expression #1, char 5: unterminated address regex\n",
-        ),
+        ({}, ["p"], False),
+        ({}, ["w /o"], True),
+        ({}, ["s/a/b/w /dev/stdout"], True),
+        ({"e": ["w /o", "k"]}, [], True),
+        ({"e": ["k", "w /o"]}, [], False),
+        ({"i": True}, ["p"], True),
+        ({}, [], False),
     ],
 )
-async def test_sed_refuses_a_script(script, message):
-    rb, wb, _ = _make_backend({})
-    output, io = await sed(
-        [], script, read_stream=rb, write_bytes=wb, stdin=b"a\n"
-    )
-    assert output is None
-    assert io.exit_code == 1
-    assert io.stderr == message
-
-
-@pytest.mark.asyncio
-async def test_sed_inplace_transliterate_writes_file():
-    rb, wb, store = _make_backend({"/a.txt": b"one\ntwo\n"})
-    output, _ = await sed(
-        [_spec("/a.txt")],
-        "y/o/0/",
-        read_stream=rb,
-        write_bytes=wb,
-        in_place=True,
-    )
-    assert output is None
-    assert store["/a.txt"] == b"0ne\ntw0\n"
-
-
-@pytest.mark.asyncio
-async def test_inplace_closes_primed_input_when_write_is_refused():
-    closed = []
-    error = PermissionError("write refused")
-    _, write, _ = _make_backend({})
-    path = _spec("/a.txt")
-
-    async def read(spec):
-        try:
-            yield b"one\n"
-            pytest.fail("refused write must not pull more input")
-        finally:
-            closed.append(spec)
-
-    async def refuse(*args, **kwargs):
-        raise error
-
-    with pytest.raises(PermissionError, match="write refused"):
-        await sed(
-            [path],
-            "s/one/two/",
-            read_stream=read,
-            write_bytes=write,
-            in_place=True,
-            dispatch=refuse,
-        )
-    assert closed == [path]
+def test_sed_writes_when_its_script_names_a_w_file(
+    flags: dict[str, FlagValue], texts: list[str], writes: bool
+) -> None:
+    assert sed_writes(flags, texts) is writes
 
 
 @pytest.mark.asyncio
@@ -137,23 +86,26 @@ async def test_inplace_closes_primed_input_when_write_is_refused():
         ("n;p", True, b"two\n"),
     ],
 )
-async def test_sed_reads_nothing_after_a_directory(script, separate, out):
-    rb, wb, _ = _make_backend({"/f": b"one\ntwo\nthree\n", "/g": b"L1\nL2\n"})
+async def test_sed_reads_nothing_after_a_directory(
+    script: str, separate: bool, out: bytes
+) -> None:
+    files = {"/f": b"one\ntwo\nthree\n", "/g": b"L1\nL2\n"}
     reads: list[str] = []
 
-    async def read(path):
+    async def read(path: PathSpec) -> AsyncIterator[bytes]:
         reads.append(path.virtual)
         if path.virtual == "/d":
-            raise IsADirectoryError(21, "Is a directory", "/d")
-        return await rb(path)
+            raise IsADirectoryError(errno.EISDIR, "Is a directory", "/d")
+        yield files[path.virtual]
 
-    output, io = await sed(
+    ctx = Context(flags={"n": True, "separate": separate})
+    output, io = await sed_generic(
         [_spec("/f"), _spec("/d"), _spec("/g")],
-        script,
-        read_stream=read,
-        write_bytes=wb,
-        suppress=True,
-        separate=separate,
+        [script],
+        ctx,
+        _resolved,
+        read,
+        False,
     )
     assert await materialize(output) == out
     assert io.exit_code == 4
@@ -161,62 +113,41 @@ async def test_sed_reads_nothing_after_a_directory(script, separate, out):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("script,code", [("w /saved", 0), ("w /saved\nq7", 7)])
-async def test_reached_writes_and_status_survive_early_output_close(
-    script, code
-):
-    rb, wb, store = _make_backend({})
-    output, io = await sed(
-        [], script, read_stream=rb, write_bytes=wb, stdin=b"x\n"
-    )
-    assert await anext(output) == b"x\n"
-    await output.aclose()
-    assert store["/saved"] == b"x\n"
-    assert io.exit_code == code
-
-
-@pytest.mark.asyncio
-async def test_repeated_stdin_operands_share_one_byte_cursor():
-    rb, wb, _ = _make_backend({})
-    output, io = await sed(
+async def test_repeated_stdin_operands_share_one_byte_cursor() -> None:
+    output, io = await sed_generic(
         [_spec("-"), _spec("-")],
-        "",
-        read_stream=rb,
-        write_bytes=wb,
-        stdin=b"x\n",
+        [""],
+        Context(stdin=b"x\n"),
+        _resolved,
+        _no_read,
+        False,
     )
     assert await materialize(output) == b"x\n"
     assert io.exit_code == 0
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("in_place", [False, True])
 @pytest.mark.parametrize(
-    "script,code", [("1r /r", 4), ("1R /r", 4), ("/none/r /r", 0)]
+    "script,code", [("w /data/saved", 0), ("w /data/saved\nq7", 7)]
 )
-async def test_an_r_file_that_fails_to_read_fails_where_it_is_read(
-    in_place, script, code
-):
-    rb, wb, store = _make_backend({"/f": b"one\ntwo\n"})
-
-    async def read(path):
-        if path.virtual == "/r":
-            raise OSError(errno.EIO, "Input/output error")
-        return await rb(path)
-
-    output, io = await sed(
-        [_spec("/f")],
-        script,
-        read_stream=read,
-        write_bytes=wb,
-        in_place=in_place,
-    )
-    if output is not None:
-        await materialize(output)
-    assert io.exit_code == code
-    stderr = await materialize(io.stderr)
-    if code:
-        assert stderr == b"sed: read error on /r: Input/output error\n"
-    else:
-        assert stderr == b""
-        assert not in_place or store["/f"] == b"one\ntwo\n"
+async def test_reached_writes_and_status_survive_early_output_close(
+    script: str, code: int
+) -> None:
+    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
+    try:
+        data = b"".join(b"%d\n" % n for n in range(100_000))
+        ctx = Context(stdin=data, vfs=Files(ws.dispatch, ledger=False))
+        output, io = await sed_generic(
+            [], [script], ctx, _resolved, _no_read, True
+        )
+        assert isinstance(output, AsyncGenerator)
+        first = await anext(output)
+        await output.aclose()
+        saved, _ = await ws.dispatch(
+            "read", PathSpec.from_str_path("/data/saved")
+        )
+        assert first.startswith(b"0\n") and data.startswith(saved)
+        assert len(first) <= len(saved) < len(data)
+        assert io.exit_code == code
+    finally:
+        await ws.close()

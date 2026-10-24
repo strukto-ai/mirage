@@ -784,6 +784,41 @@
         "stdout": "x\nrc=0\nx\nrc=4\nrc=1\n",
         "stderr": "sed: INTERNAL ERROR: Bad cmd L\nsed: -e expression #2, char 2: extra characters after command\n"
       }
+    },
+    {
+      "id": "sed_error_unknown_command_is_quoted_as_its_byte",
+      "seq": 9970054,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a\\n' | sed \"$(printf '\\351')\" 2>&1 | od -An -c; printf 'a\\n' | LC_ALL=C.UTF-8 sed \"$(printf '\\303\\251')\" 2>&1 | od -An -c",
+      "expect": {
+        "exit": 0,
+        "stdout": "   s   e   d   :       -   e       e   x   p   r   e   s   s   i\n   o   n       #   1   ,       c   h   a   r       1   :       u\n   n   k   n   o   w   n       c   o   m   m   a   n   d   :    \n   ` 351   '  \\n\n   s   e   d   :       -   e       e   x   p   r   e   s   s   i\n   o   n       #   1   ,       c   h   a   r       1   :       u\n   n   k   n   o   w   n       c   o   m   m   a   n   d   :    \n   ` 303   '  \\n\n",
+        "stderr": ""
+      },
+      "note": "GNU sed 4.9 (debian:stable-slim) names the byte it read as the command, in either locale."
     }
   ]
 }

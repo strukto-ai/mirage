@@ -45,9 +45,6 @@ async def run_sed(
             locale decides bytes or characters.
     """
 
-    async def write(path: PathSpec, data: bytes) -> None:
-        await dispatch("write", path, data=data)
-
     return await sed_generic(
         flat_scopes(scopes),
         texts,
@@ -61,5 +58,5 @@ async def run_sed(
         ),
         _resolved,
         file_stream_op(dispatch),
-        write,
+        True,
     )
