@@ -15,16 +15,15 @@
 from typing import TYPE_CHECKING
 
 from mirage.core.notion.config import NotionConfig
+from mirage.utils.loader import lazy_exports
 
 if TYPE_CHECKING:
     from mirage.vfs.notion.notion import NotionVFS
 
 __all__ = ["NotionConfig", "NotionVFS"]
 
+_EXPORTS: dict[str, tuple[str, ...]] = {
+    "mirage.vfs.notion.notion": ("NotionVFS",),
+}
 
-def __getattr__(name: str) -> "type[NotionVFS]":
-    if name == "NotionVFS":
-        from mirage.vfs.notion.notion import NotionVFS
-
-        return NotionVFS
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+__getattr__ = lazy_exports(__name__, _EXPORTS)

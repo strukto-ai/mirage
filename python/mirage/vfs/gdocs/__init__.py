@@ -14,6 +14,7 @@
 
 from typing import TYPE_CHECKING
 
+from mirage.utils.loader import lazy_exports
 from mirage.vfs.gdocs.config import GDocsConfig
 from mirage.vfs.gdocs.doc_entry import DocEntry
 
@@ -22,10 +23,8 @@ if TYPE_CHECKING:
 
 __all__ = ["GDocsConfig", "DocEntry", "GDocsVFS"]
 
+_EXPORTS: dict[str, tuple[str, ...]] = {
+    "mirage.vfs.gdocs.gdocs": ("GDocsVFS",),
+}
 
-def __getattr__(name: str) -> "type[GDocsVFS]":
-    if name == "GDocsVFS":
-        from mirage.vfs.gdocs.gdocs import GDocsVFS
-
-        return GDocsVFS
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+__getattr__ = lazy_exports(__name__, _EXPORTS)

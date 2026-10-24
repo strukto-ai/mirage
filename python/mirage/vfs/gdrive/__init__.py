@@ -14,6 +14,7 @@
 
 from typing import TYPE_CHECKING
 
+from mirage.utils.loader import lazy_exports
 from mirage.vfs.gdrive.config import GoogleDriveConfig
 
 if TYPE_CHECKING:
@@ -21,10 +22,8 @@ if TYPE_CHECKING:
 
 __all__ = ["GoogleDriveConfig", "GoogleDriveVFS"]
 
+_EXPORTS: dict[str, tuple[str, ...]] = {
+    "mirage.vfs.gdrive.gdrive": ("GoogleDriveVFS",),
+}
 
-def __getattr__(name: str) -> "type[GoogleDriveVFS]":
-    if name == "GoogleDriveVFS":
-        from mirage.vfs.gdrive.gdrive import GoogleDriveVFS
-
-        return GoogleDriveVFS
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+__getattr__ = lazy_exports(__name__, _EXPORTS)

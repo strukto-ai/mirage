@@ -1,6 +1,11 @@
 {
-  "baseline": 3146,
+  "baseline": 3142,
  "modules": {
+  "utils/loader": {
+   "python_only": {
+    "lazy_exports": "The PEP 562 __getattr__ every Python package barrel binds; TypeScript barrels re-export statically and load nothing lazily."
+   }
+  },
   "utils/ids": {
    "typescript_only": {
     "randomBelowBig": "Python ints are unbounded, so random_below takes every limit; TypeScript draws a limit past one word as a bigint and keeps randomBelow on number."

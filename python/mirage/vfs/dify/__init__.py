@@ -1,5 +1,6 @@
 from typing import TYPE_CHECKING
 
+from mirage.utils.loader import lazy_exports
 from mirage.vfs.dify.config import DifyConfig
 
 if TYPE_CHECKING:
@@ -7,10 +8,8 @@ if TYPE_CHECKING:
 
 __all__ = ["DifyConfig", "DifyVFS"]
 
+_EXPORTS: dict[str, tuple[str, ...]] = {
+    "mirage.vfs.dify.dify": ("DifyVFS",),
+}
 
-def __getattr__(name: str) -> "type[DifyVFS]":
-    if name == "DifyVFS":
-        from mirage.vfs.dify.dify import DifyVFS
-
-        return DifyVFS
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+__getattr__ = lazy_exports(__name__, _EXPORTS)

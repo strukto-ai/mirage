@@ -14,6 +14,7 @@
 
 from typing import TYPE_CHECKING
 
+from mirage.utils.loader import lazy_exports
 from mirage.vfs.gcal.config import GCalConfig
 from mirage.vfs.gcal.event_entry import make_event_filename
 
@@ -22,10 +23,8 @@ if TYPE_CHECKING:
 
 __all__ = ["GCalConfig", "make_event_filename", "GCalVFS"]
 
+_EXPORTS: dict[str, tuple[str, ...]] = {
+    "mirage.vfs.gcal.gcal": ("GCalVFS",),
+}
 
-def __getattr__(name: str) -> "type[GCalVFS]":
-    if name == "GCalVFS":
-        from mirage.vfs.gcal.gcal import GCalVFS
-
-        return GCalVFS
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+__getattr__ = lazy_exports(__name__, _EXPORTS)

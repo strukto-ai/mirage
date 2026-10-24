@@ -14,6 +14,7 @@
 
 from typing import TYPE_CHECKING
 
+from mirage.utils.loader import lazy_exports
 from mirage.vfs.ram.store import RAMStore
 
 if TYPE_CHECKING:
@@ -21,10 +22,8 @@ if TYPE_CHECKING:
 
 __all__ = ["RAMVFS", "RAMStore"]
 
+_EXPORTS: dict[str, tuple[str, ...]] = {
+    "mirage.vfs.ram.ram": ("RAMVFS",),
+}
 
-def __getattr__(name: str) -> "type[RAMVFS]":
-    if name == "RAMVFS":
-        from mirage.vfs.ram.ram import RAMVFS
-
-        return RAMVFS
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+__getattr__ = lazy_exports(__name__, _EXPORTS)

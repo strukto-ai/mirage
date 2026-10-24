@@ -15,16 +15,15 @@
 from typing import TYPE_CHECKING
 
 from mirage.core.email.config import EmailConfig
+from mirage.utils.loader import lazy_exports
 
 if TYPE_CHECKING:
     from mirage.vfs.email.email import EmailVFS
 
 __all__ = ["EmailConfig", "EmailVFS"]
 
+_EXPORTS: dict[str, tuple[str, ...]] = {
+    "mirage.vfs.email.email": ("EmailVFS",),
+}
 
-def __getattr__(name: str) -> "type[EmailVFS]":
-    if name == "EmailVFS":
-        from mirage.vfs.email.email import EmailVFS
-
-        return EmailVFS
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+__getattr__ = lazy_exports(__name__, _EXPORTS)

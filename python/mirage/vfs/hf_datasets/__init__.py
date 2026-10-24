@@ -14,6 +14,7 @@
 
 from typing import TYPE_CHECKING
 
+from mirage.utils.loader import lazy_exports
 from mirage.vfs.hf_datasets.config import HfDatasetsConfig
 
 if TYPE_CHECKING:
@@ -21,10 +22,8 @@ if TYPE_CHECKING:
 
 __all__ = ["HfDatasetsConfig", "HfDatasetsVFS"]
 
+_EXPORTS: dict[str, tuple[str, ...]] = {
+    "mirage.vfs.hf_datasets.hf_datasets": ("HfDatasetsVFS",),
+}
 
-def __getattr__(name: str) -> "type[HfDatasetsVFS]":
-    if name == "HfDatasetsVFS":
-        from mirage.vfs.hf_datasets.hf_datasets import HfDatasetsVFS
-
-        return HfDatasetsVFS
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+__getattr__ = lazy_exports(__name__, _EXPORTS)

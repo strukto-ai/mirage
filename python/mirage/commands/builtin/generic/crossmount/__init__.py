@@ -12,8 +12,9 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from importlib import import_module
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
+
+from mirage.utils.loader import lazy_exports
 
 if TYPE_CHECKING:
     from mirage.commands.builtin.generic.crossmount.detect import (
@@ -23,16 +24,12 @@ if TYPE_CHECKING:
         handle_cross_mount as handle_cross_mount,
     )
 
-_EXPORTS = {
-    "is_cross_mount": "mirage.commands.builtin.generic.crossmount.detect",
-    "handle_cross_mount": "mirage.commands.builtin.generic.crossmount.route",
+_EXPORTS: dict[str, tuple[str, ...]] = {
+    "mirage.commands.builtin.generic.crossmount.detect": ("is_cross_mount",),
+    "mirage.commands.builtin.generic.crossmount.route": (
+        "handle_cross_mount",
+    ),
 }
-__all__ = list(_EXPORTS)
+__all__ = ["is_cross_mount", "handle_cross_mount"]
 
-
-def __getattr__(name: str) -> Any:
-    if name not in _EXPORTS:
-        raise AttributeError(name)
-    value = getattr(import_module(_EXPORTS[name]), name)
-    globals()[name] = value
-    return value
+__getattr__ = lazy_exports(__name__, _EXPORTS)

@@ -12,18 +12,15 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import importlib
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
+
+from mirage.utils.loader import lazy_exports
 
 if TYPE_CHECKING:
     from .command import bc as bc
 
-_EXPORTS = {"bc": "mirage.commands.builtin.general.bc.command"}
+_EXPORTS: dict[str, tuple[str, ...]] = {
+    "mirage.commands.builtin.general.bc.command": ("bc",),
+}
 
-
-def __getattr__(name: str) -> Any:
-    if name not in _EXPORTS:
-        raise AttributeError(name)
-    value = getattr(importlib.import_module(_EXPORTS[name]), name)
-    globals()[name] = value
-    return value
+__getattr__ = lazy_exports(__name__, _EXPORTS)

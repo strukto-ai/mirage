@@ -15,16 +15,15 @@
 from typing import TYPE_CHECKING
 
 from mirage.core.trello.config import TrelloConfig
+from mirage.utils.loader import lazy_exports
 
 if TYPE_CHECKING:
     from mirage.vfs.trello.trello import TrelloVFS
 
 __all__ = ["TrelloConfig", "TrelloVFS"]
 
+_EXPORTS: dict[str, tuple[str, ...]] = {
+    "mirage.vfs.trello.trello": ("TrelloVFS",),
+}
 
-def __getattr__(name: str) -> "type[TrelloVFS]":
-    if name == "TrelloVFS":
-        from mirage.vfs.trello.trello import TrelloVFS
-
-        return TrelloVFS
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+__getattr__ = lazy_exports(__name__, _EXPORTS)

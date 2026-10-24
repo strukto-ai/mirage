@@ -15,16 +15,15 @@
 from typing import TYPE_CHECKING
 
 from mirage.core.airtable.config import AirtableConfig
+from mirage.utils.loader import lazy_exports
 
 if TYPE_CHECKING:
     from mirage.vfs.airtable.airtable import AirtableVFS
 
 __all__ = ["AirtableConfig", "AirtableVFS"]
 
+_EXPORTS: dict[str, tuple[str, ...]] = {
+    "mirage.vfs.airtable.airtable": ("AirtableVFS",),
+}
 
-def __getattr__(name: str) -> "type[AirtableVFS]":
-    if name == "AirtableVFS":
-        from mirage.vfs.airtable.airtable import AirtableVFS
-
-        return AirtableVFS
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+__getattr__ = lazy_exports(__name__, _EXPORTS)

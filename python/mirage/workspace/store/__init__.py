@@ -12,8 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from typing import Any
-
+from mirage.utils.loader import lazy_exports
 from mirage.workspace.store.base import WorkspaceFields, WorkspaceStateStore
 from mirage.workspace.store.disk import (
     DEFAULT_STATE_ROOT,
@@ -31,14 +30,9 @@ __all__ = [
     "WorkspaceStateStore",
 ]
 
+_EXPORTS: dict[str, tuple[str, ...]] = {
+    "mirage.workspace.store.redis": ("RedisWorkspaceStateStore",),
+    "mirage.workspace.store.s3": ("S3WorkspaceStateStore",),
+}
 
-def __getattr__(name: str) -> Any:
-    if name == "RedisWorkspaceStateStore":
-        from mirage.workspace.store.redis import RedisWorkspaceStateStore
-
-        return RedisWorkspaceStateStore
-    if name == "S3WorkspaceStateStore":
-        from mirage.workspace.store.s3 import S3WorkspaceStateStore
-
-        return S3WorkspaceStateStore
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+__getattr__ = lazy_exports(__name__, _EXPORTS)

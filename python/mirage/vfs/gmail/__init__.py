@@ -14,6 +14,7 @@
 
 from typing import TYPE_CHECKING
 
+from mirage.utils.loader import lazy_exports
 from mirage.vfs.gmail.config import GmailConfig
 
 if TYPE_CHECKING:
@@ -21,10 +22,8 @@ if TYPE_CHECKING:
 
 __all__ = ["GmailConfig", "GmailVFS"]
 
+_EXPORTS: dict[str, tuple[str, ...]] = {
+    "mirage.vfs.gmail.gmail": ("GmailVFS",),
+}
 
-def __getattr__(name: str) -> "type[GmailVFS]":
-    if name == "GmailVFS":
-        from mirage.vfs.gmail.gmail import GmailVFS
-
-        return GmailVFS
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+__getattr__ = lazy_exports(__name__, _EXPORTS)
