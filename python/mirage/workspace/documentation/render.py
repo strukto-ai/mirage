@@ -38,6 +38,7 @@ from mirage.workspace.documentation.constants import (
 from mirage.workspace.documentation.types import Change
 from mirage.workspace.mount.mount import MountEntry
 from mirage.workspace.mount.registry import MountRegistry
+from mirage.workspace.node.admission import unlisted_service
 from mirage.workspace.session.session import SessionState
 
 SHARED = frozenset(c.name for c in (*GENERIC_COMMANDS, *GENERAL_COMMANDS))
@@ -75,6 +76,7 @@ def allowed(
     cwd: str,
     words: Sequence[str],
     inside: bool = False,
+    registry: MountRegistry | None = None,
 ) -> bool:
     """Whether the session's profile lets a line of ``words`` run in
     ``cwd``: the documents name nothing the profile refuses.
@@ -86,6 +88,9 @@ def allowed(
             redirection, which no rule names.
         inside (bool): whether the line names a file under ``cwd``, so
             that a rule written for paths there speaks; a CLI names none.
+        registry (MountRegistry | None): the CLIs, so that a CLI reaching
+            a service is refused as execution refuses it under a profile
+            that hides paths; None for a file command.
     """
     if not words:
         return True
@@ -97,6 +102,8 @@ def allowed(
     ctx = CommandContext(
         command=words[0], paths=paths, argv=tuple(words[1:]), cwd=cwd
     )
+    if registry is not None and unlisted_service(ctx, registry, session):
+        return False
     return decide(ctx, session.commands).outcome is not Outcome.DENY
 
 
@@ -129,7 +136,11 @@ def forms(
 
 
 def runnable(
-    session: SessionState, mount: MountEntry, path: str, words: Sequence[str]
+    session: SessionState,
+    mount: MountEntry,
+    path: str,
+    words: Sequence[str],
+    claimed: Sequence[tuple[str, ...]] = (),
 ) -> bool:
     """Whether the profile lets some line of ``words`` do its work on a
     file under ``path``.
@@ -139,12 +150,37 @@ def runnable(
         mount (MountEntry): the mount holding ``path``.
         path (str): the path described.
         words (Sequence[str]): the command and its words.
+        claimed (Sequence[tuple[str, ...]]): longer commands answered on
+            their own, so a form starting with one does not count here.
     """
     spec = mount.spec_for(words[0]) if words else None
     return any(
         allowed(session, path, form, True)
         for form in forms(session, words, spec)
+        if not any(form[: len(k)] == k for k in claimed)
     )
+
+
+def admitted(
+    session: SessionState, mount: MountEntry, path: str, change: Change
+) -> bool:
+    """Whether the profile lets ``change`` run at ``path``. A longer form
+    another change names (``tee -a`` for ``tee``) counts for that change
+    alone, since it runs on that change's ops.
+
+    Args:
+        session (SessionState): the session the document is for.
+        mount (MountEntry): the mount holding ``path``.
+        path (str): the path described.
+        change (Change): the change.
+    """
+    size = len(change.command)
+    claimed = [
+        other.command
+        for other in CHANGES
+        if len(other.command) > size and other.command[:size] == change.command
+    ]
+    return runnable(session, mount, path, change.command, claimed)
 
 
 def uses(
@@ -256,7 +292,7 @@ def granted(
         and not any(
             works(mount, c)
             for c in CHANGES
-            if runnable(session, mount, path, c.command)
+            if admitted(session, mount, path, c)
         )
     ):
         return MountMode.READ
@@ -279,7 +315,7 @@ def supported(
         return runnable(session, mount, path, words)
 
     reads = [code(c) for c in READS if runs((c,))]
-    changes = [c for c in CHANGES if runs(c.command)]
+    changes = [c for c in CHANGES if admitted(session, mount, path, c)]
     working = [
         c.label for c in changes if mode != MountMode.READ and works(mount, c)
     ]
@@ -350,7 +386,7 @@ def limitations(
     if mode == MountMode.READ:
         parts.append("Read only: no command changes files.")
     else:
-        changes = [c for c in CHANGES if runs(c.command)]
+        changes = [c for c in CHANGES if admitted(session, mount, path, c)]
         missing = [c.label for c in changes if not works(mount, c)]
         if missing and len(missing) == len(changes):
             parts.append("No Unix command changes files.")
@@ -493,11 +529,13 @@ def cli_pages(
     node: CommandSpec,
     style: UsageStyle,
     session: SessionState,
+    registry: MountRegistry,
     path: tuple[str, ...] = (),
 ) -> list[str]:
     """The help pages of one CLI node and its descendants the profile
-    allows. A denied node gets no page, but its allowed descendants
-    still do, and a page lists only the children leading to one. A leaf
+    allows. A node gets a page when the profile allows it or leads to a
+    descendant it allows, so a group's own options stay documented; a
+    page lists only the children leading to an allowed one. A leaf
     counts a longer form its allow list names (``gws gmail read --id``).
 
     Args:
@@ -505,20 +543,26 @@ def cli_pages(
         node (CommandSpec): the node.
         style (UsageStyle): the CLI's help layout.
         session (SessionState): the session the skill is for.
+        registry (MountRegistry): the workspace's live CLI registry.
         path (tuple[str, ...]): the verbs from the root to ``node``.
     """
     children = [
-        (child, cli_pages(head, child, style, session, (*path, child.name)))
+        (
+            child,
+            cli_pages(
+                head, child, style, session, registry, (*path, child.name)
+            ),
+        )
         for child in node.subcommands
     ]
     pages: list[str] = []
     words = (head, *path)
-    if any(
-        allowed(session, session.cwd, form)
+    kept = tuple(child for child, found in children if found)
+    if kept or any(
+        allowed(session, session.cwd, form, registry=registry)
         for form in (forms(session, words, None) if not children else [words])
     ):
         name = " ".join(words)
-        kept = tuple(child for child, found in children if found)
         help_text = node_help(
             name, replace(node, subcommands=kept), style
         ).rstrip()
@@ -544,7 +588,11 @@ def skill_md(registry: MountRegistry, session: SessionState) -> str:
     pages: list[str] = []
     for head, install in sorted(registry.clis.items().items()):
         found = cli_pages(
-            head, install.cli.spec, install.cli.spec.usage_style, session
+            head,
+            install.cli.spec,
+            install.cli.spec.usage_style,
+            session,
+            registry,
         )
         pages.extend(found)
         if found and owns_argv(install.cli):

@@ -29,6 +29,7 @@ export const CHANGES: readonly Change[] = [
   { label: '`>`', command: [], needs: [['write']] },
   { label: '`>>`', command: [], needs: [['append']] },
   { label: '`tee`', command: ['tee'], needs: [['write']] },
+  { label: '`tee -a`', command: ['tee', '-a'], needs: [['append']] },
   { label: '`touch` of a new file', command: ['touch'], needs: [['write']] },
   { label: '`cp`', command: ['cp'], needs: [['write'], ['copy']] },
   {

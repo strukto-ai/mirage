@@ -15,7 +15,7 @@
 import { describe, expect, it } from 'vitest'
 import { CLI, CLIHandler } from '../../commands/cli/types.ts'
 import { command } from '../../commands/config.ts'
-import { CommandSpec } from '../../commands/spec/types.ts'
+import { Argument, CommandSpec } from '../../commands/spec/types.ts'
 import { IOResult } from '../../io/types.ts'
 import { parseSessionProfile } from '../../policy/profile.ts'
 import { MountMode, type PathSpec } from '../../types.ts'
@@ -63,6 +63,21 @@ function row(markdown: string, section: string, path: string): string {
 function dify(): DifyVFS {
   return new DifyVFS({ apiKey: 'k', baseUrl: 'https://dify.test', datasetId: 'd' })
 }
+
+const ACCOUNT = new CLI({
+  spec: new CommandSpec({ name: 'acct', subcommands: [new CommandSpec({ name: 'list' })] }),
+  handlers: { list: new CLIHandler({ fn: () => null }) },
+  configModel: (input: Record<string, unknown>) => ({ token: String(input.token) }),
+})
+
+const TOOL = new CLI({
+  spec: new CommandSpec({
+    name: 'tool',
+    arguments: [new Argument('--token', { required: true })],
+    subcommands: [new CommandSpec({ name: 'run' })],
+  }),
+  handlers: { run: new CLIHandler({ fn: () => null }) },
+})
 
 const NOTES = new CLI({
   spec: new CommandSpec({
@@ -140,7 +155,7 @@ describe('vfsMd', () => {
     )
     expect(row(markdown, LIMITS, '/data')).toMatch(/^Read only: no command changes files\./)
     expect(row(markdown, LIMITS, '/docs')).toMatch(
-      /^Not supported: `>`, `>>`, `tee`, `touch` of a new file, `cp`, `cp -r`, `mkdir`, `rm -r`, `rmdir`, `truncate`, `sed -i`\. Without `-w`, `grep -r` and `rg` read every file\./,
+      /^Not supported: `>`, `>>`, `tee`, `tee -a`, `touch` of a new file, `cp`, `cp -r`, `mkdir`, `rm -r`, `rmdir`, `truncate`, `sed -i`\. Without `-w`, `grep -r` and `rg` read every file\./,
     )
     expect(row(markdown, LIMITS, '/')).toMatch(
       /`grep -r`, `find` and `du` stop after 10000 files; a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused\.$/,
@@ -403,16 +418,42 @@ describe('skillMd', () => {
     })
   }
 
-  it('keeps an allowed leaf under a denied parent', async () => {
+  it('keeps the path to an allowed leaf', async () => {
     const ws = new Workspace(
       { '/': [new RAMVFS(), MountMode.WRITE] },
       { profiles: { default: parseSessionProfile({ commands: { allow: ['gws drive list'] } }) } },
     )
     ws.registerCli('gws', gws())
     const skill = await ws.skillMd()
+    expect(skill).toContain('## `gws`\n')
+    expect(skill).toContain('## `gws drive`\n')
     expect(skill).toContain('## `gws drive list`')
-    expect(skill).not.toContain('## `gws`\n')
     expect(skill).not.toContain('delete')
+  })
+
+  it('keeps the options of a group above an allowed leaf', async () => {
+    const ws = new Workspace(
+      { '/': [new RAMVFS(), MountMode.WRITE] },
+      { profiles: { default: parseSessionProfile({ commands: { allow: ['tool run'] } }) } },
+    )
+    ws.registerCli('tool', TOOL)
+    const skill = await ws.skillMd()
+    expect(skill).toContain('## `tool`\n')
+    expect(skill).toContain('--token')
+    expect(skill).toContain('## `tool run`')
+  })
+
+  it('names no service CLI a path-hiding profile leaves out', async () => {
+    const ws = new Workspace(
+      { '/': [new RAMVFS(), MountMode.WRITE] },
+      {
+        profiles: {
+          default: parseSessionProfile({ paths: { hide: ['/vault'] }, commands: { allow: ['*'] } }),
+        },
+      },
+    )
+    ws.registerCli('acct', ACCOUNT, { token: 't' })
+    expect(await ws.skillMd()).toMatch(/No CLIs are registered\.\n$/)
   })
 
   it('keeps a leaf its allow list names with arguments', async () => {
@@ -427,7 +468,7 @@ describe('skillMd', () => {
     ws.registerCli('gws', gws())
     const skill = await ws.skillMd()
     expect(skill).toContain('## `gws drive list`')
-    expect(skill).not.toContain('## `gws`\n')
+    expect(skill).not.toContain('delete')
   })
 
   it('lists no denied subcommand', async () => {
@@ -451,6 +492,7 @@ describe('skillMd', () => {
     '`>`': 'echo hi > /m/n',
     '`>>`': 'echo hi >> /m/f',
     '`tee`': 'echo hi | tee /m/t',
+    '`tee -a`': 'echo hi | tee -a /m/f',
     '`touch` of a new file': 'touch /m/new',
     '`cp`': 'cp /m/f /m/c',
     '`cp -r`': 'cp -r /m/d1 /m/d3',
@@ -464,14 +506,25 @@ describe('skillMd', () => {
     '`sed -i`': 'sed -i s/h/j/ /m/f',
   }
 
-  async function seeded(ops: readonly string[], vfs: RAMVFS = new RAMVFS()): Promise<Workspace> {
+  async function seeded(
+    ops: readonly string[],
+    vfs: RAMVFS = new RAMVFS(),
+    profile: Record<string, unknown> | null = null,
+  ): Promise<Workspace> {
     const shellParser = await getTestParser()
     const seed = new Workspace({ '/m': [vfs, MountMode.WRITE] }, { shellParser })
     expect((await seed.shell(SETUP)).exitCode).toBe(0)
     const base = BaseVFS.prototype as unknown as Record<string, unknown>
     for (const op of ops)
       (vfs as unknown as Record<string, unknown>)[methodName(op)] = base[methodName(op)]
-    return new Workspace({ '/m': [vfs, MountMode.WRITE] }, { mode: MountMode.WRITE, shellParser })
+    return new Workspace(
+      { '/m': [vfs, MountMode.WRITE] },
+      {
+        mode: MountMode.WRITE,
+        shellParser,
+        profiles: profile === null ? {} : { default: parseSessionProfile(profile) },
+      },
+    )
   }
 
   it.each([
@@ -501,5 +554,12 @@ describe('skillMd', () => {
     expect(row(await ws.vfsMd(), LIMITS, '/m')).toMatch(/^Not supported: `mkdir`\. /)
     expect((await ws.shell('cp -r /m/d1 /m/d3')).exitCode).toBe(0)
     expect((await ws.shell('cat /m/d3/a')).stdoutText).toBe('x\n')
+  })
+
+  it('judges tee -a by its own ops', async () => {
+    const ws = await seeded(['write'], new RAMVFS(), { commands: { allow: ['cat', 'tee -a'] } })
+    const markdown = await ws.vfsMd()
+    expect(row(markdown, SUPPORTED, '/m')).toContain('`tee -a`')
+    expect(row(markdown, LIMITS, '/m')).toMatch(/^Not supported: `>`\. /)
   })
 })

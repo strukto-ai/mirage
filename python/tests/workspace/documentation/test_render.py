@@ -12,15 +12,17 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import Mapping
 from unittest.mock import AsyncMock
 
 import pytest
+from pydantic import BaseModel
 
 from mirage.commands.cli.types import CLI, CLIHandler
 from mirage.commands.config import command
-from mirage.commands.spec.types import CommandSpec
+from mirage.commands.spec.types import Argument, CommandSpec
 from mirage.io.types import IOResult
-from mirage.types import MountMode, PathSpec
+from mirage.types import JsonValue, MountMode, PathSpec
 from mirage.utils.path import norm
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.dify import DifyConfig, DifyVFS
@@ -60,6 +62,26 @@ NOTES = CLI(
         "show": CLIHandler(AsyncMock()),
         "add": CLIHandler(AsyncMock(), write=True),
     },
+)
+
+
+class TokenConfig(BaseModel):
+    token: str
+
+
+ACCOUNT = CLI(
+    CommandSpec(name="acct", subcommands=(CommandSpec(name="list"),)),
+    handlers={"list": CLIHandler(AsyncMock())},
+    config_model=TokenConfig,
+)
+
+TOOL = CLI(
+    CommandSpec(
+        name="tool",
+        arguments=(Argument("--token", required=True),),
+        subcommands=(CommandSpec(name="run"),),
+    ),
+    handlers={"run": CLIHandler(AsyncMock())},
 )
 
 
@@ -196,9 +218,9 @@ async def test_vfs_md_says_what_each_path_supports():
         "Read only: no command changes files."
     )
     assert row(markdown, limits, "/docs").startswith(
-        "Not supported: `>`, `>>`, `tee`, `touch` of a new file, `cp`, "
-        "`cp -r`, `mkdir`, `rm -r`, `rmdir`, `truncate`, `sed -i`. Without "
-        "`-w`, `grep -r` and `rg` read every file."
+        "Not supported: `>`, `>>`, `tee`, `tee -a`, `touch` of a new file, "
+        "`cp`, `cp -r`, `mkdir`, `rm -r`, `rmdir`, `truncate`, `sed -i`. "
+        "Without `-w`, `grep -r` and `rg` read every file."
     )
     assert "`slack` search covers only `channels/*/*/chat.jsonl`" in row(
         markdown, limits, "/slack"
@@ -479,15 +501,16 @@ def gws() -> CLI:
 
 
 @pytest.mark.asyncio
-async def test_skill_md_keeps_an_allowed_leaf_under_a_denied_parent():
+async def test_skill_md_keeps_the_path_to_an_allowed_leaf():
     ws = Workspace(
         {"/": (RAMVFS(), MountMode.WRITE)},
         profiles={"default": {"commands": {"allow": ["gws drive list"]}}},
     )
     ws.register_cli("gws", gws())
     skill = await ws.skill_md()
+    assert "## `gws`\n" in skill
+    assert "## `gws drive`\n" in skill
     assert "## `gws drive list`" in skill
-    assert "## `gws`\n" not in skill
     assert "delete" not in skill
 
 
@@ -500,7 +523,35 @@ async def test_skill_md_keeps_a_leaf_its_allow_list_names_with_arguments():
     ws.register_cli("gws", gws())
     skill = await ws.skill_md()
     assert "## `gws drive list`" in skill
-    assert "## `gws`\n" not in skill
+    assert "delete" not in skill
+
+
+@pytest.mark.asyncio
+async def test_skill_md_keeps_the_options_of_a_group_above_an_allowed_leaf():
+    ws = Workspace(
+        {"/": (RAMVFS(), MountMode.WRITE)},
+        profiles={"default": {"commands": {"allow": ["tool run"]}}},
+    )
+    ws.register_cli("tool", TOOL)
+    skill = await ws.skill_md()
+    assert "## `tool`\n" in skill
+    assert "--token" in skill
+    assert "## `tool run`" in skill
+
+
+@pytest.mark.asyncio
+async def test_skill_md_names_no_service_cli_a_path_hiding_profile_leaves_out():
+    ws = Workspace(
+        {"/": (RAMVFS(), MountMode.WRITE)},
+        profiles={
+            "default": {
+                "paths": {"hide": ["/vault"]},
+                "commands": {"allow": ["*"]},
+            }
+        },
+    )
+    ws.register_cli("acct", ACCOUNT, {"token": "t"})
+    assert (await ws.skill_md()).endswith("No CLIs are registered.\n")
 
 
 @pytest.mark.asyncio
@@ -526,6 +577,7 @@ RUNS = {
     "`>`": "echo hi > /m/n",
     "`>>`": "echo hi >> /m/f",
     "`tee`": "echo hi | tee /m/t",
+    "`tee -a`": "echo hi | tee -a /m/f",
     "`touch` of a new file": "touch /m/new",
     "`cp`": "cp /m/f /m/c",
     "`cp -r`": "cp -r /m/d1 /m/d3",
@@ -541,7 +593,9 @@ RUNS = {
 
 
 async def seeded(
-    ops: tuple[str, ...], kind: type[RAMVFS] = RAMVFS
+    ops: tuple[str, ...],
+    kind: type[RAMVFS] = RAMVFS,
+    profile: Mapping[str, JsonValue] | None = None,
 ) -> Workspace:
     filled = RAMVFS()
     seed = Workspace({"/m": (filled, MountMode.WRITE)})
@@ -551,7 +605,11 @@ async def seeded(
     )()
     partial._store = filled._store
     partial.accessor = filled.accessor
-    return Workspace({"/m": (partial, MountMode.WRITE)}, mode=MountMode.WRITE)
+    return Workspace(
+        {"/m": (partial, MountMode.WRITE)},
+        mode=MountMode.WRITE,
+        profiles={} if profile is None else {"default": profile},
+    )
 
 
 @pytest.mark.asyncio
@@ -592,3 +650,17 @@ async def test_vfs_md_says_cp_r_copies_a_whole_tree_in_one_call():
     assert limits.startswith("Not supported: `mkdir`. ")
     assert (await ws.shell("cp -r /m/d1 /m/d3")).exit_code == 0
     assert (await ws.shell("cat /m/d3/a")).stdout == b"x\n"
+
+
+@pytest.mark.asyncio
+async def test_vfs_md_judges_tee_a_by_its_own_ops():
+    ws = await seeded(
+        ("write",), profile={"commands": {"allow": ["cat", "tee -a"]}}
+    )
+    markdown = await ws.vfs_md()
+    assert "`tee -a`" in row(
+        markdown, "## Supported Unix Commands for VFS", "/m"
+    )
+    assert row(
+        markdown, "## Limitations of Unix Commands for VFS", "/m"
+    ).startswith("Not supported: `>`. ")

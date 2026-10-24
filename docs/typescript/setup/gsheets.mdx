@@ -162,7 +162,7 @@ Where a path differs from a local filesystem:
 
 | Path | Limitations |
 | --- | --- |
-| `/<path>` | Not supported: `>`, `>>`, `tee`, `touch` of a new file, `cp`, `cp -r`, `mkdir`, `rm -r`, `rmdir`, `truncate`, `sed -i`. Without `-w`, `grep -r` and `rg` read every file. `grep -r`, `find` and `du` stop after 1000 files; a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. |
+| `/<path>` | Not supported: `>`, `>>`, `tee`, `tee -a`, `touch` of a new file, `cp`, `cp -r`, `mkdir`, `rm -r`, `rmdir`, `truncate`, `sed -i`. Without `-w`, `grep -r` and `rg` read every file. `grep -r`, `find` and `du` stop after 1000 files; a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. |
 
 Run `man` to list every command, and `man <cmd>` or `<cmd> --help` for one command's usage.
 ````

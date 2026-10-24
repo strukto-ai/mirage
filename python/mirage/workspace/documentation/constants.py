@@ -31,6 +31,7 @@ CHANGES = (
     Change("`>`", (), (("write",),)),
     Change("`>>`", (), (("append",),)),
     Change("`tee`", ("tee",), (("write",),)),
+    Change("`tee -a`", ("tee", "-a"), (("append",),)),
     Change("`touch` of a new file", ("touch",), (("write",),)),
     Change("`cp`", ("cp",), (("write",), ("copy",))),
     Change(
