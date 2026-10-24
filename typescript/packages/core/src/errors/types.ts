@@ -144,17 +144,13 @@ export interface WalkDeclinedError extends MissingOpError {
   declined: true
 }
 
-// A glob that matches more paths than its mount's fullScanLimit. The line is
+// A glob that matches more paths than its mount's walkLimit. The line is
 // refused rather than run on part of what it names, as exec(2) refuses an
 // argument list too long. Mirrors Python's GlobLimitError.
 export class GlobLimitError extends Error {
-  readonly word: string
-  readonly limit: number
   constructor(word: string, limit: number) {
-    super(`${word}: matches more than ${String(limit)} files (full_scan_limit); narrow the path`)
+    super(`${word}: matches more than ${String(limit)} files (walk_limit); narrow the path`)
     this.name = 'GlobLimitError'
-    this.word = word
-    this.limit = limit
   }
 }
 

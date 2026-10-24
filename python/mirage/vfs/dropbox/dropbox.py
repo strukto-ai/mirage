@@ -65,7 +65,7 @@ class DropboxVFS(BaseVFS):
     def __init__(self, config: DropboxConfig) -> None:
         super().__init__()
         self.config = config
-        self.full_scan_limit = config.full_scan_limit
+        self.walk_limit = config.walk_limit
         self.accessor = DropboxAccessor(config, DropboxTokenManager(config))
 
     async def readdir(self, path: PathSpec) -> list[FileStat]:
@@ -147,7 +147,7 @@ class DropboxVFS(BaseVFS):
         whole_word: bool,
         ignore_case: bool,
     ) -> list[PathSpec] | None:
-        if not whole_word or self.full_scan_limit < 0:
+        if not whole_word or self.walk_limit < 0:
             return None
         return await _files_containing(self.accessor, text, [path])
 

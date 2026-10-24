@@ -30,7 +30,7 @@ await ws.shell('echo persistent | tee /data/note.txt')
 | Field | Default | Notes |
 | --- | --- | --- |
 | `root` | `''` | Subdirectory under the OPFS root. Useful to namespace multiple workspaces. |
-| `fullScanLimit` | `10000` | Most files one command walks under a folder: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit. |
+| `walkLimit` | `10000` | Most files one command walks under a folder: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit. |
 
 ## Mount mode
 

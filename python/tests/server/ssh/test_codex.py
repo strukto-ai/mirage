@@ -431,8 +431,8 @@ async def test_walk_stops_at_the_limit_of_the_mount_it_lists(tmp_path):
         tmp_path,
         Workspace(
             {
-                "/": (RAMVFS(full_scan_limit=-1), MountMode.WRITE),
-                "/w/": (RAMVFS(full_scan_limit=2), MountMode.WRITE),
+                "/": (RAMVFS(walk_limit=-1), MountMode.WRITE),
+                "/w/": (RAMVFS(walk_limit=2), MountMode.WRITE),
             }
         ),
     )

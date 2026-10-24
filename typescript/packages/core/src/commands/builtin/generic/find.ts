@@ -269,7 +269,7 @@ export function findGeneric(
   // Under -L, each directory the walk reached again and the one above it
   // that it repeats.
   loops?: () => [string, string][],
-  // Where a walk ran past fullScanLimit, each line without the command's
+  // Where a walk ran past walkLimit, each line without the command's
   // name.
   stopped?: () => string[],
 ): Promise<CommandFnResult> {

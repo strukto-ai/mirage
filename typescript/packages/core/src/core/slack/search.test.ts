@@ -325,20 +325,20 @@ class FakeSlack implements SlackTransport {
 class SearchSlackVFS extends SlackVFSBase {
   override readonly name = 'slack'
   override readonly accessor: SlackAccessor
-  override readonly fullScanLimit: number
-  constructor(transport: SlackTransport, fullScanLimit: number) {
+  override readonly walkLimit: number
+  constructor(transport: SlackTransport, walkLimit: number) {
     super()
     this.accessor = new SlackAccessor(transport)
-    this.fullScanLimit = fullScanLimit
+    this.walkLimit = walkLimit
   }
 }
 
 type Ran = [string, number, string[], string[]]
 
-async function onSlack(line: string, fake = new FakeSlack(), fullScanLimit = 1000): Promise<Ran> {
+async function onSlack(line: string, fake = new FakeSlack(), walkLimit = 1000): Promise<Ran> {
   vi.mocked(getHistoryJsonl).mockClear()
   const ws = new Workspace(
-    { '/slack': new Mount(new SearchSlackVFS(fake, fullScanLimit), { mode: MountMode.READ }) },
+    { '/slack': new Mount(new SearchSlackVFS(fake, walkLimit), { mode: MountMode.READ }) },
     { shellParser: await getTestParser() },
   )
   try {

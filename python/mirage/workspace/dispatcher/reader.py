@@ -330,7 +330,7 @@ class NamespaceReader:
         (``crossing``) descends into each mount itself, so it has no
         boundary to stop at: no mount below a path, and no mount root;
         and it takes no mount's shortcut, so no mount answers a function
-        for it, caps its globs or narrows its search.
+        for it or narrows its search.
 
         Args:
             crossing (bool): the walk goes through the dispatcher.
@@ -372,9 +372,9 @@ class NamespaceReader:
             row = None if crossing else owner(virtual)
             return row.searchable if row is not None else None
 
-        def full_scan_limit(virtual: str) -> int:
+        def walk_limit(virtual: str) -> int:
             row = owner(virtual)
-            return row.full_scan_limit if row is not None else -1
+            return row.walk_limit if row is not None else -1
 
         return MountView(
             descendants=below,
@@ -383,5 +383,5 @@ class NamespaceReader:
             root_of=root_of,
             answers=answers,
             searchable=searchable,
-            full_scan_limit=full_scan_limit,
+            walk_limit=walk_limit,
         )

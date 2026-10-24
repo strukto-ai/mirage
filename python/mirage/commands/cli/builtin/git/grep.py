@@ -338,13 +338,13 @@ async def grep(
             ):
                 continue
             target = location.worktree.join(relative)
-            if mounts is not None and mounts.full_scan_limit is not None:
+            if mounts is not None and mounts.walk_limit is not None:
                 # A blob is read from the repository, a working-tree file
                 # from the mount serving it, and each mount counts its own.
                 source = (
                     location.gitdir if revision or cached else target
                 ).virtual
-                limit = mounts.full_scan_limit(source)
+                limit = mounts.walk_limit(source)
                 root = mounts.root_of(source)
                 if 0 <= limit <= read.get(root, 0):
                     # Past the limit the search stops, and what it found
@@ -354,7 +354,7 @@ async def grep(
                         exit_code=FATAL_EXIT,
                         stderr=encode_text(
                             f"fatal: stopped after {limit} files "
-                            "(full_scan_limit); narrow the pathspec\n"
+                            "(walk_limit); narrow the pathspec\n"
                         ),
                     )
                 read[root] = read.get(root, 0) + 1

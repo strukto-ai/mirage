@@ -212,7 +212,7 @@ class UnboundVariable(ExitSignal):
 
 
 class TooManyMatches(DiscardSignal):
-    """A glob that matches more paths than its mount's ``full_scan_limit``.
+    """A glob that matches more paths than its mount's ``walk_limit``.
 
     A command it is a word of does not run, as exec(2) refuses an
     argument list too long; anywhere else (a ``for`` list, a redirect)
@@ -220,7 +220,7 @@ class TooManyMatches(DiscardSignal):
 
     Args:
         reason (str): the limit's line, ``WORD: matches more than N files
-            (full_scan_limit); narrow the path``.
+            (walk_limit); narrow the path``.
     """
 
     def __init__(self, reason: str) -> None:

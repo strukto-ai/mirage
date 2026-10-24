@@ -98,7 +98,7 @@ def _date_children(
     Args:
         raws (list[dict]): the date's full message payloads.
         keep_text (bool): whether each message's row keeps its rendered
-            text, lowercased, for grep (a ``full_scan_limit`` of 0 or more).
+            text, lowercased, for grep (a ``walk_limit`` of 0 or more).
     """
     children: list[FileStat] = []
     seeds: dict[str, list[FileStat]] = {}
@@ -195,7 +195,7 @@ async def _list_label(
             )
         )
         children, att_seeds = _date_children(
-            groups[date_str], accessor.config.full_scan_limit >= 0
+            groups[date_str], accessor.config.walk_limit >= 0
         )
         seeds[date_str] = children
         for att_dir, att_entries in att_seeds.items():
@@ -222,7 +222,7 @@ async def _list_day(
     groups = await _group_by_date(accessor, msg_ids)
     children, att_seeds = _date_children(
         groups.get(match.slots["day"], []),
-        accessor.config.full_scan_limit >= 0,
+        accessor.config.walk_limit >= 0,
     )
     return DirListing(entries=children, seeds=att_seeds, window=True)
 

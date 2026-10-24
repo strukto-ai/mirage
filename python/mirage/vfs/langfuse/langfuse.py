@@ -34,7 +34,7 @@ class LangfuseVFS(BaseVFS):
     def __init__(self, config: LangfuseConfig) -> None:
         super().__init__()
         self.config = config
-        self.full_scan_limit = config.full_scan_limit
+        self.walk_limit = config.walk_limit
         self.accessor = LangfuseAccessor(self.config)
 
     async def readdir(self, path: PathSpec) -> list[FileStat] | DirListing:

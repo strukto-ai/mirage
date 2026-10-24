@@ -222,9 +222,9 @@ class MountView:
     # The globs its ``files_containing`` covers; None for every file.
     searchable: Callable[[str], tuple[str, ...] | None] | None = None
     # The most files one command walks under a directory of the mount
-    # serving a path (its VFS's ``full_scan_limit``), -1 for no cap, so a
+    # serving a path (its VFS's ``walk_limit``), -1 for no cap, so a
     # walk that crosses mounts charges each entry to its own backend.
-    full_scan_limit: Callable[[str], int] | None = None
+    walk_limit: Callable[[str], int] | None = None
 
 
 @runtime_checkable

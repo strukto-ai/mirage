@@ -37,7 +37,7 @@ from mirage.commands.builtin.utils.paths import (
     nearest_ancestor,
     spelled_from,
 )
-from mirage.commands.builtin.utils.tree import before_full_scan
+from mirage.commands.builtin.utils.tree import before_full_walk
 from mirage.commands.errors import UsageError
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.usage import (
@@ -2136,7 +2136,7 @@ async def cp_generic(
                 and not target_exists
             )
             if not whole_tree:
-                await before_full_scan(dispatch, src, "cp")
+                await before_full_walk(dispatch, src, "cp")
             if target_exists and not target_is_dir:
                 freed = await _clear_for_directory(
                     policy,
@@ -2239,7 +2239,7 @@ async def cp_generic(
             # pass would drop every directory that holds no files (GNU
             # keeps them).
             if whole_tree:
-                await before_full_scan(dispatch, src, "cp")
+                await before_full_walk(dispatch, src, "cp")
             # A directory the walk may not open is GNU's line; it is made at
             # the destination and the rest of the tree still copies.
             unreadable: list[str] = []

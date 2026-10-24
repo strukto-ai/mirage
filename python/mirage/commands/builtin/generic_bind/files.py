@@ -836,8 +836,8 @@ def command_files(
 
     limit = (
         -1
-        if mounts is None or mounts.full_scan_limit is None
-        else mounts.full_scan_limit(anchor)
+        if mounts is None or mounts.walk_limit is None
+        else mounts.walk_limit(anchor)
     )
     return CommandFiles(
         stat=raw_stat,

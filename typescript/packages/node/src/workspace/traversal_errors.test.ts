@@ -11,10 +11,10 @@ import { Workspace } from '../workspace.ts'
 
 const DEC = new TextDecoder()
 
-async function setup(kind: string, count = 0, fullScanLimit?: number) {
+async function setup(kind: string, count = 0, walkLimit?: number) {
   const root = await mkdtemp(join(tmpdir(), 'mirage-walk-'))
   const opened: string[] = []
-  const limit = fullScanLimit === undefined ? {} : { fullScanLimit }
+  const limit = walkLimit === undefined ? {} : { walkLimit }
   const vfs =
     kind === 'disk'
       ? new DiskVFS({ root, ...limit })
@@ -124,17 +124,17 @@ describe.each(['disk', 'ssh'])('partial traversal on %s', (kind) => {
   })
 })
 
-// Twin of test_du_stops_at_the_mounts_full_scan_limit.
+// Twin of test_du_stops_at_the_mounts_walk_limit.
 it.each(['disk', 'ssh'])(
-  'du on %s stops at the mount full scan limit',
+  'du on %s stops at the mount walk limit',
   async (kind) => {
     const { ws, vfs, close } = await setup(kind, 10001)
-    const limit = String(vfs.fullScanLimit)
+    const limit = String(vfs.walkLimit)
     try {
       const summary = await ws.shell('du -s /d/large')
       expect([summary.exitCode, DEC.decode(summary.stderr), DEC.decode(summary.stdout)]).toEqual([
         1,
-        `du: /d/large: stopped after ${limit} files (full_scan_limit); narrow the path\n`,
+        `du: /d/large: stopped after ${limit} files (walk_limit); narrow the path\n`,
         `${limit}\t/d/large\n`,
       ])
     } finally {

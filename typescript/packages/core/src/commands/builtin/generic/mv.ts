@@ -27,7 +27,7 @@ import { isFifo } from '../../../utils/stat_view.ts'
 import { UsageError } from '../../errors.ts'
 import { usageHint } from '../../spec/usage.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
-import { beforeFullScan } from '../utils/tree.ts'
+import { beforeFullWalk } from '../utils/tree.ts'
 import { backupControl, siblingPath } from '../utils/backup.ts'
 import { DEFAULT_BACKUP_SUFFIX } from '../utils/constants.ts'
 import {
@@ -559,7 +559,7 @@ export async function mvGeneric(
     // Across mounts the tree is copied file by file, so the source's mount is
     // asked before a backup or a removal touches the destination.
     if (isPrimitiveMove(strategy) && srcIsDir && !sourceLink) {
-      await beforeFullScan(dispatch, src, 'mv')
+      await beforeFullWalk(dispatch, src, 'mv')
     }
     // A cross-mount move removes the target first, and a pipe cannot be
     // removed: GNU stops there, keeping the source (`mv f >(cat)`).

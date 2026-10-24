@@ -210,7 +210,7 @@ Finding nothing is not an error.
 
 Finds files whose path matches a pattern, sorted. `**` matches any number of
 directories. A pattern that matches more files than a mount's
-[`full_scan_limit`](/home/integration/search#full_scan_limit) is an error that
+[`walk_limit`](/home/integration/search#walk_limit) is an error that
 names the limit.
 
 <ParamField body="pattern" type="string" required>The pattern, such as `**/*.py`. A relative one is matched under `path`.</ParamField>

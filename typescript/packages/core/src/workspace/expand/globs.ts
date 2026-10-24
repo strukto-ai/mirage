@@ -594,7 +594,7 @@ export async function resolveGlobs(
           const owner = mountOf(registry, served, mount)
           const count = (counts.get(owner.prefix) ?? 0) + 1
           counts.set(owner.prefix, count)
-          const limit = owner.vfs.fullScanLimit
+          const limit = owner.vfs.walkLimit
           if (limit >= 0 && count > limit) {
             throw new TooManyMatches(new GlobLimitError(unmarkGlobs(typed.rawPath), limit).message)
           }

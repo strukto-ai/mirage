@@ -21,7 +21,7 @@ import { rstripSlash } from '../../../utils/slash.ts'
 import { readdirOp, statOp } from '../generic/crossmount/utils.ts'
 import type { DirProbe, WalkFn } from '../generic/archive/walk.ts'
 import type { CommandFiles } from './files.ts'
-import { beforeFullScan } from '../utils/tree.ts'
+import { beforeFullWalk } from '../utils/tree.ts'
 
 function walkWith(
   readdir: WalkFindDeps['readdir'],
@@ -30,7 +30,7 @@ function walkWith(
   command: string,
 ): WalkFn {
   return async (p, findType) => {
-    if (findType === 'f') await beforeFullScan(dispatch, p, command)
+    if (findType === 'f') await beforeFullWalk(dispatch, p, command)
     const unreadable: string[] = []
     const paths = await walkFind(p, { unreadable, readdir, stat }, { type: findType })
     return { paths, unreadable }
@@ -51,7 +51,7 @@ function walkWith(
  * could not open rides along (as the virtual path the walk recorded), so the
  * archiver can report it the way GNU does instead of silently leaving its
  * contents out. The files listed are every file the archiver reads, so the
- * mount that owns the operand may refuse the scan before they are listed.
+ * mount that owns the operand may refuse the walk before they are listed.
  */
 export function walkOf(
   files: CommandFiles,

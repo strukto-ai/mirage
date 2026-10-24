@@ -35,7 +35,7 @@
       "command": "du -s /slack 2>&1 >/dev/null",
       "expect": {
         "exit": 1,
-        "stdout": "du: /slack: stopped after 1000 files (full_scan_limit); narrow the path\n",
+        "stdout": "du: /slack: stopped after 1000 files (walk_limit); narrow the path\n",
         "stderr": ""
       }
     }

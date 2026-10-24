@@ -14,7 +14,7 @@
 
 import { Accessor } from './base.ts'
 import type { TrelloTransport } from '../core/trello/client.ts'
-import { FULL_SCAN_LIMIT } from '../vfs/constants.ts'
+import { WALK_LIMIT } from '../vfs/constants.ts'
 
 /**
  * The mount's handle: the transport plus the configured visibility filter.
@@ -27,16 +27,16 @@ export class TrelloAccessor extends Accessor {
   readonly transport: TrelloTransport
   readonly workspaceId: string | null
   readonly boardIds: readonly string[] | null
-  readonly fullScanLimit: number
+  readonly walkLimit: number
 
   constructor(
     transport: TrelloTransport,
-    options: { workspaceId?: string; boardIds?: readonly string[]; fullScanLimit?: number } = {},
+    options: { workspaceId?: string; boardIds?: readonly string[]; walkLimit?: number } = {},
   ) {
     super()
     this.transport = transport
     this.workspaceId = options.workspaceId ?? null
     this.boardIds = options.boardIds ?? null
-    this.fullScanLimit = options.fullScanLimit ?? FULL_SCAN_LIMIT
+    this.walkLimit = options.walkLimit ?? WALK_LIMIT
   }
 }

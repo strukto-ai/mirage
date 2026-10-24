@@ -27,7 +27,7 @@ await ws.shell('ls /notion/pages/')
 | <code style={{ whiteSpace: 'nowrap' }}>apiKey</code><br />required, secret | Notion integration token. |
 | <code style={{ whiteSpace: 'nowrap' }}>baseUrl</code><br />default `'https://api.notion.com/v1'` | Notion API root; override to point at a fake or proxy. |
 | <code style={{ whiteSpace: 'nowrap' }}>apiVersion</code><br />default `'2025-09-03'` | `Notion-Version` header sent with every request; `ntn --notion-version` overrides it per line. |
-| <code style={{ whiteSpace: 'nowrap' }}>fullScanLimit</code><br />default `1000` | Most files one command walks under a folder: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit. |
+| <code style={{ whiteSpace: 'nowrap' }}>walkLimit</code><br />default `1000` | Most files one command walks under a folder: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit. |
 
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table notion end */}
@@ -54,7 +54,7 @@ await ws.shell('ls /notion/')
 | --- | --- |
 | <code style={{ whiteSpace: 'nowrap' }}>authProvider</code><br />required, secret | `OAuthClientProvider` from `@modelcontextprotocol/client` that authorizes the browser with Notion's MCP server. |
 | <code style={{ whiteSpace: 'nowrap' }}>serverUrl</code><br />default `'https://mcp.notion.com/mcp'` | Notion MCP endpoint; override to route MCP through your own URL. |
-| <code style={{ whiteSpace: 'nowrap' }}>fullScanLimit</code><br />default `1000` | Most files one command walks under a folder: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit. |
+| <code style={{ whiteSpace: 'nowrap' }}>walkLimit</code><br />default `1000` | Most files one command walks under a folder: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit. |
 
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table browser/notion end */}

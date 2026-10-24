@@ -103,7 +103,7 @@ async def test_reads_every_file_when_it_cannot_say(monkeypatch, text, under):
 
 async def test_a_listing_without_kept_text_reads_every_file(monkeypatch):
     _api(monkeypatch, EVENTS)
-    accessor = make_accessor(full_scan_limit=-1)
+    accessor = make_accessor(walk_limit=-1)
     out = await files_containing(accessor, "lunch", [spec("/")])
     assert out is None
 

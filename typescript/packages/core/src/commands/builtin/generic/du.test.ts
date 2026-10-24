@@ -90,9 +90,9 @@ describe('du', () => {
 
   it.each([
     [
-      ['/dir: stopped after 1 files (full_scan_limit); narrow the path'],
+      ['/dir: stopped after 1 files (walk_limit); narrow the path'],
       1,
-      'du: /dir: stopped after 1 files (full_scan_limit); narrow the path\n',
+      'du: /dir: stopped after 1 files (walk_limit); narrow the path\n',
     ],
     [[], 0, ''],
   ])('says where a walk was cut short and exits 1 (%j)', async (stopped, code, err) => {

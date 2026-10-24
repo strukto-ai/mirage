@@ -49,7 +49,7 @@ class LinearVFS(BaseVFS):
     def __init__(self, config: LinearConfig) -> None:
         super().__init__()
         self.config = config
-        self.full_scan_limit = config.full_scan_limit
+        self.walk_limit = config.walk_limit
         self.accessor = LinearAccessor(self.config)
 
     async def files_containing(
@@ -64,7 +64,7 @@ class LinearVFS(BaseVFS):
             self.accessor,
             text,
             [path],
-            ask_linear=whole_word and self.full_scan_limit >= 0,
+            ask_linear=whole_word and self.walk_limit >= 0,
         )
 
     async def readdir(

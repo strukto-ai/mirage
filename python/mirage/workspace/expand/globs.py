@@ -738,7 +738,7 @@ async def resolve_globs(
                     )
                     owner = _mount_of(registry, served, mount)
                     counts[owner.prefix] = counts.get(owner.prefix, 0) + 1
-                    limit = owner.vfs.full_scan_limit
+                    limit = owner.vfs.walk_limit
                     if 0 <= limit < counts[owner.prefix]:
                         refused = GlobLimitError(
                             unmark_globs(typed.raw_path), limit

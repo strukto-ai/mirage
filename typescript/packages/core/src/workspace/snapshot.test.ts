@@ -312,20 +312,20 @@ describe('Workspace.snapshot / Workspace.load', () => {
   })
 })
 
-// Twin of test_a_rebuilt_local_mount_keeps_its_full_scan_limit.
+// Twin of test_a_rebuilt_local_mount_keeps_its_walk_limit.
 describe('a rebuilt RAM mount', () => {
-  it.each([2, -1])('keeps its full scan limit (%d)', async (limit) => {
+  it.each([2, -1])('keeps its walk limit (%d)', async (limit) => {
     const ws = new Workspace(
-      { '/d': new RAMVFS({ fullScanLimit: limit }) },
+      { '/d': new RAMVFS({ walkLimit: limit }) },
       { mode: MountMode.WRITE, shellParser: parser },
     )
     const copied = await ws.copy()
     const restored = await Workspace.fromState(await toStateDict(ws), { shellParser: parser })
     try {
-      expect([
-        copied.mount('/d/').vfs.fullScanLimit,
-        restored.mount('/d/').vfs.fullScanLimit,
-      ]).toEqual([limit, limit])
+      expect([copied.mount('/d/').vfs.walkLimit, restored.mount('/d/').vfs.walkLimit]).toEqual([
+        limit,
+        limit,
+      ])
     } finally {
       await Promise.all([ws.close(), copied.close(), restored.close()])
     }
@@ -685,8 +685,8 @@ describe('cli registry snapshot', () => {
     // refuses a subclass field the caller set.
     const ws = buildWorkspace()
     const config: GDocsConfig = { clientId: 'id', clientSecret: 'sec', refreshToken: 'tok' }
-    expect(() => ws.registerCli('gws', GWS, { ...config, fullScanLimit: 1000 })).toThrow(
-      "CLI 'gws': unknown config keys: fullScanLimit",
+    expect(() => ws.registerCli('gws', GWS, { ...config, walkLimit: 1000 })).toThrow(
+      "CLI 'gws': unknown config keys: walkLimit",
     )
     ws.registerCli('gws', GWS, { ...config })
     const clone = await ws.copy()

@@ -32,7 +32,7 @@ ws = Workspace({"/slack": vfs}, mode=MountMode.READ)
 | <code style={{ whiteSpace: 'nowrap' }}>token</code><br />required, secret | Slack token every API call sends: a bot token (`xoxb-`) or a user token (`xoxp-`). |
 | <code style={{ whiteSpace: 'nowrap' }}>search_token</code><br />secret | User token (`xoxp-`) with `search:read`, used only for Slack's `search.*` methods, which refuse a bot token. Unset searches with `token`. |
 | <code style={{ whiteSpace: 'nowrap' }}>base_url</code><br />default `'https://slack.com/api'` | Slack Web API root; override to point at a fake or proxy. |
-| <code style={{ whiteSpace: 'nowrap' }}>full_scan_limit</code><br />default `1000` | Most files one command walks under a folder: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit and reads every file without asking Slack search, which lags posts and covers only message text, file names, titles and reactions. |
+| <code style={{ whiteSpace: 'nowrap' }}>walk_limit</code><br />default `1000` | Most files one command walks under a folder: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit and reads every file without asking Slack search, which lags posts and covers only message text, file names, titles and reactions. |
 
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table slack end */}
@@ -284,7 +284,7 @@ messages or finds nothing. With a separate `search_token`, every day is also rea
 when the scope holds a private channel or a DM that token's user is not in (a
 bot's own DMs), since their search never sees it; that token needs
 `channels:read`, `groups:read`, `im:read` and `mpim:read` to list the
-conversations it sees. `full_scan_limit: -1` reads every file instead, since Slack indexes a message some
+conversations it sees. `walk_limit: -1` reads every file instead, since Slack indexes a message some
 time after it is posted, and a word held only in another field of a message (a
 bot's username, an unfurled link) is not searched.
 

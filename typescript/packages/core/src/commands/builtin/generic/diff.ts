@@ -37,7 +37,7 @@ import { followedStat } from '../../../view/namespace_view.ts'
 import { extraOperandError, missingOperandError, usageHint } from '../../spec/usage.ts'
 import { isStdin, stdinStat, stdinStream } from '../utils/stream.ts'
 import { UsageError } from '../../errors.ts'
-import { beforeFullScan } from '../utils/tree.ts'
+import { beforeFullWalk } from '../utils/tree.ts'
 import { CommandName, type FlagValue } from '../../spec/types.ts'
 import { compareCodePoints } from '../../../utils/sort.ts'
 import { fnmatch } from '../../../utils/fnmatch.ts'
@@ -524,7 +524,7 @@ export async function diffGeneric(
       const bothDirs =
         (await stat(p0)).type === FileType.DIRECTORY && (await stat(p1)).type === FileType.DIRECTORY
       if (bothDirs) {
-        for (const path of [p0, p1]) await beforeFullScan(dispatchOf(ctx), path, 'diff')
+        for (const path of [p0, p1]) await beforeFullWalk(dispatchOf(ctx), path, 'diff')
         ;[output, differ] = await diffDirs(walk, p0, p1)
       }
     }

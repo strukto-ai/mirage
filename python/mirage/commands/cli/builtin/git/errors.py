@@ -224,18 +224,18 @@ class NotAWorkTreeError(GitError):
 
 
 class WorkTreeLimitError(GitError):
-    """A work tree holding more files than its mount's ``full_scan_limit``.
+    """A work tree holding more files than its mount's ``walk_limit``.
 
     The scan stops there, and a status or an add over part of the tree
     would read as one over all of it, so the verb fails instead.
 
     Args:
-        limit (int): the mount's ``full_scan_limit``.
+        limit (int): the mount's ``walk_limit``.
     """
 
     def __init__(self, limit: int) -> None:
         super().__init__(
-            f"more than {limit} files in the work tree (full_scan_limit)"
+            f"more than {limit} files in the work tree (walk_limit)"
         )
 
 

@@ -76,7 +76,7 @@ VFS_FUNCTIONS = (
     "search_many",
     "files_containing",
     "lines_containing",
-    "before_full_scan",
+    "before_full_walk",
     "is_mounted",
 )
 

@@ -41,7 +41,7 @@ ws = Workspace({"/remote": vfs}, mode=MountMode.WRITE)
 | <code style={{ whiteSpace: 'nowrap' }}>root</code><br />default `'/'` | Path on the remote that becomes the mount root. |
 | <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `30` | Seconds to wait for the TCP connection, and again for authentication. |
 | <code style={{ whiteSpace: 'nowrap' }}>known_hosts</code> | Path to a `known_hosts` file the server's host key is checked against; unset disables host-key checking. |
-| <code style={{ whiteSpace: 'nowrap' }}>full_scan_limit</code><br />default `1000` | Most files one command walks under a folder: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit. |
+| <code style={{ whiteSpace: 'nowrap' }}>walk_limit</code><br />default `1000` | Most files one command walks under a folder: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit. |
 
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table ssh end */}

@@ -33,7 +33,7 @@ from starlette.status import WS_1011_INTERNAL_ERROR
 
 from mirage import Workspace
 from mirage.commands.builtin.utils.links import link_view, mount_view
-from mirage.commands.builtin.utils.tree import ScanBudget
+from mirage.commands.builtin.utils.tree import WalkBudget
 from mirage.errors import FsCondition, classify
 from mirage.errors.classify import failure_text
 from mirage.errors.fs import eexist, enoent
@@ -352,7 +352,7 @@ async def walk(core: MountCore, root: str, options: Message) -> Message:
 
     Depth 0 is the root's own entries. A directory that cannot be read
     is reported under ``errors`` and the walk goes on. Each mount lists
-    at most its ``full_scan_limit`` entries, counted where a link
+    at most its ``walk_limit`` entries, counted where a link
     leads, as a shell walk does, and the walk is truncated there.
 
     Args:
@@ -375,7 +375,7 @@ async def walk(core: MountCore, root: str, options: Message) -> Message:
     result: Message = {"entries": entries, "errors": errors}
     if not stat.S_ISDIR((await followed(core, root)).mode):
         return {**result, "truncated": False}
-    budget = ScanBudget(
+    budget = WalkBudget(
         PathSpec.from_str_path(core.resolve(root)),
         mount_view(core.files, crossing=True),
     )

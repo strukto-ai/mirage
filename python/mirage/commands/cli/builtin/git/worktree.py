@@ -121,14 +121,14 @@ class Scanner:
             relative (str): repository-relative path of the file.
 
         Raises:
-            WorkTreeLimitError: the mount's ``full_scan_limit`` is spent.
+            WorkTreeLimitError: the mount's ``walk_limit`` is spent.
         """
         if self._roots is not None and relative in self._roots:
             return
-        if self._mounts is None or self._mounts.full_scan_limit is None:
+        if self._mounts is None or self._mounts.walk_limit is None:
             return
         virtual = self._absolute(relative).virtual
-        limit = self._mounts.full_scan_limit(virtual)
+        limit = self._mounts.walk_limit(virtual)
         root = self._mounts.root_of(virtual)
         if 0 <= limit <= self._counted.get(root, 0):
             raise WorkTreeLimitError(limit)

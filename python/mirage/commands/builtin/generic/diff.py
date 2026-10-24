@@ -19,7 +19,7 @@ from mirage.commands.builtin.utils.stream import (
     stdin_bytes,
     stdin_stat,
 )
-from mirage.commands.builtin.utils.tree import before_full_scan
+from mirage.commands.builtin.utils.tree import before_full_walk
 from mirage.commands.config import Context
 from mirage.commands.errors import UsageError
 from mirage.commands.spec import SPECS
@@ -552,7 +552,7 @@ async def diff(
             ).type == FileType.DIRECTORY
         if both_dirs:
             for path in paths:
-                await before_full_scan(dispatch, path, "diff")
+                await before_full_walk(dispatch, path, "diff")
             output, differ = await _diff_dirs(paths[0], paths[1], walk)
         else:
             result = await _diff_pair(paths[0], paths[1], walk, absent)

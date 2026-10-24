@@ -291,10 +291,10 @@ class ListedRAMVFS extends RAMVFS {
   }
 }
 
-/** A local fixture holding a full scan to `fullScanLimit` files. */
+/** A local fixture holding each walk to `walkLimit` files. */
 class LimitedRAMVFS extends RAMVFS {
-  constructor(files: Record<string, string>, fullScanLimit: number) {
-    super({ fullScanLimit })
+  constructor(files: Record<string, string>, walkLimit: number) {
+    super({ walkLimit })
     const dirs = new Set(['/'])
     for (const path of Object.keys(files)) {
       const parts = path.split('/')
@@ -451,7 +451,7 @@ for (const register of [registerNodeVfs, registerBrowserVfs]) {
     Promise.resolve(
       new LimitedRAMVFS(
         (config.files ?? {}) as Record<string, string>,
-        (config.full_scan_limit as number | undefined) ?? -1,
+        (config.walk_limit as number | undefined) ?? -1,
       ),
     ),
   )

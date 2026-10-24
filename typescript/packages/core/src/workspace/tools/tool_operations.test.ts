@@ -94,16 +94,16 @@ describe('edit', () => {
 })
 
 describe('glob', () => {
-  // Twin of test_glob_past_the_full_scan_limit_says_why.
-  it('says why past the full_scan_limit', async () => {
+  // Twin of test_glob_past_the_walk_limit_says_why.
+  it('says why past the walk_limit', async () => {
     const limited = new Workspace(
-      { '/': new RAMVFS({ fullScanLimit: 2 }) },
+      { '/': new RAMVFS({ walkLimit: 2 }) },
       { mode: MountMode.WRITE, shellParser },
     ).tools
     for (const name of ['a', 'b', 'c']) await limited.write(`/${name}.py`, 'x')
     const result = await limited.glob('*.py', '/')
     expect([result.content[0]?.text, result.isError]).toEqual([
-      '/*.py: matches more than 2 files (full_scan_limit); narrow the path',
+      '/*.py: matches more than 2 files (walk_limit); narrow the path',
       true,
     ])
   })

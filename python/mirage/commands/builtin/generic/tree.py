@@ -8,7 +8,7 @@ from mirage.commands.builtin.utils.links import links_of, mounts_of
 from mirage.commands.builtin.utils.output import format_records
 from mirage.commands.builtin.utils.paths import vfs_readdir_path, vfs_stat_path
 from mirage.commands.builtin.utils.strtol import c_int, strtoul
-from mirage.commands.builtin.utils.tree import ScanBudget
+from mirage.commands.builtin.utils.tree import WalkBudget
 from mirage.commands.config import Context
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
@@ -129,7 +129,7 @@ async def _walk_tree(
     cross_readdir: Readdir | None = None,
     cross_stat: Stat | None = None,
     target_stat: LinkTargetStat | None = None,
-    budget: ScanBudget | None = None,
+    budget: WalkBudget | None = None,
 ) -> tuple[list[str], int, int, int]:
     """One directory's lines, its counts, and how many directories in
     its subtree (itself included) could not be opened.
@@ -366,7 +366,7 @@ async def tree(
                 total_files += 1
                 continue
         warnings: list[str] = []
-        budget = ScanBudget(path, mounts)
+        budget = WalkBudget(path, mounts)
         lines, dirs, files, unopened = await _walk_tree(
             path,
             readdir,
@@ -407,7 +407,7 @@ async def tree(
     # A blank line and the one summary close the run (the file count is
     # omitted under -d).
     body += ["", _summary(total_dirs, total_files, dirs_only)]
-    # A walk past full_scan_limit draws what it listed and says where it
+    # A walk past walk_limit draws what it listed and says where it
     # stopped, exiting 2 as for a directory it could not open.
     return format_records(body), IOResult(
         exit_code=2 if failed or stopped else 0,

@@ -53,7 +53,7 @@ class HfBucketsVFS(BaseVFS):
     def __init__(self, config: HfBucketsConfig) -> None:
         super().__init__()
         self.config = config
-        self.full_scan_limit = config.full_scan_limit
+        self.walk_limit = config.walk_limit
         self.accessor = HfBucketsAccessor(self.config)
 
     async def readdir(self, path: PathSpec) -> list[FileStat]:

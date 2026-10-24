@@ -3,7 +3,6 @@ from functools import partial
 
 from mirage.accessor.s3 import S3Accessor
 from mirage.cache.index.ram import RAMIndexCacheStore
-from mirage.core.s3.constants import SCOPE_ERROR
 from mirage.core.s3.copy import copy
 from mirage.core.s3.exists import exists
 from mirage.core.s3.read import read
@@ -26,7 +25,7 @@ async def _listed(accessor, path, index=None):
 
 
 def resolve_glob(accessor, paths, index=None):
-    return make_resolve_glob(partial(_listed, accessor), SCOPE_ERROR)(paths)
+    return make_resolve_glob(partial(_listed, accessor))(paths)
 
 
 PREFIX = "users/abc/"

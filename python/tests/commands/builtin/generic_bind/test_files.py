@@ -198,10 +198,10 @@ async def test_a_mount_reads_the_stored_bytes_and_a_run_across_renders():
 @pytest.mark.asyncio
 async def test_a_glob_past_its_mounts_limit_is_refused_and_none_is_stdin():
     backend = Backend(stored={f"/f{i}.txt": b"" for i in range(3)})
-    row = _row("/", full_scan_limit=2)
+    row = _row("/", walk_limit=2)
     with _on_mount():
         capped = _files(_ctx(backend, row))
-        roomy = _files(_ctx(backend, _row("/", full_scan_limit=3)))
+        roomy = _files(_ctx(backend, _row("/", walk_limit=3)))
     across = _files(_ctx(backend, row))
     spec = PathSpec(
         virtual="/*.txt",
@@ -214,8 +214,7 @@ async def test_a_glob_past_its_mounts_limit_is_refused_and_none_is_stdin():
         with pytest.raises(GlobLimitError) as refused:
             await resolve_or_empty(files, [spec])
         assert str(refused.value) == (
-            "/*.txt: matches more than 2 files (full_scan_limit); "
-            "narrow the path"
+            "/*.txt: matches more than 2 files (walk_limit); narrow the path"
         )
     assert len(await resolve_or_empty(roomy, [spec])) == 3
     assert await resolve_or_empty(capped, []) == []

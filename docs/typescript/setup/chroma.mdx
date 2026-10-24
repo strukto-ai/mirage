@@ -55,5 +55,5 @@ filtering locally, so recursive searches avoid fetching the whole collection.
 | <code style={{ whiteSpace: 'nowrap' }}>collectionName</code><br />required | Name of the existing Chroma collection to mount. |
 | <code style={{ whiteSpace: 'nowrap' }}>slugField</code><br />default `'page_slug'` | Chunk metadata key that holds the path of the file a chunk belongs to, relative to the mount root (`guides/quickstart.md`). |
 | <code style={{ whiteSpace: 'nowrap' }}>chunkIndexField</code><br />default `'chunk_index'` | Chunk metadata key whose integer orders a file's chunks; a chunk without one sorts as `0`. |
-| <code style={{ whiteSpace: 'nowrap' }}>fullScanLimit</code><br />default `1000` | Most files one command walks under a folder: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit. |
+| <code style={{ whiteSpace: 'nowrap' }}>walkLimit</code><br />default `1000` | Most files one command walks under a folder: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit. |
 {/* generated: config-table chroma end */}

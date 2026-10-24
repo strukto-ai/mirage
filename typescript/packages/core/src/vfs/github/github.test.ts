@@ -37,9 +37,9 @@ import { RAMVFS } from '../ram/ram.ts'
 import { GitHubVFS } from './github.ts'
 
 const DEC = new TextDecoder()
-const REFUSED_AT_4 = 'more than 4 files in scope (full_scan_limit); narrow the path\n'
+const REFUSED_AT_4 = 'more than 4 files in scope (walk_limit); narrow the path\n'
 
-const STOPPED_AT_4 = 'stopped after 4 files (full_scan_limit); narrow the path\n'
+const STOPPED_AT_4 = 'stopped after 4 files (walk_limit); narrow the path\n'
 const TREE: GitHubTreeItem[] = [
   { path: 'top.txt', type: 'blob', sha: 'a', size: 2 },
   { path: 'empty', type: 'tree', sha: 'b' },
@@ -162,7 +162,7 @@ async function run(vfs: GitHubVFS | RAMVFS, line: string): Promise<Ran> {
 }
 
 function ram(limit = 10000): RAMVFS {
-  const vfs = new RAMVFS({ fullScanLimit: limit })
+  const vfs = new RAMVFS({ walkLimit: limit })
   const enc = new TextEncoder()
   for (const [key, data] of Object.entries(REPO)) {
     const parts = key.split('/')
@@ -178,7 +178,7 @@ async function onGithub(
   line: string,
   hub = new FakeGitHub(REPO),
   pinned = false,
-  fullScanLimit = 5000,
+  walkLimit = 5000,
 ): Promise<[Ran, FakeGitHub]> {
   vi.stubGlobal('fetch', hub.fetch)
   const ref = pinned ? { ref: await hub.head() } : {}
@@ -187,7 +187,7 @@ async function onGithub(
     owner: 'o',
     repo: 'r',
     baseUrl: hub.url,
-    fullScanLimit,
+    walkLimit,
     ...ref,
   })
   hub.log.length = 0
@@ -302,11 +302,7 @@ describe('grep and rg over code search', () => {
   // Twin of test_an_archive_past_the_scope_cap_is_refused.
   it('refuses an archive past the scope cap', async () => {
     const [got, hub] = await onGithub('tar -cf - /gh/src', new FakeGitHub(REPO), false, 1)
-    expect(got).toEqual([
-      '',
-      'tar: more than 1 files in scope (full_scan_limit); narrow the path\n',
-      1,
-    ])
+    expect(got).toEqual(['', 'tar: more than 1 files in scope (walk_limit); narrow the path\n', 1])
     expect(hub.count('blob')).toBe(0)
   })
 
@@ -317,7 +313,7 @@ describe('grep and rg over code search', () => {
     ['/r/gh', '', 5],
   ])('counts the refetched tree after an expiry at %s%s', async (prefix, sub, count) => {
     // One under the refetched count: a count off the expired tree is smaller,
-    // and would let the scan run.
+    // and would let the walk run.
     const hub = new FakeGitHub({ 'docs/a.txt': 'a', 'docs/b.txt': 'b', 'top.txt': 't' })
     vi.stubGlobal('fetch', hub.fetch)
     const vfs = await GitHubVFS.create({
@@ -325,7 +321,7 @@ describe('grep and rg over code search', () => {
       owner: 'o',
       repo: 'r',
       baseUrl: hub.url,
-      fullScanLimit: count - 1,
+      walkLimit: count - 1,
     })
     const ws = new Workspace(
       { [prefix]: new Mount(vfs, { mode: MountMode.READ }) },
@@ -340,7 +336,7 @@ describe('grep and rg over code search', () => {
       const target = `${prefix}${sub}`
       const result = await ws.shell(`diff -r ${target} ${target}`)
       expect(DEC.decode(result.stderr)).toBe(
-        `diff: more than ${String(count - 1)} files in scope (full_scan_limit); narrow the path\n`,
+        `diff: more than ${String(count - 1)} files in scope (walk_limit); narrow the path\n`,
       )
       expect(hub.counts()).toEqual([0, 1, 0])
     } finally {
@@ -374,7 +370,7 @@ describe('grep and rg over code search', () => {
     const [got, hub] = await onGithub('grep -rw import /gh', new FakeGitHub(REPO), false, 2)
     expect(got).toEqual([
       '/gh/big.txt:import\n',
-      'grep: /gh: stopped after 2 files (full_scan_limit); narrow the path\n',
+      'grep: /gh: stopped after 2 files (walk_limit); narrow the path\n',
       2,
     ])
     expect(await read(hub)).toEqual(['big.txt', 'docs/c.md'])

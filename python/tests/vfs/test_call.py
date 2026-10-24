@@ -121,7 +121,7 @@ def test_only_the_posix_calls_remove_move_or_copy_a_name(effect, names):
 # one language fails the other language's test.
 BUILT_INS = {
     "append": (Effect.WRITE, Target.FILE, True),
-    "before_full_scan": (Effect.READ, Target.DIR, False),
+    "before_full_walk": (Effect.READ, Target.DIR, False),
     "checksum": (Effect.READ, Target.FILE, False),
     "copy": (Effect.COPY, Target.FILE, False),
     "create": (Effect.WRITE, Target.FILE, True),

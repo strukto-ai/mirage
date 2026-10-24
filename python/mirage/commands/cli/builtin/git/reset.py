@@ -151,7 +151,7 @@ async def reset(
         for key in visible_entries(location, state.conflicts):
             state.conflicts.pop(key)
     # The tree is walked before the index is written, so a work tree past
-    # its full_scan_limit leaves the index as it was.
+    # its walk_limit leaves the index as it was.
     found = await scan(
         vfs,
         location,

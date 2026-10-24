@@ -65,7 +65,7 @@ import { escapeName } from '../../../utils/quote.ts'
 import { charWidth } from '../../../utils/width.ts'
 import { linksOf, mountsOf, owedNames } from '../utils/links.ts'
 import { vfsStatPath } from '../utils/paths.ts'
-import { ScanBudget } from '../utils/tree.ts'
+import { WalkBudget } from '../utils/tree.ts'
 import { openStream } from '../../../rs/stream.ts'
 import { concat } from '../../../utils/bytes.ts'
 import { streamConfig } from './sort.ts'
@@ -125,7 +125,7 @@ interface WalkOpts {
   statNeeded: boolean
   // Under -R, the entries the walk of this operand may still list; a
   // directory past it is listed in its parent but not opened.
-  budget?: ScanBudget
+  budget?: WalkBudget
 }
 
 // One ls operand once its kind is known. `row` is set when the operand is not
@@ -1277,7 +1277,7 @@ export async function lsGeneric(
   }
   const probed: Operand[] = []
   for (const p of targets) {
-    const budget = recursive ? new ScanBudget(p, walkOpts.mounts) : undefined
+    const budget = recursive ? new WalkBudget(p, walkOpts.mounts) : undefined
     const opts = budget === undefined ? walkOpts : { ...walkOpts, budget }
     probed.push(await probeOperand(readdir, stat, p, opts, warnings, true))
     for (const line of budget?.stopped ?? []) {

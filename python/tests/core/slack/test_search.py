@@ -85,7 +85,7 @@ async def test_search_messages_forwards_explicit_count_and_page():
 )
 async def test_a_word_reads_only_the_days_search_names(slack, line, reads):
     # A file hit names every day a message shares it, not its upload.
-    full = await slack(line, full_scan_limit=-1)
+    full = await slack(line, walk_limit=-1)
     out, code, read, _ = await slack(line)
     assert (out, code) == full[:2]
     assert read == reads
@@ -94,7 +94,7 @@ async def test_a_word_reads_only_the_days_search_names(slack, line, reads):
 @pytest.mark.asyncio
 async def test_a_day_is_read_rather_than_searched(slack):
     line = "grep -rlw deploy /slack/channels/general__C1/2025-11-06"
-    full = await slack(line, full_scan_limit=-1)
+    full = await slack(line, walk_limit=-1)
     fake = FakeSlack()
     out, code, read, searches = await slack(line, fake)
     assert (out, code, read) == full[:3]
@@ -174,7 +174,7 @@ async def test_a_channel_is_searched_by_name_and_reactions_too(slack):
     ],
 )
 async def test_every_day_is_read_when_search_cannot_answer(slack, line, fake):
-    full = await slack(line, full_scan_limit=-1)
+    full = await slack(line, walk_limit=-1)
     out, code, read, _ = await slack(line, fake)
     assert (out, code, read) == full[:3]
 
@@ -190,7 +190,7 @@ async def test_every_day_is_read_when_search_cannot_answer(slack, line, fake):
 async def test_a_channel_the_search_user_is_not_in_is_read(slack, line):
     # random is private and the search token's user is not in it, so no
     # search names its days; ruling them out would miss its deploy.
-    full = await slack(line, full_scan_limit=-1)
+    full = await slack(line, walk_limit=-1)
     hidden = FakeSlack(hidden=frozenset({"C2"}))
     out, code, read, _ = await slack(line, hidden, search_token=SEARCHER)
     assert (out, code, read) == full[:3]
@@ -203,7 +203,7 @@ async def test_a_channel_the_search_user_is_not_in_is_read(slack, line):
 async def test_a_dm_the_search_user_is_not_in_is_read(slack, line):
     # The listing's token holds a DM the search token's user is not in (a
     # bot's own DM), so no search names its days.
-    full = await slack(line, full_scan_limit=-1)
+    full = await slack(line, walk_limit=-1)
     hidden = FakeSlack(hidden=frozenset({"D1"}))
     out, code, read, _ = await slack(line, hidden, search_token=SEARCHER)
     assert (out, code, read) == full[:3]

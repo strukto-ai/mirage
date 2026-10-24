@@ -134,7 +134,7 @@ def failure(exc: Exception) -> JSONResponse:
         exc (Exception): what the call raised.
     """
     if isinstance(exc, TooManyMatches):
-        # A glob past its mount's full_scan_limit says so in words that
+        # A glob past its mount's walk_limit says so in words that
         # carry nothing private, so the caller learns why.
         return JSONResponse(status_code=400, content={"detail": exc.reason})
     condition = classify(exc)

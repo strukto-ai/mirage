@@ -42,7 +42,7 @@ PROMPT = """\
   Messages are JSONL; use jq to extract fields like .text, .user, .ts, .files.
   .user is a user ID (U…), not a username; resolve it through
   users/<username>__<user-id>.json and filter messages by the ID.
-  Unless full_scan_limit is -1, grep -rw and rg -w read only the channel
+  Unless walk_limit is -1, grep -rw and rg -w read only the channel
   and DM days Slack search names; attachments under files/ are always read."""
 
 WRITE_PROMPT = """\

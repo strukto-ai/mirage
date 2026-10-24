@@ -81,7 +81,7 @@ function linkTable(entries: Record<string, string>, cycles = false): NamespaceLi
 }
 
 // The session's files over one RAM mount and a link table: the dispatcher
-// answers from the mount itself, which a walk's scan guard never refuses.
+// answers from the mount itself, which a walk guard never refuses.
 function filesOver(vfs: RAMVFS, links: NamespaceLinks): Files {
   const dispatch: DispatchFn = async (op, path, args = [], kwargs = {}) => {
     if (op === 'stat') return [await vfs.stat(path), new IOResult()]
@@ -94,7 +94,7 @@ function filesOver(vfs: RAMVFS, links: NamespaceLinks): Files {
       const data = await vfs.read(path, {})
       return [kwargs.stream === true ? [data] : data, new IOResult()]
     }
-    if (op === 'before_full_scan' || op === 'read_many') return [null, new IOResult()]
+    if (op === 'before_full_walk' || op === 'read_many') return [null, new IOResult()]
     if (op === 'write') {
       await vfs.write(path, await materialize(args[0] as ByteSource))
       return [null, new IOResult()]

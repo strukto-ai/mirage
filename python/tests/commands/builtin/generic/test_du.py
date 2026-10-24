@@ -92,10 +92,9 @@ async def test_backend_error_on_the_content_probe_reads_as_missing():
     "stopped,code,err",
     [
         (
-            ["/dir: stopped after 1 files (full_scan_limit); narrow the path"],
+            ["/dir: stopped after 1 files (walk_limit); narrow the path"],
             1,
-            b"du: /dir: stopped after 1 files (full_scan_limit); "
-            b"narrow the path\n",
+            b"du: /dir: stopped after 1 files (walk_limit); narrow the path\n",
         ),
         ([], 0, b""),
     ],

@@ -77,7 +77,7 @@ mounts:
       token: ${GITHUB_TOKEN}
       owner: strukto-ai
       repo: mirage
-      full_scan_limit: 2000
+      walk_limit: 2000
   /scratch:
     vfs: ram
     mode: write
@@ -87,7 +87,7 @@ mounts:
   `/scratch` does.
 - `${NAME}` is read from the environment when the config loads, so keys stay
   out of the file. A missing variable is an error.
-- `full_scan_limit` is the most files one command walks on that mount.
+- `walk_limit` is the most files one command walks on that mount.
 
 ```bash
 mirage workspace create workspace.yaml --id work

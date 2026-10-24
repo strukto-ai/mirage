@@ -235,9 +235,9 @@ class CountingGmail extends GmailVFS {
 
 type Ran = [string, number, string[], string[]]
 
-async function onGmail(line: string, fake = new FakeGmail(), fullScanLimit = 1000): Promise<Ran> {
+async function onGmail(line: string, fake = new FakeGmail(), walkLimit = 1000): Promise<Ran> {
   vi.stubGlobal('fetch', fake.fetch)
-  const vfs = new CountingGmail({ accessToken: 't', apiBase: BASE, fullScanLimit })
+  const vfs = new CountingGmail({ accessToken: 't', apiBase: BASE, walkLimit })
   const ws = new Workspace(
     { '/gmail': new Mount(vfs, { mode: MountMode.READ }) },
     { shellParser: await getTestParser() },

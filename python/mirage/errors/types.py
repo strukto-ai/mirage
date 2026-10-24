@@ -94,21 +94,19 @@ class WalkDeclinedError(OperationNotSupportedError):
 
 class GlobLimitError(Exception):
     """A glob that matches more paths than its mount's
-    ``full_scan_limit``. The line is refused rather than run on part of
+    ``walk_limit``. The line is refused rather than run on part of
     what it names, as exec(2) refuses an argument list too long.
 
     Args:
         word (str): the glob as typed.
-        limit (int): the limit it passed.
+        limit (int): the mount's ``walk_limit``.
     """
 
     def __init__(self, word: str, limit: int) -> None:
         super().__init__(
-            f"{word}: matches more than {limit} files (full_scan_limit); "
+            f"{word}: matches more than {limit} files (walk_limit); "
             "narrow the path"
         )
-        self.word = word
-        self.limit = limit
 
 
 class ReadOnlyError(PermissionError):

@@ -128,7 +128,7 @@ class MountedVFS {
 
   /** Expand a pattern over this VFS's listings, as a shell glob walks them. */
   glob(path: PathSpec): Promise<PathSpec[]> {
-    return makeResolveGlob((p) => this.readdir(p), this.vfs.fullScanLimit)([path])
+    return makeResolveGlob((p) => this.readdir(p), this.vfs.walkLimit)([path])
   }
 
   async write(path: PathSpec, data: Uint8Array): Promise<void> {
@@ -214,8 +214,8 @@ type Answer = (path: PathSpec, args: readonly unknown[], kwargs: OpKwargs) => un
 /**
  * Files whose dispatcher answers each op `answers` names, and refuses any
  * other the way a mount without that function does (ENOTSUP), except
- * `before_full_scan`, which passes as it does on a mount with no
- * `fullScanLimit`: a command's files over a fake backend, for a test that
+ * `before_full_walk`, which passes as it does on a mount with no
+ * `walkLimit`: a command's files over a fake backend, for a test that
  * drives a builder alone. `rows`
  * is the mount table (`readers`), `links` the namespace's link table. Mirrors
  * Python's `tests/fixtures/answers.Answers`.
@@ -228,7 +228,7 @@ export function answeringFiles(
 ): Files {
   const dispatch: DispatchFn = async (name, path, args = [], kwargs = {}) => {
     const answer = answers[name]
-    if (answer === undefined && name === 'before_full_scan') return [null, new IOResult()]
+    if (answer === undefined && name === 'before_full_walk') return [null, new IOResult()]
     if (answer === undefined) throw enotsup('fake', name, path)
     return [await answer(path, args, kwargs), new IOResult()]
   }

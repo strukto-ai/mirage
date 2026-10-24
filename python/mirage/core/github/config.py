@@ -14,7 +14,7 @@
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr
 
-from mirage.core.github.constants import SCOPE_ERROR
+from mirage.core.github.constants import WALK_LIMIT
 
 
 class GitHubConfig(BaseModel):
@@ -38,7 +38,7 @@ class GitHubConfig(BaseModel):
     base_url: str | None = None
     """GitHub API root. Unset uses `https://api.github.com`; set it for
     GitHub Enterprise."""
-    full_scan_limit: int = Field(default=SCOPE_ERROR, ge=-1)
+    walk_limit: int = Field(default=WALK_LIMIT, ge=-1)
     """Most files one command walks under a folder, each file read one blob
     request: `grep -r`, `find` and other walks stop there, and a larger glob,
     `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit and reads

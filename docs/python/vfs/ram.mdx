@@ -22,7 +22,7 @@ ws = Workspace({"/data": vfs}, mode=MountMode.WRITE)
 
 | Field | Default | Notes |
 | --- | --- | --- |
-| `full_scan_limit` | `10000` | Most files one command walks under a folder: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit. |
+| `walk_limit` | `10000` | Most files one command walks under a folder: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit. |
 
 ## Filesystem Layout
 

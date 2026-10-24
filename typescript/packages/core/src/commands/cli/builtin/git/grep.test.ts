@@ -19,10 +19,10 @@ import { RAMVFS } from '../../../../vfs/ram/ram.ts'
 import { Workspace } from '../../../../workspace/workspace/workspace.ts'
 import { GIT } from './index.ts'
 
-const STOPPED = 'fatal: stopped after 2 files (full_scan_limit); narrow the pathspec\n'
+const STOPPED = 'fatal: stopped after 2 files (walk_limit); narrow the pathspec\n'
 
 // Twin of test_grep.py.
-describe('git grep past the full scan limit', () => {
+describe('git grep past the walk limit', () => {
   it.each([
     ['grep -e e', 128, 'a.txt:one changed\n', STOPPED],
     ['grep --cached -e e', 128, 'a.txt:one changed\n', STOPPED],
@@ -30,7 +30,7 @@ describe('git grep past the full scan limit', () => {
     ['grep -q -e one', 0, '', ''],
   ])('git %s', async (line, code, out, err) => {
     const ws = new Workspace(
-      { '/repo': new RAMVFS({ fullScanLimit: 2 }) },
+      { '/repo': new RAMVFS({ walkLimit: 2 }) },
       { mode: MountMode.WRITE, shellParser: await getTestParser() },
     )
     ws.registerCli('git', GIT)
@@ -56,7 +56,7 @@ describe('git grep over a work tree on another mount', () => {
     ['--cached ', 'a.txt:one\nc.txt:three\n0\n', ''],
   ])('git grep %s-e e', async (flag, out, err) => {
     const ws = new Workspace(
-      { '/meta': new RAMVFS({ fullScanLimit: -1 }), '/data': new RAMVFS({ fullScanLimit: 2 }) },
+      { '/meta': new RAMVFS({ walkLimit: -1 }), '/data': new RAMVFS({ walkLimit: 2 }) },
       { mode: MountMode.WRITE, shellParser: await getTestParser() },
     )
     ws.registerCli('git', GIT)

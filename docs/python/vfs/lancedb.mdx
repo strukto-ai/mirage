@@ -59,7 +59,7 @@ The mapping is config-driven; nothing about the dataset is hardcoded. Point
 | <code style={{ whiteSpace: 'nowrap' }}>vector_column</code> | Embedding column left out of cards and listings. |
 | <code style={{ whiteSpace: 'nowrap' }}>search_limit</code><br />default `10` | Results `search` returns when `--top-k` is not given. |
 | <code style={{ whiteSpace: 'nowrap' }}>max_rows</code><br />default `1000` | Most rows one folder listing reads; rows past it are left out, and a group folder lists only the values those rows carry. |
-| <code style={{ whiteSpace: 'nowrap' }}>full_scan_limit</code><br />default `1000` | Most files one command walks under a folder: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit. |
+| <code style={{ whiteSpace: 'nowrap' }}>walk_limit</code><br />default `1000` | Most files one command walks under a folder: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit. |
 
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table lancedb end */}

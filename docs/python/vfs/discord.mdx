@@ -28,7 +28,7 @@ ws = Workspace({"/discord": vfs}, mode=MountMode.READ)
 | <code style={{ whiteSpace: 'nowrap' }}>end_time</code> | End of the mount's time scope, exclusive, in the same format as `start_time`, which it must follow. Unset leaves the end open. |
 | <code style={{ whiteSpace: 'nowrap' }}>token</code><br />required, secret | Discord bot token, sent as `Authorization: Bot <token>`. |
 | <code style={{ whiteSpace: 'nowrap' }}>base_url</code> | Discord API root. Unset uses `https://discord.com/api/v10`; set it to point at a fake or proxy. |
-| <code style={{ whiteSpace: 'nowrap' }}>full_scan_limit</code><br />default `1000` | Most files one command walks under a folder: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit. |
+| <code style={{ whiteSpace: 'nowrap' }}>walk_limit</code><br />default `1000` | Most files one command walks under a folder: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit. |
 
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table discord end */}

@@ -627,7 +627,7 @@ export class MountRegistry {
         visible: (sessionId: string | null) => mount.visible === null || mount.visible(sessionId),
         calls: mount.calls,
         searchable: vfs.searchable,
-        fullScanLimit: vfs.fullScanLimit,
+        walkLimit: vfs.walkLimit,
       }
     })
     return [...this.rowCache]

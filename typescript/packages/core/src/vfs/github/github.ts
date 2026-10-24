@@ -24,7 +24,7 @@ import {
 } from '../../core/github/tree.ts'
 
 import { PROMPT } from './prompt.ts'
-import { COMMIT_SHA } from '../../core/github/constants.ts'
+import { COMMIT_SHA, WALK_LIMIT } from '../../core/github/constants.ts'
 import { ListingVersion, VFSName } from '../../types.ts'
 
 import {
@@ -39,7 +39,6 @@ import { readdir as githubReaddir } from '../../core/github/readdir.ts'
 import { read as githubRead, readStream as githubStream } from '../../core/github/read.ts'
 import { stat as githubStat, tree as githubTree } from '../../core/github/stat.ts'
 import { filesContaining as githubFilesContaining } from '../../core/github/search.ts'
-import { SCOPE_ERROR } from '../../core/github/constants.ts'
 
 export interface GitHubVFSState {
   type: string
@@ -84,12 +83,12 @@ export class GitHubVFS extends BaseVFS {
   readonly config: GitHubConfig
   override readonly accessor: GitHubAccessor
 
-  override readonly fullScanLimit: number
+  override readonly walkLimit: number
 
   private constructor(config: GitHubConfig, accessor: GitHubAccessor) {
     super()
     this.config = config
-    this.fullScanLimit = config.fullScanLimit ?? SCOPE_ERROR
+    this.walkLimit = config.walkLimit ?? WALK_LIMIT
     this.accessor = accessor
     this.listingsPin = pinOf(config.ref)
   }
@@ -155,7 +154,7 @@ export class GitHubVFS extends BaseVFS {
     text: string,
     opts: { wholeWord: boolean; ignoreCase: boolean },
   ): Promise<PathSpec[] | null> {
-    if (!opts.wholeWord || this.fullScanLimit < 0) return Promise.resolve(null)
+    if (!opts.wholeWord || this.walkLimit < 0) return Promise.resolve(null)
     return githubFilesContaining(this.accessor, text, [path])
   }
 

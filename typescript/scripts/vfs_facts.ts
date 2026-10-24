@@ -77,7 +77,7 @@ const VFS_FUNCTIONS = new Set([
   'searchMany',
   'filesContaining',
   'linesContaining',
-  'beforeFullScan',
+  'beforeFullWalk',
   'isMounted',
 ])
 

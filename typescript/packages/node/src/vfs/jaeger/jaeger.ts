@@ -21,7 +21,7 @@ import { PROMPT } from '@struktoai/mirage-core/vfs/jaeger/prompt'
 import { VFSName } from '@struktoai/mirage-core/types'
 
 import { redactJaegerConfig, type JaegerConfig, type JaegerConfigRedacted } from './config.ts'
-import { FULL_SCAN_LIMIT } from '@struktoai/mirage-core/vfs/constants'
+import { WALK_LIMIT } from '@struktoai/mirage-core/vfs/constants'
 
 export interface JaegerVFSState {
   type: string
@@ -39,11 +39,11 @@ export class JaegerVFS extends JaegerVFSBase {
   readonly config: JaegerConfig
   override readonly accessor: JaegerAccessor
 
-  override readonly fullScanLimit: number
+  override readonly walkLimit: number
   constructor(config: JaegerConfig) {
     super()
     this.config = config
-    this.fullScanLimit = config.fullScanLimit ?? FULL_SCAN_LIMIT
+    this.walkLimit = config.walkLimit ?? WALK_LIMIT
     const transportOpts: { host?: string; timeout?: number } = {}
     if (config.host !== undefined) transportOpts.host = config.host
     if (config.requestTimeout !== undefined) transportOpts.timeout = config.requestTimeout

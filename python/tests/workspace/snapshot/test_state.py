@@ -1194,15 +1194,15 @@ async def test_a_rebuilt_disk_mount_keeps_its_folder_versions(
 @pytest.mark.parametrize("route", ["copy", "load"])
 @pytest.mark.parametrize("kind", ["ram", "disk"])
 @pytest.mark.parametrize("limit", [2, -1])
-async def test_a_rebuilt_local_mount_keeps_its_full_scan_limit(
+async def test_a_rebuilt_local_mount_keeps_its_walk_limit(
     tmp_path, route, kind, limit
 ):
     root = tmp_path / "root"
     root.mkdir()
     vfs = (
-        RAMVFS(full_scan_limit=limit)
+        RAMVFS(walk_limit=limit)
         if kind == "ram"
-        else DiskVFS(str(root), full_scan_limit=limit)
+        else DiskVFS(str(root), walk_limit=limit)
     )
     ws = Workspace({"/d": vfs})
     try:
@@ -1213,7 +1213,7 @@ async def test_a_rebuilt_local_mount_keeps_its_full_scan_limit(
             await ws.snapshot(snap)
             rebuilt = await Workspace.load(snap)
         try:
-            assert rebuilt.mount("/d").vfs.full_scan_limit == limit
+            assert rebuilt.mount("/d").vfs.walk_limit == limit
         finally:
             await rebuilt.close()
     finally:

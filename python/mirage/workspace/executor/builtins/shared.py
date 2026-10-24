@@ -209,7 +209,7 @@ async def expand_operands(
             try:
                 out.extend(
                     await expand_glob(
-                        dispatch, mount, [spec], mount.vfs.full_scan_limit
+                        dispatch, mount, [spec], mount.vfs.walk_limit
                     )
                 )
             except GlobLimitError as exc:

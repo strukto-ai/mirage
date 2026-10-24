@@ -6648,7 +6648,7 @@
           "/data": {
             "vfs": "limited-ram",
             "config": {
-              "full_scan_limit": 2,
+              "walk_limit": 2,
               "files": {
                 "/d/a.txt": "alpha\n",
                 "/d/b.txt": "beta\n",
@@ -6663,7 +6663,7 @@
           "/out/n": {
             "vfs": "limited-ram",
             "config": {
-              "full_scan_limit": 2,
+              "walk_limit": 2,
               "files": {
                 "/a.txt": "alpha\n",
                 "/b.txt": "beta\n",
@@ -6686,7 +6686,7 @@
             "value": {
               "exit_code": 2,
               "stdout": "/data/d/a.txt:alpha\n/data/d/b.txt:beta\n",
-              "stderr": "grep: /data/d: stopped after 2 files (full_scan_limit); narrow the path\n"
+              "stderr": "grep: /data/d: stopped after 2 files (walk_limit); narrow the path\n"
             }
           }
         },
@@ -6697,7 +6697,7 @@
             "value": {
               "exit_code": 2,
               "stdout": "/data/d/a.txt:alpha\n/data/d/b.txt:beta\n",
-              "stderr": "rg: /data/d: stopped after 2 files (full_scan_limit); narrow the path\n"
+              "stderr": "rg: /data/d: stopped after 2 files (walk_limit); narrow the path\n"
             }
           }
         },
@@ -6708,7 +6708,7 @@
             "value": {
               "exit_code": 1,
               "stdout": "",
-              "stderr": "tar: more than 2 files in scope (full_scan_limit); narrow the path\n"
+              "stderr": "tar: more than 2 files in scope (walk_limit); narrow the path\n"
             }
           }
         },
@@ -6741,7 +6741,7 @@
             "value": {
               "exit_code": 0,
               "stdout": "/data/d/a.txt\n/data/d/b.txt\n",
-              "stderr": "find: /data/d: stopped after 2 files (full_scan_limit); narrow the path\n"
+              "stderr": "find: /data/d: stopped after 2 files (walk_limit); narrow the path\n"
             }
           }
         },
@@ -6752,7 +6752,7 @@
             "value": {
               "exit_code": 1,
               "stdout": "/data/d\n/data/d/a.txt\n/data/d/b.txt\n",
-              "stderr": "find: /data/d: stopped after 2 files (full_scan_limit); narrow the path\n"
+              "stderr": "find: /data/d: stopped after 2 files (walk_limit); narrow the path\n"
             }
           }
         },
@@ -6763,7 +6763,7 @@
             "value": {
               "exit_code": 1,
               "stdout": "/data/d:\na.txt\nb.txt\n",
-              "stderr": "ls: /data/d: stopped after 2 files (full_scan_limit); narrow the path\n"
+              "stderr": "ls: /data/d: stopped after 2 files (walk_limit); narrow the path\n"
             }
           }
         },
@@ -6774,7 +6774,7 @@
             "value": {
               "exit_code": 1,
               "stdout": "6\t/data/d/a.txt\n5\t/data/d/b.txt\n11\t/data/d\n",
-              "stderr": "du: /data/d: stopped after 2 files (full_scan_limit); narrow the path\n"
+              "stderr": "du: /data/d: stopped after 2 files (walk_limit); narrow the path\n"
             }
           }
         },
@@ -6785,7 +6785,7 @@
             "value": {
               "exit_code": 2,
               "stdout": "/data/d\n|-- a.txt\n`-- b.txt\n\n1 directory, 2 files\n",
-              "stderr": "tree: /data/d: stopped after 2 files (full_scan_limit); narrow the path\n"
+              "stderr": "tree: /data/d: stopped after 2 files (walk_limit); narrow the path\n"
             }
           }
         },
@@ -6796,7 +6796,7 @@
             "value": {
               "exit_code": 0,
               "stdout": "rc=126\n",
-              "stderr": "cat: Argument list too long\ncat: /data/d/*: matches more than 2 files (full_scan_limit); narrow the path\n"
+              "stderr": "cat: Argument list too long\ncat: /data/d/*: matches more than 2 files (walk_limit); narrow the path\n"
             }
           }
         },
@@ -6818,7 +6818,7 @@
             "value": {
               "exit_code": 0,
               "stdout": "rc=1\na.txt\nb.txt\nsub\n",
-              "stderr": "rm: more than 2 files in scope (full_scan_limit); narrow the path\n"
+              "stderr": "rm: more than 2 files in scope (walk_limit); narrow the path\n"
             }
           }
         },
@@ -6829,7 +6829,7 @@
             "value": {
               "exit_code": 0,
               "stdout": "1\n1\n1\n",
-              "stderr": "chmod: more than 2 files in scope (full_scan_limit); narrow the path\nchown: more than 2 files in scope (full_scan_limit); narrow the path\nchgrp: more than 2 files in scope (full_scan_limit); narrow the path\n"
+              "stderr": "chmod: more than 2 files in scope (walk_limit); narrow the path\nchown: more than 2 files in scope (walk_limit); narrow the path\nchgrp: more than 2 files in scope (walk_limit); narrow the path\n"
             }
           }
         },
@@ -6840,7 +6840,7 @@
             "value": {
               "exit_code": 1,
               "stdout": "",
-              "stderr": "getfattr: /data/d: stopped after 2 files (full_scan_limit); narrow the path\ngetfattr: /out/l: stopped after 2 files (full_scan_limit); narrow the path\n"
+              "stderr": "getfattr: /data/d: stopped after 2 files (walk_limit); narrow the path\ngetfattr: /out/l: stopped after 2 files (walk_limit); narrow the path\n"
             }
           }
         },
@@ -6851,7 +6851,7 @@
             "value": {
               "exit_code": 128,
               "stdout": "",
-              "stderr": "fatal: more than 2 files in the work tree (full_scan_limit)\n"
+              "stderr": "fatal: more than 2 files in the work tree (walk_limit)\n"
             }
           }
         },

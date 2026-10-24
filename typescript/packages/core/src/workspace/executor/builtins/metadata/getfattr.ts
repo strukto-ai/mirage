@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { toHex } from '../../../../utils/hex.ts'
-import { ScanBudget } from '../../../../commands/builtin/utils/tree.ts'
+import { WalkBudget } from '../../../../commands/builtin/utils/tree.ts'
 import { specOf } from '../../../../commands/spec/builtins.ts'
 import { FlagView } from '../../../../commands/spec/flag_view.ts'
 import { parseCommand, parseToKwargs } from '../../../../commands/spec/parser.ts'
@@ -76,7 +76,7 @@ async function walk(
   shown: string,
   logical: boolean,
   deref: boolean,
-  budget: ScanBudget,
+  budget: WalkBudget,
 ): Promise<[PathSpec, string][]> {
   const entries: [PathSpec, string][] = [[path, shown]]
   let stat: unknown
@@ -174,7 +174,7 @@ async function fileBlock(
  * `-d`/`-n` adding `="value"`, and the default match `^user\.` (`-m -`
  * matches every name). The attributes are the dispatcher's: what was set on
  * the path. `-h` reads a link's own attributes. `-R` stops after
- * `fullScanLimit` entries of a mount, as `ls -R` does, and exits 1.
+ * `walkLimit` entries of a mount, as `ls -R` does, and exits 1.
  * Mirrors Python's `handle_getfattr`.
  */
 export async function handleGetfattr(
@@ -228,7 +228,7 @@ export async function handleGetfattr(
   const mounts = links.mounts(true)
   for (const target of targets) {
     const typed = target.rawPath
-    const budget = new ScanBudget(target, mounts)
+    const budget = new WalkBudget(target, mounts)
     const entries = fl.asBool('recursive')
       ? await walk(
           dispatch,

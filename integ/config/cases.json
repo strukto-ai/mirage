@@ -428,15 +428,15 @@
       }
     },
     {
-      "id": "gcal_full_scan_limit_round_trips",
+      "id": "gcal_walk_limit_round_trips",
       "vfs": "gcal",
       "config": {
         "access_token": "t",
-        "full_scan_limit": 50
+        "walk_limit": 50
       },
       "expect": {
         "state": {
-          "full_scan_limit": 50
+          "walk_limit": 50
         }
       }
     },
@@ -489,51 +489,61 @@
       }
     },
     {
-      "id": "disk_full_scan_limit_defaults_to_ten_thousand",
+      "id": "disk_walk_limit_defaults_to_ten_thousand",
       "vfs": "disk",
       "config": {
         "root": "/tmp/mirage-integ-config-disk"
       },
       "expect": {
         "state": {
-          "full_scan_limit": 10000
+          "walk_limit": 10000
         }
       }
     },
     {
-      "id": "disk_full_scan_limit_can_be_lifted",
+      "id": "disk_walk_limit_can_be_lifted",
       "vfs": "disk",
       "config": {
         "root": "/tmp/mirage-integ-config-disk",
-        "full_scan_limit": -1
+        "walk_limit": -1
       },
       "expect": {
         "state": {
-          "full_scan_limit": -1
+          "walk_limit": -1
         }
       }
     },
     {
-      "id": "disk_full_scan_limit_below_minus_one_is_refused",
+      "id": "disk_walk_limit_below_minus_one_is_refused",
       "vfs": "disk",
       "config": {
         "root": "/tmp/mirage-integ-config-disk",
-        "full_scan_limit": -2
+        "walk_limit": -2
       },
       "expect": {
-        "refused": "disk: full_scan_limit: must be an integer of -1 or more"
+        "refused": "disk: walk_limit: must be an integer of -1 or more"
       }
     },
     {
-      "id": "s3_full_scan_limit_round_trips",
+      "id": "ram_walk_limit_null_is_refused",
+      "vfs": "ram",
+      "config": {
+        "walk_limit": null
+      },
+      "expect": {
+        "refused": "ram: walk_limit: must be an integer of -1 or more"
+      }
+    },
+    {
+      "id": "s3_walk_limit_round_trips",
       "vfs": "s3",
       "config": {
         "bucket": "b",
-        "full_scan_limit": -1
+        "walk_limit": -1
       },
       "expect": {
         "state": {
-          "full_scan_limit": -1
+          "walk_limit": -1
         }
       }
     }

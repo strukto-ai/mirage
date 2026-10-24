@@ -24,7 +24,7 @@ import { VFSName } from '@struktoai/mirage-core/types'
 import { HttpProxyAgent } from 'http-proxy-agent'
 import { HttpsProxyAgent } from 'https-proxy-agent'
 import { redactConfig, type S3Config, type S3ConfigRedacted } from './config.ts'
-import { FULL_SCAN_LIMIT } from '@struktoai/mirage-core/vfs/constants'
+import { WALK_LIMIT } from '@struktoai/mirage-core/vfs/constants'
 
 function createProxyAgents(proxy: string): S3HttpAgents {
   return { httpAgent: new HttpProxyAgent(proxy), httpsAgent: new HttpsProxyAgent(proxy) }
@@ -65,10 +65,10 @@ export class S3VFS extends S3VFSBase {
 
   private readonly declared: string | undefined
 
-  override readonly fullScanLimit: number
+  override readonly walkLimit: number
   constructor(config: S3Config) {
     super()
-    this.fullScanLimit = config.fullScanLimit ?? FULL_SCAN_LIMIT
+    this.walkLimit = config.walkLimit ?? WALK_LIMIT
     const normalized = normalizeKeyPrefix(config.keyPrefix)
     const cfg: S3Config = { ...config }
     if (normalized !== undefined) {

@@ -21,7 +21,7 @@ import { PROMPT, WRITE_PROMPT } from '@struktoai/mirage-core/vfs/slack/prompt'
 import { VFSName } from '@struktoai/mirage-core/types'
 
 import { redactSlackConfig, type SlackConfig, type SlackConfigRedacted } from './config.ts'
-import { FULL_SCAN_LIMIT } from '@struktoai/mirage-core/vfs/constants'
+import { WALK_LIMIT } from '@struktoai/mirage-core/vfs/constants'
 
 export interface SlackVFSState {
   type: string
@@ -41,12 +41,12 @@ export class SlackVFS extends SlackVFSBase {
   readonly config: SlackConfig
   override readonly accessor: SlackAccessor
 
-  override readonly fullScanLimit: number
+  override readonly walkLimit: number
 
   constructor(config: SlackConfig) {
     super()
     this.config = config
-    this.fullScanLimit = config.fullScanLimit ?? FULL_SCAN_LIMIT
+    this.walkLimit = config.walkLimit ?? WALK_LIMIT
     this.accessor = new SlackAccessor(
       new BrowserSlackTransport({
         proxyUrl: config.proxyUrl,

@@ -195,7 +195,7 @@ async def test_a_symlink_to_a_directory_is_not_descended(
         ("rm -q --cached b.txt", 1, False),
     ],
 )
-async def test_a_work_tree_past_the_full_scan_limit_fails_unless_named(
+async def test_a_work_tree_past_the_walk_limit_fails_unless_named(
     repo_path: Path, line: str, limit: int, refused: bool
 ):
     (repo_path / "sub").mkdir()
@@ -203,7 +203,7 @@ async def test_a_work_tree_past_the_full_scan_limit_fails_unless_named(
         (repo_path / "sub" / name).write_text("x\n", encoding="utf-8")
     index = (repo_path / ".git" / "index").read_bytes()
     with Workspace(
-        {MOUNT: DiskVFS(root=str(repo_path), full_scan_limit=limit)},
+        {MOUNT: DiskVFS(root=str(repo_path), walk_limit=limit)},
         mode=MountMode.WRITE,
     ) as ws:
         ws.register_cli("git", GIT)
@@ -212,8 +212,7 @@ async def test_a_work_tree_past_the_full_scan_limit_fails_unless_named(
     if refused:
         assert outcome == (
             "128\n",
-            f"fatal: more than {limit} files in the work tree "
-            "(full_scan_limit)\n",
+            f"fatal: more than {limit} files in the work tree (walk_limit)\n",
         )
         assert (repo_path / ".git" / "index").read_bytes() == index
     else:

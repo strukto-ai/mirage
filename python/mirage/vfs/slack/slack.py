@@ -52,7 +52,7 @@ class SlackVFS(BaseVFS):
     def __init__(self, config: SlackConfig) -> None:
         super().__init__()
         self.config = config
-        self.full_scan_limit = config.full_scan_limit
+        self.walk_limit = config.walk_limit
         self.accessor = SlackAccessor(
             self.config,
             TimeRange.from_strings(config.start_time, config.end_time),
@@ -120,7 +120,7 @@ class SlackVFS(BaseVFS):
     ) -> list[PathSpec] | None:
         if (
             not whole_word
-            or self.full_scan_limit < 0
+            or self.walk_limit < 0
             or not slack_search_available(self.config)
         ):
             return None

@@ -103,7 +103,7 @@ export function queryFlag(value: string | undefined, name: string): boolean {
 export function failure(reply: FastifyReply, err: unknown): FastifyReply {
   if (err instanceof RouteError) return reply.status(err.status).send({ detail: err.message })
   if (err instanceof CallArgsError) return reply.status(400).send({ detail: err.message })
-  // A glob past its mount's full_scan_limit says so in words that carry
+  // A glob past its mount's walk_limit says so in words that carry
   // nothing private, so the caller learns why.
   if (err instanceof TooManyMatches) return reply.status(400).send({ detail: err.reason })
   const condition = classify(err)

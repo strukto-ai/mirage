@@ -176,8 +176,8 @@ function visibleEntries(entries: string[], parent: string, vis = sessionVisibili
 }
 
 /**
- * Whether a scan guard's path is a directory: a file or a missing name has
- * nothing below it to scan. Mirrors Python's `_is_directory`.
+ * Whether a walk guard's path is a directory: a file or a missing name has
+ * nothing below it to walk. Mirrors Python's `_is_directory`.
  */
 async function isDirectory(mount: MountEntry, path: PathSpec): Promise<boolean> {
   try {
@@ -185,7 +185,7 @@ async function isDirectory(mount: MountEntry, path: PathSpec): Promise<boolean> 
     return found?.type === FileType.DIRECTORY
   } catch (err) {
     if (!isMissingPath(err) && !isEnotdir(err)) throw err
-    console.debug(`scan guard at ${path.virtual}: ${String(err)}`)
+    console.debug(`walk guard at ${path.virtual}: ${String(err)}`)
     return false
   }
 }
@@ -218,11 +218,11 @@ function visibleAnswer(
 
 /**
  * Whether a VFS may refuse a command that reads every file under a
- * directory: it defines `beforeFullScan`, or sets a `fullScanLimit` the
- * default one holds it to. Mirrors Python's `_guards_scans`.
+ * directory: it defines `beforeFullWalk`, or sets a `walkLimit` the
+ * default one holds it to. Mirrors Python's `_guards_walks`.
  */
-function guardsScans(vfs: BaseVFS): boolean {
-  return vfs.supports('before_full_scan') || vfs.fullScanLimit >= 0
+function guardsWalks(vfs: BaseVFS): boolean {
+  return vfs.supports('before_full_walk') || vfs.walkLimit >= 0
 }
 
 /**
@@ -833,22 +833,22 @@ export class Dispatcher {
       }
     }
     await this.prepare()
-    // With no scan guard on any mount, no path reaches one to ask.
+    // With no walk guard on any mount, no path reaches one to ask.
     if (
-      name === 'before_full_scan' &&
-      !this.namespace.mountPrefixes().some((p) => guardsScans(this.namespace.mountFor(p).vfs))
+      name === 'before_full_walk' &&
+      !this.namespace.mountPrefixes().some((p) => guardsWalks(this.namespace.mountFor(p).vfs))
     ) {
       return [null, new IOResult()]
     }
     // The command's gate judges its own calls; a metadata call passes, as
-    // its guards let stat pass, unless it only asks admission, and a scan
+    // its guards let stat pass, unless it only asks admission, and a walk
     // guard reads nothing: the rule judges each read it guards. A warm read
     // is judged in the cache stage, held or not: its answer stands in for the
     // read (a search's ruled-out file is read as empty), so it meets the rule
     // the read would.
     const isWarm = name === 'read' && warm === true
     const gate =
-      (METADATA_OPS.has(name) && !admitOnly) || name === 'before_full_scan' || isWarm
+      (METADATA_OPS.has(name) && !admitOnly) || name === 'before_full_walk' || isWarm
         ? null
         : (this.caller?.ruleGate ?? null)
     const call = await this.walk(
@@ -902,9 +902,9 @@ export class Dispatcher {
     }
     if (name === 'statfs') return [await this.statfs(call.path, issuer), new IOResult()]
     const owner = this.namespace.tryMountFor(call.path.virtual)
-    // A mount with no scan guard has nothing to refuse, so a command asks
+    // A mount with no walk guard has nothing to refuse, so a command asks
     // every mount it walks and only a guard costs a call.
-    if (name === 'before_full_scan' && (owner === null || !guardsScans(owner.vfs))) {
+    if (name === 'before_full_walk' && (owner === null || !guardsWalks(owner.vfs))) {
       return [null, new IOResult()]
     }
     // The cache stage answers first where the file cache decides: a call
@@ -1937,11 +1937,11 @@ export class Dispatcher {
   }
 
   /**
-   * How many files the session sees under a scan guard's path, counted off
+   * How many files the session sees under a walk guard's path, counted off
    * the mount's `readTree` with every hidden file dropped, and every file a
    * nested mount covers, so a guard's refusal never counts what the command
    * would not read. Without one, or where
-   * it cannot read the whole tree, a mount with a `fullScanLimit` is walked
+   * it cannot read the whole tree, a mount with a `walkLimit` is walked
    * listing by listing, hidden entries skipped, until one file past the
    * limit; a folder below the path it cannot open counts nothing, as the
    * command reports it itself. null otherwise. Mirrors Python's
@@ -1963,7 +1963,7 @@ export class Dispatcher {
         found = (await mount.call('read_tree', root)) as Map<string, FileStat> | null
       } catch (err) {
         if (!isFsError(err)) throw err
-        console.debug(`scan count of ${root} walks instead: ${String(err)}`)
+        console.debug(`walk count of ${root} lists instead: ${String(err)}`)
         found = null
       }
       if (found !== null) {
@@ -1975,7 +1975,7 @@ export class Dispatcher {
         return files
       }
     }
-    const limit = vfs.fullScanLimit
+    const limit = vfs.walkLimit
     if (limit < 0) return null
     let count = 0
     const pending = [root]
@@ -1989,7 +1989,7 @@ export class Dispatcher {
         entries = (await mount.call('readdir', directory)) as string[]
       } catch (err) {
         if (directory === root || !isFsError(err)) throw err
-        console.debug(`scan count skips ${directory}: ${String(err)}`)
+        console.debug(`walk count skips ${directory}: ${String(err)}`)
         continue
       }
       for (const entry of entries) {
@@ -2000,7 +2000,7 @@ export class Dispatcher {
           row = (await mount.call('stat', child)) as FileStat
         } catch (err) {
           if (!isFsError(err)) throw err
-          console.debug(`scan count skips ${child}: ${String(err)}`)
+          console.debug(`walk count skips ${child}: ${String(err)}`)
           continue
         }
         if (row.type === FileType.DIRECTORY) pending.push(child)
@@ -2098,14 +2098,6 @@ export class Dispatcher {
       ...(kwargs?.index === undefined ? this.indexKwargs(mount) : {}),
       ...(call.fresh ? { index: new ListingCheckStore({ hints: mount.index }) } : {}),
       ...(filetype !== null && kwargs?.filetype === undefined ? { filetype } : {}),
-    }
-    if (name === 'before_full_scan') {
-      if (!(await isDirectory(mount, p))) return [null, null, []]
-      fullKwargs.files = await this.visibleFiles(mount, vfs, call)
-      if (!vfs.supports(name)) {
-        await vfs.beforeFullScan(p, fullKwargs.files as number | null)
-        return [null, null, []]
-      }
     }
     const dst =
       DESTINATION_OPS.has(name) && call.args?.[0] instanceof PathSpec ? call.args[0] : null
@@ -2231,7 +2223,14 @@ export class Dispatcher {
           await this.evictFailedWrite(name, p, dst, others, lostPaths(line))
           throw err
         }
+      } else if (name === 'before_full_walk' && !(await isDirectory(mount, p))) {
+        result = null
+      } else if (name === 'before_full_walk' && !vfs.supports(name)) {
+        await vfs.beforeFullWalk(p, await this.visibleFiles(mount, vfs, call))
+        result = null
       } else {
+        if (name === 'before_full_walk')
+          fullKwargs.files = await this.visibleFiles(mount, vfs, call)
         if (names(call, this.caller)) await this.reconciler.reconcileRead(mount, p.virtual)
         const answered = probed(call, mount)
         result = answered ?? (await run(fullKwargs))

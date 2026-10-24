@@ -981,7 +981,7 @@ def _construct_vfs(mount_state: dict[str, Any]):
         saved = vfs_state.get(VFSStateKey.CONFIG) or {}
         knobs = {
             key: saved[key]
-            for key in ("folder_versions", "full_scan_limit")
+            for key in ("folder_versions", "walk_limit")
             if key in saved
         }
         for key in unknown_kwargs(cls, knobs):

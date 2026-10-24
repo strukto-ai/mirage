@@ -18,7 +18,7 @@ import {
   secretStr,
   z,
 } from '@struktoai/mirage-core/vfs/secrets'
-import { FULL_SCAN_LIMIT } from '@struktoai/mirage-core/vfs/constants'
+import { WALK_LIMIT } from '@struktoai/mirage-core/vfs/constants'
 import type { ConfigOf, RedactedConfig } from '@struktoai/mirage-core/vfs/secrets'
 
 // Doubles as the himalaya CLI's configModel: parse applies the same
@@ -48,7 +48,7 @@ export const EmailConfigSchema = z.object({
     .describe(
       "How many of a folder's newest messages the mount lists and `grep` searches, and the window `himalaya envelope list` and `search` page through.",
     ),
-  fullScanLimit: z.number().int().min(-1).default(FULL_SCAN_LIMIT).meta({
+  walkLimit: z.number().int().min(-1).default(WALK_LIMIT).meta({
     description:
       'Most files one command walks under a folder: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit and reads every message without asking the server (IMAP `SEARCH TEXT`), which searches headers and body, not the mounted JSON.',
     default: 1000,
@@ -93,7 +93,7 @@ export function buildEmailConfig(input: EmailConfigInput): EmailConfig {
     password: input.password,
     useSsl: input.useSsl ?? true,
     maxMessages: input.maxMessages ?? 200,
-    fullScanLimit: input.fullScanLimit ?? FULL_SCAN_LIMIT,
+    walkLimit: input.walkLimit ?? WALK_LIMIT,
     saveCopy: input.saveCopy ?? true,
     sentFolder: input.sentFolder ?? null,
   }

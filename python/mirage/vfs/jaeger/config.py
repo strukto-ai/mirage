@@ -14,7 +14,7 @@
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from mirage.vfs.constants import FULL_SCAN_LIMIT
+from mirage.vfs.constants import WALK_LIMIT
 
 
 class JaegerConfig(BaseModel):
@@ -37,7 +37,7 @@ class JaegerConfig(BaseModel):
     now."""
     request_timeout: int = 30
     """Seconds to wait for one HTTP request to Jaeger."""
-    full_scan_limit: int = Field(default=FULL_SCAN_LIMIT, ge=-1)
+    walk_limit: int = Field(default=WALK_LIMIT, ge=-1)
     """Most files one command walks under a folder: `grep -r`, `find` and other
     walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is
     refused. `-1` lifts the limit."""

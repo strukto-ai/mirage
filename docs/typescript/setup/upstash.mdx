@@ -32,7 +32,7 @@ await ws.shell('cat /r/greet')
 | --- | --- | --- |
 | `url` | required | The `rediss://` URL from the console, password included. Redacted in snapshots. |
 | `keyPrefix` | `mirage:fs:` | Prefix prepended to every key. |
-| `fullScanLimit` | `1000` | Most files one command walks under a folder: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit. In YAML: `full_scan_limit`. |
+| `walkLimit` | `1000` | Most files one command walks under a folder: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit. In YAML: `walk_limit`. |
 | `token` | from the URL | Browser only. Needed when `url` is the REST URL (`https://<name>.upstash.io`) instead of the redis one. |
 | `maxRequestBytes` | `8388608` | Browser only. Upstash caps a REST request at 10 MB; a larger file is written as one `SET` plus `APPEND`s of this size. |
 

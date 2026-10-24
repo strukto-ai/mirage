@@ -89,7 +89,7 @@ async def _unmeasured_du(accessor, paths, texts, opts):
 @pytest.mark.asyncio
 async def test_du_walk_charges_each_mount_its_own_limit():
     # A du that reports no measurement leaves the line to this walk.
-    outer, inner = RAMVFS(full_scan_limit=-1), RAMVFS(full_scan_limit=2)
+    outer, inner = RAMVFS(walk_limit=-1), RAMVFS(walk_limit=2)
     outer.load_state({"files": {f"/f{i}": b"x" for i in range(4)}})
     inner.load_state({"files": {f"/g{i}": b"y" for i in range(3)}})
     ws = Workspace({"/a": outer, "/a/b": inner}, mode=MountMode.WRITE)
@@ -102,8 +102,7 @@ async def test_du_walk_charges_each_mount_its_own_limit():
         ]
         assert len([r for r in rows if "/a/b/g" in r]) == 2
         assert result.stderr == (
-            b"du: /a/b: stopped after 2 files (full_scan_limit); "
-            b"narrow the path\n"
+            b"du: /a/b: stopped after 2 files (walk_limit); narrow the path\n"
         )
         assert result.exit_code == 1
     finally:

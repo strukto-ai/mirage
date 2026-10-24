@@ -335,7 +335,7 @@ async def test_resolve_glob_with_refuses_past_the_limit_and_keeps_up_to_it():
     with pytest.raises(GlobLimitError) as refused:
         await resolve_glob_with(fake_readdir, [spec], 1)
     assert str(refused.value) == (
-        "/notion/pages/*: matches more than 1 files (full_scan_limit); "
+        "/notion/pages/*: matches more than 1 files (walk_limit); "
         "narrow the path"
     )
     assert len(await resolve_glob_with(fake_readdir, [spec], 2)) == 2
@@ -366,15 +366,6 @@ async def test_make_resolve_glob_passthrough():
     )
     result = await resolve([resolved_spec])
     assert result[0] is resolved_spec
-
-
-@pytest.mark.asyncio
-async def test_make_resolve_glob_refuses_past_its_limit():
-    resolve = make_resolve_glob(fake_readdir, 1)
-    spec = glob_spec("/notion/pages/*", "/notion")
-    with pytest.raises(GlobLimitError):
-        await resolve([spec])
-    assert len(await make_resolve_glob(fake_readdir)([spec])) == 2
 
 
 @pytest.mark.asyncio

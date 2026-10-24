@@ -32,7 +32,7 @@ from mirage.types import (
     SearchQuery,
 )
 from mirage.vfs.call import vfs_call
-from mirage.vfs.constants import FULL_SCAN_LIMIT
+from mirage.vfs.constants import WALK_LIMIT
 from mirage.vfs.secrets import redacted_config_dump
 from mirage.vfs.types import (
     Effect,
@@ -169,11 +169,11 @@ class BaseVFS:
     # The most files one command walks under a directory of this mount:
     # grep -r, rg and git grep stop reading there, find, ls -R, tree, du
     # and getfattr -R stop listing, git status and the other verbs that
-    # scan a work tree fail, a glob matching more is refused, and so are
+    # walk a work tree fail, a glob matching more is refused, and so are
     # tar -c, zip -r, cp -r, rm -r, chmod -R, chown -R, chgrp -R, mv to
     # another mount and diff -r of a directory holding more
-    # (``before_full_scan``); -1 for no cap.
-    full_scan_limit: int = FULL_SCAN_LIMIT
+    # (``before_full_walk``); -1 for no cap.
+    walk_limit: int = WALK_LIMIT
 
     # Extensions whose ``read`` is a rendering rather than the stored
     # bytes, each to the name of the method that renders it, which takes
@@ -767,7 +767,7 @@ class BaseVFS:
         return None
 
     @vfs_call(effect=Effect.READ, target=Target.DIR)
-    async def before_full_scan(
+    async def before_full_walk(
         self,
         path: PathSpec,
         *,
@@ -778,23 +778,23 @@ class BaseVFS:
         Once per directory a command copies, compares, changes or removes
         whole, before the first file it touches there: tar -c, zip -r,
         cp -r, mv across mounts, diff -r, rm -r, chmod -R, chown -R and
-        chgrp -R. Return to let the scan run; raise to refuse it, and the
+        chgrp -R. Return to let the walk run; raise to refuse it, and the
         error's message is what the command prints. The default refuses
-        more than ``full_scan_limit`` files. Searches and listings are
-        never refused: they stop after ``full_scan_limit`` files.
+        more than ``walk_limit`` files. Searches and listings are
+        never refused: they stop after ``walk_limit`` files.
 
         Args:
             path (PathSpec): the directory about to be walked.
             files (int | None): how many files the session sees under
                 ``path``, with every hidden file dropped: the mount's
-                ``read_tree``, or under a ``full_scan_limit`` a walk of
+                ``read_tree``, or under a ``walk_limit`` a walk of
                 its listings that stops one file past it; None when
                 neither counts, and the guard counts them itself.
         """
-        limit = self.full_scan_limit
+        limit = self.walk_limit
         if limit >= 0 and files is not None and files > limit:
             raise ValueError(
-                f"more than {limit} files in scope (full_scan_limit); "
+                f"more than {limit} files in scope (walk_limit); "
                 "narrow the path"
             )
         return None

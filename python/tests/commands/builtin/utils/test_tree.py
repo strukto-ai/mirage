@@ -17,7 +17,7 @@ from dataclasses import replace
 import pytest
 
 from mirage.cache.index import NULL_INDEX
-from mirage.commands.builtin.utils.tree import ScanBudget, tree_walk
+from mirage.commands.builtin.utils.tree import WalkBudget, tree_walk
 from mirage.errors.fs import enotdir, enotsup, walk_declined
 from mirage.types import FileStat, FileType, MountMode, PathSpec
 from mirage.vfs.ram import RAMVFS
@@ -151,7 +151,7 @@ async def test_a_dotted_or_refused_operand_is_never_answered_from_an_earlier_ans
 
 
 class GuardedRAM(RAMVFS):
-    """A RAM mount that refuses every full scan, keeping its reads."""
+    """A RAM mount that refuses every full walk, keeping its reads."""
 
     def __init__(self) -> None:
         super().__init__()
@@ -162,7 +162,7 @@ class GuardedRAM(RAMVFS):
         self.reads.append(path.virtual)
         return await super().read(path, offset, size)
 
-    async def before_full_scan(self, path, *, files=None, index=NULL_INDEX):
+    async def before_full_walk(self, path, *, files=None, index=NULL_INDEX):
         self.scans.append(path.virtual)
         raise ValueError(f"{files} files in scope, narrow the path")
 
@@ -268,22 +268,22 @@ def _limits(limits: dict[str, int]) -> MountView:
         visible_descendants=lambda path: [],
         is_root=lambda path: False,
         root_of=root_of,
-        full_scan_limit=lambda path: limits[root_of(path)],
+        walk_limit=lambda path: limits[root_of(path)],
     )
 
 
-STOP = "stopped after {} files (full_scan_limit); narrow the path"
+STOP = "stopped after {} files (walk_limit); narrow the path"
 
 
-def test_a_scan_budget_stops_once_spent_and_opens_nothing_more():
-    budget = ScanBudget(PathSpec.from_str_path("/m/d"), _limits({"/m/": 2}))
+def test_a_walk_budget_stops_once_spent_and_opens_nothing_more():
+    budget = WalkBudget(PathSpec.from_str_path("/m/d"), _limits({"/m/": 2}))
     assert [budget.spend("/m/d") for _ in range(3)] == [True, True, False]
     assert not budget.opens("/m/d/sub")
     assert budget.stopped == [f"/m/d: {STOP.format(2)}"]
 
 
-def test_a_scan_budget_charges_each_mount_under_its_own_root():
-    budget = ScanBudget(
+def test_a_walk_budget_charges_each_mount_under_its_own_root():
+    budget = WalkBudget(
         PathSpec.from_str_path("/"), _limits({"/": -1, "/m/": 2, "/n/": 3})
     )
     assert all(budget.spend("/") for _ in range(50))
@@ -293,22 +293,22 @@ def test_a_scan_budget_charges_each_mount_under_its_own_root():
 
 
 @pytest.mark.parametrize("raw, shown", [("d", "d"), ("", ".")])
-def test_a_scan_budget_names_the_operand_as_typed(raw, shown):
+def test_a_walk_budget_names_the_operand_as_typed(raw, shown):
     operand = replace(PathSpec.from_str_path("/m/d"), raw_path=raw)
-    budget = ScanBudget(operand, _limits({"/m/": 0}))
+    budget = WalkBudget(operand, _limits({"/m/": 0}))
     assert not budget.spend("/m/d")
     assert budget.stopped == [f"{shown}: {STOP.format(0)}"]
 
 
 @pytest.mark.asyncio
-async def test_a_scan_budget_listing_cuts_one_and_skips_the_next():
+async def test_a_walk_budget_listing_cuts_one_and_skips_the_next():
     asked: list[str] = []
 
     async def readdir(path: PathSpec) -> list[str]:
         asked.append(path.virtual)
         return [f"{path.virtual}/{i}" for i in range(3)]
 
-    budget = ScanBudget(PathSpec.from_str_path("/m"), _limits({"/m/": 2}))
+    budget = WalkBudget(PathSpec.from_str_path("/m"), _limits({"/m/": 2}))
     listed = await budget.listing(readdir, PathSpec.from_str_path("/m"))
     assert listed == ["/m/0", "/m/1"]
     assert await budget.listing(readdir, PathSpec.from_str_path("/m/0")) == []

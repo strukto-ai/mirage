@@ -181,13 +181,13 @@ export class NotAWorkTreeError extends GitError {
 }
 
 /**
- * A work tree holding more files than its mount's `fullScanLimit`. The scan
+ * A work tree holding more files than its mount's `walkLimit`. The scan
  * stops there, and a status or an add over part of the tree would read as
  * one over all of it, so the verb fails instead.
  */
 export class WorkTreeLimitError extends GitError {
   constructor(limit: number) {
-    super(`more than ${String(limit)} files in the work tree (full_scan_limit)`)
+    super(`more than ${String(limit)} files in the work tree (walk_limit)`)
   }
 }
 

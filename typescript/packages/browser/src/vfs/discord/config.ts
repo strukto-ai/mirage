@@ -40,7 +40,7 @@ const DiscordConfigSchema = z
       .describe(
         'Function returning extra headers sent with every request to the proxy, such as your own session credential.',
       ),
-    fullScanLimit: z.number().int().min(-1).optional().meta({
+    walkLimit: z.number().int().min(-1).optional().meta({
       description:
         'Most files one command walks under a folder: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit.',
       default: 1000,

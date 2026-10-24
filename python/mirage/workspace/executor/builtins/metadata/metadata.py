@@ -23,7 +23,7 @@ from mirage.commands.builtin.utils.identity import (
     owner_name,
 )
 from mirage.commands.builtin.utils.paths import dispatch_stat, dot_refusal
-from mirage.commands.builtin.utils.tree import before_full_scan
+from mirage.commands.builtin.utils.tree import before_full_walk
 from mirage.commands.errors import UsageError
 from mirage.commands.spec.flag_view import FlagView
 from mirage.errors.fs import fs_strerror, walk_refusal
@@ -392,11 +392,11 @@ async def before_recursive_change(
     below = mounts.visible_descendants(root.virtual)
     for virtual in [root.virtual, *below]:
         try:
-            await before_full_scan(
+            await before_full_walk(
                 dispatch, PathSpec.from_str_path(virtual), cmd
             )
         except PermissionError as exc:
-            logger.debug("scan guard skipped at %s: %s", virtual, exc)
+            logger.debug("walk guard skipped at %s: %s", virtual, exc)
 
 
 async def walk_stats(

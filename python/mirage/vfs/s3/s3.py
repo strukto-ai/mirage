@@ -80,7 +80,7 @@ class S3VFS(BaseVFS):
     def __init__(self, config: S3Config) -> None:
         super().__init__()
         self.config = config
-        self.full_scan_limit = config.full_scan_limit
+        self.walk_limit = config.walk_limit
         self._endpoint = _declared_endpoint(config)
         pinned = (
             config.model_copy(update={"endpoint_url": self._endpoint})

@@ -164,7 +164,7 @@ export class DiscardSignal extends ExitSignal {
 }
 
 /**
- * A glob that matches more paths than its mount's `fullScanLimit`. A command
+ * A glob that matches more paths than its mount's `walkLimit`. A command
  * it is a word of does not run, as exec(2) refuses an argument list too
  * long; anywhere else (a `for` list, a redirect) the line is discarded like
  * any expansion error. `reason` is the limit's line. Mirrors Python's

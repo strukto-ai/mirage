@@ -36,7 +36,7 @@ export interface GCSConfig {
   forcePathStyle?: boolean
   keyPrefix?: string
   proxy?: string
-  fullScanLimit?: number
+  walkLimit?: number
 }
 
 const GCSConfigSchema = z.object({
@@ -71,7 +71,7 @@ export function gcsToS3Config(config: GCSConfig): S3Config {
     ...(config.forcePathStyle !== undefined ? { forcePathStyle: config.forcePathStyle } : {}),
     ...(config.keyPrefix !== undefined ? { keyPrefix: config.keyPrefix } : {}),
     ...(config.proxy !== undefined ? { proxy: config.proxy } : {}),
-    ...(config.fullScanLimit !== undefined ? { fullScanLimit: config.fullScanLimit } : {}),
+    ...(config.walkLimit !== undefined ? { walkLimit: config.walkLimit } : {}),
   }
 }
 

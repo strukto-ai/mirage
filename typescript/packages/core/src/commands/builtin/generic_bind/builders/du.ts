@@ -15,7 +15,7 @@
 import { fsStrerror, isEacces, isEnotdir, isFsError, isMissingPath } from '../../../../errors/fs.ts'
 import { underPath } from '../../../../utils/key_prefix.ts'
 import { type FileStat, FileType, PathSpec } from '../../../../types.ts'
-import { ScanBudget, treeWalk, type WalkCall } from '../../utils/tree.ts'
+import { WalkBudget, treeWalk, type WalkCall } from '../../utils/tree.ts'
 import {
   type ComputeEntries,
   type ComputeSize,
@@ -35,16 +35,14 @@ import { linksOf, mountView, mountsOf } from '../../utils/links.ts'
 /**
  * What the walks of one `du` invocation met.
  *
- * Each operand's walk lists at most `fullScanLimit` entries of each mount it
- * crosses (`ScanBudget`): a walk the mount's `readTree` does not answer takes
+ * Each operand's walk lists at most `walkLimit` entries of each mount it
+ * crosses (`WalkBudget`): a walk the mount's `readTree` does not answer takes
  * one `readdir` per directory, which on an API-backed tree is one request per
  * directory. Slack, for instance, exposes a directory per channel per day, so
  * an unbounded walk of a real workspace is tens of thousands of requests.
  * Where a walk ran out is kept, so the answer says it is partial.
  */
-export class WalkBudget {
-  // The current operand's allowance.
-  scan: ScanBudget | null = null
+export class DuTally {
   // Where a walk ran out, in the order met.
   readonly stopped: string[] = []
   // Paths the walk was refused (a rule denied them below the operand), in
@@ -88,9 +86,9 @@ export class WalkBudget {
  * named by a noun that does not fit it, and being named loudly is still
  * the better half of that trade.
  */
-function accountForWalkError(err: unknown, path: PathSpec, budget: WalkBudget): void {
+function accountForWalkError(err: unknown, path: PathSpec, tally: DuTally): void {
   if (isEacces(err)) {
-    budget.unreadable.push(path.virtual)
+    tally.unreadable.push(path.virtual)
     return
   }
   if (!isMissingPath(err) && !isEnotdir(err)) throw err
@@ -169,13 +167,13 @@ class Dereference {
 /**
  * What `du -L` counts an entry as, null when it counts nothing. `info` is the
  * entry's own stat, a link's row for a link; a link it cannot follow is
- * recorded on `budget`.
+ * recorded on `tally`.
  */
 async function counted(
   follow: Dereference,
   path: PathSpec,
   info: FileStat,
-  budget: WalkBudget,
+  tally: DuTally,
 ): Promise<FileStat | null> {
   let real: string
   let target: FileStat | null
@@ -184,11 +182,11 @@ async function counted(
     target = info.type === FileType.SYMLINK ? await follow.links.targetStat(path.virtual) : info
   } catch (err) {
     if (!isFsError(err)) throw err
-    budget.inaccessible.push([path.virtual, fsStrerror(err)])
+    tally.inaccessible.push([path.virtual, fsStrerror(err)])
     return null
   }
   if (target === null) {
-    budget.inaccessible.push([path.virtual, null])
+    tally.inaccessible.push([path.virtual, null])
     return null
   }
   if (follow.home !== null && follow.mounts?.rootOf(real) !== follow.home) return null
@@ -204,7 +202,8 @@ async function counted(
 async function duWalk(
   walk: Walk,
   path: PathSpec,
-  budget: WalkBudget,
+  tally: DuTally,
+  scan: WalkBudget,
   entries: [string, number][] | null,
   follow: Dereference | null,
 ): Promise<number> {
@@ -212,11 +211,11 @@ async function duWalk(
   try {
     info = await walk.stat(path)
   } catch (err) {
-    accountForWalkError(err, path, budget)
+    accountForWalkError(err, path, tally)
     return 0
   }
   if (follow !== null) {
-    const row = await counted(follow, path, info, budget)
+    const row = await counted(follow, path, info, tally)
     if (row === null) return 0
     info = row
   }
@@ -225,20 +224,19 @@ async function duWalk(
     if (entries !== null) entries.push([`/${stripSlash(path.virtual)}`, size])
     return size
   }
-  budget.directories.push(path.virtual)
-  const scan = budget.scan
-  if (scan !== null && !scan.opens(path.virtual)) return 0
+  tally.directories.push(path.virtual)
+  if (!scan.opens(path.virtual)) return 0
   let children: string[]
   try {
     children = await walk.readdir(path)
   } catch (err) {
-    accountForWalkError(err, path, budget)
+    accountForWalkError(err, path, tally)
     return 0
   }
   let total = 0
   for (const child of children) {
-    if (scan !== null && !scan.spend(path.virtual)) break
-    total += await duWalk(walk, PathSpec.fromStrPath(child), budget, entries, follow)
+    if (!scan.spend(path.virtual)) break
+    total += await duWalk(walk, PathSpec.fromStrPath(child), tally, scan, entries, follow)
   }
   return total
 }
@@ -251,46 +249,45 @@ async function duWalk(
  */
 async function walkOperand(
   walk: Walk,
-  budget: WalkBudget,
+  tally: DuTally,
   follow: Dereference | null,
   path: PathSpec,
   entries: [string, number][] | null,
 ): Promise<number> {
-  budget.directories.length = 0
-  const scan = new ScanBudget(path, budget.mounts)
-  budget.scan = scan
+  tally.directories.length = 0
+  const scan = new WalkBudget(path, tally.mounts)
   const state = follow === null ? null : follow.operand(path)
-  let total = await duWalk(walk, path, budget, entries, state)
+  let total = await duWalk(walk, path, tally, scan, entries, state)
   if (state !== null) {
     for (const [link, real] of state.waiting) {
       if (!state.counted.has(real)) {
-        total += await duWalk(walk, link, budget, entries, state.under(link))
+        total += await duWalk(walk, link, tally, scan, entries, state.under(link))
       }
     }
   }
   for (const line of scan.stopped) {
-    if (!budget.stopped.includes(line)) budget.stopped.push(line)
+    if (!tally.stopped.includes(line)) tally.stopped.push(line)
   }
   return total
 }
 
 export function walkSize(
   walk: Walk,
-  budget: WalkBudget,
+  tally: DuTally,
   follow: Dereference | null,
   path: PathSpec,
 ): Promise<number> {
-  return walkOperand(walk, budget, follow, path, null)
+  return walkOperand(walk, tally, follow, path, null)
 }
 
 export async function walkEntries(
   walk: Walk,
-  budget: WalkBudget,
+  tally: DuTally,
   follow: Dereference | null,
   path: PathSpec,
 ): Promise<DuEntries> {
   const entries: [string, number][] = []
-  const total = await walkOperand(walk, budget, follow, path, entries)
+  const total = await walkOperand(walk, tally, follow, path, entries)
   entries.sort((a, b) => compareCodePoints(a[0], b[0]))
   return [entries, total]
 }
@@ -298,7 +295,7 @@ export async function walkEntries(
 const du: CommandFn = async (_accessor, paths, _texts, ctx) => {
   const files = commandFiles(ctx, paths)
   const flags = new FlagView(ctx.flags, specOf('du'))
-  const budget = new WalkBudget(mountsOf(ctx) ?? null)
+  const tally = new DuTally(mountsOf(ctx) ?? null)
   // Kept on one filesystem, a listing leaves out the roots of the mounts
   // below it, which the walk must neither list nor stat.
   const bound = flags.asBool('one_file_system') ? mountView(ctx.vfs) : undefined
@@ -314,9 +311,9 @@ const du: CommandFn = async (_accessor, paths, _texts, ctx) => {
     links !== undefined && flags.typedOrder('L', 'P').at(-1) === 'L'
       ? new Dereference(links, flags.asBool('one_file_system') ? (mountsOf(ctx) ?? null) : null)
       : null
-  const computeSize: ComputeSize = (p) => walkSize(treeOf(files, listing), budget, follow, p)
+  const computeSize: ComputeSize = (p) => walkSize(treeOf(files, listing), tally, follow, p)
   const computeEntries: ComputeEntries = (p) =>
-    walkEntries(treeOf(files, listing), budget, follow, p)
+    walkEntries(treeOf(files, listing), tally, follow, p)
 
   return duGeneric(
     paths,
@@ -325,10 +322,10 @@ const du: CommandFn = async (_accessor, paths, _texts, ctx) => {
     files.stat,
     computeSize,
     computeEntries,
-    () => budget.stopped,
-    () => budget.unreadable,
-    () => budget.directories,
-    () => budget.inaccessible,
+    () => tally.stopped,
+    () => tally.unreadable,
+    () => tally.directories,
+    () => tally.inaccessible,
     follow === null ? undefined : (p) => follow.repeated(p),
   )
 }

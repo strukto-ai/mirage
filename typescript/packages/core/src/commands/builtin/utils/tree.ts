@@ -19,9 +19,9 @@ import type { DispatchFn } from '../../../runtime/types.ts'
 import { FileStat, FileType, PathSpec } from '../../../types.ts'
 import { compareCodePoints } from '../../../utils/sort.ts'
 import type { MountView } from '../../../view/types.ts'
-import { ScanLimitError, UsageError } from '../../errors.ts'
+import { WalkLimitError, UsageError } from '../../errors.ts'
 
-// The conditions under which a guard's path reaches no directory to scan.
+// The conditions under which a guard's path reaches no directory to walk.
 const NO_DIRECTORY: ReadonlySet<FsCondition> = new Set(['ENOENT', 'ENOTDIR', 'ELOOP'])
 
 export type ReadTree = (path: PathSpec) => Promise<Map<string, FileStat> | null>
@@ -35,20 +35,20 @@ export type WalkCall<R> = (path: PathSpec, nofollow?: boolean) => Promise<R>
  * directory (missing, not one, a link loop) itself. The mount refuses by
  * rejecting, which becomes the command's own error, `command: message` and
  * exit 1, on one mount or across several; any other filesystem error stays
- * one. Mirrors Python's `before_full_scan`.
+ * one. Mirrors Python's `before_full_walk`.
  */
-export async function beforeFullScan(
+export async function beforeFullWalk(
   dispatch: DispatchFn | undefined,
   path: PathSpec,
   command: string,
 ): Promise<void> {
   if (dispatch === undefined) return
   try {
-    await dispatch('before_full_scan', PathSpec.fromStrPath(path.virtual))
+    await dispatch('before_full_walk', PathSpec.fromStrPath(path.virtual))
   } catch (err) {
     const condition = classify(err)
     if (condition !== null && NO_DIRECTORY.has(condition)) {
-      console.debug(`scan guard at ${path.virtual}: ${String(err)}`)
+      console.debug(`walk guard at ${path.virtual}: ${String(err)}`)
       return
     }
     if (err instanceof UsageError || isFsError(err) || !(err instanceof Error)) throw err
@@ -59,15 +59,15 @@ export async function beforeFullScan(
 /**
  * The entries one walk of an operand may still list.
  *
- * A walk lists at most `fullScanLimit` entries of each mount it crosses: an
+ * A walk lists at most `walkLimit` entries of each mount it crosses: an
  * entry is charged to the mount serving the directory that lists it, counted
  * under the operand, or under the mount's root where that mount starts below
  * the operand. Once a count runs out the walk lists nothing more there, and
  * `stopped` holds what the command says about it, one line per folder,
  * without the command's name, in the order the walk met them. Mirrors
- * Python's `ScanBudget`.
+ * Python's `WalkBudget`.
  */
-export class ScanBudget {
+export class WalkBudget {
   readonly spent = new Map<string, number>()
   readonly stopped: string[] = []
 
@@ -77,7 +77,7 @@ export class ScanBudget {
   ) {}
 
   private limitAt(directory: string): number {
-    return this.mounts?.fullScanLimit?.(directory) ?? -1
+    return this.mounts?.walkLimit?.(directory) ?? -1
   }
 
   private folderOf(directory: string): string {
@@ -90,13 +90,14 @@ export class ScanBudget {
   private stop(folder: string, limit: number): void {
     const top = this.operand.virtual.replace(/\/+$/, '') || '/'
     const at = folder === top ? this.operand : PathSpec.fromStrPath(folder)
-    const line = new ScanLimitError(at, limit).message
+    const line = new WalkLimitError(at, limit).message
     if (!this.stopped.includes(line)) this.stopped.push(line)
   }
 
   /**
-   * Charge one entry `directory` lists: true if the walk may keep it, false
-   * once its folder's count is out, which records the stop.
+   * Charge one entry `directory` lists, or the one file a search reads when
+   * `directory` is that file: true if the walk may keep it, false once its
+   * folder's count is out, which records the stop.
    */
   spend(directory: string): boolean {
     const limit = this.limitAt(directory)
@@ -166,6 +167,15 @@ function listings(found: Map<string, FileStat>): Map<string, string[]> {
 }
 
 /**
+ * Whether an earlier answer may stand for `path`. A spelling with dots or a
+ * trailing slash (`dotted`) or one the walk refused (`walkError`) goes to the
+ * call, so the dispatcher checks it. Mirrors Python's `_answerable`.
+ */
+function answerable(path: PathSpec): boolean {
+  return path.dotted === null && path.walkError === null
+}
+
+/**
  * A walk's `readdir` and `stat`, answered from the mount's `readTree`.
  *
  * The first `readdir` of a directory no answer covers asks `readTree` for
@@ -180,15 +190,6 @@ function listings(found: Map<string, FileStat>): Map<string, string[]> {
  * the directory it leads to. Both take the path first and pass the rest
  * through. Mirrors Python's `tree_walk`.
  */
-/**
- * Whether an earlier answer may stand for `path`. A spelling with dots or a
- * trailing slash (`dotted`) or one the walk refused (`walkError`) goes to the
- * call, so the dispatcher checks it. Mirrors Python's `_answerable`.
- */
-function answerable(path: PathSpec): boolean {
-  return path.dotted === null && path.walkError === null
-}
-
 export function treeWalk<D, S>(
   readTree: ReadTree | undefined,
   readdir: WalkCall<D>,

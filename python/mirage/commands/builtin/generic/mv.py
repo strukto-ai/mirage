@@ -53,7 +53,7 @@ from mirage.commands.builtin.utils.copy import (
     path_exists,
     typed_name,
 )
-from mirage.commands.builtin.utils.tree import before_full_scan
+from mirage.commands.builtin.utils.tree import before_full_walk
 from mirage.commands.errors import UsageError
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.usage import usage_hint
@@ -695,7 +695,7 @@ async def mv_generic(
             # Across mounts the tree is copied file by file, so the
             # source's mount is asked before a backup or a removal
             # touches the destination.
-            await before_full_scan(dispatch, src, "mv")
+            await before_full_walk(dispatch, src, "mv")
         if (
             across
             and target_exists

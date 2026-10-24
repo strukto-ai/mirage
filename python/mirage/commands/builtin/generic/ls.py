@@ -22,7 +22,7 @@ from mirage.commands.builtin.utils.output import (
     format_records,
 )
 from mirage.commands.builtin.utils.paths import vfs_stat_path
-from mirage.commands.builtin.utils.tree import ScanBudget
+from mirage.commands.builtin.utils.tree import WalkBudget
 from mirage.commands.config import Context
 from mirage.commands.errors import UsageError
 from mirage.commands.spec import SPECS
@@ -1071,7 +1071,7 @@ async def probe_operand(
     escape: bool = False,
     chain: tuple[str, ...] = (),
     spell: Callable[[str], str] | None = None,
-    budget: ScanBudget | None = None,
+    budget: WalkBudget | None = None,
 ) -> tuple[Operand, list[LsWarning]]:
     """List one operand and report whether it turned out to be a directory.
 
@@ -1111,7 +1111,7 @@ async def probe_operand(
             above this one, each as the path it resolves to.
         spell (Callable[[str], str] | None): a path below the operand as
             the operand spelled it; None at the operand itself.
-        budget (ScanBudget | None): under ``-R``, the entries the walk
+        budget (WalkBudget | None): under ``-R``, the entries the walk
             may still list; a directory past it is listed in its parent
             but not opened.
     """
@@ -1581,7 +1581,7 @@ async def ls(
     )
     operands: list[Operand] = []
     for p in paths:
-        budget = ScanBudget(p, mounts) if recursive else None
+        budget = WalkBudget(p, mounts) if recursive else None
         operand, p_ws = await probe_operand(
             p,
             readdir=readdir,

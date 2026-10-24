@@ -46,7 +46,7 @@ class MountRow:
         searchable (tuple[str, ...] | None): the mount VFS's
             ``searchable`` globs, the files its ``files_containing``
             answers for; None for every file.
-        full_scan_limit (int): the mount VFS's ``full_scan_limit``, -1
+        walk_limit (int): the mount VFS's ``walk_limit``, -1
             for no cap.
         calls (frozenset[str]): the functions the mount's VFS answers
             itself: each dispatcher call it defines, and ``read_range``
@@ -60,7 +60,7 @@ class MountRow:
     anchor: bool = False
     visible: Callable[[str | None], bool] | None = None
     searchable: tuple[str, ...] | None = None
-    full_scan_limit: int = -1
+    walk_limit: int = -1
     calls: frozenset[str] = frozenset()
 
 

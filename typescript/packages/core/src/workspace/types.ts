@@ -18,10 +18,9 @@ import type { MountMode, PathSpec } from '../types.ts'
 /**
  * What the namespace's reader knows about one mount: its prefix, its VFS's
  * name (recorded on each op), its mode as it is now, which sessions are told
- * of it (null for every one), the VFS's du walk budget (null for no cap), the functions the VFS
- * answers itself (the dispatcher's names, `read_range` for a ranged read),
- * how many matches one glob word keeps there, the globs its search covers
- * (null for every file) and its VFS's `fullScanLimit` (-1 for no cap).
+ * of it (null for every one), the functions the VFS answers itself (the
+ * dispatcher's names, `read_range` for a ranged read), the globs its search
+ * covers (null for every file) and its VFS's `walkLimit` (-1 for no cap).
  * Mirrors Python's `MountRow`.
  */
 export interface MountRow {
@@ -31,7 +30,7 @@ export interface MountRow {
   readonly visible?: ((sessionId: string | null) => boolean) | null
   readonly calls?: ReadonlySet<string>
   readonly searchable?: readonly string[] | null
-  readonly fullScanLimit?: number
+  readonly walkLimit?: number
 }
 
 export interface ExecutionNodeInit {
