@@ -208,3 +208,11 @@ async def test_readdir_missing_child_of_a_coexisting_doc_and_prefix(accessor):
 async def test_readdir_coexisting_prefix_still_lists_its_children(accessor):
     with _bucket(["a", "a/x.txt"]):
         assert await readdir(accessor, _path("/a")) == ["/a/x.txt"]
+
+
+@pytest.mark.asyncio
+async def test_readdir_root_hides_the_trash(accessor):
+    with _bucket(["a.txt", "/trash/a.txt", "/trash/d/f.txt"]):
+        assert await readdir(accessor, _path("/")) == ["/a.txt"]
+        with pytest.raises(FileNotFoundError):
+            await readdir(accessor, _path("/trash"))

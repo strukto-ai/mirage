@@ -1,0 +1,61 @@
+{
+  "cases": [
+    {
+      "id": "gridfs_trash_seed",
+      "seq": 945000,
+      "targets": ["gridfs", "gridfs-prefix"],
+      "command": "mkdir -p {mount}/trash_dir && printf 'v1' > {mount}/trash_dir/f.txt && printf 'v2' > {mount}/trash_dir/f.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gridfs_trash_rm_reads_as_gone",
+      "seq": 945001,
+      "targets": ["gridfs", "gridfs-prefix"],
+      "command": "rm {mount}/trash_dir/f.txt; cat {mount}/trash_dir/f.txt; echo \"cat=$?\"; stat -c %n {mount}/trash_dir/f.txt; echo \"stat=$?\"; test -e {mount}/trash_dir/f.txt; echo \"test=$?\"; ls {mount}/trash_dir | wc -l",
+      "expect": {
+        "exit": 0,
+        "stdout": "cat=1\nstat=1\ntest=1\n0\n",
+        "stderr": "cat: {mount}/trash_dir/f.txt: No such file or directory\nstat: cannot statx '{mount}/trash_dir/f.txt': No such file or directory\n"
+      },
+      "note": "rm moves every revision of the file to the trash, which no mount path reaches, so the name reads as gone to every command."
+    },
+    {
+      "id": "gridfs_trash_rewrite_is_fresh",
+      "seq": 945002,
+      "targets": ["gridfs", "gridfs-prefix"],
+      "command": "printf 'v3' > {mount}/trash_dir/f.txt && cat {mount}/trash_dir/f.txt && echo && ls {mount}/trash_dir",
+      "expect": {
+        "exit": 0,
+        "stdout": "v3\nf.txt\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gridfs_trash_mv_does_not_resurrect",
+      "seq": 945003,
+      "targets": ["gridfs", "gridfs-prefix"],
+      "command": "mv {mount}/trash_dir/f.txt {mount}/trash_dir/g.txt && cat {mount}/trash_dir/g.txt && echo && ls {mount}/trash_dir",
+      "expect": {
+        "exit": 0,
+        "stdout": "v3\ng.txt\n",
+        "stderr": ""
+      },
+      "note": "mv retags only the live revisions; the trashed ones stay under the trash and never come back under the new name."
+    },
+    {
+      "id": "gridfs_trash_rm_r_reads_as_gone",
+      "seq": 945004,
+      "targets": ["gridfs", "gridfs-prefix"],
+      "command": "rm -r {mount}/trash_dir; ls {mount}/trash_dir; echo \"ls=$?\"; find {mount} -path '*/trash_dir/*' | wc -l",
+      "expect": {
+        "exit": 0,
+        "stdout": "ls=2\n0\n",
+        "stderr": "ls: cannot access '{mount}/trash_dir': No such file or directory\n"
+      }
+    }
+  ]
+}

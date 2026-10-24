@@ -21,12 +21,17 @@ from pymongo.asynchronous.collection import AsyncCollection
 from pymongo.asynchronous.database import AsyncDatabase
 
 from mirage.accessor.gridfs import GridFSAccessor
+from mirage.core.gridfs.constants import TRASH_PREFIX
 from mirage.utils import key_prefix as kp
 from mirage.vfs.gridfs.config import GridFSConfig
 
 # Newest revision of a filename wins; _id breaks uploadDate ties because
 # ObjectIds are monotonic within a process.
 LATEST_SORT = [("uploadDate", -1), ("_id", -1)]
+
+# Each filename's revisions together, newest first, the order prune keeps
+# them in.
+PRUNE_SORT = [("filename", -1), ("uploadDate", -1), ("_id", -1)]
 
 _BATCH = 1000
 
@@ -59,9 +64,24 @@ def bucket(accessor: GridFSAccessor) -> AsyncGridFSBucket:
 
 
 def prefix_query(pfx: str) -> dict[str, Any]:
+    """Match the live revisions under a key prefix.
+
+    Args:
+        pfx (str): backend key prefix; ``""`` is the whole store, less
+            the trash, which no mount key can reach.
+    """
     if not pfx:
-        return {}
+        return {"filename": {"$regex": "^(?!" + re.escape(TRASH_PREFIX) + ")"}}
     return {"filename": {"$regex": "^" + re.escape(pfx)}}
+
+
+def trashed(key: str) -> str:
+    """The filename ``rm`` moves a key's revisions to.
+
+    Args:
+        key (str): backend key, or a prefix of one.
+    """
+    return TRASH_PREFIX + key
 
 
 async def latest_file(
@@ -108,18 +128,92 @@ async def iter_latest(
         }
 
 
-async def delete_all(accessor: GridFSAccessor, query: dict[str, Any]) -> None:
-    """Delete every revision (file doc + chunks) matching a query.
+async def retag(
+    accessor: GridFSAccessor,
+    query: dict[str, Any],
+    prefix: str,
+    strip: str = "",
+) -> int:
+    """Rename every revision matching a query, in one server-side update.
+
+    Each filename loses its leading ``strip`` and gains ``prefix``. Both are
+    sent as literals and the server measures ``strip`` itself, so a ``$`` in
+    a name is never read as a field path and the cut counts code points,
+    as ``$substrCP`` does. The revisions keep their ``_id`` and chunks, so a
+    read pinned to one still finds it under the new name.
 
     Args:
         accessor (GridFSAccessor): GridFS accessor.
-        query (dict[str, Any]): fs.files filter selecting docs to delete.
+        query (dict[str, Any]): fs.files filter selecting the revisions;
+            every filename it selects starts with ``strip``.
+        prefix (str): what the new filename starts with.
+        strip (str): the leading part each old filename loses.
+
+    Returns:
+        int: how many revisions the query selected.
+    """
+    rest: Any = "$filename"
+    if strip:
+        rest = {
+            "$substrCP": [
+                "$filename",
+                {"$strLenCP": {"$literal": strip}},
+                {"$strLenCP": "$filename"},
+            ]
+        }
+    result = await files_coll(accessor).update_many(
+        query,
+        [{"$set": {"filename": {"$concat": [{"$literal": prefix}, rest]}}}],
+    )
+    return result.matched_count
+
+
+async def prune(accessor: GridFSAccessor, query: dict[str, Any]) -> None:
+    """Delete the revisions past ``keep_revisions`` of each matching name.
+
+    Args:
+        accessor (GridFSAccessor): GridFS accessor; its config's
+            ``keep_revisions`` is the number kept per filename, newest
+            first, and ``None`` keeps them all.
+        query (dict[str, Any]): fs.files filter naming the revisions to
+            count, live or trashed.
+    """
+    keep = accessor.config.keep_revisions
+    if keep is None:
+        return
+    # Streamed newest first within each filename and deleted in batches, so
+    # no history, however long, is ever held in one document or one list.
+    cursor = files_coll(accessor).find(
+        query,
+        projection={"_id": 1, "filename": 1},
+        sort=PRUNE_SORT,
+        allow_disk_use=True,
+    )
+    name: str | None = None
+    kept = 0
+    stale: list[Any] = []
+    async for doc in cursor:
+        if doc["filename"] != name:
+            name, kept = doc["filename"], 0
+        if kept < keep:
+            kept += 1
+            continue
+        stale.append(doc["_id"])
+        if len(stale) >= _BATCH:
+            await delete_ids(accessor, stale)
+            stale = []
+    await delete_ids(accessor, stale)
+
+
+async def delete_ids(accessor: GridFSAccessor, ids: list[Any]) -> None:
+    """Delete revisions (file doc + chunks) by ``_id``.
+
+    Args:
+        accessor (GridFSAccessor): GridFS accessor.
+        ids (list[Any]): the ``_id`` of each revision to delete.
     """
     files = files_coll(accessor)
     chunks = chunks_coll(accessor)
-    ids: list[Any] = []
-    async for doc in files.find(query, projection={"_id": 1}):
-        ids.append(doc["_id"])
     for i in range(0, len(ids), _BATCH):
         batch = ids[i : i + _BATCH]
         await chunks.delete_many({"files_id": {"$in": batch}})

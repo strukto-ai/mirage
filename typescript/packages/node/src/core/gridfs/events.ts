@@ -23,6 +23,7 @@ import { rstripSlash } from '@struktoai/mirage-core/utils/slash'
 import { eventAt, field, textField } from '@struktoai/mirage-core/events/index'
 import type { GridFSAccessor } from '../../accessor/gridfs.ts'
 import { filesColl } from './client.ts'
+import { TRASH_PREFIX } from './constants.ts'
 
 // Events after which the stream no longer describes the files collection
 // document by document.
@@ -40,8 +41,10 @@ const GONE = new Set(['drop', 'dropDatabase', 'rename', 'invalidate'])
  * GridFS keeps every upload as its own revision and serves the newest, so
  * after an insert, a delete or a rename the hook counts the revisions left
  * under each name it touched: none is a DELETE, one just made is a CREATE, and
- * any other is an UPDATE, since the file now reads another revision. A delete
- * names its document by id only; the pre-image, or the insert the hook saw,
+ * any other is an UPDATE, since the file now reads another revision. `rm`
+ * renames revisions into the trash, which no mount path reaches, so a rename
+ * there settles only the name left behind. A delete names its document by id
+ * only; the pre-image, or the insert the hook saw,
  * names the file, and with neither the whole mount is UNKNOWN. A filename
  * ending in `/` is a directory marker. A dropped or renamed collection, a
  * dropped database and an invalidated stream leave the mount UNKNOWN.
@@ -56,9 +59,13 @@ export class GridFSEventHook {
     this.accessor = accessor
   }
 
-  /** The mount-relative path of a filename, or null outside the key prefix. */
+  /**
+   * The mount-relative path of a filename, or null outside the key prefix
+   * or in the trash.
+   */
   private relative(filename: string): string | null {
     const prefix = normalize(this.accessor.config.keyPrefix)
+    if (filename.startsWith(TRASH_PREFIX)) return null
     if (prefix !== '' && !filename.startsWith(prefix)) return null
     return filename.slice(prefix.length)
   }

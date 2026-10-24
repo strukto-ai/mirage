@@ -309,6 +309,10 @@ class ObjectStoreDriver(Generic[A, C]):
             revision reads that revision.
         copy_if (Callable | None): ``copy_file`` with the destination's
             condition and the source's expected token.
+        head_revision (Callable | None): point lookup of one revision of
+            a key by the token ``head`` spells, None when it is gone; a
+            stat pinned by a snapshot asks this, so a revision the store
+            still holds under another name (a trash, a version) answers.
         delete_if (Callable | None): ``delete_file`` with a condition.
         move_file_if (Callable | None): ``move_file`` whose copy and
             delete are both conditioned on the source's version (the one
@@ -341,6 +345,9 @@ class ObjectStoreDriver(Generic[A, C]):
     move_file: Callable[[C, str, str], Awaitable[bool]] | None = None
     move_prefix: Callable[[C, str, str], Awaitable[bool]] | None = None
     copy_file: Callable[[C, str, str], Awaitable[bool]] | None = None
+    head_revision: (
+        Callable[[C, str, str], Awaitable[ObjectMeta | None]] | None
+    ) = None
     markers_supported: bool = True
     put_if: (
         Callable[[C, str, bytes, WriteCondition], Awaitable[ObjectMeta | None]]
