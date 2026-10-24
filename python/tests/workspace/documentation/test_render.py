@@ -425,7 +425,7 @@ async def test_vfs_md_describes_each_path_shown_with_its_own_mode():
 @pytest.mark.asyncio
 async def test_vfs_md_names_no_search_a_mount_turned_off():
     cfg = GDocsConfig(
-        client_id="x", client_secret="y", refresh_token="z", full_scan_limit=-1
+        client_id="x", client_secret="y", refresh_token="z", walk_limit=-1
     )
     ws = Workspace(
         {"/docs": (GDocsVFS(config=cfg), MountMode.READ)},

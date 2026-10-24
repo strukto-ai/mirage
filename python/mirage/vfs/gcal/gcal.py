@@ -156,7 +156,7 @@ class GCalVFS(BaseVFS):
         Args:
             name (str): the function name.
         """
-        if name == "files_containing" and self.full_scan_limit < 0:
+        if name == "files_containing" and self.walk_limit < 0:
             return False
         return super().supports(name)
 

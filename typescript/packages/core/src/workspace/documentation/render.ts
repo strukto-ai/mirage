@@ -297,8 +297,8 @@ function limitations(
           `${reads} every other file.`,
       )
   }
-  if (vfs.fullScanLimit >= 0) {
-    const limit = String(vfs.fullScanLimit)
+  if (vfs.walkLimit >= 0) {
+    const limit = String(vfs.walkLimit)
     const walks = WALKS.filter((c) => runs(c.split(' '))).map(code)
     const refused = REFUSED.filter((c) => runs(c.split(' '))).map(code)
     let text =

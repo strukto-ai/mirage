@@ -58,7 +58,7 @@ export const ASKS: readonly (readonly [string, string])[] = [
   ['line_count', 'wc -l'],
 ]
 
-// The walks a mount's full_scan_limit stops, and the commands it refuses
+// The walks a mount's walk_limit stops, and the commands it refuses
 // past it.
 export const WALKS: readonly string[] = ['grep -r', 'find', 'du']
 export const REFUSED: readonly string[] = ['tar -c', 'cp -r', 'rm -r']

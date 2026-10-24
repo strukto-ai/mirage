@@ -567,7 +567,7 @@ describe('wholeWordSearch', () => {
 describe('supports', () => {
   it('drops a search turned off without a walk limit', () => {
     const root = fileURLToPath(new URL('.', import.meta.url))
-    const guard = /this\.fullScanLimit < 0( \|\||\) return Promise\.resolve\(null\))/
+    const guard = /this\.walkLimit < 0( \|\||\) return Promise\.resolve\(null\))/
     for (const dir of readdirSync(root, { withFileTypes: true })) {
       if (!dir.isDirectory()) continue
       for (const file of readdirSync(`${root}${dir.name}`)) {
@@ -581,7 +581,7 @@ describe('supports', () => {
       }
     }
     const limited = { apiKey: 'k', apiToken: 't' }
-    expect(new TrelloVFS({ ...limited, fullScanLimit: -1 }).supports('files_containing')).toBe(
+    expect(new TrelloVFS({ ...limited, walkLimit: -1 }).supports('files_containing')).toBe(
       false,
     )
     expect(new TrelloVFS(limited).supports('files_containing')).toBe(true)

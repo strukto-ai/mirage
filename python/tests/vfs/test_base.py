@@ -514,14 +514,12 @@ def test_search_off_without_a_walk_limit_is_not_answered():
         cls = resolve_class(REGISTRY[name].vfs_path)
         if cls.files_containing is BaseVFS.files_containing:
             continue
-        guards = "full_scan_limit < 0" in inspect.getsource(
-            cls.files_containing
-        )
+        guards = "walk_limit < 0" in inspect.getsource(cls.files_containing)
         assert guards == (cls.supports is not BaseVFS.supports), name
         if guards:
             vfs = cls.__new__(cls)
             BaseVFS.__init__(vfs)
-            vfs.full_scan_limit = -1
+            vfs.walk_limit = -1
             assert not vfs.supports("files_containing"), name
-            vfs.full_scan_limit = 1000
+            vfs.walk_limit = 1000
             assert vfs.supports("files_containing"), name

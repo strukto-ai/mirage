@@ -138,7 +138,7 @@ export class GSlidesVFS extends BaseVFS {
    * file rather than ask the service's search.
    */
   override supports(name: string): boolean {
-    if (name === 'files_containing' && this.fullScanLimit < 0) return false
+    if (name === 'files_containing' && this.walkLimit < 0) return false
     return super.supports(name)
   }
 

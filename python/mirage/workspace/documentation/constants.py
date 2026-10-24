@@ -56,7 +56,7 @@ ASKS = (
     ("line_count", "wc -l"),
 )
 
-# The walks a mount's full_scan_limit stops, and the commands it refuses
+# The walks a mount's walk_limit stops, and the commands it refuses
 # past it.
 WALKS = ("grep -r", "find", "du")
 REFUSED = ("tar -c", "cp -r", "rm -r")

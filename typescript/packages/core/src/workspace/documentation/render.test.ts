@@ -352,7 +352,7 @@ describe('vfsMd', () => {
       clientId: 'x',
       clientSecret: 'y',
       refreshToken: 'z',
-      fullScanLimit: -1,
+      walkLimit: -1,
     })
     const ws = new Workspace({ '/docs': [docs, MountMode.READ] }, { mode: MountMode.READ })
     expect(await ws.vfsMd()).not.toContain('search')

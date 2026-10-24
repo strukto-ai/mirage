@@ -369,8 +369,8 @@ def limitations(
                 f"{code(vfs.name)} search covers only {globs}; "
                 f"{reads} every other file."
             )
-    if vfs.full_scan_limit >= 0:
-        limit = vfs.full_scan_limit
+    if vfs.walk_limit >= 0:
+        limit = vfs.walk_limit
         walks = [code(c) for c in WALKS if runs(c.split())]
         refused = [code(c) for c in REFUSED if runs(c.split())]
         text = (
