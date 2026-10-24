@@ -166,16 +166,19 @@ function refuseConflicts(fl: FlagView, name: string): void {
 }
 
 // b2sum's digest for its -l, read as GNU reads it in the option loop: a
-// decimal count of bits, 0 or past 512 meaning 512 (coreutils 9.7).
+// decimal count of bits, 0 or past 512 meaning 512 whatever it is, and one
+// under 512 a multiple of 8 (coreutils 9.7).
 function blake2b(fl: FlagView, name: string): string {
   const value = fl.asStr('length')
   if (value === undefined) return BLAKE2B
   const match = /^\s*\+?([0-9]+)$/.exec(value)
   const refusal = `${name}: invalid length: '${quoteText(value)}'`
   if (match === null) throw new UsageError(refusal, 1)
-  const bits = Number(match[1])
-  if (bits % 8 !== 0) throw new UsageError(`${refusal}\n${name}: length is not a multiple of 8`, 1)
-  return bits === 0 || bits >= 512 ? BLAKE2B : `${BLAKE2B}-${String(bits)}`
+  const bits = BigInt(match[1] ?? '0')
+  if (bits === 0n || bits >= 512n) return BLAKE2B
+  if (bits % 8n !== 0n)
+    throw new UsageError(`${refusal}\n${name}: length is not a multiple of 8`, 1)
+  return `${BLAKE2B}-${String(bits)}`
 }
 
 // Parse the shared `*sum` flag set against one command's spec; b2sum adds -l

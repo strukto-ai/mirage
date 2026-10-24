@@ -5,6 +5,8 @@ use serde::Deserialize;
 use crate::cut::{Interval, Mode, intervals};
 use crate::{Stream, StreamError, latin1, latin1_list, parse_config, quoted};
 
+const OUTPUT: usize = 64 * 1024;
+
 #[derive(Clone, Copy, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 enum Scale {
@@ -274,6 +276,12 @@ struct Numfmt {
     held: Vec<u8>,
     /// How much of `held` is known to hold no separator.
     scanned: usize,
+    /// The next operand to convert.
+    next: usize,
+    eof: bool,
+    /// Whether the last call stopped at its output window with records
+    /// left to convert.
+    again: bool,
     failed: bool,
 }
 
@@ -325,6 +333,9 @@ pub fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
         config,
         held: Vec::new(),
         scanned: 0,
+        next: 0,
+        eof: false,
+        again: false,
         failed: false,
     }))
 }
@@ -408,7 +419,58 @@ impl Numfmt {
         Ok(())
     }
 
-    fn checked(&mut self, result: Result<(), StreamError>) -> Result<(), StreamError> {
+    /// The records or operands that fit one output window, the rest left
+    /// for `drain`: a long `--suffix` on many short records would
+    /// otherwise build all of their output in one call.
+    fn step(&mut self, out: &mut Vec<u8>) -> Result<(), StreamError> {
+        let start = out.len();
+        self.again = false;
+        if !self.config.operands.is_empty() {
+            while self.next < self.config.operands.len() {
+                if out.len() - start >= OUTPUT {
+                    self.again = true;
+                    return Ok(());
+                }
+                let value = std::mem::take(&mut self.config.operands[self.next]);
+                self.next += 1;
+                self.record(&value, out)?;
+                out.push(self.separator);
+            }
+            return Ok(());
+        }
+        let held = std::mem::take(&mut self.held);
+        let mut at = 0;
+        let mut from = self.scanned;
+        let mut result = Ok(());
+        while result.is_ok() {
+            if out.len() - start >= OUTPUT {
+                self.again = true;
+                break;
+            }
+            match memchr::memchr(self.separator, &held[from..]) {
+                Some(found) => {
+                    result = self.line(&held[at..from + found], true, out);
+                    at = from + found + 1;
+                    from = at;
+                }
+                None => {
+                    if self.eof && at < held.len() {
+                        result = self.line(&held[at..], false, out);
+                        at = held.len();
+                    }
+                    from = held.len();
+                    break;
+                }
+            }
+        }
+        self.held = held;
+        self.held.drain(..at);
+        self.scanned = from - at;
+        result
+    }
+
+    fn checked(&mut self, out: &mut Vec<u8>) -> Result<(), StreamError> {
+        let result = self.step(out);
         self.failed = result.is_err();
         result
     }
@@ -420,43 +482,26 @@ impl Stream for Numfmt {
             return Ok(());
         }
         self.held.extend_from_slice(input);
-        let held = std::mem::take(&mut self.held);
-        let mut start = 0;
-        let mut from = self.scanned;
-        let mut result = Ok(());
-        while let Some(at) = memchr::memchr(self.separator, &held[from..]) {
-            result = self.line(&held[start..from + at], true, out);
-            start = from + at + 1;
-            from = start;
-            if result.is_err() {
-                break;
-            }
-        }
-        self.held = held;
-        self.held.drain(..start);
-        self.scanned = self.held.len();
-        self.checked(result)
+        self.checked(out)
     }
 
     fn finish(&mut self, out: &mut Vec<u8>) -> Result<(), StreamError> {
+        self.eof = true;
         if self.failed {
             return Ok(());
         }
-        let result = if self.config.operands.is_empty() {
-            let held = std::mem::take(&mut self.held);
-            if held.is_empty() {
-                Ok(())
-            } else {
-                self.line(&held, false, out)
-            }
-        } else {
-            self.config.operands.iter().try_for_each(|value| {
-                self.record(value, out)?;
-                out.push(self.separator);
-                Ok(())
-            })
-        };
-        self.checked(result)
+        self.checked(out)
+    }
+
+    fn busy(&self) -> bool {
+        !self.failed && self.again
+    }
+
+    fn drain(&mut self, out: &mut Vec<u8>) -> Result<(), StreamError> {
+        if self.failed {
+            return Ok(());
+        }
+        self.checked(out)
     }
 }
 
@@ -717,5 +762,33 @@ mod tests {
         stream.feed(b"\n2000\n", &mut out).unwrap();
         assert!(out.starts_with(b"1.0k xxxxxxxx") && out.ends_with(b"xxxxxxxx\n2.0k\n"));
         assert_eq!(out.len(), 4 + 9 * 1000 + 1 + 5);
+    }
+
+    #[test]
+    fn a_long_suffix_on_many_records_comes_out_a_window_at_a_time() {
+        let suffix = "B".repeat(super::OUTPUT);
+        let operands: Vec<String> = (0..8).map(|i| i.to_string()).collect();
+        for operands in [operands, Vec::new()] {
+            let config = serde_json::json!({
+                "to": "none", "from": "none", "suffix": suffix, "operands": operands,
+            });
+            let mut stream = super::open(config.to_string().as_bytes()).unwrap();
+            let mut total = Vec::new();
+            let mut window = |stream: &mut Box<dyn crate::Stream>, out: &mut Vec<u8>| loop {
+                assert!(out.len() <= 2 * super::OUTPUT);
+                total.append(out);
+                if !stream.busy() {
+                    break;
+                }
+                stream.drain(out).unwrap();
+            };
+            let mut out = Vec::new();
+            stream.feed(b"0\n1\n2\n3\n4\n5\n6\n7\n", &mut out).unwrap();
+            window(&mut stream, &mut out);
+            stream.finish(&mut out).unwrap();
+            window(&mut stream, &mut out);
+            let expected: String = (0..8).map(|i| format!("{i}{suffix}\n")).collect();
+            assert_eq!(total, expected.as_bytes());
+        }
     }
 }

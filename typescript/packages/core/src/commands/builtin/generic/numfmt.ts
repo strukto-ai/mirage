@@ -3,7 +3,8 @@ import { FlagView } from '../../spec/flag_view.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import type { CommandFnResult, Context } from '../../config.ts'
 import { StreamRefusal } from '../../../rs/errors.ts'
-import { openStream, streamOutputChunks, type OpenStream } from '../../../rs/stream.ts'
+import { closeStream, openStream, streamOutputChunks, type OpenStream } from '../../../rs/stream.ts'
+import { OutputStream, closeQuietly } from '../../../io/stream.ts'
 import { byteView } from '../../../shell/bytes.ts'
 import type { JsonValue } from '../../../types.ts'
 
@@ -67,5 +68,18 @@ export async function numfmtGeneric(
   }
   const io = new IOResult()
   const source = texts.length > 0 ? new Uint8Array(0) : (ctx.stdin ?? new Uint8Array(0))
-  return [converted(stream, source, io, ctx.signal), io]
+  // Closing the output releases the stream and, unread, the records.
+  let started = false
+  async function* output(): AsyncGenerator<Uint8Array> {
+    started = true
+    yield* converted(stream, source, io, ctx.signal)
+  }
+  const producer = output()
+  return [
+    new OutputStream(producer, async () => {
+      await closeStream(stream)
+      if (!started) await closeQuietly(source)
+    }),
+    io,
+  ]
 }

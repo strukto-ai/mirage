@@ -146,7 +146,8 @@ def _tag(algorithm: str) -> str:
 
 def _blake2b(fl: FlagView, name: str) -> str:
     """b2sum's digest for its -l, read as GNU reads it in the option loop:
-    a decimal count of bits, 0 or past 512 meaning 512 (coreutils 9.7).
+    a decimal count of bits, 0 or past 512 meaning 512 whatever it is, and
+    one under 512 a multiple of 8 (coreutils 9.7).
 
     Args:
         fl (FlagView): The command's flags.
@@ -163,11 +164,13 @@ def _blake2b(fl: FlagView, name: str) -> str:
     if match is None:
         raise UsageError(refusal, 1)
     bits = int(match.group(1))
+    if bits == 0 or bits >= 512:
+        return BLAKE2B
     if bits % 8:
         raise UsageError(
             f"{refusal}\n{name}: length is not a multiple of 8", 1
         )
-    return BLAKE2B if bits == 0 or bits >= 512 else f"{BLAKE2B}-{bits}"
+    return f"{BLAKE2B}-{bits}"
 
 
 def parse_flags(flags: Mapping[str, FlagValue], name: str) -> ChecksumFlags:

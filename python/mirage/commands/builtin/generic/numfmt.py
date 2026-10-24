@@ -1,9 +1,15 @@
 from collections.abc import AsyncIterator
 from contextlib import aclosing
 
+from mirage.io.stream import OutputStream, close_quietly
 from mirage.io.types import ByteSource, IOResult
 from mirage.rs.errors import StreamRefusal
-from mirage.rs.stream import OpenStream, open_stream, stream_output_chunks
+from mirage.rs.stream import (
+    OpenStream,
+    close_stream,
+    open_stream,
+    stream_output_chunks,
+)
 from mirage.shell.bytes import byte_view
 from mirage.types import JsonValue
 
@@ -48,24 +54,37 @@ async def numfmt_generic(
     return _converted(stream, source, io), io
 
 
-async def _converted(
+def _converted(
     stream: OpenStream, source: ByteSource, io: IOResult
-) -> AsyncIterator[bytes]:
+) -> OutputStream:
     """The records converted; a refusal stops after the ones before it.
+    Closing it releases the stream and, unread, the records.
 
     Args:
         stream (OpenStream): the opened numfmt stream.
         source (ByteSource): the records, empty when operands are given.
         io (IOResult): takes the refusal's exit 2 and line.
     """
-    try:
-        async with aclosing(stream_output_chunks(stream, source)) as parts:
-            async for part in parts:
-                yield part
-    except StreamRefusal as refusal:
-        io.exit_code, io.stderr = 2, f"{refusal.message}\n".encode()
-        if refusal.output:
-            yield refusal.output
+    started = False
+
+    async def output() -> AsyncIterator[bytes]:
+        nonlocal started
+        started = True
+        try:
+            async with aclosing(stream_output_chunks(stream, source)) as parts:
+                async for part in parts:
+                    yield part
+        except StreamRefusal as refusal:
+            io.exit_code, io.stderr = 2, f"{refusal.message}\n".encode()
+            if refusal.output:
+                yield refusal.output
+
+    async def close() -> None:
+        await close_stream(stream)
+        if not started:
+            await close_quietly(source)
+
+    return OutputStream(output(), close)
 
 
 __all__ = ["numfmt_generic"]

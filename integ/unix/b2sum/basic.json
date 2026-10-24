@@ -223,6 +223,43 @@
         "c",
         "w"
       ]
+    },
+    {
+      "id": "b2sum_l_past_512_means_512_whatever_it_is",
+      "seq": 15310017,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "b2sum -l 513 /data/b.txt; b2sum -l 9007199254740993 /data/b.txt; b2sum -l 99999999999999999999999 /data/b.txt; b2sum -l 511 /data/b.txt; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "f6115213ecbf3b428f8455a03ef459887fdb109bdabf3d4d3e8eee77f6ee81b652bccf9558b5976119a6bee268fdc6395f82132bacf9972ad60a2ea3e9be188c  /data/b.txt\nf6115213ecbf3b428f8455a03ef459887fdb109bdabf3d4d3e8eee77f6ee81b652bccf9558b5976119a6bee268fdc6395f82132bacf9972ad60a2ea3e9be188c  /data/b.txt\nf6115213ecbf3b428f8455a03ef459887fdb109bdabf3d4d3e8eee77f6ee81b652bccf9558b5976119a6bee268fdc6395f82132bacf9972ad60a2ea3e9be188c  /data/b.txt\nrc=1\n",
+        "stderr": "b2sum: invalid length: '511'\nb2sum: length is not a multiple of 8\n"
+      },
+      "flags": [
+        "l"
+      ]
     }
   ]
 }
