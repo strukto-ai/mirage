@@ -12,6 +12,8 @@
         <img src="https://img.shields.io/badge/strukto.ai-%EC%A0%9C%EC%9E%91-0C0C0C?labelColor=FAFAFA" /></a>
     <a href="https://github.com/strukto-ai/mirage/blob/main/LICENSE" alt="라이선스">
         <img src="https://img.shields.io/github/license/strukto-ai/mirage?label=%EB%9D%BC%EC%9D%B4%EC%84%A0%EC%8A%A4&color=0C0C0C&labelColor=FAFAFA" /></a>
+    <a href="https://doi.org/10.5281/zenodo.23504502" alt="DOI">
+        <img src="https://img.shields.io/badge/DOI-10.5281%2Fzenodo.23504502-0C0C0C?labelColor=FAFAFA" alt="DOI 10.5281/zenodo.23504502" /></a>
     <a href="https://discord.gg/u8BPQ65KsS" alt="Discord">
         <img src="https://img.shields.io/badge/discord-%EC%B0%B8%EC%97%AC-0C0C0C?labelColor=FAFAFA&logo=discord&logoColor=0C0C0C" /></a>
     <a href="../assets/wechat-qr-code.jpg" aria-label="WeChat 커뮤니티">
@@ -36,6 +38,17 @@
   <a href="./README.de.md"><img alt="README auf Deutsch" src="https://img.shields.io/badge/Deutsch-d9d9d9"></a>
   <a href="./README.vi.md"><img alt="README Tiếng Việt" src="https://img.shields.io/badge/Ti%E1%BA%BFng%20Vi%E1%BB%87t-d9d9d9"></a>
   <a href="./README.ko.md"><img alt="README 한국어" src="https://img.shields.io/badge/%ED%95%9C%EA%B5%AD%EC%96%B4-d9d9d9"></a>
+</p>
+
+<p align="center">
+  <a href="https://agentvfs.org">
+    <picture>
+      <source media="(max-width: 767px) and (prefers-color-scheme: dark)" srcset="../assets/agentvfs-banner-narrow-dark.svg">
+      <source media="(max-width: 767px)" srcset="../assets/agentvfs-banner-narrow-light.svg">
+      <source media="(prefers-color-scheme: dark)" srcset="../assets/agentvfs-banner-dark.svg">
+      <img src="../assets/agentvfs-banner-light.svg" width="900" alt="AgentVFS: AI 에이전트를 위한 개방형, 벤더 중립 가상 파일 시스템 인터페이스" />
+    </picture>
+  </a>
 </p>
 
 Mirage는 **AI 에이전트를 위한 가상 터미널**입니다. 가상 파일 시스템은 폭넓은 데이터 컨텍스트를 제공하고, 가상화된 CLI는 에이전트에게 더 유연한 도구 사용을 주며, 동적 런타임은 기반 인프라 비용을 줄이고 토큰을 더 아낍니다. 에이전트의 동작은 물론 무엇을 볼 수 있는지까지 세밀하게 제어하여 최고의 보안을 제공합니다. 이 요소들이 함께 하나의 가상화된 터미널을 이루어 최고의 에이전트 성능과 비용 효율, 보안을 제공합니다.
