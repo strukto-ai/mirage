@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import type { FileStat } from '@struktoai/mirage-core/types'
 import type * as ClientModule from './client.ts'
 import {
   FakeStore,
@@ -55,7 +56,9 @@ describe('gridfs rm -r', () => {
     ])
     expect(store.ids('/trash/d/f.txt')).toEqual(f)
     expect(store.ids('/trash/d/sub/g.txt')).toEqual(g)
-    expect((await readdir(accessor, spec(''))).map((row) => row.name)).toEqual(['keep.txt'])
+    expect(((await readdir(accessor, spec(''))) as FileStat[]).map((row) => row.name)).toEqual([
+      'keep.txt',
+    ])
   })
 
   it('prunes the trash under retention', async () => {
