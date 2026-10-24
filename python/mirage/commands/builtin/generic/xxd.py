@@ -460,7 +460,7 @@ async def _write_output(
     if reverse and pwrite_bytes is not None:
         try:
             for start, chunk in segments or [(0, bytearray())]:
-                await pwrite_bytes(target, chunk, start)
+                await pwrite_bytes(target, bytes(chunk), start)
         except FS_ERRORS as exc:
             return None, IOResult(
                 stderr=fs_error_line("xxd", target, exc).encode(),

@@ -286,12 +286,12 @@ fn operand(raw: &[u8]) -> Result<Operand, StreamError> {
 
 /// A printed line as its bytes, a long run of one byte (padding, or
 /// fraction zeros past the exact digits) kept as a count.
-#[derive(Clone, Default, PartialEq, Eq)]
+#[derive(Clone, Default)]
 struct Line {
     pieces: Vec<Piece>,
 }
 
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone)]
 enum Piece {
     Bytes(Vec<u8>),
     Run(u8, u64),
@@ -314,6 +314,23 @@ impl Line {
         } else {
             self.bytes(&vec![byte; count as usize]);
         }
+    }
+
+    /// The line as maximal runs of one byte, however its pieces split
+    /// them: rounding can print the same zeros as digits or as a run.
+    fn runs(&self) -> Vec<(u8, u64)> {
+        let mut runs: Vec<(u8, u64)> = Vec::new();
+        let mut push = |byte: u8, count: u64| match runs.last_mut() {
+            Some((last, total)) if *last == byte => *total += count,
+            _ => runs.push((byte, count)),
+        };
+        for piece in &self.pieces {
+            match piece {
+                Piece::Bytes(bytes) => bytes.iter().for_each(|byte| push(*byte, 1)),
+                Piece::Run(byte, count) => push(*byte, *count),
+            }
+        }
+        runs
     }
 
     /// The line as reading it back sees it: a long run is padding or
@@ -821,7 +838,8 @@ impl Seq {
         self.format.render(&value, line);
         if self.beyond(&value) {
             self.cursor = Cursor::Done;
-            return *line != self.shown && self.format.names_last(&line.reading(), &self.last);
+            return line.runs() != self.shown.runs()
+                && self.format.names_last(&line.reading(), &self.last);
         }
         self.shown.clone_from(line);
         true
@@ -1175,6 +1193,15 @@ mod tests {
         assert_eq!(
             seq(&["2", "1"], Some("%2147483648f"), false),
             Ok(String::new())
+        );
+    }
+
+    #[test]
+    fn a_row_printed_alike_as_digits_or_a_run_is_not_repeated() {
+        let zeros = format!("0.{}\n", "0".repeat(1200));
+        assert_eq!(
+            seq(&["0", "1e-1300", "0"], Some("%.1200f"), false),
+            Ok(zeros)
         );
     }
 }
