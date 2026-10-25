@@ -750,6 +750,16 @@ class TestDescriptors:
             assert f.read() == b"hello"
         assert run(ops.read("/data/dir/a.txt")) == b"hello"
 
+    def test_an_appending_write_leaves_the_position_past_it(self):
+        ops, patched = seeded()
+        fd = patched.open("/data/dir/a.txt", os.O_RDWR | os.O_APPEND)
+        patched.lseek(fd, 0, os.SEEK_SET)
+        patched.write(fd, b"!")
+        assert patched.lseek(fd, 0, os.SEEK_CUR) == 6
+        assert patched.read(fd, 10) == b""
+        patched.close(fd)
+        assert run(ops.read("/data/dir/a.txt")) == b"hello!"
+
     def test_a_host_path_keeps_a_host_descriptor(self, tmp_path):
         _, patched = seeded()
         target = tmp_path / "a.txt"

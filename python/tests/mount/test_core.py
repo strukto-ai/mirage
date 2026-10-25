@@ -1482,6 +1482,72 @@ async def test_an_appending_handle_lands_after_what_others_appended(native):
 
 
 @pytest.mark.asyncio
+async def test_an_appending_handle_appends_past_its_own_landed_writes():
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
+    await ws.vfs.write("/log", b"abc")
+    core = MountCore(ws.vfs)
+    fh = await core.open("/log", open_mode(os.O_RDWR | os.O_APPEND))
+    await core.write("/log", b"D", 0, fh)
+    await core.flush("/log", fh)
+    await core.write("/log", b"E", 0, fh)
+    assert await core.read("/log", 100, 0, fh) == b"abcDE"
+    assert (await core.fstat(fh)).size == 5
+    await core.release(fh)
+    assert await ws.vfs.read("/log") == b"abcDE"
+
+
+@pytest.mark.asyncio
+async def test_an_open_through_a_link_keeps_its_file_when_the_link_is_replaced():
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
+    await ws.vfs.write("/a", b"aaaa")
+    await ws.vfs.write("/b", b"bbbb")
+    await ws.shell("ln -s a /lk")
+    core = MountCore(ws.vfs)
+    fh = await core.open("/lk", open_mode(os.O_RDWR))
+    await core.unlink("/lk")
+    await ws.shell("ln -s b /lk")
+    await core.write("/lk", b"A", 0, fh)
+    assert await core.read("/lk", 100, 0, fh) == b"Aaaa"
+    await core.release(fh)
+    assert await ws.vfs.read("/a") == b"Aaaa"
+    assert await ws.vfs.read("/b") == b"bbbb"
+
+
+@pytest.mark.asyncio
+async def test_a_read_without_a_handle_lays_others_writes_over_its_range():
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
+    await ws.vfs.write("/f", b"ABCDEFGH")
+    core = MountCore(ws.vfs)
+    fh = await core.open("/f", open_mode(os.O_RDWR))
+    await core.write("/f", b"xy", 0, fh)
+    assert await core.read("/f", 3, 0, None) == b"xyC"
+    assert await core.read("/f", 2, 3, None) == b"DE"
+    assert await core.read("/f", 10, 6, None) == b"GH"
+    assert await core.read("/f", 10, 9, None) == b""
+    await core.release(fh)
+
+
+@pytest.mark.asyncio
+async def test_a_stream_of_writes_folds_into_one_run_another_handle_cuts():
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
+    await ws.vfs.write("/f", b"")
+    core = MountCore(ws.vfs)
+    a = await core.open("/f", open_mode(os.O_RDWR))
+    b = await core.open("/f", open_mode(os.O_RDWR))
+    for i in range(200):
+        await core.write("/f", b"a", i, a)
+    assert len(core.handles.get(a).write_buf) == 1
+    await core.write("/f", b"X", 1, a)
+    await core.write("/f", b"Z", 2, b)
+    await core.write("/f", b"cc", 200, a)
+    written = b"aXZ" + b"a" * 197 + b"cc"
+    assert await core.read("/f", 300, 0, a) == written
+    await core.release(a)
+    await core.release(b)
+    assert await ws.vfs.read("/f") == written
+
+
+@pytest.mark.asyncio
 async def test_handles_on_an_unlinked_file_share_what_it_holds(seeded):
     reader = await seeded.open("/a.txt")
     writer = await seeded.open("/a.txt", open_mode(os.O_RDWR))

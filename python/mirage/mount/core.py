@@ -597,7 +597,7 @@ class MountCore:
             writes = self._writes_on(self.identity(path), None)
             if writes:
                 return await self._read_cached(
-                    path, overlaid(data, offset, size, writes)
+                    path, overlaid(data[offset:], offset, size, writes)
                 )
             return data[offset : offset + size]
         if not ctx.mode.readable:
@@ -1325,6 +1325,13 @@ class MountCore:
             if mode.writable or mode.create or not mode.directory:
                 raise eisdir(path)
             return self._handles.add(Handle(path=path, key=key, mode=mode))
+        # The handle reads and writes the file the open reached, not the
+        # one a link at ``path`` names later.
+        at = (
+            key[len(self._root) :]
+            if key.startswith(self._root + "/")
+            else path
+        )
         emptied = s is None or mode.truncate
         if s is None:
             if not mode.create:
@@ -1341,7 +1348,7 @@ class MountCore:
                 )
             )
         ctx = Handle(
-            path=path,
+            path=at,
             key=key,
             mode=mode,
             live=s is not None and s.extra.get(LIVE_KEY) is True,
@@ -1353,10 +1360,10 @@ class MountCore:
             # A file an API mount cannot size is read whole now, after an
             # O_TRUNC too, so a renderer that gives an empty file a body is
             # honored; a caching mount keeps the bytes for the next stat.
-            ctx.data = await asyncio.shield(self._hydrate(path, mode.writable))
+            ctx.data = await asyncio.shield(self._hydrate(at, mode.writable))
         elif s.size > READ_CHUNK and not emptied:
             # Read a chunk at a time: a `head` must not move the file.
-            ctx.chunked = ChunkedHandle(path=path, size=s.size)
+            ctx.chunked = ChunkedHandle(path=at, size=s.size)
         return self._handles.add(ctx)
 
     async def _row_or_none(
@@ -1696,6 +1703,24 @@ class MountCore:
                 continue
             for ctx in hydrated:
                 ctx.data = data
+        # An appending handle holding no bytes writes at the length its
+        # open saw; the file has another one now.
+        sized = [
+            ctx for ctx in handles if ctx.mode.append and ctx.data is None
+        ]
+        if not sized:
+            return
+        try:
+            s = await self._op(self._files.stat(self.resolve(path)))
+        except Exception as err:
+            logger.warning(
+                "fuse: the length of %s after a change failed: %r", path, err
+            )
+            return
+        for ctx in sized:
+            ctx.size = content_size(s)
+            if ctx.chunked is not None:
+                ctx.chunked.size = content_size(s)
 
     async def ftruncate(self, fh: int, length: int) -> None:
         """Resize the file an open handle is on: through its name, or, on

@@ -1593,6 +1593,67 @@ describe('MountCore opens', () => {
     expect(dec.decode(await ws.vfs.read('/data/log'))).toBe('one\nother\ntwo\nthree\n')
   })
 
+  it('appends past what its own landed writes added', async () => {
+    const ws = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
+    await ws.vfs.write('/data/log', 'abc')
+    const core = new MountCore(ws.vfs)
+    const fh = await core.open('/data/log', flags(fsConstants.O_RDWR | fsConstants.O_APPEND))
+    await core.write('/data/log', fh, enc.encode('D'), 0)
+    await core.flush('/data/log', fh)
+    await core.write('/data/log', fh, enc.encode('E'), 0)
+    expect(dec.decode(await core.read('/data/log', fh, 0, 100))).toBe('abcDE')
+    expect((await core.fstat(fh)).size).toBe(5)
+    await core.release(fh)
+    expect(dec.decode(await ws.vfs.read('/data/log'))).toBe('abcDE')
+  })
+
+  it('keeps the file an open through a link reached when the link is replaced', async () => {
+    const ws = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
+    await ws.vfs.write('/data/a', 'aaaa')
+    await ws.vfs.write('/data/b', 'bbbb')
+    await ws.shell('ln -s a /data/lk')
+    const core = new MountCore(ws.vfs)
+    const fh = await core.open('/data/lk', flags(fsConstants.O_RDWR))
+    await core.unlink('/data/lk')
+    await ws.shell('ln -s b /data/lk')
+    await core.write('/data/lk', fh, enc.encode('A'), 0)
+    expect(dec.decode(await core.read('/data/lk', fh, 0, 100))).toBe('Aaaa')
+    await core.release(fh)
+    expect(dec.decode(await ws.vfs.read('/data/a'))).toBe('Aaaa')
+    expect(dec.decode(await ws.vfs.read('/data/b'))).toBe('bbbb')
+  })
+
+  it("reads a range of a file without a handle, another's writes laid over it", async () => {
+    const ws = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
+    await ws.vfs.write('/data/f', 'ABCDEFGH')
+    const core = new MountCore(ws.vfs)
+    const fh = await core.open('/data/f', flags(fsConstants.O_RDWR))
+    await core.write('/data/f', fh, enc.encode('xy'), 0)
+    expect(dec.decode(await core.read('/data/f', -1, 0, 3))).toBe('xyC')
+    expect(dec.decode(await core.read('/data/f', -1, 3, 2))).toBe('DE')
+    expect(dec.decode(await core.read('/data/f', -1, 6, 10))).toBe('GH')
+    expect(dec.decode(await core.read('/data/f', -1, 9, 10))).toBe('')
+    await core.release(fh)
+  })
+
+  it("folds a stream of writes into one run, another handle's write cut out of it", async () => {
+    const ws = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
+    await ws.vfs.write('/data/f', '')
+    const core = new MountCore(ws.vfs)
+    const a = await core.open('/data/f', flags(fsConstants.O_RDWR))
+    const b = await core.open('/data/f', flags(fsConstants.O_RDWR))
+    for (let i = 0; i < 200; i += 1) await core.write('/data/f', a, enc.encode('a'), i)
+    expect(core.handles.get(a)?.writeBuf?.length).toBe(1)
+    await core.write('/data/f', a, enc.encode('X'), 1)
+    await core.write('/data/f', b, enc.encode('Z'), 2)
+    await core.write('/data/f', a, enc.encode('cc'), 200)
+    const written = `aXZ${'a'.repeat(197)}cc`
+    expect(dec.decode(await core.read('/data/f', a, 0, 300))).toBe(written)
+    await core.release(a)
+    await core.release(b)
+    expect(dec.decode(await ws.vfs.read('/data/f'))).toBe(written)
+  })
+
   it('shares what an unlinked file holds among its handles', async () => {
     const core = await mkCore()
     const path = '/data/greeting.txt'

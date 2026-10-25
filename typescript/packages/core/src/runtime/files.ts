@@ -180,11 +180,15 @@ export class Descriptor {
     if (data.byteLength > 0) await this.files.pwrite(this.fd, offset, data)
   }
 
-  /** Write at the position, advancing it past what was written. */
+  /**
+   * Write at the position, advancing it past what was written; an appending
+   * handle writes at its end and moves the position past it.
+   */
   async write(data: Uint8Array): Promise<void> {
     const at = this.pos
     this.pos += data.byteLength
     await this.pwrite(at, data)
+    if (this.mode.append && data.byteLength > 0) this.pos = await this.size()
   }
 
   /**
@@ -259,6 +263,9 @@ export class RuntimeFiles {
    * @param core the open-file core the run's files open on; null opens
    *   nothing.
    * @param signal the run's, which stops a core op once it aborts.
+   * @param live the signals of the guest calls on the core now, which its
+   *   every dispatch checks; a call with none (a run's end landing what it
+   *   wrote) passes, however the run ended.
    */
   constructor(
     readonly bridge: BridgeDispatchFn,
@@ -266,6 +273,7 @@ export class RuntimeFiles {
     private readonly resolve: ((path: string) => string) | null = null,
     private readonly core: MountCore | null = null,
     private readonly signal: AbortSignal | null = null,
+    private readonly live: AbortSignal[] = [],
   ) {
     // One cap on every request the file adapter sends, held for that request
     // alone, so the stats of listings that run together (a guest
@@ -308,7 +316,7 @@ export class RuntimeFiles {
     if (bridge === null) return null
     const caller = currentCaller()
     const links = linkView(vfs)
-    const signal = ctx.signal
+    const live: AbortSignal[] = []
     return new RuntimeFiles(
       awaitsAs(caller, bridge),
       new CallerResolver(binding.resolver, caller),
@@ -317,16 +325,18 @@ export class RuntimeFiles {
         ? null
         : new MountCore(
             vfs.over(
-              // A cancelled run sends nothing more, whichever op of the
-              // core's was under way.
+              // A cancelled guest call sends nothing more, whichever op of
+              // the core's was under way.
               awaitsAs(caller, async (name, path, args, kwargs, report) => {
-                signal?.throwIfAborted()
+                for (const signal of live) signal.throwIfAborted()
                 const out = await vfs.dispatch(name, path, args, kwargs, report)
-                signal?.throwIfAborted()
+                for (const signal of live) signal.throwIfAborted()
                 return out
               }),
             ),
           ),
+      null,
+      live,
     )
   }
 
@@ -343,16 +353,24 @@ export class RuntimeFiles {
       this.resolve,
       this.core,
       signal,
+      this.live,
     )
   }
 
   /** Run one op on the run's open-file core; EBADF when this adapter opens nothing. */
   private async onCore<T>(op: (core: MountCore) => Promise<T>): Promise<T> {
     if (this.core === null) throw ebadf('/')
-    this.signal?.throwIfAborted()
-    const out = await op(this.core)
-    this.signal?.throwIfAborted()
-    return out
+    const signal = this.signal
+    if (signal === null) return op(this.core)
+    signal.throwIfAborted()
+    this.live.push(signal)
+    try {
+      const out = await op(this.core)
+      signal.throwIfAborted()
+      return out
+    } finally {
+      this.live.splice(this.live.indexOf(signal), 1)
+    }
   }
 
   /** The path the core's handle `fd` is on now; EBADF for any other number. */

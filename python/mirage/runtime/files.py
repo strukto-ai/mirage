@@ -180,7 +180,10 @@ class Descriptor:
             data (bytes): the payload.
         """
         self.pwrite(self.pos, data)
-        self.pos += len(data)
+        if self.mode.append and data:
+            self.pos = self.size
+        else:
+            self.pos += len(data)
 
     def seek(self, offset: int, whence: int) -> int | None:
         """Move the position, POSIX whence numbering.

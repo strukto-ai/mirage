@@ -97,9 +97,8 @@ export class MountCore {
   private readonly now: Date
   private readonly root: string
   readonly handles = new FileTable<Handle>()
-  // Per file identity: the hydration read out (opens share it), a
-  // generation a change under it bumps, the chain of mutations, the chain of
-  // removals, and the opens out that a removal waits for.
+  // The write runs `folded` grew, whose buffers have room past them.
+  private static readonly grown = new WeakSet<Uint8Array>()
   // Per file identity and view (stored or rendered): the hydration read out
   // (opens share it) and a generation a change under it bumps. Per identity:
   // the chain of mutations, the chain of removals, and the opens out that a
@@ -578,7 +577,9 @@ export class MountCore {
       // and records the version a conditional write sends.
       const data = await this.op(() => this.files.read(this.resolve(path)))
       const writes = this.writesOn(this.identity(path), null)
-      if (writes.length > 0) return this.readCached(path, overlaid(data, pos, len, writes))
+      if (writes.length > 0) {
+        return this.readCached(path, overlaid(data.subarray(pos), pos, len, writes))
+      }
       return data.subarray(pos, pos + len)
     }
     if (!ctx.mode.readable) throw ebadf(ctx.path)
@@ -657,16 +658,42 @@ export class MountCore {
   }
 
   /**
-   * Keep a write on its handle, a copy, laid over the earlier ones in order.
-   * Every 64 runs fold together, so a stream of writes stays a few runs to
-   * lay over a read. Mirrors Python's `_buffer`, which folds a stream as it
-   * comes into the bytearray it grows.
+   * Keep a write on its handle, a copy: one that starts inside the last run
+   * or right at its end folds into it, so a stream of writes stays one run;
+   * any other starts a run of its own, laid over the earlier ones in order,
+   * and every 64 of those fold together. Mirrors Python's `_buffer`.
    */
   private static buffer(ctx: Handle, pos: number, data: Uint8Array): void {
     if (data.byteLength === 0) return
     ctx.writeBuf ??= []
+    const last = ctx.writeBuf.at(-1)
+    if (last !== undefined && last[0] <= pos && pos <= last[0] + last[1].byteLength) {
+      last[1] = MountCore.folded(last[1], pos - last[0], data)
+      return
+    }
     ctx.writeBuf.push([pos, new Uint8Array(data)])
     if (ctx.writeBuf.length >= 64) ctx.writeBuf = writeRuns(ctx.writeBuf)
+  }
+
+  /**
+   * `run` with `data` laid at `at`, inside it or right at its end: in place
+   * when the run is one this grew and its buffer has the room, else in a
+   * buffer twice as long, so a stream copies what it holds only as often as
+   * its length doubles, as Python's bytearray grows.
+   */
+  private static folded(run: Uint8Array, at: number, data: Uint8Array): Uint8Array {
+    const length = Math.max(run.byteLength, at + data.byteLength)
+    let out: Uint8Array
+    if (MountCore.grown.has(run) && run.byteOffset + length <= run.buffer.byteLength) {
+      out = new Uint8Array(run.buffer, run.byteOffset, length)
+      MountCore.grown.delete(run)
+    } else {
+      out = new Uint8Array(Math.max(length, 2 * run.byteLength)).subarray(0, length)
+      out.set(run)
+    }
+    out.set(data, at)
+    MountCore.grown.add(out)
+    return out
   }
 
   /**
@@ -824,6 +851,19 @@ export class MountCore {
         continue
       }
       for (const ctx of hydrated) ctx.data = data
+    }
+    // An appending handle holding no bytes writes at the length its open
+    // saw; the file has another one now.
+    const sized = handles.filter((ctx) => ctx.mode.append && ctx.data === undefined)
+    if (sized.length === 0) return
+    try {
+      const s = await this.op(() => this.files.stat(this.resolve(path)))
+      for (const ctx of sized) {
+        ctx.size = contentSize(s)
+        if (ctx.chunked !== undefined) ctx.chunked.size = contentSize(s)
+      }
+    } catch (err) {
+      console.warn(`fuse: the length of ${path} after a change failed: ${String(err)}`)
     }
   }
 
@@ -1164,6 +1204,9 @@ export class MountCore {
       if (mode.writable || mode.create || mode.directory !== true) throw eisdir(path)
       return this.handles.add({ path, key, mode })
     }
+    // The handle reads and writes the file the open reached, not the one a
+    // link at `path` names later.
+    const at = key.startsWith(`${this.root}/`) ? key.slice(this.root.length) : path
     const emptied = s === null || mode.truncate
     if (s === null) {
       if (!mode.create) throw enoent(path)
@@ -1178,7 +1221,7 @@ export class MountCore {
       )
     }
     const ctx: Handle = {
-      path,
+      path: at,
       key,
       mode,
       live: s?.extra[LIVE_KEY] === true,
@@ -1189,12 +1232,12 @@ export class MountCore {
       // Hydrate through the rendered read path, after an O_TRUNC too: an
       // extension whose renderer gives an empty file a body is honored
       // rather than shadowed by literal raw emptiness.
-      const data = await this.hydrate(path, mode.writable)
+      const data = await this.hydrate(at, mode.writable)
       if (data !== undefined) ctx.data = data
     } else if (s.size > READ_CHUNK && !emptied) {
       // Read a chunk at a time, at the handle's path then (a rename moves
       // it): a `head` must not move the file.
-      ctx.chunked = new ChunkedHandle(path, s.size, (offset, size) =>
+      ctx.chunked = new ChunkedHandle(at, s.size, (offset, size) =>
         this.op(() =>
           this.files.read(this.resolve(ctx.path), {
             offset,

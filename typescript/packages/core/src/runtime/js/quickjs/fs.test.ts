@@ -293,3 +293,50 @@ it('does not create a file when its open stat revokes the run', async () => {
     await rt.close()
   }
 }, 120_000)
+
+it('lands what a revoked run wrote before the revoke', async () => {
+  const controller = new AbortController()
+  const calls: string[] = []
+  let made = false
+  const dispatch: BridgeDispatchFn = (op, path) => {
+    calls.push(`${op} ${path}`)
+    if (path === '/data/out') {
+      if (op === 'create') made = true
+      if ((op === 'stat' || op === 'readdir') && !made)
+        return Promise.reject(Object.assign(new Error('missing'), { code: 'ENOENT' }))
+      if (op === 'stat')
+        return Promise.resolve(new FileStat({ name: 'out', type: FileType.FILE, size: 0 }))
+      return Promise.resolve(undefined)
+    }
+    if (op === 'stat')
+      return Promise.resolve(new FileStat({ name: 'f', type: FileType.FILE, size: 1 }))
+    if (op === 'read') {
+      controller.abort(new Error('revoked'))
+      return Promise.resolve(new TextEncoder().encode('x'))
+    }
+    return Promise.resolve(undefined)
+  }
+  const rt = new QuickJsRuntime()
+  bindOver(rt, dispatch, new PrefixResolver(() => ['/data/']))
+  try {
+    await rt.interpret(
+      await rt.engine(),
+      {
+        code: `
+const w = std.open('/data/out', 'w');
+w.puts('kept');
+const f = std.open('/data/f', 'r');
+try { f.readAsString() } catch (e) {}
+try { std.open('/data/later', 'w') } catch (e) {}
+`,
+        args: [],
+        stdin: null,
+      },
+      runContext(rt, { signal: controller.signal }),
+    )
+    expect(calls).toContain('pwrite /data/out')
+    expect(calls.filter((call) => call.endsWith('/data/later'))).toEqual([])
+  } finally {
+    await rt.close()
+  }
+}, 120_000)

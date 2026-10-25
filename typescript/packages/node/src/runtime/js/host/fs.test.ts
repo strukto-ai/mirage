@@ -334,6 +334,18 @@ describe('patchNodeFs — descriptors', () => {
     await reader.close()
     await ws.close()
   })
+  it('leaves an appending descriptor past what it wrote', async () => {
+    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
+    restore = patchNodeFs(ws)
+    const fs = requireCjs('fs') as Fs
+    await fs.promises.writeFile('/data/f', 'abc')
+    const handle = await fs.promises.open('/data/f', 'a+')
+    await handle.write('X')
+    expect((await handle.read(Buffer.alloc(8))).bytesRead).toBe(0)
+    await handle.close()
+    expect(await fs.promises.readFile('/data/f', 'utf-8')).toBe('abcX')
+    await ws.close()
+  })
   it('lands a write made while a sync is out', async () => {
     const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
     restore = patchNodeFs(ws)
