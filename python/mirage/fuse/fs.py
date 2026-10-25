@@ -13,8 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
-import errno
-import logging
 import os
 import threading
 import time
@@ -33,7 +31,6 @@ from mirage.types import JsonValue
 from mirage.workspace.files import Files
 from mirage.workspace.session.session import SessionState
 
-logger = logging.getLogger(__name__)
 P = ParamSpec("P")
 T = TypeVar("T")
 
@@ -93,9 +90,9 @@ class MirageFS:
 
         Every exception is translated rather than propagated: an exception
         escaping a FUSE callback tears down the mount, so the kernel must
-        always get a code. Anything that classifies as EIO without being a
-        recognised I/O error is logged, so a genuine bug in the core still
-        leaves a trace instead of silently reading as "I/O error".
+        always get a code. ``classify_error`` logs one it cannot name, so
+        a genuine bug in the core still leaves a trace instead of silently
+        reading as "I/O error".
 
         Args:
             fn (Callable[P, Awaitable[T]]): the async MountCore method.
@@ -111,12 +108,6 @@ class MirageFS:
             )
         except Exception as err:
             code = classify_error(err)
-            if code == errno.EIO and not isinstance(
-                err, (OSError, ValueError)
-            ):
-                logger.warning(
-                    "unclassified mount error in %s: %r", fn.__name__, err
-                )
             raise OSError(code, os.strerror(code)) from err
 
     def getattr(self, path: str, fh: int | None = None) -> dict[str, Any]:

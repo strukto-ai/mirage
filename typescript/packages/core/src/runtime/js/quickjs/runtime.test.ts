@@ -59,6 +59,33 @@ describe('QuickJS cwd', () => {
   })
 })
 
+// The guest runs on the event loop, so a loop that never yields holds back
+// the timer `timeout` keeps; the VM's interrupt hook meets the deadline.
+it.each([
+  ['timeout 1 node -e "for (;;) {}"', 124],
+  ['timeout -s CONT -k 1 1 node -e "for (;;) {}"', 137],
+])(
+  'a deadline stops a guest that never yields: %s',
+  async (line, code) => {
+    const ws = new Workspace(
+      { '/data': new RAMVFS() },
+      {
+        mode: MountMode.EXEC,
+        shellParser: await getTestParser(),
+        runtimes: [new QuickJsRuntime(), 'workspace'],
+      },
+    )
+    try {
+      const io = await ws.shell(line)
+      expect(io.exitCode).toBe(code)
+      expect(io.stderrText).toBe('')
+    } finally {
+      await ws.close()
+    }
+  },
+  20_000,
+)
+
 function full(): Promise<void> {
   return Promise.reject(Object.assign(new Error('no space'), { code: 'ENOSPC' }))
 }

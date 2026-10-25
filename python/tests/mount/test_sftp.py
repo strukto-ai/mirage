@@ -24,12 +24,10 @@ import pytest
 
 from mirage import RAMVFS, MountMode, Workspace
 from mirage.context import bind_caller, current_caller, reset_caller
-from mirage.mount.constants import LISTING_CONCURRENCY
 from mirage.mount.sftp import (
     MirageSFTPServer,
     PipeServer,
     filetype,
-    listing,
     to_attrs,
 )
 from mirage.mount.types import MountAttrs
@@ -98,73 +96,6 @@ def test_attrs_carry_type_mode_size_and_split_times():
     assert (attrs.size, attrs.permissions) == (12, stat.S_IFREG | 0o640)
     assert (attrs.atime, attrs.atime_ns) == (1_700_000_000, 123_456_789)
     assert (attrs.mtime, attrs.mtime_ns) == (1_700_000_001, 5)
-
-
-class ListingCore:
-    """MountCore double: hold the first batch until the cap is full."""
-
-    def __init__(self, names, refuse=None):
-        self.names = names
-        self.refuse = refuse
-        self.started = asyncio.Barrier(LISTING_CONCURRENCY)
-        self.now = 0
-        self.peak = 0
-        self.calls = 0
-        self.tasks = 0
-
-    async def readdir(self, path):
-        return [".", ".."] + self.names
-
-    async def getattr(self, path):
-        self.calls += 1
-        self.now += 1
-        self.peak = max(self.peak, self.now)
-        self.tasks = max(self.tasks, len(asyncio.all_tasks()))
-        try:
-            if self.calls <= LISTING_CONCURRENCY:
-                async with asyncio.timeout(5):
-                    await self.started.wait()
-            else:
-                await asyncio.sleep(0)
-        finally:
-            self.now -= 1
-        if path.endswith("gone"):
-            raise FileNotFoundError(path)
-        if self.refuse is not None and path.endswith(self.refuse):
-            raise PermissionError(path)
-        return {"st_size": len(path)}
-
-
-@pytest.mark.asyncio
-async def test_listing_stats_entries_together_under_the_cap():
-    # Each stat is, on an unindexed mount, a backend request: a wide
-    # directory must not pay them one after another, nor put them all on
-    # the wire at once.
-    names = [f"f{i}" for i in range(40)] + ["gone"]
-    core = ListingCore(names)
-    rows = await listing(core, "/d")
-    assert [name for name, _ in rows] == [".", ".."] + names[:-1]
-    assert rows[2] == ("f0", {"st_size": len("/d/f0")})
-    assert core.peak == LISTING_CONCURRENCY
-    assert core.tasks <= LISTING_CONCURRENCY + 1
-
-
-@pytest.mark.asyncio
-async def test_listings_at_once_share_one_cap():
-    # Two channels listing together on one workspace share the cap rather
-    # than each bringing one of its own.
-    core = ListingCore([f"f{i}" for i in range(40)])
-    await asyncio.gather(listing(core, "/d"), listing(core, "/d"))
-    assert core.peak == LISTING_CONCURRENCY
-
-
-@pytest.mark.asyncio
-async def test_a_refused_stat_ends_the_listing_without_statting_the_rest():
-    core = ListingCore([f"f{i}" for i in range(100)], refuse="/d/f2")
-    with pytest.raises(PermissionError):
-        await listing(core, "/d")
-    assert core.now == 0
-    assert core.calls < 3 * LISTING_CONCURRENCY
 
 
 class Feed:

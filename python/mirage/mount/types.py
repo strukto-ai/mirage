@@ -77,6 +77,11 @@ class Handle:
     # The stored length the open saw, where an appending handle's writes
     # start while it holds no bytes.
     size: int = 0
+    # The file's row as its last stat fetched it and when (monotonic
+    # seconds), which a guest's fstat answers by for a moment while
+    # nothing changes the file through the core.
+    row: FileStat | None = None
+    row_at: float = 0.0
     # Why the bytes its file had could not be kept when its name went;
     # every read through it reports it rather than read what the name
     # holds now.

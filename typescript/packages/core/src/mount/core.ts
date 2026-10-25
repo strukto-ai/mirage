@@ -22,10 +22,12 @@ import {
   type OpenMode,
 } from '../runtime/handles/index.ts'
 import { READ_CHUNK } from '../runtime/handles/constants.ts'
+import { ConcurrencyLimiter } from '../concurrency/limiter.ts'
+import { FSTAT_ROW_SECONDS, LISTING_CONCURRENCY } from './constants.ts'
 import { classify } from '../errors/index.ts'
 import { FileStat, FileType, LIVE_KEY, PathSpec } from '../types.ts'
 import type { SetAttrFields } from '../types.ts'
-import { posixNormpath } from '../utils/path.ts'
+import { parent, posixNormpath } from '../utils/path.ts'
 import { rstripSlash } from '../utils/slash.ts'
 import { compareCodePoints } from '../utils/sort.ts'
 import {
@@ -72,6 +74,12 @@ export interface MountCoreOptions {
    */
   owner?: { uid: number; gid: number }
 }
+
+// An entry a listing's stat no longer finds went between the two.
+const VANISHED: ReadonlySet<string | null> = new Set(['ENOENT', 'ENOTDIR'])
+
+// One cap for the listings that run at once, as Python keeps one per loop.
+const STATS = new ConcurrencyLimiter(LISTING_CONCURRENCY)
 
 /**
  * Protocol-neutral mount logic shared by every kernel adapter.
@@ -459,7 +467,12 @@ export class MountCore {
    * The row a stat of `path` answers, the size an open handle holds and what
    * it wrote and has not landed counted. Mirrors Python's `_row`.
    */
-  private async row(path: string, follow: boolean, ctx: Handle | null): Promise<FileStat> {
+  private async row(
+    path: string,
+    follow: boolean,
+    ctx: Handle | null,
+    reuse = false,
+  ): Promise<FileStat> {
     let size = ctx?.data?.byteLength ?? null
     let s: FileStat
     let retained = false
@@ -467,11 +480,23 @@ export class MountCore {
       // Its name is gone: it stats by the row its file had then.
       retained = true
       s = ctx.detached
+    } else if (
+      reuse &&
+      ctx?.row !== undefined &&
+      performance.now() - (ctx.rowAt ?? 0) < FSTAT_ROW_SECONDS * 1000
+    ) {
+      // Judged as a stat now, as a held row is, without a fetch.
+      retained = true
+      s = ctx.row
     } else {
       try {
         s = await this.op(() =>
           this.files.stat(this.resolve(path), undefined, { nofollow: !follow }),
         )
+        if (ctx !== null) {
+          ctx.row = s
+          ctx.rowAt = performance.now()
+        }
       } catch (err) {
         if (size === null || classify(err) !== 'ENOENT') throw err
         // A hide is not an unlink: held metadata still meets the walk.
@@ -523,7 +548,7 @@ export class MountCore {
   async fstat(fd: number): Promise<FileStat> {
     const ctx = this.openHandle(fd)
     await this.settled(ctx)
-    return this.row(ctx.path, true, ctx)
+    return this.row(ctx.path, true, ctx, true)
   }
 
   /** The handle `fd` names; EBADF for any other number. */
@@ -568,6 +593,48 @@ export class MountCore {
       if (part !== '' && !isMacosMetadata(part)) names.add(part)
     }
     return ['.', '..', ...[...names].sort(compareCodePoints)]
+  }
+
+  /**
+   * A directory's entries with their attributes, in one pass. The entries
+   * are stat'd together rather than one after another, with at most
+   * `LISTING_CONCURRENCY` stats out at once across every listing. A stat
+   * that fails ends the listing, and the ones not yet sent are not. An
+   * entry that vanishes between the listing and its stat is left out, as
+   * `ls` leaves out a file deleted mid-listing. `names` are the entries to
+   * stat, in the order they are answered; null takes `readdir`'s, `.` and
+   * `..` first. Mirrors Python's `listing`.
+   */
+  async listing(
+    path: string,
+    names: readonly string[] | null = null,
+    follow = false,
+  ): Promise<[string, MountAttrs][]> {
+    const listed = names ?? (await this.readdir(path))
+    const rows: ([string, MountAttrs] | null)[] = new Array<null>(listed.length).fill(null)
+    const todo = listed.entries()
+    let failed = false
+    const worker = async (): Promise<void> => {
+      for (const [index, name] of todo) {
+        if (failed) return
+        const child =
+          name === '.' ? path : name === '..' ? parent(path) : posixNormpath(`${path}/${name}`)
+        const release = await STATS.acquire()
+        try {
+          rows[index] = [name, await this.getattr(child, follow)]
+        } catch (err) {
+          if (!VANISHED.has(classify(err))) {
+            failed = true
+            throw err
+          }
+          console.debug(`${child} vanished while listing: ${String(err)}`)
+        } finally {
+          release()
+        }
+      }
+    }
+    await Promise.all(Array.from({ length: Math.min(LISTING_CONCURRENCY, listed.length) }, worker))
+    return rows.filter((row) => row !== null)
   }
 
   async read(path: string, fd: number, pos: number, len: number): Promise<Uint8Array> {
@@ -826,6 +893,7 @@ export class MountCore {
    */
   private async changed(path: string, rehydrate = true): Promise<void> {
     const key = this.identity(path, rehydrate)
+    for (const ctx of this.openOn(key)) delete ctx.row
     for (const view of [MountCore.view(key, true), MountCore.view(key, false)]) {
       if (this.hydrations.has(view)) {
         this.hydrationGen.set(view, (this.hydrationGen.get(view) ?? 0) + 1)
@@ -1123,6 +1191,7 @@ export class MountCore {
       // writes land first, or they would stamp over them.
       if (timed) await this.landBuffered(key)
       await this.op(() => this.files.setattr(this.resolve(path), fields))
+      for (const ctx of this.openOn(key)) delete ctx.row
     }
     await (timed ? this.mutate(key, run) : run())
   }
@@ -1241,6 +1310,10 @@ export class MountCore {
       size: s === null || mode.truncate ? 0 : contentSize(s),
     }
     if (ctx.live === true || s === null) return this.handles.add(ctx)
+    if (!emptied) {
+      ctx.row = s
+      ctx.rowAt = performance.now()
+    }
     if (s.size === null) {
       // Hydrate through the rendered read path, after an O_TRUNC too: an
       // extension whose renderer gives an empty file a body is honored

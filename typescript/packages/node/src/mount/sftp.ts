@@ -331,22 +331,7 @@ export class MirageSFTPServer {
     }
     dir.done = true
     const entries: FileEntry[] = []
-    for (const name of await core.readdir(dir.path)) {
-      const child =
-        name === '.'
-          ? dir.path
-          : name === '..'
-            ? posix.dirname(dir.path)
-            : posix.join(dir.path, name)
-      let attr: MountAttrs
-      try {
-        attr = await core.getattr(child)
-      } catch (err) {
-        // Vanished between the listing and its stat, as ls leaves out a
-        // file deleted mid-listing; anything else is a real failure.
-        if (classifyErrno(err) !== ENOENT) throw err
-        continue
-      }
+    for (const [name, attr] of await core.listing(dir.path)) {
       const attrs = toAttrs(attr)
       entries.push({ filename: name, longname: longname(name, attrs), attrs })
     }

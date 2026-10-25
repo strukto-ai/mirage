@@ -18,7 +18,7 @@ import { HOME_CONFIG_KEYS, type RuntimeOptions } from '../../config.ts'
 import { JsRuntime } from '../base.ts'
 import type { OutputFn, Program, RunResult } from '../../types.ts'
 import { materialize } from '../../../io/types.ts'
-import { abortable, mergeSignals } from '../../../utils/abort.ts'
+import { abortable, fireDue, mergeSignals } from '../../../utils/abort.ts'
 import { RuntimeFiles } from '../../files.ts'
 import { fromGuestText, installQuickJsFs, toGuestText } from './fs.ts'
 import { cwdPreamble } from './execution.ts'
@@ -160,7 +160,9 @@ export class QuickJsRuntime extends JsRuntime<NewAsyncModule> {
         if (exit.called) {
           exitCode = exit.code
         } else {
-          err.push(this.formatError(vm, result.error) + '\n')
+          // A cancelled run's interruption is no error of the program's:
+          // it ends as a killed one does, saying nothing, as Monty's does.
+          if (ctx.signal?.aborted !== true) err.push(this.formatError(vm, result.error) + '\n')
           exitCode = 1
         }
         result.error.dispose()
@@ -222,6 +224,9 @@ export class QuickJsRuntime extends JsRuntime<NewAsyncModule> {
       timeoutSeconds !== undefined && timeoutSeconds > 0 ? Date.now() + timeoutSeconds * 1000 : null
     runtime.setInterruptHandler(() => {
       if (exit.called) return true
+      // No timer runs while the guest holds the event loop, so a deadline
+      // past (a `timeout` around the run) fires here, aborting the signal.
+      fireDue()
       if (deadline !== null && Date.now() > deadline) {
         timedOut.value = true
         return true

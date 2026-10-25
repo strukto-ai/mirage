@@ -269,10 +269,6 @@ async def test_namespace_only_ancestor_serves_every_ls_variant():
 
 
 # ── Group 3: a scoped session confines every surface ──
-#
-# Explicit operands and the headless FUSE core are confined today. The
-# fan-out shell commands and the guest are not: they reach a hidden
-# mount's names, bytes and sizes, and the guest can even write there.
 
 
 @pytest.mark.asyncio

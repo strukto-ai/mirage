@@ -25,6 +25,8 @@ import pytest_asyncio
 
 from mirage.errors import FsCondition, posix_errno
 from mirage.errors.types import OperationNotSupportedError, ReadOnlyError
+from mirage.mount import core as core_module
+from mirage.mount.constants import LISTING_CONCURRENCY
 from mirage.mount.core import MountCore
 from mirage.policy import Deny, Policy
 from mirage.runtime.handles.constants import READ_CHUNK
@@ -1370,6 +1372,135 @@ async def test_a_buffered_size_judges_the_fetched_row_once():
     finally:
         await core.release(fh)
         await ws.close()
+
+
+class _CountsBackendStats(RAMVFS):
+    def __init__(self) -> None:
+        super().__init__()
+        self.stats = 0
+
+    async def stat(self, path: PathSpec) -> FileStat:
+        self.stats += 1
+        return await super().stat(path)
+
+
+@pytest.mark.asyncio
+async def test_an_fstat_right_after_its_open_takes_the_row_the_open_fetched():
+    # CPython stats a descriptor again right after opening it; the open's
+    # row answers without a fetch, as a kernel's attr_timeout would, still
+    # judged as a stat, where fgetattr fetches.
+    ram = _CountsBackendStats()
+    policy = _CountsStats()
+    ws = Workspace({"/": ram}, mode=MountMode.WRITE, policies=[policy])
+    await ws.vfs.write("/a.txt", b"abc")
+    core = MountCore(ws.vfs)
+    ram.stats = policy.stats = 0
+    fh = await core.open("/a.txt", open_mode(os.O_RDONLY))
+    try:
+        assert (await core.fstat(fh)).size == 3
+        assert (await core.fstat(fh)).size == 3
+        assert (ram.stats, policy.stats) == (1, 3)
+        assert (await core.fgetattr("/a.txt", fh)).size == 3
+        assert ram.stats == 2
+    finally:
+        await core.release(fh)
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_an_fstat_sees_a_change_through_the_core_at_once_and_one_past_it_later(
+    monkeypatch,
+):
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
+    await ws.vfs.write("/a.txt", b"abc")
+    core = MountCore(ws.vfs)
+    reader = await core.open("/a.txt", open_mode(os.O_RDONLY))
+    writer = await core.open("/a.txt", open_mode(os.O_WRONLY))
+    try:
+        await core.write("/a.txt", b"abcdef", 0, writer)
+        await core.flush("/a.txt", writer)
+        assert (await core.fstat(reader)).size == 6
+        stamp = 981173106 * 10**9
+        await core.setattr("/a.txt", atime=stamp, mtime=stamp)
+        assert (await core.fstat(reader)).modified == (
+            await ws.vfs.stat("/a.txt")
+        ).modified
+        await ws.vfs.write("/a.txt", b"x")
+        assert (await core.fstat(reader)).size == 6
+        monkeypatch.setattr(core_module, "FSTAT_ROW_SECONDS", 0)
+        assert (await core.fstat(reader)).size == 1
+    finally:
+        await core.release(writer)
+        await core.release(reader)
+        await ws.close()
+
+
+class _ListingCore(MountCore):
+    """Hold the first batch of stats until the cap is full. Its listing
+    reads only ``readdir`` and ``getattr``, so no files are needed."""
+
+    def __init__(self, names, refuse=None):
+        self.names = names
+        self.refuse = refuse
+        self.started = asyncio.Barrier(LISTING_CONCURRENCY)
+        self.in_flight = 0
+        self.peak = 0
+        self.calls = 0
+        self.tasks = 0
+
+    async def readdir(self, path):
+        return [".", ".."] + self.names
+
+    async def getattr(self, path, follow=False, ctx=None):
+        self.calls += 1
+        self.in_flight += 1
+        self.peak = max(self.peak, self.in_flight)
+        self.tasks = max(self.tasks, len(asyncio.all_tasks()))
+        try:
+            if self.calls <= LISTING_CONCURRENCY:
+                async with asyncio.timeout(5):
+                    await self.started.wait()
+            else:
+                await asyncio.sleep(0)
+        finally:
+            self.in_flight -= 1
+        if path.endswith("gone"):
+            raise FileNotFoundError(path)
+        if self.refuse is not None and path.endswith(self.refuse):
+            raise PermissionError(path)
+        return {"st_size": len(path)}
+
+
+@pytest.mark.asyncio
+async def test_listing_stats_entries_together_under_the_cap():
+    # Each stat is, on an unindexed mount, a backend request: a wide
+    # directory must not pay them one after another, nor put them all on
+    # the wire at once.
+    names = [f"f{i}" for i in range(40)] + ["gone"]
+    core = _ListingCore(names)
+    rows = await core.listing("/d")
+    assert [name for name, _ in rows] == [".", ".."] + names[:-1]
+    assert rows[2] == ("f0", {"st_size": len("/d/f0")})
+    assert core.peak == LISTING_CONCURRENCY
+    assert core.tasks <= LISTING_CONCURRENCY + 1
+
+
+@pytest.mark.asyncio
+async def test_listings_at_once_share_one_cap():
+    # Two listings together on one workspace share the cap rather than
+    # each bringing one of its own.
+    core = _ListingCore([f"f{i}" for i in range(40)])
+    await asyncio.gather(core.listing("/d"), core.listing("/d"))
+    assert core.peak == LISTING_CONCURRENCY
+
+
+@pytest.mark.asyncio
+async def test_a_refused_stat_ends_the_listing_without_statting_the_rest():
+    core = _ListingCore([f"f{i}" for i in range(100)], refuse="/d/f2")
+    with pytest.raises(PermissionError):
+        await core.listing("/d")
+    assert core.in_flight == 0
+    assert core.calls < 3 * LISTING_CONCURRENCY
 
 
 @pytest.mark.asyncio

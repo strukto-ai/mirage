@@ -19,12 +19,17 @@ import time
 from collections.abc import Awaitable, Callable
 from dataclasses import replace
 from typing import Any, TypeVar, cast
+from weakref import WeakKeyDictionary
 
 from mirage.context import reset_current_session, set_current_session
 from mirage.errors import FsCondition, classify
 from mirage.errors.fs import ebadf, eexist, einval, eisdir, enoent, enotdir
-from mirage.errors.types import OperationNotSupportedError
-from mirage.mount.constants import OWNER
+from mirage.errors.types import NoMountError, OperationNotSupportedError
+from mirage.mount.constants import (
+    FSTAT_ROW_SECONDS,
+    LISTING_CONCURRENCY,
+    OWNER,
+)
 from mirage.mount.platform.macos import is_macos_metadata
 from mirage.mount.types import Handle, MountAttrs, WriteBuf
 from mirage.policy.match import skipped_at_dispatch
@@ -55,6 +60,15 @@ from mirage.workspace.session.session import SessionState
 logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
+
+# An entry a listing's stat no longer finds went between the two.
+VANISHED = (FileNotFoundError, NotADirectoryError, NoMountError)
+
+# One cap per workspace loop, so the listings that run at once on one
+# workspace share it rather than each bringing a cap of its own.
+_STATS: WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Semaphore] = (
+    WeakKeyDictionary()
+)
 
 
 class MountCore:
@@ -443,7 +457,11 @@ class MountCore:
         return self.attrs(s)
 
     async def _row(
-        self, path: str, follow: bool, ctx: Handle | None
+        self,
+        path: str,
+        follow: bool,
+        ctx: Handle | None,
+        reuse: bool = False,
     ) -> FileStat:
         """The row a stat of ``path`` answers, the size an open handle
         holds and what it wrote and has not landed counted.
@@ -452,6 +470,9 @@ class MountCore:
             path (str): mount path to stat.
             follow (bool): report a trailing link's target.
             ctx (Handle | None): the open handle a fstat reads through.
+            reuse (bool): answer by the row the handle fetched less than
+                ``FSTAT_ROW_SECONDS`` ago, if nothing changed the file
+                through the core since, judged without a fetch.
         """
         size = None if ctx is None or ctx.data is None else len(ctx.data)
         retained = False
@@ -459,6 +480,15 @@ class MountCore:
             # Its name is gone: it stats by the row its file had then.
             retained = True
             s = ctx.detached
+        elif (
+            reuse
+            and ctx is not None
+            and ctx.row is not None
+            and time.monotonic() - ctx.row_at < FSTAT_ROW_SECONDS
+        ):
+            # Judged as a stat now, as a held row is, without a fetch.
+            retained = True
+            s = ctx.row
         else:
             try:
                 s = await self._op(
@@ -470,6 +500,9 @@ class MountCore:
                 # A hide is not an unlink: held metadata still meets the walk.
                 retained = True
                 s = FileStat(name=path.rsplit("/", 1)[-1], type=FileType.FILE)
+            else:
+                if ctx is not None:
+                    ctx.row, ctx.row_at = s, time.monotonic()
         if is_link(s):
             return s
         if is_dir(s):
@@ -526,7 +559,7 @@ class MountCore:
         """
         ctx = self._open_handle(fh)
         await self._settled(ctx)
-        return await self._row(ctx.path, True, ctx)
+        return await self._row(ctx.path, True, ctx, reuse=True)
 
     def _open_handle(self, fh: int) -> Handle:
         """The handle ``fh`` names; EBADF for any other number.
@@ -574,6 +607,68 @@ class MountCore:
             if part and not is_macos_metadata(part):
                 names.add(part)
         return [".", ".."] + sorted(names)
+
+    async def listing(
+        self,
+        path: str,
+        names: list[str] | None = None,
+        follow: bool = False,
+    ) -> list[tuple[str, MountAttrs]]:
+        """A directory's entries with their attributes, in one pass.
+
+        The entries are stat'd together rather than one after another,
+        with at most ``LISTING_CONCURRENCY`` stats out at once across
+        every listing on the loop. A stat that fails ends the listing and
+        cancels the ones still waiting. An entry that vanishes between
+        the listing and its stat is left out, as ``ls`` leaves out a file
+        deleted mid-listing.
+
+        Args:
+            path (str): mount path of the directory.
+            names (list[str] | None): the entries to stat, in the order
+                they are answered; None takes ``readdir``'s, ``.`` and
+                ``..`` first.
+            follow (bool): report what a link entry points at.
+
+        Returns:
+            list[tuple[str, MountAttrs]]: (name, attributes) pairs.
+        """
+        loop = asyncio.get_running_loop()
+        slots = _STATS.get(loop)
+        if slots is None:
+            slots = _STATS[loop] = asyncio.Semaphore(LISTING_CONCURRENCY)
+
+        async def entry(name: str) -> tuple[str, MountAttrs] | None:
+            if name == ".":
+                child = path
+            elif name == "..":
+                child = posixpath.dirname(path)
+            else:
+                child = posixpath.join(path, name)
+            async with slots:
+                try:
+                    return name, await self.getattr(child, follow)
+                except VANISHED as exc:
+                    logger.debug("%s vanished while listing: %r", child, exc)
+                    return None
+
+        listed = await self.readdir(path) if names is None else names
+        rows: list[tuple[str, MountAttrs] | None] = [None] * len(listed)
+        todo = iter(enumerate(listed))
+
+        async def worker() -> None:
+            for index, name in todo:
+                rows[index] = await entry(name)
+
+        try:
+            async with asyncio.TaskGroup() as group:
+                for _ in range(min(LISTING_CONCURRENCY, len(listed))):
+                    group.create_task(worker())
+        except BaseExceptionGroup as failed:
+            # The first refusal is the listing's answer, as it was before
+            # the rest were cancelled.
+            raise failed.exceptions[0]
+        return [row for row in rows if row is not None]
 
     async def read(
         self, path: str, size: int, offset: int, fh: int | None
@@ -1050,6 +1145,8 @@ class MountCore:
                     nofollow=not follow,
                 )
             )
+            for ctx in self._open_on(key):
+                ctx.row = None
 
         await (self._mutate(key, run) if timed else run())
 
@@ -1358,6 +1455,8 @@ class MountCore:
         )
         if ctx.live or s is None:
             return self._handles.add(ctx)
+        if not emptied:
+            ctx.row, ctx.row_at = s, time.monotonic()
         if s.size is None:
             # A file an API mount cannot size is read whole now, after an
             # O_TRUNC too, so a renderer that gives an empty file a body is
@@ -1681,6 +1780,8 @@ class MountCore:
             rehydrate (bool): refresh the handles open on the file.
         """
         key = self.identity(path, follow=rehydrate)
+        for ctx in self._open_on(key):
+            ctx.row = None
         for view in ((key, True), (key, False)):
             if view in self._hydrations:
                 self._hydration_gen[view] = (

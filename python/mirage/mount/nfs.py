@@ -17,18 +17,13 @@ import bisect
 import errno
 import logging
 import os
-import posixpath
 import subprocess
 import sys
 import time
 from functools import partial
 
 from mirage.bridge.sync import on_auxiliary_loop
-from mirage.mount.constants import (
-    LISTING_CONCURRENCY,
-    OPEN_HANDLES,
-    RESERVED_PORTS,
-)
+from mirage.mount.constants import OPEN_HANDLES, RESERVED_PORTS
 from mirage.mount.core import MountCore
 from mirage.mount.errors import classify_error
 from mirage.mount.types import MountAttrs
@@ -199,7 +194,6 @@ class MirageNFSServer:
         self._writers: dict[int, asyncio.StreamWriter] = {}
         self._tasks: set[asyncio.Task[None]] = set()
         self._next_conn = 0
-        self._stats = asyncio.Semaphore(LISTING_CONCURRENCY)
         self._handles: dict[str, asyncio.Future[int]] = {}
         self._versions: dict[str, tuple[int, int]] = {}
         self._readers: dict[str, int] = {}
@@ -319,19 +313,6 @@ class MirageNFSServer:
     async def _listing(
         self, path: str, after: str | None, limit: int
     ) -> tuple[list[JsonValue], bool]:
-        async def entry(name: str) -> JsonValue:
-            async with self._stats:
-                try:
-                    attrs = await self._core.getattr(
-                        posixpath.join(path, name)
-                    )
-                except (FileNotFoundError, NotADirectoryError) as exc:
-                    logger.debug(
-                        "nfs: %s vanished while listing: %r", name, exc
-                    )
-                    return {"name": name, "attrs": None}
-            return {"name": name, "attrs": wire_attrs(attrs)}
-
         names = []
         for name in await self._core.readdir(path):
             if name in (".", ".."):
@@ -345,7 +326,10 @@ class MirageNFSServer:
         names.sort()
         start = 0 if after is None else bisect.bisect_right(names, after)
         page = names[start : start + limit]
-        rows = list(await asyncio.gather(*(entry(name) for name in page)))
+        rows: list[JsonValue] = [
+            {"name": name, "attrs": wire_attrs(attrs)}
+            for name, attrs in await self._core.listing(path, page)
+        ]
         return rows, start + limit >= len(names)
 
     async def _getattr(self, path: str) -> MountAttrs:

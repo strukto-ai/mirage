@@ -218,7 +218,9 @@ describe('the S3 client seam', () => {
     ])
   })
 
+  // It reads every source file, which a loaded runner can take past the
+  // default 5 s for.
   it('opens every S3 client through createS3Client', () => {
     expect(bypassingModules(SRC_DIR)).toEqual({})
-  })
+  }, 30_000)
 })

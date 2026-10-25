@@ -304,6 +304,27 @@ async def test_quickjs_cancellation_stops_the_run():
 
 
 @live
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line,code",
+    [
+        ('timeout 1 node -e "for (;;) {}"', 124),
+        ('timeout -s CONT -k 1 1 node -e "for (;;) {}"', 137),
+    ],
+)
+async def test_a_deadline_stops_a_guest_that_never_yields(line, code):
+    ws = Workspace(
+        {"/data": RAMVFS()}, mode=MountMode.EXEC, runtimes=["quickjs"]
+    )
+    try:
+        io = await ws.shell(line)
+        assert io.exit_code == code
+        assert await io.stderr_str() == ""
+    finally:
+        await ws.close()
+
+
+@live
 def test_quickjs_reuses_compiled_module():
     rt = QuickJsRuntime()
     first = asyncio.run(_run(rt, Program(code="console.log(1)")))

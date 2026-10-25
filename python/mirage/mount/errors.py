@@ -53,7 +53,7 @@ def classify_error(err: BaseException) -> int:
     itself), and the message needles are a last resort for bare
     OSErrors, not a classification channel. A kernel mount and SFTP can
     hand back only the number, so a policy's reason for a refusal goes
-    to the operator log here.
+    to the operator log here, and so does an error nothing names.
 
     Args:
         err (BaseException): the exception raised by the mount core.
@@ -77,4 +77,7 @@ def classify_error(err: BaseException) -> int:
     for needles, code in _MESSAGE_CODES:
         if any(n in text for n in needles):
             return code
+    if not isinstance(err, (OSError, ValueError)):
+        # A bug in the core would otherwise read only as "I/O error".
+        logger.warning("unclassified mount error: %r", err)
     return errno.EIO

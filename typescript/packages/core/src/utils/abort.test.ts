@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it, vi } from 'vitest'
-import { abortable, joinOrAbort, makeAbortError, sleep } from './abort.ts'
+import { abortable, atDeadline, fireDue, joinOrAbort, makeAbortError, sleep } from './abort.ts'
 
 function never(): Promise<never> {
   return new Promise<never>(() => undefined)
@@ -170,5 +170,46 @@ describe('sleep', () => {
     const ac = new AbortController()
     ac.abort()
     await expect(sleep(5_000_000_000, ac.signal)).rejects.toThrow()
+  })
+})
+
+describe('atDeadline', () => {
+  it('fires once its timer is due', async () => {
+    let fired = 0
+    atDeadline(0.02, () => {
+      fired++
+    })
+    await sleep(60)
+    expect(fired).toBe(1)
+  })
+
+  // A guest on the event loop that never yields holds every timer back;
+  // its interrupt hook fires what is past, once, and nothing early.
+  it('fires from fireDue while the event loop is held, and only then', () => {
+    let fired = 0
+    const cancel = atDeadline(0.1, () => {
+      fired++
+    })
+    fireDue()
+    expect(fired).toBe(0)
+    const past = performance.now() + 110
+    while (performance.now() < past) {
+      // Hold the event loop past the deadline, as such a guest does.
+    }
+    fireDue()
+    fireDue()
+    expect(fired).toBe(1)
+    cancel()
+  })
+
+  it('fires nothing once cancelled', async () => {
+    let fired = 0
+    const cancel = atDeadline(0.02, () => {
+      fired++
+    })
+    cancel()
+    await sleep(60)
+    fireDue()
+    expect(fired).toBe(0)
   })
 })

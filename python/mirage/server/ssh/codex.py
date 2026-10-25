@@ -310,28 +310,21 @@ async def directory(core: MountCore, path: str) -> list[JsonValue]:
     """``fs/readDirectory``: each entry with the kind it points at.
 
     An entry that vanishes between the listing and its stat is left
-    out, as SFTP's listing leaves it out.
+    out, as SFTP's listing leaves it out (``MountCore.listing``).
 
     Args:
         core (MountCore): the channel's mount core.
         path (str): the directory.
     """
-    entries: list[JsonValue] = []
-    for name in await children(core, path):
-        child = posixpath.join(path, name)
-        try:
-            st = await followed(core, child)
-        except MISSING as exc:
-            logger.debug("codex: %s vanished while listing: %r", child, exc)
-            continue
-        entries.append(
-            {
-                "fileName": name,
-                "isDirectory": stat.S_ISDIR(st.mode),
-                "isFile": stat.S_ISREG(st.mode),
-            }
-        )
-    return entries
+    names = await children(core, path)
+    return [
+        {
+            "fileName": name,
+            "isDirectory": stat.S_ISDIR(st.mode),
+            "isFile": stat.S_ISREG(st.mode),
+        }
+        for name, st in await core.listing(path, names, follow=True)
+    ]
 
 
 async def walk_kind(core: MountCore, path: str, follow: bool) -> str | None:

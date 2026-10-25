@@ -199,6 +199,9 @@ function shellWord(word: string): string {
  */
 function rpcError(err: unknown): CodexRPCError {
   const condition = classify(err)
+  if (condition === null && (err as { code?: unknown }).code === undefined) {
+    console.warn(`codex: unclassified error: ${String(err)}`)
+  }
   const rpc = condition === 'ENOENT' ? RPC_NOT_FOUND : RPC_INTERNAL_ERROR
   return new CodexRPCError(rpc, failureText(err))
 }
@@ -288,22 +291,18 @@ async function children(core: MountCore, path: string): Promise<string[]> {
   return (await core.readdir(path)).filter((n) => n !== '.' && n !== '..')
 }
 
-/** `fs/readDirectory`: each entry with the kind it points at. */
+/**
+ * `fs/readDirectory`: each entry with the kind it points at. An entry that
+ * vanishes between the listing and its stat is left out, as SFTP's listing
+ * leaves it out (`MountCore.listing`).
+ */
 async function directory(core: MountCore, path: string): Promise<JsonValue[]> {
-  const entries: JsonValue[] = []
-  for (const name of await children(core, path)) {
-    let st: MountAttrs
-    try {
-      st = await followed(core, posix.join(path, name))
-    } catch (err) {
-      // Vanished between the listing and its stat, as SFTP's listing
-      // leaves it out; anything else is a real failure.
-      if (!missing(err)) throw err
-      continue
-    }
-    entries.push({ fileName: name, isDirectory: isDir(st.mode), isFile: isFile(st.mode) })
-  }
-  return entries
+  const names = await children(core, path)
+  return (await core.listing(path, names, true)).map(([name, st]) => ({
+    fileName: name,
+    isDirectory: isDir(st.mode),
+    isFile: isFile(st.mode),
+  }))
 }
 
 /**
