@@ -12,10 +12,10 @@ use serde::Deserialize;
 use crate::printf::number::render_integer;
 use crate::regex::parse::Dialect;
 use crate::regex::posix::{Options, Posix};
-use crate::request::{Io, Opening, Reply, Request, WriteMode, bytes};
+use crate::request::{Io, Opening, Refused, Reply, Request, WriteMode, bytes, read_failure};
 use crate::{Stream, StreamError, parse_config, quoted};
 
-use super::pieces::{Input, MAX_SUFFIX, Piece, Refused, STEPS, read_failure, write_failure};
+use super::pieces::{Input, MAX_SUFFIX, Piece, STEPS, write_failure};
 
 /// The longest line csplit holds to test or look back over: past it the
 /// run ends as GNU's does once memory runs out.

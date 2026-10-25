@@ -2,8 +2,7 @@
 //! at a time, and each piece written through it, held to `LIMIT` bytes
 //! before it goes.
 
-use crate::request::{Io, Opening, Reply, Request, WriteMode, bytes};
-use crate::{Stream, StreamError};
+use crate::request::{Io, Opening, Reply, Request, WriteMode, read_failure};
 
 /// How much of a piece waits before it goes to the host.
 pub(super) const LIMIT: usize = 64 * 1024;
@@ -61,16 +60,6 @@ impl Input {
         }
         None
     }
-}
-
-/// A failed read as the run reports it: the host's own line for an
-/// operand, else `NAME: TEXT`.
-pub(super) fn read_failure(command: &[u8], name: &[u8], reply: &Reply) -> Vec<u8> {
-    if let Some(line) = &reply.line {
-        return bytes(line);
-    }
-    let text = bytes(reply.error.as_deref().unwrap_or_default());
-    [command, b": ", name, b": ", &text, b"\n"].concat()
 }
 
 /// One output file: created by its first write, committed by `close`.
@@ -146,35 +135,5 @@ pub(super) fn write_failure(command: &[u8], request: &Request, reply: &Reply) ->
         | Request::Flush { path: Some(path) }
         | Request::Unlink { path } => Some(read_failure(command, path, reply)),
         _ => None,
-    }
-}
-
-/// A run its options or operands refused before it read anything.
-pub(super) struct Refused {
-    stderr: Vec<u8>,
-}
-
-impl Refused {
-    pub(super) fn new(mut stderr: Vec<u8>) -> Refused {
-        stderr.push(b'\n');
-        Refused { stderr }
-    }
-}
-
-impl Stream for Refused {
-    fn feed(&mut self, _input: &[u8], _out: &mut Vec<u8>) -> Result<(), StreamError> {
-        Err(StreamError::new("the run was refused"))
-    }
-
-    fn finish(&mut self, _out: &mut Vec<u8>) -> Result<(), StreamError> {
-        Ok(())
-    }
-
-    fn status(&self) -> i32 {
-        1
-    }
-
-    fn take_stderr(&mut self, err: &mut Vec<u8>) {
-        err.append(&mut self.stderr);
     }
 }

@@ -1,10 +1,13 @@
 //! The operations a stream that reaches files and commands asks its host
-//! for, and the host's answers, which awk, sed, split and csplit share.
+//! for, and the host's answers, which awk, sed, split, csplit and od
+//! share.
 
 use std::collections::VecDeque;
 
 use serde::Deserialize;
 use serde_json::{Map, Value as Json};
+
+use crate::{Stream, StreamError};
 
 /// How a write lands in its file.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -54,6 +57,7 @@ pub(crate) enum Request {
         fd: u32,
         open: Option<(Vec<u8>, Opening)>,
     },
+    /// Let go of input `fd`, or of spool `fd` unsent.
     Close {
         fd: u32,
     },
@@ -301,4 +305,44 @@ impl Io {
 /// A reply's text as the bytes it stands for.
 pub(crate) fn bytes(text: &str) -> Vec<u8> {
     text.chars().map(|c| c as u8).collect()
+}
+
+/// A failed read as the run reports it: the host's own line for an
+/// operand, else `NAME: TEXT`.
+pub(crate) fn read_failure(command: &[u8], name: &[u8], reply: &Reply) -> Vec<u8> {
+    if let Some(line) = &reply.line {
+        return bytes(line);
+    }
+    let text = bytes(reply.error.as_deref().unwrap_or_default());
+    [command, b": ", name, b": ", &text, b"\n"].concat()
+}
+
+/// A run its options or operands refused before it read anything.
+pub(crate) struct Refused {
+    stderr: Vec<u8>,
+}
+
+impl Refused {
+    pub(crate) fn new(mut stderr: Vec<u8>) -> Refused {
+        stderr.push(b'\n');
+        Refused { stderr }
+    }
+}
+
+impl Stream for Refused {
+    fn feed(&mut self, _input: &[u8], _out: &mut Vec<u8>) -> Result<(), StreamError> {
+        Err(StreamError::new("the run was refused"))
+    }
+
+    fn finish(&mut self, _out: &mut Vec<u8>) -> Result<(), StreamError> {
+        Ok(())
+    }
+
+    fn status(&self) -> i32 {
+        1
+    }
+
+    fn take_stderr(&mut self, err: &mut Vec<u8>) {
+        err.append(&mut self.stderr);
+    }
 }
