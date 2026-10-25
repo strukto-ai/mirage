@@ -110,6 +110,7 @@ export async function searchMany(
   if (textOption(query, 'method', 'semantic') !== 'semantic') {
     throw new Error("only the 'semantic' method is supported")
   }
+  validateQuery(query.query, topK)
   const [targets, prefix] = await searchScope(CHROMA_TREE, accessor, paths)
   return searchSegments(accessor, query.query, targets, topK, prefix, threshold)
 }

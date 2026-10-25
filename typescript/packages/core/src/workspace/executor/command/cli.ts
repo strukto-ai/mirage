@@ -681,14 +681,16 @@ export async function runWalked(
   }
   // Most CLIs never read the files: an API client has no filesystem, while
   // `git` is nothing but one. Absent outside a workspace, so a verb that
-  // needs a mount refuses there on its own.
+  // needs a mount refuses there on its own. A leaf at the root is the program
+  // itself, so its spec takes the name it is installed under.
+  const leaf: CommandSpecInit = walked.leaf
   const ctx: Context = {
     stdin,
     flags: walked.flags,
     cwd: PathSpec.fromStrPath(session.cwd),
     env: envSnapshot(session),
     argv: walked.argv,
-    spec: walked.leaf,
+    spec: walked.path.length > 0 ? walked.leaf : new CommandSpec({ ...leaf, name: walked.prog }),
     ...(context.vfs !== undefined ? { vfs: context.vfs } : {}),
     ...(context.session !== undefined ? { session: context.session } : {}),
     ...(context.processes === undefined ? {} : { processes: context.processes }),

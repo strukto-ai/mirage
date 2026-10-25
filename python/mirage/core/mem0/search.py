@@ -101,6 +101,7 @@ async def search_many(
     threshold = float_option(query, "threshold", 0.0)
     if method != "semantic":
         raise ValueError("only the 'semantic' method is supported")
+    _validate(query.query, top_k, threshold)
     targets = (
         []
         if any(not p.vfs_path.strip("/") for p in paths)

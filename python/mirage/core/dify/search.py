@@ -214,6 +214,7 @@ async def search_many(
     top_k = int_option(query, "top_k", 10)
     method = text_option(query, "method", "semantic")
     threshold = float_option(query, "threshold", 0.0)
+    validate_args(query.query, method, top_k, threshold)
     targets, prefix = await search_scope(DIFY_TREE, accessor, paths)
     return await search_segments(
         accessor,

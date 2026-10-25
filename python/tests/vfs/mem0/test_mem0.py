@@ -42,6 +42,19 @@ def test_vfs_uses_generic_read_only_surface():
     assert served(res) == {"read", "readdir", "stat"}
 
 
+class _AskedClient:
+    def __init__(self):
+        self.asked: list[str] = []
+
+    async def get_all(self, options=None):
+        self.asked.append("get_all")
+        return {"next": None, "results": []}
+
+    async def search(self, query, options=None):
+        self.asked.append("search")
+        return {"results": []}
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "line,exit_code,stderr",
@@ -59,12 +72,15 @@ async def test_search_refuses_an_option_before_asking_mem0(
     line, exit_code, stderr
 ):
     cfg = Mem0Config(api_key=SecretStr("secret"), user_id="alex")
-    ws = Workspace({"/m": Mem0VFS(cfg)})
+    vfs = Mem0VFS(cfg)
+    vfs.accessor._client = _AskedClient()
+    ws = Workspace({"/m": vfs})
     ws.register_cli("search", SEARCH)
     try:
         result = await ws.shell(line)
         assert result.exit_code == exit_code
         assert await result.stderr_str() == f"search: {stderr}\n"
+        assert vfs.accessor._client.asked == []
     finally:
         await ws.close()
 

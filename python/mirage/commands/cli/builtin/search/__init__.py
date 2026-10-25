@@ -23,7 +23,7 @@ from mirage.io.types import IOResult
 from mirage.types import JsonValue, PathSpec, SearchQuery
 
 
-def search_options(fl: FlagView) -> dict[str, JsonValue]:
+def search_options(fl: FlagView, prog: str) -> dict[str, JsonValue]:
     """The options a line gives the mount's search, only those it names.
 
     The mount answers an absent one with its own default and refuses a
@@ -31,6 +31,7 @@ def search_options(fl: FlagView) -> dict[str, JsonValue]:
 
     Args:
         fl (FlagView): the line's flags.
+        prog (str): the name the CLI is installed under.
 
     Raises:
         UsageError: ``--top-k`` below 1.
@@ -39,7 +40,7 @@ def search_options(fl: FlagView) -> dict[str, JsonValue]:
     top_k = fl.as_int("top_k")
     if top_k is not None:
         if top_k < 1:
-            raise UsageError("search: top-k must be positive")
+            raise UsageError(f"{prog}: top-k must be positive")
         options["top_k"] = top_k
     threshold = fl.as_float("threshold")
     if threshold is not None:
@@ -72,12 +73,13 @@ async def search(
         texts (list[str]): the query.
         ctx (Context): the invocation context.
     """
+    prog = ctx.spec.name if ctx.spec is not None else "search"
     if not texts or not texts[0]:
-        raise UsageError("search: query is required")
+        raise UsageError(f"{prog}: query is required")
     if ctx.vfs is None:
         raise RuntimeError("no workspace files")
     query = SearchQuery(
-        texts[0], options=search_options(FlagView(ctx.flags, ctx.spec))
+        texts[0], options=search_options(FlagView(ctx.flags, ctx.spec), prog)
     )
     scopes = default_paths(paths, ctx.cwd)
     records, _ = await ctx.vfs.dispatch(
@@ -107,7 +109,8 @@ SEARCH = CLI(
             Argument(
                 "--threshold",
                 type="float",
-                help="Lowest score a hit needs; 0 keeps every hit",
+                help="Lowest score a hit needs, or on LanceDB the largest "
+                "distance it may have; 0 keeps every hit",
             ),
             Argument("query", nargs="?", help="Text to rank records by"),
             Argument(

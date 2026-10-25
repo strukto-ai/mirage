@@ -8,6 +8,7 @@ from mirage.commands.cli.builtin.search import SEARCH, search
 from mirage.commands.config import Context
 from mirage.commands.spec.parser import parse_command
 from mirage.core.dify import search as dify_search
+from mirage.core.dify import tree as dify_tree
 from mirage.types import MountMode, PathSpec, SearchQuery
 from mirage.vfs.dify import DifyVFS
 from mirage.vfs.registry import build_vfs
@@ -90,18 +91,18 @@ async def test_mounting_a_store_does_not_register_search():
         await ws.close()
 
 
-def _chroma(collection: FakeCollection) -> Workspace:
+def _chroma(collection: FakeCollection, name: str = "search") -> Workspace:
     collection.documents["__path_tree__"] = json.dumps({"a.md": {"size": 1}})
     vfs = build_vfs("chroma", {"collection_name": "docs"})
     vfs.accessor._collection = collection
     ws = Workspace({"/knowledge": Mount(vfs=vfs, mode=MountMode.READ)})
-    ws.register_cli("search", SEARCH)
+    ws.register_cli(name, SEARCH)
     return ws
 
 
 # The line's own grammar is a usage error, exit 2; a value the mount
-# cannot take fails like the mount, exit 1. Either way Chroma is not
-# asked.
+# cannot take fails like the mount, exit 1, ahead of a scope it would
+# have to look up. Either way Chroma is not asked.
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "cmd,exit_code,stderr",
@@ -129,6 +130,11 @@ def _chroma(collection: FakeCollection) -> Workspace:
             1,
             "search: only the 'semantic' method is supported\n",
         ),
+        (
+            f"search {'x' * 251} /knowledge/nope",
+            1,
+            "search: query cannot exceed 250 characters\n",
+        ),
     ],
 )
 async def test_a_refused_option_never_asks_chroma(cmd, exit_code, stderr):
@@ -139,6 +145,43 @@ async def test_a_refused_option_never_asks_chroma(cmd, exit_code, stderr):
         assert result.exit_code == exit_code
         assert await result.stderr_str() == stderr
         assert collection.queries == []
+    finally:
+        await ws.close()
+
+
+# Installed under another name, search refuses under that name, as the
+# parser and the mount do.
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "cmd,exit_code,stderr",
+    [
+        ("lookup '' /knowledge", 2, "lookup: query is required\n"),
+        (
+            "lookup --top-k 0 refunds /knowledge",
+            2,
+            "lookup: top-k must be positive\n",
+        ),
+        (
+            "lookup --bogus refunds /knowledge",
+            2,
+            "lookup: unrecognized option '--bogus'\n"
+            "Try 'lookup --help' for more information.\n",
+        ),
+        (
+            "lookup --method keyword refunds /knowledge",
+            1,
+            "lookup: only the 'semantic' method is supported\n",
+        ),
+    ],
+)
+async def test_a_renamed_install_refuses_under_its_name(
+    cmd, exit_code, stderr
+):
+    ws = _chroma(FakeCollection(), "lookup")
+    try:
+        result = await ws.shell(cmd)
+        assert result.exit_code == exit_code
+        assert await result.stderr_str() == stderr
     finally:
         await ws.close()
 
@@ -173,7 +216,12 @@ def _dify(monkeypatch, posted: list[dict]) -> Workspace:
         posted.append(body)
         return {"records": []}
 
+    async def list_all_documents(accessor):
+        posted.append({"listed": True})
+        return []
+
     monkeypatch.setattr(dify_search, "dify_post", dify_post)
+    monkeypatch.setattr(dify_tree, "list_all_documents", list_all_documents)
     accessor = StubAccessor(
         config=SimpleNamespace(slug_metadata_name="slug", dataset_id="kb")
     )
@@ -205,23 +253,28 @@ async def test_dify_answers_the_options_a_line_leaves_out(monkeypatch):
         await ws.close()
 
 
+# A scope below the root is looked up in the document list, so a refused
+# option is caught before that listing as well as before the search.
 @pytest.mark.asyncio
+@pytest.mark.parametrize("scope", ["/knowledge", "/knowledge/guides"])
 @pytest.mark.parametrize(
     "options,exit_code,stderr",
     [
         ("--method ''", 1, "method must be one of"),
         ("--method vector", 1, "method must be one of"),
+        ("--method constructor", 1, "method must be one of"),
+        ("--method toString", 1, "method must be one of"),
         ("--threshold 1.2", 1, r"threshold must be in [0, 1]"),
         ("--top-k 0", 2, "top-k must be positive"),
     ],
 )
 async def test_dify_is_not_asked_for_an_option_it_refuses(
-    monkeypatch, options, exit_code, stderr
+    monkeypatch, scope, options, exit_code, stderr
 ):
     posted: list[dict] = []
     ws = _dify(monkeypatch, posted)
     try:
-        result = await ws.shell(f"search {options} anything /knowledge")
+        result = await ws.shell(f"search {options} anything {scope}")
         assert result.exit_code == exit_code
         assert stderr in await result.stderr_str()
         assert posted == []

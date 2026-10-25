@@ -77,6 +77,7 @@ export async function searchMany(
   const method = textOption(query, 'method', 'semantic')
   const threshold = floatOption(query, 'threshold', 0)
   if (method !== 'semantic') throw new Error("only the 'semantic' method is supported")
+  validate(query.query, topK, threshold)
   const all = paths.some((p) => stripSlash(p.vfsPath) === '')
   const targets = all ? [] : await makeResolveGlob((path) => listedPaths(accessor, path))(paths)
   const ids = all ? undefined : new Set<string>()

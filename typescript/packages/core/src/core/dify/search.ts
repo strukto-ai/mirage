@@ -79,7 +79,7 @@ export async function searchSegments(
 function validateArgs(query: string, method: string, topK: number, threshold: number): string {
   validateQuery(query, topK)
   if (threshold < 0 || threshold > 1) throw new Error('threshold must be in [0, 1]')
-  const searchMethod = METHODS[method]
+  const searchMethod = Object.hasOwn(METHODS, method) ? METHODS[method] : undefined
   if (searchMethod === undefined) {
     throw new Error('method must be one of semantic, fulltext, hybrid, keyword')
   }
@@ -201,6 +201,7 @@ export async function searchMany(
   const topK = intOption(query, 'top_k', 10)
   const method = textOption(query, 'method', 'semantic')
   const threshold = floatOption(query, 'threshold', 0)
+  validateArgs(query.query, method, topK, threshold)
   const [targets, prefix] = await searchScope(DIFY_TREE, accessor, paths)
   return searchSegments(accessor, query.query, targets, {
     method,

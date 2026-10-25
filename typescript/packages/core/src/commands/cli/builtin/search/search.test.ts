@@ -120,18 +120,19 @@ it('is not registered by mounting a store', async () => {
   }
 })
 
-async function chroma(vfs: ChromaVFS): Promise<Workspace> {
+async function chroma(vfs: ChromaVFS, name = 'search'): Promise<Workspace> {
   const ws = new Workspace(
     { '/knowledge': new Mount(vfs, { mode: MountMode.READ }) },
     { shellParser: await getTestParser() },
   )
-  ws.registerCli('search', SEARCH)
+  ws.registerCli(name, SEARCH)
   return ws
 }
 
 // Twin of test_a_refused_option_never_asks_chroma: the line's own grammar
 // is a usage error, exit 2; a value the mount cannot take fails like the
-// mount, exit 1. Either way Chroma is not asked.
+// mount, exit 1, ahead of a scope it would have to look up. Either way
+// Chroma is not asked.
 it.each([
   [
     'search --top-k many refunds /knowledge',
@@ -150,6 +151,7 @@ it.each([
     1,
     "search: only the 'semantic' method is supported\n",
   ],
+  [`search ${'x'.repeat(251)} /knowledge/nope`, 1, 'search: query cannot exceed 250 characters\n'],
 ])('refuses %s without asking chroma', async (cmd, exitCode, stderr) => {
   vi.mocked(clientMod.fetchPathTree).mockResolvedValue(JSON.stringify({ 'a.md': { size: 1 } }))
   const vfs = new ChromaVFS({ collectionName: 'docs' })
@@ -159,6 +161,33 @@ it.each([
     const result = await ws.shell(cmd)
     expect([result.exitCode, result.stderrText]).toEqual([exitCode, stderr])
     expect(asked).not.toHaveBeenCalled()
+  } finally {
+    await ws.close()
+  }
+})
+
+// Twin of test_a_renamed_install_refuses_under_its_name: installed under
+// another name, search refuses under that name, as the parser and the mount
+// do.
+it.each([
+  ["lookup '' /knowledge", 2, 'lookup: query is required\n'],
+  ['lookup --top-k 0 refunds /knowledge', 2, 'lookup: top-k must be positive\n'],
+  [
+    'lookup --bogus refunds /knowledge',
+    2,
+    "lookup: unrecognized option '--bogus'\nTry 'lookup --help' for more information.\n",
+  ],
+  [
+    'lookup --method keyword refunds /knowledge',
+    1,
+    "lookup: only the 'semantic' method is supported\n",
+  ],
+])('refuses %s under the installed name', async (cmd, exitCode, stderr) => {
+  vi.mocked(clientMod.fetchPathTree).mockResolvedValue(JSON.stringify({ 'a.md': { size: 1 } }))
+  const ws = await chroma(new ChromaVFS({ collectionName: 'docs' }), 'lookup')
+  try {
+    const result = await ws.shell(cmd)
+    expect([result.exitCode, result.stderrText]).toEqual([exitCode, stderr])
   } finally {
     await ws.close()
   }
@@ -193,9 +222,11 @@ async function dify(): Promise<{ ws: Workspace; posted: unknown[] }> {
   const posted: unknown[] = []
   vi.stubGlobal(
     'fetch',
-    vi.fn((_url: string, init: { body: string }) => {
-      posted.push(JSON.parse(init.body))
-      return Promise.resolve(new Response(JSON.stringify({ records: [] })))
+    vi.fn((url: string, init: { body?: string }) => {
+      posted.push(init.body === undefined ? { listed: url } : JSON.parse(init.body))
+      return Promise.resolve(
+        new Response(JSON.stringify({ records: [], data: [], has_more: false })),
+      )
     }),
   )
   const ws = new Workspace(
@@ -234,20 +265,26 @@ it('lets Dify answer the options a line leaves out', async () => {
   }
 })
 
-// Twin of test_dify_is_not_asked_for_an_option_it_refuses.
-it.each([
-  ["--method ''", 1, 'method must be one of'],
-  ['--method vector', 1, 'method must be one of'],
-  ['--threshold 1.2', 1, 'threshold must be in [0, 1]'],
-  ['--top-k 0', 2, 'top-k must be positive'],
-])('does not ask Dify for %s', async (options, exitCode, stderr) => {
-  const { ws, posted } = await dify()
-  try {
-    const result = await ws.shell(`search ${options} anything /knowledge`)
-    expect(result.exitCode).toBe(exitCode)
-    expect(result.stderrText).toContain(stderr)
-    expect(posted).toEqual([])
-  } finally {
-    await ws.close()
-  }
+// Twin of test_dify_is_not_asked_for_an_option_it_refuses: a scope below
+// the root is looked up in the document list, so a refused option is caught
+// before that listing as well as before the search.
+describe.each(['/knowledge', '/knowledge/guides'])('over %s', (scope) => {
+  it.each([
+    ["--method ''", 1, 'method must be one of'],
+    ['--method vector', 1, 'method must be one of'],
+    ['--method constructor', 1, 'method must be one of'],
+    ['--method toString', 1, 'method must be one of'],
+    ['--threshold 1.2', 1, 'threshold must be in [0, 1]'],
+    ['--top-k 0', 2, 'top-k must be positive'],
+  ])('does not ask Dify for %s', async (options, exitCode, stderr) => {
+    const { ws, posted } = await dify()
+    try {
+      const result = await ws.shell(`search ${options} anything ${scope}`)
+      expect(result.exitCode).toBe(exitCode)
+      expect(result.stderrText).toContain(stderr)
+      expect(posted).toEqual([])
+    } finally {
+      await ws.close()
+    }
+  })
 })

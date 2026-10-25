@@ -8,7 +8,7 @@ import { Mem0VFS } from '../../vfs/mem0/mem0.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
 import { readdir } from './readdir.ts'
 import { detectScope } from './scope.ts'
-import { searchMemoriesRendered } from './search.ts'
+import { searchMany, searchMemoriesRendered } from './search.ts'
 
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -182,6 +182,28 @@ it.each([
   } finally {
     await ws.close()
   }
+})
+
+// Twin of test_search_many_refuses_before_listing_a_glob: a glob scope is
+// expanded by listing the memories, so a value the search refuses is refused
+// before that listing.
+it.each([
+  [{ query: 'morning', options: { threshold: 1.5 } }, 'threshold'],
+  [{ query: 'morning', options: { top_k: 0 } }, 'top-k'],
+  [{ query: '' }, 'query'],
+])('searchMany refuses %o before listing a glob', async (query, message) => {
+  const fetchMock = vi.fn()
+  vi.stubGlobal('fetch', fetchMock)
+  const accessor = new Mem0Accessor({ apiKey: 'key', agentId: 'routine_agent' })
+  const glob = new PathSpec({
+    virtual: '/mem/*.json',
+    directory: '/mem',
+    vfsPath: '*.json',
+    pattern: '*.json',
+    resolved: false,
+  })
+  await expect(searchMany(accessor, [glob], query)).rejects.toThrow(message)
+  expect(fetchMock).not.toHaveBeenCalled()
 })
 
 // Twin of the parse refusals in test_search_refusals: search's usage errors

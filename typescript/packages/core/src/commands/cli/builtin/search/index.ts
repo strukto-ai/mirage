@@ -26,13 +26,14 @@ import { CLI, CLIHandler } from '../../types.ts'
  * The options a line gives the mount's search, only those it names. The
  * mount answers an absent one with its own default and refuses a value it
  * cannot take, before it sends any request; a `--top-k` below 1 is a usage
- * error. Mirrors Python's `search_options`.
+ * error under `prog`, the name the CLI is installed under. Mirrors Python's
+ * `search_options`.
  */
-export function searchOptions(fl: FlagView): Record<string, JsonValue> {
+export function searchOptions(fl: FlagView, prog: string): Record<string, JsonValue> {
   const options: Record<string, JsonValue> = {}
   const topK = fl.asInt('top_k')
   if (topK !== undefined) {
-    if (topK < 1) throw new UsageError('search: top-k must be positive')
+    if (topK < 1) throw new UsageError(`${prog}: top-k must be positive`)
     options.top_k = topK
   }
   const threshold = fl.asFloat('threshold')
@@ -56,12 +57,13 @@ export async function search(
   texts: string[],
   ctx: Context,
 ): Promise<CommandFnResult> {
+  const prog = ctx.spec?.name ?? 'search'
   const text = texts[0]
-  if (text === undefined || text === '') throw new UsageError('search: query is required')
+  if (text === undefined || text === '') throw new UsageError(`${prog}: query is required`)
   if (ctx.vfs === undefined) throw new Error('no workspace files')
   const query: SearchQuery = {
     query: text,
-    options: searchOptions(new FlagView(ctx.flags, ctx.spec)),
+    options: searchOptions(new FlagView(ctx.flags, ctx.spec), prog),
   }
   const [first, ...scopes] = defaultPaths(paths, ctx.cwd.virtual)
   if (first === undefined) throw new Error('no scope to search')
@@ -91,7 +93,7 @@ export const SEARCH = new CLI({
       }),
       new Argument('--threshold', {
         type: 'float',
-        help: 'Lowest score a hit needs; 0 keeps every hit',
+        help: 'Lowest score a hit needs, or on LanceDB the largest distance it may have; 0 keeps every hit',
       }),
       new Argument('query', { nargs: '?', help: 'Text to rank records by' }),
       new Argument('paths', {
