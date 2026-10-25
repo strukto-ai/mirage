@@ -59,6 +59,33 @@ options = ClaudeAgentOptions(
 )
 ```
 
+## Shell
+
+To keep Claude's own tools and run its Bash tool in a workspace instead, point the SDK at `mirage-bash`, as for [Claude Code](/home/agents/claude-code#shell). The workspace is one the Mirage daemon serves:
+
+```bash
+mirage workspace create workspace.yaml --id demo
+```
+
+```python
+import shutil
+
+from claude_agent_sdk import ClaudeAgentOptions
+
+options = ClaudeAgentOptions(
+    cwd="/Users/me/project",
+    env={
+        "CLAUDE_CODE_SHELL": shutil.which("mirage-bash"),
+        "MIRAGE_WORKSPACE": "demo",
+        "MIRAGE_SESSION": "agent",
+    },
+)
+```
+
+- `MIRAGE_SESSION` is optional; without it commands run as the workspace's default session.
+- Mount the project and `/tmp` at their own paths, as the [Claude Code page](/home/agents/claude-code#shell) shows, so `cd` carries over and Claude's Read and Edit see the same files.
+- Claude's Read, Edit, Write, Glob and Grep still run on the host.
+
 ## Tools
 
 The server serves the session's seven tools, [`session.tools`](/python/access/in-app#session-tools): `shell`, `read`, `write`, `edit`, `ls`, `grep` and `glob`, named `mcp__mirage__<tool>` in the SDK. It carries the ones the session's profile leaves it (`session.tools.names()`).

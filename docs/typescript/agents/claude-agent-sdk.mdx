@@ -4,9 +4,9 @@ description: Run @anthropic-ai/claude-agent-sdk against a Mirage workspace throu
 icon: /images/claude-logo.svg
 ---
 
-The [Claude Agent SDK](https://code.claude.com/docs/en/agent-sdk/) builds agents on Claude. Mirage exposes any `Workspace` to the SDK as an in-process MCP server. Calls to the Mirage tools run in that workspace, under its mounts and policies.
+The [Claude Agent SDK](https://code.claude.com/docs/en/agent-sdk/) builds agents on Claude. Mirage exposes any `Workspace` to the SDK as an in-process MCP server, so every file and shell operation the agent runs is routed through Mirage instead of the host filesystem.
 
-This is distinct from [Claude Code](/home/agents/claude-code), the `claude` CLI run as it is on a workspace. Use this SDK integration when you build your own agent with the SDK's `query()` and want to add Mirage tools.
+This is distinct from [Claude Code](/home/agents/claude-code), the `claude` CLI run as it is on a workspace. Use this SDK integration when you build your own agent with the SDK's `query()` and want Mirage tools rather than the built-in file tools.
 
 ## Install
 
@@ -18,7 +18,7 @@ pnpm add @struktoai/mirage-claude-agent-sdk @struktoai/mirage-node @anthropic-ai
 
 ## Usage
 
-`buildOptions` adds and preapproves Mirage tools, and describes the mounted paths in the system prompt. Built-in SDK tools remain available under the SDK’s [permission rules](https://code.claude.com/docs/en/agent-sdk/permissions).
+`buildOptions` adds and preapproves Mirage tools, turns off the SDK's built-in tools, and describes the mounted paths in the system prompt.
 
 ```ts
 import { MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
@@ -45,9 +45,38 @@ import { MirageServer, buildSystemPrompt } from '@struktoai/mirage-claude-agent-
 const options = {
   mcpServers: { mirage: MirageServer(ws), github: githubServer },
   allowedTools: ['mcp__mirage__*', 'mcp__github__*'],
+  tools: [],
   systemPrompt: await buildSystemPrompt({ workspace: ws }),
 }
 ```
+
+## Shell
+
+To keep Claude's own tools and run its Bash tool in a workspace instead, point the SDK at `mirage-bash`, as for [Claude Code](/home/agents/claude-code#shell). The workspace is one the Mirage daemon serves:
+
+```bash
+mirage workspace create workspace.yaml --id demo
+```
+
+```ts
+import type { Options } from '@anthropic-ai/claude-agent-sdk'
+
+const options: Options = {
+  cwd: '/Users/me/project',
+  env: {
+    ...process.env,
+    CLAUDE_CODE_SHELL: '/Users/me/.local/bin/mirage-bash',
+    MIRAGE_WORKSPACE: 'demo',
+    MIRAGE_SESSION: 'agent',
+  },
+}
+```
+
+`env` replaces the environment Claude Code starts with, so keep `process.env` in it. `command -v mirage-bash` prints the path.
+
+- `MIRAGE_SESSION` is optional; without it commands run as the workspace's default session.
+- Mount the project and `/tmp` at their own paths, as the [Claude Code page](/home/agents/claude-code#shell) shows, so `cd` carries over and Claude's Read and Edit see the same files.
+- Claude's Read, Edit, Write, Glob and Grep still run on the host.
 
 ## Tools
 
@@ -59,7 +88,7 @@ The server serves the session's seven tools, [`session.tools`](/typescript/acces
 | Symbol | Purpose |
 | --- | --- |
 | <code style={{ whiteSpace: 'nowrap' }}>MirageServer</code> | An in-process MCP server exposing the Mirage tools; pass it to `options.mcpServers`. |
-| <code style={{ whiteSpace: 'nowrap' }}>buildOptions</code> | Returns ready-to-use query `Options` backed by a workspace: the `MirageServer` tools as the `mirage` MCP server, preapproved, and a system prompt describing the mounts. The SDK's built-in tools stay available under its usual permission rules. |
+| <code style={{ whiteSpace: 'nowrap' }}>buildOptions</code> | Returns ready-to-use query `Options` backed by a workspace: the `MirageServer` tools as the `mirage` MCP server, preapproved, and a system prompt describing the mounts. The SDK's built-in tools are disabled, so the Mirage tools are the agent's only file access layer. |
 | <code style={{ whiteSpace: 'nowrap' }}>BuildOptionsOptions</code> | Options for `buildOptions`: `systemPrompt` replaces the generated prompt, and `sessionId` names the Mirage session the tools act as. |
 | <code style={{ whiteSpace: 'nowrap' }}>MIRAGE_SYSTEM_PROMPT</code> | The default system prompt: how the Mirage filesystem differs from a plain one. |
 | <code style={{ whiteSpace: 'nowrap' }}>buildSystemPrompt</code> | Returns `MIRAGE_SYSTEM_PROMPT` followed by a description of the mounted paths and any extra instructions, ready to use as an agent's system prompt. |
