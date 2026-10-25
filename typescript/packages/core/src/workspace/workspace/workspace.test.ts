@@ -348,6 +348,16 @@ describe('the workspace id source', () => {
     }
   })
 
+  it('creates sessions on the workspace clock', () => {
+    const clock = new ManualClock(1_000)
+    const ws = new Workspace({ '/data': new RAMVFS() }, { clock })
+    open.push(ws)
+    clock.advance(5)
+    const created = ws.createSession('other')
+    expect(ws.getSession(ws.defaultSessionId).createdAt).toBe(1_000)
+    expect(created.createdAt).toBe(1_005)
+  })
+
   it('lets a given id outrank the source', () => {
     const ws = new Workspace(
       { '/data': new RAMVFS() },

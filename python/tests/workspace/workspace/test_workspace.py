@@ -573,6 +573,19 @@ async def test_the_default_id_source_stamps_from_the_workspace_clock():
 
 
 @pytest.mark.asyncio
+async def test_sessions_are_created_on_the_workspace_clock():
+    clock = ManualClock(start=1_000.0)
+    ws = Workspace({"/data": RAMVFS()}, clock=clock)
+    try:
+        clock.advance(5)
+        created = ws.create_session("other")
+        assert ws.get_session(ws.default_session_id).created_at == 1_000.0
+        assert created.created_at == 1_005.0
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
 async def test_a_given_id_outranks_the_id_source():
     ws = Workspace(
         {"/data": RAMVFS()},

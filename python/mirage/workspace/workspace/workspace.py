@@ -395,7 +395,10 @@ class Workspace:
         if profile is not None and profile not in self._profiles:
             raise PolicyError(f"unknown profile {profile!r}")
         self._session_mgr = SessionManager(
-            session_id, store=stores.sessions, seed_vars=seed_vars
+            session_id,
+            store=stores.sessions,
+            seed_vars=seed_vars,
+            clock=self._clock,
         )
         self._tools: dict[str | None, MirageToolOperations] = {}
         self._reads: dict[str, FileVersionTracker] = {}

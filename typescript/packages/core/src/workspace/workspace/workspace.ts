@@ -358,7 +358,7 @@ export class Workspace {
         sourceFor(seeded.managed.source)
       }
     }
-    this.sessionManager = new SessionManager(sessionId, stores.sessions, seedVars)
+    this.sessionManager = new SessionManager(sessionId, stores.sessions, seedVars, this.clock)
     this.meta = new WorkspaceMeta(
       this.wsId,
       this.stateStoreInternal,
