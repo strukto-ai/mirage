@@ -26,6 +26,7 @@ import {
   forceUnmount,
   unmountWithFusermount,
 } from './mount.ts'
+import { UNMOUNT_POLL_MS, UNMOUNT_TIMEOUT_MS } from './constants.ts'
 
 const { execFile, execFileSync, mountTable } = vi.hoisted(() => ({
   execFile: vi.fn(),
@@ -130,6 +131,7 @@ const helperDirs: string[] = []
 afterEach(() => {
   Object.defineProperty(process, 'platform', { value: REAL_PLATFORM, configurable: true })
   process.env.PATH = REAL_PATH
+  vi.useRealTimers()
   execFile.mockReset()
   execFileSync.mockReset()
   mountTable.text = ''
@@ -158,11 +160,26 @@ function unmountVia(mountpoint: string, failure: Error | null, stderr = ''): Pro
       cb: (err: Error | null, stdout: string, stderr: string) => void,
     ) => {
       cb(failure, '', stderr)
+      return { unref: vi.fn() }
     },
   )
   return new Promise((done) => {
     unmountWithFusermount(mountpoint, done)
   })
+}
+
+// A helper whose exit node never reports: the unmount still settles, on the
+// mount table, and the child does not hold the process open.
+function unmountWithLostExit(mountpoint: string): {
+  settled: Promise<Error | null>
+  unref: ReturnType<typeof vi.fn>
+} {
+  const unref = vi.fn()
+  execFile.mockImplementation(() => ({ unref }))
+  const settled = new Promise<Error | null>((done) => {
+    unmountWithFusermount(mountpoint, done)
+  })
+  return { settled, unref }
 }
 
 function markMounted(mountpoint: string): void {
@@ -238,6 +255,32 @@ describe('unmountWithFusermount', () => {
       join(helpers, 'fusermount3'),
       ['-uz', mountpoint],
       expect.any(Function),
+    )
+  })
+
+  it('settles on the mount table when the helper exit never arrives', async () => {
+    vi.useFakeTimers()
+    process.env.PATH = helperDir(['fusermount3'])
+    const mountpoint = join(realpathSync(helperDir([])), 'my mount')
+    markMounted(mountpoint)
+    const { settled, unref } = unmountWithLostExit(mountpoint)
+    expect(unref).toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(UNMOUNT_POLL_MS * 3)
+    mountTable.text = ''
+    await vi.advanceTimersByTimeAsync(UNMOUNT_POLL_MS)
+    await expect(settled).resolves.toBeNull()
+  })
+
+  it('gives up on a mount still listed when the helper exit never arrives', async () => {
+    vi.useFakeTimers()
+    process.env.PATH = helperDir(['fusermount3'])
+    const mountpoint = join(realpathSync(helperDir([])), 'my mount')
+    markMounted(mountpoint)
+    const { settled } = unmountWithLostExit(mountpoint)
+    await vi.advanceTimersByTimeAsync(UNMOUNT_TIMEOUT_MS)
+    const err = await settled
+    expect(err?.message).toBe(
+      `cannot unmount ${mountpoint}: still mounted after ${String(UNMOUNT_TIMEOUT_MS)} ms`,
     )
   })
 

@@ -30,6 +30,7 @@ import type { SessionState } from '@struktoai/mirage-core/workspace/session/sess
 import type { Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import { loadOptionalPeer } from '@struktoai/mirage-core/utils/optional_peer'
 import { checkMountpoint, FSKIT_MOUNT_ROOT, prepareBackend } from './backend.ts'
+import { UNMOUNT_POLL_MS, UNMOUNT_TIMEOUT_MS } from './constants.ts'
 import { MirageFS } from './fs.ts'
 
 export interface FuseHandle {
@@ -214,33 +215,61 @@ export function isMounted(mountpoint: string): boolean {
  * shells out to a hardcoded `fusermount -uz` and, on any error, skips the
  * native cleanup that lets node exit. A mount already released from outside
  * counts as unmounted, and `cb` runs exactly once whatever fails.
+ *
+ * The mount table settles it as well as the helper's exit: node at times
+ * never reports this child's exit (on CI the helper sat a zombie, its process
+ * handle still waiting), which left the unmount, and the process, waiting
+ * forever. So the child is unref'd and the table read every UNMOUNT_POLL_MS.
  */
 export function unmountWithFusermount(mountpoint: string, cb: (err: Error | null) => void): void {
-  const settle = (err: Error | null): void => {
-    let failure = err
-    if (err !== null) {
-      try {
-        if (!isMounted(mountpoint)) failure = null
-      } catch (checkErr) {
-        failure = checkErr as Error
-      }
+  const failureUnlessUnmounted = (err: Error | null): Error | null => {
+    if (err === null) return null
+    try {
+      return isMounted(mountpoint) ? err : null
+    } catch (checkErr) {
+      return checkErr as Error
     }
-    cb(failure)
   }
   const binary = resolveFusermountBinary()
   if (binary === null) {
-    settle(
-      new Error(`cannot unmount ${mountpoint}: neither 'fusermount' nor 'fusermount3' is on PATH`),
+    cb(
+      failureUnlessUnmounted(
+        new Error(
+          `cannot unmount ${mountpoint}: neither 'fusermount' nor 'fusermount3' is on PATH`,
+        ),
+      ),
     )
     return
   }
+  let settled = false
+  const settle = (err: Error | null): void => {
+    if (settled) return
+    settled = true
+    clearInterval(poll)
+    cb(failureUnlessUnmounted(err))
+  }
+  const deadline = Date.now() + UNMOUNT_TIMEOUT_MS
+  const poll = setInterval(() => {
+    try {
+      if (!isMounted(mountpoint)) settle(null)
+      else if (Date.now() >= deadline) {
+        settle(
+          new Error(
+            `cannot unmount ${mountpoint}: still mounted after ${String(UNMOUNT_TIMEOUT_MS)} ms`,
+          ),
+        )
+      }
+    } catch (err) {
+      settle(err as Error)
+    }
+  }, UNMOUNT_POLL_MS)
   execFile(binary, ['-uz', mountpoint], (err, _stdout, stderr) => {
     settle(
       err === null
         ? null
         : new Error(`cannot unmount ${mountpoint}: ${stderr.trim()}`, { cause: err }),
     )
-  })
+  }).unref()
 }
 
 /** Fallback unmount via platform tools — mirrors Python's SIGINT handler. */
