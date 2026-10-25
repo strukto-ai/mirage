@@ -320,7 +320,7 @@ export class MountRegistry {
     placements: RegistryPlacements = {},
     readonly io: IOConfig = new IOConfig(),
     readonly clock: Clock = new SystemClock(),
-    readonly ids: IdSource = new SystemIdSource(),
+    readonly ids: IdSource = new SystemIdSource(clock),
   ) {
     this.clis = new CLIRegistry(() => this.mountList.map((m) => m.vfs.accessor), clock)
     this.indexConfig = placements.index

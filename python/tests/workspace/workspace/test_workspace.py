@@ -15,6 +15,7 @@
 import asyncio
 import inspect
 import io
+import uuid
 
 import pytest
 
@@ -551,6 +552,22 @@ async def test_a_seeded_workspace_mints_its_ids_in_a_fixed_order():
             ws.mount("/dev").mount_id,
             ws.mount("/data").mount_id,
         ] == SEED_5_IDS
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_the_default_id_source_stamps_from_the_workspace_clock():
+    ws = Workspace(
+        {"/data": RAMVFS()}, clock=ManualClock(start=1_700_000_000.0)
+    )
+    try:
+        for value in [
+            ws.workspace_id,
+            ws.default_session_id,
+            ws.mount("/data").mount_id,
+        ]:
+            assert uuid.UUID(value).int >> 80 == 1_700_000_000_000
     finally:
         await ws.close()
 

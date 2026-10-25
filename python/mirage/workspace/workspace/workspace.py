@@ -275,7 +275,9 @@ class Workspace:
         ids: IdSource | None = None,
     ) -> None:
         self._clock: Clock = clock if clock is not None else SystemClock()
-        self._ids: IdSource = ids if ids is not None else SystemIdSource()
+        self._ids: IdSource = (
+            ids if ids is not None else SystemIdSource(self._clock)
+        )
         # Minted before any mount, so a seeded source hands out the same
         # draws in the same order on both hosts.
         self._workspace_id = (

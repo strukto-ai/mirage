@@ -340,6 +340,14 @@ describe('the workspace id source', () => {
     ]).toEqual(SEED_5_IDS)
   })
 
+  it('stamps default ids from the workspace clock', () => {
+    const ws = new Workspace({ '/data': new RAMVFS() }, { clock: new ManualClock(1_700_000_000) })
+    open.push(ws)
+    for (const value of [ws.workspaceId, ws.defaultSessionId, ws.mount('/data').mountId]) {
+      expect(parseInt(value.slice(0, 8) + value.slice(9, 13), 16)).toBe(1_700_000_000_000)
+    }
+  })
+
   it('lets a given id outrank the source', () => {
     const ws = new Workspace(
       { '/data': new RAMVFS() },
