@@ -481,7 +481,7 @@
       "command": "unzip -l /data/punzz/p.zip",
       "expect": {
         "exit": 1,
-        "stdout": "  Length      Name\n---------  ----\n        0  dir/\n      200  dir/a.txt\n        1  b.txt\n",
+        "stdout": "Archive:  /data/punzz/p.zip\n  Length      Date    Time    Name\n---------  ---------- -----   ----\n        0  2026-09-20 07:33   dir/\n      200  2026-09-20 07:33   dir/a.txt\n        1  2026-09-20 07:33   b.txt\n---------                     -------\n      201                     3 files\n",
         "stderr": "warning [/data/punzz/p.zip]:  10 extra bytes at beginning or within zipfile\n  (attempting to process anyway)\n"
       },
       "flags": [
@@ -726,7 +726,7 @@
       "command": "unzip -l /data/punzz/m.zip -x '*'",
       "expect": {
         "exit": 11,
-        "stdout": "  Length      Name\n---------  ----\n",
+        "stdout": "Archive:  /data/punzz/m.zip\n  Length      Date    Time    Name\n---------  ---------- -----   ----\n---------                     -------\n        0                     0 files\n",
         "stderr": ""
       },
       "flags": [

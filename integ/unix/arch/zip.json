@@ -43,10 +43,10 @@
         "redis",
         "opfs"
       ],
-      "command": "mkdir -p /data/zdir/sub && echo one > /data/zdir/a.txt && echo two > /data/zdir/sub/b.txt && zip -r /data/zr.zip /data/zdir && unzip -l /data/zr.zip",
+      "command": "mkdir -p /data/zdir/sub && echo one > /data/zdir/a.txt && echo two > /data/zdir/sub/b.txt && zip -r /data/zr.zip /data/zdir && unzip -l /data/zr.zip | sed -E 's/[0-9]{4}(-[0-9]{2}){2} [0-9]{2}:[0-9]{2}/YYYY-MM-DD hh:mm/'",
       "expect": {
         "exit": 0,
-        "stdout": "  adding: data/zdir/\n  adding: data/zdir/a.txt\n  adding: data/zdir/sub/\n  adding: data/zdir/sub/b.txt\n  Length      Name\n---------  ----\n        0  data/zdir/\n        4  data/zdir/a.txt\n        0  data/zdir/sub/\n        4  data/zdir/sub/b.txt\n",
+        "stdout": "  adding: data/zdir/\n  adding: data/zdir/a.txt\n  adding: data/zdir/sub/\n  adding: data/zdir/sub/b.txt\nArchive:  /data/zr.zip\n  Length      Date    Time    Name\n---------  ---------- -----   ----\n        0  YYYY-MM-DD hh:mm   data/zdir/\n        4  YYYY-MM-DD hh:mm   data/zdir/a.txt\n        0  YYYY-MM-DD hh:mm   data/zdir/sub/\n        4  YYYY-MM-DD hh:mm   data/zdir/sub/b.txt\n---------                     -------\n        8                     4 files\n",
         "stderr": ""
       },
       "flags": [
@@ -62,10 +62,10 @@
         "redis",
         "opfs"
       ],
-      "command": "mkdir -p /data/znor && echo one > /data/znor/a.txt && zip /data/znor.zip /data/znor && unzip -l /data/znor.zip",
+      "command": "mkdir -p /data/znor && echo one > /data/znor/a.txt && zip /data/znor.zip /data/znor && unzip -l /data/znor.zip | sed -E 's/[0-9]{4}(-[0-9]{2}){2} [0-9]{2}:[0-9]{2}/YYYY-MM-DD hh:mm/'",
       "expect": {
         "exit": 0,
-        "stdout": "  adding: data/znor/\n  Length      Name\n---------  ----\n        0  data/znor/\n",
+        "stdout": "  adding: data/znor/\nArchive:  /data/znor.zip\n  Length      Date    Time    Name\n---------  ---------- -----   ----\n        0  YYYY-MM-DD hh:mm   data/znor/\n---------                     -------\n        0                     1 file\n",
         "stderr": ""
       }
     },
@@ -116,10 +116,10 @@
         "redis",
         "opfs"
       ],
-      "command": "mkdir -p /data/zjunk/sub && echo one > /data/zjunk/a.txt && echo two > /data/zjunk/sub/b.txt && zip -r -j /data/zj.zip /data/zjunk && unzip -l /data/zj.zip",
+      "command": "mkdir -p /data/zjunk/sub && echo one > /data/zjunk/a.txt && echo two > /data/zjunk/sub/b.txt && zip -r -j /data/zj.zip /data/zjunk && unzip -l /data/zj.zip | sed -E 's/[0-9]{4}(-[0-9]{2}){2} [0-9]{2}:[0-9]{2}/YYYY-MM-DD hh:mm/'",
       "expect": {
         "exit": 0,
-        "stdout": "  adding: a.txt\n  adding: b.txt\n  Length      Name\n---------  ----\n        4  a.txt\n        4  b.txt\n",
+        "stdout": "  adding: a.txt\n  adding: b.txt\nArchive:  /data/zj.zip\n  Length      Date    Time    Name\n---------  ---------- -----   ----\n        4  YYYY-MM-DD hh:mm   a.txt\n        4  YYYY-MM-DD hh:mm   b.txt\n---------                     -------\n        8                     2 files\n",
         "stderr": ""
       },
       "flags": [
@@ -207,10 +207,10 @@
         "redis",
         "opfs"
       ],
-      "command": "mkdir -p /data/zself && echo one > /data/zself/a.txt && zip -q -r /data/zself/self.zip /data/zself && unzip -l /data/zself/self.zip",
+      "command": "mkdir -p /data/zself && echo one > /data/zself/a.txt && zip -q -r /data/zself/self.zip /data/zself && unzip -l /data/zself/self.zip | sed -E 's/[0-9]{4}(-[0-9]{2}){2} [0-9]{2}:[0-9]{2}/YYYY-MM-DD hh:mm/'",
       "expect": {
         "exit": 0,
-        "stdout": "  Length      Name\n---------  ----\n        0  data/zself/\n        4  data/zself/a.txt\n",
+        "stdout": "Archive:  /data/zself/self.zip\n  Length      Date    Time    Name\n---------  ---------- -----   ----\n        0  YYYY-MM-DD hh:mm   data/zself/\n        4  YYYY-MM-DD hh:mm   data/zself/a.txt\n---------                     -------\n        4                     2 files\n",
         "stderr": ""
       },
       "flags": [

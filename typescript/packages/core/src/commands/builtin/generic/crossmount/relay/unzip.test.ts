@@ -36,6 +36,6 @@ async function run(
 it('lists instead of extracting under -l', async () => {
   const { exitCode, out, written } = await run('unzip -l /a/a.zip -d /b/out')
   expect(exitCode).toBe(0)
-  expect(out.startsWith('  Length      Name\n')).toBe(true)
+  expect(out.startsWith('Archive:  /a/a.zip\n  Length      Date    Time    Name\n')).toBe(true)
   expect(written).toEqual({})
 })

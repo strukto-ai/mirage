@@ -49,7 +49,7 @@ fn a_new_archive_lists_and_pipes_back() {
     assert_eq!(status, 0);
     assert_eq!(
         out,
-        "  Length      Name\n---------  ----\n        6  a.txt\n        0  d/\n    85000  d/b.txt\n"
+        "Archive:  z.zip\n  Length      Date    Time    Name\n---------  ---------- -----   ----\n        6  1980-01-01 00:00   a.txt\n        0  1980-01-01 00:00   d/\n    85000  1980-01-01 00:00   d/b.txt\n---------                     -------\n    85006                     3 files\n"
     );
     let (status, out, _) = unzip(&mut host, "z.zip", json!({"t": true}));
     assert_eq!(status, 0);
