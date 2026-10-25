@@ -760,6 +760,17 @@ class TestDescriptors:
         patched.close(fd)
         assert run(ops.read("/data/dir/a.txt")) == b"hello!"
 
+    def test_an_append_that_cannot_find_its_end_writes_nothing(self):
+        ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
+        run(ws.vfs.write("/data/log", b"abc"))
+        patched = make_os_module(ws.vfs)
+        fd = patched.open("/data/log", os.O_WRONLY | os.O_APPEND)
+        ws.policies.add(_NoStats())
+        with pytest.raises(PermissionError):
+            patched.write(fd, b"X")
+        patched.close(fd)
+        assert run(ws.vfs.read("/data/log")) == b"abc"
+
     def test_a_host_path_keeps_a_host_descriptor(self, tmp_path):
         _, patched = seeded()
         target = tmp_path / "a.txt"

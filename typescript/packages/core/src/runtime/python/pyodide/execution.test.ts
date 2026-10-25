@@ -241,6 +241,34 @@ describe('Pyodide concurrency', { timeout: 120_000 }, () => {
       }
     },
   )
+
+  it('truncates nothing when its open stat revokes the run', async () => {
+    const rt = new PyodideRuntime()
+    const controller = new AbortController()
+    const calls: string[] = []
+    bindOver(
+      rt,
+      (op, path, _bytes, _dst, attrs) => {
+        if (attrs?.retained !== undefined) return Promise.resolve(attrs.retained)
+        calls.push(op)
+        if (op === 'stat') {
+          controller.abort()
+          return Promise.resolve(new FileStat({ name: path, type: FileType.FILE, size: 3 }))
+        }
+        return Promise.resolve(op === 'read' ? new TextEncoder().encode('abc') : undefined)
+      },
+      new PrefixResolver(() => ['/data/']),
+    )
+    try {
+      await interpret(rt, { code: "open('/data/f', 'w')" }, { signal: controller.signal }).catch(
+        () => undefined,
+      )
+      expect(calls).not.toContain('truncate')
+      expect(calls).not.toContain('write')
+    } finally {
+      await rt.close()
+    }
+  })
 })
 
 describe('Python guest module', { timeout: 120_000 }, () => {

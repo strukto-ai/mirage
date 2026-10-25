@@ -284,6 +284,24 @@ describe('MontyRuntime', () => {
     expect(result.exitCode).toBe(1)
   }, 30_000)
 
+  it('truncates nothing when its open stat revokes the run', async () => {
+    const ctrl = new AbortController()
+    const calls: string[] = []
+    const rt = make(
+      (op) => {
+        calls.push(op)
+        if (op !== 'stat') return Promise.resolve(undefined)
+        ctrl.abort(new Error('revoked'))
+        return Promise.resolve(new FileStat({ name: 'f', type: FileType.FILE, size: 3 }))
+      },
+      () => ['/data/'],
+    )
+    await interpret(rt, { code: "open('/data/f', 'w')" }, { signal: ctrl.signal }).catch(
+      () => undefined,
+    )
+    expect(calls).toEqual(['stat'])
+  }, 30_000)
+
   it('argv[0] is prog when the caller names the program', async () => {
     // A named caller (a CLI install) owns argv[0]; without one the
     // interpreter's own placeholder stands, as `python3 -c` expects.

@@ -182,13 +182,14 @@ export class Descriptor {
 
   /**
    * Write at the position, advancing it past what was written; an appending
-   * handle writes at its end and moves the position past it.
+   * handle first moves the position to its end, as O_APPEND does, so a
+   * write that fails to find the end leaves nothing written.
    */
   async write(data: Uint8Array): Promise<void> {
+    if (this.mode.append && data.byteLength > 0) this.pos = await this.size()
     const at = this.pos
     this.pos += data.byteLength
     await this.pwrite(at, data)
-    if (this.mode.append && data.byteLength > 0) this.pos = await this.size()
   }
 
   /**

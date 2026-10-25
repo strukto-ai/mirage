@@ -346,6 +346,20 @@ describe('patchNodeFs — descriptors', () => {
     expect(await fs.promises.readFile('/data/f', 'utf-8')).toBe('abcX')
     await ws.close()
   })
+  it('writes nothing for an append that cannot find its end', async () => {
+    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
+    restore = patchNodeFs(ws)
+    const fs = requireCjs('fs') as Fs
+    await fs.promises.writeFile('/data/f', 'abc')
+    const handle = await fs.promises.open('/data/f', 'a')
+    ws.policies.add({
+      preVfs: (ctx) => (ctx.call.name === 'stat' ? { kind: 'deny', reason: 'no stat' } : null),
+    })
+    await expect(handle.write('X')).rejects.toMatchObject({ code: 'EACCES' })
+    await handle.close()
+    expect(new TextDecoder().decode(await ws.vfs.read('/data/f'))).toBe('abc')
+    await ws.close()
+  })
   it('lands a write made while a sync is out', async () => {
     const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
     restore = patchNodeFs(ws)

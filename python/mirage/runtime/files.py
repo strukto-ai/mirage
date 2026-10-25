@@ -173,17 +173,18 @@ class Descriptor:
             self.files.pwrite(self.fh, offset, data)
 
     def write(self, data: bytes) -> None:
-        """Write at the position, advancing it; an appending handle writes
-        at its end and moves the position past what it wrote.
+        """Write at the position, advancing it; an appending handle first
+        moves the position to its end, as O_APPEND does.
 
         Args:
             data (bytes): the payload.
         """
-        self.pwrite(self.pos, data)
+        # The end first, as O_APPEND moves to it: a write that fails to
+        # find it leaves nothing written.
         if self.mode.append and data:
             self.pos = self.size
-        else:
-            self.pos += len(data)
+        self.pwrite(self.pos, data)
+        self.pos += len(data)
 
     def seek(self, offset: int, whence: int) -> int | None:
         """Move the position, POSIX whence numbering.

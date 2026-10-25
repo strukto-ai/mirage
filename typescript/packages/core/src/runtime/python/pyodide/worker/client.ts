@@ -200,6 +200,9 @@ export class PyodideWorkerClient {
   async execute(request: ExecuteRequest, ctx: Context, files: RuntimeFiles): Promise<RunResult> {
     if (this.failure !== null) throw this.failure
     const signal = ctx.signal
+    // The guest's calls stop once the run is cancelled; the run's end
+    // still closes what it left open through `files`.
+    const live = signal === undefined ? files : files.withSignal(signal)
     // The run's caller, which each call the guest makes runs as.
     const caller = currentCaller()
     const responses = new Set<Promise<void>>()
@@ -244,7 +247,7 @@ export class PyodideWorkerClient {
         }
         if (message.kind === 'vfs') {
           const response = this.answer(message, () =>
-            runWithCaller(caller, () => this.operation(message, files, processes, handles)),
+            runWithCaller(caller, () => this.operation(message, live, processes, handles)),
           )
           responses.add(response)
           void response.then(() => {
