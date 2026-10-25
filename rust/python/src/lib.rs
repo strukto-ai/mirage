@@ -3,6 +3,8 @@ use pyo3::exceptions::PyException;
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
 
+mod policy;
+
 create_exception!(mirage._rs, StreamError, PyException);
 
 /// One open stream: `feed` takes a chunk and returns the bytes it produced;
@@ -209,6 +211,7 @@ impl NFSServer {
 #[pymodule]
 #[pyo3(name = "_rs")]
 fn mirage_rs(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    policy::register(m)?;
     m.add_class::<Stream>()?;
     m.add_class::<NFSServer>()?;
     m.add("StreamError", m.py().get_type::<StreamError>())?;
