@@ -35,6 +35,12 @@ class _Clock:
         self.waits.append(seconds)
 
 
+class _Yielding(_Clock):
+    async def sleep(self, seconds: float) -> None:
+        self.waits.append(seconds)
+        await asyncio.sleep(0)
+
+
 class _Stalled(_Clock):
     def __init__(self, until: float) -> None:
         super().__init__()
@@ -158,3 +164,19 @@ async def test_a_caller_from_the_old_clock_leaves_the_new_schedule_alone():
     await waiting
     await limiter.acquire("appA")
     assert later.waits == pytest.approx([0.2])
+
+
+@pytest.mark.asyncio
+async def test_a_caller_from_before_a_round_trip_leaves_the_schedule_alone():
+    clock = _Yielding()
+    limiter = _limiter(5, clock)
+    await limiter.acquire("appA")
+    stale = asyncio.create_task(limiter.acquire("appA"))
+    await asyncio.sleep(0)
+    limiter.bind_clock(_Clock())
+    limiter.bind_clock(clock)
+    clock.wall = 101.0
+    await limiter.acquire("appA")
+    fresh = asyncio.create_task(limiter.acquire("appA"))
+    await asyncio.gather(stale, fresh)
+    assert clock.waits == pytest.approx([0.2, 0.2])

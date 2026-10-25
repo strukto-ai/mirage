@@ -27,6 +27,13 @@ class Clock {
   }
 }
 
+class YieldingClock extends Clock {
+  override sleep = async (seconds: number): Promise<void> => {
+    this.waits.push(seconds)
+    await Promise.resolve()
+  }
+}
+
 class StalledClock extends Clock {
   constructor(readonly until: number) {
     super()
@@ -140,5 +147,20 @@ describe('RateLimiter', () => {
     await waiting
     await l.acquire('appA')
     expect(later.waits).toEqual([expect.closeTo(0.2)])
+  })
+
+  it('keeps a caller from before a round trip of clocks off the schedule', async () => {
+    const clock = new YieldingClock()
+    const l = limiter(5, clock)
+    await l.acquire('appA')
+    const stale = l.acquire('appA')
+    await Promise.resolve()
+    l.bindClock(new Clock())
+    l.bindClock(clock)
+    clock.wall = 101
+    await l.acquire('appA')
+    const fresh = l.acquire('appA')
+    await Promise.all([stale, fresh])
+    expect(clock.waits).toEqual([expect.closeTo(0.2), expect.closeTo(0.2)])
   })
 })

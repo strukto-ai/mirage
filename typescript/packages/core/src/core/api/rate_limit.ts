@@ -31,6 +31,7 @@ export class RateLimiter {
   private clock: Clock
   private readonly next = new Map<string, number>()
   private readonly shift = new Map<string, number>()
+  private schedule = 0
 
   /**
    * @param clock what slots are read and waited on; omitted means the system
@@ -51,17 +52,20 @@ export class RateLimiter {
   bindClock(clock: Clock): void {
     if (clock === this.clock) return
     this.clock = clock
+    this.schedule += 1
     this.next.clear()
     this.shift.clear()
   }
 
   /**
    * Wait for this key's next slot (an Airtable base id). A caller waits out its
-   * slot on the clock it took it on; once another clock is bound, that slot
-   * means nothing on the new schedule, so the caller leaves it alone.
+   * slot on the clock it took it on; once another clock is bound, even one it
+   * then returns to, that slot means nothing on the new schedule, so the caller
+   * leaves it alone.
    */
   async acquire(key: string): Promise<void> {
     const clock = this.clock
+    const schedule = this.schedule
     let now = clock.monotonic()
     let slot = Math.max(now, this.next.get(key) ?? now)
     this.next.set(key, slot + this.interval)
@@ -70,7 +74,7 @@ export class RateLimiter {
     await clock.sleep(slot - now)
     for (
       let moved = this.shift.get(key) ?? 0;
-      this.clock === clock && moved !== seen;
+      this.schedule === schedule && moved !== seen;
       moved = this.shift.get(key) ?? 0
     ) {
       slot += moved - seen
@@ -78,7 +82,7 @@ export class RateLimiter {
       now = clock.monotonic()
       if (slot > now) await clock.sleep(slot - now)
     }
-    if (this.clock !== clock) return
+    if (this.schedule !== schedule) return
     const late = clock.monotonic() - slot
     if (late > 0) {
       this.shift.set(key, seen + late)

@@ -42,6 +42,7 @@ class RateLimiter:
         self._clock: Clock = clock if clock is not None else SystemClock()
         self._next: dict[str, float] = {}
         self._shift: dict[str, float] = {}
+        self._schedule = 0
 
     def bind_clock(self, clock: Clock) -> None:
         """Read and wait on the workspace's clock from now on.
@@ -56,6 +57,7 @@ class RateLimiter:
         if clock is self._clock:
             return
         self._clock = clock
+        self._schedule += 1
         self._next.clear()
         self._shift.clear()
 
@@ -63,13 +65,15 @@ class RateLimiter:
         """Wait for this key's next slot.
 
         A caller waits out its slot on the clock it took it on. If the
-        limiter is bound to another clock meanwhile, its slot means
-        nothing on the new schedule, so it leaves that schedule alone.
+        limiter is bound to another clock meanwhile, even one it then
+        returns to, its slot means nothing on the new schedule, so it
+        leaves that schedule alone.
 
         Args:
             key (str): what the server meters by (an Airtable base id).
         """
         clock = self._clock
+        schedule = self._schedule
         now = clock.monotonic()
         slot = max(now, self._next.get(key, now))
         self._next[key] = slot + self._interval
@@ -78,7 +82,7 @@ class RateLimiter:
         seen = self._shift.get(key, 0.0)
         await clock.sleep(slot - now)
         while (
-            self._clock is clock
+            self._schedule == schedule
             and (moved := self._shift.get(key, 0.0)) != seen
         ):
             slot += moved - seen
@@ -86,7 +90,7 @@ class RateLimiter:
             now = clock.monotonic()
             if slot > now:
                 await clock.sleep(slot - now)
-        if self._clock is not clock:
+        if self._schedule != schedule:
             return
         late = clock.monotonic() - slot
         if late > 0:
