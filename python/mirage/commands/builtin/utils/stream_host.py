@@ -140,7 +140,7 @@ class StreamHost:
         name: str,
         operand: int | None,
         file: bool = False,
-        as_operand: int | None = None,
+        as_operand: bool = False,
     ) -> AsyncIterator[bytes]:
         """Open an input by name.
 
@@ -149,15 +149,14 @@ class StreamHost:
             operand (int | None): The operand, from 1, the name came from.
             file (bool): a file a script names, which no spelling of
                 stdin stands for.
-            as_operand (int | None): The operand, from 1, a name stands in
-                for (unzip's ``X.zip`` for ``X``): found beside it and read
-                as it is.
+            as_operand (bool): a name standing in for an operand (unzip's
+                ``X.zip`` for ``X``), read as an operand is.
         """
         if file:
             return self.read_path(name)
         path = self._operand(name, operand)
-        if path is None and as_operand is not None:
-            path = self._stand_in(name, as_operand)
+        if path is None and as_operand:
+            path = PathSpec.from_str_path(name, cwd=self.cwd.virtual)
         if path is not None:
             if is_stdin(path, self.dash):
                 return self.stdin_view()
@@ -165,17 +164,6 @@ class StreamHost:
         if name in STDIN_NAMES:
             return self.stdin_view()
         return self.read_path(name)
-
-    def _stand_in(self, name: str, operand: int) -> PathSpec:
-        """The path a name standing in for an operand names: the operand's
-        resolved path with what the name adds to its spelling, so it does
-        not hang on the host's working directory."""
-        if 0 < operand <= len(self.operands):
-            spec = self.operands[operand - 1]
-            if name.startswith(spec.raw_path):
-                added = name[len(spec.raw_path) :]
-                return PathSpec.from_str_path(spec.virtual + added)
-        return PathSpec.from_str_path(name, cwd=self.cwd.virtual)
 
     def _operand(self, name: str, operand: int | None) -> PathSpec | None:
         """The operand a name is, when it still holds its spelling."""
@@ -278,7 +266,6 @@ class StreamHost:
         if not isinstance(path, str):
             return None
         operand = request.get("operand")
-        stand_in = request.get("as_operand")
         name = text_view(path)
         index = operand if isinstance(operand, int) else None
         if self.command and (named := self._operand(name, index)):
@@ -287,7 +274,7 @@ class StreamHost:
             name,
             index,
             request.get("file") is True,
-            stand_in if isinstance(stand_in, int) else None,
+            request.get("as_operand") is True,
         )
 
     def _failed(self, fd: int, exc: Exception) -> Served:

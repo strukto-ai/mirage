@@ -36,7 +36,6 @@ async function* parts(...chunks: string[]): AsyncIterable<Uint8Array> {
 function host(
   files: Record<string, string>,
   stdin: AsyncIterable<Uint8Array> | null = null,
-  operand: PathSpec = spec('/a.txt'),
 ): StreamHost {
   async function* stream(p: PathSpec): AsyncIterable<Uint8Array> {
     await Promise.resolve()
@@ -45,7 +44,7 @@ function host(
     yield ENC.encode(content)
   }
   const ctx = { stdin, flags: {}, cwd: PathSpec.fromStrPath('/') } as unknown as Context
-  return new StreamHost([operand], stream, ctx)
+  return new StreamHost([spec('/a.txt')], stream, ctx)
 }
 
 describe('StreamHost', () => {
@@ -59,13 +58,11 @@ describe('StreamHost', () => {
   })
 
   it('reads a name standing in for an operand as the operand is read', async () => {
-    // Outside a workspace only the operand's reader can serve a name, and the
-    // stand-in is found beside the operand, typed under /src, while the
-    // host's working directory is /.
-    const h = host({ '/src/a.zip': 'stored\n' }, null, PathSpec.fromStrPath('a', undefined, '/src'))
-    const named = await h.serve({ op: 'read', fd: 1, path: 'a.zip' }, new Uint8Array())
+    // Outside a workspace only the operand's reader can serve a name.
+    const h = host({ '/a.txt.zip': 'stored\n' })
+    const named = await h.serve({ op: 'read', fd: 1, path: '/a.txt.zip' }, new Uint8Array())
     expect(named.reply).toEqual({ error: 'No such file or directory', errno: 'ENOENT' })
-    const read = { op: 'read', fd: 2, path: 'a.zip', as_operand: 1 }
+    const read = { op: 'read', fd: 2, path: '/a.txt.zip', as_operand: true }
     expect(await h.serve(read, new Uint8Array())).toEqual({
       reply: {},
       data: ENC.encode('stored\n'),

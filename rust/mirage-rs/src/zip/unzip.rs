@@ -485,7 +485,7 @@ async fn open(host: &Host, typed: &[u8]) -> Result<(Vec<u8>, u64), Option<Vec<u8
         let opening = if at == 0 {
             Opening::Operand(1)
         } else {
-            Opening::AsOperand(1)
+            Opening::AsOperand
         };
         let open = (name.clone(), opening);
         let spool = super::ARCHIVE;

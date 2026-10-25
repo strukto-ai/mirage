@@ -30,6 +30,7 @@ async def run_unzip(
     text_args: list[str],
     flag_kwargs: dict[str, FlagValue],
     dispatch: DispatchFn,
+    cwd: str,
 ) -> CrossResult:
     """Run an unzip whose archive and -d destination span mounts.
 
@@ -43,11 +44,13 @@ async def run_unzip(
         text_args (list[str]): Info-ZIP member filespecs, as typed.
         flag_kwargs (dict): Flags parsed against the shared unzip spec.
         dispatch (DispatchFn): Workspace operation dispatcher.
+        cwd (str): The session's working directory, which a name unzip
+            tries beside its archive (``a.zip`` for ``a``) resolves against.
     """
     return await unzip_generic(
         flat_scopes(scopes),
         list(text_args),
-        Context(flags=flag_kwargs),
+        Context(flags=flag_kwargs, cwd=PathSpec.from_str_path(cwd)),
         normalized_read(transfer_primitives(dispatch)["read_bytes"]),
         dispatch,
     )
