@@ -2081,7 +2081,7 @@ impl Input {
                     if config.max_count.is_some_and(|n| self.selected >= n) {
                         self.done = true;
                     }
-                } else if !(config.pcre && config.files_without_match) {
+                } else if config.quiet || !(config.pcre && config.files_without_match) {
                     self.done = true;
                 }
             }
@@ -2931,6 +2931,14 @@ mod tests {
             assert_eq!(metadata["selected"], true, "{flag}");
             assert_eq!(metadata["error"], Value::Null, "{flag}");
         }
+        let mut later = b"ok\n".to_vec();
+        later.extend_from_slice(&[b'a'; 40]);
+        later.extend_from_slice(b"xc\n");
+        let quiet = json!({"pattern":"^ok|^(a|a)+\\1c","engine":"pcre2","quiet":true,
+                           "files_without_match":true});
+        let (_, metadata, _) = run(&later, quiet);
+        assert_eq!(metadata["selected"], true);
+        assert_eq!(metadata["error"], Value::Null);
     }
 
     #[test]

@@ -947,17 +947,18 @@
         "nextcloud",
         "box"
       ],
-      "command": "for f in -qoP -loP; do printf 'okaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaxc\\nok2\\n' | rg $f '^ok|(a|a)+\\1c'; echo \"status $?\"; done",
+      "command": "for f in -qoP -loP; do printf 'okaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaxc\\nok2\\n' | rg $f '^ok|(a|a)+\\1c'; echo \"status $?\"; done; printf 'ok\\naaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaxc\\n' | rg -qP --files-without-match '^ok|^(a|a)+\\1c'; echo \"status $?\"",
       "expect": {
         "exit": 0,
-        "stdout": "status 0\n<stdin>\nstatus 0\n",
+        "stdout": "status 0\n<stdin>\nstatus 0\nstatus 0\n",
         "stderr": ""
       },
       "flags": [
         "pcre2",
         "quiet",
         "files_with_matches",
-        "only_matching"
+        "only_matching",
+        "files_without_match"
       ]
     },
     {
