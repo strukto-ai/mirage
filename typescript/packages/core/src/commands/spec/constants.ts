@@ -837,3 +837,9 @@ export const NOT_GETOPT_LONG: ReadonlySet<string> = new Set(['curl', 'jq', 'find
 export const PYTHON_USAGE =
   'usage: {name} [option] ... [-c cmd | -m mod | file | -] [arg] ...\n' +
   "Try `python -h' for more information.\n"
+
+// How many distinct readings one spec keeps before it starts over. A line
+// reads each command's words from classification, admission, routing and
+// dispatch, a few dozen times with two or three distinct inputs, so a
+// handful covers a line and the rest only bounds memory.
+export const PARSES_KEPT = 64

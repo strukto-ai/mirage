@@ -828,6 +828,12 @@ OLD_OPTION_EXIT = 2
 # name (GNU diffutils style: `diff: Try 'diff --help' ...`).
 USAGE_HINT_PREFIX = frozenset({"diff", "cmp", "patch"})
 
+# How many distinct readings one spec keeps before it starts over. A
+# line reads each command's words from classification, admission,
+# routing and dispatch, a few dozen times with two or three distinct
+# inputs, so a handful covers a line and the rest only bounds memory.
+PARSES_KEPT = 64
+
 
 def flag_kwarg_name(flag: str) -> str:
     """Map a flag name to its dispatcher kwarg name.
