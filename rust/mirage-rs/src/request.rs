@@ -57,6 +57,7 @@ pub(crate) enum Request {
         fd: u32,
         open: Option<(Vec<u8>, Opening)>,
     },
+    /// Let go of input `fd`, or of spool `fd` unsent.
     Close {
         fd: u32,
     },

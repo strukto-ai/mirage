@@ -188,6 +188,7 @@ impl Host {
             "read" => self.read(fd, &request),
             "close" => {
                 self.inputs.remove(&fd);
+                self.spools.remove(&fd);
                 (json!({}), Vec::new())
             }
             "write" => (self.write(&request, data), Vec::new()),

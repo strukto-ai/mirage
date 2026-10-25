@@ -254,6 +254,21 @@
         "stdout": "rc=1\nrc=1\n0000003\nrc=1\n0000002   a   b   c\n0000005\nrc=1\n0000005   a   b   c   d   e\n0000012\nrc=1\nrc=1\n0000000\n0000000   a   b   c\n0000003\n0000000 6261\n0000002 0063\n0000003\nrc=1\n0000000 6261\n0000002 0063\n0000003\nrc=1\nrc=1\n0000000\n0000000\nrc=1\n",
         "stderr": "od: missing: No such file or directory\nod: missing: No such file or directory\nod: cannot skip past end of combined input\nod: missing: No such file or directory\nod: dir: Is a directory\nod: dir: Is a directory\nod: missing: No such file or directory\nod: missing: No such file or directory\nod: warning: invalid width 3; using 2 instead\nod: warning: invalid width 3; using 2 instead\nod: missing: No such file or directory\nod: cannot skip past end of combined input\nod: warning: invalid width 3; using 2 instead\nod: dir: Is a directory\n"
       }
+    },
+    {
+      "id": "od_reports_an_unopened_operand_though_its_reader_stops_early",
+      "seq": 17500118,
+      "targets": [
+        "ram",
+        "opfs",
+        "disk"
+      ],
+      "command": "mkdir -p /data/odgp && printf '' > /data/odgp/empty && od -c /data/odgp/missing /data/odgp/empty | head -c 1; echo",
+      "expect": {
+        "exit": 0,
+        "stdout": "0\n",
+        "stderr": "od: /data/odgp/missing: No such file or directory\n"
+      }
     }
   ]
 }

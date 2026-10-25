@@ -249,11 +249,74 @@ impl Place {
 /// a NUL ends. GNU 9.7 also prints one the `-N` limit cuts that is longer
 /// than the least, at an address a byte early (or -1 wrapped), though it
 /// prints none the input's end cuts; the manual's strings end in a NUL,
-/// and so do all mirage prints.
+/// and so do all mirage prints. A run past `SPILL` goes to a host spool,
+/// which the NUL sends or anything else drops.
 struct Strings {
     least: u64,
     start: u64,
+    length: u64,
+    /// The spool holding the run's first part, its rest in `text`.
+    held: Option<u32>,
     text: Vec<u8>,
+}
+
+/// The most of a run `-S` holds before it spools it.
+const SPILL: usize = 64 * 1024;
+
+impl Strings {
+    /// Scan `data`, the input at `address`, up to a run whose spool is to
+    /// be sent; how much of it was read.
+    fn scan(
+        &mut self,
+        data: &[u8],
+        address: u64,
+        place: &Place,
+        out: &mut Vec<u8>,
+        io: &mut Io,
+    ) -> usize {
+        for (index, &byte) in data.iter().enumerate() {
+            let at = address + index as u64;
+            match byte {
+                32..=126 => {
+                    if self.length == 0 {
+                        self.start = at;
+                    }
+                    self.length += 1;
+                    self.text.push(byte);
+                    if self.text.len() >= SPILL {
+                        let fd = *self.held.get_or_insert_with(|| io.fd());
+                        let data = std::mem::take(&mut self.text);
+                        io.push(Request::Spool { fd, data });
+                    }
+                    continue;
+                }
+                0 if self.length >= self.least => {
+                    let before = out.len();
+                    place.prefix(if self.length == 0 { at } else { self.start }, out);
+                    if out.len() > before {
+                        out.push(b' ');
+                    }
+                    self.length = 0;
+                    if let Some(fd) = self.held.take() {
+                        let data = std::mem::take(&mut self.text);
+                        io.push(Request::Spool { fd, data });
+                        io.push(Request::Emit { fd, window: None });
+                        return index + 1;
+                    }
+                    out.append(&mut self.text);
+                    out.push(b'\n');
+                }
+                _ => {
+                    if let Some(fd) = self.held.take() {
+                        io.push(Request::Close { fd });
+                    }
+                    self.length = 0;
+                    self.text.clear();
+                }
+            }
+        }
+        data.len()
+    }
 }
 
 /// What the dump has written and holds back.
@@ -273,46 +336,21 @@ struct Dump {
 }
 
 impl Dump {
-    fn consume(&mut self, mut data: &[u8], out: &mut Vec<u8>) {
+    /// Dump `data`, and say how much of it was read: `-S` stops at a run
+    /// the host is to send.
+    fn consume(&mut self, mut data: &[u8], out: &mut Vec<u8>, io: &mut Io) -> usize {
         if let Some(strings) = &mut self.strings {
-            for (index, &byte) in data.iter().enumerate() {
-                let at = self.address + index as u64;
-                match byte {
-                    0 => {
-                        if strings.text.len() as u64 >= strings.least {
-                            let start = if strings.text.is_empty() {
-                                at
-                            } else {
-                                strings.start
-                            };
-                            let before = out.len();
-                            self.place.prefix(start, out);
-                            if out.len() > before {
-                                out.push(b' ');
-                            }
-                            out.extend_from_slice(&strings.text);
-                            out.push(b'\n');
-                        }
-                        strings.text.clear();
-                    }
-                    32..=126 => {
-                        if strings.text.is_empty() {
-                            strings.start = at;
-                        }
-                        strings.text.push(byte);
-                    }
-                    _ => strings.text.clear(),
-                }
-            }
-            self.address += data.len() as u64;
-            return;
+            let read = strings.scan(data, self.address, &self.place, out, io);
+            self.address += read as u64;
+            return read;
         }
+        let read = data.len();
         if !self.block.is_empty() {
             let take = (self.width - self.block.len()).min(data.len());
             self.block.extend_from_slice(&data[..take]);
             data = &data[take..];
             if self.block.len() < self.width {
-                return;
+                return read;
             }
             let block = std::mem::take(&mut self.block);
             self.full(&block, out);
@@ -325,6 +363,7 @@ impl Dump {
             data = rest;
         }
         self.block.extend_from_slice(data);
+        read
     }
 
     /// A full line, or a `*` for the run of lines repeating the last.
@@ -553,6 +592,8 @@ fn plan(config: Config) -> Result<Od, Vec<u8>> {
     let strings = s.strings.map(|least| Strings {
         least,
         start: 0,
+        length: 0,
+        held: None,
         text: Vec::new(),
     });
     Ok(Od {
@@ -647,7 +688,7 @@ impl Stream for Od {
     }
 
     fn busy(&self) -> bool {
-        self.stage == Stage::Dump && self.at < self.chunk.len()
+        self.stage == Stage::Dump && self.at < self.chunk.len() && self.io.idle()
     }
 
     fn drain(&mut self, out: &mut Vec<u8>) -> Result<(), StreamError> {
@@ -655,10 +696,12 @@ impl Stream for Od {
         if let Some(left) = self.left {
             take = take.min(usize::try_from(left).unwrap_or(usize::MAX));
         }
-        self.dump.consume(&self.chunk[self.at..self.at + take], out);
-        self.at += take;
+        let read = self
+            .dump
+            .consume(&self.chunk[self.at..self.at + take], out, &mut self.io);
+        self.at += read;
         if let Some(left) = &mut self.left {
-            *left -= take as u64;
+            *left -= read as u64;
             if *left == 0 {
                 self.at = self.chunk.len();
             }
@@ -681,13 +724,22 @@ impl Stream for Od {
         self.io.take(data)
     }
 
-    fn respond(&mut self, reply: &[u8], data: &[u8], _: &mut Vec<u8>) -> Result<(), StreamError> {
-        if self.io.in_flight.take().is_none() {
+    fn respond(&mut self, reply: &[u8], data: &[u8], out: &mut Vec<u8>) -> Result<(), StreamError> {
+        let Some(request) = self.io.in_flight.take() else {
             return Err(StreamError::new("no request is waiting"));
-        }
+        };
         let reply = Reply::decode(reply).map_err(StreamError::new)?;
         if let Some(fatal) = reply.fatal {
             return Err(StreamError::new(fatal));
+        }
+        match request {
+            Request::Read { .. } => {}
+            // A string the host held ends where the host has sent it.
+            Request::Emit { .. } => {
+                out.push(b'\n');
+                return Ok(());
+            }
+            _ => return Ok(()),
         }
         let Some(input) = self.input.take() else {
             return Err(StreamError::new("no input is open"));

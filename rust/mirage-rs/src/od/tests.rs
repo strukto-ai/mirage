@@ -60,3 +60,14 @@ fn a_width_too_wide_to_write_whole_is_refused() {
     assert_eq!(host.out, b"");
     assert_eq!(host.err, b"od: -w argument '100000000' too large\n");
 }
+
+#[test]
+fn a_run_past_the_spill_is_sent_by_the_host_or_dropped() {
+    use super::SPILL;
+    let long = "x".repeat(2 * SPILL + 5);
+    let stdin = format!("{long}\0{}\x01ab\0", "y".repeat(SPILL + 1));
+    let mut host = Host::with(&[], &stdin);
+    let mut stream = od(json!([["address_radix", "n"], ["S", "2"]]), &[]);
+    assert_eq!(host.drive(stream.as_mut()), 0);
+    assert_eq!(String::from_utf8_lossy(&host.out), format!("{long}\nab\n"));
+}
