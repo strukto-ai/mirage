@@ -381,11 +381,7 @@ def corrections(
             return None
         return point
 
-    dropped = [
-        k
-        for k in keys
-        if k not in standard and seeded(k) is not None
-    ]
+    dropped = [k for k in keys if k not in standard and seeded(k) is not None]
     # One range per run of dropped sequences with no standard one between.
     defined = sorted(standard)
     excluded: list[tuple[int, int]] = []
@@ -430,7 +426,9 @@ def render(data: dict[str, dict[str, tuple[tuple[int, int], ...]]]) -> str:
                 f"        (0x{a:X}, 0x{b:X}),\n" for a, b in per[spec.name]
             )
             fields.append(
-                f"    {field}: &[\n{pairs}    ],\n" if pairs else f"    {field}: &[],\n"
+                f"    {field}: &[\n{pairs}    ],\n"
+                if pairs
+                else f"    {field}: &[],\n"
             )
         const = spec.name.replace("-", "_")
         body.append(

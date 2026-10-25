@@ -57,9 +57,9 @@ async def iconv_generic(
         stderr = from_byte_view(refusal.message) + b"\n"
         return None, IOResult(exit_code=1, stderr=stderr)
     read = stdin_stream(read_stream, ctx.stdin)
-    operands = [
-        (path, AsyncLineIterator(read(path))) for path in paths
-    ] or [(None, AsyncLineIterator(resolve_source(ctx.stdin)))]
+    operands = [(path, AsyncLineIterator(read(path))) for path in paths] or [
+        (None, AsyncLineIterator(resolve_source(ctx.stdin)))
+    ]
     io = IOResult()
 
     async def report(line: bytes) -> None:

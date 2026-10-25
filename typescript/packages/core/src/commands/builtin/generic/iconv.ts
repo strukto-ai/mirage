@@ -60,7 +60,10 @@ export async function iconvGeneric(
     })
   } catch (err) {
     if (!(err instanceof StreamRefusal)) throw err
-    return [null, new IOResult({ exitCode: 1, stderr: concat([fromByteView(err.message), NEWLINE]) })]
+    return [
+      null,
+      new IOResult({ exitCode: 1, stderr: concat([fromByteView(err.message), NEWLINE]) }),
+    ]
   }
   const converter = engine
   const read = stdinStream(stream, ctx.stdin)
