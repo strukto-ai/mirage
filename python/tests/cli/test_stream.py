@@ -430,6 +430,12 @@ async def test_raw_output_ends_with_the_refusal_line(monkeypatch, tmp_path):
             "daemon error 502: <html>bad gateway</html>",
         ),
         (500, '["odd"]', "application/json", 'daemon error 500: ["odd"]'),
+        (
+            500,
+            '{"detail": ',
+            "application/json",
+            'daemon error 500: {"detail": ',
+        ),
     ],
 )
 async def test_an_error_status_says_the_daemons_detail(

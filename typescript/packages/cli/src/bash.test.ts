@@ -20,7 +20,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 const cliMain = vi.hoisted(() => vi.fn<(argv: string[]) => Promise<void>>())
 vi.mock('./main.ts', () => ({ main: cliMain }))
 
-const { PROG, main, splitArgs, workingDirectory } = await import('./bash.ts')
+const { PROG, logger, main, splitArgs, workingDirectory } = await import('./bash.ts')
 
 afterEach(() => {
   vi.restoreAllMocks()
@@ -76,6 +76,21 @@ describe('workingDirectory', () => {
       expect(workingDirectory()).toBe(real)
     },
   )
+
+  it('logs a $PWD it cannot stat', () => {
+    const debug = vi.fn<(message: string) => void>()
+    logger.debug = debug
+    try {
+      vi.spyOn(process, 'cwd').mockReturnValue(real)
+      vi.stubEnv('PWD', join(root, 'missing'))
+      expect(workingDirectory()).toBe(real)
+      expect(debug).toHaveBeenCalledWith(
+        expect.stringContaining(`PWD ${join(root, 'missing')} is not the working directory`),
+      )
+    } finally {
+      delete logger.debug
+    }
+  })
 })
 
 describe('main', () => {

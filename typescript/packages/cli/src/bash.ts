@@ -17,6 +17,12 @@ import { isAbsolute } from 'node:path'
 import { ENV_SESSION, ENV_WORKSPACE } from './env.ts'
 import { main as cliMain } from './main.ts'
 
+/**
+ * Opt in by assigning a debug sink, as Python's module logger is off until
+ * configured: stdout carries the line's output.
+ */
+export const logger: { debug?: (message: string) => void } = {}
+
 export const PROG = 'mirage-bash'
 
 /**
@@ -56,8 +62,8 @@ export function workingDirectory(): string {
     const named = statSync(logical)
     const actual = statSync(cwd)
     return named.dev === actual.dev && named.ino === actual.ino ? logical : cwd
-  } catch {
-    // $PWD names nothing that exists: the resolved path is the only name left
+  } catch (error) {
+    logger.debug?.(`PWD ${logical} is not the working directory: ${String(error)}`)
     return cwd
   }
 }

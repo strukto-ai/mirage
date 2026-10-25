@@ -62,7 +62,17 @@ MIRAGE_WORKSPACE=demo CLAUDE_CODE_SHELL="$(command -v mirage-bash)" claude
 
 ### Session and profile
 
-Commands run as the workspace's default session. To run them under a [profile](/home/profiles), create a session and name it:
+Commands run as the workspace's default session. To run them under a [profile](/home/profiles), define it in the workspace:
+
+```yaml workspace.yaml
+profiles:
+  reviewer:
+    mounts:
+      /data: { mode: read }
+  builder: {}
+```
+
+Then create a session under it and name the session:
 
 ```bash
 mirage session create demo --id agent -p reviewer
@@ -78,7 +88,7 @@ mirage session create demo --id agent -p reviewer
 }
 ```
 
-- The session keeps its working directory and variables across commands.
+- Each command runs in a copy of the session, from Claude's working directory. `cd` carries over, since Claude Code tracks it; `export` lasts for that one command, as in Claude Code's own shell.
 - The profile applies to every command. A line it refuses fails whole, with exit `126` and the reason on stderr.
 - `mirage session update demo agent -p builder` moves the session to another profile while Claude runs.
 
