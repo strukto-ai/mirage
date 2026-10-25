@@ -353,6 +353,26 @@ interface Instance {
 }
 let current: Instance | undefined
 let generation = 0
+let queuedRetirement: Instance | undefined
+const RECYCLE_BYTES = 32 * 1024 * 1024
+
+function retireLater(native: Instance): void {
+  if (
+    current !== native ||
+    native.memory.buffer.byteLength <= RECYCLE_BYTES ||
+    queuedRetirement === native
+  )
+    return
+  const opened = generation
+  queuedRetirement = native
+  queueMicrotask(() => {
+    if (queuedRetirement === native) queuedRetirement = undefined
+    if (current !== native || generation !== opened) return
+    current = undefined
+    generation += 1
+    clearCaches(false)
+  })
+}
 
 function exported(exports: WebAssembly.Exports, name: string): (...args: number[]) => number {
   const fn = exports[name]
@@ -401,6 +421,8 @@ function invoke(operation: number, handle: number, write?: (packet: Packet) => v
       clearCaches(false)
     }
     throw error
+  } finally {
+    retireLater(native)
   }
 }
 

@@ -82,8 +82,12 @@ MODES = (MountMode.READ, MountMode.WRITE, MountMode.EXEC)
 
 
 @lru_cache(maxsize=4096)
-def units(value: str) -> Units:
+def _short_units(value: str) -> Units:
     return tuple(map(ord, value))
+
+
+def units(value: str) -> Units:
+    return _short_units(value) if len(value) <= 256 else tuple(map(ord, value))
 
 
 def from_units(value: Sequence[int]) -> str:

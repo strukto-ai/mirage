@@ -33,6 +33,143 @@ const FACTS: PolicyFacts = {
   moveTarget: null,
 }
 
+function captureInstances(): { memories: WebAssembly.Memory[]; restore: () => void } {
+  const original = WebAssembly.Instance
+  const memories: WebAssembly.Memory[] = []
+  WebAssembly.Instance = new Proxy(original, {
+    construct(target, args: ConstructorParameters<typeof WebAssembly.Instance>) {
+      const value = Reflect.construct(target, args)
+      if (!(value.exports.memory instanceof WebAssembly.Memory)) throw new Error('Missing memory')
+      memories.push(value.exports.memory)
+      return value
+    },
+  })
+  return {
+    memories,
+    restore: () => {
+      WebAssembly.Instance = original
+    },
+  }
+}
+
+const LARGE = 'x'.repeat(2_000_000)
+
+describe('policy memory retirement', () => {
+  it('retires grown instances after yielding and preserves denials across repeated cycles', async () => {
+    const tracked = captureInstances()
+    const vis = { paths: { paths: ['/secret'] } }
+    try {
+      for (let cycle = 0; cycle < 2; cycle += 1) {
+        const matcher = hiddenMatcher(vis.paths)
+        expect(matcher.pathVisible('/secret')).toBe(false)
+        expect(policySplitPattern(LARGE)).toEqual([LARGE])
+        expect(tracked.memories.at(-1)?.buffer.byteLength).toBeGreaterThan(32 * 1024 * 1024)
+        expect(matcher.live).toBe(true)
+        expect(matcher.pathVisible('/secret')).toBe(false)
+        await Promise.resolve()
+        expect(matcher.live).toBe(false)
+        const fresh = hiddenMatcher(vis.paths)
+        expect(fresh).not.toBe(matcher)
+        expect(fresh.pathVisible('/secret')).toBe(false)
+        expect(tracked.memories.at(-1)?.buffer.byteLength).toBeLessThan(32 * 1024 * 1024)
+      }
+      expect(tracked.memories).toHaveLength(3)
+    } finally {
+      tracked.restore()
+    }
+  })
+
+  it('finishes oversized construction and its immediate query before retirement', async () => {
+    const tracked = captureInstances()
+    const path = `/${LARGE}`
+    const hidden = { paths: [path] }
+    try {
+      const matcher = hiddenMatcher(hidden)
+      expect(matcher.live).toBe(true)
+      expect(matcher.pathVisible(path)).toBe(false)
+      expect(tracked.memories[0]?.buffer.byteLength).toBeGreaterThan(32 * 1024 * 1024)
+      await Promise.resolve()
+      expect(matcher.live).toBe(false)
+      expect(hiddenMatcher(hidden).pathVisible(path)).toBe(false)
+      await Promise.resolve()
+    } finally {
+      tracked.restore()
+    }
+  })
+
+  it('allows cache insertion and eviction to complete while retirement is queued', async () => {
+    expect(policySplitPattern(LARGE)).toEqual([LARGE])
+    let last = hiddenMatcher({ paths: ['/secret0'] })
+    for (let index = 1; index <= 1024; index += 1)
+      last = hiddenMatcher({ paths: [`/secret${String(index)}`] })
+    expect(last.live).toBe(true)
+    expect(last.pathVisible('/secret1024')).toBe(false)
+    await Promise.resolve()
+    expect(last.live).toBe(false)
+    expect(hiddenMatcher({ paths: ['/secret1024'] }).pathVisible('/secret1024')).toBe(false)
+  })
+
+  it('keeps replacement instances and their queued retirement independent', async () => {
+    const tracked = captureInstances()
+    try {
+      expect(policySplitPattern(LARGE)).toEqual([LARGE])
+      closePolicyMatchers()
+      const fresh = hiddenMatcher({ paths: ['/secret'] })
+      expect(fresh.pathVisible('/secret')).toBe(false)
+      await Promise.resolve()
+      expect(fresh.live).toBe(true)
+      expect(tracked.memories).toHaveLength(2)
+      expect(policySplitPattern(LARGE)).toEqual([LARGE])
+      closePolicyMatchers()
+      const next = hiddenMatcher({ paths: ['/other'] })
+      expect(policySplitPattern(LARGE)).toEqual([LARGE])
+      expect(next.pathVisible('/other')).toBe(false)
+      await Promise.resolve()
+      expect(next.live).toBe(false)
+      expect(hiddenMatcher({ paths: ['/other'] }).pathVisible('/other')).toBe(false)
+      expect(tracked.memories).toHaveLength(4)
+    } finally {
+      tracked.restore()
+    }
+  })
+
+  it('keeps ordinary small queries live across microtask boundaries', async () => {
+    const matcher = hiddenMatcher({ paths: ['/secret'] })
+    for (let index = 0; index < 3; index += 1) {
+      expect(policySplitPattern('cat /public')).toEqual(['cat', '/public'])
+      await Promise.resolve()
+      expect(matcher.live).toBe(true)
+      expect(matcher.pathVisible('/secret')).toBe(false)
+    }
+  })
+
+  it('retires large typed failures without retrying the failed query', async () => {
+    const tracked = captureInstances()
+    const matcher = new AdmissionMatcher({ deny: [{ reason: 'private', paths: ['/secret'] }] })
+    try {
+      expect(() =>
+        matcher.ruleApplies(999, { ...FACTS, tokens: Array<string>(5).fill(LARGE) }),
+      ).toThrow('invalid policy rule index')
+      expect(tracked.memories[0]?.buffer.byteLength).toBeGreaterThan(32 * 1024 * 1024)
+      expect(matcher.live).toBe(true)
+      expect(matcher.opRuling('read', '/secret', [])).toEqual([0, false])
+      await Promise.resolve()
+      expect(matcher.live).toBe(false)
+      expect(tracked.memories).toHaveLength(1)
+      expect(
+        admissionMatcher({
+          allow: null,
+          deny: [{ reason: 'private', paths: ['/secret'] }],
+          ask: [],
+        }).opRuling('read', '/secret', []),
+      ).toEqual([0, false])
+      expect(tracked.memories).toHaveLength(2)
+    } finally {
+      tracked.restore()
+    }
+  })
+})
+
 describe('native policy Wasm binding', () => {
   it('rebuilds admission when allow is reassigned or an alias is replaced', () => {
     const allowed = ['cat']

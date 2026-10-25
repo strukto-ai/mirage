@@ -22,6 +22,7 @@ import pytest
 
 from mirage._rs import PolicyAdmission, PolicyVisibility
 from mirage.commands.spec.types import WordKind
+from mirage.policy.match.allow import line_allowed
 from mirage.policy.match.decide import decide
 from mirage.policy.match.pattern import (
     pattern_matches,
@@ -34,7 +35,12 @@ from mirage.policy.types import (
     CommandRule,
     CommandWord,
 )
-from mirage.rs.policy import admission_matcher, visibility_matcher
+from mirage.rs.policy import (
+    _short_units,
+    admission_matcher,
+    units,
+    visibility_matcher,
+)
 from mirage.types import (
     HiddenPaths,
     MountMode,
@@ -238,3 +244,41 @@ def test_native_matching_allows_another_python_thread_to_run(kind):
         start.set()
         thread.join(5)
     assert not thread.is_alive()
+
+
+@pytest.mark.parametrize("length", (255, 256, 257))
+def test_text_cache_retains_only_short_queries(length):
+    _short_units.cache_clear()
+    value = "x" * length
+    first = units(value)
+    assert first == (120,) * length
+    before = _short_units.cache_info()
+    second = units(value)
+    assert second == first
+    after = _short_units.cache_info()
+    if length <= 256:
+        assert second is first
+        assert after.currsize == 1
+        assert after.hits == before.hits + 1
+    else:
+        assert after == before
+        assert after.currsize == 0
+    _short_units.cache_clear()
+
+
+def test_large_inline_query_keeps_surrogates_without_retaining_text():
+    _short_units.cache_clear()
+    value = "x" * 100000 + "\U0001f600\ud800"
+    expected = (120,) * 100000 + (0x1F600, 0xD800)
+    assert units(value) == expected
+    assert units(value) == expected
+    assert _short_units.cache_info().currsize == 0
+    rules = AdmissionRules(allow=("cat *",))
+    context = CommandContext(command="cat", argv=(value,), paths=(), cwd="/")
+    assert line_allowed(context, rules)
+    before = _short_units.cache_info()
+    assert line_allowed(context, rules)
+    after = _short_units.cache_info()
+    assert after.currsize == before.currsize
+    assert after.misses == before.misses
+    _short_units.cache_clear()
