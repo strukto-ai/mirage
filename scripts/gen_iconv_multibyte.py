@@ -471,8 +471,13 @@ def main() -> None:
             }
         )
     )
-    # rustfmt lays the tables out as `cargo fmt --check` wants them.
-    subprocess.run(["rustfmt", "--edition", "2024", str(RS_OUT)], check=True)
+    # rustfmt lays the tables out as `cargo fmt --check` wants them; from
+    # rust/, rustup runs the toolchain rust-toolchain.toml pins.
+    subprocess.run(
+        ["rustfmt", "--edition", "2024", str(RS_OUT)],
+        cwd=ROOT / "rust",
+        check=True,
+    )
 
 
 if __name__ == "__main__":
