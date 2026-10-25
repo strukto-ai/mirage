@@ -269,6 +269,53 @@ describe('Pyodide concurrency', { timeout: 120_000 }, () => {
       await rt.close()
     }
   })
+
+  it('lands what it wrote before its run was revoked', async () => {
+    const rt = new PyodideRuntime()
+    const controller = new AbortController()
+    const calls: string[] = []
+    const missing = (): Promise<never> =>
+      Promise.reject(Object.assign(new Error('missing'), { code: 'ENOENT' }))
+    let made = false
+    bindOver(
+      rt,
+      (op, path, _bytes, _dst, attrs) => {
+        if (attrs?.retained !== undefined) return Promise.resolve(attrs.retained)
+        calls.push(`${op} ${path}`)
+        if (path === '/data/out') {
+          if (op === 'create') made = true
+          if (op === 'readdir' || (op === 'stat' && !made)) return missing()
+          if (op === 'stat')
+            return Promise.resolve(new FileStat({ name: 'out', type: FileType.FILE, size: 0 }))
+          return Promise.resolve(undefined)
+        }
+        if (op === 'stat')
+          return Promise.resolve(new FileStat({ name: path, type: FileType.FILE, size: 3 }))
+        if (op !== 'read') return Promise.resolve(undefined)
+        controller.abort()
+        return Promise.resolve(new TextEncoder().encode('abc'))
+      },
+      new PrefixResolver(() => ['/data/']),
+    )
+    try {
+      await interpret(
+        rt,
+        {
+          code: [
+            'import os',
+            "fd = os.open('/data/out', os.O_WRONLY | os.O_CREAT)",
+            "os.write(fd, b'kept')",
+            "open('/data/f').read()",
+            'os.close(fd)',
+          ].join('\n'),
+        },
+        { signal: controller.signal },
+      ).catch(() => undefined)
+      expect(calls).toContain('pwrite /data/out')
+    } finally {
+      await rt.close()
+    }
+  })
 })
 
 describe('Python guest module', { timeout: 120_000 }, () => {

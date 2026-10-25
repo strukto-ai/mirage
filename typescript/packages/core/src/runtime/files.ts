@@ -358,10 +358,14 @@ export class RuntimeFiles {
     )
   }
 
-  /** Run one op on the run's open-file core; EBADF when this adapter opens nothing. */
-  private async onCore<T>(op: (core: MountCore) => Promise<T>): Promise<T> {
+  /**
+   * Run one op on the run's open-file core; EBADF when this adapter opens
+   * nothing. An op that only lands what the guest already wrote (`lands`)
+   * runs however the run ended, as the run's end would land it anyway.
+   */
+  private async onCore<T>(op: (core: MountCore) => Promise<T>, lands = false): Promise<T> {
     if (this.core === null) throw ebadf('/')
-    const signal = this.signal
+    const signal = lands ? null : this.signal
     if (signal === null) return op(this.core)
     signal.throwIfAborted()
     this.live.push(signal)
@@ -426,7 +430,7 @@ export class RuntimeFiles {
   /** Land what an open handle wrote, as fsync(2) does. */
   async fsync(fd: number): Promise<void> {
     const path = this.pathOf(fd)
-    await this.onCore((core) => core.flush(path, fd))
+    await this.onCore((core) => core.flush(path, fd), true)
   }
 
   /**
@@ -434,7 +438,7 @@ export class RuntimeFiles {
    * still lets it go, and is thrown.
    */
   async close(fd: number): Promise<void> {
-    await this.onCore((core) => core.release(fd))
+    await this.onCore((core) => core.release(fd), true)
   }
 
   /**
