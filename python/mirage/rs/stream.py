@@ -217,11 +217,16 @@ async def serve_requests(
             async with aclosing(chunks(served.output)) as pulled:
                 async for chunk in pulled:
                     yield chunk
-        if output := stream.respond(served.reply, served.data):
+        output = stream.respond(served.reply, served.data)
+        # Each diagnostic is collected before the output that follows it, so
+        # a reader that closes on that output still leaves it reported.
+        await host.errors.append(stream.take_stderr())
+        if output:
             yield output
-    if output := stream.finish():
-        yield output
+    output = stream.finish()
     await host.errors.append(stream.take_stderr())
+    if output:
+        yield output
 
 
 def open_stream(kind: str, config: Mapping[str, JsonValue]) -> OpenStream:

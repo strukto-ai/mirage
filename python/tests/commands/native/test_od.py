@@ -15,5 +15,4 @@
 
 def test_od_type_address_skip_and_limit(env):
     result = env.mirage("od -A x -j 1 -N 2 -t x1", stdin=b"ABC")
-    assert "0000001 42 43" in result
-    assert result.endswith("0000003\n")
+    assert result == "000001 42 43\n000003\n"

@@ -205,6 +205,8 @@ class StreamHost:
             source = self.inputs.pop(fd, None)
             if source is not None:
                 await _close(source)
+            if (spool := self.spools.pop(fd, None)) is not None:
+                await spool.close()
             return Served({})
         if op == "write":
             return await self._write(request, data)

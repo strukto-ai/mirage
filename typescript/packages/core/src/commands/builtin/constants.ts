@@ -68,11 +68,6 @@ export const INTMAX = 2n ** 63n - 1n
 // to read differently under another libc or locale.
 export const EOVERFLOW_TEXT = 'Value too large for defined data type'
 
-export const OD_SIZE_UNITS = sizeSuffixes('bkKmMGTPE')
-// Q/R/Y/Z are in GNU od's suffix set but always overflow uintmax, so they
-// report as too-large rather than as unknown suffixes.
-export const OD_OVERFLOW_UNITS = sizeSuffixes('QRYZ')
-
 // The bytes C `isspace` accepts, which every gnulib scanner skips before
 // the sign. Spelled out rather than written `\s`: JavaScript's `\s` also
 // matches every Unicode space and python's matches 0x1c-0x1f, and GNU

@@ -143,13 +143,28 @@ SPECS: dict[str, CommandSpec] = {
             PATH2_OPERAND,
         )
     ),
+    # GNU names the option as typed when it refuses its value (`invalid
+    # -j argument`, `invalid --skip-bytes argument`), so each spelling of
+    # one is its own entry. Each traditional letter adds a type.
     "od": CommandSpec(
         arguments=(
             Argument("-A", "--address-radix"),
-            Argument("-j", "--skip-bytes"),
-            Argument("-N", "--read-bytes"),
+            Argument("-j"),
+            Argument("--skip-bytes"),
+            Argument("-N"),
+            Argument("--read-bytes"),
+            Argument("-S"),
+            Argument("--strings", nargs="?", attached_only=True),
             Argument("-t", "--format", action="append"),
-            Argument("-c", action="store_true"),
+            Argument("-v", "--output-duplicates", action="store_true"),
+            Argument("-w", nargs="?", attached_only=True),
+            Argument("--width", nargs="?", attached_only=True),
+            Argument("--endian"),
+            Argument("--traditional", action="store_true"),
+            *(
+                Argument(f"-{letter}", action="store_true")
+                for letter in "abcdfhilosxBDeFHILOX"
+            ),
             PATHS_OPERAND,
         )
     ),

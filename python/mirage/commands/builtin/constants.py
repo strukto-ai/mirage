@@ -73,11 +73,6 @@ INTMAX = 2**63 - 1
 # most likely to read differently under another libc or locale.
 EOVERFLOW_TEXT = "Value too large for defined data type"
 
-OD_SIZE_UNITS = size_suffixes("bkKmMGTPE")
-# Q/R/Y/Z are in GNU od's suffix set but always overflow uintmax, so they
-# report as too-large rather than as unknown suffixes.
-OD_OVERFLOW_UNITS = size_suffixes("QRYZ")
-
 # The bytes C `isspace` accepts, which every gnulib scanner skips before
 # the sign. Spelled out rather than written `\s`: python's `\s` also
 # matches 0x1c-0x1f and JavaScript's matches every Unicode space, and GNU

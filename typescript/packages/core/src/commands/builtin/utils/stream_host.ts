@@ -155,8 +155,13 @@ export class StreamHost {
         break
       case 'close': {
         const source = fd === null ? undefined : this.inputs.get(fd)
-        if (fd !== null) this.inputs.delete(fd)
+        const spool = fd === null ? undefined : this.spools.get(fd)
+        if (fd !== null) {
+          this.inputs.delete(fd)
+          this.spools.delete(fd)
+        }
         if (source !== undefined) await close(source)
+        if (spool !== undefined) await spool.close()
         return { reply: {} }
       }
       case 'write':

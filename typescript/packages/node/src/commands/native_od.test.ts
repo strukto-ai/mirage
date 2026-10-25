@@ -22,8 +22,7 @@ describe.each(NATIVE_BACKENDS)('native od (%s backend)', (kind) => {
     const env = makeEnv(kind)
     try {
       const result = await env.mirage('od -A x -j 1 -N 2 -t x1', ENC.encode('ABC'))
-      expect(result).toContain('0000001 42 43')
-      expect(result).toMatch(/0000003\n$/)
+      expect(result).toBe('000001 42 43\n000003\n')
     } finally {
       await env.cleanup()
     }
