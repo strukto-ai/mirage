@@ -29,14 +29,17 @@ MIRAGE_DIR = Path(mirage.__file__).parent
 SEAMED = (
     "cache",
     "observe",
+    "accessor/airtable.py",
     "accessor/base.py",
     "accessor/box.py",
     "accessor/dropbox.py",
     "accessor/google_api.py",
     "core/api/oauth.py",
+    "core/api/rate_limit.py",
     "core/box/client.py",
     "core/dropbox/client.py",
     "core/google/client.py",
+    "shell/job_table",
     "workspace/files.py",
     "workspace/mount/mount.py",
     "workspace/mount/registry.py",
@@ -76,6 +79,11 @@ KEPT_ON_SYSTEM_CLOCK = {
         "across every store sharing it, and those stores may hold "
         "different clocks, so they stay on the process monotonic clock; "
         "listing expiry already reads the store clock"
+    ),
+    ("shell/job_table/table.py", "asyncio.timeout"): (
+        "bounds the join on a stopping job with a loop timer, which a "
+        "simulated loop already keeps on virtual time; on a manual clock "
+        "a clock sleep would end the bound before the job stops"
     ),
 }
 

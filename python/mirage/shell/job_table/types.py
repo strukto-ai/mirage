@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import time
 from collections.abc import Callable, Coroutine
 from dataclasses import dataclass, field
 from enum import Enum
@@ -43,10 +42,10 @@ class Job:
     id: int
     command: str
     cwd: str
+    created_at: float
     status: JobStatus = JobStatus.RUNNING
     exit_code: int = 0
     console: JobConsole = field(default_factory=JobConsole)
-    created_at: float = field(default_factory=time.time)
     session_id: str = ""
     process: ProcessHandle | None = None
     simple: bool = False

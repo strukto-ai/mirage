@@ -12,9 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import asyncio
-import time
-from collections.abc import Awaitable, Callable
+from mirage.utils.clock import Clock, SystemClock
 
 
 class RateLimiter:
@@ -33,26 +31,33 @@ class RateLimiter:
 
     Args:
         rate (float): calls per second allowed per key.
-        clock (Callable[[], float]): monotonic seconds, injectable for
-            tests.
-        sleep (Callable[[float], Awaitable[None]]): the wait, injectable for
-            tests.
+        clock (Clock | None): what slots are read and waited on; None is
+            the system clock until `bind_clock` names the workspace's.
     """
 
-    def __init__(
-        self,
-        rate: float,
-        *,
-        clock: Callable[[], float] = time.monotonic,
-        sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
-    ) -> None:
+    def __init__(self, rate: float, *, clock: Clock | None = None) -> None:
         if not rate > 0:
             raise ValueError(f"rate must be positive, got {rate!r}")
         self._interval = 1.0 / rate
-        self._clock = clock
-        self._sleep = sleep
+        self._clock: Clock = clock if clock is not None else SystemClock()
         self._next: dict[str, float] = {}
         self._shift: dict[str, float] = {}
+
+    def bind_clock(self, clock: Clock) -> None:
+        """Read and wait on the workspace's clock from now on.
+
+        Slots taken on another clock mean nothing on this one, so they
+        are dropped; binding the clock already in use keeps them, so a
+        second mount of one accessor cannot release a burst.
+
+        Args:
+            clock (Clock): the workspace's clock.
+        """
+        if clock is self._clock:
+            return
+        self._clock = clock
+        self._next.clear()
+        self._shift.clear()
 
     async def acquire(self, key: str) -> None:
         """Wait for this key's next slot.
@@ -60,20 +65,20 @@ class RateLimiter:
         Args:
             key (str): what the server meters by (an Airtable base id).
         """
-        now = self._clock()
+        now = self._clock.monotonic()
         slot = max(now, self._next.get(key, now))
         self._next[key] = slot + self._interval
         if slot <= now:
             return
         seen = self._shift.get(key, 0.0)
-        await self._sleep(slot - now)
+        await self._clock.sleep(slot - now)
         while (moved := self._shift.get(key, 0.0)) != seen:
             slot += moved - seen
             seen = moved
-            now = self._clock()
+            now = self._clock.monotonic()
             if slot > now:
-                await self._sleep(slot - now)
-        late = self._clock() - slot
+                await self._clock.sleep(slot - now)
+        late = self._clock.monotonic() - slot
         if late > 0:
             self._shift[key] = seen + late
-            self._next[key] += late
+            self._next[key] = self._next.get(key, slot) + late

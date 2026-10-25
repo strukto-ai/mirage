@@ -26,6 +26,7 @@ import {
 import { STOP_WAIT_SECONDS } from './constants.ts'
 import { JobTable } from './table.ts'
 import { Job, type JobResult, type JobRunner, JobStatus } from './types.ts'
+import { ManualClock } from '../../utils/clock.ts'
 
 const dec = (b: Uint8Array | undefined): string =>
   b === undefined ? '' : new TextDecoder().decode(b)
@@ -118,6 +119,17 @@ describe('JobTable.submit', () => {
     const j2 = jt.submit({ command: 'b', run: quiet, abort: new AbortController(), cwd: '/' })
     expect(j1.id).toBe(1)
     expect(j2.id).toBe(2)
+  })
+
+  it('stamps jobs on the table clock, a child table included', () => {
+    const clock = new ManualClock(1_000)
+    const jt = new JobTable(null, undefined, null, clock)
+    const first = jt.submit({ command: 'a', run: quiet, abort: new AbortController(), cwd: '/' })
+    clock.advance(5)
+    const second = jt
+      .child()
+      .submit({ command: 'b', run: quiet, abort: new AbortController(), cwd: '/' })
+    expect([first.createdAt, second.createdAt]).toEqual([1_000, 1_005])
   })
 
   it('defaults sessionId', () => {
@@ -310,7 +322,7 @@ describe('JobTable.wait', () => {
 
   it('returns an already-completed job without re-awaiting', async () => {
     const jt = new JobTable()
-    const j = new Job({ id: 99, command: 'a', cwd: '/' })
+    const j = new Job({ id: 99, command: 'a', cwd: '/', createdAt: 0 })
     j.status = JobStatus.COMPLETED
     jt.load(j)
     const result = await jt.wait(99)
@@ -555,6 +567,7 @@ describe('JobTable per-session scoping', () => {
       id: 3,
       command: 'x',
       cwd: '/',
+      createdAt: 0,
       status: JobStatus.COMPLETED,
       sessionId: 'a',
       console: new JobConsole(),

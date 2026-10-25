@@ -329,7 +329,9 @@ class Workspace:
         self._shared_mounts: set[int] = set()
         self._drift = DriftQueue()
         self.processes = ProcessSupervisor(self._ids, bind=run_with_execution)
-        self.job_table = JobTable(console_factory, self.processes)
+        self.job_table = JobTable(
+            console_factory, self.processes, clock=self._clock
+        )
         self._lines: dict[asyncio.Event, tuple[str | None, asyncio.Event]] = {}
         self._shell_executions: set[ShellExecution] = set()
         self._admitting = asyncio.Event()

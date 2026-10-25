@@ -17,15 +17,19 @@ import asyncio
 import pytest
 
 from mirage.core.api.rate_limit import RateLimiter
+from mirage.utils.clock import ManualClock
 
 
 class _Clock:
     def __init__(self) -> None:
-        self.now = 100.0
+        self.wall = 100.0
         self.waits: list[float] = []
 
-    def time(self) -> float:
-        return self.now
+    def now(self) -> float:
+        return self.wall
+
+    def monotonic(self) -> float:
+        return self.wall
 
     async def sleep(self, seconds: float) -> None:
         self.waits.append(seconds)
@@ -37,14 +41,14 @@ class _Stalled(_Clock):
         self.until = until
 
     async def sleep(self, seconds: float) -> None:
-        start = self.now
+        start = self.wall
         self.waits.append(seconds)
         await asyncio.sleep(0)
-        self.now = max(self.now, start + seconds, self.until)
+        self.wall = max(self.wall, start + seconds, self.until)
 
 
 def _limiter(rate: float, clock: _Clock) -> RateLimiter:
-    return RateLimiter(rate, clock=clock.time, sleep=clock.sleep)
+    return RateLimiter(rate, clock=clock)
 
 
 @pytest.mark.asyncio
@@ -71,7 +75,7 @@ async def test_a_slot_already_past_costs_no_wait():
     clock = _Clock()
     limiter = _limiter(5, clock)
     await limiter.acquire("appA")
-    clock.now += 1.0
+    clock.wall += 1.0
     await limiter.acquire("appA")
     assert clock.waits == []
 
@@ -92,7 +96,7 @@ async def test_a_late_wake_moves_the_slots_behind_it():
 
     async def call() -> None:
         await limiter.acquire("appA")
-        starts.append(clock.now)
+        starts.append(clock.wall)
 
     await asyncio.gather(call(), call(), call())
     await call()
@@ -104,3 +108,37 @@ async def test_a_late_wake_moves_the_slots_behind_it():
 def test_a_rate_must_be_positive():
     with pytest.raises(ValueError):
         RateLimiter(0)
+
+
+@pytest.mark.asyncio
+async def test_a_bound_clock_paces_and_waits_on_its_own_time():
+    limiter = RateLimiter(5)
+    clock = ManualClock()
+    limiter.bind_clock(clock)
+    await limiter.acquire("appA")
+    await limiter.acquire("appA")
+    assert clock.monotonic() == pytest.approx(0.2)
+
+
+@pytest.mark.asyncio
+async def test_rebinding_the_clock_in_use_keeps_the_schedule():
+    clock = _Clock()
+    limiter = _limiter(5, clock)
+    await limiter.acquire("appA")
+    limiter.bind_clock(clock)
+    await limiter.acquire("appA")
+    assert clock.waits == pytest.approx([0.2])
+
+
+@pytest.mark.asyncio
+async def test_a_new_clock_under_a_waiting_caller_lets_it_finish():
+    clock = _Stalled(until=0.0)
+    limiter = _limiter(5, clock)
+    await limiter.acquire("appA")
+    waiting = asyncio.create_task(limiter.acquire("appA"))
+    await asyncio.sleep(0)
+    later = _Clock()
+    later.wall = 200.0
+    limiter.bind_clock(later)
+    await waiting
+    assert clock.waits == pytest.approx([0.2])
