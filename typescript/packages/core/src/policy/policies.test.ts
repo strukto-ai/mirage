@@ -344,15 +344,14 @@ describe('Policies', () => {
 
 describe('workspace policies', () => {
   it('a postVfs deny suppresses a capacity reply', async () => {
-    // A file call outside a line meets postVfs; a command's own call is
-    // the line's, which postCommand and postExecute judge.
     const ws = executableWorkspace()
     try {
       await ws.shell('touch /data/f')
       ws.policies.add(new SuppressCapacity())
       await expect(ws.dispatch('statfs', '/data/f')).rejects.toThrow(PolicyDenied)
       const result = await ws.shell('stat -f -c %b /data/f')
-      expect(result.exitCode).toBe(0)
+      expect(result.exitCode).toBe(1)
+      expect(result.stdoutText).toBe('')
     } finally {
       await ws.close()
     }
@@ -1399,6 +1398,8 @@ describe('what a method sees', () => {
       expect(seer.seen).toEqual([
         ['preSession', 'agent', '/data'],
         ['preCommand', 'agent', '/data'],
+        ['preVfs', 'agent', '/data'],
+        ['preVfs', 'agent', '/data'],
         ['preVfs', 'agent', '/data'],
       ])
       await ws.explain('cat /data/owner.txt', 'agent')

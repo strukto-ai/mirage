@@ -84,8 +84,9 @@ Explain stops before anything runs, so it asks only what answers first:
 
 The `post_` methods need a result, and `pre_session` fires only as a line
 runs. So `export AWS_SECRET=x` explains as `allow` even when a
-`pre_session` policy refuses it. A line's own reads and writes never
-reach `pre_vfs`; explain the VFS call to see its answer.
+`pre_session` policy refuses it. A line's file calls reach `pre_vfs` only
+when the line runs; explain a specific VFS call to see its admission
+answer without executing the line.
 
 ### What comes back
 

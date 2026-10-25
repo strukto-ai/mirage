@@ -55,6 +55,119 @@
       "targets": ["cli-gws-scoped"],
       "command": "ID=$(gws drive files list | jq -r '.files[] | select(.name==\"Stale\") | .id') && gws docs documents batchUpdate --params \"{\\\"documentId\\\": \\\"$ID\\\"}\" --json '{\"requests\": [{\"insertText\": {\"location\": {\"index\": 1}, \"text\": \"NEWTEXT\"}}]}' > /dev/null && cat /data/Stale.gdoc.json | grep -c NEWTEXT",
       "expect": { "exit": 0, "stdout": "1\n", "stderr": "" }
+    },
+    {
+      "id": "gws_hidden_mount_requires_named_allow_wildcard",
+      "seq": 563108,
+      "targets": [
+        "cli-gws-scoped"
+      ],
+      "session": "gws-policy-wildcard",
+      "session_profiles": {
+        "gws-policy-wildcard": {
+          "paths": {
+            "hide": [
+              "/data"
+            ]
+          },
+          "commands": {
+            "allow": [
+              "*"
+            ]
+          }
+        }
+      },
+      "command": "gws drive files list",
+      "expect": {
+        "exit": 126,
+        "stdout": "",
+        "stderr": "gws: Permission denied\n"
+      }
+    },
+    {
+      "id": "gws_hidden_mount_requires_named_allow_sibling_verb",
+      "seq": 563109,
+      "targets": [
+        "cli-gws-scoped"
+      ],
+      "session": "gws-policy-sibling_verb",
+      "session_profiles": {
+        "gws-policy-sibling_verb": {
+          "paths": {
+            "hide": [
+              "/data"
+            ]
+          },
+          "commands": {
+            "allow": [
+              "gws drive files get"
+            ]
+          }
+        }
+      },
+      "command": "gws drive files list",
+      "expect": {
+        "exit": 126,
+        "stdout": "",
+        "stderr": "gws: Permission denied\n"
+      }
+    },
+    {
+      "id": "gws_explicit_service_allow_is_independent_of_hidden_mount",
+      "seq": 563110,
+      "targets": [
+        "cli-gws-scoped"
+      ],
+      "session": "gws-policy-allowed",
+      "session_profiles": {
+        "gws-policy-allowed": {
+          "paths": {
+            "hide": [
+              "/data"
+            ]
+          },
+          "commands": {
+            "allow": [
+              "gws drive files list",
+              "jq",
+              "cat"
+            ]
+          }
+        }
+      },
+      "command": "gws drive files list | jq -r '.files | type'",
+      "expect": {
+        "exit": 0,
+        "stdout": "array\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "gws_explicit_service_allow_does_not_unhide_mount_files",
+      "seq": 563111,
+      "targets": [
+        "cli-gws-scoped"
+      ],
+      "session": "gws-policy-allowed",
+      "command": "cat /data/Stale.gdoc.json",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "cat: /data/Stale.gdoc.json: No such file or directory\n"
+      }
+    },
+    {
+      "id": "gws_api_write_invalidates_warm_body_and_listing",
+      "seq": 563112,
+      "targets": [
+        "cli-gws-scoped"
+      ],
+      "command": "gws docs documents create --json '{\"title\":\"PolicyCache\"}' > /dev/null && cat /data/PolicyCache.gdoc.json > /dev/null && ls /data > /dev/null && ID=$(gws drive files list | jq -r '.files[] | select(.name==\"PolicyCache\") | .id') && gws docs documents batchUpdate --params \"{\\\"documentId\\\":\\\"$ID\\\"}\" --json '{\"requests\":[{\"insertText\":{\"location\":{\"index\":1},\"text\":\"FRESH-POLICY-CACHE\"}}]}' > /dev/null && cat /data/PolicyCache.gdoc.json | grep -c FRESH-POLICY-CACHE",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n",
+        "stderr": ""
+      }
     }
   ]
 }

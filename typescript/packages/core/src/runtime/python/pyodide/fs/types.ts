@@ -31,7 +31,9 @@ export interface SyncVFS {
   process?(payload: string): string
   /** A file's bytes; `raw` reads what is stored rather than its rendering. */
   read(path: string, raw?: boolean): Uint8Array
+  readCached(path: string, data: Uint8Array): Uint8Array
   stat(path: string): VFSStat
+  statCached(path: string, row: VFSStat): VFSStat
   readdir(path: string, classify?: boolean): VFSEntry[]
   readlink(path: string): string
   flush(mutations: MirageMutation[]): FlushFailure | undefined
@@ -103,6 +105,7 @@ export interface FSNode {
   children?: Map<string, FSNode>
   contents?: Uint8Array
   usedBytes?: number
+  source?: VFSStat['source']
   /** Placed from an unclassified listing row; `getattr` asks the mount first. */
   unclassified?: boolean
   /** A directory whose children came from a listing of the mount. */

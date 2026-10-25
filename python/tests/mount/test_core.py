@@ -17,6 +17,7 @@ import errno
 import logging
 import os
 import stat
+from unittest.mock import AsyncMock
 
 import pytest
 import pytest_asyncio
@@ -579,6 +580,42 @@ async def test_a_large_file_reads_a_chunk_at_a_time():
     moved = [r.bytes for r in ws.vfs.records[before:] if r.op == "read"]
     assert moved == [READ_CHUNK, 2]
     await core.release(fh)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "kind,code", [("hide", errno.ENOENT), ("deny", errno.EACCES)]
+)
+async def test_a_warm_chunk_obeys_session_revocation(kind, code, monkeypatch):
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
+    await ws.vfs.write("/big.bin", b"x" * (2 * READ_CHUNK))
+    core = MountCore(ws.vfs, session=ws.create_session("reader"))
+    fh = await core.open("/big.bin")
+    try:
+        assert await core.read("/big.bin", 8, 0, fh) == b"x" * 8
+        before = len(ws.vfs.records)
+        fetch = AsyncMock(side_effect=AssertionError("unexpected fetch"))
+        monkeypatch.setattr(ws.vfs, "read", fetch)
+        profile = (
+            {"paths": {"hide": ["/big.bin"]}}
+            if kind == "hide"
+            else {
+                "commands": {
+                    "deny": [{"paths": ["/big.bin"], "reason": "sealed"}]
+                }
+            }
+        )
+        await ws.set_session_profile("reader", profile)
+        with pytest.raises(OSError) as failure:
+            await core.read("/big.bin", 8, 1, fh)
+        assert failure.value.errno == code
+        await ws.set_session_profile("reader", {})
+        assert await core.read("/big.bin", 8, 1, fh) == b"x" * 8
+        fetch.assert_not_called()
+        assert not [r for r in ws.vfs.records[before:] if r.op == "read"]
+    finally:
+        await core.release(fh)
+        await ws.close()
 
 
 @pytest.mark.asyncio
@@ -1233,3 +1270,48 @@ async def test_a_sessions_handles_meet_through_a_link_the_default_hides():
     await core.release(second)
     await core.release(first)
     assert await core.read("/a.txt", 100, 0, None) == b"BB\n"
+
+
+@pytest.mark.asyncio
+async def test_hidden_mount_root_does_not_fall_back_to_synthetic_attrs():
+    ws = Workspace({"/data": RAMVFS()})
+    session = ws.create_session(
+        "reader", profile={"paths": {"hide": ["/data"]}}
+    )
+    core = MountCore(ws.vfs, root_prefix="/data", session=session)
+    try:
+        with pytest.raises(FileNotFoundError):
+            await core.getattr("/")
+        await ws.set_session_profile("reader", {})
+        assert stat.S_ISDIR((await core.getattr("/")).mode)
+    finally:
+        await ws.close()
+
+
+class _CountsStats(Policy):
+    def __init__(self) -> None:
+        self.stats = 0
+
+    async def pre_vfs(self, ctx):
+        if ctx.call.name == "stat":
+            self.stats += 1
+        return None
+
+
+@pytest.mark.asyncio
+async def test_a_buffered_size_judges_the_fetched_row_once():
+    # The stat that fetched the row judged it; the size the handle's
+    # buffered write adds is the handle's own, not a second stat.
+    policy = _CountsStats()
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE, policies=[policy])
+    await ws.vfs.write("/a.txt", b"ab")
+    core = MountCore(ws.vfs)
+    fh = await core.open("/a.txt", os.O_WRONLY)
+    try:
+        await core.write("/a.txt", b"longer", 0, fh)
+        policy.stats = 0
+        assert (await core.fgetattr("/a.txt", fh)).size == 6
+        assert policy.stats == 1
+    finally:
+        await core.release(fh)
+        await ws.close()

@@ -672,12 +672,8 @@ async function makeSealedWs(policies: Policy[]): Promise<Workspace> {
 // dispatcher too.
 const SEALED_SECRET = { commands: { deny: [{ reason: 'sealed', paths: ['/a/secret.txt'] }] } }
 
-describe('op methods judge file calls and path rules judge a line', () => {
-  it("preVfs judges file calls, not a line's I/O", async () => {
-    // The boundary (Policy.preVfs): a coded op method judges the `ws.vfs` /
-    // `session.vfs` calls, and a line's commands are preCommand's, so
-    // neither a command's own I/O nor its redirects reach it. Pinned so a
-    // move of the boundary is loud.
+describe('file policies judge every file entry point', () => {
+  it('preVfs judges file calls, commands, and redirects', async () => {
     const recorder = new OpRecorder()
     const ws = await makeSealedWs([recorder, new SealedPaths()])
     await expect(ws.vfs.read('/a/secret.txt')).rejects.toMatchObject({
@@ -686,14 +682,23 @@ describe('op methods judge file calls and path rules judge a line', () => {
     await expect(ws.vfs.write('/a/prod/new.txt', ENC.encode('hi\n'))).rejects.toThrow()
     recorder.asked.length = 0
 
-    expect((await ws.shell('echo hi > /a/prod/new.txt')).exitCode).toBe(0)
-    expect(stdoutStr(await ws.shell('cat /a/secret.txt'))).toBe('sealed\n')
-    expect(stdoutStr(await ws.shell('head -c 3 /a/secret.txt'))).toBe('sea')
-    expect((await ws.shell('rm /a/prod/keep.txt')).exitCode).toBe(0)
-    expect((await ws.shell('find /a/prod -name new.txt -delete')).exitCode).toBe(0)
-    expect((await ws.shell('rm -r /a/prod')).exitCode).toBe(0)
-    expect((await ws.shell('find /a; du -a /a')).exitCode).toBe(0)
-    expect(recorder.asked).toEqual([])
+    for (const line of [
+      'echo hi > /a/prod/new.txt',
+      'cat /a/secret.txt',
+      'head -c 3 /a/secret.txt',
+      'rm /a/prod/keep.txt',
+      'find /a/prod -name keep.txt -delete',
+      'rm -r /a/prod',
+    ]) {
+      const result = await ws.shell(line)
+      expect(result.exitCode, line).not.toBe(0)
+      expect(stdoutStr(result), line).toBe('')
+      expect(voicedStderr(result), line).toContain('Permission denied')
+    }
+    expect(await ws.vfs.read('/a/prod/keep.txt')).toEqual(ENC.encode('keep\n'))
+    expect(await ws.vfs.exists('/a/prod/new.txt')).toBe(false)
+    expect(recorder.asked.some(([, path, write]) => path === '/a/secret.txt' && !write)).toBe(true)
+    expect(recorder.asked.some(([, path, write]) => path === '/a/prod/new.txt' && write)).toBe(true)
   })
 
   it('path rules hold walks and lazy readers', async () => {

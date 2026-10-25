@@ -235,6 +235,7 @@ export function workspaceBridge(
           kwargs.size = attrs.size ?? null
         }
         if (attrs?.direct === true) kwargs.direct = true
+        if (attrs?.retained !== undefined) kwargs.retained = attrs.retained
         return (await dispatch('read', path, [], kwargs)) as Uint8Array
       }
       case 'write': {
@@ -267,6 +268,7 @@ export function workspaceBridge(
         return await dispatch('stat', path, [], {
           ...(attrs?.nofollow === true ? { nofollow: true } : {}),
           ...(attrs?.admitOnly === true ? { admit_only: true } : {}),
+          ...(attrs?.retained !== undefined ? { retained: attrs.retained } : {}),
         })
       case 'create':
         await dispatch('create', path)

@@ -160,10 +160,12 @@ cli_expressible() {
       | to_entries | all(.value.vfs == "ram"))
     and (((.world.mounts // {}) | to_entries) | all(.value.generated_files == null))
     and (((.world.mounts // {}) | to_entries) | all(.value.failing == null))
+    and (.world.read_control == null)
+    and (((.world.builtin_clis // []) | length) == 0)
     and (((.world.policies // []) | length) == 0)
     and (((.world.runtimes // []) | map(select((type == "object" and .name == "echobox") or . == "echobox")) | length) == 0)
     and (((.world.register_runtimes // {}) | length) == 0)
-    and (([(.steps // [])[] | ., (.parallel // [])[]] | map(select(has("add_runtime") or has("rename") or has("s3_put") or has("read_op") or has("facade") or has("profile"))) | length) == 0)
+    and (([(.steps // [])[] | ., (.parallel // [])[]] | map(select(has("add_runtime") or has("add_policies") or has("rename") or has("s3_put") or has("read_op") or has("facade") or has("profile") or has("handle"))) | length) == 0)
   ' >/dev/null <<<"$case_json"
 }
 

@@ -1,0 +1,2806 @@
+{
+  "cases": [
+    {
+      "id": "host_retained_read_obeys_current_policy",
+      "backends": [
+        "ram",
+        "disk"
+      ],
+      "world": {
+        "read_control": "/data/secret.txt",
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "secret.txt": "TOPSECRET plans\n"
+            }
+          },
+          "/control": {
+            "vfs": "ram",
+            "files": {
+              "allow": "",
+              "hide": "",
+              "deny": "",
+              "pre": "",
+              "post": ""
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "handle": {
+            "id": "kept",
+            "op": "open",
+            "surface": "host",
+            "path": "/data/secret.txt"
+          }
+        },
+        {
+          "handle": {
+            "id": "kept",
+            "op": "read",
+            "size": 3
+          },
+          "expect": {
+            "content": "TOP"
+          }
+        },
+        {
+          "facade": {
+            "method": "read",
+            "path": "/control/hide"
+          },
+          "expect": {
+            "value": ""
+          }
+        },
+        {
+          "handle": {
+            "id": "kept",
+            "op": "read",
+            "size": 3,
+            "offset": 3
+          },
+          "expect": {
+            "errno": "ENOENT",
+            "backend_reads": {
+              "/data/secret.txt": 0
+            }
+          }
+        },
+        {
+          "facade": {
+            "method": "read",
+            "path": "/control/allow"
+          },
+          "expect": {
+            "value": ""
+          }
+        },
+        {
+          "handle": {
+            "id": "kept",
+            "op": "read",
+            "size": 3,
+            "offset": 3
+          },
+          "expect": {
+            "content": "SEC",
+            "backend_reads": {
+              "/data/secret.txt": 0
+            }
+          }
+        },
+        {
+          "facade": {
+            "method": "read",
+            "path": "/control/deny"
+          },
+          "expect": {
+            "value": ""
+          }
+        },
+        {
+          "handle": {
+            "id": "kept",
+            "op": "read",
+            "size": 3,
+            "offset": 3
+          },
+          "expect": {
+            "errno": "EACCES",
+            "backend_reads": {
+              "/data/secret.txt": 0
+            }
+          }
+        },
+        {
+          "facade": {
+            "method": "read",
+            "path": "/control/allow"
+          },
+          "expect": {
+            "value": ""
+          }
+        },
+        {
+          "handle": {
+            "id": "kept",
+            "op": "read",
+            "size": 3,
+            "offset": 3
+          },
+          "expect": {
+            "content": "SEC",
+            "backend_reads": {
+              "/data/secret.txt": 0
+            }
+          }
+        },
+        {
+          "facade": {
+            "method": "read",
+            "path": "/control/pre"
+          },
+          "expect": {
+            "value": ""
+          }
+        },
+        {
+          "handle": {
+            "id": "kept",
+            "op": "read",
+            "size": 3,
+            "offset": 3
+          },
+          "expect": {
+            "errno": "EACCES",
+            "backend_reads": {
+              "/data/secret.txt": 0
+            }
+          }
+        },
+        {
+          "facade": {
+            "method": "read",
+            "path": "/control/allow"
+          },
+          "expect": {
+            "value": ""
+          }
+        },
+        {
+          "handle": {
+            "id": "kept",
+            "op": "read",
+            "size": 3,
+            "offset": 3
+          },
+          "expect": {
+            "content": "SEC",
+            "backend_reads": {
+              "/data/secret.txt": 0
+            }
+          }
+        },
+        {
+          "facade": {
+            "method": "read",
+            "path": "/control/post"
+          },
+          "expect": {
+            "value": ""
+          }
+        },
+        {
+          "handle": {
+            "id": "kept",
+            "op": "read",
+            "size": 3,
+            "offset": 3
+          },
+          "expect": {
+            "errno": "EACCES",
+            "backend_reads": {
+              "/data/secret.txt": 0
+            }
+          }
+        },
+        {
+          "facade": {
+            "method": "read",
+            "path": "/control/allow"
+          },
+          "expect": {
+            "value": ""
+          }
+        },
+        {
+          "handle": {
+            "id": "kept",
+            "op": "read",
+            "size": 3,
+            "offset": 3
+          },
+          "expect": {
+            "content": "SEC",
+            "backend_reads": {
+              "/data/secret.txt": 0
+            }
+          }
+        },
+        {
+          "handle": {
+            "id": "kept",
+            "op": "close"
+          }
+        }
+      ]
+    },
+    {
+      "id": "mount_retained_read_obeys_current_policy",
+      "backends": [
+        "ram",
+        "disk"
+      ],
+      "world": {
+        "read_control": "/data/secret.txt",
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "secret.txt": "TOPSECRET plans\n"
+            }
+          },
+          "/control": {
+            "vfs": "ram",
+            "files": {
+              "allow": "",
+              "hide": "",
+              "deny": "",
+              "pre": "",
+              "post": ""
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "handle": {
+            "id": "kept",
+            "op": "open",
+            "surface": "mount",
+            "path": "/data/secret.txt"
+          }
+        },
+        {
+          "handle": {
+            "id": "kept",
+            "op": "read",
+            "size": 3
+          },
+          "expect": {
+            "content": "TOP"
+          }
+        },
+        {
+          "facade": {
+            "method": "read",
+            "path": "/control/hide"
+          },
+          "expect": {
+            "value": ""
+          }
+        },
+        {
+          "handle": {
+            "id": "kept",
+            "op": "read",
+            "size": 3,
+            "offset": 3
+          },
+          "expect": {
+            "errno": "ENOENT",
+            "backend_reads": {
+              "/data/secret.txt": 0
+            }
+          }
+        },
+        {
+          "facade": {
+            "method": "read",
+            "path": "/control/allow"
+          },
+          "expect": {
+            "value": ""
+          }
+        },
+        {
+          "handle": {
+            "id": "kept",
+            "op": "read",
+            "size": 3,
+            "offset": 3
+          },
+          "expect": {
+            "content": "SEC",
+            "backend_reads": {
+              "/data/secret.txt": 0
+            }
+          }
+        },
+        {
+          "facade": {
+            "method": "read",
+            "path": "/control/deny"
+          },
+          "expect": {
+            "value": ""
+          }
+        },
+        {
+          "handle": {
+            "id": "kept",
+            "op": "read",
+            "size": 3,
+            "offset": 3
+          },
+          "expect": {
+            "errno": "EACCES",
+            "backend_reads": {
+              "/data/secret.txt": 0
+            }
+          }
+        },
+        {
+          "facade": {
+            "method": "read",
+            "path": "/control/allow"
+          },
+          "expect": {
+            "value": ""
+          }
+        },
+        {
+          "handle": {
+            "id": "kept",
+            "op": "read",
+            "size": 3,
+            "offset": 3
+          },
+          "expect": {
+            "content": "SEC",
+            "backend_reads": {
+              "/data/secret.txt": 0
+            }
+          }
+        },
+        {
+          "facade": {
+            "method": "read",
+            "path": "/control/pre"
+          },
+          "expect": {
+            "value": ""
+          }
+        },
+        {
+          "handle": {
+            "id": "kept",
+            "op": "read",
+            "size": 3,
+            "offset": 3
+          },
+          "expect": {
+            "errno": "EACCES",
+            "backend_reads": {
+              "/data/secret.txt": 0
+            }
+          }
+        },
+        {
+          "facade": {
+            "method": "read",
+            "path": "/control/allow"
+          },
+          "expect": {
+            "value": ""
+          }
+        },
+        {
+          "handle": {
+            "id": "kept",
+            "op": "read",
+            "size": 3,
+            "offset": 3
+          },
+          "expect": {
+            "content": "SEC",
+            "backend_reads": {
+              "/data/secret.txt": 0
+            }
+          }
+        },
+        {
+          "facade": {
+            "method": "read",
+            "path": "/control/post"
+          },
+          "expect": {
+            "value": ""
+          }
+        },
+        {
+          "handle": {
+            "id": "kept",
+            "op": "read",
+            "size": 3,
+            "offset": 3
+          },
+          "expect": {
+            "errno": "EACCES",
+            "backend_reads": {
+              "/data/secret.txt": 0
+            }
+          }
+        },
+        {
+          "facade": {
+            "method": "read",
+            "path": "/control/allow"
+          },
+          "expect": {
+            "value": ""
+          }
+        },
+        {
+          "handle": {
+            "id": "kept",
+            "op": "read",
+            "size": 3,
+            "offset": 3
+          },
+          "expect": {
+            "content": "SEC",
+            "backend_reads": {
+              "/data/secret.txt": 0
+            }
+          }
+        },
+        {
+          "handle": {
+            "id": "kept",
+            "op": "close"
+          }
+        }
+      ]
+    },
+    {
+      "id": "fuse_retained_read_obeys_current_policy",
+      "backends": [
+        "ram",
+        "disk"
+      ],
+      "world": {
+        "read_control": "/data/secret.txt",
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "secret.txt": "TOPSECRET plans\n"
+            }
+          },
+          "/control": {
+            "vfs": "ram",
+            "files": {
+              "allow": "",
+              "hide": "",
+              "deny": "",
+              "pre": "",
+              "post": ""
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "handle": {
+            "id": "kept",
+            "op": "open",
+            "surface": "fuse",
+            "path": "/data/secret.txt"
+          }
+        },
+        {
+          "handle": {
+            "id": "kept",
+            "op": "read",
+            "size": 3
+          },
+          "expect": {
+            "content": "TOP"
+          }
+        },
+        {
+          "facade": {
+            "method": "read",
+            "path": "/control/hide"
+          },
+          "expect": {
+            "value": ""
+          }
+        },
+        {
+          "handle": {
+            "id": "kept",
+            "op": "read",
+            "size": 3,
+            "offset": 3
+          },
+          "expect": {
+            "errno": "ENOENT",
+            "backend_reads": {
+              "/data/secret.txt": 0
+            }
+          }
+        },
+        {
+          "facade": {
+            "method": "read",
+            "path": "/control/allow"
+          },
+          "expect": {
+            "value": ""
+          }
+        },
+        {
+          "handle": {
+            "id": "kept",
+            "op": "read",
+            "size": 3,
+            "offset": 3
+          },
+          "expect": {
+            "content": "SEC",
+            "backend_reads": {
+              "/data/secret.txt": 0
+            }
+          }
+        },
+        {
+          "facade": {
+            "method": "read",
+            "path": "/control/deny"
+          },
+          "expect": {
+            "value": ""
+          }
+        },
+        {
+          "handle": {
+            "id": "kept",
+            "op": "read",
+            "size": 3,
+            "offset": 3
+          },
+          "expect": {
+            "errno": "EACCES",
+            "backend_reads": {
+              "/data/secret.txt": 0
+            }
+          }
+        },
+        {
+          "facade": {
+            "method": "read",
+            "path": "/control/allow"
+          },
+          "expect": {
+            "value": ""
+          }
+        },
+        {
+          "handle": {
+            "id": "kept",
+            "op": "read",
+            "size": 3,
+            "offset": 3
+          },
+          "expect": {
+            "content": "SEC",
+            "backend_reads": {
+              "/data/secret.txt": 0
+            }
+          }
+        },
+        {
+          "facade": {
+            "method": "read",
+            "path": "/control/pre"
+          },
+          "expect": {
+            "value": ""
+          }
+        },
+        {
+          "handle": {
+            "id": "kept",
+            "op": "read",
+            "size": 3,
+            "offset": 3
+          },
+          "expect": {
+            "errno": "EACCES",
+            "backend_reads": {
+              "/data/secret.txt": 0
+            }
+          }
+        },
+        {
+          "facade": {
+            "method": "read",
+            "path": "/control/allow"
+          },
+          "expect": {
+            "value": ""
+          }
+        },
+        {
+          "handle": {
+            "id": "kept",
+            "op": "read",
+            "size": 3,
+            "offset": 3
+          },
+          "expect": {
+            "content": "SEC",
+            "backend_reads": {
+              "/data/secret.txt": 0
+            }
+          }
+        },
+        {
+          "facade": {
+            "method": "read",
+            "path": "/control/post"
+          },
+          "expect": {
+            "value": ""
+          }
+        },
+        {
+          "handle": {
+            "id": "kept",
+            "op": "read",
+            "size": 3,
+            "offset": 3
+          },
+          "expect": {
+            "errno": "EACCES",
+            "backend_reads": {
+              "/data/secret.txt": 0
+            }
+          }
+        },
+        {
+          "facade": {
+            "method": "read",
+            "path": "/control/allow"
+          },
+          "expect": {
+            "value": ""
+          }
+        },
+        {
+          "handle": {
+            "id": "kept",
+            "op": "read",
+            "size": 3,
+            "offset": 3
+          },
+          "expect": {
+            "content": "SEC",
+            "backend_reads": {
+              "/data/secret.txt": 0
+            }
+          }
+        },
+        {
+          "handle": {
+            "id": "kept",
+            "op": "close"
+          }
+        }
+      ]
+    },
+    {
+      "id": "facade_warm_read_obeys_current_policy",
+      "backends": [
+        "ram",
+        "disk"
+      ],
+      "world": {
+        "read_control": "/data/secret.txt",
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "secret.txt": "TOPSECRET plans\n"
+            },
+            "cache_reads": true
+          },
+          "/control": {
+            "vfs": "ram",
+            "files": {
+              "allow": "",
+              "hide": "",
+              "deny": "",
+              "pre": "",
+              "post": ""
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "facade": {
+            "method": "read",
+            "path": "/data/secret.txt"
+          },
+          "expect": {
+            "value": "TOPSECRET plans\n"
+          }
+        },
+        {
+          "facade": {
+            "method": "read",
+            "path": "/control/hide"
+          },
+          "expect": {
+            "value": ""
+          }
+        },
+        {
+          "facade": {
+            "method": "read",
+            "path": "/data/secret.txt"
+          },
+          "expect": {
+            "errno": "ENOENT",
+            "backend_reads": {
+              "/data/secret.txt": 0
+            }
+          }
+        },
+        {
+          "facade": {
+            "method": "read",
+            "path": "/control/allow"
+          },
+          "expect": {
+            "value": ""
+          }
+        },
+        {
+          "facade": {
+            "method": "read",
+            "path": "/data/secret.txt"
+          },
+          "expect": {
+            "value": "TOPSECRET plans\n"
+          }
+        },
+        {
+          "facade": {
+            "method": "read",
+            "path": "/control/deny"
+          },
+          "expect": {
+            "value": ""
+          }
+        },
+        {
+          "facade": {
+            "method": "read",
+            "path": "/data/secret.txt"
+          },
+          "expect": {
+            "errno": "EACCES",
+            "backend_reads": {
+              "/data/secret.txt": 0
+            }
+          }
+        },
+        {
+          "facade": {
+            "method": "read",
+            "path": "/control/allow"
+          },
+          "expect": {
+            "value": ""
+          }
+        },
+        {
+          "facade": {
+            "method": "read",
+            "path": "/data/secret.txt"
+          },
+          "expect": {
+            "value": "TOPSECRET plans\n"
+          }
+        },
+        {
+          "facade": {
+            "method": "read",
+            "path": "/control/pre"
+          },
+          "expect": {
+            "value": ""
+          }
+        },
+        {
+          "facade": {
+            "method": "read",
+            "path": "/data/secret.txt"
+          },
+          "expect": {
+            "errno": "EACCES",
+            "backend_reads": {
+              "/data/secret.txt": 0
+            }
+          }
+        },
+        {
+          "facade": {
+            "method": "read",
+            "path": "/control/allow"
+          },
+          "expect": {
+            "value": ""
+          }
+        },
+        {
+          "facade": {
+            "method": "read",
+            "path": "/data/secret.txt"
+          },
+          "expect": {
+            "value": "TOPSECRET plans\n"
+          }
+        },
+        {
+          "facade": {
+            "method": "read",
+            "path": "/control/post"
+          },
+          "expect": {
+            "value": ""
+          }
+        },
+        {
+          "facade": {
+            "method": "read",
+            "path": "/data/secret.txt"
+          },
+          "expect": {
+            "errno": "EACCES",
+            "backend_reads": {
+              "/data/secret.txt": 0
+            }
+          }
+        },
+        {
+          "facade": {
+            "method": "read",
+            "path": "/control/allow"
+          },
+          "expect": {
+            "value": ""
+          }
+        },
+        {
+          "facade": {
+            "method": "read",
+            "path": "/data/secret.txt"
+          },
+          "expect": {
+            "value": "TOPSECRET plans\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "command_warm_read_obeys_current_policy",
+      "backends": [
+        "ram",
+        "disk"
+      ],
+      "world": {
+        "read_control": "/data/secret.txt",
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "secret.txt": "TOPSECRET plans\n"
+            },
+            "cache_reads": true
+          },
+          "/control": {
+            "vfs": "ram",
+            "files": {
+              "allow": "",
+              "hide": "",
+              "deny": "",
+              "pre": "",
+              "post": ""
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "cat /data/secret.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "TOPSECRET plans\n",
+            "stderr": ""
+          }
+        },
+        {
+          "facade": {
+            "method": "read",
+            "path": "/control/hide"
+          },
+          "expect": {
+            "value": ""
+          }
+        },
+        {
+          "command": "cat /data/secret.txt",
+          "expect": {
+            "exit": 1,
+            "stdout": "",
+            "stderr_contains": "No such file",
+            "backend_reads": {
+              "/data/secret.txt": 0
+            }
+          }
+        },
+        {
+          "facade": {
+            "method": "read",
+            "path": "/control/allow"
+          },
+          "expect": {
+            "value": ""
+          }
+        },
+        {
+          "command": "cat /data/secret.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "TOPSECRET plans\n",
+            "stderr": ""
+          }
+        },
+        {
+          "facade": {
+            "method": "read",
+            "path": "/control/deny"
+          },
+          "expect": {
+            "value": ""
+          }
+        },
+        {
+          "command": "cat /data/secret.txt",
+          "expect": {
+            "exit": 1,
+            "stdout": "",
+            "stderr_contains": "Permission denied",
+            "backend_reads": {
+              "/data/secret.txt": 0
+            }
+          }
+        },
+        {
+          "facade": {
+            "method": "read",
+            "path": "/control/allow"
+          },
+          "expect": {
+            "value": ""
+          }
+        },
+        {
+          "command": "cat /data/secret.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "TOPSECRET plans\n",
+            "stderr": ""
+          }
+        },
+        {
+          "facade": {
+            "method": "read",
+            "path": "/control/pre"
+          },
+          "expect": {
+            "value": ""
+          }
+        },
+        {
+          "command": "cat /data/secret.txt",
+          "expect": {
+            "exit": 1,
+            "stdout": "",
+            "stderr_contains": "Permission denied",
+            "backend_reads": {
+              "/data/secret.txt": 0
+            }
+          }
+        },
+        {
+          "facade": {
+            "method": "read",
+            "path": "/control/allow"
+          },
+          "expect": {
+            "value": ""
+          }
+        },
+        {
+          "command": "cat /data/secret.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "TOPSECRET plans\n",
+            "stderr": ""
+          }
+        },
+        {
+          "facade": {
+            "method": "read",
+            "path": "/control/post"
+          },
+          "expect": {
+            "value": ""
+          }
+        },
+        {
+          "command": "cat /data/secret.txt",
+          "expect": {
+            "exit": 1,
+            "stdout": "",
+            "stderr_contains": "Permission denied",
+            "backend_reads": {
+              "/data/secret.txt": 0
+            }
+          }
+        },
+        {
+          "facade": {
+            "method": "read",
+            "path": "/control/allow"
+          },
+          "expect": {
+            "value": ""
+          }
+        },
+        {
+          "command": "cat /data/secret.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "TOPSECRET plans\n",
+            "stderr": ""
+          }
+        }
+      ]
+    },
+    {
+      "id": "file_cli_warm_read_obeys_current_policy",
+      "backends": [
+        "ram",
+        "disk"
+      ],
+      "world": {
+        "read_control": "/data/secret.txt",
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "secret.txt": "TOPSECRET plans\n"
+            },
+            "cache_reads": true
+          },
+          "/control": {
+            "vfs": "ram",
+            "files": {
+              "allow": "",
+              "hide": "",
+              "deny": "",
+              "pre": "",
+              "post": ""
+            }
+          }
+        },
+        "builtin_clis": [
+          "git"
+        ]
+      },
+      "steps": [
+        {
+          "command": "git hash-object /data/secret.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "abdd848491224950da912bb7d278330cbd32b784\n",
+            "stderr": ""
+          }
+        },
+        {
+          "facade": {
+            "method": "read",
+            "path": "/control/hide"
+          },
+          "expect": {
+            "value": ""
+          }
+        },
+        {
+          "command": "git hash-object /data/secret.txt",
+          "expect": {
+            "exit": 128,
+            "stdout": "",
+            "stderr_contains": "No such file",
+            "backend_reads": {
+              "/data/secret.txt": 0
+            }
+          }
+        },
+        {
+          "facade": {
+            "method": "read",
+            "path": "/control/allow"
+          },
+          "expect": {
+            "value": ""
+          }
+        },
+        {
+          "command": "git hash-object /data/secret.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "abdd848491224950da912bb7d278330cbd32b784\n",
+            "stderr": ""
+          }
+        },
+        {
+          "facade": {
+            "method": "read",
+            "path": "/control/deny"
+          },
+          "expect": {
+            "value": ""
+          }
+        },
+        {
+          "command": "git hash-object /data/secret.txt",
+          "expect": {
+            "exit": 1,
+            "stdout": "",
+            "stderr_contains": "Permission denied",
+            "backend_reads": {
+              "/data/secret.txt": 0
+            }
+          }
+        },
+        {
+          "facade": {
+            "method": "read",
+            "path": "/control/allow"
+          },
+          "expect": {
+            "value": ""
+          }
+        },
+        {
+          "command": "git hash-object /data/secret.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "abdd848491224950da912bb7d278330cbd32b784\n",
+            "stderr": ""
+          }
+        },
+        {
+          "facade": {
+            "method": "read",
+            "path": "/control/pre"
+          },
+          "expect": {
+            "value": ""
+          }
+        },
+        {
+          "command": "git hash-object /data/secret.txt",
+          "expect": {
+            "exit": 128,
+            "stdout": "",
+            "stderr_contains": "Permission denied",
+            "backend_reads": {
+              "/data/secret.txt": 0
+            }
+          }
+        },
+        {
+          "facade": {
+            "method": "read",
+            "path": "/control/allow"
+          },
+          "expect": {
+            "value": ""
+          }
+        },
+        {
+          "command": "git hash-object /data/secret.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "abdd848491224950da912bb7d278330cbd32b784\n",
+            "stderr": ""
+          }
+        },
+        {
+          "facade": {
+            "method": "read",
+            "path": "/control/post"
+          },
+          "expect": {
+            "value": ""
+          }
+        },
+        {
+          "command": "git hash-object /data/secret.txt",
+          "expect": {
+            "exit": 128,
+            "stdout": "",
+            "stderr_contains": "Permission denied",
+            "backend_reads": {
+              "/data/secret.txt": 0
+            }
+          }
+        },
+        {
+          "facade": {
+            "method": "read",
+            "path": "/control/allow"
+          },
+          "expect": {
+            "value": ""
+          }
+        },
+        {
+          "command": "git hash-object /data/secret.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "abdd848491224950da912bb7d278330cbd32b784\n",
+            "stderr": ""
+          }
+        }
+      ]
+    },
+    {
+      "id": "guest_open_descriptor_obeys_policy_changes",
+      "runtimes": [
+        "host",
+        "wasi",
+        "quickjs",
+        "pyodide"
+      ],
+      "backends": [
+        "ram",
+        "disk"
+      ],
+      "world": {
+        "read_control": "/data/secret.txt",
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "secret.txt": "TOPSECRET plans\n"
+            }
+          },
+          "/control": {
+            "vfs": "ram",
+            "files": {
+              "allow": "",
+              "hide": "",
+              "deny": "",
+              "pre": "",
+              "post": ""
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "program": {
+            "python": "import os, errno\nfd = os.open('/data/secret.txt', os.O_RDONLY)\ntry:\n    print(os.read(fd, 3).decode())\n    for mode in ['pre', 'post']:\n        control = os.open('/control/' + mode, os.O_RDONLY)\n        os.read(control, 1)\n        os.close(control)\n        os.lseek(fd, 3, 0)\n        try:\n            print(os.read(fd, 3).decode())\n        except OSError as error:\n            print(errno.errorcode[error.errno])\n        control = os.open('/control/allow', os.O_RDONLY)\n        os.read(control, 1)\n        os.close(control)\n        os.lseek(fd, 3, 0)\n        print(os.read(fd, 3).decode())\nfinally:\n    os.close(fd)",
+            "node": "const fs = require('node:fs').promises\nconst fd = await fs.open('/data/secret.txt', 'r')\nconst take = async (offset) => {\n  const buffer = Buffer.alloc(3)\n  const {bytesRead} = await fd.read(buffer, 0, 3, offset)\n  console.log(buffer.subarray(0, bytesRead).toString())\n}\ntry {\n  await take(0)\n  for (const mode of ['pre', 'post']) {\n    await fs.readFile('/control/' + mode)\n    try { await take(3) } catch (error) { console.log(error.code) }\n    await fs.readFile('/control/allow')\n    await take(3)\n  }\n} finally { await fd.close() }",
+            "js": "const file = std.open('/data/secret.txt', 'r')\nconst take = () => {\n  const bytes = new Uint8Array(3)\n  const count = file.read(bytes.buffer, 0, 3)\n  if (file.error()) { console.log('refused'); file.clearerr() }\n  else console.log(String.fromCharCode(...bytes.slice(0, count)))\n}\ntry {\n  take()\n  for (const mode of ['pre', 'post']) {\n    let control = std.open('/control/' + mode, 'r'); control.readAsString(); control.close()\n    file.seek(3, std.SEEK_SET); take()\n    control = std.open('/control/allow', 'r'); control.readAsString(); control.close()\n    file.seek(3, std.SEEK_SET); take()\n  }\n} finally { file.close() }"
+          },
+          "expect": {
+            "python": {
+              "exit": 0,
+              "stdout": "TOP\nEACCES\nSEC\nEACCES\nSEC\n"
+            },
+            "node": {
+              "exit": 0,
+              "stdout": "TOP\nEACCES\nSEC\nEACCES\nSEC\n"
+            },
+            "js": {
+              "exit": 0,
+              "stdout": "TOP\nrefused\nSEC\nrefused\nSEC\n"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "copy_checks_warm_source_result_policy",
+      "backends": [
+        "ram",
+        "disk"
+      ],
+      "world": {
+        "read_control": "/data/secret.txt",
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "secret.txt": "TOPSECRET plans\n"
+            },
+            "cache_reads": true
+          },
+          "/control": {
+            "vfs": "ram",
+            "files": {
+              "allow": "",
+              "hide": "",
+              "deny": "",
+              "pre": "",
+              "post": ""
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "facade": {
+            "method": "read",
+            "path": "/data/secret.txt"
+          },
+          "expect": {
+            "value": "TOPSECRET plans\n"
+          }
+        },
+        {
+          "facade": {
+            "method": "read",
+            "path": "/control/post"
+          },
+          "expect": {
+            "value": ""
+          }
+        },
+        {
+          "command": "cp /data/secret.txt /data/copied.txt",
+          "expect": {
+            "exit": 1,
+            "stdout": "",
+            "stderr_contains": "Permission denied",
+            "backend_reads": {
+              "/data/secret.txt": 0
+            }
+          }
+        },
+        {
+          "facade": {
+            "method": "read",
+            "path": "/control/allow"
+          },
+          "expect": {
+            "value": ""
+          }
+        },
+        {
+          "command": "cp /data/secret.txt /data/copied.txt && cat /data/copied.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "TOPSECRET plans\n",
+            "stderr": ""
+          }
+        }
+      ]
+    },
+    {
+      "id": "monty_reads_obey_live_policy",
+      "runtimes": [
+        "monty"
+      ],
+      "backends": [
+        "ram",
+        "disk"
+      ],
+      "world": {
+        "read_control": "/data/secret.txt",
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "secret.txt": "TOPSECRET plans\n"
+            },
+            "cache_reads": true
+          },
+          "/control": {
+            "vfs": "ram",
+            "files": {
+              "allow": "",
+              "hide": "",
+              "deny": "",
+              "pre": "",
+              "post": ""
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "program": {
+            "python": "from pathlib import Path\nprint(Path('/data/secret.txt').read_text(), end='')\nfor mode in ['pre', 'post']:\n    Path('/control/' + mode).read_text()\n    try:\n        print(Path('/data/secret.txt').read_text(), end='')\n    except OSError as error:\n        print(type(error).__name__)\n    Path('/control/allow').read_text()\n    print(Path('/data/secret.txt').read_text(), end='')"
+          },
+          "expect": {
+            "exit": 0,
+            "stdout": "TOPSECRET plans\nPermissionError\nTOPSECRET plans\nPermissionError\nTOPSECRET plans\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "live_hide_revokes_running_guest",
+      "runtimes": [
+        "monty",
+        "wasi",
+        "quickjs",
+        "pyodide"
+      ],
+      "backends": [
+        "ram",
+        "disk"
+      ],
+      "world": {
+        "read_control": "/data/secret.txt",
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "secret.txt": "TOPSECRET plans\n"
+            }
+          },
+          "/control": {
+            "vfs": "ram",
+            "files": {
+              "allow": "",
+              "hide": "",
+              "deny": "",
+              "pre": "",
+              "post": ""
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "program": {
+            "python": "from pathlib import Path\nPath('/data/secret.txt').read_text()\nPath('/control/hide').read_text()\nPath('/data/continued.txt').write_text('after revocation')\nprint('after revocation')",
+            "js": "let file = std.open('/data/secret.txt', 'r'); file.readAsString(); file.close(); file = std.open('/control/hide', 'r'); file.readAsString(); file.close(); file = std.open('/data/continued.txt', 'w'); file.puts('after revocation'); file.close(); console.log('after revocation')"
+          },
+          "expect": {
+            "cancelled": true
+          }
+        },
+        {
+          "facade": {
+            "method": "exists",
+            "path": "/data/continued.txt"
+          },
+          "expect": {
+            "value": false
+          }
+        },
+        {
+          "facade": {
+            "method": "read",
+            "path": "/control/allow"
+          },
+          "expect": {
+            "value": ""
+          }
+        },
+        {
+          "program": {
+            "python": "from pathlib import Path\nprint(Path('/data/secret.txt').read_text(), end='')",
+            "js": "const file = std.open('/data/secret.txt', 'r'); console.log(file.readAsString().trim()); file.close()"
+          },
+          "expect": {
+            "exit": 0,
+            "stdout": "TOPSECRET plans\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "live_deny_revokes_running_guest",
+      "runtimes": [
+        "monty",
+        "wasi",
+        "quickjs",
+        "pyodide"
+      ],
+      "backends": [
+        "ram",
+        "disk"
+      ],
+      "world": {
+        "read_control": "/data/secret.txt",
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "secret.txt": "TOPSECRET plans\n"
+            }
+          },
+          "/control": {
+            "vfs": "ram",
+            "files": {
+              "allow": "",
+              "hide": "",
+              "deny": "",
+              "pre": "",
+              "post": ""
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "program": {
+            "python": "from pathlib import Path\nPath('/data/secret.txt').read_text()\nPath('/control/deny').read_text()\nPath('/data/continued.txt').write_text('after revocation')\nprint('after revocation')",
+            "js": "let file = std.open('/data/secret.txt', 'r'); file.readAsString(); file.close(); file = std.open('/control/deny', 'r'); file.readAsString(); file.close(); file = std.open('/data/continued.txt', 'w'); file.puts('after revocation'); file.close(); console.log('after revocation')"
+          },
+          "expect": {
+            "cancelled": true
+          }
+        },
+        {
+          "facade": {
+            "method": "exists",
+            "path": "/data/continued.txt"
+          },
+          "expect": {
+            "value": false
+          }
+        },
+        {
+          "facade": {
+            "method": "read",
+            "path": "/control/allow"
+          },
+          "expect": {
+            "value": ""
+          }
+        },
+        {
+          "program": {
+            "python": "from pathlib import Path\nprint(Path('/data/secret.txt').read_text(), end='')",
+            "js": "const file = std.open('/data/secret.txt', 'r'); console.log(file.readAsString().trim()); file.close()"
+          },
+          "expect": {
+            "exit": 0,
+            "stdout": "TOPSECRET plans\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "host_retained_metadata_attached",
+      "backends": [
+        "ram",
+        "disk"
+      ],
+      "world": {
+        "read_control": "/data/secret.txt",
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "secret.txt": "TOPSECRET plans\n"
+            }
+          },
+          "/control": {
+            "vfs": "ram",
+            "files": {
+              "allow": "",
+              "hide": "",
+              "deny": "",
+              "pre": "",
+              "post": "",
+              "pre_stat": "",
+              "post_stat": ""
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "handle": {
+            "id": "kept",
+            "op": "open",
+            "surface": "host",
+            "path": "/data/secret.txt"
+          }
+        },
+        {
+          "handle": {
+            "id": "kept",
+            "op": "read",
+            "size": 3
+          },
+          "expect": {
+            "content": "TOP"
+          }
+        },
+        {
+          "handle": {
+            "id": "kept",
+            "op": "stat"
+          },
+          "expect": {
+            "value": 16
+          }
+        },
+        {
+          "facade": {
+            "method": "read",
+            "path": "/control/hide"
+          },
+          "expect": {
+            "value": ""
+          }
+        },
+        {
+          "handle": {
+            "id": "kept",
+            "op": "stat"
+          },
+          "expect": {
+            "errno": "ENOENT"
+          }
+        },
+        {
+          "facade": {
+            "method": "read",
+            "path": "/control/allow"
+          },
+          "expect": {
+            "value": ""
+          }
+        },
+        {
+          "handle": {
+            "id": "kept",
+            "op": "stat"
+          },
+          "expect": {
+            "value": 16
+          }
+        },
+        {
+          "facade": {
+            "method": "read",
+            "path": "/control/pre_stat"
+          },
+          "expect": {
+            "value": ""
+          }
+        },
+        {
+          "handle": {
+            "id": "kept",
+            "op": "stat"
+          },
+          "expect": {
+            "errno": "EACCES"
+          }
+        },
+        {
+          "facade": {
+            "method": "read",
+            "path": "/control/allow"
+          },
+          "expect": {
+            "value": ""
+          }
+        },
+        {
+          "handle": {
+            "id": "kept",
+            "op": "stat"
+          },
+          "expect": {
+            "value": 16
+          }
+        },
+        {
+          "facade": {
+            "method": "read",
+            "path": "/control/post_stat"
+          },
+          "expect": {
+            "value": ""
+          }
+        },
+        {
+          "handle": {
+            "id": "kept",
+            "op": "stat"
+          },
+          "expect": {
+            "errno": "EACCES"
+          }
+        },
+        {
+          "facade": {
+            "method": "read",
+            "path": "/control/allow"
+          },
+          "expect": {
+            "value": ""
+          }
+        },
+        {
+          "handle": {
+            "id": "kept",
+            "op": "stat"
+          },
+          "expect": {
+            "value": 16
+          }
+        },
+        {
+          "handle": {
+            "id": "kept",
+            "op": "close"
+          }
+        }
+      ]
+    },
+    {
+      "id": "host_retained_metadata_detached",
+      "backends": [
+        "ram",
+        "disk"
+      ],
+      "world": {
+        "read_control": "/data/secret.txt",
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "secret.txt": "TOPSECRET plans\n"
+            }
+          },
+          "/control": {
+            "vfs": "ram",
+            "files": {
+              "allow": "",
+              "hide": "",
+              "deny": "",
+              "pre": "",
+              "post": "",
+              "pre_stat": "",
+              "post_stat": ""
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "handle": {
+            "id": "kept",
+            "op": "open",
+            "surface": "host",
+            "path": "/data/secret.txt"
+          }
+        },
+        {
+          "handle": {
+            "id": "kept",
+            "op": "read",
+            "size": 3
+          },
+          "expect": {
+            "content": "TOP"
+          }
+        },
+        {
+          "handle": {
+            "id": "kept",
+            "op": "stat"
+          },
+          "expect": {
+            "value": 16
+          }
+        },
+        {
+          "handle": {
+            "id": "kept",
+            "op": "unlink"
+          }
+        },
+        {
+          "handle": {
+            "id": "kept",
+            "op": "read",
+            "size": 3,
+            "offset": 3
+          },
+          "expect": {
+            "content": "SEC",
+            "backend_reads": {
+              "/data/secret.txt": 0
+            }
+          }
+        },
+        {
+          "facade": {
+            "method": "read",
+            "path": "/control/hide"
+          },
+          "expect": {
+            "value": ""
+          }
+        },
+        {
+          "handle": {
+            "id": "kept",
+            "op": "stat"
+          },
+          "expect": {
+            "errno": "ENOENT"
+          }
+        },
+        {
+          "facade": {
+            "method": "read",
+            "path": "/control/allow"
+          },
+          "expect": {
+            "value": ""
+          }
+        },
+        {
+          "handle": {
+            "id": "kept",
+            "op": "stat"
+          },
+          "expect": {
+            "value": 16
+          }
+        },
+        {
+          "facade": {
+            "method": "read",
+            "path": "/control/pre_stat"
+          },
+          "expect": {
+            "value": ""
+          }
+        },
+        {
+          "handle": {
+            "id": "kept",
+            "op": "stat"
+          },
+          "expect": {
+            "errno": "EACCES"
+          }
+        },
+        {
+          "facade": {
+            "method": "read",
+            "path": "/control/allow"
+          },
+          "expect": {
+            "value": ""
+          }
+        },
+        {
+          "handle": {
+            "id": "kept",
+            "op": "stat"
+          },
+          "expect": {
+            "value": 16
+          }
+        },
+        {
+          "facade": {
+            "method": "read",
+            "path": "/control/post_stat"
+          },
+          "expect": {
+            "value": ""
+          }
+        },
+        {
+          "handle": {
+            "id": "kept",
+            "op": "stat"
+          },
+          "expect": {
+            "errno": "EACCES"
+          }
+        },
+        {
+          "facade": {
+            "method": "read",
+            "path": "/control/allow"
+          },
+          "expect": {
+            "value": ""
+          }
+        },
+        {
+          "handle": {
+            "id": "kept",
+            "op": "stat"
+          },
+          "expect": {
+            "value": 16
+          }
+        },
+        {
+          "handle": {
+            "id": "kept",
+            "op": "close"
+          }
+        }
+      ]
+    },
+    {
+      "id": "mount_retained_metadata_attached",
+      "backends": [
+        "ram",
+        "disk"
+      ],
+      "world": {
+        "read_control": "/data/secret.txt",
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "secret.txt": "TOPSECRET plans\n"
+            }
+          },
+          "/control": {
+            "vfs": "ram",
+            "files": {
+              "allow": "",
+              "hide": "",
+              "deny": "",
+              "pre": "",
+              "post": "",
+              "pre_stat": "",
+              "post_stat": ""
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "handle": {
+            "id": "kept",
+            "op": "open",
+            "surface": "mount",
+            "path": "/data/secret.txt"
+          }
+        },
+        {
+          "handle": {
+            "id": "kept",
+            "op": "read",
+            "size": 3
+          },
+          "expect": {
+            "content": "TOP"
+          }
+        },
+        {
+          "handle": {
+            "id": "kept",
+            "op": "stat"
+          },
+          "expect": {
+            "value": 16
+          }
+        },
+        {
+          "facade": {
+            "method": "read",
+            "path": "/control/hide"
+          },
+          "expect": {
+            "value": ""
+          }
+        },
+        {
+          "handle": {
+            "id": "kept",
+            "op": "stat"
+          },
+          "expect": {
+            "errno": "ENOENT"
+          }
+        },
+        {
+          "facade": {
+            "method": "read",
+            "path": "/control/allow"
+          },
+          "expect": {
+            "value": ""
+          }
+        },
+        {
+          "handle": {
+            "id": "kept",
+            "op": "stat"
+          },
+          "expect": {
+            "value": 16
+          }
+        },
+        {
+          "facade": {
+            "method": "read",
+            "path": "/control/pre_stat"
+          },
+          "expect": {
+            "value": ""
+          }
+        },
+        {
+          "handle": {
+            "id": "kept",
+            "op": "stat"
+          },
+          "expect": {
+            "errno": "EACCES"
+          }
+        },
+        {
+          "facade": {
+            "method": "read",
+            "path": "/control/allow"
+          },
+          "expect": {
+            "value": ""
+          }
+        },
+        {
+          "handle": {
+            "id": "kept",
+            "op": "stat"
+          },
+          "expect": {
+            "value": 16
+          }
+        },
+        {
+          "facade": {
+            "method": "read",
+            "path": "/control/post_stat"
+          },
+          "expect": {
+            "value": ""
+          }
+        },
+        {
+          "handle": {
+            "id": "kept",
+            "op": "stat"
+          },
+          "expect": {
+            "errno": "EACCES"
+          }
+        },
+        {
+          "facade": {
+            "method": "read",
+            "path": "/control/allow"
+          },
+          "expect": {
+            "value": ""
+          }
+        },
+        {
+          "handle": {
+            "id": "kept",
+            "op": "stat"
+          },
+          "expect": {
+            "value": 16
+          }
+        },
+        {
+          "handle": {
+            "id": "kept",
+            "op": "close"
+          }
+        }
+      ]
+    },
+    {
+      "id": "mount_retained_metadata_detached",
+      "backends": [
+        "ram",
+        "disk"
+      ],
+      "world": {
+        "read_control": "/data/secret.txt",
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "secret.txt": "TOPSECRET plans\n"
+            }
+          },
+          "/control": {
+            "vfs": "ram",
+            "files": {
+              "allow": "",
+              "hide": "",
+              "deny": "",
+              "pre": "",
+              "post": "",
+              "pre_stat": "",
+              "post_stat": ""
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "handle": {
+            "id": "kept",
+            "op": "open",
+            "surface": "mount",
+            "path": "/data/secret.txt"
+          }
+        },
+        {
+          "handle": {
+            "id": "kept",
+            "op": "read",
+            "size": 3
+          },
+          "expect": {
+            "content": "TOP"
+          }
+        },
+        {
+          "handle": {
+            "id": "kept",
+            "op": "stat"
+          },
+          "expect": {
+            "value": 16
+          }
+        },
+        {
+          "handle": {
+            "id": "kept",
+            "op": "unlink"
+          }
+        },
+        {
+          "handle": {
+            "id": "kept",
+            "op": "read",
+            "size": 3,
+            "offset": 3
+          },
+          "expect": {
+            "content": "SEC",
+            "backend_reads": {
+              "/data/secret.txt": 0
+            }
+          }
+        },
+        {
+          "facade": {
+            "method": "read",
+            "path": "/control/hide"
+          },
+          "expect": {
+            "value": ""
+          }
+        },
+        {
+          "handle": {
+            "id": "kept",
+            "op": "stat"
+          },
+          "expect": {
+            "errno": "ENOENT"
+          }
+        },
+        {
+          "facade": {
+            "method": "read",
+            "path": "/control/allow"
+          },
+          "expect": {
+            "value": ""
+          }
+        },
+        {
+          "handle": {
+            "id": "kept",
+            "op": "stat"
+          },
+          "expect": {
+            "value": 16
+          }
+        },
+        {
+          "facade": {
+            "method": "read",
+            "path": "/control/pre_stat"
+          },
+          "expect": {
+            "value": ""
+          }
+        },
+        {
+          "handle": {
+            "id": "kept",
+            "op": "stat"
+          },
+          "expect": {
+            "errno": "EACCES"
+          }
+        },
+        {
+          "facade": {
+            "method": "read",
+            "path": "/control/allow"
+          },
+          "expect": {
+            "value": ""
+          }
+        },
+        {
+          "handle": {
+            "id": "kept",
+            "op": "stat"
+          },
+          "expect": {
+            "value": 16
+          }
+        },
+        {
+          "facade": {
+            "method": "read",
+            "path": "/control/post_stat"
+          },
+          "expect": {
+            "value": ""
+          }
+        },
+        {
+          "handle": {
+            "id": "kept",
+            "op": "stat"
+          },
+          "expect": {
+            "errno": "EACCES"
+          }
+        },
+        {
+          "facade": {
+            "method": "read",
+            "path": "/control/allow"
+          },
+          "expect": {
+            "value": ""
+          }
+        },
+        {
+          "handle": {
+            "id": "kept",
+            "op": "stat"
+          },
+          "expect": {
+            "value": 16
+          }
+        },
+        {
+          "handle": {
+            "id": "kept",
+            "op": "close"
+          }
+        }
+      ]
+    },
+    {
+      "id": "fuse_retained_metadata_attached",
+      "backends": [
+        "ram",
+        "disk"
+      ],
+      "world": {
+        "read_control": "/data/secret.txt",
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "secret.txt": "TOPSECRET plans\n"
+            }
+          },
+          "/control": {
+            "vfs": "ram",
+            "files": {
+              "allow": "",
+              "hide": "",
+              "deny": "",
+              "pre": "",
+              "post": "",
+              "pre_stat": "",
+              "post_stat": ""
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "handle": {
+            "id": "kept",
+            "op": "open",
+            "surface": "fuse",
+            "path": "/data/secret.txt"
+          }
+        },
+        {
+          "handle": {
+            "id": "kept",
+            "op": "read",
+            "size": 3
+          },
+          "expect": {
+            "content": "TOP"
+          }
+        },
+        {
+          "handle": {
+            "id": "kept",
+            "op": "stat"
+          },
+          "expect": {
+            "value": 16
+          }
+        },
+        {
+          "facade": {
+            "method": "read",
+            "path": "/control/hide"
+          },
+          "expect": {
+            "value": ""
+          }
+        },
+        {
+          "handle": {
+            "id": "kept",
+            "op": "stat"
+          },
+          "expect": {
+            "errno": "ENOENT"
+          }
+        },
+        {
+          "facade": {
+            "method": "read",
+            "path": "/control/allow"
+          },
+          "expect": {
+            "value": ""
+          }
+        },
+        {
+          "handle": {
+            "id": "kept",
+            "op": "stat"
+          },
+          "expect": {
+            "value": 16
+          }
+        },
+        {
+          "facade": {
+            "method": "read",
+            "path": "/control/pre_stat"
+          },
+          "expect": {
+            "value": ""
+          }
+        },
+        {
+          "handle": {
+            "id": "kept",
+            "op": "stat"
+          },
+          "expect": {
+            "errno": "EACCES"
+          }
+        },
+        {
+          "facade": {
+            "method": "read",
+            "path": "/control/allow"
+          },
+          "expect": {
+            "value": ""
+          }
+        },
+        {
+          "handle": {
+            "id": "kept",
+            "op": "stat"
+          },
+          "expect": {
+            "value": 16
+          }
+        },
+        {
+          "facade": {
+            "method": "read",
+            "path": "/control/post_stat"
+          },
+          "expect": {
+            "value": ""
+          }
+        },
+        {
+          "handle": {
+            "id": "kept",
+            "op": "stat"
+          },
+          "expect": {
+            "errno": "EACCES"
+          }
+        },
+        {
+          "facade": {
+            "method": "read",
+            "path": "/control/allow"
+          },
+          "expect": {
+            "value": ""
+          }
+        },
+        {
+          "handle": {
+            "id": "kept",
+            "op": "stat"
+          },
+          "expect": {
+            "value": 16
+          }
+        },
+        {
+          "handle": {
+            "id": "kept",
+            "op": "close"
+          }
+        }
+      ]
+    },
+    {
+      "id": "fuse_retained_metadata_detached",
+      "backends": [
+        "ram",
+        "disk"
+      ],
+      "world": {
+        "read_control": "/data/secret.txt",
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "secret.txt": "TOPSECRET plans\n"
+            }
+          },
+          "/control": {
+            "vfs": "ram",
+            "files": {
+              "allow": "",
+              "hide": "",
+              "deny": "",
+              "pre": "",
+              "post": "",
+              "pre_stat": "",
+              "post_stat": ""
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "handle": {
+            "id": "kept",
+            "op": "open",
+            "surface": "fuse",
+            "path": "/data/secret.txt"
+          }
+        },
+        {
+          "handle": {
+            "id": "kept",
+            "op": "read",
+            "size": 3
+          },
+          "expect": {
+            "content": "TOP"
+          }
+        },
+        {
+          "handle": {
+            "id": "kept",
+            "op": "stat"
+          },
+          "expect": {
+            "value": 16
+          }
+        },
+        {
+          "handle": {
+            "id": "kept",
+            "op": "unlink"
+          }
+        },
+        {
+          "handle": {
+            "id": "kept",
+            "op": "read",
+            "size": 3,
+            "offset": 3
+          },
+          "expect": {
+            "content": "SEC",
+            "backend_reads": {
+              "/data/secret.txt": 0
+            }
+          }
+        },
+        {
+          "facade": {
+            "method": "read",
+            "path": "/control/hide"
+          },
+          "expect": {
+            "value": ""
+          }
+        },
+        {
+          "handle": {
+            "id": "kept",
+            "op": "stat"
+          },
+          "expect": {
+            "errno": "ENOENT"
+          }
+        },
+        {
+          "facade": {
+            "method": "read",
+            "path": "/control/allow"
+          },
+          "expect": {
+            "value": ""
+          }
+        },
+        {
+          "handle": {
+            "id": "kept",
+            "op": "stat"
+          },
+          "expect": {
+            "value": 16
+          }
+        },
+        {
+          "facade": {
+            "method": "read",
+            "path": "/control/pre_stat"
+          },
+          "expect": {
+            "value": ""
+          }
+        },
+        {
+          "handle": {
+            "id": "kept",
+            "op": "stat"
+          },
+          "expect": {
+            "errno": "EACCES"
+          }
+        },
+        {
+          "facade": {
+            "method": "read",
+            "path": "/control/allow"
+          },
+          "expect": {
+            "value": ""
+          }
+        },
+        {
+          "handle": {
+            "id": "kept",
+            "op": "stat"
+          },
+          "expect": {
+            "value": 16
+          }
+        },
+        {
+          "facade": {
+            "method": "read",
+            "path": "/control/post_stat"
+          },
+          "expect": {
+            "value": ""
+          }
+        },
+        {
+          "handle": {
+            "id": "kept",
+            "op": "stat"
+          },
+          "expect": {
+            "errno": "EACCES"
+          }
+        },
+        {
+          "facade": {
+            "method": "read",
+            "path": "/control/allow"
+          },
+          "expect": {
+            "value": ""
+          }
+        },
+        {
+          "handle": {
+            "id": "kept",
+            "op": "stat"
+          },
+          "expect": {
+            "value": 16
+          }
+        },
+        {
+          "handle": {
+            "id": "kept",
+            "op": "close"
+          }
+        }
+      ]
+    },
+    {
+      "id": "guest_descriptor_metadata_attached",
+      "runtimes": [
+        "host",
+        "wasi",
+        "pyodide"
+      ],
+      "backends": [
+        "ram",
+        "disk"
+      ],
+      "world": {
+        "read_control": "/data/secret.txt",
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "secret.txt": "TOPSECRET plans\n"
+            }
+          },
+          "/control": {
+            "vfs": "ram",
+            "files": {
+              "allow": "",
+              "hide": "",
+              "deny": "",
+              "pre": "",
+              "post": "",
+              "pre_stat": "",
+              "post_stat": ""
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "program": {
+            "python": "import os, errno\nfd = os.open('/data/secret.txt', os.O_RDONLY)\ntry:\n    os.read(fd, 3)\n    print(os.fstat(fd).st_size)\n    for mode in ['pre_stat', 'post_stat']:\n        c = os.open('/control/' + mode, os.O_RDONLY)\n        os.read(c, 1)\n        os.close(c)\n        try:\n            print(os.fstat(fd).st_size)\n        except OSError as error:\n            print(errno.errorcode[error.errno])\n        c = os.open('/control/allow', os.O_RDONLY)\n        os.read(c, 1)\n        os.close(c)\n        print(os.fstat(fd).st_size)\nfinally:\n    os.close(fd)",
+            "node": "const fs = require('node:fs').promises\nconst fd = await fs.open('/data/secret.txt', 'r')\ntry {\n  await fd.read(Buffer.alloc(3), 0, 3, 0)\n  console.log((await fd.stat()).size)\n  for (const mode of ['pre_stat', 'post_stat']) {\n    await fs.readFile('/control/' + mode)\n    try { console.log((await fd.stat()).size) } catch (error) { console.log(error.code) }\n    await fs.readFile('/control/allow')\n    console.log((await fd.stat()).size)\n  }\n} finally { await fd.close() }"
+          },
+          "expect": {
+            "exit": 0,
+            "stdout": "16\nEACCES\n16\nEACCES\n16\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "guest_descriptor_metadata_detached",
+      "runtimes": [
+        "host",
+        "wasi",
+        "pyodide"
+      ],
+      "backends": [
+        "ram",
+        "disk"
+      ],
+      "world": {
+        "read_control": "/data/secret.txt",
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "secret.txt": "TOPSECRET plans\n"
+            }
+          },
+          "/control": {
+            "vfs": "ram",
+            "files": {
+              "allow": "",
+              "hide": "",
+              "deny": "",
+              "pre": "",
+              "post": "",
+              "pre_stat": "",
+              "post_stat": ""
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "program": {
+            "python": "import os, errno\nfd = os.open('/data/secret.txt', os.O_RDONLY)\ntry:\n    os.read(fd, 3)\n    print(os.fstat(fd).st_size)\n    os.unlink('/data/secret.txt')\n    print(os.fstat(fd).st_nlink)\n    for mode in ['pre_stat', 'post_stat']:\n        c = os.open('/control/' + mode, os.O_RDONLY)\n        os.read(c, 1)\n        os.close(c)\n        try:\n            print(os.fstat(fd).st_size)\n        except OSError as error:\n            print(errno.errorcode[error.errno])\n        c = os.open('/control/allow', os.O_RDONLY)\n        os.read(c, 1)\n        os.close(c)\n        print(os.fstat(fd).st_size)\nfinally:\n    os.close(fd)",
+            "node": "const fs = require('node:fs').promises\nconst fd = await fs.open('/data/secret.txt', 'r')\ntry {\n  await fd.read(Buffer.alloc(3), 0, 3, 0)\n  console.log((await fd.stat()).size)\n  await fs.unlink('/data/secret.txt')\n  console.log((await fd.stat()).nlink)\n  for (const mode of ['pre_stat', 'post_stat']) {\n    await fs.readFile('/control/' + mode)\n    try { console.log((await fd.stat()).size) } catch (error) { console.log(error.code) }\n    await fs.readFile('/control/allow')\n    console.log((await fd.stat()).size)\n  }\n} finally { await fd.close() }"
+          },
+          "expect": {
+            "exit": 0,
+            "stdout": "16\n0\nEACCES\n16\nEACCES\n16\n"
+          }
+        }
+      ]
+    }
+  ]
+}

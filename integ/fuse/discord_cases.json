@@ -1,0 +1,342 @@
+{
+  "file": "/discord/TestGuild__G1/channels/general__C1/2024-01-15/chat.jsonl",
+  "guild": {
+    "id": "G1",
+    "name": "TestGuild"
+  },
+  "channel": {
+    "id": "C1",
+    "name": "general",
+    "type": 0,
+    "last_message_id": "1196423538278400001"
+  },
+  "messages": [
+    {
+      "id": "1196423538278400000",
+      "content": "hello",
+      "author": {
+        "username": "alice"
+      }
+    },
+    {
+      "id": "1196423538278400001",
+      "content": "world",
+      "author": {
+        "username": "bob"
+      }
+    }
+  ],
+  "body": "{\"id\":\"1196423538278400000\",\"content\":\"hello\",\"author\":{\"username\":\"alice\"}}\n{\"id\":\"1196423538278400001\",\"content\":\"world\",\"author\":{\"username\":\"bob\"}}\n",
+  "partial": {
+    "offset": 3,
+    "size": 9
+  },
+  "cases": [
+    {
+      "id": "core-hydrate-0",
+      "adapter": "core",
+      "kind": "hydrate",
+      "early_close": false,
+      "expected_statuses": [
+        403,
+        200
+      ]
+    },
+    {
+      "id": "core-hydrate-1",
+      "adapter": "core",
+      "kind": "hydrate",
+      "early_close": true,
+      "expected_statuses": [
+        403,
+        200
+      ]
+    },
+    {
+      "id": "core-http-401-0",
+      "adapter": "core",
+      "kind": "failure",
+      "status": 401,
+      "recover": false,
+      "expected_errno": 5,
+      "expected_statuses": [
+        403,
+        401,
+        401
+      ]
+    },
+    {
+      "id": "core-http-401-1",
+      "adapter": "core",
+      "kind": "failure",
+      "status": 401,
+      "recover": true,
+      "expected_errno": 5,
+      "expected_statuses": [
+        403,
+        401,
+        401,
+        200
+      ]
+    },
+    {
+      "id": "core-http-403-0",
+      "adapter": "core",
+      "kind": "failure",
+      "status": 403,
+      "recover": false,
+      "expected_errno": 5,
+      "expected_statuses": [
+        403,
+        403,
+        403
+      ]
+    },
+    {
+      "id": "core-http-403-1",
+      "adapter": "core",
+      "kind": "failure",
+      "status": 403,
+      "recover": true,
+      "expected_errno": 5,
+      "expected_statuses": [
+        403,
+        403,
+        403,
+        200
+      ]
+    },
+    {
+      "id": "core-http-429-0",
+      "adapter": "core",
+      "kind": "failure",
+      "status": 429,
+      "recover": false,
+      "expected_errno": 5,
+      "expected_statuses": [
+        403,
+        429,
+        429,
+        429,
+        429,
+        429,
+        429
+      ]
+    },
+    {
+      "id": "core-http-429-1",
+      "adapter": "core",
+      "kind": "failure",
+      "status": 429,
+      "recover": true,
+      "expected_errno": 5,
+      "expected_statuses": [
+        403,
+        429,
+        429,
+        429,
+        429,
+        429,
+        429,
+        200
+      ]
+    },
+    {
+      "id": "core-policy-hide",
+      "adapter": "core",
+      "kind": "policy",
+      "restriction": "hide",
+      "expected_errno": 2,
+      "expected_statuses": [
+        403,
+        200
+      ]
+    },
+    {
+      "id": "core-policy-deny",
+      "adapter": "core",
+      "kind": "policy",
+      "restriction": "deny",
+      "expected_errno": 13,
+      "expected_statuses": [
+        403,
+        200
+      ]
+    },
+    {
+      "id": "core-policy-pre_vfs",
+      "adapter": "core",
+      "kind": "policy",
+      "restriction": "pre_vfs",
+      "expected_errno": 13,
+      "expected_statuses": [
+        403,
+        200
+      ]
+    },
+    {
+      "id": "core-policy-post_vfs",
+      "adapter": "core",
+      "kind": "policy",
+      "restriction": "post_vfs",
+      "expected_errno": 13,
+      "expected_statuses": [
+        403,
+        200
+      ]
+    },
+    {
+      "id": "fuse-hydrate-0",
+      "adapter": "fuse",
+      "kind": "hydrate",
+      "early_close": false,
+      "expected_statuses": [
+        403,
+        200
+      ]
+    },
+    {
+      "id": "fuse-hydrate-1",
+      "adapter": "fuse",
+      "kind": "hydrate",
+      "early_close": true,
+      "expected_statuses": [
+        403,
+        200
+      ]
+    },
+    {
+      "id": "fuse-http-401-0",
+      "adapter": "fuse",
+      "kind": "failure",
+      "status": 401,
+      "recover": false,
+      "expected_errno": 5,
+      "expected_statuses": [
+        403,
+        401,
+        401
+      ]
+    },
+    {
+      "id": "fuse-http-401-1",
+      "adapter": "fuse",
+      "kind": "failure",
+      "status": 401,
+      "recover": true,
+      "expected_errno": 5,
+      "expected_statuses": [
+        403,
+        401,
+        401,
+        200
+      ]
+    },
+    {
+      "id": "fuse-http-403-0",
+      "adapter": "fuse",
+      "kind": "failure",
+      "status": 403,
+      "recover": false,
+      "expected_errno": 5,
+      "expected_statuses": [
+        403,
+        403,
+        403
+      ]
+    },
+    {
+      "id": "fuse-http-403-1",
+      "adapter": "fuse",
+      "kind": "failure",
+      "status": 403,
+      "recover": true,
+      "expected_errno": 5,
+      "expected_statuses": [
+        403,
+        403,
+        403,
+        200
+      ]
+    },
+    {
+      "id": "fuse-http-429-0",
+      "adapter": "fuse",
+      "kind": "failure",
+      "status": 429,
+      "recover": false,
+      "expected_errno": 5,
+      "expected_statuses": [
+        403,
+        429,
+        429,
+        429,
+        429,
+        429,
+        429
+      ]
+    },
+    {
+      "id": "fuse-http-429-1",
+      "adapter": "fuse",
+      "kind": "failure",
+      "status": 429,
+      "recover": true,
+      "expected_errno": 5,
+      "expected_statuses": [
+        403,
+        429,
+        429,
+        429,
+        429,
+        429,
+        429,
+        200
+      ]
+    },
+    {
+      "id": "fuse-policy-hide",
+      "adapter": "fuse",
+      "kind": "policy",
+      "restriction": "hide",
+      "expected_errno": 2,
+      "expected_statuses": [
+        403,
+        200
+      ]
+    },
+    {
+      "id": "fuse-policy-deny",
+      "adapter": "fuse",
+      "kind": "policy",
+      "restriction": "deny",
+      "expected_errno": 13,
+      "expected_statuses": [
+        403,
+        200
+      ]
+    },
+    {
+      "id": "fuse-policy-pre_vfs",
+      "adapter": "fuse",
+      "kind": "policy",
+      "restriction": "pre_vfs",
+      "expected_errno": 13,
+      "expected_statuses": [
+        403,
+        200
+      ]
+    },
+    {
+      "id": "fuse-policy-post_vfs",
+      "adapter": "fuse",
+      "kind": "policy",
+      "restriction": "post_vfs",
+      "expected_errno": 13,
+      "expected_statuses": [
+        403,
+        200
+      ]
+    }
+  ]
+}

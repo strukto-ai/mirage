@@ -85,9 +85,11 @@ labels { nodes { id name } }
 
 TEAM_ISSUES_QUERY = (
     """
-query TeamIssues($teamId: String!, $first: Int!, $after: String) {
+query TeamIssues(
+  $teamId: String!, $first: Int!, $after: String, $filter: IssueFilter
+) {
   team(id: $teamId) {
-    issues(first: $first, after: $after) {
+    issues(first: $first, after: $after, filter: $filter) {
       nodes {"""
     + ISSUE_FIELDS
     + """}

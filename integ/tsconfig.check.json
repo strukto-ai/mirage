@@ -11,7 +11,9 @@
   // reported success over three fakes it had not read. A plain type error
   // (calling http.Server's closeAllConnections on a net.Server) shipped that way.
   "include": [
+    "runtime/run.ts",
     "runtime/microsandbox/**/*.ts",
+    "fuse/discord.ts",
     "server/**/*.ts",
     "hosting/**/*.ts",
     "access/**/*.ts",

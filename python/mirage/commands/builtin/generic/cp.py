@@ -1418,7 +1418,9 @@ async def _copy_entry(
     try:
         await strategy.copy(src, dst)
     except OSError as exc:
-        if exc.errno != errno.EXDEV or copies is None:
+        if copies is None or (
+            exc.errno != errno.EXDEV and not isinstance(exc, WalkDeclinedError)
+        ):
             raise
         data = await prime_stream(copies.relay.read(src))
         try:
@@ -2354,7 +2356,7 @@ async def cp_generic(
                 continue
         else:
             try:
-                await copier.copy(src, target)
+                await _copy_entry(copier, copies, src, target)
             except FS_ERRORS as exc:
                 errors.append(
                     f"cp: cannot create regular file "

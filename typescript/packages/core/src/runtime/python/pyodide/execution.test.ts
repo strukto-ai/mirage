@@ -101,7 +101,8 @@ describe('Pyodide concurrency', { timeout: 120_000 }, () => {
       const pending: Promise<unknown>[] = []
       rt.bind(
         WorkspaceBinding.overBridge(
-          async (op, path) => {
+          async (op, path, _bytes, _dst, attrs) => {
+            if (attrs?.retained !== undefined) return attrs.retained
             if (op === 'stat') return new FileStat({ name: path, type: FileType.FILE, size: 5 })
             const read = reads.get(path.slice('/data/'.length))
             if (op !== 'read' || read === undefined) throw new Error(`unexpected ${op}: ${path}`)
@@ -187,7 +188,8 @@ describe('Pyodide concurrency', { timeout: 120_000 }, () => {
       const rt = new PyodideRuntime({ config: { maxConcurrency: 2 } })
       rt.bind(
         WorkspaceBinding.overBridge(
-          async (op, path) => {
+          async (op, path, _bytes, _dst, attrs) => {
+            if (attrs?.retained !== undefined) return attrs.retained
             if (op === 'stat') return new FileStat({ name: path, type: FileType.FILE, size: 4 })
             if (op !== 'read') throw new Error(`unexpected ${op}: ${path}`)
             if (path === '/data/started') {

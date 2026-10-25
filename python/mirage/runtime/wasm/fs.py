@@ -471,6 +471,7 @@ class WasiFs:
             size=0 if row is None else row.size,
             writable=mode.writable,
             append=mode.append,
+            read_cached=functools.partial(self._read_cached, entry),
         )
         fd = self._fds.add(entry)
         self._store(caller, out, pack_u32(fd))
@@ -540,9 +541,11 @@ class WasiFs:
         entry = self._fds.get(fd)
         if h is None or entry is None or not entry.readable:
             return EBADF
+        vectors = self._iovs(caller, iovs, count)
+        data = h.read(sum(length for _, length in vectors))
         total = 0
-        for bptr, blen in self._iovs(caller, iovs, count):
-            chunk = h.read(blen)
+        for bptr, blen in vectors:
+            chunk = data[total : total + blen]
             if chunk:
                 self._store(caller, bptr, chunk)
             total += len(chunk)
@@ -564,12 +567,13 @@ class WasiFs:
         entry = self._fds.get(fd)
         if h is None or entry is None or not entry.readable:
             return EBADF
-        total, pos = 0, offset
-        for bptr, blen in self._iovs(caller, iovs, count):
-            chunk = h.pread(pos, blen)
+        vectors = self._iovs(caller, iovs, count)
+        data = h.pread(offset, sum(length for _, length in vectors))
+        total = 0
+        for bptr, blen in vectors:
+            chunk = data[total : total + blen]
             if chunk:
                 self._store(caller, bptr, chunk)
-            pos += len(chunk)
             total += len(chunk)
             if len(chunk) < blen:
                 break
@@ -676,7 +680,10 @@ class WasiFs:
             # The size is the handle's, which counts what it wrote.
             row = entry.stat or VFSStat(size=0, is_dir=False, mode=FILE_MODE)
             posix = posix_stat(
-                dataclasses.replace(row, size=entry.handle.size),
+                self._fs.stat_cached(
+                    entry.path,
+                    dataclasses.replace(row, size=entry.handle.size),
+                ),
                 entry.opened,
                 "/",
             )
@@ -838,8 +845,19 @@ class WasiFs:
         """
         if entry.kept is not None:
             end = None if size is None else offset + size
-            return kept_view(entry.kept, raw)[offset:end]
+            return self._read_cached(
+                entry, kept_view(entry.kept, raw)[offset:end]
+            )
         return self._fs.read(entry.path, offset=offset, size=size, raw=raw)
+
+    def _read_cached(self, entry: FdEntry, data: bytes) -> bytes:
+        """Judge an open file's retained bytes through its current view.
+
+        Args:
+            entry (FdEntry): the open file's entry.
+            data (bytes): the logical read result.
+        """
+        return self._fs.read_cached(entry.path, data)
 
     def _hold(self, path: str) -> list[tuple[FdEntry, Kept]]:
         """Read what the file fds open on ``path`` need before its name is

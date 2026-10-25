@@ -106,7 +106,7 @@ export class QuickJsRuntime extends JsRuntime<NewAsyncModule> {
     try {
       this.installGlobals(vm, program, ctx, out, err, exit)
       const files = RuntimeFiles.of(ctx, this.binding)
-      const closeAll = installQuickJsFs(vm, files)
+      const closeAll = installQuickJsFs(vm, files, ctx.signal)
 
       const boot = vm.evalCode(`(() => { ${BOOTSTRAP} })()`, 'mirage:bootstrap')
       if (boot.error) {
@@ -215,6 +215,7 @@ export class QuickJsRuntime extends JsRuntime<NewAsyncModule> {
     }
     const hostLog = (sink: string[]): QuickJSHandle =>
       ctx.newFunction('', (h) => {
+        run.signal?.throwIfAborted()
         sink.push(fromGuestText(ctx, h))
       })
     setGlobal(
@@ -239,6 +240,7 @@ export class QuickJsRuntime extends JsRuntime<NewAsyncModule> {
     setGlobal(
       '__mirage_readStdin',
       ctx.newFunction('', (max) => {
+        run.signal?.throwIfAborted()
         const count = ctx.getNumber(max)
         const end = count < 0 ? stdin.length : Math.min(stdin.length, position + count)
         const text = DEC.decode(stdin.subarray(position, end))

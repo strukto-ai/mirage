@@ -163,6 +163,17 @@ class WasmView:
             return build.stat(path)
         return self._core_stat(path)
 
+    def stat_cached(self, path: str, row: VFSStat) -> VFSStat:
+        """Judge retained workspace metadata; interpreter files stay local.
+
+        Args:
+            path (str): guest-absolute path.
+            row (VFSStat): the descriptor's logical metadata.
+        """
+        if self._serving_build(path) is not None:
+            return row
+        return self._files_for(path).stat_cached(path, row)
+
     def lstat(self, path: str) -> VFSStat:
         """Stat a guest path without following a trailing symlink.
 
@@ -264,6 +275,17 @@ class WasmView:
         return self._files_for(path).read(
             path, offset=offset, size=size, raw=raw
         )
+
+    def read_cached(self, path: str, data: bytes) -> bytes:
+        """Judge retained workspace bytes; interpreter build bytes are local.
+
+        Args:
+            path (str): the open file's current virtual path.
+            data (bytes): the logical read result.
+        """
+        if self._serving_build(path) is not None:
+            return data
+        return self._files_for(path).read_cached(path, data)
 
     def check_write(self, path: str) -> None:
         self._deny_build(path)

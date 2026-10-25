@@ -210,7 +210,11 @@ async def _list_projects(
 ) -> Listed:
     team_id = match.slots["team_id"]
     projects = await list_team_projects(accessor, team_id, match.limit)
-    team_issues = await list_team_issues(accessor, team_id)
+    team_issues = await list_team_issues(
+        accessor,
+        team_id,
+        projects=[str(project["id"]) for project in projects],
+    )
     rows = []
     for project in projects:
         rendered = to_json_bytes(

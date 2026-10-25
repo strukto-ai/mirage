@@ -229,9 +229,9 @@ async function explainedOp(
  * or the built-in's own error (EROFS for a mode).
  * The one seam helper the dispatcher calls, so a refusal is identical
  * however the mount is reached: shell internals, programmatic access,
- * FUSE, and the warm cache all pass through it. A running line's own I/O,
- * and a method's own read, meet the hides, path rules and mount mode alone;
- * a method's write is refused. `access` carries the
+ * FUSE, and the warm cache all pass through it. Commands and runtimes
+ * pass the same file gates. A policy method's own read meets the hides,
+ * path rules and mount mode alone; its write is refused. `access` carries the
  * owning mount's mode (unset at an entry point that judges it itself), whether
  * the op creates the path or mutates below it, and the approval ledger. An Ask is a question only where no line is running and
  * the entry point holds the ledger (a file tool, the host's facade): the ledger
@@ -301,7 +301,7 @@ export async function preVfsGate(
   const deciding = trace === DryRun.DECIDING
   if (deciding && write) throw erofs(path)
   if (!(policies.wants('preVfs') || (write && context.mode !== undefined))) return
-  const answer: Deny | Ask | null = await apart(() => policies.preVfs(ctx, line || deciding))
+  const answer: Deny | Ask | null = await apart(() => policies.preVfs(ctx, deciding))
   await refuseOp(ctx, answer, line ? null : decisions, caller)
 }
 
@@ -333,7 +333,7 @@ async function refuseOp(
  * Fire postVfs at the dispatcher; a Deny, or an Ask the host has not
  * approved, drops the result with EACCES. Nothing cuts what a call returns:
  * a call that asks for a range, as a kernel or protocol mount does, must get
- * it whole. Not fired for a running line's own I/O or a method's own read.
+ * it whole. Commands and runtimes pass the same gate; a policy method's own read is exempt.
  */
 export async function postVfsGate(
   policies: Policies,
@@ -352,7 +352,7 @@ export async function postVfsGate(
   const { decisions = null, caller, ...context } = access
   const line = caller === undefined ? lineRunning() : caller.refusals !== null
   const trace = caller === undefined ? explaining() : caller.explaining
-  if (line || trace === DryRun.DECIDING || !(await policies.wantsFor('postVfs', sessionId))) {
+  if (trace === DryRun.DECIDING || !(await policies.wantsFor('postVfs', sessionId))) {
     return
   }
   const ctx: VfsResultContext = {
@@ -366,7 +366,7 @@ export async function postVfsGate(
     caller: policyCaller((caller ?? currentCaller()).session),
     result,
   }
-  await refuseOp(ctx, await apart(() => policies.postVfs(ctx)), decisions, caller)
+  await refuseOp(ctx, await apart(() => policies.postVfs(ctx)), line ? null : decisions, caller)
 }
 
 /**
@@ -523,12 +523,12 @@ export class Policies {
    * is not one of its. For a seam that pays ahead for a method rather than
    * gating on it: the secret fill drops its masks under a session-write
    * gate, and a profile's policy at that entry point is one profile's, not
-   * every session's. `rulesOnly` counts the profile's rules alone, as
-   * `chain` takes it.
+   * every session's. `codedOnly` leaves the profile's rules out, for a
+   * caller whose line's gate already answers for them.
    */
-  async wantsFor(method: Method, sessionId: string, rulesOnly = false): Promise<boolean> {
+  async wantsFor(method: Method, sessionId: string, codedOnly = false): Promise<boolean> {
     const policies = this.placement === null ? this.policies : [...this.policies, this.placement]
-    for (const policy of policies.filter((p) => p instanceof PermissionsPolicy || !rulesOnly)) {
+    for (const policy of policies.filter((p) => !(codedOnly && p instanceof PermissionsPolicy))) {
       if (policy[method] === undefined) continue
       if (!isSessionScoped(policy)) return true
       if (await policy.wantsFor(method, sessionId)) return true
@@ -553,8 +553,8 @@ export class Policies {
    * so the order holds if the host edits registrations while a method
    * awaits; changes take effect at the next gate. `rulesOnly` asks the
    * profile's rules alone (`PermissionsPolicy`), not the policies
-   * registered in code or a profile's script: the line's passes, which
-   * judge a line before it runs, and a command's own I/O.
+   * registered in code or a profile's script. Used for preliminary rule
+   * passes and a policy's own file reads to avoid recursion.
    */
   private chain(method: Method, placed: boolean, rulesOnly = false): Policy[] {
     let chain = this.policies.filter((p) => p instanceof PermissionsPolicy || !rulesOnly)

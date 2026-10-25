@@ -29,7 +29,7 @@ import { runInCommandScope } from '../../cache/index/scope.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { BaseVFS } from '../../vfs/base.ts'
 import type { Handed } from '../../vfs/types.ts'
-import { eacces, enoent, erofs } from '../../errors/fs.ts'
+import { eacces, enoent, erofs, exdev } from '../../errors/fs.ts'
 import { CommandTimeoutError } from '../../errors/types.ts'
 import type { Policy } from '../../policy/base.ts'
 import type { DispatchFn } from '../../runtime/types.ts'
@@ -3865,4 +3865,355 @@ describe('hides answer before any policy', () => {
       await ws.close()
     }
   })
+})
+
+describe('retained reads use the shared policy boundary', () => {
+  it.each(['/data/file', '/unmounted'])(
+    'checks pre and post policy at %s without fetching',
+    async (path) => {
+      let stage = ''
+      const seen: [string, string | null][] = []
+      const policy: Policy = {
+        preVfs(ctx) {
+          if (ctx.call.name !== 'read') return null
+          seen.push(['pre', null])
+          return stage === 'pre' ? { kind: 'deny', reason: 'pre sealed' } : null
+        },
+        postVfs(ctx) {
+          if (ctx.call.name !== 'read') return null
+          expect(ctx.result).toBeInstanceOf(Uint8Array)
+          seen.push(['post', DEC.decode(ctx.result as Uint8Array)])
+          return stage === 'post' ? { kind: 'deny', reason: 'post sealed' } : null
+        },
+      }
+      const ws = new Workspace({ '/data': new RAMVFS() }, { policies: [policy] })
+      const call = vi
+        .spyOn(MountEntry.prototype, 'callKeyed')
+        .mockRejectedValue(new Error('unexpected backend call'))
+      try {
+        for (stage of ['pre', 'post', '']) {
+          seen.length = 0
+          const read = ws.vfs.dispatch('read', path, [], { retained: ENC.encode('secret') })
+          if (stage) await expect(read).rejects.toMatchObject({ code: 'EACCES' })
+          else expect((await read)[0]).toEqual(ENC.encode('secret'))
+          expect(seen).toEqual(
+            stage === 'pre'
+              ? [['pre', null]]
+              : [
+                  ['pre', null],
+                  ['post', 'secret'],
+                ],
+          )
+        }
+        expect(call).not.toHaveBeenCalled()
+      } finally {
+        call.mockRestore()
+        await ws.close()
+      }
+    },
+  )
+
+  it('refuses a hidden retained read before policy and restores it', async () => {
+    const seen: string[] = []
+    const ws = new Workspace(
+      { '/data': new RAMVFS() },
+      {
+        policies: [
+          {
+            preVfs(ctx) {
+              seen.push(ctx.call.name)
+              return null
+            },
+          },
+        ],
+      },
+    )
+    const session = ws.createSession('reader', { profile: { paths: { hide: ['/data/f'] } } })
+    const call = vi
+      .spyOn(MountEntry.prototype, 'callKeyed')
+      .mockRejectedValue(new Error('unexpected backend call'))
+    try {
+      await runWithSession(session, async () => {
+        await expect(
+          ws.vfs.dispatch('read', '/data/f', [], { retained: ENC.encode('secret') }),
+        ).rejects.toMatchObject({ code: 'ENOENT' })
+        expect(seen).toEqual([])
+        await ws.setSessionProfile('reader', {})
+        expect(
+          (await ws.vfs.dispatch('read', '/data/f', [], { retained: ENC.encode('secret') }))[0],
+        ).toEqual(ENC.encode('secret'))
+        expect(ws.vfs.records).toEqual([])
+      })
+      expect(call).not.toHaveBeenCalled()
+    } finally {
+      call.mockRestore()
+      await ws.close()
+    }
+  })
+
+  it.each([
+    ['read', null],
+    ['read', 'secret'],
+    ['write', ENC.encode('secret')],
+  ])('rejects invalid retained arguments for %s', async (op, retained) => {
+    const ws = new Workspace({ '/': new RAMVFS() })
+    try {
+      await expect(ws.vfs.dispatch(op, '/file', [], { retained })).rejects.toThrow(
+        'retained is only valid',
+      )
+    } finally {
+      await ws.close()
+    }
+  })
+})
+
+class NativeCopyRAM extends RAMVFS {
+  nativeCopies = 0
+
+  override async copy(src: PathSpec, dst: PathSpec): Promise<void> {
+    this.nativeCopies += 1
+    await super.copy(src, dst)
+  }
+
+  override copyFrom(_source: BaseVFS, _src: PathSpec, dst: PathSpec): Promise<void> {
+    this.nativeCopies += 1
+    return Promise.reject(exdev(dst))
+  }
+}
+
+it.each([false, true])(
+  'checks source post-read policy before native copy (cross-mount: %s)',
+  async (crossMount) => {
+    let sealed = true
+    const policy: Policy = {
+      postVfs(ctx) {
+        return sealed && ctx.call.name === 'read' && ctx.path.virtual === '/data/secret'
+          ? { kind: 'deny', reason: 'sensitive source' }
+          : null
+      },
+    }
+    const parser = await getTestParser()
+    const source = new NativeCopyRAM()
+    const other = new NativeCopyRAM()
+    const ws = new Workspace(
+      { '/data/': source, '/other/': other },
+      {
+        mode: MountMode.WRITE,
+        policies: [policy],
+        shellParserFactory: () => Promise.resolve(parser),
+      },
+    )
+    const destination = crossMount ? '/other/copied' : '/data/copied'
+    try {
+      await ws.vfs.write('/data/secret', ENC.encode('secret'))
+      const refused = await ws.shell(`cp /data/secret ${destination}`)
+      expect(refused.exitCode).toBe(1)
+      expect(DEC.decode(refused.stderr)).toContain('Permission denied')
+      await expect(ws.vfs.stat(destination)).rejects.toMatchObject({ code: 'ENOENT' })
+      expect(source.nativeCopies + other.nativeCopies).toBe(0)
+      sealed = false
+      const restored = await ws.shell(`cp /data/secret ${destination}`)
+      expect(restored.exitCode).toBe(0)
+      expect(await ws.vfs.read(destination)).toEqual(ENC.encode('secret'))
+      // A postVfs hook judges the bytes, so they move through a read and a
+      // write: the bytes it judged are the bytes that landed.
+      expect(source.nativeCopies + other.nativeCopies).toBe(0)
+    } finally {
+      await ws.close()
+    }
+  },
+)
+
+it.each(['/data/file', '/unmounted'])(
+  'checks retained stat policy at %s without backend calls',
+  async (path) => {
+    let stage = ''
+    const seen: string[] = []
+    const row = new FileStat({ name: 'file', type: FileType.FILE, extra: { tag: 'kept' } })
+    const policy: Policy = {
+      preVfs(ctx) {
+        if (ctx.call.name !== 'stat') return null
+        seen.push('pre')
+        return stage === 'pre' ? { kind: 'deny', reason: 'stat sealed' } : null
+      },
+      postVfs(ctx) {
+        if (ctx.call.name !== 'stat') return null
+        seen.push('post')
+        expect(ctx.result).toEqual(row)
+        return stage === 'post' ? { kind: 'deny', reason: 'stat result sealed' } : null
+      },
+    }
+    const ws = new Workspace({ '/data': new RAMVFS() }, { policies: [policy] })
+    const session = ws.createSession('reader')
+    const call = vi
+      .spyOn(MountEntry.prototype, 'callKeyed')
+      .mockRejectedValue(new Error('retained stat reached backend'))
+    try {
+      await runWithSession(session, async () => {
+        for (stage of ['pre', 'post', '']) {
+          seen.length = 0
+          const result = ws.vfs.dispatch('stat', path, [], { retained: row })
+          if (stage) await expect(result).rejects.toMatchObject({ code: 'EACCES' })
+          else expect((await result)[0]).toEqual(row)
+          expect(seen).toEqual(stage === 'pre' ? ['pre'] : ['pre', 'post'])
+        }
+        await ws.setSessionProfile('reader', { paths: { hide: [path] } })
+        seen.length = 0
+        await expect(ws.vfs.dispatch('stat', path, [], { retained: row })).rejects.toMatchObject({
+          code: 'ENOENT',
+        })
+        expect(seen).toEqual([])
+        await ws.setSessionProfile('reader', {})
+        expect((await ws.vfs.dispatch('stat', path, [], { retained: row }))[0]).toEqual(row)
+      })
+      expect(call).not.toHaveBeenCalled()
+    } finally {
+      call.mockRestore()
+      await ws.close()
+    }
+  },
+)
+
+class CountedRemoval extends RAMVFS {
+  removals = 0
+
+  override rmR(path: PathSpec): Promise<void> {
+    this.removals += 1
+    return super.rmR(path)
+  }
+}
+
+it.each([
+  ['/other/sealed', 1],
+  ['/d/t/a/f', 0],
+])("declines a line's tree removal only for a rule below it (%s)", async (sealed, removals) => {
+  // The line's gate answers for the profile's rules, scoped to the paths a
+  // walk reaches: a rule over another mount declines nothing.
+  const parser = await getTestParser()
+  const vfs = new CountedRemoval()
+  const ws = new Workspace(
+    { '/d': vfs, '/other': new RAMVFS() },
+    { mode: MountMode.WRITE, shellParserFactory: () => Promise.resolve(parser) },
+  )
+  try {
+    ws.createSession('agent', {
+      profile: { commands: { deny: [{ paths: [sealed], reason: 'sealed' }] } },
+    })
+    await ws.shell('mkdir -p /d/t/a && echo hi > /d/t/a/f')
+    await ws.shell('rm -r /d/t', { sessionId: 'agent' })
+    expect(vfs.removals).toBe(removals)
+  } finally {
+    await ws.close()
+  }
+})
+
+it('has a preVfs policy judge a shortcut without a whole read', async () => {
+  // preVfs judges the shortcut as the read it stands in for; only a postVfs
+  // policy, which judges bytes a count or a checksum does not carry, sends it
+  // to a whole read.
+  const vfs = new StandInRAM()
+  vfs.store.dirs.add('/')
+  vfs.store.files.set('/cold', ENC.encode('a\n'))
+  const seen: string[] = []
+  const policy: Policy = {
+    preVfs(ctx) {
+      seen.push(ctx.call.name)
+      return null
+    },
+  }
+  const ws = new Workspace({ '/m': vfs }, { policies: [policy] })
+  try {
+    const [answer] = await ws.vfs.dispatch('first_lines', '/m/cold', [1])
+    expect(answer).toEqual(ENC.encode('stand-in\n'))
+    expect(vfs.asked).toEqual(['first_lines'])
+    expect(seen).toContain('read')
+    expect(seen).not.toContain('first_lines')
+  } finally {
+    await ws.close()
+  }
+})
+
+it('leaves the rest of a live pipe to the next reader under a postVfs policy', async () => {
+  // A pipe's bytes come from the line's own writer; collecting them for a
+  // postVfs policy would take what the next reader is owed.
+  const parser = await getTestParser()
+  const ws = new Workspace(
+    { '/ram': new RAMVFS() },
+    { policies: [{ postVfs: () => null }], shellParserFactory: () => Promise.resolve(parser) },
+  )
+  try {
+    const result = await ws.shell(
+      'f() { head -c 1 "$1"; echo; cat "$1"; }; f <(printf a; sleep 1; printf rest)',
+    )
+    expect(DEC.decode(result.stdout)).toBe('a\nrest')
+  } finally {
+    await ws.close()
+  }
+})
+
+it('has a policy refusing reads refuse their shortcuts', async () => {
+  const vfs = new StandInRAM()
+  vfs.store.dirs.add('/')
+  vfs.store.files.set('/cold', ENC.encode('a\n'))
+  const policy: Policy = {
+    preVfs: (ctx) => (ctx.call.name === 'read' ? { kind: 'deny', reason: 'no reads' } : null),
+  }
+  const ws = new Workspace({ '/m': vfs }, { policies: [policy] })
+  try {
+    for (const [name, args] of [
+      ['first_lines', [1]],
+      ['line_count', []],
+    ] as [string, unknown[]][]) {
+      await expect(ws.vfs.dispatch(name, '/m/cold', args)).rejects.toMatchObject({ code: 'EACCES' })
+    }
+    expect(vfs.asked).toEqual([])
+  } finally {
+    await ws.close()
+  }
+})
+
+it.each([false, true])('admits a copy as a read of its source (refused: %s)', async (refused) => {
+  // A preVfs hook needs no bytes: the source is judged as a read and the
+  // backend's own copy runs, so a document stays a document.
+  const parser = await getTestParser()
+  const vfs = new NativeCopyRAM()
+  const policy: Policy = {
+    preVfs: (ctx) =>
+      refused && ctx.call.name === 'read' ? { kind: 'deny', reason: 'no reads' } : null,
+  }
+  const ws = new Workspace(
+    { '/data/': vfs },
+    {
+      mode: MountMode.WRITE,
+      policies: [policy],
+      shellParserFactory: () => Promise.resolve(parser),
+    },
+  )
+  try {
+    await ws.vfs.write('/data/a', ENC.encode('a'))
+    const ran = await ws.shell('cp /data/a /data/b')
+    expect(ran.exitCode).toBe(refused ? 1 : 0)
+    expect(vfs.nativeCopies).toBe(refused ? 0 : 1)
+  } finally {
+    await ws.close()
+  }
+})
+
+it('keeps the bytes of a copy from a pipe under file hooks', async () => {
+  const parser = await getTestParser()
+  const ws = new Workspace(
+    { '/ram': new RAMVFS() },
+    {
+      mode: MountMode.WRITE,
+      policies: [{ preVfs: () => null, postVfs: () => null }],
+      shellParserFactory: () => Promise.resolve(parser),
+    },
+  )
+  try {
+    const ran = await ws.shell('cp <(printf x) /ram/out')
+    expect(ran.exitCode).toBe(0)
+    expect(DEC.decode(await ws.vfs.read('/ram/out'))).toBe('x')
+  } finally {
+    await ws.close()
+  }
 })

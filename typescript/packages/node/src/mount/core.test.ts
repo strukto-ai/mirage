@@ -1279,3 +1279,121 @@ it('makes a flush onto a name a rename replaces wait for it', async () => {
   expect(dec.decode(await core.read('/data/b', writer, 0, 100))).toBe('NEW-body')
   expect(dec.decode(await ws.vfs.read('/data/b'))).toBe('fresh')
 })
+
+describe('MountCore cached chunks and session revocation', () => {
+  it.each(['hide', 'deny'] as const)(
+    'rechecks %s before serving a warmed chunk',
+    async (restriction) => {
+      const path = '/data/chunked.bin'
+      const ws = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
+      await ws.vfs.write(path, new Uint8Array(READ_CHUNK + 17).fill(23))
+      const session = ws.createSession('chunk-reader')
+      const core = new MountCore(ws.vfs, { session })
+      const read = vi.spyOn(ws.vfs, 'read')
+      const fd = await core.open(path)
+      try {
+        expect(await core.read(path, fd, 0, 8)).toEqual(new Uint8Array(8).fill(23))
+        const calls = read.mock.calls.length
+        expect(calls).toBe(1)
+        await ws.setSessionProfile(
+          'chunk-reader',
+          restriction === 'hide'
+            ? { paths: { hide: [path] } }
+            : { commands: { deny: [{ reason: 'sealed', paths: [path] }] } },
+        )
+        await expect(core.read(path, fd, 1, 8)).rejects.toMatchObject({
+          code: restriction === 'hide' ? 'ENOENT' : 'EACCES',
+        })
+        if (restriction === 'hide')
+          await expect(core.fgetattr(path, fd)).rejects.toMatchObject({ code: 'ENOENT' })
+        expect(read).toHaveBeenCalledTimes(calls)
+        await ws.setSessionProfile('chunk-reader', {})
+        expect(await core.read(path, fd, 1, 8)).toEqual(new Uint8Array(8).fill(23))
+        expect(read).toHaveBeenCalledTimes(calls)
+      } finally {
+        await core.release(fd)
+        expect(core.handles.has(fd)).toBe(false)
+        await ws.close()
+      }
+    },
+  )
+})
+
+it('does not replace a hidden mount root with synthetic attributes', async () => {
+  const ws = new Workspace({ '/data': new RAMVFS() })
+  const session = ws.createSession('reader', { profile: { paths: { hide: ['/data'] } } })
+  const core = new MountCore(ws.vfs, { rootPrefix: '/data', session })
+  try {
+    await expect(core.getattr('/')).rejects.toMatchObject({ code: 'ENOENT' })
+    await ws.setSessionProfile('reader', {})
+    expect((await core.getattr('/')).mode & 0o170000).toBe(0o040000)
+  } finally {
+    await ws.close()
+  }
+})
+
+it('judges the fetched row once when a buffered write sizes it', async () => {
+  // The stat that fetched the row judged it; the size the handle's buffered
+  // write adds is the handle's own, not a second stat.
+  let stats = 0
+  const ws = new Workspace(
+    { '/': new RAMVFS() },
+    {
+      mode: MountMode.WRITE,
+      policies: [
+        {
+          preVfs: (ctx: VfsContext): Action | null => {
+            if (ctx.call.name === 'stat') stats += 1
+            return null
+          },
+        },
+      ],
+    },
+  )
+  try {
+    await ws.vfs.write('/a.txt', new TextEncoder().encode('ab'))
+    const core = new MountCore(ws.vfs)
+    const fd = await core.open('/a.txt', fsConstants.O_WRONLY)
+    await core.write('/a.txt', fd, new TextEncoder().encode('longer'), 0)
+    stats = 0
+    expect((await core.fgetattr('/a.txt', fd)).size).toBe(6)
+    expect(stats).toBe(1)
+    await core.release(fd)
+  } finally {
+    await ws.close()
+  }
+})
+
+it('judges a read that joins held bytes onto a fetch', async () => {
+  // The fetch brings only what lies past the kept chunk and joins it on, so
+  // postVfs must see the whole answer, the held prefix included.
+  const judged: number[] = []
+  const ws = new Workspace(
+    { '/': new RAMVFS() },
+    {
+      mode: MountMode.WRITE,
+      policies: [
+        {
+          postVfs: (ctx) => {
+            if (ctx.call.name === 'read' && ctx.result instanceof Uint8Array) {
+              judged.push(ctx.result.byteLength)
+            }
+            return null
+          },
+        },
+      ],
+    },
+  )
+  try {
+    await ws.vfs.write('/big.bin', new Uint8Array(2 * READ_CHUNK))
+    const core = new MountCore(ws.vfs)
+    const fd = await core.open('/big.bin', fsConstants.O_RDONLY)
+    expect((await core.read('/big.bin', fd, 0, 8)).byteLength).toBe(8)
+    judged.length = 0
+    expect((await core.read('/big.bin', fd, 0, 2 * READ_CHUNK)).byteLength).toBe(2 * READ_CHUNK)
+    expect(judged).toContain(2 * READ_CHUNK)
+    await core.release(fd)
+  } finally {
+    await ws.close()
+  }
+})

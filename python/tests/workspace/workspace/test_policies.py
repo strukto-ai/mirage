@@ -286,8 +286,6 @@ class SuppressCapacity(Policy):
 
 @pytest.mark.asyncio
 async def test_post_vfs_deny_suppresses_a_capacity_reply():
-    # A file call outside a line meets post_vfs; a command's own call
-    # is the line's, which post_command and post_execute judge.
     ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
     try:
         await ws.shell("touch /data/f")
@@ -295,7 +293,8 @@ async def test_post_vfs_deny_suppresses_a_capacity_reply():
         with pytest.raises(PermissionError):
             await ws.dispatch("statfs", PathSpec.from_str_path("/data/f"))
         result = await ws.shell("stat -f -c %b /data/f")
-        assert result.exit_code == 0
+        assert result.exit_code == 1
+        assert result.stdout == b""
     finally:
         await ws.close()
 
@@ -435,11 +434,7 @@ class SealedPaths(Policy):
 
 
 @pytest.mark.asyncio
-async def test_pre_vfs_judges_file_calls_not_a_lines_io():
-    # The boundary (Policy.pre_vfs): a coded op method judges the
-    # ``ws.vfs`` / ``session.vfs`` calls, and a line's commands are
-    # pre_command's, so neither a command's own I/O nor its redirects
-    # reach it. Pinned so a move of the boundary is loud.
+async def test_pre_vfs_judges_file_calls_commands_and_redirects():
     ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
     try:
         await ws.shell("mkdir -p /data/prod")
@@ -455,16 +450,28 @@ async def test_pre_vfs_judges_file_calls_not_a_lines_io():
             await ws.vfs.write("/data/prod/new.txt", b"hi\n")
         rec.asked.clear()
 
-        assert (await ws.shell("echo hi > /data/prod/new.txt")).exit_code == 0
-        read = await ws.shell("cat /data/secret.txt")
-        assert read.stdout == b"sealed\n"
-        assert (await ws.shell("head -c 3 /data/secret.txt")).stdout == b"sea"
-        assert (await ws.shell("rm /data/prod/keep.txt")).exit_code == 0
-        found = await ws.shell("find /data/prod -name new.txt -delete")
-        assert found.exit_code == 0
-        assert (await ws.shell("rm -r /data/prod")).exit_code == 0
-        assert (await ws.shell("find /data; du -a /data")).exit_code == 0
-        assert rec.asked == []
+        for line in (
+            "echo hi > /data/prod/new.txt",
+            "cat /data/secret.txt",
+            "head -c 3 /data/secret.txt",
+            "rm /data/prod/keep.txt",
+            "find /data/prod -name keep.txt -delete",
+            "rm -r /data/prod",
+        ):
+            result = await ws.shell(line)
+            assert result.exit_code != 0, line
+            assert result.stdout == b"", line
+            assert b"Permission denied" in result.stderr, line
+        assert await ws.vfs.read("/data/prod/keep.txt") == b"keep\n"
+        assert not await ws.vfs.exists("/data/prod/new.txt")
+        assert any(
+            path == "/data/secret.txt" and not write
+            for _, path, write in rec.asked
+        )
+        assert any(
+            path == "/data/prod/new.txt" and write
+            for _, path, write in rec.asked
+        )
     finally:
         await ws.close()
 
@@ -1300,10 +1307,9 @@ async def test_a_profile_policy_judges_its_sessions_file_calls():
         with pytest.raises(PermissionError):
             await files.unlink("/data/frozen/k")
         assert await ws.vfs.read("/data/frozen/k") == b"keep\n"
-        # A line's I/O is its commands', which pre_command judges, and
-        # this script has no command method.
         ran = await ws.shell("echo x > /data/frozen/f", session_id="s")
-        assert ran.exit_code == 0
+        assert ran.exit_code == 1
+        assert not await ws.vfs.exists("/data/frozen/f")
         # Another session is not judged by it.
         await ws.vfs.write("/data/frozen/g", b"x\n")
     finally:
@@ -1899,6 +1905,8 @@ async def test_a_method_sees_who_makes_the_call():
         assert seer.seen == [
             ("pre_session", "agent", "/data"),
             ("pre_command", "agent", "/data"),
+            ("pre_vfs", "agent", "/data"),
+            ("pre_vfs", "agent", "/data"),
             ("pre_vfs", "agent", "/data"),
         ]
         await ws.explain("cat /data/owner.txt", session_id="agent")

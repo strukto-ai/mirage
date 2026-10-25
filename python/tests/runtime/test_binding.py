@@ -36,6 +36,7 @@ from mirage.context import (
     set_current_session,
 )
 from mirage.context.session_context import awaits_as, calls_as
+from mirage.io import IOResult
 from mirage.mount.core import MountCore
 from mirage.observe.context import RecordingScope, record, start_op
 from mirage.policy import Deny, Policy, PolicyDenied
@@ -412,3 +413,45 @@ def test_restrictions_belong_to_the_longest_mount(hidden, expected):
     with Workspace({"/data": RAMVFS()}, runtimes=[]) as ws:
         ws.create_session("agent", profile={"paths": {"hide": hidden}})
         assert ws.runtime_context("agent").restricted_mounts == expected
+
+
+@pytest.mark.asyncio
+async def test_cancelled_runtime_owner_refuses_queued_callbacks_without_backend_write():
+    seen = []
+    ready = asyncio.get_running_loop().create_future()
+    owner = None
+
+    async def dispatch(name, path, **kwargs):
+        seen.append(name)
+        if name == "read":
+            assert owner is not None
+            owner.cancel()
+            return b"revoked", IOResult()
+        return None, IOResult()
+
+    binding = WorkspaceBinding(dispatch, PrefixResolver(lambda: ["/data"]))
+
+    async def run():
+        files = RuntimeFiles.of(capture_binding(binding).ctx, binding)
+        ready.set_result(files)
+        await asyncio.Event().wait()
+
+    owner = asyncio.create_task(run())
+    files = await ready
+    # A native interpreter queues independent callback tasks. Revocation in
+    # the first callback must stop both its return and the next callback.
+    control = asyncio.create_task(files._call("read", "/control/deny"))
+    write = asyncio.create_task(
+        files._call("write", "/data/continued", data=b"bad")
+    )
+    results = await asyncio.gather(control, write, return_exceptions=True)
+    assert all(
+        isinstance(result, asyncio.CancelledError) for result in results
+    )
+    with pytest.raises(asyncio.CancelledError):
+        await owner
+    assert seen == ["read"]
+    # Host-owned adapters are not tied to a guest execution's cancellation.
+    manual = RuntimeFiles(dispatch, asyncio.get_running_loop())
+    await manual._call("write", "/data/host", data=b"allowed")
+    assert seen == ["read", "write"]

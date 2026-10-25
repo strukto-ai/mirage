@@ -113,20 +113,12 @@ export async function readAt(
   offset: number,
   size: number,
 ): Promise<Uint8Array> {
-  const pos = handle.pos
-  handle.pos = offset
-  try {
-    while (handle.lacks(size)) await handle.fill(size)
-    return handle.pread(offset, size)
-  } finally {
-    handle.pos = pos
-  }
+  return handle.preadChecked(offset, size)
 }
 
 /** Read up to `size` bytes at the position, advancing it. */
 export async function readOn(handle: FileHandle, size: number): Promise<Uint8Array> {
-  while (handle.lacks(size)) await handle.fill(size)
-  return handle.read(size)
+  return handle.readChecked(size)
 }
 
 /**
@@ -217,7 +209,12 @@ export class Descriptors {
       desc.handle = FileHandle.opened(
         path,
         opened === null ? null : this.fetch(desc, mode.writable),
-        { size: opened?.size ?? 0, writable: mode.writable, append: mode.append },
+        {
+          size: opened?.size ?? 0,
+          writable: mode.writable,
+          append: mode.append,
+          readCached: (data) => this.files.readCached(desc.path, data),
+        },
       )
     }
     desc.stat ??= await this.files.stat(path)
@@ -236,7 +233,10 @@ export class Descriptors {
       if (kept !== null) {
         try {
           const view = keptView(kept, raw)
-          return Promise.resolve(view.slice(offset, size === null ? undefined : offset + size))
+          return this.files.readCached(
+            desc.path,
+            view.slice(offset, size === null ? undefined : offset + size),
+          )
         } catch (err) {
           return Promise.reject(err instanceof Error ? err : new Error(String(err)))
         }

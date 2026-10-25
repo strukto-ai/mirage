@@ -40,16 +40,20 @@ CALLS = {**_VFS_CALLS, **NAMESPACE_CALLS}
 # answers for part of a file (first_lines, last_lines, line_count,
 # checksum, follow, lines_containing) is neither served from the cache
 # nor kept in it; its caller reads a cached file instead.
-DISPATCH_READ_OPS = call_names(
-    _VFS_CALLS, effects={Effect.READ}, targets={Target.FILE}
-) - {
-    "first_lines",
-    "last_lines",
-    "line_count",
-    "checksum",
-    "follow",
-    "lines_containing",
-}
+READ_SHORTCUT_OPS = frozenset(
+    {
+        "first_lines",
+        "last_lines",
+        "line_count",
+        "checksum",
+        "follow",
+        "lines_containing",
+    }
+)
+DISPATCH_READ_OPS = (
+    call_names(_VFS_CALLS, effects={Effect.READ}, targets={Target.FILE})
+    - READ_SHORTCUT_OPS
+)
 
 # The calls that stand in for a whole read of a file. The cache stage
 # answers each None for a file the read cache holds, so its caller reads
