@@ -1662,6 +1662,7 @@ async def _search_all(
                     chunks.clear()
             if tally.error is not None:
                 warnings.append(f"rg: {name}: {tally.error}")
+                damaged = True
             elapsed = time.perf_counter() - began
             selected = selected or tally.selected
             skipped = skipped or tally.skipped

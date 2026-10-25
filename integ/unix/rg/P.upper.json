@@ -923,6 +923,78 @@
         "replace",
         "only_matching"
       ]
+    },
+    {
+      "id": "rg_P_quiet_and_listings_stop_at_a_match",
+      "seq": 15200205,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "for f in -qoP -loP; do printf 'okaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaxc\\nok2\\n' | rg $f '^ok|(a|a)+\\1c'; echo \"status $?\"; done",
+      "expect": {
+        "exit": 0,
+        "stdout": "status 0\n<stdin>\nstatus 0\n",
+        "stderr": ""
+      },
+      "flags": [
+        "pcre2",
+        "quiet",
+        "files_with_matches",
+        "only_matching"
+      ]
+    },
+    {
+      "id": "rg_P_a_failed_file_prints_no_count_listing_or_total",
+      "seq": 15200206,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "mkdir -p /data/rgpl; printf 'ok\\naaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaxc\\nok2\\n' > /data/rgpl/b; printf 'ok3\\n' > /data/rgpl/d; rg -cP '^ok|^(a|a)+\\1c' /data/rgpl | sort; rg --files-without-match -P '^ok|^(a|a)+\\1c' /data/rgpl; rg -P --stats '^ok|^(a|a)+\\1c' /data/rgpl | grep -E 'files searched|bytes searched'",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/rgpl/d:1\n1 files searched\n4 bytes searched\n",
+        "stderr": "rg: /data/rgpl/b: PCRE2: error matching: match limit exceeded\nrg: /data/rgpl/b: PCRE2: error matching: match limit exceeded\nrg: /data/rgpl/b: PCRE2: error matching: match limit exceeded\n"
+      },
+      "flags": [
+        "pcre2",
+        "count",
+        "files_without_match",
+        "stats"
+      ]
     }
   ]
 }

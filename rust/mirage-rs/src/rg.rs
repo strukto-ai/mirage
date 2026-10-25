@@ -86,6 +86,9 @@ struct Config {
     max_capture_name: usize,
     #[serde(skip)]
     record_context: bool,
+    /// PCRE2 searches: -P, or --engine auto past a refusal.
+    #[serde(skip)]
+    pcre: bool,
 }
 
 impl Default for Config {
@@ -137,6 +140,7 @@ impl Default for Config {
             dfa_size_limit: None,
             max_capture_name: 0,
             record_context: false,
+            pcre: false,
         }
     }
 }
@@ -171,9 +175,16 @@ impl Config {
         self.column || self.vimgrep || self.replace.is_some() || self.only_matching
     }
     /// Whether the output reads every match of a selected line rather than
-    /// whether it has one, which decides how far a -P search goes on it.
+    /// whether it has one, which decides how far a -P search goes on it:
+    /// -q and the file listings stop at a match unless a count needs more.
     fn needs_every_match(&self) -> bool {
-        self.granular() || self.counts() || self.count_matches
+        if self.quiet {
+            self.counts()
+        } else if self.files_only || self.files_without_match {
+            self.counts() || self.count_matches
+        } else {
+            self.granular() || self.counts() || self.count_matches
+        }
     }
 }
 
@@ -2014,7 +2025,7 @@ impl Input {
         } else if let Some(offset) = self.tally.nul {
             self.tally.searched = offset;
         }
-        if config.max_count == Some(0) || self.tally.skipped {
+        if config.max_count == Some(0) || self.tally.skipped || self.tally.error.is_some() {
             return;
         }
         if config.files_only || config.files_without_match || config.quiet {
@@ -2070,7 +2081,7 @@ impl Input {
                     if config.max_count.is_some_and(|n| self.selected >= n) {
                         self.done = true;
                     }
-                } else {
+                } else if !(config.pcre && config.files_without_match) {
                     self.done = true;
                 }
             }
@@ -2219,6 +2230,7 @@ pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
     };
     config.multiline = program.is_multiline();
     config.record_context = program.uses_record_context();
+    config.pcre = program.runs_pcre();
     if config.json {
         config.context_separator = None;
     }
@@ -2640,7 +2652,7 @@ impl Rg {
             input.tally.searched = input.offset;
             input.scan = 0;
             input.record_end = None;
-            let all = if program.runs_pcre() {
+            let all = if config.pcre {
                 config.needs_every_match()
             } else {
                 !(config.quiet || config.files_only || config.files_without_match)
@@ -2905,6 +2917,37 @@ mod tests {
             metadata["error"],
             "PCRE2: error matching: match limit exceeded"
         );
+    }
+
+    #[test]
+    fn pcre2_quiet_and_listings_stop_at_a_match() {
+        let mut data = b"ok".to_vec();
+        data.extend_from_slice(&[b'a'; 40]);
+        data.extend_from_slice(b"xc\nok2\n");
+        let pattern = "^ok|(a|a)+\\1c";
+        for flag in ["quiet", "files_only"] {
+            let config = json!({"pattern":pattern,"engine":"pcre2","only_matching":true,flag:true});
+            let (_, metadata, _) = run(&data, config);
+            assert_eq!(metadata["selected"], true, "{flag}");
+            assert_eq!(metadata["error"], Value::Null, "{flag}");
+        }
+    }
+
+    #[test]
+    fn pcre2_a_failed_search_prints_no_count_or_listing() {
+        let mut data = b"ok\n".to_vec();
+        data.extend_from_slice(&[b'a'; 40]);
+        data.extend_from_slice(b"xc\nok2\n");
+        let pattern = "^ok|^(a|a)+\\1c";
+        for flag in ["count_only", "count_matches", "files_without_match"] {
+            let config = json!({"pattern":pattern,"engine":"pcre2",flag:true,"include_zero":true});
+            let (out, metadata, _) = run(&data, config);
+            assert_eq!(out, b"", "{flag}");
+            assert_eq!(
+                metadata["error"], "PCRE2: error matching: match limit exceeded",
+                "{flag}"
+            );
+        }
     }
 
     #[test]

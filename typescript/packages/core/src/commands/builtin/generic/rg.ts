@@ -1313,7 +1313,10 @@ async function* searchAll(
           continue
         }
       }
-      if (tally.error !== undefined) warnings.push(`rg: ${name}: ${tally.error}`)
+      if (tally.error !== undefined) {
+        warnings.push(`rg: ${name}: ${tally.error}`)
+        damaged = true
+      }
       const elapsed = (performance.now() - began) / 1000
       selected ||= tally.selected
       skipped ||= tally.skipped === true
