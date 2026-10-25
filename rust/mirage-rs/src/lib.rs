@@ -25,6 +25,7 @@ mod numfmt;
 mod od;
 mod paste;
 mod pcre;
+pub mod policy;
 mod printf;
 mod records;
 mod reflow;
