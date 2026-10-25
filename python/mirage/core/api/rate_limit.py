@@ -12,7 +12,9 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.utils.clock import Clock, SystemClock
+from collections.abc import Hashable
+
+from mirage.utils.clock import Clock, SystemClock, is_system_clock
 
 
 class RateLimiter:
@@ -43,23 +45,46 @@ class RateLimiter:
         self._next: dict[str, float] = {}
         self._shift: dict[str, float] = {}
         self._schedule = 0
+        self._holders: set[Hashable] = set()
 
-    def bind_clock(self, clock: Clock) -> None:
-        """Read and wait on the workspace's clock from now on.
+    def bind_clock(self, clock: Clock, owner: Hashable) -> None:
+        """Read and wait on ``clock`` while ``owner`` holds the limiter.
 
         Slots taken on another clock mean nothing on this one, so they
         are dropped; binding the clock already in use keeps them, so a
-        second mount of one accessor cannot release a burst.
+        second mount of one accessor cannot release a burst. Slots can
+        follow one clock only, so while another owner holds the limiter
+        a different clock is refused; two system clocks agree.
 
         Args:
             clock (Clock): the workspace's clock.
+            owner (Hashable): who holds it, released by the same key.
+
+        Raises:
+            ValueError: another owner holds the limiter on another clock.
         """
-        if clock is self._clock:
-            return
-        self._clock = clock
-        self._schedule += 1
-        self._next.clear()
-        self._shift.clear()
+        same = clock is self._clock or (
+            is_system_clock(clock) and is_system_clock(self._clock)
+        )
+        if not same:
+            if self._holders - {owner}:
+                raise ValueError(
+                    "this client is held by a workspace on another clock; "
+                    "unmount or uninstall it there, or give both one clock"
+                )
+            self._clock = clock
+            self._schedule += 1
+            self._next.clear()
+            self._shift.clear()
+        self._holders.add(owner)
+
+    def release_clock(self, owner: Hashable) -> None:
+        """Let ``owner`` go; once none holds, another clock may bind.
+
+        Args:
+            owner (Hashable): the key it was bound with.
+        """
+        self._holders.discard(owner)
 
     async def acquire(self, key: str) -> None:
         """Wait for this key's next slot.

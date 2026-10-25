@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { DiscordAccessor } from '../../accessor/discord.ts'
+import { soleCommandStarted } from '../../cache/index/scope.ts'
 import { afterIdPages } from './paginate.ts'
 import { jsonlBytes } from '../render/json.ts'
 
@@ -80,12 +81,58 @@ export async function listMessagesForDay(
   return out
 }
 
+/**
+ * A channel-day's messages: the ones the running command already fetched,
+ * else fetched now and kept for that command. Outside any command nothing
+ * is kept, since no command bounds how long the day would be served.
+ * Mirrors Python's `_kept_day`.
+ */
+async function keptDay(
+  accessor: DiscordAccessor,
+  channelId: string,
+  dateStr: string,
+): Promise<DiscordMessage[]> {
+  const fetch = () => listMessagesForDay(accessor, channelId, dateStr)
+  const started = soleCommandStarted()
+  if (started === null) return fetch()
+  return (await accessor.listedDay.get(
+    `${String(started)}/${channelId}/${dateStr}`,
+    fetch,
+  )) as DiscordMessage[]
+}
+
+/**
+ * A channel-day's messages for its listing, kept for the read of its
+ * chat.jsonl that follows in the same command. A walk reads a day's
+ * chat.jsonl right after it lists the day, so only the last listed day is
+ * kept, only for the command that listed it, and for at most
+ * `LISTING_TRUST_WINDOW` seconds, the window a fetch still counts as current
+ * in (none under `fresh`). That command's read takes it instead of fetching
+ * the day again; any other read, a direct one included, asks Discord. A
+ * listing nothing reads holds no more than one day. Mirrors Python's
+ * `listed_messages_for_day`.
+ */
+export async function listedMessagesForDay(
+  accessor: DiscordAccessor,
+  channelId: string,
+  dateStr: string,
+): Promise<DiscordMessage[]> {
+  accessor.listedDay.clear()
+  return keptDay(accessor, channelId, dateStr)
+}
+
+/**
+ * A channel-day's messages as JSONL: the ones the running command's listing
+ * of the day just fetched (`listedMessagesForDay`), else fetched now. Either
+ * way the day is no longer kept. Mirrors Python's `get_history_jsonl`.
+ */
 export async function getHistoryJsonl(
   accessor: DiscordAccessor,
   channelId: string,
   dateStr: string,
 ): Promise<Uint8Array> {
-  const messages = await listMessagesForDay(accessor, channelId, dateStr)
+  const messages = await keptDay(accessor, channelId, dateStr)
+  accessor.listedDay.clear()
   return jsonlBytes(messages)
 }
 

@@ -20,9 +20,19 @@ describe('AirtableAccessor', () => {
   it('paces every base call on a bound clock', async () => {
     const accessor = new AirtableAccessor({ token: 't' })
     const clock = new ManualClock()
-    accessor.bindClock(clock)
+    accessor.bindClock(clock, 'ws')
     await accessor.limiter.acquire('appA')
     await accessor.limiter.acquire('appA')
     expect(clock.monotonic()).toBeCloseTo(1 / DEFAULT_REQUESTS_PER_SECOND)
+  })
+
+  it('takes another clock once the holder lets go', () => {
+    const accessor = new AirtableAccessor({ token: 't' })
+    accessor.bindClock(new ManualClock(), 'a')
+    expect(() => {
+      accessor.bindClock(new ManualClock(), 'b')
+    }).toThrow(/another clock/)
+    accessor.releaseClock('a')
+    accessor.bindClock(new ManualClock(), 'b')
   })
 })
