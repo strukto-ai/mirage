@@ -841,5 +841,13 @@ export const PYTHON_USAGE =
 // How many distinct readings one spec keeps before it starts over. A line
 // reads each command's words from classification, admission, routing and
 // dispatch, a few dozen times with two or three distinct inputs, so a
-// handful covers a line and the rest only bounds memory.
-export const PARSES_KEPT = 64
+// handful covers a line.
+export const PARSES_KEPT = 16
+
+// The most characters a command's words may hold, in all, for a spec to keep
+// its reading of them. A longer line (a `jq --argjson` document, a
+// heredoc-sized printf) is read afresh each time: keeping it would hold its
+// words until the table starts over, and reading them is cheap beside what
+// the command then does with them. With PARSES_KEPT this bounds what one spec
+// holds to about 16K characters.
+export const PARSE_KEPT_CHARS = 1024

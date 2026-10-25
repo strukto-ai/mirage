@@ -44,6 +44,7 @@ import {
   NUMERIC_SHORT,
   OPERAND,
   OWN_OPTION_LOOP,
+  PARSE_KEPT_CHARS,
   PARSES_KEPT,
   REFUSED,
   SPELLED,
@@ -538,7 +539,8 @@ const PARSES = new WeakMap<CommandSpec, Map<string, ParsedArgs>>()
  *
  * The reading is kept per spec, keyed by everything it depends on (the
  * environment only through the variables the spec declares), so every reader
- * of one command shares one parse: read it, never change it.
+ * of one command shares one parse: read it, never change it. Words longer
+ * than PARSE_KEPT_CHARS in all are read afresh each time.
  *
  * `parse_command` in parser.py is the twin.
  */
@@ -552,21 +554,25 @@ export function parseCommand(
   abbreviations?: readonly string[],
 ): ParsedArgs {
   const cs = compileSpec(spec)
-  const key = JSON.stringify([
-    argv,
-    cwd,
-    cmdName,
-    unknownIsOperand,
-    abbreviations ?? null,
-    [...cs.envByDest.values()].map((variable) => env?.[variable] ?? null),
-  ])
-  let parses = PARSES.get(spec)
-  if (parses === undefined) {
-    parses = new Map()
-    PARSES.set(spec, parses)
+  let parses: Map<string, ParsedArgs> | undefined
+  let key = ''
+  if (argv.reduce((chars, word) => chars + word.length, 0) <= PARSE_KEPT_CHARS) {
+    key = JSON.stringify([
+      argv,
+      cwd,
+      cmdName,
+      unknownIsOperand,
+      abbreviations ?? null,
+      [...cs.envByDest.values()].map((variable) => env?.[variable] ?? null),
+    ])
+    parses = PARSES.get(spec)
+    if (parses === undefined) {
+      parses = new Map()
+      PARSES.set(spec, parses)
+    }
+    const kept = parses.get(key)
+    if (kept !== undefined) return kept
   }
-  const kept = parses.get(key)
-  if (kept !== undefined) return kept
   const wordChoiceDestSet = wordChoiceDests(spec)
 
   // tar's old option style is expanded before anything else reads the
@@ -1331,8 +1337,10 @@ export function parseCommand(
     wordBases,
     wordRoles,
   })
-  if (parses.size >= PARSES_KEPT) parses.clear()
-  parses.set(key, parsed)
+  if (parses !== undefined) {
+    if (parses.size >= PARSES_KEPT) parses.clear()
+    parses.set(key, parsed)
+  }
   return parsed
 }
 
