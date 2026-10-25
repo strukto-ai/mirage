@@ -217,10 +217,18 @@ async def stream_shell(
                     return 130
                 if response.status >= 400:
                     text = await response.text()
-                    try:
-                        detail = json.loads(text).get("detail", text)
-                    except (ValueError, AttributeError):
-                        detail = text
+                    # The daemon answers {"detail": ...}; any other body,
+                    # such as a proxy's error page, is printed as it came.
+                    body = (
+                        json.loads(text)
+                        if response.content_type == "application/json"
+                        else None
+                    )
+                    detail = (
+                        body.get("detail", text)
+                        if isinstance(body, dict)
+                        else text
+                    )
                     raise RuntimeError(
                         f"daemon error {response.status}: {detail}"
                     )
