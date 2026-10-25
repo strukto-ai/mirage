@@ -24,31 +24,31 @@ struct State {
     error: Vec<u8>,
     handles: HashMap<u32, Matcher>,
     next: u32,
-    facts: Option<FactsUpload>,
+    upload: Option<RequestUpload>,
 }
 
-struct FactsUpload {
+struct RequestUpload {
     total: usize,
     units: Vec<u32>,
 }
 
-impl FactsUpload {
+impl RequestUpload {
     fn append(&mut self, offset: usize, total: usize, input: &[u32]) -> Result<()> {
         if total > isize::MAX as usize / std::mem::size_of::<u32>() {
-            return Err("policy facts exceed addressable memory");
+            return Err("policy request exceeds addressable memory");
         }
         if total != self.total || offset != self.units.len() || input.is_empty() {
-            return Err("invalid policy facts chunk");
+            return Err("invalid policy upload chunk");
         }
         let end = offset
             .checked_add(input.len())
-            .ok_or("invalid policy facts length")?;
+            .ok_or("invalid policy upload length")?;
         if end > total {
-            return Err("invalid policy facts length");
+            return Err("invalid policy upload length");
         }
         self.units
             .try_reserve(input.len())
-            .map_err(|_| "policy facts allocation failed")?;
+            .map_err(|_| "policy upload allocation failed")?;
         self.units.extend_from_slice(input);
         Ok(())
     }
@@ -601,7 +601,7 @@ pub extern "C" fn mirage_policy_input(length: usize) -> *mut u32 {
     STATE.with_borrow_mut(|state| {
         state.input.clear();
         if length > MAX_UNITS {
-            state.facts = None;
+            state.upload = None;
             state.error = b"policy packet is too large".to_vec();
             return std::ptr::null_mut();
         }
@@ -613,7 +613,7 @@ pub extern "C" fn mirage_policy_input(length: usize) -> *mut u32 {
 #[unsafe(no_mangle)]
 pub extern "C" fn mirage_policy_call(operation: u32, handle: u32) -> i32 {
     STATE.with_borrow_mut(|state| {
-        state.facts = None;
+        state.upload = None;
         state.output.clear();
         state.error.clear();
         let input = std::mem::take(&mut state.input);
@@ -637,54 +637,50 @@ fn finish_call(state: &mut State, result: Result<Vec<u32>>) -> i32 {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn mirage_policy_facts_chunk(offset: usize, total: usize) -> i32 {
+pub extern "C" fn mirage_policy_upload_chunk(offset: usize, total: usize) -> i32 {
     STATE.with_borrow_mut(|state| {
         state.output.clear();
         state.error.clear();
         let mut facts = if offset == 0 {
-            state.facts = None;
-            FactsUpload {
+            state.upload = None;
+            RequestUpload {
                 total,
                 units: Vec::new(),
             }
-        } else if let Some(facts) = state.facts.take() {
+        } else if let Some(facts) = state.upload.take() {
             facts
         } else {
-            return finish_call(state, Err("missing policy facts upload"));
+            return finish_call(state, Err("missing policy upload"));
         };
         let result = facts.append(offset, total, &state.input);
         if result.is_ok() {
-            state.facts = Some(facts);
+            state.upload = Some(facts);
         } else {
-            state.facts = None;
+            state.upload = None;
         }
         finish_call(state, result.map(|_| Vec::new()))
     })
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn mirage_policy_facts_call(operation: u32, handle: u32) -> i32 {
+pub extern "C" fn mirage_policy_upload_call(operation: u32, handle: u32) -> i32 {
     STATE.with_borrow_mut(|state| {
         state.output.clear();
         state.error.clear();
-        let result = match state.facts.take() {
+        let result = match state.upload.take() {
             Some(facts) if facts.total == facts.units.len() => {
-                if matches!(operation, 13 | 25 | 29) {
-                    dispatch(state, operation, handle, &facts.units)
-                } else {
-                    Err("invalid policy facts operation")
-                }
+                dispatch(state, operation, handle, &facts.units)
             }
-            Some(_) => Err("incomplete policy facts upload"),
-            None => Err("missing policy facts upload"),
+            Some(_) => Err("incomplete policy upload"),
+            None => Err("missing policy upload"),
         };
         finish_call(state, result)
     })
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn mirage_policy_facts_clear() {
-    STATE.with_borrow_mut(|state| state.facts = None);
+pub extern "C" fn mirage_policy_upload_clear() {
+    STATE.with_borrow_mut(|state| state.upload = None);
 }
 
 #[unsafe(no_mangle)]
@@ -783,7 +779,7 @@ mod tests {
 
     #[test]
     fn facts_upload_checks_offsets_totals_and_addressable_lengths() {
-        let mut upload = FactsUpload {
+        let mut upload = RequestUpload {
             total: 4,
             units: Vec::new(),
         };
@@ -796,13 +792,13 @@ mod tests {
         assert!(upload.append(2, 4, &[3, 4]).is_ok());
         assert_eq!(upload.units, vec![1, 2, 3, 4]);
         let total = isize::MAX as usize / std::mem::size_of::<u32>() + 1;
-        let mut oversized = FactsUpload {
+        let mut oversized = RequestUpload {
             total,
             units: Vec::new(),
         };
         assert_eq!(
             oversized.append(0, total, &[0]),
-            Err("policy facts exceed addressable memory")
+            Err("policy request exceeds addressable memory")
         );
     }
 

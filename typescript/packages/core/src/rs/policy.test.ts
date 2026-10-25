@@ -67,9 +67,9 @@ function captureInstances(): {
           words = length
           return nativeNumber(exports.mirage_policy_input, [length])
         },
-        mirage_policy_facts_chunk: (offset: number, total: number) => {
+        mirage_policy_upload_chunk: (offset: number, total: number) => {
           uploads.push({ offset, total, words })
-          return nativeNumber(exports.mirage_policy_facts_chunk, [offset, total])
+          return nativeNumber(exports.mirage_policy_upload_chunk, [offset, total])
         },
         mirage_policy_call: (operation: number, handle: number) => {
           requests.push({ operation, words })
@@ -487,9 +487,9 @@ describe('native policy Wasm binding', () => {
       new Uint32Array(memory.buffer, ptr, packet.length).set(packet)
     }
     const chunk = (offset: number, total: number): number =>
-      nativeNumber(exports.mirage_policy_facts_chunk, [offset, total])
+      nativeNumber(exports.mirage_policy_upload_chunk, [offset, total])
     const call = (operation: number): number =>
-      nativeNumber(exports.mirage_policy_facts_call, [operation, 0])
+      nativeNumber(exports.mirage_policy_upload_call, [operation, 0])
     const packet = [1, 0, 0, 0, 1, 0, 0, 0, 0, 0]
     input(packet.slice(0, 3))
     expect(chunk(0, packet.length)).toBe(0)
@@ -511,7 +511,7 @@ describe('native policy Wasm binding', () => {
     expect(call(13)).toBe(1)
     input(packet)
     expect(chunk(0, packet.length)).toBe(0)
-    const clear = exports.mirage_policy_facts_clear
+    const clear = exports.mirage_policy_upload_clear
     if (typeof clear !== 'function') throw new Error('Missing clear export')
     Reflect.apply(clear, undefined, [])
     expect(call(13)).toBe(1)
@@ -763,3 +763,12 @@ describe('native policy Wasm binding', () => {
     ).toThrow('not show entries')
   })
 })
+
+it('preserves large argument-list admission across bounded transfers', () => {
+  const path = '/' + 'x'.repeat(1999)
+  const tokens = ['cat', ...Array<string>(9000).fill(path)]
+  const allowed = new AdmissionMatcher({ allow: ['cat'] })
+  const denied = new AdmissionMatcher({ allow: ['ls'] })
+  expect(allowed.lineAllowed(tokens, true)).toBe(true)
+  expect(denied.lineAllowed(tokens, true)).toBe(false)
+}, 30000)

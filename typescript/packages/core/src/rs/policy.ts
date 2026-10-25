@@ -12,7 +12,7 @@ import type { LinkStep } from '../utils/path.ts'
 
 const CACHE_LIMIT = 128
 const MAX_UNITS = 16 * 1024 * 1024
-const MAX_FACT_UNITS = Math.floor(0x7fffffff / Uint32Array.BYTES_PER_ELEMENT)
+const MAX_REQUEST_UNITS = Math.floor(0x7fffffff / Uint32Array.BYTES_PER_ELEMENT)
 const CHUNK_UNITS = 1024 * 1024
 const MODES = [MountMode.READ, MountMode.WRITE, MountMode.EXEC]
 
@@ -75,7 +75,6 @@ export interface PolicyPlan {
 
 class Packet {
   readonly units: number[] = []
-  hasFacts = false
   static textWords(value: string): number {
     let words = 1
     const units = value[Symbol.iterator]()
@@ -237,7 +236,6 @@ class Packet {
     this.text(value.display)
   }
   facts(value: PolicyFacts): void {
-    this.hasFacts = true
     let words =
       this.units.length +
       9 +
@@ -245,13 +243,13 @@ class Packet {
       2 * value.paths.length +
       2 * value.operands.length +
       Number(value.moveTarget !== null)
-    if (words > MAX_FACT_UNITS) throw new Error('Policy facts exceed addressable memory')
+    if (words > MAX_REQUEST_UNITS) throw new Error('Policy facts exceed addressable memory')
     const texts = new Map<string, number>()
     const ref = (text: string): number => {
       const existing = texts.get(text)
       if (existing !== undefined) return existing
       words += Packet.textWords(text)
-      if (words > MAX_FACT_UNITS) throw new Error('Policy facts exceed addressable memory')
+      if (words > MAX_REQUEST_UNITS) throw new Error('Policy facts exceed addressable memory')
       const id = texts.size
       texts.set(text, id)
       return id
@@ -456,9 +454,9 @@ interface Instance {
   readonly memory: WebAssembly.Memory
   readonly input: (length: number) => number
   readonly call: (operation: number, handle: number) => number
-  readonly factsChunk: (offset: number, total: number) => number
-  readonly factsCall: (operation: number, handle: number) => number
-  readonly factsClear: () => void
+  readonly uploadChunk: (offset: number, total: number) => number
+  readonly uploadCall: (operation: number, handle: number) => number
+  readonly uploadClear: () => void
   readonly output: () => number
   readonly outputLength: () => number
   readonly error: () => number
@@ -500,9 +498,9 @@ function instance(): Instance {
     memory: exports.memory,
     input: exported(exports, 'mirage_policy_input'),
     call: exported(exports, 'mirage_policy_call'),
-    factsChunk: exported(exports, 'mirage_policy_facts_chunk'),
-    factsCall: exported(exports, 'mirage_policy_facts_call'),
-    factsClear: exported(exports, 'mirage_policy_facts_clear'),
+    uploadChunk: exported(exports, 'mirage_policy_upload_chunk'),
+    uploadCall: exported(exports, 'mirage_policy_upload_call'),
+    uploadClear: exported(exports, 'mirage_policy_upload_clear'),
     output: exported(exports, 'mirage_policy_output'),
     outputLength: exported(exports, 'mirage_policy_output_len'),
     error: exported(exports, 'mirage_policy_error'),
@@ -514,8 +512,9 @@ function instance(): Instance {
 function invoke(operation: number, handle: number, write?: (packet: Packet) => void): Reply {
   const packet = new Packet()
   write?.(packet)
-  const staged = packet.hasFacts && packet.units.length > MAX_UNITS
-  if (!staged && packet.units.length > MAX_UNITS) throw new Error('Policy packet is too large')
+  if (packet.units.length > MAX_REQUEST_UNITS)
+    throw new Error('Policy request exceeds addressable memory')
+  const staged = packet.units.length > MAX_UNITS
   const native = instance()
   const checked = (status: number): void => {
     if (status !== 0) {
@@ -535,9 +534,9 @@ function invoke(operation: number, handle: number, write?: (packet: Packet) => v
         new Uint32Array(native.memory.buffer, ptr, length).set(
           packet.units.slice(offset, offset + length),
         )
-        checked(native.factsChunk(offset, packet.units.length))
+        checked(native.uploadChunk(offset, packet.units.length))
       }
-      checked(native.factsCall(operation, handle))
+      checked(native.uploadCall(operation, handle))
     } else {
       const ptr = native.input(packet.units.length)
       if (ptr === 0 && packet.units.length !== 0) throw new Error('Policy packet allocation failed')
@@ -555,7 +554,7 @@ function invoke(operation: number, handle: number, write?: (packet: Packet) => v
     }
     throw error
   } finally {
-    if (staged && current === native) native.factsClear()
+    if (staged && current === native) native.uploadClear()
     retireLater(native)
   }
 }

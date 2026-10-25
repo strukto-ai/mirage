@@ -1041,7 +1041,7 @@
     "snapshotShown": "Public TypeScript aggregates and array aliases are mutable, so the bounded Wasm cache owns and compares complete snapshots before reusing a handle; Python frozen tuple values are safe lru_cache keys.",
     "snapshotVars": "Public TypeScript aggregates and array aliases are mutable, so the bounded Wasm cache owns and compares complete snapshots before reusing a handle; Python frozen tuple values are safe lru_cache keys.",
     "snapshotVisibility": "Public TypeScript aggregates and array aliases are mutable, so the bounded Wasm cache owns and compares complete snapshots before reusing a handle; Python frozen tuple values are safe lru_cache keys.",
-    "MAX_FACT_UNITS": "Wasm32 fact uploads validate the addressable Vec<u32> length; native Python uses typed collections without a Wasm linear-memory boundary."
+    "MAX_REQUEST_UNITS": "Wasm32 request uploads validate the addressable Vec<u32> length; native Python uses typed collections without a Wasm linear-memory boundary."
    }
   },
   "workspace/session/resolve": {
