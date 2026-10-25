@@ -141,6 +141,10 @@
    "python_only": {
     "UTIME_NOW": "mfusepy hands utimens the raw timespecs, whose nanosecond field carries utimensat's markers; fuse-native converts the times to milliseconds in its C binding and libfuse 2 sends it no marker.",
     "UTIME_OMIT": "mfusepy hands utimens the raw timespecs, whose nanosecond field carries utimensat's markers; fuse-native converts the times to milliseconds in its C binding and libfuse 2 sends it no marker."
+   },
+   "typescript_only": {
+    "UNMOUNT_POLL_MS": "node at times never reports the exit of the fusermount child (libuv learns of it only through SIGCHLD), so the TypeScript unmount also polls the mount table; Python's subprocess.run waits on the child's pid directly.",
+    "UNMOUNT_TIMEOUT_MS": "node at times never reports the exit of the fusermount child (libuv learns of it only through SIGCHLD), so the TypeScript unmount also polls the mount table; Python's subprocess.run waits on the child's pid directly."
    }
   },
   "fuse/mount": {

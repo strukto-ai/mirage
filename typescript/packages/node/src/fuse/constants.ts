@@ -19,3 +19,9 @@
 const DARWIN = process.platform === 'darwin'
 export const XATTR_CREATE = DARWIN ? 0x2 : 0x1
 export const XATTR_REPLACE = DARWIN ? 0x4 : 0x2
+
+// A lazy unmount leaves the mount table at once, so unmountWithFusermount
+// reads the table this often beside the helper's exit, and gives up on a
+// mount still listed after UNMOUNT_TIMEOUT_MS.
+export const UNMOUNT_POLL_MS = 20
+export const UNMOUNT_TIMEOUT_MS = 10_000
