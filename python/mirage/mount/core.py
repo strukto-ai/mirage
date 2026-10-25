@@ -18,7 +18,7 @@ import os
 import posixpath
 import time
 from collections.abc import Awaitable, Callable
-from typing import Any, TypeVar
+from typing import Any, TypeVar, cast
 
 from mirage.context import reset_current_session, set_current_session
 from mirage.errors.fs import enoent
@@ -32,7 +32,7 @@ from mirage.runtime.handles import (
     write_runs,
 )
 from mirage.runtime.handles.constants import READ_CHUNK
-from mirage.types import LIVE_KEY, FileStat, FileType
+from mirage.types import LIVE_KEY, FileStat, FileType, PathSpec
 from mirage.utils.dates import ns_to_iso
 from mirage.utils.stat_view import (
     DIR_MODE,
@@ -138,6 +138,38 @@ class MountCore:
             return await call
         finally:
             reset_current_session(token)
+
+    async def _stat_cached(self, path: str, row: FileStat) -> FileStat:
+        """Judge retained metadata through the stat policy boundary.
+
+        Args:
+            path (str): the handle's current mount path.
+            row (FileStat): the metadata this stat would return.
+        """
+        result, _ = await self._op(
+            self._files.dispatch(
+                "stat",
+                PathSpec.from_str_path(self.resolve(path), cwd="/"),
+                retained=row,
+            )
+        )
+        return cast(FileStat, result)
+
+    async def _read_cached(self, path: str, data: bytes) -> bytes:
+        """Judge retained bytes through the same read boundary as a fetch.
+
+        Args:
+            path (str): the handle's current mount path.
+            data (bytes): the bytes this read would return.
+        """
+        result, _ = await self._op(
+            self._files.dispatch(
+                "read",
+                PathSpec.from_str_path(self.resolve(path), cwd="/"),
+                retained=data,
+            )
+        )
+        return cast(bytes, result)
 
     async def _queue(
         self,
@@ -319,7 +351,9 @@ class MountCore:
             s = await self._op(self._files.stat(self.resolve("/")))
         except FileNotFoundError as err:
             logger.debug("fuse: the mount root has no row of its own: %r", err)
-            return self.dir_stat()
+            s = await self._stat_cached(
+                "/", FileStat(name="/", type=FileType.DIRECTORY)
+            )
         return self.attrs(s)
 
     def shown_target(self, path: str, target: str) -> str:
@@ -396,8 +430,10 @@ class MountCore:
         if is_macos_metadata(name):
             raise enoent(path)
         virtual = self.resolve(path)
+        retained = False
         if ctx is not None and ctx.detached is not None:
             # Its name is gone: it stats by the row its file had then.
+            retained = True
             s = ctx.detached
         else:
             try:
@@ -407,13 +443,16 @@ class MountCore:
             except FileNotFoundError:
                 if size is None:
                     raise
-                # An open descriptor keeps the bytes it had after an unlink.
+                # A hide is not an unlink: held metadata still meets the walk.
+                retained = True
                 s = FileStat(name=name, type=FileType.FILE)
         if is_link(s):
             target = await self._op(self._files.readlink(virtual))
             return self.attrs(s, len(self.shown_target(path, target).encode()))
         if is_dir(s):
-            return self.attrs(s)
+            return self.attrs(
+                await self._stat_cached(path, s) if retained else s
+            )
         if size is None and s.size is None:
             # A size-unknown file stats as 0 rather than be fetched on
             # every ls -l; direct_io keeps its reads whole regardless.
@@ -421,7 +460,13 @@ class MountCore:
         if ctx is not None and ctx.write_buf:
             stored = content_size(s) if size is None else size
             size = max(stored, *(o + len(d) for o, d in ctx.write_buf))
-        return self.attrs(s, size)
+        if size is not None and size != s.size:
+            s = s.model_copy(update={"size": size})
+        # A row the stat above fetched was judged there; a held one is
+        # judged here, with the size the handle answers.
+        if retained:
+            s = await self._stat_cached(path, s)
+        return self.attrs(s)
 
     async def fgetattr(self, path: str, fh: int | None) -> MountAttrs:
         """Attributes through an open handle: the path's row, with the
@@ -481,11 +526,13 @@ class MountCore:
         # refreshed its bytes: wait for it, so the read sees what was
         # written.
         await self._settled(ctx)
+        retained = False
         if ctx.live:
             stored = await self._op(
                 self._files.read(self.resolve(ctx.path), offset, size)
             )
         elif ctx.chunked is not None and ctx.data is None:
+            retained = ctx.chunked.holds(offset, size)
             stored = await self._read_chunk(ctx, ctx.chunked, offset, size)
         else:
             held = ctx.data
@@ -496,10 +543,17 @@ class MountCore:
                 held = await self._op(self._files.read(self.resolve(ctx.path)))
                 if ctx.generation == generation:
                     ctx.data = held
+            else:
+                retained = True
             stored = held[offset : offset + size]
-        if not ctx.write_buf:
-            return stored
-        return overlaid(stored, offset, size, ctx.write_buf)
+        data = (
+            overlaid(stored, offset, size, ctx.write_buf)
+            if ctx.write_buf
+            else stored
+        )
+        if retained or ctx.write_buf:
+            return await self._read_cached(ctx.path, data)
+        return data
 
     async def _apply_writes(self, path: str, runs: WriteBuf) -> None:
         """Land write runs on the mount, one pwrite each, in order.

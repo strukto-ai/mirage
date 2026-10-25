@@ -71,9 +71,9 @@
         {
           "command": "mkdir -p /ram/locked && echo hi > /ram/locked/f.txt && cat /ram/locked/f.txt",
           "expect": {
-            "exit": 0,
-            "stdout": "hi\n",
-            "stderr": ""
+            "exit": 1,
+            "stdout": "",
+            "stderr_contains": "Permission denied"
           }
         },
         {
@@ -129,7 +129,7 @@
       ]
     },
     {
-      "id": "hook_pre_vfs_does_not_judge_a_scripts_own_read",
+      "id": "hook_pre_vfs_judges_a_scripts_own_read",
       "world": {
         "mounts": {
           "/ram": {
@@ -150,9 +150,9 @@
         {
           "command": "python3 /ram/run.sealed.py",
           "expect": {
-            "exit": 0,
-            "stdout": "1\n",
-            "stderr": ""
+            "exit": 1,
+            "stdout": "",
+            "stderr_contains": "Permission denied"
           }
         },
         {
@@ -351,6 +351,35 @@
             "exit": 126,
             "stdout": "",
             "stderr_contains": "echo: Permission denied"
+          }
+        }
+      ]
+    },
+    {
+      "id": "hook_post_vfs_leaves_a_live_pipe_to_the_next_reader",
+      "world": {
+        "mounts": {
+          "/ram": {
+            "vfs": "ram",
+            "files": {
+              "a.txt": "hello\n"
+            }
+          }
+        },
+        "policies": [
+          {
+            "name": "redact_reads",
+            "marker": "NEVER-PRESENT"
+          }
+        ]
+      },
+      "steps": [
+        {
+          "command": "f() { head -c 1 \"$1\"; echo; cat \"$1\"; }; f <(printf a; sleep 1; printf rest)",
+          "expect": {
+            "exit": 0,
+            "stdout": "a\nrest",
+            "stderr": ""
           }
         }
       ]

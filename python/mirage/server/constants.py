@@ -26,6 +26,7 @@ RESERVED_KWARGS = frozenset(
         "report",
         "issuer",
         "admit_only",
+        "retained",
         "stream",
         "direct",
     }

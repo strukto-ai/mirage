@@ -53,6 +53,11 @@ export class ChunkedHandle {
     return (await this.load(offset, size)).slice(0, size)
   }
 
+  /** Whether the kept bytes or known EOF answer without fetching. */
+  holds(offset: number, size: number): boolean {
+    return size <= 0 || this.atEnd(offset) || this.covers(offset, size)
+  }
+
   /** Whether reading `size` bytes at the position (a negative size: the rest) needs a fetch first. */
   lacks(size: number): boolean {
     if (size === 0 || this.atEnd(this.pos)) return false

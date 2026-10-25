@@ -172,7 +172,7 @@ class Admitted:
     def scopes(self, virtual: str) -> bool:
         """Whether anything at or under this path could be refused for
         the running command: a rule in force at any path its scope could
-        cover. No coded pre_vfs policy judges a command's own I/O.
+        cover. The dispatcher checks coded file policies separately.
 
         Args:
             virtual (str): absolute virtual path of a walk's start point.

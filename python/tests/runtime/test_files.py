@@ -15,13 +15,14 @@
 import asyncio
 import errno
 import logging
+from dataclasses import replace
 
 import pytest
 
 from mirage.errors.types import OperationNotSupportedError
 from mirage.runtime.constants import LISTING_ENTRY_CONCURRENCY
 from mirage.runtime.errors import CrossMountError
-from mirage.runtime.files import RuntimeFiles
+from mirage.runtime.files import RuntimeFiles, stat_row
 from mirage.runtime.handles import FlushStep
 from mirage.runtime.resolver import PrefixResolver
 from mirage.runtime.types import VFSEntry, VFSStat
@@ -671,3 +672,64 @@ async def test_readdir_is_one_hop_that_stats_at_most_the_cap_at_once():
     assert [entry.path for entry in entries] == names
     assert peak == LISTING_ENTRY_CONCURRENCY
     assert tasks <= 2 * LISTING_ENTRY_CONCURRENCY + 4
+
+
+def test_read_cached_dispatches_the_retained_logical_bytes():
+    calls = []
+
+    async def dispatch(name, path, **kwargs):
+        calls.append((name, path.virtual, kwargs))
+        return b"checked", None
+
+    files = RuntimeFiles(dispatch, None)
+    assert files.read_cached("/data/f", b"held") == b"held"
+    assert calls == [("read", "/data/f", {"retained": b"held"})]
+
+
+def test_stat_cached_preserves_unknown_source_and_checks_logical_changes():
+    row = FileStat(
+        name="unknown",
+        type=FileType.FILE,
+        size=None,
+        uid="owner",
+        modified="2026-07-15T00:00:00Z",
+        extra={"policy_tag": "secret"},
+    )
+    files = RuntimeFiles(None, None)
+    seen = []
+
+    def dispatch(op, path, **kwargs):
+        assert op == "stat"
+        assert path == "/data/unknown"
+        seen.append(kwargs["retained"])
+        return kwargs["retained"]
+
+    files.call = dispatch
+    projected = stat_row(row)
+    assert files.stat_cached("/data/unknown", projected) == projected
+    assert seen[-1] is row
+    checked = files.stat_cached(
+        "/data/unknown", replace(projected, size=7, mode=0o100600)
+    )
+    assert (checked.size, checked.mode) == (7, 0o100600)
+    assert (seen[-1].size, seen[-1].mode) == (7, 0o100600)
+    assert seen[-1].uid == "owner"
+    assert seen[-1].modified == row.modified
+    assert seen[-1].extra == row.extra
+
+
+def test_stat_cached_leaves_out_times_the_backend_never_gave():
+    # A runtime fills a missing time for its guest; the policy sees the
+    # backend's row without it.
+    row = FileStat(name="f", type=FileType.FILE, size=3)
+    files = RuntimeFiles(None, None)
+    seen = []
+
+    def dispatch(op, path, **kwargs):
+        seen.append(kwargs["retained"])
+        return kwargs["retained"]
+
+    files.call = dispatch
+    filled = replace(stat_row(row), mtime_ns=1, atime_ns=1)
+    assert files.stat_cached("/data/f", filled) == filled
+    assert (seen[-1].modified, seen[-1].atime) == (None, None)

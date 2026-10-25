@@ -117,6 +117,8 @@ describe('PyodideFs', () => {
       throw Object.assign(new Error(`no such file: ${path}`), { code: 'ENOENT' })
     }
     return {
+      readCached: (_path, data) => data,
+      statCached: (_path, row) => row,
       read: (path) => {
         const found = store.get(path)
         if (found === undefined) {
@@ -187,6 +189,8 @@ describe('PyodideFs', () => {
   ): SyncVFS {
     return {
       read: (path) => store.get(path) ?? new Uint8Array(),
+      readCached: (_path, data) => data,
+      statCached: (_path, row) => row,
       stat: (path) => {
         statCalls.push(path)
         const found = stats[path]
@@ -384,6 +388,203 @@ with open('${p}log.txt', 'a') as f:
       const held = store.get(`${p}${name}`)
       expect(held === undefined ? null : dec.decode(held)).toBe(text)
     }
+  })
+
+  it('rechecks hydrated reads and preserves the guest position on refusal', async () => {
+    const p = prefix()
+    const path = `${p}retained.txt`
+    store.set(path, enc.encode('abcdef'))
+    const sync = storeSync()
+    let refuse = false
+    let reads = 0
+    const seen: [string, string][] = []
+    mountOver(p, {
+      ...sync,
+      read: (path, raw) => {
+        reads++
+        return sync.read(path, raw)
+      },
+      readCached: (path, data) => {
+        seen.push([path, dec.decode(data)])
+        if (refuse) throw Object.assign(new Error('sealed'), { code: 'EACCES' })
+        return data
+      },
+    })
+    await py.runPythonAsync(`_retained = open('${path}', 'rb', buffering=0)`)
+    expect(reads).toBe(1)
+    refuse = true
+    await py.runPythonAsync(`
+try:
+    _retained.read(2)
+    _retained_refusal = False
+except PermissionError:
+    _retained_refusal = _retained.tell() == 0
+`)
+    expect(py.globals.get('_retained_refusal')).toBe(true)
+    refuse = false
+    await py.runPythonAsync(`_retained_result = _retained.read(2).decode(); _retained.close()`)
+    expect(py.globals.get('_retained_result')).toBe('ab')
+    expect(reads).toBe(1)
+    expect(seen).toEqual([
+      [path, 'ab'],
+      [path, 'ab'],
+    ])
+  })
+
+  describe.each([false, true])('retained metadata (detached=%s)', (detached) => {
+    it.each(['ENOENT', 'EACCES'] as const)(
+      'rechecks %s on fstat and restores the same handle',
+      async (code) => {
+        const p = prefix()
+        const path = `${p}metadata.txt`
+        store.set(path, enc.encode('abcdef'))
+        const sync = storeSync()
+        let refuse = false
+        let stats = 0
+        const seen: VFSStat[] = []
+        mountOver(p, {
+          ...sync,
+          stat: (name) => {
+            stats++
+            return sync.stat(name)
+          },
+          statCached: (name, row) => {
+            if (name === path) {
+              seen.push(row)
+              if (refuse) throw Object.assign(new Error('sealed'), { code })
+            }
+            return row
+          },
+        })
+        await py.runPythonAsync(`
+import os
+_metadata = open('${path}', 'rb', buffering=0)
+_metadata_size = os.fstat(_metadata.fileno()).st_size
+`)
+        expect(py.globals.get('_metadata_size')).toBe(6)
+        if (detached) await py.runPythonAsync(`os.unlink('${path}')`)
+        await py.runPythonAsync('_metadata_links = os.fstat(_metadata.fileno()).st_nlink')
+        expect(py.globals.get('_metadata_links')).toBe(detached ? 0 : 1)
+        const fetched = stats
+        refuse = true
+        await py.runPythonAsync(`
+try:
+    os.fstat(_metadata.fileno())
+    _metadata_refusal = None
+except OSError as error:
+    import errno
+    _metadata_refusal = error.errno == getattr(errno, '${code}')
+`)
+        expect(py.globals.get('_metadata_refusal')).toBe(true)
+        refuse = false
+        await py.runPythonAsync(
+          `_metadata_restored = os.fstat(_metadata.fileno()).st_size; _metadata.close()`,
+        )
+        expect(py.globals.get('_metadata_restored')).toBe(6)
+        expect(stats).toBe(fetched)
+        expect(seen.at(-1)?.size).toBe(6)
+      },
+    )
+  })
+
+  it("shows a retained stat's policy the guest's own time edit", async () => {
+    const p = prefix()
+    const path = `${p}stamped.txt`
+    store.set(path, enc.encode('abc'))
+    const sync = storeSync()
+    const seen: VFSStat[] = []
+    mountOver(p, {
+      ...sync,
+      stat: (name) => {
+        const row = sync.stat(name)
+        return name === path
+          ? { ...row, source: new FileStat({ name: 'stamped.txt', type: FileType.FILE, size: 3 }) }
+          : row
+      },
+      statCached: (name, row) => {
+        if (name === path) seen.push(row)
+        return row
+      },
+    })
+    await py.runPythonAsync(`
+import os
+_stamped = open('${path}', 'rb', buffering=0)
+os.utime('${path}', (1000, 2000))
+os.fstat(_stamped.fileno())
+_stamped.close()
+`)
+    expect(seen.at(-1)?.source?.atime).toBe('1970-01-01T00:16:40Z')
+    expect(seen.at(-1)?.source?.modified).toBe('1970-01-01T00:33:20Z')
+  })
+
+  it("keeps a refused time edit out of a retained stat's policy", async () => {
+    const p = prefix()
+    const path = `${p}unstamped.txt`
+    store.set(path, enc.encode('abc'))
+    const sync = storeSync()
+    const seen: VFSStat[] = []
+    mountOver(p, {
+      ...sync,
+      stat: (name) => {
+        const row = sync.stat(name)
+        return name === path
+          ? {
+              ...row,
+              source: new FileStat({ name: 'unstamped.txt', type: FileType.FILE, size: 3 }),
+            }
+          : row
+      },
+      statCached: (name, row) => {
+        if (name === path) seen.push(row)
+        return row
+      },
+      flush: (mutations) => {
+        if (mutations.some((m) => m.kind === 'setattr')) {
+          throw Object.assign(new Error('sealed'), { code: 'EACCES' })
+        }
+        return sync.flush(mutations)
+      },
+    })
+    await py.runPythonAsync(`
+import os
+_unstamped = open('${path}', 'rb', buffering=0)
+try:
+    os.utime('${path}', (1000, 2000))
+    _utime_refused = False
+except PermissionError:
+    _utime_refused = True
+os.fstat(_unstamped.fileno())
+_unstamped.close()
+`)
+    expect(py.globals.get('_utime_refused')).toBe(true)
+    expect(seen.at(-1)?.source?.atime ?? null).toBeNull()
+  })
+
+  it('checks written retained bytes without flushing the pending write', async () => {
+    const p = prefix()
+    const path = `${p}overlay.txt`
+    store.set(path, enc.encode('abcdef'))
+    const sync = storeSync()
+    const seen: string[] = []
+    mountOver(p, {
+      ...sync,
+      read: (path, raw) => sync.read(path, raw).slice(),
+      readCached: (_path, data) => {
+        seen.push(dec.decode(data))
+        return data
+      },
+    })
+    await py.runPythonAsync(`
+_overlay = open('${path}', 'r+b', buffering=0)
+_overlay.write(b'Z')
+_overlay.seek(0)
+_overlay_result = _overlay.read(2).decode()
+`)
+    expect(py.globals.get('_overlay_result')).toBe('Zb')
+    expect(seen).toEqual(['Zb'])
+    expect(dec.decode(store.get(path))).toBe('abcdef')
+    await py.runPythonAsync('_overlay.close()')
+    expect(dec.decode(store.get(path))).toBe('Zbcdef')
   })
 
   it('records a shutil.rmtree in post order, through its fd-relative walk', async () => {

@@ -13,11 +13,13 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Sequence
 from dataclasses import replace
 from typing import Any, ClassVar
 
 from mirage.commands.config import Context
+from mirage.concurrency.limiter import settle
 from mirage.runtime.config import RuntimeConfig, memory_limit
 from mirage.runtime.files import RuntimeFiles
 from mirage.runtime.python.base import PythonRuntime
@@ -110,12 +112,17 @@ class MontyRuntime(PythonRuntime[MontyExecution]):
         # A nested call must not queue behind a parent holding this pool.
         nested = ctx.processes is not None and ctx.processes.depth > 0
         execution = MontyExecution(self._max_memory) if nested else engine
+        files = RuntimeFiles.of(ctx, self._binding)
         try:
             result = await execution.run(
                 program,
                 ctx.cwd,
-                MontyFs(RuntimeFiles.of(ctx, self._binding), ctx.env or {}),
+                MontyFs(files, ctx.env or {}),
             )
+        except asyncio.CancelledError:
+            if files is not None:
+                await settle(asyncio.create_task(files.abort()))
+            raise
         finally:
             if execution is not engine:
                 await execution.close()

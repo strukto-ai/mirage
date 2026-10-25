@@ -37,7 +37,7 @@ import { CallerResolver, workspaceBridge, type WorkspaceBinding } from './bindin
 import { linkView } from '../commands/builtin/utils/links.ts'
 import type { Context } from '../commands/config.ts'
 import { awaitsAs, callsAs, currentCaller } from '../context/session_context.ts'
-import { PathSpec, type FileStat, type SetAttrFields } from '../types.ts'
+import { FileStat, FileType, PathSpec, type SetAttrFields } from '../types.ts'
 import { concat } from '../utils/bytes.ts'
 import { entryName } from '../utils/remnants.ts'
 import type { VFSEntry, VFSStat } from './types.ts'
@@ -82,6 +82,7 @@ function statRow(st: FileStat): VFSStat {
     ...(atime !== null ? { atimeMs: atime } : {}),
     ...(typeof st.uid === 'number' ? { uid: st.uid } : {}),
     ...(typeof st.gid === 'number' ? { gid: st.gid } : {}),
+    source: st,
   }
 }
 
@@ -180,6 +181,20 @@ export class RuntimeFiles {
       awaitsAs(caller, bridge),
       new CallerResolver(binding.resolver, caller),
       links === undefined ? null : callsAs(caller, links.resolve.bind(links)),
+    )
+  }
+
+  /** A live guest view that stops issuing operations once its run is cancelled. */
+  withSignal(signal: AbortSignal): RuntimeFiles {
+    return new RuntimeFiles(
+      async (...args) => {
+        signal.throwIfAborted()
+        const out = await this.bridge(...args)
+        signal.throwIfAborted()
+        return out
+      },
+      this.resolver,
+      this.resolve,
     )
   }
 
@@ -310,6 +325,12 @@ export class RuntimeFiles {
     return out
   }
 
+  /** Judge bytes a descriptor holds as a read of its path, and answer them; nothing is fetched. */
+  async readCached(path: string, data: Uint8Array): Promise<Uint8Array> {
+    await this.dispatch('read', path, undefined, undefined, { retained: data })
+    return data
+  }
+
   async write(path: string, bytes: Uint8Array): Promise<void> {
     const out = await this.dispatch('write', path, bytes)
     if (out !== undefined) {
@@ -347,6 +368,44 @@ export class RuntimeFiles {
       throw new TypeError(`runtime files: stat ${path} bad shape`)
     }
     return statRow(out as FileStat)
+  }
+
+  /**
+   * Judge a descriptor's held row as a stat of its path, and answer it;
+   * nothing is fetched. The policies see the backend's row with what the
+   * descriptor changed (size, mode, and a time the row has), so an unknown
+   * size, a named owner and a time the backend never gave stay as they were.
+   */
+  async statCached(path: string, row: VFSStat): Promise<VFSStat> {
+    // A row that crossed a worker boundary is a plain object again.
+    let held = new FileStat(
+      row.source ?? {
+        name: entryName(path),
+        type: row.isDir
+          ? FileType.DIRECTORY
+          : row.isLink === true
+            ? FileType.SYMLINK
+            : FileType.FILE,
+        mode: row.mode,
+      },
+    )
+    const mtime = mtimeMs(held)
+    const atime = atimeMs(held)
+    held = held.with({
+      ...(row.size !== contentSize(held) ? { size: row.size } : {}),
+      ...(row.mode !== posixMode(held) ? { mode: row.mode } : {}),
+      ...(row.mtimeMs !== undefined && mtime !== null && row.mtimeMs !== mtime
+        ? { modified: new Date(row.mtimeMs).toISOString() }
+        : {}),
+      ...(row.atimeMs !== undefined && atime !== null && row.atimeMs !== atime
+        ? { atime: new Date(row.atimeMs).toISOString() }
+        : {}),
+    })
+    await this.dispatch('stat', path, undefined, undefined, {
+      retained: held,
+      ...(row.isLink === true ? { nofollow: true } : {}),
+    })
+    return row
   }
 
   /**

@@ -22,6 +22,8 @@ sys.path[:] = [p for p in sys.path if p not in (_RUNTIME_DIR, _INTEG_DIR, "")]
 import asyncio  # noqa: E402
 import builtins  # noqa: E402
 import copy  # noqa: E402
+import functools  # noqa: E402
+import hashlib  # noqa: E402
 import io  # noqa: E402
 import json  # noqa: E402
 import logging  # noqa: E402
@@ -32,6 +34,7 @@ import shutil  # noqa: E402
 import tempfile  # noqa: E402
 import traceback  # noqa: E402
 import uuid  # noqa: E402
+import weakref  # noqa: E402
 from typing import Any  # noqa: E402
 
 from mirage import (  # noqa: E402
@@ -40,10 +43,13 @@ from mirage import (  # noqa: E402
     ProcessExecutorMixin,
     Workspace,
 )
+from mirage.commands.cli.specs import cli_spec_for  # noqa: E402
 from mirage.commands.cli.types import CLI  # noqa: E402
 from mirage.commands.config import Context  # noqa: E402
 from mirage.commands.spec.types import CommandSpec  # noqa: E402
 from mirage.errors import classify  # noqa: E402
+from mirage.fuse.fs import MirageFS  # noqa: E402
+from mirage.mount.core import MountCore  # noqa: E402
 from mirage.policy import Policy  # noqa: E402
 from mirage.policy.types import (  # noqa: E402
     CommandContext,
@@ -56,6 +62,7 @@ from mirage.policy.types import (  # noqa: E402
 )
 from mirage.runtime.base import Runtime  # noqa: E402
 from mirage.runtime.mixin import LineExecutorMixin  # noqa: E402
+from mirage.runtime.python.host.fs import HostFs  # noqa: E402
 from mirage.runtime.table import build_runtime, register_runtime  # noqa: E402
 from mirage.runtime.types import (  # noqa: E402
     OutputFn,
@@ -63,11 +70,17 @@ from mirage.runtime.types import (  # noqa: E402
     ScriptSource,
 )
 from mirage.types import FileStat, Limit, PathSpec  # noqa: E402
+from mirage.utils.key_prefix import mounted_path  # noqa: E402
+from mirage.utils.path import norm  # noqa: E402
 from mirage.vfs.base import BaseVFS  # noqa: E402
 from mirage.vfs.ram import RAMVFS  # noqa: E402
 from mirage.workspace.workspace.lifecycle import (  # noqa: E402
     patch_process,
     unpatch_process,
+)
+
+BACKEND_READS: weakref.WeakKeyDictionary[BaseVFS, list[str]] = (
+    weakref.WeakKeyDictionary()
 )
 
 HOST = "python"
@@ -324,6 +337,157 @@ class RedactReads(Policy):
         return None
 
 
+class ReadControl(Policy):
+    """Change the current file policy through a guest-readable control file."""
+
+    def __init__(self, ws: Workspace, path: str) -> None:
+        self.ws = ws
+        self.path = path
+        self.mode = "allow"
+
+    async def pre_vfs(self, ctx: VfsContext) -> Deny | None:
+        if ctx.call.name == "read" and ctx.path.virtual.startswith(
+            "/control/"
+        ):
+            mode = ctx.path.virtual.rsplit("/", 1)[-1]
+            if mode not in (
+                "allow",
+                "hide",
+                "deny",
+                "pre",
+                "post",
+                "pre_stat",
+                "post_stat",
+            ):
+                raise ValueError(f"unknown read control: {mode}")
+            previous = self.mode
+            self.mode = mode
+            profile = (
+                {"paths": {"hide": [self.path]}}
+                if mode == "hide"
+                else {"commands": {"deny": [{"paths": [self.path]}]}}
+                if mode == "deny"
+                else {}
+            )
+            if mode in ("hide", "deny") or previous in ("hide", "deny"):
+                await self.ws.set_session_profile(
+                    self.ws.default_session_id, profile
+                )
+        if (
+            (self.mode == "pre" and ctx.call.name == "read")
+            or (self.mode == "pre_stat" and ctx.call.name == "stat")
+        ) and ctx.path.virtual == self.path:
+            return Deny("sealed")
+        return None
+
+    async def post_vfs(self, ctx: VfsResultContext) -> Deny | None:
+        if (
+            self.mode == "post_stat"
+            and ctx.call.name == "stat"
+            and ctx.path.virtual == self.path
+        ):
+            return Deny("metadata refused")
+        if (
+            self.mode == "post"
+            and ctx.call.name == "read"
+            and ctx.path.virtual == self.path
+            and isinstance(ctx.result, (bytes, bytearray))
+            and ctx.result
+        ):
+            return Deny("redacted")
+        return None
+
+
+class RetainedHandles:
+    """Real host, MountCore and FUSE descriptors kept between JSON steps."""
+
+    def __init__(self, ws: Workspace) -> None:
+        self.ws = ws
+        self.host = HostFs(ws.vfs, asyncio.get_running_loop())
+        self.core = MountCore(
+            ws.vfs, session=ws.get_session(ws.default_session_id)
+        )
+        self.fuse: MirageFS | None = None
+        self.opened: dict[str, tuple[str, str, int]] = {}
+
+    async def run(self, spec: dict[str, Any]) -> bytes | int | None:
+        name = spec["id"]
+        operation = spec["op"]
+        if operation == "open":
+            if name in self.opened:
+                raise ValueError(f"handle already open: {name}")
+            path, surface = spec["path"], spec["surface"]
+            if surface == "host":
+                fd = await asyncio.to_thread(self.host.open, path, os.O_RDONLY)
+            elif surface == "mount":
+                fd = await self.core.open(path)
+            elif surface == "fuse":
+                if self.fuse is None:
+                    self.fuse = MirageFS(
+                        self.ws.vfs,
+                        session=self.ws.get_session(
+                            self.ws.default_session_id
+                        ),
+                    )
+                fd = await asyncio.to_thread(self.fuse.open, path, os.O_RDONLY)
+            else:
+                raise ValueError(f"unknown handle surface: {surface}")
+            self.opened[name] = (path, surface, fd)
+            return None
+        path, surface, fd = self.opened[name]
+        if operation == "stat":
+            if surface == "host":
+                return (await asyncio.to_thread(self.host.fstat, fd)).st_size
+            if surface == "mount":
+                return (await self.core.fgetattr(path, fd)).size
+            assert self.fuse is not None
+            return (await asyncio.to_thread(self.fuse.getattr, path, fd))[
+                "st_size"
+            ]
+        if operation == "unlink":
+            if surface == "host":
+                await asyncio.to_thread(self.host.unlink, path)
+            elif surface == "mount":
+                await self.core.unlink(path)
+            else:
+                assert self.fuse is not None
+                await asyncio.to_thread(self.fuse.unlink, path)
+            return None
+        if operation == "close":
+            if surface == "host":
+                await asyncio.to_thread(self.host.close, fd)
+                assert self.host._descriptors.get(fd) is None
+            elif surface == "mount":
+                await self.core.release(fd)
+                assert fd not in self.core.handles
+            else:
+                assert self.fuse is not None
+                await asyncio.to_thread(self.fuse.release, path, fd)
+                assert fd not in self.fuse.core.handles
+            del self.opened[name]
+            return None
+        if operation != "read":
+            raise ValueError(f"unknown handle operation: {operation}")
+        offset, size = spec.get("offset", 0), spec.get("size", 4096)
+        if surface == "host":
+            await asyncio.to_thread(self.host.lseek, fd, offset, os.SEEK_SET)
+            return await asyncio.to_thread(self.host.read, fd, size)
+        if surface == "mount":
+            return await self.core.read(path, size, offset, fd)
+        assert self.fuse is not None
+        return await asyncio.to_thread(self.fuse.read, path, size, offset, fd)
+
+    async def close(self) -> None:
+        for name in list(self.opened):
+            await self.run({"id": name, "op": "close"})
+        if self.fuse is not None:
+            loop = self.fuse._loop
+            loop.call_soon_threadsafe(loop.stop)
+            while loop.is_running():
+                await asyncio.sleep(0)
+            loop.close()
+
+
 class LineCap(Policy):
     """Test-only post_execute policy: bound every line's output."""
 
@@ -508,6 +672,75 @@ async def _ensure_mongo() -> None:
     _mongo_seeded = True
 
 
+class ShortcutRAMVFS(RAMVFS):
+    """RAM content exposed through real optional VFS shortcut operations."""
+
+    caches_reads = True
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.asked: list[str] = []
+
+    def _body(self, name: str, path: PathSpec) -> bytes:
+        self.asked.append(name)
+        return self._store.files[norm(path.mount_path)]
+
+    async def first_lines(self, path: PathSpec, n: int) -> bytes:
+        return b"".join(
+            self._body("first_lines", path).splitlines(keepends=True)[:n]
+        )
+
+    async def last_lines(self, path: PathSpec, n: int) -> bytes:
+        return b"".join(
+            self._body("last_lines", path).splitlines(keepends=True)[-n:]
+        )
+
+    async def line_count(self, path: PathSpec) -> int:
+        return self._body("line_count", path).count(b"\n")
+
+    async def checksum(self, path: PathSpec, algorithm: str) -> str:
+        return hashlib.new(algorithm, self._body("checksum", path)).hexdigest()
+
+    async def files_containing(
+        self, path: PathSpec, text: str, *, whole_word: bool, ignore_case: bool
+    ) -> list[PathSpec]:
+        self.asked.append("files_containing")
+        needle = text.lower() if ignore_case else text
+        return [
+            mounted_path(path, key)
+            for key, data in self._store.files.items()
+            if needle
+            in (data.decode().lower() if ignore_case else data.decode())
+        ]
+
+    async def lines_containing(
+        self, path: PathSpec, text: str, *, ignore_case: bool
+    ) -> bytes:
+        return self._body("lines_containing", path)
+
+    async def follow(self, path: PathSpec, n: int, interval: float):
+        data = b"".join(
+            self._body("follow", path).splitlines(keepends=True)[-n:]
+        )
+
+        async def stream():
+            try:
+                yield data
+            finally:
+                self.asked.append("follow_closed")
+
+        return stream()
+
+
+def _native_calls(ws: Workspace) -> list[str]:
+    return [
+        name
+        for entry in ws.mounts()
+        if isinstance(entry.vfs, ShortcutRAMVFS)
+        for name in entry.vfs.asked
+    ]
+
+
 class FailingRAMVFS(RAMVFS):
     """A RAM mount whose named records fail their stat and read.
 
@@ -546,6 +779,8 @@ class FailingRAMVFS(RAMVFS):
 
 async def _build_vfs(spec: dict[str, Any], run_id: str) -> Any:
     kind = spec["vfs"]
+    if kind == "shortcuts":
+        return ShortcutRAMVFS()
     if kind == "ram":
         vfs = FailingRAMVFS(spec["failing"]) if "failing" in spec else RAMVFS()
         if "generated_files" in spec:
@@ -645,6 +880,27 @@ def _install_clis(ws: Workspace, clis: dict[str, Any]) -> None:
         ws.register_cli(name, spec, entry.get("config"))
 
 
+def _track_reads(vfs: BaseVFS) -> None:
+    original = vfs.read
+    calls: list[str] = []
+    BACKEND_READS[vfs] = calls
+
+    @functools.wraps(original)
+    def read(path: PathSpec, *args: Any, **kwargs: Any) -> Any:
+        calls.append(path.virtual)
+        return original(path, *args, **kwargs)
+
+    vfs.read = read
+
+
+def _backend_reads(ws: Workspace) -> list[str]:
+    return [
+        path
+        for entry in ws.mounts()
+        for path in BACKEND_READS.get(entry.vfs, ())
+    ]
+
+
 async def _build_workspace(world: dict[str, Any], run_id: str) -> Workspace:
     _register_runtimes(world.get("register_runtimes", {}))
     mounts: dict[str, Any] = {}
@@ -652,6 +908,10 @@ async def _build_workspace(world: dict[str, Any], run_id: str) -> Workspace:
     mount_specs = world.get("mounts", {"/ram": {"vfs": "ram"}})
     for index, (prefix, spec) in enumerate(mount_specs.items()):
         vfs = await _build_vfs(spec, f"{run_id}-{index}")
+        if spec.get("cache_reads"):
+            vfs.caches_reads = True
+        if "read_control" in world or world.get("track_reads"):
+            _track_reads(vfs)
         guards = {
             cmd: Limit(**kwargs)
             for cmd, kwargs in spec.get("limits", {}).items()
@@ -685,8 +945,12 @@ async def _build_workspace(world: dict[str, Any], run_id: str) -> Workspace:
     if "profile" in world:
         kwargs["profile"] = world["profile"]
     ws = Workspace(mounts, mode=MountMode.EXEC, **kwargs)
+    if "read_control" in world:
+        ws.policies.add(ReadControl(ws, world["read_control"]))
     if "clis" in world:
         _install_clis(ws, world["clis"])
+    for name in world.get("builtin_clis", []):
+        ws.register_cli(name, cli_spec_for(name))
     made_dirs: set[str] = set()
     for prefix, name, data in seeds:
         # A nested seed needs its directory first: write refuses a
@@ -864,11 +1128,79 @@ async def _run_step(
     label: str,
     step: dict[str, Any],
     session_id: str | None = None,
+    handles: RetainedHandles | None = None,
+) -> list[str]:
+    before = _backend_reads(ws)
+    native_before = len(_native_calls(ws))
+    problems = await _perform_step(
+        ws, case_id, label, step, session_id, handles
+    )
+    native_expected = step.get("expect", {}).get("native_calls")
+    if native_expected is not None:
+        actual = _native_calls(ws)[native_before:]
+        if actual != native_expected:
+            problems.append(
+                f"{case_id} {label}: native calls {actual!r}, "
+                f"expected {native_expected!r}"
+            )
+    expected = step.get("expect", {}).get("backend_reads")
+    if expected is not None:
+        after = _backend_reads(ws)
+        for path, count in expected.items():
+            actual = after.count(path) - before.count(path)
+            if actual != count:
+                problems.append(
+                    f"{case_id} {label}: backend read {path}: "
+                    f"expected {count}, got {actual}"
+                )
+    return problems
+
+
+async def _perform_step(
+    ws: Workspace,
+    case_id: str,
+    label: str,
+    step: dict[str, Any],
+    session_id: str | None = None,
+    handles: RetainedHandles | None = None,
 ) -> list[str]:
     expect = step.get("expect", {})
     # The ledger slice this step adds: ws.vfs.records is the one
     # workspace-wide account, so the step's own ops are the tail.
     ledger_before = len(ws.vfs.records)
+    if "add_policies" in step:
+        for spec in step["add_policies"]:
+            ws.policies.add(_build_policy(spec))
+        return []
+    if "handle" in step:
+        assert handles is not None
+        content = None
+        value = None
+        try:
+            value = await handles.run(step["handle"])
+            content = value.decode() if isinstance(value, bytes) else None
+            errno_name = "NONE"
+        except Exception as exc:
+            condition = classify(exc)
+            errno_name = (
+                condition.name if condition is not None else type(exc).__name__
+            )
+        problems = []
+        if errno_name != expect.get("errno", "NONE"):
+            problems.append(
+                f"handle errno {errno_name}, expected {expect.get('errno', 'NONE')}"
+            )
+        if "value" in expect and value != expect["value"]:
+            problems.append(
+                f"handle value {value!r}, expected {expect['value']!r}"
+            )
+        if "content" in expect and content != expect["content"]:
+            problems.append(
+                f"handle content {content!r}, expected {expect['content']!r}"
+            )
+        seen = [f"{r.op} {r.path}" for r in ws.vfs.records[ledger_before:]]
+        problems.extend(_check_ops(expect, seen))
+        return [f"{case_id} {label}: {p}" for p in problems]
     if "facade" in step:
         problems = await _run_facade(ws, expect, step["facade"])
         seen = [f"{r.op} {r.path}" for r in ws.vfs.records[ledger_before:]]
@@ -945,6 +1277,14 @@ async def _run_step(
         kwargs["runtime"] = step["runtime"]
     if "stdin" in step:
         kwargs["stdin"] = step["stdin"].encode()
+    if expect.get("cancelled"):
+        try:
+            await ws.shell(command, **kwargs)
+        except asyncio.CancelledError:
+            return []
+        return [
+            f"{case_id} {label}: expected session revocation to cancel the command"
+        ]
     if "throws_contains" in expect:
         try:
             await ws.shell(command, **kwargs)
@@ -1360,6 +1700,7 @@ async def _run_case(suite: str, case: dict[str, Any]) -> list[str]:
         await ws.close()
         return [f"{case_id}: expected the world build to fail"]
     ws = await _build_workspace(world, run_id)
+    handles = RetainedHandles(ws)
     problems: list[str] = []
     try:
         runtimes = {runtime.name: runtime for runtime in ws.runtimes()}
@@ -1383,12 +1724,17 @@ async def _run_case(suite: str, case: dict[str, Any]) -> list[str]:
                 )
             else:
                 label = f"step[{index}]"
-                problems.extend(await _run_step(ws, case_id, label, step))
+                problems.extend(
+                    await _run_step(ws, case_id, label, step, handles=handles)
+                )
     finally:
         try:
-            await _remove_roots(ws)
+            await handles.close()
         finally:
-            await ws.close()
+            try:
+                await _remove_roots(ws)
+            finally:
+                await ws.close()
     return problems
 
 

@@ -152,6 +152,7 @@ from mirage.workspace.dispatcher.constants import (
     NO_FOLLOW_OPS,
     POLICY_WRITE_OPS,
     READ_AHEAD_BYTES,
+    READ_SHORTCUT_OPS,
     READ_STAND_IN_OPS,
     SERIAL_WRITE_OPS,
     SETATTR_KEYS,
@@ -984,7 +985,11 @@ class Dispatcher:
         """
         token = bind_caller(dataclasses.replace(caller, rule_gate=None))
         try:
-            if name == "read" and not kwargs.get("warm"):
+            if (
+                name == "read"
+                and not kwargs.get("warm")
+                and "retained" not in kwargs
+            ):
                 return await self._read_refusing_dirs(
                     path, caller, report, kwargs
                 )
@@ -1152,6 +1157,15 @@ class Dispatcher:
         admit_only = name in {"write", "stat"} and bool(
             kwargs.pop("admit_only", False)
         )
+        has_retained = "retained" in kwargs
+        retained = kwargs.pop("retained", None)
+        if has_retained and not (
+            (name == "read" and isinstance(retained, bytes))
+            or (name == "stat" and isinstance(retained, FileStat))
+        ):
+            raise TypeError(
+                "retained is only valid for read bytes or a stat row"
+            )
         stream = name == "read" and bool(kwargs.pop("stream", False))
         direct = name == "read" and bool(kwargs.pop("direct", False))
         warm = name == "read" and bool(kwargs.pop("warm", False))
@@ -1194,6 +1208,8 @@ class Dispatcher:
         await self._refuse_rename(call)
         if report is not None:
             report.path = call.path.virtual
+        if has_retained:
+            return await self._judge_held(call, retained), IOResult()
         if admit_only:
             self._follow(call)
             if name == "stat":
@@ -1245,8 +1261,15 @@ class Dispatcher:
         # The cache stage answers first where the file cache decides: a
         # call standing in for a read gives way to the read for a file it
         # holds, which is judged, and a warm read answers whether it holds
-        # one, judged as the read it stands in for.
-        if name in READ_STAND_IN_OPS and await self._held(call, mount):
+        # one, judged as the read it stands in for. A content shortcut
+        # also gives way when a post_vfs policy would judge its answer:
+        # a count or a checksum carries none of the bytes it would judge.
+        if (
+            name in READ_SHORTCUT_OPS
+            and await self._namespace.registry.policies.wants_for(
+                "post_vfs", _session_id(caller)
+            )
+        ) or (name in READ_STAND_IN_OPS and await self._held(call, mount)):
             _memory_answered(report)
             return None, IOResult()
         if warm:
@@ -1288,8 +1311,16 @@ class Dispatcher:
             )
             == MountMode.READ
         )
+        # A content shortcut stands in for a read and is admitted as one,
+        # as a warm read is, so a policy that judges reads judges it; the
+        # backend still answers the shortcut.
+        admitted = (
+            declared(type(mount.vfs), "read") or CALLS["read"]
+            if name in READ_SHORTCUT_OPS
+            else mark
+        )
         boundary = await self._admit(
-            call, mount, mark, judge_mode=not looks_up
+            call, mount, admitted, judge_mode=not looks_up
         )
         if looks_up:
             await _mkdir_on_read_only(
@@ -1449,7 +1480,6 @@ class Dispatcher:
             or await self._namespace.registry.policies.wants_for(
                 "pre_vfs",
                 _session_id(caller),
-                rules_only=caller.refusals is not None,
             )
         ):
             return
@@ -1924,12 +1954,10 @@ class Dispatcher:
 
         A backend's find, du, search, tree copy or tree removal answers
         for every entry under its path in one call, past the checks each
-        entry would meet on its own. So when the command's path rules or,
-        for a ``ws.vfs`` call, a coded pre_vfs policy reach below one of
-        its paths, it is declined and the caller walks, entry by entry,
-        through calls that are each judged. Inside a running line only the
-        profile's path rules judge an entry, so a coded policy declines no
-        walk there. A path rule declines no ``files_containing``: its
+        entry would meet on its own. Path rules and file policies decline
+        that shortcut so the caller walks, entry by entry, through calls
+        that are each judged, including inside commands. A path rule
+        declines no ``files_containing`` on its own: its
         answer only rules files out of a walk that still lists every one,
         and each file it rules out meets the rule as a warm read, so one
         the rule refuses reports ``Permission denied`` as its read would.
@@ -1957,14 +1985,30 @@ class Dispatcher:
             hidden_under(call.vis, p.virtual) for p in paths
         ):
             return True
-        if call.rule_gate is not None:
-            return call.name != "files_containing" and any(
-                call.rule_gate.scopes(p.virtual) for p in paths
+        if (
+            call.rule_gate is not None
+            and call.name != "files_containing"
+            and any(call.rule_gate.scopes(p.virtual) for p in paths)
+        ):
+            return True
+        # A file copy names both its ends, and admission judges each, the
+        # source as a read. Only a post_vfs hook needs the bytes, and then
+        # the caller moves them through a read and a write, so the bytes it
+        # judges are the bytes that land.
+        if call.name == "copy":
+            return await self._namespace.registry.policies.wants_for(
+                "post_vfs", _session_id(call.caller)
             )
-        return await self._namespace.registry.policies.wants_for(
+        # Inside a line the gate above answered for the profile's path
+        # rules, scoped to these paths; only a coded hook is left to ask.
+        policies = self._namespace.registry.policies
+        return await policies.wants_for(
             "pre_vfs",
             _session_id(call.caller),
-            rules_only=call.caller.refusals is not None,
+            coded_only=call.rule_gate is not None,
+        ) or (
+            call.name in {"dir_copy", "files_containing"}
+            and await policies.wants_for("post_vfs", _session_id(call.caller))
         )
 
     async def _admit(
@@ -2002,8 +2046,15 @@ class Dispatcher:
         boundary = self._boundary(mount, call.caller)
         if not judge_mode:
             boundary = dataclasses.replace(boundary, mode=None)
+        # A file copy reads its source, whatever the backend does with it,
+        # so the source is admitted as the read a policy judges reads by.
+        source = (
+            declared(type(mount.vfs), "read") or CALLS["read"]
+            if call.name == "copy"
+            else mark
+        )
         await boundary.admit(
-            mark,
+            source,
             call.path,
             call.write and call.name not in COPY_OPS,
             final=call.dst is None,
@@ -2034,6 +2085,36 @@ class Dispatcher:
         """
         manager = mount.cache_manager if mount is not None else None
         return manager is not None and await manager.is_cached(call.path)
+
+    async def _judge_held(
+        self, call: _Call, held: bytes | FileStat
+    ) -> bytes | FileStat:
+        """Judge bytes or a row its caller already holds, as a cache hit.
+
+        A runtime descriptor and a kernel mount's handle keep what they
+        fetched; each later read or stat of it meets the hides, the rules
+        and the file policies in force now, through the boundary a fetch
+        and the file cache answer through, and nothing is fetched. The
+        bytes were recorded when they were fetched, so this is not.
+
+        Args:
+            call (_Call): the walked read or stat.
+            held (bytes | FileStat): what the caller would answer with.
+        """
+        self._follow(call)
+        mount = self._namespace.try_mount_for(call.path.virtual)
+        mark = (
+            declared(type(mount.vfs), call.name) if mount is not None else None
+        ) or CALLS[call.name]
+        if mount is None:
+            boundary = self._boundary(None, call.caller)
+            await boundary.admit(mark, call.path, False)
+        else:
+            boundary = await self._admit(call, mount, mark)
+        _memory_answered(
+            call.report, len(held) if isinstance(held, bytes) else 0
+        )
+        return await boundary.complete(mark, call.path, call.write, held)
 
     async def _serve_cached(
         self,
@@ -2401,8 +2482,8 @@ class Dispatcher:
         answers it, a stream as it is pulled and bytes as one chunk. A
         window, a rendering, a VFS with no ``read`` of its own and a
         post_vfs policy that may read the result each get the whole bytes
-        instead, which are a stream of one chunk. A read a running line
-        makes reaches no post_vfs policy, so it streams either way.
+        instead, which are a stream of one chunk, including reads made
+        inside commands and runtimes.
 
         Args:
             call (_Call): the admitted read.
@@ -2415,7 +2496,13 @@ class Dispatcher:
             and not call.renders_read(mount)
         ):
             return False
-        return call.caller.refusals is not None or not (
+        # A live pipe answers what its writer has sent, and a bounded
+        # reader leaves the rest for the next: collecting it whole would
+        # wait for the writer to close. Its bytes come from the line's own
+        # writer, whose reads met the gates already.
+        if mount.holds_live_pipe(call.path.virtual):
+            return True
+        return not (
             await self._namespace.registry.policies.wants_for(
                 "post_vfs", _session_id(call.caller)
             )

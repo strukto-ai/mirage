@@ -125,6 +125,7 @@ import {
   NO_FOLLOW_OPS,
   POLICY_WRITE_OPS,
   READ_AHEAD_BYTES,
+  READ_SHORTCUT_OPS,
   READ_STAND_IN_OPS,
   SERIAL_WRITE_OPS,
   SETATTR_KEYS,
@@ -138,7 +139,6 @@ import {
   explaining,
   getCurrentSession,
   hiddenRefusal,
-  lineRunning,
   runWithCaller,
   sessionVisibility,
   sessionAccess,
@@ -736,11 +736,6 @@ export class Dispatcher {
     return this.caller === null ? explaining() : this.caller.explaining
   }
 
-  /** Whether the op is a running line's: the caller's, else the async context's. */
-  private lineRunning(): boolean {
-    return this.caller === null ? lineRunning() : this.caller.refusals !== null
-  }
-
   /**
    * The namespace's own answer for a path no backend serves.
    *
@@ -779,7 +774,10 @@ export class Dispatcher {
       // borrow the newest binding, which can belong to a wider concurrent
       // session.
       const run = (): ReturnType<DispatchFn> =>
-        name === 'read' && kwargs?.warm !== true
+        name === 'read' &&
+        kwargs?.warm !== true &&
+        kwargs?.admit_only !== true &&
+        !('retained' in (kwargs ?? {}))
           ? this.readRefusingDirs(path, args, kwargs, report)
           : this.dispatchAdmitted(name, path, args, kwargs, report)
       if (this.admitWrite === null || !POLICY_WRITE_OPS.has(name)) return await run()
@@ -810,6 +808,20 @@ export class Dispatcher {
     if (admitOnly) {
       kwargs = { ...kwargs }
       delete kwargs.admit_only
+    }
+    const retained = kwargs?.retained
+    if (
+      'retained' in (kwargs ?? {}) &&
+      !(
+        (name === 'read' && retained instanceof Uint8Array) ||
+        (name === 'stat' && retained instanceof FileStat)
+      )
+    ) {
+      throw new TypeError('retained is only valid for read bytes or a stat row')
+    }
+    if (retained !== undefined) {
+      kwargs = { ...kwargs }
+      delete kwargs.retained
     }
     const { stream, direct, warm, fresh, ...own } = (kwargs ?? {}) as {
       stream?: unknown
@@ -868,6 +880,9 @@ export class Dispatcher {
     call.fresh = name === 'stat' && fresh === true
     await this.refuseRename(call)
     if (report) report.path = call.path.virtual
+    if (retained !== undefined) {
+      return [await this.judgeHeld(call, retained as Uint8Array | FileStat), new IOResult()]
+    }
     if (admitOnly) {
       this.follow(call)
       if (name === 'stat') {
@@ -915,8 +930,14 @@ export class Dispatcher {
     // The cache stage answers first where the file cache decides: a call
     // standing in for a read gives way to the read for a file it holds,
     // which is judged, and a warm read answers whether it holds one, judged
-    // as the read it stands in for.
-    if (READ_STAND_IN_OPS.has(name) && (await this.held(call, owner))) {
+    // as the read it stands in for. A content shortcut also gives way when a
+    // postVfs policy would judge its answer: a count or a checksum carries
+    // none of the bytes it would judge.
+    if (
+      (READ_SHORTCUT_OPS.has(name) &&
+        (await this.policies.wantsFor('postVfs', this.sessionId()))) ||
+      (READ_STAND_IN_OPS.has(name) && (await this.held(call, owner)))
+    ) {
       memoryAnswered(report)
       return [null, new IOResult()]
     }
@@ -956,7 +977,13 @@ export class Dispatcher {
       }
       const mark = declared(owner.vfs.constructor, name) ?? CALLS.get(name) ?? null
       if (mark === null) throw enotsup(owner.vfs.name, name, call.path)
-      await this.admit(call, boundary, mark)
+      // A content shortcut stands in for a read and is admitted as one, as a
+      // warm read is, so a policy that judges reads judges it; the backend
+      // still answers the shortcut.
+      const admitted = READ_SHORTCUT_OPS.has(name)
+        ? (declared(owner.vfs.constructor, 'read') ?? CALLS.get('read') ?? mark)
+        : mark
+      await this.admit(call, boundary, admitted)
       if (looksUp) {
         await mkdirOnReadOnly(
           dispatchStat(this.dispatch),
@@ -1267,10 +1294,7 @@ export class Dispatcher {
    * Python's Dispatcher._read_many.
    */
   private async readMany(typed: readonly PathSpec[], issuer: symbol | undefined): Promise<void> {
-    if (
-      this.explaining() !== null ||
-      (await this.policies.wantsFor('preVfs', this.sessionId(), this.lineRunning()))
-    ) {
+    if (this.explaining() !== null || (await this.policies.wantsFor('preVfs', this.sessionId()))) {
       return
     }
     await this.prepare()
@@ -1690,12 +1714,10 @@ export class Dispatcher {
    *
    * A backend's find, du, search, tree copy or tree removal answers for
    * every entry under its path in one call, past the checks each entry would
-   * meet on its own. So when the command's path rules or, for a `ws.vfs`
-   * call, a coded preVfs policy reach below one of its paths, it is declined
-   * and the caller walks, entry by entry, through calls that are each judged.
-   * Inside a running line only the profile's path rules judge an entry, so a
-   * coded policy declines no walk there. A path rule declines no
-   * `files_containing`: its answer only rules files out of a walk that still
+   * meet on its own. Path rules and file policies decline that shortcut so
+   * the caller walks through calls that are each judged, including inside
+   * commands. A path rule declines no `files_containing` on its own: its
+   * answer only rules files out of a walk that still
    * lists every one, and each file it rules out meets the rule as a warm read,
    * so one the rule refuses reports `Permission denied` as its read would. A
    * hide declines the copies and the removal, which would reach hidden
@@ -1719,13 +1741,24 @@ export class Dispatcher {
     if (!HIDE_FILTERED_OPS.has(call.name) && paths.some((p) => hiddenUnder(call.vis, p.virtual))) {
       return true
     }
-    if (call.ruleGate !== null) {
-      return (
-        call.name !== 'files_containing' &&
-        paths.some((p) => call.ruleGate?.scopes(p.virtual) === true)
-      )
-    }
-    return this.policies.wantsFor('preVfs', this.sessionId(), this.lineRunning())
+    if (
+      call.ruleGate !== null &&
+      call.name !== 'files_containing' &&
+      paths.some((p) => call.ruleGate?.scopes(p.virtual) === true)
+    )
+      return true
+    // A file copy names both its ends, and admission judges each, the source
+    // as a read. Only a postVfs hook needs the bytes, and then the caller moves
+    // them through a read and a write, so the bytes it judges are the bytes
+    // that land.
+    if (call.name === 'copy') return this.policies.wantsFor('postVfs', this.sessionId())
+    // Inside a line the gate above answered for the profile's path rules,
+    // scoped to these paths; only a coded hook is left to ask.
+    return (
+      (await this.policies.wantsFor('preVfs', this.sessionId(), call.ruleGate !== null)) ||
+      ((call.name === 'dir_copy' || call.name === 'files_containing') &&
+        (await this.policies.wantsFor('postVfs', this.sessionId())))
+    )
   }
 
   /**
@@ -1748,8 +1781,13 @@ export class Dispatcher {
     // that defines it.
     call.write = call.write || WRITE_EFFECTS.includes(mark.effect)
     const gate = call.ruleGate === null ? {} : { gate: call.ruleGate }
+    // A file copy reads its source, whatever the backend does with it, so the
+    // source is admitted as the read a policy judges reads by.
+    const owner = call.name === 'copy' ? this.namespace.tryMountFor(call.path.virtual) : null
+    const source =
+      owner === null ? mark : (declared(owner.vfs.constructor, 'read') ?? CALLS.get('read') ?? mark)
     await boundary.admit(
-      mark,
+      source,
       call.path,
       call.write && !COPY_OPS.has(call.name),
       { final: call.dst === null, ...gate },
@@ -1816,8 +1854,7 @@ export class Dispatcher {
    * streams as the VFS's `read` answers it, a stream as it is pulled and bytes
    * as one chunk. A window, a rendering, a VFS with no `read` of its own and a
    * postVfs policy that may read the result each get the whole bytes instead,
-   * which are a stream of one chunk. A read a running
-   * line makes reaches no postVfs policy, so it streams either way. Mirrors
+   * which are a stream of one chunk, including inside commands and runtimes. Mirrors
    * Python's Dispatcher._streams.
    */
   private async streams(call: Call, mount: MountEntry, vfs: BaseVFS): Promise<boolean> {
@@ -1831,7 +1868,12 @@ export class Dispatcher {
     ) {
       return false
     }
-    return this.lineRunning() || !(await this.policies.wantsFor('postVfs', this.sessionId()))
+    // A live pipe answers what its writer has sent, and a bounded reader
+    // leaves the rest for the next: collecting it whole would wait for the
+    // writer to close. Its bytes come from the line's own writer, whose reads
+    // met the gates already.
+    if (mount.holdsLivePipe(call.path.virtual, this.access)) return true
+    return !(await this.policies.wantsFor('postVfs', this.sessionId()))
   }
 
   /**
@@ -1866,6 +1908,27 @@ export class Dispatcher {
    * time, since a renderer can land while the read runs. */
   private rendersRead(call: Call, mount: MountEntry): boolean {
     return mount.renders(readType(call))
+  }
+
+  /**
+   * Judge bytes or a row its caller already holds, as a cache hit. A runtime
+   * descriptor and a kernel mount's handle keep what they fetched; each later
+   * read or stat of it meets the hides, the rules and the file policies in
+   * force now, through the boundary a fetch and the file cache answer
+   * through, and nothing is fetched. The bytes were recorded when they were
+   * fetched, so this is not. Mirrors Python's Dispatcher._judge_held.
+   */
+  private async judgeHeld(call: Call, held: Uint8Array | FileStat): Promise<unknown> {
+    this.follow(call)
+    const owner = this.namespace.tryMountFor(call.path.virtual)
+    const mark =
+      (owner === null ? undefined : declared(owner.vfs.constructor, call.name)) ??
+      CALLS.get(call.name)
+    if (mark === undefined) throw new Error(`missing ${call.name} call definition`)
+    const boundary = this.boundary(owner)
+    await this.admit(call, boundary, mark)
+    memoryAnswered(call.report, held instanceof Uint8Array ? held.byteLength : 0)
+    return boundary.complete(mark, call.path, call.write, held, call.issuer)
   }
 
   /**

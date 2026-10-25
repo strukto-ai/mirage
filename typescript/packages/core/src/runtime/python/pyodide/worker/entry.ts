@@ -53,7 +53,9 @@ const sync: SyncVFS = {
   },
   process: (payload) => call({ op: 'process', path: '', payload }) as string,
   read: (path, raw = false) => call({ op: 'read', path, raw }) as Uint8Array,
+  readCached: (path, retained) => call({ op: 'read', path, retained }) as Uint8Array,
   stat: (path) => call({ op: 'stat', path }) as VFSStat,
+  statCached: (path, retainedStat) => call({ op: 'stat', path, retainedStat }) as VFSStat,
   readdir: (path, classify = true) => call({ op: 'readdir', path, classify }) as VFSEntry[],
   readlink: (path) => call({ op: 'readlink', path }) as string,
   flush: (mutations) => {

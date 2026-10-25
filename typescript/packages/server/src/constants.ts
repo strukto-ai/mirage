@@ -27,6 +27,7 @@ export const RESERVED_KWARGS: ReadonlySet<string> = new Set([
   'report',
   'issuer',
   'admit_only',
+  'retained',
   'stream',
   'direct',
 ])

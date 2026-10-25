@@ -44,6 +44,93 @@ async function read(h: FileHandle, size: number): Promise<string> {
 }
 
 describe('FileHandle', () => {
+  it('checks retained windows without duplicating a cold read and preserves position on refusal', async () => {
+    const fetches: [number, number | null][] = []
+    const checked: string[] = []
+    let refuse = false
+    const h = FileHandle.opened('/f', over('abcdef', fetches), {
+      size: 6,
+      writable: false,
+      append: false,
+      readCached: (data) => {
+        checked.push(dec.decode(data))
+        return refuse ? Promise.reject(new Error('sealed')) : Promise.resolve(data)
+      },
+    })
+    expect(await h.readChecked(0)).toEqual(new Uint8Array())
+    expect(fetches).toEqual([])
+    expect(checked).toEqual([])
+    expect(dec.decode(await h.readChecked(2))).toBe('ab')
+    expect(checked).toEqual([])
+    refuse = true
+    await expect(h.readChecked(2)).rejects.toThrow('sealed')
+    expect(h.pos).toBe(2)
+    await expect(h.preadChecked(0, 1)).rejects.toThrow('sealed')
+    expect(h.pos).toBe(2)
+    refuse = false
+    expect(dec.decode(await h.readChecked(2))).toBe('cd')
+    expect(dec.decode(await h.preadChecked(0, 1))).toBe('a')
+    expect(h.pos).toBe(4)
+    expect(fetches).toEqual([[0, null]])
+    expect(checked).toEqual(['cd', 'a', 'cd', 'a'])
+  })
+
+  it('checks bytes changed by writes over a cold fetch', async () => {
+    const checked: string[] = []
+    const h = FileHandle.opened('/f', over('abcdef'), {
+      size: 6,
+      writable: true,
+      append: false,
+      readCached: (data) => {
+        checked.push(dec.decode(data))
+        return Promise.resolve(data)
+      },
+    })
+    h.pwrite(1, enc.encode('Z'))
+    expect(dec.decode(await h.readChecked(3))).toBe('aZc')
+    expect(checked).toEqual(['aZc'])
+  })
+
+  it('checks written-only files and retained EOF reads', async () => {
+    const checked: string[] = []
+    const h = FileHandle.opened('/f', null, {
+      size: 0,
+      writable: true,
+      append: false,
+      readCached: (data) => {
+        checked.push(dec.decode(data))
+        return Promise.resolve(data)
+      },
+    })
+    h.pwrite(0, enc.encode('abc'))
+    expect(dec.decode(await h.readChecked(-1))).toBe('abc')
+    expect(await h.readChecked(1)).toEqual(new Uint8Array())
+    expect(checked).toEqual(['abc', ''])
+  })
+
+  it('keeps a refused retained line unread, including its newline', async () => {
+    let refuse = false
+    const checked: string[] = []
+    const h = FileHandle.opened('/f', over('a\nbc\n'), {
+      size: 5,
+      writable: false,
+      append: false,
+      readCached: (data) => {
+        checked.push(dec.decode(data))
+        return refuse ? Promise.reject(new Error('sealed')) : Promise.resolve(data)
+      },
+    })
+    expect(dec.decode((await h.readLineChecked()) ?? undefined)).toBe('a')
+    expect(checked).toEqual([])
+    refuse = true
+    await expect(h.readLineChecked()).rejects.toThrow('sealed')
+    expect(h.pos).toBe(2)
+    refuse = false
+    expect(dec.decode((await h.readLineChecked()) ?? undefined)).toBe('bc')
+    expect(h.pos).toBe(5)
+    expect(checked).toEqual(['bc', 'bc'])
+  })
+
   it('reads nothing at open and fetches a small file whole', async () => {
     const calls: [number, number | null][] = []
     const h = FileHandle.opened('/f', over('hello', calls), {
@@ -254,3 +341,23 @@ it.each(['AAAAAA', 'A', ''])(
     expect(dec.decode(applyFlush(enc.encode(stored), h.flushPlan()))).toBe(stored + 'BBB')
   },
 )
+
+it('judges a read that joins held bytes onto a fetch', async () => {
+  // The fill fetches only past what is kept and joins the two, so the bytes
+  // held before it must still meet the read policy in force now.
+  const checked: number[] = []
+  const size = 2 * READ_CHUNK
+  const h = FileHandle.opened('/f', over(new Uint8Array(size)), {
+    size,
+    writable: false,
+    append: false,
+    readCached: (data) => {
+      checked.push(data.length)
+      return Promise.resolve(data)
+    },
+  })
+  expect((await h.readChecked(1)).length).toBe(1)
+  checked.length = 0
+  expect((await h.preadChecked(0, size)).length).toBe(size)
+  expect(checked).toEqual([size])
+})

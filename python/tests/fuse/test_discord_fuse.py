@@ -13,9 +13,14 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import errno
 from unittest.mock import AsyncMock, patch
 
+import aiohttp
 import pytest
+import pytest_asyncio
+from aiohttp import web
+from aiohttp.test_utils import TestServer
 
 from mirage import Workspace
 from mirage.core.discord.entry import (
@@ -28,6 +33,8 @@ from mirage.core.discord.entry import (
     member_filename,
 )
 from mirage.fuse.fs import MirageFS
+from mirage.mount.core import MountCore
+from mirage.mount.errors import classify_error
 from mirage.types import ContentType, FileStat, FileType, MountMode
 from mirage.vfs.discord import DiscordConfig, DiscordVFS
 from mirage.workspace.files import Files
@@ -301,3 +308,241 @@ def test_fuse_read_beyond_eof(fs):
         data = fs.read(f"{PREFIX}/{FILE_PATH}", 4096, len(FAKE_JSONL), fh)
         fs.release(f"{PREFIX}/{FILE_PATH}", fh)
     assert data == b""
+
+
+HTTP_MESSAGES = [
+    {
+        "id": "1196423538278400000",
+        "content": "hello",
+        "author": {"username": "alice"},
+    },
+    {
+        "id": "1196423538278400001",
+        "content": "world",
+        "author": {"username": "bob"},
+    },
+]
+HTTP_JSONL = (
+    b'{"id":"1196423538278400000","content":"hello",'
+    b'"author":{"username":"alice"}}\n'
+    b'{"id":"1196423538278400001","content":"world",'
+    b'"author":{"username":"bob"}}\n'
+)
+HTTP_PATH = f"{PREFIX}/{FILE_PATH}"
+
+
+class _DiscordHTTP:
+    def __init__(self):
+        self.status = 403
+        self.requests = []
+        self.history_calls = 0
+
+    async def request(self, request):
+        assert request.headers["Authorization"] == "Bot test-token"
+        self.requests.append(request.path)
+        if request.path == "/users/@me/guilds":
+            return web.json_response([GUILD_PAYLOAD])
+        if request.path == "/guilds/G1/channels":
+            return web.json_response(
+                [
+                    {
+                        **CHANNEL_PAYLOAD,
+                        "last_message_id": HTTP_MESSAGES[-1]["id"],
+                    }
+                ]
+            )
+        assert request.path == "/channels/C1/messages"
+        self.history_calls += 1
+        if self.status != 200:
+            return web.json_response(
+                {"message": "refused", "retry_after": 0},
+                status=self.status,
+            )
+        return web.json_response(list(reversed(HTTP_MESSAGES)))
+
+
+class _DiscordReader:
+    def __init__(self, backend, ws, http, use_fuse):
+        self.backend = backend
+        self.ws = ws
+        self.http = http
+        session = ws.create_session("reader")
+        self.fuse = MirageFS(ws.vfs, session=session) if use_fuse else None
+        self.core = (
+            self.fuse.core
+            if self.fuse is not None
+            else MountCore(ws.vfs, session=session)
+        )
+        self.opened = []
+
+    async def seal(self):
+        stat = await self.ws.vfs.stat(HTTP_PATH)
+        assert stat.size is None
+        assert self.http.history_calls > 0
+
+    async def size(self, fh=None):
+        if self.fuse is not None:
+            attrs = await asyncio.to_thread(self.fuse.getattr, HTTP_PATH, fh)
+            return attrs["st_size"]
+        return (await self.core.fgetattr(HTTP_PATH, fh)).size
+
+    async def open(self):
+        if self.fuse is not None:
+            fh = await asyncio.to_thread(self.fuse.open, HTTP_PATH, 0)
+        else:
+            fh = await self.core.open(HTTP_PATH)
+        self.opened.append(fh)
+        return fh
+
+    async def read(self, fh, size=4096, offset=0):
+        if self.fuse is not None:
+            return await asyncio.to_thread(
+                self.fuse.read, HTTP_PATH, size, offset, fh
+            )
+        return await self.core.read(HTTP_PATH, size, offset, fh)
+
+    async def release(self, fh):
+        if self.fuse is not None:
+            await asyncio.to_thread(self.fuse.release, HTTP_PATH, fh)
+        else:
+            await self.core.release(fh)
+        assert fh not in self.core.handles
+
+    async def close(self):
+        for fh in self.opened:
+            if fh in self.core.handles:
+                await self.release(fh)
+        session = self.backend.accessor.pool._session
+        try:
+            if session is not None:
+                assert not session.closed
+                assert session.connector is not None
+                assert not session.connector._acquired
+        finally:
+            if self.fuse is not None:
+                await asyncio.wrap_future(
+                    asyncio.run_coroutine_threadsafe(
+                        self.backend.accessor.close(), self.fuse._loop
+                    )
+                )
+            await self.ws.close()
+            assert session is None or session.closed
+            if self.fuse is not None:
+                loop = self.fuse._loop
+                loop.call_soon_threadsafe(loop.stop)
+                while loop.is_running():
+                    await asyncio.sleep(0)
+                loop.close()
+
+
+@pytest_asyncio.fixture(params=["core", "fuse"])
+async def http_reader(request):
+    http = _DiscordHTTP()
+    app = web.Application()
+    app.router.add_get("/{path:.*}", http.request)
+    async with TestServer(app) as server:
+        backend = DiscordVFS(
+            config=DiscordConfig(
+                token="test-token", base_url=str(server.make_url(""))
+            )
+        )
+        ws = Workspace({f"{PREFIX}/": backend}, mode=MountMode.READ)
+        reader = _DiscordReader(backend, ws, http, request.param == "fuse")
+        try:
+            yield reader
+        finally:
+            await reader.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("early_close", [False, True])
+async def test_http_sealed_day_hydrates_exact_bytes_and_releases(
+    http_reader, early_close
+):
+    reader = http_reader
+    await reader.seal()
+    assert await reader.size() == 0
+    reader.http.status = 200
+    before = reader.http.history_calls
+    fh = await reader.open()
+    assert reader.http.history_calls == before + 1
+    assert await reader.size(fh) == len(HTTP_JSONL)
+    if early_close:
+        assert await reader.read(fh, 9, 3) == HTTP_JSONL[3:12]
+    else:
+        assert await reader.read(fh) == HTTP_JSONL
+        assert await reader.read(fh, 9, len(HTTP_JSONL)) == b""
+    await reader.release(fh)
+    assert reader.http.history_calls == before + 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status,attempts", [(401, 1), (403, 1), (429, 3)])
+@pytest.mark.parametrize("recover", [False, True])
+async def test_http_failure_is_deferred_to_read_and_does_not_cache_empty(
+    http_reader, status, attempts, recover
+):
+    reader = http_reader
+    await reader.seal()
+    reader.http.status = status
+    before = reader.http.history_calls
+    fh = await reader.open()
+    assert fh in reader.core.handles
+    assert reader.http.history_calls == before + attempts
+    with pytest.raises(
+        (aiohttp.ClientResponseError, RuntimeError, OSError)
+    ) as failure:
+        await reader.read(fh)
+    assert reader.http.history_calls == before + 2 * attempts
+    error = failure.value
+    if reader.fuse is not None:
+        assert isinstance(error, OSError)
+        assert error.errno == errno.EIO
+        error = error.__cause__
+    assert classify_error(error) == errno.EIO
+    if status == 429:
+        assert isinstance(error, RuntimeError)
+        assert str(error) == "Rate limited after 3 retries"
+    else:
+        assert isinstance(error, aiohttp.ClientResponseError)
+        assert error.status == status
+    if recover:
+        reader.http.status = 200
+        assert await reader.read(fh) == HTTP_JSONL
+    await reader.release(fh)
+    assert reader.http.history_calls == before + 2 * attempts + int(recover)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "kind,code", [("hide", errno.ENOENT), ("deny", errno.EACCES)]
+)
+async def test_http_hydrated_handle_obeys_new_policy_before_retained_bytes(
+    http_reader, kind, code
+):
+    reader = http_reader
+    await reader.seal()
+    reader.http.status = 200
+    fh = await reader.open()
+    assert await reader.read(fh) == HTTP_JSONL
+    before = len(reader.http.requests)
+    profile = (
+        {"paths": {"hide": [HTTP_PATH]}}
+        if kind == "hide"
+        else {
+            "commands": {"deny": [{"paths": [HTTP_PATH], "reason": "sealed"}]}
+        }
+    )
+    await reader.ws.set_session_profile("reader", profile)
+    with pytest.raises(OSError) as failure:
+        await reader.read(fh)
+    assert failure.value.errno == code
+    if kind == "hide":
+        with pytest.raises(OSError) as hidden:
+            await reader.size(fh)
+        assert hidden.value.errno == errno.ENOENT
+    assert len(reader.http.requests) == before
+    await reader.ws.set_session_profile("reader", {})
+    assert await reader.read(fh) == HTTP_JSONL
+    assert len(reader.http.requests) == before
+    await reader.release(fh)

@@ -33,9 +33,9 @@ const LINE_SCAN = 4096
  * append-mode handle writes at the end every time. Mirrors Python's
  * `FileHandle`.
  *
- * A guest that reads synchronously (quickjs) asks `lacks` or `lacksLine`
- * first and awaits `fill` until it answers false; `read`, `pread` and
- * `readLine` then answer from what is held without a fetch.
+ * Runtime adapters use the checked reads to fetch missing bytes and apply
+ * current read policy to retained bytes before delivering them to the guest.
+ * The synchronous primitives serve handles that have no policy callback.
  */
 export class FileHandle {
   readonly path: string
@@ -54,6 +54,7 @@ export class FileHandle {
     base: ChunkedHandle | null,
     mode: { writable: boolean; append: boolean },
     baseLen: number,
+    private readonly readCached?: (data: Uint8Array) => Promise<Uint8Array>,
   ) {
     this.path = path
     this.base = base
@@ -79,7 +80,12 @@ export class FileHandle {
   static opened(
     path: string,
     fetch: FileFetch | null,
-    opts: { size: number; writable: boolean; append: boolean },
+    opts: {
+      size: number
+      writable: boolean
+      append: boolean
+      readCached?: (data: Uint8Array) => Promise<Uint8Array>
+    },
   ): FileHandle {
     const size = opts.size
     const base =
@@ -88,7 +94,7 @@ export class FileHandle {
         : new ChunkedHandle(path, size, (offset, asked) =>
             offset === 0 && size <= READ_CHUNK ? fetch(0, null) : fetch(offset, asked),
           )
-    const handle = new FileHandle(path, base, opts, base === null ? 0 : size)
+    const handle = new FileHandle(path, base, opts, base === null ? 0 : size, opts.readCached)
     return handle
   }
 
@@ -169,6 +175,61 @@ export class FileHandle {
       if (low < high) out.set(run.buf.subarray(low - run.start, high - run.start), low - offset)
     }
     return out
+  }
+
+  /** Fetch and check a positioned read, leaving the position unchanged on refusal. */
+  async preadChecked(offset: number, size: number): Promise<Uint8Array> {
+    const pos = this.pos
+    this.pos = offset
+    try {
+      return await this.readChecked(size)
+    } finally {
+      this.pos = pos
+    }
+  }
+
+  /** Deliver a read through its current policy before advancing the position. */
+  async readChecked(size: number): Promise<Uint8Array> {
+    if (size === 0) return new Uint8Array()
+    const pos = this.pos
+    const retained = !this.lacks(size) || this.heldAt(pos)
+    while (this.lacks(size)) await this.fill(size)
+    const budget = size < 0 ? Math.max(0, this.size - pos) : size
+    const data = await this.checkRead(pos, this.pread(pos, budget), retained)
+    this.pos = pos + data.length
+    return data
+  }
+
+  /** Deliver a line through its current policy; a refusal leaves it unread. */
+  async readLineChecked(): Promise<Uint8Array | null> {
+    const pos = this.pos
+    const retained = !this.lacksLine() || this.heldAt(pos)
+    while (this.lacksLine()) await this.fill(0)
+    try {
+      const line = this.readLine()
+      const out = await this.checkRead(pos, line ?? new Uint8Array(), retained)
+      return line === null && out.length === 0 ? null : out
+    } catch (err) {
+      this.pos = pos
+      throw err
+    }
+  }
+
+  /** Whether bytes at `offset` are held now: a fill keeps them and joins what it fetches on. */
+  private heldAt(offset: number): boolean {
+    return (this.base?.peek(offset, 1).length ?? 0) > 0
+  }
+
+  private async checkRead(
+    offset: number,
+    data: Uint8Array,
+    retained: boolean,
+  ): Promise<Uint8Array> {
+    if (this.readCached === undefined) return data
+    if (retained) return this.readCached(data)
+    const stored = this.base?.peek(offset, data.length) ?? new Uint8Array()
+    const changed = stored.length !== data.length || data.some((byte, i) => byte !== stored[i])
+    return changed ? this.readCached(data) : data
   }
 
   /** Read from the position, advancing it; null or a negative size reads to the end. */

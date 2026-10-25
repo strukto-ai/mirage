@@ -14,7 +14,7 @@
 
 import { WorkspaceBinding } from '../../binding.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
-import { MountMode } from '../../../types.ts'
+import { FileStat, FileType, MountMode } from '../../../types.ts'
 import { getTestParser } from '../../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../../workspace/workspace/workspace.ts'
 import { describe, expect, it } from 'vitest'
@@ -166,3 +166,129 @@ describe('quickjs reads after a failed fetch', () => {
     }
   }, 120_000)
 })
+
+describe('QuickJS retained reads', () => {
+  it.each([
+    ['text', 'f.readAsString(2)', "'cd'"],
+    [
+      'bytes',
+      "(()=>{const b=new ArrayBuffer(2); const n=f.read(b,0,2); return Array.from(new Uint8Array(b)).slice(0,n).join(',')})()",
+      "'99,100'",
+    ],
+    ['line', 'f.getline()', "'cd'"],
+  ])(
+    'checks a retained %s read and leaves a refused cursor unchanged',
+    async (_name, read, expected) => {
+      let fetched = 0
+      const checked: string[] = []
+      const dispatch: BridgeDispatchFn = (op, _path, _bytes, _dst, attrs) => {
+        if (op === 'stat')
+          return Promise.resolve(new FileStat({ name: 'f.txt', type: FileType.FILE, size: 5 }))
+        if (op === 'read') {
+          if (attrs?.retained instanceof Uint8Array) {
+            checked.push(DEC.decode(attrs.retained))
+            if (checked.length === 1)
+              return Promise.reject(Object.assign(new Error('sealed'), { code: 'EACCES' }))
+            return Promise.resolve(attrs.retained)
+          }
+          fetched++
+          return Promise.resolve(new TextEncoder().encode('abcd\n'))
+        }
+        return Promise.resolve(undefined)
+      }
+      const rt = new QuickJsRuntime()
+      rt.bind(WorkspaceBinding.overBridge(dispatch, new PrefixResolver(() => ['/data/'])))
+      try {
+        const result = await run(
+          rt,
+          `
+const f = std.open('/data/f.txt', 'r');
+console.log(f.readAsString(2));
+${read};
+console.log(f.error(), f.tell());
+f.clearerr();
+console.log(${read} === ${expected});
+f.close();
+`,
+        )
+        expect(result.exitCode).toBe(0)
+        expect(DEC.decode(result.stdout)).toBe('ab\ntrue 2\ntrue\n')
+        expect(fetched).toBe(1)
+        expect(checked).toEqual(['cd', 'cd'])
+      } finally {
+        await rt.close()
+      }
+    },
+    120_000,
+  )
+})
+
+it('stops file calls and output immediately after an awaited read revokes the run', async () => {
+  const controller = new AbortController()
+  const calls: string[] = []
+  const dispatch: BridgeDispatchFn = (op) => {
+    calls.push(op)
+    if (op === 'stat')
+      return Promise.resolve(new FileStat({ name: 'f', type: FileType.FILE, size: 1 }))
+    if (op === 'read') {
+      controller.abort(new Error('revoked'))
+      return Promise.resolve(new TextEncoder().encode('x'))
+    }
+    return Promise.resolve(undefined)
+  }
+  const rt = new QuickJsRuntime()
+  rt.bind(WorkspaceBinding.overBridge(dispatch, new PrefixResolver(() => ['/data/'])))
+  try {
+    const result = await rt.interpret(
+      await rt.engine(),
+      {
+        code: `
+console.log('before');
+const f = std.open('/data/f', 'r');
+try { f.readAsString() } catch (e) {}
+try { const w = std.open('/data/continued', 'w'); w.puts('after'); w.close() } catch (e) {}
+try { console.log('after') } catch (e) {}
+`,
+        args: [],
+        stdin: null,
+      },
+      context({ signal: controller.signal }),
+    )
+    expect(DEC.decode(result.stdout)).toBe('before\n')
+    expect(calls.at(-1)).toBe('read')
+    expect(calls).not.toContain('create')
+    expect(calls).not.toContain('write')
+  } finally {
+    await rt.close()
+  }
+}, 120_000)
+
+it('does not create a file when its open stat revokes the run', async () => {
+  const controller = new AbortController()
+  const calls: string[] = []
+  const dispatch: BridgeDispatchFn = (op) => {
+    calls.push(op)
+    if (op === 'stat') {
+      controller.abort(new Error('revoked'))
+      return Promise.reject(Object.assign(new Error('missing'), { code: 'ENOENT' }))
+    }
+    return Promise.resolve(undefined)
+  }
+  const rt = new QuickJsRuntime()
+  rt.bind(WorkspaceBinding.overBridge(dispatch, new PrefixResolver(() => ['/data/'])))
+  try {
+    const result = await rt.interpret(
+      await rt.engine(),
+      {
+        code: "try { const f = std.open('/data/new', 'w'); f.puts('forbidden'); f.close() } catch (e) {}",
+        args: [],
+        stdin: null,
+      },
+      context({ signal: controller.signal }),
+    )
+    expect(DEC.decode(result.stdout)).toBe('')
+    expect(calls).toEqual(['stat'])
+  } finally {
+    await rt.close()
+  }
+}, 120_000)
