@@ -466,7 +466,7 @@ export function nextRandom(session: SessionState, stored: string | undefined): n
     state = seed
     last = 0
   } else if (session.randomState === null) {
-    state = initialSeed(session.sessionId)
+    state = initialSeed(session.ids)
     last = 0
   } else {
     state = session.randomState

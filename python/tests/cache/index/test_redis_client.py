@@ -18,11 +18,13 @@ from mirage.cache.index.constants import (
     CHILDREN_PREFIX,
     DEFAULT_KEY_PREFIX,
     ENTRY_PREFIX,
+    GENERATION_KEY,
     REGISTRY_PAGE,
 )
 from mirage.cache.index.redis import RedisIndexCacheStore
 from mirage.cache.manager import CacheManager
 from mirage.types import FileChangeKind, FileStat, FileType, PathSpec
+from mirage.utils.ids import SeededIdSource
 from mirage.workspace.mount.listing import stored_stat
 
 
@@ -1530,3 +1532,18 @@ async def test_authoritative_add_does_not_adopt_a_raced_global_generation(
     monkeypatch.setattr(client, "pipeline", pipeline_after_capture)
     await store.add_entry("/dir/a", FileStat(name="a", type=FileType.FILE))
     assert (await store.list_dir("/dir")).status == LookupStatus.EXPIRED
+
+
+@pytest.mark.asyncio
+async def test_generation_tokens_are_drawn_from_the_id_source():
+    client = FakeRedis(decode_responses=True)
+    store = RedisIndexCacheStore(
+        client=client, key_prefix="ids:", ids=SeededIdSource(5)
+    )
+    try:
+        await store.invalidate()
+        assert await client.get(f"ids:{GENERATION_KEY}") == (
+            SeededIdSource(5).uuid7()
+        )
+    finally:
+        await client.aclose()

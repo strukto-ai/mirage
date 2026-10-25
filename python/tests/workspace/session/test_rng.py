@@ -18,6 +18,7 @@ from mirage import RAMVFS, MountMode, Workspace
 from mirage.shell.constants import RANDOM, RANDOM_MAX, RANDOM_UNSET
 from mirage.shell.errors import ArithError
 from mirage.shell.variable import ShellVar
+from mirage.utils.ids import SeededIdSource
 from mirage.workspace.session import SessionState
 from mirage.workspace.session.rng import initial_seed
 from mirage.workspace.session.state import (
@@ -33,9 +34,26 @@ from mirage.workspace.session.state import (
 )
 
 
-def test_generators_started_in_one_tick_seed_apart(monkeypatch):
-    monkeypatch.setattr("time.time_ns", lambda: 1_000_000)
-    assert initial_seed("s") != initial_seed("s")
+def test_generators_seed_apart_from_one_source():
+    ids = SeededIdSource(3)
+    assert initial_seed(ids) != initial_seed(ids)
+
+
+def test_a_seeded_source_replays_the_first_seed():
+    assert initial_seed(SeededIdSource(3)) == initial_seed(SeededIdSource(3))
+
+
+@pytest.mark.asyncio
+async def test_a_seeded_workspace_replays_random_in_every_shell():
+    outputs = []
+    for _ in range(2):
+        ws = Workspace({"/": RAMVFS()}, ids=SeededIdSource(11))
+        try:
+            io = await ws.shell("echo $RANDOM $(echo $RANDOM)")
+            outputs.append(await io.stdout_str())
+        finally:
+            await ws.close()
+    assert outputs[0] == outputs[1]
 
 
 def test_seed_from_evaluates_the_word_as_arithmetic():

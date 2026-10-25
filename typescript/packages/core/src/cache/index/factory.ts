@@ -18,6 +18,7 @@ import { RAMIndexCacheStore } from './ram.ts'
 import { RedisIndexCacheStore } from './redis.ts'
 import type { IndexCacheStore } from './store.ts'
 import type { Clock } from '../../utils/clock.ts'
+import type { IdSource } from '../../utils/ids.ts'
 
 /**
  * The index store a mount runs its driver under.
@@ -34,12 +35,15 @@ import type { Clock } from '../../utils/clock.ts'
  * @param workspaceId scopes a redis store whose config names no prefix, so
  *   two workspaces on one server never read each other's listings; undefined
  *   keeps the shared default
+ * @param ids the workspace's id source, which a redis store draws its
+ *   generation and lease tokens from; undefined means the system source
  */
 export function buildIndex(
   config: IndexConfig | undefined,
   ttl: number,
   clock?: Clock,
   workspaceId?: string,
+  ids?: IdSource,
 ): IndexCacheStore {
   const timed = clock === undefined ? {} : { clock }
   if (config === undefined) return new RAMIndexCacheStore({ ttl, ...timed })
@@ -48,6 +52,7 @@ export function buildIndex(
     return new RedisIndexCacheStore({
       ttl: redis.ttl ?? 600,
       ...timed,
+      ...(ids !== undefined ? { ids } : {}),
       ...(redis.url !== undefined ? { url: redis.url } : {}),
       keyPrefix:
         redis.keyPrefix ??

@@ -54,6 +54,7 @@ import type { JobWaits } from '../../shell/job_table/index.ts'
 import type { MountMode } from '../../types.ts'
 import type { StatusWriter } from '../types.ts'
 import type { AliasExpansion } from '../../shell/types.ts'
+import { SystemIdSource, type IdSource } from '../../utils/ids.ts'
 
 /**
  * Read one entry of a session record, ignoring anything inherited from
@@ -395,6 +396,9 @@ export class SessionState {
   // superseded. Runtime identity, never serialized: a restored snapshot
   // has no line running on it.
   statusWriter: StatusWriter | null = null
+  // Where `$RANDOM` draws its first seed: the workspace's id source, shared
+  // by every fork and never serialized.
+  ids: IdSource = new SystemIdSource()
   // `$RANDOM`'s generator state and the seed word it last consumed
   // (`session/rng.ts`). A child shell reseeds, as bash's does, and the
   // parent retains its own state while the child runs.
@@ -646,6 +650,7 @@ export class SessionState {
     // again; a fork given new variables starts them.
     if (overrides.vars === undefined) forked.vars = vars
     if (this.randomSeed === RANDOM_UNSET) forked.randomSeed = RANDOM_UNSET
+    forked.ids = this.ids
     forked.terminalOutput = this.terminalOutput
     forked.pipeStatus = [...this.pipeStatus]
     forked.functionNames = this.functionNames

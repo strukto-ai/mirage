@@ -401,6 +401,7 @@ class Workspace:
             store=stores.sessions,
             seed_vars=seed_vars,
             clock=self._clock,
+            ids=self._ids,
         )
         self._tools: dict[str | None, MirageToolOperations] = {}
         self._reads: dict[str, FileVersionTracker] = {}

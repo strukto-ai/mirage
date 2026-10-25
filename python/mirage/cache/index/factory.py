@@ -19,6 +19,7 @@ from mirage.cache.index.constants import DEFAULT_KEY_PREFIX
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.cache.index.store import IndexCacheStore
 from mirage.utils.clock import Clock
+from mirage.utils.ids import IdSource
 
 redis_store: Callable[..., IndexCacheStore] | None
 try:
@@ -34,6 +35,7 @@ def build_index(
     ttl: float,
     clock: Clock | None = None,
     workspace_id: str | None = None,
+    ids: IdSource | None = None,
 ) -> IndexCacheStore:
     """The index store a mount runs its driver under.
 
@@ -53,6 +55,9 @@ def build_index(
         workspace_id (str | None): scopes a redis store whose config
             names no prefix, so two workspaces on one server never read
             each other's listings; None keeps the shared default.
+        ids (IdSource | None): the workspace's id source, which a redis
+            store draws its generation and lease tokens from; None means
+            the system source.
     """
     if config is None:
         return RAMIndexCacheStore(ttl=ttl, clock=clock)
@@ -73,5 +78,6 @@ def build_index(
                 else f"{DEFAULT_KEY_PREFIX}{workspace_id}:"
             ),
             clock=clock,
+            ids=ids,
         )
     return RAMIndexCacheStore(ttl=config.ttl, clock=clock)

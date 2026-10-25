@@ -57,6 +57,7 @@ from mirage.types import (
     Visibility,
 )
 from mirage.utils.clock import SystemClock
+from mirage.utils.ids import IdSource, SystemIdSource
 from mirage.workspace.session.constants import (
     INHERITED_FIELDS,
     STARTUP_VALUES,
@@ -316,6 +317,11 @@ class SessionState:
     # past. Runtime identity, never serialized: a restored snapshot has
     # no line running on it.
     status_writer: StatusWriter | None = None
+    # Where `$RANDOM` draws its first seed: the workspace's id source,
+    # shared by every fork and never serialized.
+    ids: IdSource = field(
+        default_factory=SystemIdSource, repr=False, compare=False
+    )
     shell_options: dict[str, bool] = field(default_factory=dict)
     # `shopt` options, kept apart from `set -o` ones because bash keeps
     # two vocabularies (`shopt -o` is the bridge). Only the names set

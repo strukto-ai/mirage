@@ -42,7 +42,7 @@ const SEED_7_IDS = [
 const SRC_DIR = join(dirname(fileURLToPath(import.meta.url)), '..')
 
 // The packages whose ids and draws come from the workspace IdSource.
-const SEAMED_PACKAGES = ['commands', 'core', 'execution', 'process', 'workspace']
+const SEAMED_PACKAGES = ['cache', 'commands', 'core', 'execution', 'process', 'workspace']
 
 const GLOBAL_DRAWS: Record<string, Set<string>> = {
   crypto: new Set(['randomUUID', 'getRandomValues']),
