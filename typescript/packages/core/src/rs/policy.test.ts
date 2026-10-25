@@ -3,6 +3,7 @@ import type { AdmissionRules, CommandRule } from '../policy/types.ts'
 import { MountMode, type Visibility } from '../types.ts'
 import { PosixRegex } from './regex.ts'
 import { openStream } from './stream.ts'
+import type { LinkStep } from '../utils/path.ts'
 import {
   AdmissionMatcher,
   VisibilityMatcher,
@@ -33,19 +34,48 @@ const FACTS: PolicyFacts = {
   moveTarget: null,
 }
 
-function captureInstances(): { memories: WebAssembly.Memory[]; restore: () => void } {
+function nativeNumber(fn: WebAssembly.ExportValue | undefined, args: number[]): number {
+  if (typeof fn !== 'function') throw new Error('Missing export')
+  const value: unknown = Reflect.apply(fn, undefined, args)
+  if (typeof value !== 'number') throw new Error('Invalid native result')
+  return value
+}
+
+function captureInstances(): {
+  memories: WebAssembly.Memory[]
+  requests: { operation: number; words: number }[]
+  restore: () => void
+} {
   const original = WebAssembly.Instance
   const memories: WebAssembly.Memory[] = []
-  WebAssembly.Instance = new Proxy(original, {
-    construct(target, args: ConstructorParameters<typeof WebAssembly.Instance>) {
-      const value = Reflect.construct(target, args)
-      if (!(value.exports.memory instanceof WebAssembly.Memory)) throw new Error('Missing memory')
-      memories.push(value.exports.memory)
-      return value
-    },
-  })
+  const requests: { operation: number; words: number }[] = []
+  class ObservedInstance extends original {
+    constructor(module: WebAssembly.Module, imports?: WebAssembly.Imports) {
+      super(module, imports)
+      const memory = super.exports.memory
+      if (!(memory instanceof WebAssembly.Memory)) throw new Error('Missing memory')
+      memories.push(memory)
+    }
+    override get exports(): WebAssembly.Exports {
+      const exports = super.exports
+      let words = 0
+      return {
+        ...exports,
+        mirage_policy_input: (length: number) => {
+          words = length
+          return nativeNumber(exports.mirage_policy_input, [length])
+        },
+        mirage_policy_call: (operation: number, handle: number) => {
+          requests.push({ operation, words })
+          return nativeNumber(exports.mirage_policy_call, [operation, handle])
+        },
+      }
+    }
+  }
+  WebAssembly.Instance = ObservedInstance
   return {
     memories,
+    requests,
     restore: () => {
       WebAssembly.Instance = original
     },
@@ -53,6 +83,207 @@ function captureInstances(): { memories: WebAssembly.Memory[]; restore: () => vo
 }
 
 const LARGE = 'x'.repeat(2_000_000)
+
+describe('bounded policy link packets', () => {
+  it('counts the outer batch header below, at and above the soft target', () => {
+    const tracked = captureInstances()
+    const matcher = new VisibilityMatcher({ paths: { paths: ['/secret'] } })
+    try {
+      for (const delta of [-1, 0, 1]) {
+        const start = tracked.requests.length
+        expect(
+          matcher.visibleLinks([
+            ['/p', [{ kind: 'landing', path: 'x'.repeat(1024 * 1024 - 7 + delta) }]],
+            ['', []],
+            ['/secret', []],
+          ]),
+        ).toEqual([true, true, false])
+        expect(
+          tracked.requests
+            .slice(start)
+            .filter((request) => request.operation === 52)
+            .map((request) => request.words),
+        ).toEqual([1024 * 1024 + delta, 12])
+      }
+    } finally {
+      matcher.close()
+      tracked.restore()
+    }
+  })
+
+  it('falls back when the outer batch header alone crosses the hard cap', () => {
+    const tracked = captureInstances()
+    const matcher = new VisibilityMatcher({})
+    try {
+      expect(
+        matcher.visibleLinks([
+          [
+            '/p',
+            [{ kind: 'hop_limit' }, { kind: 'landing', path: 'x'.repeat(16 * 1024 * 1024 - 7) }],
+          ],
+        ]),
+      ).toEqual([true])
+      expect(tracked.requests.filter((request) => request.operation !== 2)).toEqual([
+        { operation: 42, words: 3 },
+        { operation: 47, words: 3 },
+      ])
+    } finally {
+      matcher.close()
+      tracked.restore()
+    }
+  }, 30000)
+
+  it('splits large candidate lists without changing their mask order', () => {
+    const tracked = captureInstances()
+    const matcher = new VisibilityMatcher({ paths: { paths: ['/secret'] } })
+    const candidates: [string, LinkStep[]][] = Array.from({ length: 80000 }, (_, index) => [
+      `/${index % 2 === 0 ? 'secret' : 'public'}/${String(index)}`,
+      [],
+    ])
+    try {
+      expect(matcher.visibleLinks(candidates)).toEqual(
+        Array.from({ length: 80000 }, (_, index) => index % 2 !== 0),
+      )
+      const requests = tracked.requests.filter((request) => request.operation === 52)
+      expect(requests.length).toBeGreaterThan(1)
+      expect(Math.max(...requests.map((request) => request.words))).toBeLessThanOrEqual(1024 * 1024)
+    } finally {
+      matcher.close()
+      tracked.restore()
+    }
+  }, 30000)
+
+  it('supports a complete step above the soft target and sends exact bounded packets', () => {
+    const tracked = captureInstances()
+    const matcher = new VisibilityMatcher({ paths: { paths: ['/secret'] } })
+    try {
+      expect(
+        matcher.linkTraceHidden([
+          { kind: 'follow', path: '/open' },
+          { kind: 'landing', path: 'x'.repeat(1024 * 1024) },
+        ]),
+      ).toBe(false)
+      expect(
+        tracked.requests
+          .filter((request) => request.operation === 47)
+          .map((request) => request.words),
+      ).toEqual([9, 1024 * 1024 + 4])
+    } finally {
+      matcher.close()
+      tracked.restore()
+    }
+  })
+
+  it('counts hard-boundary Unicode words before querying even after a terminal fact', () => {
+    const tracked = captureInstances()
+    const matcher = new VisibilityMatcher({})
+    const text = '\ud800' + '😀'.repeat(16 * 1024 * 1024 - 5)
+    try {
+      expect(
+        matcher.linkTraceHidden([
+          { kind: 'hop_limit' },
+          { kind: 'landing', path: text.slice(0, -2) },
+        ]),
+      ).toBe(false)
+      expect(
+        matcher.linkTraceHidden([{ kind: 'hop_limit' }, { kind: 'landing', path: text }]),
+      ).toBe(false)
+      const before = tracked.requests.length
+      expect(() =>
+        matcher.linkTraceHidden([{ kind: 'hop_limit' }, { kind: 'landing', path: text + 'a' }]),
+      ).toThrow('Policy packet is too large')
+      expect(tracked.requests).toHaveLength(before)
+      expect(
+        tracked.requests
+          .filter((request) => request.operation === 47)
+          .map((request) => request.words),
+      ).toEqual([3, 3])
+    } finally {
+      matcher.close()
+      tracked.restore()
+    }
+  }, 30000)
+
+  it('keeps fold state through multiple synchronous chunks and retires only after the result', async () => {
+    const tracked = captureInstances()
+    const hidden = { paths: ['/secret'] }
+    const matcher = hiddenMatcher(hidden)
+    const body = 'x'.repeat(3_000_000)
+    try {
+      expect(
+        matcher.linkTraceHidden([
+          { kind: 'follow', path: '/open' },
+          { kind: 'landing', path: body },
+          { kind: 'follow', path: '/secret' },
+        ]),
+      ).toBe(true)
+      expect(matcher.live).toBe(true)
+      expect(tracked.requests.filter((request) => request.operation === 47)).toHaveLength(3)
+      expect(tracked.memories[0]?.buffer.byteLength).toBeGreaterThan(32 * 1024 * 1024)
+      await Promise.resolve()
+      expect(matcher.live).toBe(false)
+      expect(hiddenMatcher(hidden).pathVisible('/secret')).toBe(false)
+    } finally {
+      tracked.restore()
+    }
+  })
+
+  it('preserves terminal HopLimit and rejects unsupported later records before any query', () => {
+    const tracked = captureInstances()
+    const matcher = new VisibilityMatcher({ paths: { paths: ['/secret'] } })
+    try {
+      expect(
+        matcher.linkTraceHidden([
+          { kind: 'follow', path: '/open' },
+          { kind: 'hop_limit' },
+          { kind: 'landing', path: LARGE },
+          { kind: 'follow', path: '/secret' },
+        ]),
+      ).toBe(false)
+      expect(tracked.requests.filter((request) => request.operation === 47)).toHaveLength(1)
+      const before = tracked.requests.length
+      expect(() => {
+        Reflect.apply(matcher.linkTraceHidden.bind(matcher), undefined, [
+          [{ kind: 'hop_limit' }, { kind: 'invalid' }],
+        ])
+      }).toThrow('Invalid policy link step')
+      expect(tracked.requests).toHaveLength(before)
+    } finally {
+      matcher.close()
+      tracked.restore()
+    }
+  })
+
+  it('keeps large batch and oversized-candidate results in their original order', () => {
+    const tracked = captureInstances()
+    const matcher = new VisibilityMatcher({ paths: { paths: ['/secret'] } })
+    const trace: LinkStep[] = [
+      { kind: 'follow', path: '/open' },
+      ...Array.from({ length: 9 }, (): LinkStep => ({ kind: 'landing', path: LARGE })),
+      { kind: 'follow', path: '/secret' },
+    ]
+    try {
+      expect(
+        matcher.visibleLinks([
+          ['/before', []],
+          ['/large', trace],
+          ['/secret/child', []],
+          ['/after', []],
+        ]),
+      ).toEqual([true, false, false, true])
+      expect(tracked.requests.filter((request) => request.operation === 52)).toHaveLength(2)
+      expect(tracked.requests.filter((request) => request.operation === 47).length).toBeGreaterThan(
+        2,
+      )
+      expect(Math.max(...tracked.requests.map((request) => request.words))).toBeLessThanOrEqual(
+        16 * 1024 * 1024,
+      )
+    } finally {
+      matcher.close()
+      tracked.restore()
+    }
+  }, 30000)
+})
 
 describe('policy memory retirement', () => {
   it('retires grown instances after yielding and preserves denials across repeated cycles', async () => {

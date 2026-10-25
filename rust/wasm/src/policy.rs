@@ -2,8 +2,8 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 
 use mirage_rs::policy::{
-    self, AdmissionMatcher, CommandFacts, HideReason, LinkCandidate, LinkStep, Mode, Mount,
-    PathFact, PathScope, Paths, Profile, RestrictionPlan, Rule, Rules, Show, Subject, Text,
+    self, AdmissionMatcher, CommandFacts, HideReason, LinkCandidate, LinkState, LinkStep, Mode,
+    Mount, PathFact, PathScope, Paths, Profile, RestrictionPlan, Rule, Rules, Show, Subject, Text,
     VarScope, Visibility, VisibilityMatcher, Whitespace,
 };
 
@@ -199,6 +199,15 @@ impl<'a> Reader<'a> {
             2 => Ok(LinkStep::Landing(self.text()?)),
             3 => Ok(LinkStep::HopLimit),
             _ => Err("invalid policy link step"),
+        }
+    }
+    fn link_state(&mut self) -> Result<LinkState> {
+        match self.number()? {
+            0 => Ok(LinkState::Unfollowed),
+            1 => Ok(LinkState::Followed),
+            2 => Ok(LinkState::Hidden),
+            3 => Ok(LinkState::HopLimit),
+            _ => Err("invalid policy link state"),
         }
     }
     fn link_candidate(&mut self) -> Result<LinkCandidate> {
@@ -495,7 +504,9 @@ fn dispatch(state: &mut State, operation: u32, handle: u32, input: &[u32]) -> Re
                     w.boolean(matcher.move_reveals(&src, &r.text()?));
                 }
                 47 => {
-                    w.boolean(matcher.link_trace_hidden(&r.list(Reader::link_step)?));
+                    let state = r.link_state()?;
+                    let trace = r.list(Reader::link_step)?;
+                    w.number(matcher.fold_link_trace(state, &trace) as usize);
                 }
                 48 => w.boolean(matcher.var_hidden(&r.text()?)),
                 52 => w.list(
@@ -615,10 +626,24 @@ mod tests {
         packet.visibility(&Visibility::default());
         let handle = dispatch(&mut state, 2, 0, &packet.0).unwrap()[0];
         assert_eq!(
-            dispatch(&mut state, 47, handle, &[1, 4]).unwrap_err(),
+            dispatch(&mut state, 47, handle, &[0, 1, 4]).unwrap_err(),
             "invalid policy link step"
         );
-        assert!(dispatch(&mut state, 47, handle, &[1, 1, 0]).is_err());
+        assert!(dispatch(&mut state, 47, handle, &[0, 1, 1, 0]).is_err());
+        assert_eq!(
+            dispatch(&mut state, 47, handle, &[4, 0]).unwrap_err(),
+            "invalid policy link state"
+        );
+        for packet in [
+            &[2, 1, 4][..],
+            &[3, 1, 0, 2, 47],
+            &[2, 1, 1, 0, 2],
+            &[3, 1, 2, 1, 0x110000],
+        ] {
+            assert!(dispatch(&mut state, 47, handle, packet).is_err());
+        }
+        assert_eq!(dispatch(&mut state, 47, handle, &[2, 0]).unwrap(), vec![2]);
+        assert_eq!(dispatch(&mut state, 47, handle, &[3, 0]).unwrap(), vec![3]);
     }
     #[test]
     fn handles_reject_wrong_kind_and_do_not_reuse_after_drop() {

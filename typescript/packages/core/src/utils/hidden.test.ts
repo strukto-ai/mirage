@@ -39,7 +39,7 @@ import {
   type ShownPaths,
   type Visibility,
 } from '../types.ts'
-import { CycleError, resolveSymlinks } from './path.ts'
+import { CycleError, resolveSymlinks, traceSymlinks } from './path.ts'
 
 function vis(paths: HiddenPaths | null, shown: ShownPaths | null = null): Visibility {
   return { ...DEFAULT_VISIBILITY, paths, shown }
@@ -398,6 +398,18 @@ const LINKS = new Map([
 ])
 
 describe('leadsHidden', () => {
+  it('handles long unfollowed paths without irrelevant packet facts', () => {
+    const path = '/a'.repeat(4096)
+    const links = new Map([['/unrelated', '/public']])
+    expect(leadsHidden(vis(classifyPaths(['/secret'])), path, links)).toBe(false)
+    expect(traceSymlinks(path, links)).toHaveLength(0)
+  })
+  it('handles long relevant traces within the existing scalar input contract', () => {
+    const links = new Map([['/link', '/a'.repeat(4096)]])
+    const path =
+      '/link' + Array.from({ length: 2100 }, (_, index) => `/c${String(index)}/..`).join('')
+    expect(leadsHidden(vis(classifyPaths(['/secret'])), path, links)).toBe(false)
+  })
   it('reads only reached links and observes same-size mutations', () => {
     class LookupLinks extends Map<string, string> {
       override [Symbol.iterator](): MapIterator<[string, string]> {

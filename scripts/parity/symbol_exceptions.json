@@ -978,6 +978,8 @@
    },
    "typescript_only": {
     "RECYCLE_BYTES": "Only Wasm linear memory needs a high-water retirement threshold; native Python policy objects release their owned allocations normally.",
+    "CHUNK_UNITS": "Only the Wasm binding splits trace and candidate packets at a private word target; native typed vectors have no Wasm packet cap.",
+    "LinkState": "Wasm carries validated numeric tags from the shared Rust fold between packets; native one-shot calls delegate to the fold without a foreign state API.",
     "queuedRetirement": "Only Wasm needs an instance identity for deferred memory retirement; PyO3 objects have no shared linear-memory generation.",
     "retireLater": "Wasm retires enlarged instances after the current synchronous turn; native Python objects do not require instance retirement.",
     "CACHE_LIMIT": "Raw Wasm owns instance generations, packet buffers and explicitly dropped bounded matcher handles; Python uses owned PyO3 objects and bounded lru_cache eviction without a Wasm lifecycle.",

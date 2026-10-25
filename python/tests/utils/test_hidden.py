@@ -37,7 +37,7 @@ from mirage.utils.hidden import (
     var_hidden,
     visible_links,
 )
-from mirage.utils.path import CycleError, resolve_symlinks
+from mirage.utils.path import CycleError, resolve_symlinks, trace_symlinks
 
 
 def _vis(hide: list[str], show: tuple[ShowEntry, ...] = ()) -> Visibility:
@@ -516,3 +516,17 @@ def test_link_batches_keep_order_and_surrogate_target_text():
     ) == (False, True, False)
     links["/link\ud800"] = "/public"
     assert visible_links(scope, ("/link\ud800",), links) == (True,)
+
+
+def test_long_unfollowed_path_does_not_transfer_irrelevant_facts():
+    path = "/a" * 4096
+    links = {"/unrelated": "/public"}
+    assert not leads_hidden(_vis(["/secret"]), path, links)
+    count = len(trace_symlinks(path, links))
+    assert count == 0
+
+
+def test_long_relevant_trace_preserves_the_scalar_result():
+    links = {"/link": "/a" * 4096}
+    path = "/link" + "".join(f"/c{index}/.." for index in range(2100))
+    assert not leads_hidden(_vis(["/secret"]), path, links)

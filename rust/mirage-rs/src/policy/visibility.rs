@@ -1,6 +1,6 @@
 use crate::glob::CompiledGlob;
 
-use super::{LinkCandidate, LinkStep, Mode, PathScope, Text, VarScope, Visibility};
+use super::{LinkCandidate, LinkState, LinkStep, Mode, PathScope, Text, VarScope, Visibility};
 
 const SLASH: u32 = 47;
 
@@ -309,26 +309,43 @@ impl VisibilityMatcher {
     }
 
     pub fn link_trace_hidden(&self, trace: &[LinkStep]) -> bool {
-        let mut followed = false;
+        self.fold_link_trace(LinkState::Unfollowed, trace) == LinkState::Hidden
+    }
+
+    pub fn fold_link_trace(&self, mut state: LinkState, trace: &[LinkStep]) -> LinkState {
+        if matches!(state, LinkState::Hidden | LinkState::HopLimit) {
+            return state;
+        }
         for step in trace {
-            let checked = match step {
+            state = match step {
                 LinkStep::Follow(path) => {
-                    followed = true;
-                    Some(path)
+                    if self.path_visible(path) {
+                        LinkState::Followed
+                    } else {
+                        LinkState::Hidden
+                    }
                 }
                 LinkStep::Enter {
                     path,
-                    next_is_parent,
-                } if followed && *next_is_parent => Some(path),
-                LinkStep::Landing(path) if followed => Some(path),
-                LinkStep::HopLimit => return false,
-                _ => None,
+                    next_is_parent: true,
+                }
+                | LinkStep::Landing(path)
+                    if state == LinkState::Followed =>
+                {
+                    if self.path_visible(path) {
+                        LinkState::Followed
+                    } else {
+                        LinkState::Hidden
+                    }
+                }
+                LinkStep::HopLimit => LinkState::HopLimit,
+                _ => state,
             };
-            if checked.is_some_and(|path| !self.path_visible(path)) {
-                return true;
+            if matches!(state, LinkState::Hidden | LinkState::HopLimit) {
+                return state;
             }
         }
-        false
+        state
     }
 
     pub fn visible_links(&self, candidates: &[LinkCandidate]) -> Vec<bool> {
@@ -612,6 +629,70 @@ mod tests {
         assert!(
             matcher(&["/repo/*/secret"], &[]).move_reveals(&text("/repo/sub"), &text("/public"))
         );
+    }
+
+    #[test]
+    fn link_fold_preserves_context_and_absorbing_states_at_every_split() {
+        let vis = matcher(&["/secret"], &[]);
+        let traces = [
+            vec![
+                LinkStep::Enter {
+                    path: text("/secret"),
+                    next_is_parent: true,
+                },
+                LinkStep::Landing(text("/secret")),
+            ],
+            vec![
+                LinkStep::Follow(text("/open")),
+                LinkStep::Landing(text("/open")),
+                LinkStep::Enter {
+                    path: text("/secret"),
+                    next_is_parent: true,
+                },
+            ],
+            vec![
+                LinkStep::Follow(text("/open")),
+                LinkStep::HopLimit,
+                LinkStep::Follow(text("/secret")),
+            ],
+            vec![LinkStep::Follow(text("/secret")), LinkStep::HopLimit],
+        ];
+        assert_eq!(
+            vis.fold_link_trace(LinkState::Unfollowed, &traces[0]),
+            LinkState::Unfollowed
+        );
+        assert_eq!(
+            vis.fold_link_trace(LinkState::Unfollowed, &traces[1]),
+            LinkState::Hidden
+        );
+        assert_eq!(
+            vis.fold_link_trace(LinkState::Unfollowed, &traces[2]),
+            LinkState::HopLimit
+        );
+        assert_eq!(
+            vis.fold_link_trace(LinkState::Unfollowed, &traces[3]),
+            LinkState::Hidden
+        );
+        for state in [
+            LinkState::Unfollowed,
+            LinkState::Followed,
+            LinkState::Hidden,
+            LinkState::HopLimit,
+        ] {
+            for trace in &traces {
+                let expected = vis.fold_link_trace(state, trace);
+                for split in 0..=trace.len() {
+                    let partial = vis.fold_link_trace(state, &trace[..split]);
+                    assert_eq!(vis.fold_link_trace(partial, &trace[split..]), expected);
+                }
+                for size in 1..=3 {
+                    let partial = trace
+                        .chunks(size)
+                        .fold(state, |prior, chunk| vis.fold_link_trace(prior, chunk));
+                    assert_eq!(partial, expected);
+                }
+            }
+        }
     }
 
     #[test]

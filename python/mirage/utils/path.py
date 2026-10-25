@@ -389,7 +389,7 @@ def _resolve_symlinks(
         candidate = "/" + "/".join([*resolved, part])
         target = links.get(candidate)
         if target is None:
-            if trace is not None:
+            if trace is not None and hops > 0:
                 next_part = next(
                     (
                         part
@@ -398,7 +398,8 @@ def _resolve_symlinks(
                     ),
                     None,
                 )
-                trace.append(LinkEnter(candidate, next_part == ".."))
+                if next_part == "..":
+                    trace.append(LinkEnter(candidate, True))
             resolved.append(part)
             continue
         if trace is not None:
@@ -412,7 +413,7 @@ def _resolve_symlinks(
             resolved.clear()
         pending.extend(reversed(target.split("/")))
     landing = "/" + "/".join(resolved)
-    if trace is not None:
+    if trace is not None and hops > 0:
         trace.append(LinkLanding(landing))
     suffix = "/" if resolved and path.endswith("/") else ""
     return landing + suffix

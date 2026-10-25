@@ -321,7 +321,7 @@ function _resolveSymlinks(
     const candidate = '/' + [...resolved, part].join('/')
     const target = links.get(candidate)
     if (target === undefined) {
-      if (trace !== null) {
+      if (trace !== null && hops > 0) {
         let next: string | undefined
         for (let index = pending.length - 1; index >= 0; index -= 1) {
           const part = pending[index]
@@ -330,7 +330,7 @@ function _resolveSymlinks(
             break
           }
         }
-        trace.push({ kind: 'enter', path: candidate, nextIsParent: next === '..' })
+        if (next === '..') trace.push({ kind: 'enter', path: candidate, nextIsParent: true })
       }
       resolved.push(part)
       continue
@@ -344,7 +344,7 @@ function _resolveSymlinks(
     pending.push(...target.split('/').reverse())
   }
   const landing = '/' + resolved.join('/')
-  trace?.push({ kind: 'landing', path: landing })
+  if (hops > 0) trace?.push({ kind: 'landing', path: landing })
   const suffix = resolved.length > 0 && path.endsWith('/') ? '/' : ''
   return landing + suffix
 }

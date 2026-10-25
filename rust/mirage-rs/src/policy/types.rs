@@ -1,5 +1,15 @@
 pub type Text = Vec<u32>;
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[repr(u32)]
+pub enum LinkState {
+    #[default]
+    Unfollowed = 0,
+    Followed = 1,
+    Hidden = 2,
+    HopLimit = 3,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum LinkStep {
     Follow(Text),

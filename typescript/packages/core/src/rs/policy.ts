@@ -12,7 +12,15 @@ import type { LinkStep } from '../utils/path.ts'
 
 const CACHE_LIMIT = 128
 const MAX_UNITS = 16 * 1024 * 1024
+const CHUNK_UNITS = 1024 * 1024
 const MODES = [MountMode.READ, MountMode.WRITE, MountMode.EXEC]
+
+enum LinkState {
+  Unfollowed = 0,
+  Followed = 1,
+  Hidden = 2,
+  HopLimit = 3,
+}
 
 type PolicyCommands = Readonly<Partial<AdmissionRules>>
 interface PolicyPaths {
@@ -66,6 +74,40 @@ export interface PolicyPlan {
 
 class Packet {
   readonly units: number[] = []
+  static textWords(value: string): number {
+    let words = 1
+    const units = value[Symbol.iterator]()
+    while (!units.next().done) words += 1
+    return words
+  }
+  static readonly linkStepPlan = (step: LinkStep): { step: LinkStep; words: number } => {
+    let words: number
+    switch (step.kind) {
+      case 'follow':
+      case 'landing':
+        words = 1 + Packet.textWords(step.path)
+        break
+      case 'enter':
+        words = 2 + Packet.textWords(step.path)
+        break
+      case 'hop_limit':
+        words = 1
+        break
+      default: {
+        const exhaustive: never = step
+        throw new TypeError('Invalid policy link step', { cause: exhaustive })
+      }
+    }
+    if (2 + words > MAX_UNITS) throw new Error('Policy packet is too large')
+    return { step, words }
+  }
+  static readonly linkCandidatePlan = (value: readonly [string, readonly LinkStep[]]) => {
+    const pathWords = Packet.textWords(value[0])
+    if (pathWords > MAX_UNITS) throw new Error('Policy packet is too large')
+    const trace = value[1].map(Packet.linkStepPlan)
+    const words = pathWords + 1 + trace.reduce((total, part) => total + part.words, 0)
+    return { value, trace, words }
+  }
   number(value: number): void {
     if (!Number.isInteger(value) || value < 0 || value > 0xffffffff)
       throw new RangeError('Policy packet integer is outside u32')
@@ -253,6 +295,21 @@ class Reply {
     const value = this.number()
     if (value !== 0 && value !== 1) throw new Error('Invalid policy boolean reply')
     return value === 1
+  }
+  linkState(): LinkState {
+    const state = this.number()
+    switch (state) {
+      case 0:
+        return LinkState.Unfollowed
+      case 1:
+        return LinkState.Followed
+      case 2:
+        return LinkState.Hidden
+      case 3:
+        return LinkState.HopLimit
+      default:
+        throw new Error('Invalid policy link state reply')
+    }
   }
   text(): string {
     const length = this.number()
@@ -459,8 +516,11 @@ abstract class Handle {
     return !this.closed && this.generation === generation
   }
   protected query(operation: number, write?: (packet: Packet) => void): Reply {
-    if (!this.live) throw new Error('Closed policy matcher')
+    this.requireLive()
     return invoke(operation, this.handle, write)
+  }
+  protected requireLive(): void {
+    if (!this.live) throw new Error('Closed policy matcher')
   }
   close(drop = true): void {
     if (this.closed) return
@@ -638,17 +698,64 @@ export class VisibilityMatcher extends Handle {
     }).boolean()
   }
   linkTraceHidden(trace: readonly LinkStep[]): boolean {
-    return this.query(47, (p) => {
-      p.linkTrace(trace)
-    }).boolean()
+    this.requireLive()
+    return this.traceHidden(trace.map(Packet.linkStepPlan))
+  }
+  private traceHidden(trace: readonly ReturnType<typeof Packet.linkStepPlan>[]): boolean {
+    let state = LinkState.Unfollowed
+    let chunk: LinkStep[] = []
+    let words = 2
+    const flush = (current: LinkState): LinkState => {
+      const next = this.query(47, (p) => {
+        p.number(current)
+        p.linkTrace(chunk)
+      }).linkState()
+      chunk = []
+      words = 2
+      return next
+    }
+    for (const part of trace) {
+      if (chunk.length > 0 && words + part.words > CHUNK_UNITS) {
+        state = flush(state)
+        if (state === LinkState.Hidden || state === LinkState.HopLimit)
+          return state === LinkState.Hidden
+      }
+      chunk.push(part.step)
+      words += part.words
+    }
+    if (chunk.length > 0) state = flush(state)
+    return state === LinkState.Hidden
   }
   visibleLinks(candidates: readonly (readonly [string, readonly LinkStep[]])[]): boolean[] {
-    return this.query(52, (p) => {
-      p.list(candidates, (p, [path, trace]) => {
-        p.text(path)
-        p.linkTrace(trace)
-      })
-    }).list((r) => r.boolean())
+    this.requireLive()
+    const plans = candidates.map(Packet.linkCandidatePlan)
+    const result: boolean[] = []
+    let chunk: (typeof candidates)[number][] = []
+    let words = 1
+    const flush = (): void => {
+      if (chunk.length === 0) return
+      const mask = this.query(52, (p) => {
+        p.list(chunk, (p, [path, trace]) => {
+          p.text(path)
+          p.linkTrace(trace)
+        })
+      }).list((r) => r.boolean())
+      for (const visible of mask) result.push(visible)
+      chunk = []
+      words = 1
+    }
+    for (const plan of plans) {
+      if (1 + plan.words > MAX_UNITS) {
+        flush()
+        result.push(this.pathVisible(plan.value[0]) && !this.traceHidden(plan.trace))
+        continue
+      }
+      if (chunk.length > 0 && words + plan.words > CHUNK_UNITS) flush()
+      chunk.push(plan.value)
+      words += plan.words
+    }
+    flush()
+    return result
   }
   varHidden(name: string): boolean {
     return this.query(48, (p) => {

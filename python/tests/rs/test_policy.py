@@ -291,3 +291,27 @@ def test_native_link_facts_reject_invalid_variants(step):
     matcher = PolicyVisibility((((), ()), (), ((), ())))
     with pytest.raises(ValueError, match="invalid policy link step"):
         matcher.link_trace_hidden((step,))
+
+
+def test_native_link_trace_keeps_landing_nonterminal_and_hop_limit_terminal():
+    matcher = visibility_matcher(
+        Visibility(paths=HiddenPaths(paths=("/secret",)))
+    )
+    assert not matcher.link_trace_hidden(((2, units("/secret"), False),))
+    assert matcher.link_trace_hidden(
+        (
+            (0, units("/open"), False),
+            (2, units("/open"), False),
+            (1, units("/secret"), True),
+        )
+    )
+    assert not matcher.link_trace_hidden(
+        (
+            (0, units("/open"), False),
+            (3, (), False),
+            (0, units("/secret"), False),
+        )
+    )
+    assert matcher.link_trace_hidden(
+        ((0, units("/secret"), False), (3, (), False))
+    )
