@@ -12,21 +12,15 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import dataclasses
 import errno
-import functools
-import logging
 import os
-from collections.abc import Callable
-from dataclasses import dataclass
 from typing import IO, Any, cast
 
-from mirage.commands.builtin.utils.paths import walk_spelling
 from mirage.errors.fs import fs_error
 from mirage.errors.types import FsCondition
-from mirage.runtime.files import RuntimeFiles, kept_view
-from mirage.runtime.handles import FileHandle, Kept, apply_flush
-from mirage.runtime.handles.mode import OpenMode, parse_mode
-from mirage.runtime.open import apply_open
+from mirage.runtime.files import Descriptor, RuntimeFiles
+from mirage.runtime.handles.mode import OpenMode, open_mode, parse_mode
 from mirage.runtime.python.host.file import (
     HandleRaw,
     layered,
@@ -34,31 +28,6 @@ from mirage.runtime.python.host.file import (
     text_encoding,
 )
 from mirage.runtime.python.host.syscall import syscall
-from mirage.runtime.types import VFSStat
-from mirage.types import PathSpec
-from mirage.utils.path import CycleError, resolve_path
-
-logger = logging.getLogger(__name__)
-
-
-def open_mode(flags: int) -> OpenMode:
-    """What open(2) flags say about a handle, in the mode vocabulary.
-
-    Args:
-        flags (int): the ``os.O_*`` flags.
-    """
-    access = flags & os.O_ACCMODE
-    writable = access in (os.O_WRONLY, os.O_RDWR)
-    create = bool(flags & os.O_CREAT)
-    return OpenMode(
-        readable=access in (os.O_RDONLY, os.O_RDWR),
-        writable=writable,
-        truncate=writable and bool(flags & os.O_TRUNC),
-        append=bool(flags & os.O_APPEND),
-        create=create,
-        exclusive=create and bool(flags & os.O_EXCL),
-        binary=True,
-    )
 
 
 def open_flags(facts: OpenMode) -> int:
@@ -84,69 +53,29 @@ def open_flags(facts: OpenMode) -> int:
     return flags | getattr(os, "O_CLOEXEC", 0)
 
 
-@dataclass
-class Descriptor:
-    """One mounted file ``os.open`` or ``open`` has open.
-
-    Args:
-        path (str): the mounted path it names now, as the open's walk
-            reached it (``Descriptors.walked``); a rename through the
-            same entry point moves it.
-        facts (OpenMode): what its flags or mode asked for.
-        handle (FileHandle | None): the file it reads and writes; None
-            for a directory, which a descriptor may name but not read.
-        kept (Kept | None): its file once the name was removed or
-            replaced, which it reads and lands on from then on; None
-            while it has a name.
-        opened (str): the path it was opened at, which its inode number
-            comes from however the file is renamed since.
-    """
-
-    path: str
-    facts: OpenMode
-    handle: FileHandle | None = None
-    kept: Kept | None = None
-    opened: str = ""
-    stat: VFSStat | None = None
-
-    def __post_init__(self) -> None:
-        if not self.opened:
-            self.opened = self.path
-
-
 class Descriptors:
-    """The mounted files open through this entry point: by number for
-    ``os.open``, unnumbered for ``open``.
+    """The mounted files open through this entry point, by number for
+    ``os.open``; ``open`` hands out a stream over one with no number.
 
     Each number is a real host descriptor, the read end of a pipe whose
     write end is closed, held open as long as the mounted one is: it
     never collides with a file the host opens meanwhile, and a call that
     still reaches the host with it (a C extension) meets an empty stream,
-    never another file or a shared device. Writes stay in the handle
-    until a ``close``, a flush or an ``fsync``. Every open file follows
-    its file through a rename made through this entry point, and keeps
-    the bytes it had once one removes or replaces its name, as POSIX
+    never another file or a shared device. What a file holds and what a
+    descriptor wrote are the core's (``RuntimeFiles.open``), which lands
+    the writes at a close, a flush or an ``fsync``, follows a rename and
+    keeps the file a removal or a replacement took the name of, as POSIX
     keeps an open file on its inode.
 
     Args:
-        adapter (RuntimeFiles): the file adapter files land through.
+        adapter (RuntimeFiles): the file adapter files open through.
         host (Any): the host ``os`` functions the router snapshotted.
-        follow (Callable[[str], str] | None): where a path leads, every
-            link followed, as the session sees the namespace; None while
-            the workspace keeps no link.
     """
 
-    def __init__(
-        self,
-        adapter: RuntimeFiles,
-        host: Any,
-        follow: Callable[[str], str] | None,
-    ) -> None:
+    def __init__(self, adapter: RuntimeFiles, host: Any) -> None:
         self._adapter = adapter
         self._host = host
-        self._follow = follow
         self._open: dict[int, Descriptor] = {}
-        self._unnumbered: dict[int, Descriptor] = {}
 
     def get(self, fd: Any) -> Descriptor | None:
         """The mounted descriptor ``fd`` is, else None.
@@ -169,93 +98,21 @@ class Descriptors:
             raise OSError(errno.EBADF, os.strerror(errno.EBADF))
         return desc
 
-    def walked(self, path: str, follow: bool = True) -> str:
-        """The path an op on ``path`` lands on, as the dispatcher walks
-        it: a link in front of a dot followed before the climb, the dots
-        resolved, and the final link followed too when ``follow``. One
-        file reads as one path whichever spelling reached it, which is
-        how a rename or an unlink finds the files open on it.
-
-        Args:
-            path (str): the mounted path as the caller spelled it.
-            follow (bool): follow the final name too; a rename or a
-                removal acts on the name itself.
-        """
-        spec = PathSpec.from_str_path(path, cwd="/")
-        if self._follow is None:
-            return spec.virtual
-        try:
-            spelled = walk_spelling(spec, self._follow)
-            head, _, name = spelled.rpartition("/")
-            if follow or name in ("", ".", ".."):
-                return resolve_path(self._follow(spelled), "/")
-            above = resolve_path(self._follow(head or "/"), "/")
-        except CycleError:
-            raise fs_error(path, FsCondition.ELOOP) from None
-        return above.rstrip("/") + "/" + name
-
-    def _every(self) -> list[Descriptor]:
-        """Every open file, numbered or not."""
-        return [*self._open.values(), *self._unnumbered.values()]
-
-    def _fetch(
-        self, desc: Descriptor, raw: bool, offset: int, size: int | None
-    ) -> bytes:
-        """A range of a descriptor's file: what it kept once its name went,
-        else what is at its path now. A handle that writes reads the
-        stored bytes, since its writes land on them; a read-only one sees
-        the rendering.
-
-        Args:
-            desc (Descriptor): the descriptor.
-            raw (bool): read the stored bytes rather than the rendering.
-            offset (int): where the range starts.
-            size (int | None): how many bytes; None reads to the end.
-        """
-        if desc.kept is not None:
-            end = None if size is None else offset + size
-            return self._read_cached(
-                desc, kept_view(desc.kept, raw)[offset:end]
-            )
-        return syscall(self._adapter.read)(
-            desc.path, offset=offset, size=size, raw=raw
-        )
-
-    def _read_cached(self, desc: Descriptor, data: bytes) -> bytes:
-        """Judge a descriptor's retained bytes at its current path.
-
-        Args:
-            desc (Descriptor): the open descriptor.
-            data (bytes): the logical read result.
-        """
-        return syscall(self._adapter.read_cached)(desc.path, data)
-
-    def _opened(self, path: str, facts: OpenMode) -> Descriptor:
+    def _opened(
+        self, path: str, facts: OpenMode, directory: bool = False
+    ) -> Descriptor:
         """A descriptor on ``path`` once the open's effect landed. Nothing
-        is read at open: its handle fetches what a read lands in.
+        is read at open: the core fetches what a read lands in.
 
         Args:
             path (str): the mounted path.
             facts (OpenMode): what the open asked for.
+            directory (bool): the path is a directory the open may name.
         """
-        # What other descriptors on the file still owe lands first, so
-        # their older writes never land over what this one writes.
-        if facts.writable:
-            self.land_path(path)
-        row = apply_open(self._adapter, path, facts)
-        desc = Descriptor(
-            self.walked(path), facts, stat=row or self._adapter.stat(path)
-        )
-        desc.handle = FileHandle.opened(
-            path,
-            None
-            if row is None
-            else functools.partial(self._fetch, desc, facts.writable),
-            size=0 if row is None else row.size,
-            writable=facts.writable,
-            append=facts.append,
-            read_cached=functools.partial(self._read_cached, desc),
-        )
+        fh = syscall(self._adapter.open)(path, facts)
+        desc = Descriptor(self._adapter, fh, facts, path, directory)
+        if facts.append:
+            desc.seek(0, 2)
         return desc
 
     def open(self, path: str, flags: int) -> int:
@@ -265,7 +122,7 @@ class Descriptors:
             path (str): the mounted path.
             flags (int): the ``os.O_*`` flags.
         """
-        facts = open_mode(flags)
+        facts = dataclasses.replace(open_mode(flags), directory=True)
         nofollow = bool(flags & getattr(os, "O_NOFOLLOW", 0))
         row = syscall(self._adapter.stat_or_none)(path, nofollow=nofollow)
         if row is not None and row.is_link:
@@ -277,13 +134,7 @@ class Descriptors:
                 path,
                 FsCondition.ENOENT if row is None else FsCondition.ENOTDIR,
             )
-        directory = row is not None and row.is_dir
-        if directory and not (facts.writable or facts.create):
-            desc = Descriptor(
-                self.walked(path), facts, stat=row or self._adapter.stat(path)
-            )
-        else:
-            desc = self._opened(path, facts)
+        desc = self._opened(path, facts, row is not None and row.is_dir)
         fd, write_end = cast(tuple[int, int], self._host.pipe())
         self._host.close(write_end)
         self._open[fd] = desc
@@ -299,9 +150,10 @@ class Descriptors:
         newline: str | None = None,
     ) -> IO[bytes] | IO[str]:
         """``open`` on a mounted path: CPython's own buffered and text
-        streams over an unnumbered descriptor, so everything a file object
-        offers behaves as on disk, but ``fileno``, which has nothing to
-        answer. The arguments are checked before the open lands.
+        streams over a descriptor with no number, so everything a file
+        object offers behaves as on disk, but ``fileno``, which has
+        nothing to answer. The arguments are checked before the open
+        lands.
 
         Args:
             path (str): the mounted path.
@@ -315,141 +167,14 @@ class Descriptors:
         facts = parse_mode(mode)
         encoding = text_encoding(facts, encoding, errors, newline, buffering)
         desc = self._opened(path, facts)
-        if facts.append and desc.handle is not None:
-            desc.handle.seek(0, 2)
-        key = id(desc)
-        self._unnumbered[key] = desc
         raw = HandleRaw(
-            cast(FileHandle, desc.handle),
+            desc,
             facts.readable,
             facts.writable,
             raw_mode(facts),
-            functools.partial(self.land, desc),
-            release=functools.partial(self._forget, key),
+            release=desc.close,
         )
         return layered(raw, facts, mode, encoding, errors, newline, buffering)
-
-    def _forget(self, key: int) -> None:
-        """Drop an unnumbered descriptor once its file object closed.
-
-        Args:
-            key (int): its key in the unnumbered table.
-        """
-        self._unnumbered.pop(key, None)
-
-    def land(self, desc: Descriptor) -> None:
-        """Land a descriptor's writes on the mount; one whose name went
-        lands them on what its file kept, which every other descriptor on
-        it reads, as writes to an unlinked file stay with it.
-
-        Args:
-            desc (Descriptor): the descriptor.
-        """
-        handle = desc.handle
-        if handle is None:
-            return
-        if desc.kept is not None:
-            if handle.dirty:
-                desc.kept.data = apply_flush(
-                    desc.kept.data, handle.flush_plan()
-                )
-                handle.settle(functools.partial(self._fetch, desc, True))
-                self._invalidate_peers(desc)
-            return
-        steps = handle.flush_plan()
-        if not steps:
-            return
-        syscall(self._adapter.flush)(desc.path, steps)
-        handle.settle(functools.partial(self._fetch, desc, True))
-        self._invalidate_peers(desc)
-
-    def _invalidate_peers(self, changed: Descriptor) -> None:
-        for peer in self._every():
-            same = (
-                peer.kept is changed.kept
-                if changed.kept is not None
-                else peer.kept is None and peer.path == changed.path
-            )
-            if peer is not changed and same and peer.handle is not None:
-                size = (
-                    len(kept_view(peer.kept, peer.facts.writable))
-                    if peer.kept is not None
-                    else changed.handle.size
-                    if changed.handle is not None
-                    else 0
-                )
-                peer.handle.invalidate(
-                    functools.partial(self._fetch, peer, peer.facts.writable),
-                    size,
-                )
-
-    def land_path(self, path: str, follow: bool = True) -> None:
-        """Land the writes of every file open on ``path``, which a change
-        of its times must come after.
-
-        Args:
-            path (str): the mounted path.
-            follow (bool): the change follows a link at ``path``.
-        """
-        path = self.walked(path, follow)
-        for desc in self._every():
-            if desc.path == path:
-                self.land(desc)
-
-    def moved(self, old: str, new: str) -> None:
-        """Follow a rename: a file open on ``old`` or under it is at ``new``
-        now.
-
-        Args:
-            old (str): the path the rename took, as walked before it.
-            new (str): the path it gave, as walked before it.
-        """
-        under = old.rstrip("/") + "/"
-        for desc in self._every():
-            if desc.kept is None and (
-                desc.path == old or desc.path.startswith(under)
-            ):
-                desc.path = new + desc.path[len(old) :]
-
-    def hold(self, path: str) -> list[tuple[Descriptor, Kept]]:
-        """Read what the files open on ``path`` need before its name is
-        removed or replaced; ``keep`` them once it has gone. They share
-        what ``RuntimeFiles.kept`` reads, so a read that fails (a policy
-        refusing it, say) still lets the removal it allows go ahead.
-
-        Args:
-            path (str): the path about to go.
-        """
-        path = self.walked(path, False)
-        held = [
-            desc
-            for desc in self._every()
-            if desc.path == path
-            and desc.kept is None
-            and desc.handle is not None
-        ]
-        if not held:
-            return []
-        # A descriptor that cannot read needs nothing kept for it.
-        kept = syscall(self._adapter.kept)(
-            path,
-            stored=any(desc.facts.writable for desc in held),
-            rendered=any(
-                desc.facts.readable and not desc.facts.writable
-                for desc in held
-            ),
-        )
-        return [(desc, kept) for desc in held]
-
-    @staticmethod
-    def keep(held: list[tuple[Descriptor, Kept]]) -> None:
-        """Detach the descriptors ``hold`` read for, now their name went.
-
-        Args:
-            held (list[tuple[Descriptor, Kept]]): what ``hold`` returned.
-        """
-        for desc, kept in held:
-            desc.kept = kept
 
     def close(self, fd: int) -> None:
         """Land a descriptor's writes and give its number back.
@@ -461,7 +186,7 @@ class Descriptors:
         if desc is None:
             raise OSError(errno.EBADF, os.strerror(errno.EBADF))
         try:
-            self.land(desc)
+            desc.close()
         finally:
             self._host.close(fd)
 
@@ -489,26 +214,25 @@ class Descriptors:
             closefd (bool): close the descriptor with the file object.
         """
         desc = self[fd]
-        if desc.handle is None:
+        if desc.directory:
             raise fs_error(desc.path, FsCondition.EISDIR)
         facts = parse_mode(mode)
         encoding = text_encoding(facts, encoding, errors, newline, buffering)
         if facts.append:
-            desc.handle.seek(0, 2)
+            desc.seek(0, 2)
         raw = HandleRaw(
-            desc.handle,
-            facts.readable and desc.facts.readable,
-            facts.writable and desc.facts.writable,
+            desc,
+            facts.readable and desc.mode.readable,
+            facts.writable and desc.mode.writable,
             raw_mode(facts),
-            functools.partial(self.land, desc),
             lambda: self._open.get(fd) is desc,
-            functools.partial(self.close, fd) if closefd else None,
+            (lambda: self.close(fd)) if closefd else None,
             fd,
         )
         return layered(raw, facts, mode, encoding, errors, newline, buffering)
 
-    def file(self, fd: int, want_read: bool, want_write: bool) -> FileHandle:
-        """The handle a read or a write through ``fd`` uses.
+    def file(self, fd: int, want_read: bool, want_write: bool) -> Descriptor:
+        """The descriptor a read or a write through ``fd`` uses.
 
         Args:
             fd (int): a mounted descriptor.
@@ -516,10 +240,10 @@ class Descriptors:
             want_write (bool): the call writes.
         """
         desc = self[fd]
-        if desc.handle is None:
+        if desc.directory:
             raise fs_error(desc.path, FsCondition.EISDIR)
-        if (want_read and not desc.facts.readable) or (
-            want_write and not desc.facts.writable
+        if (want_read and not desc.mode.readable) or (
+            want_write and not desc.mode.writable
         ):
             raise fs_error(desc.path, FsCondition.EBADF)
-        return desc.handle
+        return desc

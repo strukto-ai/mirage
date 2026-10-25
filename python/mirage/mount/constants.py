@@ -12,6 +12,13 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import os
+
+# Who owns what a mount shows when a row names its owner by name (the
+# kernel wants numbers): the mounting user. Windows has none; WinFsp
+# presents files as the mounting user's.
+OWNER = (os.getuid(), os.getgid()) if hasattr(os, "getuid") else (0, 0)
+
 # The most entry stats one SFTP listing keeps in flight. Each is a hop to
 # the workspace loop and, on a mount that keeps no listing index, a backend
 # request, so a wide directory does not put every one on the wire.

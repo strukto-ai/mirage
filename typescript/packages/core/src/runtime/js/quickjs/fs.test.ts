@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { WorkspaceBinding } from '../../binding.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { FileStat, FileType, MountMode } from '../../../types.ts'
 import { getTestParser } from '../../../../tests/workspace/fixtures/workspace_fixture.ts'
@@ -21,7 +20,7 @@ import { describe, expect, it } from 'vitest'
 import { QuickJsRuntime } from './runtime.ts'
 import { PrefixResolver } from '../../resolver.ts'
 import type { BridgeDispatchFn, RunResult } from '../../types.ts'
-import { context } from '../../../../tests/workspace/fixtures/context.ts'
+import { bindOver, runContext } from '../../../../tests/runtime/fixtures/bridge.ts'
 
 const DEC = new TextDecoder()
 
@@ -53,7 +52,7 @@ function makeStatProbeBridge(statCode: string, content: string): StatProbeBridge
 }
 
 async function run(rt: QuickJsRuntime, code: string): Promise<RunResult> {
-  return rt.interpret(await rt.engine(), { code, args: [], stdin: null }, context())
+  return rt.interpret(await rt.engine(), { code, args: [], stdin: null }, runContext(rt))
 }
 
 const OPEN_APPEND_JS = `const f = std.open('/data/f.txt', 'a');
@@ -69,7 +68,7 @@ describe('quickjs std.open reads stat failures', () => {
   it('a non-absence stat failure refuses the open and mutates nothing', async () => {
     const bridge = makeStatProbeBridge('EIO', 'precious')
     const rt = new QuickJsRuntime()
-    rt.bind(WorkspaceBinding.overBridge(bridge.dispatch, new PrefixResolver(() => ['/data/'])))
+    bindOver(rt, bridge.dispatch, new PrefixResolver(() => ['/data/']))
     const result = await run(rt, OPEN_APPEND_JS)
     await rt.close()
     expect(result.exitCode).toBe(0)
@@ -83,7 +82,7 @@ describe('quickjs std.open reads stat failures', () => {
   it('a confirmed absence still lets a create-capable mode establish', async () => {
     const bridge = makeStatProbeBridge('ENOENT', '')
     const rt = new QuickJsRuntime()
-    rt.bind(WorkspaceBinding.overBridge(bridge.dispatch, new PrefixResolver(() => ['/data/'])))
+    bindOver(rt, bridge.dispatch, new PrefixResolver(() => ['/data/']))
     const result = await run(rt, OPEN_APPEND_JS)
     await rt.close()
     expect(result.exitCode).toBe(0)
@@ -168,17 +167,19 @@ describe('quickjs reads after a failed fetch', () => {
 })
 
 describe('QuickJS retained reads', () => {
+  // What is judged is what the read takes: a line, its newline too.
   it.each([
-    ['text', 'f.readAsString(2)', "'cd'"],
+    ['text', 'f.readAsString(2)', "'cd'", 'cd'],
     [
       'bytes',
       "(()=>{const b=new ArrayBuffer(2); const n=f.read(b,0,2); return Array.from(new Uint8Array(b)).slice(0,n).join(',')})()",
       "'99,100'",
+      'cd',
     ],
-    ['line', 'f.getline()', "'cd'"],
+    ['line', 'f.getline()', "'cd'", 'cd\n'],
   ])(
     'checks a retained %s read and leaves a refused cursor unchanged',
-    async (_name, read, expected) => {
+    async (_name, read, expected, judged) => {
       let fetched = 0
       const checked: string[] = []
       const dispatch: BridgeDispatchFn = (op, _path, _bytes, _dst, attrs) => {
@@ -197,7 +198,7 @@ describe('QuickJS retained reads', () => {
         return Promise.resolve(undefined)
       }
       const rt = new QuickJsRuntime()
-      rt.bind(WorkspaceBinding.overBridge(dispatch, new PrefixResolver(() => ['/data/'])))
+      bindOver(rt, dispatch, new PrefixResolver(() => ['/data/']))
       try {
         const result = await run(
           rt,
@@ -214,7 +215,7 @@ f.close();
         expect(result.exitCode).toBe(0)
         expect(DEC.decode(result.stdout)).toBe('ab\ntrue 2\ntrue\n')
         expect(fetched).toBe(1)
-        expect(checked).toEqual(['cd', 'cd'])
+        expect(checked).toEqual([judged, judged])
       } finally {
         await rt.close()
       }
@@ -237,7 +238,7 @@ it('stops file calls and output immediately after an awaited read revokes the ru
     return Promise.resolve(undefined)
   }
   const rt = new QuickJsRuntime()
-  rt.bind(WorkspaceBinding.overBridge(dispatch, new PrefixResolver(() => ['/data/'])))
+  bindOver(rt, dispatch, new PrefixResolver(() => ['/data/']))
   try {
     const result = await rt.interpret(
       await rt.engine(),
@@ -252,7 +253,7 @@ try { console.log('after') } catch (e) {}
         args: [],
         stdin: null,
       },
-      context({ signal: controller.signal }),
+      runContext(rt, { signal: controller.signal }),
     )
     expect(DEC.decode(result.stdout)).toBe('before\n')
     expect(calls.at(-1)).toBe('read')
@@ -275,7 +276,7 @@ it('does not create a file when its open stat revokes the run', async () => {
     return Promise.resolve(undefined)
   }
   const rt = new QuickJsRuntime()
-  rt.bind(WorkspaceBinding.overBridge(dispatch, new PrefixResolver(() => ['/data/'])))
+  bindOver(rt, dispatch, new PrefixResolver(() => ['/data/']))
   try {
     const result = await rt.interpret(
       await rt.engine(),
@@ -284,7 +285,7 @@ it('does not create a file when its open stat revokes the run', async () => {
         args: [],
         stdin: null,
       },
-      context({ signal: controller.signal }),
+      runContext(rt, { signal: controller.signal }),
     )
     expect(DEC.decode(result.stdout)).toBe('')
     expect(calls).toEqual(['stat'])

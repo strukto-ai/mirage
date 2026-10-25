@@ -26,6 +26,7 @@ from mirage.bridge.sync import on_auxiliary_loop, run_async_from_sync
 from mirage.fuse.constants import XATTR_CREATE, XATTR_REPLACE
 from mirage.fuse.darwin import rename_flags_check
 from mirage.mount.core import MountCore
+from mirage.runtime.handles.mode import open_mode
 from mirage.mount.errors import classify_error
 from mirage.mount.types import MountAttrs
 from mirage.types import JsonValue
@@ -264,7 +265,7 @@ class MirageFS:
         self.flush(path, fh)
 
     def open(self, path: str, flags: int) -> int:
-        return self._call(self.core.open, path, flags)
+        return self._call(self.core.open, path, open_mode(flags))
 
     def release(self, path: str, fh: int) -> int:
         self._call(self.core.release, fh)

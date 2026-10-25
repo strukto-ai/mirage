@@ -13,18 +13,34 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { constants as fsConstants } from 'node:fs'
-import { runWithSession } from '@struktoai/mirage-core/context/session_context'
-import { BaseVFS } from '@struktoai/mirage-core/vfs/base'
-import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
-import { ContentType, FileStat, FileType, Limit, MountMode } from '@struktoai/mirage-core/types'
-import type { PathSpec } from '@struktoai/mirage-core/types'
-import type { Action, Policy, VfsContext } from '@struktoai/mirage-core/policy/index'
-import { enotsup, unnamedFsError } from '@struktoai/mirage-core/errors/fs'
-import { DIR_SIZE } from '@struktoai/mirage-core/utils/stat_view'
-import { READ_CHUNK } from '@struktoai/mirage-core/runtime/handles/constants'
+import { runWithSession } from '../context/session_context.ts'
+import { BaseVFS } from '../vfs/base.ts'
+import { RAMVFS } from '../vfs/ram/ram.ts'
+import { ContentType, FileStat, FileType, Limit, MountMode } from '../types.ts'
+import type { PathSpec } from '../types.ts'
+import type { Action, Policy, VfsContext } from '../policy/index.ts'
+import { enotsup, erofs, unnamedFsError } from '../errors/fs.ts'
+import { DIR_SIZE } from '../utils/stat_view.ts'
+import { READ_CHUNK } from '../runtime/handles/constants.ts'
+import { openMode } from '../runtime/handles/index.ts'
+import {
+  Workspace as CoreWorkspace,
+  type MountSpec,
+  type WorkspaceOptions,
+} from '../workspace/workspace/workspace.ts'
 import { describe, expect, it, vi } from 'vitest'
-import { Workspace } from '../workspace.ts'
+import { render } from '../test-utils.ts'
+import { getTestParser } from '../../tests/workspace/fixtures/workspace_fixture.ts'
 import { MountCore } from './core.ts'
+
+const shellParser = await getTestParser()
+
+/** The core's workspace with the test shell parser, as node's carries its own. */
+class Workspace extends CoreWorkspace {
+  constructor(mounts: Record<string, MountSpec>, options: WorkspaceOptions = {}) {
+    super(mounts, { shellParser, ...options })
+  }
+}
 
 const PAYLOAD = new TextEncoder().encode('payload-bytes')
 
@@ -33,6 +49,22 @@ class NoTruncateRAM extends RAMVFS {
   constructor() {
     super()
     Object.defineProperty(this, 'truncate', { value: Reflect.get(BaseVFS.prototype, 'truncate') })
+  }
+}
+
+/** A mount whose writes are refused once `refused` is set: an open is
+ * admitted, and the landing is what fails. */
+class LandingRefusedRAM extends RAMVFS {
+  refused = false
+
+  override pwrite(...args: Parameters<RAMVFS['pwrite']>): ReturnType<RAMVFS['pwrite']> {
+    if (this.refused) return Promise.reject(erofs(args[0]))
+    return super.pwrite(...args)
+  }
+
+  override truncate(...args: Parameters<RAMVFS['truncate']>): ReturnType<RAMVFS['truncate']> {
+    if (this.refused) return Promise.reject(erofs(args[0]))
+    return super.truncate(...args)
   }
 }
 
@@ -204,7 +236,7 @@ describe('MountCore', () => {
     const core = new MountCore(ws.vfs)
     const enc = new TextEncoder()
     await core.write('/data/log', -1, enc.encode('more\n'), 6)
-    const fd = await core.open('/data/log', fsConstants.O_WRONLY)
+    const fd = await core.open('/data/log', openMode(fsConstants.O_WRONLY, fsConstants))
     await core.write('/data/log', fd, enc.encode('a'), 11)
     await core.write('/data/log', fd, enc.encode('b\n'), 12)
     await core.release(fd)
@@ -221,13 +253,14 @@ describe('MountCore', () => {
     const core = new MountCore(ws.vfs)
     const dec = new TextDecoder()
     const enc = new TextEncoder()
-    const reader = await core.open('/data/f', fsConstants.O_RDONLY)
+    const reader = await core.open('/data/f', openMode(fsConstants.O_RDONLY, fsConstants))
     expect(dec.decode(await core.read('/data/f', reader, 0, 8))).toBe('abcdefgh')
-    const fd = await core.open('/data/f', fsConstants.O_WRONLY)
+    const fd = await core.open('/data/f', openMode(fsConstants.O_WRONLY, fsConstants))
     await core.write('/data/f', fd, enc.encode('X'), 0)
     await core.write('/data/f', fd, enc.encode('Y'), 5)
     await expect(core.flush('/data/f', fd)).rejects.toMatchObject({ code: 'EACCES' })
-    expect(dec.decode(await core.read('/data/f', reader, 0, 8))).toBe('Xbcdefgh')
+    expect(dec.decode(await ws.vfs.read('/data/f'))).toBe('Xbcdefgh')
+    expect(dec.decode(await core.read('/data/f', reader, 0, 8))).toBe('XbcdeYgh')
   })
 
   it('lands only the runs that failed when a flush is retried', async () => {
@@ -241,7 +274,7 @@ describe('MountCore', () => {
       .mockRejectedValueOnce(unnamedFsError('EACCES', 'denied'))
     const core = new MountCore(ws.vfs)
     const enc = new TextEncoder()
-    const fd = await core.open('/data/f', fsConstants.O_WRONLY)
+    const fd = await core.open('/data/f', openMode(fsConstants.O_WRONLY, fsConstants))
     await core.write('/data/f', fd, enc.encode('Y'), 5)
     await core.write('/data/f', fd, enc.encode('X'), 0)
     await expect(core.flush('/data/f', fd)).rejects.toMatchObject({ code: 'EACCES' })
@@ -310,7 +343,7 @@ describe('MountCore', () => {
     // between (the kext always flushes on close); dropping the buffer at
     // release silently lost data written through an fskit mount.
     const core = await mkCore()
-    const fh = await core.open('/data/greeting.txt')
+    const fh = await core.open('/data/greeting.txt', openMode(fsConstants.O_WRONLY, fsConstants))
     const payload = new TextEncoder().encode('rewritten, longer than before\n')
     await core.write('/data/greeting.txt', fh, payload, 0)
     await core.release(fh)
@@ -325,15 +358,24 @@ describe('MountCore', () => {
     async (land) => {
       // The handle opened first writes inside bytes the other holds, and
       // lands first: the later write still wins, however the handles land,
-      // and nothing lands before they do.
+      // and nothing lands before they do, though a read sees both at once.
       const core = await mkCore()
       const stored = async () =>
         new TextDecoder().decode(await core.read('/data/greeting.txt', -1, 0, 100))
-      const first = await core.open('/data/greeting.txt', fsConstants.O_WRONLY)
-      const second = await core.open('/data/greeting.txt', fsConstants.O_WRONLY)
+      const landed = async () =>
+        new TextDecoder().decode(await core.files.read('/data/greeting.txt'))
+      const first = await core.open(
+        '/data/greeting.txt',
+        openMode(fsConstants.O_WRONLY, fsConstants),
+      )
+      const second = await core.open(
+        '/data/greeting.txt',
+        openMode(fsConstants.O_WRONLY, fsConstants),
+      )
       await core.write('/data/greeting.txt', second, new TextEncoder().encode('oldold'), 0)
       await core.write('/data/greeting.txt', first, new TextEncoder().encode('new'), 2)
-      expect(await stored()).toBe('hello world\n')
+      expect(await landed()).toBe('hello world\n')
+      expect(await stored()).toBe('olnewdworld\n')
       if (land === 'sync') {
         await core.sync()
       } else {
@@ -348,7 +390,7 @@ describe('MountCore', () => {
     // The old handle's file has no name left: the one now at that name is
     // another file, and its writes stay.
     const core = await mkCore()
-    const old = await core.open('/data/greeting.txt', fsConstants.O_WRONLY)
+    const old = await core.open('/data/greeting.txt', openMode(fsConstants.O_WRONLY, fsConstants))
     await core.unlink('/data/greeting.txt')
     const fresh = await core.create('/data/greeting.txt')
     await core.write('/data/greeting.txt', fresh, new TextEncoder().encode('new'), 0)
@@ -365,7 +407,10 @@ describe('MountCore', () => {
     // to do it. Ignoring it left `printf BB > f` holding BB plus the tail
     // of the longer body it replaced (#1032).
     const core = await mkCore()
-    const fh = await core.open('/data/greeting.txt', fsConstants.O_WRONLY | fsConstants.O_TRUNC)
+    const fh = await core.open(
+      '/data/greeting.txt',
+      openMode(fsConstants.O_WRONLY | fsConstants.O_TRUNC, fsConstants),
+    )
     expect((await core.fgetattr('/data/greeting.txt', fh)).size).toBe(0)
     await core.write('/data/greeting.txt', fh, new TextEncoder().encode('BB\n'), 0)
     await core.release(fh)
@@ -383,9 +428,12 @@ describe('MountCore', () => {
     await ws.shell("echo 'hello world' | tee /data/greeting.txt")
     await ws.shell('ln -s greeting.txt /data/lk')
     const core = new MountCore(ws.vfs)
-    const first = await core.open('/data/greeting.txt', fsConstants.O_WRONLY)
+    const first = await core.open('/data/greeting.txt', openMode(fsConstants.O_WRONLY, fsConstants))
     await core.write('/data/greeting.txt', first, new TextEncoder().encode('QUEUED'), 0)
-    const second = await core.open('/data/lk', fsConstants.O_WRONLY | fsConstants.O_TRUNC)
+    const second = await core.open(
+      '/data/lk',
+      openMode(fsConstants.O_WRONLY | fsConstants.O_TRUNC, fsConstants),
+    )
     await core.write('/data/lk', second, new TextEncoder().encode('BB\n'), 0)
     await core.release(second)
     await core.release(first)
@@ -406,9 +454,12 @@ describe('MountCore', () => {
     await ws.setSessionProfile(ws.defaultSessionId, { paths: { hide: ['/data/lk'] } })
     const core = new MountCore(ws.vfs, { session: ws.createSession('agent', { profile: {} }) })
     expect(core.identity('/data/lk')).toBe(core.identity('/data/greeting.txt'))
-    const first = await core.open('/data/greeting.txt', fsConstants.O_WRONLY)
+    const first = await core.open('/data/greeting.txt', openMode(fsConstants.O_WRONLY, fsConstants))
     await core.write('/data/greeting.txt', first, new TextEncoder().encode('QUEUED'), 0)
-    const second = await core.open('/data/lk', fsConstants.O_WRONLY | fsConstants.O_TRUNC)
+    const second = await core.open(
+      '/data/lk',
+      openMode(fsConstants.O_WRONLY | fsConstants.O_TRUNC, fsConstants),
+    )
     await core.write('/data/lk', second, new TextEncoder().encode('BB\n'), 0)
     await core.release(second)
     await core.release(first)
@@ -454,7 +505,10 @@ describe('MountCore', () => {
     )
     const core = new MountCore(ws.vfs)
     const pending = core.open('/data/api.json')
-    const opening = core.open('/data/api.json', fsConstants.O_WRONLY | fsConstants.O_TRUNC)
+    const opening = core.open(
+      '/data/api.json',
+      openMode(fsConstants.O_WRONLY | fsConstants.O_TRUNC, fsConstants),
+    )
     await truncateDone
     release()
     const writer = await opening
@@ -482,10 +536,13 @@ describe('MountCore', () => {
       return original(...args)
     })
     const core = new MountCore(ws.vfs)
-    const first = await core.open('/data/greeting.txt', fsConstants.O_WRONLY)
+    const first = await core.open('/data/greeting.txt', openMode(fsConstants.O_WRONLY, fsConstants))
     await core.write('/data/greeting.txt', first, new TextEncoder().encode('QUEUED'), 0)
     const flushing = core.flush('/data/greeting.txt', first)
-    const opening = core.open('/data/greeting.txt', fsConstants.O_WRONLY | fsConstants.O_TRUNC)
+    const opening = core.open(
+      '/data/greeting.txt',
+      openMode(fsConstants.O_WRONLY | fsConstants.O_TRUNC, fsConstants),
+    )
     release()
     await flushing
     const second = await opening
@@ -519,7 +576,10 @@ describe('MountCore', () => {
     const fh = await core.open('/data/u.json')
     await core.release(fh)
     expect((await core.getattr('/data/u.json')).size).toBe(PAYLOAD.byteLength)
-    const writer = await core.open('/data/lk', fsConstants.O_WRONLY | fsConstants.O_TRUNC)
+    const writer = await core.open(
+      '/data/lk',
+      openMode(fsConstants.O_WRONLY | fsConstants.O_TRUNC, fsConstants),
+    )
     await core.release(writer)
     expect((await core.getattr('/data/u.json')).size).toBe(0)
   })
@@ -529,7 +589,7 @@ describe('MountCore', () => {
     const core = new MountCore(ws.vfs)
     const generations = (core as unknown as { hydrationGen: Map<string, number> }).hydrationGen
     for (let i = 0; i < 3; i++) {
-      const fh = await core.open('/data/u.json')
+      const fh = await core.open('/data/u.json', openMode(fsConstants.O_WRONLY, fsConstants))
       await core.write('/data/u.json', fh, new TextEncoder().encode('x'), 0)
       await core.release(fh)
       await core.truncate('/data/u.json', 4)
@@ -541,7 +601,10 @@ describe('MountCore', () => {
     const ws = new Workspace({ '/d/': new NoTruncateRAM() }, { mode: MountMode.WRITE })
     await ws.shell('echo hello > /d/f')
     const core = new MountCore(ws.vfs)
-    const fh = await core.open('/d/f', fsConstants.O_WRONLY | fsConstants.O_TRUNC)
+    const fh = await core.open(
+      '/d/f',
+      openMode(fsConstants.O_WRONLY | fsConstants.O_TRUNC, fsConstants),
+    )
     await core.write('/d/f', fh, new TextEncoder().encode('new'), 0)
     await core.release(fh)
     expect(new TextDecoder().decode(await ws.vfs.read('/d/f'))).toBe('new')
@@ -583,7 +646,7 @@ describe('MountCore', () => {
     const ws = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
     await ws.shell("echo 'hello world' > /data/f")
     const core = new MountCore(ws.vfs)
-    const fd = await core.open('/data/f', fsConstants.O_WRONLY)
+    const fd = await core.open('/data/f', openMode(fsConstants.O_WRONLY, fsConstants))
     await core.write('/data/f', fd, new TextEncoder().encode('copied'), 0)
     const when = new Date('2001-09-09T01:46:40.000Z')
     await core.setattr('/data/f', null, null, null, null, when)
@@ -596,7 +659,7 @@ describe('MountCore', () => {
     const ws = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
     await ws.shell("echo 'hello world' > /data/f")
     const core = new MountCore(ws.vfs)
-    const fh = await core.open('/data/f', fsConstants.O_RDWR)
+    const fh = await core.open('/data/f', openMode(fsConstants.O_RDWR, fsConstants))
     await core.read('/data/f', fh, 0, 100)
     await core.write('/data/f', fh, new TextEncoder().encode('HELLO'), 0)
     const realPwrite = ws.vfs.pwrite.bind(ws.vfs)
@@ -624,7 +687,7 @@ describe('MountCore', () => {
 
   it('reads its own unflushed writes through a handle', async () => {
     const core = await mkCore()
-    const fh = await core.open('/data/greeting.txt', fsConstants.O_RDWR)
+    const fh = await core.open('/data/greeting.txt', openMode(fsConstants.O_RDWR, fsConstants))
     const dec = new TextDecoder()
     expect(dec.decode(await core.read('/data/greeting.txt', fh, 0, 100))).toBe('hello world\n')
     await core.write('/data/greeting.txt', fh, new TextEncoder().encode('HELLO'), 0)
@@ -640,14 +703,18 @@ describe('MountCore', () => {
     // The acknowledged bytes must stay buffered so that handle's own
     // flush reports the refusal rather than succeeding over an empty
     // buffer.
-    const vfs = new RAMVFS()
+    const vfs = new LandingRefusedRAM()
     const seed = new Workspace({ '/data/': vfs }, { mode: MountMode.WRITE })
     await seed.vfs.write('/data/existing.txt', 'seed')
-    const core = new MountCore(new Workspace({ '/data/': vfs }, { mode: MountMode.READ }).vfs)
-    const first = await core.open('/data/existing.txt', fsConstants.O_WRONLY)
+    vfs.refused = true
+    const core = new MountCore(seed.vfs)
+    const first = await core.open('/data/existing.txt', openMode(fsConstants.O_WRONLY, fsConstants))
     await core.write('/data/existing.txt', first, new TextEncoder().encode('QUEUED'), 0)
     await expect(
-      core.open('/data/existing.txt', fsConstants.O_WRONLY | fsConstants.O_TRUNC),
+      core.open(
+        '/data/existing.txt',
+        openMode(fsConstants.O_WRONLY | fsConstants.O_TRUNC, fsConstants),
+      ),
     ).rejects.toThrow()
     await expect(core.flush('/data/existing.txt', first)).rejects.toThrow()
     const body = await seed.vfs.read('/data/existing.txt')
@@ -657,11 +724,12 @@ describe('MountCore', () => {
   it('lets a handle go when its landing at release is refused', async () => {
     // As close(2): the refusal is reported and the handle is gone, rather
     // than kept open with bytes nothing will ever land.
-    const vfs = new RAMVFS()
+    const vfs = new LandingRefusedRAM()
     const seed = new Workspace({ '/data/': vfs }, { mode: MountMode.WRITE })
     await seed.vfs.write('/data/existing.txt', 'seed')
-    const core = new MountCore(new Workspace({ '/data/': vfs }, { mode: MountMode.READ }).vfs)
-    const fh = await core.open('/data/existing.txt', fsConstants.O_WRONLY)
+    vfs.refused = true
+    const core = new MountCore(seed.vfs)
+    const fh = await core.open('/data/existing.txt', openMode(fsConstants.O_WRONLY, fsConstants))
     await core.write('/data/existing.txt', fh, new TextEncoder().encode('REFUSED'), 0)
     await expect(core.release(fh)).rejects.toThrow()
     expect(core.handles.has(fh)).toBe(false)
@@ -671,7 +739,7 @@ describe('MountCore', () => {
 
   it('keeps the body when the open carries no O_TRUNC', async () => {
     const core = await mkCore()
-    const fh = await core.open('/data/greeting.txt', fsConstants.O_RDWR)
+    const fh = await core.open('/data/greeting.txt', openMode(fsConstants.O_RDWR, fsConstants))
     await core.write('/data/greeting.txt', fh, new TextEncoder().encode('J'), 0)
     await core.release(fh)
     const after = await core.open('/data/greeting.txt')
@@ -761,7 +829,7 @@ describe('open handles across rename', () => {
       const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })
       await ws.shell('mkdir /sub; echo nested > /sub/file')
       const core = new MountCore(ws.vfs)
-      const fd = await core.open('/sub/file')
+      const fd = await core.open('/sub/file', openMode(fsConstants.O_WRONLY, fsConstants))
       await core.write('/sub/file', fd, new TextEncoder().encode('BEFORE'), 0)
       await core.rename(directory ? '/sub' : '/sub/file', '/moved')
       await core.write('/sub/file', fd, new TextEncoder().encode('AFTER'), 6)
@@ -799,7 +867,7 @@ describe('MountCore chunks', () => {
     const core = new MountCore(ws.vfs)
     const reader = await core.open('/data/f.txt')
     expect(new TextDecoder().decode(await core.read('/data/f.txt', reader, 0, 3))).toBe('old')
-    const writer = await core.open('/data/f.txt')
+    const writer = await core.open('/data/f.txt', openMode(fsConstants.O_WRONLY, fsConstants))
     await core.write('/data/f.txt', writer, new TextEncoder().encode('new'), 0)
     await core.release(writer)
     expect(new TextDecoder().decode(await core.read('/data/f.txt', reader, 0, 3))).toBe('new')
@@ -957,7 +1025,7 @@ it('renames and removes a link that loops, as rename(2) and unlink(2) act on the
 
 it("stats what an unlinked file's handle wrote", async () => {
   const core = await mkCore()
-  const fd = await core.open('/data/greeting.txt', fsConstants.O_RDWR)
+  const fd = await core.open('/data/greeting.txt', openMode(fsConstants.O_RDWR, fsConstants))
   await core.read('/data/greeting.txt', fd, 0, 100)
   const longer = new TextEncoder().encode('a longer replacement')
   await core.write('/data/greeting.txt', fd, longer, 0)
@@ -1090,7 +1158,7 @@ it('keeps nothing from a first read a change raced', async () => {
   const ws = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
   await ws.vfs.write('/data/f', new TextEncoder().encode('old bytes'))
   const core = new MountCore(ws.vfs)
-  const fd = await core.open('/data/f', fsConstants.O_RDWR)
+  const fd = await core.open('/data/f', openMode(fsConstants.O_RDWR, fsConstants))
   const held = holdFirst(ws, 'read', true)
   const reading = core.read('/data/f', fd, 0, 100)
   await held.out
@@ -1104,7 +1172,7 @@ it('holds a release back until a flush still landing is done', async () => {
   const ws = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
   await ws.vfs.write('/data/f', new TextEncoder().encode('abc'))
   const core = new MountCore(ws.vfs)
-  const fd = await core.open('/data/f', fsConstants.O_WRONLY)
+  const fd = await core.open('/data/f', openMode(fsConstants.O_WRONLY, fsConstants))
   await core.write('/data/f', fd, new TextEncoder().encode('X'), 0)
   const held = holdFirst(ws, 'pwrite')
   const first = core.flush('/data/f', fd)
@@ -1142,7 +1210,7 @@ it('queues a flush a rename moved under the new name', async () => {
   const ws = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
   await ws.vfs.write('/data/a', new TextEncoder().encode('abc'))
   const core = new MountCore(ws.vfs)
-  const fd = await core.open('/data/a', fsConstants.O_WRONLY)
+  const fd = await core.open('/data/a', openMode(fsConstants.O_WRONLY, fsConstants))
   await core.write('/data/a', fd, new TextEncoder().encode('0123456789'), 0)
   const writes = holdFirst(ws, 'pwrite')
   const renames = holdFirst(ws, 'rename')
@@ -1166,7 +1234,7 @@ it('never lets a detached handle touch the file at its old name', async () => {
   await ws.vfs.write('/data/a', new TextEncoder().encode('fresh'))
   await ws.vfs.write('/data/b', new TextEncoder().encode('stale-file'))
   const core = new MountCore(ws.vfs)
-  const fd = await core.open('/data/b', fsConstants.O_RDWR)
+  const fd = await core.open('/data/b', openMode(fsConstants.O_RDWR, fsConstants))
   await core.read('/data/b', fd, 0, 100)
   await core.write('/data/b', fd, new TextEncoder().encode('STALE'), 0)
   await core.rename('/data/a', '/data/b')
@@ -1214,7 +1282,10 @@ it('makes a rename wait for an open already out', async () => {
   const ws = new Workspace({ '/data/': vfs }, { mode: MountMode.WRITE })
   const core = new MountCore(ws.vfs)
   const reads = holdFirst(ws, 'read', true)
-  const opening = core.open('/data/b', fsConstants.O_RDWR | fsConstants.O_TRUNC)
+  const opening = core.open(
+    '/data/b',
+    openMode(fsConstants.O_RDWR | fsConstants.O_TRUNC, fsConstants),
+  )
   await reads.out
   let renamed = false
   const renaming = core.rename('/data/a', '/data/b').finally(() => {
@@ -1259,7 +1330,7 @@ it('makes a flush onto a name a rename replaces wait for it', async () => {
   await ws.vfs.write('/data/b', new TextEncoder().encode('old-body'))
   const core = new MountCore(ws.vfs)
   const reader = await core.open('/data/b')
-  const writer = await core.open('/data/b', fsConstants.O_WRONLY)
+  const writer = await core.open('/data/b', openMode(fsConstants.O_RDWR, fsConstants))
   await core.write('/data/b', writer, new TextEncoder().encode('NEW'), 0)
   const reads = holdFirst(ws, 'read', true)
   const renaming = core.rename('/data/a', '/data/b')
@@ -1273,9 +1344,13 @@ it('makes a flush onto a name a rename replaces wait for it', async () => {
   reads.go()
   await renaming
   await flushing
-  expect(reads.calls()).toBe(1)
+  // One read of each view the handles hold: the stored bytes for the
+  // writer, the rendering for the reader.
+  expect(reads.calls()).toBe(2)
   const dec = new TextDecoder()
-  expect(dec.decode(await core.read('/data/b', reader, 0, 100))).toBe('old-body')
+  // Both handles are on the file the rename took the name from, which the
+  // writer's flush landed on, as POSIX keeps one inode for them.
+  expect(dec.decode(await core.read('/data/b', reader, 0, 100))).toBe('NEW-body')
   expect(dec.decode(await core.read('/data/b', writer, 0, 100))).toBe('NEW-body')
   expect(dec.decode(await ws.vfs.read('/data/b'))).toBe('fresh')
 })
@@ -1353,7 +1428,7 @@ it('judges the fetched row once when a buffered write sizes it', async () => {
   try {
     await ws.vfs.write('/a.txt', new TextEncoder().encode('ab'))
     const core = new MountCore(ws.vfs)
-    const fd = await core.open('/a.txt', fsConstants.O_WRONLY)
+    const fd = await core.open('/a.txt', openMode(fsConstants.O_WRONLY, fsConstants))
     await core.write('/a.txt', fd, new TextEncoder().encode('longer'), 0)
     stats = 0
     expect((await core.fgetattr('/a.txt', fd)).size).toBe(6)
@@ -1387,7 +1462,7 @@ it('judges a read that joins held bytes onto a fetch', async () => {
   try {
     await ws.vfs.write('/big.bin', new Uint8Array(2 * READ_CHUNK))
     const core = new MountCore(ws.vfs)
-    const fd = await core.open('/big.bin', fsConstants.O_RDONLY)
+    const fd = await core.open('/big.bin', openMode(fsConstants.O_RDONLY, fsConstants))
     expect((await core.read('/big.bin', fd, 0, 8)).byteLength).toBe(8)
     judged.length = 0
     expect((await core.read('/big.bin', fd, 0, 2 * READ_CHUNK)).byteLength).toBe(2 * READ_CHUNK)
@@ -1396,4 +1471,158 @@ it('judges a read that joins held bytes onto a fetch', async () => {
   } finally {
     await ws.close()
   }
+})
+
+/** A mount with no append of its own, as S3 has none. */
+class NoAppendRAM extends RAMVFS {
+  constructor() {
+    super()
+    Object.defineProperty(this, 'append', { value: Reflect.get(BaseVFS.prototype, 'append') })
+  }
+}
+
+describe('MountCore opens', () => {
+  const enc = new TextEncoder()
+  const dec = new TextDecoder()
+  const flags = (bits: number): ReturnType<typeof openMode> => openMode(bits, fsConstants)
+
+  it('lands two writers in the order they wrote', async () => {
+    const core = await mkCore()
+    const path = '/data/greeting.txt'
+    const first = await core.open(path, flags(fsConstants.O_WRONLY | fsConstants.O_TRUNC))
+    await core.write(path, first, enc.encode('0000'), 0)
+    await core.release(first)
+    const a = await core.open(path, flags(fsConstants.O_WRONLY))
+    const b = await core.open(path, flags(fsConstants.O_WRONLY))
+    await core.write(path, a, enc.encode('AAAA'), 0)
+    await core.write(path, b, enc.encode('BB'), 0)
+    await core.release(b)
+    await core.release(a)
+    expect(dec.decode(await core.read(path, -1, 0, 100))).toBe('BBAA')
+  })
+
+  it.each([
+    [
+      fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_EXCL,
+      '/data/greeting.txt',
+      'EEXIST',
+    ],
+    [fsConstants.O_RDONLY, '/data/missing', 'ENOENT'],
+    [fsConstants.O_WRONLY, '/data/sub', 'EISDIR'],
+    [fsConstants.O_RDONLY, '/data/greeting.txt/', 'ENOTDIR'],
+  ])('refuses an open as POSIX does (%i %s)', async (bits, path, code) => {
+    const core = await mkCore()
+    await expect(core.open(path, flags(bits))).rejects.toMatchObject({ code })
+  })
+
+  it('creates the file an open asks for, with its mode', async () => {
+    const core = await mkCore()
+    const fh = await core.open(
+      '/data/new.txt',
+      flags(fsConstants.O_WRONLY | fsConstants.O_CREAT),
+      0o600,
+    )
+    await core.write('/data/new.txt', fh, enc.encode('made'), 0)
+    await core.release(fh)
+    const attrs = await core.getattr('/data/new.txt')
+    expect([attrs.mode & 0o777, attrs.size]).toEqual([0o600, 4])
+  })
+
+  it('opens a directory for a read', async () => {
+    const core = await mkCore()
+    await expect(core.open('/data/sub')).rejects.toMatchObject({ code: 'EISDIR' })
+    const fh = await core.open('/data/sub', { ...flags(fsConstants.O_RDONLY), directory: true })
+    expect((await core.fgetattr('/data/sub', fh)).mode & fsConstants.S_IFMT).toBe(
+      fsConstants.S_IFDIR,
+    )
+    await core.release(fh)
+  })
+
+  it('admits a writable open against the write rules before its first write', async () => {
+    const vfs = new RAMVFS()
+    const seed = new Workspace({ '/data/': vfs }, { mode: MountMode.WRITE })
+    await seed.vfs.write('/data/a.txt', 'seed')
+    const core = new MountCore(new Workspace({ '/data/': vfs }, { mode: MountMode.READ }).vfs)
+    await expect(core.open('/data/a.txt', flags(fsConstants.O_WRONLY))).rejects.toMatchObject({
+      code: 'EROFS',
+    })
+    const fh = await core.open('/data/a.txt')
+    expect(dec.decode(await core.read('/data/a.txt', fh, 0, 100))).toBe('seed')
+    await core.release(fh)
+  })
+
+  it('refuses the access a handle did not open for', async () => {
+    const core = await mkCore()
+    const path = '/data/greeting.txt'
+    const reader = await core.open(path)
+    const writer = await core.open(path, flags(fsConstants.O_WRONLY))
+    await expect(core.write(path, reader, enc.encode('x'), 0)).rejects.toMatchObject({
+      code: 'EBADF',
+    })
+    await expect(core.read(path, writer, 0, 1)).rejects.toMatchObject({ code: 'EBADF' })
+    await core.release(reader)
+    await core.release(writer)
+  })
+
+  it('reads the stored bytes through a writer and the rendering through a reader', async () => {
+    const ws = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
+    render(ws.mount('/data/').vfs, '.tally', () => Promise.resolve(enc.encode('rendered')))
+    await ws.vfs.write('/data/books.tally', '0123456789')
+    const core = new MountCore(ws.vfs)
+    const reader = await core.open('/data/books.tally')
+    const writer = await core.open('/data/books.tally', flags(fsConstants.O_RDWR))
+    expect(dec.decode(await core.read('/data/books.tally', reader, 0, 100))).toBe('rendered')
+    expect(dec.decode(await core.read('/data/books.tally', writer, 0, 100))).toBe('0123456789')
+    await core.release(reader)
+    await core.release(writer)
+  })
+
+  it.each([
+    ['native', () => new RAMVFS()],
+    ['emulated', () => new NoAppendRAM()],
+  ])('lands an appending handle after what others appended (%s)', async (_kind, make) => {
+    const ws = new Workspace({ '/data/': make() }, { mode: MountMode.WRITE })
+    await ws.vfs.write('/data/log', 'one\n')
+    const core = new MountCore(ws.vfs)
+    const fh = await core.open('/data/log', flags(fsConstants.O_RDWR | fsConstants.O_APPEND))
+    await core.write('/data/log', fh, enc.encode('two\n'), 0)
+    expect(dec.decode(await core.read('/data/log', fh, 0, 100))).toBe('one\ntwo\n')
+    await ws.vfs.append('/data/log', enc.encode('other\n'))
+    await core.write('/data/log', fh, enc.encode('three\n'), 0)
+    await core.release(fh)
+    expect(dec.decode(await ws.vfs.read('/data/log'))).toBe('one\nother\ntwo\nthree\n')
+  })
+
+  it('shares what an unlinked file holds among its handles', async () => {
+    const core = await mkCore()
+    const path = '/data/greeting.txt'
+    const reader = await core.open(path)
+    const writer = await core.open(path, flags(fsConstants.O_RDWR))
+    await core.unlink(path)
+    await core.write(path, writer, enc.encode('HELLO'), 0)
+    await core.flush(path, writer)
+    expect(dec.decode(await core.read(path, reader, 0, 100))).toBe('HELLO world\n')
+    await core.ftruncate(writer, 5)
+    expect(dec.decode(await core.read(path, reader, 0, 100))).toBe('HELLO')
+    expect((await core.fstat(reader)).size).toBe(5)
+    const fresh = await core.open(path, flags(fsConstants.O_RDWR | fsConstants.O_CREAT))
+    expect(await core.read(path, fresh, 0, 100)).toEqual(new Uint8Array())
+    for (const fh of [reader, writer, fresh]) await core.release(fh)
+  })
+
+  it('counts in fstat what a handle wrote and has not landed', async () => {
+    const core = await mkCore()
+    const path = '/data/greeting.txt'
+    const fh = await core.open(path, flags(fsConstants.O_WRONLY))
+    await core.write(path, fh, enc.encode('!'), 20)
+    const row = await core.fstat(fh)
+    expect([row.size, row.type]).toEqual([21, FileType.FILE])
+    expect((await core.getattr(path)).size).toBe(21)
+    expect((await core.files.read(path)).length).toBe(12)
+    await core.ftruncate(fh, 3)
+    expect((await core.fstat(fh)).size).toBe(3)
+    await core.release(fh)
+    expect(dec.decode(await core.read(path, -1, 0, 100))).toBe('hel')
+    await expect(core.fstat(fh)).rejects.toMatchObject({ code: 'EBADF' })
+  })
 })

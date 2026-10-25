@@ -14,7 +14,8 @@
 
 import asyncio
 import logging
-from collections.abc import Coroutine, Iterator
+from collections.abc import Awaitable, Callable, Coroutine, Iterator
+from dataclasses import dataclass
 from typing import Any, TypeVar
 
 from mirage.bridge.sync import run_async_from_sync
@@ -22,21 +23,23 @@ from mirage.commands.builtin.utils.links import link_view
 from mirage.commands.config import Context
 from mirage.concurrency.limiter import ConcurrencyLimiter
 from mirage.context.session_context import (
+    Caller,
     awaits_as,
     calls_as,
     current_caller,
 )
-from mirage.errors.fs import einval, eloop, numbered
+from mirage.errors.fs import ebadf, einval, eloop, numbered
 from mirage.errors.types import OperationNotSupportedError
 from mirage.io import IOResult, OpReport
+from mirage.mount.core import MountCore
 from mirage.runtime.binding import CallerResolver, WorkspaceBinding
 from mirage.runtime.constants import ABSENT_PATH, LISTING_ENTRY_CONCURRENCY
 from mirage.runtime.errors import CrossMountError
-from mirage.runtime.handles import FlushStep, Kept
+from mirage.runtime.handles.constants import READ_CHUNK
+from mirage.runtime.handles.mode import OpenMode
 from mirage.runtime.resolver import MountResolver
 from mirage.runtime.types import DispatchFn, VFSEntry, VFSStat
-from mirage.types import FileStat, FileType, PathSpec
-from mirage.utils.dates import timestamp_iso
+from mirage.types import FileStat, PathSpec
 from mirage.utils.path import CycleError, norm, resolve_path
 from mirage.utils.remnants import entry_name
 from mirage.utils.stat_view import (
@@ -50,6 +53,7 @@ from mirage.utils.stat_view import (
     posix_mode,
 )
 from mirage.view.types import LinkResolve
+from mirage.workspace.files import Files
 
 logger = logging.getLogger(__name__)
 
@@ -71,25 +75,6 @@ def _listed(raw: str, links: set[str]) -> VFSEntry:
     return VFSEntry(path=raw, size=0, is_dir=raw.endswith("/"), is_link=linked)
 
 
-def kept_view(kept: Kept, raw: bool) -> bytes:
-    """The bytes a handle on a removed file reads: the stored ones for a
-    handle that writes, the rendering for one that only reads, or the
-    error that kept that view from being read.
-
-    Args:
-        kept (Kept): what the file kept once its name went.
-        raw (bool): the handle reads the stored bytes.
-    """
-    if not raw:
-        if kept.rendering_error is not None:
-            raise kept.rendering_error
-        if kept.rendering is not None:
-            return kept.rendering
-    if kept.error is not None:
-        raise kept.error
-    return kept.data
-
-
 def stat_row(fs: FileStat) -> VFSStat:
     """Translate one mirage stat row into the struct a guest surface reads.
 
@@ -108,6 +93,132 @@ def stat_row(fs: FileStat) -> VFSStat:
         gid=fs.gid if isinstance(fs.gid, int) else None,
         source=fs,
     )
+
+
+@dataclass(slots=True)
+class Descriptor:
+    """One file a guest holds open: the run's core handle on it, the
+    position its reads and writes move, and what its open asked for.
+
+    Nothing the guest reads or writes stays here: the core holds it
+    (``RuntimeFiles.open``), so every entry point judges, lands and keeps
+    an open file one way. A stream and a descriptor over one open share
+    this, and with it the position, as POSIX shares an open file
+    description.
+
+    Args:
+        files (RuntimeFiles): the adapter whose core the handle is on.
+        fh (int): the core's handle.
+        mode (OpenMode): what the open asked for.
+        opened (str): the path it was opened at, which its inode number
+            comes from however the file is renamed since.
+        directory (bool): it names a directory, which it may not read.
+        pos (int): the read/write position.
+    """
+
+    files: "RuntimeFiles"
+    fh: int
+    mode: OpenMode
+    opened: str
+    directory: bool = False
+    pos: int = 0
+
+    @property
+    def path(self) -> str:
+        """The path its file has now; a rename moves it."""
+        return self.files.path_of(self.fh)
+
+    @property
+    def size(self) -> int:
+        """The file's length as the handle holds it, its writes counted."""
+        return self.files.fstat(self.fh).size
+
+    def pread(self, offset: int, size: int) -> bytes:
+        """Read at an explicit offset without moving the position.
+
+        Args:
+            offset (int): byte offset to read from.
+            size (int): byte budget.
+        """
+        if size <= 0:
+            return b""
+        return self.files.pread(self.fh, offset, size)
+
+    def read(self, size: int | None = None) -> bytes:
+        """Read from the position, advancing it by what was read.
+
+        Args:
+            size (int | None): byte budget; None or negative reads to the
+                end, a chunk at a time.
+        """
+        if size is not None and size >= 0:
+            chunk = self.pread(self.pos, size)
+            self.pos += len(chunk)
+            return chunk
+        out = bytearray()
+        while chunk := self.pread(self.pos, READ_CHUNK):
+            out += chunk
+            self.pos += len(chunk)
+        return bytes(out)
+
+    def pwrite(self, offset: int, data: bytes) -> None:
+        """Write at an explicit offset without moving the position; an
+        appending handle writes at its end.
+
+        Args:
+            offset (int): byte offset to write at.
+            data (bytes): the payload.
+        """
+        if data:
+            self.files.pwrite(self.fh, offset, data)
+
+    def write(self, data: bytes) -> None:
+        """Write at the position, advancing it; an appending handle writes
+        at its end and moves the position past what it wrote.
+
+        Args:
+            data (bytes): the payload.
+        """
+        self.pwrite(self.pos, data)
+        self.pos += len(data)
+
+    def seek(self, offset: int, whence: int) -> int | None:
+        """Move the position, POSIX whence numbering.
+
+        Args:
+            offset (int): displacement from the whence base.
+            whence (int): 0 from the start, 1 from the position, 2 from
+                the end.
+
+        Returns:
+            int | None: the new position, or None when the whence is
+            unknown or the target would be negative (the position is
+            then untouched).
+        """
+        if whence == 2:
+            base: int | None = self.size
+        else:
+            base = {0: 0, 1: self.pos}.get(whence)
+        if base is None or base + offset < 0:
+            return None
+        self.pos = base + offset
+        return self.pos
+
+    def truncate(self, size: int) -> None:
+        """Set the file's length: a shrink drops bytes, growth reads zeros.
+
+        Args:
+            size (int): the new length.
+        """
+        self.files.ftruncate(self.fh, size)
+
+    def land(self) -> None:
+        """Land what it wrote, as fsync(2) does."""
+        self.files.fsync(self.fh)
+
+    def close(self) -> None:
+        """Land what it wrote and let the core's handle go."""
+        self.files.close(self.fh)
 
 
 class RuntimeFiles:
@@ -135,6 +246,16 @@ class RuntimeFiles:
     included. Either way the op runs as a shell command's would, and an
     OSError leaves numbered as a syscall's (``numbered``).
 
+    A file the guest opens is a handle on the run's ``MountCore``
+    (``open``, ``pread``, ``pwrite``, ``fstat``, ``ftruncate``,
+    ``fsync``, ``close``), the open-file layer every entry point shares:
+    it holds what the guest read, keeps what it wrote until a close or a
+    sync, lands it in the order the writes were made, and keeps a file
+    whose name went for the handles open on it. The guest's own table
+    keeps only the descriptor number, its position and its flags. A
+    removal, a rename, a truncate and a change of times by path go
+    through the core too, so the files open on that path follow them.
+
     Args:
         dispatch (DispatchFn): the workspace dispatch coroutine function.
         loop (asyncio.AbstractEventLoop | None): the loop dispatch
@@ -143,6 +264,10 @@ class RuntimeFiles:
             table; None means routing questions answer None.
         resolve (LinkResolve | None): where the namespace's links lead a
             path; None while the workspace keeps no links.
+        files (Files | None): the files the open-file core runs over,
+            through ``dispatch``; None opens nothing.
+        caller (Caller | None): who the core's ops run as; None keeps
+            the context each op is made in.
     """
 
     def __init__(
@@ -151,11 +276,15 @@ class RuntimeFiles:
         loop: asyncio.AbstractEventLoop | None,
         resolver: MountResolver | None = None,
         resolve: LinkResolve | None = None,
+        files: Files | None = None,
+        caller: Caller | None = None,
     ) -> None:
         self._dispatch = dispatch
         self._loop = loop
         self._resolver = resolver
         self._resolve = resolve
+        self._core = None if files is None else MountCore(files)
+        self._caller = caller
         self._no_append: set[str] = set()
         self._pending: set[asyncio.Task[Any]] = set()
         self._aborted = False
@@ -204,42 +333,9 @@ class RuntimeFiles:
             asyncio.get_running_loop(),
             CallerResolver(binding.resolver, caller),
             None if links is None else calls_as(caller, links.resolve),
+            ctx.vfs._over(guarded),
+            caller,
         )
-
-    def kept(self, path: str, *, stored: bool, rendered: bool) -> Kept:
-        """What the handles open on ``path`` keep once its name goes: the
-        stored bytes for one that writes, the rendering for one that only
-        reads, read once and shared when the two agree. A read that fails
-        is kept as the error the later reads of that view report, so the
-        removal still goes ahead.
-
-        Args:
-            path (str): guest-absolute virtual path.
-            stored (bool): a handle that writes is open on it.
-            rendered (bool): a handle that only reads is open on it.
-        """
-        kept = Kept()
-        raw = shown = None
-        if stored:
-            try:
-                raw = self.read(path, raw=True)
-            except OSError as err:
-                logger.warning("keeping %s failed: %r", path, err)
-                kept.error = err
-        if rendered:
-            try:
-                shown = self.read(path)
-            except OSError as err:
-                logger.warning("keeping %s rendered failed: %r", path, err)
-                kept.rendering_error = err
-        if raw is not None:
-            kept.data = raw
-            kept.rendering = shown if shown not in (None, raw) else None
-        elif stored:
-            kept.rendering = shown
-        elif shown is not None:
-            kept.data = shown
-        return kept
 
     def walked(self, path: str, *, follow: bool = True) -> str:
         """The path an op on ``path`` lands on once the namespace's links
@@ -312,6 +408,121 @@ class RuntimeFiles:
             path (str): guest-absolute virtual path.
         """
         return self._wait(self._call(name, path, **kwargs))
+
+    def _on_core(self, op: Callable[[MountCore], Awaitable[T]]) -> T:
+        """Run one op on the run's open-file core, as the run's caller.
+
+        Args:
+            op (Callable[[MountCore], Awaitable[T]]): the op, given the
+                core.
+
+        Raises:
+            OSError: EBADF when this adapter opens nothing.
+        """
+        core = self._core
+        if core is None:
+            raise ebadf("/")
+        caller = self._caller
+
+        async def run() -> T:
+            if caller is None:
+                return await op(core)
+            return await awaits_as(caller, op)(core)
+
+        return self._wait(run())
+
+    def path_of(self, fh: int) -> str:
+        """The path the core's handle ``fh`` is on now; EBADF for any
+        other number.
+
+        Args:
+            fh (int): the core's handle.
+        """
+        held = None if self._core is None else self._core.handles.get(fh)
+        if held is None:
+            raise ebadf(str(fh))
+        return held.path
+
+    def open(self, path: str, mode: OpenMode, perm: int | None = None) -> int:
+        """Open a file, the open's effect landing before any byte moves
+        (``MountCore.open``), and answer the core's handle for it.
+
+        Args:
+            path (str): guest-absolute virtual path.
+            mode (OpenMode): what the open asked for.
+            perm (int | None): the mode bits a create gives the file;
+                None takes the mount's default.
+        """
+        return self._on_core(lambda core: core.open(path, mode, perm))
+
+    def pread(self, fh: int, offset: int, size: int) -> bytes:
+        """Read through an open handle: what it holds, judged as a read
+        of its path now, with what it wrote and has not landed laid over.
+
+        Args:
+            fh (int): the core's handle.
+            offset (int): where the read starts.
+            size (int): how many bytes, at most.
+        """
+        path = self.path_of(fh)
+        return self._on_core(lambda core: core.read(path, size, offset, fh))
+
+    def pwrite(self, fh: int, offset: int, data: bytes) -> None:
+        """Write through an open handle, which keeps the bytes until a
+        close or a sync lands them; one that appends writes at its end.
+
+        Args:
+            fh (int): the core's handle.
+            offset (int): where the write starts.
+            data (bytes): the payload.
+        """
+        path = self.path_of(fh)
+        self._on_core(lambda core: core.write(path, data, offset, fh))
+
+    def fstat(self, fh: int) -> VFSStat:
+        """The row an open handle stats by, the size it holds counted.
+
+        Args:
+            fh (int): the core's handle.
+        """
+        return stat_row(self._on_core(lambda core: core.fstat(fh)))
+
+    def unlinked(self, fh: int) -> bool:
+        """Whether the name an open handle's file had went, so the file
+        has no link left.
+
+        Args:
+            fh (int): the core's handle.
+        """
+        held = None if self._core is None else self._core.handles.get(fh)
+        return held is not None and held.detached is not None
+
+    def ftruncate(self, fh: int, length: int) -> None:
+        """Set the length of the file an open handle is on.
+
+        Args:
+            fh (int): the core's handle.
+            length (int): the new length.
+        """
+        self._on_core(lambda core: core.ftruncate(fh, length))
+
+    def fsync(self, fh: int) -> None:
+        """Land what an open handle wrote, as fsync(2) does.
+
+        Args:
+            fh (int): the core's handle.
+        """
+        path = self.path_of(fh)
+        self._on_core(lambda core: core.flush(path, fh))
+
+    def close(self, fh: int) -> None:
+        """Land what an open handle wrote and let it go; a landing that
+        fails still lets it go, and is raised.
+
+        Args:
+            fh (int): the core's handle.
+        """
+        self._on_core(lambda core: core.release(fh))
 
     def prefixes(self) -> list[str]:
         """The workspace mount prefixes, longest first, slash-normalized.
@@ -400,30 +611,8 @@ class RuntimeFiles:
             return data.encode()
         return bytes(data)
 
-    def read_cached(self, path: str, data: bytes) -> bytes:
-        """Judge bytes a descriptor holds as a read of its path, and
-        answer them; nothing is fetched.
-
-        Args:
-            path (str): the file's current virtual path.
-            data (bytes): the logical bytes this read would return.
-        """
-        self.call("read", path, retained=data)
-        return data
-
     def write(self, path: str, data: bytes) -> None:
         self.call("write", path, data=data)
-
-    def pwrite(self, path: str, offset: int, data: bytes) -> None:
-        """Write bytes at an offset, leaving the rest of the file as it is.
-
-        Args:
-            path (str): guest-absolute virtual path.
-            offset (int): byte offset to write at; past the end, the gap
-                reads as zeros.
-            data (bytes): the payload.
-        """
-        self.call("pwrite", path, data=data, offset=offset)
 
     def stat(self, path: str, *, nofollow: bool = False) -> VFSStat:
         """One path's metadata, projected for a guest encoder.
@@ -442,43 +631,13 @@ class RuntimeFiles:
                 ``chown -h`` wrote; the dispatcher consumes the flag
                 and gates that read exactly as it gates ``readlink``.
         """
-        return stat_row(self.call("stat", path, nofollow=nofollow))
-
-    def stat_cached(self, path: str, row: VFSStat) -> VFSStat:
-        """Judge a descriptor's held row as a stat of its path, and
-        answer it; nothing is fetched. The policies see the backend's row
-        with what the descriptor changed (size, mode, and a time the row
-        has), so an unknown size, a named owner and a time the backend
-        never gave stay as they were.
-
-        Args:
-            path (str): the descriptor's current virtual path.
-            row (VFSStat): its logical metadata, including buffered writes.
-        """
-        held = row.source or FileStat(
-            name=entry_name(path),
-            type=FileType.DIRECTORY
-            if row.is_dir
-            else FileType.SYMLINK
-            if row.is_link
-            else FileType.FILE,
-            mode=row.mode,
+        if self._core is None:
+            return stat_row(self.call("stat", path, nofollow=nofollow))
+        # Through the core, so what the files open there wrote and have
+        # not landed counts, as write(2) is seen at once.
+        return stat_row(
+            self._on_core(lambda core: core.stat(path, not nofollow))
         )
-        updates: dict[str, Any] = {}
-        if row.size != content_size(held):
-            updates["size"] = row.size
-        if row.mode != posix_mode(held):
-            updates["mode"] = row.mode
-        for key, ns, was in (
-            ("modified", row.mtime_ns, mtime_ns(held)),
-            ("atime", row.atime_ns, atime_ns(held)),
-        ):
-            if ns is not None and was is not None and ns != was:
-                updates[key] = timestamp_iso(ns / 1_000_000_000)
-        if updates:
-            held = held.model_copy(update=updates)
-        self.call("stat", path, retained=held, nofollow=row.is_link)
-        return row
 
     def stat_or_none(
         self, path: str, *, nofollow: bool = False
@@ -649,24 +808,25 @@ class RuntimeFiles:
             gid=st.gid,
         )
 
-    def check_write(self, path: str) -> None:
-        """Admit writable access without changing content or metadata.
-
-        Args:
-            path (str): the existing file being opened.
-        """
-        self.call("write", path, admit_only=True)
-
-    def create(self, path: str) -> None:
-        self.call("create", path)
-
     def truncate(self, path: str, length: int = 0) -> None:
         if length < 0:
             raise einval(path)
-        self.call("truncate", path, length=length)
+        if self._core is None:
+            self.call("truncate", path, length=length)
+            return
+        self._on_core(lambda core: core.truncate(path, length))
 
     def unlink(self, path: str) -> None:
-        self.call("unlink", path)
+        """Remove the entry at ``path``; a file open on it keeps what it
+        held, as POSIX keeps an open file on its inode.
+
+        Args:
+            path (str): guest-absolute virtual path.
+        """
+        if self._core is None:
+            self.call("unlink", path)
+            return
+        self._on_core(lambda core: core.unlink(path))
 
     def mkdir(self, path: str, *, parents: bool = False) -> None:
         self.call("mkdir", path, parents=parents)
@@ -686,7 +846,10 @@ class RuntimeFiles:
         """
         if self.mount_of(src) != self.mount_of(dst):
             raise CrossMountError(src, dst)
-        self.call("rename", src, dst=PathSpec.from_str_path(dst, cwd="/"))
+        if self._core is None:
+            self.call("rename", src, dst=PathSpec.from_str_path(dst, cwd="/"))
+            return
+        self._on_core(lambda core: core.rename(src, dst))
 
     def symlink(self, path: str, target: str) -> None:
         """Create a namespace symlink at `path` pointing at `target`.
@@ -748,6 +911,10 @@ class RuntimeFiles:
             nofollow (bool): write the link entry's own attrs rather
                 than its target's (a guest's AT_SYMLINK_NOFOLLOW).
         """
+        if self._core is not None and (atime is not None or mtime is not None):
+            # A file still open there lands its writes first, or they
+            # would stamp over the times.
+            self._on_core(lambda core: core.land(path, not nofollow))
         self.call(
             "setattr",
             path,
@@ -794,18 +961,3 @@ class RuntimeFiles:
             self._no_append.add(mount)
             return False
         return True
-
-    def flush(self, path: str, steps: list[FlushStep]) -> None:
-        """Send what a closing handle owes the mount, in order.
-
-        Args:
-            path (str): guest-absolute virtual path.
-            steps (list[FlushStep]): the handle's ``flush_plan()``.
-        """
-        for step in steps:
-            if step.kind == "append":
-                self.append(path, step.data)
-            elif step.kind == "pwrite":
-                self.pwrite(path, step.offset, step.data)
-            else:
-                self.truncate(path, step.length)

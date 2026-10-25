@@ -1,0 +1,51 @@
+{
+  "cases": [
+    {
+      "id": "two_descriptors_land_in_the_order_their_writes_were_made",
+      "note": "The descriptor opened first writes the whole file and the second then writes its head; the second closes first. The later write wins where the two overlap and the earlier one keeps the rest, however the descriptors close.",
+      "runtimes": [
+        "wasi",
+        "pyodide",
+        "quickjs",
+        "host"
+      ],
+      "backends": [
+        "ram",
+        "disk",
+        "ssh",
+        "s3",
+        "redis"
+      ],
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "f.txt": "0000"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "program": {
+            "python": "import os\na = os.open('/data/f.txt', os.O_WRONLY)\nb = os.open('/data/f.txt', os.O_WRONLY)\nos.write(a, b'AAAA')\nos.write(b, b'BB')\nos.close(b)\nos.close(a)\nprint(open('/data/f.txt').read())",
+            "js": "const a = std.open('/data/f.txt', 'r+')\nconst b = std.open('/data/f.txt', 'r+')\na.puts('AAAA')\nb.puts('BB')\nb.close()\na.close()\nconst r = std.open('/data/f.txt', 'r')\nconsole.log(r.readAsString())\nr.close()",
+            "node": "const fsp = require('node:fs').promises\nconst a = await fsp.open('/data/f.txt', 'r+')\nconst b = await fsp.open('/data/f.txt', 'r+')\nawait a.write('AAAA', 0)\nawait b.write('BB', 0)\nawait b.close()\nawait a.close()\nconsole.log(await fsp.readFile('/data/f.txt', 'utf8'))"
+          },
+          "expect": {
+            "exit": 0,
+            "stdout": "BBAA\n"
+          }
+        },
+        {
+          "command": "cat /data/f.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "BBAA"
+          }
+        }
+      ]
+    }
+  ]
+}

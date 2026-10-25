@@ -39,7 +39,7 @@ import { PyodideFs } from './fs/fs.ts'
 import { PyodideExecution } from './execution.ts'
 import { mainFilename } from '../execution.ts'
 import { unhonoredNotice } from '../flags.ts'
-import type { FlushFailure, SyncVFS, XattrOp } from './fs/types.ts'
+import type { FlushFailure, FSStream, SyncVFS, XattrOp } from './fs/types.ts'
 import { classify } from '../../../errors/index.ts'
 import { resolvePath } from '../../../utils/path.ts'
 import { errnoError } from './fs/errors.ts'
@@ -196,6 +196,7 @@ export class PyodideRuntime extends PythonRuntime<undefined> {
   private files: RuntimeFiles | null = null
   private readonly journal: MutationJournal = createJournal()
   private readonly deferred = new Map<string, FlushFailure>()
+  private readonly streams = new Set<FSStream>()
   private readonly mounted = new Set<string>()
   // The directories made to hold a mountpoint, which an unmount takes
   // back so a mount the session no longer sees leaves no name behind.
@@ -607,6 +608,7 @@ export class PyodideRuntime extends PythonRuntime<undefined> {
           },
         },
         this.deferred,
+        this.streams,
       )
       let dir = ''
       for (const part of mountpoint.split('/').slice(1)) {
@@ -707,18 +709,35 @@ export class PyodideRuntime extends PythonRuntime<undefined> {
   }
 
   /**
-   * Replay every mutation the shim recorded during the run, in the order
-   * the guest performed them. The guest cannot await the bridge from its
-   * sync WASM frames without JSPI, so it only records; ordering is what
-   * makes a create-then-rename or mkdir-then-write sequence land the same
-   * way it ran. Returns one message per failure for the caller's stderr.
+   * Land what the run left open and replay every mutation the shim
+   * recorded during it, in the order the guest performed them. The guest
+   * cannot await the bridge from its sync WASM frames without JSPI, so it
+   * only records; ordering is what makes a create-then-rename or
+   * mkdir-then-write sequence land the same way it ran. Returns one
+   * message per failure for the caller's stderr.
    */
   private drainMutations(): string[] {
     this.journal.reopen()
     const sync = this.sync
     if (this.files === null || sync === undefined) return []
+    // A file still open lands as its close would, since the core held it
+    // for this run only; a stream a later run uses opens again.
+    const unlanded: string[] = []
+    for (const stream of this.streams) {
+      const fh = stream.fh
+      delete stream.fh
+      if (fh === undefined) continue
+      try {
+        sync.close(fh)
+      } catch (error) {
+        unlanded.push(
+          `python3: failed to write ${stream.opened ?? ''} on mount: ${error instanceof Error ? error.message : String(error)}`,
+        )
+      }
+    }
+    this.streams.clear()
     // A refusal no later call of its file came to claim.
-    const deferred = [...this.deferred.values()].map((failure) => failure.message)
+    const deferred = [...[...this.deferred.values()].map((failure) => failure.message), ...unlanded]
     this.deferred.clear()
     const failures = this.syncFailures.splice(0)
     const pending = this.journal.takeMutations()

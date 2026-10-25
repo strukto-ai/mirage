@@ -12,9 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-export { applyFlush, planFlush } from './flush.ts'
-export type { FlushKind, FlushStep, Kept } from './types.ts'
-export { parseMode, type OpenMode } from './mode.ts'
-export { FileHandle, overlaid, writeRuns } from './file_handle.ts'
+export { READ, openMode, parseMode, type OpenMode } from './mode.ts'
+export { overlaid, writeRuns } from './file_handle.ts'
 export { FileTable } from './file_table.ts'
 export { ChunkedHandle } from './chunked.ts'

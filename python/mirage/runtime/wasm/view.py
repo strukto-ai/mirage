@@ -18,8 +18,8 @@ from pathlib import Path
 from typing import Any
 
 from mirage.errors.fs import einval, enoent, exdev
-from mirage.runtime.files import RuntimeFiles
-from mirage.runtime.handles import FlushStep, Kept
+from mirage.runtime.files import Descriptor, RuntimeFiles
+from mirage.runtime.handles.mode import OpenMode
 from mirage.runtime.types import VFSEntry, VFSStat
 from mirage.runtime.wasm.build import BuildDir
 from mirage.runtime.wasm.constants import READONLY_HINT
@@ -163,17 +163,6 @@ class WasmView:
             return build.stat(path)
         return self._core_stat(path)
 
-    def stat_cached(self, path: str, row: VFSStat) -> VFSStat:
-        """Judge retained workspace metadata; interpreter files stay local.
-
-        Args:
-            path (str): guest-absolute path.
-            row (VFSStat): the descriptor's logical metadata.
-        """
-        if self._serving_build(path) is not None:
-            return row
-        return self._files_for(path).stat_cached(path, row)
-
     def lstat(self, path: str) -> VFSStat:
         """Stat a guest path without following a trailing symlink.
 
@@ -276,32 +265,28 @@ class WasmView:
             path, offset=offset, size=size, raw=raw
         )
 
-    def read_cached(self, path: str, data: bytes) -> bytes:
-        """Judge retained workspace bytes; interpreter build bytes are local.
+    def open(self, path: str, mode: OpenMode) -> Descriptor | None:
+        """Open a workspace file on the run's core, the open's effect
+        landing there; None for a build file, which the guest reads where
+        it is, and which refuses a mode that would change it.
 
         Args:
-            path (str): the open file's current virtual path.
-            data (bytes): the logical read result.
+            path (str): guest-absolute path.
+            mode (OpenMode): what the open asked for.
+
+        Raises:
+            PermissionError: a mode that writes names the build.
         """
+        if mode.writable or mode.create:
+            self._deny_build(path)
         if self._serving_build(path) is not None:
-            return data
-        return self._files_for(path).read_cached(path, data)
-
-    def check_write(self, path: str) -> None:
-        self._deny_build(path)
-        self._files_for(path).check_write(path)
-
-    def create(self, path: str) -> None:
-        self._deny_build(path)
-        self._core_call("create", path)
-
-    def truncate(self, path: str) -> None:
-        self._deny_build(path)
-        self._core_call("truncate", path, length=0)
+            return None
+        files = self._files_for(path)
+        return Descriptor(files, files.open(path, mode), mode, path)
 
     def unlink(self, path: str) -> None:
         self._deny_build(path)
-        self._core_call("unlink", path)
+        self._files_for(path).unlink(path)
 
     def mkdir(self, path: str) -> None:
         self._deny_build(path)
@@ -340,19 +325,6 @@ class WasmView:
         """
         self._deny_build(path)
         self._core_call("symlink", path, target=target)
-
-    def kept(self, path: str, *, stored: bool, rendered: bool) -> Kept:
-        """What the fds open on ``path`` keep once its name goes
-        (``RuntimeFiles.kept``); nothing when no workspace is attached.
-
-        Args:
-            path (str): guest-absolute path.
-            stored (bool): an fd that writes is open on it.
-            rendered (bool): an fd that only reads is open on it.
-        """
-        if self._files is None:
-            return Kept()
-        return self._files.kept(path, stored=stored, rendered=rendered)
 
     def walked(self, path: str, *, follow: bool = True) -> str:
         """Where the namespace's links lead ``path`` (``RuntimeFiles.walked``);
@@ -410,16 +382,6 @@ class WasmView:
         self._files_for(path).setattr(
             path, atime=atime, mtime=mtime, nofollow=nofollow
         )
-
-    def flush(self, path: str, steps: list[FlushStep]) -> None:
-        """Send what a closing handle owes the mount.
-
-        Args:
-            path (str): guest-absolute path.
-            steps (list[FlushStep]): the handle's ``flush_plan()``.
-        """
-        self._deny_build(path)
-        self._files_for(path).flush(path, steps)
 
     def readdir(self, path: str) -> list[tuple[str, int]]:
         """List a guest directory as (name, preview1 filetype) pairs.

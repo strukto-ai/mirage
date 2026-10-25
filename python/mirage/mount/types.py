@@ -15,9 +15,10 @@
 from dataclasses import dataclass, field
 
 from mirage.runtime.handles import ChunkedHandle
+from mirage.runtime.handles.mode import READ, OpenMode
 from mirage.types import FileStat
 
-WriteBuf = list[tuple[int, bytes]]
+WriteBuf = list[tuple[int, bytearray]]
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,11 +54,15 @@ class MountAttrs:
 
 @dataclass(slots=True)
 class Handle:
-    """One open file of a kernel mount."""
+    """One open file, whichever entry point opened it."""
 
     path: str
-    # Where the path really points once namespace links are followed.
+    # Where the path really points once namespace links are followed; a
+    # file whose name went keys the handles left on it alike.
     key: str
+    # What the open asked for: a handle that writes reads the stored
+    # bytes, one that appends writes at the end.
+    mode: OpenMode = READ
     live: bool = False
     data: bytes | None = None
     write_buf: WriteBuf = field(default_factory=list)
@@ -69,3 +74,10 @@ class Handle:
     # The file's row as it was when its name was removed or replaced; the
     # open file has no path left. None while it has one.
     detached: FileStat | None = None
+    # The stored length the open saw, where an appending handle's writes
+    # start while it holds no bytes.
+    size: int = 0
+    # Why the bytes its file had could not be kept when its name went;
+    # every read through it reports it rather than read what the name
+    # holds now.
+    lost: Exception | None = None

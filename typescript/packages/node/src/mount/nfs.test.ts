@@ -24,7 +24,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { DiskVFS } from '../vfs/disk/disk.ts'
 import { Workspace } from '../workspace.ts'
 import type * as ConstantsModule from './constants.ts'
-import { MountCore } from './core.ts'
+import { MountCore } from '@struktoai/mirage-core/mount/core'
 import { MirageNFSServer, mountArgs, unmountArgs } from './nfs.ts'
 
 vi.mock('./constants.ts', async (importOriginal) => ({
@@ -409,10 +409,10 @@ describe('MirageNFSServer handles and shutdown', () => {
     const clients = sockets.map((socket) => new Client(socket))
     const opened: string[] = []
     const realOpen = core.open.bind(core)
-    vi.spyOn(core, 'open').mockImplementation(async (path: string, flags?: number) => {
+    vi.spyOn(core, 'open').mockImplementation(async (path, mode, perm) => {
       opened.push(path)
       await new Promise((resolve) => setTimeout(resolve, 10))
-      return realOpen(path, flags)
+      return realOpen(path, mode, perm)
     })
     try {
       const handles = await Promise.all(clients.map((client, i) => client.handle(names[i] ?? '')))
@@ -536,10 +536,10 @@ describe('MirageNFSServer and session changes', () => {
       let releaseGate = (): void => undefined
       const realOpen = core.open.bind(core)
       const realRelease = core.release.bind(core)
-      vi.spyOn(core, 'open').mockImplementation(async (path: string, flags?: number) => {
+      vi.spyOn(core, 'open').mockImplementation(async (path, mode, perm) => {
         opening.push(path)
         if (holdOpen !== null) await holdOpen
-        const fd = await realOpen(path, flags)
+        const fd = await realOpen(path, mode, perm)
         fds.push(fd)
         return fd
       })

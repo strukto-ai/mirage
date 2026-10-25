@@ -14,7 +14,6 @@
 import { CommandSpec } from '../../../../commands/spec/types.ts'
 import { CLIHandler } from '../../../../commands/cli/types.ts'
 
-import { WorkspaceBinding } from '../../../binding.ts'
 import { readFileSync } from 'node:fs'
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { describe, expect, it, vi } from 'vitest'
@@ -28,13 +27,13 @@ import { CLI } from '../../../../commands/cli/types.ts'
 import { ScriptSource } from '../../../types.ts'
 import { Workspace } from '../../../../workspace/workspace/workspace.ts'
 import { getTestParser } from '../../../../../tests/workspace/fixtures/workspace_fixture.ts'
-import { context } from '../../../../../tests/workspace/fixtures/context.ts'
 import { RAMVFS } from '../../../../vfs/ram/ram.ts'
 
 import { getCurrentSession, runWithSession } from '../../../../context/session_context.ts'
 import { record, runWithRecording, startOp } from '../../../../observe/context.ts'
 import { SessionState } from '../../../../workspace/session/session.ts'
 import type * as asyncContextModule from '../../../../utils/async_context.ts'
+import { bindOver, runContext } from '../../../../../tests/runtime/fixtures/bridge.ts'
 
 vi.mock('../../../../utils/async_context.ts', async (importOriginal) => {
   const real = await importOriginal<typeof asyncContextModule>()
@@ -63,7 +62,7 @@ const interpret = (
   code: string,
   args: string[] = [],
   extra: Partial<Context> = {},
-): Promise<RunResult> => rt.interpret(undefined, { code, args, stdin: null }, context(extra))
+): Promise<RunResult> => rt.interpret(undefined, { code, args, stdin: null }, runContext(rt, extra))
 
 describe('Pyodide lazy VFS', { timeout: 60_000 }, () => {
   it.each(['first', 'bad', 'later'])(
@@ -76,6 +75,7 @@ describe('Pyodide lazy VFS', { timeout: 60_000 }, () => {
       const writes: string[] = []
       const dispatch: BridgeDispatchFn = async (op, path, bytes, _dst, attrs) => {
         if (attrs?.retained !== undefined) return Promise.resolve(attrs.retained)
+        if (attrs?.admitOnly === true) return undefined
         await Promise.resolve()
         const data = files.get(path)
         if (data === undefined) throw Object.assign(new Error(path), { code: 'ENOENT' })
@@ -96,7 +96,7 @@ describe('Pyodide lazy VFS', { timeout: 60_000 }, () => {
         throw new Error(`unexpected op: ${op}`)
       }
       const rt = new PyodideRuntime()
-      rt.bind(WorkspaceBinding.overBridge(dispatch, new PrefixResolver(() => ['/data/'])))
+      bindOver(rt, dispatch, new PrefixResolver(() => ['/data/']))
       try {
         const result = await interpret(
           rt,
@@ -125,53 +125,44 @@ describe('Pyodide lazy VFS', { timeout: 60_000 }, () => {
     },
   )
 
-  it('sends nothing more for a file whose write the mount refused until the file hears of it', async () => {
-    const files = new Map<string, Uint8Array>(
-      ['bad', 'good'].map((name) => [`/data/${name}`, ENC.encode('old')]),
-    )
-    const ops: string[] = []
-    const dispatch: BridgeDispatchFn = async (op, path, bytes, _dst, attrs) => {
+  it('lands what an open file wrote at the name a rename gave it', async () => {
+    const files = new Map<string, Uint8Array>([['/data/f', ENC.encode('old')]])
+    const dispatch: BridgeDispatchFn = async (op, path, bytes, dst, attrs) => {
       if (attrs?.retained !== undefined) return Promise.resolve(attrs.retained)
+      if (attrs?.admitOnly === true) return undefined
       await Promise.resolve()
-      ops.push(`${op} ${path}`)
       const data = files.get(path)
       if (data === undefined) throw Object.assign(new Error(path), { code: 'ENOENT' })
       if (op === 'stat') return new FileStat({ name: path, type: FileType.FILE, size: data.length })
       if (op === 'read') return data
+      if (op === 'rename' && dst !== undefined) {
+        files.delete(path)
+        files.set(dst, data)
+        return
+      }
       if (op === 'pwrite') {
-        if (path === '/data/bad') throw new Error('denied')
         files.set(path, bytes ?? new Uint8Array())
         return
       }
       throw new Error(`unexpected op: ${op}`)
     }
     const rt = new PyodideRuntime()
-    rt.bind(WorkspaceBinding.overBridge(dispatch, new PrefixResolver(() => ['/data/'])))
+    bindOver(rt, dispatch, new PrefixResolver(() => ['/data/']))
     try {
       const result = await interpret(
         rt,
         [
           'import os',
-          "bad = open('/data/bad', 'r+')",
-          "good = open('/data/good', 'r+')",
-          "bad.write('new'); bad.flush()",
-          "good.write('new'); good.close()",
-          'try:',
-          "    os.rename('/data/bad', '/data/moved')",
-          'except OSError as e:',
-          "    print('rename', e.errno)",
-          "print(os.path.exists('/data/bad'), os.path.exists('/data/moved'))",
-          'bad.close()',
+          "f = open('/data/f', 'r+')",
+          "f.write('new'); f.flush()",
+          "os.rename('/data/f', '/data/moved')",
+          'f.close()',
+          "print(os.path.exists('/data/f'), open('/data/moved').read())",
         ].join('\n'),
       )
       expect(DEC.decode(result.stderr ?? new Uint8Array())).toBe('')
-      expect(result.exitCode).toBe(0)
-      // The rename hears of the refused write and fails, so neither the
-      // mount nor the guest moves the file.
-      expect(DEC.decode(result.stdout)).toBe('rename 29\nTrue False\n')
-      expect(ops.filter((op) => op.startsWith('rename'))).toEqual([])
-      expect(DEC.decode(files.get('/data/bad'))).toBe('old')
-      expect(DEC.decode(files.get('/data/good'))).toBe('new')
+      expect(DEC.decode(result.stdout)).toBe('False new\n')
+      expect([...files.keys()]).toEqual(['/data/moved'])
     } finally {
       await rt.close()
     }
@@ -183,6 +174,7 @@ describe('Pyodide lazy VFS', { timeout: 60_000 }, () => {
     )
     const dispatch: BridgeDispatchFn = async (op, path, bytes, _dst, attrs) => {
       if (attrs?.retained !== undefined) return Promise.resolve(attrs.retained)
+      if (attrs?.admitOnly === true) return undefined
       await Promise.resolve()
       const data = files.get(path)
       if (data === undefined) throw Object.assign(new Error(path), { code: 'ENOENT' })
@@ -196,7 +188,7 @@ describe('Pyodide lazy VFS', { timeout: 60_000 }, () => {
       throw new Error(`unexpected op: ${op}`)
     }
     const rt = new PyodideRuntime()
-    rt.bind(WorkspaceBinding.overBridge(dispatch, new PrefixResolver(() => ['/data/'])))
+    bindOver(rt, dispatch, new PrefixResolver(() => ['/data/']))
     try {
       const result = await interpret(
         rt,
@@ -260,6 +252,7 @@ describe('Pyodide lazy VFS', { timeout: 60_000 }, () => {
     let bytes = new Uint8Array(200_000).fill(65)
     const dispatch: BridgeDispatchFn = async (op, path, _bytes, _dst, attrs) => {
       if (attrs?.retained !== undefined) return Promise.resolve(attrs.retained)
+      if (attrs?.admitOnly === true) return undefined
       await new Promise((resolve) => setTimeout(resolve, 1))
       calls.push({ op, path, session: context.getStore() })
       if (path !== '/data/one.bin') throw new Error(`unexpected access: ${op} ${path}`)
@@ -269,7 +262,7 @@ describe('Pyodide lazy VFS', { timeout: 60_000 }, () => {
       throw new Error(`unexpected op: ${op}`)
     }
     const rt = new PyodideRuntime()
-    rt.bind(WorkspaceBinding.overBridge(dispatch, new PrefixResolver(() => ['/data/', '/huge/'])))
+    bindOver(rt, dispatch, new PrefixResolver(() => ['/data/', '/huge/']))
     try {
       expect((await interpret(rt, 'print(1)')).exitCode).toBe(0)
       expect(calls).toEqual([])
@@ -301,6 +294,7 @@ describe('Pyodide lazy VFS', { timeout: 60_000 }, () => {
     let listings = 0
     const dispatch: BridgeDispatchFn = async (op, path, _bytes, _dst, attrs) => {
       if (attrs?.retained !== undefined) return Promise.resolve(attrs.retained)
+      if (attrs?.admitOnly === true) return undefined
       await Promise.resolve()
       if (op === 'readdir' && path === '/data/') {
         listings += 1
@@ -317,7 +311,7 @@ describe('Pyodide lazy VFS', { timeout: 60_000 }, () => {
       throw Object.assign(new Error(path), { code: 'ENOENT' })
     }
     const rt = new PyodideRuntime()
-    rt.bind(WorkspaceBinding.overBridge(dispatch, new PrefixResolver(() => ['/data/'])))
+    bindOver(rt, dispatch, new PrefixResolver(() => ['/data/']))
     try {
       const result = await interpret(
         rt,
@@ -337,6 +331,7 @@ describe('Pyodide lazy VFS', { timeout: 60_000 }, () => {
   it('keeps real files at standard stream paths on a /dev mount', async () => {
     const dispatch: BridgeDispatchFn = async (op, path, _bytes, _dst, attrs) => {
       if (attrs?.retained !== undefined) return Promise.resolve(attrs.retained)
+      if (attrs?.admitOnly === true) return undefined
       await Promise.resolve()
       if (path === '/dev/stdin') {
         if (op === 'stat') return new FileStat({ name: path, type: FileType.FILE, size: 4 })
@@ -345,7 +340,7 @@ describe('Pyodide lazy VFS', { timeout: 60_000 }, () => {
       throw Object.assign(new Error(path), { code: 'ENOENT' })
     }
     const rt = new PyodideRuntime()
-    rt.bind(WorkspaceBinding.overBridge(dispatch, new PrefixResolver(() => ['/dev/'])))
+    bindOver(rt, dispatch, new PrefixResolver(() => ['/dev/']))
     try {
       const result = await interpret(rt, "print(open('/dev/stdin').read())")
       expect(result.exitCode).toBe(0)
@@ -368,6 +363,7 @@ describe('Pyodide lazy VFS', { timeout: 60_000 }, () => {
     ])
     const dispatch: BridgeDispatchFn = async (op, path, _bytes, _dst, attrs) => {
       if (attrs?.retained !== undefined) return Promise.resolve(attrs.retained)
+      if (attrs?.admitOnly === true) return undefined
       await Promise.resolve()
       calls.push({ op, path })
       if (op === 'readdir') return directories.get(path) ?? []
@@ -382,9 +378,7 @@ describe('Pyodide lazy VFS', { timeout: 60_000 }, () => {
       throw Object.assign(new Error(path), { code: 'ENOENT' })
     }
     const rt = new PyodideRuntime()
-    rt.bind(
-      WorkspaceBinding.overBridge(dispatch, new PrefixResolver(() => ['/notion/', '/wandb/'])),
-    )
+    bindOver(rt, dispatch, new PrefixResolver(() => ['/notion/', '/wandb/']))
     try {
       const counts: number[] = []
       for (const name of ['first', 'second', 'third']) {
@@ -406,43 +400,46 @@ describe('Pyodide lazy VFS', { timeout: 60_000 }, () => {
     }
   })
 
+  // What a descriptor writes stays on its core handle, which a read
+  // through it sees, and its close lands it all, in order, as a close
+  // lands a kernel mount's writes.
   it.each(['truncate', 'append'])(
-    'flushes open descriptor %s writes before reads on another mount',
+    'lands what an open descriptor wrote at its close (%s)',
     async (mode) => {
       const files = new Map<string, Uint8Array>([['/data/file', ENC.encode('old')]])
       const observed: string[] = []
       const rt = new PyodideRuntime()
-      rt.bind(
-        WorkspaceBinding.overBridge(
-          async (op, path, bytes, _dst, attrs) => {
-            if (attrs?.retained !== undefined) return Promise.resolve(attrs.retained)
-            await Promise.resolve()
-            if (op === 'readdir' && path === '/other/') {
-              observed.push(DEC.decode(files.get('/data/file')))
-              return []
-            }
-            if (op === 'stat') {
-              const data = files.get(path)
-              if (data === undefined) throw Object.assign(new Error(path), { code: 'ENOENT' })
-              return new FileStat({ name: path, type: FileType.FILE, size: data.length })
-            }
-            if (op === 'read') return files.get(path)
-            if (op === 'truncate') {
-              files.set(path, new Uint8Array())
-              return
-            }
-            if (op === 'pwrite') {
-              files.set(path, bytes ?? new Uint8Array())
-              return
-            }
-            if (op === 'append') {
-              files.set(path, ENC.encode(DEC.decode(files.get(path)) + DEC.decode(bytes)))
-              return
-            }
-            throw new Error(`unexpected op: ${op} ${path}`)
-          },
-          new PrefixResolver(() => ['/data/', '/other/']),
-        ),
+      bindOver(
+        rt,
+        async (op, path, bytes, _dst, attrs) => {
+          if (attrs?.retained !== undefined) return Promise.resolve(attrs.retained)
+          if (attrs?.admitOnly === true) return undefined
+          await Promise.resolve()
+          if (op === 'readdir' && path === '/other/') {
+            observed.push(DEC.decode(files.get('/data/file')))
+            return []
+          }
+          if (op === 'stat') {
+            const data = files.get(path)
+            if (data === undefined) throw Object.assign(new Error(path), { code: 'ENOENT' })
+            return new FileStat({ name: path, type: FileType.FILE, size: data.length })
+          }
+          if (op === 'read') return files.get(path)
+          if (op === 'truncate') {
+            files.set(path, new Uint8Array())
+            return
+          }
+          if (op === 'pwrite') {
+            files.set(path, bytes ?? new Uint8Array())
+            return
+          }
+          if (op === 'append') {
+            files.set(path, ENC.encode(DEC.decode(files.get(path)) + DEC.decode(bytes)))
+            return
+          }
+          throw new Error(`unexpected op: ${op} ${path}`)
+        },
+        new PrefixResolver(() => ['/data/', '/other/']),
       )
       try {
         const result = await interpret(
@@ -452,7 +449,7 @@ describe('Pyodide lazy VFS', { timeout: 60_000 }, () => {
         )
         expect(result.exitCode).toBe(0)
         const start = mode === 'append' ? 'old' : ''
-        expect(observed).toEqual([start + 'first+', start + 'first+second', start + 'first+second'])
+        expect(observed).toEqual([start, start, start + 'first+second'])
         expect(DEC.decode(files.get('/data/file'))).toBe(start + 'first+second')
       } finally {
         await rt.close()
@@ -465,22 +462,22 @@ describe('Pyodide lazy VFS', { timeout: 60_000 }, () => {
     async (maxConcurrency) => {
       const calls: string[] = []
       const rt = new PyodideRuntime({ config: { maxConcurrency } })
-      rt.bind(
-        WorkspaceBinding.overBridge(
-          async (op, path, _bytes, _dst, attrs) => {
-            if (attrs?.retained !== undefined) return Promise.resolve(attrs.retained)
-            await Promise.resolve()
-            const session = getCurrentSession()?.sessionId ?? 'missing'
-            calls.push(`${op}:${session}`)
-            if (op === 'stat') return new FileStat({ name: path, type: FileType.FILE, size: 3 })
-            if (op === 'read') {
-              record(op, path, 'test', 3, startOp())
-              return ENC.encode(session)
-            }
-            throw new Error(`unexpected op: ${op}`)
-          },
-          new PrefixResolver(() => ['/data/']),
-        ),
+      bindOver(
+        rt,
+        async (op, path, _bytes, _dst, attrs) => {
+          if (attrs?.retained !== undefined) return Promise.resolve(attrs.retained)
+          if (attrs?.admitOnly === true) return undefined
+          await Promise.resolve()
+          const session = getCurrentSession()?.sessionId ?? 'missing'
+          calls.push(`${op}:${session}`)
+          if (op === 'stat') return new FileStat({ name: path, type: FileType.FILE, size: 3 })
+          if (op === 'read') {
+            record(op, path, 'test', 3, startOp())
+            return ENC.encode(session)
+          }
+          throw new Error(`unexpected op: ${op}`)
+        },
+        new PrefixResolver(() => ['/data/']),
       )
       const one = new SessionState({ sessionId: 'one' })
       const two = new SessionState({ sessionId: 'two' })
@@ -494,7 +491,11 @@ describe('Pyodide lazy VFS', { timeout: 60_000 }, () => {
         const [[run, firstRecords], [other, secondRecords]] = await Promise.all([first, second])
         expect(DEC.decode(run.stdout)).toBe('one\n')
         expect(DEC.decode(other.stdout)).toBe('two\n')
-        expect(calls).toEqual(['stat:one', 'read:one', 'stat:two', 'read:two'])
+        // Each call runs as the session of the run that made it, the queued
+        // run's after the first's.
+        const ofOne = calls.filter((call) => call.endsWith(':one'))
+        expect(calls).toEqual([...ofOne, ...calls.filter((call) => call.endsWith(':two'))])
+        expect(calls.filter((call) => call.startsWith('read:'))).toEqual(['read:one', 'read:two'])
         expect(firstRecords.map((entry) => entry.path)).toEqual(['/data/one'])
         expect(secondRecords.map((entry) => entry.path)).toEqual(['/data/two'])
         expect(getCurrentSession()).toBeNull()
@@ -512,31 +513,31 @@ describe('Pyodide lazy VFS', { timeout: 60_000 }, () => {
       let contents: Uint8Array = ENC.encode('old')
       const writes: string[] = []
       const rt = new PyodideRuntime()
-      rt.bind(
-        WorkspaceBinding.overBridge(
-          async (op, path, bytes, _dst, attrs) => {
-            if (attrs?.retained !== undefined) return Promise.resolve(attrs.retained)
-            if (op === 'stat')
-              return new FileStat({ name: path, type: FileType.FILE, size: contents.length })
-            if (op === 'read') return contents
-            if (op === 'truncate') {
-              contents = new Uint8Array()
-              return
+      bindOver(
+        rt,
+        async (op, path, bytes, _dst, attrs) => {
+          if (attrs?.retained !== undefined) return Promise.resolve(attrs.retained)
+          if (attrs?.admitOnly === true) return undefined
+          if (op === 'stat')
+            return new FileStat({ name: path, type: FileType.FILE, size: contents.length })
+          if (op === 'read') return contents
+          if (op === 'truncate') {
+            contents = new Uint8Array()
+            return
+          }
+          if (op === 'pwrite') {
+            const value = DEC.decode(bytes)
+            if (value === 'first') {
+              entered.resolve()
+              await release.promise
             }
-            if (op === 'pwrite') {
-              const value = DEC.decode(bytes)
-              if (value === 'first') {
-                entered.resolve()
-                await release.promise
-              }
-              contents = bytes ?? new Uint8Array()
-              writes.push(value)
-              return
-            }
-            throw new Error(`unexpected op: ${op}`)
-          },
-          new PrefixResolver(() => ['/data/']),
-        ),
+            contents = bytes ?? new Uint8Array()
+            writes.push(value)
+            return
+          }
+          throw new Error(`unexpected op: ${op}`)
+        },
+        new PrefixResolver(() => ['/data/']),
       )
       try {
         await interpret(rt, 'pass')
@@ -575,6 +576,7 @@ describe('Pyodide lazy VFS', { timeout: 60_000 }, () => {
     const release = gate()
     const dispatch: BridgeDispatchFn = async (op, path, _bytes, _dst, attrs) => {
       if (attrs?.retained !== undefined) return Promise.resolve(attrs.retained)
+      if (attrs?.admitOnly === true) return undefined
       if (op === 'stat') return new FileStat({ name: path, type: FileType.FILE, size: 4 })
       if (op === 'read') {
         entered.resolve()
@@ -584,7 +586,7 @@ describe('Pyodide lazy VFS', { timeout: 60_000 }, () => {
       throw new Error(`unexpected op: ${op}`)
     }
     const rt = new PyodideRuntime()
-    rt.bind(WorkspaceBinding.overBridge(dispatch, new PrefixResolver(() => ['/data/'])))
+    bindOver(rt, dispatch, new PrefixResolver(() => ['/data/']))
     try {
       await interpret(rt, 'pass')
       await expect(

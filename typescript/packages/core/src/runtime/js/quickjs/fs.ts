@@ -14,17 +14,14 @@
 
 import { classify } from '../../../errors/index.ts'
 import { resolvePath } from '../../../utils/path.ts'
-import { rstripSlash } from '../../../utils/slash.ts'
 import { PathSpec } from '../../../types.ts'
 import { WASI, errnoFor } from '../../../errors/wasi.ts'
 import { readdir } from './list.ts'
 import { stat } from './stat.ts'
 import { epochToIso } from '../../../utils/dates.ts'
 import { YieldBudget } from '../../../io/yield_budget.ts'
-import { applyFlush, FileHandle, FileTable, type Kept, type OpenMode } from '../../handles/index.ts'
-import { applyOpen } from '../../open.ts'
-import { keptView, type RuntimeFiles } from '../../files.ts'
-import type { VFSStat } from '../../types.ts'
+import { FileTable, type OpenMode } from '../../handles/index.ts'
+import { Descriptor, type RuntimeFiles } from '../../files.ts'
 import type { QuickJSAsyncContext, QuickJSHandle } from 'quickjs-emscripten'
 
 const ENC = new TextEncoder()
@@ -35,42 +32,6 @@ const DEC = new TextDecoder('utf-8', { fatal: false })
 // keeps: guests compare against these, so host errno numbering must not
 // leak.
 const ENOENT = WASI.ENOENT
-
-/**
- * Where an open file is now: the path its links lead to, which a rename
- * made through this engine moves. Once its name is removed or replaced it
- * reads and lands on what it `kept`.
- */
-interface Place {
-  path: string
-  kept: Kept | null
-  readable: boolean
-  raw: boolean
-}
-
-/**
- * Read a file's bytes for its handle: kept bytes once its name is gone,
- * else through the mount; a writer reads what is stored.
- */
-function fetchFor(
-  files: RuntimeFiles,
-  place: Place,
-): (offset: number, size: number | null) => Promise<Uint8Array> {
-  return (offset, size) => {
-    if (place.kept === null) {
-      const raw = place.raw
-      return files.read(place.path, size === null ? { offset, raw } : { offset, size, raw })
-    }
-    try {
-      return files.readCached(
-        place.path,
-        keptView(place.kept, place.raw).slice(offset, size === null ? undefined : offset + size),
-      )
-    } catch (err) {
-      return Promise.reject(err instanceof Error ? err : new Error(String(err)))
-    }
-  }
-}
 
 /**
  * Hand text to the guest. The engine takes a C string, so text holding
@@ -124,8 +85,7 @@ export function installQuickJsFs(
   signal?: AbortSignal,
 ): () => Promise<string[]> {
   const files = signal === undefined ? sourceFiles : (sourceFiles?.withSignal(signal) ?? null)
-  const table = new FileTable<FileHandle>()
-  const places = new Map<number, Place>()
+  const table = new FileTable<Descriptor>()
   // qjs-libc's fopen opens a directory for reading, and every read of it
   // then fails: it answers nothing and sets the stream's error flag. A
   // read of zero bytes never reaches the stream, so it leaves the flag.
@@ -153,33 +113,6 @@ export function installQuickJsFs(
     return resolved !== '/' && (path.endsWith('/') || path.endsWith('/.'))
       ? resolved + '/'
       : resolved
-  }
-
-  // Read what the files open on `path` need before its name is removed or
-  // replaced; `keep` them once it has gone. They share what
-  // RuntimeFiles.kept reads, so a read that fails still lets the removal go
-  // ahead. A stream that cannot read needs nothing kept for it.
-  const hold = async (bound: RuntimeFiles, path: string): Promise<[Place, Kept][]> => {
-    const named = bound.walked(path, false)
-    const open = [...places.values()].filter((p) => p.path === named && p.kept === null)
-    if (open.length === 0) return []
-    const kept = await bound.kept(named, {
-      stored: open.some((p) => p.raw),
-      rendered: open.some((p) => p.readable && !p.raw),
-    })
-    return open.map((place) => [place, kept])
-  }
-  const keep = (held: [Place, Kept][]): void => {
-    for (const [place, kept] of held) place.kept = kept
-  }
-  // Follow a rename: a file open on `old` or under it is at `next` now,
-  // both as walked before the rename.
-  const moved = (old: string, next: string): void => {
-    const under = `${rstripSlash(old)}/`
-    for (const place of places.values()) {
-      if (place.kept === null && (place.path === old || place.path.startsWith(under)))
-        place.path = next + place.path.slice(old.length)
-    }
   }
 
   // The guest runs on the host's event loop, and a call a RAM mount
@@ -260,70 +193,43 @@ export function installQuickJsFs(
     }
     if (files?.serves(path) !== true) return ctx.newNumber(-ENOENT)
     // The open's effect lands through the mount at open, by the rule
-    // every entry point shares, so write modes and a read-narrowed session
-    // refuse here (the guest gets null), the ledger records the real
-    // op, and a backend with a native truncate receives it. Any refusal
-    // or failure is the guest's null: a transient failure or a policy
-    // denial on an existing file must refuse the open, or a
+    // every entry point shares (`MountCore.open`), so write modes and a
+    // read-narrowed session refuse here (the guest gets null), the ledger
+    // records the real op, and a backend with a native truncate receives
+    // it. Any refusal or failure is the guest's null: a transient failure
+    // or a policy denial on an existing file must refuse the open, or a
     // create-capable mode would create over content this open never saw.
-    let handle: FileHandle
+    let file: Descriptor
     let directory = false
-    const place: Place = { path, kept: null, readable: mode.readable, raw: mode.writable }
     try {
-      // The file is named by where its links lead, so a removal or a
-      // rename of any spelling of it finds the stream.
-      place.path = files.walked(path)
-      let row: VFSStat | null
       try {
-        row = await applyOpen(files, path, mode)
+        file = new Descriptor(files, await files.open(path, mode), mode, path)
       } catch (err) {
         if (mode.writable || classify(err) !== 'EISDIR') throw err
-        row = null
+        file = new Descriptor(
+          files,
+          await files.open(path, { ...mode, directory: true }),
+          mode,
+          path,
+          true,
+        )
         directory = true
       }
-      // Nothing is read at open: the handle fetches what a read lands in.
-      // A handle that writes reads the stored bytes, since its writes land
-      // on them; a read-only one sees the rendering.
-      handle = FileHandle.opened(path, row === null ? null : fetchFor(files, place), {
-        size: row?.size ?? 0,
-        writable: mode.writable,
-        append: mode.append,
-        readCached: (data) => files.readCached(place.path, data),
-      })
     } catch (err) {
       return ctx.newNumber(-errnoFor(err))
     }
-    const fd = table.add(handle)
-    places.set(fd, place)
+    const fd = table.add(file)
     if (directory) directories.add(fd)
     if (!mode.readable) writeOnly.add(fd)
     return ctx.newNumber(fd)
   })
 
-  const land = async (file: FileHandle, place: Place): Promise<void> => {
-    if (!file.dirty || files === null) return
-    if (place.kept === null) await files.flush(place.path, file.flushPlan())
-    else place.kept.data = applyFlush(place.kept.data, file.flushPlan())
-    for (const [fd, peer] of places) {
-      const same =
-        place.kept === null
-          ? peer.kept === null && peer.path === place.path
-          : peer.kept === place.kept
-      const handle = table.get(fd)
-      if (handle === undefined || !same) continue
-      const fetch = fetchFor(files, peer)
-      if (handle === file) handle.settle(fetch)
-      else handle.invalidate(fetch, file.size)
-    }
-  }
-
   defineAsync('__mirage_flush', async (fdH) => {
     const fd = ctx.getNumber(fdH)
     const file = table.get(fd)
-    const place = places.get(fd)
-    if (file === undefined || place === undefined) return ctx.newNumber(-WASI.EBADF)
+    if (file === undefined) return ctx.newNumber(-WASI.EBADF)
     try {
-      await land(file, place)
+      await file.land()
       return ctx.newNumber(0)
     } catch (err) {
       failed.add(fd)
@@ -338,13 +244,10 @@ export function installQuickJsFs(
     writeOnly.delete(fd)
     failed.delete(fd)
     ended.delete(fd)
-    const place = places.get(fd)
-    places.delete(fd)
     const file = table.pop(fd)
-    if (file === undefined || place === undefined) return ctx.newNumber(-WASI.EBADF)
-    if (!file.dirty || files === null) return ctx.newNumber(0)
+    if (file === undefined) return ctx.newNumber(-WASI.EBADF)
     try {
-      await land(file, place)
+      await file.close()
       return ctx.newNumber(0)
     } catch (err) {
       return ctx.newNumber(-errnoFor(err))
@@ -353,35 +256,14 @@ export function installQuickJsFs(
 
   defineAsync('__mirage_readdir', (pathH) => readdir(ctx, files, absolute(pathH)))
 
-  // An EOF probe may fetch ahead; delivery still checks current read policy.
-  defineSync('__mirage_lacks', (fdH, sizeH) => {
-    const fd = ctx.getNumber(fdH)
-    const file = table.get(fd)
-    const lacks =
-      !unreadable.has(fd) && !writeOnly.has(fd) && file?.lacks(ctx.getNumber(sizeH)) === true
-    return lacks ? ctx.true : ctx.false
-  })
-
-  defineAsync('__mirage_fill', async (fdH, sizeH) => {
-    const fd = ctx.getNumber(fdH)
-    const file = table.get(fd)
-    try {
-      if (file !== undefined) await file.fill(ctx.getNumber(sizeH))
-    } catch (err) {
-      console.debug(`quickjs: read of fd ${String(fd)} failed: ${String(err)}`)
-      unreadable.add(fd)
-    }
-    return ctx.undefined
-  })
-
   defineAsync('__mirage_read', async (fdH, maxH) => {
     const fd = ctx.getNumber(fdH)
     const file = table.get(fd)
     const size = ctx.getNumber(maxH)
     if (file === undefined || readFails(fd, size)) return ctx.newString('')
     try {
-      const bytes = await file.readChecked(size)
-      if ((size < 0 && file.eof) || bytes.length < size) ended.add(fd)
+      const bytes = await file.read(size)
+      if (size < 0 || bytes.length < size) ended.add(fd)
       return toGuestText(ctx, DEC.decode(bytes))
     } catch (err) {
       console.debug(`quickjs: read of fd ${String(fd)} failed: ${String(err)}`)
@@ -398,7 +280,7 @@ export function installQuickJsFs(
     let bytes = new Uint8Array(0)
     if (file !== undefined && !readFails(fd, size)) {
       try {
-        bytes = (await file.readChecked(size)).slice(0, size)
+        bytes = (await file.read(size)).slice(0, size)
         if (bytes.length < size) ended.add(fd)
       } catch (err) {
         console.debug(`quickjs: read of fd ${String(fd)} failed: ${String(err)}`)
@@ -412,12 +294,14 @@ export function installQuickJsFs(
   defineAsync('__mirage_getline', async (fdH) => {
     const fd = ctx.getNumber(fdH)
     const file = table.get(fd)
-    const before = file?.pos ?? 0
     if (file === undefined || readFails(fd)) return ctx.null
     try {
-      const line = await file.readLineChecked()
-      if (line === null || file.pos === before + line.length) ended.add(fd)
-      return line === null ? ctx.null : toGuestText(ctx, DEC.decode(line))
+      const line = await file.readLine()
+      // A line with no newline ran into the end of the file.
+      const newline = line?.at(-1) === 0x0a
+      if (!newline) ended.add(fd)
+      if (line === null) return ctx.null
+      return toGuestText(ctx, DEC.decode(newline ? line.subarray(0, -1) : line))
     } catch (err) {
       console.debug(`quickjs: read of fd ${String(fd)} failed: ${String(err)}`)
       unreadable.add(fd)
@@ -436,26 +320,47 @@ export function installQuickJsFs(
     return ctx.undefined
   })
 
-  defineSync('__mirage_write', (fdH, textH) => {
-    const file = table.get(ctx.getNumber(fdH))
-    if (file?.writable === true) file.write(ENC.encode(fromGuestText(ctx, textH)))
+  // A write the core refuses (a mount that went read-only under the
+  // stream) is the stream's error, as libc's fputs sets it.
+  defineAsync('__mirage_write', async (fdH, textH) => {
+    const fd = ctx.getNumber(fdH)
+    const file = table.get(fd)
+    if (file?.mode.writable !== true) return ctx.undefined
+    try {
+      await file.write(ENC.encode(fromGuestText(ctx, textH)))
+    } catch (err) {
+      console.debug(`quickjs: write of fd ${String(fd)} failed: ${String(err)}`)
+      failed.add(fd)
+    }
     return ctx.undefined
   })
 
-  defineSync('__mirage_write_bytes', (fdH, bufferH) => {
-    const file = table.get(ctx.getNumber(fdH))
-    if (file?.writable !== true) return ctx.newNumber(0)
+  defineAsync('__mirage_write_bytes', async (fdH, bufferH) => {
+    const fd = ctx.getNumber(fdH)
+    const file = table.get(fd)
+    if (file?.mode.writable !== true) return ctx.newNumber(0)
     const bytes = ctx.getArrayBuffer(bufferH).consume((view) => view.value.slice())
-    file.write(bytes)
+    try {
+      await file.write(bytes)
+    } catch (err) {
+      console.debug(`quickjs: write of fd ${String(fd)} failed: ${String(err)}`)
+      failed.add(fd)
+      return ctx.newNumber(0)
+    }
     return ctx.newNumber(bytes.length)
   })
 
   // 0, or -errno as the real engine's FILE.seek answers: a target before
   // the start or an unknown whence is EINVAL and leaves the position.
-  defineSync('__mirage_seek', (fdH, offsetH, whenceH) => {
+  defineAsync('__mirage_seek', async (fdH, offsetH, whenceH) => {
     const file = table.get(ctx.getNumber(fdH))
     if (file === undefined) return ctx.newNumber(-WASI.EBADF)
-    const moved = file.seek(ctx.getNumber(offsetH), ctx.getNumber(whenceH))
+    let moved: number | null
+    try {
+      moved = await file.seek(ctx.getNumber(offsetH), ctx.getNumber(whenceH))
+    } catch (err) {
+      return ctx.newNumber(-errnoFor(err))
+    }
     if (moved !== null) ended.delete(ctx.getNumber(fdH))
     return ctx.newNumber(moved === null ? -WASI.EINVAL : 0)
   })
@@ -481,14 +386,10 @@ export function installQuickJsFs(
     try {
       // A link goes as the name it is, never as what it points at: remove
       // on a link to a directory drops the link and leaves the directory.
+      // A file open there keeps what it held (the core sees to it).
       const st = await files.stat(path, true)
-      if (st.isDir && st.isLink !== true) {
-        await files.rmdir(path)
-      } else {
-        const held = await hold(files, path)
-        await files.unlink(path)
-        keep(held)
-      }
+      if (st.isDir && st.isLink !== true) await files.rmdir(path)
+      else await files.unlink(path)
       return ctx.newNumber(0)
     } catch (err) {
       return ctx.newNumber(-errnoFor(err))
@@ -526,21 +427,10 @@ export function installQuickJsFs(
     const dst = absolute(dstH)
     if (files?.serves(src) !== true || !files.serves(dst)) return ctx.newNumber(-ENOENT)
     // The dispatcher refuses a pair on different mounts with EXDEV, which this
-    // engine numbers -75, as the real engine does.
+    // engine numbers -75, as the real engine does. The streams open on
+    // either end follow the rename (the core sees to it).
     try {
-      // Both ends as the walk names them before the rename, which may move a
-      // link the walk takes. A rename onto its own file changes nothing, its
-      // streams included, whichever spelling reached it.
-      const old = files.walked(src, false)
-      const next = files.walked(dst, false)
-      if (old === next) {
-        await files.rename(src, dst)
-        return ctx.newNumber(0)
-      }
-      const held = await hold(files, dst)
       await files.rename(src, dst)
-      keep(held)
-      moved(old, next)
       return ctx.newNumber(0)
     } catch (err) {
       return ctx.newNumber(-errnoFor(err))
@@ -551,13 +441,13 @@ export function installQuickJsFs(
 
   return async () => {
     const failures: string[] = []
-    for (const [fd, place] of places) {
-      const file = table.get(fd)
-      if (file?.dirty !== true || sourceFiles === null || place.kept !== null) continue
+    for (const file of [...table.values()]) {
+      // Through the run's own adapter, past its signal: a process's writes
+      // are in its files however it ended.
       try {
-        await sourceFiles.flush(place.path, file.flushPlan())
+        await sourceFiles?.close(file.fd)
       } catch (err) {
-        failures.push(`${place.path}: ${err instanceof Error ? err.message : String(err)}`)
+        failures.push(`${file.opened}: ${err instanceof Error ? err.message : String(err)}`)
       }
     }
     return failures

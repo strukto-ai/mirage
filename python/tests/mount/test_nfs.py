@@ -29,6 +29,7 @@ from mirage.mount.nfs import MirageNFSServer, mount_args, unmount_args
 from mirage.vfs.disk import DiskVFS
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace.session.session import SessionState
+from mirage.runtime.handles.mode import READ, OpenMode
 
 NFS = 100003
 MOUNT = 100005
@@ -147,9 +148,11 @@ class Counting(MountCore):
         self.opened: list[str] = []
         self.released: list[int] = []
 
-    async def open(self, path: str, flags: int = 0) -> int:
+    async def open(
+        self, path: str, mode: OpenMode = READ, perm: int | None = None
+    ) -> int:
         self.opened.append(path)
-        return await super().open(path, flags)
+        return await super().open(path, mode, perm)
 
     async def release(self, fh: int) -> None:
         self.released.append(fh)
@@ -414,11 +417,13 @@ class Gated(Counting):
         self.hold_open: asyncio.Future[None] | None = None
         self.hold_release: asyncio.Future[None] | None = None
 
-    async def open(self, path: str, flags: int = 0) -> int:
+    async def open(
+        self, path: str, mode: OpenMode = READ, perm: int | None = None
+    ) -> int:
         self.opening.append(path)
         if self.hold_open is not None:
             await self.hold_open
-        fh = await super().open(path, flags)
+        fh = await super().open(path, mode, perm)
         self.fhs.append(fh)
         return fh
 
@@ -479,9 +484,11 @@ async def test_a_reset_after_a_session_change_keeps_handles_opened_since() -> (
 
 
 class Slow(Counting):
-    async def open(self, path: str, flags: int = 0) -> int:
+    async def open(
+        self, path: str, mode: OpenMode = READ, perm: int | None = None
+    ) -> int:
         await asyncio.sleep(0.01)
-        return await super().open(path, flags)
+        return await super().open(path, mode, perm)
 
 
 @pytest.mark.asyncio

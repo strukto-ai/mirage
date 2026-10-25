@@ -6,11 +6,6 @@ std.open = (path, mode, errorObj) => {
   if (fd === null) throw new TypeError('invalid file mode')
   if (errorObj !== undefined) errorObj.errno = fd < 0 ? -fd : 0
   if (fd < 0) return null
-  // A chunked file holds one chunk of its bytes: fill until the read it is
-  // about to answer lacks nothing (a negative size asks for the rest).
-  const fill = (size) => {
-    while (__mirage_lacks(fd, size)) __mirage_fill(fd, size)
-  }
   let closed = false
   const methods = {
     readAsString: (max) => {
@@ -41,10 +36,7 @@ std.open = (path, mode, errorObj) => {
     clearerr: () => {
       __mirage_clearerr(fd)
     },
-    eof: () => {
-      fill(1)
-      return __mirage_eof(fd)
-    },
+    eof: () => __mirage_eof(fd),
     flush: () => {
       __mirage_flush(fd)
     },

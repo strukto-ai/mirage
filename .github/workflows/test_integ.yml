@@ -215,6 +215,7 @@ jobs:
               - 'python/mirage/workspace/fuse.py'
               - 'python/mirage/workspace/nfs.py'
               - 'typescript/packages/node/src/fuse/**'
+              - 'typescript/packages/core/src/mount/**'
               - 'typescript/packages/node/src/mount/**'
               - 'typescript/packages/node/src/workspace/fuse.ts'
               - 'typescript/packages/node/src/workspace/nfs.ts'

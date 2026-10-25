@@ -47,13 +47,6 @@ describe('RuntimeFiles transport', () => {
     expect(await files.read('/ram/x')).toBe(data)
   })
 
-  it('forwards retained bytes through the same read boundary', async () => {
-    const retained = enc.encode('held')
-    const dispatch = vi.fn<BridgeDispatchFn>(() => Promise.resolve(retained))
-    expect(await new RuntimeFiles(dispatch).readCached('/ram/x.txt', retained)).toBe(retained)
-    expect(dispatch).toHaveBeenCalledWith('read', '/ram/x.txt', undefined, undefined, { retained })
-  })
-
   it('forwards a ranged and a raw read as the read attrs', async () => {
     const dispatch = vi.fn<BridgeDispatchFn>(() => Promise.resolve(new Uint8Array([2])))
     const files = new RuntimeFiles(dispatch)
@@ -378,18 +371,14 @@ describe('RuntimeFiles transport', () => {
     await expect(refused).rejects.toThrow(message)
   })
 
-  it('forwards create and truncate as their own ops, never a write', async () => {
-    // The bridge used to lack both verbs, so quickjs faked them with
-    // write: the ledger recorded the wrong op and a backend with a
-    // native truncate got a whole-file write instead.
+  it('forwards truncate as its own op, never a write', async () => {
+    // The bridge used to lack the verb, so quickjs faked it with write:
+    // the ledger recorded the wrong op and a backend with a native
+    // truncate got a whole-file write instead.
     const dispatch = vi.fn<BridgeDispatchFn>(() => Promise.resolve(undefined))
     const vfs = new RuntimeFiles(dispatch)
-    await vfs.create('/ram/new.txt')
     await vfs.truncate('/ram/old.txt')
-    expect(dispatch.mock.calls.map((c) => [c[0], c[1]])).toEqual([
-      ['create', '/ram/new.txt'],
-      ['truncate', '/ram/old.txt'],
-    ])
+    expect(dispatch.mock.calls.map((c) => [c[0], c[1]])).toEqual([['truncate', '/ram/old.txt']])
   })
 })
 
@@ -587,74 +576,4 @@ describe('RuntimeFiles append', () => {
     ).rejects.toThrow(/read-only/)
     expect(dispatch.mock.calls.some((c) => c[0] === 'write')).toBe(false)
   })
-})
-
-describe('RuntimeFiles flush', () => {
-  it('sends each step of a plan in order', async () => {
-    const dispatch = vi.fn<BridgeDispatchFn>(() => Promise.resolve(undefined))
-    await new RuntimeFiles(dispatch, new PrefixResolver(() => ['/a'])).flush('/a/x', [
-      { kind: 'truncate', length: 2 },
-      { kind: 'pwrite', data: enc.encode('z'), offset: 4 },
-      { kind: 'append', data: enc.encode('!') },
-    ])
-    expect(dispatch.mock.calls).toEqual([
-      ['truncate', '/a/x', undefined, undefined, { length: 2 }],
-      ['pwrite', '/a/x', enc.encode('z'), undefined, { offset: 4 }],
-      ['append', '/a/x', enc.encode('!')],
-    ])
-  })
-})
-
-it('preserves unknown source metadata and checks logical changes in retained stat', async () => {
-  const source = new FileStat({
-    name: 'unknown',
-    type: FileType.FILE,
-    uid: 'owner',
-    modified: '2026-07-15T00:00:00Z',
-    extra: { policy_tag: 'secret' },
-  })
-  const seen: FileStat[] = []
-  const dispatch: BridgeDispatchFn = (op, path, _bytes, _dst, attrs) => {
-    expect(op).toBe('stat')
-    expect(path).toBe('/data/unknown')
-    if (attrs?.retained !== undefined) {
-      expect(attrs.retained).toBeInstanceOf(FileStat)
-      seen.push(attrs.retained as FileStat)
-      return Promise.resolve(attrs.retained)
-    }
-    return Promise.resolve(source)
-  }
-  const files = new RuntimeFiles(dispatch)
-  const row = await files.stat('/data/unknown')
-  expect(await files.statCached('/data/unknown', row)).toEqual(row)
-  expect(seen[0]).toEqual(source)
-  expect(seen[0]?.size).toBeNull()
-  expect((await files.statCached('/data/unknown', { ...row, size: 7, mode: 0o100600 })).size).toBe(
-    7,
-  )
-  expect(seen[1]).toMatchObject({
-    size: 7,
-    mode: 0o100600,
-    uid: 'owner',
-    modified: source.modified,
-    extra: source.extra,
-  })
-})
-
-it('leaves out of a retained stat the times the backend never gave', async () => {
-  // A runtime fills a missing time for its guest; the policy sees the
-  // backend's row without it.
-  const source = new FileStat({ name: 'f', type: FileType.FILE, size: 3 })
-  const seen: FileStat[] = []
-  const dispatch: BridgeDispatchFn = (_op, _path, _bytes, _dst, attrs) => {
-    if (attrs?.retained !== undefined) {
-      seen.push(attrs.retained as FileStat)
-      return Promise.resolve(attrs.retained)
-    }
-    return Promise.resolve(source)
-  }
-  const files = new RuntimeFiles(dispatch)
-  const row = { ...(await files.stat('/data/f')), mtimeMs: 1, atimeMs: 1 }
-  expect(await files.statCached('/data/f', row)).toEqual(row)
-  expect([seen[0]?.modified ?? null, seen[0]?.atime ?? null]).toEqual([null, null])
 })

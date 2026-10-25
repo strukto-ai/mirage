@@ -102,7 +102,7 @@ describe('the service worker bridge', () => {
       xhrAnswering({ status: 404, body: new ArrayBuffer(0), format: null }),
     )
     vi.spyOn(crypto, 'randomUUID').mockReturnValue(ID)
-    expect(() => requestOverBridge(() => undefined, { op: 'read', path: '/a' }, PAGE)).toThrow(
+    expect(() => requestOverBridge(() => undefined, { op: 'stat', path: '/a' }, PAGE)).toThrow(
       'pyodide filesystem bridge answered 404',
     )
   })

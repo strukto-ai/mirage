@@ -46,7 +46,7 @@ it('reasserts consumed deadline and abort signals until the run disarms', async 
 it('cancels a VFS wait after Pyodide has consumed the interrupt cell', () => {
   const cells = new Int32Array(new SharedArrayBuffer(16))
   Atomics.store(cells, 1, 1)
-  expect(() => requestSync(() => undefined, { op: 'read', path: '/data/hang' }, cells)).toThrow(
+  expect(() => requestSync(() => undefined, { op: 'stat', path: '/data/hang' }, cells)).toThrow(
     'interrupted',
   )
 })
