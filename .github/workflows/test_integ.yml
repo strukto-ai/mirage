@@ -48,6 +48,7 @@ env:
 jobs:
   changes:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     if: github.event_name == 'pull_request'
     permissions:
       pull-requests: read
@@ -263,6 +264,7 @@ jobs:
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.core == 'true' || needs.changes.outputs.ts == 'true' || needs.changes.outputs.database == 'true' || needs.changes.outputs.fuse == 'true' || needs.changes.outputs.observability == 'true' || needs.changes.outputs.runtime == 'true') }}
     name: TypeScript build bootstrap
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
 
@@ -294,7 +296,7 @@ jobs:
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.core == 'true' || needs.changes.outputs.ts == 'true') }}
     name: integ-hosting and integ-interrupt
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     services:
       redis:
         image: redis:7
@@ -354,6 +356,7 @@ jobs:
     needs: changes
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.core == 'true') }}
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     services:
       redis:
         image: redis:7
@@ -432,6 +435,7 @@ jobs:
     needs: changes
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.ts == 'true') }}
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     services:
       redis:
         image: redis:7
@@ -736,7 +740,7 @@ jobs:
     needs: [changes, typescript-build]
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.core == 'true' || needs.changes.outputs.ts == 'true') }}
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/integ-battery-setup
@@ -961,6 +965,7 @@ jobs:
     needs: [changes, integ-shared-py, integ-shared-ts]
     if: ${{ !cancelled() && needs.integ-shared-py.result == 'success' && needs.integ-shared-ts.result == 'success' }}
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
       - uses: actions/download-artifact@v8
@@ -988,6 +993,7 @@ jobs:
     needs: [changes, typescript-build]
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.database == 'true') }}
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     services:
       postgres:
         image: postgres:16
@@ -1116,6 +1122,7 @@ jobs:
     needs: changes
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.data == 'true') }}
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     services:
       nextcloud:
         image: nextcloud:30-apache
@@ -1172,6 +1179,7 @@ jobs:
     needs: changes
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.data == 'true') }}
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     services:
       nextcloud:
         image: nextcloud:30-apache
@@ -1392,6 +1400,7 @@ jobs:
     needs: [changes, typescript-build]
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.fuse == 'true') }}
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
 
@@ -1453,7 +1462,7 @@ jobs:
     needs: changes
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.fuse == 'true') }}
     runs-on: windows-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     # Advisory only: WinFsp support is experimental, this job is not in the
     # gate and never blocks a merge. It exists to surface what actually
     # breaks on Windows. Python only: mfusepy is ctypes and ships a WinFsp
@@ -1521,6 +1530,7 @@ jobs:
     needs: changes
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.fuse == 'true') }}
     runs-on: macos-15
+    timeout-minutes: 30
     # Not in the gate. Everything installs and enables headlessly, but the
     # mount request never reaches macFUSE's FSKit module on a hosted runner
     # (engaging the module appears to need the GUI approval in System
@@ -2086,6 +2096,7 @@ jobs:
     needs: [changes, typescript-build]
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.observability == 'true') }}
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
 
@@ -2174,6 +2185,7 @@ jobs:
     needs: [changes, typescript-build]
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.core == 'true' || needs.changes.outputs.ts == 'true') }}
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     # One job for the six small facets: each leg of the old matrix spent a
     # minute or more on setup for under a minute of cases.
     env:
@@ -2385,7 +2397,7 @@ jobs:
     needs: changes
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.core == 'true' || needs.changes.outputs.ts == 'true') }}
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
@@ -2419,7 +2431,7 @@ jobs:
     needs: [changes, typescript-build]
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.core == 'true' || needs.changes.outputs.ts == 'true') }}
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
       # Python 3.14, where coverage measures branches through sys.monitoring,
@@ -2446,6 +2458,7 @@ jobs:
   gate:
     name: integ-gate
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     needs: [changes, typescript-build, integ, integ-ts, integ-shared-py, integ-shared-ts, integ-selftests, integ-shared-parity, integ-database, integ-data, integ-events, integ-fuse, integ-observability, integ-facets, integ-runtime, integ-e2b, integ-wandb, integ-shell-coverage]
     if: always()
     steps:
