@@ -142,3 +142,19 @@ async def test_a_new_clock_under_a_waiting_caller_lets_it_finish():
     limiter.bind_clock(later)
     await waiting
     assert clock.waits == pytest.approx([0.2])
+
+
+@pytest.mark.asyncio
+async def test_a_caller_from_the_old_clock_leaves_the_new_schedule_alone():
+    clock = _Stalled(until=0.0)
+    limiter = _limiter(5, clock)
+    await limiter.acquire("appA")
+    waiting = asyncio.create_task(limiter.acquire("appA"))
+    await asyncio.sleep(0)
+    later = _Clock()
+    later.wall = 200.0
+    limiter.bind_clock(later)
+    await limiter.acquire("appA")
+    await waiting
+    await limiter.acquire("appA")
+    assert later.waits == pytest.approx([0.2])

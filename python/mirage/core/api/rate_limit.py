@@ -62,23 +62,33 @@ class RateLimiter:
     async def acquire(self, key: str) -> None:
         """Wait for this key's next slot.
 
+        A caller waits out its slot on the clock it took it on. If the
+        limiter is bound to another clock meanwhile, its slot means
+        nothing on the new schedule, so it leaves that schedule alone.
+
         Args:
             key (str): what the server meters by (an Airtable base id).
         """
-        now = self._clock.monotonic()
+        clock = self._clock
+        now = clock.monotonic()
         slot = max(now, self._next.get(key, now))
         self._next[key] = slot + self._interval
         if slot <= now:
             return
         seen = self._shift.get(key, 0.0)
-        await self._clock.sleep(slot - now)
-        while (moved := self._shift.get(key, 0.0)) != seen:
+        await clock.sleep(slot - now)
+        while (
+            self._clock is clock
+            and (moved := self._shift.get(key, 0.0)) != seen
+        ):
             slot += moved - seen
             seen = moved
-            now = self._clock.monotonic()
+            now = clock.monotonic()
             if slot > now:
-                await self._clock.sleep(slot - now)
-        late = self._clock.monotonic() - slot
+                await clock.sleep(slot - now)
+        if self._clock is not clock:
+            return
+        late = clock.monotonic() - slot
         if late > 0:
             self._shift[key] = seen + late
-            self._next[key] = self._next.get(key, slot) + late
+            self._next[key] += late

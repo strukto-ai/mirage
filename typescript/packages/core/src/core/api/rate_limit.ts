@@ -55,21 +55,31 @@ export class RateLimiter {
     this.shift.clear()
   }
 
-  /** Wait for this key's next slot (an Airtable base id). */
+  /**
+   * Wait for this key's next slot (an Airtable base id). A caller waits out its
+   * slot on the clock it took it on; once another clock is bound, that slot
+   * means nothing on the new schedule, so the caller leaves it alone.
+   */
   async acquire(key: string): Promise<void> {
-    let now = this.clock.monotonic()
+    const clock = this.clock
+    let now = clock.monotonic()
     let slot = Math.max(now, this.next.get(key) ?? now)
     this.next.set(key, slot + this.interval)
     if (slot <= now) return
     let seen = this.shift.get(key) ?? 0
-    await this.clock.sleep(slot - now)
-    for (let moved = this.shift.get(key) ?? 0; moved !== seen; moved = this.shift.get(key) ?? 0) {
+    await clock.sleep(slot - now)
+    for (
+      let moved = this.shift.get(key) ?? 0;
+      this.clock === clock && moved !== seen;
+      moved = this.shift.get(key) ?? 0
+    ) {
       slot += moved - seen
       seen = moved
-      now = this.clock.monotonic()
-      if (slot > now) await this.clock.sleep(slot - now)
+      now = clock.monotonic()
+      if (slot > now) await clock.sleep(slot - now)
     }
-    const late = this.clock.monotonic() - slot
+    if (this.clock !== clock) return
+    const late = clock.monotonic() - slot
     if (late > 0) {
       this.shift.set(key, seen + late)
       this.next.set(key, (this.next.get(key) ?? slot) + late)

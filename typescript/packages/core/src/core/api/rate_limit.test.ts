@@ -126,4 +126,19 @@ describe('RateLimiter', () => {
     await waiting
     expect(clock.waits).toEqual([expect.closeTo(0.2)])
   })
+
+  it('keeps a caller from the old clock off the new schedule', async () => {
+    const clock = new StalledClock(0)
+    const l = limiter(5, clock)
+    await l.acquire('appA')
+    const waiting = l.acquire('appA')
+    await Promise.resolve()
+    const later = new Clock()
+    later.wall = 200
+    l.bindClock(later)
+    await l.acquire('appA')
+    await waiting
+    await l.acquire('appA')
+    expect(later.waits).toEqual([expect.closeTo(0.2)])
+  })
 })
