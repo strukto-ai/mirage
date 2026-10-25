@@ -21,6 +21,8 @@ import { classify, failureText } from '@struktoai/mirage-core/errors/classify'
 import { PathSpec, type JsonValue } from '@struktoai/mirage-core/types'
 import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
 import { MountCore, type MountAttrs } from '@struktoai/mirage-node'
+import { OWNER } from '@struktoai/mirage-node/mount/constants'
+import type { OpenMode } from '@struktoai/mirage-core/runtime/handles/index'
 import { eexist, enoent } from '@struktoai/mirage-core/errors/fs'
 import type { ServerChannel } from 'ssh2'
 import type { WebSocket } from 'ws'
@@ -62,6 +64,15 @@ interface Kinds {
 }
 
 const FILE_SCHEME = 'file://'
+const WRITE: OpenMode = {
+  readable: false,
+  writable: true,
+  truncate: true,
+  append: false,
+  create: true,
+  exclusive: false,
+  binary: true,
+}
 const encoder = new TextEncoder()
 const decoder = new TextDecoder()
 
@@ -258,10 +269,7 @@ async function readFile(core: MountCore, path: string): Promise<Uint8Array> {
 /** `fs/writeFile`: create or replace the file; its directory must exist. */
 async function writeFile(core: MountCore, path: string, data: Uint8Array): Promise<void> {
   if ((await lookup(core, posix.dirname(path))) === null) throw enoent(path)
-  const fd =
-    (await lookup(core, path)) !== null
-      ? await core.open(path, fsConstants.O_TRUNC)
-      : await core.create(path)
+  const fd = await core.open(path, WRITE)
   try {
     if (data.byteLength > 0) await core.write(path, fd, data, 0)
     await core.flush(path, fd)
@@ -490,7 +498,7 @@ class CodexChannel {
     private readonly write: (text: string) => Promise<void>,
   ) {
     const ws = entry.runner.ws
-    this.core = new MountCore(ws.vfs, { session: ws.getSession(sessionId) })
+    this.core = new MountCore(ws.vfs, { session: ws.getSession(sessionId), owner: OWNER })
     this.methods = {
       initialize: () => this.initialize(),
       'environment/info': () => this.environmentInfo(),

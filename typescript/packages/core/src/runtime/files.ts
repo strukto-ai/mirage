@@ -14,7 +14,7 @@
 
 import { ConcurrencyLimiter } from '../concurrency/limiter.ts'
 import { classify } from '../errors/index.ts'
-import { einval, eloop, isMissingOp, isMissingPath } from '../errors/fs.ts'
+import { ebadf, einval, eloop, isMissingOp, isMissingPath } from '../errors/fs.ts'
 import {
   atimeMs,
   contentSize,
@@ -30,14 +30,16 @@ import { ABSENT_PATH, LISTING_ENTRY_CONCURRENCY } from './constants.ts'
 import { CrossMountError } from './errors.ts'
 import { normDir, rstripSlash } from '../utils/slash.ts'
 import { CycleError, resolvePath } from '../utils/path.ts'
-import type { FlushStep, Kept } from './handles/index.ts'
+import { READ_CHUNK } from './handles/constants.ts'
+import type { OpenMode } from './handles/index.ts'
+import { MountCore } from '../mount/core.ts'
 import { PrefixResolver, type MountResolver } from './resolver.ts'
 import type { BridgeDispatchFn } from './types.ts'
 import { CallerResolver, workspaceBridge, type WorkspaceBinding } from './binding.ts'
 import { linkView } from '../commands/builtin/utils/links.ts'
 import type { Context } from '../commands/config.ts'
 import { awaitsAs, callsAs, currentCaller } from '../context/session_context.ts'
-import { FileStat, FileType, PathSpec, type SetAttrFields } from '../types.ts'
+import { type FileStat, PathSpec, type SetAttrFields } from '../types.ts'
 import { concat } from '../utils/bytes.ts'
 import { entryName } from '../utils/remnants.ts'
 import type { VFSEntry, VFSStat } from './types.ts'
@@ -87,17 +89,136 @@ function statRow(st: FileStat): VFSStat {
 }
 
 /**
- * The bytes a handle on a removed file reads: the stored ones for a handle
- * that writes, the rendering for one that only reads, or the error that
- * kept that view from being read. Mirrors Python's `kept_view`.
+ * One file a guest holds open: the run's core handle on it, the position
+ * its reads and writes move, and what its open asked for. Nothing the guest
+ * reads or writes stays here: the core holds it (`RuntimeFiles.open`), so
+ * every entry point judges, lands and keeps an open file one way. A stream
+ * and a descriptor over one open share this, and with it the position, as
+ * POSIX shares an open file description. Mirrors Python's `Descriptor`.
  */
-export function keptView(kept: Kept, raw: boolean): Uint8Array {
-  if (!raw) {
-    if (kept.renderingError !== null) throw kept.renderingError
-    if (kept.rendering !== null) return kept.rendering
+export class Descriptor {
+  pos = 0
+
+  /**
+   * @param files the adapter whose core the handle is on.
+   * @param fd the core's handle.
+   * @param mode what the open asked for.
+   * @param opened the path it was opened at, which its inode number comes
+   *   from however the file is renamed since.
+   * @param directory it names a directory, which it may not read.
+   */
+  constructor(
+    readonly files: RuntimeFiles,
+    readonly fd: number,
+    readonly mode: OpenMode,
+    readonly opened: string,
+    readonly directory = false,
+  ) {}
+
+  /** The path its file has now; a rename moves it. */
+  get path(): string {
+    return this.files.pathOf(this.fd)
   }
-  if (kept.error !== null) throw kept.error
-  return kept.data
+
+  /** The file's length as the handle holds it, its writes counted. */
+  async size(): Promise<number> {
+    return (await this.files.fstat(this.fd)).size
+  }
+
+  /** Read at an explicit offset without moving the position. */
+  async pread(offset: number, size: number): Promise<Uint8Array> {
+    if (size <= 0) return new Uint8Array()
+    return this.files.pread(this.fd, offset, size)
+  }
+
+  /**
+   * Read from the position, advancing it by what was read; a negative or
+   * null size reads to the end, a chunk at a time.
+   */
+  async read(size: number | null = null): Promise<Uint8Array> {
+    if (size !== null && size >= 0) {
+      const chunk = await this.pread(this.pos, size)
+      this.pos += chunk.byteLength
+      return chunk
+    }
+    const parts: Uint8Array[] = []
+    for (;;) {
+      const chunk = await this.pread(this.pos, READ_CHUNK)
+      if (chunk.byteLength === 0) return concat(parts)
+      parts.push(chunk)
+      this.pos += chunk.byteLength
+    }
+  }
+
+  /**
+   * One line from the position, its newline included, advancing past it;
+   * null at the end of the file. It reads ahead 4 KiB at a time, so a
+   * short line costs one read.
+   */
+  async readLine(): Promise<Uint8Array | null> {
+    const parts: Uint8Array[] = []
+    let at = this.pos
+    for (;;) {
+      const chunk = await this.pread(at, 4096)
+      const newline = chunk.indexOf(0x0a)
+      if (newline >= 0) {
+        parts.push(chunk.subarray(0, newline + 1))
+        this.pos = at + newline + 1
+        return concat(parts)
+      }
+      if (chunk.byteLength === 0) {
+        this.pos = at
+        return parts.length === 0 ? null : concat(parts)
+      }
+      parts.push(chunk)
+      at += chunk.byteLength
+    }
+  }
+
+  /** Write at an explicit offset without moving the position; an appending handle writes at its end. */
+  async pwrite(offset: number, data: Uint8Array): Promise<void> {
+    if (data.byteLength > 0) await this.files.pwrite(this.fd, offset, data)
+  }
+
+  /**
+   * Write at the position, advancing it past what was written; an appending
+   * handle first moves the position to its end, as O_APPEND does, so a
+   * write that fails to find the end leaves nothing written.
+   */
+  async write(data: Uint8Array): Promise<void> {
+    if (this.mode.append && data.byteLength > 0) this.pos = await this.size()
+    const at = this.pos
+    this.pos += data.byteLength
+    await this.pwrite(at, data)
+  }
+
+  /**
+   * Move the position, POSIX whence numbering; null when the whence is
+   * unknown or the target would be negative (the position is then
+   * untouched).
+   */
+  async seek(offset: number, whence: number): Promise<number | null> {
+    const base =
+      whence === 0 ? 0 : whence === 1 ? this.pos : whence === 2 ? await this.size() : null
+    if (base === null || base + offset < 0) return null
+    this.pos = base + offset
+    return this.pos
+  }
+
+  /** Set the file's length: a shrink drops bytes, growth reads zeros. */
+  async truncate(size: number): Promise<void> {
+    await this.files.ftruncate(this.fd, size)
+  }
+
+  /** Land what it wrote, as fsync(2) does. */
+  async land(): Promise<void> {
+    await this.files.fsync(this.fd)
+  }
+
+  /** Land what it wrote and let the core's handle go. */
+  async close(): Promise<void> {
+    await this.files.close(this.fd)
+  }
 }
 
 /**
@@ -116,6 +237,16 @@ export function keptView(kept: Kept, raw: boolean): Uint8Array {
  * the call (quickjs asyncify) or records the mutation and replays it
  * after the run (pyodide), so nothing here has to block a worker
  * thread the way the Python runtimes do.
+ *
+ * A file the guest opens is a handle on the run's `MountCore` (`open`,
+ * `pread`, `pwrite`, `fstat`, `ftruncate`, `fsync`, `close`), the
+ * open-file layer every entry point shares: it holds what the guest read,
+ * keeps what it wrote until a close or a sync, lands it in the order the
+ * writes were made, and keeps a file whose name went for the handles open
+ * on it. The guest's own table keeps only the descriptor number, its
+ * position and its flags. A removal, a rename, a truncate and a change of
+ * times by path go through the core too, so the files open on that path
+ * follow them. Mirrors Python's `RuntimeFiles`.
  */
 export class RuntimeFiles {
   private readonly dispatch: BridgeDispatchFn
@@ -130,11 +261,20 @@ export class RuntimeFiles {
    *   no mounts, so routing questions answer null.
    * @param resolve where the namespace's links lead a path; null while the
    *   workspace keeps no links.
+   * @param core the open-file core the run's files open on; null opens
+   *   nothing.
+   * @param signal the run's, which stops a core op once it aborts.
+   * @param live the signals of the guest calls on the core now, which its
+   *   every dispatch checks; a call with none (a run's end landing what it
+   *   wrote) passes, however the run ended.
    */
   constructor(
     readonly bridge: BridgeDispatchFn,
     resolver: MountResolver = new PrefixResolver(() => []),
     private readonly resolve: ((path: string) => string) | null = null,
+    private readonly core: MountCore | null = null,
+    private readonly signal: AbortSignal | null = null,
+    private readonly live: AbortSignal[] = [],
   ) {
     // One cap on every request the file adapter sends, held for that request
     // alone, so the stats of listings that run together (a guest
@@ -177,10 +317,27 @@ export class RuntimeFiles {
     if (bridge === null) return null
     const caller = currentCaller()
     const links = linkView(vfs)
+    const live: AbortSignal[] = []
     return new RuntimeFiles(
       awaitsAs(caller, bridge),
       new CallerResolver(binding.resolver, caller),
       links === undefined ? null : callsAs(caller, links.resolve.bind(links)),
+      vfs === undefined
+        ? null
+        : new MountCore(
+            vfs.over(
+              // A cancelled guest call sends nothing more, whichever op of
+              // the core's was under way.
+              awaitsAs(caller, async (name, path, args, kwargs, report) => {
+                for (const signal of live) signal.throwIfAborted()
+                const out = await vfs.dispatch(name, path, args, kwargs, report)
+                for (const signal of live) signal.throwIfAborted()
+                return out
+              }),
+            ),
+          ),
+      null,
+      live,
     )
   }
 
@@ -195,55 +352,93 @@ export class RuntimeFiles {
       },
       this.resolver,
       this.resolve,
+      this.core,
+      signal,
+      this.live,
     )
   }
 
   /**
-   * What the handles open on `path` keep once its name goes: the stored
-   * bytes for one that writes, the rendering for one that only reads, read
-   * once and shared when the two agree. A read that fails is kept as the
-   * error the later reads of that view report, so the removal still goes
-   * ahead. Mirrors Python's RuntimeFiles.kept.
+   * Run one op on the run's open-file core; EBADF when this adapter opens
+   * nothing. An op that only lands what the guest already wrote (`lands`)
+   * runs however the run ended, as the run's end would land it anyway.
    */
-  async kept(path: string, opts: { stored: boolean; rendered: boolean }): Promise<Kept> {
-    const kept: Kept = {
-      data: new Uint8Array(),
-      rendering: null,
-      error: null,
-      renderingError: null,
+  private async onCore<T>(op: (core: MountCore) => Promise<T>, lands = false): Promise<T> {
+    if (this.core === null) throw ebadf('/')
+    const signal = lands ? null : this.signal
+    if (signal === null) return op(this.core)
+    signal.throwIfAborted()
+    this.live.push(signal)
+    try {
+      const out = await op(this.core)
+      signal.throwIfAborted()
+      return out
+    } finally {
+      this.live.splice(this.live.indexOf(signal), 1)
     }
-    const failed = (err: unknown): Error => {
-      console.warn(`runtime files: keeping ${path} failed`, err)
-      return err instanceof Error ? err : new Error(String(err))
-    }
-    let raw: Uint8Array | null = null
-    let shown: Uint8Array | null = null
-    if (opts.stored) {
-      try {
-        raw = await this.read(path, { raw: true })
-      } catch (err) {
-        kept.error = failed(err)
-      }
-    }
-    if (opts.rendered) {
-      try {
-        shown = await this.read(path)
-      } catch (err) {
-        kept.renderingError = failed(err)
-      }
-    }
-    if (raw !== null) {
-      const stored = raw
-      kept.data = stored
-      const same =
-        shown !== null && shown.length === stored.length && shown.every((b, i) => b === stored[i])
-      kept.rendering = shown === null || same ? null : shown
-    } else if (opts.stored) {
-      kept.rendering = shown
-    } else if (shown !== null) {
-      kept.data = shown
-    }
-    return kept
+  }
+
+  /** The path the core's handle `fd` is on now; EBADF for any other number. */
+  pathOf(fd: number): string {
+    const held = this.core?.handles.get(fd)
+    if (held === undefined) throw ebadf(String(fd))
+    return held.path
+  }
+
+  /**
+   * Open a file, the open's effect landing before any byte moves
+   * (`MountCore.open`), and answer the core's handle for it. `perm` is the
+   * mode bits a create gives the file; null takes the mount's default.
+   */
+  async open(path: string, mode: OpenMode, perm: number | null = null): Promise<number> {
+    return this.onCore((core) => core.open(path, mode, perm))
+  }
+
+  /**
+   * Read through an open handle: what it holds, judged as a read of its
+   * path now, with what it wrote and has not landed laid over.
+   */
+  async pread(fd: number, offset: number, size: number): Promise<Uint8Array> {
+    const path = this.pathOf(fd)
+    return this.onCore((core) => core.read(path, fd, offset, size))
+  }
+
+  /**
+   * Write through an open handle, which keeps the bytes until a close or a
+   * sync lands them; one that appends writes at its end.
+   */
+  async pwrite(fd: number, offset: number, data: Uint8Array): Promise<void> {
+    const path = this.pathOf(fd)
+    await this.onCore((core) => core.write(path, fd, data, offset))
+  }
+
+  /** The row an open handle stats by, the size it holds counted. */
+  async fstat(fd: number): Promise<VFSStat> {
+    return statRow(await this.onCore((core) => core.fstat(fd)))
+  }
+
+  /** Whether the name an open handle's file had went, so the file has no link left. */
+  unlinked(fd: number): boolean {
+    return this.core?.handles.get(fd)?.detached !== undefined
+  }
+
+  /** Set the length of the file an open handle is on. */
+  async ftruncate(fd: number, length: number): Promise<void> {
+    await this.onCore((core) => core.ftruncate(fd, length))
+  }
+
+  /** Land what an open handle wrote, as fsync(2) does. */
+  async fsync(fd: number): Promise<void> {
+    const path = this.pathOf(fd)
+    await this.onCore((core) => core.flush(path, fd), true)
+  }
+
+  /**
+   * Land what an open handle wrote and let it go; a landing that fails
+   * still lets it go, and is thrown.
+   */
+  async close(fd: number): Promise<void> {
+    await this.onCore((core) => core.release(fd), true)
   }
 
   /**
@@ -325,25 +520,11 @@ export class RuntimeFiles {
     return out
   }
 
-  /** Judge bytes a descriptor holds as a read of its path, and answer them; nothing is fetched. */
-  async readCached(path: string, data: Uint8Array): Promise<Uint8Array> {
-    await this.dispatch('read', path, undefined, undefined, { retained: data })
-    return data
-  }
-
   async write(path: string, bytes: Uint8Array): Promise<void> {
     const out = await this.dispatch('write', path, bytes)
     if (out !== undefined) {
       throw new TypeError(`runtime files: write ${path} expected void, got ${typeof out}`)
     }
-  }
-
-  /**
-   * Write bytes at an offset, leaving the rest of the file as it is; past
-   * the end, the gap reads as zeros.
-   */
-  async pwrite(path: string, offset: number, bytes: Uint8Array): Promise<void> {
-    await this.dispatch('pwrite', path, bytes, undefined, { offset })
   }
 
   /**
@@ -357,6 +538,9 @@ export class RuntimeFiles {
    *   the flag and gates that read exactly as it gates `readlink`.
    */
   async stat(path: string, nofollow = false): Promise<VFSStat> {
+    // Through the core, so what the files open there wrote and have not
+    // landed counts, as write(2) is seen at once.
+    if (this.core !== null) return statRow(await this.onCore((core) => core.stat(path, !nofollow)))
     const out = await this.dispatch(
       'stat',
       path,
@@ -368,44 +552,6 @@ export class RuntimeFiles {
       throw new TypeError(`runtime files: stat ${path} bad shape`)
     }
     return statRow(out as FileStat)
-  }
-
-  /**
-   * Judge a descriptor's held row as a stat of its path, and answer it;
-   * nothing is fetched. The policies see the backend's row with what the
-   * descriptor changed (size, mode, and a time the row has), so an unknown
-   * size, a named owner and a time the backend never gave stay as they were.
-   */
-  async statCached(path: string, row: VFSStat): Promise<VFSStat> {
-    // A row that crossed a worker boundary is a plain object again.
-    let held = new FileStat(
-      row.source ?? {
-        name: entryName(path),
-        type: row.isDir
-          ? FileType.DIRECTORY
-          : row.isLink === true
-            ? FileType.SYMLINK
-            : FileType.FILE,
-        mode: row.mode,
-      },
-    )
-    const mtime = mtimeMs(held)
-    const atime = atimeMs(held)
-    held = held.with({
-      ...(row.size !== contentSize(held) ? { size: row.size } : {}),
-      ...(row.mode !== posixMode(held) ? { mode: row.mode } : {}),
-      ...(row.mtimeMs !== undefined && mtime !== null && row.mtimeMs !== mtime
-        ? { modified: new Date(row.mtimeMs).toISOString() }
-        : {}),
-      ...(row.atimeMs !== undefined && atime !== null && row.atimeMs !== atime
-        ? { atime: new Date(row.atimeMs).toISOString() }
-        : {}),
-    })
-    await this.dispatch('stat', path, undefined, undefined, {
-      retained: held,
-      ...(row.isLink === true ? { nofollow: true } : {}),
-    })
-    return row
   }
 
   /**
@@ -558,28 +704,20 @@ export class RuntimeFiles {
     }
   }
 
-  /** Admit writable access without changing content or metadata. */
-  async checkWrite(path: string): Promise<void> {
-    await this.dispatch('write', path, undefined, undefined, { admitOnly: true })
-  }
-
-  /**
-   * Establish an empty file at `path` through the mount, so write
-   * modes and a missing parent answer at open time and the ledger
-   * records the op a create is.
-   */
-  async create(path: string): Promise<void> {
-    await this.dispatch('create', path)
-  }
-
   /** Set `path`'s length: a shrink drops bytes, growth reads zeros. */
   async truncate(path: string, length = 0): Promise<void> {
     if (length < 0) throw einval(path)
-    await this.dispatch('truncate', path, undefined, undefined, { length })
+    if (this.core === null) await this.dispatch('truncate', path, undefined, undefined, { length })
+    else await this.onCore((core) => core.truncate(path, length))
   }
 
+  /**
+   * Remove the entry at `path`; a file open on it keeps what it held, as
+   * POSIX keeps an open file on its inode.
+   */
   async unlink(path: string): Promise<void> {
-    await this.dispatch('unlink', path)
+    if (this.core === null) await this.dispatch('unlink', path)
+    else await this.onCore((core) => core.unlink(path))
   }
 
   /**
@@ -613,7 +751,8 @@ export class RuntimeFiles {
    */
   async rename(src: string, dst: string): Promise<void> {
     if (this.mountOf(src) !== this.mountOf(dst)) throw new CrossMountError(src, dst)
-    await this.dispatch('rename', src, undefined, dst)
+    if (this.core === null) await this.dispatch('rename', src, undefined, dst)
+    else await this.onCore((core) => core.rename(src, dst))
   }
 
   /**
@@ -661,6 +800,11 @@ export class RuntimeFiles {
    *   attrs: the fields to write, unset ones omitted.
    */
   async setattr(path: string, attrs: SetAttrFields): Promise<void> {
+    // A file still open there lands its writes first, or they would stamp
+    // over the times.
+    if (attrs.atime !== undefined || attrs.mtime !== undefined) {
+      if (this.core !== null) await this.onCore((core) => core.land(path, attrs.nofollow !== true))
+    }
     await this.dispatch('setattr', path, undefined, undefined, attrs)
   }
 
@@ -708,15 +852,5 @@ export class RuntimeFiles {
       return false
     }
     return true
-  }
-
-  /** Send what a closing handle owes the mount, in order (its `flushPlan()`). */
-  async flush(path: string, steps: readonly FlushStep[]): Promise<void> {
-    for (const step of steps) {
-      const data = step.data ?? new Uint8Array()
-      if (step.kind === 'append') await this.append(path, data)
-      else if (step.kind === 'pwrite') await this.pwrite(path, step.offset ?? 0, data)
-      else await this.truncate(path, step.length ?? 0)
-    }
   }
 }

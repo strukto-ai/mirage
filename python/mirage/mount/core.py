@@ -14,14 +14,17 @@
 
 import asyncio
 import logging
-import os
 import posixpath
 import time
 from collections.abc import Awaitable, Callable
+from dataclasses import replace
 from typing import Any, TypeVar, cast
 
 from mirage.context import reset_current_session, set_current_session
-from mirage.errors.fs import enoent
+from mirage.errors import FsCondition, classify
+from mirage.errors.fs import ebadf, eexist, einval, eisdir, enoent, enotdir
+from mirage.errors.types import OperationNotSupportedError
+from mirage.mount.constants import OWNER
 from mirage.mount.platform.macos import is_macos_metadata
 from mirage.mount.types import Handle, MountAttrs, WriteBuf
 from mirage.policy.match import skipped_at_dispatch
@@ -32,6 +35,7 @@ from mirage.runtime.handles import (
     write_runs,
 )
 from mirage.runtime.handles.constants import READ_CHUNK
+from mirage.runtime.handles.mode import READ, OpenMode
 from mirage.types import LIVE_KEY, FileStat, FileType, PathSpec
 from mirage.utils.dates import ns_to_iso
 from mirage.utils.stat_view import (
@@ -100,17 +104,22 @@ class MountCore:
         self._now = time.time_ns()
         self._root = root_prefix.rstrip("/")
         self._handles: FileTable[Handle] = FileTable()
-        # Per file identity: the hydration read out (opens share it), a
-        # generation a change under it bumps, the chain of mutations, the
-        # chain of removals, and the opens out that a removal waits for.
-        self._hydrations: dict[str, asyncio.Future[bytes | None]] = {}
-        self._hydration_gen: dict[str, int] = {}
+        # Per file identity and view (stored or rendered): the hydration
+        # read out (opens share it) and a generation a change under it
+        # bumps. Per identity: the chain of mutations, the chain of
+        # removals, and the opens out that a removal waits for.
+        self._hydrations: dict[
+            tuple[str, bool], asyncio.Future[bytes | None]
+        ] = {}
+        self._hydration_gen: dict[tuple[str, bool], int] = {}
+        # The mounts that refused an append, which land one as a write.
+        self._no_append: set[str] = set()
+        # Names the files whose name went, one per removal.
+        self._removed = 0
         self._pending: dict[str, asyncio.Future[None]] = {}
         self._removals: dict[str, asyncio.Future[None]] = {}
         self._opening: dict[str, set[asyncio.Future[None]]] = {}
-        # Windows has none; WinFsp presents files as the mounting user's.
-        self._uid = os.getuid() if hasattr(os, "getuid") else 0
-        self._gid = os.getgid() if hasattr(os, "getgid") else 0
+        self._uid, self._gid = OWNER
 
     @property
     def files(self) -> Files:
@@ -421,15 +430,30 @@ class MountCore:
         Raises:
             FileNotFoundError: no such entry.
         """
-        size = None if ctx is None or ctx.data is None else len(ctx.data)
         if path == "/":
             return await self.root_attrs()
         # macOS Finder/Spotlight probes .DS_Store, ._*, .Spotlight-V100, etc.
         # Reject early to avoid hitting the ops layer.
-        name = path.rsplit("/", 1)[-1]
-        if is_macos_metadata(name):
+        if is_macos_metadata(path.rsplit("/", 1)[-1]):
             raise enoent(path)
-        virtual = self.resolve(path)
+        s = await self._row(path, follow, ctx)
+        if is_link(s):
+            target = await self._op(self._files.readlink(self.resolve(path)))
+            return self.attrs(s, len(self.shown_target(path, target).encode()))
+        return self.attrs(s)
+
+    async def _row(
+        self, path: str, follow: bool, ctx: Handle | None
+    ) -> FileStat:
+        """The row a stat of ``path`` answers, the size an open handle
+        holds and what it wrote and has not landed counted.
+
+        Args:
+            path (str): mount path to stat.
+            follow (bool): report a trailing link's target.
+            ctx (Handle | None): the open handle a fstat reads through.
+        """
+        size = None if ctx is None or ctx.data is None else len(ctx.data)
         retained = False
         if ctx is not None and ctx.detached is not None:
             # Its name is gone: it stats by the row its file had then.
@@ -438,35 +462,34 @@ class MountCore:
         else:
             try:
                 s = await self._op(
-                    self._files.stat(virtual, nofollow=not follow)
+                    self._files.stat(self.resolve(path), nofollow=not follow)
                 )
             except FileNotFoundError:
                 if size is None:
                     raise
                 # A hide is not an unlink: held metadata still meets the walk.
                 retained = True
-                s = FileStat(name=name, type=FileType.FILE)
+                s = FileStat(name=path.rsplit("/", 1)[-1], type=FileType.FILE)
         if is_link(s):
-            target = await self._op(self._files.readlink(virtual))
-            return self.attrs(s, len(self.shown_target(path, target).encode()))
+            return s
         if is_dir(s):
-            return self.attrs(
-                await self._stat_cached(path, s) if retained else s
-            )
+            return await self._stat_cached(path, s) if retained else s
         if size is None and s.size is None:
             # A size-unknown file stats as 0 rather than be fetched on
             # every ls -l; direct_io keeps its reads whole regardless.
             size = self.held_size(path)
-        if ctx is not None and ctx.write_buf:
+        key = self.identity(path, follow) if ctx is None else ctx.key
+        writes = self._writes_on(key, ctx)
+        if writes:
             stored = content_size(s) if size is None else size
-            size = max(stored, *(o + len(d) for o, d in ctx.write_buf))
+            size = max(stored, *(o + len(d) for o, d in writes))
         if size is not None and size != s.size:
             s = s.model_copy(update={"size": size})
         # A row the stat above fetched was judged there; a held one is
         # judged here, with the size the handle answers.
         if retained:
             s = await self._stat_cached(path, s)
-        return self.attrs(s)
+        return s
 
     async def fgetattr(self, path: str, fh: int | None) -> MountAttrs:
         """Attributes through an open handle: the path's row, with the
@@ -481,6 +504,56 @@ class MountCore:
             return await self.getattr(path)
         await self._settled(ctx)
         return await self.getattr(ctx.path, True, ctx)
+
+    async def stat(self, path: str, follow: bool = True) -> FileStat:
+        """The row a stat of ``path`` answers, what the handles open on
+        it wrote and have not landed counted, as a guest projects it into
+        its own record.
+
+        Args:
+            path (str): mount path to stat.
+            follow (bool): report a trailing link's target.
+        """
+        return await self._row(path, follow, None)
+
+    async def fstat(self, fh: int) -> FileStat:
+        """The row an open handle stats by: its file's, with the size it
+        holds and what it wrote and has not landed counted, judged as a
+        stat of its path. A guest projects this into its own record.
+
+        Args:
+            fh (int): the open handle.
+        """
+        ctx = self._open_handle(fh)
+        await self._settled(ctx)
+        return await self._row(ctx.path, True, ctx)
+
+    def _open_handle(self, fh: int) -> Handle:
+        """The handle ``fh`` names; EBADF for any other number.
+
+        Args:
+            fh (int): the handle id.
+        """
+        ctx = self._handles.get(fh)
+        if ctx is None:
+            raise ebadf(str(fh))
+        return ctx
+
+    @staticmethod
+    def _end(ctx: Handle) -> int:
+        """Where the file a handle holds ends: its bytes, else the length
+        its open saw, and past them what it wrote.
+
+        Args:
+            ctx (Handle): the open handle.
+        """
+        if ctx.data is not None:
+            stored = len(ctx.data)
+        elif ctx.chunked is not None:
+            stored = ctx.chunked.size
+        else:
+            stored = ctx.size
+        return max([stored, *(o + len(d) for o, d in ctx.write_buf)])
 
     async def readdir(self, path: str) -> list[str]:
         """Entry names under a directory, including "." and "..".
@@ -521,15 +594,27 @@ class MountCore:
             # Whole, as a handle's first read is: the read that fills the
             # cache and records the version a conditional write sends.
             data = await self._op(self._files.read(self.resolve(path)))
+            writes = self._writes_on(self.identity(path), None)
+            if writes:
+                return await self._read_cached(
+                    path, overlaid(data[offset:], offset, size, writes)
+                )
             return data[offset : offset + size]
+        if not ctx.mode.readable:
+            raise ebadf(ctx.path)
+        if ctx.lost is not None and ctx.data is None:
+            raise ctx.lost
         # A flush still landing has taken the handle's buffer and not yet
         # refreshed its bytes: wait for it, so the read sees what was
         # written.
         await self._settled(ctx)
         retained = False
+        # A handle that writes reads the stored bytes its writes land on;
+        # one that only reads sees the rendering.
+        raw = ctx.mode.writable
         if ctx.live:
             stored = await self._op(
-                self._files.read(self.resolve(ctx.path), offset, size)
+                self._files.read(self.resolve(ctx.path), offset, size, raw)
             )
         elif ctx.chunked is not None and ctx.data is None:
             retained = ctx.chunked.holds(offset, size)
@@ -540,52 +625,113 @@ class MountCore:
                 # A change landing while this read is out keeps it from
                 # holding what it fetched.
                 generation = ctx.generation
-                held = await self._op(self._files.read(self.resolve(ctx.path)))
+                held = await self._op(
+                    self._files.read(self.resolve(ctx.path), raw=raw)
+                )
                 if ctx.generation == generation:
                     ctx.data = held
             else:
                 retained = True
             stored = held[offset : offset + size]
-        data = (
-            overlaid(stored, offset, size, ctx.write_buf)
-            if ctx.write_buf
-            else stored
-        )
-        if retained or ctx.write_buf:
+        writes = self._writes_on(ctx.key, ctx)
+        data = overlaid(stored, offset, size, writes) if writes else stored
+        if retained or writes:
             return await self._read_cached(ctx.path, data)
         return data
 
-    async def _apply_writes(self, path: str, runs: WriteBuf) -> None:
+    def _writes_on(self, key: str, ctx: Handle | None) -> WriteBuf:
+        """What a read of the file ``key`` names sees that has not landed:
+        every handle's writes on it, as write(2) is seen by every reader at
+        once. ``_supersede`` keeps them apart, so they lay over the stored
+        bytes in any order; an appending handle's are its own, since they
+        land at the end the file has then, and the reader's own go last.
+
+        Args:
+            key (str): the file identity.
+            ctx (Handle | None): the handle reading; None reads by path.
+        """
+        out: WriteBuf = []
+        for other in self._open_on(key):
+            if other is not ctx and not other.mode.append:
+                out.extend(other.write_buf)
+        if ctx is not None:
+            out.extend(ctx.write_buf)
+        return out
+
+    async def _apply_writes(
+        self,
+        path: str,
+        runs: list[tuple[int, bytes]],
+        append: bool = False,
+    ) -> None:
         """Land write runs on the mount, one pwrite each, in order.
 
         A pwrite keeps every stored byte the handle did not write, so
         nothing is read through the dispatcher first: a session that may
         write a file and not read it writes through FUSE, as through a
-        write-only descriptor. The runs that landed leave ``runs`` in one
-        step, so after a failure ``runs`` holds only what did not land
-        and a retry never replays a run over bytes another writer has
-        since put there. A run that fails still invalidates what the core
-        holds, since the runs before it have landed.
+        write-only descriptor. An appending handle's runs land as appends
+        instead, at the end the file has then, so what another writer
+        appended meanwhile stays before them, as O_APPEND keeps it. The
+        runs that landed leave ``runs`` in one step, so after a failure
+        ``runs`` holds only what did not land and a retry never replays
+        a run over bytes another writer has since put there. A run that
+        fails still invalidates what the core holds, since the runs
+        before it have landed.
 
         Args:
             path (str): mount path being written.
-            runs (WriteBuf): (offset, payload) runs; the landed ones are
-                removed.
+            runs (list[tuple[int, bytes]]): (offset, payload) runs; the
+                landed ones are removed.
+            append (bool): the runs are an appending handle's.
         """
         target = self.resolve(path)
         landed = 0
         try:
             for offset, data in runs:
-                await self._op(self._files.pwrite(target, data, offset))
+                if append:
+                    await self._append(target, data)
+                else:
+                    await self._op(self._files.pwrite(target, data, offset))
                 landed += 1
         finally:
             del runs[:landed]
             await self._changed(path)
 
+    async def _append(self, target: str, data: bytes) -> None:
+        """Extend a file by ``data`` at the end it has now. A mount with
+        no append (S3) takes a write of the whole file, read fresh from
+        the backend rather than from a copy, so a write another action
+        made since stays; a mount that declined once is remembered.
+
+        Args:
+            target (str): the workspace path.
+            data (bytes): the bytes to add.
+        """
+        mount = self._files.mount_of(target) or target
+        if mount not in self._no_append:
+            try:
+                await self._op(self._files.append(target, data))
+                return
+            except OperationNotSupportedError:
+                self._no_append.add(mount)
+        try:
+            base, _ = await self._op(
+                self._files.dispatch(
+                    "read",
+                    PathSpec.from_str_path(target, cwd="/"),
+                    filetype=None,
+                    direct=True,
+                )
+            )
+        except FileNotFoundError:
+            base = b""
+        await self._op(self._files.write(target, bytes(base) + data))
+
     async def write(
         self, path: str, data: bytes, offset: int, fh: int | None
     ) -> int:
-        """Write bytes at an offset, buffering when a handle is open.
+        """Write bytes at an offset, buffering when a handle is open. An
+        appending handle writes at the end it holds, whatever the offset.
 
         Args:
             path (str): mount path to write.
@@ -595,17 +741,46 @@ class MountCore:
 
         Returns:
             int: number of bytes accepted.
+
+        Raises:
+            OSError: EBADF through a handle opened only to read.
         """
         ctx = self._handles.get(fh) if fh is not None else None
-        key = self.identity(path) if ctx is None else ctx.key
-        self._supersede(key, offset, len(data), ctx)
         if ctx is not None:
-            ctx.write_buf.append((offset, data))
+            if not ctx.mode.writable:
+                raise ebadf(ctx.path)
+            if ctx.mode.append:
+                offset = self._end(ctx)
+            self._supersede(ctx.key, offset, len(data), ctx)
+            self._buffer(ctx, offset, data)
             return len(data)
+        key = self.identity(path)
+        self._supersede(key, offset, len(data), None)
         await self._mutate(
             key, lambda: self._apply_writes(path, [(offset, data)])
         )
         return len(data)
+
+    @staticmethod
+    def _buffer(ctx: Handle, offset: int, data: bytes) -> None:
+        """Keep a write on its handle: one that starts inside the last run
+        or right at its end folds into it, so a stream of writes stays
+        one run; any other starts a run of its own, laid over the earlier
+        ones in order.
+
+        Args:
+            ctx (Handle): the handle writing.
+            offset (int): where the write starts.
+            data (bytes): the payload.
+        """
+        if not data:
+            return
+        if ctx.write_buf:
+            start, last = ctx.write_buf[-1]
+            if start <= offset <= start + len(last):
+                last[offset - start : offset - start + len(data)] = data
+                return
+        ctx.write_buf.append((offset, bytearray(data)))
 
     def _supersede(
         self, key: str, offset: int, size: int, ctx: Handle | None
@@ -624,12 +799,12 @@ class MountCore:
             ctx (Handle | None): the handle making it, None for a direct
                 write.
         """
-        if ctx is not None and ctx.detached is not None:
-            # Its name is gone: the handles open there are on another file.
+        if ctx is not None and ctx.mode.append:
+            # Its bytes land at the end the file has then, not here.
             return
         end = offset + size
         for other in self._open_on(key):
-            if other is ctx:
+            if other is ctx or other.mode.append:
                 continue
             kept: WriteBuf = []
             for at, run in other.write_buf:
@@ -654,14 +829,29 @@ class MountCore:
             int: the new handle id.
         """
         key = self.identity(path)
+        await self._make(path, mode)
+        return self._handles.add(
+            Handle(
+                path=path,
+                key=key,
+                mode=replace(READ, writable=True, create=True),
+            )
+        )
+
+    async def _make(self, path: str, mode: int | None) -> None:
+        """Create an empty file in the file's turn.
+
+        Args:
+            path (str): mount path to create.
+            mode (int | None): the requested mode, or None.
+        """
 
         async def make() -> None:
             await self._op(self._files.create(self.resolve(path)))
             await self._keep_mode(path, mode)
             await self._changed(path)
 
-        await self._mutate(key, make)
-        return self._handles.add(Handle(path=path, key=key))
+        await self._mutate(self.identity(path), make)
 
     async def mkdir(self, path: str, mode: int | None = None) -> None:
         """Create a directory.
@@ -749,8 +939,7 @@ class MountCore:
             named = self._named(path)
             row = await self._hold(path, named)
             await self._op(self._files.unlink(self.resolve(path)))
-            for ctx in named:
-                ctx.detached = row
+            self._detach(named, row)
             await self._changed(path, rehydrate=False)
 
         await self._removing([path], lambda: self._mutate(key, remove))
@@ -773,15 +962,20 @@ class MountCore:
         async def replace() -> None:
             replaced = [c for c in self._named(new) if c.key != moved]
             row = await self._hold(new, replaced)
+            # Both ends as the links above them lead in this turn, right
+            # before the move: a link the move takes along no longer leads
+            # there after it.
+            start = self.identity(old, follow=False)
+            landing = self.identity(new, follow=False)
             await self._op(self._files.rename(source, target))
-            for ctx in replaced:
-                ctx.detached = row
+            self._detach(replaced, row)
             for ctx in self._handles.values():
                 if ctx.detached is not None:
                     continue
-                if ctx.key == source or ctx.key.startswith(source + "/"):
-                    ctx.key = target + ctx.key[len(source) :]
-                    ctx.path = ctx.key[len(self._root) :]
+                if ctx.key == start or ctx.key.startswith(start + "/"):
+                    rest = ctx.key[len(start) :]
+                    ctx.key = landing + rest
+                    ctx.path = self._mount_path(ctx.key, new + rest)
             await self._changed(old, rehydrate=False)
             await self._changed(new, rehydrate=False)
 
@@ -927,17 +1121,40 @@ class MountCore:
         Args:
             ctx (Handle): the handle whose buffer to land.
         """
-        if not ctx.write_buf or ctx.detached is not None:
-            # A detached handle keeps what it wrote, as writes to an
-            # unlinked file stay with it: there is no name to land them on.
+        if not ctx.write_buf:
+            return
+        if ctx.detached is not None:
+            self._land_held(ctx, ctx.detached)
             return
         runs = write_runs(ctx.write_buf)
         ctx.write_buf = []
         try:
-            await self._apply_writes(ctx.path, runs)
+            await self._apply_writes(ctx.path, runs, ctx.mode.append)
         except BaseException:
-            ctx.write_buf = [*runs, *ctx.write_buf]
+            ctx.write_buf = [
+                *((at, bytearray(run)) for at, run in runs),
+                *ctx.write_buf,
+            ]
             raise
+
+    def _land_held(self, ctx: Handle, row: FileStat) -> None:
+        """Land a handle's writes on a file whose name went: on the bytes
+        it holds, which every handle open on that file reads, as writes
+        to an unlinked file stay with it. A handle reading a rendering
+        the stored bytes differ from keeps its own.
+
+        Args:
+            ctx (Handle): a detached handle with writes buffered.
+            row (FileStat): the row it stats by.
+        """
+        held = ctx.data or b""
+        data = overlaid(held, 0, self._end(ctx), ctx.write_buf)
+        ctx.write_buf = []
+        landed = row.model_copy(update={"size": len(data)})
+        for other in self._open_on(ctx.key):
+            if other is ctx or other.data is held:
+                other.data = data
+                other.detached = landed
 
     def _named(self, path: str) -> list[Handle]:
         """The handles open on the entry at ``path`` itself.
@@ -948,17 +1165,41 @@ class MountCore:
         return self._open_on(self.identity(path, follow=False))
 
     def _open_on(self, key: str) -> list[Handle]:
-        """The handles open on the file ``key`` names. A detached handle is
-        on a file with no name left, whatever its key says.
+        """The handles open on the file ``key`` names. The handles left on
+        a file whose name went share a key of their own (``_detach``), so
+        no path names them.
 
         Args:
             key (str): the file identity.
         """
-        return [
-            ctx
-            for ctx in self._handles.values()
-            if ctx.key == key and ctx.detached is None
-        ]
+        return [ctx for ctx in self._handles.values() if ctx.key == key]
+
+    def _detach(self, named: list[Handle], row: FileStat) -> None:
+        """Leave the handles open on a name that went on the file it had:
+        they stat by its row from then on, and share a key no path gives,
+        so a write through one reaches the others and nothing that opens
+        the name later.
+
+        Args:
+            named (list[Handle]): the handles open on the name.
+            row (FileStat): the file's row before it went.
+        """
+        self._removed += 1
+        key = f"\0{self._removed}"
+        for ctx in named:
+            ctx.detached = row
+            ctx.key = key
+
+    async def land(self, path: str, follow: bool = True) -> None:
+        """Land what every handle open on ``path`` wrote, in the file's
+        turn, as a change of its times by path must come after.
+
+        Args:
+            path (str): mount path whose open handles land.
+            follow (bool): the change follows a link at ``path``.
+        """
+        key = self.identity(path, follow)
+        await self._mutate(key, lambda: self._land_buffered(key))
 
     async def _land_buffered(self, key: str) -> None:
         """Land the buffered writes of every handle open on ``key``.
@@ -1015,19 +1256,36 @@ class MountCore:
         while not await self._mutate(key, land):
             key = ctx.key
 
-    async def open(self, path: str, flags: int = 0) -> int:
-        """Open a path, hydrating it when its size is unknown.
+    async def open(
+        self, path: str, mode: OpenMode = READ, perm: int | None = None
+    ) -> int:
+        """Open a path, the open's effect landing before any byte moves.
+
+        One rule for every entry point, however it spells the open
+        (open(2) flags, SFTP pflags, an fopen mode, preview1 oflags): an
+        exclusive create refuses what exists, a dangling link or a listed
+        directory included; a directory refuses a mode that would write
+        it; a missing path is created when the mode creates and refused
+        when it does not; a truncating mode empties what exists, which
+        CPython's ``open('w')`` leaves behind even when nothing is
+        written; and a mode that writes is admitted against the file's
+        write rules before its first write. A file an API mount cannot
+        size is then read whole.
 
         Args:
             path (str): mount path to open.
-            flags (int): the open(2) flags the kernel passed. Only
-                ``O_TRUNC`` is read here.
+            mode (OpenMode): what the open asked for.
+            perm (int | None): the mode bits a create gives the file,
+                umask applied; None takes the mount's default.
 
         Returns:
             int: the new handle id.
 
         Raises:
-            FileNotFoundError: no such entry.
+            FileExistsError: an exclusive create found the path.
+            IsADirectoryError: a mode that writes named a directory.
+            FileNotFoundError: no such entry, and the mode does not
+                create.
         """
         while (removal := self._removal_of(path)) is not None:
             await asyncio.shield(removal)
@@ -1036,7 +1294,7 @@ class MountCore:
         for key in keys:
             self._opening.setdefault(key, set()).add(out)
         try:
-            return await self._open_path(path, flags)
+            return await self._open_path(path, mode, perm)
         finally:
             out.set_result(None)
             for key in keys:
@@ -1044,36 +1302,117 @@ class MountCore:
                 if not self._opening[key]:
                     del self._opening[key]
 
-    async def _open_path(self, path: str, flags: int) -> int:
+    async def _open_path(
+        self, path: str, mode: OpenMode, perm: int | None
+    ) -> int:
         """The open itself, which a removal of its name waits for.
 
         Args:
             path (str): mount path to open.
-            flags (int): the open(2) flags the kernel passed.
+            mode (OpenMode): what the open asked for.
+            perm (int | None): the mode bits a create gives the file.
         """
-        s = await self._op(self._files.stat(self.resolve(path)))
+        if path.endswith("/") and path != "/":
+            leaf = await self._row_or_none(path.rstrip("/"))
+            if leaf is not None and not is_dir(leaf):
+                raise enotdir(path)
+            if leaf is None and mode.create:
+                raise eisdir(path)
+        # An exclusive create follows no link (O_CREAT|O_EXCL), so a
+        # dangling one is a name that is there. A path with no row may
+        # still be a directory the mount lists, and a create there would
+        # put a file at a directory's name.
+        s = await self._row_or_none(path, nofollow=mode.exclusive)
+        listed = is_dir(s) if s is not None else await self._listed(path)
+        if mode.exclusive and (s is not None or listed):
+            raise eexist(path)
+        key = self.identity(path)
+        if listed:
+            if mode.writable or mode.create or not mode.directory:
+                raise eisdir(path)
+            return self._handles.add(Handle(path=path, key=key, mode=mode))
+        # The handle reads and writes the file the open reached, not the
+        # one a link at ``path`` names later.
+        at = self._mount_path(key, path)
+        emptied = s is None or mode.truncate
+        if s is None:
+            if not mode.create:
+                raise enoent(path)
+            await self._make(path, perm)
+        elif mode.truncate:
+            await self._empty(path)
+        elif mode.writable:
+            await self._op(
+                self._files.dispatch(
+                    "write",
+                    PathSpec.from_str_path(self.resolve(path), cwd="/"),
+                    admit_only=True,
+                )
+            )
         ctx = Handle(
-            path=path,
-            key=self.identity(path),
-            live=s.extra.get(LIVE_KEY) is True,
+            path=at,
+            key=key,
+            mode=mode,
+            live=s is not None and s.extra.get(LIVE_KEY) is True,
+            size=0 if s is None or mode.truncate else content_size(s),
         )
-        if s.type == FileType.DIRECTORY:
-            return self._handles.add(ctx)
-        if flags & os.O_TRUNC:
-            # libfuse 3 sends no SETATTR ahead of an O_TRUNC open (atomic
-            # O_TRUNC), so the flag is the whole truncation.
-            await self.truncate(path, 0)
-        if ctx.live:
+        if ctx.live or s is None:
             return self._handles.add(ctx)
         if s.size is None:
             # A file an API mount cannot size is read whole now, after an
             # O_TRUNC too, so a renderer that gives an empty file a body is
             # honored; a caching mount keeps the bytes for the next stat.
-            ctx.data = await asyncio.shield(self._hydrate(path))
-        elif s.size > READ_CHUNK and not flags & os.O_TRUNC:
+            ctx.data = await asyncio.shield(self._hydrate(at, mode.writable))
+        elif s.size > READ_CHUNK and not emptied:
             # Read a chunk at a time: a `head` must not move the file.
-            ctx.chunked = ChunkedHandle(path=path, size=s.size)
+            ctx.chunked = ChunkedHandle(path=at, size=s.size)
         return self._handles.add(ctx)
+
+    async def _row_or_none(
+        self, path: str, nofollow: bool = False
+    ) -> FileStat | None:
+        """The path's row, or None when the mount says it is not there.
+
+        Args:
+            path (str): mount path to stat.
+            nofollow (bool): report a trailing link itself.
+        """
+        try:
+            return await self._op(
+                self._files.stat(self.resolve(path), nofollow=nofollow)
+            )
+        except FileNotFoundError:
+            return None
+
+    async def _listed(self, path: str) -> bool:
+        """Whether a path with no row is a directory the mount only
+        implies (the root above a nested mount), which it lists.
+
+        Args:
+            path (str): mount path with no row.
+        """
+        try:
+            await self._op(self._files.readdir(self.resolve(path)))
+        except (FileNotFoundError, NotADirectoryError):
+            return False
+        return True
+
+    async def _empty(self, path: str) -> None:
+        """Empty a file an open truncates. A mount with no truncate (hf
+        buckets, databricks volumes) still empties it through an empty
+        create, which is the effect the open asked for.
+
+        Args:
+            path (str): mount path to empty.
+        """
+        try:
+            # libfuse 3 sends no SETATTR ahead of an O_TRUNC open (atomic
+            # O_TRUNC), so the flag is the whole truncation.
+            await self.truncate(path, 0)
+        except Exception as exc:
+            if classify(exc) is not FsCondition.ENOTSUP:
+                raise
+            await self._make(path, None)
 
     def _removal_of(self, path: str) -> asyncio.Future[None] | None:
         """A removal of ``path`` still running. One is keyed by the name it
@@ -1109,27 +1448,31 @@ class MountCore:
             return chunked.peek(offset, size)
         generation = chunked.generation
         data = await self._op(
-            self._files.read(self.resolve(ctx.path), offset, asked)
+            self._files.read(
+                self.resolve(ctx.path), offset, asked, ctx.mode.writable
+            )
         )
         if chunked.generation != generation:
             return data[:size]
         chunked.keep(offset, data, asked)
         return chunked.peek(offset, size)
 
-    def _hydrate(self, path: str) -> asyncio.Future[bytes | None]:
+    def _hydrate(self, path: str, raw: bool) -> asyncio.Future[bytes | None]:
         """Read a size-unknown file whole for the handle opening it.
 
         Resolves to None when the read fails for any reason: open() stays
         permissive and the read() that follows surfaces the error. This
         matters most after an O_TRUNC, whose truncation has already
         committed by the time this runs: failing the open then would erase
-        the old body and refuse the replacement. Opens of one file while
-        a read is out share it.
+        the old body and refuse the replacement. Opens of one view of one
+        file while a read is out share it.
 
         Args:
             path (str): mount path being opened.
+            raw (bool): the stored bytes, for a handle that writes,
+                rather than the rendering.
         """
-        key = self.identity(path)
+        key = (self.identity(path), raw)
         inflight = self._hydrations.get(key)
         if inflight is not None:
             return inflight
@@ -1138,7 +1481,9 @@ class MountCore:
             try:
                 while True:
                     gen = self._hydration_gen.get(key, 0)
-                    data = await self._op(self._files.read(self.resolve(path)))
+                    data = await self._op(
+                        self._files.read(self.resolve(path), raw=raw)
+                    )
                     # The file changed while this read was out: what came
                     # back is stale, so read again rather than hand it over.
                     if self._hydration_gen.get(key, 0) != gen:
@@ -1168,7 +1513,10 @@ class MountCore:
         a rename onto it must not leave a handle reading or stat'ing the
         file at that name next. A handle holding no bytes yet (never read,
         or chunked and holding one chunk) gets them all from one read every
-        such handle shares; it runs under ``_removing`` and the file's
+        such handle of its view shares, the stored bytes for one that
+        writes and the rendering for one that only reads, and handles whose
+        views agree hold one copy, which a write through any of them then
+        reaches (``_land_held``); it runs under ``_removing`` and the file's
         ``_pending`` chain, so no handle opens on the file and no write
         lands on it meanwhile. The handles are matched by the entry itself,
         so removing a link holds nothing: it takes the link, never its
@@ -1196,19 +1544,35 @@ class MountCore:
             logger.warning(
                 "fuse: the row of %s before it goes failed: %r", path, err
             )
-        lacking = [c for c in named if c.data is None and not c.live]
-        if not lacking:
-            return row
-        try:
-            data = await self._op(self._files.read(virtual))
-        except Exception as err:
-            logger.warning(
-                "fuse: holding %s before it goes failed: %r", path, err
-            )
-            return row
-        for ctx in lacking:
-            ctx.data = data
-            ctx.chunked = None
+        for raw in (True, False):
+            lacking = [
+                c
+                for c in named
+                if c.data is None and not c.live and c.mode.writable == raw
+            ]
+            if not lacking:
+                continue
+            try:
+                data = await self._op(self._files.read(virtual, raw=raw))
+            except Exception as err:
+                logger.warning(
+                    "fuse: holding %s before it goes failed: %r", path, err
+                )
+                for ctx in lacking:
+                    ctx.lost = err
+                continue
+            for ctx in lacking:
+                ctx.data = data
+                ctx.chunked = None
+        copies: list[bytes] = []
+        for ctx in named:
+            if ctx.data is None:
+                continue
+            same = next((c for c in copies if c == ctx.data), None)
+            if same is None:
+                copies.append(ctx.data)
+            else:
+                ctx.data = same
         return row
 
     async def release(self, fh: int) -> None:
@@ -1228,6 +1592,18 @@ class MountCore:
                 await self.flush(ctx.path, fh)
         finally:
             self._handles.pop(fh)
+
+    def _mount_path(self, key: str, spelled: str) -> str:
+        """The mount path the file ``key`` names, or ``spelled`` where it
+        lies outside the mount's root.
+
+        Args:
+            key (str): the file's identity.
+            spelled (str): the mount path to fall back on.
+        """
+        if key.startswith(self._root + "/"):
+            return key[len(self._root) :]
+        return spelled
 
     def identity(self, path: str, follow: bool = True) -> str:
         """Where a mount path really points: the mount-resolved path with
@@ -1305,8 +1681,11 @@ class MountCore:
             rehydrate (bool): refresh the handles open on the file.
         """
         key = self.identity(path, follow=rehydrate)
-        if key in self._hydrations:
-            self._hydration_gen[key] = self._hydration_gen.get(key, 0) + 1
+        for view in ((key, True), (key, False)):
+            if view in self._hydrations:
+                self._hydration_gen[view] = (
+                    self._hydration_gen.get(view, 0) + 1
+                )
         if not rehydrate:
             return
         handles = self._open_on(key)
@@ -1314,19 +1693,80 @@ class MountCore:
             ctx.generation += 1
             if ctx.chunked is not None:
                 ctx.chunked.drop()
-        hydrated = [ctx for ctx in handles if ctx.data is not None]
-        if not hydrated:
+        for raw in (True, False):
+            hydrated = [
+                ctx
+                for ctx in handles
+                if ctx.data is not None and ctx.mode.writable == raw
+            ]
+            if not hydrated:
+                continue
+            try:
+                data = await self._op(
+                    self._files.read(self.resolve(path), raw=raw)
+                )
+            except Exception as err:
+                # The mutation landed, so a refresh that fails must not
+                # fail it; the next read through these handles fetches
+                # and reports.
+                logger.warning(
+                    "fuse: refresh of %s after a change failed: %r", path, err
+                )
+                for ctx in hydrated:
+                    ctx.data = None
+                continue
+            for ctx in hydrated:
+                ctx.data = data
+        # An appending handle holding no bytes writes at the length its
+        # open saw; the file has another one now.
+        sized = [
+            ctx for ctx in handles if ctx.mode.append and ctx.data is None
+        ]
+        if not sized:
             return
         try:
-            data = await self._op(self._files.read(self.resolve(path)))
+            s = await self._op(self._files.stat(self.resolve(path)))
         except Exception as err:
-            # The mutation landed, so a refresh that fails must not fail
-            # it; the next read through these handles fetches and reports.
             logger.warning(
-                "fuse: refresh of %s after a change failed: %r", path, err
+                "fuse: the length of %s after a change failed: %r", path, err
             )
-            for ctx in hydrated:
-                ctx.data = None
             return
-        for ctx in hydrated:
-            ctx.data = data
+        for ctx in sized:
+            ctx.size = content_size(s)
+            if ctx.chunked is not None:
+                ctx.chunked.size = content_size(s)
+
+    async def ftruncate(self, fh: int, length: int) -> None:
+        """Resize the file an open handle is on: through its name, or, on
+        a file whose name went, the bytes its handles hold.
+
+        Args:
+            fh (int): the open handle.
+            length (int): the new byte length.
+
+        Raises:
+            OSError: EBADF through a handle opened only to read, EINVAL
+                for a negative length.
+        """
+        ctx = self._open_handle(fh)
+        if not ctx.mode.writable:
+            raise ebadf(ctx.path)
+        if length < 0:
+            raise einval(ctx.path)
+        if ctx.detached is None:
+            await self.truncate(ctx.path, length)
+            return
+        if ctx.write_buf:
+            self._land_held(ctx, ctx.detached)
+        held = ctx.data or b""
+        data = held[:length] + bytes(max(0, length - len(held)))
+        landed = ctx.detached.model_copy(update={"size": length})
+        for other in self._open_on(ctx.key):
+            if other is ctx or other.data is held:
+                other.data = data
+                other.detached = landed
+                other.write_buf = [
+                    (at, run[: length - at])
+                    for at, run in other.write_buf
+                    if at < length
+                ]

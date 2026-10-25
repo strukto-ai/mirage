@@ -12,8 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { MountCore } from '@struktoai/mirage-node/mount/core'
-import { STATUS } from '@struktoai/mirage-node/mount/constants'
+import { MountCore } from '@struktoai/mirage-core/mount/core'
+import { OWNER, STATUS } from '@struktoai/mirage-node/mount/constants'
 import { SFTPStatusError } from '@struktoai/mirage-node/mount/errors'
 import { MirageSFTPServer } from '@struktoai/mirage-node/mount/sftp'
 import type { SFTPWrapper } from 'ssh2'
@@ -56,7 +56,7 @@ export function serveSFTP(
     const ws = found.runner.ws
     await openSession(ws, sessionId, {}, keyProfile(profile))
     entry = found
-    return new MountCore(ws.vfs, { session: ws.getSession(sessionId) })
+    return new MountCore(ws.vfs, { session: ws.getSession(sessionId), owner: OWNER })
   }
   const onExit = async (): Promise<void> => {
     try {

@@ -35,6 +35,16 @@ export const STATUS = {
 export const SSH2_SFTP_MODULE = 'ssh2/lib/protocol/SFTP.js'
 export const PIPE_PACKET_SIZE = 64 * 1024
 
+/**
+ * Who owns what a mount shows when a row names its owner by name (the
+ * kernel wants numbers): the mounting user. Windows has none. Mirrors
+ * Python's OWNER.
+ */
+export const OWNER = {
+  uid: typeof process.getuid === 'function' ? process.getuid() : 0,
+  gid: typeof process.getgid === 'function' ? process.getgid() : 0,
+}
+
 /** Stats a directory listing runs at once. Mirrors Python's LISTING_CONCURRENCY. */
 export const LISTING_CONCURRENCY = 16
 

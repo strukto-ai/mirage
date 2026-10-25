@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use super::parse::{self, Ast, Dialect};
 use super::posix::{self, Posix, Spans};
-use super::{Options as GrepOptions, Regex, Step, Syntax};
+use super::{EXCEEDED, Options as GrepOptions, Regex, Step, Syntax};
 use crate::{Stream, StreamError, parse_config};
 
 /// An offset that stands for a group with no part in the match.
@@ -89,7 +89,8 @@ enum Matcher {
 /// `begin` names the search, `feed` the subject's bytes, and `finish`
 /// writes the answer as little-endian u32 offsets, a start and an end per
 /// group with `u32::MAX` for none (posix), a pair per match (extents), or
-/// one byte (test).
+/// one byte (test). A -P line search that gives up at the match limit
+/// refuses in GNU grep's words instead of answering.
 struct RegexStream {
     matcher: Matcher,
     subject: Vec<u8>,
@@ -138,7 +139,10 @@ pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
                 extents: true,
             };
             let compiled = Regex::compile(&patterns, &options).map_err(StreamError::new)?;
-            let needles = line_needles(&patterns, syntax, ignore_case, utf8);
+            let needles = match compiled.regex.perl_regular() {
+                Some(regular) => super::perl_needles(regular, ignore_case, utf8),
+                None => line_needles(&patterns, syntax, ignore_case, utf8),
+            };
             Matcher::Lines {
                 regex: Box::new(compiled.regex),
                 warnings: compiled.warnings,
@@ -222,6 +226,9 @@ impl RegexStream {
                 line.push(b'\n');
                 let to = hay.len();
                 let hit = done(regex.matches(&line, 0, to, &mut u64::MAX.clone()));
+                if regex.exceeded() {
+                    return Err(StreamError::new(EXCEEDED));
+                }
                 out.push(u8::from(hit));
             }
             (Matcher::Lines { regex, .. }, Operation::Extents) => {
@@ -230,9 +237,11 @@ impl RegexStream {
                 let to = hay.len();
                 let mut at = 0;
                 while at <= to {
-                    let Some((start, end)) =
-                        done(regex.extent(&line, 0, at, to, &mut u64::MAX.clone()))
-                    else {
+                    let found = done(regex.extent(&line, 0, at, to, &mut u64::MAX.clone()));
+                    if regex.exceeded() {
+                        return Err(StreamError::new(EXCEEDED));
+                    }
+                    let Some((start, end)) = found else {
                         break;
                     };
                     if end > start {
@@ -363,6 +372,45 @@ mod tests {
             String::from_utf8(meta)
                 .unwrap()
                 .contains(r#""needles":["ab","abcd","x"]"#)
+        );
+    }
+
+    #[test]
+    fn perl_lines_select_and_find_needles_past_their_assertions() {
+        let mut stream = open(
+            br#"{"mode":"lines","patterns":["(?<=id=)value\\d+|key=\\Kvalue"],"syntax":"perl"}"#,
+        )
+        .unwrap();
+        assert_eq!(ask(stream.as_mut(), r#"{"op":"test"}"#, b"id=value1"), [1]);
+        assert_eq!(ask(stream.as_mut(), r#"{"op":"test"}"#, b"value1"), [0]);
+        let out = ask(stream.as_mut(), r#"{"op":"extents"}"#, b"key=value");
+        assert_eq!(words(&out), [4, 9]);
+        let mut meta = Vec::new();
+        stream.metadata(&mut meta);
+        assert!(
+            String::from_utf8(meta)
+                .unwrap()
+                .contains(r#""needles":["value","key=value"]"#)
+        );
+    }
+
+    #[test]
+    fn perl_lines_refuse_past_the_match_limit() {
+        let mut stream =
+            open(br#"{"mode":"lines","patterns":["^(a|a)+\\1c|^ok"],"syntax":"perl"}"#).unwrap();
+        let mut runaway = vec![b'a'; 40];
+        runaway.extend_from_slice(b"xc");
+        for op in [r#"{"op":"test"}"#, r#"{"op":"extents"}"#] {
+            stream.begin(op.as_bytes()).unwrap();
+            let mut out = Vec::new();
+            stream.feed(&runaway, &mut out).unwrap();
+            let err = stream.finish(&mut out).err().unwrap();
+            assert_eq!(err.message, EXCEEDED);
+        }
+        assert_eq!(ask(stream.as_mut(), r#"{"op":"test"}"#, b"ok"), [1]);
+        assert_eq!(
+            words(&ask(stream.as_mut(), r#"{"op":"extents"}"#, b"ok")),
+            [0, 2]
         );
     }
 }

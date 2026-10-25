@@ -46,7 +46,6 @@ from mirage.commands.builtin.generic.rg import (
     ignore_rules,
     json_summary,
     label_flags,
-    rg_matcher,
     runs_parallel,
     sort_haystacks,
     walk_filter,
@@ -55,11 +54,7 @@ from mirage.commands.builtin.generic.rg import (
     parse_flags as parse_rg_flags,
 )
 from mirage.commands.builtin.grep_binary import GrepFlags
-from mirage.commands.builtin.grep_pattern import (
-    LineMatcher,
-    compile_pattern,
-    pattern_arg,
-)
+from mirage.commands.builtin.grep_pattern import compile_pattern, pattern_arg
 from mirage.commands.builtin.grep_select import dir_admitted, file_admitted
 from mirage.commands.builtin.rg_scan import Haystack, walk_error_line
 from mirage.commands.builtin.rg_search import RgFlags, Totals, split_footer
@@ -78,6 +73,7 @@ from mirage.commands.spec.types import FlagValue
 from mirage.errors.render import fs_error_line
 from mirage.io import IOResult
 from mirage.io.types import ByteSource, materialize
+from mirage.rs.regex import LineRegex
 from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import byte_view, encode_text
 from mirage.types import FileStat, FileType, PathSpec
@@ -166,7 +162,7 @@ async def run_search(
     )
     if rg is not None and rg.type_list:
         return await run_single(name, paths[:1], texts, flags)
-    matcher: LineMatcher | None = None
+    matcher: LineRegex | None = None
     if grep is not None:
         pattern = pattern_arg(texts, view)
         if pattern is not None:
@@ -182,10 +178,7 @@ async def run_search(
     if rg is not None and not rg.list_files:
         pattern = pattern_arg(texts, view)
         if pattern is not None:
-            if rg.engine == "default":
-                open_rg(pattern, False, rg)
-            else:
-                rg_matcher(pattern, False, rg)
+            open_rg(pattern, False, rg)
     quiet = grep.quiet if grep is not None else bool(rg and rg.quiet)
     # -q stops at the first match, but --stats and --json count every file.
     stops = quiet and not (rg is not None and (rg.stats or rg.json))
@@ -457,13 +450,7 @@ def _one_footer(
         return parts, b""
     total = time.perf_counter() - started
     if summary:
-        return parts, (
-            format_totals(totals, "summary", total)
-            if f.engine == "default"
-            else totals.summary_record(total)
-        )
-    return parts, (b"\n" if blank and any(parts) else b"") + (
-        format_totals(totals, "stats", total)
-        if f.engine == "default"
-        else totals.stats_block(total)
+        return parts, format_totals(totals, "summary", total)
+    return parts, (b"\n" if blank and any(parts) else b"") + format_totals(
+        totals, "stats", total
     )

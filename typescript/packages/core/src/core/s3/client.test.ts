@@ -130,8 +130,6 @@ describe('isConditionLost', () => {
 const SRC_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', '..')
 // The one place an S3 client is built, which every test seam stubs.
 const SEAM = 'core/s3/client.ts'
-// A module naming neither can open no S3 client, so it is not parsed.
-const S3_HINTS = /@aws-sdk\/|S3Client/
 
 /** What one module does to open an S3 client past the seam. */
 function s3Bypasses(source: string): string[] {
@@ -173,7 +171,7 @@ function bypassingModules(root: string): Record<string, string[]> {
     const module = name.split(sep).join('/')
     if (module === SEAM || module.startsWith('generated/')) continue
     const source = readFileSync(join(root, name), 'utf8')
-    if (!S3_HINTS.test(source)) continue
+    if (!source.includes('@aws-sdk/') && !source.includes('S3Client')) continue
     const found = s3Bypasses(source)
     if (found.length > 0) offenders[module] = found
   }

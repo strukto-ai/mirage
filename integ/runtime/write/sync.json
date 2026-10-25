@@ -2,7 +2,7 @@
   "cases": [
     {
       "id": "fsync_lands_the_writes_before_the_close",
-      "note": "The second open reads the mount, so it sees the bytes only once the sync landed them; a pyodide file shares one in-memory node, which shows them either way.",
+      "note": "A second open sees what the first wrote before it lands, as a write is seen at once; the sync lands it on the mount before the close, which the cat after the close reads.",
       "runtimes": [
         "monty",
         "wasi",

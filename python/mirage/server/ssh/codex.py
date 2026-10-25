@@ -18,7 +18,6 @@ import binascii
 import concurrent.futures
 import json
 import logging
-import os
 import posixpath
 import shlex
 import stat
@@ -42,6 +41,7 @@ from mirage.errors.types import NoMountError
 from mirage.io.types import ByteSource
 from mirage.mount.core import MountCore
 from mirage.mount.types import MountAttrs
+from mirage.runtime.handles.mode import OpenMode
 from mirage.server.registry import WorkspaceEntry, WorkspaceRegistry
 from mirage.server.rpc.constants import (
     RPC_INTERNAL_ERROR,
@@ -79,6 +79,15 @@ Handler = Callable[[Message], Awaitable[JsonValue]]
 FILE_SCHEME = "file://"
 NS_PER_MS = 1_000_000
 MISSING = (FileNotFoundError, NotADirectoryError, NoMountError)
+WRITE = OpenMode(
+    readable=False,
+    writable=True,
+    truncate=True,
+    append=False,
+    create=True,
+    exclusive=False,
+    binary=True,
+)
 
 
 def to_path(uri: JsonValue) -> str:
@@ -276,11 +285,7 @@ async def write_file(core: MountCore, path: str, data: bytes) -> None:
     parent = await lookup(core, posixpath.dirname(path))
     if parent is None:
         raise enoent(path)
-    fh = (
-        await core.open(path, os.O_TRUNC)
-        if await lookup(core, path)
-        else await core.create(path)
-    )
+    fh = await core.open(path, WRITE)
     try:
         if data:
             await core.write(path, data, 0, fh)

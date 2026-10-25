@@ -698,7 +698,10 @@ describe('unzip archive validation', () => {
     vfs.store.files.set('/m.zip', bad)
     const r = await runCmd(RAM_UNZIP, vfs, [PathSpec.fromStrPath('/m.zip')], { Z: true })
     expect(r.exitCode).toBe(3)
-    expect(DEC.decode(r.stderr)).toContain('start of central directory not found')
+    // zipinfo's totals put the refusal on stdout, under its header.
+    const out = DEC.decode(r.out)
+    expect(out).toContain('number of entries: 2\n')
+    expect(out).toContain('start of central directory not found')
   })
 
   it('bytes before the archive shift every offset, and it lists with a warning', async () => {

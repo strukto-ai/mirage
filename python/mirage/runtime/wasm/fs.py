@@ -25,10 +25,9 @@ from typing import Any, Callable, Literal
 from mirage.errors.fs import enoent, enotdir
 from mirage.errors.wasi import errno_for
 from mirage.runtime.errors import CrossMountError
-from mirage.runtime.files import kept_view
-from mirage.runtime.handles import FileHandle, FileTable, Kept, apply_flush
+from mirage.runtime.files import Descriptor
+from mirage.runtime.handles import ChunkedHandle, FileTable
 from mirage.runtime.handles.mode import OpenMode
-from mirage.runtime.open import apply_open
 from mirage.runtime.stat import posix_stat
 from mirage.runtime.types import VFSStat
 from mirage.runtime.wasm.constants import (
@@ -72,7 +71,7 @@ from mirage.runtime.wasm.stat import (
 )
 from mirage.runtime.wasm.view import WasmView
 from mirage.utils.dates import timestamp_iso
-from mirage.utils.stat_view import CHAR_MODE, FILE_MODE
+from mirage.utils.stat_view import CHAR_MODE
 
 logger = logging.getLogger(__name__)
 
@@ -172,33 +171,90 @@ def _open_mode(oflags: int, rights_base: int, fdflags: int) -> OpenMode:
 
 @dataclass(slots=True)
 class FdEntry:
-    """One guest fd: a directory, a stdio stream, or a buffered file.
+    """One guest fd: a directory, a stdio stream, or a file.
 
     Args:
         kind (FdKind): which of the five fd shapes this is.
-        handle (FileHandle | None): the shared file handle; set for
-            files and for stdin (read-only bytes), None otherwise.
-        path (str): guest path, for dirs and files.
+        file (Descriptor | None): a mount file, open on the run's core,
+            which holds what it read and wrote; None otherwise.
+        local (ChunkedHandle | None): bytes it only reads that are no
+            mount's, stdin's or an interpreter build file's; None
+            otherwise.
+        pos (int): where the next read of ``local`` starts.
+        path (str): guest path, for dirs and build files.
         preopen (bool): the preopened root dir, which close refuses.
         dirents (list[tuple[str, int]] | None): a dir fd's cached
             listing, filled on the first fd_readdir.
-        stat (VFSStat | None): a file's stat at open, for mtime.
-        kept (Kept | None): its file once the name was removed or
-            replaced, which it reads and lands on from then on; None
-            while it has a name.
         opened (str): the path it was opened at, which its inode number
             comes from however the file is renamed since.
+        readable (bool): its open asked to read.
     """
 
     kind: FdKind
-    handle: FileHandle | None = None
+    file: Descriptor | None = None
+    local: ChunkedHandle | None = None
+    pos: int = 0
     path: str = ""
     preopen: bool = False
     dirents: list[tuple[str, int]] | None = None
-    stat: VFSStat | None = None
-    kept: Kept | None = None
     opened: str = ""
     readable: bool = True
+
+    def read(self, size: int) -> bytes:
+        """Read from the position, advancing it.
+
+        Args:
+            size (int): byte budget.
+        """
+        if self.file is not None:
+            return self.file.read(size)
+        if self.local is None:
+            return b""
+        chunk = self.local.pread(self.pos, size)
+        self.pos += len(chunk)
+        return chunk
+
+    def pread(self, offset: int, size: int) -> bytes:
+        """Read at an explicit offset without moving the position.
+
+        Args:
+            offset (int): byte offset to read from.
+            size (int): byte budget.
+        """
+        if self.file is not None:
+            return self.file.pread(offset, size)
+        if self.local is None:
+            return b""
+        return self.local.pread(offset, size)
+
+    @property
+    def position(self) -> int:
+        """Where the next read or write lands."""
+        return self.file.pos if self.file is not None else self.pos
+
+    @property
+    def size(self) -> int:
+        """The file's length, what was written and not landed counted."""
+        if self.file is not None:
+            return self.file.size
+        return 0 if self.local is None else self.local.size
+
+    def seek(self, offset: int, whence: int) -> int | None:
+        """Move the position, POSIX whence numbering; None when the
+        whence is unknown or the target negative.
+
+        Args:
+            offset (int): displacement from the whence base.
+            whence (int): 0 from the start, 1 from the position, 2 from
+                the end.
+        """
+        if self.file is not None:
+            return self.file.seek(offset, whence)
+        base = {0: 0, 1: self.pos, 2: self.size}.get(whence)
+        if base is None or base + offset < 0:
+            return None
+        self.pos = base + offset
+        return self.pos
 
 
 class WasiFs:
@@ -241,7 +297,14 @@ class WasiFs:
         self._fds: FileTable[FdEntry] = FileTable(first_id=4)
         self._fds.set(
             0,
-            FdEntry(kind="stdin", handle=FileHandle.of_bytes("", stdin)),
+            FdEntry(
+                kind="stdin",
+                local=ChunkedHandle(
+                    path="",
+                    size=len(stdin),
+                    fetch=lambda offset, size: stdin[offset : offset + size],
+                ),
+            ),
         )
         self._fds.set(1, FdEntry(kind="stdout"))
         self._fds.set(2, FdEntry(kind="stderr"))
@@ -311,12 +374,15 @@ class WasiFs:
                 if entry is None or entry.kind == "dir":
                     error = EBADF
                 elif kind == 1:
-                    if entry.handle is None or not entry.readable:
+                    if (
+                        entry.file is None and entry.local is None
+                    ) or not entry.readable:
                         error = EBADF
                     else:
-                        nbytes = max(0, entry.handle.size - entry.handle.pos)
+                        nbytes = max(0, entry.size - entry.position)
                 elif entry.kind == "stdin" or (
-                    entry.handle is not None and not entry.handle.writable
+                    entry.kind == "file"
+                    and (entry.file is None or not entry.file.mode.writable)
                 ):
                     error = EBADF
             else:
@@ -386,25 +452,27 @@ class WasiFs:
 
     # -- fd lookups -------------------------------------------------------
 
-    def _handle(self, fd: int) -> FileHandle | None:
-        """The buffered handle under `fd`: a file's, or stdin's.
+    def _readable(self, fd: int) -> FdEntry | None:
+        """The entry under `fd` when it reads: a file's, or stdin.
 
         Args:
             fd (int): the guest fd.
         """
         entry = self._fds.get(fd)
-        return entry.handle if entry is not None else None
-
-    def _file_handle(self, fd: int) -> FileHandle | None:
-        """The handle under `fd` only when it is a regular file.
-
-        Args:
-            fd (int): the guest fd.
-        """
-        entry = self._fds.get(fd)
-        if entry is None or entry.kind != "file":
+        if entry is None or entry.kind not in ("file", "stdin"):
             return None
-        return entry.handle
+        return entry if entry.readable else None
+
+    def _writer(self, fd: int) -> Descriptor | None:
+        """The mount file under `fd` when its open asked to write.
+
+        Args:
+            fd (int): the guest fd.
+        """
+        entry = self._fds.get(fd)
+        if entry is None or entry.file is None:
+            return None
+        return entry.file if entry.file.mode.writable else None
 
     # -- prestat ----------------------------------------------------------
 
@@ -457,37 +525,35 @@ class WasiFs:
             return self._open_dir(caller, path, out)
         mode = _open_mode(oflags, rights_base, fdflags)
         try:
-            row = apply_open(self._fs, path, mode)
+            file = self._fs.open(path, mode)
         except IsADirectoryError:
             # POSIX opens a directory read-only without O_DIRECTORY too;
             # only a mode that would write refuses it.
             if mode.writable:
                 raise
             return self._open_dir(caller, path, out)
-        # A file the open created or emptied has no row from before it,
-        # so fd_filestat_get answers from the row the open left behind.
-        # The file is named by where its links lead, so a removal or a
-        # rename of any spelling of it finds the fd.
-        entry = FdEntry(
-            kind="file",
-            path=self._fs.walked(path),
-            stat=self._fs.stat_or_none(path) if row is None else row,
-            opened=path,
-            readable=mode.readable,
-        )
-        # Nothing is read at open: the handle fetches what a read lands
-        # in. A handle that writes reads the stored bytes, since its
-        # writes land on them; a read-only one sees the rendering.
-        entry.handle = FileHandle.opened(
-            path,
-            None
-            if row is None
-            else functools.partial(self._fetch, entry, mode.writable),
-            size=0 if row is None else row.size,
-            writable=mode.writable,
-            append=mode.append,
-            read_cached=functools.partial(self._read_cached, entry),
-        )
+        if file is not None:
+            entry = FdEntry(
+                kind="file", file=file, opened=path, readable=mode.readable
+            )
+        else:
+            # The interpreter's own file, read where it is.
+            row = self._fs.stat(path)
+            if row.is_dir:
+                return self._open_dir(caller, path, out)
+            entry = FdEntry(
+                kind="file",
+                local=ChunkedHandle(
+                    path=path,
+                    size=row.size,
+                    fetch=lambda offset, size: self._fs.read(
+                        path, offset=offset, size=size
+                    ),
+                ),
+                path=path,
+                opened=path,
+                readable=mode.readable,
+            )
         fd = self._fds.add(entry)
         self._store(caller, out, pack_u32(fd))
         return OK
@@ -502,7 +568,8 @@ class WasiFs:
         if entry is None or entry.preopen:
             return EBADF
         self._fds.pop(fd)
-        self._land(entry)
+        if entry.file is not None:
+            entry.file.close()
         return OK
 
     def close_all(self) -> list[str]:
@@ -517,20 +584,18 @@ class WasiFs:
         """
         failures: list[str] = []
         for entry in list(self._fds.values()):
-            h = entry.handle
-            if entry.kind != "file" or h is None or not h.dirty:
-                continue
-            if entry.kept is not None:
+            file, entry.file = entry.file, None
+            if file is None:
                 continue
             try:
-                self._fs.flush(entry.path, h.flush_plan())
+                file.close()
             except (
                 OSError,
                 ValueError,
                 NotImplementedError,
                 CrossMountError,
             ) as exc:
-                failures.append(f"{entry.path}: {exc}")
+                failures.append(f"{entry.opened}: {exc}")
         return failures
 
     def fd_renumber(self, caller: "wasmtime.Caller", fd: int, to: int) -> int:
@@ -552,12 +617,11 @@ class WasiFs:
         count: int,
         nread: int,
     ) -> int:
-        h = self._handle(fd)
-        entry = self._fds.get(fd)
-        if h is None or entry is None or not entry.readable:
+        entry = self._readable(fd)
+        if entry is None:
             return EBADF
         vectors = self._iovs(caller, iovs, count)
-        data = h.read(sum(length for _, length in vectors))
+        data = entry.read(sum(length for _, length in vectors))
         total = 0
         for bptr, blen in vectors:
             chunk = data[total : total + blen]
@@ -578,12 +642,11 @@ class WasiFs:
         offset: int,
         nread: int,
     ) -> int:
-        h = self._file_handle(fd)
-        entry = self._fds.get(fd)
-        if h is None or entry is None or not entry.readable:
+        entry = self._readable(fd)
+        if entry is None or entry.kind != "file":
             return EBADF
         vectors = self._iovs(caller, iovs, count)
-        data = h.pread(offset, sum(length for _, length in vectors))
+        data = entry.pread(offset, sum(length for _, length in vectors))
         total = 0
         for bptr, blen in vectors:
             chunk = data[total : total + blen]
@@ -620,10 +683,10 @@ class WasiFs:
                     except Exception as exc:
                         logger.debug("guest %s closed: %r", entry.kind, exc)
                         return EPIPE
-            elif entry.kind == "file" and entry.handle is not None:
-                if not entry.handle.writable:
+            elif entry.kind == "file":
+                if entry.file is None or not entry.file.mode.writable:
                     return EBADF
-                entry.handle.write(data)
+                entry.file.write(data)
             else:
                 return EINVAL
             total += blen
@@ -639,13 +702,13 @@ class WasiFs:
         offset: int,
         nwritten: int,
     ) -> int:
-        h = self._file_handle(fd)
-        if h is None or not h.writable:
+        file = self._writer(fd)
+        if file is None:
             return EBADF
         total, pos = 0, offset
         for bptr, blen in self._iovs(caller, iovs, count):
             data = self._load(caller, bptr, blen)
-            h.pwrite(pos, data)
+            file.pwrite(pos, data)
             pos += blen
             total += blen
         self._store(caller, nwritten, pack_u32(total))
@@ -661,11 +724,11 @@ class WasiFs:
     ) -> int:
         if fd in (0, 1, 2):
             return ESPIPE
-        h = self._handle(fd)
-        if h is None:
+        entry = self._fds.get(fd)
+        if entry is None or entry.kind != "file":
             return EBADF
         # preview1's WHENCE_* numbering is POSIX's 0/1/2, which seek speaks.
-        pos = h.seek(offset, whence)
+        pos = entry.seek(offset, whence)
         if pos is None:
             return EINVAL
         self._store(caller, out, pack_u64(pos))
@@ -674,10 +737,10 @@ class WasiFs:
     def fd_tell(self, caller: "wasmtime.Caller", fd: int, out: int) -> int:
         if fd in (0, 1, 2):
             return ESPIPE
-        h = self._handle(fd)
-        if h is None:
+        entry = self._fds.get(fd)
+        if entry is None or entry.kind != "file":
             return EBADF
-        self._store(caller, out, pack_u64(h.pos))
+        self._store(caller, out, pack_u64(entry.position))
         return OK
 
     # -- stat -------------------------------------------------------------
@@ -698,19 +761,20 @@ class WasiFs:
         entry = self._fds.get(fd)
         if entry is None:
             return EBADF
-        if entry.kind == "file" and entry.handle is not None:
-            # The size is the handle's, which counts what it wrote.
-            row = entry.stat or VFSStat(size=0, is_dir=False, mode=FILE_MODE)
-            posix = posix_stat(
-                self._fs.stat_cached(
-                    entry.path,
-                    dataclasses.replace(row, size=entry.handle.size),
-                ),
-                entry.opened,
-                "/",
-            )
-            if entry.kept is not None:
-                posix = dataclasses.replace(posix, nlink=0)
+        if entry.kind == "file":
+            file = entry.file
+            if file is None:
+                posix = posix_stat(
+                    self._fs.stat(entry.path), entry.opened, "/"
+                )
+            else:
+                # The core's row, its size the handle's, which counts what
+                # it wrote and has not landed.
+                posix = posix_stat(
+                    file.files.fstat(file.fh), entry.opened, "/"
+                )
+                if file.files.unlinked(file.fh):
+                    posix = dataclasses.replace(posix, nlink=0)
             packed = pack_filestat(posix, FT_REG)
         elif entry.kind == "dir":
             st = self._fs.stat(entry.path)
@@ -749,10 +813,10 @@ class WasiFs:
     def fd_filestat_set_size(
         self, caller: "wasmtime.Caller", fd: int, size: int
     ) -> int:
-        h = self._file_handle(fd)
-        if h is None or not h.writable:
+        file = self._writer(fd)
+        if file is None:
             return EBADF
-        h.truncate(size)
+        file.truncate(size)
         return OK
 
     # -- readdir ----------------------------------------------------------
@@ -790,9 +854,7 @@ class WasiFs:
         path = self._path_arg(caller, dirfd, ptr, length)
         if path is None:
             return EBADF
-        held = self._hold(path)
         self._fs.unlink(path)
-        self._keep(held)
         return OK
 
     def path_create_directory(
@@ -827,18 +889,7 @@ class WasiFs:
         dst = self._path_arg(caller, dst_dirfd, dst_ptr, dst_length)
         if src is None or dst is None:
             return EBADF
-        # Both ends as the walk names them before the rename, which may
-        # move a link the walk takes. A rename onto its own file changes
-        # nothing, its fds included, whichever spelling reached it.
-        old = self._fs.walked(src, follow=False)
-        new = self._fs.walked(dst, follow=False)
-        if old == new:
-            self._fs.rename(src, dst)
-            return OK
-        held = self._hold(dst)
         self._fs.rename(src, dst)
-        self._keep(held)
-        self._moved(old, new)
         return OK
 
     # -- stubs and no-ops -------------------------------------------------
@@ -853,138 +904,6 @@ class WasiFs:
     ) -> int:
         return OK
 
-    def _fetch(
-        self, entry: FdEntry, raw: bool, offset: int, size: int | None
-    ) -> bytes:
-        """A range of a file fd's bytes: what it kept once its name went,
-        else what is at its path now.
-
-        Args:
-            entry (FdEntry): the fd's entry.
-            raw (bool): read the stored bytes rather than the rendering.
-            offset (int): where the range starts.
-            size (int | None): how many bytes; None reads to the end.
-        """
-        if entry.kept is not None:
-            end = None if size is None else offset + size
-            return self._read_cached(
-                entry, kept_view(entry.kept, raw)[offset:end]
-            )
-        return self._fs.read(entry.path, offset=offset, size=size, raw=raw)
-
-    def _read_cached(self, entry: FdEntry, data: bytes) -> bytes:
-        """Judge an open file's retained bytes through its current view.
-
-        Args:
-            entry (FdEntry): the open file's entry.
-            data (bytes): the logical read result.
-        """
-        return self._fs.read_cached(entry.path, data)
-
-    def _hold(self, path: str) -> list[tuple[FdEntry, Kept]]:
-        """Read what the file fds open on ``path`` need before its name is
-        removed or replaced; ``_keep`` them once it has gone. They share
-        what ``WasmView.kept`` reads, so a read that fails still lets the
-        removal go ahead.
-
-        Args:
-            path (str): the guest path about to go.
-        """
-        named = self._fs.walked(path, follow=False)
-        entries: list[tuple[FdEntry, FileHandle]] = []
-        for entry in self._fds.values():
-            h = entry.handle
-            if entry.kind != "file" or h is None or entry.kept is not None:
-                continue
-            if entry.path == named:
-                entries.append((entry, h))
-        if not entries:
-            return []
-        kept = self._fs.kept(
-            named,
-            stored=any(h.writable for _, h in entries),
-            rendered=any(not h.writable for _, h in entries),
-        )
-        return [(entry, kept) for entry, _ in entries]
-
-    @staticmethod
-    def _keep(held: list[tuple[FdEntry, Kept]]) -> None:
-        """Detach the fds ``_hold`` read for, now their name went.
-
-        Args:
-            held (list[tuple[FdEntry, Kept]]): what ``_hold`` returned.
-        """
-        for entry, kept in held:
-            entry.kept = kept
-
-    def _moved(self, old: str, new: str) -> None:
-        """Follow a rename: an fd open on ``old`` or under it is at ``new``
-        now, so its reads and its writes go there.
-
-        Args:
-            old (str): the path the rename took, as walked before it.
-            new (str): the path it gave, as walked before it.
-        """
-        under = old.rstrip("/") + "/"
-        for entry in self._fds.values():
-            if entry.preopen or entry.kept is not None:
-                continue
-            if entry.path == old or entry.path.startswith(under):
-                entry.path = new + entry.path[len(old) :]
-
-    def _land(self, entry: FdEntry) -> None:
-        """Land a file fd's writes now, as fsync(2) does: the mount and
-        every other fd on the path see them before the close, which then
-        owes only what came after.
-
-        Args:
-            entry (FdEntry): the fd's entry.
-        """
-        h = entry.handle
-        if entry.kind != "file" or h is None or not h.dirty:
-            return
-        if entry.kept is not None:
-            entry.kept.data = apply_flush(entry.kept.data, h.flush_plan())
-            h.settle(functools.partial(self._fetch, entry, True))
-            self._invalidate_peers(entry)
-            return
-        self._fs.flush(entry.path, h.flush_plan())
-        h.settle(functools.partial(self._fetch, entry, True))
-        entry.stat = self._fs.stat(entry.path)
-        self._invalidate_peers(entry)
-
-    def _invalidate_peers(self, changed: FdEntry) -> None:
-        for peer in self._fds.values():
-            same = (
-                peer.kept is changed.kept
-                if changed.kept is not None
-                else peer.kept is None and peer.path == changed.path
-            )
-            if peer is not changed and same and peer.handle is not None:
-                size = (
-                    len(kept_view(peer.kept, peer.handle.writable))
-                    if peer.kept is not None
-                    else changed.handle.size
-                    if changed.handle is not None
-                    else 0
-                )
-                peer.handle.invalidate(
-                    functools.partial(self._fetch, peer, peer.handle.writable),
-                    size,
-                )
-
-    def _land_path(self, path: str) -> None:
-        """Land the writes of every file fd open on ``path``, which a
-        change of its times must come after.
-
-        Args:
-            path (str): guest-absolute path.
-        """
-        path = self._fs.walked(path)
-        for entry in list(self._fds.values()):
-            if entry.path == path:
-                self._land(entry)
-
     def fd_datasync(self, caller: "wasmtime.Caller", fd: int) -> int:
         return self.fd_sync(caller, fd)
 
@@ -992,7 +911,8 @@ class WasiFs:
         entry = self._fds.get(fd)
         if entry is None:
             return EBADF
-        self._land(entry)
+        if entry.file is not None:
+            entry.file.land()
         return OK
 
     def fd_fdstat_set_flags(
@@ -1032,12 +952,11 @@ class WasiFs:
         entry = self._fds.get(fd)
         if entry is None or entry.kind not in ("file", "dir"):
             return EBADF
-        # Writes any fd on the file still owes land first, or landing them
-        # at a close would stamp over the times set here (cp -p).
-        self._land_path(entry.path)
-        self._set_times(entry.path, atim, mtim, flags, nofollow=False)
-        if entry.kind == "file":
-            entry.stat = self._fs.stat(entry.path)
+        # Writes any fd on the file still owes land first (the core sees
+        # to it), or landing them at a close would stamp over the times
+        # set here (cp -p).
+        path = entry.path if entry.file is None else entry.file.path
+        self._set_times(path, atim, mtim, flags, nofollow=False)
         return OK
 
     def path_filestat_set_times(
@@ -1054,7 +973,6 @@ class WasiFs:
         path = self._path_arg(caller, dirfd, ptr, length)
         if path is None:
             return EBADF
-        self._land_path(path)
         self._set_times(
             path,
             atim,

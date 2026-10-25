@@ -20,7 +20,6 @@ import {
   mergePatternList,
   NEVER_MATCH,
   patternWarnings,
-  rustEscape,
 } from './grep_pattern.ts'
 import { RegexSyntax } from './types.ts'
 import { byteView } from '../../shell/bytes.ts'
@@ -186,9 +185,5 @@ describe('the other dialects', () => {
     expect(() => compilePattern('(', false, false, false, RegexSyntax.PERL)).toThrow(
       new UsageError('grep: missing closing parenthesis'),
     )
-  })
-
-  it('escapes as regex::escape', () => {
-    expect(rustEscape('a.b-c~d')).toBe('a\\.b\\-c\\~d')
   })
 })

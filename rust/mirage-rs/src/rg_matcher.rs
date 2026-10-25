@@ -12,6 +12,8 @@ use regex_automata::util::primitives::StateID;
 use regex_automata::{PatternID, Span};
 use serde::Serialize;
 
+use crate::pcre::{self, Pcre};
+
 use crate::StreamError;
 
 #[derive(Clone, Copy, Debug)]
@@ -23,6 +25,10 @@ pub(crate) enum CaptureRequirement {
 struct SearchMemoryLimit(usize);
 
 const SEARCH_MEMORY_LIMIT: SearchMemoryLimit = SearchMemoryLimit(64 * 1024 * 1024);
+
+/// The backtracking steps of a -P search that weigh as much as one byte of
+/// rg's work, so a search past every quick limit ends a step of it.
+const PCRE_STEPS_PER_UNIT: usize = 16;
 
 impl SearchMemoryLimit {
     fn check(&self, nfa: &NFA) -> Result<(), StreamError> {
@@ -117,6 +123,10 @@ pub(crate) struct SearchHints {
 pub(crate) struct Program {
     nfa: NFA,
     filters: LiteralFilters,
+    /// -P's matcher, which searches in place of the NFA.
+    pcre: Option<Box<Pcre>>,
+    /// The groups each -P match records: all of them, or the whole match.
+    pcre_groups: usize,
     multiline: bool,
     cr_selects: bool,
     record_context: bool,
@@ -129,6 +139,8 @@ impl Program {
             return Ok(Self {
                 nfa: NFA::never_match(),
                 filters: LiteralFilters::default(),
+                pcre: None,
+                pcre_groups: 0,
                 required_terms: None,
                 multiline: false,
                 cr_selects: false,
@@ -201,6 +213,8 @@ impl Program {
         Ok(Self {
             nfa,
             filters,
+            pcre: None,
+            pcre_groups: 0,
             multiline,
             cr_selects: options.multiline
                 && !multiline
@@ -238,12 +252,94 @@ impl Program {
         })
     }
 
+    /// rg -P's program: the list handed to PCRE2 as ripgrep hands it,
+    /// `(?:a)|(?:b)`, wrapped for -w and -x, so a refusal's offset counts
+    /// into that string.
+    pub(crate) fn pcre(patterns: &[String], options: Options) -> Result<Self, StreamError> {
+        let joined = patterns
+            .iter()
+            .map(|pattern| format!("(?:{pattern})"))
+            .collect::<Vec<_>>()
+            .join("|");
+        let display = if options.line_regexp {
+            format!("(?m:^)(?:{joined})(?m:$)")
+        } else if options.whole_word {
+            format!("(?<!\\w)(?:{joined})(?!\\w)")
+        } else {
+            joined
+        };
+        let mode = pcre::Mode {
+            unicode: options.unicode,
+            bytes: !options.unicode,
+            ignore_case: options.ignore_case,
+            multi_line: options.null_data || options.multiline,
+            dotall: options.dotall,
+            crlf: options.crlf && options.multiline,
+            whole_line: false,
+        };
+        let chars = pcre::pattern_chars(display.as_bytes(), mode.bytes)
+            .map_err(|err| StreamError::new(err.message))?;
+        let compiled = Pcre::new(&chars, mode).map_err(|err| {
+            let offset = if mode.bytes {
+                err.offset
+            } else {
+                chars[..err.offset.min(chars.len())]
+                    .iter()
+                    .map(|ch| ch.len_utf8())
+                    .sum()
+            };
+            StreamError::new(format!(
+                "PCRE2: error compiling pattern at offset {offset}: {}",
+                err.message
+            ))
+        })?;
+        let pcre_groups = match options.capture_requirement {
+            CaptureRequirement::All => compiled.group_count(),
+            CaptureRequirement::WholeMatch => 1,
+        };
+        let required_terms =
+            crate::regex::perl_needles(&compiled.regular, options.ignore_case, options.unicode)
+                .and_then(|needles| {
+                    let texts: Vec<String> = needles
+                        .into_iter()
+                        .map(|needle| String::from_utf8(needle).ok().filter(|t| t.len() >= 3))
+                        .collect::<Option<_>>()?;
+                    (texts.len() <= 16).then_some(SearchHints {
+                        texts,
+                        whole_word: false,
+                        ignore_case: options.ignore_case,
+                    })
+                });
+        let record_context = options.multiline && options.null_data && !compiled.matches_nul;
+        Ok(Self {
+            nfa: NFA::never_match(),
+            filters: LiteralFilters::default(),
+            pcre: Some(Box::new(compiled)),
+            pcre_groups,
+            multiline: options.multiline,
+            cr_selects: false,
+            record_context,
+            required_terms,
+        })
+    }
+
     pub(crate) fn capture_index(&self, name: &str) -> Option<usize> {
-        self.nfa.group_info().to_index(PatternID::ZERO, name)
+        match &self.pcre {
+            Some(pcre) => pcre
+                .capture_names()
+                .find(|(each, _)| *each == name)
+                .map(|(_, index)| index),
+            None => self.nfa.group_info().to_index(PatternID::ZERO, name),
+        }
     }
 
     pub(crate) fn is_multiline(&self) -> bool {
         self.multiline
+    }
+
+    /// Whether PCRE2 searches: -P, or --engine auto past a refusal.
+    pub(crate) fn runs_pcre(&self) -> bool {
+        self.pcre.is_some()
     }
 
     pub(crate) fn uses_record_context(&self) -> bool {
@@ -257,12 +353,17 @@ impl Program {
         self.cr_selects
     }
 
-    pub(crate) fn capture_names(&self) -> impl Iterator<Item = (&str, usize)> {
-        self.nfa
-            .group_info()
-            .pattern_names(PatternID::ZERO)
-            .enumerate()
-            .filter_map(|(index, name)| name.map(|name| (name, index)))
+    pub(crate) fn capture_names(&self) -> Box<dyn Iterator<Item = (&str, usize)> + '_> {
+        match &self.pcre {
+            Some(pcre) => Box::new(pcre.capture_names()),
+            None => Box::new(
+                self.nfa
+                    .group_info()
+                    .pattern_names(PatternID::ZERO)
+                    .enumerate()
+                    .filter_map(|(index, name)| name.map(|name| (name, index))),
+            ),
+        }
     }
 
     pub(crate) fn start(&self, haystack: Vec<u8>, all: bool) -> Search {
@@ -500,6 +601,10 @@ pub(crate) struct Search {
     group_count: usize,
     matches: Growing<Match>,
     captures: Growing<Capture>,
+    /// Each group of the last -P match.
+    groups: Vec<Option<(usize, usize)>>,
+    /// A -P search gave up at the backtracking limit.
+    exceeded: bool,
 }
 
 impl Search {
@@ -519,10 +624,78 @@ impl Search {
             has_candidate: false,
             last_end: None,
             building: None,
-            group_count: program.nfa.group_info().group_len(PatternID::ZERO),
+            group_count: if program.pcre.is_some() {
+                program.pcre_groups
+            } else {
+                program.nfa.group_info().group_len(PatternID::ZERO)
+            },
             matches: Growing::new(),
             captures: Growing::new(),
+            groups: Vec::new(),
+            exceeded: false,
         }
+    }
+
+    /// Whether a -P search gave up at the backtracking limit, which ends
+    /// the input with PCRE2's error.
+    pub(crate) fn exceeded(&self) -> bool {
+        self.exceeded
+    }
+
+    /// One -P search per step of `budget`: each match the record holds, as
+    /// ripgrep iterates them (an empty match right where the last one
+    /// ended is skipped, and after an empty match the search resumes one
+    /// character on), or only the first unless `all`.
+    fn step_pcre(&mut self, pcre: &Pcre, budget: &mut usize) -> bool {
+        while *budget > 0 && !matches!(self.phase, Phase::Done) {
+            *budget -= 1;
+            if self.at > self.haystack.len() {
+                self.phase = Phase::Done;
+                break;
+            }
+            let (found, steps) = if self.group_count > 1 {
+                let (found, steps) = pcre.captures(&self.haystack, self.at, &mut self.groups);
+                let found = found
+                    .map(|found| found.then(|| self.groups[0].expect("a match spans group 0")));
+                (found, steps)
+            } else {
+                pcre.find(&self.haystack, self.at)
+            };
+            *budget = budget.saturating_sub(steps / PCRE_STEPS_PER_UNIT);
+            let (start, end) = match found {
+                Ok(Some(span)) => span,
+                Ok(None) => {
+                    self.phase = Phase::Done;
+                    break;
+                }
+                Err(pcre::Exceeded) => {
+                    self.exceeded = true;
+                    self.phase = Phase::Done;
+                    break;
+                }
+            };
+            let from = self.at;
+            self.at = if end > start {
+                end
+            } else {
+                end + pcre.unit_len(&self.haystack, end)
+            };
+            *budget = budget.saturating_sub(self.at.saturating_sub(from));
+            if start == end && self.last_end == Some(end) {
+                continue;
+            }
+            self.last_end = Some(end);
+            self.matches.values.push(Match { start, end });
+            if self.group_count > 1 {
+                self.captures.values.extend(self.groups.iter().copied());
+            } else {
+                self.captures.values.push(Some((start, end)));
+            }
+            if !self.all {
+                self.phase = Phase::Done;
+            }
+        }
+        matches!(self.phase, Phase::Done)
     }
 
     #[cfg(test)]
@@ -580,10 +753,14 @@ impl Search {
         self.building = None;
         self.matches.clear();
         self.captures.clear();
+        self.exceeded = false;
         self.phase = Phase::Reject { cursor: 0 };
     }
 
     pub(crate) fn step(&mut self, program: &Program, budget: &mut usize) -> bool {
+        if let Some(pcre) = &program.pcre {
+            return self.step_pcre(pcre, budget);
+        }
         while *budget > 0 && !matches!(self.phase, Phase::Done) {
             *budget -= 1;
             if let Phase::Reject { cursor } = self.phase {

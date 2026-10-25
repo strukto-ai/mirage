@@ -1,6 +1,5 @@
 const computations: Record<string, () => Promise<unknown>> = {
   diffDispatch: async () => (await import('../rs/diff_worker.ts')).diffDispatch,
-  scan: async () => (await import('../utils/regex_scan.ts')).scan,
   jqRunTexts: async () => (await import('../core/jq/eval.ts')).jqRunTexts,
 }
 

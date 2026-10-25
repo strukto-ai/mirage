@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { PathSpec } from '../../../../../types.ts'
+import { PathSpec } from '../../../../../types.ts'
 import { IOResult } from '../../../../../io/types.ts'
 import { Files } from '../../../../../workspace/files.ts'
 import { unzipGeneric } from '../../unzip.ts'
@@ -24,19 +24,22 @@ import type { FlagValue } from '../../../../spec/types.ts'
  * Run an unzip whose archive and -d destination span mounts.
  *
  * Pure wiring: the archive is read from its mount and every extracted path
- * lands on whichever mount owns it.
+ * lands on whichever mount owns it. `cwd` is the session's working
+ * directory, which a name unzip tries beside its archive (`a.zip` for `a`)
+ * resolves against.
  */
 export function runUnzip(
   scopes: PathSpec[],
   textArgs: string[],
   flagKwargs: Record<string, FlagValue>,
   dispatch: DispatchFn,
+  cwd: string,
 ): CrossResult {
   const vfs = new Files(dispatch, null, null, { ledger: false }).servedBy(null)
   const result = unzipGeneric(
     flatten(scopes),
     textArgs,
-    { ...crossOpts(flagKwargs), vfs },
+    { ...crossOpts(flagKwargs), cwd: PathSpec.fromStrPath(cwd), vfs },
     streamOp(dispatch),
   )
   return result ?? [null, new IOResult()]

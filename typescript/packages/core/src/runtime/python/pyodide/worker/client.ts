@@ -21,6 +21,7 @@ import type { Context } from '../../../../commands/config.ts'
 import { currentCaller, runWithCaller } from '../../../../context/session_context.ts'
 import type { RunResult } from '../../../types.ts'
 import type { RuntimeFiles } from '../../../files.ts'
+import { READ } from '../../../handles/mode.ts'
 import { applyMutation } from '../fs/journal.ts'
 import type { FlushFailure } from '../fs/types.ts'
 import { failureText } from './failure.ts'
@@ -199,10 +200,17 @@ export class PyodideWorkerClient {
   async execute(request: ExecuteRequest, ctx: Context, files: RuntimeFiles): Promise<RunResult> {
     if (this.failure !== null) throw this.failure
     const signal = ctx.signal
+    // The guest's calls stop once the run is cancelled; the run's end
+    // still closes what it left open through `files`.
+    const live = signal === undefined ? files : files.withSignal(signal)
     // The run's caller, which each call the guest makes runs as.
     const caller = currentCaller()
     const responses = new Set<Promise<void>>()
-    const processes = new GuestProcessTable(ctx, files)
+    // A child's program is found through the guest's view, so none starts
+    // once the run is cancelled.
+    const processes = new GuestProcessTable(ctx, live)
+    // The core handles the guest's streams hold open.
+    const handles = new Set<number>()
     const cap = request.config.maxMemory ?? null
     const limit = memoryLimit(cap)
     const unwatch =
@@ -241,7 +249,7 @@ export class PyodideWorkerClient {
         }
         if (message.kind === 'vfs') {
           const response = this.answer(message, () =>
-            runWithCaller(caller, () => this.operation(message, files, processes)),
+            runWithCaller(caller, () => this.operation(message, live, processes, handles)),
           )
           responses.add(response)
           void response.then(() => {
@@ -264,6 +272,16 @@ export class PyodideWorkerClient {
       // Keep the runtime queue closed until every response has finished.
       await processes.close()
       await Promise.all(responses)
+      // The run's end closes what the guest left open; one still open here
+      // ended with its guest mid-call, so a landing that fails has no one
+      // to tell.
+      for (const fh of handles) {
+        try {
+          await files.close(fh)
+        } catch (error) {
+          console.debug(`pyodide: landing an open file failed: ${String(error)}`)
+        }
+      }
     }
   }
 
@@ -325,18 +343,33 @@ export class PyodideWorkerClient {
     request: VfsRequest,
     files: RuntimeFiles,
     processes: GuestProcessTable,
+    handles: Set<number>,
   ): Promise<unknown> {
+    const fh = request.fh ?? -1
     switch (request.op) {
       case 'process':
+        // A child reads the mounts, so what an open file wrote lands
+        // first, as a child would read it from the page cache.
+        for (const open of handles) await files.fsync(open)
         return processes.call(request.payload ?? '{}')
-      case 'read':
-        return request.retained === undefined
-          ? files.read(request.path, request.raw === true ? { raw: true } : {})
-          : files.readCached(request.path, request.retained)
+      case 'open': {
+        const opened = await files.open(request.path, request.mode ?? READ)
+        handles.add(opened)
+        return opened
+      }
+      case 'pread':
+        return files.pread(fh, request.offset ?? 0, request.size ?? 0)
+      case 'pwrite':
+        return files.pwrite(fh, request.offset ?? 0, request.bytes ?? new Uint8Array())
+      case 'fstat':
+        return files.fstat(fh)
+      case 'ftruncate':
+        return files.ftruncate(fh, request.size ?? 0)
+      case 'close':
+        handles.delete(fh)
+        return files.close(fh)
       case 'stat':
-        return request.retainedStat === undefined
-          ? files.stat(request.path, true)
-          : files.statCached(request.path, request.retainedStat)
+        return files.stat(request.path, true)
       case 'readdir':
         return files.readdir(request.path, request.classify ?? true)
       case 'readlink':

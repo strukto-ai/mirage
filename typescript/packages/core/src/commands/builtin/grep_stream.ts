@@ -35,9 +35,9 @@ export function latin1(data: Uint8Array): string {
 }
 
 /**
- * The mirage-rs grep stream's configuration for a command line; -P never
- * reaches the stream, and a null pattern is a -f list of no patterns, which
- * matches nothing. Mirrors Python's stream_config.
+ * The mirage-rs grep stream's configuration for a command line; a null
+ * pattern is a -f list of no patterns, which matches nothing. Mirrors
+ * Python's stream_config.
  */
 export function streamConfig(
   f: FlagSet,
@@ -54,7 +54,13 @@ export function streamConfig(
     }
     patterns.push(data.subarray(start))
   }
-  const syntax = f.fixedString ? 'fixed' : f.syntax === RegexSyntax.EXTENDED ? 'extended' : 'basic'
+  const syntax = f.fixedString
+    ? 'fixed'
+    : f.syntax === RegexSyntax.PERL
+      ? 'perl'
+      : f.syntax === RegexSyntax.EXTENDED
+        ? 'extended'
+        : 'basic'
   const separator = groupLine(f)
   return {
     patterns: patterns.map(latin1),

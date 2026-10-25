@@ -21,7 +21,8 @@ import type { SessionState } from '@struktoai/mirage-core/workspace/session/sess
 import type { Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import { checkSizes } from '../fuse/backend.ts'
 import { canonicalMountpoint } from '../fuse/mount.ts'
-import { MountCore } from '../mount/core.ts'
+import { MountCore } from '@struktoai/mirage-core/mount/core'
+import { OWNER } from '../mount/constants.ts'
 import { MirageNFSServer, mountNfs, unmountArgs, unmountNfs } from '../mount/nfs.ts'
 import { CLEANUP, type CleanupEntry, removeMountpointIfOwned } from './fuse.ts'
 
@@ -54,6 +55,7 @@ export class NFSManager {
     const kernel = canonicalMountpoint(mountpoint)
     const server = new MirageNFSServer(
       new MountCore(ws.vfs, {
+        owner: OWNER,
         ...(options.rootPrefix !== undefined ? { rootPrefix: options.rootPrefix } : {}),
         ...(options.session !== undefined ? { session: options.session } : {}),
       }),

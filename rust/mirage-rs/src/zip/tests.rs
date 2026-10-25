@@ -159,7 +159,23 @@ fn a_file_that_is_no_archive_is_refused() {
     let (status, _, err) = unzip(&mut host, "nope.zip", json!({}));
     assert_eq!(
         (status, err.as_str()),
-        (9, "unzip: nope.zip: No such file or directory\n")
+        (
+            9,
+            "unzip:  cannot find or open nope.zip, nope.zip.zip or nope.zip.ZIP.\n"
+        )
+    );
+}
+
+#[test]
+fn a_name_with_nothing_there_opens_with_zip_or_upper_zip() {
+    let mut host = sample();
+    let archive = host.files.remove("z.zip").expect("written");
+    host.files.insert("up.ZIP".to_owned(), archive);
+    host.directories.push("up".to_owned());
+    let (status, out, _) = unzip(&mut host, "up", json!({"t": true, "q": 1}));
+    assert_eq!(
+        (status, out.as_str()),
+        (0, "No errors detected in compressed data of up.ZIP.\n")
     );
 }
 
@@ -192,7 +208,7 @@ fn a_chain_that_cannot_be_made_skips_its_member_and_goes_on() {
     let mut host = Host::with(&[("denied/a.txt", "A"), ("ok.txt", "OK")], "");
     let found = json!([file("denied/a.txt", 2), file("ok.txt", 3)]);
     assert_eq!(zip(&mut host, "z.zip", found).0, 0);
-    let (status, _, err) = unzip(&mut host, "z.zip", json!({"q": true}));
+    let (status, _, err) = unzip(&mut host, "z.zip", json!({"q": 1}));
     assert_eq!(status, 2);
     assert_eq!(
         err,

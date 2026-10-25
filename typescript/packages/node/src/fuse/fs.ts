@@ -15,9 +15,12 @@
 import { classify } from '@struktoai/mirage-core/errors/index'
 import type { Files } from '@struktoai/mirage-core/workspace/files'
 import type { SessionState } from '@struktoai/mirage-core/workspace/session/session'
+import { constants as fsConstants } from 'node:fs'
+import { MountCore } from '@struktoai/mirage-core/mount/core'
+import type { MountAttrs } from '@struktoai/mirage-core/mount/types'
+import { openMode } from '@struktoai/mirage-core/runtime/handles/index'
 import { XATTR_CREATE, XATTR_REPLACE } from './constants.ts'
-import { MountCore } from '../mount/core.ts'
-import type { MountAttrs } from '../mount/types.ts'
+import { OWNER } from '../mount/constants.ts'
 import { classifyError } from '../mount/errors.ts'
 
 type Cb<T> = (code: number, result?: T) => void
@@ -45,7 +48,7 @@ export class MirageFS {
   readonly core: MountCore
 
   constructor(files: Files, options: MirageFSOptions = {}) {
-    this.core = new MountCore(files, options)
+    this.core = new MountCore(files, { ...options, owner: OWNER })
   }
 
   // ── FUSE op surface (mirrors mfusepy Operations) ─────────────────
@@ -247,7 +250,7 @@ export class MirageFS {
   }
 
   private open(path: string, flags: number, cb: Cb<number>): void {
-    this.respond(this.core.open(path, flags), cb)
+    this.respond(this.core.open(path, openMode(flags, fsConstants)), cb)
   }
 
   private release(_path: string, fd: number, cb: (code: number) => void): void {

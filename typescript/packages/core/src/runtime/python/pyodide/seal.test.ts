@@ -19,12 +19,11 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { Worker } from 'node:worker_threads'
 import { describe, expect, it, vi } from 'vitest'
-import { WorkspaceBinding } from '../../binding.ts'
 import { PrefixResolver } from '../../resolver.ts'
 import { FileStat, FileType } from '../../../types.ts'
 import type { BridgeDispatchFn, RunResult } from '../../types.ts'
 import { PyodideRuntime } from './runtime.ts'
-import { context } from '../../../../tests/workspace/fixtures/context.ts'
+import { bindOver, runContext } from '../../../../tests/runtime/fixtures/bridge.ts'
 import * as sealing from './seal.ts'
 
 const ENC = new TextEncoder()
@@ -46,11 +45,11 @@ function unexpected(): never {
 
 /** Run `code` at `/` with no stdin. */
 function interpret(rt: PyodideRuntime, code: string): Promise<RunResult> {
-  return rt.interpret(undefined, { code, args: [], stdin: null }, context())
+  return rt.interpret(undefined, { code, args: [], stdin: null }, runContext(rt))
 }
 
 function bind(rt: PyodideRuntime): PyodideRuntime {
-  rt.bind(WorkspaceBinding.overBridge(dispatch, new PrefixResolver(() => ['/data'])))
+  bindOver(rt, dispatch, new PrefixResolver(() => ['/data']))
   return rt
 }
 
@@ -461,9 +460,12 @@ it('fails a run whose worker seal failed', async () => {
   const rt = new PyodideRuntime(
     { config: { autoLoadFromImports: false } },
     {
-      read: unexpected,
-      readCached: unexpected,
-      statCached: unexpected,
+      open: unexpected,
+      pread: unexpected,
+      pwrite: unexpected,
+      fstat: unexpected,
+      ftruncate: unexpected,
+      close: unexpected,
       stat: unexpected,
       checkPath: unexpected,
       readdir: unexpected,

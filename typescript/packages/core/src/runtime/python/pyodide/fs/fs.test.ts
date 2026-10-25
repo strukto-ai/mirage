@@ -27,6 +27,8 @@ import type { BridgeDispatchFn, VFSEntry, VFSStat } from '../../../types.ts'
 import { DIR_MODE, FILE_MODE } from './constants.ts'
 import type { FSNode, SyncVFS } from './types.ts'
 import { ContentType, FileStat, FileType, type SetAttrFields } from '../../../../types.ts'
+import { overlaid } from '../../../handles/file_handle.ts'
+import type { OpenMode } from '../../../handles/mode.ts'
 
 const enc = new TextEncoder()
 
@@ -42,6 +44,18 @@ interface Call {
   bytes?: Uint8Array
 }
 
+// One handle of the double's open-file core: the file as its open found
+// it, and what it wrote since.
+interface Held {
+  path: string
+  mode: OpenMode
+  row: VFSStat
+  data: Uint8Array
+  writes: [number, Uint8Array][]
+}
+
+type HandleOps = Pick<SyncVFS, 'open' | 'pread' | 'pwrite' | 'fstat' | 'ftruncate' | 'close'>
+
 describe('PyodideFs', () => {
   let py: PyodideInterface
   let files: RuntimeFiles
@@ -52,6 +66,9 @@ describe('PyodideFs', () => {
   const links = new Map<string, string>()
   const attrs: [string, SetAttrFields][] = []
   const flushed: MirageMutation[] = []
+  const held = new Map<number, Held>()
+  const opened: [string, OpenMode][] = []
+  let nextHandle = 0
   // The test mount's store, answered synchronously: the bridge wraps it in
   // a promise, and the worker double's flush calls it directly, as the
   // host applies what a worker flushes before it answers.
@@ -69,12 +86,6 @@ describe('PyodideFs', () => {
 
   function serveMutation(mutation: MirageMutation): void {
     switch (mutation.kind) {
-      case 'append':
-        serve('append', mutation.path, mutation.bytes)
-        return
-      case 'pwrite':
-        serve('pwrite', mutation.path, mutation.bytes, undefined, { offset: mutation.offset })
-        return
       case 'truncate':
         serve('truncate', mutation.path, undefined, undefined, { length: mutation.length })
         return
@@ -97,6 +108,62 @@ describe('PyodideFs', () => {
     return [...flushed.splice(0), ...journal.takeMutations()]
   }
 
+  // The run's open-file core as the worker reaches it, over the store: a
+  // handle holds the file as its open found it and reads what it wrote
+  // over that, and its close lands what it wrote while the file still has
+  // its name. What the core itself does with held bytes is its own tests'.
+  function handlesOver(stat: (path: string) => VFSStat): HandleOps {
+    const of = (fh: number): Held => {
+      const found = held.get(fh)
+      if (found === undefined) {
+        throw Object.assign(new Error(`no handle ${String(fh)}`), { code: 'EBADF' })
+      }
+      return found
+    }
+    const bytes = (h: Held): Uint8Array => overlaid(h.data, 0, Number.MAX_SAFE_INTEGER, h.writes)
+    return {
+      open: (path, mode) => {
+        opened.push([path, mode])
+        if (mode.create && !store.has(path)) serve('create', path)
+        const row = stat(path)
+        nextHandle += 1
+        held.set(nextHandle, {
+          path,
+          mode,
+          row,
+          data: store.get(path) ?? new Uint8Array(),
+          writes: [],
+        })
+        return nextHandle
+      },
+      pread: (fh, offset, size) => bytes(of(fh)).slice(offset, offset + size),
+      pwrite: (fh, offset, data) => {
+        const h = of(fh)
+        h.writes.push([h.mode.append ? bytes(h).length : offset, data])
+      },
+      fstat: (fh) => {
+        const h = of(fh)
+        return { ...h.row, size: bytes(h).length }
+      },
+      ftruncate: (fh, length) => {
+        const h = of(fh)
+        const data = new Uint8Array(length)
+        data.set(bytes(h).subarray(0, length))
+        h.data = data
+        h.writes = []
+      },
+      close: (fh) => {
+        const h = of(fh)
+        held.delete(fh)
+        if (!store.has(h.path)) return
+        for (const [offset, data] of h.writes) {
+          if (h.mode.append) serve('append', h.path, data)
+          else serve('pwrite', h.path, data, undefined, { offset })
+        }
+      },
+    }
+  }
+
   function storeSync(): SyncVFS {
     const stat = (path: string): VFSStat => {
       const found = store.get(path)
@@ -117,15 +184,7 @@ describe('PyodideFs', () => {
       throw Object.assign(new Error(`no such file: ${path}`), { code: 'ENOENT' })
     }
     return {
-      readCached: (_path, data) => data,
-      statCached: (_path, row) => row,
-      read: (path) => {
-        const found = store.get(path)
-        if (found === undefined) {
-          throw Object.assign(new Error(`no such file: ${path}`), { code: 'ENOENT' })
-        }
-        return found
-      },
+      ...handlesOver(stat),
       stat,
       readdir: (dir) => {
         const names = new Set<string>()
@@ -187,18 +246,19 @@ describe('PyodideFs', () => {
     stats: Record<string, VFSStat | Error>,
     statCalls: string[],
   ): SyncVFS {
+    const row = (path: string): VFSStat => {
+      const found = stats[path]
+      if (found === undefined) {
+        throw Object.assign(new Error(`no such file: ${path}`), { code: 'ENOENT' })
+      }
+      if (found instanceof Error) throw found
+      return found
+    }
     return {
-      read: (path) => store.get(path) ?? new Uint8Array(),
-      readCached: (_path, data) => data,
-      statCached: (_path, row) => row,
+      ...handlesOver(row),
       stat: (path) => {
         statCalls.push(path)
-        const found = stats[path]
-        if (found === undefined) {
-          throw Object.assign(new Error(`no such file: ${path}`), { code: 'ENOENT' })
-        }
-        if (found instanceof Error) throw found
-        return found
+        return row(path)
       },
       readdir: (path) => rows[path] ?? [],
       readlink: (path) => {
@@ -316,6 +376,8 @@ describe('PyodideFs', () => {
     links.clear()
     attrs.length = 0
     flushed.length = 0
+    held.clear()
+    opened.length = 0
     journal.takeMutations()
     counter += 1
   })
@@ -324,7 +386,7 @@ describe('PyodideFs', () => {
     return `/m${String(counter)}/`
   }
 
-  it('records only the tail for an append, and does not clobber the mount', async () => {
+  it('writes an append through an appending handle, and does not clobber the mount', async () => {
     const p = prefix()
     store.set(`${p}log.txt`, enc.encode('BASE'))
     await mountPrefix(p)
@@ -332,11 +394,12 @@ describe('PyodideFs', () => {
 with open('${p}log.txt', 'a') as f:
     f.write('+more')
 `)
-    const mutations = recorded()
-    expect(mutations).toHaveLength(1)
-    const only = mutations[0]
-    if (only?.kind !== 'append') throw new Error(`expected an append, got ${String(only?.kind)}`)
-    expect(dec.decode(only.bytes)).toBe('+more')
+    expect(opened.map(([path, mode]) => [path, mode.append, mode.writable])).toEqual([
+      [`${p}log.txt`, true, true],
+    ])
+    expect(calls.map((c) => c.op)).toEqual(['append'])
+    expect(dec.decode(store.get(`${p}log.txt`))).toBe('BASE+more')
+    expect(recorded()).toEqual([])
   })
 
   // What a program leaves on the mount once the journal drains: each
@@ -390,28 +453,22 @@ with open('${p}log.txt', 'a') as f:
     }
   })
 
-  it('rechecks hydrated reads and preserves the guest position on refusal', async () => {
+  it('keeps the guest position when the core refuses a read', async () => {
     const p = prefix()
     const path = `${p}retained.txt`
     store.set(path, enc.encode('abcdef'))
     const sync = storeSync()
     let refuse = false
-    let reads = 0
-    const seen: [string, string][] = []
+    const seen: [number, number][] = []
     mountOver(p, {
       ...sync,
-      read: (path, raw) => {
-        reads++
-        return sync.read(path, raw)
-      },
-      readCached: (path, data) => {
-        seen.push([path, dec.decode(data)])
+      pread: (fh, offset, size) => {
+        seen.push([offset, size])
         if (refuse) throw Object.assign(new Error('sealed'), { code: 'EACCES' })
-        return data
+        return sync.pread(fh, offset, size)
       },
     })
     await py.runPythonAsync(`_retained = open('${path}', 'rb', buffering=0)`)
-    expect(reads).toBe(1)
     refuse = true
     await py.runPythonAsync(`
 try:
@@ -424,16 +481,15 @@ except PermissionError:
     refuse = false
     await py.runPythonAsync(`_retained_result = _retained.read(2).decode(); _retained.close()`)
     expect(py.globals.get('_retained_result')).toBe('ab')
-    expect(reads).toBe(1)
     expect(seen).toEqual([
-      [path, 'ab'],
-      [path, 'ab'],
+      [0, 2],
+      [0, 2],
     ])
   })
 
-  describe.each([false, true])('retained metadata (detached=%s)', (detached) => {
+  describe.each([false, true])('fstat (detached=%s)', (detached) => {
     it.each(['ENOENT', 'EACCES'] as const)(
-      'rechecks %s on fstat and restores the same handle',
+      'answers the core refusing %s and keeps the same handle',
       async (code) => {
         const p = prefix()
         const path = `${p}metadata.txt`
@@ -448,11 +504,10 @@ except PermissionError:
             stats++
             return sync.stat(name)
           },
-          statCached: (name, row) => {
-            if (name === path) {
-              seen.push(row)
-              if (refuse) throw Object.assign(new Error('sealed'), { code })
-            }
+          fstat: (fh) => {
+            const row = sync.fstat(fh)
+            seen.push(row)
+            if (refuse) throw Object.assign(new Error('sealed'), { code })
             return row
           },
         })
@@ -487,57 +542,13 @@ except OSError as error:
     )
   })
 
-  it("shows a retained stat's policy the guest's own time edit", async () => {
-    const p = prefix()
-    const path = `${p}stamped.txt`
-    store.set(path, enc.encode('abc'))
-    const sync = storeSync()
-    const seen: VFSStat[] = []
-    mountOver(p, {
-      ...sync,
-      stat: (name) => {
-        const row = sync.stat(name)
-        return name === path
-          ? { ...row, source: new FileStat({ name: 'stamped.txt', type: FileType.FILE, size: 3 }) }
-          : row
-      },
-      statCached: (name, row) => {
-        if (name === path) seen.push(row)
-        return row
-      },
-    })
-    await py.runPythonAsync(`
-import os
-_stamped = open('${path}', 'rb', buffering=0)
-os.utime('${path}', (1000, 2000))
-os.fstat(_stamped.fileno())
-_stamped.close()
-`)
-    expect(seen.at(-1)?.source?.atime).toBe('1970-01-01T00:16:40Z')
-    expect(seen.at(-1)?.source?.modified).toBe('1970-01-01T00:33:20Z')
-  })
-
-  it("keeps a refused time edit out of a retained stat's policy", async () => {
+  it('raises the refusal a time edit got', async () => {
     const p = prefix()
     const path = `${p}unstamped.txt`
     store.set(path, enc.encode('abc'))
     const sync = storeSync()
-    const seen: VFSStat[] = []
     mountOver(p, {
       ...sync,
-      stat: (name) => {
-        const row = sync.stat(name)
-        return name === path
-          ? {
-              ...row,
-              source: new FileStat({ name: 'unstamped.txt', type: FileType.FILE, size: 3 }),
-            }
-          : row
-      },
-      statCached: (name, row) => {
-        if (name === path) seen.push(row)
-        return row
-      },
       flush: (mutations) => {
         if (mutations.some((m) => m.kind === 'setattr')) {
           throw Object.assign(new Error('sealed'), { code: 'EACCES' })
@@ -557,34 +568,7 @@ os.fstat(_unstamped.fileno())
 _unstamped.close()
 `)
     expect(py.globals.get('_utime_refused')).toBe(true)
-    expect(seen.at(-1)?.source?.atime ?? null).toBeNull()
-  })
-
-  it('checks written retained bytes without flushing the pending write', async () => {
-    const p = prefix()
-    const path = `${p}overlay.txt`
-    store.set(path, enc.encode('abcdef'))
-    const sync = storeSync()
-    const seen: string[] = []
-    mountOver(p, {
-      ...sync,
-      read: (path, raw) => sync.read(path, raw).slice(),
-      readCached: (_path, data) => {
-        seen.push(dec.decode(data))
-        return data
-      },
-    })
-    await py.runPythonAsync(`
-_overlay = open('${path}', 'r+b', buffering=0)
-_overlay.write(b'Z')
-_overlay.seek(0)
-_overlay_result = _overlay.read(2).decode()
-`)
-    expect(py.globals.get('_overlay_result')).toBe('Zb')
-    expect(seen).toEqual(['Zb'])
-    expect(dec.decode(store.get(path))).toBe('abcdef')
-    await py.runPythonAsync('_overlay.close()')
-    expect(dec.decode(store.get(path))).toBe('Zbcdef')
+    expect(attrs).toEqual([])
   })
 
   it('records a shutil.rmtree in post order, through its fd-relative walk', async () => {
@@ -696,7 +680,10 @@ with open('${p}../escaped.txt', 'w') as f:
             { path: `${p}bad.json`, size: 0, isDir: false },
           ],
         },
-        { [`${p}bad.json`]: new Error('upstream 502 Bad Gateway') },
+        {
+          [`${p}good.json`]: { size: 2, isDir: false, mode: FILE_MODE, mtimeMs: 0 },
+          [`${p}bad.json`]: new Error('upstream 502 Bad Gateway'),
+        },
         statCalls,
       ),
     )
@@ -713,7 +700,7 @@ except OSError as e:
     expect(py.globals.get('_names')).toBe('bad.json,good.json')
     expect(py.globals.get('_good')).toBe(2)
     expect(py.globals.get('_errno')).toBe(py.ERRNO_CODES.EIO)
-    expect(statCalls).toEqual([`${p}bad.json`])
+    expect(statCalls).toContain(`${p}bad.json`)
   })
 
   // The placeholder is a regular file; a mount that answers "directory"
@@ -744,9 +731,9 @@ _inner = ','.join(os.listdir('${p}sub'))
   })
 
   // A child process may change anything the tree served, so the runtime
-  // forgets every node once one returns. A handle the guest still holds
-  // keeps the bytes it was reading, as a descriptor keeps its inode: a
-  // read through it returns them and a write ships them whole.
+  // forgets every node once one returns. A stream the guest still holds
+  // reads and writes on through its core handle, as a descriptor keeps
+  // its inode.
   it('keeps an open handle whole across an invalidation', async () => {
     const p = prefix()
     const row = { size: 11, isDir: false, mode: FILE_MODE, mtimeMs: 0 }
@@ -780,8 +767,6 @@ _held.close()
     const sync = storeSync()
     mountOver(p, {
       ...sync,
-      // A copy, so only what reaches the mount changes the stored bytes.
-      read: (path, raw) => sync.read(path, raw).slice(),
       flush: (mutations) => {
         const at = mutations.findIndex((m) => m.kind === 'unlink')
         if (at < 0) return sync.flush(mutations)
@@ -894,47 +879,43 @@ _seen = f'{_st.st_uid}:{_st.st_gid} {int(_st.st_atime)} {_st.st_blocks}'
     expect(py.globals.get('_seen')).toBe('501:20 1000 2')
   })
 
-  it('reads what is stored for a writing open and the rendering for a reading one', async () => {
+  // The core reads what is stored for a writing handle and the rendering
+  // for a reading one, so the stream's access is what it must be told.
+  it('opens a reading stream read-only and a writing one writable', async () => {
     const p = prefix()
-    const reads: [string, boolean][] = []
     const row = { size: 3, isDir: false, mode: FILE_MODE, mtimeMs: 0 }
-    const sync = syncOver({}, { [`${p}r.txt`]: row, [`${p}w.txt`]: row }, [])
-    mountOver(p, {
-      ...sync,
-      read: (path, raw = false) => {
-        reads.push([path, raw])
-        return enc.encode('abc')
-      },
-    })
+    store.set(`${p}r.txt`, enc.encode('abc'))
+    store.set(`${p}w.txt`, enc.encode('abc'))
+    mountOver(p, syncOver({}, { [`${p}r.txt`]: row, [`${p}w.txt`]: row }, []))
     await py.runPythonAsync(`
 open('${p}r.txt').read()
 f = open('${p}w.txt', 'r+')
 f.read()
 f.close()
 `)
-    expect(reads).toEqual([
-      [`${p}r.txt`, false],
-      [`${p}w.txt`, true],
+    expect(opened.map(([path, mode]) => [path, mode.readable, mode.writable])).toEqual([
+      [`${p}r.txt`, true, false],
+      [`${p}w.txt`, true, true],
     ])
   })
 
-  it('fetches the other view for an open once the last one closed', async () => {
+  // A file whose name went has only the bytes its handles hold, so a
+  // resize goes to a handle that writes it (tempfile.TemporaryFile's).
+  it('resizes a file with no name left through its handle', async () => {
     const p = prefix()
-    const row = { size: 6, isDir: false, mode: FILE_MODE, mtimeMs: 0 }
-    const sync = syncOver({}, { [`${p}a.txt`]: row, [`${p}b.txt`]: row }, [])
-    mountOver(p, {
-      ...sync,
-      read: (_path, raw = false) => enc.encode(raw ? 'STORED' : 'RENDER'),
-    })
+    await mountPrefix(p)
     await py.runPythonAsync(`
-open('${p}a.txt', 'r+').close()
-_a = open('${p}a.txt').read()
-open('${p}b.txt').read()
-f = open('${p}b.txt', 'r+')
-_b = f.read()
-f.close()
+import os
+_tmp = open('${p}scratch', 'w+b', buffering=0)
+os.unlink('${p}scratch')
+_tmp.write(b'abcdef')
+_tmp.truncate(3)
+_tmp.seek(0)
+_shrunk = _tmp.read().decode()
+_tmp.close()
 `)
-    expect([py.globals.get('_a'), py.globals.get('_b')]).toEqual(['RENDER', 'STORED'])
+    expect(py.globals.get('_shrunk')).toBe('abc')
+    expect(store.has(`${p}scratch`)).toBe(false)
   })
 
   it('keeps a group the mount reports without an owner', async () => {

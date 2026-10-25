@@ -12,27 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it, vi } from 'vitest'
-import { AsyncLineIterator } from '../../io/async_line_iterator.ts'
-import { materialize } from '../../io/types.ts'
+import { describe, expect, it } from 'vitest'
 import { specOf } from '../spec/builtins.ts'
 import { FlagView } from '../spec/flag_view.ts'
 import type { FlagValue } from '../spec/types.ts'
 import { UsageError } from '../errors.ts'
-import { parseFlags, rgMatcher } from './generic/rg.ts'
-import { RgProgram, openRg, searchInput } from './rg_stream.ts'
-import {
-  ByteCursor,
-  NonmatchStop,
-  RgBinary,
-  type RgFlags,
-  expand,
-  replaceAll,
-  rustMatches,
-  searchHaystack,
-  smartCaseFolds,
-  transcoded,
-} from './rg_search.ts'
+import { parseFlags } from './generic/rg.ts'
+import { openRg, streamHaystack } from './rg_stream.ts'
+import { RgBinary, type RgFlags, smartCaseFolds, transcoded } from './rg_search.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
@@ -55,58 +42,26 @@ async function search(
   const f = flagsOf(flags)
   const out: Uint8Array[] = []
   const tally = { selected: false }
-  const pat =
-    f.engine === 'default' ? await openRg(pattern, false, f) : rgMatcher(pattern, false, f)
+  const pat = await openRg(pattern, false, f)
   try {
-    for await (const chunk of searchInput(source(data), pat, f, 'f', label, tally)) {
+    for await (const chunk of streamHaystack(
+      source(data),
+      pat,
+      f,
+      'f',
+      label,
+      tally,
+      undefined,
+      true,
+      false,
+    )) {
       out.push(chunk)
     }
     return out.map((c) => DEC.decode(c)).join('')
   } finally {
-    if (pat instanceof RgProgram) pat.stream.close()
+    pat.stream.close()
   }
 }
-
-describe('rustMatches', () => {
-  it('skips the empty match a match ends at', () => {
-    // `b*` over `abc` is empty, `b`, empty.
-    const spans = [...rustMatches(/b*/, 'abc')].map((m) => [m.index, m.index + m[0].length])
-    expect(spans).toEqual([
-      [0, 0],
-      [1, 2],
-      [3, 3],
-    ])
-  })
-})
-
-describe('expand', () => {
-  it.each([
-    ['<$1>', '<b>'],
-    ['<${1}>', '<b>'],
-    ['<$name>', '<b>'],
-    ['<$1x>', '<>'],
-    ['<$$>', '<$>'],
-    ['<$>', '<$>'],
-    ['<$9>', '<>'],
-  ])("reads %s as Rust's Captures::expand", (template, want) => {
-    const re = /a(?<name>b)/
-    const m = re.exec('ab')
-    expect(m).not.toBeNull()
-    if (m !== null) expect(expand(template, m, re)).toBe(want)
-  })
-})
-
-describe('replaceAll', () => {
-  it('reports where each replacement landed', () => {
-    expect(replaceAll(/o/, 'foo', 'XY')).toEqual([
-      'fXYXY',
-      [
-        [1, 3],
-        [3, 5],
-      ],
-    ])
-  })
-})
 
 describe('smartCaseFolds', () => {
   it.each([
@@ -123,32 +78,7 @@ describe('smartCaseFolds', () => {
   })
 })
 
-describe('ByteCursor', () => {
-  it('counts each step from the last', () => {
-    const cursor = new ByteCursor('café abc abc')
-    expect([cursor.at(5), cursor.at(9)]).toEqual([6, 10])
-  })
-})
-
-describe('NonmatchStop', () => {
-  it('arms after the first selection', () => {
-    const stop = new NonmatchStop(true, false)
-    expect(stop.armed).toBe(false)
-    stop.select()
-    expect(stop.armed).toBe(true)
-  })
-
-  it('passes one line over when inverted', () => {
-    const stop = new NonmatchStop(true, true)
-    expect(stop.passesOver()).toBe(false)
-    stop.select()
-    expect(stop.passesOver()).toBe(true)
-    expect(stop.armed).toBe(true)
-    expect(stop.passesOver()).toBe(false)
-  })
-})
-
-describe('searchHaystack', () => {
+describe('streamHaystack', () => {
   it.each([
     [{}, 'a1\na2\n'],
     [{ after_context: '1' }, 'a1\na2\nb\n'],
@@ -214,114 +144,6 @@ it.each([{}, { line_regexp: true }])(
   },
 )
 
-describe.each(['needle', 'needle|qqzzyy', 'nee.le', '\\bneedle\\b', '(?:needle|other)+'])(
-  'block search %s',
-  (pattern) => {
-    it.each([
-      { count: true },
-      { files_with_matches: true },
-      {},
-      { ignore_case: true, count: true },
-      { ignore_case: true, files_with_matches: true },
-      { ignore_case: true },
-      { word_regexp: true, count: true },
-      { line_regexp: true, count: true },
-      { null_data: true, count: true },
-      { null_data: true },
-    ])('does not read each nonmatching record: %j', async (flags) => {
-      const lines = vi.spyOn(AsyncLineIterator.prototype, 'readline')
-      const records = vi.spyOn(AsyncLineIterator.prototype, 'readUntil')
-      try {
-        const data = ('abcdefg' + ('null_data' in flags ? '\0' : '\n')).repeat(40000)
-        expect(await search(data, pattern, flags)).toBe('')
-        expect(lines.mock.calls.length + records.mock.calls.length).toBeLessThan(50)
-      } finally {
-        lines.mockRestore()
-        records.mockRestore()
-      }
-    })
-  },
-)
-
-it.each([1, 7, 16384, 65536])(
-  'preserves records and offsets across %i-byte chunks',
-  async (size) => {
-    const data = ENC.encode(
-      'abcdefg\n'.repeat(size < 10 ? 200 : 9000) +
-        'é NEEDLE\nother\n' +
-        'abcdefg\n'.repeat(size < 10 ? 200 : 9000) +
-        'needle',
-    )
-    async function* input(): AsyncIterable<Uint8Array> {
-      await Promise.resolve()
-      for (let at = 0; at < data.length; at += size) yield data.subarray(at, at + size)
-    }
-    for (const flags of [
-      { line_number: true, byte_offset: true, ignore_case: true },
-      { count: true, ignore_case: true },
-      { files_with_matches: true, ignore_case: true },
-      { after_context: 1, before_context: 1, ignore_case: true },
-      { invert_match: true, count: true },
-      { stop_on_nonmatch: true, ignore_case: true },
-    ]) {
-      const f = flagsOf(flags)
-      const pat = rgMatcher('needle|other', false, f)
-      const fast = { selected: false },
-        slow = { selected: false }
-      const actual = await materialize(searchHaystack(input(), pat, f, 'f', null, fast))
-      const skip = vi
-        .spyOn(AsyncLineIterator.prototype, 'skipNonmatchingLines')
-        .mockReturnValue([0, 0])
-      let expected: Uint8Array
-      try {
-        expected = await materialize(searchHaystack(input(), pat, f, 'f', null, slow))
-      } finally {
-        skip.mockRestore()
-      }
-      expect([actual, fast]).toEqual([expected, slow])
-    }
-  },
-  // Twelve whole scans of a 144 KB haystack: well under a second alone, but a
-  // shared CI runner can take it past the 5 s default.
-  30_000,
-)
-
-it.each([
-  {},
-  { count: true },
-  { count_matches: true },
-  { files_with_matches: true },
-  { files_without_match: true },
-  { quiet: true },
-  { max_count: 1 },
-  { invert_match: true },
-  { context: 2 },
-  { passthru: true },
-  { stop_on_nonmatch: true },
-  { null_data: true },
-  { only_matching: true },
-  { word_regexp: true },
-])('preserves rg output and offsets with filtering disabled: %j', async (flags) => {
-  const data =
-    'abc\n'.repeat(200) +
-    'NEEDLE\nnone\nneedle needle\nſ\nK\nİ\nı\n' +
-    'abc\n'.repeat(200) +
-    'needle'
-  const opts = { ...flags, ignore_case: true, line_number: true, byte_offset: true }
-  for (const pattern of ['needle|qqzzyy', 'nee.le', '\\bneedle\\b', '(?:needle)?', 's|k|i']) {
-    const skip = vi
-      .spyOn(AsyncLineIterator.prototype, 'skipNonmatchingLines')
-      .mockReturnValue([0, 0])
-    let expected: string
-    try {
-      expected = await search(data, pattern, opts)
-    } finally {
-      skip.mockRestore()
-    }
-    expect(await search(data, pattern, opts)).toBe(expected)
-  }
-})
-
 // ripgrep 14.1.1 through PCRE2: `rg -oP`, `-r`, `-b` and `--column` report
 // the match from its last `\\K`. Mirrors `test_rg_search.py`.
 describe('PCRE2 keep', () => {
@@ -348,9 +170,9 @@ describe('PCRE2 keep', () => {
     )
   })
 
-  it('falls back to PCRE2 under auto only when the default refuses', () => {
-    expect(rgMatcher('(a)\\1', false, flagsOf({ engine: 'auto' })).test('aa')).toBe(true)
-    expect(() => rgMatcher('(a)\\1', false, flagsOf({}))).toThrow(
+  it('falls back to PCRE2 under auto only when the default refuses', async () => {
+    expect(await search('aa\nab\n', '(a)\\1', { engine: 'auto' })).toBe('aa\n')
+    await expect(openRg('(a)\\1', false, flagsOf({}))).rejects.toThrow(
       /backreferences are not supported/,
     )
   })
@@ -453,10 +275,15 @@ describe('transcoded', () => {
     async function found(data: number[], pattern: string, flags: Record<string, FlagValue>) {
       const f = flagsOf(flags)
       const tally = { selected: false }
-      const out = await bytesOf(
-        searchHaystack(parts(data), rgMatcher(pattern, false, f), f, 'f', null, tally),
-      )
-      return [DEC.decode(new Uint8Array(out)), tally.selected]
+      const pat = await openRg(pattern, false, f)
+      try {
+        const out = await bytesOf(
+          streamHaystack(parts(data), pat, f, 'f', null, tally, undefined, true, false),
+        )
+        return [DEC.decode(new Uint8Array(out)), tally.selected]
+      } finally {
+        pat.stream.close()
+      }
     }
     expect(await found([0xff, 0xfe, 0x68, 0, 0x69, 0, 0x0a, 0], 'hi', {})).toEqual(['hi\n', true])
     expect(await found([0x63, 0x61, 0x66, 0xe9, 0x0a], 'café', { encoding: 'latin1' })).toEqual([

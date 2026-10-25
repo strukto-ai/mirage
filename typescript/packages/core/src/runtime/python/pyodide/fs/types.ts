@@ -15,6 +15,7 @@
 import type { BridgeOpAttrs } from '../../../types.ts'
 import type { VFSEntry, VFSStat } from '../../../types.ts'
 import type { FsCondition } from '../../../../errors/types.ts'
+import type { OpenMode } from '../../../handles/mode.ts'
 import type { MirageMutation } from './journal.ts'
 
 /** An inline flush stops at its first failure; skipped excludes that entry. */
@@ -29,11 +30,20 @@ export interface SyncVFS {
   /** Check a requested alias against command rules without issuing a backend op. */
   checkPath(path: string, follow: boolean): void
   process?(payload: string): string
-  /** A file's bytes; `raw` reads what is stored rather than its rendering. */
-  read(path: string, raw?: boolean): Uint8Array
-  readCached(path: string, data: Uint8Array): Uint8Array
+  /**
+   * Open a file on the run's open-file core (`RuntimeFiles.open`), which
+   * holds what the handle reads and writes, and answer the handle.
+   */
+  open(path: string, mode: OpenMode): number
+  pread(fh: number, offset: number, size: number): Uint8Array
+  pwrite(fh: number, offset: number, bytes: Uint8Array): void
+  /** The row an open handle stats by, what it wrote and has not landed counted. */
+  fstat(fh: number): VFSStat
+  ftruncate(fh: number, length: number): void
+  /** Land what a handle wrote and let it go; a landing that fails throws. */
+  close(fh: number): void
+  /** A path's own row, never its link's target; what open handles wrote counts. */
   stat(path: string): VFSStat
-  statCached(path: string, row: VFSStat): VFSStat
   readdir(path: string, classify?: boolean): VFSEntry[]
   readlink(path: string): string
   flush(mutations: MirageMutation[]): FlushFailure | undefined
@@ -103,20 +113,15 @@ export interface FSNode {
    * property and would resolve to something off Object.prototype.
    */
   children?: Map<string, FSNode>
-  contents?: Uint8Array
-  usedBytes?: number
   source?: VFSStat['source']
   /** Placed from an unclassified listing row; `getattr` asks the mount first. */
   unclassified?: boolean
   /** A directory whose children came from a listing of the mount. */
   listed?: boolean
-  loaded?: boolean
   /** The owner the mount reported; absent reads as 0. */
   uid?: number
   gid?: number
-  /** Whether the loaded bytes are the stored ones rather than the
-   * rendering, and how many streams have the node open. */
-  raw?: boolean
+  /** How many streams have the node open. */
   opens?: number
   /** Its name went while a stream had it open (`PyodideFs.orphan`). */
   unlinked?: boolean
@@ -138,6 +143,12 @@ export interface FSStream {
    * under, while a stat by path names the current one.
    */
   opened?: string
+  /**
+   * The core handle a file's stream reads and writes through, which holds
+   * its bytes; absent for a directory or a device, and once the run that
+   * opened it ended (`PyodideFs.handleOf` opens it again).
+   */
+  fh?: number
 }
 
 export interface FSAttr {

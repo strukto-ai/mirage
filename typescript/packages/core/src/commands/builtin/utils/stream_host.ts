@@ -109,11 +109,19 @@ export class StreamHost {
   /**
    * Open an input by name: `-` or `/dev/stdin` is stdin; `operand` is the
    * operand, from 1, the name came from; `file` is a file a script names,
-   * which no spelling of stdin stands for.
+   * which no spelling of stdin stands for; `asOperand` is a name standing in
+   * for an operand (unzip's `X.zip` for `X`), read as an operand is.
    */
-  openInput(name: string, operand: number | null, file = false): AsyncIterable<Uint8Array> {
+  openInput(
+    name: string,
+    operand: number | null,
+    file = false,
+    asOperand = false,
+  ): AsyncIterable<Uint8Array> {
     if (file) return this.readPath(name)
-    const path = this.operand(name, operand)
+    const path =
+      this.operand(name, operand) ??
+      (asOperand ? PathSpec.fromStrPath(name, undefined, this.ctx.cwd) : undefined)
     if (path !== undefined) {
       if (isStdin(path, this.dash)) return this.stdinView()
       return this.readPath(path, this.local(path))
@@ -226,7 +234,8 @@ export class StreamHost {
     if (named !== undefined) this.named.set(fd, named)
     // Each pull loses to the abort, and a producer left mid-pull is closed
     // without a wait.
-    return chunks(this.openInput(name, operand, request.file === true), this.ctx.signal, false)
+    const opened = this.openInput(name, operand, request.file === true, request.as_operand === true)
+    return chunks(opened, this.ctx.signal, false)
   }
 
   /**

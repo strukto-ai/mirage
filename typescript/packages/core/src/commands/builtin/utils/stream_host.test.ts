@@ -57,6 +57,18 @@ describe('StreamHost', () => {
     expect(missing.reply).toEqual({ error: 'No such file or directory', errno: 'ENOENT' })
   })
 
+  it('reads a name standing in for an operand as the operand is read', async () => {
+    // Outside a workspace only the operand's reader can serve a name.
+    const h = host({ '/a.txt.zip': 'stored\n' })
+    const named = await h.serve({ op: 'read', fd: 1, path: '/a.txt.zip' }, new Uint8Array())
+    expect(named.reply).toEqual({ error: 'No such file or directory', errno: 'ENOENT' })
+    const read = { op: 'read', fd: 2, path: '/a.txt.zip', as_operand: true }
+    expect(await h.serve(read, new Uint8Array())).toEqual({
+      reply: {},
+      data: ENC.encode('stored\n'),
+    })
+  })
+
   it('shares one stdin cursor between readers', async () => {
     const h = host({}, parts('p\n', 'q\n'))
     const first = await h.serve({ op: 'read', fd: 1, path: '-' }, new Uint8Array())

@@ -1,5 +1,5 @@
 {
-  "baseline": 3018,
+  "baseline": 2984,
  "modules": {
   "vfs/ram/store": {
    "python_only": {
@@ -129,12 +129,6 @@
     "synchronous": "Shares the current embedded Wasm instance between synchronous utilities and asynchronous command streams.",
     "movables": "The matcher streams each instance holds, which close with it when it retires; the wasm instance loader; Python imports mirage-rs as a native PyO3 module, so it has no instance to compile, size or recycle.",
     "retire": "Drops a grown or trapped instance and closes the matcher streams still on it; the wasm instance loader; Python imports mirage-rs as a native PyO3 module, so it has no instance to compile, size or recycle."
-   }
-  },
-  "utils/regex": {
-   "python_only": {
-    "Pattern": "Python union of a native pattern and its prepared asynchronous facade; TypeScript subclasses RegExp.",
-    "RegexMatch": "Python union of re.Match and its serializable twin; TypeScript RegExpExecArray is structured-cloneable."
    }
   },
   "fuse/constants": {
@@ -355,11 +349,6 @@
   "commands/builtin/general/curl": {
    "typescript_only": {
     "UNRESERVED": "TypeScript percent-encodes --data-urlencode by hand against RFC 3986's unreserved set, since encodeURIComponent also keeps !'()*; Python's quote(safe=\"\") keeps exactly that set already."
-   }
-  },
-  "runtime/handles/file_handle": {
-   "typescript_only": {
-    "LINE_SCAN": "QuickJS on TypeScript reads a line through the handle itself, a window at a time; a Python guest reads lines through CPython's io layer over the handle, so Python has no window."
    }
   },
   "workspace/executor/jobs": {

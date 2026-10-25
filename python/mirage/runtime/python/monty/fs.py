@@ -21,7 +21,6 @@ from typing import Any
 from mirage.errors import FsCondition, classify
 from mirage.runtime.files import RuntimeFiles
 from mirage.runtime.handles import parse_mode
-from mirage.runtime.open import apply_open
 from mirage.runtime.python.monty.constants import (
     MAX_URANDOM_BYTES,
     NOT_A_LINK,
@@ -75,8 +74,9 @@ class MontyFs(AbstractOS):
 
     Monty hands the callbacks whole-file calls: an open, then reads of the
     whole file and appends of each new write. So an open applies its
-    mode's effect on the mount (``apply_open``) and nothing else, and
-    each write after it ships only its own bytes.
+    mode's effect on the mount (``RuntimeFiles.open``, closed again at
+    once) and nothing else, and each write after it ships only its own
+    bytes.
 
     The callbacks are synchronous, so the file API's hop parks the
     tokio worker for the whole I/O wait. That caps concurrent
@@ -194,14 +194,13 @@ class MontyFs(AbstractOS):
         files = self._files_for(path)
         parsed = parse_mode(mode)
         with _as_guest(str(path)):
-            row = apply_open(files, str(path), parsed)
-            if parsed.append and row is not None:
-                size = (
-                    row.size
-                    if row.size is not None
-                    else len(files.read(str(path)))
-                )
-                return MontyFileHandle(str(path), mode, position=size)
+            fh = files.open(str(path), parsed)
+            try:
+                size = files.fstat(fh).size if parsed.append else 0
+            finally:
+                files.close(fh)
+        if parsed.append:
+            return MontyFileHandle(str(path), mode, position=size)
         return handle
 
     def path_read_text(self, path: PurePosixPath | MontyFileHandle) -> str:
