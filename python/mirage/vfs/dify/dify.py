@@ -3,7 +3,7 @@ from typing import Any
 from mirage.accessor.dify import DifyAccessor
 from mirage.core.dify.read import read as _read
 from mirage.core.dify.read import read_stream as _read_stream
-from mirage.core.dify.search import METHODS, search_many
+from mirage.core.dify.search import search_many
 from mirage.core.dify.stat import stat as _stat
 from mirage.core.dify.tree import DIFY_TREE
 from mirage.io.types import ByteSource
@@ -11,8 +11,7 @@ from mirage.types import DirListing, FileStat, PathSpec, SearchQuery, VFSName
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.dify.config import DifyConfig
 
-VFS_MD = (
-    """This is a Dify Knowledge Base mounted as a read-only filesystem.
+VFS_MD = """This is a Dify Knowledge Base mounted as a read-only filesystem.
 
 All files are plain text assembled from Dify document segments, regardless of
 their original extension. You can use cat, head, tail, grep, find, ls, wc, and
@@ -20,9 +19,7 @@ search on these files.
 
 For semantic or relevance-based queries, use:
 
-search "<query>" [path ...] [--method """
-    + "|".join(METHODS)
-    + """]
+search "<query>" [path ...] [--method semantic|fulltext|hybrid|keyword]
     [--top-k N] [--threshold F]
 
 --threshold keeps the hits Dify scores at least F, from 0 to 1.
@@ -37,7 +34,6 @@ Scoped search requires documents with the configured slug metadata field
 (default: slug) or Dify Built-in Fields enabled for name-based documents.
 Otherwise, scoped searches against name-based paths may return empty
 results."""
-)
 
 _readdir = DIFY_TREE.readdir
 

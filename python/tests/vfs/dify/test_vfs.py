@@ -1,8 +1,10 @@
 import pytest
 from pydantic import ValidationError
 
+from mirage.core.dify.search import METHODS
 from mirage.types import VFSName
 from mirage.vfs.dify import DifyConfig
+from mirage.vfs.dify.dify import VFS_MD
 from mirage.vfs.registry import REGISTRY, build_vfs
 from tests.fixtures.mount_commands import mount_commands
 from tests.fixtures.vfs_io import served
@@ -119,3 +121,8 @@ async def test_dify_vfs_close_closes_shared_client():
 
     assert session.closed is True
     assert vfs.accessor.pool._session is None
+
+
+# VFS.md lists the methods search takes, the ones the command checks.
+def test_vfs_md_names_every_search_method():
+    assert f"[--method {'|'.join(METHODS)}]" in VFS_MD
