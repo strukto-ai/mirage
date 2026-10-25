@@ -12,404 +12,132 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import functools
-from collections.abc import Callable, Collection, Sequence
+
+from collections.abc import Collection, Sequence
 from dataclasses import dataclass
+from functools import lru_cache
 
 from mirage.commands.spec import SPECS, parse_command, parse_to_kwargs
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import WordKind
-from mirage.policy.constants import (
-    METADATA_OPS,
-    SUBTREE_COMMANDS,
-    SUBTREE_OPS,
-    VERB_ORDER,
-)
 from mirage.policy.match.allow import line_tokens
-from mirage.policy.match.pattern import pattern_matches
 from mirage.policy.types import (
     AdmissionRules,
     CommandContext,
     CommandRule,
-    LiveRules,
-    Outcome,
     VfsContext,
 )
-from mirage.types import HiddenPaths, PathSpec
-from mirage.utils.hidden import (
-    anchor_depth,
-    classify_paths,
-    hides_intersect,
-    path_covers,
-    path_hidden,
+from mirage.rs.policy import (
+    FactsValue,
+    PathValue,
+    admission,
+    from_units,
+    policy_subjects,
+    units,
 )
-from mirage.utils.path import gnu_basename
-
-
-def better_match(
-    current: tuple[int, int] | None, depth: int, verb: int
-) -> bool:
-    """Whether a match beats the best one so far: deeper anchor first,
-    then the stronger verb, then the earlier rule (which is why this is
-    strict).
-
-    The order :func:`rule_at` reads every candidate by.
-
-    Args:
-        current (tuple[int, int] | None): the best (depth, verb) so far.
-        depth (int): the candidate's anchor depth.
-        verb (int): ``DENY_FIRST`` or ``ASK_SECOND``.
-    """
-    if current is None:
-        return True
-    best_depth, best_verb = current
-    if depth != best_depth:
-        return depth > best_depth
-    return verb < best_verb
-
-
-def written(rules: AdmissionRules) -> LiveRules:
-    """A profile's rules as :func:`rule_at` reads them: every deny, then
-    every ask, each in the order written.
-
-    Args:
-        rules (AdmissionRules): the session's admission rules.
-    """
-    return [
-        *((Outcome.DENY, rule) for rule in rules.deny),
-        *((Outcome.ASK, rule) for rule in rules.ask),
-    ]
-
-
-def rule_at(
-    live: LiveRules, reach: Callable[[CommandRule], int | None]
-) -> tuple[Outcome, CommandRule, int] | None:
-    """The rule that speaks about one thing, None when none does: the
-    deepest anchor, deny before ask at equal depth, the earlier rule on
-    a full tie (:func:`better_match`).
-
-    The one law a line's subjects (``decide``), the entries a walk
-    reaches below them (:func:`io_refusal`) and a bare op
-    (:func:`op_ruling`) are all read by; each says how far a rule reaches
-    its thing, since a line, an entry and an op carry different facts.
-
-    Args:
-        live (LiveRules): the candidate rules, deny before ask, in the
-            order written.
-        reach (Callable[[CommandRule], int | None]): a rule's anchor
-            depth at the thing, None when it says nothing about it.
-    """
-    best: tuple[int, int] | None = None
-    chosen: tuple[Outcome, CommandRule, int] | None = None
-    for outcome, rule in live:
-        depth = reach(rule)
-        verb = VERB_ORDER[outcome]
-        if depth is None or not better_match(best, depth, verb):
-            continue
-        best = (depth, verb)
-        chosen = (outcome, rule, depth)
-    return chosen
-
-
-def ungranted(
-    spoke: tuple[Outcome, CommandRule, int] | None,
-    granted: Collection[CommandRule],
-) -> tuple[CommandRule, bool] | None:
-    """The rule that still holds an entry or an op back, and whether it
-    asks: the one :func:`rule_at` chose, unless it is an ask the running
-    line already holds a grant under (the nod the gate took for
-    ``rm -r /x`` covers the entries under ``/x``).
-
-    Args:
-        spoke (tuple[Outcome, CommandRule, int] | None): what
-            :func:`rule_at` chose.
-        granted (Collection[CommandRule]): the ask rules the line runs
-            under a grant for.
-    """
-    if spoke is None:
-        return None
-    outcome, rule, _ = spoke
-    if outcome is Outcome.ASK and rule in granted:
-        return None
-    return rule, outcome is Outcome.ASK
+from mirage.types import HiddenPaths, PathSpec
+from mirage.utils.hidden import classify_paths
 
 
 @dataclass(frozen=True, slots=True)
 class Subject:
-    """One thing a line's rules are read against.
-
-    A line is judged subject by subject, because the paths a command
-    names are not one question: ``cp /sealed/x /wip/y`` reads one file
-    and writes another, and a nod for the destination says nothing
-    about the source.
-
-    Args:
-        path (PathSpec | None): the path, None for the line itself,
-            which is the only subject of a line naming no path and is
-            reached only by a rule naming no paths.
-        holds (bool): whether this subject would take a whole subtree
-            along (``rm -r /x``, ``mv /x /y``), so a rule anchored
-            below it speaks about it.
-        ancestors (bool): whether an ancestor of the rule's scope
-            counts as holding it; False for ``mv``'s destination, which
-            lands in the scope only when it is that directory itself.
-    """
-
     path: PathSpec | None
     holds: bool = False
     ancestors: bool = True
 
 
 def operand_paths(ctx: CommandContext) -> list[PathSpec]:
-    """The paths a command's operands name, in order: what ``rm -r``
-    removes or ``mv``, ``tar`` and ``cp`` take as sources, never an
-    option's value.
-
-    Args:
-        ctx (CommandContext): the classified command.
-    """
     return [
-        w.path
-        for w in ctx.words
-        if w.kind is WordKind.OPERAND and w.path is not None
+        word.path
+        for word in ctx.words
+        if word.kind is WordKind.OPERAND and word.path is not None
     ]
 
 
 def _target_directory(ctx: CommandContext) -> str | None:
-    """The target directory an ``mv`` line names by option (``-t``,
-    ``--target-directory``), as its grammar reads the line, so a
-    ``-S.txt`` suffix is no target; None when it names none.
-
-    Args:
-        ctx (CommandContext): the classified command.
-    """
     spec = SPECS["mv"]
     parsed = parse_command(spec, list(ctx.argv), ctx.cwd, "mv")
-    fl = FlagView(parse_to_kwargs(parsed), spec=spec)
-    return fl.as_str("target_directory")
+    flags = FlagView(parse_to_kwargs(parsed), spec=spec)
+    return flags.as_str("target_directory")
 
 
-def _destination(ctx: CommandContext) -> PathSpec | None:
-    """``mv``'s positional destination, None when the line has none:
-    another command, a single operand, or a target directory named by
-    option, which leaves every operand a source.
-
-    Args:
-        ctx (CommandContext): the classified command.
-    """
-    operands = operand_paths(ctx)
-    if ctx.command != "mv" or len(operands) < 2:
-        return None
-    if _target_directory(ctx) is not None:
-        return None
-    return operands[-1]
+def path_value(path: PathSpec) -> PathValue:
+    return units(path.virtual), units(path.raw_path or path.virtual)
 
 
-def subjects(ctx: CommandContext) -> tuple[Subject, ...]:
-    """What a line's rules are read against, in the order they are read.
-
-    Every path the line names first, each asked whether it lies inside
-    a rule's scope; then the operands of a subtree command, asked the
-    second question, whether they hold one. The two orders together are
-    what a single rule sees, so the first subject a rule reaches is the
-    operand its refusal names. A line naming no path is one subject,
-    itself.
-
-    Args:
-        ctx (CommandContext): the classified command.
-    """
-    if not ctx.paths:
-        return (Subject(None),)
-    subs = [Subject(p) for p in ctx.paths]
-    if ctx.command in SUBTREE_COMMANDS:
-        operands = operand_paths(ctx)
-        dst = _destination(ctx)
-        if dst is not None:
-            operands.pop()
-        subs.extend(Subject(p, holds=True) for p in operands)
-        if dst is not None:
-            subs.append(Subject(dst, holds=True, ancestors=False))
-    return tuple(subs)
-
-
-def _under(path: str, root: str) -> bool:
-    return root == "/" or path == root or path.startswith(root + "/")
-
-
-def _touches(mount: str, ctx: CommandContext) -> bool:
-    """Whether a line works inside a mount: its cwd is under the root,
-    one of its paths is, or the command walks a directory holding the
-    root (``grep -r x /scratch`` enters ``/scratch/child``: the fan-out
-    reruns the traversal inside each descendant mount and no admission
-    fires again there, so the ancestor operand is the one place the
-    mount's rule can speak) or takes that directory along whole
-    (``mv /scratch /done``, ``rm -r /scratch``), as a path rule judges
-    a subtree operand.
-
-    Args:
-        mount (str): the mount root.
-        ctx (CommandContext): the classified command.
-    """
-    if _under(ctx.cwd, mount):
-        return True
-    if any(_under(p.virtual, mount) for p in ctx.paths):
-        return True
-    if ctx.walks:
-        return any(_under(mount, p.virtual) for p in ctx.paths)
-    if ctx.command not in SUBTREE_COMMANDS:
-        return False
-    # Every path the line names is taken along, a link's target included,
-    # except where mv moves things to: its -t value or its destination,
-    # typed or reached through a link above it. mv never follows a last
-    # component, so a followed path keeps the operand's name: one under
-    # the destination's name that no source carries is the destination.
-    targets: set[str] = set()
-    if ctx.command == "mv":
-        target = _target_directory(ctx)
-        if target is not None:
-            targets.add(target)
-    dst = _destination(ctx)
-    if dst is not None:
-        name = gnu_basename(dst.virtual)
-        sources = operand_paths(ctx)[:-1]
-        if all(gnu_basename(p.virtual) != name for p in sources):
-            targets.update(
-                p.virtual for p in ctx.paths if gnu_basename(p.virtual) == name
-            )
-        targets.add(dst.virtual)
-    return any(
-        _under(mount, p.virtual) for p in ctx.paths if p.virtual not in targets
+def command_facts(ctx: CommandContext) -> FactsValue:
+    return (
+        units(ctx.command),
+        tuple(units(value) for value in line_tokens(ctx)),
+        ctx.tool,
+        units(ctx.cwd),
+        tuple(path_value(path) for path in ctx.paths),
+        tuple(path_value(path) for path in operand_paths(ctx)),
+        ctx.walks,
+        units(target)
+        if ctx.command == "mv"
+        and ctx.paths
+        and (target := _target_directory(ctx)) is not None
+        else None,
     )
 
 
+def subjects(ctx: CommandContext) -> tuple[Subject, ...]:
+    paths = (*ctx.paths, *operand_paths(ctx))
+    return tuple(
+        Subject(
+            next(
+                (
+                    path
+                    for path in paths
+                    if path.virtual == from_units(value[0])
+                    and (path.raw_path or path.virtual) == from_units(value[1])
+                ),
+                None,
+            )
+            if value is not None
+            else None,
+            holds=holds,
+            ancestors=ancestors,
+        )
+        for value, holds, ancestors in policy_subjects(command_facts(ctx))
+    )
+
+
+@lru_cache(maxsize=1024)
+def _single(rule: CommandRule) -> AdmissionRules:
+    return AdmissionRules(deny=(rule,))
+
+
 def rule_applies(rule: CommandRule, ctx: CommandContext) -> bool:
-    """Whether a rule speaks about a line at all, before any of the
-    line's subjects is read.
-
-    Two questions: the rule's command patterns (a prefix of the line's
-    tokens; none means every command), and the rule's mount (a rule
-    written under a mount section applies only to a line working inside
-    it).
-
-    Args:
-        rule (CommandRule): the rule.
-        ctx (CommandContext): the classified command.
-    """
-    if rule.commands:
-        tokens = line_tokens(ctx)
-        if not any(pattern_matches(p, tokens) for p in rule.commands):
-            return False
-    return not rule.mount or _touches(rule.mount, ctx)
+    return admission(_single(rule)).rule_applies(0, command_facts(ctx))
 
 
 def rule_reach(
     rule: CommandRule, scope: HiddenPaths | None, subject: Subject
 ) -> int | None:
-    """How deep a rule reaches at one subject of a line, None when it
-    says nothing about that subject.
-
-    A rule naming no paths reaches every subject at depth 0: it is off
-    the path axis, so any entry naming a place outranks it. A rule
-    carrying paths reaches a subject lying inside them, or, for a
-    subtree operand, one holding them (``rm -r /x`` takes
-    ``/x/locked/*`` along, and ``mv``'s destination lands in the scope
-    only when it is that directory itself). The depth is the deepest
-    entry that actually reached, never the rule's deepest entry.
-
-    Args:
-        rule (CommandRule): the rule.
-        scope (HiddenPaths | None): the rule's paths, classified once
-            through ``classify_paths``; None when the rule names none.
-        subject (Subject): one subject of the line.
-    """
-    if scope is None:
-        return 0
-    if subject.path is None:
-        return None
-    virtual = subject.path.virtual
-    if path_hidden(scope, virtual):
-        return hidden_depth(rule, virtual)
-    if subject.holds and path_covers(scope, virtual, subject.ancestors):
-        return covers_depth(rule, virtual, subject.ancestors)
-    return None
-
-
-def matched_operand(rule: CommandRule, subject: Subject) -> str | None:
-    """The operand a rule's refusal names, as typed: the subject it
-    reached, or None when the rule names no paths and so refuses the
-    whole line.
-
-    Args:
-        rule (CommandRule): the rule that spoke.
-        subject (Subject): the subject it reached.
-    """
-    if not rule.paths or subject.path is None:
-        return None
-    return subject.path.raw_path or subject.path.virtual
-
-
-@functools.lru_cache(maxsize=1024)
-def _entry_scope(entry: str) -> HiddenPaths | None:
-    """One document entry, classified alone so it can be scored on its
-    own; remembered, since a rule is re-read on every line.
-
-    Args:
-        entry (str): one entry of a rule's ``paths``.
-    """
-    return classify_paths((entry,))
+    return admission(_single(rule)).rule_reach(
+        0,
+        (
+            path_value(subject.path) if subject.path is not None else None,
+            subject.holds,
+            subject.ancestors,
+        ),
+    )
 
 
 def hidden_depth(rule: CommandRule, virtual: str) -> int:
-    """The anchor depth of the deepest entry of a rule that holds this
-    path, 0 when none does.
-
-    Args:
-        rule (CommandRule): the rule that matched.
-        virtual (str): absolute virtual path the rule matched on.
-    """
-    return max(
-        (
-            anchor_depth(e)
-            for e in rule.paths
-            if path_hidden(_entry_scope(e), virtual)
-        ),
-        default=0,
-    )
+    return admission(_single(rule)).hidden_depth(0, units(virtual))
 
 
 def covers_depth(
     rule: CommandRule, virtual: str, ancestors: bool = True
 ) -> int:
-    """The anchor depth of the deepest entry of a rule that sits at or
-    under this path, 0 when none does.
-
-    The subtree counterpart of :func:`hidden_depth`, for an operand
-    that would take the scope along rather than lie inside it.
-
-    Args:
-        rule (CommandRule): the rule that matched.
-        virtual (str): absolute virtual path of the subtree operand.
-        ancestors (bool): whether an ancestor of the scope counts.
-    """
-    return max(
-        (
-            anchor_depth(e)
-            for e in rule.paths
-            if path_covers(_entry_scope(e), virtual, ancestors)
-        ),
-        default=0,
-    )
+    return admission(_single(rule)).covers_depth(0, units(virtual), ancestors)
 
 
-@functools.lru_cache(maxsize=1024)
+@lru_cache(maxsize=1024)
 def rule_scope(rule: CommandRule) -> HiddenPaths | None:
-    """A rule's paths, classified once and remembered: None when the
-    rule names none, so a caller can tell a whole-line rule from a
-    path-scoped one without re-reading the document grammar.
-
-    Args:
-        rule (CommandRule): the rule, which is frozen and so a key.
-    """
     return classify_paths(rule.paths)
 
 
@@ -420,65 +148,26 @@ def match_io(
     virtual: str,
     subtree: bool = False,
 ) -> bool:
-    """Whether a rule reaches an entry a command touches on its own,
-    below its operands: the rule names the line (its command patterns
-    against the line's tokens, none meaning every command) and its
-    paths hold the entry. A rule with no paths spoke about the whole
-    line at admission and has nothing to add at an entry, except a
-    mount's: its mount holds the entry, since a line that works outside
-    the mount still reaches entries inside it (``cp -r``, ``chmod -R``,
-    a runtime's ``open``) where no admission asked its rule. The
-    directory holding a scope is not in it, so a listing still shows
-    a refused entry's name, which is what deny means: present, and
-    refused.
-
-    Args:
-        rule (CommandRule): the rule.
-        scope (HiddenPaths | None): the rule's classified paths.
-        tokens (Sequence[str]): the line as an admission pattern reads
-            it, command name first.
-        virtual (str): absolute virtual path of the entry.
-        subtree (bool): whether to ask about every entry at or under
-            ``virtual`` rather than the entry itself, as a walk does
-            before it trusts the raw tree (:func:`io_reach`).
-    """
-    if scope is None and not rule.mount:
-        return False
-    if rule.commands and not any(
-        pattern_matches(p, tokens) for p in rule.commands
-    ):
-        return False
-    if scope is None:
-        return _under(virtual, rule.mount) or (
-            subtree and _under(rule.mount, virtual)
-        )
-    if subtree:
-        return hides_intersect(scope, virtual)
-    return path_hidden(scope, virtual)
+    return admission(_single(rule)).match_io(
+        0, tuple(units(value) for value in tokens), units(virtual), subtree
+    )
 
 
 def io_reach(
     rules: AdmissionRules | None, tokens: Sequence[str], virtual: str
 ) -> bool:
-    """Whether a rule in force could reach an entry at or under this
-    path for the running line: the rule names the line and its paths,
-    or a mount rule's mount, could cover something in the subtree.
+    return admission(rules).io_reach(
+        tuple(units(value) for value in tokens), units(virtual)
+    )
 
-    What a native walk asks before it trusts the raw tree, per operand
-    the way a hide is: a rule on ``/repo/.env`` leaves ``find /s3`` its
-    native op.
 
-    Args:
-        rules (AdmissionRules | None): the session's admission rules.
-        tokens (Sequence[str]): the line as an admission pattern reads
-            it, command name first.
-        virtual (str): absolute virtual path of the walk's start point.
-    """
-    if rules is None:
-        return False
-    return any(
-        match_io(rule, rule_scope(rule), tokens, virtual, subtree=True)
-        for rule in (*rules.deny, *rules.ask)
+def _granted(
+    rules: AdmissionRules, granted: Collection[CommandRule]
+) -> tuple[int, ...]:
+    return tuple(
+        index
+        for index, rule in enumerate((*rules.deny, *rules.ask))
+        if rule in granted
     )
 
 
@@ -488,65 +177,21 @@ def io_refusal(
     virtual: str,
     granted: Collection[CommandRule],
 ) -> str | None:
-    """The reason a command may not touch an entry it reached on its
-    own, None when it may.
-
-    The same law the admission gate applies to a line, and literally
-    the same loop (:func:`rule_at`): anchor depth first,
-    deny before ask at equal depth. Reading every deny before any ask
-    instead would let a broad deny on ``/repo/*`` overrule an approved
-    ask on ``/repo/sealed/*`` that the gate had just admitted the line
-    under, so the carve-out would survive admission and then refuse
-    every entry it was written for.
-
-    The winning rule then answers: a deny refuses, an ask refuses
-    unless the line holds a grant under it (the nod the gate took for
-    ``rm -r /x`` covers the entries under ``/x``; a walk that wanders
-    into an asked scope from outside gets no nod mid-command, so it is
-    refused and the agent names the path to be asked).
-
-    Args:
-        rules (AdmissionRules | None): the session's admission rules.
-        tokens (Sequence[str]): the line's tokens, command name first.
-        virtual (str): absolute virtual path of the entry.
-        granted (Collection[CommandRule]): the ask rules the line runs
-            under a grant for.
-    """
     if rules is None:
         return None
-
-    def reach(rule: CommandRule) -> int | None:
-        if not match_io(rule, rule_scope(rule), tokens, virtual):
-            return None
-        return hidden_depth(rule, virtual)
-
-    refused = ungranted(rule_at(written(rules), reach), granted)
-    return None if refused is None else refused[0].reason
+    result = admission(rules).io_refusal(
+        tuple(units(value) for value in tokens),
+        units(virtual),
+        _granted(rules, granted),
+    )
+    return None if result is None else (*rules.deny, *rules.ask)[result].reason
 
 
 def posix_level(rule: CommandRule) -> bool:
-    """Whether a rule holds at a dispatcher too: a pure path rule, which
-    names no command and has paths to match, the one kind an op can meet.
-
-    The sort of a profile's rules: a POSIX-level rule holds at every
-    entry point, a command-level one (it names a command, or no path) only
-    where a line is judged.
-
-    Args:
-        rule (CommandRule): the rule.
-    """
-    return not rule.commands and rule_scope(rule) is not None
+    return admission(_single(rule)).posix_level(0)
 
 
 def skipped_at_dispatch(rules: AdmissionRules | None) -> tuple[str, ...]:
-    """The command-level parts of a profile's rules, which an entry point that
-    sees only ops (a kernel mount, SFTP, codex-exec's file calls) cannot
-    apply, each described for the operator's warning: the allow list and
-    every rule that is not POSIX level.
-
-    Args:
-        rules (AdmissionRules | None): the session's admission rules.
-    """
     if rules is None:
         return ()
     skipped = ["commands.allow"] if rules.allow is not None else []
@@ -562,35 +207,9 @@ def skipped_at_dispatch(rules: AdmissionRules | None) -> tuple[str, ...]:
 def op_reach(
     rule: CommandRule, scope: HiddenPaths | None, ctx: VfsContext
 ) -> int | None:
-    """The anchor depth at which a rule reaches an op, None when it does
-    not reach it at all.
-
-    Only a pure path rule can, since an op does not know which command
-    issued it. The op's path is tested against the scope, and an op that
-    moves or removes a whole subtree (``SUBTREE_OPS``) is also reached on
-    the directory holding the scope or on any ancestor, since it would
-    take the scope along. A metadata op (``METADATA_OPS``) is reached by
-    nothing: deny is present and refused, so the entry stats and its
-    content is what the entry point withholds.
-
-    The dispatcher twin of :func:`rule_reach`, and the same shape: the
-    depth is the one the arm that matched measures, so a rule cannot
-    lend an operand specificity from an entry that said nothing about
-    it.
-
-    Args:
-        rule (CommandRule): the rule.
-        scope (HiddenPaths | None): the rule's classified paths.
-        ctx (VfsContext): the op about to run.
-    """
-    if rule.commands or scope is None or ctx.call.name in METADATA_OPS:
-        return None
-    virtual = ctx.path.virtual
-    if path_hidden(scope, virtual):
-        return hidden_depth(rule, virtual)
-    if ctx.call.name in SUBTREE_OPS and path_covers(scope, virtual):
-        return covers_depth(rule, virtual)
-    return None
+    return admission(_single(rule)).op_reach(
+        0, units(ctx.call.name), units(ctx.path.virtual)
+    )
 
 
 def op_ruling(
@@ -598,33 +217,13 @@ def op_ruling(
     ctx: VfsContext,
     granted: Collection[CommandRule],
 ) -> tuple[CommandRule, bool] | None:
-    """The rule an op meets and whether it asks, None when the op may
-    run.
-
-    The dispatcher twin of :func:`io_refusal`, and the same law: anchor
-    depth first, deny before ask at equal depth, and an ask satisfied
-    by a grant the line already holds. Reading every deny before any
-    ask instead let a broad deny on ``/repo/*`` overrule an approved
-    ask on ``/repo/outbox/*``, so the carve-out command admission had
-    just admitted the line under could not authorize the redirect it
-    was written for: the write reached the dispatcher and was refused there.
-
-    What an ask means is the entry point's to say: inside a running line it
-    refuses like a deny, since the line was admitted without it, and
-    outside one (a file tool, the host's facade) it goes to the
-    approval ledger, keyed by rule and path.
-
-    Args:
-        rules (AdmissionRules | None): the session's admission rules.
-        ctx (VfsContext): the op about to run.
-        granted (Collection[CommandRule]): the ask rules the running
-            line holds a grant under, empty when no command is bound.
-    """
     if rules is None:
         return None
-    return ungranted(
-        rule_at(
-            written(rules), lambda rule: op_reach(rule, rule_scope(rule), ctx)
-        ),
-        granted,
+    result = admission(rules).op_ruling(
+        units(ctx.call.name), units(ctx.path.virtual), _granted(rules, granted)
+    )
+    return (
+        None
+        if result is None
+        else ((*rules.deny, *rules.ask)[result[0]], result[1])
     )

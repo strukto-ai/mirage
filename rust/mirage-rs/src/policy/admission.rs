@@ -419,8 +419,7 @@ mod tests {
     #[test]
     fn frozen_admission_corpus() {
         let corpus: Value =
-            serde_json::from_str(include_str!("../../../../integ/policy/matching.json"))
-                .unwrap();
+            serde_json::from_str(include_str!("../../../../integ/policy/matching.json")).unwrap();
         for case in corpus["admissions"].as_array().unwrap() {
             let rules = &case["rules"];
             let matcher = AdmissionMatcher::new(

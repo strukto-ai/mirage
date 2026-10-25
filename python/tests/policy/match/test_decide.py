@@ -13,8 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.commands.spec.types import WordKind
-from mirage.policy.constants import ASK_SECOND, DENY_FIRST
-from mirage.policy.match.decide import decide, outranks, source_of
+from mirage.policy.match.decide import decide, source_of
 from mirage.policy.types import (
     AdmissionRules,
     CommandContext,
@@ -139,15 +138,6 @@ def test_the_decision_reports_the_rule_and_where_it_was_written():
     assert decision.rule is inside
     assert decision.source == "mounts./a"
     assert source_of(top) == "top"
-
-
-def test_outranks_reads_the_verb_first_where_better_match_reads_depth():
-    # Two subjects of one line are a question of severity, so a deny at
-    # depth 0 outranks an ask at depth 3.
-    assert outranks((ASK_SECOND, 3), DENY_FIRST, 0)
-    assert not outranks((DENY_FIRST, 0), ASK_SECOND, 3)
-    assert outranks((DENY_FIRST, 1), DENY_FIRST, 2)
-    assert not outranks((DENY_FIRST, 2), DENY_FIRST, 2)
 
 
 def test_every_subjects_ask_is_reported_not_just_the_winner():
