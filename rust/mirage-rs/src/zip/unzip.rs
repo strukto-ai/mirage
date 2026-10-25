@@ -596,17 +596,14 @@ async fn mode(run: &mut Run<'_>, directory: &Directory, warning: Vec<u8>) -> i32
     // -l lists only when neither -t nor -p asks for another mode, and -v
     // widens it into the verbose table; neither prints a caution.
     if (config.l || config.v) && !(config.t || config.p) {
-        if config.v {
-            listing::verbose(
-                &config.archive,
-                &selected,
-                config.q,
-                &directory.comment,
-                &mut out,
-            );
-        } else {
-            listing::short_list(&selected, &mut out);
-        }
+        listing::list(
+            &config.archive,
+            &selected,
+            config.q,
+            config.v,
+            &directory.comment,
+            &mut out,
+        );
         run.host.print(&out);
         return nothing;
     }

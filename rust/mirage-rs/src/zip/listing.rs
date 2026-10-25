@@ -23,6 +23,9 @@ const MONTHS: [&str; 12] = [
 const VERBOSE_HEADER: &str = " Length   Method    Size  Cmpr    Date    Time   CRC-32   Name\n\
 --------  ------  ------- ---- ---------- ----- --------  ----\n";
 const VERBOSE_RULE: &str = "--------          -------  ---                            -------\n";
+const SHORT_HEADER: &str = "  Length      Date    Time    Name\n\
+---------  ---------- -----   ----\n";
+const SHORT_RULE: &str = "---------                     -------\n";
 
 /// What one zipinfo run prints.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -338,23 +341,15 @@ fn comment(raw: &[u8], out: &mut Vec<u8>) {
     }
 }
 
-/// `unzip -l`: names and sizes.
-pub(super) fn short_list(entries: &[&Entry], out: &mut Vec<u8>) {
-    out.extend_from_slice(b"  Length      Name\n---------  ----\n");
-    for entry in entries {
-        out.extend_from_slice(format!("{:>9}  ", entry.size).as_bytes());
-        out.extend_from_slice(&entry.name);
-        out.push(b'\n');
-    }
-}
-
-/// `unzip -v`: the method, compressed size, percent saved and CRC-32 of
-/// each entry and a totals line; `-q` drops the archive line and every
+/// `unzip -l`, or with `verbose` the `-v` table: each entry's size, stamp
+/// and name, `-v` adding the method, compressed size, percent saved and
+/// CRC-32, and a totals line; `-q` drops the archive line and every
 /// comment, which are written as stored.
-pub(super) fn verbose(
+pub(super) fn list(
     archive: &[u8],
     entries: &[&Entry],
     quiet: bool,
+    verbose: bool,
     archive_comment: &[u8],
     out: &mut Vec<u8>,
 ) {
@@ -364,20 +359,28 @@ pub(super) fn verbose(
         out.push(b'\n');
         comment(archive_comment, out);
     }
-    out.extend_from_slice(VERBOSE_HEADER.as_bytes());
+    let header = if verbose {
+        VERBOSE_HEADER
+    } else {
+        SHORT_HEADER
+    };
+    out.extend_from_slice(header.as_bytes());
     for entry in entries {
         let (year, month, day, hour, minute, _) = entry.stamp();
+        let stamp = format!("{year:04}-{month:02}-{day:02} {hour:02}:{minute:02}");
         let packed = compressed(entry);
-        out.extend_from_slice(
+        let row = if verbose {
             format!(
-                "{:>8}  {:<7}{packed:>8} {:>4} {year:04}-{month:02}-{day:02} {hour:02}:{minute:02} {:08x}  ",
+                "{:>8}  {:<7}{packed:>8} {:>4} {stamp} {:08x}  ",
                 entry.size,
                 list_method(entry),
                 saved(i128::from(entry.size), packed),
                 entry.crc
             )
-            .as_bytes(),
-        );
+        } else {
+            format!("{:>9}  {stamp}   ", entry.size)
+        };
+        out.extend_from_slice(row.as_bytes());
         out.extend_from_slice(&entry.name);
         out.push(b'\n');
         if !quiet {
@@ -387,13 +390,14 @@ pub(super) fn verbose(
     let size: i128 = entries.iter().map(|e| i128::from(e.size)).sum();
     let packed: i128 = entries.iter().map(|e| compressed(e)).sum();
     let plural = if entries.len() == 1 { "" } else { "s" };
-    out.extend_from_slice(
+    let totals = if verbose {
         format!(
-            "{VERBOSE_RULE}{size:>8}         {packed:>8} {:>4}{}{} file{plural}\n",
+            "{VERBOSE_RULE}{size:>8}         {packed:>8} {:>4}{:28}",
             saved(size, packed),
-            " ".repeat(28),
-            entries.len()
+            ""
         )
-        .as_bytes(),
-    );
+    } else {
+        format!("{SHORT_RULE}{size:>9}{:21}", "")
+    };
+    out.extend_from_slice(format!("{totals}{} file{plural}\n", entries.len()).as_bytes());
 }

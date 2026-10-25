@@ -46,5 +46,7 @@ async def _run(line: str) -> tuple[int, bytes, dict[str, bytes]]:
 async def test_relay_listing_letters_list_instead_of_extracting():
     exit_code, out, written = await _run("unzip -l /a/a.zip -d /b/out")
     assert exit_code == 0
-    assert out.startswith(b"  Length      Name\n")
+    assert out.startswith(
+        b"Archive:  /a/a.zip\n  Length      Date    Time    Name\n"
+    )
     assert written == {}

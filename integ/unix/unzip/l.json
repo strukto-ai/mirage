@@ -100,6 +100,179 @@
         "l",
         "d"
       ]
+    },
+    {
+      "id": "unzip_l_prints_the_dated_listing",
+      "seq": 15100751,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(mkdir -p /data/unzl_a && printf %s 'UEsDBBQAAAAIAC48NF0AAAAAAgAAAAAAAAAEAAAAZGlyLwMAUEsDBBQAAAAIAC48NF1Y8JpZBgAAAMgAAAAJAAAAZGlyL2EudHh0S0wcHgAAUEsDBBQAAAAIAC48NF35775xAwAAAAEAAAAFAAAAYi50eHRLAgBQSwECFAMUAAAACAAuPDRdAAAAAAIAAAAAAAAABAAAAAAAAAAAABAA/UEAAAAAZGlyL1BLAQIUAxQAAAAIAC48NF1Y8JpZBgAAAMgAAAAJAAAAAAAAAAAAAACAASQAAABkaXIvYS50eHRQSwECFAMUAAAACAAuPDRd+e++cQMAAAABAAAABQAAAAAAAAAAAAAAgAFRAAAAYi50eHRQSwUGAAAAAAMAAwCcAAAAdwAAAAAA' | base64 -d > /data/unzl_a/m.zip && unzip -l /data/unzl_a/m.zip && unzip -lq /data/unzl_a/m.zip; rc=$?; rm -r /data/unzl_a; exit $rc)",
+      "expect": {
+        "exit": 0,
+        "stdout": "Archive:  /data/unzl_a/m.zip\n  Length      Date    Time    Name\n---------  ---------- -----   ----\n        0  2026-09-20 07:33   dir/\n      200  2026-09-20 07:33   dir/a.txt\n        1  2026-09-20 07:33   b.txt\n---------                     -------\n      201                     3 files\n  Length      Date    Time    Name\n---------  ---------- -----   ----\n        0  2026-09-20 07:33   dir/\n      200  2026-09-20 07:33   dir/a.txt\n        1  2026-09-20 07:33   b.txt\n---------                     -------\n      201                     3 files\n",
+        "stderr": ""
+      },
+      "flags": [
+        "l",
+        "q"
+      ]
+    },
+    {
+      "id": "unzip_l_filespecs_and_x_pick_the_rows_totaled",
+      "seq": 15100752,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(mkdir -p /data/unzl_f && printf %s 'UEsDBBQAAAAIAC48NF0AAAAAAgAAAAAAAAAEAAAAZGlyLwMAUEsDBBQAAAAIAC48NF1Y8JpZBgAAAMgAAAAJAAAAZGlyL2EudHh0S0wcHgAAUEsDBBQAAAAIAC48NF35775xAwAAAAEAAAAFAAAAYi50eHRLAgBQSwECFAMUAAAACAAuPDRdAAAAAAIAAAAAAAAABAAAAAAAAAAAABAA/UEAAAAAZGlyL1BLAQIUAxQAAAAIAC48NF1Y8JpZBgAAAMgAAAAJAAAAAAAAAAAAAACAASQAAABkaXIvYS50eHRQSwECFAMUAAAACAAuPDRd+e++cQMAAAABAAAABQAAAAAAAAAAAAAAgAFRAAAAYi50eHRQSwUGAAAAAAMAAwCcAAAAdwAAAAAA' | base64 -d > /data/unzl_f/m.zip && unzip -l /data/unzl_f/m.zip b.txt nomatch; echo rc=$?; unzip -lq /data/unzl_f/m.zip -x b.txt; unzip -lq /data/unzl_f/m.zip nomatch; rc=$?; rm -r /data/unzl_f; exit $rc)",
+      "expect": {
+        "exit": 11,
+        "stdout": "Archive:  /data/unzl_f/m.zip\n  Length      Date    Time    Name\n---------  ---------- -----   ----\n        1  2026-09-20 07:33   b.txt\n---------                     -------\n        1                     1 file\nrc=0\n  Length      Date    Time    Name\n---------  ---------- -----   ----\n        0  2026-09-20 07:33   dir/\n      200  2026-09-20 07:33   dir/a.txt\n---------                     -------\n      200                     2 files\n  Length      Date    Time    Name\n---------  ---------- -----   ----\n---------                     -------\n        0                     0 files\n",
+        "stderr": ""
+      },
+      "flags": [
+        "l",
+        "x"
+      ]
+    },
+    {
+      "id": "unzip_l_prints_comments_unless_quiet",
+      "seq": 15100753,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(mkdir -p /data/unzl_c && printf %s 'UEsDBBQAAAAAAAAAIQDCQSQ1AwAAAAMAAAAFAAAAYS50eHRhYmNQSwMEFAAAAAAAAAAhAMJBJDUDAAAAAwAAAAUAAABiLnR4dGFiY1BLAQIUAxQAAAAAAAAAIQDCQSQ1AwAAAAMAAAAFAAAADwAAAAAAAACAAQAAAABhLnR4dGVudHJ5IGNvbW1lbnQNClBLAQIUAxQAAAAAAAAAIQDCQSQ1AwAAAAMAAAAFAAAAFAAAAAAAAACAASYAAABiLnR4dG90aGVyIGNvbW1lbnQAaGlkZGVuUEsFBgAAAAACAAIAiQAAAEwAAAAcAGFyY2hpdmUgY29tbWVudA0Kc2Vjb25kIGxpbmU=' | base64 -d > /data/unzl_c/c.zip && unzip -l /data/unzl_c/c.zip && unzip -lq /data/unzl_c/c.zip; rc=$?; rm -r /data/unzl_c; exit $rc)",
+      "expect": {
+        "exit": 0,
+        "stdout": "Archive:  /data/unzl_c/c.zip\narchive comment\nsecond line\n  Length      Date    Time    Name\n---------  ---------- -----   ----\n        3  1980-01-01 00:00   a.txt\nentry comment\n        3  1980-01-01 00:00   b.txt\nother comment\n---------                     -------\n        6                     2 files\n  Length      Date    Time    Name\n---------  ---------- -----   ----\n        3  1980-01-01 00:00   a.txt\n        3  1980-01-01 00:00   b.txt\n---------                     -------\n        6                     2 files\n",
+        "stderr": ""
+      },
+      "flags": [
+        "l",
+        "q"
+      ]
+    },
+    {
+      "id": "unzip_l_widens_sizes_past_nine_digits",
+      "seq": 15100754,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(mkdir -p /data/unzl_w && printf %s 'UEsDBBQAAAAAAIMYIlggMDo2BgAAAAYAAAAJAAAAc21hbGwudHh0aGVsbG8KUEsDBBQAAAAAAIMYIlgAAAAAAAAAAAAAAAAHAAAAdGVuLmJpblBLAwQUAAAAAACDGCJYAAAAAAAAAAAAAAAACgAAAGVsZXZlbi5iaW5QSwECHgMUAAAAAACDGCJYIDA6NgYAAAAGAAAACQAAAAAAAAAAAAAApIEAAAAAc21hbGwudHh0UEsBAh4DFAAAAAAAgxgiWAAAAAAAAAAAAChr7gcAAAAAAAAAAAAAAKSBLQAAAHRlbi5iaW5QSwECHgMUAAAAAACDGCJYAAAAAAAAAAD/////CgAMAAAAAAAAAAAApIFSAAAAZWxldmVuLmJpbgEACAA1HNzfAgAAAFBLBQYAAAAAAwADALAAAAB6AAAAAAA=' | base64 -d > /data/unzl_w/big.zip && unzip -l /data/unzl_w/big.zip; rc=$?; rm -r /data/unzl_w; exit $rc)",
+      "expect": {
+        "exit": 0,
+        "stdout": "Archive:  /data/unzl_w/big.zip\n  Length      Date    Time    Name\n---------  ---------- -----   ----\n        6  2024-01-02 03:04   small.txt\n4000000000  2024-01-02 03:04   ten.bin\n12345678901  2024-01-02 03:04   eleven.bin\n---------                     -------\n16345678907                     3 files\n",
+        "stderr": ""
+      },
+      "flags": [
+        "l"
+      ]
+    },
+    {
+      "id": "unzip_l_prints_a_non_ascii_name_as_stored",
+      "seq": 15100755,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(mkdir -p /data/unzl_u && printf %s 'UEsDBAoAAAAAAIMYIliDFtyMAQAAAAEAAAAJAAAAY2Fmw6kudHh0eFBLAQIeAwoAAAAAAIMYIliDFtyMAQAAAAEAAAAJAAAAAAAAAAEAAACkgQAAAABjYWbDqS50eHRQSwUGAAAAAAEAAQA3AAAAKAAAAAAA' | base64 -d > /data/unzl_u/utf.zip && unzip -l /data/unzl_u/utf.zip; rc=$?; rm -r /data/unzl_u; exit $rc)",
+      "expect": {
+        "exit": 0,
+        "stdout": "Archive:  /data/unzl_u/utf.zip\n  Length      Date    Time    Name\n---------  ---------- -----   ----\n        1  2024-01-02 03:04   café.txt\n---------                     -------\n        1                     1 file\n",
+        "stderr": ""
+      },
+      "flags": [
+        "l"
+      ]
     }
   ]
 }
