@@ -18,6 +18,35 @@ type Span = (usize, usize);
 type Positions = Arc<Vec<Span>>;
 type Key = (usize, usize, usize);
 
+pub(crate) struct CompiledGlob {
+    program: Program,
+}
+
+impl CompiledGlob {
+    pub(crate) fn new(pattern: Vec<u32>) -> Self {
+        let mut compiler = Compiler::new(pattern, Dialect::Shell, false);
+        while !compiler.done() {
+            compiler.step();
+        }
+        Self {
+            program: compiler.program,
+        }
+    }
+
+    pub(crate) fn matches(&self, subject: &[u32]) -> bool {
+        let mut evaluator = Evaluator::default();
+        evaluator.start((0, self.program.units.len(), 0), false);
+        loop {
+            if let Some(answer) = evaluator.answer.take() {
+                return answer
+                    .last()
+                    .is_some_and(|&(_, hi)| hi == subject.len() + 1);
+            }
+            evaluator.step(&self.program, subject, false, false);
+        }
+    }
+}
+
 fn yes() -> bool {
     true
 }
