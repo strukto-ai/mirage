@@ -29,7 +29,7 @@ import type { Handed } from '../types.ts'
 import { DIFY_TREE } from '../../core/dify/tree.ts'
 import { read, readStream } from '../../core/dify/read.ts'
 import { stat } from '../../core/dify/stat.ts'
-import { searchMany } from '../../core/dify/search.ts'
+import { METHODS, searchMany } from '../../core/dify/search.ts'
 import { WALK_LIMIT } from '../constants.ts'
 
 export const VFS_MD = `This is a Dify Knowledge Base mounted as a read-only filesystem.
@@ -40,8 +40,10 @@ search on these files.
 
 For semantic or relevance-based queries, use:
 
-search "<query>" [path ...] [--method semantic|fulltext|hybrid|keyword]
+search "<query>" [path ...] [--method ${Object.keys(METHODS).join('|')}]
     [--top-k N] [--threshold F]
+
+--threshold keeps the hits Dify scores at least F, from 0 to 1.
 
 Use grep for exact pattern or regex matching; use search when meaning matters.
 Search can target multiple files, folders, or globs. Each result is returned as

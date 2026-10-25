@@ -33,6 +33,8 @@ field is configured, where <id> is the Qdrant point id. The embedding vector is
 never shown. For semantic search use the search command, which returns ranked
 points as their content file paths with a similarity score, e.g.
 search "red running shoes" /mount then cat one of the returned files.
+search takes only --method semantic; --top-k N caps the hits and
+--threshold F keeps those scoring at least F.
 Use ls/cd/cat/tree/find/wc as usual; grep/rg stay lexical. Quote queries that
 contain spaces."""
 

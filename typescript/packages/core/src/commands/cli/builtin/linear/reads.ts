@@ -62,7 +62,7 @@ async function teamProjectRows(
   teamId: string,
   projectId: string,
 ): Promise<NormalizedProjectIssue[]> {
-  const teamIssues = await listTeamIssues(accessor.transport, teamId)
+  const teamIssues = await listTeamIssues(accessor.transport, teamId, undefined, [projectId])
   const rows: NormalizedProjectIssue[] = []
   for (const issue of teamIssues) {
     const proj = issue.project

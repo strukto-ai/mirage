@@ -121,6 +121,41 @@ async def test_readdir_team_members(accessor):
     assert result[0].size == len(to_json_bytes(normalize_user(users[0])))
 
 
+# A project's file names its issues, so the listing asks Linear for the
+# issues of the projects it lists and no others.
+@pytest.mark.asyncio
+async def test_readdir_projects_asks_only_for_their_issues(accessor):
+    projects = [
+        {"id": "P1", "name": "Alpha", "updatedAt": "2026-04-05T00:00:00Z"},
+        {"id": "P2", "name": "Beta", "updatedAt": "2026-04-05T00:00:00Z"},
+    ]
+    issues = AsyncMock(return_value=[])
+    with (
+        patch(
+            "mirage.core.linear.readdir.list_teams",
+            new_callable=AsyncMock,
+            return_value=[_TEAM_STUB],
+        ),
+        patch(
+            "mirage.core.linear.readdir.list_team_projects",
+            new_callable=AsyncMock,
+            return_value=projects,
+        ),
+        patch("mirage.core.linear.readdir.list_team_issues", issues),
+    ):
+        result = await readdir(
+            accessor,
+            PathSpec(
+                vfs_path="teams/ENG__Engineering__TEAM1/projects",
+                virtual="/teams/ENG__Engineering__TEAM1/projects",
+                directory="/teams/ENG__Engineering__TEAM1/projects",
+            ),
+            FileStat(name="projects", type=FileType.DIRECTORY),
+        )
+    assert len(result) == 2
+    issues.assert_awaited_once_with(accessor, "TEAM1", projects=["P1", "P2"])
+
+
 @pytest.mark.asyncio
 async def test_readdir_issue_folder(accessor):
     issue = {

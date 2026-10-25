@@ -22,8 +22,6 @@ import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import { defaultPaths } from '../utils/paths.ts'
 
-const ENC = new TextEncoder()
-
 /**
  * A ranked store's search options, read off the flags: the store answers
  * `--top-k` (its own default when absent) and `--threshold`; any method but
@@ -96,17 +94,11 @@ export function makeSearch(
     const fl = new FlagView(ctx.flags, specOf(name))
     const topK = fl.asInt('top_k')
     if (topK !== undefined && topK < 1) throw new UsageError('search: top-k must be positive')
-    try {
-      const scopes = defaultPaths(paths, ctx.cwd.virtual)
-      const asked = { query, options: options(fl) }
-      if (ctx.vfs === undefined) throw new Error('search: no workspace files')
-      const out = await searchResources(ctx.vfs.dispatch, scopes, asked)
-      return [out, new IOResult()]
-    } catch (err) {
-      if (err instanceof UsageError) throw err
-      const msg = err instanceof Error ? err.message : String(err)
-      return [null, new IOResult({ exitCode: 1, stderr: ENC.encode(`${msg}\n`) })]
-    }
+    const scopes = defaultPaths(paths, ctx.cwd.virtual)
+    const asked = { query, options: options(fl) }
+    if (ctx.vfs === undefined) throw new Error('search: no workspace files')
+    const out = await searchResources(ctx.vfs.dispatch, scopes, asked)
+    return [out, new IOResult()]
   }
   return command({
     name,

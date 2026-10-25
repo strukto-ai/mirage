@@ -97,7 +97,7 @@ async function readProject(
   const teams = await listTeams(accessor.transport)
   const team = teams.find((t) => t.id === teamId) ?? {}
   const projects = await listTeamProjects(accessor.transport, teamId)
-  const teamIssues = await listTeamIssues(accessor.transport, teamId)
+  const teamIssues = await listTeamIssues(accessor.transport, teamId, undefined, [projectId])
   for (const project of projects) {
     if (project.id !== projectId) continue
     const projectIssues: NormalizedProjectIssue[] = []

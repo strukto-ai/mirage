@@ -73,6 +73,10 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Chroma mounted at `/<path>`
     Use cat, head, tail, ls, find, tree, grep, and chroma-query to inspect
     indexed documents. Paths are document slugs from the collection path tree.
     Writes are not supported.
+
+    chroma-query "<query>" [path ...] ranks chunks by meaning: --method takes only
+    semantic, --top-k N caps the hits and --threshold F keeps those scoring at
+    least F, a score being 1 minus Chroma's distance.
     ```
 
     #### Supported Unix Commands for VFS
@@ -115,6 +119,10 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Chroma mounted at `/<path>`
     Use cat, head, tail, ls, find, tree, grep, and chroma-query to inspect
     indexed documents. Paths are document slugs from the collection path tree.
     Writes are not supported.
+
+    chroma-query "<query>" [path ...] ranks chunks by meaning: --method takes only
+    semantic, --top-k N caps the hits and --threshold F keeps those scoring at
+    least F, a score being 1 minus Chroma's distance.
     ```
 
     ## Supported Unix Commands for VFS
@@ -208,9 +216,6 @@ chroma-query --top-k 5 "billing policy" /knowledge/policies/
 chroma-query --top-k 3 "API authentication" /knowledge/guides/quickstart.md
 chroma-query --threshold 0.8 "billing policy" /knowledge/
 ```
-
-`--threshold` keeps hits whose score (1 minus Chroma's distance) is at least
-that value. `--method` takes only `semantic`.
 
 Results are emitted one hit per line:
 

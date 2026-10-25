@@ -13,7 +13,10 @@ import { searchMany } from '../../core/mem0/search.ts'
 import { WALK_LIMIT } from '../constants.ts'
 
 export const VFS_MD = `{prefix}
-  <memory-id>.json`
+  <memory-id>.json
+  search "<query>" [path ...] ranks memories by meaning: --method takes only
+  semantic, --top-k N caps the hits and --threshold F keeps those scoring at
+  least F, from 0 to 1.`
 
 export interface Mem0VFSState {
   type: string

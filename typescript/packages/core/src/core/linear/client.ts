@@ -162,8 +162,12 @@ export async function listTeamIssues(
   transport: LinearTransport,
   teamId: string,
   limit?: number,
+  projects?: readonly string[],
 ): Promise<Record<string, unknown>[]> {
-  return paginate(transport, TEAM_ISSUES_QUERY, { teamId }, ['team', 'issues'], limit)
+  if (projects?.length === 0) return []
+  const variables: Record<string, unknown> =
+    projects === undefined ? { teamId } : { teamId, filter: { project: { id: { in: projects } } } }
+  return paginate(transport, TEAM_ISSUES_QUERY, variables, ['team', 'issues'], limit)
 }
 
 export async function listTeamProjects(
