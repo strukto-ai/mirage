@@ -32,7 +32,7 @@ from mirage.policy.types import (
     CommandRule,
     CommandWord,
 )
-from mirage.rs.policy import admission, visibility
+from mirage.rs.policy import admission_matcher, visibility_matcher
 from mirage.types import (
     HiddenPaths,
     MountMode,
@@ -178,8 +178,8 @@ def test_native_answers_keep_original_rule_objects_and_cached_plan_lifetimes():
     result = decide(ctx, rules)
     assert result.rule is rule
     assert result.asks[0] is rule
-    retained = admission(rules)
-    admission.cache_clear()
+    retained = admission_matcher(rules)
+    admission_matcher.cache_clear()
     assert retained.head_allowed((99, 97, 116))
     assert decide(ctx, rules).rule is rule
 
@@ -196,6 +196,6 @@ def test_restored_visibility_retains_component_depth_and_surrogate_text():
     assert path_visible(restored.visibility, "/secret/x")
     assert not path_visible(restored.visibility, "/\ud800.key")
     assert not path_visible(restored.visibility, "/\U0001f600.key")
-    retained = visibility(restored.visibility)
-    visibility.cache_clear()
+    retained = visibility_matcher(restored.visibility)
+    visibility_matcher.cache_clear()
     assert retained.path_visible((47, 111, 112, 101, 110))

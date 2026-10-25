@@ -14,16 +14,16 @@
 
 
 from mirage.policy.types import AdmissionRules
-from mirage.rs.policy import admission, units
+from mirage.rs.policy import admission_matcher, units
 
 
 def has_rules(rules: AdmissionRules | None) -> bool:
-    return admission(rules).has_rules()
+    return admission_matcher(rules).has_rules()
 
 
 def reads_args(rules: AdmissionRules | None, name: str) -> bool:
-    return admission(rules).reads_args(units(name))
+    return admission_matcher(rules).reads_args(units(name))
 
 
 def scopes_paths(rules: AdmissionRules | None, name: str) -> bool:
-    return admission(rules).scopes_paths(units(name))
+    return admission_matcher(rules).scopes_paths(units(name))

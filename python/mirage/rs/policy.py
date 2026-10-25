@@ -43,7 +43,6 @@ from mirage.types import (
 )
 
 if TYPE_CHECKING:
-    from mirage.policy.profile import PathsBlock, SessionProfile
     from mirage.policy.types import AdmissionRules, CommandRule
 
 Units: TypeAlias = tuple[int, ...]
@@ -53,7 +52,6 @@ RuleValue: TypeAlias = tuple[
 RulesValue: TypeAlias = tuple[
     tuple[Units, ...] | None, tuple[RuleValue, ...], tuple[RuleValue, ...]
 ]
-ScopeValue: TypeAlias = tuple[tuple[Units, ...], tuple[Units, ...]]
 ShowValue: TypeAlias = tuple[Units, int | None]
 ReasonValue: TypeAlias = tuple[tuple[Units, ...], Units]
 PathsValue: TypeAlias = tuple[
@@ -113,12 +111,17 @@ def rules_value(rules: AdmissionRules | None) -> RulesValue:
 
 
 @lru_cache(maxsize=1024)
-def admission(rules: AdmissionRules | None) -> PolicyAdmission:
+def admission_matcher(rules: AdmissionRules | None) -> PolicyAdmission:
     return PolicyAdmission(rules_value(rules), False)
 
 
 @lru_cache(maxsize=1024)
-def visibility(vis: Visibility | None) -> PolicyVisibility:
+def rule_matcher(rule: CommandRule) -> PolicyAdmission:
+    return PolicyAdmission((None, (rule_value(rule),), ()), False)
+
+
+@lru_cache(maxsize=1024)
+def visibility_matcher(vis: Visibility | None) -> PolicyVisibility:
     hidden = vis.paths if vis is not None else None
     shown = vis.shown if vis is not None else None
     variables = vis.vars if vis is not None else None
@@ -144,68 +147,6 @@ def visibility(vis: Visibility | None) -> PolicyVisibility:
                 else (),
             ),
         )
-    )
-
-
-def profile_value(profile: SessionProfile) -> ProfileValue:
-    block = profile.commands
-    commands = (
-        (
-            None
-            if block.allow is None
-            else tuple(units(v) for v in block.allow),
-            tuple(rule_value(rule) for rule in block.deny),
-            tuple(rule_value(rule) for rule in block.ask),
-        )
-        if block is not None
-        else None
-    )
-    paths = paths_value(profile.paths)
-    mounts = (
-        tuple(
-            (
-                units(prefix),
-                MODES.index(entry.mode) if entry.mode is not None else None,
-                (
-                    None,
-                    tuple(rule_value(rule) for rule in entry.commands.deny),
-                    tuple(rule_value(rule) for rule in entry.commands.ask),
-                )
-                if entry.commands is not None
-                else None,
-                paths_value(entry.paths),
-            )
-            for prefix, entry in profile.mounts.items()
-        )
-        if profile.mounts is not None
-        else None
-    )
-    return (
-        commands,
-        paths,
-        tuple(units(v) for v in profile.vars.hide)
-        if profile.vars is not None
-        else None,
-        mounts,
-    )
-
-
-def paths_value(block: PathsBlock | None) -> PathsValue | None:
-    if block is None:
-        return None
-    return (
-        tuple(units(v) for v in block.hide),
-        tuple(
-            (
-                units(v.path),
-                MODES.index(v.mode) if v.mode is not None else None,
-            )
-            for v in block.show
-        ),
-        tuple(
-            (tuple(units(v) for v in group.patterns), units(group.reason))
-            for group in block.reasons
-        ),
     )
 
 

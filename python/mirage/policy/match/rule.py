@@ -30,9 +30,10 @@ from mirage.policy.types import (
 from mirage.rs.policy import (
     FactsValue,
     PathValue,
-    admission,
+    admission_matcher,
     from_units,
     policy_subjects,
+    rule_matcher,
     units,
 )
 from mirage.types import HiddenPaths, PathSpec
@@ -61,7 +62,7 @@ def _target_directory(ctx: CommandContext) -> str | None:
     return flags.as_str("target_directory")
 
 
-def path_value(path: PathSpec) -> PathValue:
+def _path_fact(path: PathSpec) -> PathValue:
     return units(path.virtual), units(path.raw_path or path.virtual)
 
 
@@ -71,8 +72,8 @@ def command_facts(ctx: CommandContext) -> FactsValue:
         tuple(units(value) for value in line_tokens(ctx)),
         ctx.tool,
         units(ctx.cwd),
-        tuple(path_value(path) for path in ctx.paths),
-        tuple(path_value(path) for path in operand_paths(ctx)),
+        tuple(_path_fact(path) for path in ctx.paths),
+        tuple(_path_fact(path) for path in operand_paths(ctx)),
         ctx.walks,
         units(target)
         if ctx.command == "mv"
@@ -104,22 +105,17 @@ def subjects(ctx: CommandContext) -> tuple[Subject, ...]:
     )
 
 
-@lru_cache(maxsize=1024)
-def _single(rule: CommandRule) -> AdmissionRules:
-    return AdmissionRules(deny=(rule,))
-
-
 def rule_applies(rule: CommandRule, ctx: CommandContext) -> bool:
-    return admission(_single(rule)).rule_applies(0, command_facts(ctx))
+    return rule_matcher(rule).rule_applies(0, command_facts(ctx))
 
 
 def rule_reach(
     rule: CommandRule, scope: HiddenPaths | None, subject: Subject
 ) -> int | None:
-    return admission(_single(rule)).rule_reach(
+    return rule_matcher(rule).rule_reach(
         0,
         (
-            path_value(subject.path) if subject.path is not None else None,
+            _path_fact(subject.path) if subject.path is not None else None,
             subject.holds,
             subject.ancestors,
         ),
@@ -127,13 +123,13 @@ def rule_reach(
 
 
 def hidden_depth(rule: CommandRule, virtual: str) -> int:
-    return admission(_single(rule)).hidden_depth(0, units(virtual))
+    return rule_matcher(rule).hidden_depth(0, units(virtual))
 
 
 def covers_depth(
     rule: CommandRule, virtual: str, ancestors: bool = True
 ) -> int:
-    return admission(_single(rule)).covers_depth(0, units(virtual), ancestors)
+    return rule_matcher(rule).covers_depth(0, units(virtual), ancestors)
 
 
 @lru_cache(maxsize=1024)
@@ -148,7 +144,7 @@ def match_io(
     virtual: str,
     subtree: bool = False,
 ) -> bool:
-    return admission(_single(rule)).match_io(
+    return rule_matcher(rule).match_io(
         0, tuple(units(value) for value in tokens), units(virtual), subtree
     )
 
@@ -156,12 +152,12 @@ def match_io(
 def io_reach(
     rules: AdmissionRules | None, tokens: Sequence[str], virtual: str
 ) -> bool:
-    return admission(rules).io_reach(
+    return admission_matcher(rules).io_reach(
         tuple(units(value) for value in tokens), units(virtual)
     )
 
 
-def _granted(
+def _grant_indices(
     rules: AdmissionRules, granted: Collection[CommandRule]
 ) -> tuple[int, ...]:
     return tuple(
@@ -179,16 +175,16 @@ def io_refusal(
 ) -> str | None:
     if rules is None:
         return None
-    result = admission(rules).io_refusal(
+    result = admission_matcher(rules).io_refusal(
         tuple(units(value) for value in tokens),
         units(virtual),
-        _granted(rules, granted),
+        _grant_indices(rules, granted),
     )
     return None if result is None else (*rules.deny, *rules.ask)[result].reason
 
 
 def posix_level(rule: CommandRule) -> bool:
-    return admission(_single(rule)).posix_level(0)
+    return rule_matcher(rule).posix_level(0)
 
 
 def skipped_at_dispatch(rules: AdmissionRules | None) -> tuple[str, ...]:
@@ -207,7 +203,7 @@ def skipped_at_dispatch(rules: AdmissionRules | None) -> tuple[str, ...]:
 def op_reach(
     rule: CommandRule, scope: HiddenPaths | None, ctx: VfsContext
 ) -> int | None:
-    return admission(_single(rule)).op_reach(
+    return rule_matcher(rule).op_reach(
         0, units(ctx.call.name), units(ctx.path.virtual)
     )
 
@@ -219,8 +215,10 @@ def op_ruling(
 ) -> tuple[CommandRule, bool] | None:
     if rules is None:
         return None
-    result = admission(rules).op_ruling(
-        units(ctx.call.name), units(ctx.path.virtual), _granted(rules, granted)
+    result = admission_matcher(rules).op_ruling(
+        units(ctx.call.name),
+        units(ctx.path.virtual),
+        _grant_indices(rules, granted),
     )
     return (
         None

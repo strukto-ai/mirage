@@ -29,7 +29,7 @@ from typing import TYPE_CHECKING, Any, TypeVar
 
 from mirage.errors.fs import eacces, enoent, erofs
 from mirage.rs.policy import MODES, from_units, units
-from mirage.rs.policy import visibility as policy_visibility
+from mirage.rs.policy import visibility_matcher as policy_visibility
 from mirage.types import (
     MountMode,
     PathSpec,

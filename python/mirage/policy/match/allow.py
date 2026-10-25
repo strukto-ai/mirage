@@ -14,11 +14,11 @@
 
 
 from mirage.policy.types import AdmissionRules, CommandContext
-from mirage.rs.policy import admission, units
+from mirage.rs.policy import admission_matcher, units
 
 
 def head_allowed(name: str, rules: AdmissionRules | None) -> bool:
-    return admission(rules).head_allowed(units(name))
+    return admission_matcher(rules).head_allowed(units(name))
 
 
 def line_tokens(ctx: CommandContext) -> tuple[str, ...]:
@@ -26,6 +26,6 @@ def line_tokens(ctx: CommandContext) -> tuple[str, ...]:
 
 
 def line_allowed(ctx: CommandContext, rules: AdmissionRules | None) -> bool:
-    return admission(rules).line_allowed(
+    return admission_matcher(rules).line_allowed(
         tuple(units(v) for v in line_tokens(ctx)), ctx.tool
     )

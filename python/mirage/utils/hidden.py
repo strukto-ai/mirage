@@ -24,7 +24,7 @@ from mirage.rs.policy import (
     policy_show_head,
     policy_vars,
     units,
-    visibility,
+    visibility_matcher,
 )
 from mirage.types import (
     HiddenPaths,
@@ -72,7 +72,9 @@ def classify_vars(entries: Iterable[str]) -> HiddenVars | None:
 def hide_depth(hidden: HiddenPaths | None, virtual: str) -> int | None:
     if hidden is None:
         return None
-    return visibility(Visibility(paths=hidden)).hide_depth(units(virtual))
+    return visibility_matcher(Visibility(paths=hidden)).hide_depth(
+        units(virtual)
+    )
 
 
 def path_hidden(hidden: HiddenPaths | None, virtual: str) -> bool:
@@ -86,13 +88,15 @@ def show_head(entry: str) -> str:
 def show_depth(shown: ShownPaths | None, virtual: str) -> int | None:
     if shown is None:
         return None
-    return visibility(Visibility(shown=shown)).show_depth(units(virtual))
+    return visibility_matcher(Visibility(shown=shown)).show_depth(
+        units(virtual)
+    )
 
 
 def path_visible(vis: Visibility | None, virtual: str) -> bool:
     if vis is None or vis.paths is None:
         return True
-    return visibility(vis).path_visible(units(virtual))
+    return visibility_matcher(vis).path_visible(units(virtual))
 
 
 def shown_mode(
@@ -100,7 +104,9 @@ def shown_mode(
 ) -> tuple[int, MountMode] | None:
     if shown is None:
         return None
-    result = visibility(Visibility(shown=shown)).shown_mode(units(virtual))
+    result = visibility_matcher(Visibility(shown=shown)).shown_mode(
+        units(virtual)
+    )
     return None if result is None else (result[0], MODES[result[1]])
 
 
@@ -109,7 +115,7 @@ def path_covers(
 ) -> bool:
     if hidden is None:
         return False
-    return visibility(Visibility(paths=hidden)).path_covers(
+    return visibility_matcher(Visibility(paths=hidden)).path_covers(
         units(virtual), ancestors
     )
 
@@ -117,7 +123,7 @@ def path_covers(
 def move_reveals(vis: Visibility | None, src: str, dst: str) -> bool:
     if vis is None or vis.paths is None:
         return False
-    return visibility(vis).move_reveals(units(src), units(dst))
+    return visibility_matcher(vis).move_reveals(units(src), units(dst))
 
 
 def classify_shows(entries: Iterable[ShowEntry]) -> ShownPaths | None:
@@ -130,7 +136,7 @@ def leads_hidden(
 ) -> bool:
     if vis is None or not links:
         return False
-    return visibility(vis).leads_hidden(
+    return visibility_matcher(vis).leads_hidden(
         units(virtual),
         tuple((units(name), units(target)) for name, target in links.items()),
         MAX_SYMLINK_HOPS,
@@ -140,16 +146,18 @@ def leads_hidden(
 def hidden_under(vis: Visibility | None, virtual: str) -> bool:
     if vis is None or vis.paths is None:
         return False
-    return visibility(vis).hides_intersect(units(virtual))
+    return visibility_matcher(vis).hides_intersect(units(virtual))
 
 
 def hides_intersect(hidden: HiddenPaths | None, virtual: str) -> bool:
     if hidden is None:
         return False
-    return visibility(Visibility(paths=hidden)).hides_intersect(units(virtual))
+    return visibility_matcher(Visibility(paths=hidden)).hides_intersect(
+        units(virtual)
+    )
 
 
 def var_hidden(vis: Visibility | None, name: str) -> bool:
     if vis is None or vis.vars is None:
         return False
-    return visibility(vis).var_hidden(units(name))
+    return visibility_matcher(vis).var_hidden(units(name))

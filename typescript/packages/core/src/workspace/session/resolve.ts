@@ -30,7 +30,6 @@ import { DEFAULT_VISIBILITY, weakerMode } from '../../types.ts'
 import { compilePolicy, restrictPolicy } from '../../rs/policy.ts'
 import {
   compileProgram,
-  type CommandsBlock,
   type CompiledProfile,
   type SessionProfile,
 } from '../../policy/profile.ts'
@@ -55,14 +54,6 @@ export function resolveProfile(
   const found = profiles[profile]
   if (found === undefined) throw new PolicyError(`unknown profile ${JSON.stringify(profile)}`)
   return found
-}
-
-export function refuseAllow(inline: CommandsBlock | null | undefined): void {
-  restrictMatching(null, { commands: inline ?? null })
-}
-
-export function refuseShow(inline: SessionProfile): void {
-  restrictMatching(null, { paths: inline.paths ?? null, mounts: inline.mounts ?? null })
 }
 
 function restrictMatching(

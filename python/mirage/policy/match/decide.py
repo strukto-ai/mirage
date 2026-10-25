@@ -22,7 +22,7 @@ from mirage.policy.types import (
     Outcome,
     Ruling,
 )
-from mirage.rs.policy import admission, from_units
+from mirage.rs.policy import admission_matcher, from_units
 
 
 def decide(ctx: CommandContext, rules: AdmissionRules | None) -> Ruling:
@@ -30,7 +30,7 @@ def decide(ctx: CommandContext, rules: AdmissionRules | None) -> Ruling:
         return Ruling(Outcome.ALLOW)
     if not line_allowed(ctx, rules):
         return Ruling(Outcome.DENY, source="commands.allow")
-    matcher = admission(rules)
+    matcher = admission_matcher(rules)
     result = matcher.decide(command_facts(ctx))
     listed = (*rules.deny, *rules.ask) if rules is not None else ()
     rule = listed[result[1]] if result[1] is not None else None

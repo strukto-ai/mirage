@@ -41,10 +41,13 @@ from mirage.policy.types import (
 from mirage.process.config import ProcessPermissions
 from mirage.rs.policy import (
     MODES,
+    PathsValue,
+    ProfileValue,
     from_units,
     policy_compile,
     policy_restrict,
-    profile_value,
+    rule_value,
+    units,
     visibility_from_value,
 )
 from mirage.types import MountMode, ShowEntry, weaker_mode
@@ -68,6 +71,68 @@ def resolve_profile(
     if profile not in profiles:
         raise PolicyError(f"unknown profile {profile!r}")
     return profiles[profile]
+
+
+def _profile_value(profile: SessionProfile) -> ProfileValue:
+    block = profile.commands
+    commands = (
+        (
+            None
+            if block.allow is None
+            else tuple(units(v) for v in block.allow),
+            tuple(rule_value(rule) for rule in block.deny),
+            tuple(rule_value(rule) for rule in block.ask),
+        )
+        if block is not None
+        else None
+    )
+    paths = _paths_value(profile.paths)
+    mounts = (
+        tuple(
+            (
+                units(prefix),
+                MODES.index(entry.mode) if entry.mode is not None else None,
+                (
+                    None,
+                    tuple(rule_value(rule) for rule in entry.commands.deny),
+                    tuple(rule_value(rule) for rule in entry.commands.ask),
+                )
+                if entry.commands is not None
+                else None,
+                _paths_value(entry.paths),
+            )
+            for prefix, entry in profile.mounts.items()
+        )
+        if profile.mounts is not None
+        else None
+    )
+    return (
+        commands,
+        paths,
+        tuple(units(v) for v in profile.vars.hide)
+        if profile.vars is not None
+        else None,
+        mounts,
+    )
+
+
+def _paths_value(block: PathsBlock | None) -> PathsValue | None:
+    if block is None:
+        return None
+    return (
+        tuple(units(v) for v in block.hide),
+        tuple(
+            (
+                units(v.path),
+                MODES.index(v.mode) if v.mode is not None else None,
+            )
+            for v in block.show
+        ),
+        tuple(
+            (tuple(units(v) for v in group.patterns), units(group.reason))
+            for group in block.reasons
+        ),
+    )
 
 
 def _rule_from_value(value: PolicyRule) -> CommandRule:
@@ -147,18 +212,24 @@ def _profile_fields(
     )
 
 
+def _restrict_matching(
+    base: SessionProfile | None, inline: SessionProfile | None
+) -> PolicyProfile | None:
+    try:
+        return policy_restrict(
+            _profile_value(base) if base is not None else None,
+            _profile_value(inline) if inline is not None else None,
+        )
+    except ValueError as exc:
+        raise PolicyError(str(exc)) from exc
+
+
 def with_inline(
     base: SessionProfile | None, inline: SessionProfile | None
 ) -> SessionProfile | None:
     if inline is None:
         return base
-    try:
-        value = policy_restrict(
-            profile_value(base) if base is not None else None,
-            profile_value(inline),
-        )
-    except ValueError as exc:
-        raise PolicyError(str(exc)) from exc
+    value = _restrict_matching(base, inline)
     if inline.command_limits is not None:
         raise PolicyError(
             "command_limits belong on the profile, not inline permissions"
@@ -200,7 +271,7 @@ def with_inline(
 
 
 def compile_commands(profile: SessionProfile) -> AdmissionRules | None:
-    return _commands_from_value(policy_compile(profile_value(profile))[0])
+    return _commands_from_value(policy_compile(_profile_value(profile))[0])
 
 
 def compile_scripts(effective: SessionProfile, name: str) -> ProfileScripts:
@@ -246,7 +317,7 @@ def compile_profile(
     """
     if effective is None:
         return CompiledProfile(profile=name or None)
-    value = policy_compile(profile_value(effective))
+    value = policy_compile(_profile_value(effective))
     commands = _commands_from_value(value[0])
     check_rules(commands)
     processes = effective.processes or ProcessPermissions()
