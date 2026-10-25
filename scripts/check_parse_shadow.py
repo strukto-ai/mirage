@@ -103,7 +103,25 @@ def positional_digit(data: bytes, ts: Tree, rs: Tree) -> bool:
 
 
 def time_word(data: bytes, ts: Tree, rs: Tree) -> bool:
-    return any(n[0] == "timed_statement" for n in nodes(rs))
+    """A `time` timing a pipeline, where the trees agree once its keywords
+    are blanked: a `:` stands in for one that times nothing."""
+    blanked = bytearray(data)
+    found = False
+    for n in nodes(rs):
+        if n[0] != "timed_statement":
+            continue
+        found = True
+        for word in n[8]:
+            if not word[1]:
+                blanked[word[3] : word[4]] = b" " * (word[4] - word[3])
+        if all(not c[1] for c in n[8]):
+            blanked[n[3] : n[3] + 1] = b":"
+    if not found:
+        return False
+    ts, ts_error, rs, rs_error = trees(
+        blanked.decode("utf-8", "surrogateescape")
+    )
+    return not ts_error and not rs_error and first_difference(ts, rs) is None
 
 
 def heredoc_body(data: bytes, ts: Tree, rs: Tree) -> bool:
@@ -169,16 +187,42 @@ def regex_argument(data: bytes, ts: Tree, rs: Tree) -> bool:
     )
 
 
+def shape(tree: Tree) -> Tree:
+    """A tree without its spans: kind, named, field, missing, children.
+
+    Args:
+        tree (Tree): a canonical tree.
+    """
+    return [*tree[:3], tree[7], [shape(child) for child in tree[8]]]
+
+
 def regex_ampersand(data: bytes, ts: Tree, rs: Tree) -> bool:
+    """A regex the grammar takes whole across an `&&`, where bash ends it:
+    the parser's tree is the one both give once the `&&` is spaced out."""
+    splits = []
     for n in nodes(ts):
         if n[0] != "regex":
             continue
         depth = 0
-        for byte in text(data, n):
-            depth += (byte == ord("(")) - (byte == ord(")"))
-            if byte == ord("&") and depth == 0:
-                return True
-    return False
+        for at in range(n[3], n[4]):
+            depth += (data[at] == ord("(")) - (data[at] == ord(")"))
+            if depth == 0 and data[at : at + 2] == b"&&":
+                splits.append(at)
+                break
+    if not splits:
+        return False
+    spaced = data
+    for at in sorted(splits, reverse=True):
+        spaced = spaced[:at] + b" && " + spaced[at + 2 :]
+    ts, ts_error, spaced_rs, rs_error = trees(
+        spaced.decode("utf-8", "surrogateescape")
+    )
+    return (
+        not ts_error
+        and not rs_error
+        and first_difference(ts, spaced_rs) is None
+        and shape(rs) == shape(spaced_rs)
+    )
 
 
 def negated_compound(data: bytes, ts: Tree, rs: Tree) -> bool:
@@ -472,6 +516,16 @@ def key(line: str) -> str:
     return hashlib.sha1(encoded(line)).hexdigest()[:16]
 
 
+def digest(lines: list[str]) -> str:
+    """The corpus a pin covered: every line has bash's status from it.
+
+    Args:
+        lines (list[str]): the corpus.
+    """
+    keys = "\n".join(sorted(key(line) for line in lines))
+    return hashlib.sha1(keys.encode()).hexdigest()[:16]
+
+
 def trees(line: str) -> tuple[Tree, bool, Tree, bool]:
     data = encoded(line)
     ts = GRAMMAR.parse(data).root_node
@@ -511,6 +565,8 @@ def classify(line: str, status: dict[str, int]) -> tuple[str, str]:
     """
     ts, ts_error, rs, rs_error = trees(line)
     if not ts_error and not rs_error:
+        if status.get(key(line), 0) != 0:
+            return "unexplained", f"bash status {status[key(line)]}"
         difference = first_difference(ts, rs)
         if difference is None:
             return "same", ""
@@ -575,9 +631,12 @@ def pin(
 
 def dumped(fixture: dict[str, Any]) -> str:
     """The fixture's text, one row per line so a re-pin diffs by line.
+    Every line of the corpus is pinned; the statuses kept are those of the
+    lines either parser or bash refuses.
 
     Args:
-        fixture (dict[str, Any]): the pin note, examples and statuses.
+        fixture (dict[str, Any]): the pin note, corpus digest, examples and
+            statuses.
     """
     examples = ",\n".join(
         f"  {json.dumps(name)}: {json.dumps(row, ensure_ascii=False)}"
@@ -587,9 +646,10 @@ def dumped(fixture: dict[str, Any]) -> str:
         f"  {json.dumps(k)}: {v}" for k, v in sorted(fixture["status"].items())
     )
     pinned = json.dumps(fixture["pinned"])
+    corpus = json.dumps(fixture["corpus"])
     return (
-        f'{{\n "pinned": {pinned},\n "examples": {{\n{examples}\n }},\n'
-        f' "status": {{\n{status}\n }}\n}}\n'
+        f'{{\n "pinned": {pinned},\n "corpus": {corpus},\n'
+        f' "examples": {{\n{examples}\n }},\n "status": {{\n{status}\n }}\n}}\n'
     )
 
 
@@ -615,15 +675,16 @@ def main() -> int:
         else {"pinned": PINNED, "examples": {}, "status": {}}
     )
     if args.pin:
-        wanted = []
-        for line in lines:
-            _, ts_error, _, rs_error = trees(line)
-            if ts_error or rs_error:
-                wanted.append(line)
         examples = [example for _, example, _ in REASONS.values()]
-        status, rendered = pin(wanted, examples)
+        status, rendered = pin(lines, examples)
+        kept = {}
+        for line, got in zip(lines, status):
+            _, ts_error, _, rs_error = trees(line)
+            if ts_error or rs_error or got != 0:
+                kept[key(line)] = got
         fixture = {
             "pinned": PINNED,
+            "corpus": digest(lines),
             "examples": {
                 name: {
                     "line": example,
@@ -635,10 +696,12 @@ def main() -> int:
                     REASONS.items(), rendered
                 )
             },
-            "status": {key(line): got for line, got in zip(wanted, status)},
+            "status": kept,
         }
         FIXTURE.write_text(dumped(fixture))
     failures = []
+    if fixture.get("corpus") != digest(lines):
+        failures.append("the corpus changed since the pin; run with --pin")
     for name, (_, example, rule) in REASONS.items():
         ts, ts_error, rs, _ = trees(example)
         row = fixture["examples"].get(name)

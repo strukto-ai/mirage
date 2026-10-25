@@ -1,5 +1,6 @@
 {
  "pinned": "bash 5.2.37 (debian:stable-slim): `bash -n -c LINE` per line; per example, `declare -f f` after `f() { LINE }` and the output of `bash -c LINE`",
+ "corpus": "6a0fa2e81c15e096",
  "examples": {
   "assignment-name": {"line": "1a=x; echo $?", "status": 0, "declared": "f () \n{ \n    1a=x;\n    echo $?\n}", "output": "bash: line 1: 1a=x: command not found\n127"},
   "backtick-pairing": {"line": "echo `echo a` `echo b`", "status": 0, "declared": "f () \n{ \n    echo `echo a` `echo b`\n}", "output": "a b"},

@@ -8,7 +8,7 @@ pub(super) fn is_space(byte: u8) -> bool {
 }
 
 /// Bytes that end a word, or cannot start one.
-pub(super) fn is_special(byte: u8) -> bool {
+fn is_special(byte: u8) -> bool {
     matches!(
         byte,
         b'\''
@@ -80,9 +80,7 @@ pub(super) fn number_end(source: &[u8], at: usize) -> Option<usize> {
     }
     let digits = |from: usize| {
         let mut to = from;
-        while source.get(to).is_some_and(u8::is_ascii_digit) {
-            to += 1;
-        }
+        to = digits_end(source, to);
         to
     };
     let mut after = digits(end);
@@ -129,6 +127,37 @@ pub(super) fn is_word(source: &[u8], at: usize, word: &[u8]) -> bool {
             .is_none_or(|byte| is_space(*byte) || is_operator(*byte))
 }
 
+/// Whether a backslash escapes the byte at `at`: an odd run of them ends
+/// right before it.
+pub(super) fn escaped(source: &[u8], at: usize) -> bool {
+    source[..at]
+        .iter()
+        .rev()
+        .take_while(|byte| **byte == b'\\')
+        .count()
+        % 2
+        == 1
+}
+
+/// Past the run from `at` of the bytes `keep` takes.
+pub(super) fn span_while(source: &[u8], at: usize, keep: impl Fn(u8) -> bool) -> usize {
+    let at = at.min(source.len());
+    source[at..]
+        .iter()
+        .position(|byte| !keep(*byte))
+        .map_or(source.len(), |offset| at + offset)
+}
+
+/// Past the blanks from `at`.
+pub(super) fn blank_end(source: &[u8], at: usize) -> usize {
+    span_while(source, at, is_blank)
+}
+
+/// Past the digits from `at`.
+pub(super) fn digits_end(source: &[u8], at: usize) -> usize {
+    span_while(source, at, |byte| byte.is_ascii_digit())
+}
+
 /// Past the quote closing the one at `at`; a backslash escapes in double
 /// quotes and backticks.
 pub(super) fn quote_end(source: &[u8], at: usize, quote: u8) -> Option<usize> {
@@ -146,11 +175,25 @@ pub(super) fn quote_end(source: &[u8], at: usize, quote: u8) -> Option<usize> {
     None
 }
 
-/// Past the `}` closing the `${` at `at`, as bash matches it: nested
-/// braces, quotes and escapes skipped.
-pub(super) fn brace_end(source: &[u8], at: usize) -> Option<usize> {
+/// Past the quote closing the `$'` at `at`, a backslash escaping the
+/// byte after it, the quote too.
+pub(super) fn ansi_c_end(source: &[u8], at: usize) -> Option<usize> {
+    let mut end = at + 2;
+    while end < source.len() {
+        match source[end] {
+            b'\\' => end += 2,
+            b'\'' => return Some(end + 1),
+            _ => end += 1,
+        }
+    }
+    None
+}
+
+/// Past the `close` that matches the `open` at `at`, as bash matches a
+/// pair: nested pairs counted, quotes and escapes skipped.
+pub(super) fn pair_end(source: &[u8], at: usize, open: u8, close: u8) -> Option<usize> {
     let mut depth = 0usize;
-    let mut end = at + 1;
+    let mut end = at;
     while end < source.len() {
         match source[end] {
             b'\\' => end += 1,
@@ -158,8 +201,12 @@ pub(super) fn brace_end(source: &[u8], at: usize) -> Option<usize> {
                 end = quote_end(source, end, source[end])?;
                 continue;
             }
-            b'{' => depth += 1,
-            b'}' => {
+            b'$' if source.get(end + 1) == Some(&b'\'') => {
+                end = ansi_c_end(source, end)?;
+                continue;
+            }
+            byte if byte == open => depth += 1,
+            byte if byte == close => {
                 depth -= 1;
                 if depth == 0 {
                     return Some(end + 1);
@@ -172,7 +219,8 @@ pub(super) fn brace_end(source: &[u8], at: usize) -> Option<usize> {
     None
 }
 
-/// Past the `]` closing the `[` at `at`, nested brackets counted.
+/// Past the `]` closing the `[` at `at`, nested brackets counted and
+/// quotes skipped.
 pub(super) fn bracket_end(source: &[u8], at: usize) -> Option<usize> {
     let mut depth = 0usize;
     let mut end = at;
@@ -181,6 +229,10 @@ pub(super) fn bracket_end(source: &[u8], at: usize) -> Option<usize> {
             b'\\' => end += 1,
             b'\'' | b'"' => {
                 end = quote_end(source, end, source[end])?;
+                continue;
+            }
+            b'$' if source.get(end + 1) == Some(&b'\'') => {
+                end = ansi_c_end(source, end)?;
                 continue;
             }
             b'[' => depth += 1,

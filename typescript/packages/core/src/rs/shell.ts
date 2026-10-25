@@ -109,16 +109,11 @@ export class ShellTreeNode implements ShellNode {
     return ((this.word(0) >>> 24) & 1) !== 0
   }
 
-  get isMissing(): boolean {
-    return ((this.word(0) >>> 24) & 2) !== 0
-  }
+  /** Always false: the parser refuses a line instead of inventing a missing token. */
+  readonly isMissing = false
 
   get hasError(): boolean {
-    return ((this.word(0) >>> 24) & 4) !== 0
-  }
-
-  get isError(): boolean {
-    return (this.word(0) & 0xffff) === 0
+    return ((this.word(0) >>> 24) & 2) !== 0
   }
 
   get startIndex(): number {
@@ -187,14 +182,9 @@ export class ShellTreeNode implements ShellNode {
   }
 
   childForFieldName(name: string): ShellTreeNode | null {
-    return this.childrenForFieldName(name)[0] ?? null
-  }
-
-  childrenForFieldName(name: string): ShellTreeNode[] {
     const field = fields.indexOf(name) + 1
-    return field === 0
-      ? []
-      : this.children.filter((child) => ((child.word(0) >>> 16) & 0xff) === field)
+    if (field === 0) return null
+    return this.children.find((child) => ((child.word(0) >>> 16) & 0xff) === field) ?? null
   }
 }
 

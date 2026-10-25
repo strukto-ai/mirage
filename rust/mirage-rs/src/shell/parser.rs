@@ -50,6 +50,16 @@ pub(super) struct Fail {
     pub message: String,
 }
 
+impl Fail {
+    /// bash's refusal of input that ends before the `closer` it waits for.
+    pub(super) fn eof(at: usize, closer: char) -> Self {
+        Self {
+            at,
+            message: format!("unexpected EOF while looking for matching `{closer}'"),
+        }
+    }
+}
+
 pub(super) type R<T> = Result<T, Fail>;
 
 /// Where a speculative parse started, to go back to.
@@ -58,7 +68,8 @@ pub(super) struct Mark {
     i: usize,
     comments: usize,
     pending: usize,
-    saved: usize,
+    taken: usize,
+    raw_bodies: usize,
     depth: usize,
 }
 
@@ -88,9 +99,12 @@ pub(super) struct Parser<'a> {
     pub in_backtick: bool,
     /// Heredocs whose bodies start after the next newline.
     pub pending: Vec<super::heredoc::Pending>,
-    /// `pending` as it was before each read of bodies, for a reset to
-    /// restore.
-    pub saved: Vec<Vec<super::heredoc::Pending>>,
+    /// The heredocs each read of bodies took, with their places in
+    /// `pending`, for a reset to put back.
+    pub taken: Vec<Vec<(usize, super::heredoc::Pending)>>,
+    /// The quoted heredoc bodies read so far, whose continuations bash
+    /// keeps.
+    pub raw_bodies: Vec<(usize, usize)>,
     /// How many command substitutions enclose the cursor.
     pub comsub: usize,
     /// A heredoc's delimiter line ended mid-line: what follows on it is
@@ -108,7 +122,7 @@ pub(super) struct Parser<'a> {
 /// Parse a whole program.
 pub(super) fn parse(source: &[u8]) -> Tree {
     let mut pass = parse_pass(source);
-    let dropped = continuations(source, &pass.root, &pass.comments);
+    let dropped = continuations(source, &pass);
     if !dropped.is_empty() {
         let mut logical = Vec::with_capacity(source.len());
         let mut map = Vec::with_capacity(source.len() + 1);
@@ -135,6 +149,7 @@ pub(super) fn parse(source: &[u8]) -> Tree {
         mut root,
         comments,
         error,
+        ..
     } = pass;
     place_comments(&mut root, &comments);
     root.start = root
@@ -148,24 +163,13 @@ pub(super) fn parse(source: &[u8]) -> Tree {
 struct Pass {
     root: Syn,
     comments: Vec<(usize, usize)>,
+    raw_bodies: Vec<(usize, usize)>,
     error: Option<(usize, String)>,
 }
 
 fn parse_pass(source: &[u8]) -> Pass {
     let work = std::cell::Cell::new(0);
-    let mut parser = Parser {
-        s: source,
-        i: 0,
-        comments: Vec::new(),
-        depth: 0,
-        in_backtick: false,
-        pending: Vec::new(),
-        saved: Vec::new(),
-        comsub: 0,
-        line_break: false,
-        braces: 0,
-        work: &work,
-    };
+    let mut parser = Parser::new(source, &work);
     let mut children = Vec::new();
     let mut error = None;
     loop {
@@ -187,6 +191,7 @@ fn parse_pass(source: &[u8]) -> Pass {
     Pass {
         root: Syn::node("program", children),
         comments: parser.comments,
+        raw_bodies: parser.raw_bodies,
         error,
     }
 }
@@ -195,15 +200,24 @@ fn parse_pass(source: &[u8]) -> Pass {
 /// that an odd run ends, before a newline or the end, and that newline.
 /// Single-quoted and ANSI-C text, a comment and a quoted heredoc's body
 /// keep theirs.
-fn continuations(source: &[u8], root: &Syn, comments: &[(usize, usize)]) -> Vec<usize> {
+fn continuations(source: &[u8], pass: &Pass) -> Vec<usize> {
     if memchr::memmem::find(source, b"\\\n").is_none() {
         return Vec::new();
     }
-    let mut verbatim: Vec<(usize, usize)> = comments.to_vec();
-    collect_verbatim(root, source, &mut verbatim);
-    if let Some(error) = root.children.last().filter(|node| node.kind == "ERROR") {
+    let mut verbatim = [&pass.comments[..], &pass.raw_bodies[..]].concat();
+    collect_verbatim(&pass.root, source, &mut verbatim);
+    if let Some(error) = pass
+        .root
+        .children
+        .last()
+        .filter(|node| node.kind == "ERROR")
+    {
         scan_verbatim(source, error.start, &mut verbatim);
     }
+    verbatim.sort_unstable();
+    // The candidates come in order: a sweep finds the spans holding each.
+    let mut spans = verbatim.iter().peekable();
+    let mut covered = 0;
     let mut dropped = Vec::new();
     let mut at = 0;
     while let Some(offset) = memchr::memchr(b'\\', &source[at..]) {
@@ -213,9 +227,10 @@ fn continuations(source: &[u8], root: &Syn, comments: &[(usize, usize)]) -> Vec<
             end += 1;
         }
         let last = end - 1;
-        let live = (end - start) % 2 == 1
-            && source.get(end) == Some(&b'\n')
-            && !verbatim.iter().any(|&(from, to)| from <= last && last < to);
+        while let Some(&(_, to)) = spans.next_if(|span| span.0 <= last) {
+            covered = covered.max(to);
+        }
+        let live = (end - start) % 2 == 1 && source.get(end) == Some(&b'\n') && covered <= last;
         if live {
             dropped.push(last);
             if end < source.len() {
@@ -238,22 +253,7 @@ fn collect_verbatim(root: &Syn, source: &[u8], spans: &mut Vec<(usize, usize)>) 
 fn verbatim_of(node: &Syn, source: &[u8], spans: &mut Vec<(usize, usize)>) {
     match node.kind {
         "raw_string" | "ansi_c_string" => spans.push((node.start, node.end)),
-        "heredoc_redirect" => {
-            let quoted = node.children.iter().any(|child| {
-                child.kind == "heredoc_start"
-                    && source[child.start..child.end]
-                        .iter()
-                        .any(|byte| matches!(byte, b'\'' | b'"' | b'\\'))
-            });
-            for child in &node.children {
-                if child.kind == "heredoc_body" && quoted {
-                    spans.push((child.start, child.end));
-                }
-                if child.kind == "heredoc_start" {
-                    scan_verbatim(&source[..child.end], child.start, spans);
-                }
-            }
-        }
+        "heredoc_start" => scan_verbatim(&source[..node.end], node.start, spans),
         _ => {}
     }
 }
@@ -284,11 +284,7 @@ fn scan_verbatim(source: &[u8], mut at: usize, spans: &mut Vec<(usize, usize)>) 
                 continue;
             }
             b'$' if source.get(at + 1) == Some(&b'\'') => {
-                let mut end = at + 2;
-                while end < source.len() && source[end] != b'\'' {
-                    end += if source[end] == b'\\' { 2 } else { 1 };
-                }
-                let end = (end + 1).min(source.len());
+                let end = super::lex::ansi_c_end(source, at).unwrap_or(source.len());
                 spans.push((at, end));
                 at = end;
                 continue;
@@ -324,13 +320,34 @@ fn remap(root: &mut Syn, map: &[usize]) {
     }
 }
 
+impl<'a> Parser<'a> {
+    /// A parser at the start of `s`, counting its work in `work`.
+    pub(super) fn new(s: &'a [u8], work: &'a std::cell::Cell<usize>) -> Self {
+        Self {
+            s,
+            i: 0,
+            comments: Vec::new(),
+            depth: 0,
+            in_backtick: false,
+            pending: Vec::new(),
+            taken: Vec::new(),
+            raw_bodies: Vec::new(),
+            comsub: 0,
+            line_break: false,
+            braces: 0,
+            work,
+        }
+    }
+}
+
 impl Parser<'_> {
     pub(super) fn mark(&self) -> Mark {
         Mark {
             i: self.i,
             comments: self.comments.len(),
             pending: self.pending.len(),
-            saved: self.saved.len(),
+            taken: self.taken.len(),
+            raw_bodies: self.raw_bodies.len(),
             depth: self.depth,
         }
     }
@@ -342,8 +359,11 @@ impl Parser<'_> {
         self.i = mark.i;
         self.depth = mark.depth;
         self.comments.truncate(mark.comments);
-        if let Some(pending) = self.saved.drain(mark.saved..).next() {
-            self.pending = pending;
+        self.raw_bodies.truncate(mark.raw_bodies);
+        if let Some(taken) = self.taken.drain(mark.taken..).next() {
+            for (index, heredoc) in taken {
+                self.pending.insert(index.min(self.pending.len()), heredoc);
+            }
         }
         self.pending.truncate(mark.pending);
     }
@@ -471,7 +491,7 @@ impl Parser<'_> {
 
     /// `skip_space`, reading the body of each pending heredoc at the
     /// newline it starts after.
-    pub(super) fn skip_space_bodies(&mut self, out: &mut Vec<Syn>) -> R<()> {
+    fn skip_space_bodies(&mut self, out: &mut Vec<Syn>) -> R<()> {
         loop {
             self.skip_blank();
             if self.peek() != b'\n' {
@@ -788,20 +808,17 @@ impl Parser<'_> {
                 return self.fail(at);
             }
         }
-        for word in [
-            &b"declare"[..],
-            b"typeset",
-            b"export",
-            b"readonly",
-            b"local",
+        for (word, kind) in [
+            ("declare", "declaration_command"),
+            ("typeset", "declaration_command"),
+            ("export", "declaration_command"),
+            ("readonly", "declaration_command"),
+            ("local", "declaration_command"),
+            ("unset", "unset_command"),
+            ("unsetenv", "unset_command"),
         ] {
-            if self.at_word(word) {
-                return self.declaration(word);
-            }
-        }
-        for word in [&b"unset"[..], b"unsetenv"] {
-            if self.at_word(word) {
-                return self.unset(word);
+            if self.at_word(word.as_bytes()) {
+                return self.declaration(word, kind);
             }
         }
         if !self.at_assignment() {
@@ -833,12 +850,13 @@ impl Parser<'_> {
     }
 
     fn negated(&mut self) -> R<Syn> {
-        let bang = self.expect("!")?;
+        self.enter()?;
+        let mut children = vec![self.expect("!")?];
         self.skip_blank();
-        if self.at_list_end() {
-            return Ok(Syn::node("negated_command", vec![bang]));
+        if !self.at_list_end() {
+            children.push(self.primary()?);
         }
-        let body = self.primary()?;
-        Ok(Syn::node("negated_command", vec![bang, body]))
+        self.leave();
+        Ok(Syn::node("negated_command", children))
     }
 }

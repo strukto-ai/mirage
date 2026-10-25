@@ -1,4 +1,4 @@
-use super::lex::{is_blank, is_space};
+use super::lex::{blank_end, is_space};
 use super::parser::{Fail, Parser, R};
 
 /// Unary operators of a conditional command, without their dash.
@@ -28,6 +28,12 @@ enum Token {
     Word(usize, usize),
 }
 
+impl Token {
+    fn ends_term(self) -> bool {
+        matches!(self, Token::End | Token::And | Token::Or | Token::Close)
+    }
+}
+
 /// bash's grammar for the inside of `[[ ... ]]`, checked over the text
 /// the tree was built from: the grammar's expression rules take more
 /// than bash does, so a tree alone cannot tell a refused line.
@@ -38,7 +44,7 @@ struct Cond<'p, 'a> {
 }
 
 impl Cond<'_, '_> {
-    pub(super) fn fail<T>(&self, at: usize) -> R<T> {
+    fn fail<T>(&self, at: usize) -> R<T> {
         Err(Fail {
             at,
             message: "syntax error in conditional expression".into(),
@@ -50,11 +56,9 @@ impl Cond<'_, '_> {
     }
 
     /// The next token, the cursor left after it.
-    pub(super) fn next(&mut self) -> R<Token> {
+    fn next(&mut self) -> R<Token> {
         let s = self.parser.s;
-        while self.at < self.end && is_blank(s[self.at]) {
-            self.at += 1;
-        }
+        self.at = blank_end(s, self.at).min(self.end);
         if self.at >= self.end {
             return Ok(Token::End);
         }
@@ -104,30 +108,12 @@ impl Cond<'_, '_> {
         while s.get(end) == Some(&b'(')
             && end > at
             && matches!(s[end - 1], b'@' | b'!' | b'*' | b'+' | b'?')
+            && !super::lex::escaped(s, end - 1)
         {
-            let mut depth = 0usize;
-            let mut close = end;
-            loop {
-                match s.get(close) {
-                    None => return self.fail(end),
-                    Some(b'(') => depth += 1,
-                    Some(b')') => {
-                        depth -= 1;
-                        if depth == 0 {
-                            break;
-                        }
-                    }
-                    Some(b'\\') => close += 1,
-                    Some(&quote @ (b'\'' | b'"' | b'`')) => {
-                        close = super::lex::quote_end(s, close, quote)
-                            .ok_or_else(|| self.parser.unexpected(s.len()))?
-                            - 1;
-                    }
-                    _ => {}
-                }
-                close += 1;
-            }
-            end = close + 1;
+            let Some(close) = super::lex::pair_end(s, end, b'(', b')') else {
+                return self.fail(end);
+            };
+            end = close;
             let mut probe = self.parser.probe(end);
             if probe.concat_continues(super::word::Ctx::default())
                 && probe.literal_opt(super::word::Ctx::default())?.is_some()
@@ -188,14 +174,14 @@ impl Cond<'_, '_> {
                     if let Token::Word(..) = operand {
                         return self.next_skipping();
                     }
-                    if !matches!(operand, Token::End | Token::And | Token::Or | Token::Close) {
+                    if !operand.ends_term() {
                         return self.fail(self.at);
                     }
                     return self.fail(start);
                 }
                 let after = self.next()?;
                 match after {
-                    Token::End | Token::And | Token::Or | Token::Close => Ok(after),
+                    _ if after.ends_term() => Ok(after),
                     Token::Less | Token::Greater => self.right(false),
                     Token::Word(op_start, op_end)
                         if BINARY.contains(&self.text(op_start, op_end)) =>
@@ -216,13 +202,18 @@ impl Cond<'_, '_> {
             return self.regex();
         }
         match self.next()? {
-            Token::Word(..) => {}
-            _ => return self.fail(self.at),
-        }
-        let after = self.next_skipping()?;
-        match after {
-            Token::End | Token::And | Token::Or | Token::Close => Ok(after),
+            Token::Word(..) => self.after_term(),
             _ => self.fail(self.at),
+        }
+    }
+
+    /// The token after a whole term: the end, a `)`, `&&` or `||`.
+    fn after_term(&mut self) -> R<Token> {
+        let after = self.next_skipping()?;
+        if after.ends_term() {
+            Ok(after)
+        } else {
+            self.fail(self.at)
         }
     }
 
@@ -231,9 +222,7 @@ impl Cond<'_, '_> {
     /// `&&` right after the operator leaves the regex empty.
     fn regex(&mut self) -> R<Token> {
         let s = self.parser.s;
-        while self.at < self.end && is_blank(s[self.at]) {
-            self.at += 1;
-        }
+        self.at = blank_end(s, self.at).min(self.end);
         if s[self.at..self.end].starts_with(b"&&") {
             return self.next();
         }
@@ -244,6 +233,9 @@ impl Cond<'_, '_> {
                 b'\\' => self.at += 1,
                 b'\'' | b'"' => {
                     self.at = super::lex::quote_end(s, self.at, s[self.at]).unwrap_or(self.end) - 1;
+                }
+                b'$' if s.get(self.at + 1) == Some(&b'\'') => {
+                    self.at = super::lex::ansi_c_end(s, self.at).unwrap_or(self.end) - 1;
                 }
                 b'$' if matches!(s.get(self.at + 1), Some(b'(' | b'{')) => {
                     let mut probe = self.parser.probe(self.at);
@@ -270,11 +262,7 @@ impl Cond<'_, '_> {
         if self.at == start {
             return self.fail(start);
         }
-        let after = self.next_skipping()?;
-        match after {
-            Token::End | Token::And | Token::Or | Token::Close => Ok(after),
-            _ => self.fail(self.at),
-        }
+        self.after_term()
     }
 }
 

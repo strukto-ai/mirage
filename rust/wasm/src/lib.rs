@@ -485,7 +485,7 @@ fn utf16_offsets(source: &[u8]) -> Vec<u32> {
 /// Parse the args buffer's first `len` bytes as a shell program. Its node
 /// table, `NODE_WORDS` words a node level by level, offsets and columns in
 /// UTF-16 units, is at `mirage_rs_shell_table` until the next parse:
-/// kind | field << 16 | flags << 24 (1 named, 2 missing, 4 has_error),
+/// kind | field << 16 | flags << 24 (1 named, 2 has_error),
 /// start, end, start row, start column, end row, end column, parent,
 /// first child, child count. Returns the node count.
 #[unsafe(no_mangle)]
@@ -494,34 +494,21 @@ pub extern "C" fn mirage_rs_shell_parse(len: usize) -> usize {
     let source = &args[..len.min(args.len())];
     let tree = mirage_rs::shell::parse(source);
     let utf16 = utf16_offsets(source);
-    let lines: Vec<usize> = std::iter::once(0)
-        .chain(
-            source
-                .iter()
-                .enumerate()
-                .filter(|(_, byte)| **byte == b'\n')
-                .map(|(at, _)| at + 1),
-        )
-        .collect();
-    let column = |row: u32, offset: u32| {
-        let start = lines[row as usize];
-        utf16[offset as usize] - utf16[start]
-    };
+    let column =
+        |offset: u32, bytes: u32| utf16[offset as usize] - utf16[(offset - bytes) as usize];
     PARSED.with_borrow_mut(|parsed| {
         parsed.table.clear();
         parsed.table.reserve(tree.nodes.len() * NODE_WORDS);
         for node in &tree.nodes {
-            let flags = u32::from(node.named)
-                | u32::from(node.missing) << 1
-                | u32::from(node.has_error) << 2;
+            let flags = u32::from(node.named) | u32::from(node.has_error) << 1;
             parsed.table.extend_from_slice(&[
                 u32::from(node.kind) | u32::from(node.field) << 16 | flags << 24,
                 utf16[node.start as usize],
                 utf16[node.end as usize],
                 node.start_row,
-                column(node.start_row, node.start),
+                column(node.start, node.start_column),
                 node.end_row,
-                column(node.end_row, node.end),
+                column(node.end, node.end_column),
                 node.parent,
                 node.first_child,
                 node.child_count,

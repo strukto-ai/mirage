@@ -306,3 +306,48 @@ fn a_heredoc_pending_across_an_array_is_read_again() {
          (command name: (command_name (word=echo)) argument: (word=x)))"
     );
 }
+
+#[test]
+fn an_array_element_opens_a_subscript_only_at_its_start() {
+    read("a=(\"[\" '[7' \\[ x[)");
+    refused("a=(x [)");
+    // After a redirect bash reads a first assignment's elements as words
+    // that may assign, so `name[` opens one too.
+    refused("2>f x=(a[)");
+    read("2>f x=($a[)");
+    read("2>f x=1 a=(x[)");
+}
+
+#[test]
+fn heredoc_delimiters_read_as_bash_reads_them() {
+    assert!(read("cat <<$'\\x41'\nb\nA\necho").contains("(heredoc_end=A)"));
+    assert!(read("cat <<$'\\''\nb\n'\necho").contains("(heredoc_end=')"));
+    // A substitution's quotes stay in the delimiter and quote nothing.
+    let tree = read("cat <<$(echo 'a')\n$x\n$(echo 'a')");
+    assert!(tree.contains("(heredoc_body (simple_expansion"), "{tree}");
+    // A quoted body keeps its continuations, read after its line too.
+    let tree = read("cat <<'E'; :\na\\\nE\necho");
+    assert!(
+        tree.contains("(heredoc_body=a\\\n) (heredoc_end=E)"),
+        "{tree}"
+    );
+}
+
+#[test]
+fn bash_readings_from_review() {
+    assert_eq!(
+        read("x=#$y"),
+        "(program (variable_assignment name: (variable_name=x) value: (concatenation (word=#) \
+         (simple_expansion (variable_name=y)))))"
+    );
+    read("cat <((echo $'\\''))");
+    read("[[ a == @($'\\'') ]]");
+    refused("[[ a == \\@(x) ]]");
+    refused("for i in a & do :; done");
+    refused("select i & do :; done");
+    let bangs = format!("{}a", "! ".repeat(200));
+    assert_eq!(refused(&bangs).1, "syntax error: nesting too deep");
+    // Too deep to read, a loop header is raw text bash reads when it runs.
+    let chain = format!("for (({}1;;)); do :; done", "a=".repeat(200));
+    assert!(read(&chain).contains("(word=a=a=a="));
+}

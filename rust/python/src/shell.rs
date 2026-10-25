@@ -3,7 +3,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyString};
-use streams::shell::{FIELDS, KINDS, Node, Tree};
+use streams::shell::{FIELDS, KINDS, Node, Tree, field_id};
 
 /// Gives each tree a number, so node ids differ across trees.
 static TREES: AtomicU64 = AtomicU64::new(0);
@@ -92,11 +92,6 @@ impl ShellNode {
     }
 
     #[getter]
-    fn kind_id(&self) -> u16 {
-        self.node().kind
-    }
-
-    #[getter]
     fn text<'py>(&self, py: Python<'py>) -> Bound<'py, PyBytes> {
         let node = self.node();
         PyBytes::new(
@@ -151,24 +146,10 @@ impl ShellNode {
         self.node().child_count
     }
 
-    #[getter]
-    fn named_child_count(&self) -> usize {
-        self.child_indices()
-            .filter(|index| self.tree.nodes[*index as usize].named)
-            .count()
-    }
-
     fn child(&self, index: i64) -> Option<ShellNode> {
         let node = self.node();
         let index = u32::try_from(index).ok()?;
         (index < node.child_count).then(|| self.at(node.first_child + index))
-    }
-
-    fn named_child(&self, index: usize) -> Option<ShellNode> {
-        self.child_indices()
-            .filter(|index| self.tree.nodes[*index as usize].named)
-            .nth(index)
-            .map(|index| self.at(index))
     }
 
     #[getter]
@@ -192,14 +173,11 @@ impl ShellNode {
         self.node().named
     }
 
+    /// Always false: the parser refuses a line instead of inventing a
+    /// missing token.
     #[getter]
     fn is_missing(&self) -> bool {
-        self.node().missing
-    }
-
-    #[getter]
-    fn is_error(&self) -> bool {
-        self.node().kind == 0
+        false
     }
 
     #[getter]
@@ -212,16 +190,6 @@ impl ShellNode {
         self.child_indices()
             .find(|index| self.tree.nodes[*index as usize].field == field)
             .map(|index| self.at(index))
-    }
-
-    fn children_by_field_name(&self, name: &str) -> Vec<ShellNode> {
-        let Some(field) = field_id(name) else {
-            return Vec::new();
-        };
-        self.child_indices()
-            .filter(|index| self.tree.nodes[*index as usize].field == field)
-            .map(|index| self.at(index))
-            .collect()
     }
 
     fn field_name_for_child(&self, index: u32) -> Option<&'static str> {
@@ -252,11 +220,4 @@ impl ShellNode {
             node.end
         )
     }
-}
-
-fn field_id(name: &str) -> Option<u8> {
-    FIELDS
-        .iter()
-        .position(|field| *field == name)
-        .and_then(|index| u8::try_from(index + 1).ok())
 }

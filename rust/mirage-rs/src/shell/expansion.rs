@@ -1,4 +1,8 @@
-use super::lex::{is_blank, is_name, is_name_start, is_space, name_end, number_end};
+// Expansion word and regex token rules adapted from tree-sitter-bash 0.25.1,
+// src/scanner.c.
+// https://github.com/tree-sitter/tree-sitter-bash
+// Licensed under MIT. See licenses/third_party/tree-sitter-bash-parser.txt.
+use super::lex::{blank_end, digits_end, is_name, is_name_start, is_space, name_end, number_end};
 use super::parser::{Parser, R};
 use super::tree::Syn;
 use super::word::{Ctx, SPECIAL};
@@ -15,7 +19,7 @@ impl Parser<'_> {
         let mut children = vec![Syn::token("${", at, at + 2)];
         let parsed = self.expansion_body(&mut children);
         if parsed.is_err() || self.peek() != b'}' {
-            let Some(end) = super::lex::brace_end(self.s, at) else {
+            let Some(end) = super::lex::pair_end(self.s, at + 1, b'{', b'}') else {
                 return match parsed {
                     Err(fail) => Err(fail),
                     Ok(()) => self.fail(self.i),
@@ -72,9 +76,7 @@ impl Parser<'_> {
         if is_name_start(byte) || byte.is_ascii_digit() {
             let end = if byte.is_ascii_digit() {
                 let mut end = at;
-                while self.s.get(end).is_some_and(u8::is_ascii_digit) {
-                    end += 1;
-                }
+                end = digits_end(self.s, end);
                 end
             } else {
                 name_end(self.s, at)
@@ -128,7 +130,7 @@ impl Parser<'_> {
                 children.push(self.op(text));
                 if self.peek() != b'}' {
                     let at = self.i;
-                    let end = self.regex_end(at, b'}');
+                    let end = self.regex_end(at);
                     self.i = end;
                     children.push(Syn::leaf("regex", at, end));
                 }
@@ -189,31 +191,24 @@ impl Parser<'_> {
                 continue;
             }
             let piece = match self.peek() {
-                b'(' => Some(self.array()?),
-                b'"' => Some(self.string()?),
-                b'\'' => Some(self.raw_string()?),
-                b'$' => Some(self.dollar()?),
-                b'`' => Some(self.backtick()?),
-                b'<' | b'>' if self.at(1) == b'(' => Some(self.process_substitution()?),
+                b'(' => self.array()?,
+                b'"' => self.string()?,
+                b'\'' => self.raw_string()?,
+                b'$' => self.dollar()?,
+                b'`' => self.backtick()?,
+                b'<' | b'>' if self.at(1) == b'(' => self.process_substitution()?,
                 _ => {
                     let end = self.value_word_end(at);
                     if end == at {
                         return self.fail(at);
                     }
                     self.i = end;
-                    Some(Syn::leaf("word", at, end))
+                    Syn::leaf("word", at, end)
                 }
             };
-            match piece {
-                Some(piece) => pieces.push(piece),
-                None => return self.fail(at),
-            }
+            pieces.push(piece);
         }
-        match pieces.len() {
-            0 => {}
-            1 => children.push(pieces.pop().expect("one piece")),
-            _ => children.push(Syn::node("concatenation", pieces)),
-        }
+        children.extend(Syn::concat(pieces));
         Ok(())
     }
 
@@ -260,12 +255,12 @@ impl Parser<'_> {
         end.min(self.s.len())
     }
 
-    /// Where a pattern operand ends: before the unmatched closer, with
-    /// trailing blanks left out.
-    fn regex_end(&self, at: usize, closer: u8) -> usize {
+    /// Where a pattern operand ends: before the `}` closing its expansion,
+    /// with trailing blanks left out.
+    fn regex_end(&self, at: usize) -> usize {
         let mut end = at;
         let mut last = at;
-        let (mut paren, mut bracket, mut brace) = (0i32, 0i32, 0i32);
+        let mut brace = 0usize;
         let mut quoted = false;
         while end < self.s.len() {
             let byte = self.s[end];
@@ -284,27 +279,9 @@ impl Parser<'_> {
                     continue;
                 }
                 b'\'' => quoted = true,
-                b'(' => paren += 1,
-                b'[' => bracket += 1,
                 b'{' => brace += 1,
-                b')' => {
-                    if paren == 0 && closer == b')' {
-                        break;
-                    }
-                    paren -= 1;
-                }
-                b']' => {
-                    if bracket == 0 && closer == b']' {
-                        break;
-                    }
-                    bracket -= 1;
-                }
-                b'}' => {
-                    if brace == 0 {
-                        break;
-                    }
-                    brace -= 1;
-                }
+                b'}' if brace == 0 => break,
+                b'}' => brace -= 1,
                 _ => {}
             }
             end += 1;
@@ -335,7 +312,7 @@ impl Parser<'_> {
                 }
                 _ => {
                     let at = self.i;
-                    let end = self.regex_end(at, b'}');
+                    let end = self.regex_end(at);
                     if end == at {
                         return self.fail(at);
                     }
@@ -380,9 +357,7 @@ impl Parser<'_> {
         // The replacement: a word up to `}`.
         let mut pieces: Vec<Syn> = Vec::new();
         loop {
-            while is_blank(self.peek()) {
-                self.i += 1;
-            }
+            self.i = blank_end(self.s, self.i);
             if self.eof() {
                 return self.fail(self.i);
             }
@@ -398,39 +373,27 @@ impl Parser<'_> {
                 None => return self.fail(self.i),
             }
         }
-        match pieces.len() {
-            0 => {}
-            1 => children.push(pieces.pop().expect("one piece")),
-            _ => children.push(Syn::node("concatenation", pieces)),
-        }
+        children.extend(Syn::concat(pieces));
         Ok(())
     }
 
     /// `:offset` and `:offset:length`.
     fn expansion_slice(&mut self, children: &mut Vec<Syn>) -> R<()> {
         if self.peek() != b':' {
-            while is_blank(self.peek()) {
-                self.i += 1;
-            }
+            self.i = blank_end(self.s, self.i);
             if self.peek() != b'}' && self.peek() != b':' {
                 children.push(self.slice_expression()?);
             }
         }
-        while is_blank(self.peek()) {
-            self.i += 1;
-        }
+        self.i = blank_end(self.s, self.i);
         if self.peek() == b':' {
             children.push(self.op(":"));
-            while is_blank(self.peek()) {
-                self.i += 1;
-            }
+            self.i = blank_end(self.s, self.i);
             if self.peek() != b'}' {
                 children.push(self.slice_expression()?);
             }
         }
-        while is_blank(self.peek()) {
-            self.i += 1;
-        }
+        self.i = blank_end(self.s, self.i);
         Ok(())
     }
 
@@ -443,9 +406,7 @@ impl Parser<'_> {
 
     fn slice_binary(&mut self, mut left: Syn, min: u8) -> R<Syn> {
         loop {
-            while is_blank(self.peek()) {
-                self.i += 1;
-            }
+            self.i = blank_end(self.s, self.i);
             let (text, prec) = match self.peek() {
                 b'+' => ("+", 1),
                 b'-' => ("-", 1),
@@ -458,14 +419,10 @@ impl Parser<'_> {
                 return Ok(left);
             }
             let op = self.op(text);
-            while is_blank(self.peek()) {
-                self.i += 1;
-            }
+            self.i = blank_end(self.s, self.i);
             let mut right = self.slice_operand()?;
             loop {
-                while is_blank(self.peek()) {
-                    self.i += 1;
-                }
+                self.i = blank_end(self.s, self.i);
                 let next = match self.peek() {
                     b'*' | b'/' | b'%' => 2,
                     b'+' | b'-' => 1,
@@ -493,7 +450,7 @@ impl Parser<'_> {
             b'$' if self.starts(b"$((") => self.arithmetic_expansion(),
             b'$' if self.starts(b"$(") => self.command_substitution(),
             b'$' if self.starts(b"${") => self.expansion(),
-            b'(' => self.parenthesized_test(),
+            b'(' => self.parenthesized(),
             byte if is_name_start(byte) => {
                 let end = name_end(self.s, at);
                 self.i = end;

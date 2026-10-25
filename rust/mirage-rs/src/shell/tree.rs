@@ -1,3 +1,6 @@
+// Node kinds and field names from tree-sitter-bash 0.25.1, src/node-types.json.
+// https://github.com/tree-sitter/tree-sitter-bash
+// Licensed under MIT. See licenses/third_party/tree-sitter-bash-parser.txt.
 /// Every node kind, named ones first, then the anonymous tokens by their
 /// text: tree-sitter-bash 0.25.1's node types (its `node-types.json`)
 /// plus `ERROR`. A kind's id is its index here.
@@ -227,7 +230,6 @@ pub(crate) struct Syn {
     /// such as a newline ending a statement: it takes up its bytes, so it
     /// widens the nodes around it, but it is no node of the tree.
     pub hidden: bool,
-    pub missing: bool,
 }
 
 /// A long `&&` chain nests as deep as it is long: dropping a node takes
@@ -252,7 +254,6 @@ impl Syn {
             end,
             children: Vec::new(),
             hidden: false,
-            missing: false,
         }
     }
 
@@ -277,6 +278,15 @@ impl Syn {
         let mut node = Self::leaf(kind, start, end);
         node.children = children;
         node
+    }
+
+    /// A word of `pieces`: none, the one piece, or a concatenation.
+    pub fn concat(mut pieces: Vec<Syn>) -> Option<Self> {
+        match pieces.len() {
+            0 => None,
+            1 => pieces.pop(),
+            _ => Some(Self::node("concatenation", pieces)),
+        }
     }
 
     /// A named node with no children at `at`.
@@ -379,8 +389,7 @@ pub struct Node {
     /// Field id in its parent, 0 for none.
     pub field: u8,
     pub named: bool,
-    pub missing: bool,
-    /// Whether the node is or holds an `ERROR` or missing node.
+    /// Whether the node is or holds an `ERROR` node.
     pub has_error: bool,
     pub start: u32,
     pub end: u32,
@@ -417,7 +426,7 @@ fn kind_index() -> &'static [(&'static str, u16)] {
     })
 }
 
-pub(crate) fn kind_id(kind: &str) -> u16 {
+fn kind_id(kind: &str) -> u16 {
     let index = kind_index();
     match index.binary_search_by(|(name, _)| (*name).cmp(kind)) {
         Ok(at) => index[at].1,
@@ -425,14 +434,12 @@ pub(crate) fn kind_id(kind: &str) -> u16 {
     }
 }
 
-fn field_id(field: Option<&str>) -> u8 {
-    field.map_or(0, |name| {
-        FIELDS
-            .iter()
-            .position(|known| *known == name)
-            .and_then(|index| u8::try_from(index + 1).ok())
-            .unwrap_or_else(|| panic!("unknown field {name:?}"))
-    })
+/// A field's id: its place in `FIELDS` plus one, as 0 is no field.
+pub fn field_id(name: &str) -> Option<u8> {
+    FIELDS
+        .iter()
+        .position(|known| *known == name)
+        .and_then(|index| u8::try_from(index + 1).ok())
 }
 
 fn drop_hidden(root: &mut Syn) {
@@ -471,10 +478,11 @@ pub(crate) fn lay_out(source: Vec<u8>, mut root: Syn, error: Option<(usize, Stri
         let kind = kind_id(syn.kind);
         nodes.push(Node {
             kind,
-            field: field_id(syn.field),
+            field: syn.field.map_or(0, |name| {
+                field_id(name).unwrap_or_else(|| panic!("unknown field {name:?}"))
+            }),
             named: syn.named,
-            missing: syn.missing,
-            has_error: kind == error_kind || syn.missing,
+            has_error: kind == error_kind,
             start: to_u32(syn.start),
             end: to_u32(syn.end),
             start_row,

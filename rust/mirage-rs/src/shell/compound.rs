@@ -1,4 +1,4 @@
-use super::lex::{is_blank, is_operator, is_space, name_end};
+use super::lex::{blank_end, is_operator, is_space, name_end};
 use super::parser::{Close, Parser, R};
 use super::tree::Syn;
 
@@ -160,15 +160,11 @@ impl Parser<'_> {
         }
         self.skip_blank();
         let at = self.i;
-        let separated = matches!(self.peek(), b';' | b'&' | b'\n');
+        let separated = matches!(self.peek(), b';' | b'\n');
         match self.peek() {
             b';' => {
                 self.i += 1;
                 children.push(Syn::token(";", at, at + 1));
-            }
-            b'&' => {
-                self.i += 1;
-                children.push(Syn::token("&", at, at + 1));
             }
             b'\n' => {
                 self.i += 1;
@@ -309,7 +305,6 @@ impl Parser<'_> {
 
     /// `function name [()] body` or `name () body`.
     pub(super) fn function_definition(&mut self) -> R<Syn> {
-        self.enter()?;
         let mut children = vec![self.keyword("function")?];
         self.skip_blank();
         let at = self.i;
@@ -319,22 +314,14 @@ impl Parser<'_> {
         }
         self.i = end;
         children.push(Syn::leaf("word", at, end).with_field("name"));
-        self.skip_blank();
-        if self.peek() == b'(' {
-            let mut after = self.i + 1;
-            while self.s.get(after).is_some_and(|byte| is_blank(*byte)) {
-                after += 1;
-            }
-            if self.s.get(after) == Some(&b')') {
-                let open = self.expect("(")?;
-                self.skip_blank();
-                let close = self.expect(")")?;
-                children.extend([open, close]);
-            }
+        if let Some((open, close)) = self.empty_parens(self.i) {
+            children.extend([
+                Syn::token("(", open, open + 1),
+                Syn::token(")", close, close + 1),
+            ]);
+            self.i = close + 1;
         }
-        let node = self.function_rest(children)?;
-        self.leave();
-        Ok(node)
+        self.function_rest(children)
     }
 
     /// `name ()` starts a function definition.
@@ -344,30 +331,11 @@ impl Parser<'_> {
         if end == at || matches!(self.s.get(end), Some(b'\'' | b'"' | b'$' | b'`')) {
             return self.try_quoted_function();
         }
-        let mut after = end;
-        while after < self.s.len() && is_blank(self.s[after]) {
-            after += 1;
-        }
-        if self.s.get(after) != Some(&b'(') {
+        let Some(parens) = self.empty_parens(end) else {
             return Ok(None);
-        }
-        let mut close = after + 1;
-        while close < self.s.len() && is_blank(self.s[close]) {
-            close += 1;
-        }
-        if self.s.get(close) != Some(&b')') {
-            return Ok(None);
-        }
-        self.enter()?;
-        self.i = close + 1;
-        let children = vec![
-            Syn::leaf("word", at, end).with_field("name"),
-            Syn::token("(", after, after + 1),
-            Syn::token(")", close, close + 1),
-        ];
-        let node = self.function_rest(children)?;
-        self.leave();
-        Ok(Some(node))
+        };
+        self.named_function(Syn::leaf("word", at, end), parens)
+            .map(Some)
     }
 
     /// `'f'() body` or `f$x() body`: bash takes any word as the name and
@@ -378,11 +346,7 @@ impl Parser<'_> {
         let Ok(end) = self.word_extent(self.i) else {
             return Ok(None);
         };
-        let mut paren = end;
-        while self.s.get(paren).is_some_and(|byte| is_blank(*byte)) {
-            paren += 1;
-        }
-        if end == self.i || self.s.get(paren) != Some(&b'(') {
+        if end == self.i || self.empty_parens(end).is_none() {
             return Ok(None);
         }
         let mark = self.mark();
@@ -390,31 +354,33 @@ impl Parser<'_> {
             self.reset(mark);
             return Ok(None);
         };
-        let mut after = self.i;
-        while self.s.get(after).is_some_and(|byte| is_blank(*byte)) {
-            after += 1;
-        }
-        let mut close = after + 1;
-        while self.s.get(close).is_some_and(|byte| is_blank(*byte)) {
-            close += 1;
-        }
-        if self.s.get(after) != Some(&b'(') || self.s.get(close) != Some(&b')') {
+        let Some(parens) = self.empty_parens(self.i) else {
             self.reset(mark);
             return Ok(None);
-        }
-        self.enter()?;
+        };
+        self.named_function(name, parens).map(Some)
+    }
+
+    /// The `(` and `)` of an empty pair after the blanks from `at`.
+    fn empty_parens(&self, at: usize) -> Option<(usize, usize)> {
+        let open = blank_end(self.s, at);
+        let close = blank_end(self.s, open + 1);
+        (self.s.get(open) == Some(&b'(') && self.s.get(close) == Some(&b')'))
+            .then_some((open, close))
+    }
+
+    /// `name (open)(close) body`.
+    fn named_function(&mut self, name: Syn, (open, close): (usize, usize)) -> R<Syn> {
         self.i = close + 1;
-        let children = vec![
+        self.function_rest(vec![
             name.with_field("name"),
-            Syn::token("(", after, after + 1),
+            Syn::token("(", open, open + 1),
             Syn::token(")", close, close + 1),
-        ];
-        let node = self.function_rest(children)?;
-        self.leave();
-        Ok(Some(node))
+        ])
     }
 
     fn function_rest(&mut self, mut children: Vec<Syn>) -> R<Syn> {
+        self.enter()?;
         self.skip_space();
         if !(self.starts_compound() || self.starts(b"((")) {
             return self.fail(self.i);
@@ -427,6 +393,7 @@ impl Parser<'_> {
         } else if self.starts(b"<<<") {
             children.push(self.herestring()?.with_field("redirect"));
         }
+        self.leave();
         Ok(Syn::node("function_definition", children))
     }
 }

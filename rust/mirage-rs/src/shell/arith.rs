@@ -2,9 +2,10 @@ use super::lex::{is_name, is_name_start, is_space, name_end};
 use super::parser::{Parser, R};
 use super::tree::Syn;
 
-/// Binary operators by precedence, as tree-sitter-bash ranks them; the
-/// longest spelling of each first, so `<<=` is not read as `<<`.
-const ARITHMETIC: &[(&str, u8)] = &[
+/// Binary operators of arithmetic and test expressions by precedence, as
+/// tree-sitter-bash ranks them; the longest spelling of each first, so
+/// `<<=` is not read as `<<`.
+pub(super) const BINARY: &[(&str, u8)] = &[
     ("**=", 0),
     ("<<=", 0),
     (">>=", 0),
@@ -76,9 +77,9 @@ const C_STYLE: &[(&str, u8)] = &[
     ("%", 14),
 ];
 
-const TERNARY: u8 = 2;
-const UNARY: u8 = 11;
-const PREFIX: u8 = 17;
+pub(super) const TERNARY: u8 = 2;
+pub(super) const UNARY: u8 = 11;
+pub(super) const PREFIX: u8 = 17;
 
 /// Which expression grammar a parse follows.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -339,7 +340,9 @@ impl Parser<'_> {
                 self.i = after;
                 let op = self.expect("=")?;
                 self.arith_blank();
+                self.enter()?;
                 let value = self.c_expression()?.with_field("value");
+                self.leave();
                 return Ok(Syn::node("variable_assignment", vec![name, op, value]));
             }
         }
@@ -399,7 +402,7 @@ impl Parser<'_> {
 
     fn binary_operator(&self, grammar: Grammar) -> Option<(&'static str, u8)> {
         let table = match grammar {
-            Grammar::Arithmetic => ARITHMETIC,
+            Grammar::Arithmetic => BINARY,
             Grammar::CStyle => C_STYLE,
         };
         table
@@ -488,16 +491,10 @@ impl Parser<'_> {
                 children.push(self.expect(")")?);
                 Ok(Syn::node("parenthesized_expression", children))
             }
-            b'$' => match self.literal_dollar()? {
-                Some(node) => Ok(node),
-                None => self.fail(at),
-            },
+            b'$' if !matches!(self.at(1), b'\'' | b'"') => self.dollar(),
             b'"' => self.string(),
             b'\'' if grammar == Grammar::Arithmetic => self.raw_string(),
-            b'`' => match Some(self.backtick()?) {
-                Some(node) => Ok(node),
-                None => self.fail(at),
-            },
+            b'`' => self.backtick(),
             b'-' if grammar == Grammar::CStyle => {
                 let end = super::lex::number_end(self.s, at).unwrap_or(at + 1);
                 self.i = end;
@@ -528,13 +525,5 @@ impl Parser<'_> {
             }
             _ => self.fail(at),
         }
-    }
-
-    /// A `$` construct in an expression.
-    fn literal_dollar(&mut self) -> R<Option<Syn>> {
-        if self.at(1) == b'\'' || self.at(1) == b'"' {
-            return Ok(None);
-        }
-        self.dollar().map(Some)
     }
 }

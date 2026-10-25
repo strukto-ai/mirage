@@ -18,6 +18,7 @@ ADAPTED = [
     ROOT / "licenses/third_party/ripgrep.txt",
     ROOT / "licenses/third_party/unicode-data.txt",
     ROOT / "licenses/third_party/xxd.txt",
+    ROOT / "licenses/third_party/tree-sitter-bash-parser.txt",
 ]
 CORE_LEAD = (
     "The WebAssembly module embedded in this package (src/generated/"

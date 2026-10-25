@@ -1,49 +1,15 @@
+// Token rules for test operators, regexes and extglob patterns adapted from
+// tree-sitter-bash 0.25.1, src/scanner.c.
+// https://github.com/tree-sitter/tree-sitter-bash
+// Licensed under MIT. See licenses/third_party/tree-sitter-bash-parser.txt.
+use super::arith::{BINARY, PREFIX, TERNARY, UNARY};
 use super::lex::is_space;
 use super::parser::{Fail, Parser, R};
 use super::tree::Syn;
 use super::word::Ctx;
 
-/// Binary operators of a test expression by precedence, longest
-/// spelling first; a `-op` test operator binds at `TEST`.
-const BINARY: &[(&str, u8)] = &[
-    ("**=", 0),
-    ("<<=", 0),
-    (">>=", 0),
-    ("+=", 0),
-    ("-=", 0),
-    ("*=", 0),
-    ("/=", 0),
-    ("%=", 0),
-    ("&=", 0),
-    ("^=", 0),
-    ("|=", 0),
-    ("=~", 1),
-    ("||", 3),
-    ("&&", 4),
-    ("==", 8),
-    ("!=", 8),
-    ("<=", 9),
-    (">=", 9),
-    ("<<", 12),
-    (">>", 12),
-    ("**", 15),
-    ("=", 1),
-    ("|", 5),
-    ("^", 6),
-    ("&", 7),
-    ("<", 9),
-    (">", 9),
-    ("+", 13),
-    ("-", 13),
-    ("*", 14),
-    ("/", 14),
-    ("%", 14),
-];
-
-const TERNARY: u8 = 2;
+/// Where a `-op` test operator binds.
 const TEST: u8 = 10;
-const UNARY: u8 = 11;
-const PREFIX: u8 = 17;
 
 /// Where a test expression ends.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -57,17 +23,6 @@ enum Closer {
 }
 
 impl Parser<'_> {
-    fn test_blank(&mut self) {
-        loop {
-            self.skip_blank();
-            if self.peek() == b'\n' {
-                self.i += 1;
-            } else {
-                break;
-            }
-        }
-    }
-
     /// `[ expression ]` or `[[ expression ]]`.
     pub(super) fn test_command(&mut self, double: bool) -> R<Syn> {
         self.enter()?;
@@ -78,7 +33,7 @@ impl Parser<'_> {
         };
         let mut children = vec![self.expect(open)?];
         let inside = self.i;
-        self.test_blank();
+        self.skip_space();
         if !self.at_test_close(closer) {
             let expression = if double {
                 self.top_test_expression()?
@@ -86,7 +41,7 @@ impl Parser<'_> {
                 self.test_expression(closer, 0)?
             };
             children.push(expression);
-            self.test_blank();
+            self.skip_space();
         }
         if !self.at_test_close(closer) {
             return self.fail(self.i);
@@ -117,17 +72,17 @@ impl Parser<'_> {
     fn top_test_expression(&mut self) -> R<Syn> {
         let mark = self.mark();
         let left = self.test_unary(Closer::Double)?;
-        self.test_blank();
+        self.skip_space();
         if self.peek() == b'=' && is_space(self.at(1)) {
             let at = self.i;
             self.i += 1;
             let op = Syn::token("=", at, at + 1).with_field("operator");
-            self.test_blank();
+            self.skip_space();
             if let Some(end) = self.regex_no_space_end() {
                 let regex_at = self.i;
                 self.i = end;
                 let right = Syn::leaf("regex", regex_at, end).with_field("right");
-                self.test_blank();
+                self.skip_space();
                 if self.at_test_close(Closer::Double) {
                     return Ok(Syn::node(
                         "binary_expression",
@@ -145,17 +100,17 @@ impl Parser<'_> {
         self.enter()?;
         let mut left = self.test_unary(closer)?;
         loop {
-            self.test_blank();
+            self.skip_space();
             if self.at_test_close(closer) || self.eof() {
                 break;
             }
             if self.peek() == b'?' && TERNARY >= min {
                 let question = self.expect("?")?;
-                self.test_blank();
+                self.skip_space();
                 let consequence = self.test_expression(closer, 0)?;
-                self.test_blank();
+                self.skip_space();
                 let colon = self.expect(":")?;
-                self.test_blank();
+                self.skip_space();
                 let alternative = self.test_expression(closer, TERNARY + 1)?;
                 left = Syn::node(
                     "ternary_expression",
@@ -187,7 +142,7 @@ impl Parser<'_> {
                 break;
             }
             let op = op.with_field("operator");
-            self.test_blank();
+            self.skip_space();
             let right = match op.kind {
                 "=~" => self.regex_operand(closer)?,
                 "==" | "!=" => self.pattern_operand(closer, prec)?,
@@ -233,7 +188,7 @@ impl Parser<'_> {
         if let Some(end) = self.test_operator_end() {
             self.i = end;
             let op = Syn::leaf("test_operator", at, end).with_field("operator");
-            self.test_blank();
+            self.skip_space();
             if self.at_test_close(closer) {
                 self.i = at;
                 return self.test_operand(closer);
@@ -262,7 +217,7 @@ impl Parser<'_> {
         if let Some((text, prec)) = prefix {
             self.i += text.len();
             let op = Syn::token(text, at, self.i).with_field("operator");
-            self.test_blank();
+            self.skip_space();
             let operand = if text == "!" {
                 self.test_expression(closer, UNARY)?
             } else {
@@ -288,7 +243,7 @@ impl Parser<'_> {
 
     fn test_operand(&mut self, closer: Closer) -> R<Syn> {
         if self.peek() == b'(' {
-            return self.parenthesized(closer);
+            return self.parenthesized();
         }
         let ctx = Ctx {
             bracket: closer == Closer::Single,
@@ -300,11 +255,12 @@ impl Parser<'_> {
         }
     }
 
-    fn parenthesized(&mut self, _closer: Closer) -> R<Syn> {
+    /// `(expression)`, in a test or where an expansion's offset takes one.
+    pub(super) fn parenthesized(&mut self) -> R<Syn> {
         let open = self.expect("(")?;
-        self.test_blank();
+        self.skip_space();
         let inner = self.test_expression(Closer::Paren, 0)?;
-        self.test_blank();
+        self.skip_space();
         let close = self.expect(")")?;
         Ok(Syn::node(
             "parenthesized_expression",
@@ -315,11 +271,6 @@ impl Parser<'_> {
     /// A subscript's index: a word, or a test expression up to `]`.
     pub(super) fn subscript_index(&mut self) -> R<Syn> {
         self.test_expression(Closer::Single, 0)
-    }
-
-    /// `(expression)` where an expansion's offset takes one.
-    pub(super) fn parenthesized_test(&mut self) -> R<Syn> {
-        self.parenthesized(Closer::Paren)
     }
 
     /// The right side of `=~`: a regex up to a blank when it holds more
@@ -432,10 +383,7 @@ impl Parser<'_> {
         loop {
             if self.eof() {
                 if depth > 0 {
-                    return Err(Fail {
-                        at: self.i,
-                        message: "unexpected EOF while looking for matching `)'".into(),
-                    });
+                    return Err(Fail::eof(self.i, ')'));
                 }
                 break;
             }
@@ -448,7 +396,8 @@ impl Parser<'_> {
             match byte {
                 b'(' if depth > 0 => depth += 1,
                 b'(' if self.i > start
-                    && matches!(self.s[self.i - 1], b'?' | b'*' | b'+' | b'@' | b'!') =>
+                    && matches!(self.s[self.i - 1], b'?' | b'*' | b'+' | b'@' | b'!')
+                    && !super::lex::escaped(self.s, self.i - 1) =>
                 {
                     group = true;
                     depth = 1;
@@ -486,11 +435,7 @@ impl Parser<'_> {
         if self.i > run {
             pieces.push(Syn::leaf("extglob_pattern", run, self.i));
         }
-        Ok(Some(if pieces.len() == 1 {
-            pieces.pop().expect("one piece")
-        } else {
-            Syn::node("concatenation", pieces)
-        }))
+        Ok(Syn::concat(pieces))
     }
 
     /// Where an extglob pattern ends, if the pattern scanner of

@@ -1,4 +1,7 @@
-use super::lex::{is_blank, is_space};
+// Heredoc token rules adapted from tree-sitter-bash 0.25.1, src/scanner.c.
+// https://github.com/tree-sitter/tree-sitter-bash
+// Licensed under MIT. See licenses/third_party/tree-sitter-bash-parser.txt.
+use super::lex::{ansi_c_end, blank_end, is_space, pair_end, quote_end};
 use super::parser::{Fail, Parser, R};
 use super::tree::Syn;
 
@@ -26,9 +29,7 @@ impl Parser<'_> {
         let op = if dash { "<<-" } else { "<<" };
         self.i += op.len();
         children.push(Syn::token(op, at, self.i));
-        while is_blank(self.peek()) && !self.eof() {
-            self.i += 1;
-        }
+        self.i = blank_end(self.s, self.i);
         let (start, end, delimiter, raw) = self.heredoc_word()?;
         children.push(Syn::leaf("heredoc_start", start, end));
         let pending = Pending {
@@ -86,19 +87,19 @@ impl Parser<'_> {
             }
             end = match byte {
                 b'\\' => end + 2,
-                b'\'' => close_quote(s, end, b'\'').ok_or_else(|| self.unexpected(s.len()))?,
-                b'"' => close_quote(s, end, b'"').ok_or_else(|| self.unexpected(s.len()))?,
-                b'`' => close_quote(s, end, b'`').ok_or_else(|| self.unexpected(s.len()))?,
+                b'\'' | b'"' | b'`' => {
+                    quote_end(s, end, byte).ok_or_else(|| self.unexpected(s.len()))?
+                }
                 b'$' if matches!(s.get(end + 1), Some(b'(' | b'{')) => {
                     let (open, close) = if s[end + 1] == b'(' {
                         (b'(', b')')
                     } else {
                         (b'{', b'}')
                     };
-                    close_nested(s, end + 1, open, close).ok_or_else(|| self.unexpected(s.len()))?
+                    pair_end(s, end + 1, open, close).ok_or_else(|| self.unexpected(s.len()))?
                 }
                 b'$' if s.get(end + 1) == Some(&b'\'') => {
-                    close_quote(s, end + 1, b'\'').ok_or_else(|| self.unexpected(s.len()))?
+                    ansi_c_end(s, end).ok_or_else(|| self.unexpected(s.len()))?
                 }
                 _ => end + 1,
             };
@@ -222,12 +223,22 @@ impl Parser<'_> {
     /// Take the pending heredocs a newline here reads, the deepest first:
     /// inside a substitution, only those opened in it.
     fn take_readable(&mut self) -> Vec<Pending> {
-        let all = std::mem::take(&mut self.pending);
-        self.saved.push(all.clone());
         let comsub = self.comsub;
-        let (mut readable, outer): (Vec<_>, Vec<_>) =
-            all.into_iter().partition(|heredoc| heredoc.depth >= comsub);
-        self.pending = outer;
+        if !self.pending.iter().any(|heredoc| heredoc.depth >= comsub) {
+            return Vec::new();
+        }
+        let mut taken = Vec::new();
+        let mut kept = Vec::new();
+        for (index, heredoc) in std::mem::take(&mut self.pending).into_iter().enumerate() {
+            if heredoc.depth >= comsub {
+                taken.push((index, heredoc));
+            } else {
+                kept.push(heredoc);
+            }
+        }
+        self.pending = kept;
+        let mut readable: Vec<Pending> = taken.iter().map(|(_, heredoc)| heredoc.clone()).collect();
+        self.taken.push(taken);
         readable.sort_by_key(|heredoc| std::cmp::Reverse(heredoc.depth));
         readable
     }
@@ -294,16 +305,26 @@ impl Parser<'_> {
         }
     }
 
+    /// One body and its delimiter line, noting a quoted one's span.
+    fn heredoc_body(&mut self, heredoc: &Pending) -> R<Vec<Syn>> {
+        let start = self.i;
+        let nodes = self.body_nodes(heredoc)?;
+        if heredoc.raw {
+            self.raw_bodies.push((start, self.i));
+        }
+        Ok(nodes)
+    }
+
     /// One body and its delimiter line, as tree-sitter-bash's scanner
     /// tokenizes them: text runs as `heredoc_content` around the
     /// expansions an unquoted body holds, or one plain body.
-    fn heredoc_body(&mut self, heredoc: &Pending) -> R<Vec<Syn>> {
+    fn body_nodes(&mut self, heredoc: &Pending) -> R<Vec<Syn>> {
         let mut children = Vec::new();
         let mut body_start = None;
         let mut started = false;
         loop {
             let token_start = self.i;
-            match self.scan_content(heredoc, started) {
+            match self.scan_content(heredoc) {
                 Content::End { start, end } => {
                     // The text before the delimiter line, then the line.
                     let first = *body_start.get_or_insert(start);
@@ -311,9 +332,7 @@ impl Parser<'_> {
                         children.push(Syn::leaf("heredoc_content", start, end));
                     }
                     let body = if started {
-                        let mut body = Syn::node("heredoc_body", std::mem::take(&mut children));
-                        body.start = first;
-                        body
+                        body_node(std::mem::take(&mut children), first)
                     } else {
                         Syn::leaf("heredoc_body", start, end)
                     };
@@ -343,37 +362,20 @@ impl Parser<'_> {
                         b'{' => self.expansion(),
                         b'(' if self.at(2) == b'(' => self.arithmetic_or_substitution(),
                         b'(' => self.command_substitution(),
-                        _ => Err(Fail {
-                            at: end,
-                            message: String::new(),
-                        }),
+                        _ => self.simple_expansion().ok_or_else(|| self.unexpected(end)),
                     };
-                    let node = match parsed {
-                        Ok(node) => node,
+                    match parsed {
+                        Ok(node) => children.push(node),
                         Err(_) => {
+                            // bash reads a body's substitutions when it
+                            // expands them: one that does not parse is text
+                            // here.
                             self.reset(mark);
-                            if super::lex::is_name_start(self.at(1)) {
-                                let name_end = super::lex::name_end(self.s, end + 1);
-                                self.i = name_end;
-                                Syn::node(
-                                    "simple_expansion",
-                                    vec![
-                                        Syn::token("$", end, end + 1),
-                                        Syn::leaf("variable_name", end + 1, name_end),
-                                    ],
-                                )
-                            } else {
-                                // bash reads a body's substitutions when it
-                                // expands them: one that does not parse is
-                                // text here.
-                                let text_end = self.text_through_line(end);
-                                children.push(Syn::leaf("heredoc_content", end, text_end));
-                                self.i = text_end;
-                                continue;
-                            }
+                            let text_end = self.text_through_line(end);
+                            children.push(Syn::leaf("heredoc_content", end, text_end));
+                            self.i = text_end;
                         }
-                    };
-                    children.push(node);
+                    }
                 }
                 Content::Unterminated => {
                     // bash takes the body to the end of the input.
@@ -386,15 +388,11 @@ impl Parser<'_> {
                     let rest = &self.s[token_start..end];
                     let mut nodes = Vec::new();
                     if rest.is_empty() || rest == b"\n" {
-                        let mut body = Syn::node("heredoc_body", std::mem::take(&mut children));
-                        body.start = first;
-                        nodes.push(body);
+                        nodes.push(body_node(std::mem::take(&mut children), first));
                         nodes.push(Syn::leaf("heredoc_end", end, end));
                     } else {
                         children.push(Syn::leaf("heredoc_content", token_start, end));
-                        let mut body = Syn::node("heredoc_body", std::mem::take(&mut children));
-                        body.start = first;
-                        nodes.push(body);
+                        nodes.push(body_node(std::mem::take(&mut children), first));
                     }
                     return Ok(nodes);
                 }
@@ -439,7 +437,7 @@ impl Parser<'_> {
 
     /// Scan body text from the cursor up to the next expansion or the
     /// delimiter line.
-    fn scan_content(&mut self, heredoc: &Pending, started: bool) -> Content {
+    fn scan_content(&mut self, heredoc: &Pending) -> Content {
         let mut start = self.i;
         let mut advanced = false;
         let mut skipped = false;
@@ -456,30 +454,14 @@ impl Parser<'_> {
                 }
                 b'$' if !heredoc.raw => {
                     let next = self.at(1);
-                    if advanced {
-                        let end = self.i;
-                        if next.is_ascii_alphabetic() || next == b'{' || next == b'(' {
-                            return Content::Expansion { start, end };
-                        }
-                        self.i += 1;
-                    } else if !started && column0(self.i, self.s) {
-                        if next.is_ascii_alphabetic() || next == b'{' || next == b'(' {
-                            return Content::Expansion {
-                                start: self.i,
-                                end: self.i,
-                            };
-                        }
-                        advanced = true;
-                        self.i += 1;
-                    } else if next.is_ascii_alphabetic() || next == b'{' || next == b'(' {
+                    if next.is_ascii_alphabetic() || matches!(next, b'{' | b'(') {
                         return Content::Expansion {
-                            start: self.i,
+                            start: if advanced { start } else { self.i },
                             end: self.i,
                         };
-                    } else {
-                        advanced = true;
-                        self.i += 1;
                     }
+                    advanced = true;
+                    self.i += 1;
                 }
                 b'\n' if heredoc.delimiter.is_empty() && column0(self.i, self.s) => {
                     return Content::End {
@@ -530,6 +512,13 @@ impl Parser<'_> {
     }
 }
 
+/// A body of text runs and expansions, which starts at `start`.
+fn body_node(children: Vec<Syn>, start: usize) -> Syn {
+    let mut body = Syn::node("heredoc_body", children);
+    body.start = start;
+    body
+}
+
 enum Content {
     /// Text from `start` to `end`, then the delimiter line at the cursor.
     End {
@@ -542,48 +531,6 @@ enum Content {
         end: usize,
     },
     Unterminated,
-}
-
-/// Past the quote that closes the one at `at`; a backslash escapes in
-/// double quotes and backticks.
-fn close_quote(s: &[u8], at: usize, quote: u8) -> Option<usize> {
-    let mut end = at + 1;
-    while end < s.len() {
-        if s[end] == b'\\' && quote != b'\'' {
-            end += 2;
-            continue;
-        }
-        if s[end] == quote {
-            return Some(end + 1);
-        }
-        end += 1;
-    }
-    None
-}
-
-/// Past the bracket that closes the one at `at`, quotes inside skipped.
-fn close_nested(s: &[u8], at: usize, open: u8, close: u8) -> Option<usize> {
-    let mut depth = 0usize;
-    let mut end = at;
-    while end < s.len() {
-        match s[end] {
-            b'\\' => end += 1,
-            b'\'' | b'"' | b'`' => {
-                end = close_quote(s, end, s[end])?;
-                continue;
-            }
-            byte if byte == open => depth += 1,
-            byte if byte == close => {
-                depth -= 1;
-                if depth == 0 {
-                    return Some(end + 1);
-                }
-            }
-            _ => {}
-        }
-        end += 1;
-    }
-    None
 }
 
 /// A delimiter word with its quotes removed, and whether it had any.
@@ -602,13 +549,13 @@ fn unquote(word: &[u8]) -> (Vec<u8>, bool) {
             }
             b'\'' => {
                 quoted = true;
-                let end = close_quote(word, at, b'\'').unwrap_or(word.len());
+                let end = quote_end(word, at, b'\'').unwrap_or(word.len());
                 text.extend_from_slice(&word[at + 1..end.saturating_sub(1).max(at + 1)]);
                 at = end;
             }
             b'"' => {
                 quoted = true;
-                let end = close_quote(word, at, b'"').unwrap_or(word.len());
+                let end = quote_end(word, at, b'"').unwrap_or(word.len());
                 let mut inner = at + 1;
                 while inner + 1 < end {
                     if word[inner] == b'\\'
@@ -623,8 +570,21 @@ fn unquote(word: &[u8]) -> (Vec<u8>, bool) {
             }
             b'$' if word.get(at + 1) == Some(&b'\'') => {
                 quoted = true;
-                let end = close_quote(word, at + 1, b'\'').unwrap_or(word.len());
+                let end = ansi_c_end(word, at).unwrap_or(word.len());
                 ansi_c(&word[at + 2..end.saturating_sub(1).max(at + 2)], &mut text);
+                at = end;
+            }
+            // A substitution's text stays as typed, its quotes too, and
+            // quotes nothing.
+            b'$' if matches!(word.get(at + 1), Some(b'(' | b'{')) => {
+                let close = if word[at + 1] == b'(' { b')' } else { b'}' };
+                let end = pair_end(word, at + 1, word[at + 1], close).unwrap_or(word.len());
+                text.extend_from_slice(&word[at..end]);
+                at = end;
+            }
+            b'`' => {
+                let end = quote_end(word, at, b'`').unwrap_or(word.len());
+                text.extend_from_slice(&word[at..end]);
                 at = end;
             }
             b'$' if word.get(at + 1) == Some(&b'"') => {
@@ -639,27 +599,113 @@ fn unquote(word: &[u8]) -> (Vec<u8>, bool) {
     (text, quoted)
 }
 
-/// `$'...'` text with its escapes applied.
+/// `$'...'` text with its escapes applied, as bash decodes it under a
+/// UTF-8 locale: a NUL ends the text, and an escape it does not know
+/// keeps its backslash. In a delimiter bash keeps the `\x01` it marks a
+/// `\x01` or `\x7f` byte with, so those come out doubled.
 fn ansi_c(text: &[u8], out: &mut Vec<u8>) {
     let mut at = 0;
     while at < text.len() {
-        if text[at] != b'\\' || at + 1 >= text.len() {
-            out.push(text[at]);
+        if text[at] != b'\\' || at + 1 == text.len() {
+            push_marked(text[at], out);
             at += 1;
             continue;
         }
-        let escaped = match text[at + 1] {
+        let marker = text[at + 1];
+        at += 2;
+        let value = match marker {
             b'a' => 7,
             b'b' => 8,
             b'e' | b'E' => 0x1b,
             b'f' => 0x0c,
-            b'n' => b'\n',
-            b'r' => b'\r',
-            b't' => b'\t',
+            b'n' => 10,
+            b'r' => 13,
+            b't' => 9,
             b'v' => 0x0b,
-            other => other,
+            b'\\' | b'\'' | b'"' | b'?' => u32::from(marker),
+            b'0'..=b'7' => {
+                let (value, end) = digits(text, at - 1, 3, 8);
+                at = end;
+                value & 0xff
+            }
+            b'x' | b'u' | b'U' => {
+                let width = match marker {
+                    b'x' => 2,
+                    b'u' => 4,
+                    _ => 8,
+                };
+                let (value, end) = digits(text, at, width, 16);
+                if end == at {
+                    out.extend_from_slice(&[b'\\', marker]);
+                    continue;
+                }
+                at = end;
+                if marker != b'x' && value > 0x7f {
+                    utf8_shaped(value, out);
+                    continue;
+                }
+                value
+            }
+            b'c' if at < text.len() => {
+                let operand = text[at];
+                at += 1;
+                if operand == b'\\' && text.get(at) == Some(&b'\\') {
+                    at += 1;
+                }
+                if operand == b'?' {
+                    0x7f
+                } else {
+                    u32::from(operand.to_ascii_uppercase() & 0x1f)
+                }
+            }
+            _ => {
+                out.extend_from_slice(&[b'\\', marker]);
+                continue;
+            }
         };
-        out.push(escaped);
-        at += 2;
+        if value == 0 {
+            return;
+        }
+        push_marked(value as u8, out);
+    }
+}
+
+fn push_marked(byte: u8, out: &mut Vec<u8>) {
+    if matches!(byte, 0x01 | 0x7f) {
+        out.push(0x01);
+    }
+    out.push(byte);
+}
+
+/// Up to `width` digits in `radix` from `at`: their value and where they
+/// end.
+fn digits(text: &[u8], at: usize, width: usize, radix: u32) -> (u32, usize) {
+    let mut value = 0u32;
+    let mut end = at;
+    while end < text.len() && end - at < width {
+        let Some(digit) = char::from(text[end]).to_digit(radix) else {
+            break;
+        };
+        value = value * radix + digit;
+        end += 1;
+    }
+    (value, end)
+}
+
+/// A value's UTF-8 form, as bash writes any value under 2^31: surrogates
+/// and values past Unicode take the same shape.
+fn utf8_shaped(value: u32, out: &mut Vec<u8>) {
+    let len = match value {
+        0..0x800 => 2,
+        0x800..0x1_0000 => 3,
+        0x1_0000..0x20_0000 => 4,
+        0x20_0000..0x400_0000 => 5,
+        0x400_0000..0x8000_0000 => 6,
+        _ => return,
+    };
+    let lead: u8 = [0xc0, 0xe0, 0xf0, 0xf8, 0xfc][len - 2];
+    out.push(lead | (value >> (6 * (len - 1))) as u8);
+    for shift in (0..len - 1).rev() {
+        out.push(0x80 | ((value >> (6 * shift)) & 0x3f) as u8);
     }
 }

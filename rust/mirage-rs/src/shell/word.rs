@@ -1,5 +1,12 @@
-use super::lex::{is_blank, is_name, is_name_start, is_space, name_end, number_end, word_end};
-use super::parser::{Close, Parser, R};
+// Concatenation and variable-name token rules adapted from tree-sitter-bash
+// 0.25.1, src/scanner.c.
+// https://github.com/tree-sitter/tree-sitter-bash
+// Licensed under MIT. See licenses/third_party/tree-sitter-bash-parser.txt.
+use super::lex::{
+    blank_end, digits_end, is_blank, is_name, is_name_start, is_space, name_end, number_end,
+    word_end,
+};
+use super::parser::{Close, Fail, Parser, R};
 use super::tree::Syn;
 
 /// What closes the construct a word sits in, which ends the word.
@@ -23,6 +30,12 @@ impl Parser<'_> {
         let Some(first) = self.piece(ctx, true)? else {
             return Ok(None);
         };
+        self.word_from(first, ctx).map(Some)
+    }
+
+    /// The word `first` starts: it alone, or it and the pieces after it as
+    /// a concatenation.
+    pub(super) fn word_from(&mut self, first: Syn, ctx: Ctx) -> R<Syn> {
         let mut pieces = vec![first];
         while self.concat_continues(ctx) {
             match self.piece(ctx, false)? {
@@ -30,11 +43,7 @@ impl Parser<'_> {
                 None => break,
             }
         }
-        Ok(Some(if pieces.len() == 1 {
-            pieces.pop().expect("one piece")
-        } else {
-            Syn::node("concatenation", pieces)
-        }))
+        Ok(Syn::concat(pieces).expect("a first piece"))
     }
 
     /// Lone `{ } [ ]` words separated only by blanks, which the grammar
@@ -61,9 +70,7 @@ impl Parser<'_> {
         let mut end = at + 1;
         let mut next = end;
         loop {
-            while self.s.get(next).is_some_and(|byte| is_blank(*byte)) {
-                next += 1;
-            }
+            next = blank_end(self.s, next);
             let closes = (ctx.brace && self.s.get(next) == Some(&b'}'))
                 || (ctx.bracket && self.s.get(next) == Some(&b']'));
             if next > end && lone(next, self.s) && !closes {
@@ -156,9 +163,7 @@ impl Parser<'_> {
         let at = self.i;
         let digits = |from: usize| {
             let mut to = from;
-            while self.s.get(to).is_some_and(u8::is_ascii_digit) {
-                to += 1;
-            }
+            to = digits_end(self.s, to);
             to
         };
         let first = digits(at + 1);
@@ -190,31 +195,18 @@ impl Parser<'_> {
                 self.i = at + 1 + offset + 1;
                 Ok(Syn::leaf("raw_string", at, self.i))
             }
-            None => Err(super::parser::Fail {
-                at,
-                message: "unexpected EOF while looking for matching `''".into(),
-            }),
+            None => Err(Fail::eof(at, '\'')),
         }
     }
 
     /// `$'...'`, where a backslash escapes the quote.
     fn ansi_c_string(&mut self) -> R<Syn> {
         let at = self.i;
-        let mut end = at + 2;
-        while end < self.s.len() {
-            match self.s[end] {
-                b'\\' => end += 2,
-                b'\'' => {
-                    self.i = end + 1;
-                    return Ok(Syn::leaf("ansi_c_string", at, self.i));
-                }
-                _ => end += 1,
-            }
-        }
-        Err(super::parser::Fail {
-            at,
-            message: "unexpected EOF while looking for matching `''".into(),
-        })
+        let Some(end) = super::lex::ansi_c_end(self.s, at) else {
+            return Err(Fail::eof(at, '\''));
+        };
+        self.i = end;
+        Ok(Syn::leaf("ansi_c_string", at, end))
     }
 
     /// `"..."`: text runs, expansions and substitutions. Blanks the text
@@ -243,10 +235,7 @@ impl Parser<'_> {
                 }
             }
             if self.eof() {
-                return Err(super::parser::Fail {
-                    at: open_at,
-                    message: "unexpected EOF while looking for matching `\"'".into(),
-                });
+                return Err(Fail::eof(open_at, '"'));
             }
             match self.peek() {
                 b'"' => {
@@ -358,16 +347,23 @@ impl Parser<'_> {
         self.enter()?;
         let open = self.expect("$(")?;
         let mut children = vec![open];
-        let saved = self.in_backtick;
-        self.in_backtick = false;
-        self.comsub += 1;
-        let body = self.substitution_body(Close::Paren);
-        self.comsub -= 1;
-        self.in_backtick = saved;
+        let body = self.substituted(|parser| parser.substitution_body(Close::Paren));
         children.extend(body?);
         children.push(self.expect(")")?);
         self.leave();
         Ok(Syn::node("command_substitution", children))
+    }
+
+    /// `read` inside a `$(...)` or `<(...)`, where a backtick is text and
+    /// a newline reads only the heredocs opened inside.
+    fn substituted<T>(&mut self, read: impl FnOnce(&mut Self) -> T) -> T {
+        let saved = self.in_backtick;
+        self.in_backtick = false;
+        self.comsub += 1;
+        let body = read(self);
+        self.comsub -= 1;
+        self.in_backtick = saved;
+        body
     }
 
     /// The statements of a substitution; a lone redirect is the
@@ -396,10 +392,7 @@ impl Parser<'_> {
         self.enter()?;
         let at = self.i;
         let Some(end) = super::lex::quote_end(self.s, at, b'`') else {
-            return Err(super::parser::Fail {
-                at,
-                message: "unexpected EOF while looking for matching ``'".into(),
-            });
+            return Err(Fail::eof(at, '`'));
         };
         let mark = self.mark();
         let open = self.expect("`")?;
@@ -445,10 +438,8 @@ impl Parser<'_> {
         let op = if self.peek() == b'<' { "<(" } else { ">(" };
         let raw_end = if self.at(2) == b'(' {
             Some(
-                paren_end(self.s, at + 1).ok_or_else(|| super::parser::Fail {
-                    at: self.s.len(),
-                    message: "unexpected EOF while looking for matching `)'".into(),
-                })?,
+                super::lex::pair_end(self.s, at + 1, b'(', b')')
+                    .ok_or_else(|| Fail::eof(self.s.len(), ')'))?,
             )
         } else {
             None
@@ -456,12 +447,7 @@ impl Parser<'_> {
         self.i += 2;
         let mut children = vec![Syn::token(op, at, at + 2)];
         let mark = self.mark();
-        let saved = self.in_backtick;
-        self.in_backtick = false;
-        self.comsub += 1;
-        let body = self.statements(Close::Paren, None, false);
-        self.comsub -= 1;
-        self.in_backtick = saved;
+        let body = self.substituted(|parser| parser.statements(Close::Paren, None, false));
         match (body, raw_end) {
             (Ok(body), Some(end)) if self.i + 1 == end => children.extend(body),
             (body, None) => children.extend(body?),
@@ -477,10 +463,9 @@ impl Parser<'_> {
         Ok(Syn::node("process_substitution", children))
     }
 
-    /// `$((`: an arithmetic expansion, or a command substitution whose
-    /// first command is a subshell when the text does not read as one.
     /// `$((`: arithmetic when the parentheses close with `))`, else a
-    /// command substitution, which bash then parses when it runs it.
+    /// command substitution whose first command is a subshell, which bash
+    /// parses when it runs it.
     pub(super) fn arithmetic_or_substitution(&mut self) -> R<Syn> {
         if self.double_paren_end(self.i + 1).is_some() {
             return self.arithmetic_expansion();
@@ -490,7 +475,7 @@ impl Parser<'_> {
         match self.command_substitution() {
             Ok(node) => Ok(node),
             Err(fail) => {
-                let Some(end) = paren_end(self.s, at + 1) else {
+                let Some(end) = super::lex::pair_end(self.s, at + 1, b'(', b')') else {
                     return Err(fail);
                 };
                 self.reset(mark);
@@ -508,8 +493,9 @@ impl Parser<'_> {
         }
     }
 
-    /// `double_paren_end`, with each `$(...)` inside read by the parser,
-    /// so a `)` of a case pattern there does not close the outer pair.
+    /// Past the `))` closing the `((` at `at`, if the pair closes with
+    /// one; each `$(...)` inside is read by the parser, so a `)` of a case
+    /// pattern there does not close the outer pair.
     pub(super) fn double_paren_end(&self, at: usize) -> Option<usize> {
         let mut depth = 0usize;
         let mut end = at + 2;
@@ -518,6 +504,10 @@ impl Parser<'_> {
                 b'\\' => end += 1,
                 b'\'' | b'"' | b'`' => {
                     end = super::lex::quote_end(self.s, end, self.s[end])?;
+                    continue;
+                }
+                b'$' if self.s.get(end + 1) == Some(&b'\'') => {
+                    end = super::lex::ansi_c_end(self.s, end)?;
                     continue;
                 }
                 b'$' if self.s.get(end + 1) == Some(&b'(')
@@ -557,6 +547,10 @@ impl Parser<'_> {
                     probe.string()?;
                     at = probe.i;
                 }
+                b'$' if self.s.get(at + 1) == Some(&b'\'') => {
+                    at = super::lex::ansi_c_end(self.s, at)
+                        .ok_or_else(|| self.unexpected(self.s.len()))?;
+                }
                 b'$' if self.s.get(at + 1) == Some(&b'{') && !braces => at += 2,
                 b'$' if matches!(self.s.get(at + 1), Some(b'(' | b'{')) => {
                     let mut probe = self.probe(at);
@@ -578,44 +572,13 @@ impl Parser<'_> {
     /// A parser over the same source at `at`, for a look ahead.
     pub(super) fn probe(&self, at: usize) -> Parser<'_> {
         Parser {
-            s: self.s,
             i: at,
-            comments: Vec::new(),
             depth: self.depth,
-            in_backtick: false,
-            pending: Vec::new(),
-            saved: Vec::new(),
             comsub: self.comsub,
-            line_break: false,
             braces: self.braces,
-            work: self.work,
+            ..Parser::new(self.s, self.work)
         }
     }
-}
-
-/// Past the `)` closing the `(` at `at`, quotes skipped.
-fn paren_end(s: &[u8], at: usize) -> Option<usize> {
-    let mut depth = 0usize;
-    let mut end = at;
-    while end < s.len() {
-        match s[end] {
-            b'\\' => end += 1,
-            b'\'' | b'"' | b'`' => {
-                end = super::lex::quote_end(s, end, s[end])?;
-                continue;
-            }
-            b'(' => depth += 1,
-            b')' => {
-                depth -= 1;
-                if depth == 0 {
-                    return Some(end + 1);
-                }
-            }
-            _ => {}
-        }
-        end += 1;
-    }
-    None
 }
 
 /// Move a node's start, and its first token's, back over blanks the

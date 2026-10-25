@@ -1,4 +1,6 @@
-use super::lex::{is_blank, is_name, is_name_start, is_operator, is_space, name_end};
+use super::lex::{
+    blank_end, digits_end, is_blank, is_name, is_name_start, is_operator, is_space, name_end,
+};
 use super::parser::{Fail, Mark, Parser, R};
 use super::tree::Syn;
 
@@ -7,32 +9,30 @@ impl Parser<'_> {
     pub(super) fn command(&mut self) -> R<Syn> {
         let mut prefix: Vec<Syn> = Vec::new();
         let mut marks = Vec::new();
+        // bash refuses an array assignment once a redirect has followed an
+        // assignment, and reads a first assignment after a redirect more
+        // strictly.
+        let mut assigned = false;
+        let mut redirected = false;
+        let mut poisoned = false;
         loop {
             self.skip_blank();
             marks.push(self.mark());
             if self.at_assignment() {
-                // bash refuses an array assignment once a redirect has
-                // followed an assignment.
-                let poisoned = prefix
-                    .iter()
-                    .position(|node| node.is("variable_assignment"))
-                    .is_some_and(|first| {
-                        prefix[first..]
-                            .iter()
-                            .any(|node| node.field == Some("redirect"))
-                    });
-                if self.at_compound_assignment() && poisoned {
+                if poisoned && self.at_compound_assignment() {
                     let open = self.s[self.i..]
                         .iter()
                         .position(|byte| *byte == b'(')
                         .unwrap_or(0);
                     return self.fail(self.i + open);
                 }
-                let first = !prefix.iter().any(|node| node.is("variable_assignment"));
-                prefix.push(self.assignment(first)?);
+                prefix.push(self.assignment(redirected && !assigned)?);
+                assigned = true;
             } else if self.at_herestring() {
+                (poisoned, redirected) = (assigned, true);
                 prefix.push(self.herestring()?.with_field("redirect"));
             } else if self.at_redirect() {
+                (poisoned, redirected) = (assigned, true);
                 if self.starts(b"<<") && !prefix.is_empty() {
                     break;
                 }
@@ -65,10 +65,7 @@ impl Parser<'_> {
         if prefix.is_empty() && is_name_start(self.peek()) {
             let end = name_end(self.s, self.i);
             if self.s.get(end) == Some(&b'[') && super::lex::bracket_end(self.s, end).is_none() {
-                return Err(Fail {
-                    at: self.s.len(),
-                    message: "unexpected EOF while looking for matching `]'".into(),
-                });
+                return Err(Fail::eof(self.s.len(), ']'));
             }
         }
         if self.at_command_end() || self.at_word(b"}") && !prefix.is_empty() {
@@ -289,37 +286,32 @@ impl Parser<'_> {
             return false;
         }
         let mut at = self.i + 2;
-        while self.s.get(at).is_some_and(|byte| is_blank(*byte)) {
-            at += 1;
-        }
+        at = blank_end(self.s, at);
         self.s
             .get(at)
             .is_some_and(|byte| !is_space(*byte) && !is_operator(*byte))
     }
 
-    /// bash reads a `[` in an array's word as a subscript that runs to a
-    /// `]` however far off; one with none is refused.
-    fn check_array_subscripts(&self, array: &Syn) -> R<()> {
-        for element in &array.children {
-            if !element.named {
-                continue;
+    /// bash reads an array element that starts with a bare `[` as a
+    /// subscript that runs to a `]` however far off; one with none is
+    /// refused. With `names`, an element that starts `name[` is one too, as
+    /// bash reads a first assignment's elements after a redirect.
+    fn check_array_subscripts(&self, array: &Syn, names: bool) -> R<()> {
+        for element in array.children.iter().filter(|element| element.named) {
+            let mut at = element.start;
+            if names && is_name_start(self.s[at]) {
+                at = name_end(self.s, at);
             }
-            for at in element.start..element.end {
-                if self.s[at] == b'[' && super::lex::bracket_end(self.s, at).is_none() {
-                    return Err(Fail {
-                        at: self.s.len(),
-                        message: "unexpected EOF while looking for matching `]'".into(),
-                    });
-                }
+            if self.s.get(at) == Some(&b'[') && super::lex::bracket_end(self.s, at).is_none() {
+                return Err(Fail::eof(self.s.len(), ']'));
             }
         }
         Ok(())
     }
 
-    /// `name=value`, `name+=value` or `name[index]=value`. `strict`
-    /// checks an array value's subscripts, as bash does for a command's
-    /// first assignment.
-    fn assignment(&mut self, strict: bool) -> R<Syn> {
+    /// `name=value`, `name+=value` or `name[index]=value`; `names` checks
+    /// an array value's elements as after a redirect.
+    fn assignment(&mut self, names: bool) -> R<Syn> {
         let at = self.i;
         let end = name_end(self.s, at);
         let name = if self.s.get(end) == Some(&b'[') {
@@ -339,15 +331,18 @@ impl Parser<'_> {
         let byte = self.peek();
         if byte == b'(' {
             let array = self.array()?;
-            if strict {
-                self.check_array_subscripts(&array)?;
-            }
+            self.check_array_subscripts(&array, names)?;
             children.push(array.with_field("value"));
         } else if byte == b'#' {
-            let end = super::lex::word_end(self.s, self.i + 1);
+            // The grammar ends a `#` value at an expansion or a quote; bash
+            // reads the rest of the word into it.
             let start = self.i;
-            self.i = end;
-            children.push(Syn::leaf("word", start, end).with_field("value"));
+            self.i = super::lex::word_end(self.s, start + 1);
+            let head = Syn::leaf("word", start, self.i);
+            children.push(
+                self.word_from(head, super::word::Ctx::default())?
+                    .with_field("value"),
+            );
         } else if !(self.eof() || is_space(byte) || byte == b';' || byte == b'&') {
             if let Some(value) = self.literal_opt(super::word::Ctx::default())? {
                 children.push(value.with_field("value"));
@@ -425,9 +420,7 @@ impl Parser<'_> {
     /// Whether a file or heredoc redirect starts here.
     pub(super) fn at_redirect(&self) -> bool {
         let mut at = self.i;
-        while self.s.get(at).is_some_and(u8::is_ascii_digit) {
-            at += 1;
-        }
+        at = digits_end(self.s, at);
         let rest = &self.s[at.min(self.s.len())..];
         if rest.starts_with(b"<<<") {
             return false;
@@ -446,9 +439,7 @@ impl Parser<'_> {
     pub(super) fn redirect(&mut self, greedy: bool) -> R<Syn> {
         let mut children = Vec::new();
         let digits = self.i;
-        while self.peek().is_ascii_digit() {
-            self.i += 1;
-        }
+        self.i = digits_end(self.s, self.i);
         if self.i > digits {
             children.push(Syn::leaf("file_descriptor", digits, self.i).with_field("descriptor"));
         }
@@ -500,9 +491,7 @@ impl Parser<'_> {
 
     pub(super) fn at_herestring(&self) -> bool {
         let mut at = self.i;
-        while self.s.get(at).is_some_and(u8::is_ascii_digit) {
-            at += 1;
-        }
+        at = digits_end(self.s, at);
         self.s[at.min(self.s.len())..].starts_with(b"<<<")
     }
 
@@ -510,9 +499,7 @@ impl Parser<'_> {
     pub(super) fn herestring(&mut self) -> R<Syn> {
         let mut children = Vec::new();
         let digits = self.i;
-        while self.peek().is_ascii_digit() {
-            self.i += 1;
-        }
+        self.i = digits_end(self.s, self.i);
         if self.i > digits {
             children.push(Syn::leaf("file_descriptor", digits, self.i).with_field("descriptor"));
         }
@@ -525,21 +512,16 @@ impl Parser<'_> {
         Ok(Syn::node("herestring_redirect", children))
     }
 
-    pub(super) fn declaration(&mut self, word: &[u8]) -> R<Syn> {
-        let word = match word {
-            b"declare" => "declare",
-            b"typeset" => "typeset",
-            b"export" => "export",
-            b"readonly" => "readonly",
-            _ => "local",
-        };
+    /// `declare`, `local` and their kin, or `unset`: names, words, and for
+    /// a declaration assignments.
+    pub(super) fn declaration(&mut self, word: &'static str, kind: &'static str) -> R<Syn> {
         let mut children = vec![self.keyword(word)?];
         loop {
             self.skip_blank();
             if self.at_command_end() {
                 break;
             }
-            if self.at_declared_assignment() {
+            if kind == "declaration_command" && self.at_declared_assignment() {
                 if self.subscripted_array() {
                     return self.fail(self.i);
                 }
@@ -555,31 +537,7 @@ impl Parser<'_> {
                 None => break,
             }
         }
-        Ok(Syn::node("declaration_command", children))
-    }
-
-    pub(super) fn unset(&mut self, word: &[u8]) -> R<Syn> {
-        let word = if word == b"unset" {
-            "unset"
-        } else {
-            "unsetenv"
-        };
-        let mut children = vec![self.keyword(word)?];
-        loop {
-            self.skip_blank();
-            if self.at_command_end() {
-                break;
-            }
-            if let Some(name) = self.bare_name() {
-                children.push(name);
-                continue;
-            }
-            match self.literal_opt(super::word::Ctx::default())? {
-                Some(value) => children.push(value),
-                None => break,
-            }
-        }
-        Ok(Syn::node("unset_command", children))
+        Ok(Syn::node(kind, children))
     }
 
     /// A word that is only a name, which the grammar reads as one.

@@ -21,7 +21,7 @@ mod word;
 #[cfg(test)]
 mod tests;
 
-pub use tree::{FIELDS, KINDS, Node, Tree};
+pub use tree::{FIELDS, KINDS, Node, Tree, field_id};
 
 /// Parse a program.
 pub fn parse(source: &[u8]) -> Tree {
