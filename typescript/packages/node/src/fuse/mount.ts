@@ -250,17 +250,20 @@ export function unmountWithFusermount(mountpoint: string, cb: (err: Error | null
   }
   const deadline = Date.now() + UNMOUNT_TIMEOUT_MS
   const poll = setInterval(() => {
+    let mounted: boolean
     try {
-      if (!isMounted(mountpoint)) settle(null)
-      else if (Date.now() >= deadline) {
-        settle(
-          new Error(
-            `cannot unmount ${mountpoint}: still mounted after ${String(UNMOUNT_TIMEOUT_MS)} ms`,
-          ),
-        )
-      }
+      mounted = isMounted(mountpoint)
     } catch (err) {
       settle(err as Error)
+      return
+    }
+    if (!mounted) settle(null)
+    else if (Date.now() >= deadline) {
+      settle(
+        new Error(
+          `cannot unmount ${mountpoint}: still mounted after ${String(UNMOUNT_TIMEOUT_MS)} ms`,
+        ),
+      )
     }
   }, UNMOUNT_POLL_MS)
   execFile(binary, ['-uz', mountpoint], (err, _stdout, stderr) => {
