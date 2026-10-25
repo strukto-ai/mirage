@@ -112,6 +112,7 @@ async def shell(
         )
     if explain:
         return await _explained(entry, request, session_id, background)
+    await session_of(entry, session_id)
     jobs = request.app.state.jobs
     content_type = request.headers.get("content-type", "")
     upload: asyncio.Task[None] | None = None

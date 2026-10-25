@@ -216,7 +216,11 @@ async def stream_shell(
                 if response.status == 499:
                     return 130
                 if response.status >= 400:
-                    detail = await response.text()
+                    text = await response.text()
+                    try:
+                        detail = json.loads(text).get("detail", text)
+                    except (ValueError, AttributeError):
+                        detail = text
                     raise RuntimeError(
                         f"daemon error {response.status}: {detail}"
                     )

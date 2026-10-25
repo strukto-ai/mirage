@@ -40,7 +40,8 @@
     "dist"
   ],
   "bin": {
-    "mirage": "./dist/bin/mirage.js"
+    "mirage": "./dist/bin/mirage.js",
+    "mirage-bash": "./dist/bin/mirage-bash.js"
   },
   "scripts": {
     "build": "tsup",

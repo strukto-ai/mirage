@@ -16,7 +16,9 @@ from mirage.server.auth.config import ENV_AUTH_MODE, ENV_AUTH_TOKEN
 from mirage.server.env import ENV_DAEMON_PORT, ENV_IDLE_GRACE_SECONDS
 
 ENV_DAEMON_URL = "MIRAGE_DAEMON_URL"
+ENV_SESSION = "MIRAGE_SESSION"
 ENV_TOKEN = "MIRAGE_TOKEN"
+ENV_WORKSPACE = "MIRAGE_WORKSPACE"
 
 __all__ = [
     "ENV_AUTH_MODE",
@@ -24,5 +26,7 @@ __all__ = [
     "ENV_DAEMON_PORT",
     "ENV_DAEMON_URL",
     "ENV_IDLE_GRACE_SECONDS",
+    "ENV_SESSION",
     "ENV_TOKEN",
+    "ENV_WORKSPACE",
 ]

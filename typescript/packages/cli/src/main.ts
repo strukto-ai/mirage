@@ -16,6 +16,9 @@ import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Command } from 'commander'
+import { DaemonConfigError } from '@struktoai/mirage-server/daemon_config'
+import { DaemonUnreachable } from './client.ts'
+import { LoginError } from './credentials.ts'
 import { registerConfigCommands } from './config.ts'
 import { registerDaemonCommands } from './daemon.ts'
 import { registerShellCommand } from './shell.ts'
@@ -66,4 +69,26 @@ export function buildProgram(): Command {
   registerDaemonCommands(program)
   registerConfigCommands(program)
   return program
+}
+
+/**
+ * Entry point that turns config errors into clean exit-2 lines and an
+ * unreachable daemon or an ended login into a clean exit-1 line. `argv` is
+ * the arguments after the program name.
+ */
+export async function main(argv: string[]): Promise<void> {
+  try {
+    await buildProgram().parseAsync(argv, { from: 'user' })
+  } catch (err) {
+    if (err instanceof DaemonConfigError) {
+      console.error(err.message)
+      process.exit(2)
+    }
+    if (err instanceof DaemonUnreachable || err instanceof LoginError) {
+      console.error(err.message)
+      process.exit(1)
+    }
+    console.error(err)
+    process.exit(1)
+  }
 }

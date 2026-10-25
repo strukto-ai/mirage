@@ -1,0 +1,62 @@
+---
+title: Grok Build
+description: Connect Grok Build to a Mirage workspace through MCP or a FUSE mount.
+icon: /images/grok-logo.svg
+---
+
+| Way | Grok Build gets | Needs |
+| --- | --- | --- |
+| [MCP](#mcp) | Mirage's seven tools, beside its own | Node.js |
+| [FUSE](#fuse) | its own tools, on the workspace as a folder | the `mirage` CLI and a [FUSE driver](/home/setup/fuse) |
+
+## Install
+
+Install [Grok Build](https://x.ai/cli) separately; its command is `grok`. FUSE also needs the `mirage` CLI:
+
+<CodeGroup>
+```bash uv
+uv tool install 'mirage-ai[fuse]'
+```
+```bash npm
+npm install -g @struktoai/mirage-cli
+```
+</CodeGroup>
+
+## Workspace
+
+```yaml .mirage/workspace.yaml
+mode: write
+mounts:
+  /:
+    vfs: ram
+```
+
+## MCP
+
+Install the Mirage plugin:
+
+```bash
+grok plugin install strukto-ai/mirage
+```
+
+It adds a filesystem skill, a VFS authoring skill and an MCP server that runs `npx -y @struktoai/mirage-cli mcp` on your project's `.mirage/workspace.yaml`. Open `/plugins` in `grok` to check that it is on.
+
+## FUSE
+
+Install your platform's [FUSE driver](/home/setup/fuse). With npm on macOS, also follow the [macFUSE 4 workaround](/typescript/setup/fuse#macfuse-4-symlink-workaround). Then expose the workspace at a local folder:
+
+```yaml .mirage/workspace.yaml
+mode: write
+mounts:
+  /:
+    vfs: ram
+    backend: fuse
+    mountpoint: /tmp/mirage-demo
+```
+
+```bash
+mirage workspace create .mirage/workspace.yaml --id demo
+cd /tmp/mirage-demo && grok
+```
+
+File operations inside `/tmp/mirage-demo` go through Mirage. The mount does not restrict the agent's access to other host paths. `mirage workspace delete demo` unmounts it. On macOS the daemon holds one FUSE mount at a time.

@@ -64,6 +64,7 @@ Issues = "https://github.com/strukto-ai/mirage/issues"
 
 [project.scripts]
 mirage = "mirage.cli.main:main"
+mirage-bash = "mirage.cli.bash:main"
 
 [build-system]
 requires = ["maturin>=1.9,<2"]
