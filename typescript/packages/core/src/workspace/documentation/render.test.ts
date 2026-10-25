@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
+import { SEARCH } from '../../commands/cli/builtin/search/index.ts'
 import { CLI, CLIHandler } from '../../commands/cli/types.ts'
 import { command } from '../../commands/config.ts'
 import { Argument, CommandSpec } from '../../commands/spec/types.ts'
@@ -213,7 +214,7 @@ describe('vfsMd', () => {
     expect(row(markdown, SUPPORTED, '/')).toBe('Almost all Unix commands.')
     expect(row(markdown, SUPPORTED, '/docs')).toBe(
       'Commands that read files (`ls`, `cat`, `grep`, `find`, `jq` and the rest), and `mv`, `rm` and `unlink`. ' +
-        '`grep -r` and `rg` with `-w` use `gdocs` search.',
+        '`grep -r` and `rg` with `-w` ask `gdocs` which files may match.',
     )
     expect(row(markdown, LIMITS, '/data')).toMatch(/^Read only: no command changes files\./)
     expect(row(markdown, LIMITS, '/docs')).toMatch(
@@ -224,9 +225,11 @@ describe('vfsMd', () => {
     )
   })
 
-  it("names a mount's own commands", async () => {
+  // Twin of test_vfs_md_leaves_out_a_cli_over_the_mount.
+  it('leaves out a CLI over the mount', async () => {
     const ws = new Workspace({ '/kb': [dify(), MountMode.READ] })
-    expect(row(await ws.vfsMd(), SUPPORTED, '/kb')).toMatch(/Also `search`\.$/)
+    ws.registerCli('search', SEARCH)
+    expect(await ws.vfsMd()).not.toContain('search')
   })
 
   it('names no command the profile denies', async () => {
@@ -280,7 +283,7 @@ describe('vfsMd', () => {
     )
     const markdown = await ws.vfsMd()
     expect(markdown).not.toContain('`rg`')
-    expect(markdown).toContain('`grep -r` with `-w` uses `gdocs` search.')
+    expect(markdown).toContain('`grep -r` with `-w` asks `gdocs` which files may match.')
     expect(markdown).toContain('Without `-w`, `grep -r` reads every file.')
   })
 

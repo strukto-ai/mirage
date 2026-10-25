@@ -13,20 +13,10 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { BaseVFS } from '../../vfs/base.ts'
-import { ChromaVFS } from '../../vfs/chroma/chroma.ts'
 import { DevVFS } from '../../vfs/dev/dev.ts'
-import { DifyVFS } from '../../vfs/dify/dify.ts'
-import { LanceDBVFSBase } from '../../vfs/lancedb/lancedb.ts'
-import { Mem0VFS } from '../../vfs/mem0/mem0.ts'
-import { QdrantVFS } from '../../vfs/qdrant/qdrant.ts'
 import { Command } from '../../commands/config.ts'
 import type { CLI } from '../../commands/cli/types.ts'
-import { CHROMA_COMMANDS } from '../../commands/builtin/chroma/index.ts'
 import { DEV_COMMANDS } from '../../commands/builtin/dev/index.ts'
-import { DIFY_COMMANDS } from '../../commands/builtin/dify/index.ts'
-import { LANCEDB_COMMANDS } from '../../commands/builtin/lancedb/index.ts'
-import { MEM0_COMMANDS } from '../../commands/builtin/mem0/index.ts'
-import { QDRANT_COMMANDS } from '../../commands/builtin/qdrant/index.ts'
 
 // A VFS class, whatever its constructor's visibility (one may build
 // through a factory).
@@ -108,9 +98,4 @@ export function commandsFor(vfs: BaseVFS): (Command | CLI)[] {
   return [...backendCommands(vfs), ...vfs.commands()]
 }
 
-registerBackendCommands(ChromaVFS, () => CHROMA_COMMANDS)
 registerBackendCommands(DevVFS, () => DEV_COMMANDS)
-registerBackendCommands(DifyVFS, () => DIFY_COMMANDS)
-registerBackendCommands(LanceDBVFSBase, () => LANCEDB_COMMANDS)
-registerBackendCommands(Mem0VFS, () => MEM0_COMMANDS)
-registerBackendCommands(QdrantVFS, () => QDRANT_COMMANDS)

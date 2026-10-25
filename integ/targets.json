@@ -1415,6 +1415,9 @@
         "python",
         "typescript-node"
       ],
+      "clis": [
+        "search"
+      ],
       "service": "mem0",
       "facet": "mem0",
       "mounts": [
@@ -1536,6 +1539,9 @@
         "python",
         "typescript-node"
       ],
+      "clis": [
+        "search"
+      ],
       "service": "chroma",
       "mounts": [
         {
@@ -1552,6 +1558,9 @@
         "python",
         "typescript-node"
       ],
+      "clis": [
+        "search"
+      ],
       "service": "qdrant",
       "mounts": [
         {
@@ -1567,6 +1576,9 @@
       "hosts": [
         "python",
         "typescript-node"
+      ],
+      "clis": [
+        "search"
       ],
       "service": "lancedb",
       "mounts": [
@@ -2593,6 +2605,9 @@
       "hosts": [
         "python",
         "typescript-node"
+      ],
+      "clis": [
+        "search"
       ],
       "service": "dify",
       "facet": "dify",

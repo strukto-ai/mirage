@@ -12,17 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 import { CommandSpec, Argument } from '../types.ts'
-import { PATHS_OPERAND, TEXT_OPERAND } from '../constants.ts'
-
-const SEARCH = new CommandSpec({
-  arguments: [
-    new Argument('--method'),
-    new Argument('--top-k', { type: 'int' }),
-    new Argument('--threshold', { type: 'float' }),
-    TEXT_OPERAND,
-    PATHS_OPERAND,
-  ],
-})
+import { PATHS_OPERAND } from '../constants.ts'
 
 export const SPECS: Record<string, CommandSpec> = {
   awk: new CommandSpec({
@@ -34,7 +24,6 @@ export const SPECS: Record<string, CommandSpec> = {
       PATHS_OPERAND,
     ],
   }),
-  'chroma-query': SEARCH,
   grep: new CommandSpec({
     arguments: [
       new Argument(['-r', '--recursive'], { action: 'store_true' }),
@@ -384,7 +373,6 @@ export const SPECS: Record<string, CommandSpec> = {
     ],
     allowAbbrev: false,
   }),
-  search: SEARCH,
   sed: new CommandSpec({
     arguments: [
       new Argument('-i', { action: 'store_true' }),

@@ -4,14 +4,14 @@ icon: /images/mem0.svg
 description: Mount scoped Mem0 Platform memories as JSON files from Node or the browser.
 ---
 
-`Mem0VFS` is a browser-safe, read-only view of one Mem0 user, agent, or run scope. Every memory is rendered as `<memory-id>.json`; `search` performs semantic search in that same scope.
+`Mem0VFS` is a browser-safe, read-only view of one Mem0 user, agent, or run scope. Every memory is rendered as `<memory-id>.json`; the [`search` CLI](/typescript/cli/search) performs semantic search in that same scope.
 
 <Warning>
   Mem0 API keys are secrets. Use this VFS from Node or another trusted runtime; do not embed a Platform API key in a public browser bundle. Browser applications should call a server-side proxy instead.
 </Warning>
 
 ```ts
-import { Mem0VFS, MountMode, Workspace } from '@struktoai/mirage-node'
+import { Mem0VFS, MountMode, SEARCH, Workspace } from '@struktoai/mirage-node'
 
 const memories = new Mem0VFS({
   apiKey: process.env.MEM0_API_KEY!,
@@ -19,6 +19,7 @@ const memories = new Mem0VFS({
 })
 
 const ws = new Workspace({ '/memories': memories }, { mode: MountMode.READ })
+ws.registerCli('search', SEARCH)
 await ws.shell('ls /memories/')
 await ws.shell('search --top-k 5 "quarterly planning" /memories/')
 ```
@@ -68,7 +69,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Mem0 mounted at `/<path>`.
 
     | Path | Supported |
     | --- | --- |
-    | `/<path>` | Commands that read files (`ls`, `cat`, `grep`, `find`, `jq` and the rest). Also `search`. |
+    | `/<path>` | Commands that read files (`ls`, `cat`, `grep`, `find`, `jq` and the rest). |
 
     #### Limitations of Unix Commands for VFS
 
@@ -106,7 +107,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Mem0 mounted at `/<path>`.
 
     | Path | Supported |
     | --- | --- |
-    | `/<path>` | Commands that read files (`ls`, `cat`, `grep`, `find`, `jq` and the rest). Also `search`. |
+    | `/<path>` | Commands that read files (`ls`, `cat`, `grep`, `find`, `jq` and the rest). |
 
     ## Limitations of Unix Commands for VFS
 

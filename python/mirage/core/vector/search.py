@@ -57,13 +57,13 @@ async def search_rows_output(
         mount_prefix (str): the mount's prefix the paths are spelled in.
     """
     if not query:
-        raise ValueError("search: query is required")
+        raise ValueError("query is required")
     if top_k <= 0:
-        raise ValueError("search: top-k must be positive")
+        raise ValueError("top-k must be positive")
     pinned = tree.pinned(accessor)
     table = _target_table(pinned, paths)
     if table is None:
-        raise ValueError("search: no table to search")
+        raise ValueError("no table to search")
     blocks: list[tuple[str, str]] = []
     for row in await tree.search_rows(accessor, table, query, top_k):
         rank = row.get(tree.rank_key)
@@ -96,11 +96,11 @@ def make_search(tree: VectorTree[A]) -> SearchOps:
         validate_options(query, {"top_k", "method", "threshold"})
         top_k = int_option(query, "top_k", tree.search_limit(accessor))
         if not paths:
-            raise ValueError("search: at least one scope is required")
+            raise ValueError("at least one scope is required")
         method = text_option(query, "method", "semantic")
         threshold = float_option(query, "threshold", 0.0)
         if method != "semantic":
-            raise ValueError("search: only the 'semantic' method is supported")
+            raise ValueError("only the 'semantic' method is supported")
         return await search_rows_output(
             tree,
             accessor,

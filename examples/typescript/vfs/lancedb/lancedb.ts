@@ -15,7 +15,7 @@
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { LanceDBVFS, MountMode, Workspace, type FileStat } from '@struktoai/mirage-node'
+import { LanceDBVFS, MountMode, SEARCH, Workspace, type FileStat } from '@struktoai/mirage-node'
 import { buildTable } from './build_table.ts'
 
 const DEC = new TextDecoder()
@@ -44,6 +44,7 @@ async function main(): Promise<void> {
     },
   })
   const ws = new Workspace({ '/fashion/': vfs }, { mode: MountMode.READ })
+  ws.registerCli('search', SEARCH)
 
   console.log(`=== mounted LanceDB table 'fashion' (${uri}) at /fashion/ ===`)
 

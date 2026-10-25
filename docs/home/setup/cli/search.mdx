@@ -1,0 +1,27 @@
+---
+title: search
+icon: magnifying-glass
+description: Set up the search CLI for Dify, Chroma, mem0, Qdrant and LanceDB mounts with Python or TypeScript.
+---
+
+`search` ranks the records of Dify, Chroma, mem0, Qdrant and LanceDB mounts
+with each store's own search. It needs no account config and searches the
+mounts it is pointed at. Register it on `ws`. Commands:
+[Python](/python/cli/search) · [TypeScript](/typescript/cli/search).
+
+<Tabs>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    from mirage.commands.cli.builtin.search import SEARCH
+
+    ws.register_cli("search", SEARCH)
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    import { SEARCH } from '@struktoai/mirage-node'
+
+    ws.registerCli('search', SEARCH)
+    ```
+  </Tab>
+</Tabs>

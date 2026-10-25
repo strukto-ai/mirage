@@ -14,6 +14,7 @@
 
 import pytest
 
+from mirage.commands.cli.builtin.search import SEARCH
 from mirage.types import MountMode
 from mirage.vfs.lancedb import LanceDBVFS
 from mirage.workspace import Workspace
@@ -21,7 +22,9 @@ from mirage.workspace import Workspace
 
 @pytest.fixture
 def ws(lance_config) -> Workspace:
-    return Workspace({"/db/": LanceDBVFS(lance_config)}, mode=MountMode.READ)
+    ws = Workspace({"/db/": LanceDBVFS(lance_config)}, mode=MountMode.READ)
+    ws.register_cli("search", SEARCH)
+    return ws
 
 
 async def _out(ws: Workspace, cmd: str) -> str:
@@ -85,7 +88,7 @@ async def test_grep_recursive_over_cards(ws):
         ('search "" /db/animals', 2, "search: query is required\n"),
         (
             "search --method hybrid dog /db/animals",
-            2,
+            1,
             "search: only the 'semantic' method is supported\n",
         ),
         ("search dog /db", 1, "search: no table to search\n"),

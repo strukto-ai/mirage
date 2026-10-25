@@ -108,8 +108,9 @@ export async function searchMany(
   const topK = intOption(query, 'top_k', 10)
   const threshold = floatOption(query, 'threshold', 0)
   if (textOption(query, 'method', 'semantic') !== 'semantic') {
-    throw new Error("search: only the 'semantic' method is supported")
+    throw new Error("only the 'semantic' method is supported")
   }
+  validateQuery(query.query, topK)
   const [targets, prefix] = await searchScope(CHROMA_TREE, accessor, paths)
   return searchSegments(accessor, query.query, targets, topK, prefix, threshold)
 }

@@ -6,7 +6,7 @@ description: Set up a Qdrant connection for the Qdrant VFS.
 
 [Qdrant](https://qdrant.tech/) mounts a collection as a read-only filesystem: group-by payload fields
 become nested folders, each point is a `.json` payload file (plus a `.txt` text
-file and an optional blob), and semantic search is the `search` command.
+file and an optional blob), and semantic search is the [`search` CLI](/home/setup/cli/search).
 
 ## Connection
 
@@ -32,7 +32,7 @@ QDRANT_API_KEY=...
 
 ## Search
 
-Search is the `search "<query>" <path>` command. It returns ranked points as
+Search is the [`search` CLI](/home/setup/cli/search)'s `search "<query>" <path>`. It returns ranked points as
 their canonical `<id>.txt` (or `<id>.json`) file paths plus a similarity score,
 so results compose with `cat`, `wc`, and pipes (`grep`/`rg` stay lexical).
 

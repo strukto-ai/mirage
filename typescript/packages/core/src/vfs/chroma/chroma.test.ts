@@ -20,7 +20,6 @@ vi.mock('../../core/chroma/client.ts', async () => {
   return { ...actual, fetchPathTree: vi.fn() }
 })
 
-import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import * as clientMod from '../../core/chroma/client.ts'
 import { DEFAULT_READ_TTL, MountMode, ReadPolicy, type FileStat } from '../../types.ts'
 import { Mount } from '../../workspace/mount/spec.ts'
@@ -88,71 +87,6 @@ describe('chroma stat through a mount', () => {
       const names = await ws.readdir('/knowledge/guides')
       for (const name of names) expect(((await ws.stat(name)) as FileStat).size).toBe(0)
       expect(scans).toHaveLength(1)
-    } finally {
-      await ws.close()
-    }
-  })
-})
-
-describe('chroma-query refusals', () => {
-  it.each([
-    [
-      'chroma-query --top-k many refunds /knowledge',
-      "chroma-query: invalid int value: 'many' for '--top-k'\n" +
-        "Try 'chroma-query --help' for more information.\n",
-    ],
-    [
-      'chroma-query --bogus refunds /knowledge',
-      "chroma-query: unrecognized option '--bogus'\n" +
-        "Try 'chroma-query --help' for more information.\n",
-    ],
-    ['chroma-query --top-k 0 refunds /knowledge', 'search: top-k must be positive\n'],
-    [
-      'chroma-query --method keyword refunds /knowledge',
-      "search: only the 'semantic' method is supported\n",
-    ],
-  ])('refuses %s before asking chroma', async (cmd, stderr) => {
-    const vfs = new ChromaVFS({ collectionName: 'docs' })
-    const asked = vi.spyOn(vfs.accessor, 'getCollection')
-    const ws = new Workspace(
-      { '/knowledge': new Mount(vfs, { mode: MountMode.READ }) },
-      { shellParser: await getTestParser() },
-    )
-    try {
-      const result = await ws.shell(cmd)
-      expect(result.exitCode).toBe(2)
-      expect(result.stderrText).toBe(stderr)
-      expect(asked).not.toHaveBeenCalled()
-    } finally {
-      await ws.close()
-    }
-  })
-})
-
-// Twin of test_chroma_query_names_itself_in_a_failure.
-describe('chroma-query failures', () => {
-  it('names the command in a failure', async () => {
-    vi.mocked(clientMod.fetchPathTree).mockResolvedValue(JSON.stringify({ 'a.md': { size: 1 } }))
-    const vfs = new ChromaVFS({ collectionName: 'docs' })
-    const down = {
-      get: () => Promise.resolve({ ids: [], documents: [], metadatas: [] }),
-      query: () => Promise.reject(new Error('chroma is down')),
-    }
-    vi.spyOn(vfs.accessor, 'getCollection').mockResolvedValue(
-      down as unknown as Awaited<ReturnType<typeof vfs.accessor.getCollection>>,
-    )
-    const ws = new Workspace(
-      { '/knowledge': new Mount(vfs, { mode: MountMode.READ }) },
-      { shellParser: await getTestParser() },
-    )
-    try {
-      const missing = await ws.shell('chroma-query refunds /knowledge/nope')
-      const failed = await ws.shell('chroma-query refunds /knowledge')
-      expect([missing.exitCode, missing.stderrText]).toEqual([
-        1,
-        'chroma-query: /knowledge/nope: No such file or directory\n',
-      ])
-      expect([failed.exitCode, failed.stderrText]).toEqual([1, 'chroma-query: chroma is down\n'])
     } finally {
       await ws.close()
     }

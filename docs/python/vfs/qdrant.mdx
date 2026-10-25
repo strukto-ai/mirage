@@ -1,13 +1,13 @@
 ---
 title: Qdrant
-description: Mount a Qdrant collection as a Mirage filesystem, with payload folders, multimodal blobs, and a semantic search command for Python agents.
+description: Mount a Qdrant collection as a Mirage filesystem, with payload folders, multimodal blobs, and semantic search through the search CLI for Python agents.
 icon: /images/qdrant-logo.svg
 ---
 
 The Qdrant VFS exposes a [Qdrant](https://qdrant.tech/) collection as a virtual filesystem mounted
 at some prefix such as `/q/`. Group-by payload fields become nested folders,
 each point becomes a `.json` payload file (plus a `.txt` text file and an optional blob), and semantic search is the
-`search` command, which returns ranked points as canonical file paths.
+[`search` CLI](/python/cli/search), which returns ranked points as canonical file paths.
 
 For connection setup (self-hosted, Qdrant Cloud, search), see
 [Qdrant Setup](/home/setup/qdrant).
@@ -137,11 +137,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Qdrant mounted at `/<path>`
     by its id: <id>.json (the full payload), <id>.txt (the embedded source text)
     when a text field is configured, and <id>.<ext> (raw blob bytes) when a blob
     field is configured, where <id> is the Qdrant point id. The embedding vector is
-    never shown. For semantic search use the search command, which returns ranked
-    points as their content file paths with a similarity score, e.g.
-    search "red running shoes" /mount then cat one of the returned files.
-    Use ls/cd/cat/tree/find/wc as usual; grep/rg stay lexical. Quote queries that
-    contain spaces.
+    never shown. Use ls/cd/cat/tree/find/wc/grep/rg as usual.
     ```
 
     #### Supported Unix Commands for VFS
@@ -150,7 +146,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Qdrant mounted at `/<path>`
 
     | Path | Supported |
     | --- | --- |
-    | `/<path>` | Commands that read files (`ls`, `cat`, `grep`, `find`, `jq` and the rest). `grep -r` and `rg` use `qdrant` search. Also `search`. |
+    | `/<path>` | Commands that read files (`ls`, `cat`, `grep`, `find`, `jq` and the rest). `grep -r` and `rg` ask `qdrant` which files may match. |
 
     #### Limitations of Unix Commands for VFS
 
@@ -186,11 +182,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Qdrant mounted at `/<path>`
     by its id: <id>.json (the full payload), <id>.txt (the embedded source text)
     when a text field is configured, and <id>.<ext> (raw blob bytes) when a blob
     field is configured, where <id> is the Qdrant point id. The embedding vector is
-    never shown. For semantic search use the search command, which returns ranked
-    points as their content file paths with a similarity score, e.g.
-    search "red running shoes" /mount then cat one of the returned files.
-    Use ls/cd/cat/tree/find/wc as usual; grep/rg stay lexical. Quote queries that
-    contain spaces.
+    never shown. Use ls/cd/cat/tree/find/wc/grep/rg as usual.
     ```
 
     ## Supported Unix Commands for VFS
@@ -199,7 +191,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Qdrant mounted at `/<path>`
 
     | Path | Supported |
     | --- | --- |
-    | `/<path>` | Commands that read files (`ls`, `cat`, `grep`, `find`, `jq` and the rest). `grep -r` and `rg` use `qdrant` search. Also `search`. |
+    | `/<path>` | Commands that read files (`ls`, `cat`, `grep`, `find`, `jq` and the rest). `grep -r` and `rg` ask `qdrant` which files may match. |
 
     ## Limitations of Unix Commands for VFS
 
@@ -263,7 +255,16 @@ $ cat /fashion/Men/Shoes/White/3.json
 
 ## Semantic search
 
-Search is a command, not a path. It returns each ranked point as its **canonical
+Search is the [`search` CLI](/python/cli/search), not a path. Register it on the
+workspace:
+
+```python
+from mirage.commands.cli.builtin.search import SEARCH
+
+ws.register_cli("search", SEARCH)
+```
+
+It returns each ranked point as its **canonical
 content path** (the `.txt`, or `.json` when no `text_field` is set)
 annotated with the similarity score, followed by the content:
 
@@ -302,7 +303,6 @@ All commands delegate to Mirage's shared implementations.
 | `stat`          | directory vs file, blob size, image mime type            |
 | `find`          | walk the tree (e.g. `find /fashion -name '*.txt'`)       |
 | `grep` / `rg`   | lexical search over the text/JSON files ([below](#integration)) |
-| `search`        | semantic (vector) search -> ranked content paths + score |
 | `head` / `tail` | first/last lines of a file                               |
 | `wc`            | count lines/bytes of a file                              |
 
@@ -326,7 +326,7 @@ The mount is **read-only** (`MountMode.READ`); writes are not supported. The two
 read modes are:
 
 - **Browse** by payload folders: scroll filters on `group_by` fields, no embedding.
-- **Search** by meaning: `search "<query>" <path>` runs vector search and returns
+- **Search** by meaning: the `search` CLI's `search "<query>" <path>` runs vector search and returns
   canonical point paths.
 
 Folder listings are capped by `max_rows`. A filtered listing scrolls first and
