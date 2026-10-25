@@ -13,7 +13,16 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { GlobMatcher, globMatcher } from './glob.ts'
+import { Glob, GlobMatcher, globMatcher } from './glob.ts'
+
+it('feeds a long subject in pieces without splitting a surrogate pair', async () => {
+  const glob = new Glob('*😀b')
+  try {
+    expect(await glob.matchesAsync('a'.repeat(4095) + '😀b')).toBe(true)
+  } finally {
+    glob.close()
+  }
+})
 
 describe('GlobMatcher', () => {
   it.each([

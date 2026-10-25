@@ -32,7 +32,7 @@ fn request(
     let answer = collect(stream.as_mut());
     if test {
         let mut stream = open(&serde_json::to_vec(&config).unwrap()).unwrap();
-        let (head, tail) = bytes.split_at(bytes.len() / 8 * 4);
+        let (head, tail) = bytes.split_at((bytes.len() / 2).saturating_sub(1));
         stream.feed(head, &mut Vec::new()).unwrap();
         assert_eq!(
             json!(stream.test(tail).unwrap()),

@@ -16,8 +16,7 @@ import { z } from 'zod'
 import type { util } from 'zod'
 import { fromByteView } from '../shell/bytes.ts'
 import { RegexError, SearchLimit, StreamRefusal } from './errors.ts'
-import type { OpenStream } from './stream.ts'
-import { openStreamSync } from './stream.ts'
+import { MovableStream } from './stream.ts'
 
 export type Span = [number, number]
 export type Groups = (Span | null)[]
@@ -27,9 +26,6 @@ export type LineSyntax = 'basic' | 'extended' | 'fixed' | 'perl'
 const UNSET = 0xffffffff
 const SPECIAL = /[\\.[\]()*+?{}|^$]/g
 const decoder = new TextDecoder()
-const finalizer = new FinalizationRegistry<OpenStream>((stream) => {
-  stream.close()
-})
 const posixMeta = z.object({ groups: z.number().int().nonnegative() })
 const lineMeta = z.object({
   warnings: z.array(z.string()),
@@ -121,9 +117,9 @@ function spans(subject: Subject, data: Uint8Array): Span[] {
   return out
 }
 
-function open(config: Readonly<Record<string, util.JSONType>>): OpenStream {
+function open(config: Readonly<Record<string, util.JSONType>>): MovableStream {
   try {
-    return openStreamSync('regex', config, true)
+    return new MovableStream('regex', config)
   } catch (err) {
     if (err instanceof StreamRefusal) throw new RegexError(err.message)
     throw err
@@ -142,8 +138,7 @@ function open(config: Readonly<Record<string, util.JSONType>>): OpenStream {
  */
 export class PosixRegex {
   readonly groups: number
-  private readonly config: Readonly<Record<string, util.JSONType>>
-  private stream: OpenStream
+  private readonly stream: MovableStream
 
   constructor(
     pattern: string,
@@ -154,7 +149,7 @@ export class PosixRegex {
     multiline = false,
     word = false,
   ) {
-    this.config = {
+    const config = {
       mode: 'posix',
       pattern: latin1(fromByteView(pattern, utf8)),
       extended,
@@ -164,22 +159,12 @@ export class PosixRegex {
       multiline,
       word,
     }
-    this.stream = open(this.config)
-    finalizer.register(this, this.stream)
-    this.groups = posixMeta.parse(JSON.parse(decoder.decode(this.stream.metadata()))).groups
-  }
-
-  // The stream, opened again when the instance it was on retired.
-  private live(): OpenStream {
-    if (!this.stream.live) {
-      this.stream = open(this.config)
-      finalizer.register(this, this.stream)
-    }
-    return this.stream
+    this.stream = open(config)
+    this.groups = posixMeta.parse(JSON.parse(decoder.decode(this.stream.live.metadata()))).groups
   }
 
   private ask(subject: Subject, request: Readonly<Record<string, util.JSONType>>): number[] {
-    const stream = this.live()
+    const stream = this.stream.live
     stream.begin(request)
     stream.feed(subject.data)
     return words(stream.finish())
@@ -274,8 +259,7 @@ export class LineRegex {
   readonly needles: string[] | null
   /** Letters fold by Unicode, so `ſ` matches `s` and the Kelvin sign `k`. */
   readonly unicodeFolds: boolean
-  private readonly config: Readonly<Record<string, util.JSONType>>
-  private stream: OpenStream
+  private readonly stream: MovableStream
 
   constructor(
     patterns: readonly string[],
@@ -285,7 +269,7 @@ export class LineRegex {
     word = false,
     line = false,
   ) {
-    this.config = {
+    const config = {
       mode: 'lines',
       patterns: patterns.map((part) => latin1(fromByteView(part, utf8))),
       syntax,
@@ -294,25 +278,15 @@ export class LineRegex {
       word,
       line,
     }
-    this.stream = open(this.config)
-    finalizer.register(this, this.stream)
+    this.stream = open(config)
     this.unicodeFolds = ignoreCase && utf8
-    const meta = lineMeta.parse(JSON.parse(decoder.decode(this.stream.metadata())))
+    const meta = lineMeta.parse(JSON.parse(decoder.decode(this.stream.live.metadata())))
     this.warnings = meta.warnings
     this.needles = meta.needles
   }
 
-  // The stream, opened again when the instance it was on retired.
-  private live(): OpenStream {
-    if (!this.stream.live) {
-      this.stream = open(this.config)
-      finalizer.register(this, this.stream)
-    }
-    return this.stream
-  }
-
   private ask(subject: Subject, op: string): Uint8Array {
-    const stream = this.live()
+    const stream = this.stream.live
     stream.begin({ op })
     stream.feed(subject.data)
     return stream.finish()

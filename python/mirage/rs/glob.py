@@ -14,6 +14,7 @@
 
 import json
 import threading
+from collections.abc import Iterator
 from functools import lru_cache
 from typing import Literal, TypeAlias, TypedDict, cast
 
@@ -46,12 +47,17 @@ _Operation: TypeAlias = _Plain | _End | _Suffix | _Replace
 _Reply: TypeAlias = bool | int | None | list[int] | list[list[int]]
 _Dialect: TypeAlias = Literal["shell", "python"]
 
-_CHUNK = 16 * 1024
+_CHUNK = 4096
 _CACHE_SIZE = 256
 
 
 def _encoded(text: str) -> bytes:
     return text.encode("utf-32-le", "surrogatepass")
+
+
+def _pieces(text: str) -> Iterator[bytes]:
+    for start in range(0, len(text), _CHUNK):
+        yield _encoded(text[start : start + _CHUNK])
 
 
 def _config(
@@ -138,10 +144,9 @@ class Glob:
         try:
             budget = self._budget
             if not reuse:
-                data = _encoded(name)
-                for start in range(0, len(data), _CHUNK):
+                for part in _pieces(name):
                     await budget.run()
-                    stream.feed(data[start : start + _CHUNK])
+                    stream.feed(part)
             out = bytearray(stream.finish())
             while stream.busy():
                 await budget.run()

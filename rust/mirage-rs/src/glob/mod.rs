@@ -72,7 +72,7 @@ struct Request {
 struct Glob {
     compiler: Option<Compiler>,
     program: Option<Program>,
-    flat: Option<Flat>,
+    flat: Option<Option<Flat>>,
     reverse: Option<Reverse>,
     reversed_compiler: Option<Compiler>,
     reversed: Option<Program>,
@@ -146,6 +146,16 @@ fn emit_option(out: &mut Vec<u8>, value: Option<usize>) {
 }
 
 impl Glob {
+    fn decode(&mut self, units: &[u8]) -> Result<(), StreamError> {
+        for unit in units.chunks_exact(4) {
+            let cp = u32::from_le_bytes(unit.try_into().expect("four bytes"));
+            if cp > 0x10ffff {
+                return Err(StreamError::new("glob unit is past U+10FFFF"));
+            }
+            self.subject.push(cp);
+        }
+        Ok(())
+    }
     fn needs_reverse(&self) -> bool {
         match &self.operation {
             Operation::Suffix { .. } => true,
@@ -158,7 +168,6 @@ impl Glob {
             compiler.step();
             if compiler.done() {
                 self.program = self.compiler.take().map(|compiler| compiler.program);
-                self.flat = self.program.as_ref().and_then(Flat::new);
             }
             return true;
         }
@@ -360,21 +369,23 @@ impl Glob {
 }
 
 impl Stream for Glob {
-    fn feed(&mut self, input: &[u8], _: &mut Vec<u8>) -> Result<(), StreamError> {
+    fn feed(&mut self, mut input: &[u8], _: &mut Vec<u8>) -> Result<(), StreamError> {
         if self.active {
             return Err(StreamError::new("glob operation is still busy"));
         }
-        self.partial.extend_from_slice(input);
-        let whole = self.partial.len() / 4 * 4;
-        for unit in self.partial[..whole].chunks_exact(4) {
-            let cp = u32::from_le_bytes(unit.try_into().expect("four bytes"));
-            if cp > 0x10ffff {
-                return Err(StreamError::new("glob unit is past U+10FFFF"));
+        if !self.partial.is_empty() {
+            let (head, rest) = input.split_at(input.len().min(4 - self.partial.len()));
+            self.partial.extend_from_slice(head);
+            input = rest;
+            if self.partial.len() < 4 {
+                return Ok(());
             }
-            self.subject.push(cp);
+            let unit = std::mem::take(&mut self.partial);
+            self.decode(&unit)?;
         }
-        self.partial.drain(..whole);
-        Ok(())
+        let whole = input.len() / 4 * 4;
+        self.partial.extend_from_slice(&input[whole..]);
+        self.decode(&input[..whole])
     }
     fn finish(&mut self, _: &mut Vec<u8>) -> Result<(), StreamError> {
         if !self.partial.is_empty() {
@@ -394,13 +405,13 @@ impl Stream for Glob {
         while self.compiler.is_some() {
             self.compile_step();
         }
-        let period = self.period && self.subject.first() == Some(&u32::from(b'.'));
+        let subject = std::mem::take(&mut self.subject);
+        let period = self.period && subject.first() == Some(&u32::from(b'.'));
         let program = self.program.as_ref().expect("compiled pattern");
-        let answer = match &self.flat {
-            Some(flat) => flat.matches(&self.subject, period),
-            None => Evaluator::matches(program, &self.subject, period),
+        let answer = match self.flat.get_or_insert_with(|| Flat::new(program)) {
+            Some(flat) => flat.matches(&subject, period),
+            None => Evaluator::matches(program, &subject, period),
         };
-        self.subject.clear();
         self.forward = Evaluator::default();
         self.backward = Evaluator::default();
         Ok(answer)

@@ -389,6 +389,42 @@ export function openStreamSync(
   return open(synchronous, kind, config, movable)
 }
 
+const movableFinalizer = new FinalizationRegistry<OpenStream>((stream) => {
+  stream.close()
+})
+
+/**
+ * A movable synchronous stream for an object a cache keeps, such as a compiled
+ * matcher: it opens again on the live instance once the one it was on retired,
+ * and closes when its owner is collected. A retired stream is unregistered, so
+ * it never holds its instance's memory.
+ */
+export class MovableStream {
+  private stream: OpenStream
+
+  constructor(
+    private readonly kind: string,
+    private readonly config: Readonly<Record<string, util.JSONType>>,
+  ) {
+    this.stream = this.open()
+  }
+
+  /** The stream, opened again first when its instance retired. */
+  get live(): OpenStream {
+    if (!this.stream.live) {
+      movableFinalizer.unregister(this)
+      this.stream = this.open()
+    }
+    return this.stream
+  }
+
+  private open(): OpenStream {
+    const stream = openStreamSync(this.kind, this.config, true)
+    movableFinalizer.register(this, stream, this)
+    return stream
+  }
+}
+
 function open(
   exports: Exports,
   kind: string,
