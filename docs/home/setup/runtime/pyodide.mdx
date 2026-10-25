@@ -20,8 +20,9 @@ untrusted programs.
 pnpm add @struktoai/mirage-node @struktoai/mirage-core pyodide
 ```
 
-In a browser, install `@struktoai/mirage-browser`, `@struktoai/mirage-core` and `pyodide` instead. The page
-must be cross-origin isolated or registered with Mirage's service worker; see
+In a browser, install `@struktoai/mirage-browser` and `@struktoai/mirage-core`
+instead: Pyodide loads from its CDN or `home`, not the `pyodide` package. The
+page must be cross-origin isolated or registered with Mirage's service worker; see
 [worker and browser setup](/typescript/runtime/python#worker-and-browser-setup).
 
 ## Usage
