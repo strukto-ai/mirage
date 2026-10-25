@@ -14,6 +14,7 @@
 
 import asyncio
 import errno
+import time
 import tracemalloc
 
 import pytest
@@ -25,6 +26,7 @@ from mirage.core.ram.write import write
 from mirage.types import PathSpec
 from mirage.vfs.dev.store import DevFiles, DevStore
 from mirage.vfs.ram.store import RAMStore
+from tests.fixtures.held_loop import HeldLoop, run_on_held_loop
 
 
 @pytest.fixture
@@ -324,3 +326,24 @@ async def test_a_stream_into_a_discarding_device_keeps_nothing():
         tracemalloc.stop()
     assert peak < 1 << 20
     assert store.files["/null"] == b""
+
+
+def test_the_publish_interval_is_spent_on_the_loop_clock():
+    # Real time passing between chunks does not publish them on a loop
+    # whose clock stood still; the end of the write does.
+    accessor = RAMAccessor(RAMStore())
+    seen: list[bytes] = []
+
+    async def chunks():
+        yield b"a"
+        time.sleep(STREAM_PUBLISH_SECONDS * 2)
+        yield b"b"
+        seen.append(accessor.store.files["/log"])
+        yield b"c"
+
+    async def main(loop: HeldLoop) -> bytes:
+        await write(accessor, _spec("log"), chunks())
+        return accessor.store.files["/log"]
+
+    assert run_on_held_loop(main) == b"abc"
+    assert seen == [b""]
