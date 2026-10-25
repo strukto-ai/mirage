@@ -1,0 +1,75 @@
+{
+  "cases": [
+    {
+      "id": "unzip_qq_lists_only_the_rows",
+      "seq": 15100766,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(mkdir -p /data/unzql && printf %s 'UEsDBBQAAAAAAAAAIQDCQSQ1AwAAAAMAAAAFAAAAYS50eHRhYmNQSwMEFAAAAAAAAAAhAMJBJDUDAAAAAwAAAAUAAABiLnR4dGFiY1BLAQIUAxQAAAAAAAAAIQDCQSQ1AwAAAAMAAAAFAAAADwAAAAAAAACAAQAAAABhLnR4dGVudHJ5IGNvbW1lbnQNClBLAQIUAxQAAAAAAAAAIQDCQSQ1AwAAAAMAAAAFAAAAFAAAAAAAAACAASYAAABiLnR4dG90aGVyIGNvbW1lbnQAaGlkZGVuUEsFBgAAAAACAAIAiQAAAEwAAAAcAGFyY2hpdmUgY29tbWVudA0Kc2Vjb25kIGxpbmU=' | base64 -d > /data/unzql/c.zip && cd /data/unzql && unzip -lqq c.zip && unzip -vqq c.zip && unzip -l -q -q c.zip; cd / && rm -r /data/unzql)",
+      "expect": {
+        "exit": 0,
+        "stdout": "        3  1980-01-01 00:00   a.txt\n        3  1980-01-01 00:00   b.txt\n       3  Stored        3   0% 1980-01-01 00:00 352441c2  a.txt\n       3  Stored        3   0% 1980-01-01 00:00 352441c2  b.txt\n        3  1980-01-01 00:00   a.txt\n        3  1980-01-01 00:00   b.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "l",
+        "v",
+        "q"
+      ]
+    },
+    {
+      "id": "unzip_extract_prints_the_archive_comment_unless_q",
+      "seq": 15100767,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(mkdir -p /data/unzqx && printf %s 'UEsDBBQAAAAAAAAAIQDCQSQ1AwAAAAMAAAAFAAAAYS50eHRhYmNQSwMEFAAAAAAAAAAhAMJBJDUDAAAAAwAAAAUAAABiLnR4dGFiY1BLAQIUAxQAAAAAAAAAIQDCQSQ1AwAAAAMAAAAFAAAADwAAAAAAAACAAQAAAABhLnR4dGVudHJ5IGNvbW1lbnQNClBLAQIUAxQAAAAAAAAAIQDCQSQ1AwAAAAMAAAAFAAAAFAAAAAAAAACAASYAAABiLnR4dG90aGVyIGNvbW1lbnQAaGlkZGVuUEsFBgAAAAACAAIAiQAAAEwAAAAcAGFyY2hpdmUgY29tbWVudA0Kc2Vjb25kIGxpbmU=' | base64 -d > /data/unzqx/c.zip && cd /data/unzqx && unzip -d o c.zip && unzip -q -d o2 c.zip && unzip -qq -d o3 c.zip a.txt nomatch; echo rc=$?; ls o o2 o3; cd / && rm -r /data/unzqx)",
+      "expect": {
+        "exit": 0,
+        "stdout": "Archive:  c.zip\narchive comment\nsecond line\n extracting: o/a.txt                 \n extracting: o/b.txt                 \nrc=11\no:\na.txt\nb.txt\n\no2:\na.txt\nb.txt\n\no3:\na.txt\n",
+        "stderr": "caution: filename not matched:  nomatch\n"
+      },
+      "flags": [
+        "d",
+        "q"
+      ]
+    }
+  ]
+}

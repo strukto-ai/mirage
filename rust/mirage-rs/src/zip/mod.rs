@@ -246,8 +246,9 @@ pub(super) struct Directory {
 pub(super) enum Fault {
     /// No end record: not an archive at all.
     NoEnd,
-    /// An end record whose directory is not where it says.
-    Corrupt,
+    /// An end record whose directory, of this many entries, is not where
+    /// it says.
+    Corrupt(u64),
     /// The host failed a read of its spool, in these words.
     Read(Vec<u8>),
 }
@@ -342,10 +343,13 @@ impl<'h> Spool<'h> {
                 }
             }
         }
-        let start = end.at.checked_sub(end.size).ok_or(Fault::Corrupt)?;
+        let start = end
+            .at
+            .checked_sub(end.size)
+            .ok_or(Fault::Corrupt(end.count))?;
         let slack = i128::from(start) - i128::from(end.offset);
         let directory = self.read(start, end.size).await.map_err(Fault::Read)?;
-        let entries = central(&directory, end.count, slack).ok_or(Fault::Corrupt)?;
+        let entries = central(&directory, end.count, slack).ok_or(Fault::Corrupt(end.count))?;
         Ok(Directory {
             entries,
             comment: end.comment,

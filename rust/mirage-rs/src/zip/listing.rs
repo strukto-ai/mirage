@@ -323,7 +323,7 @@ fn saved(uncompressed: i128, compressed: i128) -> String {
 
 /// A comment as Info-ZIP prints it: up to a NUL, less CR and ^S, ESC as
 /// `^[`, and a newline at the end.
-fn comment(raw: &[u8], out: &mut Vec<u8>) {
+pub(super) fn comment(raw: &[u8], out: &mut Vec<u8>) {
     let text = raw.split(|&b| b == 0).next().unwrap_or_default();
     let start = out.len();
     for &byte in text {
@@ -340,28 +340,17 @@ fn comment(raw: &[u8], out: &mut Vec<u8>) {
 
 /// `unzip -l`, or with `verbose` the `-v` table: each entry's size, stamp
 /// and name, `-v` adding the method, compressed size, percent saved and
-/// CRC-32, and a totals line; `-q` drops the archive line and every
-/// comment, which are written as stored.
-pub(super) fn list(
-    archive: &[u8],
-    entries: &[&Entry],
-    quiet: bool,
-    verbose: bool,
-    archive_comment: &[u8],
-    out: &mut Vec<u8>,
-) {
-    if !quiet {
-        out.extend_from_slice(b"Archive:  ");
-        out.extend_from_slice(archive);
-        out.push(b'\n');
-        comment(archive_comment, out);
-    }
+/// CRC-32, each with its comment, written as stored, and a totals line;
+/// `quiet` once drops the comments, twice the header and totals too.
+pub(super) fn list(entries: &[&Entry], quiet: u8, verbose: bool, out: &mut Vec<u8>) {
     let header = if verbose {
         VERBOSE_HEADER
     } else {
         SHORT_HEADER
     };
-    out.extend_from_slice(header.as_bytes());
+    if quiet < 2 {
+        out.extend_from_slice(header.as_bytes());
+    }
     for entry in entries {
         let (year, month, day, hour, minute, _) = entry.stamp();
         let stamp = format!("{year:04}-{month:02}-{day:02} {hour:02}:{minute:02}");
@@ -380,9 +369,12 @@ pub(super) fn list(
         out.extend_from_slice(row.as_bytes());
         out.extend_from_slice(&entry.name);
         out.push(b'\n');
-        if !quiet {
+        if quiet == 0 {
             comment(&entry.comment, out);
         }
+    }
+    if quiet > 1 {
+        return;
     }
     let size: i128 = entries.iter().map(|e| i128::from(e.size)).sum();
     let packed: i128 = entries.iter().map(|e| compressed(e)).sum();

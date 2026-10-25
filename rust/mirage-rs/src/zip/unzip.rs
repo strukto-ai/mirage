@@ -71,7 +71,9 @@ pub(super) struct Config {
     s: bool,
     m: bool,
     h: bool,
-    q: bool,
+    /// How many times -q was given: once drops the `Archive:` line and
+    /// the comments, twice the listings' header and totals and -t's summary.
+    q: u8,
     o: bool,
     n: bool,
     /// Entries by their places in the directory, a window at a time, each
@@ -84,30 +86,60 @@ pub(super) struct Config {
     index: bool,
 }
 
-/// Info-ZIP's refusal of an archive it cannot open, and its exit.
-fn refusal(config: &Config, fault: &Fault) -> (Vec<u8>, i32) {
-    let archive = config.archive.as_slice();
-    match fault {
-        Fault::NoEnd => {
-            let mut text = if config.p || config.zipinfo {
-                say("[{}]\n", &[archive])
-            } else {
-                Vec::new()
-            };
-            text.extend_from_slice(NO_END.as_bytes());
-            if !config.p {
-                let prog: &[u8] = if config.zipinfo { b"zipinfo" } else { b"unzip" };
-                let indent = vec![b' '; prog.len() + 3];
-                text.extend(say(
-                    "{}:  cannot find zipfile directory in one of {} or\n{}{}.zip, and cannot find {}.ZIP, period.\n",
-                    &[prog, archive, &indent, archive, archive],
-                ));
-            }
-            (text, NO_ARCHIVE_EXIT)
-        }
-        Fault::Corrupt => (say(CORRUPT, &[archive]), CORRUPT_EXIT),
-        Fault::Read(text) => (say("unzip: {}: {}\n", &[archive, text]), NO_ARCHIVE_EXIT),
+impl Config {
+    fn filtered(&self) -> bool {
+        !self.members.is_empty() || !self.excludes.is_empty()
     }
+
+    /// zipinfo's rows, header and totals.
+    fn layout(&self) -> (Rows, bool, bool) {
+        let letters = Letters {
+            names: self.names,
+            names_headers: self.names_headers,
+            long: self.l,
+            medium: self.m,
+            short: self.s,
+            header: self.h,
+            totals: self.t,
+        };
+        listing::layout(letters, self.filtered())
+    }
+
+    /// Whether an `Archive:` line opens the run, and whether what goes
+    /// wrong opening the archive is said on stdout: -t's, and zipinfo's
+    /// header and totals.
+    fn report(&self) -> (bool, bool) {
+        if self.zipinfo {
+            let (_, header, totals) = self.layout();
+            return (header, totals);
+        }
+        (self.q == 0 && !self.p, self.t)
+    }
+}
+
+/// Info-ZIP's refusal of an archive that opened but is none, and its exit:
+/// the archive named where no `Archive:` line came first, and the names
+/// tried as typed.
+fn refusal(config: &Config, typed: &[u8], archive_line: bool, fault: &Fault) -> (Vec<u8>, i32) {
+    let archive = config.archive.as_slice();
+    if !matches!(fault, Fault::NoEnd) {
+        return (say(CORRUPT, &[archive]), CORRUPT_EXIT);
+    }
+    let mut text = if config.zipinfo || !archive_line {
+        say("[{}]\n", &[archive])
+    } else {
+        Vec::new()
+    };
+    text.extend_from_slice(NO_END.as_bytes());
+    if !config.p {
+        let prog: &[u8] = if config.zipinfo { b"zipinfo" } else { b"unzip" };
+        let indent = vec![b' '; prog.len() + 3];
+        text.extend(say(
+            "{}:  cannot find zipfile directory in one of {} or\n{}{}.zip, and cannot find {}.ZIP, period.\n",
+            &[prog, typed, &indent, typed, typed],
+        ));
+    }
+    (text, NO_ARCHIVE_EXIT)
 }
 
 /// The entries the filespecs and `-x` leave, and the patterns of each
@@ -434,20 +466,82 @@ impl Sink for File {
     }
 }
 
-pub(super) async fn run(host: Host, config: Config) -> i32 {
-    let open = (config.archive.clone(), Opening::Operand(1));
-    let spool = super::ARCHIVE;
-    let (reply, _) = host.ask(Request::Fill { spool, open }).await;
-    if failed(&reply) {
-        host.warn(&read_failure(&config.archive, &reply));
-        return NO_ARCHIVE_EXIT;
+/// Say `text` on stdout or stderr.
+fn tell(host: &Host, stdout: bool, text: &[u8]) {
+    if stdout {
+        host.print(text);
+    } else {
+        host.warn(text);
     }
-    let mut spool = Spool::new(&host, spool, reply.size);
+}
+
+/// Fill the archive's spool from the name as typed, or with `.zip` or
+/// `.ZIP` added when nothing, or a directory, stands there; the name that
+/// opened and its size. None when no name opened; a failure of another
+/// kind is the host's.
+async fn open(host: &Host, typed: &[u8]) -> Result<(Vec<u8>, u64), Option<Vec<u8>>> {
+    for (at, suffix) in [&b""[..], b".zip", b".ZIP"].into_iter().enumerate() {
+        let name = [typed, suffix].concat();
+        let opening = if at == 0 {
+            Opening::Operand(1)
+        } else {
+            Opening::Name
+        };
+        let open = (name.clone(), opening);
+        let spool = super::ARCHIVE;
+        let (reply, _) = host.ask(Request::Fill { spool, open }).await;
+        if !failed(&reply) {
+            return Ok((name, reply.size));
+        }
+        if !reply.names(&["ENOENT", "ENOTDIR", "EISDIR"]) {
+            return Err(Some(read_failure(&name, &reply)));
+        }
+    }
+    Err(None)
+}
+
+pub(super) async fn run(host: Host, mut config: Config) -> i32 {
+    let (archive_line, stdout) = config.report();
+    let typed = config.archive.clone();
+    let size = match open(&host, &typed).await {
+        Ok((name, size)) => {
+            config.archive = name;
+            size
+        }
+        Err(Some(text)) => {
+            host.warn(&text);
+            return NO_ARCHIVE_EXIT;
+        }
+        Err(None) => {
+            // -p opens its archive in silence.
+            if !config.p {
+                let prog: &[u8] = if config.zipinfo { b"zipinfo" } else { b"unzip" };
+                let line = "{}:  cannot find or open {}, {}.zip or {}.ZIP.\n";
+                tell(&host, stdout, &say(line, &[prog, &typed, &typed, &typed]));
+            }
+            return NO_ARCHIVE_EXIT;
+        }
+    };
+    let mut spool = Spool::new(&host, super::ARCHIVE, size);
     let directory = match spool.directory(false).await {
         Ok(directory) => directory,
+        Err(Fault::Read(text)) => {
+            host.warn(&say("unzip: {}: {}\n", &[&config.archive, &text]));
+            return NO_ARCHIVE_EXIT;
+        }
         Err(fault) => {
-            let (text, status) = refusal(&config, &fault);
-            host.warn(&text);
+            // zipinfo's header counts what the end record claims.
+            match fault {
+                Fault::Corrupt(count) if config.zipinfo && archive_line => {
+                    let mut out = Vec::new();
+                    listing::header(&config.archive, size, count, &mut out);
+                    host.print(&out);
+                }
+                _ if archive_line => host.print(&say("Archive:  {}\n", &[&config.archive])),
+                _ => {}
+            }
+            let (text, status) = refusal(&config, &typed, archive_line, &fault);
+            tell(&host, stdout, &text);
             return status;
         }
     };
@@ -482,8 +576,7 @@ pub(super) async fn run(host: Host, config: Config) -> i32 {
             WARN_EXIT,
         ),
     };
-    let on_stdout = config.t && !config.zipinfo;
-    if !on_stdout {
+    if !stdout {
         host.warn(&warning);
     }
     let mut run = Run {
@@ -493,7 +586,7 @@ pub(super) async fn run(host: Host, config: Config) -> i32 {
         damage: 0,
         skipped: 0,
     };
-    let warning = if on_stdout { warning } else { Vec::new() };
+    let warning = if stdout { warning } else { Vec::new() };
     let status = mode(&mut run, &directory, warning).await;
     match (status.max(floor).max(run.damage), run.skipped) {
         (0, 0) => 0,
@@ -507,6 +600,40 @@ fn read_failure(archive: &[u8], reply: &Reply) -> Vec<u8> {
         Some(text) => bytes(text),
         None => say("unzip: {}: {}\n", &[archive, &failure_text(reply)]),
     }
+}
+
+/// The `Archive:` line and the archive's comment that open every mode
+/// but -p and zipinfo, unless -q.
+fn opening(config: &Config, comment: &[u8]) -> Vec<u8> {
+    let mut out = Vec::new();
+    if config.q == 0 && !config.p {
+        out = say("Archive:  {}\n", &[&config.archive]);
+        listing::comment(comment, &mut out);
+    }
+    out
+}
+
+/// An archive of no entries, which every mode reports and exits 1 on:
+/// zipinfo under its header, the rest in a warning.
+fn empty(run: &Run<'_>, directory: &Directory, warning: Vec<u8>) -> i32 {
+    let config = &run.config;
+    let (archive_line, stdout) = config.report();
+    let mut out = Vec::new();
+    if config.zipinfo {
+        if archive_line {
+            listing::header(&config.archive, run.spool.size, 0, &mut out);
+        }
+        out.extend(warning);
+        out.extend_from_slice(b"Empty zipfile.\n");
+        run.host.print(&out);
+        return WARN_EXIT;
+    }
+    out.extend(opening(config, &directory.comment));
+    out.extend(warning);
+    run.host.print(&out);
+    let text = say("warning [{}]:  zipfile is empty\n", &[&config.archive]);
+    tell(run.host, stdout, &text);
+    WARN_EXIT
 }
 
 /// One mode over the opened archive. Every filespec and `-x` pattern that
@@ -529,10 +656,13 @@ async fn mode(run: &mut Run<'_>, directory: &Directory, warning: Vec<u8>) -> i32
         }
         return 0;
     }
+    if directory.entries.is_empty() {
+        return empty(run, directory, warning);
+    }
     let config = &run.config;
     let (selected, cautions, unmatched) =
         select(&directory.entries, &config.members, &config.excludes);
-    let filtered = !config.members.is_empty() || !config.excludes.is_empty();
+    let filtered = config.filtered();
     let nothing = if filtered && selected.is_empty() {
         NO_MATCH_EXIT
     } else {
@@ -540,20 +670,12 @@ async fn mode(run: &mut Run<'_>, directory: &Directory, warning: Vec<u8>) -> i32
     };
     let mut out = Vec::new();
     if config.zipinfo {
-        let letters = Letters {
-            names: config.names,
-            names_headers: config.names_headers,
-            long: config.l,
-            medium: config.m,
-            short: config.s,
-            header: config.h,
-            totals: config.t,
-        };
-        let (rows, header, totals) = listing::layout(letters, filtered);
+        let (rows, header, totals) = config.layout();
         if header {
             let count = directory.entries.len() as u64;
             listing::header(&config.archive, run.spool.size, count, &mut out);
         }
+        out.extend(warning);
         for entry in &selected {
             match rows {
                 Rows::None => {}
@@ -571,23 +693,19 @@ async fn mode(run: &mut Run<'_>, directory: &Directory, warning: Vec<u8>) -> i32
     // -l lists only when neither -t nor -p asks for another mode, and -v
     // widens it into the verbose table; neither prints a caution.
     if (config.l || config.v) && !(config.t || config.p) {
-        listing::list(
-            &config.archive,
-            &selected,
-            config.q,
-            config.v,
-            &directory.comment,
-            &mut out,
-        );
+        out.extend(opening(config, &directory.comment));
+        listing::list(&selected, config.q, config.v, &mut out);
         run.host.print(&out);
         return nothing;
     }
+    let mut opened = opening(config, &directory.comment);
     if config.t {
-        return test(run, &selected, filtered, unmatched, cautions, warning).await;
+        opened.extend(warning);
+        return test(run, &selected, unmatched, cautions, opened).await;
     }
     let status = if unmatched { NO_MATCH_EXIT } else { nothing };
     if !config.p {
-        return extract(run, &selected, status, &cautions).await;
+        return extract(run, &selected, status, &cautions, &opened).await;
     }
     run.host.warn(&cautions);
     for entry in selected.iter().filter(|e| !e.is_dir()) {
@@ -596,31 +714,32 @@ async fn mode(run: &mut Run<'_>, directory: &Directory, warning: Vec<u8>) -> i32
     status
 }
 
-/// `-t`: an unmatched filespec ends the test before any member is read.
+/// `-t`, after `opened`: an unmatched filespec ends the test before any
+/// member is read, and -qq drops the summary.
 async fn test(
     run: &mut Run<'_>,
     selected: &[&Entry],
-    filtered: bool,
     unmatched: bool,
     cautions: Vec<u8>,
-    warning: Vec<u8>,
+    opened: Vec<u8>,
 ) -> i32 {
     let archive = run.config.archive.clone();
-    let quiet = run.config.q;
-    if !quiet {
-        run.host.print(&say("Archive:  {}\n", &[&archive]));
-    }
-    run.host.print(&warning);
+    let quiet = run.config.q > 0;
+    let summary = run.config.q < 2;
+    let filtered = run.config.filtered();
+    run.host.print(&opened);
     if unmatched || (filtered && selected.is_empty()) {
         run.host.print(&cautions);
-        run.host.print(&say(
-            if unmatched {
-                "At least one error was detected in {}.\n"
-            } else {
-                "Caution:  zero files tested in {}.\n"
-            },
-            &[&archive],
-        ));
+        if summary {
+            run.host.print(&say(
+                if unmatched {
+                    "At least one error was detected in {}.\n"
+                } else {
+                    "Caution:  zero files tested in {}.\n"
+                },
+                &[&archive],
+            ));
+        }
         return NO_MATCH_EXIT;
     }
     let mut tested = 0;
@@ -654,6 +773,10 @@ async fn test(
     }
     let skipped = run.skipped;
     out.extend(cautions);
+    if !summary {
+        run.host.print(&out);
+        return 0;
+    }
     out.extend(if run.damage > WARN_EXIT {
         say("At least one error was detected in {}.\n", &[&archive])
     } else if run.damage == WARN_EXIT {
@@ -845,7 +968,7 @@ impl Extract {
                     let (renamed, skipped) = map_name(after_slashes(&typed));
                     if skipped {
                         self.raise(WARN_EXIT);
-                        if !run.config.q {
+                        if run.config.q == 0 {
                             host.print(&say(SKIPPED_DOTDOT, &[&typed]));
                         }
                     }
@@ -903,10 +1026,16 @@ impl Extract {
     }
 }
 
-async fn extract(run: &mut Run<'_>, selected: &[&Entry], status: i32, cautions: &[u8]) -> i32 {
+async fn extract(
+    run: &mut Run<'_>,
+    selected: &[&Entry],
+    status: i32,
+    cautions: &[u8],
+    opened: &[u8],
+) -> i32 {
     let host = run.host;
     let config = &run.config;
-    let quiet = config.q;
+    let quiet = config.q > 0;
     let mut state = Extract {
         base: config.base.clone(),
         typed: config.dest.clone().unwrap_or_default(),
@@ -921,9 +1050,7 @@ async fn extract(run: &mut Run<'_>, selected: &[&Entry], status: i32, cautions: 
         create_failed: false,
         code: status,
     };
-    if !quiet {
-        host.print(&say("Archive:  {}\n", &[&config.archive]));
-    }
+    host.print(opened);
     if config.dest.is_some() {
         let base = state.base.clone();
         if let Err((_, text)) = ensure(host, &mut state.made, &base).await {

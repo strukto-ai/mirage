@@ -39,7 +39,6 @@ LETTERS = {
     "s": "s",
     "m": "m",
     "h": "h",
-    "q": "q",
     "o": "o",
     "n": "n",
 }
@@ -48,6 +47,7 @@ LETTERS = {
 @dataclass(frozen=True, slots=True)
 class UnzipFlags:
     letters: Mapping[str, bool]
+    quiet: int = 0
     dest: PathSpec | str | None = None
     excludes: tuple[str, ...] = ()
 
@@ -59,6 +59,7 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> UnzipFlags:
         letters=MappingProxyType(
             {key: fl.as_bool(flag) for key, flag in LETTERS.items()}
         ),
+        quiet=fl.as_int("q", 0),
         dest=dest if isinstance(dest, (PathSpec, str)) else None,
         excludes=tuple(fl.as_list("x")),
     )
@@ -141,6 +142,7 @@ async def unzip_generic(
         "members": [byte_view(member) for member in members],
         "excludes": [byte_view(pattern) for pattern in excludes],
         "base": byte_view(extract_dest(dest, ctx.cwd, True).rstrip("/")),
+        "q": parsed.quiet,
         **letters,
     }
     if dest is not None:
