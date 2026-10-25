@@ -12,481 +12,127 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { HiddenPaths, PathSpec } from '../../types.ts'
-import { gnuBasename } from '../../utils/path.ts'
-import {
-  anchorDepth,
-  classifyPaths,
-  hidesIntersect,
-  pathCovers,
-  pathHidden,
-} from '../../utils/hidden.ts'
-import { METADATA_OPS, SUBTREE_COMMANDS, SUBTREE_OPS, VERB_ORDER } from '../constants.ts'
-import {
-  Outcome,
-  type AdmissionRules,
-  type CommandContext,
-  type CommandRule,
-  type LiveRules,
-  type VfsContext,
-} from '../types.ts'
 import { FlagView, SPECS, parseCommand } from '../../commands/spec/index.ts'
 import { parseToKwargs } from '../../commands/spec/parser.ts'
 import { WordKind } from '../../commands/spec/types.ts'
+import {
+  admissionMatcher,
+  policySubjects,
+  ruleMatcher,
+  type PolicyFacts,
+  type PolicyPath,
+} from '../../rs/policy.ts'
+import type { HiddenPaths, PathSpec } from '../../types.ts'
+import { classifyPaths } from '../../utils/hidden.ts'
+import type { AdmissionRules, CommandContext, CommandRule, VfsContext } from '../types.ts'
 import { lineTokens } from './allow.ts'
-import { patternMatches } from './pattern.ts'
 
-/**
- * Whether a match beats the best one so far: deeper anchor first, then
- * the stronger verb, then the earlier rule (which is why this is
- * strict).
- *
- * The order `ruleAt` reads every candidate by.
- */
-export function betterMatch(
-  current: readonly [number, number] | null,
-  depth: number,
-  verb: number,
-): boolean {
-  if (current === null) return true
-  const [bestDepth, bestVerb] = current
-  if (depth !== bestDepth) return depth > bestDepth
-  return verb < bestVerb
-}
-
-/**
- * A profile's rules as `ruleAt` reads them: every deny, then every ask,
- * each in the order written.
- */
-export function written(rules: AdmissionRules): LiveRules {
-  return [
-    ...rules.deny.map((rule) => [Outcome.DENY, rule] as const),
-    ...rules.ask.map((rule) => [Outcome.ASK, rule] as const),
-  ]
-}
-
-/**
- * The rule that speaks about one thing, null when none does: the deepest
- * anchor, deny before ask at equal depth, the earlier rule on a full tie
- * (`betterMatch`).
- *
- * The one law a line's subjects (`decide`), the entries a walk reaches
- * below them (`ioRefusal`) and a bare op (`opRuling`) are all read by;
- * each says how far a rule reaches its thing, since a line, an entry and
- * an op carry different facts.
- */
-export function ruleAt(
-  live: LiveRules,
-  reach: (rule: CommandRule) => number | null,
-): readonly [Outcome, CommandRule, number] | null {
-  let best: [number, number] | null = null
-  let chosen: readonly [Outcome, CommandRule, number] | null = null
-  for (const [outcome, rule] of live) {
-    const depth = reach(rule)
-    const verb = VERB_ORDER[outcome] ?? 0
-    if (depth === null || !betterMatch(best, depth, verb)) continue
-    best = [depth, verb]
-    chosen = [outcome, rule, depth]
-  }
-  return chosen
-}
-
-/**
- * The rule that still holds an entry or an op back, and whether it asks:
- * the one `ruleAt` chose, unless it is an ask the running line already
- * holds a grant under (the nod the gate took for `rm -r /x` covers the
- * entries under `/x`).
- */
-export function ungranted(
-  spoke: readonly [Outcome, CommandRule, number] | null,
-  granted: readonly CommandRule[],
-): [CommandRule, boolean] | null {
-  if (spoke === null) return null
-  const [outcome, rule] = spoke
-  if (outcome === Outcome.ASK && granted.includes(rule)) return null
-  return [rule, outcome === Outcome.ASK]
-}
-
-/**
- * One thing a line's rules are read against.
- *
- * A line is judged subject by subject, because the paths a command names
- * are not one question: `cp /sealed/x /wip/y` reads one file and writes
- * another, and a nod for the destination says nothing about the source.
- */
 export interface Subject {
-  /**
-   * The path, null for the line itself, which is the only subject of a
-   * line naming no path and is reached only by a rule naming no paths.
-   */
   readonly path: PathSpec | null
-  /**
-   * Whether this subject would take a whole subtree along (`rm -r /x`,
-   * `mv /x /y`), so a rule anchored below it speaks about it.
-   */
   readonly holds: boolean
-  /**
-   * Whether an ancestor of the rule's scope counts as holding it; false
-   * for `mv`'s destination, which lands in the scope only when it is
-   * that directory itself.
-   */
   readonly ancestors: boolean
 }
 
-/**
- * The paths a command's operands name, in order: what `rm -r` removes or
- * `mv`, `tar` and `cp` take as sources, never an option's value. Mirrors
- * Python's `operand_paths`.
- */
 export function operandPaths(ctx: CommandContext): PathSpec[] {
-  return (ctx.words ?? []).flatMap((w) =>
-    w.kind === WordKind.OPERAND && w.path !== null ? [w.path] : [],
+  return (ctx.words ?? []).flatMap((word) =>
+    word.kind === WordKind.OPERAND && word.path !== null ? [word.path] : [],
   )
 }
-
-/**
- * The target directory an `mv` line names by option (`-t`,
- * `--target-directory`), as its grammar reads the line, so a `-S.txt` suffix
- * is no target; null when it names none. Mirrors Python's `_target_directory`.
- */
 function targetDirectory(ctx: CommandContext): string | null {
   const spec = SPECS.mv
-  if (spec === undefined) return null
-  const fl = new FlagView(parseToKwargs(parseCommand(spec, [...ctx.argv], ctx.cwd, 'mv')), spec)
-  return fl.asStr('target_directory') ?? null
-}
-
-/**
- * `mv`'s positional destination, null when the line has none: another
- * command, a single operand, or a target directory named by option, which
- * leaves every operand a source. Mirrors Python's `_destination`.
- */
-function destination(ctx: CommandContext): PathSpec | null {
-  const operands = operandPaths(ctx)
-  if (ctx.command !== 'mv' || operands.length < 2) return null
-  if (targetDirectory(ctx) !== null) return null
-  return operands.at(-1) ?? null
-}
-
-/**
- * What a line's rules are read against, in the order they are read.
- *
- * Every path the line names first, each asked whether it lies inside a
- * rule's scope; then the operands of a subtree command, asked the second
- * question, whether they hold one. The two orders together are what a
- * single rule sees, so the first subject a rule reaches is the operand
- * its refusal names. A line naming no path is one subject, itself.
- */
-export function subjects(ctx: CommandContext): readonly Subject[] {
-  if (ctx.paths.length === 0) return [{ path: null, holds: false, ancestors: true }]
-  const subs: Subject[] = ctx.paths.map((p) => ({ path: p, holds: false, ancestors: true }))
-  if (SUBTREE_COMMANDS.has(ctx.command)) {
-    const operands = operandPaths(ctx)
-    const dst = destination(ctx)
-    if (dst !== null) operands.pop()
-    for (const p of operands) subs.push({ path: p, holds: true, ancestors: true })
-    if (dst !== null) subs.push({ path: dst, holds: true, ancestors: false })
-  }
-  return subs
-}
-
-function under(path: string, root: string): boolean {
-  return root === '/' || path === root || path.startsWith(root + '/')
-}
-
-// Whether a line works inside a mount: its cwd is under the root, one
-// of its paths is, or the command walks a directory holding the root
-// (`grep -r x /scratch` enters `/scratch/child`: the fan-out reruns the
-// traversal inside each descendant mount and no admission fires again
-// there, so the ancestor operand is the one place the mount's rule can
-// speak) or takes that directory along whole (`mv /scratch /done`,
-// `rm -r /scratch`), as a path rule judges a subtree operand.
-function touches(mount: string, ctx: CommandContext): boolean {
-  if (under(ctx.cwd, mount)) return true
-  if (ctx.paths.some((p) => under(p.virtual, mount))) return true
-  if (ctx.walks ?? false) return ctx.paths.some((p) => under(mount, p.virtual))
-  if (!SUBTREE_COMMANDS.has(ctx.command)) return false
-  // Every path the line names is taken along, a link's target included,
-  // except where mv moves things to: its -t value or its destination, typed or
-  // reached through a link above it. mv never follows a last component, so a
-  // followed path keeps the operand's name: one under the destination's name
-  // that no source carries is the destination.
-  const targets = new Set<string>()
-  const target = ctx.command === 'mv' ? targetDirectory(ctx) : null
-  if (target !== null) targets.add(target)
-  const dst = destination(ctx)
-  if (dst !== null) {
-    const name = gnuBasename(dst.virtual)
-    const sources = operandPaths(ctx).slice(0, -1)
-    if (sources.every((p) => gnuBasename(p.virtual) !== name)) {
-      for (const p of ctx.paths) if (gnuBasename(p.virtual) === name) targets.add(p.virtual)
-    }
-    targets.add(dst.virtual)
-  }
-  return ctx.paths.some((p) => !targets.has(p.virtual) && under(mount, p.virtual))
-}
-
-/**
- * Whether a rule speaks about a line at all, before any of the line's
- * subjects is read. Two questions: the rule's command patterns (a prefix
- * of the line's tokens; none means every command), and the rule's mount
- * (a rule written under a mount section applies only to a line working
- * inside it).
- */
-export function ruleApplies(rule: CommandRule, ctx: CommandContext): boolean {
-  const commands = rule.commands ?? []
-  if (commands.length > 0) {
-    const tokens = lineTokens(ctx)
-    if (!commands.some((p) => patternMatches(p, tokens))) return false
-  }
-  return rule.mount === undefined || rule.mount === '' || touches(rule.mount, ctx)
-}
-
-/**
- * How deep a rule reaches at one subject of a line, null when it says
- * nothing about that subject.
- *
- * A rule naming no paths reaches every subject at depth 0: it is off the
- * path axis, so any entry naming a place outranks it. A rule carrying
- * paths reaches a subject lying inside them, or, for a subtree operand,
- * one holding them (`rm -r /x` takes `/x/locked/*` along, and `mv`'s
- * destination lands in the scope only when it is that directory itself).
- * The depth is the deepest entry that actually reached, never the rule's
- * deepest entry.
- */
-export function ruleReach(
-  rule: CommandRule,
-  scope: HiddenPaths | null,
-  subject: Subject,
-): number | null {
-  if (scope === null) return 0
-  if (subject.path === null) return null
-  const virtual = subject.path.virtual
-  if (pathHidden(scope, virtual)) return hiddenDepth(rule, virtual)
-  if (subject.holds && pathCovers(scope, virtual, subject.ancestors)) {
-    return coversDepth(rule, virtual, subject.ancestors)
-  }
-  return null
-}
-
-/**
- * The operand a rule's refusal names, as typed: the subject it reached,
- * or null when the rule names no paths and so refuses the whole line.
- */
-export function matchedOperand(rule: CommandRule, subject: Subject): string | null {
-  if ((rule.paths ?? []).length === 0 || subject.path === null) return null
-  return subject.path.rawPath || subject.path.virtual
-}
-
-const entryScopes = new Map<string, HiddenPaths | null>()
-
-/**
- * One document entry, classified alone so it can be scored on its own;
- * remembered, since a rule is re-read on every line.
- */
-function entryScope(entry: string): HiddenPaths | null {
-  const known = entryScopes.get(entry)
-  if (known !== undefined) return known
-  const scope = classifyPaths([entry])
-  entryScopes.set(entry, scope)
-  return scope
-}
-
-/**
- * The anchor depth of the deepest entry of a rule that holds this path,
- * 0 when none does.
- */
-export function hiddenDepth(rule: CommandRule, virtual: string): number {
-  let best = 0
-  for (const entry of rule.paths ?? []) {
-    if (pathHidden(entryScope(entry), virtual)) best = Math.max(best, anchorDepth(entry))
-  }
-  return best
-}
-
-/**
- * The anchor depth of the deepest entry of a rule that sits at or under
- * this path, 0 when none does. The subtree counterpart of
- * `hiddenDepth`, for an operand that would take the scope along rather
- * than lie inside it.
- */
-export function coversDepth(rule: CommandRule, virtual: string, ancestors = true): number {
-  let best = 0
-  for (const entry of rule.paths ?? []) {
-    if (pathCovers(entryScope(entry), virtual, ancestors)) best = Math.max(best, anchorDepth(entry))
-  }
-  return best
-}
-
-/**
- * The anchor depth at which a rule reaches an op, null when it does not
- * reach it at all.
- *
- * Only a pure path rule can, since an op does not know which command
- * issued it. The op's path is tested against the scope, and an op that
- * moves or removes a whole subtree (SUBTREE_OPS) is also reached on the
- * directory holding the scope or on any ancestor, since it would take
- * the scope along. A metadata op (METADATA_OPS) is reached by nothing:
- * deny is present and refused, so the entry stats and its content is
- * what the entry point withholds.
- *
- * The dispatcher twin of `ruleReach`, and the same shape: the depth is the
- * one the arm that matched measures, so a rule cannot lend an operand
- * specificity from an entry that said nothing about it.
- */
-export function opReach(
-  rule: CommandRule,
-  scope: HiddenPaths | null,
-  ctx: VfsContext,
-): number | null {
-  if ((rule.commands ?? []).length > 0 || scope === null || METADATA_OPS.has(ctx.call.name))
-    return null
-  const virtual = ctx.path.virtual
-  if (pathHidden(scope, virtual)) return hiddenDepth(rule, virtual)
-  if (SUBTREE_OPS.has(ctx.call.name) && pathCovers(scope, virtual))
-    return coversDepth(rule, virtual)
-  return null
-}
-
-/**
- * The rule an op meets and whether it asks, null when the op may run.
- *
- * The dispatcher twin of `ioRefusal`, and the same law: anchor depth first,
- * deny before ask at equal depth, and an ask satisfied by a grant the
- * line already holds. Reading every deny before any ask instead let a
- * broad deny on `/repo/*` overrule an approved ask on `/repo/outbox/*`,
- * so the carve-out command admission had just admitted the line under
- * could not authorize the redirect it was written for: the write reached
- * the dispatcher and was refused there.
- *
- * What an ask means is the entry point's to say: inside a running line it
- * refuses like a deny, since the line was admitted without it, and
- * outside one (a file tool, the host's facade) it goes to the approval
- * ledger, keyed by rule and path. Mirrors Python's `op_ruling`.
- */
-export function opRuling(
-  rules: AdmissionRules | null,
-  ctx: VfsContext,
-  granted: readonly CommandRule[],
-): [CommandRule, boolean] | null {
-  if (rules === null) return null
-  return ungranted(
-    ruleAt(written(rules), (rule) => opReach(rule, ruleScope(rule), ctx)),
-    granted,
+  if (ctx.command !== 'mv' || ctx.paths.length === 0 || spec === undefined) return null
+  return (
+    new FlagView(parseToKwargs(parseCommand(spec, [...ctx.argv], ctx.cwd, 'mv')), spec).asStr(
+      'target_directory',
+    ) ?? null
   )
 }
-
+function pathFact(path: PathSpec): PolicyPath {
+  return { virtual: path.virtual, display: path.rawPath || path.virtual }
+}
+export function commandFacts(ctx: CommandContext): PolicyFacts {
+  return {
+    command: ctx.command,
+    tokens: lineTokens(ctx),
+    tool: ctx.tool ?? true,
+    cwd: ctx.cwd,
+    paths: ctx.paths.map(pathFact),
+    operands: operandPaths(ctx).map(pathFact),
+    walks: ctx.walks ?? false,
+    moveTarget: targetDirectory(ctx),
+  }
+}
+export function subjects(ctx: CommandContext): readonly Subject[] {
+  const paths = [...ctx.paths, ...operandPaths(ctx)]
+  return policySubjects(commandFacts(ctx)).map((subject): Subject => {
+    if (subject.path === null) return { ...subject, path: null }
+    const fact = subject.path
+    const path = paths.find(
+      (path) => path.virtual === fact.virtual && (path.rawPath || path.virtual) === fact.display,
+    )
+    if (path === undefined) throw new Error('Invalid policy subject reply')
+    return { path, holds: subject.holds, ancestors: subject.ancestors }
+  })
+}
+export function ruleApplies(rule: CommandRule, ctx: CommandContext): boolean {
+  return ruleMatcher(rule).ruleApplies(0, commandFacts(ctx))
+}
+export function ruleReach(
+  rule: CommandRule,
+  _scope: HiddenPaths | null,
+  subject: Subject,
+): number | null {
+  return ruleMatcher(rule).ruleReach(0, {
+    ...subject,
+    path: subject.path === null ? null : pathFact(subject.path),
+  })
+}
+export function hiddenDepth(rule: CommandRule, virtual: string): number {
+  return ruleMatcher(rule).hiddenDepth(0, virtual)
+}
+export function coversDepth(rule: CommandRule, virtual: string, ancestors = true): number {
+  return ruleMatcher(rule).coversDepth(0, virtual, ancestors)
+}
 const scopes = new WeakMap<CommandRule, HiddenPaths | null>()
-
-/**
- * A rule's paths, classified once and remembered: null when the rule
- * names none, so a caller can tell a whole-line rule from a path-scoped
- * one without re-reading the document grammar.
- */
 export function ruleScope(rule: CommandRule): HiddenPaths | null {
-  const known = scopes.get(rule)
-  if (known !== undefined) return known
+  if (scopes.has(rule)) return scopes.get(rule) ?? null
   const scope = classifyPaths(rule.paths ?? [])
   scopes.set(rule, scope)
   return scope
 }
-
-/**
- * Whether a rule reaches an entry a command touches on its own, below
- * its operands: the rule names the line (its command patterns against
- * the line's tokens, none meaning every command) and its paths hold the
- * entry. A rule with no paths spoke about the whole line at admission
- * and has nothing to add at an entry, except a mount's: its mount holds
- * the entry, since a line that works outside the mount still reaches
- * entries inside it (`cp -r`, `chmod -R`, a runtime's `open`) where no
- * admission asked its rule. The directory holding a scope is not in it,
- * so a listing still shows a refused entry's name, which is what deny
- * means: present, and refused. With `subtree`, it asks about every entry
- * at or under `virtual` rather than the entry itself, as a walk does
- * before it trusts the raw tree (`ioReach`).
- */
 export function matchIo(
   rule: CommandRule,
-  scope: HiddenPaths | null,
+  _scope: HiddenPaths | null,
   tokens: readonly string[],
   virtual: string,
   subtree = false,
 ): boolean {
-  const mount = rule.mount ?? ''
-  if (scope === null && mount === '') return false
-  const commands = rule.commands ?? []
-  if (commands.length > 0 && !commands.some((p) => patternMatches(p, tokens))) return false
-  if (scope === null) return under(virtual, mount) || (subtree && under(mount, virtual))
-  return subtree ? hidesIntersect(scope, virtual) : pathHidden(scope, virtual)
+  return ruleMatcher(rule).matchIo(0, tokens, virtual, subtree)
 }
-
-/**
- * Whether a rule holds at a dispatcher too: a pure path rule, which names
- * no command and has paths to match, the one kind an op can meet. The
- * sort of a profile's rules: a POSIX-level rule holds at every entry point, a
- * command-level one (it names a command, or no path) only where a line
- * is judged.
- */
 export function posixLevel(rule: CommandRule): boolean {
-  return (rule.commands ?? []).length === 0 && ruleScope(rule) !== null
+  return ruleMatcher(rule).posixLevel(0)
 }
-
-/**
- * The command-level parts of a profile's rules, which an entry point that sees
- * only ops (a kernel mount, SFTP, codex-exec's file calls) cannot apply,
- * each described for the operator's warning: the allow list and every
- * rule that is not POSIX level.
- */
 export function skippedAtDispatch(rules: AdmissionRules | null): string[] {
   if (rules === null) return []
-  const skipped = rules.allow !== null ? ['commands.allow'] : []
+  const skipped = rules.allow === null ? [] : ['commands.allow']
   for (const [verb, listed] of [
     ['deny', rules.deny],
     ['ask', rules.ask],
-  ] as const) {
-    for (const rule of listed) {
+  ] as const)
+    for (const rule of listed)
       if (!posixLevel(rule)) skipped.push(`commands.${verb}: ${rule.reason}`)
-    }
-  }
   return skipped
 }
-
-/**
- * Whether a rule in force could reach an entry at or under this path for
- * the running line: the rule names the line and its paths, or a mount
- * rule's mount, could cover something in the subtree. What a native walk asks before it trusts the
- * raw tree, per operand the way a hide is: a rule on `/repo/.env` leaves
- * `find /s3` its native op.
- */
 export function ioReach(
   rules: AdmissionRules | null,
   tokens: readonly string[],
   virtual: string,
 ): boolean {
-  if (rules === null) return false
-  return [...rules.deny, ...rules.ask].some((rule) =>
-    matchIo(rule, ruleScope(rule), tokens, virtual, true),
-  )
+  return rules !== null && admissionMatcher(rules).ioReach(tokens, virtual)
 }
-
-/**
- * The reason a command may not touch an entry it reached on its own,
- * null when it may.
- *
- * The same law the admission gate applies to a line, and literally the
- * same loop (`ruleAt`): anchor depth first, deny before ask
- * at equal depth. Reading every deny before any ask instead would let a
- * broad deny on `/repo/*` overrule an approved ask on `/repo/sealed/*`
- * that the gate had just admitted the line under, so the carve-out
- * would survive admission and then refuse every entry it was written
- * for.
- *
- * The winning rule then answers: a deny refuses, an ask refuses unless
- * the line holds a grant under it (the nod the gate took for `rm -r /x`
- * covers the entries under `/x`; a walk that wanders into an asked
- * scope from outside gets no nod mid-command, so it is refused and the
- * agent names the path to be asked).
- */
+function grantIndices(rules: AdmissionRules, granted: readonly CommandRule[]): number[] {
+  return [...rules.deny, ...rules.ask].flatMap((rule, id) => (granted.includes(rule) ? [id] : []))
+}
 export function ioRefusal(
   rules: AdmissionRules | null,
   tokens: readonly string[],
@@ -494,7 +140,32 @@ export function ioRefusal(
   granted: readonly CommandRule[],
 ): string | null {
   if (rules === null) return null
-  const reach = (rule: CommandRule): number | null =>
-    matchIo(rule, ruleScope(rule), tokens, virtual) ? hiddenDepth(rule, virtual) : null
-  return ungranted(ruleAt(written(rules), reach), granted)?.[0].reason ?? null
+  const id = admissionMatcher(rules).ioRefusal(tokens, virtual, grantIndices(rules, granted))
+  if (id === null) return null
+  const rule = [...rules.deny, ...rules.ask][id]
+  if (rule === undefined) throw new Error('Invalid policy rule reply')
+  return rule.reason
+}
+export function opReach(
+  rule: CommandRule,
+  _scope: HiddenPaths | null,
+  ctx: VfsContext,
+): number | null {
+  return ruleMatcher(rule).opReach(0, ctx.call.name, ctx.path.virtual)
+}
+export function opRuling(
+  rules: AdmissionRules | null,
+  ctx: VfsContext,
+  granted: readonly CommandRule[],
+): [CommandRule, boolean] | null {
+  if (rules === null) return null
+  const answer = admissionMatcher(rules).opRuling(
+    ctx.call.name,
+    ctx.path.virtual,
+    grantIndices(rules, granted),
+  )
+  if (answer === null) return null
+  const rule = [...rules.deny, ...rules.ask][answer[0]]
+  if (rule === undefined) throw new Error('Invalid policy rule reply')
+  return [rule, answer[1]]
 }

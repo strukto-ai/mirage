@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { visibilityMatcher } from '../rs/policy.ts'
 import { mergeSignals } from '../utils/abort.ts'
 import type { SessionAccess } from '../view/types.ts'
 import { createAsyncContext } from '../utils/async_context.ts'
@@ -22,21 +23,14 @@ import type { ExecutionNode } from '../workspace/types.ts'
 import type { EvaluationContext } from '../workspace/evaluation.ts'
 import type { SessionState } from '../workspace/session/session.ts'
 import type { ProcessHandle } from '../process/handle.ts'
-import { rstripSlash, stripSlash } from '../utils/slash.ts'
-import {
-  anchorDepth,
-  isGlob,
-  leadsHidden,
-  pathVisible,
-  showHead,
-  shownMode,
-} from '../utils/hidden.ts'
+import { rstripSlash } from '../utils/slash.ts'
+import { leadsHidden, pathVisible } from '../utils/hidden.ts'
 import { eacces, enoent, erofs } from '../errors/fs.ts'
 import { norm, parent } from '../utils/path.ts'
 import type { DecisionOwner, DryRun, EntryGate, HandOff, VfsExplanation } from '../policy/types.ts'
 import type { OpRecord } from '../observe/record.ts'
 import type { PathSpec, Refusal, Visibility, WalkProbe } from '../types.ts'
-import { MOUNT_MODE_RANK, MountMode, weakerMode } from '../types.ts'
+import { MountMode, weakerMode } from '../types.ts'
 
 /** Whoever binds sessions: one per workspace, compared by identity. */
 export abstract class SessionOwner {
@@ -853,20 +847,8 @@ function pathModeUnder(
 ): MountMode {
   const prefix = norm(mountPrefix)
   const cap = sess.mountModes?.get(prefix) ?? null
-  let bestDepth = cap != null ? anchorDepth(prefix) : null
-  let bestMode: MountMode | null = cap
-  const deepest = shownMode(sess.visibility?.shown, virtual)
-  if (deepest != null) {
-    const [depth, mode] = deepest
-    if (bestDepth === null || depth > bestDepth) {
-      bestDepth = depth
-      bestMode = mode
-    } else if (depth === bestDepth && bestMode != null) {
-      bestMode = weakerMode(bestMode, mode)
-    }
-  }
-  if (bestMode == null) return mountMode
-  return weakerMode(mountMode, bestMode)
+  if (cap === null && sess.visibility?.shown == null) return mountMode
+  return visibilityMatcher(sess.visibility ?? null).effectiveMode(virtual, prefix, mountMode, cap)
 }
 
 export function effectivePathMode(
@@ -884,21 +866,6 @@ export function effectivePathMode(
 }
 
 /**
- * Whether a show anchor could cover any path under a mount prefix: the
- * anchor lies at or under the prefix, or the prefix inside the
- * anchor's subtree.
- */
-function reachesUnder(head: string, prefix: string): boolean {
-  return (
-    head === '/' ||
-    prefix === '/' ||
-    head === prefix ||
-    head.startsWith(prefix + '/') ||
-    prefix.startsWith(head + '/')
-  )
-}
-
-/**
  * The strongest mode one session reaches anywhere under a mount: its
  * mount-wide mode, or a deeper show grant, still capped by the mount's
  * configured mode. Mirrors the Python `strongest_under_session`.
@@ -908,18 +875,10 @@ export function strongestUnderSession(
   mountPrefix: string,
   mountMode: MountMode,
 ): MountMode {
-  let best = weakerMode(mountMode, sessionModeOf(sess, mountPrefix))
-  const shown = sess.visibility?.shown
-  if (shown == null) return best
   const prefix = norm(mountPrefix)
-  for (const entry of shown.entries) {
-    if (entry.mode == null) continue
-    if (reachesUnder(showHead(entry.path), prefix)) {
-      const reached = weakerMode(mountMode, entry.mode)
-      if (MOUNT_MODE_RANK[reached] > MOUNT_MODE_RANK[best]) best = reached
-    }
-  }
-  return best
+  const cap = sess.mountModes?.get(prefix) ?? null
+  if (cap === null && sess.visibility?.shown == null) return mountMode
+  return visibilityMatcher(sess.visibility ?? null).strongestMode(prefix, mountMode, cap)
 }
 
 /**
@@ -966,25 +925,14 @@ function readonlyBelowUnder(
   mountPrefix: string,
   mountMode: MountMode,
 ): string | null {
-  const shown = sess.visibility?.shown
-  if (shown == null) return null
-  const v = '/' + stripSlash(virtual)
-  for (const entry of shown.entries) {
-    if (entry.mode == null) continue
-    if (isGlob(entry.path)) {
-      if (entry.mode === MountMode.READ && reachesUnder(showHead(entry.path), v)) {
-        return virtual
-      }
-      continue
-    }
-    const anchor = '/' + stripSlash(entry.path)
-    const below = v === '/' ? anchor !== '/' : anchor.startsWith(v + '/')
-    if (!below) continue
-    if (pathModeUnder(sess, anchor, mountPrefix, mountMode) === MountMode.READ) {
-      return anchor
-    }
-  }
-  return null
+  if (sess.visibility?.shown == null) return null
+  const prefix = norm(mountPrefix)
+  return visibilityMatcher(sess.visibility).readonlyBelow(
+    virtual,
+    prefix,
+    mountMode,
+    sess.mountModes?.get(prefix) ?? null,
+  )
 }
 
 export function readonlyBelow(

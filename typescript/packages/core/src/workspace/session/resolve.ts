@@ -16,37 +16,26 @@ import {
   DEFAULT_PROCESS_PERMISSIONS,
   parseProcessPermissions,
   restrictProcesses,
-  type ProcessPermissions,
 } from '../../process/config.ts'
-import type { Limit } from '../../types.ts'
 import { checkRules } from './validate.ts'
 import { PolicyError } from '../../policy/errors.ts'
 import type {
-  CommandRule,
   AdmissionRules,
-  HideReason,
   ProfileScript,
   ProfileScripts,
   ScriptMethod,
 } from '../../policy/types.ts'
-import type { HiddenPaths, MountMode, ShowEntry, ShownPaths } from '../../types.ts'
+import type { MountMode } from '../../types.ts'
 import { DEFAULT_VISIBILITY, weakerMode } from '../../types.ts'
-import { classifyPaths, classifyShows, classifyVars } from '../../utils/hidden.ts'
-import { norm } from '../../utils/path.ts'
+import { compilePolicy, restrictPolicy } from '../../rs/policy.ts'
 import {
   compileProgram,
   type CommandsBlock,
   type CompiledProfile,
-  type MountCommandsBlock,
-  type PathsBlock,
-  type ProfileMount,
-  type ProfilePolicy,
   type SessionProfile,
-  type VarsBlock,
 } from '../../policy/profile.ts'
 import { DEFAULT_PROFILE } from './constants.ts'
 import { varsFromEntries, type SessionState } from './session.ts'
-import type { EnvEntries } from '../../secrets/config.ts'
 import { setCwd } from './shell_dirs.ts'
 
 /**
@@ -68,115 +57,23 @@ export function resolveProfile(
   return found
 }
 
-/** Every entry of both blocks, first spelling wins, order kept. */
-function unionHide(
-  a: PathsBlock | VarsBlock | null | undefined,
-  b: PathsBlock | VarsBlock | null | undefined,
-): string[] {
-  const out: string[] = []
-  for (const block of [a, b]) {
-    for (const entry of block?.hide ?? []) if (!out.includes(entry)) out.push(entry)
-  }
-  return out
-}
-
-/** One verb's rules in a mount section's commands block, empty when unstated. */
-function rulesOf(
-  block: MountCommandsBlock | null | undefined,
-  verb: 'ask' | 'deny',
-): readonly CommandRule[] {
-  return (verb === 'ask' ? block?.ask : block?.deny) ?? []
-}
-
-/**
- * The profile's commands block with the inline document's rules added. An
- * inline document may only restrict, so it carries ask and deny rules
- * and never an allow list: a list there would install a command the
- * profile does not have, which is the one thing a per-call document must
- * not do.
- */
-/**
- * Refuse an allow list in an inline document.
- *
- * The refusal belongs to *where the document was written*, not to
- * whether a profile happened to resolve, so both paths into `withInline`
- * run it: a workspace with no default profile must not quietly accept a
- * list a workspace with one refuses.
- */
 export function refuseAllow(inline: CommandsBlock | null | undefined): void {
-  if (inline?.allow !== null && inline?.allow !== undefined) {
-    throw new PolicyError('inline permissions may add ask and deny rules, not an allow list')
-  }
+  restrictMatching(null, { commands: inline ?? null })
 }
 
-/**
- * Refuse a show entry in an inline document.
- *
- * An inline document may only restrict: it adds ask and deny rules and
- * hides. A show re-opens a subtree or states a mode, which is the
- * profile's to say; same rule as `refuseAllow`, and it runs on both
- * paths into `withInline` for the same reason.
- */
 export function refuseShow(inline: SessionProfile): void {
-  const blocks = [inline.paths, ...[...(inline.mounts?.values() ?? [])].map((m) => m.paths)]
-  if (blocks.some((block) => block != null && (block.show ?? []).length > 0)) {
-    throw new PolicyError(
-      'inline permissions may add ask and deny rules and hides, not show entries',
-    )
-  }
+  restrictMatching(null, { paths: inline.paths ?? null, mounts: inline.mounts ?? null })
 }
 
-/** Both blocks' reason groups, the profile's first. */
-function mergeReasons(
-  a: PathsBlock | null | undefined,
-  b: PathsBlock | null | undefined,
-): HideReason[] {
-  const out: HideReason[] = []
-  for (const block of [a, b]) out.push(...(block?.reasons ?? []))
-  return out
-}
-
-function addCommands(
-  base: CommandsBlock | null | undefined,
-  inline: CommandsBlock | null | undefined,
-): CommandsBlock | null {
-  if (inline === null || inline === undefined) return base ?? null
-  refuseAllow(inline)
-  if (base === null || base === undefined) return inline
-  return {
-    allow: base.allow ?? null,
-    ask: [...(base.ask ?? []), ...(inline.ask ?? [])],
-    deny: [...(base.deny ?? []), ...(inline.deny ?? [])],
+function restrictMatching(
+  base: SessionProfile | null,
+  inline: SessionProfile | null,
+): ReturnType<typeof restrictPolicy> {
+  try {
+    return restrictPolicy(base, inline)
+  } catch (error) {
+    throw new PolicyError(error instanceof Error ? error.message : String(error))
   }
-}
-
-/**
- * One mount's entry with the inline document's added: the weaker mode,
- * both rule lists, both hide lists.
- */
-function addMount(base: ProfileMount | undefined, inline: ProfileMount | undefined): ProfileMount {
-  if (base === undefined) return inline ?? {}
-  if (inline === undefined) return base
-  let mode = base.mode ?? null
-  if (inline.mode !== null && inline.mode !== undefined) {
-    mode = mode === null ? inline.mode : weakerMode(mode, inline.mode)
-  }
-  const ask = [...rulesOf(base.commands, 'ask'), ...rulesOf(inline.commands, 'ask')]
-  const deny = [...rulesOf(base.commands, 'deny'), ...rulesOf(inline.commands, 'deny')]
-  const hide = unionHide(base.paths, inline.paths)
-  const show = base.paths?.show ?? []
-  const reasons = mergeReasons(base.paths, inline.paths)
-  const out: { mode?: MountMode | null; commands?: MountCommandsBlock; paths?: PathsBlock } = {}
-  if (mode !== null) out.mode = mode
-  if (ask.length > 0 || deny.length > 0) out.commands = { ask, deny }
-  if (hide.length > 0 || show.length > 0 || reasons.length > 0) {
-    out.paths = {
-      hide,
-      ...(show.length > 0 ? { show } : {}),
-      ...(reasons.length > 0 ? { reasons } : {}),
-    }
-  }
-  return out
 }
 
 /**
@@ -196,8 +93,7 @@ export function withInline(
   inline: SessionProfile | null,
 ): SessionProfile | null {
   if (inline === null) return base
-  refuseAllow(inline.commands)
-  refuseShow(inline)
+  const restriction = restrictMatching(base, inline)
   if (inline.commandLimits != null)
     throw new PolicyError('command_limits belong on the profile, not inline permissions')
   if (inline.policy !== undefined && inline.policy !== null) {
@@ -212,166 +108,18 @@ export function withInline(
       ? own
       : restrictProcesses(own, parseProcessPermissions(inline.processes))
   if (base === null) return inline.processes == null ? inline : { ...inline, processes }
-  const hidePaths = unionHide(base.paths, inline.paths)
-  const hideVars = unionHide(base.vars, inline.vars)
-  const out: {
-    cwd?: string | null
-    env?: Readonly<EnvEntries> | null
-    mounts?: ReadonlyMap<string, ProfileMount> | null
-    paths?: PathsBlock | null
-    vars?: VarsBlock | null
-    commands?: CommandsBlock | null
-    policy?: ProfilePolicy | null
-    commandLimits?: Readonly<Record<string, Limit>> | null
-    processes?: ProcessPermissions
-  } = {}
-  out.commandLimits = base.commandLimits ?? null
-  out.processes = processes
-  out.cwd = inline.cwd ?? base.cwd ?? null
-  if (base.env != null || inline.env != null) out.env = { ...base.env, ...inline.env }
-  if (base.mounts != null || inline.mounts != null) {
-    const prefixes = [...(base.mounts?.keys() ?? [])]
-    for (const p of inline.mounts?.keys() ?? []) if (!prefixes.includes(p)) prefixes.push(p)
-    out.mounts = new Map(
-      prefixes.map((prefix): [string, ProfileMount] => [
-        prefix,
-        addMount(base.mounts?.get(prefix), inline.mounts?.get(prefix)),
-      ]),
-    )
+  return {
+    ...restriction,
+    commandLimits: base.commandLimits ?? null,
+    processes,
+    cwd: inline.cwd ?? base.cwd ?? null,
+    ...(base.env != null || inline.env != null ? { env: { ...base.env, ...inline.env } } : {}),
+    ...(base.policy != null ? { policy: base.policy } : {}),
   }
-  if (base.paths != null || inline.paths != null) {
-    const show = base.paths?.show ?? []
-    const reasons = mergeReasons(base.paths, inline.paths)
-    out.paths = {
-      hide: hidePaths,
-      ...(show.length > 0 ? { show } : {}),
-      ...(reasons.length > 0 ? { reasons } : {}),
-    }
-  }
-  if (base.vars != null || inline.vars != null) out.vars = { hide: hideVars }
-  out.commands = addCommands(base.commands, inline.commands)
-  if (base.policy != null) out.policy = base.policy
-  return out
 }
 
-/**
- * A mount section's path entries, anchored to the mount they are written
- * under.
- *
- * An absolute entry already names something inside the root (`underMount`
- * refuses one that does not) and is left as written. A name pattern
- * (`*.pem`, no slash) anchors nothing, and both places a mount section's
- * entries are read from have lost the section by then: the session's
- * hidden set is one list for every mount, and the dispatcher matches a
- * rule's paths without consulting `rule.mount`. Left raw,
- * `mounts./repo.paths.hide: ["*.pem"]` hid `/other/key.pem` too, and a
- * path-only deny under `/repo` refused a read of it. The dialect's `*`
- * crosses `/`, so `/repo/*.pem` is every `.pem` at any depth below
- * `/repo` and nothing outside it; anchoring also gives the entry the
- * mount's own anchor depth, which is what it was always worth.
- */
-function anchored(entries: readonly string[], root: string): string[] {
-  const head = root === '/' ? '' : root
-  return entries.map((e) => (e.startsWith('/') ? e : `${head}/${e}`))
-}
-
-/**
- * A mount section's rules, stamped with the mount they belong to and
- * anchored to it. The stamp is what makes the rule apply to a line that
- * *works inside* the mount, by cwd or by operand, which a path-scoped
- * rule cannot express. The anchor is for the entries the stamp cannot
- * reach: the dispatcher reads a rule's paths alone (`anchored`).
- */
-function scopeRules(rules: readonly CommandRule[], root: string): CommandRule[] {
-  return rules.map((rule) =>
-    rule.paths === undefined
-      ? { ...rule, mount: root }
-      : { ...rule, paths: anchored(rule.paths, root), mount: root },
-  )
-}
-
-/**
- * A profile's admission rules: its own, plus every mount section's, in one
- * list; null when the profile states none. Mount rules come first so the
- * section closest to the data speaks first when several rules match at
- * the same anchor depth and only the message differs.
- */
 export function compileCommands(profile: SessionProfile): AdmissionRules | null {
-  const ask: CommandRule[] = []
-  const deny: CommandRule[] = []
-  for (const [prefix, entry] of profile.mounts ?? new Map<string, ProfileMount>()) {
-    const root = norm(prefix)
-    ask.push(...scopeRules(rulesOf(entry.commands, 'ask'), root))
-    deny.push(...scopeRules(rulesOf(entry.commands, 'deny'), root))
-  }
-  const block = profile.commands
-  const allow = block?.allow ?? null
-  if (block != null) {
-    ask.push(...(block.ask ?? []))
-    deny.push(...(block.deny ?? []))
-  }
-  if (allow === null && ask.length === 0 && deny.length === 0) return null
-  return { allow, ask, deny }
-}
-
-/**
- * Every path the profile hides: its own entries, and each mount section's
- * anchored to the mount it was written under, since the set is one list
- * for the whole session and nothing in it remembers which section an
- * entry came from (`anchored`).
- */
-function hidden(profile: SessionProfile): HiddenPaths | null {
-  const entries = [...(profile.paths?.hide ?? [])]
-  for (const [prefix, entry] of profile.mounts ?? new Map<string, ProfileMount>()) {
-    entries.push(...anchored(entry.paths?.hide ?? [], norm(prefix)))
-  }
-  return classifyPaths(entries)
-}
-
-/**
- * Every show entry the profile states: its own and each mount
- * section's, one list, since a show entry is absolute wherever it is
- * written and the compiled axis has no sections.
- */
-function shown(profile: SessionProfile): ShownPaths | null {
-  const entries: ShowEntry[] = [...(profile.paths?.show ?? [])]
-  for (const entry of profile.mounts?.values() ?? []) {
-    entries.push(...(entry.paths?.show ?? []))
-  }
-  return classifyShows(entries)
-}
-
-/**
- * The operator's reasons for grouped hides, a mount section's anchored
- * to its mount exactly like the hide entries they describe, so the
- * side table names what the compiled spec matches.
- */
-function hideReasonsOf(profile: SessionProfile): readonly HideReason[] {
-  const groups: HideReason[] = [...(profile.paths?.reasons ?? [])]
-  for (const [prefix, entry] of profile.mounts ?? new Map<string, ProfileMount>()) {
-    const root = norm(prefix)
-    groups.push(
-      ...(entry.paths?.reasons ?? []).map((g): HideReason => ({
-        patterns: anchored(g.patterns, root),
-        reason: g.reason,
-      })),
-    )
-  }
-  return groups
-}
-
-/**
- * The mode each mount section states, null when none does. A mount the
- * profile does not name is absent from the map and keeps the mode it
- * declares in the workspace's `mounts:`; the map only narrows, it never
- * grants.
- */
-function modes(profile: SessionProfile): Map<string, MountMode> | null {
-  const modes = new Map<string, MountMode>()
-  for (const [prefix, entry] of profile.mounts ?? new Map<string, ProfileMount>()) {
-    if (entry.mode !== null && entry.mode !== undefined) modes.set(prefix, entry.mode)
-  }
-  return modes.size > 0 ? modes : null
+  return compilePolicy(profile).commands
 }
 
 /**
@@ -417,7 +165,8 @@ export function compileProfile(effective: SessionProfile | null, name = ''): Com
       profile,
     }
   }
-  const commands = compileCommands(effective)
+  const plan = compilePolicy(effective)
+  const commands = plan.commands
   checkRules(commands)
   const processes =
     effective.processes == null
@@ -426,19 +175,17 @@ export function compileProfile(effective: SessionProfile | null, name = ''): Com
   return {
     setup: { env: effective.env ?? null, cwd: effective.cwd ?? null },
     visibility: {
-      paths: hidden(effective),
-      shown: shown(effective),
-      vars: classifyVars(effective.vars?.hide ?? []),
+      ...plan.visibility,
       processes: processes.list,
     },
     policies: {
-      mountModes: modes(effective),
+      mountModes: plan.mountModes,
       commands,
       scripts: compileScripts(effective, name),
       commandLimits: effective.commandLimits ?? null,
       processes,
     },
-    hideReasons: hideReasonsOf(effective),
+    hideReasons: plan.hideReasons,
     profile,
   }
 }

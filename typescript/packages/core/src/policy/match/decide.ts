@@ -12,89 +12,26 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { Ruling } from '../types.ts'
-import { VERB_ORDER } from '../constants.ts'
-import { Outcome, type CommandContext, type CommandRule, type AdmissionRules } from '../types.ts'
-import { lineAllowed } from './allow.ts'
+import { admissionMatcher } from '../../rs/policy.ts'
 import {
-  matchedOperand,
-  ruleApplies,
-  ruleAt,
-  ruleReach,
-  ruleScope,
-  subjects,
-  written,
-} from './rule.ts'
+  Outcome,
+  type AdmissionRules,
+  type CommandContext,
+  type CommandRule,
+  type Ruling,
+} from '../types.ts'
+import { commandFacts } from './rule.ts'
+import { lineTokens } from './allow.ts'
 
-/**
- * Whether one subject's decision outranks the line's best so far: the
- * stronger verb first, then the deeper anchor.
- *
- * The mirror image of `betterMatch`, and deliberately so. Two rules
- * about *one* subject are a question of specificity, so depth leads
- * there. Two subjects of one line are a question of severity: every path
- * a line names has to survive it, so a deny anywhere refuses the line
- * however deeply another path was carved out.
- */
-export function outranks(current: readonly [number, number], verb: number, depth: number): boolean {
-  const [bestVerb, bestDepth] = current
-  if (verb !== bestVerb) return verb < bestVerb
-  return depth > bestDepth
-}
-
-/**
- * Where in the document a rule was written, as a host reads it: the
- * mount section it belongs to, or the top level.
- */
 export function sourceOf(rule: CommandRule): string {
-  return (rule.mount ?? '') !== '' ? `mounts.${rule.mount ?? ''}` : 'top'
+  return rule.mount ? `mounts.${rule.mount}` : 'top'
 }
 
-/**
- * The profile's answer about one line: the whole law, in one place.
- *
- * Two rules, because a command name and a path are not the same kind of
- * thing. A rule naming no path is read by verb, deny before ask,
- * wherever it was written: it is off the path axis entirely, so one in a
- * mount section scores 0 exactly as a top-level one does. Writing it
- * under `mounts./repo` scopes it to lines working inside that mount
- * (`ruleApplies` reads `rule.mount`); it does not make it more specific
- * than a rule about the whole session. That is what keeps "denied
- * generally, asked inside one mount" inexpressible for a pathless rule,
- * which in practice means an account CLI: such a CLI reaches a service
- * and touches no mount, so scoping it to one was never meaningful.
- *
- * A rule carrying paths is read by anchor depth, the deeper entry
- * winning, ties broken by verb. The depth is the matched entry's, not
- * the rule's deepest, so an entry that says nothing about this operand
- * cannot lend it specificity. The allow list is asked first, since a
- * line no list covers never reaches a rule.
- *
- * All of which is settled *per subject*, and only then across them
- * (`outranks`), because a line names more than one path and a carve-out
- * written for one of them must not answer for the rest: with `deny cp
- * /protected/*` and a deeper `ask cp /review/deep/*`, `cp
- * /protected/secret /review/deep/out` is the source's deny, and reading
- * one best match for the whole line answered it with the destination's
- * ask instead, so a nod meant for the destination carried the protected
- * file out.
- *
- * Ranking across subjects is the whole answer for a deny, which refuses
- * the line, and only half of it for an ask, which is a question the host
- * still has to answer. So every ask that won a subject of its own is
- * reported (`Ruling.asks`) and the entry point requires all of them: with
- * `ask cp /a/*` and a deeper `ask cp /deep/b/*`, `cp /a/x /deep/b/y` used
- * to present the deeper one alone, and a nod for the destination ran the
- * line without the source ever being asked about.
- *
- * `PermissionsPolicy` renders this into the outcome table and `explain`
- * reports it, so the two cannot disagree about what a line would do.
- */
 export function decide(ctx: CommandContext, rules: AdmissionRules | null): Ruling {
-  if (rules === null) {
+  if (rules === null || (rules.allow === null && rules.deny.length === 0 && rules.ask.length === 0))
     return { outcome: Outcome.ALLOW, rule: null, matchedPath: null, source: '', asks: [] }
-  }
-  if (!lineAllowed(ctx, rules)) {
+  const matcher = admissionMatcher(rules)
+  if (!matcher.lineAllowed(lineTokens(ctx), ctx.tool ?? true)) {
     return {
       outcome: Outcome.DENY,
       rule: null,
@@ -103,32 +40,28 @@ export function decide(ctx: CommandContext, rules: AdmissionRules | null): Rulin
       asks: [],
     }
   }
-  const live = written(rules).filter(([, rule]) => ruleApplies(rule, ctx))
-  let best: [number, number] | null = null
-  let chosen: Ruling = {
-    outcome: Outcome.ALLOW,
-    rule: null,
-    matchedPath: null,
-    source: '',
-    asks: [],
+  const answer = matcher.decide(commandFacts(ctx))
+  const listed = [...rules.deny, ...rules.ask]
+  const ruleAt = (id: number): CommandRule => {
+    const rule = listed[id]
+    if (rule === undefined) throw new Error('Invalid policy rule reply')
+    return rule
   }
-  const asked: CommandRule[] = []
-  for (const subject of subjects(ctx)) {
-    const spoke = ruleAt(live, (rule) => ruleReach(rule, ruleScope(rule), subject))
-    if (spoke === null) continue
-    const [outcome, rule, depth] = spoke
-    if (outcome === Outcome.ASK && !asked.includes(rule)) asked.push(rule)
-    const verb = VERB_ORDER[outcome] ?? 0
-    if (best !== null && !outranks(best, verb, depth)) continue
-    best = [verb, depth]
-    chosen = {
-      outcome,
-      rule,
-      matchedPath: matchedOperand(rule, subject),
-      source: sourceOf(rule),
-      asks: [],
-    }
+  const outcome =
+    answer.outcome === 0
+      ? Outcome.ALLOW
+      : answer.outcome === 1
+        ? Outcome.DENY
+        : answer.outcome === 2
+          ? Outcome.ASK
+          : null
+  if (outcome === null) throw new Error('Invalid policy outcome reply')
+  const rule = answer.rule === null ? null : ruleAt(answer.rule)
+  return {
+    outcome,
+    rule,
+    matchedPath: answer.matched,
+    source: answer.allowList ? 'commands.allow' : rule === null ? '' : sourceOf(rule),
+    asks: answer.asks.map(ruleAt),
   }
-  if (chosen.outcome !== Outcome.ASK) return chosen
-  return { ...chosen, asks: asked }
 }
