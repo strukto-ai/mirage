@@ -81,9 +81,10 @@ impl Stream {
         self.inner.cancel()
     }
 
-    /// One bounded step of the work `busy` reports, and its output.
+    /// Bounded steps of the work `busy` reports, up to a piece of output
+    /// (`streams::drain_steps`), and that output.
     fn drain<'py>(&mut self, py: Python<'py>) -> PyResult<Bound<'py, PyBytes>> {
-        self.step(py, |stream, out| stream.drain(out))
+        self.step(py, |stream, out| streams::drain_steps(stream, out))
     }
 
     fn end_input<'py>(&mut self, py: Python<'py>, index: usize) -> PyResult<Bound<'py, PyBytes>> {

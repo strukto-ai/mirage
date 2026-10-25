@@ -98,8 +98,16 @@ class BytePipe:
             self._changed.clear()
             await self._changed.wait()
 
-    async def stream(self) -> AsyncIterator[bytes]:
-        """Read once; abandoning the iterator closes its endpoint."""
+    async def stream(self, joined: bool = False) -> AsyncIterator[bytes]:
+        """Read once; abandoning the iterator closes its endpoint.
+
+        Args:
+            joined (bool): take everything buffered in each read, as a
+                kernel pipe's read does, for a reader that keeps no write
+                boundaries: one behind a writer that filled the pipe wakes
+                once for the lot rather than once per chunk. Otherwise
+                each read is one chunk as written.
+        """
         if self._reading:
             raise RuntimeError("byte pipe already has a reader")
         self._reading = True
@@ -107,11 +115,18 @@ class BytePipe:
         try:
             while not self._reader_closed:
                 if self._chunks:
-                    chunk = self._chunks.popleft()
+                    count = len(self._chunks) if joined else 1
+                    chunk = (
+                        self._chunks.popleft()
+                        if count == 1
+                        else b"".join(self._chunks)
+                    )
+                    if count > 1:
+                        self._chunks.clear()
                     self._bytes -= len(chunk)
                     self._changed.set()
                     yield chunk
-                    self._accepted += 1
+                    self._accepted += count
                     self._changed.set()
                 elif self._ended:
                     if self._failure is not None:

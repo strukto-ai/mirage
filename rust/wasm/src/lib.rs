@@ -161,10 +161,13 @@ pub extern "C" fn mirage_rs_cancel(handle: u32) -> i32 {
     with_slot(handle, 0, |slot| i32::from(slot.stream.cancel()))
 }
 
-/// One bounded step of the work `mirage_rs_busy` reports, and its output.
+/// Bounded steps of the work `mirage_rs_busy` reports, up to a piece of
+/// output (`mirage_rs::drain_steps`), and that output.
 #[unsafe(no_mangle)]
 pub extern "C" fn mirage_rs_drain(handle: u32) -> i32 {
-    call(handle, 0, |stream, _, out| stream.drain(out))
+    call(handle, 0, |stream, _, out| {
+        mirage_rs::drain_steps(stream, out)
+    })
 }
 
 /// Start the next input of a stream that reads one after another, its

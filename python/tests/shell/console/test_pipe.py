@@ -28,7 +28,7 @@ async def test_writes_are_buffered_before_the_reader_takes_them():
         await asyncio.wait_for(pipe.emit(Channel.STDOUT, chunk), 1)
     pipe.end()
     stream = pipe.stream()
-    assert await anext(stream) == b"1\n"
+    assert await anext(stream) == b"1\n2\n3\n"
     await stream.aclose()
     await pipe.drain()
     with pytest.raises(PipeClosed):
@@ -58,10 +58,8 @@ async def test_a_full_buffer_blocks_the_writer_until_the_reader_advances():
     await asyncio.sleep(0)
     assert not writer.done()
     stream = pipe.stream()
-    assert len(await anext(stream)) == 16384
+    assert len(await anext(stream)) == 65536
     await asyncio.wait_for(writer, 1)
-    for _ in range(3):
-        assert len(await anext(stream)) == 16384
     assert await anext(stream) == b"y"
     await stream.aclose()
 
