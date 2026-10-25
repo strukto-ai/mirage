@@ -173,8 +173,8 @@ fn positive(value: &[u8], what: &str) -> Result<u64, Vec<u8>> {
         .ok_or_else(|| refusal(what, value))
 }
 
-/// The multiplier a byte count's suffix stands for, saturating.
-pub(crate) fn unit(suffix: &[u8]) -> Option<u64> {
+/// The multiplier a byte count's suffix stands for.
+pub(crate) fn unit(suffix: &[u8]) -> Option<u128> {
     let (&letter, tail) = suffix.split_first()?;
     if !SIZE_LETTERS.contains(&letter) {
         return None;
@@ -186,12 +186,12 @@ pub(crate) fn unit(suffix: &[u8]) -> Option<u64> {
         .iter()
         .position(|&p| p == letter.to_ascii_uppercase())?
         + 1;
-    let base: u64 = match tail {
+    let base: u128 = match tail {
         b"" | b"iB" => 1024,
         b"B" => 1000,
         _ => return None,
     };
-    Some((0..power).fold(1u64, |n, _| n.saturating_mul(base)))
+    Some(base.pow(power as u32))
 }
 
 fn byte_count(value: &[u8]) -> Result<u64, Vec<u8>> {
@@ -206,7 +206,7 @@ fn byte_count(value: &[u8]) -> Result<u64, Vec<u8>> {
         .unwrap_or((value, 1));
     let digits =
         positive(digits, "number of bytes").map_err(|_| refusal("number of bytes", value))?;
-    Ok(digits.saturating_mul(multiplier))
+    Ok(digits.saturating_mul(u64::try_from(multiplier).unwrap_or(u64::MAX)))
 }
 
 /// -n as GNU reads it: one leading `l/` or `r/`, then K/N cut at the

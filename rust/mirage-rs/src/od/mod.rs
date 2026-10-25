@@ -78,9 +78,7 @@ fn count(raw: &[u8], label: &str, suffixes: bool) -> Result<u64, String> {
     let suffix = &rest[start + digits..];
     let multiplier = match suffix {
         [] => 1,
-        _ if suffixes => unit(suffix)
-            .map(u128::from)
-            .ok_or_else(|| suffixed(label, raw))?,
+        _ if suffixes => unit(suffix).ok_or_else(|| suffixed(label, raw))?,
         _ => return Err(suffixed(label, raw)),
     };
     value
