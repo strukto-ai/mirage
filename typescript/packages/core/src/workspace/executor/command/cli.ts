@@ -216,17 +216,13 @@ function scriptOutput(
     spec: new CommandSpec({ ...spec, name: prog }),
     ...(timeout !== null && timeout > 0 ? { timeoutSeconds: timeout } : {}),
   }
-  const run = async (
-    output: OutputFn,
-    errors: OutputFn | undefined,
-    stop: AbortSignal,
-  ): Promise<RunResult> => {
+  const run = async (output: OutputFn, errors: OutputFn, stop: AbortSignal): Promise<RunResult> => {
     try {
       return await runtime.execute(
         [],
         [...(ctx.argv ?? [])],
         { ...runCtx, signal: stop },
-        { output, ...(errors !== undefined ? { errors } : {}) },
+        { output, errors },
       )
     } catch (err) {
       // A limit interrupt is named after the CLI, as the workspace's own

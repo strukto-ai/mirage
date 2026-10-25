@@ -23,10 +23,11 @@ import { MontyUnavailableError } from '../../../runtime/python/monty/errors.ts'
 import { PyodideUnavailableError } from '../../../runtime/python/pyodide/errors.ts'
 import type { CommandRuntime, OutputFn, RunResult } from '../../../runtime/types.ts'
 import { encodeText } from '../../../shell/bytes.ts'
+import { STOP_WAIT_SECONDS } from '../../../shell/job_table/constants.ts'
 import type { PathSpec, Producer } from '../../../types.ts'
 import { errorVirtualPath, isFsError } from '../../../errors/fs.ts'
 import { CommandTimeoutError } from '../../../errors/types.ts'
-import { hasAborted, mergeSignals } from '../../../utils/abort.ts'
+import { ABORT_JOIN_MS, hasAborted, joinOrAbort, mergeSignals } from '../../../utils/abort.ts'
 import { concat } from '../../../utils/bytes.ts'
 import type { CommandFnResult, Context } from '../../config.ts'
 
@@ -41,21 +42,22 @@ import type { CommandFnResult, Context } from '../../config.ts'
  * not stream lands at the end. The status, and the stderr the run returned,
  * settle on the result as the output ends (`IOResult.output`), stderr after
  * what the result already held. A reader that stops early stops the run,
- * which then exits 141, as SIGPIPE leaves a program. Mirrors Python's
- * `run_output`.
+ * which then exits 141, as SIGPIPE leaves a program, and keeps the stderr it
+ * had written. A stopped run that does not end within its grace is left
+ * running, as a stopped handler is (`joinOrAbort`). Mirrors Python's
+ * `run_output`, whose cancel ends the run outright.
  *
  * @param run starts the run, given where it writes stdout, where it writes
- *   stderr (undefined keeps stderr in its result) and the signal that stops
- *   it.
+ *   stderr and the signal that stops it.
  * @param producer what made the output, for a program run past the
  *   workspace's own commands.
  * @param errors takes stderr as the run writes it, after the stdout written
- *   before it has been read; undefined keeps stderr for the result.
+ *   before it has been read; undefined lands it on the result's stderr.
  * @param stdin the run's input, closed once the output ends.
  * @param signal the command's own abort, which stops the run too.
  */
 export function runOutput(
-  run: (output: OutputFn, errors: OutputFn | undefined, signal: AbortSignal) => Promise<RunResult>,
+  run: (output: OutputFn, errors: OutputFn, signal: AbortSignal) => Promise<RunResult>,
   producer: Producer | null = null,
   errors?: OutputFn,
   stdin: ByteSource | null = null,
@@ -72,23 +74,32 @@ export function runOutput(
   let settled = false
   let stopped = false
   let closing: Promise<void> | undefined
+  const kept: Uint8Array[] = []
   // Stdout written before this chunk reaches its reader first, so the two
   // keep the order the program wrote them in (`2>&1`).
-  const ordered =
-    errors === undefined
-      ? undefined
-      : async (chunk: Uint8Array): Promise<void> => {
-          await pipe.drain()
-          await errors(chunk)
-        }
+  const ordered = async (chunk: Uint8Array): Promise<void> => {
+    await pipe.drain()
+    await errors?.(chunk)
+  }
+  const keep = (chunk: Uint8Array): Promise<void> => {
+    kept.push(chunk)
+    return Promise.resolve()
+  }
+  // A `kill` naming a signal gives the run the stop bound to answer it, as
+  // a stopped handler gets; any other stop releases the reader soon.
+  const grace = (): number =>
+    (caller.process?.signal ?? null) === null ? ABORT_JOIN_MS : STOP_WAIT_SECONDS * 1000
   const execute = async (): Promise<void> => {
     try {
-      const result = await run((chunk) => pipe.write(chunk), ordered, runSignal)
+      const result = await run(
+        (chunk) => pipe.write(chunk),
+        errors === undefined ? keep : ordered,
+        runSignal,
+      )
+      if (result.stderr !== null && result.stderr.length > 0) kept.push(result.stderr)
       if (stopped) return
       if (result.stdout.length > 0) await pipe.write(result.stdout)
       io.exitCode = result.exitCode
-      if (result.stderr !== null && result.stderr.length > 0)
-        io.stderr = concat([await materialize(io.stderr), result.stderr])
       pipe.end()
     } catch (error) {
       stop.abort()
@@ -105,11 +116,14 @@ export function runOutput(
         stopped = true
         stop.abort()
       }
-      await task?.catch((error: unknown) => {
-        if (stopped || error instanceof PipeClosed) return
-        console.debug(`runtime output ended: ${String(error)}`)
-      })
+      if (task !== undefined) {
+        await joinOrAbort(task, stop.signal, grace).catch((error: unknown) => {
+          if (stopped || error instanceof PipeClosed) return
+          console.debug(`runtime output ended: ${String(error)}`)
+        })
+      }
       if (stopped) io.exitCode = 141
+      if (kept.length > 0) io.stderr = concat([await materialize(io.stderr), ...kept])
       await closeQuietly(stdin)
       state.finish()
     })()
@@ -120,7 +134,6 @@ export function runOutput(
     void task.catch(() => undefined)
     try {
       yield* pipe.stream()
-      await task
     } finally {
       await close()
     }
@@ -152,7 +165,7 @@ export function runtimeVersion(
 ): CommandFnResult {
   const run = async (
     _output: OutputFn,
-    _errors: OutputFn | undefined,
+    _errors: OutputFn,
     stop: AbortSignal,
   ): Promise<RunResult> => {
     try {
@@ -244,16 +257,11 @@ export function runInterpreter(
 ): CommandFnResult {
   const run = async (
     output: OutputFn,
-    errors: OutputFn | undefined,
+    errors: OutputFn,
     signal: AbortSignal,
   ): Promise<RunResult> => {
     try {
-      return await runtime.execute(
-        paths,
-        texts,
-        { ...ctx, signal },
-        { output, ...(errors !== undefined ? { errors } : {}) },
-      )
+      return await runtime.execute(paths, texts, { ...ctx, signal }, { output, errors })
     } catch (err) {
       if (err instanceof CommandTimeoutError) throw new CommandTimeoutError(label, err.seconds)
       if ((err instanceof Error && err.name === 'AbortError') || hasAborted(signal)) throw err

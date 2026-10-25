@@ -22,7 +22,7 @@ import { WorkspaceRuntime } from '../runtime/workspace.ts'
 import { isLineExecutor, LINE_EXECUTOR, type LineExecutor } from '../runtime/mixin.ts'
 import { runtimeForLanguage } from '../runtime/routing/index.ts'
 import { SCRIPT_EVAL_TIMEOUT } from '../runtime/constants.ts'
-import type { RunResult } from '../runtime/types.ts'
+import type { OutputFn, RunResult } from '../runtime/types.ts'
 import { MontyRuntime } from '../runtime/python/monty/index.ts'
 import { QuickJsRuntime } from '../runtime/js/quickjs/runtime.ts'
 import { ScriptSource } from '../runtime/types.ts'
@@ -738,6 +738,39 @@ describe('whole-line runtimes', () => {
       expect(result.exitCode).toBe(124)
     } finally {
       delete DEFAULT_COMMAND_LIMITS.anything
+      await ws.close()
+    }
+  }, 10_000)
+
+  it('times out a program whose runtime ignores its stop', async () => {
+    class Deaf extends LanguageRuntime {
+      readonly language = 'python'
+      readonly name = 'deaf'
+      constructor() {
+        super({ captures: ['python3'] })
+      }
+      async interpret(
+        _engine: unknown,
+        _program: unknown,
+        _ctx: Context,
+        output?: OutputFn,
+      ): Promise<RunResult> {
+        await output?.(ENC.encode('a\n'))
+        return new Promise<RunResult>(() => undefined)
+      }
+    }
+    DEFAULT_COMMAND_LIMITS.python3 = new Limit({ timeoutSeconds: 0.2 })
+    const parser = await getTestParser()
+    const ws = new Workspace(
+      { '/': new RAMVFS() },
+      { mode: MountMode.EXEC, shellParser: parser, runtimes: [new Deaf(), 'workspace'] },
+    )
+    try {
+      for (const line of ['python3 -c x', 'python3 -c x | cat', 'python3 -c x > /out']) {
+        expect((await ws.shell(line)).exitCode).toBe(124)
+      }
+    } finally {
+      delete DEFAULT_COMMAND_LIMITS.python3
       await ws.close()
     }
   }, 10_000)

@@ -186,6 +186,20 @@ async def test_run_output_stops_the_run_when_its_reader_goes_away():
 
 
 @pytest.mark.asyncio
+async def test_run_output_keeps_the_stderr_a_stopped_run_had_written():
+    async def run(output, errors):
+        await errors(b"warn\n")
+        await output(b"a")
+        await asyncio.Event().wait()
+        return RunResult(stdout=b"", stderr=None, exit_code=0)
+
+    stdout, io = run_output(run)
+    assert await anext(stdout) == b"a"
+    await stdout.aclose()
+    assert (io.exit_code, io.stderr) == (141, b"warn\n")
+
+
+@pytest.mark.asyncio
 async def test_run_output_writes_stderr_after_the_stdout_before_it():
     seen: list[tuple[str, bytes]] = []
 

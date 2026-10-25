@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 
 
 def run_output(
-    run: Callable[[OutputFn, OutputFn | None], Awaitable[RunResult]],
+    run: Callable[[OutputFn, OutputFn], Awaitable[RunResult]],
     producer: Producer | None = None,
     errors: OutputFn | None = None,
     stdin: ByteSource | None = None,
@@ -52,17 +52,18 @@ def run_output(
     status, and the stderr the run returned, settle on the result as the
     output ends (``IOResult.output``), stderr after what the result
     already held. A reader that stops early stops the run, which then
-    exits 141, as SIGPIPE leaves a program.
+    exits 141, as SIGPIPE leaves a program, and keeps the stderr it had
+    written.
 
     Args:
-        run (Callable[[OutputFn, OutputFn | None], Awaitable[RunResult]]):
+        run (Callable[[OutputFn, OutputFn], Awaitable[RunResult]]):
             starts the run, given where it writes stdout and where it
-            writes stderr (None keeps stderr in its result).
+            writes stderr.
         producer (Producer | None): what made the output, for a program
             run past the workspace's own commands.
         errors (OutputFn | None): takes stderr as the run writes it,
-            after the stdout written before it has been read; None keeps
-            stderr for the result.
+            after the stdout written before it has been read; None lands
+            it on the result's stderr.
         stdin (ByteSource | None): the run's input, closed once the
             output ends.
     """
@@ -73,6 +74,7 @@ def run_output(
     task: asyncio.Task[None] | None = None
     settled = False
     closing: asyncio.Task[None] | None = None
+    kept: list[bytes] = []
 
     async def ordered(chunk: bytes) -> None:
         # Stdout written before this chunk reaches its reader first, so
@@ -81,17 +83,20 @@ def run_output(
         await pipe.drain()
         await errors(chunk)
 
+    async def keep(chunk: bytes) -> None:
+        kept.append(chunk)
+
     async def execute() -> None:
         nonlocal settled
         try:
             result = await run(
-                pipe.write, ordered if errors is not None else None
+                pipe.write, ordered if errors is not None else keep
             )
+            if result.stderr:
+                kept.append(result.stderr)
             if result.stdout:
                 await pipe.write(result.stdout)
             io.exit_code = result.exit_code
-            if result.stderr:
-                io.stderr = await materialize(io.stderr) + result.stderr
             pipe.end()
         except BaseException as exc:
             pipe.end(exc)
@@ -113,6 +118,8 @@ def run_output(
                 io.exit_code = 141
             except Exception as exc:
                 logger.debug("runtime output ended: %s", exc)
+        if kept:
+            io.stderr = await materialize(io.stderr) + b"".join(kept)
         await close_quietly(stdin)
         state.finish()
 
@@ -128,7 +135,6 @@ def run_output(
         try:
             async for chunk in pipe.stream():
                 yield chunk
-            await task
         finally:
             await close()
 
@@ -152,7 +158,7 @@ def run_interpreter(
             switches.
     """
 
-    async def run(output: OutputFn, errors: OutputFn | None) -> RunResult:
+    async def run(output: OutputFn, errors: OutputFn) -> RunResult:
         try:
             return await runtime.execute(
                 paths, texts, ctx, output=output, errors=errors
@@ -188,7 +194,7 @@ def not_bound(label: str, unavailable: str | None) -> CommandOutput:
 async def runtime_version(
     runtime: LanguageRuntime[Any], env: dict[str, str] | None
 ) -> CommandOutput:
-    async def run(output: OutputFn, errors: OutputFn | None) -> RunResult:
+    async def run(output: OutputFn, errors: OutputFn) -> RunResult:
         return await runtime.version(env or {})
 
     return run_output(run)

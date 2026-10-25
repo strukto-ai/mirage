@@ -61,7 +61,7 @@ async def run_external(
     writes its stderr into ``sink`` as it arrives, where the statement it
     runs in writes (a job's console, a redirect, a compound body), so it
     lands beside its stdout and stays when the program is stopped;
-    without one it comes back in the result.
+    without one it lands on the result, kept as it arrives all the same.
     """
     bindings = routing.bindings
     entry = bindings.get(argv.name, bindings.get(EXTERNAL_COMMANDS))
@@ -96,12 +96,16 @@ async def run_external(
     said: list[bytes] = []
 
     async def to_sink(chunk: bytes) -> None:
-        # The command's record keeps a copy for the policies that read it.
-        said.append(chunk)
         assert sink is not None
         await sink.emit(Channel.STDERR, chunk)
 
-    async def run(output: OutputFn, errors: OutputFn | None) -> RunResult:
+    async def run(output: OutputFn, errors: OutputFn) -> RunResult:
+        async def told(chunk: bytes) -> None:
+            # The command's record keeps a copy for the policies that
+            # read it.
+            said.append(chunk)
+            await errors(chunk)
+
         try:
             result = await run_with_timeout(
                 _execute_program(
@@ -111,7 +115,7 @@ async def run_external(
                     ctx,
                     kind,
                     output,
-                    errors,
+                    told,
                 ),
                 timeout,
                 argv.name,

@@ -43,8 +43,8 @@ import { Channel, type JobConsole } from '../../../shell/console/index.ts'
  * deadline, kept alive until the output is closed. A program writes its
  * stderr into `sink` as it arrives, where the statement it runs in writes (a
  * job's console, a redirect, a compound body), so it lands beside its stdout
- * and stays when the program is stopped; without one it comes back in the
- * result.
+ * and stays when the program is stopped; without one it lands on the result,
+ * kept as it arrives all the same.
  */
 export async function runExternal(
   argv: Argv,
@@ -85,16 +85,15 @@ export async function runExternal(
   }
   const node = new ExecutionNode({ command, exitCode: 0 })
   const said: Uint8Array[] = []
-  // The command's record keeps a copy for the policies that read it.
   const toSink = async (chunk: Uint8Array): Promise<void> => {
-    said.push(chunk)
     await sink?.emit(Channel.STDERR, chunk)
   }
-  const run = async (
-    output: OutputFn,
-    errors: OutputFn | undefined,
-    stop: AbortSignal,
-  ): Promise<RunResult> => {
+  const run = async (output: OutputFn, errors: OutputFn, stop: AbortSignal): Promise<RunResult> => {
+    // The command's record keeps a copy for the policies that read it.
+    const told = async (chunk: Uint8Array): Promise<void> => {
+      said.push(chunk)
+      await errors(chunk)
+    }
     const deadline = new AbortController()
     try {
       const result = await runWithTimeout(
@@ -103,7 +102,7 @@ export async function runExternal(
           argv.name,
           process ? argv.tokens : [],
           { ...ctx, signal: AbortSignal.any([stop, deadline.signal]) },
-          { kind, output, ...(errors !== undefined ? { errors } : {}) },
+          { kind, output, errors: told },
         ),
         timeout,
         argv.name,

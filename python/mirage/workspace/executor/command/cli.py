@@ -240,7 +240,7 @@ async def _script_output(
         ),
     )
 
-    async def run(output: OutputFn, errors: OutputFn | None) -> RunResult:
+    async def run(output: OutputFn, errors: OutputFn) -> RunResult:
         try:
             return await runtime.execute(
                 [], list(ctx.argv), run_ctx, output=output, errors=errors

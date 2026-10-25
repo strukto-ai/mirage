@@ -101,7 +101,7 @@ async def run_whole_line(
         cwd=PathSpec.from_str_path(session.cwd),
     )
 
-    async def run(output: OutputFn, errors: OutputFn | None) -> RunResult:
+    async def run(output: OutputFn, errors: OutputFn) -> RunResult:
         try:
             return await run_with_timeout(
                 runtime.execute(

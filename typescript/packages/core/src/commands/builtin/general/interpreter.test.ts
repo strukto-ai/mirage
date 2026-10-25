@@ -26,9 +26,9 @@ function ran(): Promise<RunResult> {
   return Promise.resolve({ stdout: ENC.encode('out'), stderr: ENC.encode('err'), exitCode: 3 })
 }
 
-async function outThenErr(output: OutputFn, errors: OutputFn | undefined): Promise<RunResult> {
+async function outThenErr(output: OutputFn, errors: OutputFn): Promise<RunResult> {
   await output(ENC.encode('a'))
-  await errors?.(ENC.encode('e'))
+  await errors(ENC.encode('e'))
   return { stdout: new Uint8Array(), stderr: null, exitCode: 0 }
 }
 
@@ -157,6 +157,35 @@ describe('runOutput', () => {
     expect(stopped).toBe(true)
     expect(io.exitCode).toBe(141)
     expect(input.closed).toBe(true)
+  })
+
+  it('keeps the stderr a stopped run had written', async () => {
+    const [stdout, io] = runOutput(async (output, errors, signal) => {
+      await errors(ENC.encode('warn\n'))
+      await output(ENC.encode('a'))
+      await new Promise<void>((resolve) => {
+        signal.addEventListener('abort', () => {
+          resolve()
+        })
+      })
+      return { stdout: new Uint8Array(), stderr: ENC.encode('late\n'), exitCode: 0 }
+    })
+    expect(DEC.decode((await stdout.next()).value as Uint8Array)).toBe('a')
+    await stdout.return()
+    expect([io.exitCode, DEC.decode(await materialize(io.stderr))]).toEqual([141, 'warn\nlate\n'])
+  })
+
+  // A promise cannot be cancelled, so a run that never looks at its stop is
+  // given a grace and then left running.
+  it('lets its reader go when a stopped run ignores the stop', async () => {
+    const [stdout, io] = runOutput(async (output) => {
+      await output(ENC.encode('a'))
+      return new Promise<RunResult>(() => undefined)
+    })
+    expect(DEC.decode((await stdout.next()).value as Uint8Array)).toBe('a')
+    await stdout.return()
+    expect(io.exitCode).toBe(141)
+    expect(io.output?.settled).toBe(true)
   })
 
   it('writes stderr after the stdout before it', async () => {

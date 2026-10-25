@@ -96,11 +96,7 @@ export async function runWholeLine(
     env: envSnapshot(session),
     cwd: PathSpec.fromStrPath(session.cwd),
   }
-  const run = async (
-    output: OutputFn,
-    errors: OutputFn | undefined,
-    stop: AbortSignal,
-  ): Promise<RunResult> => {
+  const run = async (output: OutputFn, errors: OutputFn, stop: AbortSignal): Promise<RunResult> => {
     const deadline = new AbortController()
     try {
       return await runWithTimeout(
@@ -108,7 +104,7 @@ export async function runWholeLine(
           [],
           [],
           { ...ctx, signal: AbortSignal.any([stop, deadline.signal]) },
-          { kind: 'line', output, ...(errors !== undefined ? { errors } : {}) },
+          { kind: 'line', output, errors },
         ),
         timeout,
         name,
