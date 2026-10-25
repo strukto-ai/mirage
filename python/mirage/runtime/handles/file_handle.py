@@ -178,8 +178,19 @@ class FileHandle:
             offset (int): byte offset to read from.
             size (int): byte budget.
         """
+        data, held = self._assemble(offset, size)
+        return self._judged(data, held)
+
+    def _assemble(self, offset: int, size: int) -> tuple[bytes, bool]:
+        """The bytes a read at ``offset`` answers, and whether any of
+        them were held rather than fetched for it.
+
+        Args:
+            offset (int): byte offset to read from.
+            size (int): byte budget.
+        """
         if size <= 0:
-            return b""
+            return b"", False
         stored = b""
         retained = True
         if self.base is not None and (self.cut is None or offset < self.cut):
@@ -198,9 +209,18 @@ class FileHandle:
                     low - start : high - start
                 ]
         result = bytes(out)
-        if self.read_cached is not None and (retained or result != stored):
-            return self.read_cached(result)
-        return result
+        return result, retained or result != stored
+
+    def _judged(self, data: bytes, held: bool) -> bytes:
+        """Held bytes as the read policy in force now answers them.
+
+        Args:
+            data (bytes): what the read assembled.
+            held (bool): whether any of it was held rather than fetched.
+        """
+        if self.read_cached is not None and held:
+            return self.read_cached(data)
+        return data
 
     def read(self, size: int | None = None) -> bytes:
         """Read from the position, advancing it by what was read.
@@ -214,14 +234,15 @@ class FileHandle:
             self.pos += len(chunk)
             return chunk
         out = bytearray()
-        at = self.pos
+        held = False
         while True:
-            chunk = self.pread(at, READ_CHUNK)
+            chunk, kept = self._assemble(self.pos + len(out), READ_CHUNK)
             out += chunk
-            at += len(chunk)
+            held = held or kept
             if len(chunk) < READ_CHUNK:
-                self.pos = at
-                return bytes(out)
+                data = self._judged(bytes(out), held)
+                self.pos += len(data)
+                return data
 
     def pwrite(self, offset: int, data: bytes) -> None:
         """Write bytes at an offset without moving the position.

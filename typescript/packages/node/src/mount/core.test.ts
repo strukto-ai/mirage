@@ -1331,3 +1331,35 @@ it('does not replace a hidden mount root with synthetic attributes', async () =>
     await ws.close()
   }
 })
+
+it('judges the fetched row once when a buffered write sizes it', async () => {
+  // The stat that fetched the row judged it; the size the handle's buffered
+  // write adds is the handle's own, not a second stat.
+  let stats = 0
+  const ws = new Workspace(
+    { '/': new RAMVFS() },
+    {
+      mode: MountMode.WRITE,
+      policies: [
+        {
+          preVfs: (ctx: VfsContext): Action | null => {
+            if (ctx.call.name === 'stat') stats += 1
+            return null
+          },
+        },
+      ],
+    },
+  )
+  try {
+    await ws.vfs.write('/a.txt', new TextEncoder().encode('ab'))
+    const core = new MountCore(ws.vfs)
+    const fd = await core.open('/a.txt', fsConstants.O_WRONLY)
+    await core.write('/a.txt', fd, new TextEncoder().encode('longer'), 0)
+    stats = 0
+    expect((await core.fgetattr('/a.txt', fd)).size).toBe(6)
+    expect(stats).toBe(1)
+    await core.release(fd)
+  } finally {
+    await ws.close()
+  }
+})

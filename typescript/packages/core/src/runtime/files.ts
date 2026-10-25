@@ -37,7 +37,7 @@ import { CallerResolver, workspaceBridge, type WorkspaceBinding } from './bindin
 import { linkView } from '../commands/builtin/utils/links.ts'
 import type { Context } from '../commands/config.ts'
 import { awaitsAs, callsAs, currentCaller } from '../context/session_context.ts'
-import { DEVICE_NUMBERS_KEY, FileStat, FileType, PathSpec, type SetAttrFields } from '../types.ts'
+import { FileStat, FileType, PathSpec, type SetAttrFields } from '../types.ts'
 import { concat } from '../utils/bytes.ts'
 import { entryName } from '../utils/remnants.ts'
 import type { VFSEntry, VFSStat } from './types.ts'
@@ -325,13 +325,10 @@ export class RuntimeFiles {
     return out
   }
 
-  /** Check a logical read of bytes a runtime handle already holds. */
+  /** Judge bytes a descriptor holds as a read of its path, and answer them; nothing is fetched. */
   async readCached(path: string, data: Uint8Array): Promise<Uint8Array> {
-    const out = await this.dispatch('read', path, undefined, undefined, { retained: data })
-    if (!(out instanceof Uint8Array)) {
-      throw new TypeError(`runtime files: read ${path} expected Uint8Array, got ${typeof out}`)
-    }
-    return out
+    await this.dispatch('read', path, undefined, undefined, { retained: data })
+    return data
   }
 
   async write(path: string, bytes: Uint8Array): Promise<void> {
@@ -373,51 +370,30 @@ export class RuntimeFiles {
     return statRow(out as FileStat)
   }
 
-  /** Judge a descriptor's retained metadata without fetching its name. */
+  /**
+   * Judge a descriptor's held row as a stat of its path, and answer it;
+   * nothing is fetched. The policies see the backend's row with the
+   * descriptor's own size, so an unknown size stays unknown.
+   */
   async statCached(path: string, row: VFSStat): Promise<VFSStat> {
-    const source =
-      row.source === undefined
-        ? new FileStat({
-            name: entryName(path),
-            type: row.isDir
-              ? FileType.DIRECTORY
-              : row.isLink
-                ? FileType.SYMLINK
-                : (row.mode & 0o170000) === 0o020000
-                  ? FileType.CHAR_DEVICE
-                  : (row.mode & 0o170000) === 0o010000
-                    ? FileType.FIFO
-                    : FileType.FILE,
-            size: row.size,
-            mode: row.mode,
-            uid: row.uid ?? null,
-            gid: row.gid ?? null,
-            modified: row.mtimeMs === undefined ? null : new Date(row.mtimeMs).toISOString(),
-            atime: row.atimeMs === undefined ? null : new Date(row.atimeMs).toISOString(),
-            extra: { [DEVICE_NUMBERS_KEY]: [(row.rdev ?? 0) >> 8, (row.rdev ?? 0) & 255] },
-          })
-        : new FileStat(row.source).with({
-            ...(row.size !== contentSize(row.source) ? { size: row.size } : {}),
-            ...(row.mode !== posixMode(row.source) ? { mode: row.mode } : {}),
-            ...(row.uid !== (typeof row.source.uid === 'number' ? row.source.uid : undefined)
-              ? { uid: row.uid ?? null }
-              : {}),
-            ...(row.gid !== (typeof row.source.gid === 'number' ? row.source.gid : undefined)
-              ? { gid: row.gid ?? null }
-              : {}),
-            ...((row.mtimeMs ?? null) !== mtimeMs(row.source)
-              ? { modified: row.mtimeMs === undefined ? null : new Date(row.mtimeMs).toISOString() }
-              : {}),
-            ...((row.atimeMs ?? null) !== atimeMs(row.source)
-              ? { atime: row.atimeMs === undefined ? null : new Date(row.atimeMs).toISOString() }
-              : {}),
-          })
-    return statRow(
-      (await this.dispatch('stat', path, undefined, undefined, {
-        retained: source,
-        ...(row.isLink === true ? { nofollow: true } : {}),
-      })) as FileStat,
+    // A row that crossed a worker boundary is a plain object again.
+    let held = new FileStat(
+      row.source ?? {
+        name: entryName(path),
+        type: row.isDir
+          ? FileType.DIRECTORY
+          : row.isLink === true
+            ? FileType.SYMLINK
+            : FileType.FILE,
+        mode: row.mode,
+      },
     )
+    if (row.size !== contentSize(held)) held = held.with({ size: row.size })
+    await this.dispatch('stat', path, undefined, undefined, {
+      retained: held,
+      ...(row.isLink === true ? { nofollow: true } : {}),
+    })
+    return row
   }
 
   /**

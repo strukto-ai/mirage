@@ -3713,111 +3713,6 @@ async def test_a_probe_of_a_hidden_path_answers_as_absent_before_any_policy():
     mount.call.assert_not_called()
 
 
-class _ReadAdmission(Policy):
-    def __init__(self) -> None:
-        self.sealed = False
-        self.seen: list[tuple[str, str]] = []
-
-    async def pre_vfs(self, ctx: VfsContext) -> Action | None:
-        self.seen.append((ctx.call.name, ctx.path.virtual))
-        if self.sealed and ctx.call.name == "read":
-            return Deny("read sealed")
-        return None
-
-
-@pytest.mark.asyncio
-async def test_read_admission_never_fetches_or_records_a_success(monkeypatch):
-    policy = _ReadAdmission()
-    ws = Workspace(
-        {"/data": RAMVFS()}, mode=MountMode.WRITE, policies=[policy]
-    )
-    try:
-        call = AsyncMock(side_effect=AssertionError("unexpected backend call"))
-        monkeypatch.setattr(MountEntry, "call", call)
-        before = list(ws.vfs.records)
-        for name in ("read", "stat", "write"):
-            result, _ = await ws.vfs.dispatch(
-                name, _path("/data/not-created"), admit_only=True
-            )
-            assert result is None
-        result, _ = await ws.vfs.dispatch(
-            "read", _path("/unmounted"), admit_only=True
-        )
-        assert result is None
-        assert policy.seen == [
-            ("read", "/data/not-created"),
-            ("write", "/data/not-created"),
-            ("read", "/unmounted"),
-        ]
-        call.assert_not_awaited()
-        assert ws.vfs.records == before
-    finally:
-        await ws.close()
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("path", ["/data/file", "/unmounted"])
-async def test_read_admission_judges_read_denial_even_when_stat_is_allowed(
-    monkeypatch, path
-):
-    policy = _ReadAdmission()
-    ws = Workspace(
-        {"/data": RAMVFS()}, mode=MountMode.WRITE, policies=[policy]
-    )
-    try:
-        await ws.vfs.write("/data/file", b"secret")
-        policy.sealed = True
-        assert (await ws.vfs.stat("/data/file")).size == 6
-        policy.seen.clear()
-        call = AsyncMock(side_effect=AssertionError("unexpected backend call"))
-        monkeypatch.setattr(MountEntry, "call", call)
-        with pytest.raises(PolicyDenied) as exc:
-            await ws.vfs.dispatch("read", _path(path), admit_only=True)
-        assert exc.value.refusal is not None
-        assert exc.value.refusal.reason == "read sealed"
-        assert policy.seen == [("read", path)]
-        call.assert_not_awaited()
-    finally:
-        await ws.close()
-
-
-@pytest.mark.asyncio
-async def test_read_admission_hides_aliases_and_can_be_restored_without_fetching(
-    monkeypatch,
-):
-    policy = _ReadAdmission()
-    ws = Workspace(
-        {"/data": RAMVFS()}, mode=MountMode.WRITE, policies=[policy]
-    )
-    try:
-        await ws.vfs.symlink("/data/alias", "/data/secret")
-        session = ws.create_session(
-            "reader", profile={"paths": {"hide": ["/data/secret"]}}
-        )
-        policy.seen.clear()
-        call = AsyncMock(side_effect=AssertionError("unexpected backend call"))
-        monkeypatch.setattr(MountEntry, "call", call)
-        token = set_current_session(session)
-        try:
-            for path in ("/data/secret", "/data/alias"):
-                with pytest.raises(FileNotFoundError):
-                    await ws.vfs.dispatch("read", _path(path), admit_only=True)
-            assert policy.seen == []
-            await ws.set_session_profile("reader", {})
-            before = list(ws.vfs.records)
-            result, _ = await ws.vfs.dispatch(
-                "read", _path("/data/alias"), admit_only=True
-            )
-            assert result is None
-            assert policy.seen == [("read", "/data/secret")]
-            assert ws.vfs.records == before
-        finally:
-            reset_current_session(token)
-        call.assert_not_awaited()
-    finally:
-        await ws.close()
-
-
 class _RetainedReadPolicy(Policy):
     def __init__(self) -> None:
         self.stage = ""
@@ -3893,7 +3788,7 @@ async def test_hidden_retained_read_is_refused_before_policy_and_restored(
             "read", _path("/data/f"), retained=b"secret"
         )
         assert result == b"secret"
-        assert [(r.source, r.bytes) for r in ws.vfs.records] == [("ram", 6)]
+        assert ws.vfs.records == []
         call.assert_not_awaited()
     finally:
         reset_current_session(token)
@@ -4031,4 +3926,71 @@ async def test_retained_stat_runs_current_policy_without_backend(
         call.assert_not_awaited()
     finally:
         reset_current_session(token)
+        await ws.close()
+
+
+class _CountedRemoval(RAMVFS):
+    """A RAM mount that counts its one-call tree removals."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.removals = 0
+
+    async def rm_r(self, path: PathSpec) -> Any:
+        self.removals += 1
+        return await super().rm_r(path)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "sealed,removals", [("/other/sealed", 1), ("/d/t/a/f", 0)]
+)
+async def test_a_lines_tree_removal_declines_only_for_a_rule_below_it(
+    sealed, removals
+):
+    # The line's gate answers for the profile's rules, scoped to the
+    # paths a walk reaches: a rule over another mount declines nothing.
+    vfs = _CountedRemoval()
+    mounts = {"/d/": vfs, "/other/": RAMVFS()}
+    with Workspace(mounts, mode=MountMode.WRITE) as ws:
+        ws.create_session(
+            "agent",
+            profile={
+                "commands": {"deny": [{"paths": [sealed], "reason": "sealed"}]}
+            },
+        )
+        await ws.shell("mkdir -p /d/t/a && echo hi > /d/t/a/f")
+        await ws.shell("rm -r /d/t", session_id="agent")
+    assert vfs.removals == removals
+
+
+class _SeesCalls(Policy):
+    """A pre_vfs policy that admits every call and remembers its name."""
+
+    def __init__(self) -> None:
+        self.seen: list[str] = []
+
+    async def pre_vfs(self, ctx: VfsContext) -> Action | None:
+        self.seen.append(ctx.call.name)
+        return None
+
+
+@pytest.mark.asyncio
+async def test_a_pre_vfs_policy_judges_a_shortcut_without_a_whole_read():
+    # pre_vfs judges the shortcut's own call; only a post_vfs policy,
+    # which judges bytes a count or a checksum does not carry, sends it
+    # to a whole read.
+    vfs = _StandInRAM()
+    vfs._store.dirs.add("/")
+    vfs._store.files["/cold"] = b"a\n"
+    policy = _SeesCalls()
+    ws = Workspace({"/m": vfs}, policies=[policy])
+    try:
+        answer, _ = await ws.vfs.dispatch(
+            "first_lines", PathSpec.from_str_path("/m/cold"), n=1
+        )
+        assert answer == b"stand-in\n"
+        assert vfs.asked == ["first_lines"]
+        assert "first_lines" in policy.seen
+    finally:
         await ws.close()

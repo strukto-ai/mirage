@@ -578,7 +578,7 @@ async def test_a_large_file_reads_a_chunk_at_a_time():
     tail = await core.read("/big.bin", 4096, 3 * READ_CHUNK - 2, fh)
     assert tail == b"\x01\x01"
     moved = [r.bytes for r in ws.vfs.records[before:] if r.op == "read"]
-    assert moved == [READ_CHUNK, 4096, 2]
+    assert moved == [READ_CHUNK, 2]
     await core.release(fh)
 
 
@@ -612,8 +612,7 @@ async def test_a_warm_chunk_obeys_session_revocation(kind, code, monkeypatch):
         await ws.set_session_profile("reader", {})
         assert await core.read("/big.bin", 8, 1, fh) == b"x" * 8
         fetch.assert_not_called()
-        reads = [r for r in ws.vfs.records[before:] if r.op == "read"]
-        assert [(r.source, r.bytes) for r in reads] == [("ram", 8)]
+        assert not [r for r in ws.vfs.records[before:] if r.op == "read"]
     finally:
         await core.release(fh)
         await ws.close()
@@ -1286,4 +1285,33 @@ async def test_hidden_mount_root_does_not_fall_back_to_synthetic_attrs():
         await ws.set_session_profile("reader", {})
         assert stat.S_ISDIR((await core.getattr("/")).mode)
     finally:
+        await ws.close()
+
+
+class _CountsStats(Policy):
+    def __init__(self) -> None:
+        self.stats = 0
+
+    async def pre_vfs(self, ctx):
+        if ctx.call.name == "stat":
+            self.stats += 1
+        return None
+
+
+@pytest.mark.asyncio
+async def test_a_buffered_size_judges_the_fetched_row_once():
+    # The stat that fetched the row judged it; the size the handle's
+    # buffered write adds is the handle's own, not a second stat.
+    policy = _CountsStats()
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE, policies=[policy])
+    await ws.vfs.write("/a.txt", b"ab")
+    core = MountCore(ws.vfs)
+    fh = await core.open("/a.txt", os.O_WRONLY)
+    try:
+        await core.write("/a.txt", b"longer", 0, fh)
+        policy.stats = 0
+        assert (await core.fgetattr("/a.txt", fh)).size == 6
+        assert policy.stats == 1
+    finally:
+        await core.release(fh)
         await ws.close()

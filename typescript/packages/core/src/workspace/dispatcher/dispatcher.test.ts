@@ -3867,127 +3867,6 @@ describe('hides answer before any policy', () => {
   })
 })
 
-describe('read admission for held bytes', () => {
-  it('never fetches or records a successful admission', async () => {
-    const seen: [string, string][] = []
-    const policy: Policy = {
-      preVfs: (ctx: VfsContext) => {
-        seen.push([ctx.call.name, ctx.path.virtual])
-        return null
-      },
-    }
-    const ws = new Workspace(
-      { '/data': new RAMVFS() },
-      { mode: MountMode.WRITE, policies: [policy] },
-    )
-    const call = vi
-      .spyOn(MountEntry.prototype, 'callKeyed')
-      .mockRejectedValue(new Error('unexpected backend call'))
-    try {
-      const before = [...ws.vfs.records]
-      for (const name of ['read', 'stat', 'write']) {
-        const [result] = await ws.vfs.dispatch(name, '/data/not-created', [], { admit_only: true })
-        expect(result).toBeNull()
-      }
-      const [result] = await ws.vfs.dispatch('read', '/unmounted', [], { admit_only: true })
-      expect(result).toBeNull()
-      expect(seen).toEqual([
-        ['read', '/data/not-created'],
-        ['write', '/data/not-created'],
-        ['read', '/unmounted'],
-      ])
-      expect(call).not.toHaveBeenCalled()
-      expect(ws.vfs.records).toEqual(before)
-    } finally {
-      call.mockRestore()
-      await ws.close()
-    }
-  })
-
-  it.each(['/data/file', '/unmounted'])(
-    'judges read denial at %s even when stat is allowed',
-    async (path) => {
-      let sealed = false
-      const seen: [string, string][] = []
-      const policy: Policy = {
-        preVfs: (ctx: VfsContext): Action | null => {
-          seen.push([ctx.call.name, ctx.path.virtual])
-          return sealed && ctx.call.name === 'read' ? { kind: 'deny', reason: 'read sealed' } : null
-        },
-      }
-      const ws = new Workspace(
-        { '/data': new RAMVFS() },
-        { mode: MountMode.WRITE, policies: [policy] },
-      )
-      try {
-        await ws.vfs.write('/data/file', ENC.encode('secret'))
-        sealed = true
-        expect((await ws.vfs.stat('/data/file')).size).toBe(6)
-        seen.length = 0
-        const call = vi
-          .spyOn(MountEntry.prototype, 'callKeyed')
-          .mockRejectedValue(new Error('unexpected backend call'))
-        try {
-          await expect(
-            ws.vfs.dispatch('read', path, [], { admit_only: true }),
-          ).rejects.toMatchObject({
-            refusal: { reason: 'read sealed' },
-          })
-          expect(seen).toEqual([['read', path]])
-          expect(call).not.toHaveBeenCalled()
-        } finally {
-          call.mockRestore()
-        }
-      } finally {
-        await ws.close()
-      }
-    },
-  )
-
-  it('hides aliases and restores admission without fetching', async () => {
-    const seen: [string, string][] = []
-    const policy: Policy = {
-      preVfs: (ctx: VfsContext) => {
-        seen.push([ctx.call.name, ctx.path.virtual])
-        return null
-      },
-    }
-    const ws = new Workspace(
-      { '/data': new RAMVFS() },
-      { mode: MountMode.WRITE, policies: [policy] },
-    )
-    try {
-      await ws.vfs.symlink('/data/alias', '/data/secret')
-      const session = ws.createSession('reader', { profile: { paths: { hide: ['/data/secret'] } } })
-      seen.length = 0
-      const call = vi
-        .spyOn(MountEntry.prototype, 'callKeyed')
-        .mockRejectedValue(new Error('unexpected backend call'))
-      try {
-        await runWithSession(session, async () => {
-          for (const path of ['/data/secret', '/data/alias']) {
-            await expect(
-              ws.vfs.dispatch('read', path, [], { admit_only: true }),
-            ).rejects.toMatchObject({ code: 'ENOENT' })
-          }
-          expect(seen).toEqual([])
-          await ws.setSessionProfile('reader', {})
-          const before = [...ws.vfs.records]
-          const [result] = await ws.vfs.dispatch('read', '/data/alias', [], { admit_only: true })
-          expect(result).toBeNull()
-          expect(seen).toEqual([['read', '/data/secret']])
-          expect(ws.vfs.records).toEqual(before)
-        })
-        expect(call).not.toHaveBeenCalled()
-      } finally {
-        call.mockRestore()
-      }
-    } finally {
-      await ws.close()
-    }
-  })
-})
-
 describe('retained reads use the shared policy boundary', () => {
   it.each(['/data/file', '/unmounted'])(
     'checks pre and post policy at %s without fetching',
@@ -4063,7 +3942,7 @@ describe('retained reads use the shared policy boundary', () => {
         expect(
           (await ws.vfs.dispatch('read', '/data/f', [], { retained: ENC.encode('secret') }))[0],
         ).toEqual(ENC.encode('secret'))
-        expect(ws.vfs.records.map((r) => [r.source, r.bytes])).toEqual([['ram', 6]])
+        expect(ws.vfs.records).toEqual([])
       })
       expect(call).not.toHaveBeenCalled()
     } finally {
@@ -4192,3 +4071,60 @@ it.each(['/data/file', '/unmounted'])(
     }
   },
 )
+
+class CountedRemoval extends RAMVFS {
+  removals = 0
+
+  override rmR(path: PathSpec): Promise<void> {
+    this.removals += 1
+    return super.rmR(path)
+  }
+}
+
+it.each([
+  ['/other/sealed', 1],
+  ['/d/t/a/f', 0],
+])("declines a line's tree removal only for a rule below it (%s)", async (sealed, removals) => {
+  // The line's gate answers for the profile's rules, scoped to the paths a
+  // walk reaches: a rule over another mount declines nothing.
+  const parser = await getTestParser()
+  const vfs = new CountedRemoval()
+  const ws = new Workspace(
+    { '/d': vfs, '/other': new RAMVFS() },
+    { mode: MountMode.WRITE, shellParserFactory: () => Promise.resolve(parser) },
+  )
+  try {
+    ws.createSession('agent', {
+      profile: { commands: { deny: [{ paths: [sealed], reason: 'sealed' }] } },
+    })
+    await ws.shell('mkdir -p /d/t/a && echo hi > /d/t/a/f')
+    await ws.shell('rm -r /d/t', { sessionId: 'agent' })
+    expect(vfs.removals).toBe(removals)
+  } finally {
+    await ws.close()
+  }
+})
+
+it('has a preVfs policy judge a shortcut without a whole read', async () => {
+  // preVfs judges the shortcut's own call; only a postVfs policy, which judges
+  // bytes a count or a checksum does not carry, sends it to a whole read.
+  const vfs = new StandInRAM()
+  vfs.store.dirs.add('/')
+  vfs.store.files.set('/cold', ENC.encode('a\n'))
+  const seen: string[] = []
+  const policy: Policy = {
+    preVfs(ctx) {
+      seen.push(ctx.call.name)
+      return null
+    },
+  }
+  const ws = new Workspace({ '/m': vfs }, { policies: [policy] })
+  try {
+    const [answer] = await ws.vfs.dispatch('first_lines', '/m/cold', [1])
+    expect(answer).toEqual(ENC.encode('stand-in\n'))
+    expect(vfs.asked).toEqual(['first_lines'])
+    expect(seen).toContain('first_lines')
+  } finally {
+    await ws.close()
+  }
+})

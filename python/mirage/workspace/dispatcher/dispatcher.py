@@ -988,7 +988,6 @@ class Dispatcher:
             if (
                 name == "read"
                 and not kwargs.get("warm")
-                and not kwargs.get("admit_only")
                 and "retained" not in kwargs
             ):
                 return await self._read_refusing_dirs(
@@ -1155,7 +1154,7 @@ class Dispatcher:
         # read of what the backend holds now, past the file cache, a read
         # of what the file cache alone holds, and a stat of what the
         # backend holds now, past the mount's index.
-        admit_only = name in {"read", "write", "stat"} and bool(
+        admit_only = name in {"write", "stat"} and bool(
             kwargs.pop("admit_only", False)
         )
         has_retained = "retained" in kwargs
@@ -1209,9 +1208,11 @@ class Dispatcher:
         await self._refuse_rename(call)
         if report is not None:
             report.path = call.path.virtual
-        if admit_only or retained is not None:
+        if has_retained:
+            return await self._judge_held(call, retained), IOResult()
+        if admit_only:
             self._follow(call)
-            if name == "stat" and not has_retained:
+            if name == "stat":
                 serving = self._namespace.try_mount_for(call.path.virtual)
                 if report is not None and serving is not None:
                     key = mount_key(
@@ -1221,32 +1222,9 @@ class Dispatcher:
                 _memory_answered(report)
                 return None, IOResult()
             mount = self._namespace.try_mount_for(call.path.virtual)
-            if name in {"read", "stat"}:
-                read_mark = (
-                    declared(type(mount.vfs), name)
-                    if mount is not None
-                    else None
-                ) or CALLS[name]
-                if mount is None:
-                    boundary = self._boundary(None, caller)
-                    await boundary.admit(read_mark, call.path, False)
-                else:
-                    boundary = await self._admit(call, mount, read_mark)
-                if retained is not None:
-                    _memory_answered(
-                        report,
-                        len(retained) if isinstance(retained, bytes) else 0,
-                    )
-                    return (
-                        await boundary.complete(
-                            read_mark, call.path, call.write, retained
-                        ),
-                        IOResult(),
-                    )
-            else:
-                if mount is None:
-                    raise enoent(call.path.virtual)
-                await self._admit(call, mount, CALLS["write"])
+            if mount is None:
+                raise enoent(call.path.virtual)
+            await self._admit(call, mount, CALLS["write"])
             _memory_answered(report)
             return None, IOResult()
         if self._table_answers(name, call.path.virtual, kwargs):
@@ -1280,15 +1258,16 @@ class Dispatcher:
             mount is None or not _guards_walks(mount.vfs)
         ):
             return None, IOResult()
-        # Content shortcuts give way to checked reads when file hooks
-        # need the canonical call and bytes, whether cold or cached.
-        # Without hooks, whole-file shortcuts still use a held copy.
-        policies = self._namespace.registry.policies
+        # The cache stage answers first where the file cache decides: a
+        # call standing in for a read gives way to the read for a file it
+        # holds, which is judged, and a warm read answers whether it holds
+        # one, judged as the read it stands in for. A content shortcut
+        # also gives way when a post_vfs policy would judge its answer:
+        # a count or a checksum carries none of the bytes it would judge.
         if (
             name in READ_SHORTCUT_OPS
-            and (
-                await policies.wants_for("pre_vfs", _session_id(caller))
-                or await policies.wants_for("post_vfs", _session_id(caller))
+            and await self._namespace.registry.policies.wants_for(
+                "post_vfs", _session_id(caller)
             )
         ) or (name in READ_STAND_IN_OPS and await self._held(call, mount)):
             _memory_answered(report)
@@ -2004,9 +1983,13 @@ class Dispatcher:
             and any(call.rule_gate.scopes(p.virtual) for p in paths)
         ):
             return True
+        # Inside a line the gate above answered for the profile's path
+        # rules, scoped to these paths; only a coded hook is left to ask.
         policies = self._namespace.registry.policies
         return await policies.wants_for(
-            "pre_vfs", _session_id(call.caller)
+            "pre_vfs",
+            _session_id(call.caller),
+            coded_only=call.rule_gate is not None,
         ) or (
             (call.name in COPY_OPS or call.name == "files_containing")
             and await policies.wants_for("post_vfs", _session_id(call.caller))
@@ -2079,6 +2062,36 @@ class Dispatcher:
         """
         manager = mount.cache_manager if mount is not None else None
         return manager is not None and await manager.is_cached(call.path)
+
+    async def _judge_held(
+        self, call: _Call, held: bytes | FileStat
+    ) -> bytes | FileStat:
+        """Judge bytes or a row its caller already holds, as a cache hit.
+
+        A runtime descriptor and a kernel mount's handle keep what they
+        fetched; each later read or stat of it meets the hides, the rules
+        and the file policies in force now, through the boundary a fetch
+        and the file cache answer through, and nothing is fetched. The
+        bytes were recorded when they were fetched, so this is not.
+
+        Args:
+            call (_Call): the walked read or stat.
+            held (bytes | FileStat): what the caller would answer with.
+        """
+        self._follow(call)
+        mount = self._namespace.try_mount_for(call.path.virtual)
+        mark = (
+            declared(type(mount.vfs), call.name) if mount is not None else None
+        ) or CALLS[call.name]
+        if mount is None:
+            boundary = self._boundary(None, call.caller)
+            await boundary.admit(mark, call.path, False)
+        else:
+            boundary = await self._admit(call, mount, mark)
+        _memory_answered(
+            call.report, len(held) if isinstance(held, bytes) else 0
+        )
+        return await boundary.complete(mark, call.path, call.write, held)
 
     async def _serve_cached(
         self,

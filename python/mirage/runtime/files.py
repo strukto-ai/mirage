@@ -35,8 +35,7 @@ from mirage.runtime.errors import CrossMountError
 from mirage.runtime.handles import FlushStep, Kept
 from mirage.runtime.resolver import MountResolver
 from mirage.runtime.types import DispatchFn, VFSEntry, VFSStat
-from mirage.types import DEVICE_NUMBERS_KEY, FileStat, FileType, PathSpec
-from mirage.utils.dates import timestamp_iso
+from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.path import CycleError, norm, resolve_path
 from mirage.utils.remnants import entry_name
 from mirage.utils.stat_view import (
@@ -401,14 +400,15 @@ class RuntimeFiles:
         return bytes(data)
 
     def read_cached(self, path: str, data: bytes) -> bytes:
-        """Judge bytes retained by a runtime through the ordinary read policy.
+        """Judge bytes a descriptor holds as a read of its path, and
+        answer them; nothing is fetched.
 
         Args:
             path (str): the file's current virtual path.
             data (bytes): the logical bytes this read would return.
         """
-        result = self.call("read", path, retained=data)
-        return result.encode() if isinstance(result, str) else bytes(result)
+        self.call("read", path, retained=data)
+        return data
 
     def write(self, path: str, data: bytes) -> None:
         self.call("write", path, data=data)
@@ -444,79 +444,27 @@ class RuntimeFiles:
         return stat_row(self.call("stat", path, nofollow=nofollow))
 
     def stat_cached(self, path: str, row: VFSStat) -> VFSStat:
-        """Judge a descriptor's retained metadata without fetching its name.
+        """Judge a descriptor's held row as a stat of its path, and
+        answer it; nothing is fetched. The policies see the backend's row
+        with the descriptor's own size, so an unknown size stays unknown.
 
         Args:
             path (str): the descriptor's current virtual path.
-            row (VFSStat): its logical metadata, including buffered changes.
+            row (VFSStat): its logical metadata, including buffered writes.
         """
-        if row.source is not None:
-            source = row.source
-            updates: dict[str, Any] = {}
-            for field, value, old in (
-                ("size", row.size, content_size(source)),
-                ("mode", row.mode, posix_mode(source)),
-                (
-                    "uid",
-                    row.uid,
-                    source.uid if isinstance(source.uid, int) else None,
-                ),
-                (
-                    "gid",
-                    row.gid,
-                    source.gid if isinstance(source.gid, int) else None,
-                ),
-            ):
-                if value != old:
-                    updates[field] = value
-            if row.mtime_ns != mtime_ns(source):
-                updates["modified"] = timestamp_iso(
-                    None
-                    if row.mtime_ns is None
-                    else row.mtime_ns / 1_000_000_000
-                )
-            if row.atime_ns != atime_ns(source):
-                updates["atime"] = timestamp_iso(
-                    None
-                    if row.atime_ns is None
-                    else row.atime_ns / 1_000_000_000
-                )
-            if updates:
-                source = source.model_copy(update=updates)
-        else:
-            kind = (
-                FileType.DIRECTORY
-                if row.is_dir
-                else FileType.SYMLINK
-                if row.is_link
-                else FileType.CHAR_DEVICE
-                if row.mode & 0o170000 == 0o020000
-                else FileType.FIFO
-                if row.mode & 0o170000 == 0o010000
-                else FileType.FILE
-            )
-            source = FileStat(
-                name=entry_name(path),
-                type=kind,
-                size=row.size,
-                mode=row.mode,
-                uid=row.uid,
-                gid=row.gid,
-                modified=timestamp_iso(
-                    None
-                    if row.mtime_ns is None
-                    else row.mtime_ns / 1_000_000_000
-                ),
-                atime=timestamp_iso(
-                    None
-                    if row.atime_ns is None
-                    else row.atime_ns / 1_000_000_000
-                ),
-                extra={DEVICE_NUMBERS_KEY: [row.rdev >> 8, row.rdev & 255]},
-            )
-        return stat_row(
-            self.call("stat", path, retained=source, nofollow=row.is_link)
+        held = row.source or FileStat(
+            name=entry_name(path),
+            type=FileType.DIRECTORY
+            if row.is_dir
+            else FileType.SYMLINK
+            if row.is_link
+            else FileType.FILE,
+            mode=row.mode,
         )
+        if row.size != content_size(held):
+            held = held.model_copy(update={"size": row.size})
+        self.call("stat", path, retained=held, nofollow=row.is_link)
+        return row
 
     def stat_or_none(
         self, path: str, *, nofollow: bool = False

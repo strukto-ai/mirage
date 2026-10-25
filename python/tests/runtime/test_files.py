@@ -682,7 +682,7 @@ def test_read_cached_dispatches_the_retained_logical_bytes():
         return b"checked", None
 
     files = RuntimeFiles(dispatch, None)
-    assert files.read_cached("/data/f", b"held") == b"checked"
+    assert files.read_cached("/data/f", b"held") == b"held"
     assert calls == [("read", "/data/f", {"retained": b"held"})]
 
 
@@ -711,8 +711,8 @@ def test_stat_cached_preserves_unknown_source_and_checks_logical_changes():
     checked = files.stat_cached(
         "/data/unknown", replace(projected, size=7, mode=0o100600)
     )
-    assert checked.size == 7
-    assert seen[-1].mode == 0o100600
+    assert (checked.size, checked.mode) == (7, 0o100600)
+    assert seen[-1].size == 7
     assert seen[-1].uid == "owner"
     assert seen[-1].modified == row.modified
     assert seen[-1].extra == row.extra

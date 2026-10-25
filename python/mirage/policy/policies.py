@@ -697,7 +697,7 @@ class Policies:
         return method in self._wanted
 
     async def wants_for(
-        self, method: str, session_id: str, rules_only: bool = False
+        self, method: str, session_id: str, coded_only: bool = False
     ) -> bool:
         """True when some policy will speak at ``method`` for this session.
 
@@ -712,12 +712,12 @@ class Policies:
         Args:
             method (str): method name (pre_command, pre_vfs, pre_session).
             session_id (str): the session, empty when none is bound.
-            rules_only (bool): count the profile's rules alone, as
-                ``_chain`` takes it.
+            coded_only (bool): leave the profile's rules out, for a
+                caller whose line's gate already answers for them.
         """
         base = getattr(Policy, method)
         for policy in (*self._policies, *filter(None, [self._placement])):
-            if rules_only and not isinstance(policy, PermissionsPolicy):
+            if coded_only and isinstance(policy, PermissionsPolicy):
                 continue
             if getattr(type(policy), method) is base:
                 continue

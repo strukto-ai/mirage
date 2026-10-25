@@ -523,12 +523,12 @@ export class Policies {
    * is not one of its. For a seam that pays ahead for a method rather than
    * gating on it: the secret fill drops its masks under a session-write
    * gate, and a profile's policy at that entry point is one profile's, not
-   * every session's. `rulesOnly` counts the profile's rules alone, as
-   * `chain` takes it.
+   * every session's. `codedOnly` leaves the profile's rules out, for a
+   * caller whose line's gate already answers for them.
    */
-  async wantsFor(method: Method, sessionId: string, rulesOnly = false): Promise<boolean> {
+  async wantsFor(method: Method, sessionId: string, codedOnly = false): Promise<boolean> {
     const policies = this.placement === null ? this.policies : [...this.policies, this.placement]
-    for (const policy of policies.filter((p) => p instanceof PermissionsPolicy || !rulesOnly)) {
+    for (const policy of policies.filter((p) => !(codedOnly && p instanceof PermissionsPolicy))) {
       if (policy[method] === undefined) continue
       if (!isSessionScoped(policy)) return true
       if (await policy.wantsFor(method, sessionId)) return true

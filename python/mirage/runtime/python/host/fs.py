@@ -1170,13 +1170,12 @@ class HostFs:
 
     def fstat(self, fd: int) -> _real_os.stat_result:
         desc = self._descriptors[fd]
-        retained = desc.kept is not None and desc.stat is not None
-        st = desc.stat if retained else self._adapter.stat(desc.path)
-        assert st is not None
-        if desc.handle is not None and desc.handle.size != st.size:
+        held = desc.stat if desc.kept is not None else None
+        st = self._adapter.stat(desc.path) if held is None else held
+        if desc.handle is not None:
             st = dataclasses.replace(st, size=desc.handle.size)
-            retained = True
-        if retained:
+        # A fetched row was judged by its stat; a held one is judged here.
+        if held is not None:
             st = self._adapter.stat_cached(desc.path, st)
         return self._stat_of(desc.opened, st, desc.kept is not None)
 

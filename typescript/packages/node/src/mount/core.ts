@@ -406,10 +406,9 @@ export class MountCore {
       for (const [offset, data] of ctx.writeBuf) end = Math.max(end, offset + data.byteLength)
       size = end
     }
-    if (size !== null && size !== s.size) {
-      s = s.with({ size })
-      retained = true
-    }
+    if (size !== null && size !== s.size) s = s.with({ size })
+    // A row the stat above fetched was judged there; a held one is judged
+    // here, with the size the handle answers.
     if (retained) s = await this.statCached(path, s)
     return this.attrs(s)
   }

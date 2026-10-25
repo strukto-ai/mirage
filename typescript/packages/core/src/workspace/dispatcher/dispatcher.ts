@@ -804,8 +804,7 @@ export class Dispatcher {
     // what the backend holds now, past the file cache, a read of what the file
     // cache alone holds, and a stat of what the backend holds now, past the
     // mount's index.
-    const admitOnly =
-      (name === 'read' || name === 'write' || name === 'stat') && kwargs?.admit_only === true
+    const admitOnly = (name === 'write' || name === 'stat') && kwargs?.admit_only === true
     if (admitOnly) {
       kwargs = { ...kwargs }
       delete kwargs.admit_only
@@ -881,9 +880,12 @@ export class Dispatcher {
     call.fresh = name === 'stat' && fresh === true
     await this.refuseRename(call)
     if (report) report.path = call.path.virtual
-    if (admitOnly || retained !== undefined) {
+    if (retained !== undefined) {
+      return [await this.judgeHeld(call, retained as Uint8Array | FileStat), new IOResult()]
+    }
+    if (admitOnly) {
       this.follow(call)
-      if (name === 'stat' && retained === undefined) {
+      if (name === 'stat') {
         const serving = this.namespace.tryMountFor(call.path.virtual)
         if (report && serving !== null) {
           report.store = `${String(this.storeId(serving.vfs))}:${mountKey(call.path.virtual, rstripSlash(serving.prefix))}`
@@ -892,25 +894,10 @@ export class Dispatcher {
         return [null, new IOResult()]
       }
       const owner = this.namespace.tryMountFor(call.path.virtual)
-      if (name === 'read' || name === 'stat') {
-        const mark =
-          (owner === null ? undefined : declared(owner.vfs.constructor, name)) ?? CALLS.get(name)
-        if (mark === undefined) throw new Error(`missing ${name} call definition`)
-        const boundary = this.boundary(owner)
-        await this.admit(call, boundary, mark)
-        if (retained !== undefined) {
-          memoryAnswered(report, retained instanceof Uint8Array ? retained.byteLength : 0)
-          return [
-            await boundary.complete(mark, call.path, call.write, retained, call.issuer),
-            new IOResult(),
-          ]
-        }
-      } else {
-        if (owner === null) throw enoent(call.path)
-        const writeCall = CALLS.get('write')
-        if (writeCall === undefined) throw new Error('missing write call definition')
-        await this.admit(call, this.boundary(owner), writeCall)
-      }
+      if (owner === null) throw enoent(call.path)
+      const writeCall = CALLS.get('write')
+      if (writeCall === undefined) throw new Error('missing write call definition')
+      await this.admit(call, this.boundary(owner), writeCall)
       memoryAnswered(report)
       return [null, new IOResult()]
     }
@@ -940,13 +927,15 @@ export class Dispatcher {
     if (name === 'before_full_walk' && (owner === null || !guardsWalks(owner.vfs))) {
       return [null, new IOResult()]
     }
-    // Content shortcuts give way to checked reads when file hooks need
-    // the canonical call and bytes, whether cold or cached. Without hooks,
-    // whole-file shortcuts still use a held copy.
+    // The cache stage answers first where the file cache decides: a call
+    // standing in for a read gives way to the read for a file it holds,
+    // which is judged, and a warm read answers whether it holds one, judged
+    // as the read it stands in for. A content shortcut also gives way when a
+    // postVfs policy would judge its answer: a count or a checksum carries
+    // none of the bytes it would judge.
     if (
       (READ_SHORTCUT_OPS.has(name) &&
-        ((await this.policies.wantsFor('preVfs', this.sessionId())) ||
-          (await this.policies.wantsFor('postVfs', this.sessionId())))) ||
+        (await this.policies.wantsFor('postVfs', this.sessionId()))) ||
       (READ_STAND_IN_OPS.has(name) && (await this.held(call, owner)))
     ) {
       memoryAnswered(report)
@@ -1752,8 +1741,10 @@ export class Dispatcher {
       paths.some((p) => call.ruleGate?.scopes(p.virtual) === true)
     )
       return true
+    // Inside a line the gate above answered for the profile's path rules,
+    // scoped to these paths; only a coded hook is left to ask.
     return (
-      (await this.policies.wantsFor('preVfs', this.sessionId())) ||
+      (await this.policies.wantsFor('preVfs', this.sessionId(), call.ruleGate !== null)) ||
       ((COPY_OPS.has(call.name) || call.name === 'files_containing') &&
         (await this.policies.wantsFor('postVfs', this.sessionId())))
     )
@@ -1896,6 +1887,27 @@ export class Dispatcher {
    * time, since a renderer can land while the read runs. */
   private rendersRead(call: Call, mount: MountEntry): boolean {
     return mount.renders(readType(call))
+  }
+
+  /**
+   * Judge bytes or a row its caller already holds, as a cache hit. A runtime
+   * descriptor and a kernel mount's handle keep what they fetched; each later
+   * read or stat of it meets the hides, the rules and the file policies in
+   * force now, through the boundary a fetch and the file cache answer
+   * through, and nothing is fetched. The bytes were recorded when they were
+   * fetched, so this is not. Mirrors Python's Dispatcher._judge_held.
+   */
+  private async judgeHeld(call: Call, held: Uint8Array | FileStat): Promise<unknown> {
+    this.follow(call)
+    const owner = this.namespace.tryMountFor(call.path.virtual)
+    const mark =
+      (owner === null ? undefined : declared(owner.vfs.constructor, call.name)) ??
+      CALLS.get(call.name)
+    if (mark === undefined) throw new Error(`missing ${call.name} call definition`)
+    const boundary = this.boundary(owner)
+    await this.admit(call, boundary, mark)
+    memoryAnswered(call.report, held instanceof Uint8Array ? held.byteLength : 0)
+    return boundary.complete(mark, call.path, call.write, held, call.issuer)
   }
 
   /**

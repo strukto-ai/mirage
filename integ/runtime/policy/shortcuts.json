@@ -31,6 +31,44 @@
       ]
     },
     {
+      "id": "head_pre_hook_allowing_keeps_native_shortcut",
+      "world": {
+        "track_reads": true,
+        "mounts": {
+          "/data": {
+            "vfs": "shortcuts",
+            "files": {
+              "secret.txt": "TOPSECRET plans\nsecond\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "add_policies": [
+            {
+              "name": "seal_reads",
+              "suffix": "other.txt"
+            }
+          ]
+        },
+        {
+          "command": "head -n 1 /data/secret.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "TOPSECRET plans\n",
+            "stderr": "",
+            "native_calls": [
+              "first_lines"
+            ],
+            "backend_reads": {
+              "/data/secret.txt": 0
+            }
+          }
+        }
+      ]
+    },
+    {
       "id": "head_pre_hook_cold",
       "world": {
         "track_reads": true,

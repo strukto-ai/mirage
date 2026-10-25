@@ -462,7 +462,8 @@ class MountCore:
             size = max(stored, *(o + len(d) for o, d in ctx.write_buf))
         if size is not None and size != s.size:
             s = s.model_copy(update={"size": size})
-            retained = True
+        # A row the stat above fetched was judged there; a held one is
+        # judged here, with the size the handle answers.
         if retained:
             s = await self._stat_cached(path, s)
         return self.attrs(s)

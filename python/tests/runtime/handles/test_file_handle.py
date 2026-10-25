@@ -321,3 +321,24 @@ def test_read_policy_judges_the_logical_bytes_with_local_writes():
     h.seek(0, 0)
     assert h.read(3) == b"new"
     assert checked[-1] == b"new"
+
+
+def test_a_read_to_the_end_judges_what_it_held_once():
+    checked = []
+
+    def read_cached(data):
+        checked.append(len(data))
+        return data
+
+    size = 3 * READ_CHUNK
+    h = FileHandle.opened(
+        "/f",
+        None,
+        size=0,
+        writable=True,
+        append=False,
+        read_cached=read_cached,
+    )
+    h.pwrite(0, b"x" * size)
+    assert len(h.read()) == size
+    assert checked == [size]
