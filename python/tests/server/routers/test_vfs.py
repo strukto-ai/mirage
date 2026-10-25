@@ -107,7 +107,13 @@ async def test_custom_functions_and_streams_keep_the_session_gate():
             )
             assert reply.status_code == 404, reply.text
             assert backend.calls == 1
-            for reserved in ("session_id", "report", "admit_only", "stream"):
+            for reserved in (
+                "session_id",
+                "report",
+                "admit_only",
+                "retained",
+                "stream",
+            ):
                 reply = await client.post(
                     base + "/peek?session_id=agent",
                     json={

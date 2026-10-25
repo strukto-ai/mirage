@@ -162,7 +162,7 @@ export class Admitted implements EntryGate {
 
   // Whether anything at or under this path could be refused for the
   // running command: a rule in force at any path its scope could cover.
-  // No coded preVfs policy judges a command's own I/O.
+  // The dispatcher checks coded file policies separately.
   scopes(virtual: string): boolean {
     return ioReach(this.rules, this.ctx.tokens ?? [], virtual)
   }

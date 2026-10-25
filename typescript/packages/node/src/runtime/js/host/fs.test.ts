@@ -26,7 +26,7 @@ import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join, relative } from 'node:path'
 import { promisify } from 'node:util'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { parseSessionProfile } from '@struktoai/mirage-core/policy/profile'
 import { render } from '@struktoai/mirage-core/test-utils'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
@@ -362,6 +362,62 @@ describe('patchNodeFs — descriptors', () => {
     expect(buffer.toString('utf8', 0, bytesRead)).toBe('ab')
     await handle.close()
     await ws.close()
+  })
+
+  describe.each([false, true])('retained descriptor (detached=%s)', (detached) => {
+    it.each(['hide', 'deny', 'pre', 'post'] as const)(
+      'rechecks %s without consuming bytes or rereading the backend',
+      async (restriction) => {
+        const path = '/data/retained.txt'
+        const vfs = new RAMVFS()
+        const ws = new Workspace({ '/data': vfs }, { mode: MountMode.WRITE })
+        await ws.vfs.write(path, 'abcdef')
+        const read = vi.spyOn(vfs, 'read')
+        let refuse = false
+        ws.policies.add({
+          preVfs: (ctx) =>
+            restriction === 'pre' && refuse && ctx.call.name === 'read'
+              ? { kind: 'deny', reason: 'sealed' }
+              : null,
+          postVfs: (ctx) =>
+            restriction === 'post' && refuse && ctx.call.name === 'read'
+              ? { kind: 'deny', reason: 'sealed' }
+              : null,
+        })
+        restore = patchNodeFs(ws)
+        const fs = requireCjs('fs') as Fs
+        const handle = await fs.promises.open(path, 'r')
+        try {
+          const first = await handle.read(Buffer.alloc(2), 0, 2, null)
+          expect(first.buffer.toString()).toBe('ab')
+          if (detached) await fs.promises.unlink(path)
+          const fetched = read.mock.calls.length
+          if (restriction === 'hide' || restriction === 'deny') {
+            await ws.setSessionProfile(
+              ws.defaultSessionId,
+              restriction === 'hide'
+                ? { paths: { hide: [path] } }
+                : { commands: { deny: [{ reason: 'sealed', paths: [path] }] } },
+            )
+          }
+          refuse = true
+          const denied = Buffer.alloc(2, 90)
+          await expect(handle.read(denied, 0, 2, null)).rejects.toMatchObject({
+            code: restriction === 'hide' ? 'ENOENT' : 'EACCES',
+          })
+          expect(denied.toString()).toBe('ZZ')
+          expect(read).toHaveBeenCalledTimes(fetched)
+          refuse = false
+          await ws.setSessionProfile(ws.defaultSessionId, {})
+          const next = await handle.read(Buffer.alloc(2), 0, 2, null)
+          expect(next.buffer.toString()).toBe('cd')
+          expect(read).toHaveBeenCalledTimes(fetched)
+        } finally {
+          await handle.close()
+          await ws.close()
+        }
+      },
+    )
   })
 
   it('lets an open file go under a policy that refuses reads', async () => {

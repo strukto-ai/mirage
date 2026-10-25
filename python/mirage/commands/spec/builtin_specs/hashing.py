@@ -118,11 +118,12 @@ SPECS: dict[str, CommandSpec] = {
     ),
     "iconv": CommandSpec(
         arguments=(
-            Argument("-f"),
-            Argument("-t"),
+            Argument("-f", "--from-code"),
+            Argument("-t", "--to-code"),
             Argument("-c", action="store_true"),
-            Argument("-o", type="path"),
+            Argument("-o", "--output", type="path"),
             Argument("-l", "--list", action="store_true"),
+            Argument("-s", "--silent", action="store_true"),
             PATHS_OPERAND,
         )
     ),

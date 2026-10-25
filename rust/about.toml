@@ -15,3 +15,23 @@ ignore-dev-dependencies = true
 
 [private]
 ignore = true
+
+# encoding_rs's src/data.rs repeats the WHATWG notice above its tables;
+# read the notices from the crate's license files alone.
+[encoding_rs.clarify]
+license = "(Apache-2.0 OR MIT) AND BSD-3-Clause"
+
+[[encoding_rs.clarify.files]]
+path = "LICENSE-WHATWG"
+license = "BSD-3-Clause"
+checksum = "838118388fe5c2e7f1dbbaeed13e1c7f3ebf88be91319c7c1d77c18e987d1a50"
+
+[[encoding_rs.clarify.files]]
+path = "LICENSE-APACHE"
+license = "Apache-2.0"
+checksum = "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+
+[[encoding_rs.clarify.files]]
+path = "LICENSE-MIT"
+license = "MIT"
+checksum = "3fa4ca83dcc9237839b1bdeb2e6d16bdfb5ec0c5ce42b24694d8bbf0dcbef72c"

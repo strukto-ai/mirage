@@ -198,7 +198,12 @@ async function listProjects(
 ): Promise<Listed> {
   const teamId = match.slots.team_id ?? ''
   const projects = await listTeamProjects(accessor.transport, teamId, match.limit)
-  const teamIssues = await listTeamIssues(accessor.transport, teamId)
+  const teamIssues = await listTeamIssues(
+    accessor.transport,
+    teamId,
+    undefined,
+    projects.map((project) => pickString(project, 'id')),
+  )
   const rows = projects.map((project) => {
     const projectId = pickString(project, 'id')
     const projectIssues: NormalizedProjectIssue[] = []

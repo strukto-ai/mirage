@@ -23,7 +23,7 @@ import {
 } from '@struktoai/mirage-core/runtime/handles/index'
 import { READ_CHUNK } from '@struktoai/mirage-core/runtime/handles/constants'
 import { classify } from '@struktoai/mirage-core/errors/index'
-import { FileStat, FileType, LIVE_KEY } from '@struktoai/mirage-core/types'
+import { FileStat, FileType, LIVE_KEY, PathSpec } from '@struktoai/mirage-core/types'
 import type { SetAttrFields } from '@struktoai/mirage-core/types'
 import { posixNormpath } from '@struktoai/mirage-core/utils/path'
 import { rstripSlash } from '@struktoai/mirage-core/utils/slash'
@@ -125,6 +125,26 @@ export class MountCore {
    */
   private op<T>(fn: () => Promise<T>): Promise<T> {
     return this.session === null ? fn() : runWithSession(this.session, fn)
+  }
+
+  /** Judge retained metadata through the stat policy boundary. */
+  private async statCached(path: string, row: FileStat): Promise<FileStat> {
+    const [result] = await this.op(() =>
+      this.files.dispatch('stat', PathSpec.fromStrPath(this.resolve(path), undefined, '/'), [], {
+        retained: row,
+      }),
+    )
+    return result as FileStat
+  }
+
+  /** Judge retained bytes through the same read boundary as a fetch. */
+  private async readCached(path: string, data: Uint8Array): Promise<Uint8Array> {
+    const [result] = await this.op(() =>
+      this.files.dispatch('read', PathSpec.fromStrPath(this.resolve(path), undefined, '/'), [], {
+        retained: data,
+      }),
+    )
+    return result as Uint8Array
   }
 
   resolve(path: string): string {
@@ -358,15 +378,18 @@ export class MountCore {
     }
     const virtual = this.resolve(path)
     let s: FileStat
+    let retained = false
     if (ctx?.detached !== undefined) {
       // Its name is gone: it stats by the row its file had then.
+      retained = true
       s = ctx.detached
     } else {
       try {
         s = await this.op(() => this.files.stat(virtual, undefined, { nofollow: !follow }))
       } catch (err) {
-        // An open descriptor keeps the bytes it had after an unlink.
         if (size === null || classify(err) !== 'ENOENT') throw err
+        // A hide is not an unlink: held metadata still meets the walk.
+        retained = true
         s = new FileStat({ name, type: FileType.FILE })
       }
     }
@@ -374,7 +397,7 @@ export class MountCore {
       const target = await this.op(() => this.files.readlink(virtual))
       return this.attrs(s, new TextEncoder().encode(this.shownTarget(path, target)).byteLength)
     }
-    if (isDir(s)) return this.attrs(s)
+    if (isDir(s)) return this.attrs(retained ? await this.statCached(path, s) : s)
     // A size-unknown file stats as 0 rather than be fetched on every ls -l;
     // direct_io keeps its reads whole regardless.
     if (size === null && s.size === null) size = this.heldSize(path)
@@ -383,7 +406,11 @@ export class MountCore {
       for (const [offset, data] of ctx.writeBuf) end = Math.max(end, offset + data.byteLength)
       size = end
     }
-    return this.attrs(s, size)
+    if (size !== null && size !== s.size) s = s.with({ size })
+    // A row the stat above fetched was judged there; a held one is judged
+    // here, with the size the handle answers.
+    if (retained) s = await this.statCached(path, s)
+    return this.attrs(s)
   }
 
   /**
@@ -408,7 +435,7 @@ export class MountCore {
     } catch (err) {
       if (classify(err) !== 'ENOENT') throw err
       console.debug(`fuse: the mount root has no row of its own: ${String(err)}`)
-      return this.dirStat()
+      s = await this.statCached('/', new FileStat({ name: '/', type: FileType.DIRECTORY }))
     }
     return this.attrs(s)
   }
@@ -434,11 +461,15 @@ export class MountCore {
       return data.subarray(pos, pos + len)
     }
     let stored: Uint8Array
+    let retained = false
     if (ctx.live === true) {
       stored = await this.op(() =>
         this.files.read(this.resolve(ctx.path), { offset: pos, size: len }),
       )
     } else if (ctx.chunked !== undefined && ctx.data === undefined) {
+      // A fetch joins what it brings onto bytes kept at `pos`, so any kept
+      // byte there makes the answer held.
+      retained = ctx.chunked.holds(pos, len) || ctx.chunked.peek(pos, 1).byteLength > 0
       stored = await ctx.chunked.pread(pos, len)
     } else {
       let held = ctx.data
@@ -448,11 +479,14 @@ export class MountCore {
         const generation = ctx.generation ?? 0
         held = await this.op(() => this.files.read(this.resolve(ctx.path)))
         if ((ctx.generation ?? 0) === generation) ctx.data = held
+      } else {
+        retained = true
       }
       stored = held.subarray(pos, pos + len)
     }
-    if (ctx.writeBuf === undefined || ctx.writeBuf.length === 0) return stored
-    return overlaid(stored, pos, len, ctx.writeBuf)
+    const writes = ctx.writeBuf !== undefined && ctx.writeBuf.length > 0
+    const data = writes ? overlaid(stored, pos, len, ctx.writeBuf ?? []) : stored
+    return retained || writes ? this.readCached(ctx.path, data) : data
   }
 
   /** Buffer a write on its handle, or apply it directly when there is none. */

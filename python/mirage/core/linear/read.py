@@ -115,7 +115,9 @@ async def _read_project(
     teams = await list_teams(accessor)
     team = next((item for item in teams if item.get("id") == team_id), {})
     projects = await list_team_projects(accessor, team_id)
-    team_issues = await list_team_issues(accessor, team_id)
+    team_issues = await list_team_issues(
+        accessor, team_id, projects=[project_id]
+    )
     for project in projects:
         if project.get("id") == project_id:
             project_issues = project_issue_rows(team_issues, project_id)

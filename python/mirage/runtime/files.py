@@ -28,13 +28,15 @@ from mirage.context.session_context import (
 )
 from mirage.errors.fs import einval, eloop, numbered
 from mirage.errors.types import OperationNotSupportedError
+from mirage.io import IOResult, OpReport
 from mirage.runtime.binding import CallerResolver, WorkspaceBinding
 from mirage.runtime.constants import ABSENT_PATH, LISTING_ENTRY_CONCURRENCY
 from mirage.runtime.errors import CrossMountError
 from mirage.runtime.handles import FlushStep, Kept
 from mirage.runtime.resolver import MountResolver
 from mirage.runtime.types import DispatchFn, VFSEntry, VFSStat
-from mirage.types import FileStat, PathSpec
+from mirage.types import FileStat, FileType, PathSpec
+from mirage.utils.dates import timestamp_iso
 from mirage.utils.path import CycleError, norm, resolve_path
 from mirage.utils.remnants import entry_name
 from mirage.utils.stat_view import (
@@ -104,6 +106,7 @@ def stat_row(fs: FileStat) -> VFSStat:
         atime_ns=atime_ns(fs),
         uid=fs.uid if isinstance(fs.uid, int) else None,
         gid=fs.gid if isinstance(fs.gid, int) else None,
+        source=fs,
     )
 
 
@@ -178,8 +181,26 @@ class RuntimeFiles:
             return None
         caller = current_caller()
         links = link_view(ctx.vfs)
+        owner = asyncio.current_task()
+        dispatch = awaits_as(caller, ctx.vfs.dispatch)
+
+        async def guarded(
+            name: str,
+            path: PathSpec,
+            /,
+            *,
+            report: OpReport | None = None,
+            **kwargs: Any,
+        ) -> tuple[Any, IOResult]:
+            if owner is not None and owner.cancelling():
+                raise asyncio.CancelledError()
+            result = await dispatch(name, path, report=report, **kwargs)
+            if owner is not None and owner.cancelling():
+                raise asyncio.CancelledError()
+            return result
+
         return cls(
-            awaits_as(caller, ctx.vfs.dispatch),
+            guarded,
             asyncio.get_running_loop(),
             CallerResolver(binding.resolver, caller),
             None if links is None else calls_as(caller, links.resolve),
@@ -379,6 +400,17 @@ class RuntimeFiles:
             return data.encode()
         return bytes(data)
 
+    def read_cached(self, path: str, data: bytes) -> bytes:
+        """Judge bytes a descriptor holds as a read of its path, and
+        answer them; nothing is fetched.
+
+        Args:
+            path (str): the file's current virtual path.
+            data (bytes): the logical bytes this read would return.
+        """
+        self.call("read", path, retained=data)
+        return data
+
     def write(self, path: str, data: bytes) -> None:
         self.call("write", path, data=data)
 
@@ -411,6 +443,42 @@ class RuntimeFiles:
                 and gates that read exactly as it gates ``readlink``.
         """
         return stat_row(self.call("stat", path, nofollow=nofollow))
+
+    def stat_cached(self, path: str, row: VFSStat) -> VFSStat:
+        """Judge a descriptor's held row as a stat of its path, and
+        answer it; nothing is fetched. The policies see the backend's row
+        with what the descriptor changed (size, mode, and a time the row
+        has), so an unknown size, a named owner and a time the backend
+        never gave stay as they were.
+
+        Args:
+            path (str): the descriptor's current virtual path.
+            row (VFSStat): its logical metadata, including buffered writes.
+        """
+        held = row.source or FileStat(
+            name=entry_name(path),
+            type=FileType.DIRECTORY
+            if row.is_dir
+            else FileType.SYMLINK
+            if row.is_link
+            else FileType.FILE,
+            mode=row.mode,
+        )
+        updates: dict[str, Any] = {}
+        if row.size != content_size(held):
+            updates["size"] = row.size
+        if row.mode != posix_mode(held):
+            updates["mode"] = row.mode
+        for key, ns, was in (
+            ("modified", row.mtime_ns, mtime_ns(held)),
+            ("atime", row.atime_ns, atime_ns(held)),
+        ):
+            if ns is not None and was is not None and ns != was:
+                updates[key] = timestamp_iso(ns / 1_000_000_000)
+        if updates:
+            held = held.model_copy(update=updates)
+        self.call("stat", path, retained=held, nofollow=row.is_link)
+        return row
 
     def stat_or_none(
         self, path: str, *, nofollow: bool = False

@@ -14,6 +14,14 @@
 
 import { parseCommandLimits } from '@struktoai/mirage-core/policy/builtin/output_cap'
 import { Console } from 'node:console'
+import { createHash } from 'node:crypto'
+import fs from 'node:fs'
+import type { FileHandle as NodeFileHandle } from 'node:fs/promises'
+import { constants as osConstants } from 'node:os'
+import { MountCore } from '@struktoai/mirage-node/mount/core'
+import { MirageFS } from '@struktoai/mirage-node/fuse/fs'
+import { classify } from '@struktoai/mirage-core/errors/index'
+import { cliSpecFor } from '@struktoai/mirage-core/commands/cli/specs'
 import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
@@ -58,10 +66,14 @@ import {
 } from '@struktoai/mirage-node'
 import { parseSessionProfile } from '@struktoai/mirage-core/policy/profile'
 import { singleQuote } from '@struktoai/mirage-core/utils/quote'
+import { mountedPath } from '@struktoai/mirage-core/utils/key_prefix'
+import { norm } from '@struktoai/mirage-core/utils/path'
 import { EXTERNAL_COMMANDS, PROCESS_EXECUTOR, type ProcessExecutor } from '@struktoai/mirage-core'
 import type { Language } from '@struktoai/mirage-core/runtime/types'
 import type { Handed } from '@struktoai/mirage-core/vfs/types'
-import type { FileStat, PathSpec } from '@struktoai/mirage-core/types'
+import type { FileStat } from '@struktoai/mirage-core/types'
+
+const BACKEND_READS = new WeakMap<BaseVFS, string[]>()
 
 const HOST = 'typescript'
 const SUITE_DIR = dirname(fileURLToPath(import.meta.url))
@@ -72,6 +84,7 @@ const ENC = new TextEncoder()
 const DEC = new TextDecoder()
 
 interface Expect {
+  cancelled?: boolean
   exit?: number
   stdout?: string
   stdout_contains?: string
@@ -83,6 +96,8 @@ interface Expect {
   ops_contain?: string[]
   ops_absent?: string[]
   ops_count?: Record<string, number>
+  backend_reads?: Record<string, number>
+  native_calls?: string[]
   value?: unknown
   // An expect keyed by language, as `program` is: each language's own
   // answer for the step.
@@ -99,6 +114,15 @@ interface FacadeSpec {
   length?: number
 }
 
+interface HandleStep {
+  id: string
+  op: 'open' | 'read' | 'stat' | 'unlink' | 'close'
+  surface?: 'host' | 'mount' | 'fuse'
+  path?: string
+  size?: number
+  offset?: number
+}
+
 interface Step {
   command?: string | Record<string, string>
   script?: string | Record<string, string>
@@ -109,11 +133,13 @@ interface Step {
   runtime?: string
   stdin?: string
   add_runtime?: string
+  add_policies?: PolicySpec[]
   // The default session's profile from this step on.
   profile?: Record<string, unknown>
   s3_put?: { key: string; body: string }
   rename?: { src: string; dst: string }
   read_op?: string
+  handle?: HandleStep
   // What one backend answers differently, merged over `expect`.
   expect_on?: Record<string, Expect>
   facade?: FacadeSpec
@@ -131,6 +157,7 @@ interface MountSpecJson {
   scoped?: boolean
   files?: Record<string, string>
   generated_files?: number
+  cache_reads?: boolean
   // Names, spelled as `files` spells them, whose stat and read fail the
   // way an upstream 5xx does while the listing still names them.
   failing?: string[]
@@ -145,6 +172,9 @@ interface CliSpecJson {
 }
 
 interface World {
+  read_control?: string
+  track_reads?: boolean
+  builtin_clis?: string[]
   session_id?: string
   command_limits?: unknown
   register_runtimes?: Record<string, string>
@@ -340,6 +370,169 @@ class RedactReads implements TestPolicy<VfsResultContext> {
   }
 }
 
+class ReadControl implements Policy {
+  mode = 'allow'
+  constructor(
+    private readonly ws: Workspace,
+    private readonly path: string,
+  ) {}
+
+  async preVfs(ctx: VfsContext): Promise<Action | null> {
+    if (ctx.call.name === 'read' && ctx.path.virtual.startsWith('/control/')) {
+      const mode = ctx.path.virtual.split('/').at(-1) ?? ''
+      if (!['allow', 'hide', 'deny', 'pre', 'post', 'pre_stat', 'post_stat'].includes(mode)) {
+        throw new Error(`unknown read control: ${mode}`)
+      }
+      const previous = this.mode
+      this.mode = mode
+      const profile =
+        mode === 'hide'
+          ? { paths: { hide: [this.path] } }
+          : mode === 'deny'
+            ? { commands: { deny: [{ paths: [this.path] }] } }
+            : {}
+      if (['hide', 'deny'].includes(mode) || ['hide', 'deny'].includes(previous)) {
+        await this.ws.setSessionProfile(
+          this.ws.defaultSessionId,
+          parseSessionProfile(profile, 'read control'),
+        )
+      }
+    }
+    return ((this.mode === 'pre' && ctx.call.name === 'read') ||
+      (this.mode === 'pre_stat' && ctx.call.name === 'stat')) &&
+      ctx.path.virtual === this.path
+      ? { kind: 'deny', reason: 'sealed' }
+      : null
+  }
+
+  postVfs(ctx: VfsResultContext): Action | null {
+    if (this.mode === 'post_stat' && ctx.call.name === 'stat' && ctx.path.virtual === this.path)
+      return { kind: 'deny', reason: 'metadata refused' }
+    return this.mode === 'post' &&
+      ctx.call.name === 'read' &&
+      ctx.path.virtual === this.path &&
+      ctx.result instanceof Uint8Array &&
+      ctx.result.length > 0
+      ? { kind: 'deny', reason: 'redacted' }
+      : null
+  }
+}
+
+interface KeptHandle {
+  path: string
+  surface: 'host' | 'mount' | 'fuse'
+  fd: number
+  host?: NodeFileHandle
+  unlink?: () => Promise<void>
+}
+
+class RetainedHandles {
+  private readonly core: MountCore
+  private fuse: MirageFS | null = null
+  private readonly opened = new Map<string, KeptHandle>()
+
+  constructor(private readonly ws: Workspace) {
+    this.core = new MountCore(ws.vfs, { session: ws.getSession(ws.defaultSessionId) })
+  }
+
+  private callback<T>(name: string, ...args: unknown[]): Promise<[number, T | undefined]> {
+    const fn = (this.fuse?.ops() as Record<string, (...args: unknown[]) => void>)[name]
+    if (fn === undefined) throw new Error(`missing FUSE callback: ${name}`)
+    return new Promise((resolve, reject) => {
+      fn(...args, (code: number, value?: T) => {
+        if (code < 0) {
+          const condition = Object.entries(osConstants.errno).find(
+            ([, value]) => value === -code,
+          )?.[0]
+          reject(Object.assign(new Error(`FUSE ${name}: ${code}`), { code: condition ?? 'EIO' }))
+        } else resolve([code, value])
+      })
+    })
+  }
+
+  async run(spec: HandleStep): Promise<Uint8Array | number | null> {
+    if (spec.op === 'open') {
+      if (this.opened.has(spec.id)) throw new Error(`handle already open: ${spec.id}`)
+      if (spec.path === undefined || spec.surface === undefined)
+        throw new Error('open needs path and surface')
+      const path = spec.path
+      const surface = spec.surface
+      let fd: number
+      let host: NodeFileHandle | undefined
+      let unlink: (() => Promise<void>) | undefined
+      if (surface === 'host') {
+        const restore = patchNodeFs(this.ws)
+        try {
+          host = await fs.promises.open(path, 'r')
+          fd = host.fd
+          const remove = fs.promises.unlink
+          unlink = () => remove(path)
+        } finally {
+          restore()
+        }
+      } else if (surface === 'mount') {
+        fd = await this.core.open(path)
+      } else {
+        this.fuse ??= new MirageFS(this.ws.vfs, {
+          session: this.ws.getSession(this.ws.defaultSessionId),
+        })
+        const [, value] = await this.callback<number>('open', path, 0)
+        if (value === undefined) throw new Error('FUSE open returned no descriptor')
+        fd = value
+      }
+      this.opened.set(spec.id, {
+        path,
+        surface,
+        fd,
+        ...(host === undefined ? {} : { host }),
+        ...(unlink === undefined ? {} : { unlink }),
+      })
+      return null
+    }
+    const kept = this.opened.get(spec.id)
+    if (kept === undefined) throw new Error(`handle is not open: ${spec.id}`)
+    const { path, surface, fd, host } = kept
+    if (spec.op === 'stat') {
+      if (host !== undefined) return (await host.stat()).size
+      if (surface === 'mount') return (await this.core.fgetattr(path, fd)).size
+      const [, attrs] = await this.callback<{ size: number }>('fgetattr', path, fd)
+      if (attrs === undefined) throw new Error('FUSE fgetattr returned no metadata')
+      return attrs.size
+    }
+    if (spec.op === 'unlink') {
+      if (kept.unlink !== undefined) await kept.unlink()
+      else if (surface === 'mount') await this.core.unlink(path)
+      else await this.callback('unlink', path)
+      return null
+    }
+    if (spec.op === 'close') {
+      if (host !== undefined) await host.close()
+      else if (surface === 'mount') await this.core.release(fd)
+      else await this.callback('release', path, fd)
+      const core = surface === 'fuse' ? this.fuse?.core : this.core
+      if (surface !== 'host' && core?.handles.has(fd) === true)
+        throw new Error('released descriptor retained')
+      this.opened.delete(spec.id)
+      return null
+    }
+    const offset = spec.offset ?? 0
+    const size = spec.size ?? 4096
+    if (host !== undefined) {
+      const buffer = Buffer.alloc(size, 0xa5)
+      const { bytesRead } = await host.read(buffer, 0, size, offset)
+      return buffer.subarray(0, bytesRead)
+    }
+    if (surface === 'mount') return this.core.read(path, fd, offset, size)
+    const buffer = Buffer.alloc(size, 0xa5)
+    const [count] = await this.callback('read', path, fd, buffer, size, offset)
+    return buffer.subarray(0, count)
+  }
+
+  async close(): Promise<void> {
+    for (const id of this.opened.keys()) await this.run({ id, op: 'close' })
+  }
+}
+
 class LineCap implements TestPolicy<ExecuteResultContext> {
   readonly hook = 'postExecute'
   private readonly limit: Limit
@@ -407,7 +600,7 @@ function requirementMet(req: string): boolean {
 function s3Client(): S3Client {
   return new S3Client({
     region: 'us-east-1',
-    endpoint: process.env.S3_ENDPOINT,
+    ...(process.env.S3_ENDPOINT === undefined ? {} : { endpoint: process.env.S3_ENDPOINT }),
     forcePathStyle: true,
     credentials: {
       accessKeyId: process.env.AWS_ACCESS_KEY_ID ?? 'minio',
@@ -457,6 +650,95 @@ async function ensureMongo(): Promise<void> {
   mongoSeeded = true
 }
 
+class ShortcutRAMVFS extends RAMVFS {
+  override readonly cachesReads = true
+  readonly asked: string[] = []
+
+  private body(name: string, path: PathSpec): Uint8Array {
+    this.asked.push(name)
+    const data = this.store.files.get(norm(path.mountPath))
+    if (data === undefined) throw new Error(`missing shortcut fixture: ${path.virtual}`)
+    return data
+  }
+
+  override firstLines(path: PathSpec, n: number): Promise<Uint8Array> {
+    return Promise.resolve(
+      ENC.encode(
+        DEC.decode(this.body('first_lines', path))
+          .split(/(?<=\n)/)
+          .slice(0, n)
+          .join(''),
+      ),
+    )
+  }
+
+  override lastLines(path: PathSpec, n: number): Promise<Uint8Array> {
+    return Promise.resolve(
+      ENC.encode(
+        DEC.decode(this.body('last_lines', path))
+          .split(/(?<=\n)/)
+          .filter(Boolean)
+          .slice(-n)
+          .join(''),
+      ),
+    )
+  }
+
+  override lineCount(path: PathSpec): Promise<number> {
+    return Promise.resolve([...this.body('line_count', path)].filter((b) => b === 10).length)
+  }
+
+  override checksum(path: PathSpec, algorithm: string): Promise<string> {
+    return Promise.resolve(createHash(algorithm).update(this.body('checksum', path)).digest('hex'))
+  }
+
+  override filesContaining(
+    path: PathSpec,
+    text: string,
+    opts: { wholeWord: boolean; ignoreCase: boolean },
+  ): Promise<PathSpec[]> {
+    this.asked.push('files_containing')
+    const needle = opts.ignoreCase ? text.toLowerCase() : text
+    return Promise.resolve(
+      [...this.store.files]
+        .filter(([, data]) => {
+          const body = DEC.decode(data)
+          return (opts.ignoreCase ? body.toLowerCase() : body).includes(needle)
+        })
+        .map(([key]) => mountedPath(path, key)),
+    )
+  }
+
+  override linesContaining(path: PathSpec): Promise<Uint8Array> {
+    return Promise.resolve(this.body('lines_containing', path))
+  }
+
+  override follow(path: PathSpec, n: number): Promise<AsyncIterable<Uint8Array>> {
+    const data = ENC.encode(
+      DEC.decode(this.body('follow', path))
+        .split(/(?<=\n)/)
+        .filter(Boolean)
+        .slice(-n)
+        .join(''),
+    )
+    const asked = this.asked
+    async function* stream(): AsyncIterable<Uint8Array> {
+      try {
+        yield await Promise.resolve(data)
+      } finally {
+        asked.push('follow_closed')
+      }
+    }
+    return Promise.resolve(stream())
+  }
+}
+
+function nativeCalls(ws: Workspace): string[] {
+  return ws
+    .mounts()
+    .flatMap((entry) => (entry.vfs instanceof ShortcutRAMVFS ? entry.vfs.asked : []))
+}
+
 /**
  * A RAM mount whose named records fail their stat and read.
  *
@@ -483,9 +765,9 @@ class FailingRAMVFS extends RAMVFS {
     this.failing = new Set(failing)
   }
 
-  override stat(path: PathSpec, handed?: Handed): Promise<FileStat> {
+  override stat(path: PathSpec): Promise<FileStat> {
     if (this.fails(path)) return Promise.reject(new Error('upstream 502 Bad Gateway'))
-    return super.stat(path, handed)
+    return super.stat(path)
   }
 
   override read(
@@ -493,7 +775,7 @@ class FailingRAMVFS extends RAMVFS {
     handed?: Handed,
     offset = 0,
     size: number | null = null,
-  ): Promise<Uint8Array> {
+  ): ReturnType<RAMVFS['read']> {
     if (this.fails(path)) return Promise.reject(new Error('upstream 502 Bad Gateway'))
     return super.read(path, handed, offset, size)
   }
@@ -504,6 +786,7 @@ class FailingRAMVFS extends RAMVFS {
 }
 
 async function buildVfs(spec: MountSpecJson, runId: string): Promise<BaseVFS> {
+  if (spec.vfs === 'shortcuts') return new ShortcutRAMVFS()
   if (spec.vfs === 'ram') {
     const vfs = spec.failing !== undefined ? new FailingRAMVFS(spec.failing) : new RAMVFS()
     if (spec.generated_files !== undefined) {
@@ -556,7 +839,7 @@ async function buildVfs(spec: MountSpecJson, runId: string): Promise<BaseVFS> {
       ...(spec.scoped === true ? { keyPrefix: `mirage-integ-runtime-ts-${runId}/` } : {}),
       bucket: BUCKET,
       region: 'us-east-1',
-      endpoint: process.env.S3_ENDPOINT,
+      ...(process.env.S3_ENDPOINT === undefined ? {} : { endpoint: process.env.S3_ENDPOINT }),
       forcePathStyle: true,
       accessKeyId: process.env.AWS_ACCESS_KEY_ID ?? 'minio',
       secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY ?? 'minio123',
@@ -586,6 +869,20 @@ function buildEntry(entry: string | Record<string, unknown>): RuntimeEntry {
   return buildRuntime(entry.name as string, options)
 }
 
+function trackReads(vfs: BaseVFS): void {
+  const original = vfs.read.bind(vfs)
+  const calls: string[] = []
+  BACKEND_READS.set(vfs, calls)
+  vfs.read = (path, ...args) => {
+    calls.push(path.virtual)
+    return original(path, ...args)
+  }
+}
+
+function backendReads(ws: Workspace): string[] {
+  return ws.mounts().flatMap((entry) => BACKEND_READS.get(entry.vfs) ?? [])
+}
+
 async function buildWorkspace(world: World, runId: string): Promise<Workspace> {
   registerRuntimes(world.register_runtimes ?? {})
   const mounts: Record<string, MountSpec> = {}
@@ -593,6 +890,8 @@ async function buildWorkspace(world: World, runId: string): Promise<Workspace> {
   const mountSpecs = world.mounts ?? { '/ram': { vfs: 'ram' } }
   for (const [index, [prefix, spec]] of Object.entries(mountSpecs).entries()) {
     const vfs = await buildVfs(spec, `${runId}-${index}`)
+    if (spec.cache_reads === true) Object.defineProperty(vfs, 'cachesReads', { value: true })
+    if (world.read_control !== undefined || world.track_reads === true) trackReads(vfs)
     const guards = Object.fromEntries(
       Object.entries(spec.limits ?? {}).map(([cmd, kwargs]) => [
         cmd,
@@ -629,6 +928,8 @@ async function buildWorkspace(world: World, runId: string): Promise<Workspace> {
   }
   if (world.profile !== undefined) options.profile = world.profile
   const ws = new Workspace(mounts, options)
+  if (world.read_control !== undefined) ws.policies.add(new ReadControl(ws, world.read_control))
+  for (const name of world.builtin_clis ?? []) ws.registerCli(name, cliSpecFor(name))
   // The world's script CLIs, the yaml `clis:` shape inline: each entry
   // embeds its program instead of naming a file, the same way a runtime
   // entry embeds a policy script here; cli.sh writes them back out to
@@ -810,6 +1111,34 @@ async function runStep(
   label: string,
   step: Step,
   sessionId?: string,
+  handles?: RetainedHandles,
+): Promise<string[]> {
+  const before = backendReads(ws)
+  const nativeBefore = nativeCalls(ws).length
+  const problems = await performStep(ws, caseId, label, step, sessionId, handles)
+  if (step.expect?.native_calls !== undefined) {
+    const actual = nativeCalls(ws).slice(nativeBefore)
+    if (JSON.stringify(actual) !== JSON.stringify(step.expect.native_calls))
+      problems.push(
+        `${caseId} ${label}: native calls ${JSON.stringify(actual)}, expected ${JSON.stringify(step.expect.native_calls)}`,
+      )
+  }
+  const after = backendReads(ws)
+  for (const [path, count] of Object.entries(step.expect?.backend_reads ?? {})) {
+    const actual = after.filter((p) => p === path).length - before.filter((p) => p === path).length
+    if (actual !== count)
+      problems.push(`${caseId} ${label}: backend read ${path}: expected ${count}, got ${actual}`)
+  }
+  return problems
+}
+
+async function performStep(
+  ws: Workspace,
+  caseId: string,
+  label: string,
+  step: Step,
+  sessionId?: string,
+  handles?: RetainedHandles,
 ): Promise<string[]> {
   const expect = step.expect ?? {}
   // The ledger slice this step adds: ws.records delegates to the Files
@@ -817,6 +1146,34 @@ async function runStep(
   const ledgerBefore = ws.records.length
   if (step.host_program !== undefined) {
     return runHostProgram(ws, caseId, label, step.host_program, expect)
+  }
+  if (step.add_policies !== undefined) {
+    for (const spec of step.add_policies) ws.policies.add(buildPolicy(spec))
+    return []
+  }
+  if (step.handle !== undefined) {
+    if (handles === undefined) throw new Error('handle step needs a descriptor table')
+    let content: string | null = null
+    let value: Uint8Array | number | null = null
+    let errnoName = 'NONE'
+    try {
+      value = await handles.run(step.handle)
+      content = value instanceof Uint8Array ? DEC.decode(value) : null
+    } catch (error) {
+      errnoName = classify(error) ?? (error instanceof Error ? error.name : 'UNKNOWN')
+    }
+    const problems: string[] = []
+    if (errnoName !== (expect.errno ?? 'NONE'))
+      problems.push(`handle errno ${errnoName}, expected ${expect.errno ?? 'NONE'}`)
+    if (expect.value !== undefined && value !== expect.value)
+      problems.push(`handle value ${String(value)}, expected ${String(expect.value)}`)
+    if (expect.content !== undefined && content !== expect.content)
+      problems.push(
+        `handle content ${JSON.stringify(content)}, expected ${JSON.stringify(expect.content)}`,
+      )
+    const seen = ws.records.slice(ledgerBefore).map((r) => `${r.op} ${r.path}`)
+    problems.push(...checkOps(expect, seen))
+    return problems.map((p) => `${caseId} ${label}: ${p}`)
   }
   if (step.facade !== undefined) {
     const problems = await runFacade(ws, expect, step.facade)
@@ -876,7 +1233,8 @@ async function runStep(
     }
     return problems.map((p) => `${caseId} ${label}: ${p}`)
   }
-  let command = step.command ?? ''
+  if (typeof step.command !== 'string') throw new Error('a runnable step needs one command')
+  let command = step.command
   if (typeof step.script === 'string') {
     const source = readFileSync(join(SUITE_DIR, '../fixtures/runtime', step.script), 'utf8')
     command += ' ' + singleQuote(source)
@@ -885,6 +1243,15 @@ async function runStep(
   if (sessionId !== undefined) options.sessionId = sessionId
   if (step.runtime !== undefined) options.runtime = step.runtime
   if (step.stdin !== undefined) options.stdin = ENC.encode(step.stdin)
+  if (expect.cancelled === true) {
+    try {
+      await ws.shell(command, options)
+    } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') return []
+      throw error
+    }
+    return [`${caseId} ${label}: expected session revocation to cancel the command`]
+  }
   if (expect.throws_contains !== undefined) {
     try {
       await ws.shell(command, options)
@@ -1266,6 +1633,7 @@ async function runCase(suite: string, testCase: Case): Promise<string[]> {
     return [`${caseId}: expected the world build to fail`]
   }
   const ws = await buildWorkspace(world, runId)
+  const handles = new RetainedHandles(ws)
   const problems: string[] = []
   try {
     for (const [name, operations] of Object.entries(testCase.filesystem ?? {})) {
@@ -1289,14 +1657,18 @@ async function runCase(suite: string, testCase: Case): Promise<string[]> {
       problems.push(
         ...(step.parallel !== undefined
           ? await runParallel(ws, caseId, index, step.parallel)
-          : await runStep(ws, caseId, `step[${index}]`, step)),
+          : await runStep(ws, caseId, `step[${index}]`, step, undefined, handles)),
       )
     }
   } finally {
     try {
-      await removeRoots(ws)
+      await handles.close()
     } finally {
-      await ws.close()
+      try {
+        await removeRoots(ws)
+      } finally {
+        await ws.close()
+      }
     }
   }
   return problems

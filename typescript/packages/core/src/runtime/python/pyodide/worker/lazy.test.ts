@@ -74,7 +74,8 @@ describe('Pyodide lazy VFS', { timeout: 60_000 }, () => {
         names.map((name) => [`/data/${name}`, ENC.encode('old')]),
       )
       const writes: string[] = []
-      const dispatch: BridgeDispatchFn = async (op, path, bytes) => {
+      const dispatch: BridgeDispatchFn = async (op, path, bytes, _dst, attrs) => {
+        if (attrs?.retained !== undefined) return Promise.resolve(attrs.retained)
         await Promise.resolve()
         const data = files.get(path)
         if (data === undefined) throw Object.assign(new Error(path), { code: 'ENOENT' })
@@ -129,7 +130,8 @@ describe('Pyodide lazy VFS', { timeout: 60_000 }, () => {
       ['bad', 'good'].map((name) => [`/data/${name}`, ENC.encode('old')]),
     )
     const ops: string[] = []
-    const dispatch: BridgeDispatchFn = async (op, path, bytes) => {
+    const dispatch: BridgeDispatchFn = async (op, path, bytes, _dst, attrs) => {
+      if (attrs?.retained !== undefined) return Promise.resolve(attrs.retained)
       await Promise.resolve()
       ops.push(`${op} ${path}`)
       const data = files.get(path)
@@ -179,7 +181,8 @@ describe('Pyodide lazy VFS', { timeout: 60_000 }, () => {
     const files = new Map<string, Uint8Array>(
       ['bad', 'good', 'later'].map((name) => [`/data/${name}`, ENC.encode('old')]),
     )
-    const dispatch: BridgeDispatchFn = async (op, path, bytes) => {
+    const dispatch: BridgeDispatchFn = async (op, path, bytes, _dst, attrs) => {
+      if (attrs?.retained !== undefined) return Promise.resolve(attrs.retained)
       await Promise.resolve()
       const data = files.get(path)
       if (data === undefined) throw Object.assign(new Error(path), { code: 'ENOENT' })
@@ -255,7 +258,8 @@ describe('Pyodide lazy VFS', { timeout: 60_000 }, () => {
     const context = new AsyncLocalStorage<string>()
     const calls: { op: string; path: string; session: string | undefined }[] = []
     let bytes = new Uint8Array(200_000).fill(65)
-    const dispatch: BridgeDispatchFn = async (op, path) => {
+    const dispatch: BridgeDispatchFn = async (op, path, _bytes, _dst, attrs) => {
+      if (attrs?.retained !== undefined) return Promise.resolve(attrs.retained)
       await new Promise((resolve) => setTimeout(resolve, 1))
       calls.push({ op, path, session: context.getStore() })
       if (path !== '/data/one.bin') throw new Error(`unexpected access: ${op} ${path}`)
@@ -295,7 +299,8 @@ describe('Pyodide lazy VFS', { timeout: 60_000 }, () => {
   it('classifies a directory once and stats only the names a later listing adds', async () => {
     const stats: string[] = []
     let listings = 0
-    const dispatch: BridgeDispatchFn = async (op, path) => {
+    const dispatch: BridgeDispatchFn = async (op, path, _bytes, _dst, attrs) => {
+      if (attrs?.retained !== undefined) return Promise.resolve(attrs.retained)
       await Promise.resolve()
       if (op === 'readdir' && path === '/data/') {
         listings += 1
@@ -330,7 +335,8 @@ describe('Pyodide lazy VFS', { timeout: 60_000 }, () => {
   })
 
   it('keeps real files at standard stream paths on a /dev mount', async () => {
-    const dispatch: BridgeDispatchFn = async (op, path) => {
+    const dispatch: BridgeDispatchFn = async (op, path, _bytes, _dst, attrs) => {
+      if (attrs?.retained !== undefined) return Promise.resolve(attrs.retained)
       await Promise.resolve()
       if (path === '/dev/stdin') {
         if (op === 'stat') return new FileStat({ name: path, type: FileType.FILE, size: 4 })
@@ -360,7 +366,8 @@ describe('Pyodide lazy VFS', { timeout: 60_000 }, () => {
       ['/notion/databases/demo/', [target]],
       ['/wandb/', catalog],
     ])
-    const dispatch: BridgeDispatchFn = async (op, path) => {
+    const dispatch: BridgeDispatchFn = async (op, path, _bytes, _dst, attrs) => {
+      if (attrs?.retained !== undefined) return Promise.resolve(attrs.retained)
       await Promise.resolve()
       calls.push({ op, path })
       if (op === 'readdir') return directories.get(path) ?? []
@@ -407,7 +414,8 @@ describe('Pyodide lazy VFS', { timeout: 60_000 }, () => {
       const rt = new PyodideRuntime()
       rt.bind(
         WorkspaceBinding.overBridge(
-          async (op, path, bytes) => {
+          async (op, path, bytes, _dst, attrs) => {
+            if (attrs?.retained !== undefined) return Promise.resolve(attrs.retained)
             await Promise.resolve()
             if (op === 'readdir' && path === '/other/') {
               observed.push(DEC.decode(files.get('/data/file')))
@@ -459,7 +467,8 @@ describe('Pyodide lazy VFS', { timeout: 60_000 }, () => {
       const rt = new PyodideRuntime({ config: { maxConcurrency } })
       rt.bind(
         WorkspaceBinding.overBridge(
-          async (op, path) => {
+          async (op, path, _bytes, _dst, attrs) => {
+            if (attrs?.retained !== undefined) return Promise.resolve(attrs.retained)
             await Promise.resolve()
             const session = getCurrentSession()?.sessionId ?? 'missing'
             calls.push(`${op}:${session}`)
@@ -505,7 +514,8 @@ describe('Pyodide lazy VFS', { timeout: 60_000 }, () => {
       const rt = new PyodideRuntime()
       rt.bind(
         WorkspaceBinding.overBridge(
-          async (op, path, bytes) => {
+          async (op, path, bytes, _dst, attrs) => {
+            if (attrs?.retained !== undefined) return Promise.resolve(attrs.retained)
             if (op === 'stat')
               return new FileStat({ name: path, type: FileType.FILE, size: contents.length })
             if (op === 'read') return contents
@@ -563,7 +573,8 @@ describe('Pyodide lazy VFS', { timeout: 60_000 }, () => {
   it('interrupts compute and a blocked file read, then keeps serving requests', async () => {
     const entered = gate()
     const release = gate()
-    const dispatch: BridgeDispatchFn = async (op, path) => {
+    const dispatch: BridgeDispatchFn = async (op, path, _bytes, _dst, attrs) => {
+      if (attrs?.retained !== undefined) return Promise.resolve(attrs.retained)
       if (op === 'stat') return new FileStat({ name: path, type: FileType.FILE, size: 4 })
       if (op === 'read') {
         entered.resolve()

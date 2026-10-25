@@ -30,7 +30,8 @@ import * as sealing from './seal.ts'
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
 
-const dispatch: BridgeDispatchFn = (op, path) => {
+const dispatch: BridgeDispatchFn = (op, path, _bytes, _dst, attrs) => {
+  if (attrs?.retained !== undefined) return Promise.resolve(attrs.retained)
   if (path !== '/data/hello.txt')
     return Promise.reject(Object.assign(new Error(path), { code: 'ENOENT' }))
   if (op === 'stat')
@@ -461,6 +462,8 @@ it('fails a run whose worker seal failed', async () => {
     { config: { autoLoadFromImports: false } },
     {
       read: unexpected,
+      readCached: unexpected,
+      statCached: unexpected,
       stat: unexpected,
       checkPath: unexpected,
       readdir: unexpected,

@@ -77,13 +77,21 @@ class ChunkedHandle:
             int | None: the fetch size, or None when the kept chunk (or
             the end of the file) already answers the read.
         """
+        return None if self.holds(offset, size) else max(size, READ_CHUNK)
+
+    def holds(self, offset: int, size: int) -> bool:
+        """Whether the kept bytes or known EOF answer without fetching.
+
+        Args:
+            offset (int): byte offset to read from.
+            size (int): requested byte budget.
+        """
         if size <= 0 or (self._end is not None and offset >= self._end):
-            return None
+            return True
         kept_end = self._start + len(self._kept)
-        inside = self._start <= offset < kept_end and (
+        return self._start <= offset < kept_end and (
             offset + size <= kept_end or kept_end == self._end
         )
-        return None if inside else max(size, READ_CHUNK)
 
     def keep(self, offset: int, data: bytes, asked: int) -> None:
         """Keep a fetched chunk; a short one marks the end of the file.

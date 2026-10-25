@@ -229,3 +229,116 @@ def test_append_invalidate_keeps_explicit_read_position():
     h.invalidate(_over(b""), 0)
     assert h.pos == 0
     assert apply_flush(b"", h.flush_plan()) == b"BBB"
+
+
+def test_retained_reads_are_judged_once_without_rechecking_a_fresh_fetch():
+    checked = []
+    fetched = []
+
+    def read_cached(data):
+        checked.append(data)
+        return data.upper()
+
+    h = FileHandle.opened(
+        "/f",
+        _over(b"abcdef", fetched),
+        size=6,
+        writable=False,
+        append=False,
+        read_cached=read_cached,
+    )
+    assert h.read(1) == b"a"
+    assert checked == []
+    assert h.read(2) == b"BC"
+    assert checked == [b"bc"]
+    assert fetched == [(0, None)]
+
+
+def test_a_refused_retained_read_leaves_its_position():
+    sealed = False
+
+    def read_cached(data):
+        if sealed:
+            raise PermissionError("sealed")
+        return data
+
+    h = FileHandle.opened(
+        "/f",
+        _over(b"abcdef"),
+        size=6,
+        writable=False,
+        append=False,
+        read_cached=read_cached,
+    )
+    assert h.read(1) == b"a"
+    sealed = True
+    with pytest.raises(PermissionError, match="sealed"):
+        h.read(2)
+    assert h.pos == 1
+    sealed = False
+    assert h.read(2) == b"bc"
+
+
+def test_a_read_all_failure_leaves_the_original_position():
+    calls = []
+
+    def fetch(offset, size):
+        calls.append(offset)
+        if offset:
+            raise PermissionError("second chunk refused")
+        return b"x" * READ_CHUNK
+
+    h = FileHandle.opened(
+        "/f", fetch, size=2 * READ_CHUNK, writable=False, append=False
+    )
+    with pytest.raises(PermissionError, match="second chunk"):
+        h.read()
+    assert calls == [0, READ_CHUNK]
+    assert h.pos == 0
+
+
+def test_read_policy_judges_the_logical_bytes_with_local_writes():
+    checked = []
+
+    def read_cached(data):
+        checked.append(data)
+        return data
+
+    h = FileHandle.opened(
+        "/f",
+        _over(b"abc"),
+        size=3,
+        writable=True,
+        append=False,
+        read_cached=read_cached,
+    )
+    h.pwrite(1, b"X")
+    assert h.read(3) == b"aXc"
+    assert checked == [b"aXc"]
+    h.truncate(0)
+    h.seek(0, 0)
+    h.write(b"new")
+    h.seek(0, 0)
+    assert h.read(3) == b"new"
+    assert checked[-1] == b"new"
+
+
+def test_a_read_to_the_end_judges_what_it_held_once():
+    checked = []
+
+    def read_cached(data):
+        checked.append(len(data))
+        return data
+
+    size = 3 * READ_CHUNK
+    h = FileHandle.opened(
+        "/f",
+        None,
+        size=0,
+        writable=True,
+        append=False,
+        read_cached=read_cached,
+    )
+    h.pwrite(0, b"x" * size)
+    assert len(h.read()) == size
+    assert checked == [size]

@@ -74,8 +74,9 @@ flowchart LR
     end
     subgraph call["A VFS call"]
         direction LR
-        PV["pre_vfs"] --> Op["call runs"] --> PoV["post_vfs"]
+        PV["pre_vfs"] --> Op["call runs or cache answers"] --> PoV["post_vfs"]
     end
+    Run -. file operations .-> PV
     subgraph write["A variable write"]
         direction LR
         PS["pre_session"] --> Land["write lands"] --> PoS["post_session"]
@@ -88,7 +89,7 @@ flowchart LR
 | `pre_command` | `preCommand` | before each command or CLI, once the line is parsed and expanded | Deny, Ask |
 | `post_command` | `postCommand` | after each command, once its output drained | Deny, Ask |
 | `post_execute` | `postExecute` | once per line, after it ends | Deny, Ask, Limit |
-| `pre_vfs` | `preVfs` | before each VFS call, not a command's own reads and writes | Deny, Ask |
+| `pre_vfs` | `preVfs` | before each VFS call, including command and runtime file operations | Deny, Ask |
 | `post_vfs` | `postVfs` | after each VFS call | Deny, Ask |
 | `pre_session` | `preSession` | before each variable write | Deny, Ask |
 | `post_session` | `postSession` | after the write lands | Deny, Ask |
@@ -102,13 +103,19 @@ flowchart LR
 
 | Entry point | Sends |
 | --- | --- |
-| `ws.shell`, `session.shell` | a line, with its commands and variable writes |
-| the `shell`, `ls` and `grep` tools | a line, with its commands and variable writes |
-| `mirage shell`, HTTP `/shell`, RPC `shell`, SSH | a line, with its commands and variable writes |
+| `ws.shell`, `session.shell` | a line, with its commands, file operations and variable writes |
+| the `shell`, `ls` and `grep` tools | a line, with its commands, file operations and variable writes |
+| `mirage shell`, HTTP `/shell`, RPC `shell`, SSH | a line, with its commands, file operations and variable writes |
 | `session.vfs` | a VFS call |
 | the `read`, `write`, `edit` and `glob` tools | a VFS call |
 | `mirage vfs`, HTTP `/vfs/<call>`, RPC `vfs/<call>` | a VFS call |
 | FUSE, FSKit, SFTP | a VFS call |
+
+File policies also apply when a command or file-based CLI uses `ctx.vfs`.
+An account CLI calls its service directly, so command policy authorizes
+that API operation; it has no VFS path to check. Its writes invalidate
+caches for the mounts reached by that account. A policy's own file reads
+remain exempt from coded file hooks to avoid recursion.
 
 ## Context
 
@@ -309,8 +316,9 @@ const readOnlyReports: Policy = {
 
 </CodeGroup>
 
-`session.vfs.write("/reports/q3.md", ...)` raises `EACCES`. A
-command's own write (`echo x > /reports/q3.md`) does not reach `pre_vfs`.
+`session.vfs.write("/reports/q3.md", ...)` raises `EACCES`. The same
+policy refuses a command redirect (`echo x > /reports/q3.md`) and writes
+through runtime file APIs, FUSE, FSKit and SFTP.
 
 ### post_vfs
 
@@ -338,7 +346,12 @@ const noKeysOut: Policy = {
 </CodeGroup>
 
 Reading a file that holds a private key with `session.vfs.read` raises
-`EACCES`. `post_vfs` can refuse a read but not shorten it: the file comes
+`EACCES`; commands and runtime file reads meet the same check. Cached
+reads and retained handles are checked against current policy before
+returning their bytes or metadata. These checks do not fetch the retained
+value again. Bytes already delivered to a program remain in its memory.
+
+`post_vfs` can refuse a read but not shorten it: the file comes
 back whole or not at all. To cap how much a command prints, use
 `post_execute`.
 

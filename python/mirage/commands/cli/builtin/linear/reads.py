@@ -57,7 +57,9 @@ def _require_team(fl: FlagView) -> str:
 async def _project_issue_rows(
     accessor: LinearAccessor, team_id: str, project_id: str
 ) -> list[dict[str, JsonValue]]:
-    team_issues = await list_team_issues(accessor, team_id)
+    team_issues = await list_team_issues(
+        accessor, team_id, projects=[project_id]
+    )
     rows: list[dict[str, JsonValue]] = []
     for issue in team_issues:
         if (issue.get("project") or {}).get("id") != project_id:

@@ -75,9 +75,9 @@
         {
           "command": "mkdir -p /ram/locked && echo hi > /ram/locked/f.txt && cat /ram/locked/f.txt",
           "expect": {
-            "exit": 0,
-            "stdout": "hi\n",
-            "stderr": ""
+            "exit": 1,
+            "stdout": "",
+            "stderr_contains": "Permission denied"
           }
         },
         {

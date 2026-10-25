@@ -214,10 +214,21 @@ class Descriptors:
         """
         if desc.kept is not None:
             end = None if size is None else offset + size
-            return kept_view(desc.kept, raw)[offset:end]
+            return self._read_cached(
+                desc, kept_view(desc.kept, raw)[offset:end]
+            )
         return syscall(self._adapter.read)(
             desc.path, offset=offset, size=size, raw=raw
         )
+
+    def _read_cached(self, desc: Descriptor, data: bytes) -> bytes:
+        """Judge a descriptor's retained bytes at its current path.
+
+        Args:
+            desc (Descriptor): the open descriptor.
+            data (bytes): the logical read result.
+        """
+        return syscall(self._adapter.read_cached)(desc.path, data)
 
     def _opened(self, path: str, facts: OpenMode) -> Descriptor:
         """A descriptor on ``path`` once the open's effect landed. Nothing
@@ -243,6 +254,7 @@ class Descriptors:
             size=0 if row is None else row.size,
             writable=facts.writable,
             append=facts.append,
+            read_cached=functools.partial(self._read_cached, desc),
         )
         return desc
 

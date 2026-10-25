@@ -83,3 +83,20 @@ it('pages a team listing no further than a walk limit', async () => {
   expect(issues.map((issue) => issue.id)).toEqual(['i1'])
   expect(asked).toBe(1)
 })
+
+// Twin of test_a_project_scoped_listing_asks_only_for_those_projects.
+it('asks a project-scoped listing only for those projects', async () => {
+  const asked: Record<string, unknown>[] = []
+  const transport: LinearTransport = {
+    graphql: (_query, variables) => {
+      asked.push(variables ?? {})
+      return Promise.resolve({
+        team: { issues: { nodes: [], pageInfo: { hasNextPage: false, endCursor: null } } },
+      })
+    },
+  }
+  await listTeamIssues(transport, 'T1', undefined, ['P1', 'P2'])
+  expect(await listTeamIssues(transport, 'T1', undefined, [])).toEqual([])
+  expect(asked).toHaveLength(1)
+  expect(asked[0]?.filter).toEqual({ project: { id: { in: ['P1', 'P2'] } } })
+})

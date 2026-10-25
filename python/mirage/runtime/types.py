@@ -18,7 +18,7 @@ from typing import Any, Generic, Literal, Protocol, TypeAlias, TypeVar
 
 from mirage.io import IOResult, OpReport
 from mirage.io.types import ByteSource
-from mirage.types import PathSpec
+from mirage.types import FileStat, PathSpec
 
 
 class RuntimeIdentity(Protocol):
@@ -199,6 +199,8 @@ class VFSStat:
         uid (int | None): the owner's numeric id, None when unknown or
             stored as a name.
         gid (int | None): the group's numeric id, read the same way.
+        source (FileStat | None): original row for checking retained metadata
+            without losing unknown size or backend-specific fields.
     """
 
     size: int
@@ -210,6 +212,7 @@ class VFSStat:
     atime_ns: int | None = None
     uid: int | None = None
     gid: int | None = None
+    source: FileStat | None = field(default=None, repr=False, compare=False)
 
 
 @dataclass(frozen=True, slots=True)
