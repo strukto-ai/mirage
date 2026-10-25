@@ -1,0 +1,259 @@
+{
+  "cases": [
+    {
+      "id": "od_integer_types_and_sizes",
+      "seq": 17500101,
+      "targets": [
+        "ram",
+        "opfs",
+        "disk"
+      ],
+      "command": "mkdir -p /data/odgi && printf '\\200\\377\\177\\000\\376\\377\\377\\377\\000\\000\\000\\200\\377\\377\\377\\377\\377\\377\\377\\177\\001\\002\\003\\004' > /data/odgi/n && for t in d1 d2 d4 d8 dC dS dI dL u1 u2 u4 u8 o1 o2 o4 o8 x1 x2 x4 x8 d u o x; do od -t $t /data/odgi/n; done",
+      "expect": {
+        "exit": 0,
+        "stdout": "0000000 -128   -1  127    0   -2   -1   -1   -1    0    0    0 -128   -1   -1   -1   -1\n0000020   -1   -1   -1  127    1    2    3    4\n0000030\n0000000   -128    127     -2     -1      0 -32768     -1     -1\n0000020     -1  32767    513   1027\n0000030\n0000000     8388480          -2 -2147483648          -1\n0000020  2147483647    67305985\n0000030\n0000000          -8581546112          -2147483648\n0000020   289077006547550207\n0000030\n0000000 -128   -1  127    0   -2   -1   -1   -1    0    0    0 -128   -1   -1   -1   -1\n0000020   -1   -1   -1  127    1    2    3    4\n0000030\n0000000   -128    127     -2     -1      0 -32768     -1     -1\n0000020     -1  32767    513   1027\n0000030\n0000000     8388480          -2 -2147483648          -1\n0000020  2147483647    67305985\n0000030\n0000000          -8581546112          -2147483648\n0000020   289077006547550207\n0000030\n0000000 128 255 127   0 254 255 255 255   0   0   0 128 255 255 255 255\n0000020 255 255 255 127   1   2   3   4\n0000030\n0000000 65408   127 65534 65535     0 32768 65535 65535\n0000020 65535 32767   513  1027\n0000030\n0000000    8388480 4294967294 2147483648 4294967295\n0000020 2147483647   67305985\n0000030\n0000000 18446744065128005504 18446744071562067968\n0000020   289077006547550207\n0000030\n0000000 200 377 177 000 376 377 377 377 000 000 000 200 377 377 377 377\n0000020 377 377 377 177 001 002 003 004\n0000030\n0000000 177600 000177 177776 177777 000000 100000 177777 177777\n0000020 177777 077777 001001 002003\n0000030\n0000000 00037777600 37777777776 20000000000 37777777777\n0000020 17777777777 00400601001\n0000030\n0000000 1777777777700037777600 1777777777760000000000\n0000020 0020030040057777777777\n0000030\n0000000 80 ff 7f 00 fe ff ff ff 00 00 00 80 ff ff ff ff\n0000020 ff ff ff 7f 01 02 03 04\n0000030\n0000000 ff80 007f fffe ffff 0000 8000 ffff ffff\n0000020 ffff 7fff 0201 0403\n0000030\n0000000 007fff80 fffffffe 80000000 ffffffff\n0000020 7fffffff 04030201\n0000030\n0000000 fffffffe007fff80 ffffffff80000000\n0000020 040302017fffffff\n0000030\n0000000     8388480          -2 -2147483648          -1\n0000020  2147483647    67305985\n0000030\n0000000    8388480 4294967294 2147483648 4294967295\n0000020 2147483647   67305985\n0000030\n0000000 00037777600 37777777776 20000000000 37777777777\n0000020 17777777777 00400601001\n0000030\n0000000 007fff80 fffffffe 80000000 ffffffff\n0000020 7fffffff 04030201\n0000030\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "od_named_and_c_characters",
+      "seq": 17500102,
+      "targets": [
+        "ram",
+        "opfs",
+        "disk"
+      ],
+      "command": "printf '\\000\\007\\010\\011\\012\\013\\014\\015\\033 A~\\177\\200\\240\\301\\377' > /data/odgc; od -a /data/odgc; od -t c /data/odgc; od -t a -t c -t d1 -t x1 -t o1 -t u1 /data/odgc",
+      "expect": {
+        "exit": 0,
+        "stdout": "0000000 nul bel  bs  ht  nl  vt  ff  cr esc  sp   A   ~ del nul  sp   A\n0000020 del\n0000021\n0000000  \\0  \\a  \\b  \\t  \\n  \\v  \\f  \\r 033       A   ~ 177 200 240 301\n0000020 377\n0000021\n0000000  nul  bel   bs   ht   nl   vt   ff   cr  esc   sp    A    ~  del  nul   sp    A\n          \\0   \\a   \\b   \\t   \\n   \\v   \\f   \\r  033         A    ~  177  200  240  301\n           0    7    8    9   10   11   12   13   27   32   65  126  127 -128  -96  -63\n          00   07   08   09   0a   0b   0c   0d   1b   20   41   7e   7f   80   a0   c1\n         000  007  010  011  012  013  014  015  033  040  101  176  177  200  240  301\n           0    7    8    9   10   11   12   13   27   32   65  126  127  128  160  193\n0000020  del\n         377\n          -1\n          ff\n         377\n         255\n0000021\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "od_floats_print_the_shortest_text_that_reads_back",
+      "seq": 17500103,
+      "targets": [
+        "ram",
+        "opfs",
+        "disk"
+      ],
+      "command": "mkdir -p /data/odgf && printf '\\000\\000\\200\\077\\000\\000\\040\\300\\315\\314\\314\\075\\371\\002\\025\\120\\000\\000\\200\\177\\000\\000\\200\\377\\000\\000\\300\\177\\000\\000\\000\\000\\000\\000\\000\\200\\320\\017\\111\\100\\302\\026\\001\\000\\361\\073\\071\\312\\243\\171\\353\\114\\001\\000\\000\\000\\000\\000\\000\\077\\377\\377\\177\\177' > /data/odgf/f4 && printf '\\000\\000\\000\\000\\000\\000\\360\\077\\000\\000\\000\\000\\000\\000\\004\\300\\232\\231\\231\\231\\231\\231\\271\\077\\175\\303\\224\\045\\255\\111\\262\\124\\001\\000\\000\\000\\000\\000\\000\\000\\000\\000\\000\\000\\000\\000\\000\\001\\100\\336\\167\\203\\041\\022\\334\\102\\120\\357\\342\\326\\344\\032\\113\\104' > /data/odgf/f8 && printf '\\000\\074\\000\\301\\146\\056\\377\\173\\001\\000\\110\\102\\320\\143\\124\\065' > /data/odgf/f2 && printf '\\000\\000\\000\\000\\000\\000\\000\\000\\000\\000\\000\\000\\000\\000\\377\\077\\000\\000\\000\\000\\000\\000\\000\\000\\000\\000\\000\\000\\000\\100\\000\\300\\232\\231\\231\\231\\231\\231\\231\\231\\231\\231\\231\\231\\231\\231\\373\\077\\001\\000\\000\\000\\000\\000\\000\\000\\000\\000\\000\\000\\000\\000\\000\\000' > /data/odgf/f16 && od -t f4 /data/odgf/f4 && od -f -N 8 /data/odgf/f4 && od -t fF -N 8 /data/odgf/f4 && od -t f8 /data/odgf/f8 && od -t fD -N 16 /data/odgf/f8 && od -t f -N 16 /data/odgf/f8 && od -e -N 16 /data/odgf/f8 && od -F -N 16 /data/odgf/f8 && od -t fH /data/odgf/f2 && od -t f2 -N 4 /data/odgf/f2 && od -t fB /data/odgf/f2 && od -t fL /data/odgf/f16 && od -t f16 -N 16 /data/odgf/f16 && od -t f4 /data/odgf/f2",
+      "expect": {
+        "exit": 0,
+        "stdout": "0000000               1            -2.5             0.1           1e+10\n0000020             inf            -inf             nan               0\n0000040              -0         3.14159           1e-40      -3034876.2\n0000060   1.2345679e+08           1e-45             0.5   3.4028235e+38\n0000100\n0000000               1            -2.5\n0000010\n0000000               1            -2.5\n0000010\n0000000                        1                     -2.5\n0000020                      0.1                   1e+100\n0000040                   5e-324  7.2911220195563975e-304\n0000060          123456789012345                    1e+21\n0000100\n0000000                        1                     -2.5\n0000020\n0000000                        1                     -2.5\n0000020\n0000000                        1                     -2.5\n0000020\n0000000                        1                     -2.5\n0000020\n0000000               1            -2.5     0.099975586           65504   5.9604645e-08        3.140625            1000       0.3330078\n0000020\n0000000               1            -2.5\n0000004\n0000000       0.0078125              -8   5.2295945e-11   2.6480714e+36      9.1835e-41              50   7.6738455e+21   7.8976154e-07\n0000020\n0000000                                            1\n0000020                                         -2.5\n0000040                                          0.1\n0000060                                      6e-4966\n0000100\n0000000                                            1\n0000020\n0000000       -8.014648   2.6499535e+36       50.000004     7.91214e-07\n0000020\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "od_type_strings_are_refused_as_gnu_words_them",
+      "seq": 17500104,
+      "targets": [
+        "ram",
+        "opfs",
+        "disk"
+      ],
+      "command": "for t in q d3 x16 f3 f1 dX z x1zz zx1 c1 a2 dLL d0 f32 d99999999999999999999 x1z2 x,c 'x1 c' tx1; do od -t \"$t\" /dev/null; echo rc=$?; done; printf ab | od -t ''; od -t q -t x3 -t r /dev/null; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\nrc=1\nrc=1\nrc=1\nrc=1\nrc=1\nrc=1\nrc=1\nrc=1\nrc=1\nrc=1\nrc=1\nrc=1\nrc=1\nrc=1\nrc=1\nrc=1\nrc=1\nrc=1\n0000000 061141\n0000002\nrc=1\n",
+        "stderr": "od: invalid character 'q' in type string 'q'\nod: invalid type string 'd3';\nthis system doesn't provide a 3-byte integral type\nod: invalid type string 'x16';\nthis system doesn't provide a 16-byte integral type\nod: invalid type string 'f3';\nthis system doesn't provide a 3-byte floating point type\nod: invalid type string 'f1';\nthis system doesn't provide a 1-byte floating point type\nod: invalid character 'X' in type string 'dX'\nod: invalid character 'z' in type string 'z'\nod: invalid character 'z' in type string 'x1zz'\nod: invalid character 'z' in type string 'zx1'\nod: invalid character '1' in type string 'c1'\nod: invalid character '2' in type string 'a2'\nod: invalid character 'L' in type string 'dLL'\nod: invalid type string 'd0';\nthis system doesn't provide a 0-byte integral type\nod: invalid type string 'f32';\nthis system doesn't provide a 32-byte floating point type\nod: invalid type string 'd99999999999999999999'\nod: invalid character '2' in type string 'x1z2'\nod: invalid character ',' in type string 'x,c'\nod: invalid character ' ' in type string 'x1 c'\nod: invalid character 't' in type string 'tx1'\nod: invalid character 'q' in type string 'q'\nod: invalid type string 'x3';\nthis system doesn't provide a 3-byte integral type\nod: invalid character 'r' in type string 'r'\n"
+      }
+    },
+    {
+      "id": "od_z_appends_the_printable_bytes",
+      "seq": 17500105,
+      "targets": [
+        "ram",
+        "opfs",
+        "disk"
+      ],
+      "command": "printf 'hello\\nworld\\n\\tTab\\177\\200\\377 end\\033\\000\\007\\010\\013\\014\\015' > /data/odgz; od -t x1z /data/odgz; od -t cz /data/odgz; od -t az -An /data/odgz; od -t d2z -N 5 /data/odgz; od -t x1z -w4 /data/odgz; od -t x2z -t cz /data/odgz",
+      "expect": {
+        "exit": 0,
+        "stdout": "0000000 68 65 6c 6c 6f 0a 77 6f 72 6c 64 0a 09 54 61 62  >hello.world..Tab<\n0000020 7f 80 ff 20 65 6e 64 1b 00 07 08 0b 0c 0d        >... end.......<\n0000036\n0000000   h   e   l   l   o  \\n   w   o   r   l   d  \\n  \\t   T   a   b  >hello.world..Tab<\n0000020 177 200 377       e   n   d 033  \\0  \\a  \\b  \\v  \\f  \\r          >... end.......<\n0000036\n   h   e   l   l   o  nl   w   o   r   l   d  nl  ht   T   a   b  >hello.world..Tab<\n del nul del  sp   e   n   d esc nul bel  bs  vt  ff  cr          >... end.......<\n0000000  25960  27756    111                                     >hello<\n0000005\n0000000 68 65 6c 6c  >hell<\n0000004 6f 0a 77 6f  >o.wo<\n0000010 72 6c 64 0a  >rld.<\n0000014 09 54 61 62  >.Tab<\n0000020 7f 80 ff 20  >... <\n0000024 65 6e 64 1b  >end.<\n0000030 00 07 08 0b  >....<\n0000034 0c 0d        >..<\n0000036\n0000000    6568    6c6c    0a6f    6f77    6c72    0a64    5409    6261  >hello.world..Tab<\n          h   e   l   l   o  \\n   w   o   r   l   d  \\n  \\t   T   a   b  >hello.world..Tab<\n0000020    807f    20ff    6e65    1b64    0700    0b08    0d0c          >... end.......<\n        177 200 377       e   n   d 033  \\0  \\a  \\b  \\v  \\f  \\r          >... end.......<\n0000036\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "od_several_types_line_up_column_by_column",
+      "seq": 17500106,
+      "targets": [
+        "ram",
+        "opfs",
+        "disk"
+      ],
+      "command": "mkdir -p /data/odga && printf 'hello\\nworld\\n\\tTab\\177\\200\\377 end\\033\\000\\007\\010\\013\\014\\015' > /data/odga/t && printf '\\000\\000\\000\\000\\000\\000\\360\\077\\000\\000\\000\\000\\000\\000\\004\\300\\232\\231\\231\\231\\231\\231\\271\\077\\175\\303\\224\\045\\255\\111\\262\\124\\001\\000\\000\\000\\000\\000\\000\\000\\000\\000\\000\\000\\000\\000\\000\\001\\100\\336\\167\\203\\041\\022\\334\\102\\120\\357\\342\\326\\344\\032\\113\\104' > /data/odga/f && od -t x1 -t c /data/odga/t && od -t x2 -t c /data/odga/t && od -t c -t x2 /data/odga/t && od -t d1 -t x1 -t c /data/odga/t && od -bcx /data/odga/t && od -t x1 -t f8 -N 32 /data/odga/f && od -t x1 -t d2 -N 5 /data/odga/t && od -t x8 -t c -N 9 /data/odga/t && od -t d1 -t x8 -N 20 /data/odga/t",
+      "expect": {
+        "exit": 0,
+        "stdout": "0000000  68  65  6c  6c  6f  0a  77  6f  72  6c  64  0a  09  54  61  62\n          h   e   l   l   o  \\n   w   o   r   l   d  \\n  \\t   T   a   b\n0000020  7f  80  ff  20  65  6e  64  1b  00  07  08  0b  0c  0d\n        177 200 377       e   n   d 033  \\0  \\a  \\b  \\v  \\f  \\r\n0000036\n0000000    6568    6c6c    0a6f    6f77    6c72    0a64    5409    6261\n          h   e   l   l   o  \\n   w   o   r   l   d  \\n  \\t   T   a   b\n0000020    807f    20ff    6e65    1b64    0700    0b08    0d0c\n        177 200 377       e   n   d 033  \\0  \\a  \\b  \\v  \\f  \\r\n0000036\n0000000   h   e   l   l   o  \\n   w   o   r   l   d  \\n  \\t   T   a   b\n           6568    6c6c    0a6f    6f77    6c72    0a64    5409    6261\n0000020 177 200 377       e   n   d 033  \\0  \\a  \\b  \\v  \\f  \\r\n           807f    20ff    6e65    1b64    0700    0b08    0d0c\n0000036\n0000000  104  101  108  108  111   10  119  111  114  108  100   10    9   84   97   98\n          68   65   6c   6c   6f   0a   77   6f   72   6c   64   0a   09   54   61   62\n           h    e    l    l    o   \\n    w    o    r    l    d   \\n   \\t    T    a    b\n0000020  127 -128   -1   32  101  110  100   27    0    7    8   11   12   13\n          7f   80   ff   20   65   6e   64   1b   00   07   08   0b   0c   0d\n         177  200  377         e    n    d  033   \\0   \\a   \\b   \\v   \\f   \\r\n0000036\n0000000 150 145 154 154 157 012 167 157 162 154 144 012 011 124 141 142\n          h   e   l   l   o  \\n   w   o   r   l   d  \\n  \\t   T   a   b\n           6568    6c6c    0a6f    6f77    6c72    0a64    5409    6261\n0000020 177 200 377 040 145 156 144 033 000 007 010 013 014 015\n        177 200 377       e   n   d 033  \\0  \\a  \\b  \\v  \\f  \\r\n           807f    20ff    6e65    1b64    0700    0b08    0d0c\n0000036\n0000000  00 00 00 00 00 00 f0 3f  00 00 00 00 00 00 04 c0\n                               1                     -2.5\n0000020  9a 99 99 99 99 99 b9 3f  7d c3 94 25 ad 49 b2 54\n                             0.1                   1e+100\n0000040\n0000000  68 65  6c 6c  6f\n         25960  27756    111\n0000005\n0000000                6f770a6f6c6c6568                0000000000000072\n          h   e   l   l   o  \\n   w   o   r\n0000011\n0000000  104  101  108  108  111   10  119  111  114  108  100   10    9   84   97   98\n                               6f770a6f6c6c6568                        626154090a646c72\n0000020  127 -128   -1   32\n                               0000000020ff807f\n0000024\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "od_address_radixes_and_their_widths",
+      "seq": 17500107,
+      "targets": [
+        "ram",
+        "opfs",
+        "disk"
+      ],
+      "command": "printf 'hello\\nworld\\n\\tTab\\177\\200\\377 end\\033\\000\\007\\010\\013\\014\\015' > /data/odgr; for r in d o x n; do od -A $r -t x1 -t c /data/odgr; done; od -A dd -c /data/odgr; od --address-radix=x -c /data/odgr",
+      "expect": {
+        "exit": 0,
+        "stdout": "0000000  68  65  6c  6c  6f  0a  77  6f  72  6c  64  0a  09  54  61  62\n          h   e   l   l   o  \\n   w   o   r   l   d  \\n  \\t   T   a   b\n0000016  7f  80  ff  20  65  6e  64  1b  00  07  08  0b  0c  0d\n        177 200 377       e   n   d 033  \\0  \\a  \\b  \\v  \\f  \\r\n0000030\n0000000  68  65  6c  6c  6f  0a  77  6f  72  6c  64  0a  09  54  61  62\n          h   e   l   l   o  \\n   w   o   r   l   d  \\n  \\t   T   a   b\n0000020  7f  80  ff  20  65  6e  64  1b  00  07  08  0b  0c  0d\n        177 200 377       e   n   d 033  \\0  \\a  \\b  \\v  \\f  \\r\n0000036\n000000  68  65  6c  6c  6f  0a  77  6f  72  6c  64  0a  09  54  61  62\n         h   e   l   l   o  \\n   w   o   r   l   d  \\n  \\t   T   a   b\n000010  7f  80  ff  20  65  6e  64  1b  00  07  08  0b  0c  0d\n       177 200 377       e   n   d 033  \\0  \\a  \\b  \\v  \\f  \\r\n00001e\n  68  65  6c  6c  6f  0a  77  6f  72  6c  64  0a  09  54  61  62\n   h   e   l   l   o  \\n   w   o   r   l   d  \\n  \\t   T   a   b\n  7f  80  ff  20  65  6e  64  1b  00  07  08  0b  0c  0d\n 177 200 377       e   n   d 033  \\0  \\a  \\b  \\v  \\f  \\r\n0000000   h   e   l   l   o  \\n   w   o   r   l   d  \\n  \\t   T   a   b\n0000016 177 200 377       e   n   d 033  \\0  \\a  \\b  \\v  \\f  \\r\n0000030\n000000   h   e   l   l   o  \\n   w   o   r   l   d  \\n  \\t   T   a   b\n000010 177 200 377       e   n   d 033  \\0  \\a  \\b  \\v  \\f  \\r\n00001e\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "od_width_sets_the_bytes_a_line_and_warns_off_a_misfit",
+      "seq": 17500108,
+      "targets": [
+        "ram",
+        "opfs",
+        "disk"
+      ],
+      "command": "mkdir -p /data/odgw && printf '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGH' > /data/odgw/s && od -w8 -t x1 /data/odgw/s; od -w -t x1 /data/odgw/s; od --width=4 -t x1 -N 9 /data/odgw/s; od -w3 -t x2 /data/odgw/s; od -w6 -t x4 -t x2 -N 12 /data/odgw/s; od -w010 -t x1 -N 12 /data/odgw/s; od -w 8 -t x1 /data/odgw/s; echo rc=$?; od -w1 -S 3 /dev/null; for w in 0x10 1K x 18446744073709551616; do od -w$w /dev/null; echo rc=$?; done; od --width=x /dev/null; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "0000000 30 31 32 33 34 35 36 37\n0000010 38 39 61 62 63 64 65 66\n0000020 67 68 69 6a 6b 6c 6d 6e\n0000030 6f 70 71 72 73 74 75 76\n0000040 77 78 79 7a 41 42 43 44\n0000050 45 46 47 48\n0000054\n0000000 30 31 32 33 34 35 36 37 38 39 61 62 63 64 65 66 67 68 69 6a 6b 6c 6d 6e 6f 70 71 72 73 74 75 76\n0000040 77 78 79 7a 41 42 43 44 45 46 47 48\n0000054\n0000000 30 31 32 33\n0000004 34 35 36 37\n0000010 38\n0000011\n0000000 3130\n0000002 3332\n0000004 3534\n0000006 3736\n0000010 3938\n0000012 6261\n0000014 6463\n0000016 6665\n0000020 6867\n0000022 6a69\n0000024 6c6b\n0000026 6e6d\n0000030 706f\n0000032 7271\n0000034 7473\n0000036 7675\n0000040 7877\n0000042 7a79\n0000044 4241\n0000046 4443\n0000050 4645\n0000052 4847\n0000054\n0000000  33323130\n        3130 3332\n0000004  37363534\n        3534 3736\n0000010  62613938\n        3938 6261\n0000014\n0000000 30 31 32 33 34 35 36 37 38 39\n0000012 61 62\n0000014\n0000000 30 31 32 33 34 35 36 37 38 39 61 62 63 64 65 66 67 68 69 6a 6b 6c 6d 6e 6f 70 71 72 73 74 75 76\n0000040 77 78 79 7a 41 42 43 44 45 46 47 48\n0000054\nrc=1\nrc=1\nrc=1\nrc=1\nrc=1\nrc=1\n",
+        "stderr": "od: warning: invalid width 3; using 2 instead\nod: warning: invalid width 6; using 4 instead\nod: 8: No such file or directory\nod: warning: invalid width 1; using 2 instead\nod: invalid suffix in -w argument '0x10'\nod: invalid suffix in -w argument '1K'\nod: invalid -w argument 'x'\nod: -w argument '18446744073709551616' too large\nod: invalid --width argument 'x'\n"
+      }
+    },
+    {
+      "id": "od_star_stands_for_lines_that_repeat_the_last",
+      "seq": 17500109,
+      "targets": [
+        "ram",
+        "opfs",
+        "disk"
+      ],
+      "command": "mkdir -p /data/odgd && printf 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABBBBBBBBBBBBBBBBAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAB' > /data/odgd/r && od -c /data/odgd/r && od -v -t x1 -N 48 /data/odgd/r && od --output-duplicates -An -c -N 32 /data/odgd/r && od -An -t x1 -w4 -N 40 /data/odgd/r && od -t x1 -t c -j 64 /data/odgd/r && od -t x1z -j 2 -N 46 /data/odgd/r",
+      "expect": {
+        "exit": 0,
+        "stdout": "0000000   A   A   A   A   A   A   A   A   A   A   A   A   A   A   A   A\n*\n0000100   B   B   B   B   B   B   B   B   B   B   B   B   B   B   B   B\n0000120   A   A   A   A   A   A   A   A   A   A   A   A   A   A   A   A\n*\n0000200   A   B\n0000202\n0000000 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41\n0000020 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41\n0000040 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41\n0000060\n   A   A   A   A   A   A   A   A   A   A   A   A   A   A   A   A\n   A   A   A   A   A   A   A   A   A   A   A   A   A   A   A   A\n 41 41 41 41\n*\n0000100  42  42  42  42  42  42  42  42  42  42  42  42  42  42  42  42\n          B   B   B   B   B   B   B   B   B   B   B   B   B   B   B   B\n0000120  41  41  41  41  41  41  41  41  41  41  41  41  41  41  41  41\n          A   A   A   A   A   A   A   A   A   A   A   A   A   A   A   A\n*\n0000200  41  42\n          A   B\n0000202\n0000002 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41  >AAAAAAAAAAAAAAAA<\n*\n0000042 41 41 41 41 41 41 41 41 41 41 41 41 41 41        >AAAAAAAAAAAAAA<\n0000060\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "od_strings_lists_nul_ended_runs",
+      "seq": 17500110,
+      "targets": [
+        "ram",
+        "opfs",
+        "disk"
+      ],
+      "command": "printf 'ab\\0abc\\0abcd\\0\\001xyz\\0longer string\\0\\200hi\\177there\\0noterm' > /data/odgs; od -S 3 /data/odgs; od -S 1 /data/odgs; od --strings /data/odgs; od --strings=5 /data/odgs; od -A d -S 3 /data/odgs; od -A n -S 4 /data/odgs; od -A x -S 2 -j 5 -N 26 /data/odgs; printf 'a\\0\\0b\\0' | od -S 0; od -S 3 -t x1 /data/odgs; echo rc=$?; od -c -S 3 /data/odgs; echo rc=$?; od -S x /data/odgs; echo rc=$?; od -S 1Q /data/odgs; echo rc=$?; od -S 1k /data/odgs; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "0000003 abc\n0000007 abcd\n0000015 xyz\n0000021 longer string\n0000043 there\n0000000 ab\n0000003 abc\n0000007 abcd\n0000015 xyz\n0000021 longer string\n0000043 there\n0000003 abc\n0000007 abcd\n0000015 xyz\n0000021 longer string\n0000043 there\n0000021 longer string\n0000043 there\n0000003 abc\n0000007 abcd\n0000013 xyz\n0000017 longer string\n0000035 there\nabcd\nlonger string\nthere\n000007 abcd\n00000d xyz\n000011 longer string\n0000000 a\n0000002 \n0000003 b\nrc=1\nrc=1\nrc=1\nrc=1\nrc=0\n",
+        "stderr": "od: no type may be specified when dumping strings\nod: no type may be specified when dumping strings\nod: invalid -S argument 'x'\nod: -S argument '1Q' too large\n"
+      }
+    },
+    {
+      "id": "od_endian_reorders_each_value_bytes",
+      "seq": 17500111,
+      "targets": [
+        "ram",
+        "opfs",
+        "disk"
+      ],
+      "command": "mkdir -p /data/odge && printf '\\200\\377\\177\\000\\376\\377\\377\\377\\000\\000\\000\\200\\377\\377\\377\\377\\377\\377\\377\\177\\001\\002\\003\\004' > /data/odge/n && printf '\\000\\000\\200\\077\\000\\000\\040\\300\\315\\314\\314\\075\\371\\002\\025\\120\\000\\000\\200\\177\\000\\000\\200\\377\\000\\000\\300\\177\\000\\000\\000\\000\\000\\000\\000\\200\\320\\017\\111\\100\\302\\026\\001\\000\\361\\073\\071\\312\\243\\171\\353\\114\\001\\000\\000\\000\\000\\000\\000\\077\\377\\377\\177\\177' > /data/odge/f && for t in x2 x4 x8 d2 u4 x1 c; do od --endian=big -t $t -N 12 /data/odge/n; done; od --endian=big -t f4 -N 16 /data/odge/f; od --endian=little -t x2 -N 4 /data/odge/n; od --endian=b -t x2 -N 4 /data/odge/n; od --end=l -t x2 -N 4 /data/odge/n; od --endian=little --endian=big -t x2 -N 4 /data/odge/n; printf abc | od --endian=big -t x2 -t c; for e in middle BIG ''; do od --endian=$e /dev/null; echo rc=$?; done",
+      "expect": {
+        "exit": 0,
+        "stdout": "0000000 80ff 7f00 feff ffff 0000 0080\n0000014\n0000000 80ff7f00 feffffff 00000080\n0000014\n0000000 80ff7f00feffffff 0000008000000000\n0000014\n0000000 -32513  32512   -257     -1      0    128\n0000014\n0000000 2164227840 4278190079        128\n0000014\n0000000 80 ff 7f 00 fe ff ff ff 00 00 00 80\n0000014\n0000000 200 377 177  \\0 376 377 377 377  \\0  \\0  \\0 200\n0000014\n0000000      4.6006e-41      1.1748e-41  -4.2949213e+08   -4.221443e+34\n0000020\n0000000 ff80 007f\n0000004\n0000000 80ff 7f00\n0000004\n0000000 ff80 007f\n0000004\n0000000 80ff 7f00\n0000004\n0000000    6162    6300\n          a   b   c\n0000003\nrc=1\nrc=1\nrc=1\n",
+        "stderr": "od: invalid argument 'middle' for '--endian'\nValid arguments are:\n  - 'little'\n  - 'big'\nTry 'od --help' for more information.\nod: invalid argument 'BIG' for '--endian'\nValid arguments are:\n  - 'little'\n  - 'big'\nTry 'od --help' for more information.\nod: ambiguous argument '' for '--endian'\nValid arguments are:\n  - 'little'\n  - 'big'\nTry 'od --help' for more information.\n"
+      }
+    },
+    {
+      "id": "od_traditional_letters_select_types",
+      "seq": 17500112,
+      "targets": [
+        "ram",
+        "opfs",
+        "disk"
+      ],
+      "command": "printf '\\200\\377\\177\\000\\376\\377\\377\\377\\000\\000\\000\\200\\377\\377\\377\\377\\377\\377\\377\\177\\001\\002\\003\\004' > /data/odgl; for o in a b c d f h i l o s x B D e F H I L O X; do od -$o /data/odgl; done; od -bcdosx -N 8 /data/odgl; od -cc -N 4 /data/odgl; od -c -c -t c -N 2 /data/odgl",
+      "expect": {
+        "exit": 0,
+        "stdout": "0000000 nul del del nul   ~ del del del nul nul nul nul del del del del\n0000020 del del del del soh stx etx eot\n0000030\n0000000 200 377 177 000 376 377 377 377 000 000 000 200 377 377 377 377\n0000020 377 377 377 177 001 002 003 004\n0000030\n0000000 200 377 177  \\0 376 377 377 377  \\0  \\0  \\0 200 377 377 377 377\n0000020 377 377 377 177 001 002 003 004\n0000030\n0000000 65408   127 65534 65535     0 32768 65535 65535\n0000020 65535 32767   513  1027\n0000030\n0000000   1.1754764e-38            -nan              -0            -nan\n0000020             nan   1.5399896e-36\n0000030\n0000000 ff80 007f fffe ffff 0000 8000 ffff ffff\n0000020 ffff 7fff 0201 0403\n0000030\n0000000     8388480          -2 -2147483648          -1\n0000020  2147483647    67305985\n0000030\n0000000          -8581546112          -2147483648\n0000020   289077006547550207\n0000030\n0000000 177600 000177 177776 177777 000000 100000 177777 177777\n0000020 177777 077777 001001 002003\n0000030\n0000000   -128    127     -2     -1      0 -32768     -1     -1\n0000020     -1  32767    513   1027\n0000030\n0000000 ff80 007f fffe ffff 0000 8000 ffff ffff\n0000020 ffff 7fff 0201 0403\n0000030\n0000000 177600 000177 177776 177777 000000 100000 177777 177777\n0000020 177777 077777 001001 002003\n0000030\n0000000    8388480 4294967294 2147483648 4294967295\n0000020 2147483647   67305985\n0000030\n0000000                     -nan                     -nan\n0000020   2.438073745744411e-289\n0000030\n0000000                     -nan                     -nan\n0000020   2.438073745744411e-289\n0000030\n0000000 007fff80 fffffffe 80000000 ffffffff\n0000020 7fffffff 04030201\n0000030\n0000000          -8581546112          -2147483648\n0000020   289077006547550207\n0000030\n0000000          -8581546112          -2147483648\n0000020   289077006547550207\n0000030\n0000000 00037777600 37777777776 20000000000 37777777777\n0000020 17777777777 00400601001\n0000030\n0000000 007fff80 fffffffe 80000000 ffffffff\n0000020 7fffffff 04030201\n0000030\n0000000 200 377 177 000 376 377 377 377\n        200 377 177  \\0 376 377 377 377\n          65408     127   65534   65535\n         177600  000177  177776  177777\n           -128     127      -2      -1\n           ff80    007f    fffe    ffff\n0000010\n0000000 200 377 177  \\0\n        200 377 177  \\0\n0000004\n0000000 200 377\n        200 377\n        200 377\n0000002\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "od_a_last_operand_can_be_an_offset",
+      "seq": 17500113,
+      "targets": [
+        "ram",
+        "opfs",
+        "disk"
+      ],
+      "command": "mkdir -p /data/odgo && printf '0123456789abcdefghijklmnopqrstuvwxyz' > /data/odgo/s && (cd /data/odgo && for off in +10 10 10b 1B 0x10 +0x1f 0b +017 08 10. 1k +x; do od -c s $off; echo rc=$?; done; printf abcdef | od -c +2; printf abcdef | od -c +10; echo rc=$?; od -c -- s +3; od -c s -- 3; od -x s +2; od -t x1 s +2; echo rc=$?; od -A d -c s +2; echo rc=$?; od -c -N 4 s +2; od -c s +1 2; echo rc=$?)",
+      "expect": {
+        "exit": 0,
+        "stdout": "0000010   8   9   a   b   c   d   e   f   g   h   i   j   k   l   m   n\n0000030   o   p   q   r   s   t   u   v   w   x   y   z\n0000044\nrc=0\n0000010   8   9   a   b   c   d   e   f   g   h   i   j   k   l   m   n\n0000030   o   p   q   r   s   t   u   v   w   x   y   z\n0000044\nrc=0\nrc=1\nrc=1\n0000020   g   h   i   j   k   l   m   n   o   p   q   r   s   t   u   v\n0000040   w   x   y   z\n0000044\nrc=0\n0000037   v   w   x   y   z\n0000044\nrc=0\n0000000   0   1   2   3   4   5   6   7   8   9   a   b   c   d   e   f\n0000020   g   h   i   j   k   l   m   n   o   p   q   r   s   t   u   v\n0000040   w   x   y   z\n0000044\nrc=0\n0000017   f   g   h   i   j   k   l   m   n   o   p   q   r   s   t   u\n0000037   v   w   x   y   z\n0000044\nrc=0\n0000000   0   1   2   3   4   5   6   7   8   9   a   b   c   d   e   f\n0000020   g   h   i   j   k   l   m   n   o   p   q   r   s   t   u   v\n0000040   w   x   y   z\n0000044\nrc=1\n0000000   0   1   2   3   4   5   6   7   8   9   a   b   c   d   e   f\n0000020   g   h   i   j   k   l   m   n   o   p   q   r   s   t   u   v\n0000040   w   x   y   z\n0000044\nrc=1\n0000000   0   1   2   3   4   5   6   7   8   9   a   b   c   d   e   f\n0000020   g   h   i   j   k   l   m   n   o   p   q   r   s   t   u   v\n0000040   w   x   y   z\n0000044\nrc=1\n0000000   0   1   2   3   4   5   6   7   8   9   a   b   c   d   e   f\n0000020   g   h   i   j   k   l   m   n   o   p   q   r   s   t   u   v\n0000040   w   x   y   z\n0000044\nrc=1\n0000002   c   d   e   f\n0000006\nrc=1\n0000003   3   4   5   6   7   8   9   a   b   c   d   e   f   g   h   i\n0000023   j   k   l   m   n   o   p   q   r   s   t   u   v   w   x   y\n0000043   z\n0000044\n0000003   3   4   5   6   7   8   9   a   b   c   d   e   f   g   h   i\n0000023   j   k   l   m   n   o   p   q   r   s   t   u   v   w   x   y\n0000043   z\n0000044\n0000002 3332 3534 3736 3938 6261 6463 6665 6867\n0000022 6a69 6c6b 6e6d 706f 7271 7473 7675 7877\n0000042 7a79\n0000044\n0000000 30 31 32 33 34 35 36 37 38 39 61 62 63 64 65 66\n0000020 67 68 69 6a 6b 6c 6d 6e 6f 70 71 72 73 74 75 76\n0000040 77 78 79 7a\n0000044\nrc=1\n0000000   0   1   2   3   4   5   6   7   8   9   a   b   c   d   e   f\n0000016   g   h   i   j   k   l   m   n   o   p   q   r   s   t   u   v\n0000032   w   x   y   z\n0000036\nrc=1\n0000000   0   1   2   3\n0000004\n0000000   0   1   2   3   4   5   6   7   8   9   a   b   c   d   e   f\n0000020   g   h   i   j   k   l   m   n   o   p   q   r   s   t   u   v\n0000040   w   x   y   z\n0000044\nrc=1\n",
+        "stderr": "od: cannot skip past end of combined input\nod: cannot skip past end of combined input\nod: 08: No such file or directory\nod: 10.: No such file or directory\nod: 1k: No such file or directory\nod: +x: No such file or directory\nod: cannot skip past end of combined input\nod: +2: No such file or directory\nod: +2: No such file or directory\nod: +1: No such file or directory\nod: 2: No such file or directory\n"
+      }
+    },
+    {
+      "id": "od_traditional_reads_an_offset_and_a_label",
+      "seq": 17500114,
+      "targets": [
+        "ram",
+        "opfs",
+        "disk"
+      ],
+      "command": "mkdir -p /data/odgt && printf '0123456789abcdefghijklmnopqrstuvwxyz' > /data/odgt/s && (cd /data/odgt && od --traditional -c s 10 20; od --traditional -A d -t x1 -t c -N 6 s 10 0x20; od --traditional -A n -c -N 4 s 1 100; od --traditional -A x -t x1 -t c -N 4 s 1 2; od --traditional -S 2 s; od --traditional -A n -t x1z -N 3 s +1 +2; od --traditional -c -N 3 s 0 0xffffffffffffffff; printf abcdef | od --traditional -c 1; printf abcdef | od --traditional -c 1 2; od --traditional -j 4 -c -N 2 s 10 20; od --trad -c -N 2 s 10; for args in 's x' 's 10 x' 's 10 20 30' 's x 10' 's s'; do od --traditional -c $args; echo rc=$?; done)",
+      "expect": {
+        "exit": 0,
+        "stdout": "0000010 (0000020)   8   9   a   b   c   d   e   f   g   h   i   j   k   l   m   n\n0000030 (0000040)   o   p   q   r   s   t   u   v   w   x   y   z\n0000044 (0000054)\n0000008 (0000032)  38  39  61  62  63  64\n          8   9   a   b   c   d\n0000014 (0000038)\n(0000001)   1   2   3   4\n(0000005)\n000001 (000002)  31  32  33  34\n         1   2   3   4\n000005 (000006)\n(0000001) 31 32 33                                         >123<\n(0000004)\n0000000 (1777777777777777777777)   0   1   2\n0000003 (0000002)\n0000001   b   c   d   e   f\n0000006\n0000001 (0000002)   b   c   d   e   f\n0000006 (0000007)\n0000010 (0000020)   8   9\n0000012 (0000022)\n0000010   8   9\n0000012\nrc=1\nrc=1\nrc=1\nrc=1\nrc=1\n",
+        "stderr": "od: extra operand 'x'\nod: compatibility mode supports at most one file\nTry 'od --help' for more information.\nod: extra operand '10'\nod: compatibility mode supports at most one file\nTry 'od --help' for more information.\nod: extra operand '10'\nod: compatibility mode supports at most one file\nTry 'od --help' for more information.\nod: extra operand 'x'\nod: compatibility mode supports at most one file\nTry 'od --help' for more information.\nod: extra operand 's'\nod: compatibility mode supports at most one file\nTry 'od --help' for more information.\n"
+      }
+    },
+    {
+      "id": "od_counts_take_size_letters_and_name_the_option_as_typed",
+      "seq": 17500115,
+      "targets": [
+        "ram",
+        "opfs",
+        "disk"
+      ],
+      "command": "mkdir -p /data/odgn && printf '0123456789' > /data/odgn/s && for n in 1kB 0x4 04 ' 2' +3; do od -c -N \"$n\" /data/odgn/s; done; for n in 1Ki 1iB 1B 2.5 1e3 -1 1Z 99999999999999999999; do od -N \"$n\" /data/odgn/s; echo rc=$?; done; od --skip-bytes=x /data/odgn/s; od --skip=x /data/odgn/s; od --read-bytes=x /data/odgn/s; od --read=1Q /data/odgn/s; od --skip-bytes=1Z /data/odgn/s; od --strings=x /data/odgn/s; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "0000000   0   1   2   3   4   5   6   7   8   9\n0000012\n0000000   0   1   2   3\n0000004\n0000000   0   1   2   3\n0000004\n0000000   0   1\n0000002\n0000000   0   1   2\n0000003\nrc=1\nrc=1\nrc=1\nrc=1\nrc=1\nrc=1\nrc=1\nrc=1\nrc=1\n",
+        "stderr": "od: invalid suffix in -N argument '1Ki'\nod: invalid suffix in -N argument '1iB'\nod: invalid suffix in -N argument '1B'\nod: invalid suffix in -N argument '2.5'\nod: invalid suffix in -N argument '1e3'\nod: invalid -N argument '-1'\nod: -N argument '1Z' too large\nod: -N argument '99999999999999999999' too large\nod: invalid --skip-bytes argument 'x'\nod: invalid --skip-bytes argument 'x'\nod: invalid --read-bytes argument 'x'\nod: --read-bytes argument '1Q' too large\nod: --skip-bytes argument '1Z' too large\nod: invalid --strings argument 'x'\n"
+      }
+    },
+    {
+      "id": "od_options_are_refused_in_the_order_typed",
+      "seq": 17500116,
+      "targets": [
+        "ram",
+        "opfs",
+        "disk"
+      ],
+      "command": "od -N x -j y /dev/null; od -j y -N x /dev/null; od -t q -N x /dev/null; od -N x -t q /dev/null; od -A q -t q /dev/null; od -t q -A q /dev/null; od --endian=x -N y /dev/null; od -N y --endian=x /dev/null; od -wx -N y /dev/null; od -A x -A q /dev/null; od -t x1 -t q -t r /dev/null; od -t x1 -S 3 -w3 /dev/null; od -S 3 --traditional -t x1 /dev/null 1 2 3; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\n",
+        "stderr": "od: invalid -N argument 'x'\nod: invalid -j argument 'y'\nod: invalid character 'q' in type string 'q'\nod: invalid -N argument 'x'\nod: invalid -N argument 'x'\nod: invalid output address radix 'q'; it must be one character from [doxn]\nod: invalid character 'q' in type string 'q'\nod: invalid output address radix 'q'; it must be one character from [doxn]\nod: invalid argument 'x' for '--endian'\nValid arguments are:\n  - 'little'\n  - 'big'\nTry 'od --help' for more information.\nod: invalid -N argument 'y'\nod: invalid -w argument 'x'\nod: invalid output address radix 'q'; it must be one character from [doxn]\nod: invalid character 'q' in type string 'q'\nod: invalid character 'r' in type string 'r'\nod: no type may be specified when dumping strings\nod: no type may be specified when dumping strings\n"
+      }
+    },
+    {
+      "id": "od_skip_spends_on_what_opens_and_warns_after_it",
+      "seq": 17500117,
+      "targets": [
+        "ram",
+        "opfs",
+        "disk"
+      ],
+      "command": "mkdir -p /data/odgk/dir && printf abc > /data/odgk/s && printf abcde > /data/odgk/f && (cd /data/odgk && od -c -j 2 missing; echo rc=$?; od -c -j 10 s missing; echo rc=$?; od -c -j 3 s missing; echo rc=$?; od -c -j 2 dir s; echo rc=$?; od -c -j 5 s dir f; echo rc=$?; od -c -N 0 missing; echo rc=$?; od -c -N 0 s missing; od -c -N 3 s dir; od -w3 -t x2 missing s; echo rc=$?; od -w3 -t x2 s missing; echo rc=$?; od -w3 -t x2 -j 10 s; echo rc=$?; od -w3 -t x2 -N 0 s; od -c dir; echo rc=$?)",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\nrc=1\n0000003\nrc=1\n0000002   a   b   c\n0000005\nrc=1\n0000005   a   b   c   d   e\n0000012\nrc=1\nrc=1\n0000000\n0000000   a   b   c\n0000003\n0000000 6261\n0000002 0063\n0000003\nrc=1\n0000000 6261\n0000002 0063\n0000003\nrc=1\nrc=1\n0000000\n0000000\nrc=1\n",
+        "stderr": "od: missing: No such file or directory\nod: missing: No such file or directory\nod: cannot skip past end of combined input\nod: missing: No such file or directory\nod: dir: Is a directory\nod: dir: Is a directory\nod: missing: No such file or directory\nod: missing: No such file or directory\nod: warning: invalid width 3; using 2 instead\nod: warning: invalid width 3; using 2 instead\nod: missing: No such file or directory\nod: cannot skip past end of combined input\nod: warning: invalid width 3; using 2 instead\nod: dir: Is a directory\n"
+      }
+    }
+  ]
+}

@@ -13,17 +13,17 @@ mod tests;
 use serde::Deserialize;
 use serde_json::Value as Json;
 
-use crate::request::{Io, Opening, Reply, Request, WriteMode, bytes};
+use crate::request::{Io, Opening, Refused, Reply, Request, WriteMode, bytes, read_failure};
 use crate::{Stream, StreamError, parse_config, quoted};
 
-use self::pieces::{Input, MAX_SUFFIX, Piece, Refused, STEPS, read_failure, write_failure};
+use self::pieces::{Input, MAX_SUFFIX, Piece, STEPS, write_failure};
 
 const ALPHA: &[u8] = b"abcdefghijklmnopqrstuvwxyz";
 const DECIMAL: &[u8] = b"0123456789";
 const HEX: &[u8] = b"0123456789abcdef";
 
-/// The size letters split takes after a byte count (coreutils 9.7): every
-/// power letter in upper case, `k` and `m` in lower case, and `b`.
+/// The size letters split and od take after a byte count (coreutils 9.7):
+/// every power letter in upper case, `k` and `m` in lower case, and `b`.
 const SIZE_LETTERS: &[u8] = b"bkKmMEGPQRTYZ";
 const POWERS: &[u8] = b"KMGTPEZYRQ";
 
@@ -173,8 +173,8 @@ fn positive(value: &[u8], what: &str) -> Result<u64, Vec<u8>> {
         .ok_or_else(|| refusal(what, value))
 }
 
-/// The multiplier a byte count's suffix stands for.
-fn unit(suffix: &[u8]) -> Option<u64> {
+/// The multiplier a byte count's suffix stands for, saturating.
+pub(crate) fn unit(suffix: &[u8]) -> Option<u64> {
     let (&letter, tail) = suffix.split_first()?;
     if !SIZE_LETTERS.contains(&letter) {
         return None;
