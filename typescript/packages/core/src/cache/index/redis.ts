@@ -968,8 +968,8 @@ export class RedisIndexCacheStore extends IndexCacheStore {
    * while exactly one command is live is served from that command's memo,
    * under the same write counting and window.
    */
-  listDir(vfsPath: string): Promise<ListResult> {
-    return this.listings.read(vfsPath, () => this.readListing(vfsPath))
+  listDir(vfsPath: string, child?: string): Promise<ListResult> {
+    return this.listings.read(vfsPath, () => this.readListing(vfsPath), child)
   }
 
   private async readListing(vfsPath: string): Promise<[ListResult, number | null]> {

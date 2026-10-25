@@ -108,7 +108,9 @@ async def readdir(
     elif len(ps) == 3:
         key = path.virtual.rstrip("/")
         parent = key.rsplit("/", 1)[0] or "/"
-        listed = await index.list_dir(parent) if index is not None else None
+        listed = (
+            await index.list_dir(parent, key) if index is not None else None
+        )
         if listed is None or key not in (listed.entries or []):
             await accessor.client.run(run_vars(ps), RUN_EXISTS)
         return [_leaf(n) for n in LEAVES] + [row("files", True)]

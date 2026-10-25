@@ -757,8 +757,8 @@ async def test_ownership_lost_during_the_read_stays_not_found():
     await store.set_dir("/data", [("a", _child("a"))])
     original = store.list_dir
 
-    async def unmount_mid_read(key):
-        result = await original(key)
+    async def unmount_mid_read(key, child=None):
+        result = await original(key, child)
         owned.clear()
         return result
 

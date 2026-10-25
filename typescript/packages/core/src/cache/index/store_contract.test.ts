@@ -161,6 +161,29 @@ for (const backend of ['ram', 'redis']) {
         },
       )
 
+      it('narrows a lookup of one child to that child, as listed now', async () => {
+        await store.setDir(
+          '/dir',
+          [
+            ['a', entry()],
+            ['b', entry('b')],
+          ],
+          undefined,
+          { version: 'v1', window: true },
+        )
+        expect(await store.listDir('/dir', '/dir/a')).toEqual({
+          entries: ['/dir/a'],
+          version: 'v1',
+          window: true,
+        })
+        expect((await store.listDir('/dir', '/dir/z')).entries).toEqual([])
+        await store.invalidateEntry('/dir/a')
+        expect((await store.listDir('/dir', '/dir/a')).partialEntries).toEqual([])
+        await store.addEntry('/dir/c', entry('c'))
+        expect((await store.listDir('/dir', '/dir/c')).partialEntries).toEqual(['/dir/c'])
+        expect((await store.listDir('/none', '/none/a')).status).toBe(LookupStatus.NOT_FOUND)
+      })
+
       it.each(['deadline', 'generation'])(
         'narrow mutation does not revive stale parent (%s)',
         async (state) => {

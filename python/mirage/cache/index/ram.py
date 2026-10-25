@@ -157,18 +157,25 @@ class RAMIndexCacheStore(IndexCacheStore, KeyLockMixin):
             self._entries[vfs_path] = entry
             return True
 
-    async def list_dir(self, vfs_path: str) -> ListResult:
+    async def list_dir(
+        self, vfs_path: str, child: str | None = None
+    ) -> ListResult:
         exp = self._expiry.get(vfs_path)
         if exp is None:
             return ListResult(status=LookupStatus.NOT_FOUND)
         if datetime.fromtimestamp(self.clock.now(), timezone.utc) >= exp:
             return ListResult(status=LookupStatus.EXPIRED)
-        children = self._children.get(vfs_path)
+        if child is None:
+            children = self._children.get(vfs_path) or []
+        else:
+            # A folder's flags name exactly the children its listing holds.
+            named = child in self._folder_flags.get(vfs_path, {})
+            children = [child] if named else []
         version = self._versions.get(vfs_path)
         if vfs_path in self._partial:
-            return ListResult(partial_entries=children or [], version=version)
+            return ListResult(partial_entries=children, version=version)
         return ListResult(
-            entries=children or [],
+            entries=children,
             version=version,
             window=vfs_path in self._windows,
         )

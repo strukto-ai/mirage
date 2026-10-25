@@ -24,13 +24,6 @@ const ROW_WRITES_BY_PREFIX = new Map<string, number>()
 const ROWS_WRITTEN_BY_PREFIX = new Map<string, Map<string, { count: number; at: number }>>()
 const HOLDERS_BY_PREFIX = new Map<string, number>()
 
-function copied(listing: ListResult): ListResult {
-  const copy = { ...listing }
-  if (copy.entries != null) copy.entries = [...copy.entries]
-  if (copy.partialEntries != null) copy.partialEntries = [...copy.partialEntries]
-  return copy
-}
-
 interface Read {
   readonly writesBefore: number
   readonly readAt: number
@@ -38,6 +31,33 @@ interface Read {
   readonly listing: ListResult
   rowWrites: number
   readonly rows: Map<string, FileStat | null>
+  // Where each listed key sits, built on the first lookup of one.
+  positions: Map<string, number> | null
+}
+
+function positions(kept: Read): ReadonlyMap<string, number> {
+  const keys = kept.listing.entries ?? kept.listing.partialEntries ?? []
+  kept.positions ??= new Map(keys.map((key, at) => [key, at]))
+  return kept.positions
+}
+
+/**
+ * A listing as `read` answers it: a kept one copied, so a caller's edit never
+ * reaches it, or, given `child`, narrowed to that key where it is listed.
+ */
+function answer(listing: ListResult, child: string | undefined, kept: Read | null): ListResult {
+  if (child === undefined && kept === null) return listing
+  const named =
+    child !== undefined &&
+    (kept === null
+      ? (listing.entries ?? listing.partialEntries ?? []).includes(child)
+      : positions(kept).has(child))
+  const keys = (entries: string[]): string[] =>
+    child === undefined ? [...entries] : named ? [child] : []
+  const copy = { ...listing }
+  if (copy.entries != null) copy.entries = keys(copy.entries)
+  if (copy.partialEntries != null) copy.partialEntries = keys(copy.partialEntries)
+  return copy
 }
 
 /**
@@ -88,36 +108,40 @@ export class ListingMemo {
    * @param folder the listed folder's key.
    * @param fetch reads the listing from Redis and answers it with its
    *   expiry, or with null when there is no live listing to keep.
+   * @param child the one key a lookup asks about, to narrow the entries to.
    */
   async read(
     folder: string,
     fetch: () => Promise<[ListResult, number | null]>,
+    child?: string,
   ): Promise<ListResult> {
     const stamp = soleCommandStarted()
-    if (stamp === null) return (await fetch())[0]
+    if (stamp === null) return answer((await fetch())[0], child, null)
     const key = `${String(stamp)}:${folder}`
     const kept = this.reads.get(key)
-    if (kept !== undefined && this.live(kept)) return copied(kept.listing)
+    if (kept !== undefined && this.live(kept)) return answer(kept.listing, child, kept)
     const writes = this.written()
     const readAt = performance.now()
     const [listing, expiresAt] = await fetch()
     if (expiresAt === null || this.written() !== writes || soleCommandStarted() !== stamp) {
-      return listing
+      return answer(listing, child, null)
     }
     for (const [held, read] of this.reads) {
       if (this.live(read)) break
       this.reads.delete(held)
     }
-    this.reads.delete(key)
-    this.reads.set(key, {
+    const read: Read = {
       writesBefore: writes,
       readAt,
       expiresAt,
       listing,
       rowWrites: -1,
       rows: new Map(),
-    })
-    return copied(listing)
+      positions: null,
+    }
+    this.reads.delete(key)
+    this.reads.set(key, read)
+    return answer(listing, child, read)
   }
 
   /** Batch a listed row with its siblings within the listing's lifetime. */
@@ -140,9 +164,9 @@ export class ListingMemo {
     }
     let row = kept.rows.get(path)
     if (row === undefined) {
+      const position = positions(kept).get(path)
+      if (position === undefined) return null
       const paths = kept.listing.entries ?? kept.listing.partialEntries ?? []
-      const position = paths.indexOf(path)
-      if (position < 0) return null
       const start = Math.floor(position / ROW_READ_BATCH) * ROW_READ_BATCH
       const missing = paths.slice(start, start + ROW_READ_BATCH).filter((p) => !kept.rows.has(p))
       const fetched = await fetch(missing)

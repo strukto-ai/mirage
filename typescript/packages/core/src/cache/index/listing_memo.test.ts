@@ -112,6 +112,21 @@ describe('ListingMemo', () => {
     },
   )
 
+  it.each([false, true])('narrows a lookup of one child (partial: %s)', async (partial) => {
+    const folder = new Folder(undefined, partial)
+    const keys = async (child?: string): Promise<string[] | null | undefined> => {
+      const listing = await memo.read('/d', folder.fetch, child)
+      return partial ? listing.partialEntries : listing.entries
+    }
+    expect(await keys('/d/a')).toEqual(['/d/a'])
+    await runInCommandScope(async () => {
+      expect(await keys('/d/b')).toEqual(['/d/b'])
+      expect(await keys('/d/z')).toEqual([])
+      expect(await keys()).toEqual(['/d/a', '/d/b'])
+    })
+    expect(folder.reads).toBe(2)
+  })
+
   it.each([LISTING_TRUST_WINDOW / 2, LISTING_TRUST_WINDOW * 2])(
     'expires rows at the listing expiry or trust window (%s)',
     async (expiry) => {
