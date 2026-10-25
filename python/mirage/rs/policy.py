@@ -143,7 +143,7 @@ def visibility_wire(vis: Visibility) -> Wire:
         "shown": [
             {
                 "path": units(entry.path),
-                "mode": None if entry.mode is None else entry.mode.value,
+                "mode": entry.mode,
             }
             for entry in shown.entries
         ]

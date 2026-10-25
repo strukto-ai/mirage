@@ -93,7 +93,7 @@ def _paths_wire(block: PathsBlock | None) -> Wire | None:
         "show": [
             {
                 "path": units(entry.path),
-                "mode": None if entry.mode is None else entry.mode.value,
+                "mode": entry.mode,
             }
             for entry in block.show
         ],
@@ -124,7 +124,7 @@ def _profile_wire(profile: SessionProfile) -> Wire:
         else [
             {
                 "prefix": units(prefix),
-                "mode": None if entry.mode is None else entry.mode.value,
+                "mode": entry.mode,
                 "commands": None
                 if entry.commands is None
                 else rules_wire(

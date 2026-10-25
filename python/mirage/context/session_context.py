@@ -945,8 +945,8 @@ def _path_mode_under(
             "effective_mode",
             path=units(virtual),
             prefix=units(prefix),
-            configured=mount_mode.value,
-            cap=None if cap is None else cap.value,
+            configured=mount_mode,
+            cap=cap,
         )
     )
 
@@ -973,8 +973,8 @@ def strongest_under_session(
         visibility_matcher(sess.visibility).ask(
             "strongest_mode",
             prefix=units(prefix),
-            configured=mount_mode.value,
-            cap=None if cap is None else cap.value,
+            configured=mount_mode,
+            cap=cap,
         )
     )
 
@@ -1055,8 +1055,8 @@ def _readonly_below_under(
         "readonly_below",
         path=units(virtual),
         prefix=units(prefix),
-        configured=mount_mode.value,
-        cap=None if cap is None else cap.value,
+        configured=mount_mode,
+        cap=cap,
     )
     return None if result is None else from_units(result)
 
