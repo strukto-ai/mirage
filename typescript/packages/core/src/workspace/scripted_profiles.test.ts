@@ -400,9 +400,9 @@ describe('profile policies at the op and session views', () => {
       await expect(ws.vfs.write('/data/frozen/f', 'x\n', 's')).rejects.toThrow()
       await expect(ws.vfs.unlink('/data/frozen/k', 's')).rejects.toThrow()
       expect((await ws.shell('cat /data/frozen/k')).stdoutText).toBe('keep\n')
-      // A line's I/O is its commands', which preCommand judges, and this
-      // profile has no command program.
-      expect((await ws.shell('echo x > /data/frozen/f', { sessionId: 's' })).exitCode).toBe(0)
+      // A line's own write meets the same file gate.
+      expect((await ws.shell('echo x > /data/frozen/f', { sessionId: 's' })).exitCode).toBe(1)
+      expect(await ws.vfs.exists('/data/frozen/f')).toBe(false)
       // Another session is not judged by it.
       await ws.vfs.write('/data/frozen/g', 'x\n')
     } finally {

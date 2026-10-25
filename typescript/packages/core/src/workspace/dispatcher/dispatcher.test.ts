@@ -29,7 +29,7 @@ import { runInCommandScope } from '../../cache/index/scope.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { BaseVFS } from '../../vfs/base.ts'
 import type { Handed } from '../../vfs/types.ts'
-import { eacces, enoent, erofs } from '../../errors/fs.ts'
+import { eacces, enoent, erofs, exdev } from '../../errors/fs.ts'
 import { CommandTimeoutError } from '../../errors/types.ts'
 import type { Policy } from '../../policy/base.ts'
 import type { DispatchFn } from '../../runtime/types.ts'
@@ -3975,9 +3975,9 @@ class NativeCopyRAM extends RAMVFS {
     await super.copy(src, dst)
   }
 
-  override copyFrom(): Promise<void> {
+  override copyFrom(_source: BaseVFS, _src: PathSpec, dst: PathSpec): Promise<void> {
     this.nativeCopies += 1
-    return Promise.reject(new Error('copyFrom bypassed the source read policy'))
+    return Promise.reject(exdev(dst))
   }
 }
 
@@ -4015,7 +4015,8 @@ it.each([false, true])(
       const restored = await ws.shell(`cp /data/secret ${destination}`)
       expect(restored.exitCode).toBe(0)
       expect(await ws.vfs.read(destination)).toEqual(ENC.encode('secret'))
-      expect(source.nativeCopies + other.nativeCopies).toBe(0)
+      // Once the source's read passes, the backend's own copy runs.
+      expect([source.nativeCopies, other.nativeCopies]).toEqual(crossMount ? [0, 1] : [1, 0])
     } finally {
       await ws.close()
     }
@@ -4124,6 +4125,24 @@ it('has a preVfs policy judge a shortcut without a whole read', async () => {
     expect(answer).toEqual(ENC.encode('stand-in\n'))
     expect(vfs.asked).toEqual(['first_lines'])
     expect(seen).toContain('first_lines')
+  } finally {
+    await ws.close()
+  }
+})
+
+it('leaves the rest of a live pipe to the next reader under a postVfs policy', async () => {
+  // A pipe's bytes come from the line's own writer; collecting them for a
+  // postVfs policy would take what the next reader is owed.
+  const parser = await getTestParser()
+  const ws = new Workspace(
+    { '/ram': new RAMVFS() },
+    { policies: [{ postVfs: () => null }], shellParserFactory: () => Promise.resolve(parser) },
+  )
+  try {
+    const result = await ws.shell(
+      'f() { head -c 1 "$1"; echo; cat "$1"; }; f <(printf a; sleep 1; printf rest)',
+    )
+    expect(DEC.decode(result.stdout)).toBe('a\nrest')
   } finally {
     await ws.close()
   }

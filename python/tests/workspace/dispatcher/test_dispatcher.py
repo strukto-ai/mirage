@@ -3835,7 +3835,7 @@ class _NativeCopyRAM(RAMVFS):
         self, source: BaseVFS, src: PathSpec, dst: PathSpec
     ) -> None:
         self.native_copies += 1
-        raise AssertionError("copy_from bypassed the source read policy")
+        raise OSError(errno.EXDEV, "no store-to-store copy", dst.virtual)
 
 
 @pytest.mark.asyncio
@@ -3863,9 +3863,29 @@ async def test_native_copy_meets_source_post_read_policy_before_writing(
         restored = await ws.shell(f"cp /data/secret {destination}")
         assert restored.exit_code == 0
         assert await ws.vfs.read(destination) == b"secret"
-        assert source.native_copies == other.native_copies == 0
+        # Once the source's read passes, the backend's own copy runs.
+        assert (source.native_copies, other.native_copies) == (
+            (0, 1) if cross_mount else (1, 0)
+        )
     finally:
         await ws.close()
+
+
+class _NoopReads(Policy):
+    async def post_vfs(self, ctx: VfsResultContext) -> Action | None:
+        return None
+
+
+@pytest.mark.asyncio
+async def test_a_bounded_read_of_a_live_pipe_leaves_the_rest_under_post_vfs():
+    # A pipe's bytes come from the line's own writer; collecting them for
+    # a post_vfs policy would take what the next reader is owed.
+    with Workspace({"/ram/": RAMVFS()}, policies=[_NoopReads()]) as ws:
+        result = await ws.shell(
+            'f() { head -c 1 "$1"; echo; cat "$1"; }; '
+            "f <(printf a; sleep 1; printf rest)"
+        )
+    assert result.stdout == b"a\nrest"
 
 
 @pytest.mark.asyncio

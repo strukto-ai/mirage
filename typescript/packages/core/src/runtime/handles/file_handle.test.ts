@@ -341,3 +341,23 @@ it.each(['AAAAAA', 'A', ''])(
     expect(dec.decode(applyFlush(enc.encode(stored), h.flushPlan()))).toBe(stored + 'BBB')
   },
 )
+
+it('judges a read that joins held bytes onto a fetch', async () => {
+  // The fill fetches only past what is kept and joins the two, so the bytes
+  // held before it must still meet the read policy in force now.
+  const checked: number[] = []
+  const size = 2 * READ_CHUNK
+  const h = FileHandle.opened('/f', over(new Uint8Array(size)), {
+    size,
+    writable: false,
+    append: false,
+    readCached: (data) => {
+      checked.push(data.length)
+      return Promise.resolve(data)
+    },
+  })
+  expect((await h.readChecked(1)).length).toBe(1)
+  checked.length = 0
+  expect((await h.preadChecked(0, size)).length).toBe(size)
+  expect(checked).toEqual([size])
+})

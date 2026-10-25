@@ -467,12 +467,10 @@ export class MountCore {
         this.files.read(this.resolve(ctx.path), { offset: pos, size: len }),
       )
     } else if (ctx.chunked !== undefined && ctx.data === undefined) {
-      if (ctx.chunked.holds(pos, len)) {
-        stored = ctx.chunked.peek(pos, len)
-        retained = true
-      } else {
-        stored = await ctx.chunked.pread(pos, len)
-      }
+      // A fetch joins what it brings onto bytes kept at `pos`, so any kept
+      // byte there makes the answer held.
+      retained = ctx.chunked.holds(pos, len) || ctx.chunked.peek(pos, 1).byteLength > 0
+      stored = await ctx.chunked.pread(pos, len)
     } else {
       let held = ctx.data
       if (held === undefined) {

@@ -978,6 +978,9 @@ export class Dispatcher {
       const mark = declared(owner.vfs.constructor, name) ?? CALLS.get(name) ?? null
       if (mark === null) throw enotsup(owner.vfs.name, name, call.path)
       await this.admit(call, boundary, mark)
+      if (name === 'copy' && (await this.copyReadsFirst(call))) {
+        await this.dispatchAdmitted('read', call.path, [], {})
+      }
       if (looksUp) {
         await mkdirOnReadOnly(
           dispatchStat(this.dispatch),
@@ -1741,12 +1744,30 @@ export class Dispatcher {
       paths.some((p) => call.ruleGate?.scopes(p.virtual) === true)
     )
       return true
+    // A file copy names both its ends, and admission judges each; a file hook
+    // meets its bytes as the source's read before it runs.
+    if (call.name === 'copy') return false
     // Inside a line the gate above answered for the profile's path rules,
     // scoped to these paths; only a coded hook is left to ask.
     return (
       (await this.policies.wantsFor('preVfs', this.sessionId(), call.ruleGate !== null)) ||
-      ((COPY_OPS.has(call.name) || call.name === 'files_containing') &&
+      ((call.name === 'dir_copy' || call.name === 'files_containing') &&
         (await this.policies.wantsFor('postVfs', this.sessionId())))
+    )
+  }
+
+  /**
+   * Whether a file copy reads its source through the gate first. The
+   * backend's copy moves bytes no read passes, so a file hook meets them as
+   * the source's read, and the copy then keeps the backend's own kind of file
+   * (a document stays a document). Inside a line the gate answered for the
+   * profile's path rules already. Mirrors Python's
+   * Dispatcher._copy_reads_first.
+   */
+  private async copyReadsFirst(call: Call): Promise<boolean> {
+    return (
+      (await this.policies.wantsFor('preVfs', this.sessionId(), call.ruleGate !== null)) ||
+      (await this.policies.wantsFor('postVfs', this.sessionId()))
     )
   }
 
@@ -1852,6 +1873,11 @@ export class Dispatcher {
     ) {
       return false
     }
+    // A live pipe answers what its writer has sent, and a bounded reader
+    // leaves the rest for the next: collecting it whole would wait for the
+    // writer to close. Its bytes come from the line's own writer, whose reads
+    // met the gates already.
+    if (mount.holdsLivePipe(call.path.virtual, this.access)) return true
     return !(await this.policies.wantsFor('postVfs', this.sessionId()))
   }
 

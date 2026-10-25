@@ -1363,3 +1363,37 @@ it('judges the fetched row once when a buffered write sizes it', async () => {
     await ws.close()
   }
 })
+
+it('judges a read that joins held bytes onto a fetch', async () => {
+  // The fetch brings only what lies past the kept chunk and joins it on, so
+  // postVfs must see the whole answer, the held prefix included.
+  const judged: number[] = []
+  const ws = new Workspace(
+    { '/': new RAMVFS() },
+    {
+      mode: MountMode.WRITE,
+      policies: [
+        {
+          postVfs: (ctx) => {
+            if (ctx.call.name === 'read' && ctx.result instanceof Uint8Array) {
+              judged.push(ctx.result.byteLength)
+            }
+            return null
+          },
+        },
+      ],
+    },
+  )
+  try {
+    await ws.vfs.write('/big.bin', new Uint8Array(2 * READ_CHUNK))
+    const core = new MountCore(ws.vfs)
+    const fd = await core.open('/big.bin', fsConstants.O_RDONLY)
+    expect((await core.read('/big.bin', fd, 0, 8)).byteLength).toBe(8)
+    judged.length = 0
+    expect((await core.read('/big.bin', fd, 0, 2 * READ_CHUNK)).byteLength).toBe(2 * READ_CHUNK)
+    expect(judged).toContain(2 * READ_CHUNK)
+    await core.release(fd)
+  } finally {
+    await ws.close()
+  }
+})

@@ -192,7 +192,7 @@ export class FileHandle {
   async readChecked(size: number): Promise<Uint8Array> {
     if (size === 0) return new Uint8Array()
     const pos = this.pos
-    const retained = !this.lacks(size)
+    const retained = !this.lacks(size) || this.heldAt(pos)
     while (this.lacks(size)) await this.fill(size)
     const budget = size < 0 ? Math.max(0, this.size - pos) : size
     const data = await this.checkRead(pos, this.pread(pos, budget), retained)
@@ -203,7 +203,7 @@ export class FileHandle {
   /** Deliver a line through its current policy; a refusal leaves it unread. */
   async readLineChecked(): Promise<Uint8Array | null> {
     const pos = this.pos
-    const retained = !this.lacksLine()
+    const retained = !this.lacksLine() || this.heldAt(pos)
     while (this.lacksLine()) await this.fill(0)
     try {
       const line = this.readLine()
@@ -213,6 +213,11 @@ export class FileHandle {
       this.pos = pos
       throw err
     }
+  }
+
+  /** Whether bytes at `offset` are held now: a fill keeps them and joins what it fetches on. */
+  private heldAt(offset: number): boolean {
+    return (this.base?.peek(offset, 1).length ?? 0) > 0
   }
 
   private async checkRead(

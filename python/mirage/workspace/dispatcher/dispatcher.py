@@ -1325,6 +1325,8 @@ class Dispatcher:
             )
             await boundary.complete(mark, call.path, call.write, None)
             return None, IOResult()
+        if name == "copy" and await self._copy_reads_first(call):
+            await self._dispatch("read", call.path, caller)
         if across is not None:
             await self._copy_across(call, mount, across)
             await boundary.complete(mark, call.path, call.write, None)
@@ -1983,6 +1985,10 @@ class Dispatcher:
             and any(call.rule_gate.scopes(p.virtual) for p in paths)
         ):
             return True
+        # A file copy names both its ends, and admission judges each; a
+        # file hook meets its bytes as the source's read before it runs.
+        if call.name == "copy":
+            return False
         # Inside a line the gate above answered for the profile's path
         # rules, scoped to these paths; only a coded hook is left to ask.
         policies = self._namespace.registry.policies
@@ -1991,9 +1997,26 @@ class Dispatcher:
             _session_id(call.caller),
             coded_only=call.rule_gate is not None,
         ) or (
-            (call.name in COPY_OPS or call.name == "files_containing")
+            call.name in {"dir_copy", "files_containing"}
             and await policies.wants_for("post_vfs", _session_id(call.caller))
         )
+
+    async def _copy_reads_first(self, call: _Call) -> bool:
+        """Whether a file copy reads its source through the gate first.
+
+        The backend's copy moves bytes no read passes, so a file hook
+        meets them as the source's read, and the copy then keeps the
+        backend's own kind of file (a document stays a document). Inside
+        a line the gate answered for the profile's path rules already.
+
+        Args:
+            call (_Call): the admitted copy.
+        """
+        policies = self._namespace.registry.policies
+        session_id = _session_id(call.caller)
+        return await policies.wants_for(
+            "pre_vfs", session_id, coded_only=call.rule_gate is not None
+        ) or await policies.wants_for("post_vfs", session_id)
 
     async def _admit(
         self,
@@ -2473,6 +2496,12 @@ class Dispatcher:
             and not call.renders_read(mount)
         ):
             return False
+        # A live pipe answers what its writer has sent, and a bounded
+        # reader leaves the rest for the next: collecting it whole would
+        # wait for the writer to close. Its bytes come from the line's own
+        # writer, whose reads met the gates already.
+        if mount.holds_live_pipe(call.path.virtual):
+            return True
         return not (
             await self._namespace.registry.policies.wants_for(
                 "post_vfs", _session_id(call.caller)

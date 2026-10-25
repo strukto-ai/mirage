@@ -354,6 +354,35 @@
           }
         }
       ]
+    },
+    {
+      "id": "hook_post_vfs_leaves_a_live_pipe_to_the_next_reader",
+      "world": {
+        "mounts": {
+          "/ram": {
+            "vfs": "ram",
+            "files": {
+              "a.txt": "hello\n"
+            }
+          }
+        },
+        "policies": [
+          {
+            "name": "redact_reads",
+            "marker": "NEVER-PRESENT"
+          }
+        ]
+      },
+      "steps": [
+        {
+          "command": "f() { head -c 1 \"$1\"; echo; cat \"$1\"; }; f <(printf a; sleep 1; printf rest)",
+          "expect": {
+            "exit": 0,
+            "stdout": "a\nrest",
+            "stderr": ""
+          }
+        }
+      ]
     }
   ]
 }
