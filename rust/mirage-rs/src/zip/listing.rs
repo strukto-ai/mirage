@@ -280,11 +280,14 @@ pub(super) fn row(entry: &Entry, rows: Rows, out: &mut Vec<u8>) {
     out.push(b'\n');
 }
 
-pub(super) fn header(archive: &[u8], size: u64, entries: u64, out: &mut Vec<u8>) {
+/// The `-h` lines, `between` them what UnZip says while opening the archive.
+pub(super) fn header(archive: &[u8], between: &[u8], size: u64, entries: u64, out: &mut Vec<u8>) {
     out.extend_from_slice(b"Archive:  ");
     out.extend_from_slice(archive);
+    out.push(b'\n');
+    out.extend_from_slice(between);
     out.extend_from_slice(
-        format!("\nZip file size: {size} bytes, number of entries: {entries}\n").as_bytes(),
+        format!("Zip file size: {size} bytes, number of entries: {entries}\n").as_bytes(),
     );
 }
 
