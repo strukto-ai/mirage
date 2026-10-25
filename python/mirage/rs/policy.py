@@ -15,9 +15,9 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from functools import lru_cache
-from typing import TYPE_CHECKING, TypeAlias
+from typing import TYPE_CHECKING, TypeAlias, assert_never
 
 from mirage._rs import (
     PolicyAdmission,
@@ -41,11 +41,19 @@ from mirage.types import (
     ShownPaths,
     Visibility,
 )
+from mirage.utils.path import (
+    LinkEnter,
+    LinkFollow,
+    LinkHopLimit,
+    LinkLanding,
+    LinkStep,
+)
 
 if TYPE_CHECKING:
     from mirage.policy.types import AdmissionRules, CommandRule
 
 Units: TypeAlias = tuple[int, ...]
+LinkStepValue: TypeAlias = tuple[int, Units, bool]
 RuleValue: TypeAlias = tuple[
     Units, tuple[Units, ...], tuple[Units, ...], Units | None
 ]
@@ -92,6 +100,22 @@ def units(value: str) -> Units:
 
 def from_units(value: Sequence[int]) -> str:
     return "".join(map(chr, value))
+
+
+def link_trace_value(trace: Iterable[LinkStep]) -> tuple[LinkStepValue, ...]:
+    out: list[LinkStepValue] = []
+    for step in trace:
+        if isinstance(step, LinkFollow):
+            out.append((0, units(step.path), False))
+        elif isinstance(step, LinkEnter):
+            out.append((1, units(step.path), step.next_is_parent))
+        elif isinstance(step, LinkLanding):
+            out.append((2, units(step.path), False))
+        elif isinstance(step, LinkHopLimit):
+            out.append((3, (), False))
+        else:
+            assert_never(step)
+    return tuple(out)
 
 
 @lru_cache(maxsize=1024)

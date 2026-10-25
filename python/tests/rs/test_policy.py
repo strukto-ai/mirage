@@ -282,3 +282,12 @@ def test_large_inline_query_keeps_surrogates_without_retaining_text():
     assert after.currsize == before.currsize
     assert after.misses == before.misses
     _short_units.cache_clear()
+
+
+@pytest.mark.parametrize(
+    "step", ((4, (), False), (3, (47,), False), (0, (), True))
+)
+def test_native_link_facts_reject_invalid_variants(step):
+    matcher = PolicyVisibility((((), ()), (), ((), ())))
+    with pytest.raises(ValueError, match="invalid policy link step"):
+        matcher.link_trace_hidden((step,))

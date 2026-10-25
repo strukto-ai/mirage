@@ -2,9 +2,9 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 
 use mirage_rs::policy::{
-    self, AdmissionMatcher, CommandFacts, HideReason, Mode, Mount, PathFact, PathScope, Paths,
-    Profile, RestrictionPlan, Rule, Rules, Show, Subject, Text, VarScope, Visibility,
-    VisibilityMatcher, Whitespace,
+    self, AdmissionMatcher, CommandFacts, HideReason, LinkCandidate, LinkStep, Mode, Mount,
+    PathFact, PathScope, Paths, Profile, RestrictionPlan, Rule, Rules, Show, Subject, Text,
+    VarScope, Visibility, VisibilityMatcher, Whitespace,
 };
 
 const MAX_UNITS: usize = 16 * 1024 * 1024;
@@ -188,6 +188,24 @@ impl<'a> Reader<'a> {
     }
     fn indices(&mut self) -> Result<Vec<usize>> {
         self.list(|r| Ok(r.number()? as usize))
+    }
+    fn link_step(&mut self) -> Result<LinkStep> {
+        match self.number()? {
+            0 => Ok(LinkStep::Follow(self.text()?)),
+            1 => Ok(LinkStep::Enter {
+                path: self.text()?,
+                next_is_parent: self.boolean()?,
+            }),
+            2 => Ok(LinkStep::Landing(self.text()?)),
+            3 => Ok(LinkStep::HopLimit),
+            _ => Err("invalid policy link step"),
+        }
+    }
+    fn link_candidate(&mut self) -> Result<LinkCandidate> {
+        Ok(LinkCandidate {
+            path: self.text()?,
+            trace: self.list(Self::link_step)?,
+        })
     }
     fn end(&self) -> Result<()> {
         if self.offset == self.input.len() {
@@ -457,7 +475,7 @@ fn dispatch(state: &mut State, operation: u32, handle: u32, input: &[u32]) -> Re
                 _ => unreachable!(),
             }
         }
-        40..=51 => {
+        40..=52 => {
             let matcher = visibility(state, handle)?;
             match operation {
                 40 => w.optional(matcher.hide_depth(&r.text()?), Writer::number),
@@ -477,11 +495,13 @@ fn dispatch(state: &mut State, operation: u32, handle: u32, input: &[u32]) -> Re
                     w.boolean(matcher.move_reveals(&src, &r.text()?));
                 }
                 47 => {
-                    let path = r.text()?;
-                    let links = r.list(|r| Ok((r.text()?, r.text()?)))?;
-                    w.boolean(matcher.leads_hidden(&path, &links, r.number()? as usize));
+                    w.boolean(matcher.link_trace_hidden(&r.list(Reader::link_step)?));
                 }
                 48 => w.boolean(matcher.var_hidden(&r.text()?)),
+                52 => w.list(
+                    &matcher.visible_links(&r.list(Reader::link_candidate)?),
+                    |w, visible| w.boolean(*visible),
+                ),
                 49 => {
                     let path = r.text()?;
                     let prefix = r.text()?;
@@ -591,6 +611,14 @@ mod tests {
         );
         assert!(dispatch(&mut state, 8, 0, &[1, 0xd800]).is_ok());
         assert!(dispatch(&mut state, 8, 0, &[0, 1]).is_err());
+        let mut packet = Writer::default();
+        packet.visibility(&Visibility::default());
+        let handle = dispatch(&mut state, 2, 0, &packet.0).unwrap()[0];
+        assert_eq!(
+            dispatch(&mut state, 47, handle, &[1, 4]).unwrap_err(),
+            "invalid policy link step"
+        );
+        assert!(dispatch(&mut state, 47, handle, &[1, 1, 0]).is_err());
     }
     #[test]
     fn handles_reject_wrong_kind_and_do_not_reuse_after_drop() {

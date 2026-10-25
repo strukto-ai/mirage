@@ -35,6 +35,25 @@ type FactsValue = (
 );
 type RulingValue = (u32, Option<usize>, Option<Text>, bool, Vec<usize>);
 type SubjectValue = (Option<PathValue>, bool, bool);
+type LinkStepValue = (u32, Text, bool);
+
+fn link_step(value: LinkStepValue) -> PyResult<LinkStep> {
+    let path = text(value.1)?;
+    match value.0 {
+        0 if !value.2 => Ok(LinkStep::Follow(path)),
+        1 => Ok(LinkStep::Enter {
+            path,
+            next_is_parent: value.2,
+        }),
+        2 if !value.2 => Ok(LinkStep::Landing(path)),
+        3 if path.is_empty() && !value.2 => Ok(LinkStep::HopLimit),
+        _ => Err(PyValueError::new_err("invalid policy link step")),
+    }
+}
+
+fn link_trace(value: Vec<LinkStepValue>) -> PyResult<Vec<LinkStep>> {
+    value.into_iter().map(link_step).collect()
+}
 
 fn text(value: Text) -> PyResult<Text> {
     if value.iter().any(|&unit| unit > 0x10ffff) {
@@ -437,19 +456,25 @@ impl PolicyVisibility {
         let dst = text(dst)?;
         Ok(py.detach(|| self.inner.move_reveals(&src, &dst)))
     }
-    fn leads_hidden(
+    fn link_trace_hidden(&self, py: Python<'_>, value: Vec<LinkStepValue>) -> PyResult<bool> {
+        let value = link_trace(value)?;
+        Ok(py.detach(|| self.inner.link_trace_hidden(&value)))
+    }
+    fn visible_links(
         &self,
         py: Python<'_>,
-        value: Text,
-        links: Vec<(Text, Text)>,
-        max_hops: usize,
-    ) -> PyResult<bool> {
-        let links = links
+        value: Vec<(Text, Vec<LinkStepValue>)>,
+    ) -> PyResult<Vec<bool>> {
+        let value = value
             .into_iter()
-            .map(|(name, target)| Ok((text(name)?, text(target)?)))
+            .map(|(path, trace)| {
+                Ok(LinkCandidate {
+                    path: text(path)?,
+                    trace: link_trace(trace)?,
+                })
+            })
             .collect::<PyResult<Vec<_>>>()?;
-        let value = text(value)?;
-        Ok(py.detach(|| self.inner.leads_hidden(&value, &links, max_hops)))
+        Ok(py.detach(|| self.inner.visible_links(&value)))
     }
     fn var_hidden(&self, py: Python<'_>, value: Text) -> PyResult<bool> {
         let value = text(value)?;

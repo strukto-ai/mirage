@@ -1,6 +1,6 @@
 use crate::glob::CompiledGlob;
 
-use super::{Mode, PathScope, Text, VarScope, Visibility};
+use super::{LinkCandidate, LinkStep, Mode, PathScope, Text, VarScope, Visibility};
 
 const SLASH: u32 = 47;
 
@@ -308,60 +308,36 @@ impl VisibilityMatcher {
             .any(|head| under(head, &source) || under(&source, head))
     }
 
-    pub fn leads_hidden(&self, path: &[u32], links: &[(Text, Text)], max_hops: usize) -> bool {
-        if links.is_empty() {
-            return false;
-        }
-        let mut pending: Vec<Text> = path
-            .split(|unit| *unit == SLASH)
-            .rev()
-            .filter(|part| !part.is_empty() && *part != [46])
-            .map(<[u32]>::to_vec)
-            .collect();
-        let mut walked: Vec<Text> = Vec::new();
-        let mut hops = 0;
-        while let Some(part) = pending.pop() {
-            if part == [46, 46] {
-                walked.pop();
-                continue;
-            }
-            let mut name = vec![SLASH];
-            if !walked.is_empty() {
-                name.extend(walked.join(&SLASH));
-                name.push(SLASH);
-            }
-            name.extend_from_slice(&part);
-            let Some((_, target)) = links.iter().find(|(link, _)| link == &name) else {
-                if hops > 0
-                    && pending.last().is_some_and(|next| next == &[46, 46])
-                    && !self.path_visible(&name)
-                {
-                    return true;
+    pub fn link_trace_hidden(&self, trace: &[LinkStep]) -> bool {
+        let mut followed = false;
+        for step in trace {
+            let checked = match step {
+                LinkStep::Follow(path) => {
+                    followed = true;
+                    Some(path)
                 }
-                walked.push(part);
-                continue;
+                LinkStep::Enter {
+                    path,
+                    next_is_parent,
+                } if followed && *next_is_parent => Some(path),
+                LinkStep::Landing(path) if followed => Some(path),
+                LinkStep::HopLimit => return false,
+                _ => None,
             };
-            if !self.path_visible(&name) {
+            if checked.is_some_and(|path| !self.path_visible(path)) {
                 return true;
             }
-            hops += 1;
-            if hops > max_hops {
-                return false;
-            }
-            if target.first() == Some(&SLASH) {
-                walked.clear();
-            }
-            pending.extend(
-                target
-                    .split(|unit| *unit == SLASH)
-                    .rev()
-                    .filter(|part| !part.is_empty() && *part != [46])
-                    .map(<[u32]>::to_vec),
-            );
         }
-        let mut landing = vec![SLASH];
-        landing.extend(walked.join(&SLASH));
-        hops > 0 && !self.path_visible(&landing)
+        false
+    }
+
+    pub fn visible_links(&self, candidates: &[LinkCandidate]) -> Vec<bool> {
+        candidates
+            .iter()
+            .map(|candidate| {
+                self.path_visible(&candidate.path) && !self.link_trace_hidden(&candidate.trace)
+            })
+            .collect()
     }
 
     pub fn var_hidden(&self, name: &[u32]) -> bool {
@@ -584,15 +560,45 @@ mod tests {
     #[test]
     fn supplied_links_preserve_target_names_before_parent_steps() {
         let vis = matcher(&["/data/secret"], &[]);
-        let links = vec![
-            (text("/link"), text("/data/secret/../public")),
-            (text("/relative"), text("data/secret")),
+        let trace = vec![
+            LinkStep::Follow(text("/link")),
+            LinkStep::Enter {
+                path: text("/data/secret"),
+                next_is_parent: true,
+            },
+            LinkStep::Landing(text("/data/public/file")),
         ];
-        assert!(vis.leads_hidden(&text("/link/file"), &links, 40));
-        assert!(vis.leads_hidden(&text("/relative"), &links, 40));
-        assert!(!vis.leads_hidden(&text("/unlinked"), &links, 40));
-        let looped = vec![(text("/a"), text("/b")), (text("/b"), text("/a"))];
-        assert!(!vis.leads_hidden(&text("/a"), &looped, 40));
+        assert!(vis.link_trace_hidden(&trace));
+        assert!(vis.link_trace_hidden(&[
+            LinkStep::Follow(text("/relative")),
+            LinkStep::Landing(text("/data/secret"))
+        ]));
+        assert!(!vis.link_trace_hidden(&[LinkStep::Landing(text("/data/secret"))]));
+        assert!(!vis.link_trace_hidden(&[
+            LinkStep::Follow(text("/a")),
+            LinkStep::Follow(text("/b")),
+            LinkStep::HopLimit
+        ]));
+        assert!(
+            vis.link_trace_hidden(&[LinkStep::Follow(text("/data/secret")), LinkStep::HopLimit])
+        );
+        assert_eq!(
+            vis.visible_links(&[
+                LinkCandidate {
+                    path: text("/data/secret/name"),
+                    trace: vec![]
+                },
+                LinkCandidate {
+                    path: text("/public"),
+                    trace
+                },
+                LinkCandidate {
+                    path: text("/open"),
+                    trace: vec![]
+                },
+            ]),
+            vec![false, false, true]
+        );
     }
 
     #[test]

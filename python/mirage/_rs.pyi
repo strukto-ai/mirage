@@ -44,6 +44,7 @@ PolicyFacts: TypeAlias = tuple[
     PolicyText | None,
 ]
 PolicySubject: TypeAlias = tuple[PolicyPath | None, bool, bool]
+PolicyLinkStep: TypeAlias = tuple[int, PolicyText, bool]
 PolicyRuling: TypeAlias = tuple[
     int, int | None, PolicyText | None, bool, Sequence[int]
 ]
@@ -97,12 +98,10 @@ class PolicyVisibility:
     def path_covers(self, value: PolicyText, ancestors: bool) -> bool: ...
     def hides_intersect(self, value: PolicyText) -> bool: ...
     def move_reveals(self, src: PolicyText, dst: PolicyText) -> bool: ...
-    def leads_hidden(
-        self,
-        value: PolicyText,
-        links: Sequence[tuple[PolicyText, PolicyText]],
-        max_hops: int,
-    ) -> bool: ...
+    def link_trace_hidden(self, value: Sequence[PolicyLinkStep]) -> bool: ...
+    def visible_links(
+        self, value: Sequence[tuple[PolicyText, Sequence[PolicyLinkStep]]]
+    ) -> Sequence[bool]: ...
     def var_hidden(self, value: PolicyText) -> bool: ...
     def effective_mode(
         self,

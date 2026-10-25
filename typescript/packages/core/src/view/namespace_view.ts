@@ -14,7 +14,7 @@
 
 import { normDir, rstripSlash } from '../utils/slash.ts'
 import { FileStat, FileType, type PathSpec, type Visibility } from '../types.ts'
-import { hiddenUnder, leadsHidden, pathVisible } from '../utils/hidden.ts'
+import { hiddenUnder, pathVisible, visibleLinks } from '../utils/hidden.ts'
 import { getAdmission, sessionVisibility } from '../context/session_context.ts'
 import { eloop } from '../errors/fs.ts'
 import { CycleError } from '../utils/path.ts'
@@ -96,9 +96,9 @@ function linkNames(vis: Visibility | null, links: NamespaceLinks | null, parent:
   if (links === null) return []
   const targets = links.symlinkTargets()
   const below = normDir(parent)
-  const shown = [...targets.keys()].filter(
-    (path) => path.startsWith(below) && pathVisible(vis, path) && !leadsHidden(vis, path, targets),
-  )
+  const candidates = [...targets.keys()].filter((path) => path.startsWith(below))
+  const visible = visibleLinks(vis, candidates, targets)
+  const shown = candidates.filter((_, index) => visible[index])
   return visibleChildSegments(vis, shown, parent)
 }
 

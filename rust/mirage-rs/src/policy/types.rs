@@ -1,5 +1,19 @@
 pub type Text = Vec<u32>;
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum LinkStep {
+    Follow(Text),
+    Enter { path: Text, next_is_parent: bool },
+    Landing(Text),
+    HopLimit,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LinkCandidate {
+    pub path: Text,
+    pub trace: Vec<LinkStep>,
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Whitespace {
     #[default]

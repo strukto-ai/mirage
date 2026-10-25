@@ -13,11 +13,12 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 
 from mirage.rs.policy import (
     MODES,
     from_units,
+    link_trace_value,
     policy_anchor_depth,
     policy_is_glob,
     policy_paths,
@@ -34,7 +35,7 @@ from mirage.types import (
     ShownPaths,
     Visibility,
 )
-from mirage.utils.path import MAX_SYMLINK_HOPS
+from mirage.utils.path import trace_symlinks
 
 
 def is_glob(entry: str) -> bool:
@@ -136,10 +137,23 @@ def leads_hidden(
 ) -> bool:
     if vis is None or not links:
         return False
-    return visibility_matcher(vis).leads_hidden(
-        units(virtual),
-        tuple((units(name), units(target)) for name, target in links.items()),
-        MAX_SYMLINK_HOPS,
+    return visibility_matcher(vis).link_trace_hidden(
+        link_trace_value(trace_symlinks(virtual, links)),
+    )
+
+
+def visible_links(
+    vis: Visibility | None, paths: Sequence[str], links: Mapping[str, str]
+) -> tuple[bool, ...]:
+    if vis is None:
+        return (True,) * len(paths)
+    return tuple(
+        visibility_matcher(vis).visible_links(
+            tuple(
+                (units(path), link_trace_value(trace_symlinks(path, links)))
+                for path in paths
+            )
+        )
     )
 
 

@@ -251,6 +251,24 @@ export function ancestors(path: string): string[] {
 
 export const MAX_SYMLINK_HOPS = 40
 
+export interface LinkFollow {
+  readonly kind: 'follow'
+  readonly path: string
+}
+export interface LinkEnter {
+  readonly kind: 'enter'
+  readonly path: string
+  readonly nextIsParent: boolean
+}
+export interface LinkLanding {
+  readonly kind: 'landing'
+  readonly path: string
+}
+export interface LinkHopLimit {
+  readonly kind: 'hop_limit'
+}
+export type LinkStep = LinkFollow | LinkEnter | LinkLanding | LinkHopLimit
+
 // Raised when symlink resolution exceeds the maximum hop count. Mirrors POSIX
 // ELOOP (a loop such as `a -> b -> a` or an unbounded expansion such as
 // `a -> a/x`). Command boundaries render this as the GNU strerror text
@@ -272,6 +290,24 @@ export class CycleError extends Error {
 }
 
 export function resolveSymlinks(path: string, links: ReadonlyMap<string, string>): string {
+  return _resolveSymlinks(path, links, null)
+}
+
+export function traceSymlinks(path: string, links: ReadonlyMap<string, string>): LinkStep[] {
+  const trace: LinkStep[] = []
+  try {
+    _resolveSymlinks(path, links, trace)
+  } catch (error) {
+    if (!(error instanceof CycleError) || trace.at(-1)?.kind !== 'hop_limit') throw error
+  }
+  return trace
+}
+
+function _resolveSymlinks(
+  path: string,
+  links: ReadonlyMap<string, string>,
+  trace: LinkStep[] | null,
+): string {
   const pending = path.split('/').reverse()
   const resolved: string[] = []
   let hops = 0
@@ -285,15 +321,32 @@ export function resolveSymlinks(path: string, links: ReadonlyMap<string, string>
     const candidate = '/' + [...resolved, part].join('/')
     const target = links.get(candidate)
     if (target === undefined) {
+      if (trace !== null) {
+        let next: string | undefined
+        for (let index = pending.length - 1; index >= 0; index -= 1) {
+          const part = pending[index]
+          if (part !== '' && part !== '.') {
+            next = part
+            break
+          }
+        }
+        trace.push({ kind: 'enter', path: candidate, nextIsParent: next === '..' })
+      }
       resolved.push(part)
       continue
     }
-    if (++hops > MAX_SYMLINK_HOPS) throw new CycleError(path)
+    trace?.push({ kind: 'follow', path: candidate })
+    if (++hops > MAX_SYMLINK_HOPS) {
+      trace?.push({ kind: 'hop_limit' })
+      throw new CycleError(path)
+    }
     if (target.startsWith('/')) resolved.length = 0
     pending.push(...target.split('/').reverse())
   }
+  const landing = '/' + resolved.join('/')
+  trace?.push({ kind: 'landing', path: landing })
   const suffix = resolved.length > 0 && path.endsWith('/') ? '/' : ''
-  return '/' + resolved.join('/') + suffix
+  return landing + suffix
 }
 
 export function gnuBasename(path: string, suffix?: string): string {

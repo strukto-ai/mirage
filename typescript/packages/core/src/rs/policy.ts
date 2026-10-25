@@ -8,6 +8,7 @@ import {
   type Visibility,
 } from '../types.ts'
 import { compiledModuleSync } from './stream.ts'
+import type { LinkStep } from '../utils/path.ts'
 
 const CACHE_LIMIT = 128
 const MAX_UNITS = 16 * 1024 * 1024
@@ -215,6 +216,28 @@ class Packet {
     })
     this.boolean(value.holds)
     this.boolean(value.ancestors)
+  }
+  linkTrace(trace: readonly LinkStep[]): void {
+    this.list(trace, (p, step) => {
+      switch (step.kind) {
+        case 'follow':
+          p.number(0)
+          p.text(step.path)
+          break
+        case 'enter':
+          p.number(1)
+          p.text(step.path)
+          p.boolean(step.nextIsParent)
+          break
+        case 'landing':
+          p.number(2)
+          p.text(step.path)
+          break
+        case 'hop_limit':
+          p.number(3)
+          break
+      }
+    })
   }
 }
 
@@ -614,15 +637,18 @@ export class VisibilityMatcher extends Handle {
       p.text(dst)
     }).boolean()
   }
-  leadsHidden(path: string, links: ReadonlyMap<string, string>, hops: number): boolean {
+  linkTraceHidden(trace: readonly LinkStep[]): boolean {
     return this.query(47, (p) => {
-      p.text(path)
-      p.list([...links], (p, [a, b]) => {
-        p.text(a)
-        p.text(b)
-      })
-      p.number(hops)
+      p.linkTrace(trace)
     }).boolean()
+  }
+  visibleLinks(candidates: readonly (readonly [string, readonly LinkStep[]])[]): boolean[] {
+    return this.query(52, (p) => {
+      p.list(candidates, (p, [path, trace]) => {
+        p.text(path)
+        p.linkTrace(trace)
+      })
+    }).list((r) => r.boolean())
   }
   varHidden(name: string): boolean {
     return this.query(48, (p) => {

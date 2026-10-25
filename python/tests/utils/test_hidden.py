@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import pytest
+
 from mirage.types import (
     HiddenPaths,
     HiddenVars,
@@ -33,7 +35,9 @@ from mirage.utils.hidden import (
     show_head,
     shown_mode,
     var_hidden,
+    visible_links,
 )
+from mirage.utils.path import CycleError, resolve_symlinks
 
 
 def _vis(hide: list[str], show: tuple[ShowEntry, ...] = ()) -> Visibility:
@@ -457,3 +461,58 @@ def test_leads_hidden_needs_a_hide_and_a_link():
     assert not leads_hidden(
         _vis(["/data/secret"]), "/data/shared/to_secret", {}
     )
+
+
+def test_leads_hidden_reads_only_reached_links_and_observes_mutation():
+    class LookupLinks(dict[str, str]):
+        def items(self):
+            raise AssertionError(
+                "Unrelated link entries must not be enumerated"
+            )
+
+    links = LookupLinks(
+        {f"/unused{index}": "/public" for index in range(10000)}
+    )
+    links["/link"] = "/public"
+    assert not leads_hidden(_vis(["/secret"]), "/link", links)
+    links["/link"] = "/secret"
+    assert leads_hidden(_vis(["/secret"]), "/link", links)
+
+
+@pytest.mark.parametrize("target", ("", ".", "./", "/./"))
+def test_leads_hidden_keeps_effective_parent_steps_after_empty_targets(target):
+    links = {"/link": target}
+    path = "/link/secret/./..//public/"
+    assert resolve_symlinks(path, links) == "/public/"
+    assert leads_hidden(_vis(["/secret"]), path, links)
+
+
+def test_leads_hidden_checks_the_link_name_before_the_hop_limit():
+    links = {f"/link{index}": f"/link{index + 1}" for index in range(41)}
+    assert leads_hidden(_vis(["/link40"]), "/link0", links)
+    assert not leads_hidden(_vis(["/elsewhere"]), "/link0", links)
+    with pytest.raises(CycleError):
+        resolve_symlinks("/link0", links)
+
+
+def test_link_exposure_propagates_lookup_errors():
+    class ErrorLinks(dict[str, str]):
+        def get(self, key, default=None):
+            raise CycleError("/caller")
+
+    with pytest.raises(CycleError) as failure:
+        leads_hidden(
+            _vis(["/secret"]), "/link", ErrorLinks({"/link": "/public"})
+        )
+    assert failure.value.filename == "/caller"
+
+
+def test_link_batches_keep_order_and_surrogate_target_text():
+    links = {"/link\ud800": "/secret\ud800/../public"}
+    scope = _vis(["/secret\ud800"])
+    assert resolve_symlinks("/link\ud800/", links) == "/public/"
+    assert visible_links(
+        scope, ("/link\ud800", "/public", "/secret\ud800/key"), links
+    ) == (False, True, False)
+    links["/link\ud800"] = "/public"
+    assert visible_links(scope, ("/link\ud800",), links) == (True,)

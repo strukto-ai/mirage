@@ -31,7 +31,7 @@ import {
   varsMatcher,
   visibilityMatcher,
 } from '../rs/policy.ts'
-import { MAX_SYMLINK_HOPS } from './path.ts'
+import { traceSymlinks } from './path.ts'
 
 export function isGlob(entry: string): boolean {
   return policyIsGlob(entry)
@@ -87,7 +87,17 @@ export function leadsHidden(
   return (
     vis?.paths != null &&
     links.size > 0 &&
-    visibilityMatcher(vis).leadsHidden(virtual, links, MAX_SYMLINK_HOPS)
+    visibilityMatcher(vis).linkTraceHidden(traceSymlinks(virtual, links))
+  )
+}
+export function visibleLinks(
+  vis: Visibility | null | undefined,
+  paths: readonly string[],
+  links: ReadonlyMap<string, string>,
+): boolean[] {
+  if (vis?.paths == null) return paths.map(() => true)
+  return visibilityMatcher(vis).visibleLinks(
+    paths.map((path) => [path, traceSymlinks(path, links)]),
   )
 }
 export function hiddenUnder(vis: Visibility | null | undefined, virtual: string): boolean {

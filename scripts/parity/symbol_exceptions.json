@@ -961,6 +961,8 @@
   "rs/policy": {
    "python_only": {
     "_short_units": "PyO3 receives ordinal tuples directly; this length-gated private LRU retains only short native input conversions. Wasm writes text into per-call packets without a text cache.",
+    "LinkStepValue": "PyO3 extracts validated tagged tuples for operation-scoped link facts; TypeScript encodes its LinkStep union in Packet.linkTrace.",
+    "link_trace_value": "Python converts host traversal variants to native tagged tuples; TypeScript performs the corresponding conversion in its private Packet.linkTrace method.",
     "FactsValue": "PyO3 extracts typed native tuples of ordinal arrays; TypeScript retains typed string facts and writes its private u32 packet at the Wasm boundary.",
     "MountValue": "PyO3 extracts typed native tuples of ordinal arrays; TypeScript retains typed string facts and writes its private u32 packet at the Wasm boundary.",
     "PathValue": "PyO3 extracts typed native tuples of ordinal arrays; TypeScript retains typed string facts and writes its private u32 packet at the Wasm boundary.",

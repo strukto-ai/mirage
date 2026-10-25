@@ -21,6 +21,7 @@ import {
   hiddenUnder,
   isGlob,
   leadsHidden,
+  visibleLinks,
   moveReveals,
   pathCovers,
   pathHidden,
@@ -38,6 +39,7 @@ import {
   type ShownPaths,
   type Visibility,
 } from '../types.ts'
+import { CycleError, resolveSymlinks } from './path.ts'
 
 function vis(paths: HiddenPaths | null, shown: ShownPaths | null = null): Visibility {
   return { ...DEFAULT_VISIBILITY, paths, shown }
@@ -396,6 +398,65 @@ const LINKS = new Map([
 ])
 
 describe('leadsHidden', () => {
+  it('reads only reached links and observes same-size mutations', () => {
+    class LookupLinks extends Map<string, string> {
+      override [Symbol.iterator](): MapIterator<[string, string]> {
+        throw new Error('Unrelated link entries must not be enumerated')
+      }
+    }
+    const links = new LookupLinks(
+      Array.from({ length: 10000 }, (_, index) => [`/unused${String(index)}`, '/public']),
+    )
+    links.set('/link', '/public')
+    const scope = vis(classifyPaths(['/secret']))
+    expect(leadsHidden(scope, '/link', links)).toBe(false)
+    links.set('/link', '/secret')
+    expect(leadsHidden(scope, '/link', links)).toBe(true)
+  })
+
+  it.each(['', '.', './', '/./'])('keeps effective parent steps after target %s', (target) => {
+    const links = new Map([['/link', target]])
+    const path = '/link/secret/./..//public/'
+    expect(resolveSymlinks(path, links)).toBe('/public/')
+    expect(leadsHidden(vis(classifyPaths(['/secret'])), path, links)).toBe(true)
+  })
+
+  it('checks the followed link name before the hop limit', () => {
+    const links = new Map(
+      Array.from({ length: 41 }, (_, index) => [
+        `/link${String(index)}`,
+        `/link${String(index + 1)}`,
+      ]),
+    )
+    expect(leadsHidden(vis(classifyPaths(['/link40'])), '/link0', links)).toBe(true)
+    expect(leadsHidden(vis(classifyPaths(['/elsewhere'])), '/link0', links)).toBe(false)
+    expect(() => resolveSymlinks('/link0', links)).toThrow(CycleError)
+  })
+
+  it('propagates lookup errors', () => {
+    const failure = new CycleError('/caller')
+    class ErrorLinks extends Map<string, string> {
+      override get(): string | undefined {
+        throw failure
+      }
+    }
+    expect(() =>
+      leadsHidden(vis(classifyPaths(['/secret'])), '/link', new ErrorLinks([['/link', '/public']])),
+    ).toThrow(failure)
+  })
+
+  it('keeps batch order and surrogate target text', () => {
+    const links = new Map([['/link\ud800', '/secret\ud800/../public']])
+    const scope = vis(classifyPaths(['/secret\ud800']))
+    expect(resolveSymlinks('/link\ud800/', links)).toBe('/public/')
+    expect(visibleLinks(scope, ['/link\ud800', '/public', '/secret\ud800/key'], links)).toEqual([
+      false,
+      true,
+      false,
+    ])
+    links.set('/link\ud800', '/public')
+    expect(visibleLinks(scope, ['/link\ud800'], links)).toEqual([true])
+  })
   it('follows a link into hidden space', () => {
     const v = vis(classifyPaths(['/data/secret']))
     for (const path of [
