@@ -2943,6 +2943,12 @@ class Workspace:
         try:
             if stop is not None:
                 await self._admit_line(stop, cancel)
+            if self.processes.queued():
+                # A job started before this line (an earlier line's, or
+                # the enclosing line's when this one is its substitution)
+                # begins first, as its fork already runs: what its
+                # redirect opens is there for the line to read.
+                await asyncio.sleep(0)
             result = await run_cancellable(line(), cancel, stop)
         except (MirageAbortError, asyncio.CancelledError):
             # An abandoned invocation is the caller's outcome, not the

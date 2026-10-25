@@ -59,6 +59,7 @@ class ProcessHandle:
         self._signal: int | None = None
         self._program_code: int | None = None
         self._completion: Future[ProcessInfo] = Future()
+        self.begun = False
 
     def start(self, eager: bool = False) -> None:
         """Start the runner.
@@ -78,6 +79,7 @@ class ProcessHandle:
 
     async def _work(self) -> int:
         self.task = cast("asyncio.Task[int]", asyncio.current_task())
+        self.begun = True
         if self._bind is None:
             return await self._run()
         return await self._bind(self._info.execution_id, self._run, self)

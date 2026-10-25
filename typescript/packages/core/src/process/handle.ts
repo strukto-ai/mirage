@@ -22,6 +22,8 @@ export type ExecutionBind = <T>(
  */
 export class ProcessHandle {
   task!: Promise<number>
+  /** Whether the runner has started running. */
+  begun = false
   private current: ProcessInfo
   private stopSignal: number | null = null
   private exitedCode: number | null = null
@@ -47,7 +49,10 @@ export class ProcessHandle {
    *   as one whose promise rejects.
    */
   start(eager = false): void {
-    const work = () => this.bind(this.current.executionId, this.run, this)
+    const work = () => {
+      this.begun = true
+      return this.bind(this.current.executionId, this.run, this)
+    }
     this.task = eager ? (async () => work())() : Promise.resolve().then(work)
     this.completion = this.task.then(
       (code) => this.settle(code, null, this.finished),

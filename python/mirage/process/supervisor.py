@@ -66,8 +66,11 @@ class ProcessSupervisor:
                 caller sets up from the process's identity before its
                 runner runs (the session's ``$BASHPID``). A caller that
                 passes it has nothing left to do first, so the runner
-                then starts at once, eagerly; without it the runner
-                starts on the loop's next turn.
+                then starts at once, eagerly, unless a runner started
+                before it has yet to begin: runners begin in the order
+                they were started, so a job's redirect lands before the
+                line that started it reads the file. Without it the
+                runner starts on the loop's next turn.
 
         Raises:
             BlockingIOError: the session already holds ``limit``
@@ -116,10 +119,11 @@ class ProcessSupervisor:
                 lambda signal: self.terminate_children(pid, signal),
                 self._bind,
             )
+            queued = self.queued()
             self._live[pid] = (self._generations.get(session_id, 0), handle)
         if started is not None:
             started(handle.info)
-        handle.start(eager=started is not None)
+        handle.start(eager=started is not None and not queued)
         return handle
 
     def terminate_children(self, pid: int, signal: int = 9) -> None:
@@ -227,6 +231,11 @@ class ProcessSupervisor:
         """Host-only inventory, including disowned and stopping runners."""
         with self._lock:
             return tuple(handle for _, handle in self._live.values())
+
+    def queued(self) -> bool:
+        """Whether a runner that was started has yet to begin."""
+        with self._lock:
+            return any(not handle.begun for _, handle in self._live.values())
 
     async def drain(
         self, blocked: asyncio.AbstractEventLoop | None = None

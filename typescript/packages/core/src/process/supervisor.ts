@@ -35,7 +35,10 @@ export class ProcessSupervisor {
    * Past it this throws EAGAIN, what fork(2) answers at `ulimit -u`.
    * `started` is what the caller sets up from the process's identity before
    * its runner runs (the session's `$BASHPID`); a caller that passes it has
-   * nothing left to do first, so the runner then starts at once.
+   * nothing left to do first, so the runner then starts at once, unless a
+   * runner started before it has yet to begin: runners begin in the order
+   * they were started, so a job's redirect lands before the line that
+   * started it reads the file.
    */
   start(init: {
     sessionId: string
@@ -92,9 +95,10 @@ export class ProcessSupervisor {
       },
       this.bind,
     )
+    const queued = [...this.runners.values()].some(({ handle: live }) => !live.begun)
     this.runners.set(pid, { generation: this.generations.get(init.sessionId) ?? 0, handle })
     init.started?.(handle.info)
-    handle.start(init.started !== undefined)
+    handle.start(init.started !== undefined && !queued)
     return handle
   }
 
