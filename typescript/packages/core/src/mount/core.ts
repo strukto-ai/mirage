@@ -903,20 +903,21 @@ export class MountCore {
     // source's backend.
     const source = this.resolve(src)
     const target = this.resolve(dst)
-    // Both ends as the links above them lead now: a link the rename moves
-    // no longer leads there after it.
     const moved = this.identity(src, false)
-    const landing = this.identity(dst, false)
     await this.removing([src, dst], () =>
-      this.queueAll(this.pending, [moved, landing], async () => {
+      this.queueAll(this.pending, [moved, this.identity(dst, false)], async () => {
         const replaced = this.named(dst).filter((ctx) => ctx.key !== moved)
         const row = await this.hold(dst, replaced)
+        // Both ends as the links above them lead in this turn, right before
+        // the move: a link the move takes along no longer leads there after.
+        const start = this.identity(src, false)
+        const landing = this.identity(dst, false)
         await this.op(() => this.files.rename(source, target))
         this.detach(replaced, row)
         for (const ctx of this.handles.values()) {
           if (ctx.detached !== undefined) continue
-          if (ctx.key === moved || ctx.key.startsWith(`${moved}/`)) {
-            const rest = ctx.key.slice(moved.length)
+          if (ctx.key === start || ctx.key.startsWith(`${start}/`)) {
+            const rest = ctx.key.slice(start.length)
             ctx.key = landing + rest
             ctx.path = this.mountPath(ctx.key, dst + rest)
           }

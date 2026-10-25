@@ -956,22 +956,24 @@ class MountCore:
             new (str): mount path it moves to.
         """
         source, target = self.resolve(old), self.resolve(new)
-        # Both ends as the links above them lead now: a link the rename
-        # moves no longer leads there after it.
         moved = self.identity(old, follow=False)
-        landing = self.identity(new, follow=False)
-        keys = [moved, landing]
+        keys = [moved, self.identity(new, follow=False)]
 
         async def replace() -> None:
             replaced = [c for c in self._named(new) if c.key != moved]
             row = await self._hold(new, replaced)
+            # Both ends as the links above them lead in this turn, right
+            # before the move: a link the move takes along no longer leads
+            # there after it.
+            start = self.identity(old, follow=False)
+            landing = self.identity(new, follow=False)
             await self._op(self._files.rename(source, target))
             self._detach(replaced, row)
             for ctx in self._handles.values():
                 if ctx.detached is not None:
                     continue
-                if ctx.key == moved or ctx.key.startswith(moved + "/"):
-                    rest = ctx.key[len(moved) :]
+                if ctx.key == start or ctx.key.startswith(start + "/"):
+                    rest = ctx.key[len(start) :]
                     ctx.key = landing + rest
                     ctx.path = self._mount_path(ctx.key, new + rest)
             await self._changed(old, rehydrate=False)

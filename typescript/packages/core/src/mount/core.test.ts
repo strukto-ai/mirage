@@ -1139,6 +1139,27 @@ function holdFirst(
   return { out, go, calls: () => calls }
 }
 
+it('ties a renamed handle to the destination a link names once the rename runs', async () => {
+  const ws = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
+  await ws.shell('mkdir -p /data/a /data/b && printf hello > /data/f && ln -s a /data/lk')
+  const core = new MountCore(ws.vfs)
+  const enc = new TextEncoder()
+  const fh = await core.open('/data/f', openMode(fsConstants.O_RDWR, fsConstants))
+  await core.write('/data/f', fh, enc.encode('H'), 0)
+  const held = holdFirst(ws, 'pwrite')
+  const flushing = core.flush('/data/f', fh)
+  await held.out
+  const renaming = core.rename('/data/f', '/data/lk/f')
+  await ws.shell('rm /data/lk && ln -s b /data/lk')
+  held.go()
+  await flushing
+  await renaming
+  await core.write('/data/f', fh, enc.encode('J'), 1)
+  await core.release(fh)
+  expect(new TextDecoder().decode(await ws.vfs.read('/data/b/f'))).toBe('HJllo')
+  await expect(ws.vfs.stat('/data/a/f')).rejects.toMatchObject({ code: 'ENOENT' })
+})
+
 it('lands a direct write still out before a truncate', async () => {
   const ws = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
   await ws.vfs.write('/data/f', new TextEncoder().encode('abc'))

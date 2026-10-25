@@ -807,6 +807,28 @@ class _Held:
 
 
 @pytest.mark.asyncio
+async def test_a_renamed_handle_follows_the_link_the_rename_ran_through():
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
+    await ws.shell("mkdir -p /a /b && printf hello > /f && ln -s a /lk")
+    files = _Held(ws.vfs, "pwrite")
+    core = MountCore(files)
+    fh = await core.open("/f", open_mode(os.O_RDWR))
+    await core.write("/f", b"H", 0, fh)
+    flushing = asyncio.create_task(core.flush("/f", fh))
+    await files.out.wait()
+    renaming = asyncio.create_task(core.rename("/f", "/lk/f"))
+    await ws.shell("rm /lk && ln -s b /lk")
+    files.go.set()
+    await flushing
+    await renaming
+    await core.write("/f", b"J", 1, fh)
+    await core.release(fh)
+    assert await ws.vfs.read("/b/f") == b"HJllo"
+    with pytest.raises(FileNotFoundError):
+        await ws.vfs.stat("/a/f")
+
+
+@pytest.mark.asyncio
 async def test_a_hydration_out_across_a_truncate_reads_again():
     # The first open's read was out when the O_TRUNC open landed; what it
     # fetched is the old body, and installing it would let that handle
