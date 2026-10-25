@@ -759,6 +759,49 @@ describe('streamed stderr', () => {
       await ws.close()
     }
   })
+
+  // The record keeps what the program wrote and why it failed, with or
+  // without a sink for its stderr.
+  it.each(['warn-tool', 'warn-tool && echo done > /out'])(
+    'keeps what %s wrote and why it failed',
+    async (line) => {
+      class WarnsThenFails extends ProcessProbe {
+        override async runProcess(
+          _e: unknown,
+          _p: PathSpec[],
+          _argv: string[],
+          _ctx: Context,
+          _out: OutputFn | undefined,
+          errors?: OutputFn,
+        ): Promise<RunResult> {
+          await errors?.(ENC.encode('warning\n'))
+          throw new Error('provider unavailable')
+        }
+      }
+      const results: string[] = []
+      const seen: Policy = {
+        postExecute(ctx: ExecuteResultContext) {
+          results.push(JSON.stringify(ctx.results))
+          return null
+        },
+      }
+      const ws = new Workspace(
+        { '/': new RAMVFS() },
+        {
+          shellParser: await getTestParser(),
+          runtimes: [new WarnsThenFails()],
+          mode: MountMode.EXEC,
+          policies: [seen],
+        },
+      )
+      try {
+        await ws.shell(line)
+        expect(results.join('\n')).toContain('"warning\\nwarn-tool: provider unavailable\\n"')
+      } finally {
+        await ws.close()
+      }
+    },
+  )
 })
 
 class EndlessProbe extends ProcessProbe {

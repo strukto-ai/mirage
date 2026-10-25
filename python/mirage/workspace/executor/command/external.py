@@ -122,7 +122,7 @@ async def run_external(
             )
         finally:
             await registry.settle(runtime)
-        node.stderr = b"".join(said) or result.stderr or b""
+        node.stderr = b"".join(said) + (result.stderr or b"")
         return result
 
     def settled() -> None:

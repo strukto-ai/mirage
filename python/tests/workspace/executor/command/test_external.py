@@ -810,6 +810,34 @@ async def test_streamed_stderr_stays_in_the_command_record():
     assert '"stderr": "streamed\\n"' in seen.results[0]
 
 
+class WarnsThenFails(ProcessProbe):
+    async def run_process(
+        self, engine, paths, texts, ctx, output, errors=None
+    ) -> RunResult:
+        assert errors is not None
+        await errors(b"warning\n")
+        raise RuntimeError("provider unavailable")
+
+
+# The record keeps what the program wrote and why it failed, with or
+# without a sink for its stderr.
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line", ["warn-tool", "warn-tool && echo done > /out"]
+)
+async def test_the_record_keeps_streamed_and_returned_stderr(line):
+    seen = SeesResults()
+    async with workspace(
+        {"/": RAMVFS()},
+        mode=MountMode.EXEC,
+        runtimes=[WarnsThenFails()],
+        policies=[seen],
+    ) as ws:
+        await ws.shell(line)
+    said = '"warning\\nwarn-tool: provider unavailable\\n"'
+    assert any(said in results for results in seen.results)
+
+
 class EndlessProbe(ProcessProbe):
     async def run_process(
         self, engine, paths, texts, ctx, output, errors=None

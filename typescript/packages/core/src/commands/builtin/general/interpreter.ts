@@ -43,7 +43,7 @@ import type { CommandFnResult, Context } from '../../config.ts'
  * settle on the result as the output ends (`IOResult.output`), stderr after
  * what the result already held. A reader that stops early stops the run,
  * which then exits 141, as SIGPIPE leaves a program, and keeps the stderr it
- * had written. A stopped run that does not end within its grace is left
+ * had written. A stopped run that does not end within the stop bound is left
  * running, as a stopped handler is (`joinOrAbort`). Mirrors Python's
  * `run_output`, whose cancel ends the run outright.
  *
@@ -82,13 +82,16 @@ export function runOutput(
     await errors?.(chunk)
   }
   const keep = (chunk: Uint8Array): Promise<void> => {
-    kept.push(chunk)
+    kept.push(new Uint8Array(chunk))
     return Promise.resolve()
   }
-  // A `kill` naming a signal gives the run the stop bound to answer it, as
-  // a stopped handler gets; any other stop releases the reader soon.
+  // A run its reader or deadline stopped, or a `kill` naming a signal, gets
+  // the stop bound to answer, which a sandbox's reap fits within; a run whose
+  // caller went away releases it soon, as a stopped handler does.
   const grace = (): number =>
-    (caller.process?.signal ?? null) === null ? ABORT_JOIN_MS : STOP_WAIT_SECONDS * 1000
+    hasAborted(signal) && (caller.process?.signal ?? null) === null
+      ? ABORT_JOIN_MS
+      : STOP_WAIT_SECONDS * 1000
   const execute = async (): Promise<void> => {
     try {
       const result = await run(

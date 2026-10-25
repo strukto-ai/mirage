@@ -91,7 +91,7 @@ export async function runExternal(
   const run = async (output: OutputFn, errors: OutputFn, stop: AbortSignal): Promise<RunResult> => {
     // The command's record keeps a copy for the policies that read it.
     const told = async (chunk: Uint8Array): Promise<void> => {
-      said.push(chunk)
+      said.push(new Uint8Array(chunk))
       await errors(chunk)
     }
     const deadline = new AbortController()
@@ -107,7 +107,7 @@ export async function runExternal(
         timeout,
         argv.name,
       )
-      node.stderr = said.length > 0 ? concat(said) : (result.stderr ?? new Uint8Array())
+      node.stderr = concat([...said, result.stderr ?? new Uint8Array()])
       return result
     } catch (err) {
       // A run past its deadline is stopped before its runtime settles,

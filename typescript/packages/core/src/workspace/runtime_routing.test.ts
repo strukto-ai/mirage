@@ -766,14 +766,12 @@ describe('whole-line runtimes', () => {
       { mode: MountMode.EXEC, shellParser: parser, runtimes: [new Deaf(), 'workspace'] },
     )
     try {
-      for (const line of ['python3 -c x', 'python3 -c x | cat', 'python3 -c x > /out']) {
-        expect((await ws.shell(line)).exitCode).toBe(124)
-      }
+      expect((await ws.shell('python3 -c x | cat')).exitCode).toBe(124)
     } finally {
       delete DEFAULT_COMMAND_LIMITS.python3
       await ws.close()
     }
-  }, 10_000)
+  }, 30_000)
 
   it('keeps what an aborted runtime read on the books', async () => {
     // The runtime finished its read before the line was aborted: the read

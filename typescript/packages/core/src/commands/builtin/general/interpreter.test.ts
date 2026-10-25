@@ -12,10 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { materialize } from '../../../io/types.ts'
 import type { LanguageRuntime } from '../../../runtime/language.ts'
 import type { OutputFn, RunResult } from '../../../runtime/types.ts'
+import { STOP_WAIT_SECONDS } from '../../../shell/job_table/constants.ts'
+import { ABORT_JOIN_MS } from '../../../utils/abort.ts'
 import type { Context } from '../../config.ts'
 import { runInterpreter, runOutput } from './interpreter.ts'
 
@@ -175,17 +177,60 @@ describe('runOutput', () => {
     expect([io.exitCode, DEC.decode(await materialize(io.stderr))]).toEqual([141, 'warn\nlate\n'])
   })
 
-  // A promise cannot be cancelled, so a run that never looks at its stop is
-  // given a grace and then left running.
-  it('lets its reader go when a stopped run ignores the stop', async () => {
-    const [stdout, io] = runOutput(async (output) => {
+  // A sandbox reaps its program after the stop, and the runtime settles
+  // after that, so the reader waits for both before the next command.
+  it('waits for a stopped run that takes its time to end', async () => {
+    let ended = false
+    const [stdout] = runOutput(async (output, _errors, signal) => {
       await output(ENC.encode('a'))
-      return new Promise<RunResult>(() => undefined)
+      await new Promise<void>((resolve) => {
+        signal.addEventListener('abort', () => {
+          setTimeout(resolve, ABORT_JOIN_MS * 2)
+        })
+      })
+      ended = true
+      return { stdout: new Uint8Array(), stderr: null, exitCode: 0 }
     })
-    expect(DEC.decode((await stdout.next()).value as Uint8Array)).toBe('a')
+    await stdout.next()
     await stdout.return()
-    expect(io.exitCode).toBe(141)
-    expect(io.output?.settled).toBe(true)
+    expect(ended).toBe(true)
+  })
+
+  // A promise cannot be cancelled, so a run that never looks at its stop is
+  // given the stop bound and then left running.
+  it('lets its reader go when a stopped run ignores the stop', async () => {
+    vi.useFakeTimers()
+    try {
+      const [stdout, io] = runOutput(async (output) => {
+        await output(ENC.encode('a'))
+        return new Promise<RunResult>(() => undefined)
+      })
+      expect(DEC.decode((await stdout.next()).value as Uint8Array)).toBe('a')
+      let released = false
+      const closing = stdout.return().then(() => {
+        released = true
+      })
+      await vi.advanceTimersByTimeAsync(STOP_WAIT_SECONDS * 1000 - 1)
+      expect(released).toBe(false)
+      await vi.advanceTimersByTimeAsync(1)
+      await closing
+      expect(io.exitCode).toBe(141)
+      expect(io.output?.settled).toBe(true)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('keeps each stderr write as it was written', async () => {
+    const [stdout, io] = runOutput(async (_output, errors) => {
+      const scratch = ENC.encode('one\n')
+      await errors(scratch)
+      scratch.set(ENC.encode('two\n'))
+      await errors(scratch)
+      return { stdout: new Uint8Array(), stderr: null, exitCode: 0 }
+    })
+    await materialize(stdout)
+    expect(DEC.decode(await materialize(io.stderr))).toBe('one\ntwo\n')
   })
 
   it('writes stderr after the stdout before it', async () => {
