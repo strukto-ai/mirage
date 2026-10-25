@@ -351,3 +351,17 @@ fn bash_readings_from_review() {
     let chain = format!("for (({}1;;)); do :; done", "a=".repeat(200));
     assert!(read(&chain).contains("(word=a=a=a="));
 }
+
+#[test]
+fn a_failed_read_puts_back_every_heredoc_it_took() {
+    // The expansion's word fails to parse after reading B's body, and is
+    // read raw: A is pending again with its own delimiter.
+    let tree = read("cat <<A; echo ${x:-$(cat <<B\nb\nB\n)(a\na\nA\n|)}\nafter\nA\necho done");
+    assert!(
+        tree.ends_with(
+            "(heredoc_body=after\n) (heredoc_end=A) (command name: (command_name (word=echo)) \
+             argument: (word=done)))"
+        ),
+        "{tree}"
+    );
+}
