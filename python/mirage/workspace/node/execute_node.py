@@ -44,6 +44,7 @@ from mirage.io.errors import PipeClosed
 from mirage.io.types import ByteSource
 from mirage.policy import HandOff, PolicyDenied
 from mirage.process.supervisor import ProcessSupervisor
+from mirage.process.types import ProcessInfo
 from mirage.runtime.types import DispatchFn
 from mirage.shell.barrier import BarrierPolicy, apply_barrier
 from mirage.shell.bytes import decode_text
@@ -1451,6 +1452,9 @@ async def _execute_node(
                     reset_program_invocation(program_token)
                 await child.session.close_inputs()
 
+        def forked(info: ProcessInfo) -> None:
+            child.session.process_id = info.pid
+
         try:
             process = sub_table.processes.start(
                 session_id=session.session_id,
@@ -1459,10 +1463,10 @@ async def _execute_node(
                 parent_pid=session.process_id,
                 run=run_subshell,
                 limit=session.processes.max,
+                started=forked,
             )
         except BlockingIOError as exc:
             raise ExitSignal(FORK_FAILED_STATUS, stderr=FORK_FAILED) from exc
-        child.session.process_id = process.info.pid
         await process.task
         return results[0]
 

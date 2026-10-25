@@ -888,11 +888,10 @@ describe('choices violations are reported, never thrown', () => {
     expect(parsed.invalidValueOptions).toEqual([])
   })
 
-  // python's compileSpec twin caches on a frozen dataclass, so ITS key is
-  // structural and a spec built to look exactly like tee's shares the
-  // builtin's compiled tables. The word-choice decision is therefore read off
-  // the spec in both languages and never stored on the compiled tables,
-  // which is the only way the two answer alike here. Mirrors test_parser.py.
+  // A spec built to look exactly like tee's compiles to tables of its own,
+  // in both languages, and the word-choice decision is read off the spec,
+  // so the twin never inherits it and the real tee never loses it.
+  // Mirrors test_parser.py.
   it('gives a structural twin of a builtin spec no word choice', () => {
     const tee = specOf('tee')
     // Declared the long way round, exactly as builtin_specs/text_proc.ts

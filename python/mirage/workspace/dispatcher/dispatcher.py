@@ -983,7 +983,7 @@ class Dispatcher:
             report (OpReport | None): the caller's report.
             kwargs (dict[str, Any]): the op's own arguments.
         """
-        token = bind_caller(dataclasses.replace(caller, rule_gate=None))
+        token = bind_caller(caller.changed({"rule_gate": None}))
         try:
             if (
                 name == "read"
@@ -1096,7 +1096,7 @@ class Dispatcher:
         # would tell that it is there.
         if not sees(caller.visibility, self._namespace, path.virtual):
             return False
-        prober = dataclasses.replace(caller, rule_gate=None)
+        prober = caller.changed({"rule_gate": None})
         # A read follows a final link, so the kind is its target's, as
         # GNU's cat calls a link to a directory one; the error keeps the
         # name as typed.

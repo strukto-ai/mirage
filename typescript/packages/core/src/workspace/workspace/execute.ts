@@ -343,6 +343,10 @@ async function runLine(
         cancel: () => {
           abort.abort()
         },
+        started: (info) => {
+          targetSession.processId = info.pid
+          targetSession.shellPid ??= info.pid
+        },
         run: async () => {
           result = await runWithSession(
             targetSession,
@@ -365,8 +369,6 @@ async function runLine(
       recordStatus(targetSession, FORK_FAILED_STATUS)
       return new ExecuteResult(new Uint8Array(), encodeText(FORK_FAILED), FORK_FAILED_STATUS)
     }
-    targetSession.processId = process.info.pid
-    targetSession.shellPid ??= process.info.pid
     try {
       await process.task
       if (result === undefined) throw new Error('process completed without a result')

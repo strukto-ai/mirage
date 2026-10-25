@@ -14,7 +14,6 @@
 
 import asyncio
 from collections.abc import AsyncIterator, Callable
-from dataclasses import replace
 from typing import Any, Literal, cast, overload
 
 from mirage.context import (
@@ -394,7 +393,7 @@ class Files:
         token = (
             None
             if own is None
-            else bind_caller(replace(current_caller(), recorder=own))
+            else bind_caller(current_caller().changed({"recorder": own}))
         )
 
         async def run() -> tuple[Any, Any]:

@@ -2390,7 +2390,7 @@ class Workspace:
         self._writes += 1
         self._writes_idle.clear()
         try:
-            yield replace(caller, write_held=True)
+            yield caller.changed({"write_held": True})
         finally:
             self._writes -= 1
             if self._writes == 0:
@@ -2535,7 +2535,10 @@ class Workspace:
         """
         caller = current_caller()
         return await self.dispatch(
-            name, path, caller=replace(caller, rule_gate=caller.gate), **kwargs
+            name,
+            path,
+            caller=caller.changed({"rule_gate": caller.gate}),
+            **kwargs,
         )
 
     async def stat(self, path: str) -> FileStat:
@@ -2908,7 +2911,7 @@ class Workspace:
         if handed is None:
             stop = asyncio.Event()
             self._lines[stop] = (session_id, ended)
-            token = bind_caller(replace(current_caller(), stop=stop))
+            token = bind_caller(current_caller().changed({"stop": stop}))
 
         async def line() -> IOResult:
             result = await self._serialize_line(

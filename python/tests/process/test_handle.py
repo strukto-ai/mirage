@@ -44,7 +44,9 @@ async def _raises() -> int:
 @pytest.mark.asyncio
 async def test_a_finished_runner_reports_its_code_and_its_pid():
     finished: list[int] = []
-    info = await ProcessHandle(_info(), _exits_3, finished.append).join()
+    handle = ProcessHandle(_info(), _exits_3, finished.append)
+    handle.start()
+    info = await handle.join()
     assert (info.state, info.exit_code, finished) == (
         ProcessState.EXITED,
         3,
@@ -54,7 +56,9 @@ async def test_a_finished_runner_reports_its_code_and_its_pid():
 
 @pytest.mark.asyncio
 async def test_a_failing_runner_exits_1_with_its_failure():
-    info = await ProcessHandle(_info(), _raises, lambda _pid: None).join()
+    handle = ProcessHandle(_info(), _raises, lambda _pid: None)
+    handle.start()
+    info = await handle.join()
     assert (info.exit_code, info.failure) == (1, "boom")
 
 
@@ -70,6 +74,7 @@ async def test_terminate_asks_once_and_the_runner_exits_137():
     handle = ProcessHandle(
         _info(), run, lambda _pid: None, bind=run_with_execution
     )
+    handle.start()
     await started.wait()
     assert handle.terminate() is True
     assert handle.terminate() is False
@@ -98,6 +103,7 @@ async def test_a_runner_stopped_with_a_signal_exits_128_plus_it(signal, code):
     handle = ProcessHandle(
         _info(), run, lambda _pid: None, bind=run_with_execution
     )
+    handle.start()
     await started.wait()
     assert handle.signal is None
     assert handle.terminate(signal) is True
@@ -124,8 +130,38 @@ async def test_a_program_that_handled_the_signal_keeps_its_own_status():
     handle = ProcessHandle(
         _info(), run, lambda _pid: None, bind=run_with_execution
     )
+    handle.start()
     await started.wait()
     assert handle.program_code is None
     assert handle.terminate(15) is True
     info = await handle.join()
     assert (info.exit_code, handle.program_code) == (143, 3)
+
+
+# An eager start runs a runner that never waits to its end before start
+# returns, so joining it takes no turn of the loop.
+@pytest.mark.asyncio
+async def test_an_eager_runner_that_never_waits_is_done_once_started():
+    handle = ProcessHandle(_info(), _exits_3, lambda _pid: None)
+    handle.start(eager=True)
+    assert handle.task.done()
+    assert (await handle.join()).exit_code == 3
+
+
+# A runner stopping itself while its eager start still runs (a `kill
+# $BASHPID` before its first wait) is stopped like any other.
+@pytest.mark.asyncio
+async def test_a_runner_that_stops_itself_during_an_eager_start_exits_137():
+    async def run() -> int:
+        runner = current_caller().process
+        assert runner is not None
+        runner.terminate()
+        await asyncio.Event().wait()
+        return 0
+
+    handle = ProcessHandle(
+        _info(), run, lambda _pid: None, bind=run_with_execution
+    )
+    handle.start(eager=True)
+    info = await handle.join()
+    assert (info.exit_code, info.cancellation_requested) == (137, True)

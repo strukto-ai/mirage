@@ -89,11 +89,10 @@ def _word_choice_dests(spec: CommandSpec) -> frozenset[str]:
     appends --help/--version, once per backend), while every declared
     Argument stays the same object.
 
-    Read off the spec rather than cached on its CompiledSpec because
-    ``compile_spec`` keys on a frozen dataclass, so its cache is
-    STRUCTURAL: a custom spec that merely looked like tee's would share
-    the builtin's compiled tables, and an identity-derived fact stored
-    in there would be whichever of the two compiled first.
+    Read off the spec rather than kept on its CompiledSpec, as the
+    TypeScript twin reads it: the tables describe the grammar, and
+    whether a choice set is tee's is a fact about which Argument objects
+    the spec holds.
 
     Args:
         spec (CommandSpec): the grammar being parsed.

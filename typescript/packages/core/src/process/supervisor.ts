@@ -1,7 +1,7 @@
 import { DEFAULT_PROCESS_PERMISSIONS, type ProcessPermissions } from './config.ts'
 import type { PathSpec, ProcessScope } from '../types.ts'
 import { ProcessHandle, type ExecutionBind } from './handle.ts'
-import type { ProcessRunner } from './types.ts'
+import type { ProcessInfo, ProcessRunner } from './types.ts'
 import type { ProcessView } from './view.ts'
 import { newExecutionId } from '../execution/context.ts'
 import type { IdSource } from '../utils/ids.ts'
@@ -33,6 +33,9 @@ export class ProcessSupervisor {
    * `limit` is the most runners the session may hold, this one included;
    * stopping runners count until they finish cleanup and leave the live registry.
    * Past it this throws EAGAIN, what fork(2) answers at `ulimit -u`.
+   * `started` is what the caller sets up from the process's identity before
+   * its runner runs (the session's `$BASHPID`); a caller that passes it has
+   * nothing left to do first, so the runner then starts at once.
    */
   start(init: {
     sessionId: string
@@ -43,6 +46,7 @@ export class ProcessSupervisor {
     parentPid?: number | null
     limit?: number | null
     executionId?: string
+    started?: (info: ProcessInfo) => void
   }): ProcessHandle {
     if (this.stopped) throw new Error('process supervisor is stopped')
     if (
@@ -89,6 +93,8 @@ export class ProcessSupervisor {
       this.bind,
     )
     this.runners.set(pid, { generation: this.generations.get(init.sessionId) ?? 0, handle })
+    init.started?.(handle.info)
+    handle.start(init.started !== undefined)
     return handle
   }
 

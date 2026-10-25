@@ -18,7 +18,6 @@ import re
 import uuid
 from collections.abc import Awaitable, Callable, Coroutine, Iterable
 from contextvars import Context
-from dataclasses import replace
 from typing import Any, TypeVar
 
 from mirage.context import (
@@ -325,8 +324,8 @@ class SandboxMounts:
         done: asyncio.Future[None] = asyncio.get_running_loop().create_future()
         lent.add(done)
         token = bind_caller(
-            replace(
-                current_caller(), stop=held.stop, write_held=held.write_held
+            current_caller().changed(
+                {"stop": held.stop, "write_held": held.write_held}
             )
         )
         try:

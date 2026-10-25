@@ -138,12 +138,8 @@ ISOLATION = {
 }
 TURNS_LINES = 10
 TURNS = {
-    "line": ("echo", "loop-turns", 12),
-    "pipe": (
-        "echo hi | cat",
-        "loop-turns-pipe",
-        20 if sys.version_info >= (3, 12) else None,
-    ),
+    "line": ("echo", "loop-turns", 10),
+    "pipe": ("echo hi | cat", "loop-turns-pipe", 19),
 }
 
 
@@ -1269,15 +1265,16 @@ def loop_turns(key: str, path: Path, report: Report) -> None:
     writes them as the server stops; the median of each ``quiet_lines``
     line must stay within its ``TURNS`` budget. ``echo`` took 16 before
     the turns spent joining event waiters and on a separate session-load
-    call were cut; it takes 10 now. The pipeline also closes output and
-    activity streams, which a plain ``echo`` never opens: it took 30,
-    takes 15, 23 with its output streams' close started a turn late
-    again and 24 with no close started eagerly. Python 3.11 starts every
-    close a turn late by design, 33 turns, so that budget holds from
-    3.12; ``serve.py`` runs on this interpreter. A line that outlives
-    the yield interval (2 ms here) also yields, so a loaded runner adds
-    a few turns, up to 18 for the pipeline: the budgets leave room for
-    them. A streamed request is left out, since its output crosses to
+    call were cut, then 10, and takes 8 now that the shell execution,
+    the line and its process start eagerly: the rest is the hand-off
+    between the server's loop and the workspace's. The pipeline also
+    closes output and activity streams, which a plain ``echo`` never
+    opens: it took 30, then 15, takes 14, 23 with its output streams'
+    close started a turn late again and 24 with no close started
+    eagerly. A line that outlives the yield interval
+    (2 ms here) also yields, so a loaded runner adds a few turns, up to
+    17 for the pipeline: the budgets leave room for them. A streamed
+    request is left out, since its output crosses to
     the server's own loop and its turns follow that hand-off more than
     the line.
 

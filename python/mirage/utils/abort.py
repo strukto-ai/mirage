@@ -17,6 +17,8 @@ import logging
 from collections.abc import Coroutine
 from typing import Any, TypeVar
 
+from mirage.concurrency.limiter import owned_task
+
 logger = logging.getLogger(__name__)
 
 
@@ -114,11 +116,14 @@ async def run_cancellable(
     is plain asyncio: one delivery, at the await the line is in, and no
     grace for the epilogue.
 
-    The event waiters are cancelled and left to finish on their own:
-    each only waits on an event, and joining them would cost every line
-    three more turns of the loop, each a slice of whatever else is
-    running on it. A line that failed as its caller was cancelled has
-    its error read and logged here, since nothing else reads it.
+    The task starts eagerly, so a line that never waits is done before
+    any waiter exists and costs the loop no turn; an event already set
+    refuses the line before any of it runs. The event waiters a waiting
+    line needs are cancelled and left to finish on their own: each only
+    waits on an event, and joining them would cost every line three more
+    turns of the loop, each a slice of whatever else is running on it. A
+    line that failed as its caller was cancelled has its error read and
+    logged here, since nothing else reads it.
 
     Args:
         coro (Coroutine): the work to run, a whole line or a subtree.
@@ -129,12 +134,18 @@ async def run_cancellable(
     events = [e for e in (cancel, stop) if e is not None]
     if not events:
         return await coro
-    task = asyncio.ensure_future(coro)
-    waiters = [asyncio.create_task(e.wait()) for e in events]
+    if any(e.is_set() for e in events):
+        coro.close()
+        raise MirageAbortError()
+    task = owned_task(coro)
+    waiters = (
+        [] if task.done() else [asyncio.create_task(e.wait()) for e in events]
+    )
     try:
-        await asyncio.wait(
-            {task, *waiters}, return_when=asyncio.FIRST_COMPLETED
-        )
+        if waiters:
+            await asyncio.wait(
+                {task, *waiters}, return_when=asyncio.FIRST_COMPLETED
+            )
         if any(e.is_set() for e in events):
             await _cancel_and_join(task)
             raise MirageAbortError()

@@ -133,6 +133,7 @@ async def test_an_externally_cancelled_caller_gets_the_same_grace():
 
 
 async def _fail() -> None:
+    await asyncio.sleep(0)
     raise ValueError("lost")
 
 
@@ -140,7 +141,9 @@ async def _fail() -> None:
 async def test_a_failure_its_cancelled_caller_left_is_read_and_logged(caplog):
     # The caller is cancelled in the turn its line fails, so its wait is
     # cut short with the failure unread. It is logged here instead of
-    # left for asyncio to report as never retrieved.
+    # left for asyncio to report as never retrieved. The line waits once
+    # first: an eager start would otherwise fail it before the caller
+    # ever waits.
     loop = asyncio.get_running_loop()
     reported: list[dict] = []
     handler = loop.get_exception_handler()

@@ -2440,17 +2440,16 @@ class MountEntry:
         Args:
             caller (Caller): who makes the call.
         """
-        return dataclasses.replace(
-            caller,
-            revisions=self.revisions or None,
-            recorder=(
-                None
+        return caller.changed(
+            {
+                "revisions": self.revisions or None,
+                "recorder": None
                 if caller.recorder is None
                 else dataclasses.replace(
                     caller.recorder, mount_id=self.mount_id
-                )
-            ),
-            write_context=self.write_context(),
+                ),
+                "write_context": self.write_context(),
+            }
         )
 
     def _scope(self, path: str | PathSpec) -> PathSpec:

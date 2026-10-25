@@ -17,34 +17,45 @@ export type ExecutionBind = <T>(
  * receives it, and a cancelled runner's status is 128 plus it, as a shell
  * reports a child the signal ended. Joining covers the runner's finally
  * blocks, not untracked native descendants.
+ * The runner starts once `start` is called, so whoever tracks the handle
+ * registers it before even a synchronous prelude of the runner runs.
  */
 export class ProcessHandle {
-  readonly task: Promise<number>
+  task!: Promise<number>
   private current: ProcessInfo
   private stopSignal: number | null = null
   private exitedCode: number | null = null
-  private readonly completion: Promise<ProcessInfo>
+  private completion!: Promise<ProcessInfo>
 
   constructor(
     info: ProcessInfo,
-    run: ProcessRunner,
+    private readonly run: ProcessRunner,
     private readonly cancel: (signal: number) => void,
-    finished: (pid: number) => void,
+    private readonly finished: (pid: number) => void,
     private readonly cancelChildren: (signal: number) => void = () => undefined,
-    bind: ExecutionBind = (_id, run) => run(),
+    private readonly bind: ExecutionBind = (_id, run) => run(),
   ) {
     this.current = Object.freeze(info)
-    // Register identity before executing even a synchronous runner prelude.
-    this.task = Promise.resolve().then(() => bind(info.executionId, run, this))
+  }
+
+  /**
+   * Start the runner.
+   *
+   * @param eager run it at once, up to its first wait, for a caller with
+   *   nothing left to set up; otherwise it starts on the next microtask.
+   */
+  start(eager = false): void {
+    const work = () => this.bind(this.current.executionId, this.run, this)
+    this.task = eager ? work() : Promise.resolve().then(work)
     this.completion = this.task.then(
-      (code) => this.settle(code, null, finished),
+      (code) => this.settle(code, null, this.finished),
       (error: unknown) => {
         const aborted = error instanceof Error && error.name === 'AbortError'
         if (aborted) this.current = Object.freeze({ ...this.current, cancellationRequested: true })
         return this.settle(
           aborted ? 128 + (this.stopSignal ?? 9) : 1,
           aborted ? null : error instanceof Error ? error.message : String(error),
-          finished,
+          this.finished,
         )
       },
     )
