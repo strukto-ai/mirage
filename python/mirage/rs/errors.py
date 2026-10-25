@@ -32,6 +32,21 @@ class StreamRefusal(Exception):
         return type(self), (self.message, self.output)
 
 
+class SearchLimit(Exception):
+    """A -P line search gave up at PCRE2's match limit.
+
+    Args:
+        message (str): the refusal in GNU grep's words.
+        spans (list[tuple[int, int]]): the matches -o found on the line
+            before the search gave up.
+    """
+
+    def __init__(self, message: str, spans: list[tuple[int, int]]) -> None:
+        super().__init__(message)
+        self.message = message
+        self.spans = spans
+
+
 class RegexError(Exception):
     """A pattern mirage-rs refused to compile.
 

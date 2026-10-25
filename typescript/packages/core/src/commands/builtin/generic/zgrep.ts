@@ -15,7 +15,7 @@
 import { byteView, decodeText, encodeText, textView, utf8Locale } from '../../../shell/bytes.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
-import { StreamRefusal } from '../../../rs/errors.ts'
+import { SearchLimit } from '../../../rs/errors.ts'
 import { LineRegex } from '../../../rs/regex.ts'
 import { IOResult, materialize } from '../../../io/types.ts'
 import type { PathSpec, StatFn } from '../../../types.ts'
@@ -189,19 +189,22 @@ export async function zgrepGeneric(
           const line = byteView(raw, utf8)
           // Whether the line is selected is its own question: an empty match
           // selects it and gives -o nothing to print. A -P search past
-          // PCRE2's match limit ends the input.
-          let hit: boolean
+          // PCRE2's match limit ends the input after the matches it found.
+          let hit = false
           let selected: [number, string][] = []
           try {
             hit = lineSelected(pattern, line) !== parsed.invert
             if (!hit) selected = []
-            else if (pieces && !parsed.invert && !(filesOnly || filesWithoutMatch))
+            else if (
+              pieces &&
+              !(parsed.invert || parsed.count || quiet || filesOnly || filesWithoutMatch)
+            )
               selected = linePieces(pattern, line)
             else selected = [[0, line]]
           } catch (err) {
-            if (!(err instanceof StreamRefusal)) throw err
+            if (!(err instanceof SearchLimit)) throw err
             gaveUp = err.message
-            continue
+            selected = err.spans.map(([start, end]) => [start, line.slice(start, end)])
           }
           if (hit) {
             count++

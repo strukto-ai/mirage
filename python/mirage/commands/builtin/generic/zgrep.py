@@ -29,7 +29,7 @@ from mirage.commands.spec.types import FlagValue
 from mirage.io.async_line_iterator import AsyncLineIterator
 from mirage.io.stream import OutputStream, close_quietly
 from mirage.io.types import ByteSource, IOResult, materialize
-from mirage.rs.errors import StreamRefusal
+from mirage.rs.errors import SearchLimit
 from mirage.rs.regex import LineRegex
 from mirage.shell.bytes import byte_view, encode_text, text_view
 from mirage.types import PathSpec, PolymorphicReadFn, StatFn
@@ -188,23 +188,30 @@ async def zgrep_generic(
                     line = byte_view(raw, utf8)
                     # Whether the line is selected is its own question: an
                     # empty match selects it and gives -o nothing to print.
-                    # A -P search past PCRE2's match limit ends the input.
+                    # A -P search past PCRE2's match limit ends the input
+                    # after the matches it found.
+                    hit = False
+                    selected: list[tuple[int, str]] = []
                     try:
                         hit = line_selected(compiled, line) != f.invert
-                        selected: list[tuple[int, str]] = []
                         if not hit:
                             pass
-                        elif (
-                            f.only_matching
-                            and not f.invert
-                            and not (f.files_only or f.files_without_match)
+                        elif f.only_matching and not (
+                            f.invert
+                            or f.count
+                            or f.quiet
+                            or f.files_only
+                            or f.files_without_match
                         ):
                             selected = line_pieces(compiled, line)
                         else:
                             selected = [(0, line)]
-                    except StreamRefusal as exc:
+                    except SearchLimit as exc:
                         gave_up = exc.message
-                        continue
+                        selected = [
+                            (start, line[start:end])
+                            for start, end in exc.spans
+                        ]
                     if hit:
                         count += 1
                         any_match = True

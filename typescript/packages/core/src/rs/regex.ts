@@ -15,7 +15,7 @@
 import { z } from 'zod'
 import type { util } from 'zod'
 import { fromByteView } from '../shell/bytes.ts'
-import { RegexError, StreamRefusal } from './errors.ts'
+import { RegexError, SearchLimit, StreamRefusal } from './errors.ts'
 import type { OpenStream } from './stream.ts'
 import { openStreamSync } from './stream.ts'
 
@@ -110,6 +110,14 @@ function words(data: Uint8Array): number[] {
   const view = new DataView(data.buffer, data.byteOffset, data.byteLength)
   const out: number[] = []
   for (let at = 0; at + 4 <= data.byteLength; at += 4) out.push(view.getUint32(at, true))
+  return out
+}
+
+function spans(subject: Subject, data: Uint8Array): Span[] {
+  const found = words(data)
+  const out: Span[] = []
+  for (let at = 0; at + 1 < found.length; at += 2)
+    out.push([subject.index(found[at] ?? 0), subject.index(found[at + 1] ?? 0)])
   return out
 }
 
@@ -310,18 +318,31 @@ export class LineRegex {
     return stream.finish()
   }
 
-  /** Whether the line, without its terminator, matches. */
+  /**
+   * Whether the line, without its terminator, matches. Throws SearchLimit when
+   * a -P search gives up at PCRE2's match limit.
+   */
   matches(line: string): boolean {
-    return this.ask(new Subject(line, this.utf8), 'test')[0] === 1
+    try {
+      return this.ask(new Subject(line, this.utf8), 'test')[0] === 1
+    } catch (err) {
+      if (err instanceof StreamRefusal) throw new SearchLimit(err.message, [])
+      throw err
+    }
   }
 
-  /** Each match grep -o prints from the line. */
+  /**
+   * Each match grep -o prints from the line. Throws SearchLimit, carrying the
+   * matches found before it, when a -P search gives up at PCRE2's match limit.
+   */
   extents(line: string): Span[] {
     const subject = new Subject(line, this.utf8)
-    const found = words(this.ask(subject, 'extents'))
-    const out: Span[] = []
-    for (let at = 0; at + 1 < found.length; at += 2)
-      out.push([subject.index(found[at] ?? 0), subject.index(found[at + 1] ?? 0)])
-    return out
+    try {
+      return spans(subject, this.ask(subject, 'extents'))
+    } catch (err) {
+      if (err instanceof StreamRefusal)
+        throw new SearchLimit(err.message, spans(subject, err.output))
+      throw err
+    }
   }
 }

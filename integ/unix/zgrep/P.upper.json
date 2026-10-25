@@ -46,6 +46,36 @@
       "flags": [
         "P"
       ]
+    },
+    {
+      "id": "zgrep_P_only_matching_keeps_matches_before_the_limit",
+      "seq": 15200201,
+      "command": "printf 'okaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaxc\\nok2\\n' | gzip | zgrep -oP '^ok|(a|a)+\\1c'",
+      "expect": {
+        "exit": 2,
+        "stdout": "ok\n",
+        "stderr": "grep: (standard input): exceeded PCRE's backtracking limit\n"
+      },
+      "flags": [
+        "P",
+        "o"
+      ]
+    },
+    {
+      "id": "zgrep_P_count_and_quiet_never_reach_the_limit",
+      "seq": 15200202,
+      "command": "for f in -qoP -coP; do printf 'okaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaxc\\nok2\\n' | gzip | zgrep $f '^ok|(a|a)+\\1c'; echo \"status $?\"; done",
+      "expect": {
+        "exit": 0,
+        "stdout": "status 0\n2\nstatus 0\n",
+        "stderr": ""
+      },
+      "flags": [
+        "P",
+        "o",
+        "q",
+        "c"
+      ]
     }
   ]
 }
