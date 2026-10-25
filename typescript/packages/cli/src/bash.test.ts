@@ -93,14 +93,14 @@ describe('workingDirectory', () => {
   })
 })
 
+function exits() {
+  return vi.spyOn(process, 'exit').mockImplementation((code) => {
+    throw new Error(`exit ${String(code)}`)
+  })
+}
+
 describe('main', () => {
   const here = realpathSync(tmpdir())
-
-  function exits() {
-    return vi.spyOn(process, 'exit').mockImplementation((code) => {
-      throw new Error(`exit ${String(code)}`)
-    })
-  }
 
   it('runs the line as mirage shell from the working directory', async () => {
     vi.spyOn(process, 'cwd').mockReturnValue(here)
