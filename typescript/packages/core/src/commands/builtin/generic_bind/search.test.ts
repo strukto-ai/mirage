@@ -239,6 +239,8 @@ it.each<[string, string, string | null, string]>([
   ['rg -x bob /d', 'files', 'b.txt', 'bob -w'],
   ["grep -rE 'conn.*refused' /d", 'files', 'b.txt', 'refused'],
   ["grep -rP 'conn.*refused' /d", 'files', 'b.txt', 'refused'],
+  ["grep -riP 'WAS\\s+REFUSED' /d", 'files', 'b.txt', 'refused'],
+  ["rg -iP 'CONN\\s+WA' /d", 'files', 'b.txt', 'conn'],
   ["rg --engine auto -w '(?i:ADA)' /d", 'files', 'a.txt sub/d.txt', 'ada -w'],
   ['rg --engine auto café /d', 'files', '', 'café'],
   ['grep -ra ada /d', 'files', 'a.txt sub/d.txt w.bin', 'ada'],

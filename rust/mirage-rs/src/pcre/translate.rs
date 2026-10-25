@@ -427,11 +427,17 @@ impl Translator {
         self.repeatable = false;
     }
 
+    /// One literal code point outside a class. Folded under `i`, it still
+    /// reads as itself in the regular approximation when the whole line is
+    /// caseless, since its needles then fold too.
     fn literal(&mut self, cp: u32) {
         if self.flags.i && !self.folded {
             let folded = charset::fold(&CharSet::chars(&[cp]), self.mode.bytes);
             if folded.single().is_none() {
-                let piece = self.class_piece(&folded);
+                let mut piece = self.class_piece(&folded);
+                if self.mode.ignore_case {
+                    piece.regular = ere_char(cp);
+                }
                 self.atom(piece, (1, Some(1)));
                 return;
             }
@@ -1804,6 +1810,28 @@ mod tests {
         assert!(translated.fold);
         assert_eq!(source(&translated, false), "(?i)ab");
         assert_eq!(source(&translated, true), "(?i)^(?:ab)\\z");
+    }
+
+    #[test]
+    fn a_caseless_line_keeps_its_letters_in_the_regular_reading() {
+        let caseless = Mode {
+            ignore_case: true,
+            ..Mode::default()
+        };
+        let translated = translate(&chars("gamma\\s+delta"), caseless).unwrap();
+        assert!(!translated.fold);
+        assert!(
+            translated.regular.starts_with("gamma"),
+            "{}",
+            translated.regular
+        );
+        assert!(
+            translated.regular.ends_with("delta"),
+            "{}",
+            translated.regular
+        );
+        let inline = translate(&chars("(?i)gamma"), Mode::default()).unwrap();
+        assert_eq!(inline.regular, ".....");
     }
 
     #[test]
