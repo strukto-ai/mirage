@@ -103,12 +103,11 @@ export async function loadPyodideRuntime(
   // A browser worker starts from a blob (worker/client.ts), where neither
   // a bare specifier nor a relative path resolves, so it loads pyodide's
   // loader and every other asset from the distribution's absolute URL, a
-  // path read from the page's origin.
-  const origin =
-    !isNode() &&
-    typeof (globalThis as { WorkerGlobalScope?: unknown }).WorkerGlobalScope === 'function'
-      ? (globalThis as { location?: { origin: string } }).location?.origin
-      : undefined
+  // path read from the page's origin. The page loads from the same URL, so
+  // the two always run one release and the page needs no pyodide package.
+  const origin = isNode()
+    ? undefined
+    : (globalThis as { location?: { origin: string } }).location?.origin
   const resolved = home === null || origin === undefined ? home : new URL(home, `${origin}/`).href
   const indexURL = resolved === null || resolved.endsWith('/') ? resolved : `${resolved}/`
   const distribution = origin === undefined ? null : indexURL
