@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Hashable, Mapping, Sequence
 from dataclasses import dataclass, field
 
 from mirage.commands.spec import constants
@@ -33,6 +33,8 @@ from mirage.commands.spec.constants import (
     INT_VALUE,
     NO_LONG_OPTIONS,
     NUMERIC_SHORT,
+    PARSE_KEPT_CHARS,
+    PARSES_KEPT,
     SOLE_ARGUMENT_LONG_OPTIONS,
     WORD_CHOICE_OPTIONS,
     flag_kwarg_name,
@@ -580,9 +582,33 @@ def parse_command(
 
     Returns:
         ParsedArgs: the flag bag, operands, and every refusal the line
-            earned.
+            earned. The reading is kept on the spec, keyed by everything
+            it depends on (the environment only through the variables the
+            spec declares), so every reader of one command shares one
+            parse: read it, never change it. Words longer than
+            PARSE_KEPT_CHARS in all are read afresh each time.
     """
     cs = compile_spec(spec)
+    parses: dict[Hashable, ParsedArgs] | None = None
+    key: Hashable = None
+    if sum(map(len, argv)) <= PARSE_KEPT_CHARS:
+        key = (
+            tuple(argv),
+            cwd,
+            cmd_name,
+            unknown_is_operand,
+            None if abbreviations is None else tuple(abbreviations),
+            tuple(
+                env.get(v) if env else None for v in cs.env_by_dest.values()
+            ),
+        )
+        parses = spec.__dict__.get("_parses")
+        if parses is None:
+            parses = {}
+            object.__setattr__(spec, "_parses", parses)
+        kept = parses.get(key)
+        if kept is not None:
+            return kept
     word_choice_dests = _word_choice_dests(spec)
 
     # tar's old option style is expanded before anything else reads the
@@ -1409,7 +1435,7 @@ def parse_command(
         else None
         for slot in range(len(argv))
     ]
-    return ParsedArgs(
+    parsed = ParsedArgs(
         flags=flags,
         args=classified,
         raw_path_flags=raw_path_flags,
@@ -1434,6 +1460,11 @@ def parse_command(
         old_option_needs_value=old.needs_value if old is not None else None,
         builtin=builtin,
     )
+    if parses is not None:
+        if len(parses) >= PARSES_KEPT:
+            parses.clear()
+        parses[key] = parsed
+    return parsed
 
 
 def parse_to_kwargs(parsed: ParsedArgs) -> dict[str, ParsedFlagValue]:

@@ -69,7 +69,15 @@ export abstract class IndexCacheStore {
   replaceIfUnchanged(_path: string, _predecessor: string, _entry: FileStat): Promise<boolean> {
     return Promise.resolve(false)
   }
-  abstract listDir(vfsPath: string): Promise<ListResult>
+  /**
+   * A directory's listing. Given `child`, the one key a lookup asks about,
+   * its entries are narrowed to that key, kept where the listing names it,
+   * so a stat of each child of a large directory costs no scan or copy of
+   * the whole listing, which made `ls` of one quadratic
+   * (strukto-ai/mirage#1840). A custom store may answer the whole listing
+   * instead: callers check the key against the entries either way.
+   */
+  abstract listDir(vfsPath: string, child?: string): Promise<ListResult>
   /**
    * Cache a complete directory listing. A complete listing names every
    * child, so a child the previous listing named and this one does not is

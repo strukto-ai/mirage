@@ -15,6 +15,7 @@ jobs:
   # there; macOS x86_64 cross-compiles on the arm64 runner.
   build:
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -48,6 +49,7 @@ jobs:
   # Anything without a wheel above builds from this with Rust 1.85 or later.
   sdist:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
       - uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
@@ -79,6 +81,7 @@ jobs:
   check:
     needs: build
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:

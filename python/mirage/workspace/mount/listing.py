@@ -76,7 +76,7 @@ async def beyond_window(index: IndexCacheStore, key: str) -> bool:
         index (IndexCacheStore): the mount's index.
         key (str): the path's key, below the mount root.
     """
-    listing = await index.list_dir(folder_of(key))
+    listing = await index.list_dir(folder_of(key), key)
     return (
         listing.window
         and listing.entries is not None
@@ -135,7 +135,7 @@ async def unproven_miss(index: IndexCacheStore, key: str) -> bool:
         key (str): the path's key, below the mount root.
     """
     folder = folder_of(key)
-    listing = await index.list_dir(folder)
+    listing = await index.list_dir(folder, key)
     return (
         listing.entries is not None
         and not listing.window
@@ -171,7 +171,7 @@ async def stored_stat(
             not name the path.
     """
     folder = folder_of(key)
-    listing = await index.list_dir(folder)
+    listing = await index.list_dir(folder, key)
     if listing.entries is not None:
         if key not in listing.entries:
             if listing.window or (proves is not None and not proves(folder)):

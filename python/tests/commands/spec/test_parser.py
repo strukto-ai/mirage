@@ -17,6 +17,7 @@ import pytest
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.builtins import registered_spec
 from mirage.commands.spec.compile import compile_spec
+from mirage.commands.spec.constants import PARSE_KEPT_CHARS, PARSES_KEPT
 from mirage.commands.spec.parser import parse_command, parse_to_kwargs
 from mirage.commands.spec.types import Argument, CommandSpec
 
@@ -2083,3 +2084,26 @@ def test_optional_value_inside_a_short_option_cluster(words, expected):
         )
     )
     assert parse_command(spec, words, "/").flags == expected
+
+
+def test_one_command_read_twice_is_read_once():
+    spec = SPECS["grep"]
+    first = parse_command(spec, ["-c", "x", "f"], "/")
+    assert parse_command(spec, ["-c", "x", "f"], "/") is first
+    assert parse_command(spec, ["-c", "x", "f"], "/w") is not first
+
+
+def test_a_line_past_the_kept_length_is_read_afresh():
+    spec = SPECS["grep"]
+    words = ["-e", "x" * PARSE_KEPT_CHARS]
+    assert parse_command(spec, words, "/") is not parse_command(
+        spec, words, "/"
+    )
+
+
+def test_readings_stay_right_once_the_table_starts_over():
+    spec = CommandSpec(arguments=(Argument("--count", type="int"),))
+    for _ in range(2):
+        for n in range(PARSES_KEPT + 1):
+            parsed = parse_command(spec, ["--count", str(n)], "/")
+            assert parsed.flags == {"--count": str(n)}

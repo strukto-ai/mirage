@@ -154,11 +154,17 @@ export class RAMIndexCacheStore extends IndexCacheStore {
     })
   }
 
-  listDir(vfsPath: string): Promise<ListResult> {
+  listDir(vfsPath: string, child?: string): Promise<ListResult> {
     const exp = this.expiry.get(vfsPath)
     if (exp === undefined) return Promise.resolve({ status: LookupStatus.NOT_FOUND })
     if (this.clock.now() * 1000 >= exp) return Promise.resolve({ status: LookupStatus.EXPIRED })
-    const children = this.children.get(vfsPath) ?? []
+    // A folder's flags name exactly the children its listing holds.
+    const children =
+      child === undefined
+        ? (this.children.get(vfsPath) ?? [])
+        : this.folderFlags.get(vfsPath)?.has(child) === true
+          ? [child]
+          : []
     const version = this.versions.get(vfsPath) ?? null
     if (this.partial.has(vfsPath)) return Promise.resolve({ partialEntries: children, version })
     return Promise.resolve({ entries: children, version, window: this.windowed.has(vfsPath) })

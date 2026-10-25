@@ -53,7 +53,7 @@ export async function entryOrWarm(
 ): Promise<FileStat | null> {
   const parent = rstripSlash(virtualKey).replace(/\/[^/]+$/, '') || '/'
   return indexLock(index, parent, async () => {
-    let listing = await index.listDir(parent)
+    let listing = await index.listDir(parent, virtualKey)
     if (listing.entries != null && !listing.entries.includes(virtualKey)) return null
     const hit = await index.get(virtualKey)
     if (
@@ -80,7 +80,7 @@ export async function entryOrWarm(
       if (!isEnoent(err)) throw err
       return null
     }
-    listing = await index.listDir(parent)
+    listing = await index.listDir(parent, virtualKey)
     if (listing.entries != null && !listing.entries.includes(virtualKey)) return null
     const warmed = await index.get(virtualKey)
     return warmed.entry ?? null

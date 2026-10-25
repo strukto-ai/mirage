@@ -43,9 +43,7 @@ async def test_get_history_jsonl(accessor):
         new_callable=AsyncMock,
         return_value=messages,
     ):
-        result = await get_history_jsonl(
-            accessor, "C001", "2024-01-15", TimeRange()
-        )
+        result = await get_history_jsonl(accessor, "C001", "2024-01-15")
 
     lines = result.decode().strip().split("\n")
     assert len(lines) == 2
@@ -63,9 +61,7 @@ async def test_get_history_empty(accessor):
         new_callable=AsyncMock,
         return_value=[],
     ):
-        result = await get_history_jsonl(
-            accessor, "C001", "2024-01-15", TimeRange()
-        )
+        result = await get_history_jsonl(accessor, "C001", "2024-01-15")
 
     assert result == b""
 

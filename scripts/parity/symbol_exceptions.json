@@ -827,6 +827,11 @@
     "ArgumentInit": "TypeScript describes the Argument constructor options with an interface; Python spells them as constructor keyword parameters."
    }
   },
+  "commands/spec/parser": {
+   "typescript_only": {
+    "PARSES": "TypeScript keeps each spec's readings in a WeakMap keyed by the spec, as compileSpec keeps its tables; Python keeps them on the spec itself, since a frozen dataclass key would hash every field on every parse."
+   }
+  },
   "commands/builtin/utils/limit": {
    "typescript_only": {
     "deadlineCheck": "A JavaScript generator cannot be cancelled from outside, so a TypeScript scan inside one pull checks the invocation's deadline itself; Python's with_timeout cancels the pull, and the scan stops at its next await."

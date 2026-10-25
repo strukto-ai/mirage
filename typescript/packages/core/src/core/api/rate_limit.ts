@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { SystemClock, type Clock } from '../../utils/clock.ts'
+import { isSystemClock, SystemClock, type Clock } from '../../utils/clock.ts'
 
 /**
  * Spaces calls that share a key to at most `rate` per second.
@@ -32,6 +32,7 @@ export class RateLimiter {
   private readonly next = new Map<string, number>()
   private readonly shift = new Map<string, number>()
   private schedule = 0
+  private readonly holders = new Set<unknown>()
 
   /**
    * @param clock what slots are read and waited on; omitted means the system
@@ -44,17 +45,35 @@ export class RateLimiter {
   }
 
   /**
-   * Read and wait on the workspace's clock from now on. Slots taken on another
-   * clock mean nothing on this one, so they are dropped; binding the clock
-   * already in use keeps them, so a second mount of one accessor cannot
-   * release a burst.
+   * Read and wait on `clock` while `owner` holds the limiter. Slots taken on
+   * another clock mean nothing on this one, so they are dropped; binding the
+   * clock already in use keeps them, so a second mount of one accessor cannot
+   * release a burst. Slots can follow one clock only, so while another owner
+   * holds the limiter a different clock is refused; two system clocks agree.
+   *
+   * @param owner who holds it, released by the same key.
+   * @throws Error when another owner holds the limiter on another clock.
    */
-  bindClock(clock: Clock): void {
-    if (clock === this.clock) return
-    this.clock = clock
-    this.schedule += 1
-    this.next.clear()
-    this.shift.clear()
+  bindClock(clock: Clock, owner: unknown): void {
+    const same = clock === this.clock || (isSystemClock(clock) && isSystemClock(this.clock))
+    if (!same) {
+      if ([...this.holders].some((held) => held !== owner)) {
+        throw new Error(
+          'this client is held by a workspace on another clock; ' +
+            'unmount or uninstall it there, or give both one clock',
+        )
+      }
+      this.clock = clock
+      this.schedule += 1
+      this.next.clear()
+      this.shift.clear()
+    }
+    this.holders.add(owner)
+  }
+
+  /** Let `owner` go; once none holds, another clock may bind. */
+  releaseClock(owner: unknown): void {
+    this.holders.delete(owner)
   }
 
   /**

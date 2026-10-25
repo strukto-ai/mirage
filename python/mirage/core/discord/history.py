@@ -13,9 +13,11 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import AsyncGenerator
+from functools import partial
 from typing import Any
 
 from mirage.accessor.discord import DiscordAccessor
+from mirage.cache.index.scope import sole_command_started
 from mirage.core.discord.client import discord_get
 from mirage.core.discord.paginate import after_id_pages
 from mirage.core.render.json import jsonl_bytes
@@ -114,23 +116,74 @@ async def list_messages_for_day(
     return out
 
 
+async def _kept_day(
+    accessor: DiscordAccessor, channel_id: str, date_str: str
+) -> list[dict[str, Any]]:
+    """A channel-day's messages: the ones the running command already
+    fetched, else fetched now and kept for that command. Outside any
+    command nothing is kept, since no command bounds how long the day
+    would be served.
+
+    Args:
+        accessor (DiscordAccessor): Discord accessor.
+        channel_id (str): channel ID.
+        date_str (str): YYYY-MM-DD.
+    """
+    fetch = partial(
+        list_messages_for_day,
+        accessor,
+        channel_id,
+        date_str,
+        accessor.time_range,
+    )
+    started = sole_command_started()
+    if started is None:
+        return await fetch()
+    return await accessor.listed_day.get(
+        (started, channel_id, date_str), fetch
+    )
+
+
+async def listed_messages_for_day(
+    accessor: DiscordAccessor, channel_id: str, date_str: str
+) -> list[dict[str, Any]]:
+    """A channel-day's messages for its listing, kept for the read of its
+    chat.jsonl that follows in the same command.
+
+    A walk reads a day's chat.jsonl right after it lists the day, so only
+    the last listed day is kept, only for the command that listed it, and
+    for at most ``LISTING_TRUST_WINDOW`` seconds, the window a fetch
+    still counts as current in (none under ``fresh``). That command's
+    read takes it instead of fetching the day again; any other read, a
+    direct one included, asks Discord. A listing nothing reads holds no
+    more than one day.
+
+    Args:
+        accessor (DiscordAccessor): Discord accessor.
+        channel_id (str): channel ID.
+        date_str (str): YYYY-MM-DD.
+    """
+    accessor.listed_day.clear()
+    return await _kept_day(accessor, channel_id, date_str)
+
+
 async def get_history_jsonl(
-    accessor: DiscordAccessor, channel_id: str, date_str: str, scope: TimeRange
+    accessor: DiscordAccessor, channel_id: str, date_str: str
 ) -> bytes:
-    """Fetch channel messages for a date as JSONL.
+    """A channel-day's messages as JSONL: the ones the running command's
+    listing of the day just fetched (``listed_messages_for_day``), else
+    fetched now. Either way the day is no longer kept.
 
     Args:
         accessor (DiscordAccessor): Discord accessor.
         channel_id (str): channel ID.
         date_str (str): date in YYYY-MM-DD format.
-        scope (TimeRange): the mount's time scope, clipping the day.
 
     Returns:
         bytes: JSONL-encoded messages.
     """
-    messages = await list_messages_for_day(
-        accessor, channel_id, date_str, scope
-    )
+    messages = await _kept_day(accessor, channel_id, date_str)
+    accessor.listed_day.clear()
     return jsonl_bytes(messages)
 
 

@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 import { describe, expect, it } from 'vitest'
 import { helpSpec, registeredSpec, specOf } from './builtins.ts'
+import { PARSE_KEPT_CHARS, PARSES_KEPT } from './constants.ts'
 import { flagOccurrences } from './flag_view.ts'
 import { ParsedArgs, parseCommand, parseToKwargs } from './parser.ts'
 import { CommandSpec, Argument } from './types.ts'
@@ -2198,4 +2199,30 @@ it.each([
     ],
   })
   expect(parseCommand(spec, words, '/').flags).toEqual(expected)
+})
+
+describe('readings a spec keeps', () => {
+  it('reads one command twice once', () => {
+    const spec = specOf('grep')
+    const first = parseCommand(spec, ['-c', 'x', 'f'], '/')
+    expect(parseCommand(spec, ['-c', 'x', 'f'], '/')).toBe(first)
+    expect(parseCommand(spec, ['-c', 'x', 'f'], '/w')).not.toBe(first)
+  })
+
+  it('reads a line past the kept length afresh', () => {
+    const spec = specOf('grep')
+    const words = ['-e', 'x'.repeat(PARSE_KEPT_CHARS)]
+    expect(parseCommand(spec, words, '/')).not.toBe(parseCommand(spec, words, '/'))
+  })
+
+  it('stays right once the table starts over', () => {
+    const spec = new CommandSpec({ arguments: [new Argument('--count', { type: 'int' })] })
+    for (let round = 0; round < 2; round++) {
+      for (let n = 0; n <= PARSES_KEPT; n++) {
+        expect(parseCommand(spec, ['--count', String(n)], '/').flags).toEqual({
+          '--count': String(n),
+        })
+      }
+    }
+  })
 })

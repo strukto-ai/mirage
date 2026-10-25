@@ -64,7 +64,9 @@ class NullIndexCacheStore(IndexCacheStore):
     ) -> None:
         return None
 
-    async def list_dir(self, vfs_path: str) -> ListResult:
+    async def list_dir(
+        self, vfs_path: str, child: str | None = None
+    ) -> ListResult:
         return ListResult(status=LookupStatus.NOT_FOUND)
 
     async def set_dir(
