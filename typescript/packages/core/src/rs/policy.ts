@@ -1,4 +1,3 @@
-import type { CommandsBlock, PathsBlock, ProfileMount, SessionProfile } from '../policy/profile.ts'
 import type { AdmissionRules, CommandRule, HideReason } from '../policy/types.ts'
 import {
   MountMode,
@@ -14,7 +13,23 @@ const CACHE_LIMIT = 128
 const MAX_UNITS = 16 * 1024 * 1024
 const MODES = [MountMode.READ, MountMode.WRITE, MountMode.EXEC]
 
-type PolicyProfile = Pick<SessionProfile, 'commands' | 'paths' | 'vars' | 'mounts'>
+type PolicyCommands = Readonly<Partial<AdmissionRules>>
+interface PolicyPaths {
+  readonly hide: readonly string[]
+  readonly show?: ShownPaths['entries']
+  readonly reasons?: readonly HideReason[]
+}
+interface PolicyMount {
+  readonly mode?: MountMode | null
+  readonly commands?: Omit<PolicyCommands, 'allow'> | null
+  readonly paths?: PolicyPaths | null
+}
+interface PolicyProfile {
+  readonly commands?: PolicyCommands | null
+  readonly paths?: PolicyPaths | null
+  readonly vars?: { readonly hide: readonly string[] } | null
+  readonly mounts?: ReadonlyMap<string, PolicyMount> | null
+}
 export interface PolicyPath {
   readonly virtual: string
   readonly display: string
@@ -51,6 +66,8 @@ export interface PolicyPlan {
 class Packet {
   readonly units: number[] = []
   number(value: number): void {
+    if (!Number.isInteger(value) || value < 0 || value > 0xffffffff)
+      throw new RangeError('Policy packet integer is outside u32')
     this.units.push(value)
   }
   boolean(value: boolean): void {
@@ -82,7 +99,7 @@ class Packet {
     })
     this.text(value.mount ?? '')
   }
-  rules(value: CommandsBlock): void {
+  rules(value: PolicyCommands): void {
     this.optional(value.allow, (p, v) => {
       p.list(v, (p, t) => {
         p.text(t)
@@ -127,7 +144,7 @@ class Packet {
       p.text(t)
     })
   }
-  paths(value: PathsBlock): void {
+  paths(value: PolicyPaths): void {
     this.list(value.hide, (p, t) => {
       p.text(t)
     })
@@ -138,7 +155,7 @@ class Packet {
       p.reason(r)
     })
   }
-  mount(value: readonly [string, ProfileMount]): void {
+  mount(value: readonly [string, PolicyMount]): void {
     this.text(value[0])
     this.optional(value[1].mode, (p, m) => {
       p.mode(m)
@@ -279,7 +296,7 @@ class Reply {
       processes: 'session',
     }
   }
-  paths(): PathsBlock {
+  paths(): PolicyPaths {
     const hide = this.list((r) => r.text()),
       show = this.list((r) => r.show()),
       reasons = this.list((r) => r.reason())
@@ -289,7 +306,7 @@ class Reply {
       ...(reasons.length === 0 ? {} : { reasons }),
     }
   }
-  mount(): readonly [string, ProfileMount] {
+  mount(): readonly [string, PolicyMount] {
     const prefix = this.text(),
       mode = this.optional((r) => r.mode()),
       commands = this.optional((r) => r.rules()),
@@ -406,7 +423,7 @@ abstract class Handle {
 }
 
 export class AdmissionMatcher extends Handle {
-  constructor(rules: CommandsBlock) {
+  constructor(rules: PolicyCommands) {
     super(
       invoke(1, 0, (p) => {
         p.rules(rules)
@@ -629,38 +646,151 @@ export class VisibilityMatcher extends Handle {
   }
 }
 
+function sameStrings(left: readonly string[], right: readonly string[]): boolean {
+  if (left.length !== right.length) return false
+  for (let index = 0; index < left.length; index += 1)
+    if (left[index] !== right[index]) return false
+  return true
+}
+function sameEntries<T>(
+  left: readonly T[],
+  right: readonly T[],
+  equal: (left: T, right: T) => boolean,
+): boolean {
+  if (left.length !== right.length) return false
+  for (let index = 0; index < left.length; index += 1) {
+    const entry = left[index],
+      other = right[index]
+    if (entry === undefined || other === undefined || !equal(entry, other)) return false
+  }
+  return true
+}
+function snapshotRule(rule: CommandRule): CommandRule {
+  return {
+    reason: rule.reason,
+    commands: [...(rule.commands ?? [])],
+    paths: [...(rule.paths ?? [])],
+    mount: rule.mount ?? '',
+  }
+}
+function sameRule(left: CommandRule, right: CommandRule): boolean {
+  return (
+    left.reason === right.reason &&
+    (left.mount ?? '') === (right.mount ?? '') &&
+    sameStrings(left.commands ?? [], right.commands ?? []) &&
+    sameStrings(left.paths ?? [], right.paths ?? [])
+  )
+}
+function snapshotRules(rules: AdmissionRules): AdmissionRules {
+  return {
+    allow: rules.allow === null ? null : [...rules.allow],
+    deny: rules.deny.map(snapshotRule),
+    ask: rules.ask.map(snapshotRule),
+  }
+}
+function sameRules(left: AdmissionRules, right: AdmissionRules): boolean {
+  return (
+    (left.allow === null
+      ? right.allow === null
+      : right.allow !== null && sameStrings(left.allow, right.allow)) &&
+    sameEntries(left.deny, right.deny, sameRule) &&
+    sameEntries(left.ask, right.ask, sameRule)
+  )
+}
+function snapshotHidden(hidden: HiddenPaths): HiddenPaths {
+  return { paths: [...(hidden.paths ?? [])], patterns: [...(hidden.patterns ?? [])] }
+}
+function sameHidden(left: HiddenPaths, right: HiddenPaths): boolean {
+  return (
+    sameStrings(left.paths ?? [], right.paths ?? []) &&
+    sameStrings(left.patterns ?? [], right.patterns ?? [])
+  )
+}
+function snapshotShown(shown: ShownPaths): ShownPaths {
+  return { entries: shown.entries.map((entry) => ({ path: entry.path, mode: entry.mode })) }
+}
+function sameShown(left: ShownPaths, right: ShownPaths): boolean {
+  return sameEntries(
+    left.entries,
+    right.entries,
+    (entry, other) => entry.path === other.path && entry.mode === other.mode,
+  )
+}
+function snapshotVars(vars: HiddenVars): HiddenVars {
+  return { names: [...(vars.names ?? [])], patterns: [...(vars.patterns ?? [])] }
+}
+function sameVars(left: HiddenVars, right: HiddenVars): boolean {
+  return (
+    sameStrings(left.names ?? [], right.names ?? []) &&
+    sameStrings(left.patterns ?? [], right.patterns ?? [])
+  )
+}
+function sameOptional<T>(
+  left: T | null,
+  right: T | null,
+  equal: (left: T, right: T) => boolean,
+): boolean {
+  return left === null ? right === null : right !== null && equal(left, right)
+}
+function snapshotVisibility(vis: Visibility): Visibility {
+  return {
+    paths: vis.paths === null ? null : snapshotHidden(vis.paths),
+    shown: vis.shown === null ? null : snapshotShown(vis.shown),
+    vars: vis.vars === null ? null : snapshotVars(vis.vars),
+    processes: vis.processes,
+  }
+}
+function sameVisibility(left: Visibility, right: Visibility): boolean {
+  return (
+    sameOptional(left.paths, right.paths, sameHidden) &&
+    sameOptional(left.shown, right.shown, sameShown) &&
+    sameOptional(left.vars, right.vars, sameVars) &&
+    left.processes === right.processes
+  )
+}
+
 class MatcherCache<K, V extends Handle> {
-  private readonly values = new Map<K, V>()
+  private readonly values = new Map<K, { readonly matcher: V; readonly snapshot: K }>()
+  constructor(
+    private readonly snapshot: (key: K) => K,
+    private readonly equal: (key: K, snapshot: K) => boolean,
+  ) {}
   get(key: K, build: () => V): V {
     const known = this.values.get(key)
-    if (known?.live) {
+    if (known?.matcher.live && this.equal(key, known.snapshot)) {
       this.values.delete(key)
       this.values.set(key, known)
-      return known
+      return known.matcher
     }
-    if (known !== undefined) this.values.delete(key)
+    if (known !== undefined) {
+      known.matcher.close()
+      this.values.delete(key)
+    }
     const value = build()
-    this.values.set(key, value)
+    this.values.set(key, { matcher: value, snapshot: this.snapshot(key) })
     if (this.values.size > CACHE_LIMIT) {
       const oldest = this.values.keys().next()
       if (!oldest.done) {
-        this.values.get(oldest.value)?.close()
+        this.values.get(oldest.value)?.matcher.close()
         this.values.delete(oldest.value)
       }
     }
     return value
   }
   clear(drop: boolean): void {
-    for (const value of this.values.values()) value.close(drop)
+    for (const value of this.values.values()) value.matcher.close(drop)
     this.values.clear()
   }
 }
-const admissions = new MatcherCache<AdmissionRules, AdmissionMatcher>()
-const rules = new MatcherCache<CommandRule, AdmissionMatcher>()
-const visibilities = new MatcherCache<Visibility, VisibilityMatcher>()
-const hidden = new MatcherCache<HiddenPaths, VisibilityMatcher>()
-const shown = new MatcherCache<ShownPaths, VisibilityMatcher>()
-const variables = new MatcherCache<HiddenVars, VisibilityMatcher>()
+const admissions = new MatcherCache<AdmissionRules, AdmissionMatcher>(snapshotRules, sameRules)
+const rules = new MatcherCache<CommandRule, AdmissionMatcher>(snapshotRule, sameRule)
+const visibilities = new MatcherCache<Visibility, VisibilityMatcher>(
+  snapshotVisibility,
+  sameVisibility,
+)
+const hidden = new MatcherCache<HiddenPaths, VisibilityMatcher>(snapshotHidden, sameHidden)
+const shown = new MatcherCache<ShownPaths, VisibilityMatcher>(snapshotShown, sameShown)
+const variables = new MatcherCache<HiddenVars, VisibilityMatcher>(snapshotVars, sameVars)
 const unrestrictedRules: AdmissionRules = { allow: null, deny: [], ask: [] }
 const unrestrictedVisibility: Visibility = {
   paths: null,

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import type { AdmissionRules } from '../policy/types.ts'
-import { MountMode } from '../types.ts'
+import type { AdmissionRules, CommandRule } from '../policy/types.ts'
+import { MountMode, type Visibility } from '../types.ts'
 import { PosixRegex } from './regex.ts'
 import { openStream } from './stream.ts'
 import {
@@ -9,14 +9,147 @@ import {
   admissionMatcher,
   closePolicyMatchers,
   compilePolicy,
+  hiddenMatcher,
   policyPatternMatches,
   policySplitPattern,
   restrictPolicy,
+  ruleMatcher,
+  shownMatcher,
+  varsMatcher,
+  visibilityMatcher,
+  type PolicyFacts,
 } from './policy.ts'
 
 afterEach(closePolicyMatchers)
 
+const FACTS: PolicyFacts = {
+  command: 'cat',
+  tokens: ['cat'],
+  tool: true,
+  cwd: '/repo',
+  paths: [],
+  operands: [],
+  walks: false,
+  moveTarget: null,
+}
+
 describe('native policy Wasm binding', () => {
+  it('rebuilds admission when allow is reassigned or an alias is replaced', () => {
+    const allowed = ['cat']
+    const rules: AdmissionRules = { allow: allowed, deny: [], ask: [] }
+    expect(admissionMatcher(rules).headAllowed('cat')).toBe(true)
+    allowed[0] = 'ls'
+    expect(admissionMatcher(rules).headAllowed('cat')).toBe(false)
+    expect(admissionMatcher(rules).headAllowed('ls')).toBe(true)
+    rules.allow = []
+    expect(admissionMatcher(rules).headAllowed('ls')).toBe(false)
+  })
+
+  it('rebuilds admission when deny and ask arrays change through aliases', () => {
+    const deny: CommandRule[] = []
+    const ask: CommandRule[] = []
+    const rules: AdmissionRules = { allow: null, deny, ask }
+    expect(admissionMatcher(rules).decide(FACTS).outcome).toBe(0)
+    ask.push({ reason: 'review', commands: ['cat'] })
+    expect(admissionMatcher(rules).decide(FACTS).outcome).toBe(2)
+    deny.push({ reason: 'refuse', commands: ['cat'] })
+    expect(admissionMatcher(rules).decide(FACTS).outcome).toBe(1)
+    deny[0] = { reason: 'other', commands: ['ls'] }
+    expect(admissionMatcher(rules).decide(FACTS).outcome).toBe(2)
+    rules.ask = []
+    expect(admissionMatcher(rules).decide(FACTS).outcome).toBe(0)
+  })
+
+  it('rebuilds a rule when command aliases and mount fields change', () => {
+    const commands = ['cat']
+    const rule: CommandRule = { reason: 'review', commands, mount: '/repo' }
+    expect(ruleMatcher(rule).ruleApplies(0, FACTS)).toBe(true)
+    commands[0] = 'ls'
+    expect(ruleMatcher(rule).ruleApplies(0, FACTS)).toBe(false)
+    commands[0] = 'cat'
+    rule.mount = '/other'
+    expect(ruleMatcher(rule).ruleApplies(0, FACTS)).toBe(false)
+  })
+
+  it('rebuilds admission when a retained rule changes its commands and mount', () => {
+    const commands = ['cat']
+    const rule: CommandRule = { reason: 'refuse', commands, mount: '/repo' }
+    const rules: AdmissionRules = { allow: null, deny: [rule], ask: [] }
+    expect(admissionMatcher(rules).decide(FACTS).outcome).toBe(1)
+    commands[0] = 'ls'
+    expect(admissionMatcher(rules).decide(FACTS).outcome).toBe(0)
+    commands[0] = 'cat'
+    rule.mount = '/other'
+    expect(admissionMatcher(rules).decide(FACTS).outcome).toBe(0)
+  })
+
+  it('rebuilds visibility when a nested path alias changes', () => {
+    const paths: string[] = []
+    const vis: Visibility = { paths: { paths }, shown: null, vars: null, processes: 'session' }
+    expect(visibilityMatcher(vis).pathVisible('/secret')).toBe(true)
+    paths.push('/secret')
+    expect(visibilityMatcher(vis).pathVisible('/secret')).toBe(false)
+    paths[0] = '/other'
+    expect(visibilityMatcher(vis).pathVisible('/secret')).toBe(true)
+  })
+
+  it('rebuilds path scopes after same-length exact and pattern replacements', () => {
+    const paths = ['/other']
+    const patterns = ['*.tmp']
+    const hidden = { paths, patterns }
+    expect(hiddenMatcher(hidden).pathVisible('/secret')).toBe(true)
+    paths[0] = '/secret'
+    expect(hiddenMatcher(hidden).pathVisible('/secret')).toBe(false)
+    expect(hiddenMatcher(hidden).pathVisible('/token.key')).toBe(true)
+    patterns[0] = '*.key'
+    expect(hiddenMatcher(hidden).pathVisible('/token.key')).toBe(false)
+  })
+
+  it('rebuilds shows and aggregate visibility after a mode alias changes', () => {
+    const entry: { path: string; mode: MountMode } = { path: '/repo/out', mode: MountMode.WRITE }
+    const shown = { entries: [entry] }
+    const vis: Visibility = { paths: null, shown, vars: null, processes: 'session' }
+    expect(shownMatcher(shown).shownMode('/repo/out')).toEqual([2, MountMode.WRITE])
+    expect(visibilityMatcher(vis).effectiveMode('/repo/out', '/repo', MountMode.EXEC, null)).toBe(
+      MountMode.WRITE,
+    )
+    entry.mode = MountMode.READ
+    expect(shownMatcher(shown).shownMode('/repo/out')).toEqual([2, MountMode.READ])
+    expect(visibilityMatcher(vis).effectiveMode('/repo/out', '/repo', MountMode.EXEC, null)).toBe(
+      MountMode.READ,
+    )
+    entry.path = '/other'
+    expect(shownMatcher(shown).shownMode('/repo/out')).toBeNull()
+  })
+
+  it('rebuilds variables and aggregate visibility after name and pattern edits', () => {
+    const names = ['OTHER']
+    const patterns = ['OLD_*']
+    const vars = { names, patterns }
+    const vis: Visibility = { paths: null, shown: null, vars, processes: 'session' }
+    expect(varsMatcher(vars).varHidden('SECRET')).toBe(false)
+    expect(visibilityMatcher(vis).varHidden('SECRET')).toBe(false)
+    names[0] = 'SECRET'
+    expect(varsMatcher(vars).varHidden('SECRET')).toBe(true)
+    expect(visibilityMatcher(vis).varHidden('SECRET')).toBe(true)
+    patterns[0] = 'NEW_*'
+    expect(varsMatcher(vars).varHidden('NEW_KEY')).toBe(true)
+    expect(visibilityMatcher(vis).varHidden('NEW_KEY')).toBe(true)
+  })
+
+  it.each([2 ** 32, -1, 0.5, NaN, Infinity])(
+    'rejects invalid numeric packet values %s',
+    (value) => {
+      const matcher = new AdmissionMatcher({ ask: [{ reason: 'review', paths: ['/secret'] }] })
+      try {
+        expect(() => matcher.opRuling('write', '/secret', [value])).toThrow()
+        expect(() => matcher.ruleApplies(value, FACTS)).toThrow()
+      } finally {
+        matcher.close()
+      }
+    },
+  )
+
   it('preserves non-BMP and surrogate characters without JSON', () => {
     for (const name of ['snow\u{1f328}', 'lone\ud800', 'low\udfff']) {
       const matcher = new VisibilityMatcher({
