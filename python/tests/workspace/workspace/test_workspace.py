@@ -15,6 +15,7 @@
 import asyncio
 import inspect
 import io
+import itertools
 import uuid
 
 import pytest
@@ -31,6 +32,7 @@ from mirage.vfs.gdrive.gdrive import GoogleDriveVFS
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Session, Workspace
 from mirage.workspace.session import RAMSessionStore
+from mirage.workspace.shell_execution import ShellExecution
 from mirage.workspace.snapshot import apply_state_dict, read_tar
 
 SEED_5_IDS = [
@@ -598,3 +600,30 @@ async def test_a_given_id_outranks_the_id_source():
         assert ws.default_session_id == "sess-given"
     finally:
         await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_close_cancels_streamed_lines_in_the_order_they_started(
+    monkeypatch,
+):
+    # Hashes that fall as lines start, so a set visits them out of start
+    # order; close must follow start order, whatever the hashes are.
+    hashes = itertools.count(1_000, -1)
+    assigned: dict[int, int] = {}
+    monkeypatch.setattr(
+        ShellExecution,
+        "__hash__",
+        lambda self: assigned.setdefault(id(self), next(hashes)),
+    )
+    cancelled: list[ShellExecution] = []
+    cancel = ShellExecution.cancel
+
+    def recording(self: ShellExecution) -> None:
+        cancelled.append(self)
+        cancel(self)
+
+    monkeypatch.setattr(ShellExecution, "cancel", recording)
+    ws = Workspace({"/data": RAMVFS()})
+    started = [await ws.shell("sleep 100", stream=True) for _ in range(4)]
+    await ws.close()
+    assert cancelled[: len(started)] == started

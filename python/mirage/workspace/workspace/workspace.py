@@ -333,7 +333,7 @@ class Workspace:
             console_factory, self.processes, clock=self._clock
         )
         self._lines: dict[asyncio.Event, tuple[str | None, asyncio.Event]] = {}
-        self._shell_executions: set[ShellExecution] = set()
+        self._shell_executions: dict[ShellExecution, None] = {}
         self._admitting = asyncio.Event()
         self._admitting.set()
         self._capture_lock = asyncio.Lock()
@@ -2874,9 +2874,9 @@ class Workspace:
             buffer_bytes=self.io.buffer_bytes,
         )
         if stream:
-            self._shell_executions.add(execution)
+            self._shell_executions[execution] = None
             execution.on_settled(
-                lambda: self._shell_executions.discard(execution)
+                lambda: self._shell_executions.pop(execution, None)
             )
             try:
                 await asyncio.sleep(0)
