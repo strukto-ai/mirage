@@ -141,6 +141,19 @@ describe('execute router', () => {
     await app.close()
   })
 
+  it.each(['false', 'true'])('answers 404 for an unknown session (stream=%s)', async (stream) => {
+    const app = buildApp()
+    await createWs(app, 'ew')
+    const res = await app.inject({
+      method: 'POST',
+      url: `/v1/workspaces/ew/shell?session_id=nope&stream=${stream}`,
+      payload: { command: 'echo hi' },
+    })
+    expect(res.statusCode).toBe(404)
+    expect(res.json()).toEqual({ detail: 'session not found' })
+    await app.close()
+  })
+
   it('refuses an unknown field rather than ignoring it', async () => {
     const app = buildApp()
     await createWs(app, 'ew-strict')

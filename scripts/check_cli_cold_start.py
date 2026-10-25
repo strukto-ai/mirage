@@ -144,7 +144,7 @@ def bare_specifiers(entry: Path) -> tuple[set[str], list[str]]:
 def gated_entries() -> dict[str, Path]:
     """Every built entry the gate walks.
 
-    The server's light subpaths, plus the CLI binary itself -- the CLI is
+    The server's light subpaths, plus the CLI binaries themselves -- the CLI is
     what pays the cold start, and its own deferrals (`mirage-server/mcp`,
     `mirage-server/rpc`, `mirage-node/config`, `yaml`) are ungated
     without it.
@@ -160,6 +160,7 @@ def gated_entries() -> dict[str, Path]:
         rel = target["import"] if isinstance(target, dict) else target
         out[f"{SERVER_PKG}{subpath[1:]}"] = SERVER / rel
     out["mirage (cli binary)"] = CLI / "dist/bin/mirage.js"
+    out["mirage-bash (cli binary)"] = CLI / "dist/bin/mirage-bash.js"
     return out
 
 

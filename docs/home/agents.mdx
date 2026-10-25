@@ -21,14 +21,26 @@ These connections work independently of your agent's programming language.
 
 ### Coding agents
 
-| Agent | Python | TypeScript |
-| --- | --- | --- |
-| Claude Code | [Guide](/python/agents/claude-code) | [Guide](/typescript/agents/claude-code) |
-| Codex | [Guide](/python/agents/codex) | [Guide](/typescript/agents/codex) |
-| Grok Build | [Guide](/python/agents/grok-build) | [Guide](/typescript/agents/grok-build) |
-| Pi Coding Agent | — | [Plugin](/typescript/agents/pi) |
-| OpenCode | — | [Plugin](/typescript/agents/opencode) |
-| DeepSeek Harness | — | [Plugin](/typescript/agents/dsh) |
+Run the agent as it is, on a workspace the `mirage` CLI creates.
+
+| Agent | Shell | MCP | SSH | FUSE |
+| --- | :-: | :-: | :-: | :-: |
+| [Claude Code](/home/agents/claude-code) | ✓ | ✓ | | ✓ |
+| [Codex](/home/agents/codex) | | ✓ | ✓ | ✓ |
+| [Grok Build](/home/agents/grok-build) | | ✓ | | ✓ |
+
+- **Shell**: the agent's own shell is [`mirage-bash`](/home/access/cli#mirage-bash), so every command it runs goes to the workspace.
+- **MCP**: the agent adds Mirage's seven tools, from its plugin or `mirage mcp`.
+- **SSH**: the agent's own tools run in the workspace.
+- **FUSE**: the agent's own tools work on the workspace, mounted as a folder.
+
+Or load Mirage into the agent as a TypeScript plugin, which replaces its own file and shell tools:
+
+| Agent | Plugin |
+| --- | --- |
+| [Pi Coding Agent](/typescript/agents/pi) | `@struktoai/mirage-pi` |
+| [OpenCode](/typescript/agents/opencode) | `@struktoai/mirage-opencode` |
+| [DeepSeek Harness](/typescript/agents/dsh) | `@struktoai/mirage-dsh` |
 
 ### Agent frameworks
 

@@ -13,10 +13,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { DaemonConfigError } from '@struktoai/mirage-server/daemon_config'
-import { DaemonUnreachable } from '../client.ts'
-import { LoginError } from '../credentials.ts'
-import { buildProgram } from '../main.ts'
+import { main } from '../main.ts'
 
 const ALIASES: Record<string, string> = {
   '--workspace_id': '--workspace',
@@ -34,17 +31,4 @@ function rewriteArgv(argv: string[]): string[] {
   })
 }
 
-buildProgram()
-  .parseAsync(rewriteArgv(process.argv))
-  .catch((err: unknown) => {
-    if (err instanceof DaemonConfigError) {
-      console.error(err.message)
-      process.exit(2)
-    }
-    if (err instanceof DaemonUnreachable || err instanceof LoginError) {
-      console.error(err.message)
-      process.exit(1)
-    }
-    console.error(err)
-    process.exit(1)
-  })
+await main(rewriteArgv(process.argv.slice(2)))
