@@ -192,7 +192,10 @@ async fn original(spool: &mut Spool<'_>) -> Option<Original> {
     if split || wide || u64::from(u16_at(&tail, at + 8)) != end.count {
         return None;
     }
-    spool.zip64(&mut end).await.ok()?;
+    // Zip 3.0 takes a locator that points at no record for a split
+    // archive's and asks for the missing part; mirage reads the ordinary
+    // record, as UnZip does.
+    spool.zip64(&mut end, &tail, base).await.ok()?;
     let start = end.at.checked_sub(end.size)?;
     let slack = i128::from(start) - i128::from(end.offset);
     if slack < 0 {

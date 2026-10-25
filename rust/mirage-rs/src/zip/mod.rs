@@ -240,6 +240,8 @@ pub(super) struct Directory {
     pub(super) entries: Vec<Entry>,
     pub(super) comment: Vec<u8>,
     pub(super) slack: i128,
+    /// A ZIP64 locator pointing at no record.
+    pub(super) misplaced: bool,
 }
 
 /// Why an archive could not be read.
@@ -317,25 +319,53 @@ impl<'h> Spool<'h> {
         Ok(out)
     }
 
-    /// `end` as the ZIP64 record before it says, when its locator stands
-    /// just before `end`. The record ends where its locator starts, which a
-    /// long comment can push before the tail; a writer may keep the true
-    /// values in the ordinary record too, so it is looked for whatever that
-    /// record holds.
-    pub(super) async fn zip64(&mut self, end: &mut End) -> Result<(), Vec<u8>> {
-        let at = end.at.checked_sub(20);
-        if let Some((at, record)) = at.and_then(|at| Some((at, at.checked_sub(56)?))) {
-            if u32_at(&self.read(at, 20).await?, 0) == LOCATOR64 {
-                let wide = self.read(record, 56).await?;
-                if u32_at(&wide, 0) == END64 {
-                    end.at = record;
-                    end.count = u64_at(&wide, 32);
-                    end.size = u64_at(&wide, 40);
-                    end.offset = u64_at(&wide, 48);
-                }
-            }
+    /// `end` as the ZIP64 record says, when a locator stands just before
+    /// `end` and points at one. A writer may keep the true values in the
+    /// ordinary record too, so the locator is looked for whatever that
+    /// record holds; true when it points at no record (a member comment can
+    /// hold its signature), which UnZip reports before reading the ordinary
+    /// record. `tail`, read from `base`, answers what it holds.
+    pub(super) async fn zip64(
+        &mut self,
+        end: &mut End,
+        tail: &[u8],
+        base: u64,
+    ) -> Result<bool, Vec<u8>> {
+        let Some(at) = end.at.checked_sub(20) else {
+            return Ok(false);
+        };
+        let locator = self.within(tail, base, at, 20).await?;
+        if u32_at(&locator, 0) != LOCATOR64 {
+            return Ok(false);
         }
-        Ok(())
+        let record = u64_at(&locator, 8);
+        let wide = self.within(tail, base, record, 56).await?;
+        if wide.len() < 56 || u32_at(&wide, 0) != END64 {
+            return Ok(true);
+        }
+        end.at = record;
+        end.count = u64_at(&wide, 32);
+        end.size = u64_at(&wide, 40);
+        end.offset = u64_at(&wide, 48);
+        Ok(false)
+    }
+
+    /// `size` bytes from `skip`: from `tail`, read from `base`, when it
+    /// holds them, else from the host.
+    async fn within(
+        &mut self,
+        tail: &[u8],
+        base: u64,
+        skip: u64,
+        size: usize,
+    ) -> Result<Vec<u8>, Vec<u8>> {
+        let start = skip
+            .checked_sub(base)
+            .and_then(|at| usize::try_from(at).ok());
+        match start.and_then(|at| tail.get(at..at.checked_add(size)?)) {
+            Some(bytes) => Ok(bytes.to_vec()),
+            None => self.read(skip, size as u64).await,
+        }
     }
 
     /// The archive's directory; `exact` is zip's stricter search for the
@@ -347,7 +377,10 @@ impl<'h> Spool<'h> {
             .await
             .map_err(Fault::Read)?;
         let mut end = end_record(&tail, base, exact).ok_or(Fault::NoEnd)?;
-        self.zip64(&mut end).await.map_err(Fault::Read)?;
+        let misplaced = self
+            .zip64(&mut end, &tail, base)
+            .await
+            .map_err(Fault::Read)?;
         let start = end.at.checked_sub(end.size).ok_or(Fault::Corrupt)?;
         let slack = i128::from(start) - i128::from(end.offset);
         let directory = self.read(start, end.size).await.map_err(Fault::Read)?;
@@ -356,6 +389,7 @@ impl<'h> Spool<'h> {
             entries,
             comment: end.comment,
             slack,
+            misplaced,
         })
     }
 

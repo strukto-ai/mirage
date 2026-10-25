@@ -241,11 +241,41 @@ fn a_zip64_end_record_is_read() {
             (0, "a.txt\nd/\nd/b.txt\n", "")
         );
     }
+    host.files.insert("a.txt".into(), b"new\n".to_vec());
     let (status, out, err) = zip(&mut host, "z.zip", json!([file("a.txt", 2)]));
     assert_eq!(
         (status, out.as_str(), err.as_str()),
         (0, "updating: a.txt\n", "")
     );
+    let (status, out, _) = unzip(&mut host, "z.zip", json!({"p": true}));
+    let body = "alpha beta gamma\n".repeat(5000);
+    assert_eq!((status, out), (0, format!("new\n{body}")));
+}
+
+#[test]
+fn a_locator_in_a_member_comment_points_at_no_record() {
+    let mut host = Host::with(&[("a.txt", "alpha\n"), ("b.txt", "beta\n")], "");
+    zip(&mut host, "c.zip", json!([file("a.txt", 2)]));
+    let archive = host.files.remove("c.zip").expect("written");
+    let end = archive.len() - 22;
+    let central = u32::from_le_bytes(archive[end + 16..end + 20].try_into().expect("4 bytes"));
+    let mut faked = archive[..end].to_vec();
+    faked[central as usize + 32] = 76;
+    faked.extend(0x0606_4b50u32.to_le_bytes());
+    faked.resize(faked.len() + 52, 0);
+    faked.extend(0x0706_4b50u32.to_le_bytes());
+    faked.resize(faked.len() + 16, 0);
+    let mut ending = archive[end..].to_vec();
+    ending[12] += 76;
+    faked.extend(ending);
+    host.files.insert("c.zip".into(), faked);
+    let stray = "[c.zip]\nerror: End-of-centdir-64 signature not where expected (prepended bytes?)\n  (attempting to process anyway)\n";
+    let (status, out, err) = unzip(&mut host, "c.zip", json!({"Z": true, "1": true}));
+    assert_eq!((status, out.as_str(), err.as_str()), (0, "a.txt\n", stray));
+    let (status, _, err) = zip(&mut host, "c.zip", json!([file("b.txt", 3)]));
+    assert_eq!((status, err.as_str()), (0, ""));
+    let (status, out, _) = unzip(&mut host, "c.zip", json!({"p": true}));
+    assert_eq!((status, out.as_str()), (0, "alpha\nbeta\n"));
 }
 
 #[test]
