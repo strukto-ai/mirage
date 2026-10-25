@@ -592,6 +592,40 @@ describe('MirageNFSServer and session changes', () => {
     }
   })
 
+  it('pages on past a page whose names all vanished', async () => {
+    const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })
+    await ws.shell('mkdir /d && for i in $(seq 100 299); do echo > /d/f$i; done')
+    const core = new MountCore(ws.vfs, { session: ws.createSession('reader') })
+    const getattr = core.getattr.bind(core)
+    core.getattr = (path, follow, ctx) =>
+      path.startsWith('/d/f') && path < '/d/f250'
+        ? Promise.reject(Object.assign(new Error(path), { code: 'ENOENT' }))
+        : getattr(path, follow, ctx)
+    const server = new MirageNFSServer(core, '/', false)
+    const port = await server.start()
+    const socket = connect(port, '127.0.0.1')
+    await new Promise<void>((resolve) => socket.once('connect', resolve))
+    const client = new Client(socket)
+    try {
+      const dir = await client.handle('d')
+      let [listed, eof] = await client.readdir(dir, 0, 512)
+      let cookie = listed.at(-1)?.[1] ?? 0
+      for (let turn = 0; turn < 200 && !eof; turn++) {
+        const [page, end] = await client.readdir(dir, cookie, 512)
+        listed = [...listed, ...page]
+        cookie = page.at(-1)?.[1] ?? cookie
+        eof = end
+      }
+      expect(listed.map(([name]) => name)).toEqual(
+        Array.from({ length: 50 }, (_, i) => `f${String(i + 250)}`),
+      )
+      expect(eof).toBe(true)
+    } finally {
+      socket.destroy()
+      await server.close()
+    }
+  })
+
   it('pages a listing by name and a later page sees a new hide', async () => {
     const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })
     await ws.shell('mkdir /d && for i in $(seq 10 39); do echo > /d/f$i; done')

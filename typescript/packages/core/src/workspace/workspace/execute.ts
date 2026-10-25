@@ -55,6 +55,7 @@ import {
   abortable,
   ABORT_JOIN_MS,
   joinOrAbort,
+  stopSignal,
 } from '../../utils/abort.ts'
 import { lineStatusWriter, runWithLineAbort } from '../abort.ts'
 import type { Dispatcher } from '../dispatcher/index.ts'
@@ -1164,7 +1165,9 @@ async function runParsedLine(
         // bound to answer it, as Python joins the cancelled line whole.
         const runner = currentCaller().process
         const result = await joinOrAbort(running, killed, () =>
-          (runner?.signal ?? null) === null ? ABORT_JOIN_MS : STOP_WAIT_SECONDS * 1000,
+          (runner?.signal ?? stopSignal(killed)) === null
+            ? ABORT_JOIN_MS
+            : STOP_WAIT_SECONDS * 1000,
         )
         if (killed?.aborted === true) throw makeAbortError(killed)
         return result

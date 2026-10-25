@@ -66,6 +66,8 @@ export interface Handle {
    */
   row?: FileStat
   rowAt?: number
+  /** Bumped whenever the core changes the file's row, so a stat that was out meanwhile does not keep the row it fetched. */
+  restats?: number
   /**
    * Why the bytes its file had could not be kept when its name went; every
    * read through it reports it rather than read what the name holds now.

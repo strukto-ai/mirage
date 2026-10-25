@@ -199,7 +199,7 @@ function shellWord(word: string): string {
  */
 function rpcError(err: unknown): CodexRPCError {
   const condition = classify(err)
-  if (condition === null && (err as { code?: unknown }).code === undefined) {
+  if (condition === null && (err as { code?: unknown } | null | undefined)?.code === undefined) {
     console.warn(`codex: unclassified error: ${String(err)}`)
   }
   const rpc = condition === 'ENOENT' ? RPC_NOT_FOUND : RPC_INTERNAL_ERROR

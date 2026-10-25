@@ -489,11 +489,12 @@ export class MountCore {
       retained = true
       s = ctx.row
     } else {
+      const restats = ctx?.restats ?? 0
       try {
         s = await this.op(() =>
           this.files.stat(this.resolve(path), undefined, { nofollow: !follow }),
         )
-        if (ctx !== null) {
+        if (ctx !== null && (ctx.restats ?? 0) === restats) {
           ctx.row = s
           ctx.rowAt = performance.now()
         }
@@ -613,19 +614,21 @@ export class MountCore {
     const listed = names ?? (await this.readdir(path))
     const rows: ([string, MountAttrs] | null)[] = new Array<null>(listed.length).fill(null)
     const todo = listed.entries()
-    let failed = false
+    const refused: { error?: unknown; failed: boolean } = { failed: false }
     const worker = async (): Promise<void> => {
       for (const [index, name] of todo) {
-        if (failed) return
         const child =
           name === '.' ? path : name === '..' ? parent(path) : posixNormpath(`${path}/${name}`)
         const release = await STATS.acquire()
         try {
+          // A listing that failed stats nothing more, a worker that was
+          // waiting for a slot included.
+          if (refused.failed) return
           rows[index] = [name, await this.getattr(child, follow)]
         } catch (err) {
           if (!VANISHED.has(classify(err))) {
-            failed = true
-            throw err
+            if (!refused.failed) Object.assign(refused, { error: err, failed: true })
+            return
           }
           console.debug(`${child} vanished while listing: ${String(err)}`)
         } finally {
@@ -633,7 +636,10 @@ export class MountCore {
         }
       }
     }
+    // Every worker settles before the listing answers, so none sends a stat
+    // after it; the first refusal is the answer.
     await Promise.all(Array.from({ length: Math.min(LISTING_CONCURRENCY, listed.length) }, worker))
+    if (refused.failed) throw refused.error
     return rows.filter((row) => row !== null)
   }
 
@@ -893,7 +899,10 @@ export class MountCore {
    */
   private async changed(path: string, rehydrate = true): Promise<void> {
     const key = this.identity(path, rehydrate)
-    for (const ctx of this.openOn(key)) delete ctx.row
+    for (const ctx of this.openOn(key)) {
+      delete ctx.row
+      ctx.restats = (ctx.restats ?? 0) + 1
+    }
     for (const view of [MountCore.view(key, true), MountCore.view(key, false)]) {
       if (this.hydrations.has(view)) {
         this.hydrationGen.set(view, (this.hydrationGen.get(view) ?? 0) + 1)
@@ -1191,7 +1200,10 @@ export class MountCore {
       // writes land first, or they would stamp over them.
       if (timed) await this.landBuffered(key)
       await this.op(() => this.files.setattr(this.resolve(path), fields))
-      for (const ctx of this.openOn(key)) delete ctx.row
+      for (const ctx of this.openOn(key)) {
+        delete ctx.row
+        ctx.restats = (ctx.restats ?? 0) + 1
+      }
     }
     await (timed ? this.mutate(key, run) : run())
   }

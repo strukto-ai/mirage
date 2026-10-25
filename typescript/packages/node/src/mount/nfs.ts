@@ -283,10 +283,13 @@ export class MirageNFSServer {
     const found = after === null ? 0 : names.findIndex((name) => compareCodePoints(name, after) > 0)
     const start = found === -1 ? names.length : found
     const page = names.slice(start, start + limit)
-    const rows: JsonValue[] = (await this.core.listing(path, page)).map(([name, attrs]) => ({
-      name,
-      attrs: wireAttrs(attrs),
-    }))
+    // A name that vanished keeps its place with no attributes: the engine
+    // leaves it out and pages on from the last name sent.
+    const stats = new Map(await this.core.listing(path, page))
+    const rows: JsonValue[] = page.map((name) => {
+      const attrs = stats.get(name)
+      return { name, attrs: attrs === undefined ? null : wireAttrs(attrs) }
+    })
     return [rows, start + limit >= names.length]
   }
 

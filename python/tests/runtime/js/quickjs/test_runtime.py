@@ -324,6 +324,34 @@ async def test_a_deadline_stops_a_guest_that_never_yields(line, code):
         await ws.close()
 
 
+class _SlowRAM(RAMVFS):
+    async def pwrite(self, path, data, offset):
+        await asyncio.sleep(0.6)
+        await super().pwrite(path, data, offset)
+
+    async def write(self, path, data, *, atomic=False):
+        await asyncio.sleep(0.6)
+        await super().write(path, data, atomic=atomic)
+
+
+@live
+@pytest.mark.asyncio
+async def test_a_deadline_joins_the_landing_of_what_a_stopped_guest_wrote():
+    # The run's end closes the file it left open, which takes longer than
+    # a moment: timeout answers once that write has landed.
+    ws = Workspace(
+        {"/data": _SlowRAM()}, mode=MountMode.EXEC, runtimes=["quickjs"]
+    )
+    try:
+        io = await ws.shell(
+            "timeout 1 node -e \"const f = std.open('/data/o', 'w'); "
+            "f.puts('kept'); f.flush(); for (;;) {}\"; cat /data/o"
+        )
+        assert await io.stdout_str() == "kept"
+    finally:
+        await ws.close()
+
+
 @live
 def test_quickjs_reuses_compiled_module():
     rt = QuickJsRuntime()

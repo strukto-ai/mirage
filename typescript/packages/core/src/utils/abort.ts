@@ -123,6 +123,22 @@ export function fireDue(): void {
   }
 }
 
+/**
+ * What a stop that names a signal aborts with (`timeout`'s TERM): what the
+ * stopped run started gets a stop's grace to finish, a guest landing the
+ * file it left open, as one a `kill` stops does through its process's
+ * signal. Python cancels the run and joins it whole, so it needs none.
+ */
+export class SignalStop {
+  constructor(readonly signal: number) {}
+}
+
+/** The signal a stop named, through any signal merged over it; null for a plain abort. */
+export function stopSignal(signal: AbortSignal | null | undefined): number | null {
+  const reason: unknown = signal?.aborted === true ? signal.reason : undefined
+  return reason instanceof SignalStop ? reason.signal : null
+}
+
 /** Settle with `promise`, or reject as an abort as soon as `signal` fires. */
 export function abortable<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
   if (signal === undefined) return promise

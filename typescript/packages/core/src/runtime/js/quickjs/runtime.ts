@@ -167,7 +167,7 @@ export class QuickJsRuntime extends JsRuntime<NewAsyncModule> {
         }
         result.error.dispose()
       } else {
-        exitCode = await this.drainJobs(runtime, vm, err, exit)
+        exitCode = await this.drainJobs(runtime, vm, err, exit, ctx.signal)
         // A module's evaluation is a promise, so a throw after a top-level
         // await rejects it rather than failing the eval; a script's last
         // value is the promise of the async call it ends with (`main()`).
@@ -177,7 +177,8 @@ export class QuickJsRuntime extends JsRuntime<NewAsyncModule> {
         if (state.type === 'rejected') {
           if (!exit.called) {
             const label = ctx.flags.module === true ? '' : 'Possibly unhandled promise rejection: '
-            err.push(label + this.formatError(vm, state.error) + '\n')
+            if (ctx.signal?.aborted !== true)
+              err.push(label + this.formatError(vm, state.error) + '\n')
             exitCode = 1
           }
           state.error.dispose()
@@ -352,6 +353,7 @@ export class QuickJsRuntime extends JsRuntime<NewAsyncModule> {
     ctx: QuickJSAsyncContext,
     err: string[],
     exit: { called: boolean },
+    signal: AbortSignal | undefined,
   ): Promise<number> {
     type RuntimePointer = Parameters<QuickJSAsyncContext['getMemory']>[0]
     type ValuePointer = Parameters<
@@ -387,7 +389,8 @@ export class QuickJsRuntime extends JsRuntime<NewAsyncModule> {
       }
       const jobs = memory.heapValueHandle(done)
       if (ctx.typeof(jobs) !== 'number') {
-        if (!exit.called) err.push(this.formatError(ctx, jobs) + '\n')
+        // A cancelled run's interruption is no error of the program's.
+        if (!exit.called && signal?.aborted !== true) err.push(this.formatError(ctx, jobs) + '\n')
         jobs.dispose()
         return 1
       }

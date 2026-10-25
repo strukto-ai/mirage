@@ -64,6 +64,8 @@ describe('QuickJS cwd', () => {
 it.each([
   ['timeout 1 node -e "for (;;) {}"', 124],
   ['timeout -s CONT -k 1 1 node -e "for (;;) {}"', 137],
+  ['timeout 1 node -e "Promise.resolve().then(() => { for (;;) {} })"', 124],
+  ['timeout 1 node -e "(async () => { await 0; for (;;) {} })()"', 124],
 ])(
   'a deadline stops a guest that never yields: %s',
   async (line, code) => {
@@ -85,6 +87,40 @@ it.each([
   },
   20_000,
 )
+
+it('a deadline joins the landing of what a stopped guest wrote', async () => {
+  // The run's end closes the file it left open, which takes longer than a
+  // plain abort's grace: the stop names a signal, so the line waits for it,
+  // as a kill's does.
+  const slow = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 600))
+  class SlowRAMVFS extends RAMVFS {
+    override async pwrite(...args: Parameters<RAMVFS['pwrite']>): ReturnType<RAMVFS['pwrite']> {
+      await slow()
+      return super.pwrite(...args)
+    }
+
+    override async write(...args: Parameters<RAMVFS['write']>): ReturnType<RAMVFS['write']> {
+      await slow()
+      return super.write(...args)
+    }
+  }
+  const ws = new Workspace(
+    { '/data': new SlowRAMVFS() },
+    {
+      mode: MountMode.EXEC,
+      shellParser: await getTestParser(),
+      runtimes: [new QuickJsRuntime(), 'workspace'],
+    },
+  )
+  try {
+    const io = await ws.shell(
+      `timeout 1 node -e "const f = std.open('/data/o', 'w'); f.puts('kept'); for (;;) {}"; cat /data/o`,
+    )
+    expect(io.stdoutText).toBe('kept')
+  } finally {
+    await ws.close()
+  }
+}, 20_000)
 
 function full(): Promise<void> {
   return Promise.reject(Object.assign(new Error('no space'), { code: 'ENOSPC' }))

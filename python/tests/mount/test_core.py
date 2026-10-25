@@ -1435,6 +1435,47 @@ async def test_an_fstat_sees_a_change_through_the_core_at_once_and_one_past_it_l
         await ws.close()
 
 
+class _HeldStat(RAMVFS):
+    """A RAM mount whose next stat, once armed, answers the row it read
+    only when the gate opens."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.armed: asyncio.Future[None] | None = None
+        self.entered = asyncio.Event()
+
+    async def stat(self, path: PathSpec) -> FileStat:
+        row = await super().stat(path)
+        gate, self.armed = self.armed, None
+        if gate is not None:
+            self.entered.set()
+            await gate
+        return row
+
+
+@pytest.mark.asyncio
+async def test_a_stat_out_across_a_change_does_not_keep_its_row():
+    ram = _HeldStat()
+    ws = Workspace({"/": ram}, mode=MountMode.WRITE)
+    await ws.vfs.write("/a.txt", b"abc")
+    core = MountCore(ws.vfs)
+    reader = await core.open("/a.txt", open_mode(os.O_RDONLY))
+    writer = await core.open("/a.txt", open_mode(os.O_WRONLY))
+    try:
+        gate = ram.armed = asyncio.get_running_loop().create_future()
+        late = asyncio.create_task(core.fgetattr("/a.txt", reader))
+        await ram.entered.wait()
+        await core.write("/a.txt", b"abcdef", 0, writer)
+        await core.flush("/a.txt", writer)
+        gate.set_result(None)
+        await late
+        assert (await core.fstat(reader)).size == 6
+    finally:
+        await core.release(writer)
+        await core.release(reader)
+        await ws.close()
+
+
 class _ListingCore(MountCore):
     """Hold the first batch of stats until the cap is full. Its listing
     reads only ``readdir`` and ``getattr``, so no files are needed."""

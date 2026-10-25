@@ -490,6 +490,7 @@ class MountCore:
             retained = True
             s = ctx.row
         else:
+            restats = 0 if ctx is None else ctx.restats
             try:
                 s = await self._op(
                     self._files.stat(self.resolve(path), nofollow=not follow)
@@ -501,7 +502,7 @@ class MountCore:
                 retained = True
                 s = FileStat(name=path.rsplit("/", 1)[-1], type=FileType.FILE)
             else:
-                if ctx is not None:
+                if ctx is not None and ctx.restats == restats:
                     ctx.row, ctx.row_at = s, time.monotonic()
         if is_link(s):
             return s
@@ -1147,6 +1148,7 @@ class MountCore:
             )
             for ctx in self._open_on(key):
                 ctx.row = None
+                ctx.restats += 1
 
         await (self._mutate(key, run) if timed else run())
 
@@ -1782,6 +1784,7 @@ class MountCore:
         key = self.identity(path, follow=rehydrate)
         for ctx in self._open_on(key):
             ctx.row = None
+            ctx.restats += 1
         for view in ((key, True), (key, False)):
             if view in self._hydrations:
                 self._hydration_gen[view] = (

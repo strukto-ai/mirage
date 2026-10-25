@@ -326,9 +326,15 @@ class MirageNFSServer:
         names.sort()
         start = 0 if after is None else bisect.bisect_right(names, after)
         page = names[start : start + limit]
+        # A name that vanished keeps its place with no attributes: the
+        # engine leaves it out and pages on from the last name sent.
+        found = dict(await self._core.listing(path, page))
         rows: list[JsonValue] = [
-            {"name": name, "attrs": wire_attrs(attrs)}
-            for name, attrs in await self._core.listing(path, page)
+            {
+                "name": name,
+                "attrs": wire_attrs(found[name]) if name in found else None,
+            }
+            for name in page
         ]
         return rows, start + limit >= len(names)
 

@@ -1463,6 +1463,52 @@ it('judges the fetched row once when a buffered write sizes it', async () => {
   }
 })
 
+/** A RAM mount whose next stat, once armed, answers the row it read only when the gate opens. */
+class HeldStat extends RAMVFS {
+  armed: Promise<void> | null = null
+  entered: () => void = () => undefined
+
+  override async stat(path: PathSpec): Promise<FileStat> {
+    const row = await super.stat(path)
+    const gate = this.armed
+    this.armed = null
+    if (gate !== null) {
+      this.entered()
+      await gate
+    }
+    return row
+  }
+}
+
+it('keeps no row from a stat that was out across a change', async () => {
+  const ram = new HeldStat()
+  const ws = new Workspace({ '/': ram }, { mode: MountMode.WRITE })
+  try {
+    await ws.vfs.write('/a.txt', new TextEncoder().encode('abc'))
+    const core = new MountCore(ws.vfs)
+    const reader = await core.open('/a.txt', openMode(fsConstants.O_RDONLY, fsConstants))
+    const writer = await core.open('/a.txt', openMode(fsConstants.O_WRONLY, fsConstants))
+    let open = (): void => undefined
+    ram.armed = new Promise<void>((resolve) => {
+      open = resolve
+    })
+    const entered = new Promise<void>((resolve) => {
+      ram.entered = resolve
+    })
+    const late = core.fgetattr('/a.txt', reader)
+    await entered
+    await core.write('/a.txt', writer, new TextEncoder().encode('abcdef'), 0)
+    await core.flush('/a.txt', writer)
+    open()
+    await late
+    expect((await core.fstat(reader)).size).toBe(6)
+    await core.release(writer)
+    await core.release(reader)
+  } finally {
+    await ws.close()
+  }
+})
+
 /** Holds the first batch of stats until the cap is full; its listing reads only readdir and getattr. */
 class ListingCore extends MountCore {
   inFlight = 0
@@ -1548,6 +1594,7 @@ describe('MountCore listing', () => {
         '/d/f2',
       )
       await expect(core.listing('/d')).rejects.toMatchObject({ code: 'EACCES' })
+      expect(core.inFlight).toBe(0)
       expect(core.calls).toBeLessThan(3 * LISTING_CONCURRENCY)
     } finally {
       await ws.close()

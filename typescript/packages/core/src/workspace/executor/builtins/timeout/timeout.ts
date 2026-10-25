@@ -31,7 +31,7 @@ import type { ByteSource } from '../../../../io/types.ts'
 import { ensureStream, yieldBytes } from '../../../../io/stream.ts'
 import { Channel, JobConsole } from '../../../../shell/console/index.ts'
 import { shellJoin } from '../../../../shell/join.ts'
-import { abortable, atDeadline, joinOrAbort } from '../../../../utils/abort.ts'
+import { SignalStop, abortable, atDeadline, joinOrAbort } from '../../../../utils/abort.ts'
 import { STOP_WAIT_SECONDS } from '../../../../shell/job_table/constants.ts'
 import { execs } from '../../../lookup/lookup.ts'
 import type { MountRegistry } from '../../../mount/registry.ts'
@@ -379,12 +379,12 @@ async function supervise(
     cancel: () => undefined,
   }
   const reached = (): void => {
-    if (stops || !carriesOn) abort.abort()
+    if (stops || !carriesOn) abort.abort(new SignalStop(signal))
     if (!carriesOn || killAfter === 0) return
     kill.at = new Promise((resolve) => {
       kill.cancel = atDeadline(killAfter, () => {
         resolve(TIMED_OUT)
-        abort.abort()
+        abort.abort(new SignalStop(SIGKILL))
       })
     })
   }
