@@ -59,7 +59,8 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> UnzipFlags:
         letters=MappingProxyType(
             {key: fl.as_bool(flag) for key, flag in LETTERS.items()}
         ),
-        quiet=fl.as_int("q", 0),
+        # Only none, -q and -qq differ; mirage-rs takes a byte.
+        quiet=min(fl.as_int("q", 0), 2),
         dest=dest if isinstance(dest, (PathSpec, str)) else None,
         excludes=tuple(fl.as_list("x")),
     )

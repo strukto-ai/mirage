@@ -67,7 +67,8 @@ function parseFlags(fl: FlagView): UnzipFlags {
         Object.entries(LETTERS).map(([letter, flag]) => [letter, fl.asBool(flag)]),
       ),
     ),
-    quiet: fl.asInt('q', 0),
+    // Only none, -q and -qq differ; mirage-rs takes a byte.
+    quiet: Math.min(fl.asInt('q', 0), 2),
     dest: fl.asPath('d') ?? null,
     typed: fl.raw('d') !== undefined,
     excludes: fl.asList('x'),

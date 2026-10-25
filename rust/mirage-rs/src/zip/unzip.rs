@@ -476,16 +476,16 @@ fn tell(host: &Host, stdout: bool, text: &[u8]) {
 }
 
 /// Fill the archive's spool from the name as typed, or with `.zip` or
-/// `.ZIP` added when nothing, or a directory, stands there; the name that
-/// opened and its size. None when no name opened; a failure of another
-/// kind is the host's.
+/// `.ZIP` added, read as the operand is, when nothing, or a directory,
+/// stands there; the name that opened and its size. None when no name
+/// opened; a failure of another kind is the host's.
 async fn open(host: &Host, typed: &[u8]) -> Result<(Vec<u8>, u64), Option<Vec<u8>>> {
     for (at, suffix) in [&b""[..], b".zip", b".ZIP"].into_iter().enumerate() {
         let name = [typed, suffix].concat();
         let opening = if at == 0 {
             Opening::Operand(1)
         } else {
-            Opening::Name
+            Opening::AsOperand
         };
         let open = (name.clone(), opening);
         let spool = super::ARCHIVE;
