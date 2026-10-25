@@ -67,13 +67,31 @@ async def exec_node(
     # The node is a recorded artifact (compared by value, serialized via a
     # sync to_dict, sometimes read twice), so the live lazy io.stderr is
     # materialized to concrete bytes here, and the bytes stay on io so the
-    # caller still reads them. On the cross-mount path it is bytes.
-    return ExecutionNode(
+    # caller still reads them. On the cross-mount path it is bytes. A
+    # result whose fields fill in as its output drains (a runtime's run)
+    # brings the node up to date once they have.
+    node = ExecutionNode(
         command=cmd_str,
         stderr=await io.materialize_stderr(),
         exit_code=io.exit_code,
         paths=paths,
     )
+    state = io.output
+    if state is not None and not state.settled:
+        state.callbacks.append(functools.partial(_settled, node, io))
+    return node
+
+
+def _settled(node: ExecutionNode, io: IOResult) -> None:
+    """Record what a result settled as its output drained.
+
+    Args:
+        node (ExecutionNode): the command's record.
+        io (IOResult): its result, settled.
+    """
+    node.exit_code = io.exit_code
+    if isinstance(io.stderr, bytes):
+        node.stderr = io.stderr
 
 
 def admission_denial(cmd_name: str) -> IOResult:
@@ -274,6 +292,11 @@ async def run_on_mount(
                     unavailable=registry.runtime_unavailable.get(cmd_name),
                     exec_allowed=registry.is_exec_allowed(),
                     exec_path_allowed=registry.exec_allowed_at,
+                    settle=(
+                        functools.partial(registry.settle, line_runtime)
+                        if line_runtime is not None
+                        else None
+                    ),
                 ),
                 shell=(
                     functools.partial(
@@ -313,8 +336,3 @@ async def run_on_mount(
             exit_code=read_fail_exit_code(cmd_name, exc),
             stderr=format_fs_error(cmd_name, exc, paths),
         )
-    finally:
-        # The interpreter's program may have written past the dispatcher,
-        # as a captured program may.
-        if line_runtime is not None:
-            await registry.settle(line_runtime)

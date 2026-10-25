@@ -23,7 +23,8 @@ import { explanationToDict, ioResultToDict } from '../io_serde.ts'
 import { MAX_REQUEST_PART, MultipartError, partEvents, type PartEvent } from '../multipart.ts'
 import { MAX_STDIN_BYTES } from '../constants.ts'
 import { UploadStdin } from '../stdin.ts'
-import { ShellOutput, shellResponse } from '../stream.ts'
+import { shellResponse } from '../stream.ts'
+import type { ShellExecution } from '@struktoai/mirage-core/workspace/shell_execution'
 import { RouteError, failure, queryFlag, requireEntry, sessionOf } from './vfs.ts'
 
 export interface ShellRoutesDeps {
@@ -293,7 +294,10 @@ export function registerShellRoutes(app: FastifyInstance, deps: ShellRoutesDeps)
       const { body, stdin } = upload
       await entry.runner.ws.ensureSessionsLoaded()
       const sessionId = req.query.session_id ?? entry.runner.ws.defaultSessionId
-      const output = streaming ? new ShellOutput(entry.runner.ws.io.bufferBytes) : undefined
+      let opened!: (execution: ShellExecution | null) => void
+      const execution = new Promise<ShellExecution | null>((resolve) => {
+        opened = resolve
+      })
       let job = deps.jobs.submit(
         wsId,
         body.command,
@@ -307,22 +311,21 @@ export function registerShellRoutes(app: FastifyInstance, deps: ShellRoutesDeps)
             ...(stdin !== undefined ? { stdin } : {}),
             signal,
           }
-          if (output === undefined)
-            return ioResultToDict(await entry.runner.ws.shell(body.command, options))
-          const execution = await entry.runner.ws.shell(body.command, { ...options, stream: true })
+          if (!streaming) return ioResultToDict(await entry.runner.ws.shell(body.command, options))
+          // The response reads the events and closes the execution; the job
+          // waits for its status, and a cancelled job's signal stops it.
           try {
-            for await (const chunk of execution.events)
-              await output.emit(chunk.stream, chunk.data, signal)
-            return ioResultToDict(await execution.wait())
+            const shell = await entry.runner.ws.shell(body.command, { ...options, stream: true })
+            opened(shell)
+            return ioResultToDict(await shell.wait())
           } finally {
-            await execution.close()
+            opened(null)
           }
         },
         sessionId,
       )
       reply.header('X-Mirage-Job-Id', job.id)
-      if (output !== undefined)
-        return shellResponse(output, deps.jobs, job, reply, upload.failed, stdin)
+      if (streaming) return shellResponse(execution, deps.jobs, job, reply, upload.failed, stdin)
       if (background) {
         await upload.finish()
         return reply.status(202).send({

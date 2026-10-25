@@ -22,6 +22,7 @@ from mirage.concurrency import ConcurrencyLimiter
 from mirage.concurrency.limiter import (
     bounded_map,
     bounded_map_stream,
+    on_loop,
     owned_task,
     run_blocking,
     settle,
@@ -232,3 +233,39 @@ async def test_stream_map_yields_without_waiting_for_another_input_and_joins():
     assert await asyncio.wait_for(anext(mapped), 1) == 2
     await mapped.aclose()
     assert closed.is_set()
+
+
+async def _running_loop() -> asyncio.AbstractEventLoop:
+    return asyncio.get_running_loop()
+
+
+# Work handed to another loop runs there; a caller that is cancelled
+# cancels it there and returns only once it has settled.
+@pytest.mark.asyncio
+async def test_on_loop_runs_the_work_there_and_cancels_it_there():
+    other = asyncio.new_event_loop()
+    thread = threading.Thread(target=other.run_forever, daemon=True)
+    thread.start()
+    started, settled = threading.Event(), threading.Event()
+
+    async def held() -> None:
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            settled.set()
+
+    try:
+        here = asyncio.get_running_loop()
+        assert await on_loop(_running_loop(), other) is other
+        assert await on_loop(_running_loop(), here) is here
+        call = asyncio.create_task(on_loop(held(), other))
+        assert await asyncio.to_thread(started.wait, 5)
+        call.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await call
+        assert settled.is_set()
+    finally:
+        other.call_soon_threadsafe(other.stop)
+        await asyncio.to_thread(thread.join, 5)
+        other.close()

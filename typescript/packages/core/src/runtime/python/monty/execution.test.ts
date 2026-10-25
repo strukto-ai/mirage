@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it, vi } from 'vitest'
+import { PathSpec } from '../../../types.ts'
 import { MontyExecution } from './execution.ts'
 
 interface PoolHooks {
@@ -67,4 +68,34 @@ describe('MontyExecution.close', () => {
     await expect(opening).rejects.toThrow('not installed')
     await expect(closing).resolves.toBeUndefined()
   })
+})
+
+// A reader that holds a finished program's last prints back does not hold
+// its kill back: the run ends at the abort.
+describe('MontyExecution.run', () => {
+  it('stops at an abort while its reader holds the prints back', async () => {
+    const execution = new MontyExecution()
+    const stop = new AbortController()
+    let taken = 0
+    const output = (): Promise<void> => {
+      taken += 1
+      return new Promise<void>(() => undefined)
+    }
+    try {
+      const run = execution.run(
+        { code: 'print(1)\n', args: [], stdin: null },
+        { stdin: null, flags: {}, cwd: PathSpec.fromStrPath('/'), signal: stop.signal },
+        null,
+        output,
+      )
+      await vi.waitFor(() => {
+        expect(taken).toBe(1)
+      })
+      stop.abort()
+      const result = await run
+      expect(result.exitCode).toBe(1)
+    } finally {
+      await execution.close()
+    }
+  }, 30_000)
 })

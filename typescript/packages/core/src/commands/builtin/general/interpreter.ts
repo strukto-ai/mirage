@@ -12,39 +12,120 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { IOResult } from '../../../io/types.ts'
+import { currentCaller, withCaller } from '../../../context/session_context.ts'
+import { BytePipe } from '../../../io/pipe.ts'
+import { PipeClosed } from '../../../io/errors.ts'
+import { OutputStream, closeQuietly } from '../../../io/stream.ts'
+import { IOResult, OutputState, materialize, type ByteSource } from '../../../io/types.ts'
 import type { LanguageRuntime } from '../../../runtime/language.ts'
 import { QuickJsUnavailableError } from '../../../runtime/js/quickjs/errors.ts'
 import { MontyUnavailableError } from '../../../runtime/python/monty/errors.ts'
 import { PyodideUnavailableError } from '../../../runtime/python/pyodide/errors.ts'
-import type { CommandRuntime, RunResult } from '../../../runtime/types.ts'
+import type { CommandRuntime, OutputFn, RunResult } from '../../../runtime/types.ts'
+import { encodeText } from '../../../shell/bytes.ts'
 import type { PathSpec, Producer } from '../../../types.ts'
 import { errorVirtualPath, isFsError } from '../../../errors/fs.ts'
 import { CommandTimeoutError } from '../../../errors/types.ts'
-import { hasAborted } from '../../../utils/abort.ts'
+import { hasAborted, mergeSignals } from '../../../utils/abort.ts'
+import { concat } from '../../../utils/bytes.ts'
 import type { CommandFnResult, Context } from '../../config.ts'
 
 /**
- * Convert one runtime outcome into a command's output pair.
+ * A runtime run as a command's output, handed over as it runs.
  *
- * The single RunResult-to-IOResult mapping: empty stdout becomes null
- * (no stream), the exit code and stderr pass through. The interpreter
- * handlers, the CLI script arm and a captured program all convert through
- * here so the mapping cannot drift (Python's run_output in
- * commands/builtin/general/interpreter.py).
+ * The one mapping from a run to a command's output shape: the interpreter
+ * commands, a script CLI, a program a runtime captured and a whole line all
+ * answer through here. The run starts when its output is first read and
+ * writes stdout into a bounded pipe, so a reader that falls behind holds the
+ * program back and the output is never held whole; what a transport could
+ * not stream lands at the end. The status, and the stderr the run returned,
+ * settle on the result as the output ends (`IOResult.output`), stderr after
+ * what the result already held. A reader that stops early stops the run,
+ * which then exits 141, as SIGPIPE leaves a program. Mirrors Python's
+ * `run_output`.
  *
- * @param result the runtime's outcome.
+ * @param run starts the run, given where it writes stdout, where it writes
+ *   stderr (undefined keeps stderr in its result) and the signal that stops
+ *   it.
  * @param producer what made the output, for a program run past the
  *   workspace's own commands.
+ * @param errors takes stderr as the run writes it, after the stdout written
+ *   before it has been read; undefined keeps stderr for the result.
+ * @param stdin the run's input, closed once the output ends.
+ * @param signal the command's own abort, which stops the run too.
  */
 export function runOutput(
-  result: RunResult,
+  run: (output: OutputFn, errors: OutputFn | undefined, signal: AbortSignal) => Promise<RunResult>,
   producer: Producer | null = null,
-): [Uint8Array | null, IOResult] {
-  return [
-    result.stdout.length > 0 ? result.stdout : null,
-    new IOResult({ exitCode: result.exitCode, stderr: result.stderr, producer }),
-  ]
+  errors?: OutputFn,
+  stdin: ByteSource | null = null,
+  signal?: AbortSignal,
+): [OutputStream, IOResult] {
+  const pipe = new BytePipe()
+  const stop = new AbortController()
+  const runSignal = mergeSignals(signal, stop.signal) ?? stop.signal
+  const caller = currentCaller()
+  const io = new IOResult({ producer })
+  const state = new OutputState()
+  io.output = state
+  let task: Promise<void> | undefined
+  let settled = false
+  let stopped = false
+  let closing: Promise<void> | undefined
+  // Stdout written before this chunk reaches its reader first, so the two
+  // keep the order the program wrote them in (`2>&1`).
+  const ordered =
+    errors === undefined
+      ? undefined
+      : async (chunk: Uint8Array): Promise<void> => {
+          await pipe.drain()
+          await errors(chunk)
+        }
+  const execute = async (): Promise<void> => {
+    try {
+      const result = await run((chunk) => pipe.write(chunk), ordered, runSignal)
+      if (stopped) return
+      if (result.stdout.length > 0) await pipe.write(result.stdout)
+      io.exitCode = result.exitCode
+      if (result.stderr !== null && result.stderr.length > 0)
+        io.stderr = concat([await materialize(io.stderr), result.stderr])
+      pipe.end()
+    } catch (error) {
+      stop.abort()
+      pipe.end(error)
+      throw error
+    } finally {
+      settled = true
+    }
+  }
+  const close = (): Promise<void> => {
+    closing ??= (async () => {
+      pipe.closeReader()
+      if (task !== undefined && !settled) {
+        stopped = true
+        stop.abort()
+      }
+      await task?.catch((error: unknown) => {
+        if (stopped || error instanceof PipeClosed) return
+        console.debug(`runtime output ended: ${String(error)}`)
+      })
+      if (stopped) io.exitCode = 141
+      await closeQuietly(stdin)
+      state.finish()
+    })()
+    return closing
+  }
+  async function* output(): AsyncGenerator<Uint8Array> {
+    task = execute()
+    void task.catch(() => undefined)
+    try {
+      yield* pipe.stream()
+      await task
+    } finally {
+      await close()
+    }
+  }
+  return [new OutputStream(withCaller(output(), caller), close), io]
 }
 
 /**
@@ -62,26 +143,31 @@ export function runtimeUnavailable(err: unknown): err is Error {
   )
 }
 
-export async function runtimeVersion(
+export function runtimeVersion(
   label: string,
   runtime: LanguageRuntime,
   env: Record<string, string>,
   signal?: AbortSignal,
   timeoutSeconds?: number,
-): Promise<[Uint8Array | null, IOResult]> {
-  try {
-    return runOutput(await runtime.version(env, signal, timeoutSeconds))
-  } catch (err) {
-    if (err instanceof CommandTimeoutError) throw err
-    const message = err instanceof Error ? err.message : String(err)
-    return [
-      null,
-      new IOResult({
+): CommandFnResult {
+  const run = async (
+    _output: OutputFn,
+    _errors: OutputFn | undefined,
+    stop: AbortSignal,
+  ): Promise<RunResult> => {
+    try {
+      return await runtime.version(env, stop, timeoutSeconds)
+    } catch (err) {
+      if (err instanceof CommandTimeoutError) throw err
+      const message = err instanceof Error ? err.message : String(err)
+      return {
+        stdout: new Uint8Array(),
+        stderr: encodeText(`${label}: ${message}\n`),
         exitCode: runtimeUnavailable(err) ? 127 : 1,
-        stderr: new TextEncoder().encode(`${label}: ${message}\n`),
-      }),
-    ]
+      }
+    }
   }
+  return runOutput(run, null, undefined, null, signal)
 }
 
 function failed(label: string, message: string, exitCode: number): [null, IOResult] {
@@ -132,13 +218,13 @@ export function execRefusal(
 }
 
 /**
- * Run an interpreter command's operands on its bound runtime and convert
- * the outcome. A failure of the runtime itself answers as the command: a
- * missing engine 127, any other 1, an in-VM limit interrupt a timeout
- * named after the command, as the workspace's own timer names it. A
- * script the runtime could not read is the command's own read failure,
- * left to the executor to render as any command's is, as Python lets it
- * escape.
+ * Run an interpreter command's operands on its bound runtime, the program's
+ * output handed over as it runs (`runOutput`). A failure of the runtime
+ * itself answers as the command: a missing engine 127, any other 1, an
+ * in-VM limit interrupt a timeout named after the command, as the
+ * workspace's own timer names it. A script the runtime could not read is
+ * the command's own read failure, left to the executor to render as any
+ * command's is, as Python lets it escape.
  *
  * @param label the command name used in messages.
  * @param runtime the runtime bound to the command.
@@ -148,21 +234,40 @@ export function execRefusal(
  * @param script the script operand (`scriptOperand`), null for a program
  *   from -c, -m or stdin.
  */
-export async function runInterpreter(
+export function runInterpreter(
   label: string,
   runtime: LanguageRuntime,
   paths: PathSpec[],
   texts: string[],
   ctx: Context,
   script: PathSpec | null,
-): Promise<CommandFnResult> {
-  try {
-    return runOutput(await runtime.execute(paths, texts, ctx))
-  } catch (err) {
-    if (err instanceof CommandTimeoutError) throw new CommandTimeoutError(label, err.seconds)
-    if ((err instanceof Error && err.name === 'AbortError') || hasAborted(ctx.signal)) throw err
-    if (script !== null && isFsError(err) && errorVirtualPath(err) === script.virtual) throw err
-    const message = err instanceof Error ? err.message : String(err)
-    return failed(label, message, runtimeUnavailable(err) ? 127 : 1)
+): CommandFnResult {
+  const run = async (
+    output: OutputFn,
+    errors: OutputFn | undefined,
+    signal: AbortSignal,
+  ): Promise<RunResult> => {
+    try {
+      return await runtime.execute(
+        paths,
+        texts,
+        { ...ctx, signal },
+        { output, ...(errors !== undefined ? { errors } : {}) },
+      )
+    } catch (err) {
+      if (err instanceof CommandTimeoutError) throw new CommandTimeoutError(label, err.seconds)
+      if ((err instanceof Error && err.name === 'AbortError') || hasAborted(signal)) throw err
+      if (script !== null && isFsError(err) && errorVirtualPath(err) === script.virtual) throw err
+      const message = err instanceof Error ? err.message : String(err)
+      return {
+        stdout: new Uint8Array(),
+        stderr: encodeText(`${label}: ${message}\n`),
+        exitCode: runtimeUnavailable(err) ? 127 : 1,
+      }
+    } finally {
+      // The program may have written past the dispatcher.
+      await ctx.runtime?.settle?.()
+    }
   }
+  return runOutput(run, null, undefined, ctx.stdin, ctx.signal)
 }

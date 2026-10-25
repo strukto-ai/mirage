@@ -48,7 +48,9 @@ from mirage.runtime.base import Runtime
 from mirage.runtime.language import LanguageRuntime
 from mirage.runtime.routing import runtime_for_language
 from mirage.runtime.types import (
+    OutputFn,
     RouteDecision,
+    RunResult,
     RuntimeIdentity,
     ScriptSource,
     ShellFn,
@@ -207,8 +209,8 @@ async def _script_output(
     read ``pager:`` and a renamed install names itself), re-parses
     ``argv`` (the verbatim tokens after the head), reads piped stdin,
     and finds the install's config as ``MIRAGE_CLI_CONFIG`` (JSON) in
-    its environment. The outcome converts through the interpreter
-    commands' one mapping (run_output).
+    its environment. The output converts through the interpreter
+    commands' one mapping (run_output), handed over as the program runs.
 
     Args:
         config (Any): the install's config, handed to the program as JSON.
@@ -227,25 +229,27 @@ async def _script_output(
     flags: dict[str, FlagValue] = {"c": script.source, "script_cli": True}
     if script.module:
         flags["module"] = True
-    try:
-        result = await runtime.execute(
-            [],
-            list(ctx.argv),
-            replace(
-                ctx,
-                flags=flags,
-                env=env,
-                spec=(
-                    replace(ctx.spec, name=prog)
-                    if ctx.spec is not None
-                    else CommandSpec(name=prog)
-                ),
-            ),
-        )
-    finally:
-        if settle is not None:
-            await settle(runtime)
-    return run_output(result)
+    run_ctx = replace(
+        ctx,
+        flags=flags,
+        env=env,
+        spec=(
+            replace(ctx.spec, name=prog)
+            if ctx.spec is not None
+            else CommandSpec(name=prog)
+        ),
+    )
+
+    async def run(output: OutputFn, errors: OutputFn | None) -> RunResult:
+        try:
+            return await runtime.execute(
+                [], list(ctx.argv), run_ctx, output=output, errors=errors
+            )
+        finally:
+            if settle is not None:
+                await settle(runtime)
+
+    return run_output(run, stdin=ctx.stdin)
 
 
 @dataclass(frozen=True, slots=True)
@@ -753,7 +757,6 @@ async def _run_cli(
             Producer(command=prog, declared=binding.limit),
             cli_voice(prog),
             drop=drop_caches if binding.write else None,
-            frame=install.cli.script is None,
             vfs=ctx.vfs,
         )
 
@@ -787,6 +790,10 @@ async def run_walked(
     """
     active = True
 
+    def ended() -> None:
+        nonlocal active
+        active = False
+
     async def shell(line: str, data: ByteSource | None = None) -> IOResult:
         if not active:
             raise RuntimeError("CLI shell is no longer active")
@@ -812,9 +819,16 @@ async def run_walked(
     )
     try:
         out = await run(ctx)
-    finally:
-        active = False
+    except BaseException:
+        ended()
+        raise
     stdout, io = out if out is not None else (None, IOResult())
+    # A run that starts as its output is read (a script's) may still call
+    # back, so the shell stays live until that output settles.
+    if io.output is not None and not io.output.settled:
+        io.output.callbacks.append(ended)
+    else:
+        ended()
     if io.producer is None:
         return (
             stdout,

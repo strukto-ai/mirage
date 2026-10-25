@@ -25,6 +25,7 @@ from mirage.runtime.js.base import JsRuntime
 from mirage.runtime.js.quickjs.execution import cwd_preamble
 from mirage.runtime.types import (
     FilesystemOperation,
+    OutputFn,
     Program,
     RunResult,
     RuntimeReach,
@@ -122,7 +123,12 @@ class QuickJsRuntime(JsRuntime[WasmExecution]):
         return RunResult(stdout=stdout, stderr=stderr, exit_code=exit_code)
 
     async def interpret(
-        self, engine: WasmExecution, program: Program, ctx: Context
+        self,
+        engine: WasmExecution,
+        program: Program,
+        ctx: Context,
+        output: OutputFn | None = None,
+        errors: OutputFn | None = None,
     ) -> RunResult:
         # --std exposes the std/os globals (stdin via std.in); -m selects
         # ES-module mode for .mjs sources, and --script names classic mode
@@ -163,5 +169,7 @@ class QuickJsRuntime(JsRuntime[WasmExecution]):
             stdin=program.stdin,
             env=list((ctx.env or {}).items()),
             fs=fs,
+            output=output,
+            errors=errors,
         )
         return RunResult(stdout=stdout, stderr=stderr, exit_code=exit_code)

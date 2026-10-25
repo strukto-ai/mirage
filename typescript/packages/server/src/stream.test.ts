@@ -2,14 +2,16 @@ import { EventEmitter } from 'node:events'
 import type { Readable } from 'node:stream'
 import type { FastifyReply } from 'fastify'
 import { expect, it, vi } from 'vitest'
-import { CAPACITY } from '@struktoai/mirage-core/io/pipe'
 import { ExecutionTable } from './jobs.ts'
 import { ExecutionStatus } from '@struktoai/mirage-core/execution/types'
 import type { JsonValue } from '@struktoai/mirage-core/types'
 import type { ExecutionScope } from '@struktoai/mirage-core/workspace/execution'
+import { ShellExecution } from '@struktoai/mirage-core/workspace/shell_execution'
+import { ExecuteResult } from '@struktoai/mirage-core/workspace/workspace/types'
+import type { JobConsole } from '@struktoai/mirage-core/shell/console/job_console'
 import { MAX_FINISHED_JOBS } from './constants.ts'
 import { UploadStdin } from './stdin.ts'
-import { ShellOutput, shellResponse } from './stream.ts'
+import { PAYLOAD_SIZE, record, shellResponse } from './stream.ts'
 
 function gate() {
   let release!: () => void
@@ -19,50 +21,128 @@ function gate() {
   return { wait, release }
 }
 
-it('a larger output buffer accepts more without a reader', async () => {
-  const output = new ShellOutput(CAPACITY * 2)
-  const data = Uint8Array.from({ length: CAPACITY }, (_, i) => i % 256)
-  await output.emit('stdout', data)
-  output.pipe.end()
-  const encoded: Uint8Array[] = []
-  for await (const chunk of output.pipe.stream()) encoded.push(chunk)
-  const records = Buffer.concat(encoded)
+const ENC = new TextEncoder()
+
+function finished(): ExecuteResult {
+  return new ExecuteResult(new Uint8Array(), new Uint8Array(), 0)
+}
+
+async function said(sink: JobConsole): Promise<ExecuteResult> {
+  await sink.emit('stdout', ENC.encode('out'))
+  await sink.emit('stderr', ENC.encode('err'))
+  return finished()
+}
+
+async function failing(sink: JobConsole): Promise<ExecuteResult> {
+  await sink.emit('stdout', ENC.encode('partial'))
+  throw new Error('boom')
+}
+
+function replyFor(raw = new EventEmitter()): { reply: FastifyReply; body: () => Readable } {
+  let source: Readable | undefined
+  const reply = {
+    raw,
+    log: { error: vi.fn(), debug: vi.fn() },
+    header: vi.fn().mockReturnThis(),
+    type: vi.fn().mockReturnThis(),
+    send: (body: Readable) => {
+      source = body
+      return reply
+    },
+  } as unknown as FastifyReply
+  return {
+    reply,
+    body: () => {
+      if (source === undefined) throw new Error('response did not send a stream')
+      return source
+    },
+  }
+}
+
+async function lines(body: Readable): Promise<Record<string, unknown>[]> {
+  const chunks: Buffer[] = []
+  for await (const chunk of body) chunks.push(Buffer.from(chunk as Uint8Array))
+  return Buffer.concat(chunks)
+    .toString()
+    .trimEnd()
+    .split('\n')
+    .map((line) => JSON.parse(line) as Record<string, unknown>)
+}
+
+it('a record holds at most a payload of its event', () => {
+  const data = Uint8Array.from({ length: PAYLOAD_SIZE * 2 + 256 }, (_, i) => i % 256)
+  const records = Buffer.from(record('stdout', data))
     .toString()
     .trimEnd()
     .split('\n')
     .map((line) => JSON.parse(line) as { stream: string; data: string })
-  expect(records.every((record) => Object.keys(record).sort().join(',') === 'data,stream')).toBe(
-    true,
-  )
-  expect(records.every((record) => record.stream === 'stdout')).toBe(true)
-  expect(Buffer.concat(records.map((record) => Buffer.from(record.data, 'base64')))).toEqual(
-    Buffer.from(data),
-  )
+  expect(records).toHaveLength(3)
+  expect(records.every((r) => Object.keys(r).sort().join(',') === 'data,stream')).toBe(true)
+  expect(records.every((r) => r.stream === 'stdout')).toBe(true)
+  const parts = records.map((r) => Buffer.from(r.data, 'base64'))
+  expect(parts.every((part) => part.byteLength <= PAYLOAD_SIZE)).toBe(true)
+  expect(Buffer.concat(parts)).toEqual(Buffer.from(data))
 })
 
-it('ending a blocked write leaves only complete wire records', async () => {
-  const output = new ShellOutput()
-  const writing = output.emit('stdout', new Uint8Array(65536).fill(120))
-  const interrupted = expect(writing).rejects.toThrow()
-  await new Promise((resolve) => setTimeout(resolve, 0))
-  output.pipe.end()
-  await interrupted
-  const encoded: Uint8Array[] = []
-  for await (const chunk of output.pipe.stream()) encoded.push(chunk)
-  const lines = Buffer.concat(encoded).toString()
-  expect(lines.endsWith('\n')).toBe(true)
-  const records = lines
-    .trimEnd()
-    .split('\n')
-    .map((line) => JSON.parse(line) as { stream: string; data: string })
-  expect(records.every((record) => Object.keys(record).sort().join(',') === 'data,stream')).toBe(
-    true,
+// The line's events go out as its records, as they come, then the final
+// record with its status.
+it('sends each event then the final record', async () => {
+  const table = new ExecutionTable()
+  let opened!: (shell: ShellExecution) => void
+  const execution = new Promise<ShellExecution | null>((resolve) => {
+    opened = resolve
+  })
+  const job = table.submit(
+    'workspace',
+    'line',
+    async (signal, scope) => {
+      await scope.start()
+      const shell = new ShellExecution(said, scope, signal)
+      opened(shell)
+      await shell.wait()
+      return { exit_code: 0 }
+    },
+    'session',
   )
-  expect(records.every((record) => record.stream === 'stdout')).toBe(true)
-  const prefix = Buffer.concat(records.map((record) => Buffer.from(record.data, 'base64')))
-  expect(prefix.byteLength).toBeGreaterThan(0)
-  expect(prefix.byteLength).toBeLessThan(65536)
-  expect(prefix).toEqual(Buffer.alloc(prefix.byteLength, 120))
+  const { reply, body } = replyFor()
+  shellResponse(execution, table, job, reply, Promise.resolve(undefined), undefined)
+  const records = await lines(body())
+  expect(
+    records.slice(0, 2).map((r) => [r.stream, Buffer.from(r.data as string, 'base64').toString()]),
+  ).toEqual([
+    ['stdout', 'out'],
+    ['stderr', 'err'],
+  ])
+  expect(records[2]?.status).toBe('done')
+  await table.close()
+})
+
+// A line that fails while it streams keeps what it sent, and its final
+// record says how it ended.
+it('a line that fails while streaming still sends the final record', async () => {
+  const table = new ExecutionTable()
+  let opened!: (shell: ShellExecution) => void
+  const execution = new Promise<ShellExecution | null>((resolve) => {
+    opened = resolve
+  })
+  const job = table.submit(
+    'workspace',
+    'line',
+    async (signal, scope) => {
+      await scope.start()
+      const shell = new ShellExecution(failing, scope, signal)
+      opened(shell)
+      await shell.wait()
+      return { exit_code: 0 }
+    },
+    'session',
+  )
+  const { reply, body } = replyFor()
+  shellResponse(execution, table, job, reply, Promise.resolve(undefined), undefined)
+  const records = await lines(body())
+  expect(Buffer.from(records[0]?.data as string, 'base64').toString()).toBe('partial')
+  expect(records.at(-1)).toMatchObject({ status: 'failed', error: 'Error: boom' })
+  await table.close()
 })
 
 it('disconnect cancels the job and joins its cleanup before closing the transport', async () => {
@@ -70,24 +150,36 @@ it('disconnect cancels the job and joins its cleanup before closing the transpor
     cleanup = gate(),
     release = gate()
   const table = new ExecutionTable()
-  const output = new ShellOutput()
+  let opened!: (shell: ShellExecution) => void
+  const execution = new Promise<ShellExecution | null>((resolve) => {
+    opened = resolve
+  })
   const job = table.submit(
     'workspace',
     'held',
     async (signal, scope) => {
       await scope.start()
-      await output.emit('stdout', new TextEncoder().encode('prefix'))
-      entered.release()
+      const shell = new ShellExecution(
+        async (sink, stop) => {
+          await sink.emit('stdout', ENC.encode('prefix'))
+          entered.release()
+          await new Promise<void>((resolve) => {
+            stop.addEventListener(
+              'abort',
+              () => {
+                resolve()
+              },
+              { once: true },
+            )
+          })
+          return finished()
+        },
+        scope,
+        signal,
+      )
+      opened(shell)
       try {
-        await new Promise<void>((_, reject) => {
-          signal.addEventListener(
-            'abort',
-            () => {
-              reject(new DOMException('aborted', 'AbortError'))
-            },
-            { once: true },
-          )
-        })
+        await shell.wait()
       } finally {
         cleanup.release()
         await release.wait
@@ -110,7 +202,7 @@ it('disconnect cancels the job and joins its cleanup before closing the transpor
       return reply
     },
   } as unknown as FastifyReply
-  shellResponse(output, table, job, reply, Promise.resolve(undefined), undefined)
+  shellResponse(execution, table, job, reply, Promise.resolve(undefined), undefined)
   if (source === undefined) throw new Error('response did not send a stream')
   const body = source
   let ended = false
@@ -155,7 +247,7 @@ it('the final record does not wait for stdin to end', async () => {
     },
   } as unknown as FastifyReply
   const failed = uploaded.wait.then(() => undefined)
-  shellResponse(new ShellOutput(), table, job, reply, failed, new UploadStdin())
+  shellResponse(Promise.resolve(null), table, job, reply, failed, new UploadStdin())
   if (source === undefined) throw new Error('response did not send a stream')
   const body = source
   const records: string[] = []
@@ -202,7 +294,7 @@ it('a hang-up after the final record ends the body', async () => {
     },
   } as unknown as FastifyReply
   const failed = hangUp.wait.then(() => new Error('aborted'))
-  shellResponse(new ShellOutput(), table, job, reply, failed, new UploadStdin())
+  shellResponse(Promise.resolve(null), table, job, reply, failed, new UploadStdin())
   if (source === undefined) throw new Error('response did not send a stream')
   const body = source
   const records: string[] = []
@@ -254,7 +346,7 @@ it('an upload that failed first fails the final record', async () => {
   } as unknown as FastifyReply
   const failed = Promise.resolve(new Error('bad multipart body'))
   await failed
-  shellResponse(new ShellOutput(), table, job, reply, failed, undefined)
+  shellResponse(Promise.resolve(null), table, job, reply, failed, undefined)
   if (source === undefined) throw new Error('response did not send a stream')
   const records: string[] = []
   for await (const chunk of source) records.push(Buffer.from(chunk as Uint8Array).toString())
@@ -294,7 +386,7 @@ it('an upload failing while its cleanup runs fails the record', async () => {
   stdin.discard = () => held.wait
   const error = new Error('stdin part too large')
   const failed = stdin.fail(error).then(() => error)
-  shellResponse(new ShellOutput(), table, job, reply, failed, stdin)
+  shellResponse(Promise.resolve(null), table, job, reply, failed, stdin)
   if (source === undefined) throw new Error('response did not send a stream')
   const body = source
   const records: string[] = []
@@ -332,7 +424,7 @@ it('the final record survives its eviction', async () => {
       return reply
     },
   } as unknown as FastifyReply
-  shellResponse(new ShellOutput(), table, job, reply, Promise.resolve(undefined), undefined)
+  shellResponse(Promise.resolve(null), table, job, reply, Promise.resolve(undefined), undefined)
   for (let i = 0; i < MAX_FINISHED_JOBS; i++) table.submit('workspace', 'other', work, 'session')
   if (source === undefined) throw new Error('response did not send a stream')
   const body = source

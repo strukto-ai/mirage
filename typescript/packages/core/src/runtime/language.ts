@@ -16,7 +16,7 @@ import type { Context } from '../commands/config.ts'
 import type { PathSpec } from '../types.ts'
 import { Runtime } from './base.ts'
 import { type Argv0Rules, resolveProgram } from './source.ts'
-import type { Program, RunResult, Language } from './types.ts'
+import type { Language, OutputFn, Program, RunResult } from './types.ts'
 
 /**
  * A runtime that interprets one language's code inside a command.
@@ -52,12 +52,16 @@ export abstract class LanguageRuntime<E = unknown> extends Runtime<E> {
    * @param paths the script operand, if any.
    * @param texts the program's argv.
    * @param ctx the run's context.
+   * @param output receives stdout as it comes.
+   * @param errors receives stderr as it comes.
    */
   override async run(
     engine: E,
     paths: PathSpec[],
     texts: string[],
     ctx: Context,
+    output?: OutputFn,
+    errors?: OutputFn,
   ): Promise<RunResult> {
     const named = ctx.spec?.name ?? ''
     const label =
@@ -72,7 +76,7 @@ export abstract class LanguageRuntime<E = unknown> extends Runtime<E> {
       this.name,
     )
     if ('exitCode' in program) return program
-    return this.interpret(engine, program, ctx)
+    return this.interpret(engine, program, ctx, output, errors)
   }
 
   /**
@@ -100,7 +104,7 @@ export abstract class LanguageRuntime<E = unknown> extends Runtime<E> {
   }
 
   /**
-   * Execute one program and return its captured outcome.
+   * Execute one program and return its outcome.
    *
    * Each call represents an independent language command, such as
    * python3 or node. Guest globals, imports and builtin mutations
@@ -112,6 +116,16 @@ export abstract class LanguageRuntime<E = unknown> extends Runtime<E> {
    * @param program the source and argv to run.
    * @param ctx the run's context: working directory, environment,
    *   switches, files, signal and limit.
+   * @param output receives stdout as the program writes it, which the
+   *   result then leaves out; undefined, or an engine that cannot stream,
+   *   returns it whole.
+   * @param errors the same for stderr.
    */
-  abstract interpret(engine: E, program: Program, ctx: Context): Promise<RunResult>
+  abstract interpret(
+    engine: E,
+    program: Program,
+    ctx: Context,
+    output?: OutputFn,
+    errors?: OutputFn,
+  ): Promise<RunResult>
 }

@@ -760,3 +760,60 @@ describe('streamed stderr', () => {
     }
   })
 })
+
+class EndlessProbe extends ProcessProbe {
+  override async runProcess(
+    _e: unknown,
+    _p: PathSpec[],
+    _argv: string[],
+    _ctx: Context,
+    out: OutputFn | undefined,
+  ): Promise<RunResult> {
+    for (;;) await out?.(ENC.encode('y\n'))
+  }
+}
+
+// A reader that stops early stops the program, as SIGPIPE stops it.
+it('exits 141 when its reader stopped it', async () => {
+  const ws = new Workspace(
+    { '/': new RAMVFS() },
+    { shellParser: await getTestParser(), runtimes: [new EndlessProbe()], mode: MountMode.EXEC },
+  )
+  try {
+    const io = await ws.shell('endless-tool | head -n 1; echo "${PIPESTATUS[@]}"')
+    expect(new TextDecoder().decode(await materialize(io.stdout))).toBe('y\n141 0\n')
+  } finally {
+    await ws.close()
+  }
+})
+
+// An output cap stops the program the same way, and the command's record,
+// which postExecute policies read, keeps the status it settled with.
+it('records a program its cap stopped as 141', async () => {
+  DEFAULT_COMMAND_LIMITS['endless-tool'] = new Limit({ maxLines: 1 })
+  const results: string[] = []
+  const seen: Policy = {
+    postExecute(ctx: ExecuteResultContext) {
+      results.push(JSON.stringify(ctx.results))
+      return null
+    },
+  }
+  const ws = new Workspace(
+    { '/': new RAMVFS() },
+    {
+      shellParser: await getTestParser(),
+      runtimes: [new EndlessProbe()],
+      mode: MountMode.EXEC,
+      policies: [seen],
+    },
+  )
+  try {
+    const io = await ws.shell('endless-tool')
+    expect(new TextDecoder().decode(await materialize(io.stdout))).toBe('y\n')
+    expect(io.exitCode).toBe(141)
+    expect(results[0]).toContain('"exitCode":141')
+  } finally {
+    delete DEFAULT_COMMAND_LIMITS['endless-tool']
+    await ws.close()
+  }
+})

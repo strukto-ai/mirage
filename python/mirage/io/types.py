@@ -101,7 +101,12 @@ CommandOutput = tuple["ByteSource | None", "IOResult"]
 
 @dataclass(slots=True)
 class OutputState:
-    """Settlement of a result whose fields fill in as its output drains."""
+    """Settlement of a result whose fields fill in as its output drains.
+
+    ``finish`` runs every callback each time it is called, so a field
+    changed after the output ended (a failure framed onto stderr) is
+    settled again.
+    """
 
     settled: bool = False
     callbacks: list[Callable[[], None]] = field(default_factory=list)
@@ -110,7 +115,6 @@ class OutputState:
         self.settled = True
         for callback in self.callbacks:
             callback()
-        self.callbacks.clear()
 
 
 async def materialize(stream: ByteSource | None) -> bytes:

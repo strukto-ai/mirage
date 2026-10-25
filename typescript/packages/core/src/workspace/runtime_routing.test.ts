@@ -29,7 +29,8 @@ import { ScriptSource } from '../runtime/types.ts'
 import { getTestParser } from '../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Channel, JobConsole } from '../shell/console/index.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
-import { MountMode, VFSName, type PathSpec } from '../types.ts'
+import { Limit, MountMode, VFSName, type PathSpec } from '../types.ts'
+import { DEFAULT_COMMAND_LIMITS } from '../policy/builtin/output_cap.ts'
 import { Workspace } from './workspace/workspace.ts'
 import type { WorkspaceOptions } from './workspace/types.ts'
 import type { Policy } from '../policy/base.ts'
@@ -661,6 +662,85 @@ describe('whole-line runtimes', () => {
       await ws.close()
     }
   })
+
+  it('hands a runtime that failed to post_execute as its result', async () => {
+    // A failed run is still the line's result: a policy reading
+    // post_execute sees its status and its error.
+    class BrokenBox extends LineBox {
+      override runLine(): Promise<RunResult> {
+        return Promise.reject(new Error('box broke'))
+      }
+    }
+    const seen: [number, string][] = []
+    const parser = await getTestParser()
+    const box = new BrokenBox()
+    box.captures = ['*']
+    const ws = new Workspace(
+      { '/': new RAMVFS() },
+      {
+        mode: MountMode.EXEC,
+        shellParser: parser,
+        runtimes: [box, 'workspace'],
+        policies: [
+          {
+            postExecute: (ctx) => {
+              seen.push([ctx.exitCode, JSON.stringify(ctx.results)])
+              return null
+            },
+          },
+        ],
+      },
+    )
+    try {
+      const result = await ws.shell('anything')
+      expect(result.exitCode).toBe(1)
+      expect(DEC.decode(result.stderr)).toBe('box broke')
+      expect(seen).toHaveLength(1)
+      expect(seen[0]?.[0]).toBe(1)
+      expect(seen[0]?.[1]).toContain('box broke')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('stops a run past its deadline before its runtime settles', async () => {
+    // Settling may wait for the run, so the deadline stops it first.
+    let running: Promise<void> = Promise.resolve()
+    class SettlingBox extends LineBox {
+      override runLine(
+        _e: unknown,
+        _p: PathSpec[],
+        _t: string[],
+        ctx: Context,
+      ): Promise<RunResult> {
+        running = new Promise<void>((resolve) => {
+          ctx.signal?.addEventListener('abort', () => {
+            resolve()
+          })
+        })
+        return new Promise<RunResult>(() => undefined)
+      }
+
+      override settle(): Promise<void> {
+        return running
+      }
+    }
+    DEFAULT_COMMAND_LIMITS.anything = new Limit({ timeoutSeconds: 0.2 })
+    const parser = await getTestParser()
+    const box = new SettlingBox()
+    box.captures = ['*']
+    const ws = new Workspace(
+      { '/': new RAMVFS() },
+      { mode: MountMode.EXEC, shellParser: parser, runtimes: [box, 'workspace'] },
+    )
+    try {
+      const result = await ws.shell('anything')
+      expect(result.exitCode).toBe(124)
+    } finally {
+      delete DEFAULT_COMMAND_LIMITS.anything
+      await ws.close()
+    }
+  }, 10_000)
 
   it('keeps what an aborted runtime read on the books', async () => {
     // The runtime finished its read before the line was aborted: the read

@@ -970,6 +970,7 @@
   },
   "concurrency/limiter": {
    "python_only": {
+    "on_loop": "A hosted Python workspace runs on its runner's own event loop thread while the server's transports live on the server's, so work hops between the two; a JavaScript process has one event loop and nothing to hop between.",
     "owned_task": "asyncio starts a task a turn of the loop later and settles it through shield's callbacks, so owned work that never waits would still cost turns; Python 3.12 starts it eagerly. A TypeScript promise starts at once and an await that is already settled takes no turn."
    }
   }

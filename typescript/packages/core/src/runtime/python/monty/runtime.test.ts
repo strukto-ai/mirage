@@ -24,6 +24,7 @@ import { ContentType, FileStat, FileType, MountMode, PathSpec } from '../../../t
 import { Workspace } from '../../../workspace/workspace/workspace.ts'
 import { PrefixResolver } from '../../resolver.ts'
 import { context } from '../../../../tests/workspace/fixtures/context.ts'
+import { materialize } from '../../../io/types.ts'
 
 function makeBridge(
   seed: Record<string, Uint8Array>,
@@ -644,7 +645,7 @@ describe('monty unavailable', () => {
       }
     }
     const runtime = new UnavailableMonty()
-    const out = await runInterpreter(
+    const out = runInterpreter(
       'python3',
       runtime,
       [],
@@ -653,7 +654,8 @@ describe('monty unavailable', () => {
       null,
     )
     if (out === null) throw new Error('no output')
-    const [, io] = out
+    const [stdout, io] = out
+    await materialize(stdout)
     expect(io.exitCode).toBe(127)
     expect(new TextDecoder().decode(io.stderr as Uint8Array)).toContain('@pydantic/monty')
   })

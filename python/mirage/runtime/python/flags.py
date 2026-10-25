@@ -18,10 +18,11 @@ from mirage.commands.spec.types import FlagValue
 
 # The interpreter-init switches, keyed by CPython's own letter. These
 # configure the interpreter rather than selecting what it runs, so they
-# ride in ctx.flags and each engine answers the ones it can. `-u`
-# and `-q` are deliberately absent: mirage buffers every stream and
-# prints no banner, so they are structural no-ops in every runtime
-# rather than something one engine honors and another does not.
+# ride in ctx.flags and each engine answers the ones it can. `-q` is
+# deliberately absent: mirage prints no banner, so it is a no-op in every
+# runtime. `-u` is absent too, since only a spawned CPython buffers its
+# output: init_argv hands it back there, and every other engine already
+# hands each write over as it comes, so none reports it.
 BOOL_FLAGS: tuple[str, ...] = ("B", "E", "I", "P", "s", "S")
 COUNT_FLAGS: tuple[str, ...] = ("O", "b")
 LIST_FLAGS: tuple[str, ...] = ("W", "X")
@@ -84,13 +85,14 @@ def init_argv(flags: Mapping[str, FlagValue]) -> list[str]:
     For the engines that spawn a real interpreter, honoring these is
     just handing them back to CPython in its own spelling. ``-O`` and
     ``-b`` repeat rather than taking a number, so level 2 is ``-O -O``,
-    which CPython reads exactly as ``-OO``.
+    which CPython reads exactly as ``-OO``. ``-u`` goes back first: a
+    spawned CPython buffers stdout on a pipe, as it would anywhere.
 
     Args:
         flags (Mapping[str, FlagValue]): the run's interpreter switches
             (``ctx.flags``).
     """
-    argv: list[str] = []
+    argv: list[str] = ["-u"] if flags.get("u") else []
     for key in BOOL_FLAGS:
         if flags.get(key):
             argv.append(f"-{key}")

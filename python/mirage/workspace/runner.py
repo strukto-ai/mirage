@@ -13,12 +13,11 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
-import concurrent.futures
 import logging
 import threading
 from typing import Any, Coroutine, TypeVar
 
-from mirage.concurrency.limiter import settle
+from mirage.concurrency.limiter import on_loop
 from mirage.workspace.workspace import Workspace
 
 logger = logging.getLogger(__name__)
@@ -72,14 +71,6 @@ class WorkspaceRunner:
         asyncio.set_event_loop(self.loop)
         self.loop.run_forever()
 
-    def _schedule(
-        self, coro: Coroutine[Any, Any, T]
-    ) -> concurrent.futures.Future[T]:
-        if self._stopped:
-            coro.close()
-            raise RuntimeError("WorkspaceRunner is stopped")
-        return asyncio.run_coroutine_threadsafe(coro, self.loop)
-
     async def call(self, coro: Coroutine[Any, Any, T]) -> T:
         """Run ``coro`` on the workspace loop and await the result.
 
@@ -98,39 +89,10 @@ class WorkspaceRunner:
         Raises:
             RuntimeError: ``stop`` has begun.
         """
-        work: asyncio.Task[Any] | None = None
-        canceled = False
-
-        async def run() -> T:
-            nonlocal work
-            if canceled:
-                coro.close()
-                raise asyncio.CancelledError()
-            work = asyncio.current_task()
-            return await coro
-
-        def cancel() -> None:
-            nonlocal canceled
-            canceled = True
-            if work is not None:
-                work.cancel()
-
-        try:
-            result = asyncio.wrap_future(self._schedule(run()))
-        except RuntimeError:
+        if self._stopped:
             coro.close()
-            raise
-        try:
-            return await asyncio.shield(result)
-        except asyncio.CancelledError:
-            self.loop.call_soon_threadsafe(cancel)
-            try:
-                await settle(result)
-            except Exception:
-                logger.debug(
-                    "workspace call failed during cancellation", exc_info=True
-                )
-            raise
+            raise RuntimeError("WorkspaceRunner is stopped")
+        return await on_loop(coro, self.loop)
 
     async def stop(self, *, delete: bool = False) -> None:
         """Close the workspace and shut down the runner cleanly.
@@ -153,10 +115,8 @@ class WorkspaceRunner:
             return
         failure: Exception | None = None
         try:
-            await asyncio.wrap_future(
-                asyncio.run_coroutine_threadsafe(
-                    self.ws.delete() if delete else self.ws.close(), self.loop
-                )
+            await on_loop(
+                self.ws.delete() if delete else self.ws.close(), self.loop
             )
         except Exception as exc:
             if delete:

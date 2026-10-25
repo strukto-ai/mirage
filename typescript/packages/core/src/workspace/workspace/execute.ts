@@ -1029,6 +1029,7 @@ async function runParsedLine(
           killed,
           claimantFor(rootNode, handed),
           route,
+          options.sink,
         )
       // The runtime's file calls are the line's, recorded as a tree's are,
       // and handed over however the run ends: a call it finished before it

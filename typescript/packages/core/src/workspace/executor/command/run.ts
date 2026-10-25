@@ -18,6 +18,7 @@ import type { EvaluationContext } from '../../evaluation.ts'
 import { type ByteSource, IOResult } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
 import type { MountEntry } from '../../mount/mount.ts'
+import { ExecutionNode } from '../../types.ts'
 import type { FollowOperands } from '../../../view/types.ts'
 import type { Namespace } from '../../mount/namespace/namespace.ts'
 import { envSnapshot, sessionView } from '../../session/state.ts'
@@ -100,6 +101,45 @@ interface RunOnMountOpts {
   // The words after the command name, as the line spelled them; absent for
   // a run split out of a line.
   argv?: readonly string[]
+}
+
+/**
+ * Build the recorded execution node, materializing any streamed stderr.
+ *
+ * The node is a recorded artifact, so the live lazy stderr is materialized
+ * to concrete bytes here, and the bytes stay on `io` so the caller still
+ * reads them. A result whose fields fill in as its output drains (a
+ * runtime's run) brings the node up to date once they have. Mirrors
+ * Python's `exec_node`.
+ *
+ * @param command original command text for the record.
+ * @param io the command's result, whose stderr and status the node carries.
+ * @param paths the classified path operands.
+ */
+export async function execNode(
+  command: string,
+  io: IOResult,
+  paths: PathSpec[] = [],
+): Promise<ExecutionNode> {
+  const node = new ExecutionNode({
+    command,
+    stderr: await io.materializeStderr(),
+    exitCode: io.exitCode,
+    paths,
+  })
+  const state = io.output
+  if (state !== null && !state.settled) {
+    state.callbacks.push(() => {
+      settled(node, io)
+    })
+  }
+  return node
+}
+
+/** Record what a result settled as its output drained. Mirrors Python's `_settled`. */
+function settled(node: ExecutionNode, io: IOResult): void {
+  node.exitCode = io.exitCode
+  if (io.stderr instanceof Uint8Array) node.stderr = io.stderr
 }
 
 /** The 126 result for a command no runtime accepted. */
@@ -232,7 +272,9 @@ export async function runOnMount(
         runtime: {
           execAllowed: registry.isExecAllowed(access),
           execPathAllowed: (virtual: string) => registry.execAllowedAt(virtual, access),
-          ...(lineRuntime !== undefined ? { bound: lineRuntime } : {}),
+          ...(lineRuntime !== undefined
+            ? { bound: lineRuntime, settle: () => registry.settle(lineRuntime) }
+            : {}),
         },
         ...(signal !== undefined ? { signal } : {}),
         ...(ctx.executeFn !== undefined
@@ -272,9 +314,5 @@ export async function runOnMount(
         stderr: formatFsError(cmdName, err, paths),
       }),
     ]
-  } finally {
-    // The interpreter's program may have written past the dispatcher, as a
-    // captured program may.
-    if (lineRuntime !== undefined) await registry.settle(lineRuntime)
   }
 }

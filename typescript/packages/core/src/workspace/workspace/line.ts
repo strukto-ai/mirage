@@ -13,13 +13,15 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { Limit } from '../../types.ts'
-import { guardOutput, runWithTimeout } from '../../commands/builtin/utils/limit.ts'
+import { runOutput } from '../../commands/builtin/general/interpreter.ts'
+import { guardIO, guardOutput, runWithTimeout } from '../../commands/builtin/utils/limit.ts'
+import type { Context } from '../../commands/config.ts'
 import { CommandTimeoutError } from '../../errors/types.ts'
 import type { ByteSource } from '../../io/types.ts'
 import { materialize } from '../../io/types.ts'
 import type { Runtime } from '../../runtime/base.ts'
 import type { LineExecutor } from '../../runtime/mixin.ts'
-import type { RunResult } from '../../runtime/types.ts'
+import type { OutputFn, RunResult } from '../../runtime/types.ts'
 import type { RouteContext } from '../../policy/types.ts'
 import {
   type Claimant,
@@ -28,12 +30,15 @@ import {
   renderDeny,
   resolveLimit,
 } from '../../policy/index.ts'
+import { Channel, type JobConsole } from '../../shell/console/index.ts'
+import { pump } from '../executor/jobs.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import type { SessionState } from '../session/session.ts'
 import { envSnapshot } from '../session/state.ts'
 import { commandName } from './utils.ts'
 import { ExecutionNode } from '../types.ts'
-import { makeAbortError, mergeSignals } from '../../utils/abort.ts'
+import { makeAbortError } from '../../utils/abort.ts'
+import { concat } from '../../utils/bytes.ts'
 import { isControlFlowError } from './failure.ts'
 import { PathSpec, type Refusal } from '../../types.ts'
 import { encodeText } from '../../shell/bytes.ts'
@@ -56,6 +61,9 @@ export interface LineResult extends RunResult {
  * workspace's mounts, every one of which the line may span (a whole-line
  * runtime sees the full workspace), its policies and its command
  * defaults; it settles the line when it ends (`MountRegistry.settle`).
+ * Its output is handed over as the runtime writes it (`runOutput`): into
+ * `sink` as it comes, unless a `postExecute` policy must see it whole
+ * before any of it escapes, and back in the result without one.
  */
 export async function runWholeLine(
   runtime: Runtime & LineExecutor,
@@ -68,8 +76,9 @@ export async function runWholeLine(
   // What `preExecute` saw of the line, which `postExecute` sees with what
   // came back; null when no policy reads `postExecute`.
   route: RouteContext | null = null,
+  // Where the line writes; absent returns its output in the result.
+  sink?: JobConsole,
 ): Promise<LineResult> {
-  const data = stdin !== null ? await materialize(stdin) : null
   const name = commandName(command)
   const mounts = registry.allMounts()
   const guard = resolveLimit(
@@ -81,69 +90,103 @@ export async function runWholeLine(
     session.commandLimits,
   )
   const timeout = guard?.timeoutSeconds ?? null
-  const deadline = timeout !== null && timeout > 0 ? new AbortController() : null
-  const runSignal = mergeSignals(signal, deadline?.signal)
-  let result: RunResult
-  try {
-    const ctx = {
-      flags: { c: command },
-      stdin: data,
-      env: envSnapshot(session),
-      cwd: PathSpec.fromStrPath(session.cwd),
-      ...(runSignal === undefined ? {} : { signal: runSignal }),
+  const ctx: Context = {
+    flags: { c: command },
+    stdin,
+    env: envSnapshot(session),
+    cwd: PathSpec.fromStrPath(session.cwd),
+  }
+  const run = async (
+    output: OutputFn,
+    errors: OutputFn | undefined,
+    stop: AbortSignal,
+  ): Promise<RunResult> => {
+    const deadline = new AbortController()
+    try {
+      return await runWithTimeout(
+        runtime.execute(
+          [],
+          [],
+          { ...ctx, signal: AbortSignal.any([stop, deadline.signal]) },
+          { kind: 'line', output, ...(errors !== undefined ? { errors } : {}) },
+        ),
+        timeout,
+        name,
+      )
+    } catch (err) {
+      // A run past its deadline is stopped before its runtime settles,
+      // which may wait for the run.
+      if (err instanceof CommandTimeoutError) deadline.abort()
+      throw err
+    } finally {
+      await registry.settle(runtime)
     }
-    result = await runWithTimeout(runtime.execute([], [], ctx, { kind: 'line' }), timeout, name)
+  }
+  const producer = { command: name, prefixes: mounts.map((m) => m.prefix), declared: null }
+  const shown = route === null ? sink : undefined
+  const [stdout, io] = runOutput(
+    run,
+    producer,
+    shown === undefined ? undefined : (chunk) => shown.emit(Channel.STDERR, chunk),
+    stdin,
+    signal,
+  )
+  let data: Uint8Array = new Uint8Array()
+  try {
+    if (route === null) {
+      const out = guardIO(stdout, io, session.terminalOutput ? guard : null)
+      if (shown === undefined) data = await materialize(out)
+      else await pump(shown, Channel.STDOUT, out)
+    } else {
+      data = await materialize(stdout)
+    }
   } catch (err) {
     if (signal?.aborted) throw makeAbortError()
     if (isControlFlowError(err)) throw err
+    // A failed run is still a result, which post_execute sees.
+    data = new Uint8Array()
     if (err instanceof CommandTimeoutError) {
-      deadline?.abort()
-      result = {
-        stdout: new Uint8Array(),
-        stderr: encodeText(`${err.message}\n`),
-        exitCode: 124,
-      }
+      io.stderr = encodeText(`${err.message}\n`)
+      io.exitCode = 124
     } else {
-      result = {
-        stdout: new Uint8Array(),
-        stderr: encodeText(err instanceof Error ? err.message : String(err)),
-        exitCode: 1,
-      }
+      io.stderr = encodeText(err instanceof Error ? err.message : String(err))
+      io.exitCode = 1
     }
-  } finally {
-    await registry.settle(runtime)
   }
-  const [refused, bound] =
-    route === null
-      ? [null, null]
-      : await postExecuteGate(
-          registry.policies,
-          {
-            ...route,
-            producer: { command: name, prefixes: mounts.map((m) => m.prefix), declared: null },
-            exitCode: result.exitCode,
-            output: await materialize(result.stdout),
-            results: new ExecutionNode({
-              command,
-              stderr: await materialize(result.stderr),
-              exitCode: result.exitCode,
-            }).toDict(),
-          },
-          claimant,
-          signal,
-        )
+  const stderr = await io.materializeStderr()
+  if (route === null) {
+    return {
+      stdout: data,
+      stderr: stderr.length > 0 ? stderr : null,
+      exitCode: io.exitCode,
+      refusal: null,
+    }
+  }
+  const [refused, bound] = await postExecuteGate(
+    registry.policies,
+    {
+      ...route,
+      producer,
+      exitCode: io.exitCode,
+      output: data,
+      results: new ExecutionNode({ command, stderr, exitCode: io.exitCode }).toDict(),
+    },
+    claimant,
+    signal,
+  )
   if (refused !== null) {
     const [denyBytes, exitCode] = renderDeny(name, refused)
-    const priorErr = result.stderr !== null ? await materialize(result.stderr) : new Uint8Array()
-    const mergedErr = new Uint8Array(priorErr.byteLength + denyBytes.byteLength)
-    mergedErr.set(priorErr, 0)
-    mergedErr.set(denyBytes, priorErr.byteLength)
-    return { stdout: new Uint8Array(), stderr: mergedErr, exitCode, refusal: refusalOf(refused) }
+    return {
+      stdout: new Uint8Array(),
+      stderr: concat([stderr, denyBytes]),
+      exitCode,
+      refusal: refusalOf(refused),
+    }
   }
   const [capped, cappedErr, cappedCode] = await guardOutput(
-    result.stdout,
-    result.stderr,
-    result.exitCode,
+    data,
+    stderr.length > 0 ? stderr : null,
+    io.exitCode,
     Limit.aggr([session.terminalOutput ? guard : null, bound]),
   )
   return {

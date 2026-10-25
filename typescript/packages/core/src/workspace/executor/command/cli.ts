@@ -27,12 +27,18 @@ import { CLAP_EXIT, CLI_CONFIG_ENV, GIT_LONG_OPTIONS } from '../../../commands/c
 import type { CLI, CLIHandler } from '../../../commands/cli/types.ts'
 import type { CommandFnResult, Context } from '../../../commands/config.ts'
 import { listedNode, nodeHelp, ownsArgv, walk } from '../../../commands/cli/walk.ts'
-import { type RunResult, type ScriptSource, type ShellFn } from '../../../runtime/types.ts'
+import {
+  type OutputFn,
+  type RunResult,
+  type ScriptSource,
+  type ShellFn,
+} from '../../../runtime/types.ts'
 import type { FollowOperands, SessionView } from '../../../view/types.ts'
 import type { Files } from '../../files.ts'
 import { flagKwargName } from '../../../commands/spec/constants.ts'
 import { UsageStyle, Argument, type FlagValue } from '../../../commands/spec/types.ts'
 import { CommandTimeoutError } from '../../../errors/types.ts'
+import { mergeSignals } from '../../../utils/abort.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import { closeQuietly } from '../../../io/stream.ts'
 import { maybeWithTimeout } from '../../../commands/builtin/utils/limit.ts'
@@ -44,7 +50,7 @@ import { ExecutionNode } from '../../types.ts'
 import { resolveLimit } from '../../../policy/index.ts'
 import { runtimeForLanguage } from '../../../runtime/routing/decide.ts'
 import type { RouteDecision } from '../../../runtime/types.ts'
-import { admissionDenial } from './run.ts'
+import { admissionDenial, execNode } from './run.ts'
 import { answered, cliVoice, runHandler } from './handler.ts'
 import { runOutput, runtimeUnavailable } from '../../../commands/builtin/general/interpreter.ts'
 import type { Runtime } from '../../../runtime/base.ts'
@@ -170,8 +176,8 @@ function missing(message: string): IOResult {
  * `pager:` and a renamed install names itself), re-parses `argv` (the
  * verbatim tokens after the head), reads piped stdin, and finds the
  * install's config as `MIRAGE_CLI_CONFIG` (JSON) in its environment.
- * The outcome converts through the interpreter handlers' one mapping
- * (runOutput).
+ * The output converts through the interpreter handlers' one mapping
+ * (runOutput), handed over as the program runs.
  *
  * @param config the install's config, handed to the program as JSON.
  * @param ctx the line's context.
@@ -183,7 +189,7 @@ function missing(message: string): IOResult {
  * @param signal aborted when the limit trips.
  * @param settle settles the runtime once the program ends, however it ends.
  */
-async function scriptOutput(
+function scriptOutput(
   config: unknown,
   ctx: Context,
   script: ScriptSource,
@@ -192,7 +198,7 @@ async function scriptOutput(
   timeout: number | null,
   signal: AbortSignal,
   settle: ((runtime: Runtime) => Promise<void>) | undefined,
-): Promise<[Uint8Array | null, IOResult]> {
+): [ByteSource | null, IOResult] {
   const env: Record<string, string> = { ...ctx.env }
   if (config !== null && config !== undefined) {
     env[CLI_CONFIG_ENV] = JSON.stringify(config)
@@ -203,28 +209,42 @@ async function scriptOutput(
   if (script.module) flags.module = true
   // Renamed to the installed head word, which the program names itself by.
   const spec: CommandSpecInit = ctx.spec ?? {}
-  let result: RunResult
-  try {
-    result = await runtime.execute([], [...(ctx.argv ?? [])], {
-      ...ctx,
-      flags,
-      env,
-      spec: new CommandSpec({ ...spec, name: prog }),
-      signal,
-      ...(timeout !== null && timeout > 0 ? { timeoutSeconds: timeout } : {}),
-    })
-  } catch (err) {
-    // A limit interrupt is named after the CLI, as the workspace's own
-    // timer names it.
-    if (err instanceof CommandTimeoutError) throw new CommandTimeoutError(prog, err.seconds)
-    // The interpreter is missing, not the program: 127, as the
-    // interpreter command answers for the same runtime.
-    if (!runtimeUnavailable(err)) throw err
-    return [null, missing(`${prog}: ${err.message}`)]
-  } finally {
-    await settle?.(runtime)
+  const runCtx: Context = {
+    ...ctx,
+    flags,
+    env,
+    spec: new CommandSpec({ ...spec, name: prog }),
+    ...(timeout !== null && timeout > 0 ? { timeoutSeconds: timeout } : {}),
   }
-  return runOutput(result)
+  const run = async (
+    output: OutputFn,
+    errors: OutputFn | undefined,
+    stop: AbortSignal,
+  ): Promise<RunResult> => {
+    try {
+      return await runtime.execute(
+        [],
+        [...(ctx.argv ?? [])],
+        { ...runCtx, signal: stop },
+        { output, ...(errors !== undefined ? { errors } : {}) },
+      )
+    } catch (err) {
+      // A limit interrupt is named after the CLI, as the workspace's own
+      // timer names it.
+      if (err instanceof CommandTimeoutError) throw new CommandTimeoutError(prog, err.seconds)
+      // The interpreter is missing, not the program: 127, as the
+      // interpreter command answers for the same runtime.
+      if (!runtimeUnavailable(err)) throw err
+      return {
+        stdout: new Uint8Array(),
+        stderr: encodeText(`${prog}: ${err.message}\n`),
+        exitCode: 127,
+      }
+    } finally {
+      await settle?.(runtime)
+    }
+  }
+  return runOutput(run, null, undefined, ctx.stdin, mergeSignals(ctx.signal, signal))
 }
 
 /**
@@ -588,7 +608,9 @@ async function runCli(
       ]
     }
     start = (ctx, signal) =>
-      scriptOutput(install.config, ctx, script, runtime, prog, timeout, signal, context.settle)
+      Promise.resolve(
+        scriptOutput(install.config, ctx, script, runtime, prog, timeout, signal, context.settle),
+      )
   } else {
     const fn = binding.fn
     if (fn === null) {
@@ -625,7 +647,6 @@ async function runCli(
         abort,
         settle: settled,
         ...(binding.write && dropCaches !== null ? { drop: dropCaches } : {}),
-        ...(script !== null ? { frame: false } : {}),
         ...(ctx.vfs !== undefined ? { vfs: ctx.vfs } : {}),
       },
     )
@@ -652,6 +673,9 @@ export async function runWalked(
   run: (ctx: Context) => Promise<CommandFnResult>,
 ): Promise<[ByteSource | null, IOResult, ExecutionNode]> {
   let active = true
+  const ended = (): void => {
+    active = false
+  }
   const shell: ShellFn = async (line, data = null) => {
     if (!active || context.signal?.aborted === true) {
       throw new Error('CLI shell is no longer active')
@@ -678,10 +702,15 @@ export async function runWalked(
   let out: CommandFnResult
   try {
     out = await run(ctx)
-  } finally {
-    active = false
+  } catch (err) {
+    ended()
+    throw err
   }
   const [answer, io] = out ?? [null, new IOResult()]
+  // A run that starts as its output is read (a script's) may still call
+  // back, so the shell stays live until that output settles.
+  if (io.output !== null && !io.output.settled) io.output.callbacks.push(ended)
+  else ended()
   let stdout = answer
   if (io.producer === null) {
     const stderr = await io.materializeStderr()
@@ -707,15 +736,5 @@ export async function runWalked(
   stdout = maybeWithTimeout(stdout, limit, prog)
   io.stderr = maybeWithTimeout(io.stderr, limit, prog)
 
-  const stderrBytes = await io.materializeStderr()
-  return [
-    stdout,
-    io,
-    new ExecutionNode({
-      command: walked.cmdStr,
-      stderr: stderrBytes,
-      exitCode: io.exitCode,
-      paths: walked.paths,
-    }),
-  ]
+  return [stdout, io, await execNode(walked.cmdStr, io, walked.paths)]
 }

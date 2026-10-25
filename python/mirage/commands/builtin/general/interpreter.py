@@ -12,34 +12,157 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
+import logging
+from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Any
 
-from mirage.io.types import CommandOutput, IOResult
+from mirage.commands.config import Context
+from mirage.context.session_context import current_caller, with_caller
+from mirage.io.pipe import BytePipe
+from mirage.io.stream import OutputStream, close_quietly
+from mirage.io.types import (
+    ByteSource,
+    CommandOutput,
+    IOResult,
+    OutputState,
+    materialize,
+)
 from mirage.runtime.language import LanguageRuntime
-from mirage.runtime.types import CommandRuntime, RunResult
+from mirage.runtime.types import CommandRuntime, OutputFn, RunResult
 from mirage.types import PathSpec, Producer
+
+logger = logging.getLogger(__name__)
 
 
 def run_output(
-    result: RunResult, producer: Producer | None = None
+    run: Callable[[OutputFn, OutputFn | None], Awaitable[RunResult]],
+    producer: Producer | None = None,
+    errors: OutputFn | None = None,
+    stdin: ByteSource | None = None,
 ) -> CommandOutput:
-    """Convert one runtime outcome into a command's output shape.
+    """A runtime run as a command's output, handed over as it runs.
 
-    The single RunResult-to-IOResult mapping: empty stdout becomes
-    None (no stream), the exit code and stderr pass through. The
-    interpreter commands, the CLI script arm and a captured program
-    all convert through here so the mapping cannot drift.
+    The one mapping from a run to a command's output shape: the
+    interpreter commands, a script CLI, a program a runtime captured and
+    a whole line all answer through here. The run starts when its output
+    is first read and writes stdout into a bounded pipe, so a reader that
+    falls behind holds the program back and the output is never held
+    whole; what a transport could not stream lands at the end. The
+    status, and the stderr the run returned, settle on the result as the
+    output ends (``IOResult.output``), stderr after what the result
+    already held. A reader that stops early stops the run, which then
+    exits 141, as SIGPIPE leaves a program.
 
     Args:
-        result (RunResult): the runtime's outcome.
-        producer (Producer | None): what made the output, for a
-            program run past the workspace's own commands.
+        run (Callable[[OutputFn, OutputFn | None], Awaitable[RunResult]]):
+            starts the run, given where it writes stdout and where it
+            writes stderr (None keeps stderr in its result).
+        producer (Producer | None): what made the output, for a program
+            run past the workspace's own commands.
+        errors (OutputFn | None): takes stderr as the run writes it,
+            after the stdout written before it has been read; None keeps
+            stderr for the result.
+        stdin (ByteSource | None): the run's input, closed once the
+            output ends.
     """
-    return result.stdout if result.stdout else None, IOResult(
-        exit_code=result.exit_code,
-        stderr=result.stderr,
-        producer=producer,
-    )
+    pipe = BytePipe()
+    caller = current_caller()
+    io = IOResult(producer=producer)
+    io.output = state = OutputState()
+    task: asyncio.Task[None] | None = None
+    settled = False
+    closing: asyncio.Task[None] | None = None
+
+    async def ordered(chunk: bytes) -> None:
+        # Stdout written before this chunk reaches its reader first, so
+        # the two keep the order the program wrote them in (`2>&1`).
+        assert errors is not None
+        await pipe.drain()
+        await errors(chunk)
+
+    async def execute() -> None:
+        nonlocal settled
+        try:
+            result = await run(
+                pipe.write, ordered if errors is not None else None
+            )
+            if result.stdout:
+                await pipe.write(result.stdout)
+            io.exit_code = result.exit_code
+            if result.stderr:
+                io.stderr = await materialize(io.stderr) + result.stderr
+            pipe.end()
+        except BaseException as exc:
+            pipe.end(exc)
+            raise
+        finally:
+            settled = True
+
+    async def finalize() -> None:
+        pipe.close_reader()
+        if task is not None:
+            if not task.done() and not settled:
+                task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                current = asyncio.current_task()
+                if current is not None and current.cancelling():
+                    raise
+                io.exit_code = 141
+            except Exception as exc:
+                logger.debug("runtime output ended: %s", exc)
+        await close_quietly(stdin)
+        state.finish()
+
+    async def close() -> None:
+        nonlocal closing
+        if closing is None:
+            closing = asyncio.create_task(finalize())
+        await closing
+
+    async def output() -> AsyncIterator[bytes]:
+        nonlocal task
+        task = asyncio.create_task(execute())
+        try:
+            async for chunk in pipe.stream():
+                yield chunk
+            await task
+        finally:
+            await close()
+
+    return OutputStream(with_caller(output(), caller), close), io
+
+
+def run_interpreter(
+    runtime: LanguageRuntime[Any],
+    paths: list[PathSpec],
+    texts: list[str],
+    ctx: Context,
+) -> CommandOutput:
+    """Run an interpreter command's operands on its bound runtime, the
+    program's output handed over as it runs (``run_output``).
+
+    Args:
+        runtime (LanguageRuntime[Any]): the runtime bound to the command.
+        paths (list[PathSpec]): the path operands.
+        texts (list[str]): the text operands.
+        ctx (Context): the command's context, its flags the runtime's
+            switches.
+    """
+
+    async def run(output: OutputFn, errors: OutputFn | None) -> RunResult:
+        try:
+            return await runtime.execute(
+                paths, texts, ctx, output=output, errors=errors
+            )
+        finally:
+            # The program may have written past the dispatcher.
+            if ctx.runtime is not None and ctx.runtime.settle is not None:
+                await ctx.runtime.settle()
+
+    return run_output(run, stdin=ctx.stdin)
 
 
 def not_bound(label: str, unavailable: str | None) -> CommandOutput:
@@ -65,7 +188,10 @@ def not_bound(label: str, unavailable: str | None) -> CommandOutput:
 async def runtime_version(
     runtime: LanguageRuntime[Any], env: dict[str, str] | None
 ) -> CommandOutput:
-    return run_output(await runtime.version(env or {}))
+    async def run(output: OutputFn, errors: OutputFn | None) -> RunResult:
+        return await runtime.version(env or {})
+
+    return run_output(run)
 
 
 def exec_refusal(

@@ -21,6 +21,8 @@ import { ConcurrencyLimiter } from '../../../concurrency/limiter.ts'
 import { CommandTimeoutError } from '../../../errors/types.ts'
 import { PythonRuntime } from '../base.ts'
 import type { Program, RunResult, RuntimeReach } from '../../types.ts'
+import { materialize } from '../../../io/types.ts'
+import { abortable } from '../../../utils/abort.ts'
 import { memoryLimit, type RuntimeOptions } from '../../config.ts'
 import type { WorkspaceBinding } from '../../binding.ts'
 import {
@@ -252,13 +254,20 @@ export class PyodideRuntime extends PythonRuntime<undefined> {
 
   /**
    * Run one program on a fresh interpreter: in the worker for a run with
-   * files, in process for one without.
+   * files, in process for one without. The guest's prints come back in the
+   * result, its input whole: both cross to the guest as a message.
    *
    * @param _engine none; each run builds its own interpreter.
-   * @param program the source and argv to run.
+   * @param source the source and argv to run.
    * @param ctx the run's context.
    */
-  async interpret(_engine: undefined, program: Program, ctx: Context): Promise<RunResult> {
+  async interpret(_engine: undefined, source: Program, ctx: Context): Promise<RunResult> {
+    // Read through the run's signal: input left open must not hold back
+    // the stop of a run that is cancelled or past its deadline.
+    const program = {
+      ...source,
+      stdin: source.stdin === null ? null : await abortable(materialize(source.stdin), ctx.signal),
+    }
     const binding = this.binding
     const execute = async (runtime: PyodideRuntime): Promise<RunResult> =>
       this.capped(runtime, await runtime.runOne(program, ctx, binding))
@@ -750,7 +759,7 @@ export class PyodideRuntime extends PythonRuntime<undefined> {
   }
 
   private async runOne(
-    program: Program,
+    program: Program & { stdin: Uint8Array | null },
     ctx: Context,
     binding: WorkspaceBinding | null,
   ): Promise<RunResult> {

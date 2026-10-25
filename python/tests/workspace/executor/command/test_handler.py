@@ -101,21 +101,16 @@ async def test_a_closed_pipe_from_a_mount_reaches_the_executor_after_the_drop():
 
 
 @pytest.mark.parametrize(
-    "lazy,frame,early",
-    [
-        (True, True, False),
-        (True, False, False),
-        (True, True, True),
-        (False, True, False),
-    ],
-    ids=["framed", "unframed", "closed", "bytes"],
+    "lazy,early",
+    [(True, False), (True, True), (False, False)],
+    ids=["streamed", "closed", "bytes"],
 )
 async def test_a_write_drops_once_answered_and_again_once_its_stream_ends(
-    lazy, frame, early
+    lazy, early
 ):
     drops = Drops()
     stdout = _stream(b"a\n", b"b\n") if lazy else b"a\nb\n"
-    out, _ = await _run(_answer(stdout), drop=drops, frame=frame)
+    out, _ = await _run(_answer(stdout), drop=drops)
     assert drops.count == 1
     if early:
         assert await anext(out) == b"a\n"
