@@ -170,7 +170,9 @@ function bypassingModules(root: string): Record<string, string[]> {
     if (!name.endsWith('.ts') || name.endsWith('.test.ts')) continue
     const module = name.split(sep).join('/')
     if (module === SEAM || module.startsWith('generated/')) continue
-    const found = s3Bypasses(readFileSync(join(root, name), 'utf8'))
+    const source = readFileSync(join(root, name), 'utf8')
+    if (!source.includes('@aws-sdk/') && !source.includes('S3Client')) continue
+    const found = s3Bypasses(source)
     if (found.length > 0) offenders[module] = found
   }
   return offenders
