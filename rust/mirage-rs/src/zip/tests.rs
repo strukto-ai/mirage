@@ -209,29 +209,42 @@ fn a_zip64_end_record_is_read() {
     let (size, offset) = (&archive[end + 12..end + 16], &archive[end + 16..end + 20]);
     let [size, offset] =
         [size, offset].map(|b| u64::from(u32::from_le_bytes(b.try_into().expect("4 bytes"))));
-    let mut wide = archive[..end].to_vec();
-    let record = wide.len() as u64;
-    wide.extend(0x0606_4b50u32.to_le_bytes());
-    wide.extend(44u64.to_le_bytes());
-    wide.extend([45, 0, 45, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
-    for value in [3, 3, size, offset] {
-        wide.extend(u64::to_le_bytes(value));
+    let mut saturated = [0xFF; 16];
+    saturated[..4].fill(0);
+    // Behind an ordinary record saturated, its longest comment putting the
+    // locator before the tail searched, or one keeping the true values, as
+    // Python's zipfile writes it.
+    for (fields, comment) in [
+        (saturated.as_slice(), 0xFFFF),
+        (&archive[end + 4..end + 20], 0),
+    ] {
+        let mut wide = archive[..end].to_vec();
+        let record = wide.len() as u64;
+        wide.extend(0x0606_4b50u32.to_le_bytes());
+        wide.extend(44u64.to_le_bytes());
+        wide.extend([45, 0, 45, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+        for value in [3, 3, size, offset] {
+            wide.extend(u64::to_le_bytes(value));
+        }
+        wide.extend(0x0706_4b50u32.to_le_bytes());
+        wide.extend(0u32.to_le_bytes());
+        wide.extend(record.to_le_bytes());
+        wide.extend(1u32.to_le_bytes());
+        wide.extend(0x0605_4b50u32.to_le_bytes());
+        wide.extend(fields);
+        wide.extend(u16::to_le_bytes(comment));
+        wide.extend(vec![b'c'; usize::from(comment)]);
+        host.files.insert("z.zip".into(), wide);
+        let (status, out, err) = unzip(&mut host, "z.zip", json!({"Z": true, "1": true}));
+        assert_eq!(
+            (status, out.as_str(), err.as_str()),
+            (0, "a.txt\nd/\nd/b.txt\n", "")
+        );
     }
-    wide.extend(0x0706_4b50u32.to_le_bytes());
-    wide.extend(0u32.to_le_bytes());
-    wide.extend(record.to_le_bytes());
-    wide.extend(1u32.to_le_bytes());
-    wide.extend(0x0605_4b50u32.to_le_bytes());
-    wide.extend([0, 0, 0, 0, 0xFF, 0xFF, 0xFF, 0xFF]);
-    wide.extend([0xFF; 8]);
-    // The longest comment puts the locator before the tail searched.
-    wide.extend([0xFF, 0xFF]);
-    wide.extend([b'c'; 0xFFFF]);
-    host.files.insert("z.zip".into(), wide);
-    let (status, out, err) = unzip(&mut host, "z.zip", json!({"Z": true, "1": true}));
+    let (status, out, err) = zip(&mut host, "z.zip", json!([file("a.txt", 2)]));
     assert_eq!(
         (status, out.as_str(), err.as_str()),
-        (0, "a.txt\nd/\nd/b.txt\n", "")
+        (0, "updating: a.txt\n", "")
     );
 }
 

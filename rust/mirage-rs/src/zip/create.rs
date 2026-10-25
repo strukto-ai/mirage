@@ -185,13 +185,17 @@ fn plain_extra(extra: &[u8]) -> bool {
 async fn original(spool: &mut Spool<'_>) -> Option<Original> {
     let base = spool.size.saturating_sub(super::END_SEARCH);
     let tail = spool.read(base, spool.size - base).await.ok()?;
-    let end = end_record(&tail, base, true)?;
+    let mut end = end_record(&tail, base, true)?;
     let at = (end.at - base) as usize;
     let split = u16_at(&tail, at + 4) != 0 || u16_at(&tail, at + 6) != 0;
     let wide = end.count == 0xFFFF || end.size == ZIP32 || end.offset == ZIP32;
+    if split || wide || u64::from(u16_at(&tail, at + 8)) != end.count {
+        return None;
+    }
+    spool.zip64(&mut end).await.ok()?;
     let start = end.at.checked_sub(end.size)?;
     let slack = i128::from(start) - i128::from(end.offset);
-    if split || wide || u64::from(u16_at(&tail, at + 8)) != end.count || slack < 0 {
+    if slack < 0 {
         return None;
     }
     let directory = spool.read(start, end.size).await.ok()?;
