@@ -282,10 +282,7 @@ class SessionState:
     # and an array in another, and an attribute cannot drift from the
     # value it describes.
     vars: dict[str, ShellVar] = field(default_factory=dict)
-    # The manager passes its workspace clock's reading. A session built
-    # on its own reads the system clock through SystemClock, which looks
-    # `time.time` up on each call: a default of `time.time` itself holds
-    # the function from import, where a replaced clock cannot reach it.
+    # The manager stamps it on the workspace clock.
     created_at: float = field(default_factory=SystemClock().now)
     functions: dict[str, str] = field(default_factory=dict)
     # The functions `readonly -f` has frozen. A set beside `functions`

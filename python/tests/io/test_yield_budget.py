@@ -80,22 +80,23 @@ def test_a_budget_built_outside_a_loop_starts_at_its_first_run():
     assert run_on_held_loop(main) == []
 
 
+async def spin_until_a_turn(loop: HeldLoop) -> list[int]:
+    point = YieldBudget()
+    ran: list[int] = []
+
+    def tick() -> None:
+        ran.append(calls)
+        loop.now += 1e-3
+
+    loop.call_soon(tick)
+    calls = 0
+    while not ran:
+        calls += 1
+        await point.run()
+    return list(ran)
+
+
 def test_a_busy_consumer_yields_on_a_held_clock_within_the_call_bound():
     # A loop that keeps virtual time holds it still while a task
     # computes; the call bound still hands timers and cancellation a turn.
-    async def main(loop: HeldLoop) -> list[int]:
-        point = YieldBudget()
-        ran: list[int] = []
-
-        def tick() -> None:
-            ran.append(calls)
-            loop.now += 1e-3
-
-        loop.call_soon(tick)
-        calls = 0
-        while not ran:
-            calls += 1
-            await point.run()
-        return list(ran)
-
-    assert run_on_held_loop(main) == [budget_mod.YIELD_CALLS]
+    assert run_on_held_loop(spin_until_a_turn) == [budget_mod.YIELD_CALLS]
