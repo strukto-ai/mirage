@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import type { AdmissionRules, CommandRule } from '../policy/types.ts'
 import { MountMode, type Visibility } from '../types.ts'
 import { PosixRegex } from './regex.ts'
-import { openStream } from './stream.ts'
+import { compiledModuleSync, openStream } from './stream.ts'
 import type { LinkStep } from '../utils/path.ts'
 import {
   AdmissionMatcher,
@@ -44,11 +44,13 @@ function nativeNumber(fn: WebAssembly.ExportValue | undefined, args: number[]): 
 function captureInstances(): {
   memories: WebAssembly.Memory[]
   requests: { operation: number; words: number }[]
+  uploads: { offset: number; total: number; words: number }[]
   restore: () => void
 } {
   const original = WebAssembly.Instance
   const memories: WebAssembly.Memory[] = []
   const requests: { operation: number; words: number }[] = []
+  const uploads: { offset: number; total: number; words: number }[] = []
   class ObservedInstance extends original {
     constructor(module: WebAssembly.Module, imports?: WebAssembly.Imports) {
       super(module, imports)
@@ -65,6 +67,10 @@ function captureInstances(): {
           words = length
           return nativeNumber(exports.mirage_policy_input, [length])
         },
+        mirage_policy_facts_chunk: (offset: number, total: number) => {
+          uploads.push({ offset, total, words })
+          return nativeNumber(exports.mirage_policy_facts_chunk, [offset, total])
+        },
         mirage_policy_call: (operation: number, handle: number) => {
           requests.push({ operation, words })
           return nativeNumber(exports.mirage_policy_call, [operation, handle])
@@ -76,6 +82,7 @@ function captureInstances(): {
   return {
     memories,
     requests,
+    uploads,
     restore: () => {
       WebAssembly.Instance = original
     },
@@ -379,7 +386,10 @@ describe('policy memory retirement', () => {
     const matcher = new AdmissionMatcher({ deny: [{ reason: 'private', paths: ['/secret'] }] })
     try {
       expect(() =>
-        matcher.ruleApplies(999, { ...FACTS, tokens: Array<string>(5).fill(LARGE) }),
+        matcher.ruleApplies(999, {
+          ...FACTS,
+          tokens: Array.from({ length: 9 }, (_, index) => LARGE + String(index)),
+        }),
       ).toThrow('invalid policy rule index')
       expect(tracked.memories[0]?.buffer.byteLength).toBeGreaterThan(32 * 1024 * 1024)
       expect(matcher.live).toBe(true)
@@ -402,6 +412,124 @@ describe('policy memory retirement', () => {
 })
 
 describe('native policy Wasm binding', () => {
+  it('admits 9000 long file operands under an unrelated path rule', () => {
+    const paths = Array.from({ length: 9000 }, (_, index) => {
+      const path = '/repo/' + String(index).padStart(6, '0') + 'x'.repeat(388)
+      return { virtual: path, display: path }
+    })
+    const facts = {
+      ...FACTS,
+      tokens: ['cat', ...paths.map((path) => path.display)],
+      paths,
+      operands: paths,
+    }
+    const matcher = new AdmissionMatcher({ deny: [{ reason: 'elsewhere', paths: ['/secret'] }] })
+    expect(matcher.decide(facts).outcome).toBe(0)
+  }, 30000)
+
+  it('preserves Unicode facts, deny precedence, ask winners and grants', () => {
+    const path = '/repo/😀\ud800'
+    const facts = {
+      ...FACTS,
+      tokens: ['cat', path],
+      paths: [{ virtual: path, display: path }],
+      operands: [{ virtual: path, display: path }],
+    }
+    const rules = { ask: [{ reason: 'review', paths: [path] }] }
+    const matcher = new AdmissionMatcher(rules)
+    expect(matcher.decide(facts)).toMatchObject({ outcome: 2, rule: 0, matched: path, asks: [0] })
+    expect(matcher.ruleApplies(0, facts)).toBe(true)
+    expect(matcher.opRuling('read', path, [])).toEqual([0, true])
+    expect(matcher.opRuling('read', path, [0])).toBeNull()
+    const denied = new AdmissionMatcher({ ...rules, deny: [{ reason: 'refuse', paths: [path] }] })
+    expect(denied.decide(facts)).toMatchObject({ outcome: 1, rule: 0, matched: path, asks: [] })
+    expect(denied.opRuling('read', path, [0, 1])).toEqual([0, false])
+  })
+
+  it('stages distinct facts above the request cap and retires after the complete decision', async () => {
+    const tracked = captureInstances()
+    const rules: AdmissionRules = {
+      allow: null,
+      deny: [{ reason: 'elsewhere', paths: ['/secret'] }],
+      ask: [],
+    }
+    const matcher = admissionMatcher(rules)
+    const tokens = [
+      'cat',
+      ...Array.from({ length: 40 }, (_, index) => String(index) + 'x'.repeat(450000)),
+    ]
+    try {
+      expect(matcher.decide({ ...FACTS, tokens }).outcome).toBe(0)
+      expect(tracked.uploads.length).toBeGreaterThan(1)
+      let offset = 0
+      for (const upload of tracked.uploads) {
+        expect(upload.offset).toBe(offset)
+        expect(upload.words).toBeLessThanOrEqual(1024 * 1024)
+        offset += upload.words
+      }
+      expect(offset).toBe(tracked.uploads[0]?.total)
+      expect(offset).toBeGreaterThan(16 * 1024 * 1024)
+      expect(matcher.live).toBe(true)
+      await Promise.resolve()
+      expect(matcher.live).toBe(false)
+      expect(admissionMatcher(rules).decide(FACTS).outcome).toBe(0)
+    } finally {
+      tracked.restore()
+    }
+  }, 30000)
+
+  it('rejects malformed raw facts uploads and frees consumed or interrupted state', () => {
+    const exports = new WebAssembly.Instance(compiledModuleSync(), {}).exports
+    const memory = exports.memory
+    if (!(memory instanceof WebAssembly.Memory)) throw new Error('Missing memory')
+    const input = (packet: number[]): void => {
+      const ptr = nativeNumber(exports.mirage_policy_input, [packet.length])
+      new Uint32Array(memory.buffer, ptr, packet.length).set(packet)
+    }
+    const chunk = (offset: number, total: number): number =>
+      nativeNumber(exports.mirage_policy_facts_chunk, [offset, total])
+    const call = (operation: number): number =>
+      nativeNumber(exports.mirage_policy_facts_call, [operation, 0])
+    const packet = [1, 0, 0, 0, 1, 0, 0, 0, 0, 0]
+    input(packet.slice(0, 3))
+    expect(chunk(0, packet.length)).toBe(0)
+    expect(call(13)).toBe(1)
+    expect(call(13)).toBe(1)
+    input(packet)
+    expect(chunk(1, packet.length)).toBe(1)
+    expect(chunk(0, packet.length)).toBe(0)
+    expect(call(42)).toBe(1)
+    expect(call(13)).toBe(1)
+    expect(chunk(0, packet.length)).toBe(0)
+    expect(call(13)).toBe(0)
+    expect(call(13)).toBe(1)
+    const invalid = [...packet]
+    invalid[2] = 1
+    input(invalid)
+    expect(chunk(0, invalid.length)).toBe(0)
+    expect(call(13)).toBe(1)
+    expect(call(13)).toBe(1)
+    input(packet)
+    expect(chunk(0, packet.length)).toBe(0)
+    const clear = exports.mirage_policy_facts_clear
+    if (typeof clear !== 'function') throw new Error('Missing clear export')
+    Reflect.apply(clear, undefined, [])
+    expect(call(13)).toBe(1)
+    expect(chunk(0, packet.length)).toBe(0)
+    input([0])
+    expect(nativeNumber(exports.mirage_policy_call, [8, 0])).toBe(0)
+    expect(call(13)).toBe(1)
+    expect(chunk(0, 2)).toBe(0)
+    expect(nativeNumber(exports.mirage_policy_input, [16 * 1024 * 1024 + 1])).toBe(0)
+    expect(call(13)).toBe(1)
+    input([0])
+    expect(chunk(0, 0x20000000)).toBe(1)
+    expect(chunk(0, 2)).toBe(0)
+    expect(chunk(2, 2)).toBe(1)
+    expect(chunk(1, 3)).toBe(1)
+    expect(call(13)).toBe(1)
+  })
+
   it('rebuilds admission when allow is reassigned or an alias is replaced', () => {
     const allowed = ['cat']
     const rules: AdmissionRules = { allow: allowed, deny: [], ask: [] }

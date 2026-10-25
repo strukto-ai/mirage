@@ -96,6 +96,32 @@ function virtuals(w: Workspace, name: string, ...args: string[]): string[] {
 }
 
 describe('admission', () => {
+  it('cats 9000 long absolute operands with an unrelated path rule', async () => {
+    const ram = new RAMVFS()
+    const names = Array.from(
+      { length: 9000 },
+      (_, index) => String(index).padStart(6, '0') + 'x'.repeat(388),
+    )
+    for (const name of names) ram.store.files.set('/' + name, new Uint8Array([120]))
+    const w = new Workspace(
+      { '/data': ram },
+      {
+        mode: MountMode.WRITE,
+        shellParser: await getTestParser(),
+        profiles: {
+          default: parseSessionProfile({
+            commands: { deny: [{ reason: 'elsewhere', paths: ['/secret'] }] },
+          }),
+        },
+      },
+    )
+    open.push(w)
+    const result = await w.shell('cat ' + names.map((name) => '/data/' + name).join(' '))
+    expect(result.exitCode).toBe(0)
+    expect(DEC.decode(await materialize(result.stdout))).toBe('x'.repeat(9000))
+    expect(DEC.decode(await materialize(result.stderr))).toBe('')
+  }, 30000)
+
   it('policy scopes follow links only for a following command', async () => {
     const w = await ws()
     await w.shell('echo top > /data/secret && ln -s /data/secret /data/link')

@@ -24,6 +24,34 @@ struct State {
     error: Vec<u8>,
     handles: HashMap<u32, Matcher>,
     next: u32,
+    facts: Option<FactsUpload>,
+}
+
+struct FactsUpload {
+    total: usize,
+    units: Vec<u32>,
+}
+
+impl FactsUpload {
+    fn append(&mut self, offset: usize, total: usize, input: &[u32]) -> Result<()> {
+        if total > isize::MAX as usize / std::mem::size_of::<u32>() {
+            return Err("policy facts exceed addressable memory");
+        }
+        if total != self.total || offset != self.units.len() || input.is_empty() {
+            return Err("invalid policy facts chunk");
+        }
+        let end = offset
+            .checked_add(input.len())
+            .ok_or("invalid policy facts length")?;
+        if end > total {
+            return Err("invalid policy facts length");
+        }
+        self.units
+            .try_reserve(input.len())
+            .map_err(|_| "policy facts allocation failed")?;
+        self.units.extend_from_slice(input);
+        Ok(())
+    }
 }
 
 thread_local! {
@@ -168,15 +196,28 @@ impl<'a> Reader<'a> {
         })
     }
     fn facts(&mut self) -> Result<CommandFacts> {
+        let texts = self.list(Self::text)?;
+        let text = |r: &mut Self| {
+            texts
+                .get(r.number()? as usize)
+                .cloned()
+                .ok_or("invalid policy facts text reference")
+        };
+        let path = |r: &mut Self| {
+            Ok(PathFact {
+                virtual_path: text(r)?,
+                display_path: text(r)?,
+            })
+        };
         Ok(CommandFacts {
-            command: self.text()?,
-            tokens: self.list(Self::text)?,
+            command: text(self)?,
+            tokens: self.list(text)?,
             tool: self.boolean()?,
-            cwd: self.text()?,
-            paths: self.list(Self::path)?,
-            operands: self.list(Self::path)?,
+            cwd: text(self)?,
+            paths: self.list(path)?,
+            operands: self.list(path)?,
             walks: self.boolean()?,
-            move_target: self.optional(Self::text)?,
+            move_target: self.optional(text)?,
         })
     }
     fn subject(&mut self) -> Result<Subject> {
@@ -560,6 +601,7 @@ pub extern "C" fn mirage_policy_input(length: usize) -> *mut u32 {
     STATE.with_borrow_mut(|state| {
         state.input.clear();
         if length > MAX_UNITS {
+            state.facts = None;
             state.error = b"policy packet is too large".to_vec();
             return std::ptr::null_mut();
         }
@@ -571,22 +613,78 @@ pub extern "C" fn mirage_policy_input(length: usize) -> *mut u32 {
 #[unsafe(no_mangle)]
 pub extern "C" fn mirage_policy_call(operation: u32, handle: u32) -> i32 {
     STATE.with_borrow_mut(|state| {
+        state.facts = None;
         state.output.clear();
         state.error.clear();
         let input = std::mem::take(&mut state.input);
         let result = dispatch(state, operation, handle, &input);
         state.input = input;
-        match result {
-            Ok(output) => {
-                state.output = output;
-                0
-            }
-            Err(error) => {
-                state.error = error.as_bytes().to_vec();
-                1
-            }
-        }
+        finish_call(state, result)
     })
+}
+
+fn finish_call(state: &mut State, result: Result<Vec<u32>>) -> i32 {
+    match result {
+        Ok(output) => {
+            state.output = output;
+            0
+        }
+        Err(error) => {
+            state.error = error.as_bytes().to_vec();
+            1
+        }
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn mirage_policy_facts_chunk(offset: usize, total: usize) -> i32 {
+    STATE.with_borrow_mut(|state| {
+        state.output.clear();
+        state.error.clear();
+        let mut facts = if offset == 0 {
+            state.facts = None;
+            FactsUpload {
+                total,
+                units: Vec::new(),
+            }
+        } else if let Some(facts) = state.facts.take() {
+            facts
+        } else {
+            return finish_call(state, Err("missing policy facts upload"));
+        };
+        let result = facts.append(offset, total, &state.input);
+        if result.is_ok() {
+            state.facts = Some(facts);
+        } else {
+            state.facts = None;
+        }
+        finish_call(state, result.map(|_| Vec::new()))
+    })
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn mirage_policy_facts_call(operation: u32, handle: u32) -> i32 {
+    STATE.with_borrow_mut(|state| {
+        state.output.clear();
+        state.error.clear();
+        let result = match state.facts.take() {
+            Some(facts) if facts.total == facts.units.len() => {
+                if matches!(operation, 13 | 25 | 29) {
+                    dispatch(state, operation, handle, &facts.units)
+                } else {
+                    Err("invalid policy facts operation")
+                }
+            }
+            Some(_) => Err("incomplete policy facts upload"),
+            None => Err("missing policy facts upload"),
+        };
+        finish_call(state, result)
+    })
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn mirage_policy_facts_clear() {
+    STATE.with_borrow_mut(|state| state.facts = None);
 }
 
 #[unsafe(no_mangle)]
@@ -645,6 +743,69 @@ mod tests {
         assert_eq!(dispatch(&mut state, 47, handle, &[2, 0]).unwrap(), vec![2]);
         assert_eq!(dispatch(&mut state, 47, handle, &[3, 0]).unwrap(), vec![3]);
     }
+    #[test]
+    fn facts_preserve_interned_text_and_reject_malformed_references() {
+        let mut packet = Writer::default();
+        packet.list(
+            &[vec![99, 97, 116], vec![47], vec![47, 0x1f600, 0xd800]],
+            |w, text| w.text(text),
+        );
+        packet.number(0);
+        packet.list(&[0, 2], |w, id| w.number(*id));
+        packet.boolean(true);
+        packet.number(1);
+        for _ in 0..2 {
+            packet.number(1);
+            packet.number(2);
+            packet.number(2);
+        }
+        packet.boolean(false);
+        packet.boolean(true);
+        packet.number(2);
+        let facts = Reader::new(&packet.0).facts().unwrap();
+        assert_eq!(facts.command, vec![99, 97, 116]);
+        assert_eq!(facts.tokens[1], vec![47, 0x1f600, 0xd800]);
+        assert_eq!(facts.paths[0].virtual_path, facts.tokens[1]);
+        assert_eq!(facts.operands, facts.paths);
+        assert_eq!(facts.move_target.as_ref(), Some(&facts.tokens[1]));
+        for end in 0..packet.0.len() {
+            assert!(Reader::new(&packet.0[..end]).facts().is_err());
+        }
+        let mut invalid = packet.0.clone();
+        invalid[11] = 3;
+        assert_eq!(
+            Reader::new(&invalid).facts().unwrap_err(),
+            "invalid policy facts text reference"
+        );
+        assert!(Reader::new(&[u32::MAX]).facts().is_err());
+        assert!(Reader::new(&[1, u32::MAX]).facts().is_err());
+    }
+
+    #[test]
+    fn facts_upload_checks_offsets_totals_and_addressable_lengths() {
+        let mut upload = FactsUpload {
+            total: 4,
+            units: Vec::new(),
+        };
+        assert!(upload.append(0, 4, &[1, 2]).is_ok());
+        assert!(upload.append(1, 4, &[3]).is_err());
+        assert!(upload.append(2, 5, &[3]).is_err());
+        assert!(upload.append(2, 4, &[]).is_err());
+        assert!(upload.append(2, 4, &[3, 4, 5]).is_err());
+        assert_eq!(upload.units, vec![1, 2]);
+        assert!(upload.append(2, 4, &[3, 4]).is_ok());
+        assert_eq!(upload.units, vec![1, 2, 3, 4]);
+        let total = isize::MAX as usize / std::mem::size_of::<u32>() + 1;
+        let mut oversized = FactsUpload {
+            total,
+            units: Vec::new(),
+        };
+        assert_eq!(
+            oversized.append(0, total, &[0]),
+            Err("policy facts exceed addressable memory")
+        );
+    }
+
     #[test]
     fn handles_reject_wrong_kind_and_do_not_reuse_after_drop() {
         let mut state = State::default();
