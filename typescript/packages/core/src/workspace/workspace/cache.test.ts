@@ -308,12 +308,17 @@ describe('the workspace clock', () => {
     try {
       const done = ws.mount('/g').activity.acquire()
       const unmounting = ws.unmount('/g')
-      await Promise.resolve()
-      expect(() => {
-        vfs.accessor.bindClock(new ManualClock(), 'later')
-      }).toThrow(/another clock/)
-      done()
-      await unmounting
+      try {
+        while (ws.mounts().some((m) => m.prefix === '/g/')) {
+          await new Promise((resolve) => setTimeout(resolve, 0))
+        }
+        expect(() => {
+          vfs.accessor.bindClock(new ManualClock(), 'later')
+        }).toThrow(/another clock/)
+      } finally {
+        done()
+        await unmounting
+      }
       const later = new ManualClock()
       vfs.accessor.bindClock(later, 'later')
       expect(vfs.accessor.tokenManager.clock).toBe(later)

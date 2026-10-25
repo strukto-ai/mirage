@@ -645,11 +645,14 @@ async def test_an_unmount_holds_the_clock_until_its_calls_finish():
     try:
         done = ws.mount("/g").activity.acquire()
         unmounting = asyncio.create_task(ws.unmount("/g"))
-        await asyncio.sleep(0)
-        with pytest.raises(ValueError, match="another clock"):
-            vfs.accessor.bind_clock(ManualClock(), "later")
-        done()
-        await unmounting
+        try:
+            while any(m.prefix == "/g/" for m in ws.mounts()):
+                await asyncio.sleep(0)
+            with pytest.raises(ValueError, match="another clock"):
+                vfs.accessor.bind_clock(ManualClock(), "later")
+        finally:
+            done()
+            await unmounting
         later = ManualClock()
         vfs.accessor.bind_clock(later, "later")
         assert vfs.accessor.token_manager.clock is later
