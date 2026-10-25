@@ -61,6 +61,10 @@ class ResponseCache(Generic[K, V]):
     async def get(self, key: K, fetch: Callable[[], Awaitable[V]]) -> V:
         """The kept answer for ``key``, else ``fetch``'s, kept.
 
+        An answer is kept for the bound from when it arrives, as the file
+        cache keeps a read from when it lands, so a fetch slower than the
+        bound is not expired as it arrives.
+
         Args:
             key (K): the question.
             fetch (Callable[[], Awaitable[V]]): asks the service.
@@ -76,7 +80,9 @@ class ResponseCache(Generic[K, V]):
         # A clear while the service answered may be for the very write
         # this answer predates, so it is handed back but not kept.
         if generation == self._generation:
-            expires = None if self._ttl is None else now + self._ttl
+            expires = (
+                None if self._ttl is None else time.monotonic() + self._ttl
+            )
             self._answers[key] = (expires, value)
         return value
 

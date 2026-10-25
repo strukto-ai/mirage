@@ -49,7 +49,11 @@ export class ResponseCache<K, V> {
     }
   }
 
-  /** The kept answer for `key`, else `fetch`'s, kept. */
+  /**
+   * The kept answer for `key`, else `fetch`'s, kept. An answer is kept for
+   * the bound from when it arrives, as the file cache keeps a read from when
+   * it lands, so a fetch slower than the bound is not expired as it arrives.
+   */
   async get(key: K, fetch: () => Promise<V>): Promise<V> {
     if (this.ttl !== null && this.ttl <= 0) return fetch()
     const now = Date.now()
@@ -60,7 +64,10 @@ export class ResponseCache<K, V> {
     // A clear while the service answered may be for the very write this
     // answer predates, so it is handed back but not kept.
     if (generation === this.generation) {
-      this.answers.set(key, { expires: this.ttl === null ? null : now + this.ttl * 1000, value })
+      this.answers.set(key, {
+        expires: this.ttl === null ? null : Date.now() + this.ttl * 1000,
+        value,
+      })
     }
     return value
   }

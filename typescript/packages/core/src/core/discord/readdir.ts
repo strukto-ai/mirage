@@ -23,7 +23,7 @@ import { DiscordApiError } from './client.ts'
 import { channelEntry, guildEntry, historyEntry, memberEntry, snowflakeToDate } from './entry.ts'
 import { fileBlobName, isListed } from './files.ts'
 import { listGuilds } from './guilds.ts'
-import { listMessagesForDay } from './history.ts'
+import { listedMessagesForDay } from './history.ts'
 import { listMembers } from './members.ts'
 import { jsonlBytes } from '../render/json.ts'
 import { detectScope } from './scope.ts'
@@ -147,7 +147,7 @@ async function dayListing(
 ): Promise<DirListing> {
   let messages
   try {
-    messages = await listMessagesForDay(accessor, channelId, dateStr)
+    messages = await listedMessagesForDay(accessor, channelId, dateStr)
   } catch (e) {
     // A soft error is not the channel saying the day's messages are gone,
     // so the empty day must not evict what it held.
