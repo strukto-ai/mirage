@@ -1,21 +1,11 @@
-from dataclasses import dataclass
-
-from mirage.commands.builtin.grep_select import WalkFilters
-from mirage.commands.builtin.types import RegexSyntax
-from mirage.commands.builtin.utils.constants import GREP_STDIN_LABEL
-
-
-@dataclass(frozen=True, slots=True)
-class GrepFlags:
-    """Parsed grep flags (TS FlagSet parity); the complete set grep honors."""
-
-    ignore_case: bool
-    invert: bool
-
 import pytest
 
 from mirage.commands.builtin.generic.grep import parse_flags
-from mirage.commands.builtin.grep_binary import group_line, name_end, valid_utf8
+from mirage.commands.builtin.grep_binary import (
+    group_line,
+    name_end,
+    valid_utf8,
+)
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 
