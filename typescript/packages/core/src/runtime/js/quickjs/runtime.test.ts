@@ -107,7 +107,8 @@ class SlowRAMVFS extends RAMVFS {
 it('a deadline joins the landing of what a stopped guest wrote', async () => {
   // The run's end closes the file it left open, which takes longer than a
   // plain abort's grace: the stop names a signal, so the line waits for it,
-  // as a kill's does.
+  // as a kill's does. The stderr the guest wrote before the stop reaches the
+  // line only as its run ends, and is kept.
   const ws = new Workspace(
     { '/data': new SlowRAMVFS() },
     {
@@ -118,9 +119,9 @@ it('a deadline joins the landing of what a stopped guest wrote', async () => {
   )
   try {
     const io = await ws.shell(
-      `timeout 1 node -e "const f = std.open('/data/o', 'w'); f.puts('kept'); for (;;) {}"; cat /data/o`,
+      `timeout 1 node -e "std.err.puts('warn\\n'); const f = std.open('/data/o', 'w'); f.puts('kept'); for (;;) {}"; cat /data/o`,
     )
-    expect(io.stdoutText).toBe('kept')
+    expect([io.stdoutText, io.stderrText]).toEqual(['kept', 'warn\n'])
   } finally {
     await ws.close()
   }
