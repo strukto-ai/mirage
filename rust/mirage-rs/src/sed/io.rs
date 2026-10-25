@@ -1,6 +1,6 @@
-use std::collections::VecDeque;
 use std::task::Poll;
 
+pub(super) use crate::request::Io;
 use crate::request::{Opening, Reply, Request, bytes};
 
 /// How much output, or what one file holds, waits before it goes to the
@@ -51,36 +51,6 @@ pub(super) fn read_error(name: &[u8], failure: &Failure) -> Vec<u8> {
         b"\n",
     ]
     .concat()
-}
-
-/// The requests a run waits on, in the order it asks.
-#[derive(Default)]
-pub(super) struct Io {
-    pub(super) requests: VecDeque<Request>,
-    pub(super) in_flight: Option<Request>,
-    next_fd: u32,
-}
-
-impl Io {
-    pub(super) fn idle(&self) -> bool {
-        self.requests.is_empty() && self.in_flight.is_none()
-    }
-
-    pub(super) fn fd(&mut self) -> u32 {
-        self.next_fd += 1;
-        self.next_fd
-    }
-
-    pub(super) fn push(&mut self, request: Request) {
-        self.requests.push_back(request);
-    }
-
-    pub(super) fn take(&mut self, data: &mut Vec<u8>) -> Option<Vec<u8>> {
-        let mut request = self.requests.pop_front()?;
-        let header = request.encode(data);
-        self.in_flight = Some(request);
-        Some(header)
-    }
 }
 
 /// A line and whether a newline ended it.

@@ -14,31 +14,34 @@
 
 
 from mirage.accessor.base import Accessor
-from mirage.commands.builtin.generic.crossmount.utils import (
-    transfer_primitives,
-)
-from mirage.commands.builtin.generic.split import (
-    parse_bytes_value,
-    parse_chunks_value,
-    parse_lines_value,
-    parse_separator,
-    parse_suffix_length,
-    parse_suffix_start,
-)
-from mirage.commands.builtin.generic.split import (
-    split_generic as generic_split,
-)
 from mirage.commands.builtin.generic_bind.adapter import GenericCommand
 from mirage.commands.builtin.generic_bind.files import (
     command_files,
     resolve_or_empty,
 )
 from mirage.commands.builtin.utils.links import dispatch_of
+from mirage.commands.builtin.utils.operands import normalized_read
+from mirage.commands.builtin.utils.stream_host import (
+    StreamHost,
+    hosted_stream,
+)
 from mirage.commands.config import Context
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.types import ByteSource, IOResult
-from mirage.types import PathSpec
+from mirage.shell.bytes import byte_view
+from mirage.types import JsonValue, PathSpec
+
+FLAGS = (
+    "lines",
+    "bytes",
+    "number",
+    "suffix_length",
+    "numeric_suffixes",
+    "hex_suffixes",
+    "additional_suffix",
+    "separator",
+)
 
 
 async def split(
@@ -50,68 +53,26 @@ async def split(
     files = command_files(ctx, paths)
     fl = FlagView(ctx.flags, spec=SPECS["split"])
     paths = await resolve_or_empty(files, paths)
-    # as_str, not `x or y`: the latter would swallow an explicitly empty
-    # value, which GNU rejects loudly (`split -b ''` is an invalid number,
-    # not an absent flag).
-    lines_value = fl.as_str("lines")
-    bytes_value = fl.as_str("bytes")
-    number_value = fl.as_str("number")
-    numeric_value = fl.raw("numeric_suffixes")
-    hex_value = fl.raw("hex_suffixes")
-    length_value = fl.as_str("suffix_length")
-    # GNU reads an explicit `-a 0` as "revert to auto width": names start
-    # at the default length of 2 and keep auto-lengthening. An explicit
-    # width or an explicit start value pins the width instead.
-    suffix_len_raw = (
-        parse_suffix_length(length_value) if length_value is not None else None
-    )
-    suffix_len = suffix_len_raw or 2
-    suffix_auto = (
-        not suffix_len_raw
-        and not isinstance(numeric_value, str)
-        and not isinstance(hex_value, str)
-    )
-    suffix_start = (
-        parse_suffix_start(numeric_value, False, suffix_len)
-        if isinstance(numeric_value, str)
-        else parse_suffix_start(hex_value, True, suffix_len)
-        if isinstance(hex_value, str)
-        else 0
-    )
+    # mirage-rs reads each value as typed, so an explicitly empty one is
+    # refused as GNU refuses it; -d and -x come as `true` without one.
+    config: dict[str, JsonValue] = {
+        name: value if isinstance(value, bool) else byte_view(value)
+        for name in FLAGS
+        if isinstance(value := fl.raw(name), (str, bool))
+    }
+    config["operands"] = [byte_view(path.raw_path) for path in paths]
     # The pieces go to the prefix, or `x` in the working directory, which
-    # need not be this mount, so a dispatcher routes each write to the
-    # mount that owns it.
-    dispatch = dispatch_of(ctx)
-    write_bytes = (
-        transfer_primitives(dispatch)["write"]
-        if dispatch is not None
-        else files.write
-    )
-    return await generic_split(
+    # need not be this mount, so the dispatcher routes each write.
+    host = StreamHost(
         paths,
-        read_stream=files.read,
-        write_bytes=write_bytes,
-        stdin=ctx.stdin,
-        lines_per_file=(
-            parse_lines_value(lines_value) if lines_value is not None else 0
-        ),
-        byte_limit=(
-            parse_bytes_value(bytes_value) if bytes_value is not None else 0
-        ),
-        chunks=(
-            parse_chunks_value(number_value)
-            if number_value is not None
-            else None
-        ),
-        suffix_len=suffix_len,
-        suffix_auto=suffix_auto,
-        numeric_suffix=numeric_value is not None,
-        hex_suffix=hex_value is not None,
-        suffix_start=suffix_start,
-        additional_suffix=fl.as_str("additional_suffix") or "",
-        separator=parse_separator(fl.as_str("separator")),
-        cwd=ctx.cwd.virtual,
+        normalized_read(files.read),
+        ctx.stdin,
+        dispatch_of(ctx),
+        ctx.cwd,
+        command="split",
     )
+    io = IOResult()
+    return hosted_stream("split", config, host, io), io
 
 
 BUILDER = GenericCommand("split", split, write=True)

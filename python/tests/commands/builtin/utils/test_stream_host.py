@@ -33,8 +33,6 @@ def _host(files: dict[str, bytes], stdin: bytes = b"") -> StreamHost:
         _chunks(*stdin.split(b"|")) if stdin else None,
         None,
         ROOT_CWD,
-        None,
-        lambda path: True,
     )
 
 
@@ -116,9 +114,7 @@ async def test_a_replacement_lands_whole_once_flushed() -> None:
     async def stream(path: PathSpec) -> AsyncIterator[bytes]:
         yield files[path.virtual]
 
-    host = StreamHost(
-        [], stream, None, dispatch, ROOT_CWD, None, lambda path: True
-    )
+    host = StreamHost([], stream, None, dispatch, ROOT_CWD)
     replace: dict[str, JsonValue] = {
         "op": "write",
         "path": "/out",
@@ -190,9 +186,7 @@ async def test_an_error_reply_carries_its_words_as_bytes() -> None:
     async def stream(path: PathSpec) -> AsyncIterator[bytes]:
         yield b""
 
-    host = StreamHost(
-        [], stream, None, dispatch, ROOT_CWD, None, lambda path: True
-    )
+    host = StreamHost([], stream, None, dispatch, ROOT_CWD)
     write: dict[str, JsonValue] = {
         "op": "write",
         "path": "/o",

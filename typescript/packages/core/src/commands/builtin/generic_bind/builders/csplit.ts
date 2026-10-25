@@ -12,33 +12,40 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { csplitGeneric } from '../../generic/csplit.ts'
+import { type util } from 'zod'
+
 import type { CommandFn } from '../../../config.ts'
+import { specOf } from '../../../spec/builtins.ts'
+import { FlagView } from '../../../spec/flag_view.ts'
+import { IOResult } from '../../../../io/types.ts'
+import { byteView, utf8Locale } from '../../../../shell/bytes.ts'
+import { StreamHost, hostedStream } from '../../utils/stream_host.ts'
 import type { GenericCommand } from '../adapter.ts'
 import { commandFiles, resolveOrEmpty } from '../files.ts'
-import { dispatchOf } from '../../utils/links.ts'
 
 const csplit: CommandFn = async (_accessor, paths, texts, ctx) => {
   const files = commandFiles(ctx, paths)
+  const fl = new FlagView(ctx.flags, specOf('csplit'))
   const resolved = await resolveOrEmpty(files, paths)
+  const digits = fl.asText('digits')
+  const suffixFormat = fl.asStr('suffix_format')
+  const config: Record<string, util.JSONType> = {
+    prefix: byteView(fl.asPath('prefix')?.rawPath ?? 'xx'),
+    keep: fl.asBool('keep_files'),
+    silent: fl.asBool('quiet') || fl.asBool('silent'),
+    suppress: fl.asBool('suppress_matched'),
+    elide: fl.asBool('elide_empty_files'),
+    utf8: utf8Locale(ctx.env),
+    operands: [...resolved.map((path) => path.rawPath), ...texts].map((word) => byteView(word)),
+  }
+  if (digits !== undefined) config.digits = byteView(digits)
+  if (typeof suffixFormat === 'string') config.suffix_format = byteView(suffixFormat)
   // The pieces go to the prefix, or `xx` in the working directory, which
   // need not be this mount, so the dispatcher routes each write, and the
-  // removal of a failed run's pieces, to the mount that owns it. Mirrors
-  // the Python builder.
-  const dispatch = dispatchOf(ctx)
-  if (dispatch === undefined) throw new TypeError('csplit: no workspace files')
-  return csplitGeneric(
-    resolved,
-    texts,
-    ctx,
-    files.read,
-    async (p, d) => {
-      await dispatch('write', p, [d])
-    },
-    async (p) => {
-      await dispatch('unlink', p)
-    },
-  )
+  // removal of a failed run's pieces. Mirrors the Python builder.
+  const host = new StreamHost(resolved, files.read, ctx, true, 'csplit')
+  const io = new IOResult()
+  return [hostedStream('csplit', config, host, io, ctx.signal), io]
 }
 
 export const BUILDER: GenericCommand = {

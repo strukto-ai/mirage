@@ -44,7 +44,7 @@ function host(
     yield ENC.encode(content)
   }
   const ctx = { stdin, flags: {}, cwd: PathSpec.fromStrPath('/') } as unknown as Context
-  return new StreamHost([spec('/a.txt')], stream, ctx, () => true)
+  return new StreamHost([spec('/a.txt')], stream, ctx)
 }
 
 describe('StreamHost', () => {
@@ -91,12 +91,7 @@ describe('StreamHost', () => {
       cwd: PathSpec.fromStrPath('/'),
       vfs: new Files(dispatch, null, null, { ledger: false }),
     } as unknown as Context
-    const h = new StreamHost(
-      [],
-      () => parts(),
-      ctx,
-      () => true,
-    )
+    const h = new StreamHost([], () => parts(), ctx)
     await h.serve({ op: 'write', path: '/out', atomic: true }, ENC.encode('new '))
     await h.serve({ op: 'spool', fd: 4 }, ENC.encode('tail'))
     await h.serve({ op: 'write', path: '/out', append: true, spool: 4 }, new Uint8Array())
@@ -128,7 +123,7 @@ describe('StreamHost', () => {
       cwd: PathSpec.fromStrPath('/'),
       signal: controller.signal,
     } as unknown as Context
-    const h = new StreamHost([spec('/a.txt')], stalled, ctx, () => true)
+    const h = new StreamHost([spec('/a.txt')], stalled, ctx)
     const pending = h.serve({ op: 'read', fd: 1, path: '/a.txt', operand: 1 }, new Uint8Array())
     controller.abort()
     await expect(pending).rejects.toMatchObject({ name: 'AbortError' })

@@ -94,18 +94,6 @@ export const SUFFIXED_COUNT_PATTERN = new RegExp(
 // as a bad suffix rather than as too-large.
 export const CMP_SIZE_UNITS = sizeSuffixes('kKMGTPEZY')
 
-// GNU split's letter set: every uppercase power letter plus b, and lowercase
-// k/m only (pinned against coreutils 9.7). Unlike od, split is base-10 only:
-// hex and octal spellings are invalid numbers.
-export const SPLIT_BYTE_UNITS = sizeSuffixes('bkKmMEGPQRTYZ')
-export const SPLIT_BYTE_SUFFIXES = Object.keys(SPLIT_BYTE_UNITS).sort((a, b) => b.length - a.length)
-export const SPLIT_COUNT_PATTERN = new RegExp(`^${C_SPACE}\\+?[0-9]+$`)
-// Suffix start values are the exception to the grammar above: coreutils 9.7
-// rejects both `--numeric-suffixes=+5` and `=" 5"`, so they keep the strict
-// digits-only form.
-export const SPLIT_DIGITS = /^[0-9]+$/
-export const SPLIT_HEX_DIGITS = /^[0-9a-f]+$/
-
 // gzip 1.13's file naming. The suffix gzip writes and looks for unless -S
 // names another; the suffixes it always recognizes on a name it
 // decompresses, compared without regard to ASCII case; the ones it tries in

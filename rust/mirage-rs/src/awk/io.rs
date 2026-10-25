@@ -371,7 +371,7 @@ impl Io {
             let data = std::mem::take(&mut self.held);
             self.push(Request::Spool { fd, data });
         }
-        self.push(Request::Emit { fd });
+        self.push(Request::Emit { fd, window: None });
     }
 
     pub(super) fn stdout(&mut self, body: &[u8]) {

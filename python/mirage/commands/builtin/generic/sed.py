@@ -2,20 +2,21 @@ import json
 import posixpath
 import re
 from collections.abc import (
-    AsyncIterator,
     Awaitable,
     Callable,
     Mapping,
     Sequence,
 )
-from contextlib import aclosing
 from dataclasses import dataclass
 
 from mirage.commands.builtin.constants import SED_MISSING_SCRIPT
 from mirage.commands.builtin.utils.links import dispatch_of
 from mirage.commands.builtin.utils.operands import normalized_read
 from mirage.commands.builtin.utils.stream import is_stdin
-from mirage.commands.builtin.utils.stream_host import StreamHost
+from mirage.commands.builtin.utils.stream_host import (
+    StreamHost,
+    hosted_stream,
+)
 from mirage.commands.config import Context
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
@@ -24,9 +25,8 @@ from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import fs_strerror
 from mirage.errors.posix import posix_phrase
 from mirage.errors.types import FsCondition
-from mirage.io.stream import drain
 from mirage.io.types import ByteSource, IOResult, materialize
-from mirage.rs.stream import open_stream, serve_requests
+from mirage.rs.stream import open_stream
 from mirage.shell.bytes import byte_view, encode_text, utf8_locale
 from mirage.types import JsonValue, PathSpec, PolymorphicReadFn
 
@@ -54,45 +54,8 @@ def _line_length(raw: str | None) -> int:
     return 0 if width >> 31 else width
 
 
-def _served_here(path: PathSpec) -> bool:
-    """Every operand reads through the mount sed runs on, which resolved
-    it.
-
-    Args:
-        path (PathSpec): the operand.
-    """
-    return True
-
-
 def _failed(stderr: str, exit_code: int) -> tuple[None, IOResult]:
     return None, IOResult(exit_code=exit_code, stderr=encode_text(stderr))
-
-
-async def _sed_stream(
-    config: Mapping[str, JsonValue], host: StreamHost, io: IOResult
-) -> AsyncIterator[bytes]:
-    """Run the script, yielding its output as it settles; output closed
-    early still lets what the script wrote to its files land. The engine
-    opens on the first pull, so output closed before one holds none.
-
-    Args:
-        config (Mapping[str, JsonValue]): the sed engine's configuration.
-        host (StreamHost): serves the inputs and files it reaches.
-        io (IOResult): receives the exit status and stderr.
-    """
-    engine = open_stream("sed", config)
-    try:
-        async with aclosing(serve_requests(engine, host)) as output:
-            async for chunk in output:
-                yield chunk
-    except GeneratorExit:
-        if engine.cancel():
-            await drain(serve_requests(engine, host))
-        raise
-    finally:
-        io.exit_code = engine.status()
-        io.stderr = await host.errors.output()
-        await host.close()
 
 
 @dataclass(frozen=True, slots=True)
@@ -316,12 +279,10 @@ async def sed_generic(
         ctx.stdin,
         dispatch_of(ctx),
         ctx.cwd,
-        None,
-        _served_here,
         dash=not parsed.in_place,
     )
     io = IOResult()
-    return _sed_stream(config, host, io), io
+    return hosted_stream("sed", config, host, io), io
 
 
 __all__ = ["sed_generic", "sed_writes"]
