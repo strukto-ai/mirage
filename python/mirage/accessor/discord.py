@@ -29,7 +29,7 @@ class DiscordAccessor(SessionAccessor):
         self.config = config
         self.time_range = time_range
         self.listed_day = ResponseCache[
-            tuple[str, str], list[dict[str, Any]]
+            tuple[int, str, str], list[dict[str, Any]]
         ]()
 
     def caches(self) -> Iterable[ResponseCache[Any, Any]]:
