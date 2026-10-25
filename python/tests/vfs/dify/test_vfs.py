@@ -10,6 +10,7 @@ from mirage.vfs.dify import DifyConfig, DifyVFS
 from mirage.vfs.registry import REGISTRY, build_vfs
 from tests.fixtures.mount_commands import mount_commands
 from tests.fixtures.vfs_io import StubAccessor, served, vfs_over
+from tests.vfs.dify.conftest import document
 
 
 @pytest.mark.asyncio
@@ -123,24 +124,6 @@ async def test_dify_vfs_close_closes_shared_client():
 
     assert session.closed is True
     assert vfs.accessor.pool._session is None
-
-
-def document(document_id: str, name: str, slug: str | None = None) -> dict:
-    metadata = []
-    if slug is not None:
-        metadata = [{"name": "slug", "value": slug}]
-    return {
-        "id": document_id,
-        "name": name,
-        "doc_metadata": metadata,
-        "enabled": True,
-        "indexing_status": "completed",
-        "archived": False,
-        "tokens": 4,
-        "data_source_type": "upload_file",
-        "data_source_detail_dict": {"upload_file": {"size": 12}},
-        "created_at": 1716282000,
-    }
 
 
 def accessor() -> StubAccessor:
