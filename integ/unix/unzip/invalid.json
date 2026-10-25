@@ -27,7 +27,7 @@
       "command": "mkdir -p /data/punzi && printf 'plain text' > /data/punzi/plain.zip && unzip -l /data/punzi/plain.zip",
       "expect": {
         "exit": 9,
-        "stdout": "",
+        "stdout": "Archive:  /data/punzi/plain.zip\n",
         "stderr": "  End-of-central-directory signature not found.  Either this file is not\n  a zipfile, or it constitutes one disk of a multi-part archive.  In the\n  latter case the central directory and zipfile comment will be found on\n  the last disk(s) of this archive.\nunzip:  cannot find zipfile directory in one of /data/punzi/plain.zip or\n        /data/punzi/plain.zip.zip, and cannot find /data/punzi/plain.zip.ZIP, period.\n"
       },
       "flags": [
@@ -61,7 +61,7 @@
       "command": "printf '' > /data/punzi/empty.zip && unzip /data/punzi/empty.zip",
       "expect": {
         "exit": 9,
-        "stdout": "",
+        "stdout": "Archive:  /data/punzi/empty.zip\n",
         "stderr": "  End-of-central-directory signature not found.  Either this file is not\n  a zipfile, or it constitutes one disk of a multi-part archive.  In the\n  latter case the central directory and zipfile comment will be found on\n  the last disk(s) of this archive.\nunzip:  cannot find zipfile directory in one of /data/punzi/empty.zip or\n        /data/punzi/empty.zip.zip, and cannot find /data/punzi/empty.zip.ZIP, period.\n"
       }
     },
@@ -161,7 +161,7 @@
       "command": "echo 'UEsDBBQAAAAAAC48NF2GphA2BQAAAAUAAAAMAAAAZG9jdW1lbnQudHh0aGVsbG9YWFhYFAMUAAAAAAAuPDRdhqYQNgUAAAAFAAAADAAAAAAAAAAAAAAAgAEAAAAAZG9jdW1lbnQudHh0UEsFBgAAAAABAAEAOgAAAC8AAAAAAA==' | base64 -d > /data/punzi/badcd.zip && unzip -l /data/punzi/badcd.zip",
       "expect": {
         "exit": 3,
-        "stdout": "",
+        "stdout": "Archive:  /data/punzi/badcd.zip\n",
         "stderr": "error [/data/punzi/badcd.zip]:  start of central directory not found;\n  zipfile corrupt.\n  (please check that you have transferred or created the zipfile in the\n  appropriate BINARY mode and that you have compiled UnZip properly)\n"
       },
       "flags": [
@@ -195,7 +195,7 @@
       "command": "echo 'UEsDBBQAAAAIAC48NF0AAAAAAgAAAAAAAAAEAAAAZGlyLwMAUEsDBBQAAAAIAC48NF1Y8JpZBgAAAMgAAAAJAAAAZGlyL2EudHh0S0wcHgAAUEsDBBQAAAAIAC48NF35775xAwAAAAEAAAAFAAAAYi50eHRLAgBQSwECFAMUAAAACAAuPDRdAAAAAAIAAAAAAAAABAAAAAAAAAAAABAA/UEAAAAAZGlyL1BLAQIUAxQAAAAIAC48NF1Y8JpZBgAAAMgAAAAJAAAAAAAAAAAAAACAASQAAABkaXIvYS50eHRQSwECFAMUAAAACAAuPDRd+e++cQMAAAABAAAABQAAAAAAAAAAAAAAgAFRAAAAYi50eHRQSwUGAAAAAAMAAgCcAAAAdwAAAAAA' | base64 -d > /data/punzi/short.zip && unzip -l /data/punzi/short.zip",
       "expect": {
         "exit": 3,
-        "stdout": "",
+        "stdout": "Archive:  /data/punzi/short.zip\n",
         "stderr": "error [/data/punzi/short.zip]:  start of central directory not found;\n  zipfile corrupt.\n  (please check that you have transferred or created the zipfile in the\n  appropriate BINARY mode and that you have compiled UnZip properly)\n"
       },
       "flags": [
@@ -419,6 +419,185 @@
         "o",
         "q",
         "d"
+      ]
+    },
+    {
+      "id": "unzip_adds_zip_or_ZIP_to_a_name_with_nothing_there",
+      "seq": 15100760,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(mkdir -p /data/unzsx && printf %s 'UEsDBBQAAAAIAC48NF0AAAAAAgAAAAAAAAAEAAAAZGlyLwMAUEsDBBQAAAAIAC48NF1Y8JpZBgAAAMgAAAAJAAAAZGlyL2EudHh0S0wcHgAAUEsDBBQAAAAIAC48NF35775xAwAAAAEAAAAFAAAAYi50eHRLAgBQSwECFAMUAAAACAAuPDRdAAAAAAIAAAAAAAAABAAAAAAAAAAAABAA/UEAAAAAZGlyL1BLAQIUAxQAAAAIAC48NF1Y8JpZBgAAAMgAAAAJAAAAAAAAAAAAAACAASQAAABkaXIvYS50eHRQSwECFAMUAAAACAAuPDRd+e++cQMAAAABAAAABQAAAAAAAAAAAAAAgAFRAAAAYi50eHRQSwUGAAAAAAMAAwCcAAAAdwAAAAAA' | base64 -d > /data/unzsx/m.zip && cd /data/unzsx && mkdir -p dd && printf k > dd/k && cp m.zip dd.zip && unzip -l m && unzip -t dd && unzip -Z1 m && unzip -p ./m b.txt && echo && printf junk > j.zip; unzip -l j; echo rc=$?; cd / && rm -r /data/unzsx)",
+      "expect": {
+        "exit": 0,
+        "stdout": "Archive:  m.zip\n  Length      Date    Time    Name\n---------  ---------- -----   ----\n        0  2026-09-20 07:33   dir/\n      200  2026-09-20 07:33   dir/a.txt\n        1  2026-09-20 07:33   b.txt\n---------                     -------\n      201                     3 files\nArchive:  dd.zip\n    testing: dir/                     OK\n    testing: dir/a.txt                OK\n    testing: b.txt                    OK\nNo errors detected in compressed data of dd.zip.\ndir/\ndir/a.txt\nb.txt\nb\nArchive:  j.zip\nrc=9\n",
+        "stderr": "  End-of-central-directory signature not found.  Either this file is not\n  a zipfile, or it constitutes one disk of a multi-part archive.  In the\n  latter case the central directory and zipfile comment will be found on\n  the last disk(s) of this archive.\nunzip:  cannot find zipfile directory in one of j or\n        j.zip, and cannot find j.ZIP, period.\n"
+      }
+    },
+    {
+      "id": "unzip_names_a_missing_archive_and_both_suffixes",
+      "seq": 15100761,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(mkdir -p /data/unzsn && printf %s 'UEsDBBQAAAAIAC48NF0AAAAAAgAAAAAAAAAEAAAAZGlyLwMAUEsDBBQAAAAIAC48NF1Y8JpZBgAAAMgAAAAJAAAAZGlyL2EudHh0S0wcHgAAUEsDBBQAAAAIAC48NF35775xAwAAAAEAAAAFAAAAYi50eHRLAgBQSwECFAMUAAAACAAuPDRdAAAAAAIAAAAAAAAABAAAAAAAAAAAABAA/UEAAAAAZGlyL1BLAQIUAxQAAAAIAC48NF1Y8JpZBgAAAMgAAAAJAAAAAAAAAAAAAACAASQAAABkaXIvYS50eHRQSwECFAMUAAAACAAuPDRd+e++cQMAAAABAAAABQAAAAAAAAAAAAAAgAFRAAAAYi50eHRQSwUGAAAAAAMAAwCcAAAAdwAAAAAA' | base64 -d > /data/unzsn/m.zip && cd /data/unzsn && mkdir -p d2 && printf k > d2/k && unzip -l nosuch; echo rc=$?; unzip -t nosuch; echo rc=$?; unzip -p nosuch; echo rc=$?; unzip -Z nosuch; echo rc=$?; unzip -Z1 nosuch.zip; echo rc=$?; unzip -l d2; echo rc=$?; cd / && rm -r /data/unzsn)",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=9\nunzip:  cannot find or open nosuch, nosuch.zip or nosuch.ZIP.\nrc=9\nrc=9\nzipinfo:  cannot find or open nosuch, nosuch.zip or nosuch.ZIP.\nrc=9\nrc=9\nrc=9\n",
+        "stderr": "unzip:  cannot find or open nosuch, nosuch.zip or nosuch.ZIP.\nzipinfo:  cannot find or open nosuch.zip, nosuch.zip.zip or nosuch.zip.ZIP.\nunzip:  cannot find or open d2, d2.zip or d2.ZIP.\n"
+      },
+      "flags": [
+        "p",
+        "t",
+        "Z"
+      ]
+    },
+    {
+      "id": "unzip_reports_an_empty_archive_in_every_mode",
+      "seq": 15100762,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(mkdir -p /data/unzse && printf %s 'UEsFBgAAAAAAAAAAAAAAAAAAAAAOAG9ubHkgYSBjb21tZW50' | base64 -d > /data/unzse/e.zip && cd /data/unzse && unzip -l e.zip; echo rc=$?; unzip -lq e.zip; echo rc=$?; unzip -t e.zip; echo rc=$?; unzip -p e.zip; echo rc=$?; unzip -d o e.zip; echo rc=$?; unzip -Z e.zip; echo rc=$?; unzip -Z1 e.zip; echo rc=$?; ls; cd / && rm -r /data/unzse)",
+      "expect": {
+        "exit": 0,
+        "stdout": "Archive:  e.zip\nonly a comment\nrc=1\nrc=1\nArchive:  e.zip\nonly a comment\nwarning [e.zip]:  zipfile is empty\nrc=1\nrc=1\nArchive:  e.zip\nonly a comment\nrc=1\nArchive:  e.zip\nZip file size: 36 bytes, number of entries: 0\nEmpty zipfile.\nrc=1\nEmpty zipfile.\nrc=1\ne.zip\n",
+        "stderr": "warning [e.zip]:  zipfile is empty\nwarning [e.zip]:  zipfile is empty\nwarning [e.zip]:  zipfile is empty\nwarning [e.zip]:  zipfile is empty\n"
+      },
+      "flags": [
+        "l",
+        "q",
+        "t",
+        "p",
+        "d",
+        "Z"
+      ]
+    },
+    {
+      "id": "unzip_names_the_archive_before_refusing_it",
+      "seq": 15100763,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(mkdir -p /data/unzsb && printf %s 'UEsDBBQAAAAAAC48NF2GphA2BQAAAAUAAAAMAAAAZG9jdW1lbnQudHh0aGVsbG9YWFhYFAMUAAAAAAAuPDRdhqYQNgUAAAAFAAAADAAAAAAAAAAAAAAAgAEAAAAAZG9jdW1lbnQudHh0UEsFBgAAAAABAAEAOgAAAC8AAAAAAA==' | base64 -d > /data/unzsb/bad.zip && cd /data/unzsb && printf junk > j.zip && unzip -lq j.zip; echo rc=$?; unzip -t bad.zip; echo rc=$?; unzip -Z j.zip; echo rc=$?; unzip -Zh bad.zip; echo rc=$?; unzip -Zt bad.zip; echo rc=$?; cd / && rm -r /data/unzsb)",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=9\nArchive:  bad.zip\nerror [bad.zip]:  start of central directory not found;\n  zipfile corrupt.\n  (please check that you have transferred or created the zipfile in the\n  appropriate BINARY mode and that you have compiled UnZip properly)\nrc=3\nArchive:  j.zip\n[j.zip]\n  End-of-central-directory signature not found.  Either this file is not\n  a zipfile, or it constitutes one disk of a multi-part archive.  In the\n  latter case the central directory and zipfile comment will be found on\n  the last disk(s) of this archive.\nzipinfo:  cannot find zipfile directory in one of j.zip or\n          j.zip.zip, and cannot find j.zip.ZIP, period.\nrc=9\nArchive:  bad.zip\nZip file size: 127 bytes, number of entries: 1\nrc=3\nerror [bad.zip]:  start of central directory not found;\n  zipfile corrupt.\n  (please check that you have transferred or created the zipfile in the\n  appropriate BINARY mode and that you have compiled UnZip properly)\nrc=3\n",
+        "stderr": "[j.zip]\n  End-of-central-directory signature not found.  Either this file is not\n  a zipfile, or it constitutes one disk of a multi-part archive.  In the\n  latter case the central directory and zipfile comment will be found on\n  the last disk(s) of this archive.\nunzip:  cannot find zipfile directory in one of j.zip or\n        j.zip.zip, and cannot find j.zip.ZIP, period.\nerror [bad.zip]:  start of central directory not found;\n  zipfile corrupt.\n  (please check that you have transferred or created the zipfile in the\n  appropriate BINARY mode and that you have compiled UnZip properly)\n"
+      },
+      "flags": [
+        "q",
+        "t",
+        "Z",
+        "h"
+      ]
+    },
+    {
+      "id": "unzip_a_name_ending_in_slash_opens_zip_inside_it",
+      "seq": 15100769,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(mkdir -p /data/unzsl/dir && printf %s 'UEsDBBQAAAAIAC48NF0AAAAAAgAAAAAAAAAEAAAAZGlyLwMAUEsDBBQAAAAIAC48NF1Y8JpZBgAAAMgAAAAJAAAAZGlyL2EudHh0S0wcHgAAUEsDBBQAAAAIAC48NF35775xAwAAAAEAAAAFAAAAYi50eHRLAgBQSwECFAMUAAAACAAuPDRdAAAAAAIAAAAAAAAABAAAAAAAAAAAABAA/UEAAAAAZGlyL1BLAQIUAxQAAAAIAC48NF1Y8JpZBgAAAMgAAAAJAAAAAAAAAAAAAACAASQAAABkaXIvYS50eHRQSwECFAMUAAAACAAuPDRd+e++cQMAAAABAAAABQAAAAAAAAAAAAAAgAFRAAAAYi50eHRQSwUGAAAAAAMAAwCcAAAAdwAAAAAA' | base64 -d > /data/unzsl/dir/.zip && printf %s 'UEsDBBQAAAAAAAAAIQDCQSQ1AwAAAAMAAAAFAAAAYS50eHRhYmNQSwMEFAAAAAAAAAAhAMJBJDUDAAAAAwAAAAUAAABiLnR4dGFiY1BLAQIUAxQAAAAAAAAAIQDCQSQ1AwAAAAMAAAAFAAAADwAAAAAAAACAAQAAAABhLnR4dGVudHJ5IGNvbW1lbnQNClBLAQIUAxQAAAAAAAAAIQDCQSQ1AwAAAAMAAAAFAAAAFAAAAAAAAACAASYAAABiLnR4dG90aGVyIGNvbW1lbnQAaGlkZGVuUEsFBgAAAAACAAIAiQAAAEwAAAAcAGFyY2hpdmUgY29tbWVudA0Kc2Vjb25kIGxpbmU=' | base64 -d > /data/unzsl/dir.zip && cd /data/unzsl && unzip -Z1 dir/ && unzip -l dir/ | head -n 1 && unzip -Z1 dir; cd / && rm -r /data/unzsl)",
+      "expect": {
+        "exit": 0,
+        "stdout": "dir/\ndir/a.txt\nb.txt\nArchive:  dir/.zip\na.txt\nb.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "Z",
+        "1",
+        "l"
       ]
     }
   ]

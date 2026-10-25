@@ -47,7 +47,6 @@ const LETTERS: Record<string, string> = {
   s: 's',
   m: 'm',
   h: 'h',
-  q: 'q',
   o: 'o',
   n: 'n',
 }
@@ -55,6 +54,7 @@ const LETTERS: Record<string, string> = {
 // The flags unzip reads, parsed once. Mirrors unzip.py's UnzipFlags.
 interface UnzipFlags {
   readonly letters: Readonly<Record<string, boolean>>
+  readonly quiet: number
   readonly dest: PathSpec | null
   readonly typed: boolean
   readonly excludes: readonly string[]
@@ -67,6 +67,8 @@ function parseFlags(fl: FlagView): UnzipFlags {
         Object.entries(LETTERS).map(([letter, flag]) => [letter, fl.asBool(flag)]),
       ),
     ),
+    // Only none, -q and -qq differ; mirage-rs takes a byte.
+    quiet: Math.min(fl.asInt('q', 0), 2),
     dest: fl.asPath('d') ?? null,
     typed: fl.raw('d') !== undefined,
     excludes: fl.asList('x'),
@@ -141,6 +143,7 @@ export function unzipGeneric(
     members: chosen.map((member) => byteView(member)),
     excludes: excludes.map((pattern) => byteView(pattern)),
     base: byteView(rstripSlash(extractDest(dest, ctx.cwd.virtual))),
+    q: flags.quiet,
     ...letters,
   }
   if (flags.typed) config.dest = byteView(dest?.rawPath ?? '')

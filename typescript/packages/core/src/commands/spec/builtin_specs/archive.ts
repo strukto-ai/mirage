@@ -68,7 +68,7 @@ export const SPECS: Record<string, CommandSpec> = {
       new Argument('-n', { action: 'store_true' }),
       new Argument('-l', { action: 'store_true' }),
       new Argument('-d', { type: 'path' }),
-      new Argument('-q', { action: 'store_true' }),
+      new Argument('-q', { action: 'count' }),
       new Argument('-p', { action: 'store_true' }),
       new Argument('-t', { action: 'store_true' }),
       new Argument('-v', { action: 'store_true' }),

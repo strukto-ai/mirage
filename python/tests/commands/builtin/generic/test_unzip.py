@@ -19,6 +19,7 @@ import pytest
 from mirage.types import MountMode
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
+from tests.fixtures.vfs_io import install, replaces
 
 
 def _zip_entries(entries: tuple[tuple[str, bytes], ...]) -> bytes:
@@ -86,3 +87,22 @@ async def test_a_read_only_mount_refuses_unzip_at_the_write(
         result.stderr,
     ) == (code, stdout, stderr)
     assert vfs._store.files == before
+
+
+@replaces("read", filetype=".zip")
+async def _rendered(accessor, path, **kwargs):
+    return b"RENDERED"
+
+
+@pytest.mark.asyncio
+async def test_a_name_with_zip_added_reads_the_stored_archive():
+    # The mount renders .zip reads; unzip opens a.zip for a, as it opens
+    # a.zip typed, from the bytes the store holds.
+    vfs = RAMVFS()
+    vfs._store.files["/a.zip"] = _zip_entries((("f.txt", b"hello\n"),))
+    ws = Workspace({"/m/": (vfs, MountMode.READ)})
+    install(ws.mount("/m"), [_rendered])
+    result = await ws.shell("unzip -p /m/a f.txt")
+    out = await result.materialize_stdout()
+    await ws.close()
+    assert (result.exit_code, out) == (0, b"hello\n")

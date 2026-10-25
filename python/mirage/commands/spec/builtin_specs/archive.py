@@ -108,7 +108,8 @@ SPECS: dict[str, CommandSpec] = {
             Argument("-n", action="store_true"),
             Argument("-l", action="store_true"),
             Argument("-d", type="path"),
-            Argument("-q", action="store_true"),
+            # -qq says less than -q.
+            Argument("-q", action="count"),
             Argument("-p", action="store_true"),
             Argument("-t", action="store_true"),
             # -v is -l's verbose table, or the version banner when no

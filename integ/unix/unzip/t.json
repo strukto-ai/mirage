@@ -1,0 +1,75 @@
+{
+  "cases": [
+    {
+      "id": "unzip_t_prints_the_archive_comment_unless_q",
+      "seq": 15100764,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(mkdir -p /data/unztc && printf %s 'UEsDBBQAAAAAAAAAIQDCQSQ1AwAAAAMAAAAFAAAAYS50eHRhYmNQSwMEFAAAAAAAAAAhAMJBJDUDAAAAAwAAAAUAAABiLnR4dGFiY1BLAQIUAxQAAAAAAAAAIQDCQSQ1AwAAAAMAAAAFAAAADwAAAAAAAACAAQAAAABhLnR4dGVudHJ5IGNvbW1lbnQNClBLAQIUAxQAAAAAAAAAIQDCQSQ1AwAAAAMAAAAFAAAAFAAAAAAAAACAASYAAABiLnR4dG90aGVyIGNvbW1lbnQAaGlkZGVuUEsFBgAAAAACAAIAiQAAAEwAAAAcAGFyY2hpdmUgY29tbWVudA0Kc2Vjb25kIGxpbmU=' | base64 -d > /data/unztc/c.zip && cd /data/unztc && unzip -t c.zip a.txt && unzip -tq c.zip; cd / && rm -r /data/unztc)",
+      "expect": {
+        "exit": 0,
+        "stdout": "Archive:  c.zip\narchive comment\nsecond line\n    testing: a.txt                    OK\nNo errors detected in c.zip for the 1 file tested.\nNo errors detected in compressed data of c.zip.\n",
+        "stderr": ""
+      },
+      "flags": [
+        "t",
+        "q"
+      ]
+    },
+    {
+      "id": "unzip_tqq_keeps_only_cautions_and_damage",
+      "seq": 15100765,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(mkdir -p /data/unztq && printf %s 'UEsDBBQAAAAIAC48NF0AAAAAAgAAAAAAAAAEAAAAZGlyLwMAUEsDBBQAAAAIAC48NF1Y8JpZBgAAAMgAAAAJAAAAZGlyL2EudHh0S0wcHgAAUEsDBBQAAAAIAC48NF35775xAwAAAAEAAAAFAAAAYi50eHRLAgBQSwECFAMUAAAACAAuPDRdAAAAAAIAAAAAAAAABAAAAAAAAAAAABAA/UEAAAAAZGlyL1BLAQIUAxQAAAAIAC48NF1Y8JpZBgAAAMgAAAAJAAAAAAAAAAAAAACAASQAAABkaXIvYS50eHRQSwECFAMUAAAACAAuPDRd+e++cQMAAAABAAAABQAAAAAAAAAAAAAAgAFRAAAAYi50eHRQSwUGAAAAAAMAAwCcAAAAdwAAAAAA' | base64 -d > /data/unztq/m.zip && printf %s 'UEsDBBQAAAAAAAAAIQAhMDo2BgAAAAYAAAAFAAAAYS50eHRoZWxsbwpQSwMEFAAAAAgAAAAhACE52zkQAAAAIQAAAAUAAABiLnR4dCvPL8pJUSjPTEnlKsfKBABQSwMEFAAAAAAAAAAhACAwOjYGAAAABgAAAAUAAABjLnR4dGhlbGxvClBLAQIUAxQAAAAAAAAAIQAhMDo2BgAAAAYAAAAFAAAAAAAAAAAAAACkgQAAAABhLnR4dFBLAQIUAxQAAAAIAAAAIQAhOds5EAAAACEAAAAFAAAAAAAAAAAAAACkgSkAAABiLnR4dFBLAQIUAxQAAAAAAAAAIQAgMDo2BgAAAAYAAAAFAAAAAAAAAAAAAACkgVwAAABjLnR4dFBLBQYAAAAAAwADAJkAAACFAAAAAAA=' | base64 -d > /data/unztq/crc.zip && cd /data/unztq && unzip -tqq m.zip; echo rc=$?; unzip -tqq m.zip b.txt nomatch; echo rc=$?; unzip -tqq m.zip -x '*'; echo rc=$?; unzip -tqq crc.zip; echo rc=$?; cd / && rm -r /data/unztq)",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=0\ncaution: filename not matched:  nomatch\nrc=11\nrc=11\na.txt                   bad CRC 363a3020  (should be 363a3021)\nb.txt                   bad CRC 39db39de  (should be 39db3921)\nrc=2\n",
+        "stderr": ""
+      },
+      "flags": [
+        "t",
+        "q",
+        "x"
+      ]
+    }
+  ]
+}

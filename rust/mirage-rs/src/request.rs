@@ -45,14 +45,16 @@ pub(crate) enum WriteMode {
     },
 }
 
-/// What a read opens: an operand still as typed, a name a program reads
-/// (where `-` and `/dev/stdin` are standard input), a file a script
-/// names, which no spelling of standard input stands for, or a spool the
-/// run filled, past its first `skip` bytes; a window, `size` bytes of a
-/// spool, comes whole in one reply and leaves nothing open.
+/// What a read opens: an operand still as typed, a name standing in for
+/// one (unzip's `X.zip` for `X`), read as that operand is, a name a
+/// program reads (where `-` and `/dev/stdin` are standard input), a file
+/// a script names, which no spelling of standard input stands for, or a
+/// spool the run filled, past its first `skip` bytes; a window, `size`
+/// bytes of a spool, comes whole in one reply and leaves nothing open.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Opening {
     Operand(usize),
+    AsOperand,
     Name,
     File,
     Spool { fd: u32, skip: u64 },
@@ -149,6 +151,10 @@ fn opening(put: &mut impl FnMut(&str, Json), path: &[u8], opening: Opening) {
         Opening::Operand(operand) => {
             put("path", latin1(path));
             put("operand", operand.into());
+        }
+        Opening::AsOperand => {
+            put("path", latin1(path));
+            put("as_operand", true.into());
         }
         Opening::File => {
             put("path", latin1(path));

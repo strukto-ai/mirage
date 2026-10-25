@@ -136,7 +136,11 @@ class StreamHost:
                 yield chunk
 
     def open_input(
-        self, name: str, operand: int | None, file: bool = False
+        self,
+        name: str,
+        operand: int | None,
+        file: bool = False,
+        as_operand: bool = False,
     ) -> AsyncIterator[bytes]:
         """Open an input by name.
 
@@ -145,10 +149,14 @@ class StreamHost:
             operand (int | None): The operand, from 1, the name came from.
             file (bool): a file a script names, which no spelling of
                 stdin stands for.
+            as_operand (bool): a name standing in for an operand (unzip's
+                ``X.zip`` for ``X``), read as an operand is.
         """
         if file:
             return self.read_path(name)
         path = self._operand(name, operand)
+        if path is None and as_operand:
+            path = PathSpec.from_str_path(name, cwd=self.cwd.virtual)
         if path is not None:
             if is_stdin(path, self.dash):
                 return self.stdin_view()
@@ -262,7 +270,12 @@ class StreamHost:
         index = operand if isinstance(operand, int) else None
         if self.command and (named := self._operand(name, index)):
             self.named[fd] = named
-        return self.open_input(name, index, request.get("file") is True)
+        return self.open_input(
+            name,
+            index,
+            request.get("file") is True,
+            request.get("as_operand") is True,
+        )
 
     def _failed(self, fd: int, exc: Exception) -> Served:
         """A failed input's reply, or raise what is not the file's own: the

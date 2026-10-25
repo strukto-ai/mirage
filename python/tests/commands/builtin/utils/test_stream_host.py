@@ -55,6 +55,19 @@ async def test_an_operand_as_typed_reads_through_the_mount() -> None:
 
 
 @pytest.mark.asyncio
+async def test_a_name_standing_in_for_an_operand_reads_as_one() -> None:
+    # Outside a workspace only the operand's reader can serve a name.
+    host = _host({"/a.txt.zip": b"stored\n"})
+    named: dict[str, JsonValue] = {"op": "read", "fd": 1, "path": "/a.txt.zip"}
+    assert (await host.serve(named, b"")).reply == {
+        "error": "No such file or directory",
+        "errno": "ENOENT",
+    }
+    stand_in: dict[str, JsonValue] = {**named, "fd": 2, "as_operand": True}
+    assert await host.serve(stand_in, b"") == ({}, b"stored\n", None)
+
+
+@pytest.mark.asyncio
 async def test_stdin_readers_share_one_cursor() -> None:
     host = _host({}, stdin=b"p\n|q\n")
     first = await host.serve({"op": "read", "fd": 1, "path": "-"}, b"")
