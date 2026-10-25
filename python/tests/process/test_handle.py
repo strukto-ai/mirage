@@ -55,11 +55,13 @@ async def test_a_finished_runner_reports_its_code_and_its_pid():
 
 
 @pytest.mark.asyncio
-async def test_a_failing_runner_exits_1_with_its_failure():
-    handle = ProcessHandle(_info(), _raises, lambda _pid: None)
-    handle.start()
+@pytest.mark.parametrize("eager", [False, True])
+async def test_a_failing_runner_exits_1_with_its_failure(eager):
+    finished: list[int] = []
+    handle = ProcessHandle(_info(), _raises, finished.append)
+    handle.start(eager)
     info = await handle.join()
-    assert (info.exit_code, info.failure) == (1, "boom")
+    assert (info.exit_code, info.failure, finished) == (1, "boom", [7])
 
 
 @pytest.mark.asyncio

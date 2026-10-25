@@ -177,4 +177,21 @@ describe('ProcessHandle', () => {
     order.push('returned')
     expect(order).toEqual(['run', 'returned'])
   })
+
+  // A runner that throws before it returns its promise fails like one
+  // whose promise rejects, so its slot is freed rather than held forever.
+  it('an eager runner that throws at once fails and finishes', async () => {
+    const finished: number[] = []
+    const handle = new ProcessHandle(
+      info(),
+      () => {
+        throw new Error('boom')
+      },
+      ignore,
+      (pid) => finished.push(pid),
+    )
+    handle.start(true)
+    const ended = await handle.join()
+    expect([ended.exitCode, ended.failure, finished]).toEqual([1, 'boom', [ended.pid]])
+  })
 })

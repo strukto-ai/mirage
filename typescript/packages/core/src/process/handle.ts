@@ -43,10 +43,12 @@ export class ProcessHandle {
    *
    * @param eager run it at once, up to its first wait, for a caller with
    *   nothing left to set up; otherwise it starts on the next microtask.
+   *   Either way a runner that throws before it returns its promise fails
+   *   as one whose promise rejects.
    */
   start(eager = false): void {
     const work = () => this.bind(this.current.executionId, this.run, this)
-    this.task = eager ? work() : Promise.resolve().then(work)
+    this.task = eager ? (async () => work())() : Promise.resolve().then(work)
     this.completion = this.task.then(
       (code) => this.settle(code, null, this.finished),
       (error: unknown) => {
