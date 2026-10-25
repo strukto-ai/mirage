@@ -86,7 +86,7 @@ impl Pattern {
         let anchored = pattern.contains(&SLASH);
         Self {
             head: anchored.then(|| pattern_head(pattern)),
-            depth: anchor_depth(pattern),
+            depth: if anchored { anchor_depth(pattern) } else { 0 },
             matcher: CompiledGlob::new(if anchored {
                 norm_abs(pattern)
             } else {
@@ -468,6 +468,23 @@ mod tests {
                 .collect(),
             ..Visibility::default()
         })
+    }
+
+    #[test]
+    fn hydrated_component_patterns_keep_zero_anchor_depth() {
+        let matcher = VisibilityMatcher::new(Visibility {
+            hidden: PathScope {
+                paths: Vec::new(),
+                patterns: vec![text("secret")],
+            },
+            shown: vec![Show {
+                path: text("/secret"),
+                mode: None,
+            }],
+            ..Visibility::default()
+        });
+        assert_eq!(matcher.hide_depth(&text("/secret/x")), Some(0));
+        assert!(matcher.path_visible(&text("/secret/x")));
     }
 
     #[test]
