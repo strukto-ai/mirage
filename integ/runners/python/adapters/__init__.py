@@ -3061,12 +3061,12 @@ def cli_install(
 ) -> tuple[CLI, dict[str, JsonValue] | None]:
     """The spec and config to install one CLI under its head word.
 
-    Every CLI here so far talks to an API, so its mock service hands
-    over both the tree and the credentials pointing at itself. `git` is
-    the first with neither: it reads a repository out of a mount, which
-    is what makes it installable from a bare name, so it resolves
-    through the registry the YAML ``clis:`` section uses and installs
-    with no config at all.
+    A CLI that talks to an API gets both the tree and the credentials
+    pointing at itself from its mock service. `git` and `search` need
+    neither: git reads a repository out of a mount and search asks a
+    mount's own search, which is what makes them installable from a
+    bare name, so they resolve through the registry the YAML ``clis:``
+    section uses and install with no config at all.
 
     Args:
         service (Service | None): the target's mock service, None for a
@@ -3075,7 +3075,7 @@ def cli_install(
     """
     if cli_name == "scope-probe":
         return COMMAND_CLI, None
-    if service is None:
+    if service is None or cli_name == "search":
         return cli_spec_for(cli_name), None
     # Widen the assert when another service grows a CLI.
     assert isinstance(

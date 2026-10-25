@@ -6,7 +6,7 @@ description: Set up a LanceDB connection for the LanceDB VFS.
 
 LanceDB mounts a table as a read-only filesystem: group-by columns become nested
 folders, each row is a card plus an optional blob file, and semantic search is
-the `search` command.
+the [`search` CLI](/home/setup/cli/search).
 
 ## Connection
 
@@ -40,7 +40,7 @@ LANCEDB_HOST_OVERRIDE=https://my-database.us-east-1.api.lancedb.com
 
 ## Search
 
-Search is the `search "<query>" <path>` command. It returns ranked rows as their
+Search is the [`search` CLI](/home/setup/cli/search)'s `search "<query>" <path>`. It returns ranked rows as their
 canonical `<id>.md` file paths plus a score, so results compose with `cat`, `wc`,
 and pipes (`grep`/`rg` stay lexical). It requires a table built with an embedding
 function on a source field, so `tbl.search(text)` auto-embeds the query.

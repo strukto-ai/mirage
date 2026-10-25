@@ -108,7 +108,7 @@ async def search_many(
     top_k = int_option(query, "top_k", 10)
     threshold = float_option(query, "threshold", 0.0)
     if text_option(query, "method", "semantic") != "semantic":
-        raise ValueError("search: only the 'semantic' method is supported")
+        raise ValueError("only the 'semantic' method is supported")
     targets, prefix = await search_scope(CHROMA_TREE, accessor, paths)
     return await search_segments(
         accessor,

@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { QdrantClient } from '@qdrant/js-client-rest'
-import { MountMode, QdrantVFS, Workspace, type FileStat } from '@struktoai/mirage-node'
+import { MountMode, QdrantVFS, SEARCH, Workspace, type FileStat } from '@struktoai/mirage-node'
 import { buildCollection, buildLineageCollection, embed } from './build_collection.ts'
 
 function client(): QdrantClient {
@@ -75,6 +75,7 @@ async function main(): Promise<void> {
     },
   })
   const ws = new Workspace({ '/fashion/': fashion, '/docs/': docs }, { mode: MountMode.READ })
+  ws.registerCli('search', SEARCH)
 
   console.log("=== mounted Qdrant collection 'fashion' at /fashion/ ===")
 

@@ -76,7 +76,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Mem0 mounted at `/<path>`.
 
     | Path | Supported |
     | --- | --- |
-    | `/<path>` | Commands that read files (`ls`, `cat`, `grep`, `find`, `jq` and the rest). Also `search`. |
+    | `/<path>` | Commands that read files (`ls`, `cat`, `grep`, `find`, `jq` and the rest). |
 
     #### Limitations of Unix Commands for VFS
 
@@ -114,7 +114,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Mem0 mounted at `/<path>`.
 
     | Path | Supported |
     | --- | --- |
-    | `/<path>` | Commands that read files (`ls`, `cat`, `grep`, `find`, `jq` and the rest). Also `search`. |
+    | `/<path>` | Commands that read files (`ls`, `cat`, `grep`, `find`, `jq` and the rest). |
 
     ## Limitations of Unix Commands for VFS
 
@@ -180,8 +180,15 @@ rg "banana" /memory/
 
 ## Search
 
-The `search` command calls Mem0's semantic search API within the configured
-scope. Use it when meaning matters more than exact text.
+The [`search` CLI](/python/cli/search) asks Mem0's semantic search API within
+the configured scope. Use it when meaning matters more than exact text.
+Register it on the workspace:
+
+```python
+from mirage.commands.cli.builtin.search import SEARCH
+
+ws.register_cli("search", SEARCH)
+```
 
 ```bash
 search "what does the user eat for breakfast" /memory/
@@ -189,8 +196,8 @@ search --top-k 5 "morning routine" /memory/
 search --threshold 0.4 "movie preferences" /memory/
 ```
 
-`top-k` defaults to `default_search_limit` (10). `threshold` must be between `0`
-and `1`. Results are emitted one hit per block, ranked by score:
+`--top-k` defaults to `default_search_limit` (10). `--threshold` must be
+between `0` and `1`. Results are emitted one hit per block, ranked by score:
 
 ```text
 /memory/6d1ba0fc-1f0c-495b-b5b1-9141b2674b37.json:0.91
@@ -214,6 +221,7 @@ import os
 from dotenv import load_dotenv
 
 from mirage import MountMode, Workspace
+from mirage.commands.cli.builtin.search import SEARCH
 from mirage.vfs.mem0 import Mem0Config, Mem0VFS
 
 load_dotenv(".env.development")
@@ -227,6 +235,7 @@ vfs = Mem0VFS(config=config)
 
 async def main() -> None:
     ws = Workspace({"/memory/": vfs}, mode=MountMode.READ)
+    ws.register_cli("search", SEARCH)
 
     r = await ws.shell("ls /memory/")
     print(await r.stdout_str())
@@ -255,4 +264,3 @@ if __name__ == "__main__":
 | `find` | Search the virtual tree by name, type, depth, and size |
 | `wc` | Count lines, words, bytes, characters, and max line length |
 | `stat` | Show a memory's size and timestamps |
-| `search` | Semantic search through Mem0, ranked by score |

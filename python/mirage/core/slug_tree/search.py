@@ -22,11 +22,11 @@ from mirage.utils.key_prefix import mount_prefix_of
 
 def validate_query(query: str, top_k: int) -> None:
     if not query:
-        raise ValueError("search: query is required")
+        raise ValueError("query is required")
     if len(query) > 250:
-        raise ValueError("search: query cannot exceed 250 characters")
+        raise ValueError("query cannot exceed 250 characters")
     if top_k <= 0:
-        raise ValueError("search: top-k must be positive")
+        raise ValueError("top-k must be positive")
 
 
 async def target_entries(
@@ -86,7 +86,7 @@ async def search_scope(
         paths (list[PathSpec]): the search scopes, globs unexpanded.
     """
     if not paths:
-        raise ValueError("search: at least one scope is required")
+        raise ValueError("at least one scope is required")
     prefix = mount_prefix_of(paths[0].virtual, paths[0].vfs_path)
     if any(not path.vfs_path.strip("/") for path in paths):
         return [], prefix

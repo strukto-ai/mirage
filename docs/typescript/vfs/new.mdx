@@ -271,11 +271,11 @@ filters, limits, or other JSON values. Regex support and grep compatibility
 are not required. Leaving `search` undefined also works.
 
 `search` returns one `[path, record]` pair per hit: the hit's virtual path,
-which a session's hides are checked against, and the text record the `search`
-command prints. `[]` means no matches and `null` declines the request. Errors propagate, and a truncated result is never a complete answer.
-Expose semantic or service-specific queries through a custom command that calls
-the same function with its own options. grep and rg never ask `search`; they
-use the functions below.
+which a session's hides are checked against, and the text record the
+[`search` CLI](/typescript/cli/search) prints. `[]` means no matches and `null` declines the request. Errors propagate, and a truncated result is never a complete answer.
+The CLI hands over only the options its line gives: `--top-k` as `top_k`,
+`--threshold` as `threshold` and `--method` as `method`. Validate them before
+any request. grep and rg never ask `search`; they use the functions below.
 
 A search never passes the file cache, so an accessor that keeps results of its
 own keeps them in a `ResponseCache` and returns it from `caches()`. Its mount
@@ -511,8 +511,8 @@ marks already.
 
 The generic commands are registered once per workspace, and every mount falls back to them after its VFS's own. Each reads and writes only through the session's files (`ctx.vfs`), so every call it makes is judged at the dispatcher, and the generic command owns flag interpretation, so a backend wrapper is wiring only. A command of the same name replaces the generic on that backend; `generic('<name>')` is the default command the replacement hands what it does not support, and `generic('<name>', { vfs })` registers that default for one backend. Export a backend's own commands as `<NAME>_COMMANDS` from `commands/builtin/<name>/index.ts`, and register it for the VFS class in `workspace/mount/backends.ts` with `registerBackendCommands(MyVFS, () => MY_VFS_COMMANDS)`. The registry is keyed by the class itself, so a minified bundle still finds it, and a subclass serves its base's commands.
 
-- Let grep and rg skip files by defining `filesContaining` (and `linesContaining` for row stores) on the VFS; `search` serves the `search` command.
-- A mount verb (`chroma-query`) declares its own `new CommandSpec({...})`, reads flags through `new FlagView(ctx.flags, SPEC)` (never `flags.get(...)`) and registers `write: true` for a mutation. Specs declared inline are dumped to `.cache/spec/typescript/<node|browser>/vfs_commands/` and compared with Python's.
+- Let grep and rg skip files by defining `filesContaining` (and `linesContaining` for row stores) on the VFS; `search` serves the [`search` CLI](/typescript/cli/search).
+- A mount verb declares its own `new CommandSpec({...})`, reads flags through `new FlagView(ctx.flags, SPEC)` (never `flags.get(...)`) and registers `write: true` for a mutation. Specs declared inline are dumped to `.cache/spec/typescript/<node|browser>/vfs_commands/` and compared with Python's.
 - A verb addressed by a service id rather than a path (`trello card create`) is an account [CLI](/typescript/cli/custom), not a mount command: a `CLI` under `commands/cli/builtin/<name>/` with a `configModel` and an `accessor`, which consults no mount and marks its writes on the `CLIHandler`. A VFS prompt that shows such verbs is pinned against the CLI's specs (`vfs/trello/prompt.test.ts`).
 - A handler that reads its `accessor` directly reaches its backend past the dispatcher. Admission judges the paths it is given, but no policy sees what it reads below them, so keep such a handler to its operands. A user command, one handed through `commands` or registered later with `ws.mount(prefix).registerCommands(...)`, runs under the session's hides and path rules, which apply to what it reads and writes through `ctx.vfs`; what it reads through its accessor is up to the handler. One that writes is refused on a read-only mount before it runs.
 - A command that prints paths from its own data (an index, a listing it fetched) hands its output over as rows on `IOResult.rows` rather than as stdout. The workspace drops the rows the session hides and renders the rest, so no line, count or total stands for a hidden path ([rows](/typescript/cli/custom#use-workspace-files)).
@@ -702,13 +702,13 @@ snapshot behavior.
 
 A VFS may also define `searchMany(paths, query)`. Use it when ranking
 and `top_k` must apply once across several paths. `search` remains required.
-Resource search commands use `searchMany` when it is defined and otherwise
+The `search` CLI uses `searchMany` when it is defined and otherwise
 concatenate single-path results; a declined request reports an error rather
 than no matches.
 
-Chroma, Dify, Qdrant, LanceDB, and Mem0 use this capability for their existing
-resource search commands. Their options remain backend-specific: for example,
-`top_k`, `threshold`, and `method`. These declarations do not opt into grep.
+Chroma, Dify, Qdrant, LanceDB, and Mem0 define it. Their options remain
+backend-specific: Dify takes four methods, the others only `semantic`. These
+declarations do not opt into grep.
 
 ### Start from a packaged example
 

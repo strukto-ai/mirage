@@ -1,12 +1,12 @@
 ---
 title: LanceDB
 icon: database
-description: Mount a LanceDB table as a Mirage filesystem in TypeScript, with label folders and a semantic search command.
+description: Mount a LanceDB table as a Mirage filesystem in TypeScript, with label folders and semantic search through the search CLI.
 ---
 
 `LanceDBVFS` exposes a LanceDB table as a read-only filesystem: group-by
 columns become nested folders, each row is a card plus an optional blob file, and
-semantic search is the `search` command. The TypeScript backend mirrors the
+semantic search is the [`search` CLI](/typescript/cli/search). The TypeScript backend mirrors the
 [Python one](/python/vfs/lancedb) and returns identical results.
 
 ## Node
@@ -16,7 +16,7 @@ pnpm add @struktoai/mirage-node @lancedb/lancedb
 ```
 
 ```ts
-import { LanceDBVFS, MountMode, Workspace } from '@struktoai/mirage-node'
+import { LanceDBVFS, MountMode, SEARCH, Workspace } from '@struktoai/mirage-node'
 
 const fashion = new LanceDBVFS({
   config: {
@@ -27,15 +27,16 @@ const fashion = new LanceDBVFS({
     titleColumn: 'productDisplayName',
     blobColumn: 'image_bytes',
     blobExt: 'jpg',
-    vectorColumn: 'vector', // presence enables the search command
+    vectorColumn: 'vector',
     searchLimit: 5,
   },
 })
 
 const ws = new Workspace({ '/fashion/': fashion }, { mode: MountMode.READ })
+ws.registerCli('search', SEARCH)
 
 await ws.shell('ls /fashion/Men/Shoes/White')
-await ws.shell('search "red running shoes" /fashion') // ranked paths + score + card
+await ws.shell('search "red running shoes" /fashion')
 ```
 
 ### Config
@@ -81,11 +82,8 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with LanceDB mounted at `/<path>
     This mount is a LanceDB table exposed as a filesystem.
 
     Directories are the configured group-by columns; descending narrows a filter.
-    Each matching row is a <id>.md card plus a <id>.<ext> blob file. For semantic
-    search use the search command, which returns ranked rows as canonical file
-    paths with a score, e.g. search "red running shoes" /mount then cat one of the
-    returned <path>.md files. Use ls/cd/cat/tree/find/wc as usual; grep/rg stay
-    lexical. Quote queries that contain spaces.
+    Each matching row is a <id>.md card plus a <id>.<ext> blob file. Use
+    ls/cd/cat/tree/find/wc/grep/rg as usual.
     ```
 
     #### Supported Unix Commands for VFS
@@ -94,7 +92,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with LanceDB mounted at `/<path>
 
     | Path | Supported |
     | --- | --- |
-    | `/<path>` | Commands that read files (`ls`, `cat`, `grep`, `find`, `jq` and the rest). `grep -r` and `rg` use `lancedb` search. Also `search`. |
+    | `/<path>` | Commands that read files (`ls`, `cat`, `grep`, `find`, `jq` and the rest). `grep -r` and `rg` ask `lancedb` which files may match. |
 
     #### Limitations of Unix Commands for VFS
 
@@ -102,7 +100,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with LanceDB mounted at `/<path>
 
     | Path | Limitations |
     | --- | --- |
-    | `/<path>` | Read only: no command changes files. `lancedb` search covers only `*/*.md`; `grep -r` and `rg` read every other file. `grep -r`, `find` and `du` stop after 1000 files; a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. |
+    | `/<path>` | Read only: no command changes files. `lancedb` answers only for `*/*.md`; `grep -r` and `rg` read every other file. `grep -r`, `find` and `du` stop after 1000 files; a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. |
 
     Run `man` to list every command, and `man <cmd>` or `<cmd> --help` for one command's usage.
   </Tab>
@@ -125,11 +123,8 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with LanceDB mounted at `/<path>
     This mount is a LanceDB table exposed as a filesystem.
 
     Directories are the configured group-by columns; descending narrows a filter.
-    Each matching row is a <id>.md card plus a <id>.<ext> blob file. For semantic
-    search use the search command, which returns ranked rows as canonical file
-    paths with a score, e.g. search "red running shoes" /mount then cat one of the
-    returned <path>.md files. Use ls/cd/cat/tree/find/wc as usual; grep/rg stay
-    lexical. Quote queries that contain spaces.
+    Each matching row is a <id>.md card plus a <id>.<ext> blob file. Use
+    ls/cd/cat/tree/find/wc/grep/rg as usual.
     ```
 
     ## Supported Unix Commands for VFS
@@ -138,7 +133,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with LanceDB mounted at `/<path>
 
     | Path | Supported |
     | --- | --- |
-    | `/<path>` | Commands that read files (`ls`, `cat`, `grep`, `find`, `jq` and the rest). `grep -r` and `rg` use `lancedb` search. Also `search`. |
+    | `/<path>` | Commands that read files (`ls`, `cat`, `grep`, `find`, `jq` and the rest). `grep -r` and `rg` ask `lancedb` which files may match. |
 
     ## Limitations of Unix Commands for VFS
 
@@ -146,7 +141,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with LanceDB mounted at `/<path>
 
     | Path | Limitations |
     | --- | --- |
-    | `/<path>` | Read only: no command changes files. `lancedb` search covers only `*/*.md`; `grep -r` and `rg` read every other file. `grep -r`, `find` and `du` stop after 1000 files; a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. |
+    | `/<path>` | Read only: no command changes files. `lancedb` answers only for `*/*.md`; `grep -r` and `rg` read every other file. `grep -r`, `find` and `du` stop after 1000 files; a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. |
 
     Run `man` to list every command, and `man <cmd>` or `<cmd> --help` for one command's usage.
     ````
@@ -198,8 +193,8 @@ The [Python LanceDB docs](/python/vfs/lancedb#integration) list when each search
 
 ## Supported commands
 
-`ls`, `cd`, `tree`, `cat`, `stat`, `find`, `wc`, and `search`. `grep`/`rg` stay
-lexical; `search "<query>" <path>` is the semantic command, returning ranked
+`ls`, `cd`, `tree`, `cat`, `stat`, `find` and `wc`. `grep`/`rg` stay
+lexical; the `search` CLI's `search "<query>" <path>` is the semantic path, returning ranked
 rows as canonical `<id>.md` paths plus a score, so results compose with `cat`,
 `wc`, and pipes. Flags: `--top-k`, `--threshold`, `--method semantic`.
 

@@ -1,6 +1,7 @@
 import pytest
 from pydantic import SecretStr
 
+from mirage.commands.cli.builtin.search import SEARCH
 from mirage.types import VFSName
 from mirage.vfs.mem0 import Mem0Config
 from mirage.vfs.mem0.mem0 import Mem0VFS
@@ -36,7 +37,6 @@ def test_vfs_uses_generic_read_only_surface():
         "jq",
         "ls",
         "rg",
-        "search",
         "stat",
     } <= commands
     assert served(res) == {"read", "readdir", "stat"}
@@ -44,22 +44,26 @@ def test_vfs_uses_generic_read_only_surface():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "line,stderr",
+    "line,exit_code,stderr",
     [
-        ("search --threshold 2 plans /m", "threshold must be in [0, 1]"),
-        ("search --top-k 0 plans /m", "top-k must be positive"),
+        ("search --threshold 2 plans /m", 1, "threshold must be in [0, 1]"),
+        ("search --top-k 0 plans /m", 2, "top-k must be positive"),
         (
             "search --method keyword plans /m",
+            1,
             "only the 'semantic' method is supported",
         ),
     ],
 )
-async def test_search_refuses_an_option_before_asking_mem0(line, stderr):
+async def test_search_refuses_an_option_before_asking_mem0(
+    line, exit_code, stderr
+):
     cfg = Mem0Config(api_key=SecretStr("secret"), user_id="alex")
     ws = Workspace({"/m": Mem0VFS(cfg)})
+    ws.register_cli("search", SEARCH)
     try:
         result = await ws.shell(line)
-        assert result.exit_code == 2
+        assert result.exit_code == exit_code
         assert await result.stderr_str() == f"search: {stderr}\n"
     finally:
         await ws.close()

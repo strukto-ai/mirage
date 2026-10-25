@@ -48,6 +48,10 @@ SUMMARIES = {
     "himalaya": "List and search mail; read, compose, reply, forward and send messages",
     "linear": "Query teams, issues, projects and documents; update issues and comments",
     "ntn": "Read and edit Markdown pages, query data sources and call Notion APIs",
+    "search": (
+        "Rank the records of Dify, Chroma, mem0, Qdrant and LanceDB mounts "
+        "for a query"
+    ),
     "slack": (
         "Read and send messages; manage reactions and pins; find members "
         "and search"
@@ -102,7 +106,11 @@ def reference(cli: CLI) -> str:
         START,
         "## Supported commands",
         "",
-        f"Run `{spec.name} <command> --help` for the supported flags and operands.",
+        (
+            f"Run `{spec.name} <command> --help` for the supported flags and operands."
+            if spec.subcommands
+            else f"Run `{spec.name} --help` for the supported flags and operands."
+        ),
         "This list is generated from Mirage's registered command tree.",
         "",
         "| Command | Description |",

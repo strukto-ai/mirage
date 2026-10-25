@@ -1,13 +1,13 @@
 ---
 title: Chroma
 icon: /images/chroma-logo.svg
-description: Mount a ChromaDB collection as a Mirage filesystem in TypeScript, with shell commands and native vector retrieval.
+description: Mount a ChromaDB collection as a Mirage filesystem in TypeScript, with shell commands and vector retrieval through the search CLI.
 ---
 
 `ChromaVFS` exposes a ChromaDB collection as a read-only filesystem: the
 directory tree comes from the collection's `__path_tree__` document, pages are
 chunk sets joined in `chunk_index` order, and vector retrieval is the
-`chroma-query` command. The TypeScript backend mirrors the
+[`search` CLI](/typescript/cli/search). The TypeScript backend mirrors the
 [Python one](/python/vfs/chroma) and returns identical results.
 
 ## Node
@@ -20,7 +20,7 @@ pnpm add @struktoai/mirage-node chromadb
 ```
 
 ```ts
-import { ChromaVFS, MountMode, Workspace } from '@struktoai/mirage-node'
+import { ChromaVFS, MountMode, SEARCH, Workspace } from '@struktoai/mirage-node'
 
 const knowledge = new ChromaVFS({
   config: {
@@ -33,18 +33,19 @@ const knowledge = new ChromaVFS({
 })
 
 const ws = new Workspace({ '/knowledge': knowledge }, { mode: MountMode.READ })
+ws.registerCli('search', SEARCH)
 
 console.log(await (await ws.shell('tree /knowledge/')).stdoutStr())
 console.log(await (await ws.shell('grep -r refund /knowledge/policies/')).stdoutStr())
 console.log(
-  await (await ws.shell('chroma-query "how am I throttled" /knowledge/')).stdoutStr(),
+  await (await ws.shell('search "how am I throttled" /knowledge/')).stdoutStr(),
 )
 ```
 
 `grep` pushes `$contains` / `$regex` filters down to ChromaDB before fine
 filtering locally, so recursive searches avoid fetching the whole collection.
 
-`chroma-query` takes `--top-k`, `--threshold` and `--method` as it does in
+`search` takes `--top-k`, `--threshold` and `--method` as it does in
 [Python](/python/vfs/chroma#vector-search).
 
 ### Config
@@ -80,9 +81,9 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Chroma mounted at `/<path>`
     Chroma is mounted as a read-only virtual filesystem backed by a ChromaDB
     collection.
 
-    Use cat, head, tail, ls, find, tree, grep, and chroma-query to inspect
-    indexed documents. Paths are document slugs from the collection path tree.
-    Writes are not supported.
+    Use cat, head, tail, ls, find, tree, and grep to inspect indexed documents.
+    Paths are document slugs from the collection path tree. Writes are not
+    supported.
     ```
 
     #### Supported Unix Commands for VFS
@@ -91,7 +92,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Chroma mounted at `/<path>`
 
     | Path | Supported |
     | --- | --- |
-    | `/<path>` | Commands that read files (`ls`, `cat`, `grep`, `find`, `jq` and the rest). `grep -r` and `rg` use `chroma` search. Also `chroma-query`. |
+    | `/<path>` | Commands that read files (`ls`, `cat`, `grep`, `find`, `jq` and the rest). `grep -r` and `rg` ask `chroma` which files may match. |
 
     #### Limitations of Unix Commands for VFS
 
@@ -122,9 +123,9 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Chroma mounted at `/<path>`
     Chroma is mounted as a read-only virtual filesystem backed by a ChromaDB
     collection.
 
-    Use cat, head, tail, ls, find, tree, grep, and chroma-query to inspect
-    indexed documents. Paths are document slugs from the collection path tree.
-    Writes are not supported.
+    Use cat, head, tail, ls, find, tree, and grep to inspect indexed documents.
+    Paths are document slugs from the collection path tree. Writes are not
+    supported.
     ```
 
     ## Supported Unix Commands for VFS
@@ -133,7 +134,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Chroma mounted at `/<path>`
 
     | Path | Supported |
     | --- | --- |
-    | `/<path>` | Commands that read files (`ls`, `cat`, `grep`, `find`, `jq` and the rest). `grep -r` and `rg` use `chroma` search. Also `chroma-query`. |
+    | `/<path>` | Commands that read files (`ls`, `cat`, `grep`, `find`, `jq` and the rest). `grep -r` and `rg` ask `chroma` which files may match. |
 
     ## Limitations of Unix Commands for VFS
 

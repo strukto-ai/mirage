@@ -267,11 +267,11 @@ or other JSON values. Neither regex support nor grep compatibility is
 required. Leaving `search` undefined also works.
 
 `search` returns one `(path, record)` pair per hit: the hit's virtual path,
-which a session's hides are checked against, and the text record the `search`
-command prints. `[]` means no matches and `None` declines the request. Errors propagate, and a truncated result is never a complete answer.
-Expose semantic or service-specific queries through a custom command that calls
-the same function with its own options. grep and rg never ask `search`; they
-use the functions below.
+which a session's hides are checked against, and the text record the
+[`search` CLI](/python/cli/search) prints. `[]` means no matches and `None` declines the request. Errors propagate, and a truncated result is never a complete answer.
+The CLI hands over only the options its line gives: `--top-k` as `top_k`,
+`--threshold` as `threshold` and `--method` as `method`. Validate them before
+any request. grep and rg never ask `search`; they use the functions below.
 
 A search never passes the file cache, so an accessor that keeps results of its
 own keeps them in a `ResponseCache` and returns it from `caches()`. Its mount
@@ -529,8 +529,8 @@ already.
 
 The generic commands are registered once per workspace, and every mount falls back to them after its VFS's own. Each is an ordinary handler that reads and writes only through the line's files (`ctx.vfs`), so the dispatcher judges every call it makes and reaches the mount's functions by name; the generic command owns flag interpretation, so a backend wrapper is wiring only. A command of the same name in the backend's `COMMANDS` replaces the generic on that backend, and `generic("<name>")` is the default command a replacement hands what it does not support: `generic("grep").fn(accessor, paths, texts, ctx)`.
 
-- Let grep and rg skip files by defining `files_containing` (and `lines_containing` for row stores) on the VFS; `search` serves the `search` command.
-- A mount verb (`chroma-query`) declares its own `CommandSpec`, reads flags through `FlagView(ctx.flags, spec=SPEC)` (never `flags.get(...)`) and registers `write=True` for a mutation. Specs declared inline are dumped to `.cache/spec/python/vfs_commands/` and compared with TypeScript's.
+- Let grep and rg skip files by defining `files_containing` (and `lines_containing` for row stores) on the VFS; `search` serves the [`search` CLI](/python/cli/search).
+- A mount verb declares its own `CommandSpec`, reads flags through `FlagView(ctx.flags, spec=SPEC)` (never `flags.get(...)`) and registers `write=True` for a mutation. Specs declared inline are dumped to `.cache/spec/python/vfs_commands/` and compared with TypeScript's.
 - A verb addressed by a service id rather than a path (`trello card create`) is an account [CLI](/python/cli/custom), not a mount command: a `CLI` under `commands/cli/builtin/<name>/` with a `config_model` and an `accessor`, which consults no mount and marks its writes on the `CLIHandler`. A VFS prompt that shows such verbs is pinned against the CLI's specs (`tests/vfs/trello/test_prompt.py`).
 - Handlers take `(accessor, paths, texts, ctx)`. Read `stdin`, the working directory and namespace facts from `ctx`, and files through `ctx.vfs`; do not add injected parameters or a second handler convention.
 - A handler that reads its `accessor` directly reaches its backend past the dispatcher. Admission judges the paths it is given, but no policy sees what it reads below them, so keep such a handler to its operands. A command handed through `commands=[...]`, or registered later with `ws.mount(prefix).register_commands(...)`, is such a user command. It runs under the session's hides and path rules, which apply to what it reads and writes through `ctx.vfs`; what it reads through its accessor is up to the handler. A write command is refused on a read-only mount before it runs.
@@ -718,13 +718,13 @@ snapshot behavior.
 
 A VFS may also define `search_many(paths, query)`. Use it when ranking
 and `top_k` must apply once across several paths. `search` remains required.
-Resource search commands use `search_many` when it is defined and otherwise
+The `search` CLI uses `search_many` when it is defined and otherwise
 concatenate single-path results; a declined request raises an error rather
 than reporting no matches.
 
-Chroma, Dify, Qdrant, LanceDB, and Mem0 use this capability for their existing
-resource search commands. Their options remain backend-specific: for example,
-`top_k`, `threshold`, and `method`. These declarations do not opt into grep.
+Chroma, Dify, Qdrant, LanceDB, and Mem0 define it. Their options remain
+backend-specific: Dify takes four methods, the others only `semantic`. These
+declarations do not opt into grep.
 
 ### Start from a packaged example
 

@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Mem0Accessor } from '../../accessor/mem0.ts'
+import { SEARCH } from '../../commands/cli/builtin/search/index.ts'
 import { PathSpec, type FileStat } from '../../types.ts'
 import { Mem0VFS } from '../../vfs/mem0/mem0.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
@@ -162,19 +163,20 @@ describe('mem0 detectScope', () => {
 
 // Twin of test_search_refuses_an_option_before_asking_mem0.
 it.each([
-  ['search --threshold 2 plans /m', 'threshold must be in [0, 1]'],
-  ['search --top-k 0 plans /m', 'top-k must be positive'],
-  ['search --method keyword plans /m', "only the 'semantic' method is supported"],
-])('%s is a usage error before mem0 is asked', async (line, stderr) => {
+  ['search --threshold 2 plans /m', 1, 'threshold must be in [0, 1]'],
+  ['search --top-k 0 plans /m', 2, 'top-k must be positive'],
+  ['search --method keyword plans /m', 1, "only the 'semantic' method is supported"],
+])('%s is refused before mem0 is asked', async (line, exitCode, stderr) => {
   const fetchMock = vi.fn()
   vi.stubGlobal('fetch', fetchMock)
   const ws = new Workspace(
     { '/m': new Mem0VFS({ apiKey: 'key', userId: 'alex' }) },
     { shellParser: await getTestParser() },
   )
+  ws.registerCli('search', SEARCH)
   try {
     const result = await ws.shell(line)
-    expect(result.exitCode).toBe(2)
+    expect(result.exitCode).toBe(exitCode)
     expect(result.stderrText).toBe(`search: ${stderr}\n`)
     expect(fetchMock).not.toHaveBeenCalled()
   } finally {
@@ -189,6 +191,7 @@ it('refuses a value its spec types as a usage error', async () => {
     { '/m': new Mem0VFS({ apiKey: 'key', userId: 'alex' }) },
     { shellParser: await getTestParser() },
   )
+  ws.registerCli('search', SEARCH)
   try {
     const result = await ws.shell('search --top-k many plans /m')
     expect(result.exitCode).toBe(2)

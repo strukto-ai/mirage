@@ -26,10 +26,10 @@ import { rstripSlash, stripSlash } from '../../utils/slash.ts'
 import { searchMemories } from './client.ts'
 
 function validate(query: string, topK: number, threshold: number): void {
-  if (query === '') throw new Error('search: query is required')
-  if (!Number.isInteger(topK) || topK <= 0) throw new Error('search: top-k must be positive')
+  if (query === '') throw new Error('query is required')
+  if (!Number.isInteger(topK) || topK <= 0) throw new Error('top-k must be positive')
   if (!Number.isFinite(threshold) || threshold < 0 || threshold > 1) {
-    throw new Error('search: threshold must be in [0, 1]')
+    throw new Error('threshold must be in [0, 1]')
   }
 }
 
@@ -72,11 +72,11 @@ export async function searchMany(
   validateOptions(query, ['top_k', 'threshold', 'method'])
   const topK = intOption(query, 'top_k', accessor.config.defaultSearchLimit)
   const first = paths[0]
-  if (first === undefined) throw new Error('search: at least one scope is required')
+  if (first === undefined) throw new Error('at least one scope is required')
   const prefix = mountPrefixOf(first.virtual, first.vfsPath)
   const method = textOption(query, 'method', 'semantic')
   const threshold = floatOption(query, 'threshold', 0)
-  if (method !== 'semantic') throw new Error("search: only the 'semantic' method is supported")
+  if (method !== 'semantic') throw new Error("only the 'semantic' method is supported")
   const all = paths.some((p) => stripSlash(p.vfsPath) === '')
   const targets = all ? [] : await makeResolveGlob((path) => listedPaths(accessor, path))(paths)
   const ids = all ? undefined : new Set<string>()

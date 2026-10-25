@@ -84,10 +84,10 @@ def validate_args(
 ) -> str:
     validate_query(query, top_k)
     if threshold < 0 or threshold > 1:
-        raise ValueError("search: threshold must be in [0, 1]")
+        raise ValueError("threshold must be in [0, 1]")
     if method not in METHODS:
         raise ValueError(
-            "search: method must be one of semantic, fulltext, hybrid, keyword"
+            "method must be one of semantic, fulltext, hybrid, keyword"
         )
     return METHODS[method]
 

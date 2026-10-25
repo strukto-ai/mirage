@@ -35,11 +35,11 @@ from mirage.vfs.search import (
 
 def _validate(query: str, top_k: int, threshold: float) -> None:
     if not query:
-        raise ValueError("search: query is required")
+        raise ValueError("query is required")
     if top_k <= 0:
-        raise ValueError("search: top-k must be positive")
+        raise ValueError("top-k must be positive")
     if not math.isfinite(threshold) or threshold < 0 or threshold > 1:
-        raise ValueError("search: threshold must be in [0, 1]")
+        raise ValueError("threshold must be in [0, 1]")
 
 
 async def search_memories_rendered(
@@ -95,12 +95,12 @@ async def search_many(
     validate_options(query, {"top_k", "method", "threshold"})
     top_k = int_option(query, "top_k", accessor.config.default_search_limit)
     if not paths:
-        raise ValueError("search: at least one scope is required")
+        raise ValueError("at least one scope is required")
     prefix = mount_prefix_of(paths[0].virtual, paths[0].vfs_path)
     method = text_option(query, "method", "semantic")
     threshold = float_option(query, "threshold", 0.0)
     if method != "semantic":
-        raise ValueError("search: only the 'semantic' method is supported")
+        raise ValueError("only the 'semantic' method is supported")
     targets = (
         []
         if any(not p.vfs_path.strip("/") for p in paths)
