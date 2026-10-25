@@ -823,12 +823,9 @@ class RedisIndexCacheStore(IndexCacheStore):
         # cancellation of one waiter must not cancel the others.
         return await asyncio.shield(task)
 
-    async def _directory_generations(
-        self, directories: set[str]
-    ) -> dict[str, str]:
-        if not directories:
+    async def _directory_generations(self, paths: list[str]) -> dict[str, str]:
+        if not paths:
             return {}
-        paths = list(directories)
         keys = [f"{self._directory_generation_prefix}{path}" for path in paths]
         current = await self._client.mget(keys)
         generations = {
@@ -867,7 +864,7 @@ class RedisIndexCacheStore(IndexCacheStore):
                     for path in children
                 }
                 directory_generations = await self._directory_generations(
-                    set(last_seed)
+                    list(last_seed)
                 )
                 rows = {
                     path: entry
