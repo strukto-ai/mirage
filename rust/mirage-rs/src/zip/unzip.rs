@@ -74,9 +74,10 @@ pub(super) struct Config {
     q: bool,
     o: bool,
     n: bool,
-    /// Entries by their places in the directory, each behind a status byte
-    /// (0 when it decoded whole) and its eight-byte little-endian length:
-    /// how a host reads an archive it holds, its directory read once.
+    /// Entries by their places in the directory, a window at a time, each
+    /// frame a tag (0 a window, 1 the entry decoded whole, 2 it did not)
+    /// and its four-byte little-endian length: how a host reads an archive
+    /// it holds, its directory read once.
     picks: Option<Vec<usize>>,
     /// Every entry's stored name behind its two-byte little-endian length,
     /// in directory order: how a host lists an archive it holds.
@@ -358,12 +359,14 @@ impl Sink for Discard {
     }
 }
 
-/// A host's pick: held whole, to go out behind its length.
-struct Hold(Vec<u8>);
+/// A host's pick: each window framed, the host taking it before the next.
+struct Frames;
 
-impl Sink for Hold {
+impl Sink for Frames {
     async fn take(&mut self, host: &Host, window: &[u8]) -> bool {
-        self.0.extend_from_slice(window);
+        host.print(&[0]);
+        host.print(&(window.len() as u32).to_le_bytes());
+        host.print(window);
         host.pause().await;
         true
     }
@@ -518,14 +521,11 @@ async fn mode(run: &mut Run<'_>, directory: &Directory, warning: Vec<u8>) -> i32
     }
     if let Some(picks) = run.config.picks.clone() {
         for at in picks {
-            let mut held = Hold(Vec::new());
             let sound = match directory.entries.get(at) {
-                Some(entry) => matches!(run.decode(entry, &mut held).await, Decoded::Sound),
+                Some(entry) => matches!(run.decode(entry, &mut Frames).await, Decoded::Sound),
                 None => false,
             };
-            run.host.print(&[u8::from(!sound)]);
-            run.host.print(&(held.0.len() as u64).to_le_bytes());
-            run.host.print(&held.0);
+            run.host.print(&[if sound { 1 } else { 2 }, 0, 0, 0, 0]);
         }
         return 0;
     }

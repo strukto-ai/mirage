@@ -233,7 +233,9 @@ async function unzipped(
 }
 
 // Entries `picks` of a run's log archive, read in one pass over its
-// directory: each by its place, null for one that did not decode whole.
+// directory a window at a time: each frame a tag (0 a window, 1 the entry
+// whole, 2 not) and its four-byte length. Null for an entry that did not
+// decode whole.
 async function members(
   archive: Uint8Array,
   picks: readonly number[],
@@ -243,9 +245,16 @@ async function members(
   const read = new Map<number, Uint8Array | null>()
   let at = 0
   for (const pick of picks) {
-    const end = at + 9 + Number(view.getBigUint64(at + 1, true))
-    read.set(pick, framed[at] === 0 ? framed.subarray(at + 9, end) : null)
-    at = end
+    const windows: Uint8Array[] = []
+    let tag = framed[at]
+    while (tag === 0) {
+      const end = at + 5 + view.getUint32(at + 1, true)
+      windows.push(framed.subarray(at + 5, end))
+      at = end
+      tag = framed[at]
+    }
+    at += 5
+    read.set(pick, tag === 1 ? concat(windows) : null)
   }
   return read
 }

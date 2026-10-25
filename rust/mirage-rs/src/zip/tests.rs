@@ -313,11 +313,13 @@ fn a_host_lists_names_whole_and_reads_picks_framed() {
     let (status, out, _) = unzip(&mut host, "g.zip", json!({"index": true}));
     assert_eq!((status, out.as_str()), (0, "\u{7}\0a\nb.txt\u{5}\0c.txt"));
     let (status, out, _) = unzip(&mut host, "g.zip", json!({"picks": [1, 2, 0]}));
-    let frame = |status: u8, data: &str| {
-        let mut frame = vec![status];
-        frame.extend((data.len() as u64).to_le_bytes());
+    let frame = |tag: u8, data: &str| {
+        let mut frame = vec![tag];
+        frame.extend((data.len() as u32).to_le_bytes());
         String::from_utf8(frame).expect("ascii") + data
     };
-    let frames = frame(0, "two\n") + &frame(1, "") + &frame(0, "one\n");
+    let frames = [(0, "two\n"), (1, ""), (2, ""), (0, "one\n"), (1, "")]
+        .map(|(tag, data)| frame(tag, data))
+        .concat();
     assert_eq!((status, out), (0, frames));
 }
