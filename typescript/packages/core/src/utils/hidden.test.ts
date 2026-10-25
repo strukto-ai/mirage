@@ -410,6 +410,20 @@ describe('leadsHidden', () => {
       '/link' + Array.from({ length: 2100 }, (_, index) => `/c${String(index)}/..`).join('')
     expect(leadsHidden(vis(classifyPaths(['/secret'])), path, links)).toBe(false)
   })
+  it('does not inspect targets of hidden links', () => {
+    const lookups: string[] = []
+    class LookupLinks extends Map<string, string> {
+      override get(path: string): string | undefined {
+        lookups.push(path)
+        return super.get(path)
+      }
+    }
+    const links = new LookupLinks([['/secret/link', '/' + 'x'.repeat(17000000)]])
+    const scope = vis(classifyPaths(['/secret']))
+    expect(visibleLinks(scope, ['/secret/link', '/public'], links)).toEqual([false, true])
+    expect(lookups).not.toContain('/secret/link')
+  })
+
   it('handles targets with many redundant separators', () => {
     const scope = vis(classifyPaths(['/secret']))
     const links = new Map([['/link', '/'.repeat(200000) + 'public']])

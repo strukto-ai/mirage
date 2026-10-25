@@ -541,3 +541,22 @@ def test_link_targets_with_many_redundant_separators():
     links["/link"] = "/" * 200000 + "secret"
     assert leads_hidden(scope, "/link", links)
     assert visible_links(scope, ("/link",), links) == (False,)
+
+
+def test_hidden_link_targets_are_not_inspected():
+    lookups: list[str] = []
+
+    class LookupLinks(dict[str, str]):
+        def get(self, key, default=None):
+            lookups.append(key)
+            if key == "/secret/link":
+                raise AssertionError(
+                    "Hidden link targets must not be inspected"
+                )
+            return super().get(key, default)
+
+    links = LookupLinks({"/secret/link": "/" + "x" * 17000000})
+    assert visible_links(
+        _vis(["/secret"]), ("/secret/link", "/public"), links
+    ) == (False, True)
+    assert "/secret/link" not in lookups

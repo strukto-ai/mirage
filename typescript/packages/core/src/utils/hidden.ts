@@ -96,9 +96,12 @@ export function visibleLinks(
   links: ReadonlyMap<string, string>,
 ): boolean[] {
   if (vis?.paths == null) return paths.map(() => true)
-  return visibilityMatcher(vis).visibleLinks(
-    paths.map((path) => [path, traceSymlinks(path, links)]),
-  )
+  const matcher = visibilityMatcher(vis)
+  const shown = matcher.visibleLinks(paths.map((path) => [path, []]))
+  const selected = paths.filter((_, index) => shown[index])
+  const checked = matcher.visibleLinks(selected.map((path) => [path, traceSymlinks(path, links)]))
+  let index = 0
+  return shown.map((keep) => keep && checked[index++] === true)
 }
 export function hiddenUnder(vis: Visibility | null | undefined, virtual: string): boolean {
   return vis?.paths != null && visibilityMatcher(vis).hidesIntersect(virtual)

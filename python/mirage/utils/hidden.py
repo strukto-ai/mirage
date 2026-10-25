@@ -145,16 +145,20 @@ def leads_hidden(
 def visible_links(
     vis: Visibility | None, paths: Sequence[str], links: Mapping[str, str]
 ) -> tuple[bool, ...]:
-    if vis is None:
+    if vis is None or vis.paths is None:
         return (True,) * len(paths)
-    return tuple(
-        visibility_matcher(vis).visible_links(
+    matcher = visibility_matcher(vis)
+    shown = matcher.visible_links(tuple((units(path), ()) for path in paths))
+    selected = (path for path, keep in zip(paths, shown, strict=True) if keep)
+    checked = iter(
+        matcher.visible_links(
             tuple(
                 (units(path), link_trace_value(trace_symlinks(path, links)))
-                for path in paths
+                for path in selected
             )
         )
     )
+    return tuple(next(checked) if keep else False for keep in shown)
 
 
 def hidden_under(vis: Visibility | None, virtual: str) -> bool:
