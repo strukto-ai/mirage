@@ -4,6 +4,7 @@ use serde::Deserialize;
 
 mod compile;
 mod evaluate;
+mod flat;
 mod reverse;
 #[cfg(test)]
 mod tests;
@@ -11,6 +12,7 @@ mod tests;
 use crate::{Stream, StreamError, parse_config};
 use compile::{Compiler, Dialect, Program, is};
 use evaluate::Evaluator;
+use flat::Flat;
 use reverse::Reverse;
 
 const WORK: usize = 2048;
@@ -70,6 +72,7 @@ struct Request {
 struct Glob {
     compiler: Option<Compiler>,
     program: Option<Program>,
+    flat: Option<Flat>,
     reverse: Option<Reverse>,
     reversed_compiler: Option<Compiler>,
     reversed: Option<Program>,
@@ -100,6 +103,7 @@ pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
             config.extglob,
         )),
         program: None,
+        flat: None,
         reverse: None,
         reversed_compiler: None,
         reversed: None,
@@ -154,6 +158,7 @@ impl Glob {
             compiler.step();
             if compiler.done() {
                 self.program = self.compiler.take().map(|compiler| compiler.program);
+                self.flat = self.program.as_ref().and_then(Flat::new);
             }
             return true;
         }
@@ -359,18 +364,16 @@ impl Stream for Glob {
         if self.active {
             return Err(StreamError::new("glob operation is still busy"));
         }
-        for &byte in input {
-            self.partial.push(byte);
-            if self.partial.len() == 4 {
-                let cp =
-                    u32::from_le_bytes(self.partial.as_slice().try_into().expect("four bytes"));
-                if cp > 0x10ffff {
-                    return Err(StreamError::new("glob unit is past U+10FFFF"));
-                }
-                self.subject.push(cp);
-                self.partial.clear();
+        self.partial.extend_from_slice(input);
+        let whole = self.partial.len() / 4 * 4;
+        for unit in self.partial[..whole].chunks_exact(4) {
+            let cp = u32::from_le_bytes(unit.try_into().expect("four bytes"));
+            if cp > 0x10ffff {
+                return Err(StreamError::new("glob unit is past U+10FFFF"));
             }
+            self.subject.push(cp);
         }
+        self.partial.drain(..whole);
         Ok(())
     }
     fn finish(&mut self, _: &mut Vec<u8>) -> Result<(), StreamError> {
@@ -382,6 +385,25 @@ impl Stream for Glob {
     }
     fn busy(&self) -> bool {
         self.active
+    }
+    fn test(&mut self, input: &[u8]) -> Result<bool, StreamError> {
+        self.feed(input, &mut Vec::new())?;
+        if !self.partial.is_empty() {
+            return Err(StreamError::new("glob subject ends inside a u32 unit"));
+        }
+        while self.compiler.is_some() {
+            self.compile_step();
+        }
+        let period = self.period && self.subject.first() == Some(&u32::from(b'.'));
+        let program = self.program.as_ref().expect("compiled pattern");
+        let answer = match &self.flat {
+            Some(flat) => flat.matches(&self.subject, period),
+            None => Evaluator::matches(program, &self.subject, period),
+        };
+        self.subject.clear();
+        self.forward = Evaluator::default();
+        self.backward = Evaluator::default();
+        Ok(answer)
     }
     fn drain(&mut self, out: &mut Vec<u8>) -> Result<(), StreamError> {
         for _ in 0..WORK {

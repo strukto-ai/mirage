@@ -17,7 +17,7 @@ import { getTestParser } from '../../tests/workspace/fixtures/workspace_fixture.
 import { describe, expect, it, vi } from 'vitest'
 import { encodeBase64 } from '../utils/base64.ts'
 import { StreamRefusal } from './errors.ts'
-import { Glob } from './glob.ts'
+import { Glob, GlobMatcher } from './glob.ts'
 import { PosixRegex } from './regex.ts'
 import { compiledModule, mergeOutput, openStream, serveRequests } from './stream.ts'
 import type * as StreamModule from './stream.ts'
@@ -54,6 +54,7 @@ describe('openStream', () => {
   it('moves matchers off an instance a large search grew', async () => {
     const instance = (stream: unknown): unknown => (stream as { exports: unknown }).exports
     const small = new PosixRegex('b')
+    const glob = new GlobMatcher('a*b')
     const large = new PosixRegex('x$')
     const size = 34 * 1024 * 1024
     expect(large.search('a'.repeat(size) + 'x')).toEqual([[size, size + 1]])
@@ -65,6 +66,7 @@ describe('openStream', () => {
     expect(instance(after)).not.toBe(grown)
     after.close()
     expect(small.search('abc')).toEqual([[1, 2]])
+    expect(glob.matches('axb')).toBe(true)
     expect(large.search('ax')).toEqual([[1, 2]])
   })
 
@@ -83,6 +85,15 @@ describe('openStream', () => {
         expect(text(stream.finish())).toBe(count)
         expect(stream.status()).toBe(status)
       }
+    } finally {
+      stream.close()
+    }
+  })
+
+  it('refuses a test from a stream that answers none', async () => {
+    const stream = await openStream('base64', DECODE)
+    try {
+      expect(() => stream.test(new Uint8Array())).toThrow('answers no test')
     } finally {
       stream.close()
     }

@@ -13,8 +13,8 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import json
-import struct
-from collections.abc import Iterator
+import threading
+from functools import lru_cache
 from typing import Literal, TypeAlias, TypedDict, cast
 
 from mirage._rs import Stream
@@ -44,12 +44,28 @@ class _Replace(TypedDict):
 
 _Operation: TypeAlias = _Plain | _End | _Suffix | _Replace
 _Reply: TypeAlias = bool | int | None | list[int] | list[list[int]]
+_Dialect: TypeAlias = Literal["shell", "python"]
+
+_CHUNK = 16 * 1024
+_CACHE_SIZE = 256
 
 
-def _encoded_units(text: str) -> Iterator[bytes]:
-    for start in range(0, len(text), 4096):
-        part = text[start : start + 4096]
-        yield struct.pack("<" + "I" * len(part), *(ord(ch) for ch in part))
+def _encoded(text: str) -> bytes:
+    return text.encode("utf-32-le", "surrogatepass")
+
+
+def _config(
+    pattern: str, extglob: bool, period: bool, dialect: _Dialect
+) -> bytes:
+    return json.dumps(
+        {
+            "pattern": [ord(ch) for ch in pattern],
+            "dialect": dialect,
+            "extglob": extglob,
+            "period": period,
+            "operation": {"kind": "matches"},
+        }
+    ).encode()
 
 
 def _position(result: _Reply) -> int | None:
@@ -84,19 +100,10 @@ class Glob:
         pattern: str,
         extglob: bool = False,
         period: bool = False,
-        dialect: Literal["shell", "python"] = "shell",
+        dialect: _Dialect = "shell",
     ) -> None:
         self._stream: Stream | None = Stream(
-            "glob",
-            json.dumps(
-                {
-                    "pattern": [ord(ch) for ch in pattern],
-                    "dialect": dialect,
-                    "extglob": extglob,
-                    "period": period,
-                    "operation": {"kind": "matches"},
-                }
-            ).encode(),
+            "glob", _config(pattern, extglob, period, dialect)
         )
         self._subject: str | None = None
         self._budget = YieldBudget()
@@ -119,8 +126,7 @@ class Glob:
         reuse = self._subject == name
         stream = self._prepare(name, operation)
         if not reuse:
-            for part in _encoded_units(name):
-                stream.feed(part)
+            stream.feed(_encoded(name))
         out = bytearray(stream.finish())
         while stream.busy():
             out.extend(stream.drain())
@@ -132,9 +138,10 @@ class Glob:
         try:
             budget = self._budget
             if not reuse:
-                for part in _encoded_units(name):
+                data = _encoded(name)
+                for start in range(0, len(data), _CHUNK):
                     await budget.run()
-                    stream.feed(part)
+                    stream.feed(data[start : start + _CHUNK])
             out = bytearray(stream.finish())
             while stream.busy():
                 await budget.run()
@@ -142,11 +149,6 @@ class Glob:
             return cast(_Reply, json.loads(out))
         finally:
             del stream
-
-    def matches(self, name: str) -> bool:
-        result = self._run(name, {"kind": "matches"})
-        assert isinstance(result, bool)
-        return result
 
     async def matches_async(self, name: str) -> bool:
         result = await self._run_async(name, {"kind": "matches"})
@@ -197,3 +199,52 @@ class Glob:
         result = self._run("", {"kind": "parts"})
         assert isinstance(result, list)
         return [_text(part) for part in result]
+
+
+class GlobMatcher:
+    """One compiled pattern asked whether whole names match, one native
+    call per name: what a filter walking many names needs.
+
+    Args:
+        pattern (str): pattern with quoting sentinels intact.
+        extglob (bool): recognize extended pattern groups.
+        period (bool): require an explicit leading pathname dot.
+        dialect (str): shell or Python fnmatchcase grammar.
+    """
+
+    def __init__(
+        self,
+        pattern: str,
+        extglob: bool = False,
+        period: bool = False,
+        dialect: _Dialect = "shell",
+    ) -> None:
+        # A cached matcher answers every thread, and its test runs with the
+        # GIL released: one test goes through the stream at a time.
+        self._lock = threading.Lock()
+        self._stream = Stream(
+            "glob", _config(pattern, extglob, period, dialect)
+        )
+
+    def matches(self, name: str) -> bool:
+        data = _encoded(name)
+        with self._lock:
+            return self._stream.test(data)
+
+
+@lru_cache(maxsize=_CACHE_SIZE)
+def glob_matcher(
+    pattern: str,
+    extglob: bool = False,
+    period: bool = False,
+    dialect: _Dialect = "shell",
+) -> GlobMatcher:
+    """A compiled ``GlobMatcher``, shared by every caller asking the same.
+
+    Args:
+        pattern (str): pattern with quoting sentinels intact.
+        extglob (bool): recognize extended pattern groups.
+        period (bool): require an explicit leading pathname dot.
+        dialect (str): shell or Python fnmatchcase grammar.
+    """
+    return GlobMatcher(pattern, extglob, period, dialect)

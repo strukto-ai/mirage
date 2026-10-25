@@ -97,6 +97,8 @@
    "typescript_only": {
     "units": "Validates character-value arrays returned by Rust; Python checks integer units while constructing a string.",
     "finalizer": "Closes Wasm slots for abandoned synchronous matcher objects; Python releases native streams by reference counting.",
+    "matchers": "The compiled-pattern map behind globMatcher; Python's functools.lru_cache holds the same entries.",
+    "scratch": "One reused buffer for the code units a synchronous call copies into Wasm; Python's str.encode builds them natively.",
     "spans": "Validates the Rust span result at the JavaScript boundary; Python validates pairs while reconstructing typed tuples."
    }
   },

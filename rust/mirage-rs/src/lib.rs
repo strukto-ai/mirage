@@ -116,6 +116,15 @@ pub trait Stream: Send + Sync {
         Err(StreamError::new("this stream reads one input"))
     }
 
+    /// Answer a yes-or-no question about one whole input in one call: the
+    /// bytes fed since the last answer, then `input`. The next input starts
+    /// empty. It is for a host asking once per name, where the calls of
+    /// `begin`, `feed`, `finish` and `drain` would cost more than the work.
+    fn test(&mut self, input: &[u8]) -> Result<bool, StreamError> {
+        let _ = input;
+        Err(StreamError::new("this stream answers no test"))
+    }
+
     /// Whether the stream wants no more of the current input: the host
     /// stops reading it and calls `finish`.
     fn done(&self) -> bool {

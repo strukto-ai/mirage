@@ -1,11 +1,13 @@
 import asyncio
 import base64
+import json
 import sys
 import threading
 from collections.abc import Mapping
 
 import pytest
 
+from mirage._rs import Stream, StreamError
 from mirage.concurrency.worker import Worker
 from mirage.io.spool import ByteSpool
 from mirage.rs.errors import StreamRefusal
@@ -54,6 +56,11 @@ def test_one_stream_reads_one_input_after_another():
 def test_a_stream_of_one_input_refuses_another():
     with pytest.raises(StreamRefusal):
         open_stream("base64", DECODE).begin({})
+
+
+def test_a_stream_that_answers_no_test_refuses_one():
+    with pytest.raises(StreamError, match="answers no test"):
+        Stream("base64", json.dumps(DECODE).encode()).test(b"")
 
 
 def test_a_stream_may_be_freed_on_another_thread(monkeypatch):

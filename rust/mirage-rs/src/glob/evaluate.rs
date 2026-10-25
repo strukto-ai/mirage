@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::Arc;
 
-use super::compile::{Atom, Program, has, is};
+use super::compile::{Program, has, is};
 use super::{Key, Positions, Span};
 
 fn append_span(spans: &mut Vec<Span>, (lo, hi): Span) {
@@ -277,12 +277,7 @@ impl Frame {
                     return Progress::Continue;
                 }
                 if let Some(&atom) = bracket.atoms.get(index) {
-                    let cp = character(self.position);
-                    found |= match atom {
-                        Atom::Literal(unit) => unit == cp,
-                        Atom::Range(lo, hi) => lo <= cp && cp <= hi,
-                        Atom::Class(class) => class.contains(cp),
-                    };
+                    found |= atom.contains(character(self.position));
                     self.phase = Phase::Bracket {
                         state,
                         index: index + 1,
@@ -410,6 +405,19 @@ pub(super) struct Evaluator {
 }
 
 impl Evaluator {
+    /// Whether `subject` matches whole, evaluated to the end in one call.
+    pub(super) fn matches(program: &Program, subject: &[u32], period: bool) -> bool {
+        let mut evaluator = Self::default();
+        evaluator.start((0, program.units.len(), 0), false);
+        loop {
+            if let Some(answer) = &evaluator.answer {
+                return answer
+                    .last()
+                    .is_some_and(|&(_, hi)| hi - 1 == subject.len());
+            }
+            evaluator.step(program, subject, false, period);
+        }
+    }
     pub(super) fn start(&mut self, key: Key, retain_runs: bool) {
         self.answer = self.memo.get(&key).cloned();
         if self.answer.is_none() {
