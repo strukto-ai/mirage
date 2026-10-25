@@ -44,6 +44,8 @@ import {
   NUMERIC_SHORT,
   OPERAND,
   OWN_OPTION_LOOP,
+  PARSE_KEPT_CHARS,
+  PARSES_KEPT,
   REFUSED,
   SPELLED,
   SPELLED_WORDS,
@@ -505,6 +507,9 @@ function matchDigitCluster(
   return digits === '' ? null : { bools, digits, rest: null }
 }
 
+/** Each spec's readings, keyed by spec as `compileSpec` keys its tables. */
+const PARSES = new WeakMap<CommandSpec, Map<string, ParsedArgs>>()
+
 /**
  * Read one command line against a spec.
  *
@@ -532,6 +537,11 @@ function matchDigitCluster(
  * program that takes whole words only (git's revision walkers). Undefined
  * leaves the getopt_long reading against the spec.
  *
+ * The reading is kept per spec, keyed by everything it depends on (the
+ * environment only through the variables the spec declares), so every reader
+ * of one command shares one parse: read it, never change it. Words longer
+ * than PARSE_KEPT_CHARS in all are read afresh each time.
+ *
  * `parse_command` in parser.py is the twin.
  */
 export function parseCommand(
@@ -544,6 +554,25 @@ export function parseCommand(
   abbreviations?: readonly string[],
 ): ParsedArgs {
   const cs = compileSpec(spec)
+  let parses: Map<string, ParsedArgs> | undefined
+  let key = ''
+  if (argv.reduce((chars, word) => chars + word.length, 0) <= PARSE_KEPT_CHARS) {
+    key = JSON.stringify([
+      argv,
+      cwd,
+      cmdName,
+      unknownIsOperand,
+      abbreviations ?? null,
+      [...cs.envByDest.values()].map((variable) => env?.[variable] ?? null),
+    ])
+    parses = PARSES.get(spec)
+    if (parses === undefined) {
+      parses = new Map()
+      PARSES.set(spec, parses)
+    }
+    const kept = parses.get(key)
+    if (kept !== undefined) return kept
+  }
   const wordChoiceDestSet = wordChoiceDests(spec)
 
   // tar's old option style is expanded before anything else reads the
@@ -1283,7 +1312,7 @@ export function parseCommand(
           ? WordKind.VALUE
           : null,
   )
-  return new ParsedArgs({
+  const parsed = new ParsedArgs({
     flags,
     args: classified,
     rawPathFlags,
@@ -1308,6 +1337,11 @@ export function parseCommand(
     wordBases,
     wordRoles,
   })
+  if (parses !== undefined) {
+    if (parses.size >= PARSES_KEPT) parses.clear()
+    parses.set(key, parsed)
+  }
+  return parsed
 }
 
 export function parseToKwargs(parsed: ParsedArgs): Record<string, ParsedFlagValue> {
