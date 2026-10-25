@@ -12,8 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { ChunkedHandle } from '@struktoai/mirage-core/runtime/handles/index'
-import type { FileStat } from '@struktoai/mirage-core/types'
+import type { ChunkedHandle, OpenMode } from '../runtime/handles/index.ts'
+import type { FileStat } from '../types.ts'
 
 /**
  * One entry's POSIX attributes, as every adapter over the core needs them:
@@ -32,11 +32,19 @@ export interface MountAttrs {
   rdev: number
 }
 
-/** One open file of a kernel mount. */
+/** One open file, whichever entry point opened it. */
 export interface Handle {
   path: string
-  /** Where the path really points once namespace links are followed. */
+  /**
+   * Where the path really points once namespace links are followed; a file
+   * whose name went keys the handles left on it alike.
+   */
   key: string
+  /**
+   * What the open asked for: a handle that writes reads the stored bytes,
+   * one that appends writes at the end.
+   */
+  mode: OpenMode
   data?: Uint8Array
   writeBuf?: [number, Uint8Array][]
   live?: boolean
@@ -49,4 +57,11 @@ export interface Handle {
    * file has no path left. Unset while it has one.
    */
   detached?: FileStat
+  /** The stored length the open saw, where an appending handle's writes start while it holds no bytes. */
+  size?: number
+  /**
+   * Why the bytes its file had could not be kept when its name went; every
+   * read through it reports it rather than read what the name holds now.
+   */
+  lost?: Error
 }

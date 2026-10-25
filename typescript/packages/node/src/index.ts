@@ -45,8 +45,8 @@ export { RedisAccessor } from '@struktoai/mirage-core/accessor/redis'
 export { RedisFileCacheStore, type RedisFileCacheOptions } from './cache/file/redis.ts'
 export { FuseManager } from './workspace/fuse.ts'
 export { MirageFS, type MirageFSOptions } from './fuse/fs.ts'
-export type { MountAttrs } from './mount/types.ts'
-export { MountCore, type MountCoreOptions } from './mount/core.ts'
+export type { MountAttrs } from '@struktoai/mirage-core/mount/types'
+export { MountCore, type MountCoreOptions } from '@struktoai/mirage-core/mount/core'
 export { classifyErrno, classifyError } from './mount/errors.ts'
 export {
   checkMountpoint,
@@ -63,7 +63,7 @@ export {
   type FuseHandle,
   type MountOptions as FuseMountOptions,
 } from './fuse/mount.ts'
-export { isMacosMetadata } from './mount/platform/macos.ts'
+export { isMacosMetadata } from '@struktoai/mirage-core/mount/platform/macos'
 export { S3VFS, type S3VFSState } from './vfs/s3/s3.ts'
 export { GridFSVFS, type GridFSVFSState } from './vfs/gridfs/gridfs.ts'
 export {

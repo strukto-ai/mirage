@@ -19,7 +19,8 @@ import { MountMode, PathSpec, WritePolicy } from '@struktoai/mirage-core/types'
 import { Mount } from '@struktoai/mirage-core/workspace/mount/spec'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
-import { MountCore } from '../../mount/core.ts'
+import { MountCore } from '@struktoai/mirage-core/mount/core'
+import { openMode } from '@struktoai/mirage-core/runtime/handles/index'
 import { MinIOVFS } from '../minio/minio.ts'
 import {
   inFlightConflict,
@@ -791,14 +792,19 @@ describe('conditional writes on an S3 mount', () => {
     const core = new MountCore(ws.vfs)
     expect(DEC.decode(await core.read('/s3/d/a', -1, 0, 100))).toBe('a\n')
     mock.ledger.length = 0
-    const fd = await core.open('/s3/d/a', constants.O_WRONLY | constants.O_TRUNC)
+    const fd = await core.open(
+      '/s3/d/a',
+      openMode(constants.O_WRONLY | constants.O_TRUNC, constants),
+    )
     await core.write('/s3/d/a', fd, ENC.encode('A\n'), 0)
     await core.release(fd)
     expect(object('d/a')).toBe('A\n')
     expect(sent('PutObject')).toEqual([{ IfMatch: etag('a\n') }, { IfMatch: etag('') }])
     expect(DEC.decode(await core.read('/s3/f', -1, 0, 100))).toBe('one\n')
     theirs()
-    await expect(core.open('/s3/f', constants.O_WRONLY | constants.O_TRUNC)).rejects.toMatchObject({
+    await expect(
+      core.open('/s3/f', openMode(constants.O_WRONLY | constants.O_TRUNC, constants)),
+    ).rejects.toMatchObject({
       code: 'STALE_WRITE',
     })
     expect(object('f')).toBe('theirs\n')

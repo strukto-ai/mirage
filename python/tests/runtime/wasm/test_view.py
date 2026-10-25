@@ -20,6 +20,7 @@ import time
 import pytest
 
 from mirage.runtime.files import RuntimeFiles
+from mirage.runtime.handles.mode import parse_mode
 from mirage.runtime.resolver import PrefixResolver
 from mirage.runtime.types import VFSStat
 from mirage.runtime.wasm.constants import (
@@ -210,15 +211,15 @@ def test_missing_host_path_falls_through_to_bridge(tmp_path):
     bridge = FakeVFS(files={"/new.txt": b"ram-root"})
     fs = WasmView(str(tmp_path), bridge)
     assert fs.read("/new.txt") == b"ram-root"
-    fs.create("/created.txt")
-    assert bridge.files["/created.txt"] == b""
+    fs.mkdir("/created")
+    assert "/created" in bridge.dirs
 
 
 def test_host_paths_are_read_only(tmp_path):
     (tmp_path / "python.wasm").write_bytes(b"\0asm")
     fs = WasmView(str(tmp_path), FakeVFS())
     with pytest.raises(PermissionError, match="read-only"):
-        fs.create("/python.wasm")
+        fs.open("/python.wasm", parse_mode("w"))
     with pytest.raises(PermissionError, match="read-only"):
         fs.unlink("/python.wasm")
     assert (tmp_path / "python.wasm").read_bytes() == b"\0asm"

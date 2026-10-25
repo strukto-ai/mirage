@@ -334,6 +334,32 @@ describe('patchNodeFs — descriptors', () => {
     await reader.close()
     await ws.close()
   })
+  it('leaves an appending descriptor past what it wrote', async () => {
+    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
+    restore = patchNodeFs(ws)
+    const fs = requireCjs('fs') as Fs
+    await fs.promises.writeFile('/data/f', 'abc')
+    const handle = await fs.promises.open('/data/f', 'a+')
+    await handle.write('X')
+    expect((await handle.read(Buffer.alloc(8))).bytesRead).toBe(0)
+    await handle.close()
+    expect(await fs.promises.readFile('/data/f', 'utf-8')).toBe('abcX')
+    await ws.close()
+  })
+  it('writes nothing for an append that cannot find its end', async () => {
+    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
+    restore = patchNodeFs(ws)
+    const fs = requireCjs('fs') as Fs
+    await fs.promises.writeFile('/data/f', 'abc')
+    const handle = await fs.promises.open('/data/f', 'a')
+    ws.policies.add({
+      preVfs: (ctx) => (ctx.call.name === 'stat' ? { kind: 'deny', reason: 'no stat' } : null),
+    })
+    await expect(handle.write('X')).rejects.toMatchObject({ code: 'EACCES' })
+    await handle.close()
+    expect(new TextDecoder().decode(await ws.vfs.read('/data/f'))).toBe('abc')
+    await ws.close()
+  })
   it('lands a write made while a sync is out', async () => {
     const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
     restore = patchNodeFs(ws)
@@ -515,9 +541,10 @@ describe('patchNodeFs — descriptors', () => {
     await ws.close()
   })
 
-  it('holds a handle opened while a removal reads the file', async () => {
-    // The removal reads what its open handles keep; one opened while that
-    // read was out is open on the file too, so its writes stay off the name.
+  it('waits out a removal an open races, then finds the file gone', async () => {
+    // The removal reads what its open handles keep; an open that arrives
+    // while that read is out waits for it, as the kernel orders an open
+    // and an unlink of one name.
     const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
     restore = patchNodeFs(ws)
     const fs = requireCjs('fs') as Fs
@@ -540,12 +567,11 @@ describe('patchNodeFs — descriptors', () => {
     gated = true
     const removing = fs.promises.unlink('/data/f.txt')
     await started
-    const late = await fs.promises.open('/data/f.txt', 'r+')
+    const late = fs.promises.open('/data/f.txt', 'r+')
     gated = false
     release()
     await removing
-    await late.write('X', 0)
-    await late.close()
+    await expect(late).rejects.toMatchObject({ code: 'ENOENT' })
     await reader.close()
     expect(await ws.vfs.exists('/data/f.txt')).toBe(false)
     await ws.close()
@@ -571,10 +597,13 @@ describe('patchNodeFs — ledger', () => {
     restore = patchNodeFs(ws)
     const fs = requireCjs('fs') as Fs
 
+    // A write opens the file, which creates it, and its close lands the
+    // bytes, as an open, a write and a close do on a kernel mount.
     await fs.promises.writeFile('/data/x.txt', 'hi')
     await fs.promises.readFile('/data/x.txt')
     expect(ws.vfs.records.map((r) => [r.op, r.path, r.bytes])).toEqual([
-      ['write', '/data/x.txt', 2],
+      ['create', '/data/x.txt', 0],
+      ['pwrite', '/data/x.txt', 2],
       ['read', '/data/x.txt', 2],
     ])
     await ws.close()

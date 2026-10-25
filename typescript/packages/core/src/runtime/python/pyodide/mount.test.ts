@@ -12,17 +12,16 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { WorkspaceBinding } from '../../binding.ts'
 import { describe, expect, it } from 'vitest'
 import { PyodideRuntime } from './runtime.ts'
 import type { BridgeDispatchFn, RunResult } from '../../types.ts'
 import { ContentType, FileStat, FileType } from '../../../types.ts'
 import { PrefixResolver } from '../../resolver.ts'
-import { context } from '../../../../tests/workspace/fixtures/context.ts'
+import { bindOver, runContext } from '../../../../tests/runtime/fixtures/bridge.ts'
 
 /** Run `code` at `/` with empty stdin. */
 function interpret(rt: PyodideRuntime, code: string): Promise<RunResult> {
-  return rt.interpret(undefined, { code, args: [], stdin: new Uint8Array() }, context())
+  return rt.interpret(undefined, { code, args: [], stdin: new Uint8Array() }, runContext(rt))
 }
 
 function makeBridge(): {
@@ -88,6 +87,9 @@ function makeBridge(): {
     // (R1), so the double reports them too: preload descends through
     // them exactly as it does against a live workspace.
     for (const d of dirs) entries.push(d)
+    // A name that lists nothing is no directory, as the dispatcher says.
+    if (op === 'readdir' && entries.length === 0 && !path.endsWith('/'))
+      return Promise.reject(Object.assign(new Error(`no such dir: ${path}`), { code: 'ENOENT' }))
     return Promise.resolve(entries)
   }
   return { dispatch, calls, files }
@@ -98,7 +100,7 @@ describe('PyodideRuntime mount visibility', () => {
     const { dispatch, calls } = makeBridge()
     const mounts: string[] = ['/ram/']
     const rt = new PyodideRuntime()
-    rt.bind(WorkspaceBinding.overBridge(dispatch, new PrefixResolver(() => mounts)))
+    bindOver(rt, dispatch, new PrefixResolver(() => mounts))
     await interpret(rt, 'pass')
     mounts.length = 0
     await interpret(rt, `with open('/ram/x.txt', 'wb') as f: f.write(b'nope')`)
@@ -111,7 +113,7 @@ describe('PyodideRuntime mount visibility', () => {
     files.set('/ram/lazy.txt', new TextEncoder().encode('lazy'))
     const mounts: string[] = []
     const rt = new PyodideRuntime()
-    rt.bind(WorkspaceBinding.overBridge(dispatch, new PrefixResolver(() => mounts)))
+    bindOver(rt, dispatch, new PrefixResolver(() => mounts))
     await interpret(rt, 'pass')
     mounts.push('/ram/')
     const result = await interpret(rt, `with open('/ram/lazy.txt') as f: print(f.read())`)
@@ -130,7 +132,7 @@ describe('PyodideRuntime mount visibility', () => {
     const warn = console.warn
     console.warn = (msg: unknown) => warnings.push(String(msg))
     const rt = new PyodideRuntime()
-    rt.bind(WorkspaceBinding.overBridge(dispatch, new PrefixResolver(() => ['/'])))
+    bindOver(rt, dispatch, new PrefixResolver(() => ['/']))
     try {
       const result = await interpret(rt, `open('/out.txt', 'wb').write(b'data')`)
       expect(result.exitCode).toBe(0)
@@ -149,7 +151,7 @@ describe('PyodideRuntime mount visibility', () => {
     async (prefix) => {
       const { dispatch, calls } = makeBridge()
       const rt = new PyodideRuntime()
-      rt.bind(WorkspaceBinding.overBridge(dispatch, new PrefixResolver(() => [prefix])))
+      bindOver(rt, dispatch, new PrefixResolver(() => [prefix]))
       try {
         const result = await interpret(rt, 'print(1)')
         expect(result.exitCode).toBe(126)
@@ -168,7 +170,7 @@ describe('PyodideRuntime mount visibility', () => {
   it('a mount beside the stdlib under /lib leaves the run alone', async () => {
     const { dispatch } = makeBridge()
     const rt = new PyodideRuntime()
-    rt.bind(WorkspaceBinding.overBridge(dispatch, new PrefixResolver(() => ['/lib/app/'])))
+    bindOver(rt, dispatch, new PrefixResolver(() => ['/lib/app/']))
     try {
       const result = await interpret(rt, 'print(1)')
       expect(result.exitCode).toBe(0)
@@ -179,17 +181,19 @@ describe('PyodideRuntime mount visibility', () => {
   }, 60_000)
 
   it('a refused create fails the open with the mount errno', async () => {
-    const dispatch: BridgeDispatchFn = (op, _path, _bytes, _dst, attrs) => {
+    const dispatch: BridgeDispatchFn = (op, path, _bytes, _dst, attrs) => {
       if (attrs?.retained !== undefined) return Promise.resolve(attrs.retained)
       if (op === 'stat')
         return Promise.reject(Object.assign(new Error('missing'), { code: 'ENOENT' }))
       if (op === 'create')
         return Promise.reject(Object.assign(new Error('mount is read-only'), { code: 'EROFS' }))
       if (op === 'read') return Promise.resolve(new Uint8Array())
+      if (op === 'readdir' && !path.endsWith('/'))
+        return Promise.reject(Object.assign(new Error('not a dir'), { code: 'ENOENT' }))
       return Promise.resolve([])
     }
     const rt = new PyodideRuntime()
-    rt.bind(WorkspaceBinding.overBridge(dispatch, new PrefixResolver(() => ['/ram/'])))
+    bindOver(rt, dispatch, new PrefixResolver(() => ['/ram/']))
     const result = await interpret(rt, `with open('/ram/out.txt', 'wb') as f: f.write(b'data')`)
     expect(result.exitCode).toBe(1)
     const stderr = new TextDecoder().decode(result.stderr ?? new Uint8Array())
@@ -215,11 +219,13 @@ describe('PyodideRuntime mount visibility', () => {
         return Promise.reject(Object.assign(new Error('missing'), { code: 'ENOENT' }))
       if (op === 'create') return Promise.reject(new Error('backend hiccup'))
       if (op === 'read') return Promise.resolve(new Uint8Array())
+      if (op === 'readdir' && !path.endsWith('/'))
+        return Promise.reject(Object.assign(new Error('not a dir'), { code: 'ENOENT' }))
       if (op === 'readdir') return Promise.resolve([])
       return Promise.resolve(undefined)
     }
     const rt = new PyodideRuntime()
-    rt.bind(WorkspaceBinding.overBridge(dispatch, new PrefixResolver(() => ['/ram/'])))
+    bindOver(rt, dispatch, new PrefixResolver(() => ['/ram/']))
     const result = await interpret(
       rt,
       [
@@ -237,11 +243,12 @@ describe('PyodideRuntime mount visibility', () => {
     await rt.close()
   }, 60_000)
 
-  it('an unreadable base refuses the open rather than replacing the file', async () => {
+  it('an append whose base the mount will not read lands as an append', async () => {
     const writes: Uint8Array[] = []
+    const appends: string[] = []
     // The mount lists the file, so it exists, but will not hand over its
-    // content. Leaving it out of the guest's tree would read as absence,
-    // and the append would then ship its tail as the whole file.
+    // content. An append needs none of it: the tail lands as an append,
+    // and nothing ships it as the whole file.
     const dispatch: BridgeDispatchFn = (op, path, bytes, _dst, attrs) => {
       if (attrs?.retained !== undefined) return Promise.resolve(attrs.retained)
       if (op === 'read' && path === '/ram/log.txt') {
@@ -255,39 +262,54 @@ describe('PyodideRuntime mount visibility', () => {
         )
       }
       if (op === 'write' && bytes !== undefined) writes.push(new Uint8Array(bytes))
+      if (op === 'append' && bytes !== undefined) appends.push(new TextDecoder().decode(bytes))
       return Promise.resolve(undefined)
     }
     const rt = new PyodideRuntime()
-    rt.bind(WorkspaceBinding.overBridge(dispatch, new PrefixResolver(() => ['/ram/'])))
+    bindOver(rt, dispatch, new PrefixResolver(() => ['/ram/']))
     const result = await interpret(rt, `open('/ram/log.txt', 'a').write('tail')`)
+    expect(new TextDecoder().decode(result.stderr ?? new Uint8Array())).toBe('')
     expect(writes).toHaveLength(0)
-    // The refusal reaches the guest at the call site now, rather than
-    // surfacing after the run as a failed replay.
-    const stderr = new TextDecoder().decode(result.stderr ?? new Uint8Array())
-    expect(stderr).toContain('OSError')
-    expect(result.exitCode).toBe(1)
+    expect(appends).toEqual(['tail'])
+    expect(result.exitCode).toBe(0)
     await rt.close()
   }, 60_000)
 })
+
+/**
+ * A mount that holds only the empty files a run made: they stat as files,
+ * every other name is missing, and only a directory lists.
+ */
+function answerMade(made: Set<string>, op: string, path: string): unknown {
+  if (op === 'stat') {
+    if (made.has(path)) return new FileStat({ name: path, size: 0, type: FileType.FILE })
+    throw Object.assign(new Error('missing'), { code: 'ENOENT' })
+  }
+  if (op === 'read') return new Uint8Array()
+  if (op === 'readdir') {
+    if (path.endsWith('/')) return []
+    throw Object.assign(new Error('not a dir'), { code: 'ENOENT' })
+  }
+  return undefined
+}
 
 // Every op a bound run makes reaches the mount through the worker, which
 // is where the guest's filesystem lives.
 describe('PyodideRuntime writes', () => {
   it('a dirty close flushes to the mount and the script exits 0', async () => {
     const calls: { op: string; path: string; bytes?: Uint8Array }[] = []
+    const made = new Set<string>()
     const dispatch: BridgeDispatchFn = async (op, path, bytes, _dst, attrs) => {
       if (attrs?.retained !== undefined) return Promise.resolve(attrs.retained)
       // settle on a macrotask so a run_sync anywhere in the path would
       // have to suspend, not ride an already-resolved promise
       await new Promise((resolve) => setTimeout(resolve, 1))
       calls.push(bytes ? { op, path, bytes: new Uint8Array(bytes) } : { op, path })
-      if (op === 'stat') throw Object.assign(new Error('missing'), { code: 'ENOENT' })
-      if (op === 'read') return new Uint8Array()
-      if (op === 'readdir') return []
-      return undefined
+      if (op === 'create') made.add(path)
+      return answerMade(made, op, path)
     }
     const rt = new PyodideRuntime()
-    rt.bind(WorkspaceBinding.overBridge(dispatch, new PrefixResolver(() => ['/ram/'])))
+    bindOver(rt, dispatch, new PrefixResolver(() => ['/ram/']))
     const result = await interpret(rt, `with open('/ram/out.txt', 'wb') as f: f.write(b'landed')`)
     expect(new TextDecoder().decode(result.stderr ?? new Uint8Array())).toBe('')
     expect(result.exitCode).toBe(0)
@@ -304,17 +326,18 @@ describe('PyodideRuntime writes', () => {
 
   it('mutations reach the mount in guest order', async () => {
     const calls: { op: string; path: string; dst?: string }[] = []
+    const made = new Set<string>()
     const dispatch: BridgeDispatchFn = async (op, path, _bytes, dst, attrs) => {
       if (attrs?.retained !== undefined) return Promise.resolve(attrs.retained)
       await new Promise((resolve) => setTimeout(resolve, 1))
       calls.push(dst === undefined ? { op, path } : { op, path, dst })
-      if (op === 'stat') throw Object.assign(new Error('missing'), { code: 'ENOENT' })
-      if (op === 'read') return new Uint8Array()
-      if (op === 'readdir') return []
-      return undefined
+      if (op === 'create') made.add(path)
+      if (op === 'rename' && dst !== undefined && made.delete(path)) made.add(dst)
+      if (op === 'unlink') made.delete(path)
+      return answerMade(made, op, path)
     }
     const rt = new PyodideRuntime()
-    rt.bind(WorkspaceBinding.overBridge(dispatch, new PrefixResolver(() => ['/ram/'])))
+    bindOver(rt, dispatch, new PrefixResolver(() => ['/ram/']))
     const result = await interpret(
       rt,
       [
@@ -382,7 +405,7 @@ describe('PyodideRuntime writes', () => {
       return undefined
     }
     const rt = new PyodideRuntime()
-    rt.bind(WorkspaceBinding.overBridge(dispatch, new PrefixResolver(() => ['/ram/'])))
+    bindOver(rt, dispatch, new PrefixResolver(() => ['/ram/']))
     await interpret(rt, 'pass')
     files.set('/ram/log.txt', new TextEncoder().encode('a'))
     const result = await interpret(

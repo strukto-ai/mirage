@@ -32,11 +32,13 @@ from asyncssh.constants import (
     FXF_APPEND,
     FXF_CREAT,
     FXF_EXCL,
+    FXF_READ,
     FXF_TRUNC,
+    FXF_WRITE,
 )
 from asyncssh.sftp import run_sftp_server
 
-from mirage.errors.fs import eexist, eisdir, enoent
+from mirage.errors.fs import eexist, enoent
 from mirage.errors.types import NoMountError
 from mirage.mount.constants import (
     ENCODING,
@@ -47,6 +49,7 @@ from mirage.mount.constants import (
 from mirage.mount.core import MountCore
 from mirage.mount.errors import classify_error
 from mirage.mount.types import MountAttrs
+from mirage.runtime.handles.mode import OpenMode
 from mirage.runtime.types import ByteReader, PipeWriter
 from mirage.workspace.files import Files
 from mirage.workspace.session import SessionState
@@ -65,13 +68,10 @@ class OpenFile:
     Args:
         path (str): the workspace path it was opened on.
         fh (int): the MountCore handle id.
-        append_at (int | None): where the next write lands when the file
-            was opened for append, None otherwise.
     """
 
     path: str
     fh: int
-    append_at: int | None = None
 
 
 def opened(file_obj: Any) -> OpenFile:
@@ -205,6 +205,9 @@ async def open_file(
 ) -> OpenFile:
     """Open or create a file the way an SFTP ``open`` asks.
 
+    The open's effect is the core's (create, exclusive, truncate), and a
+    directory refuses it, as SFTP opens files only.
+
     Args:
         core (MountCore): the mount core.
         path (str): the file.
@@ -219,21 +222,16 @@ async def open_file(
         FileNotFoundError: no such file and no CREAT.
         IsADirectoryError: the path is a directory.
     """
-    found = await exists(core, path)
-    if found and pflags & FXF_CREAT and pflags & FXF_EXCL:
-        raise eexist(path)
-    if not found:
-        if not pflags & FXF_CREAT:
-            raise enoent(path)
-        fh = await core.create(path, mode)
-    else:
-        if stat.S_ISDIR((await core.getattr(path)).mode):
-            raise eisdir(path)
-        fh = await core.open(path, os.O_TRUNC if pflags & FXF_TRUNC else 0)
-    append_at = None
-    if pflags & FXF_APPEND:
-        append_at = (await core.fgetattr(path, fh)).size
-    return OpenFile(path, fh, append_at)
+    facts = OpenMode(
+        readable=bool(pflags & FXF_READ),
+        writable=bool(pflags & (FXF_WRITE | FXF_APPEND)),
+        truncate=bool(pflags & FXF_TRUNC),
+        append=bool(pflags & FXF_APPEND),
+        create=bool(pflags & FXF_CREAT),
+        exclusive=bool(pflags & FXF_CREAT and pflags & FXF_EXCL),
+        binary=True,
+    )
+    return OpenFile(path, await core.open(path, facts, mode))
 
 
 def epoch_ns(seconds: int | None, ns: int | None) -> int | None:
@@ -466,9 +464,6 @@ class MirageSFTPServer(asyncssh.SFTPServer):
 
     async def write(self, file_obj: Any, offset: int, data: bytes) -> int:
         f = opened(file_obj)
-        if f.append_at is not None:
-            offset = f.append_at
-            f.append_at += len(data)
         return await self._call(
             lambda core: core.write(f.path, data, offset, f.fh)
         )

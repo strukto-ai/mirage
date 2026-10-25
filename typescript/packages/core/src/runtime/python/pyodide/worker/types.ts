@@ -13,26 +13,33 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { FlagValue } from '../../../../commands/spec/types.ts'
-import type { Program, RunResult, BridgeDispatchFn, VFSStat } from '../../../types.ts'
+import type { OpenMode } from '../../../handles/mode.ts'
+import type { Program, RunResult, BridgeDispatchFn } from '../../../types.ts'
 import type { PyodideConfig } from '../config.ts'
 import type { MirageMutation } from '../fs/journal.ts'
 
-export type ReadOperation = 'read' | 'stat' | 'readdir' | 'readlink'
+export type ReadOperation = 'stat' | 'readdir' | 'readlink'
+/** A call on a core handle the worker's stream holds (`SyncVFS`). */
+export type HandleOperation = 'open' | 'pread' | 'pwrite' | 'fstat' | 'ftruncate' | 'close'
 export interface VfsRequest {
   kind: 'vfs'
   /** The memory a worker that shares it waits on for the answer. */
   buffer?: SharedArrayBuffer
   /** The request the service worker holds for a worker that shares none. */
   id?: string
-  op: ReadOperation | 'dispatch' | 'flush' | 'process'
+  op: ReadOperation | HandleOperation | 'dispatch' | 'flush' | 'process'
   path: string
   args?: Parameters<BridgeDispatchFn>
   mutations?: MirageMutation[]
   payload?: string
   classify?: boolean
-  raw?: boolean
-  retained?: Uint8Array
-  retainedStat?: VFSStat
+  mode?: OpenMode
+  fh?: number
+  /** Where a pread or pwrite starts. */
+  offset?: number
+  /** How many bytes a pread asks for, or the length a ftruncate leaves. */
+  size?: number
+  bytes?: Uint8Array
 }
 /**
  * One run the main thread hands the worker: the program it resolved, and

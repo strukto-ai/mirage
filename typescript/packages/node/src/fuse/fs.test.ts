@@ -21,7 +21,7 @@ import { Workspace } from '../workspace.ts'
 import { EEXIST, ENOTEMPTY as POSITIVE_ENOTEMPTY } from '../mount/errors.ts'
 import { XATTR_CREATE, XATTR_REPLACE } from './constants.ts'
 import { MirageFS } from './fs.ts'
-import type { MountAttrs } from '../mount/types.ts'
+import type { MountAttrs } from '@struktoai/mirage-core/mount/types'
 
 const ENOENT = -2
 const ENOTEMPTY = -POSITIVE_ENOTEMPTY
@@ -228,31 +228,16 @@ describe('MirageFS — read-only mount write consistency', () => {
     )
     expect(truncOpenCode).toBe(EROFS)
 
-    const [openCode, fh] = await callOp<[number, number]>(
+    // So is any open that would write: it is admitted against the mount's
+    // mode before its first write, as open(2) refuses O_WRONLY on a
+    // read-only filesystem, rather than taking writes no flush can land.
+    const [openCode] = await callOp<[number]>(
       mfs,
       'open',
       '/data/existing.txt',
       fsConstants.O_WRONLY,
     )
-    expect(openCode).toBe(0)
-
-    const bytes = Buffer.from('changed')
-    const [writeBytes] = await callOp<[number]>(
-      mfs,
-      'write',
-      '/data/existing.txt',
-      fh,
-      bytes,
-      bytes.byteLength,
-      0,
-    )
-    expect(writeBytes).toBe(bytes.byteLength)
-
-    // The kernel reports byte acceptance before flush. Flush is the point where
-    // Mirage commits buffered FUSE writes, so it must enforce the same READ-mode
-    // restriction as create.
-    const [flushCode] = await callOp<[number]>(mfs, 'flush', '/data/existing.txt', fh)
-    expect(flushCode).toBe(EROFS)
+    expect(openCode).toBe(EROFS)
     expect(new TextDecoder().decode(await seedWs.vfs.read('/data/existing.txt'))).toBe('seed')
   })
 })
@@ -487,7 +472,12 @@ describe('MirageFS — release flushes pending writes', () => {
   it('flush persists the buffered writes', async () => {
     const ws = await mkWs()
     const mfs = new MirageFS(ws.vfs)
-    const [, fh] = await callOp<[number, number]>(mfs, 'open', '/data/greeting.txt', 0)
+    const [, fh] = await callOp<[number, number]>(
+      mfs,
+      'open',
+      '/data/greeting.txt',
+      fsConstants.O_WRONLY,
+    )
     const data = Buffer.from('CLOBBER world\n')
     await callOp(mfs, 'write', '/data/greeting.txt', fh, data, data.byteLength, 0)
     await callOp(mfs, 'flush', '/data/greeting.txt', fh)

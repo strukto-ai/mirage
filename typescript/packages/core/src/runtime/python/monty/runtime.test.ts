@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { WorkspaceBinding } from '../../binding.ts'
 import { afterAll, describe, expect, it, vi } from 'vitest'
 import type { Context } from '../../../commands/config.ts'
 import type { BridgeDispatchFn, Program, RunResult } from '../../types.ts'
@@ -25,6 +24,7 @@ import { Workspace } from '../../../workspace/workspace/workspace.ts'
 import { PrefixResolver } from '../../resolver.ts'
 import { context } from '../../../../tests/workspace/fixtures/context.ts'
 import { materialize } from '../../../io/types.ts'
+import { bindOver, runContext } from '../../../../tests/runtime/fixtures/bridge.ts'
 
 function makeBridge(
   seed: Record<string, Uint8Array>,
@@ -140,7 +140,11 @@ async function interpret(
   program: Partial<Program> & { code: string },
   extra: Partial<Context> = {},
 ): Promise<RunResult> {
-  return rt.interpret(await rt.engine(), { args: [], stdin: null, ...program }, context(extra))
+  return rt.interpret(
+    await rt.engine(),
+    { args: [], stdin: null, ...program },
+    runContext(rt, extra),
+  )
 }
 
 function run(
@@ -161,8 +165,7 @@ describe('MontyRuntime', () => {
     listMounts: () => string[] = () => [],
   ): MontyRuntime => {
     const rt = new MontyRuntime()
-    if (dispatch !== undefined)
-      rt.bind(WorkspaceBinding.overBridge(dispatch, new PrefixResolver(listMounts)))
+    if (dispatch !== undefined) bindOver(rt, dispatch, new PrefixResolver(listMounts))
     runtimes.push(rt)
     return rt
   }
@@ -279,6 +282,24 @@ describe('MontyRuntime', () => {
     }, 200)
     const result = await interpret(rt, { code: 'while True: pass' }, { signal: ctrl.signal })
     expect(result.exitCode).toBe(1)
+  }, 30_000)
+
+  it('truncates nothing when its open stat revokes the run', async () => {
+    const ctrl = new AbortController()
+    const calls: string[] = []
+    const rt = make(
+      (op) => {
+        calls.push(op)
+        if (op !== 'stat') return Promise.resolve(undefined)
+        ctrl.abort(new Error('revoked'))
+        return Promise.resolve(new FileStat({ name: 'f', type: FileType.FILE, size: 3 }))
+      },
+      () => ['/data/'],
+    )
+    await interpret(rt, { code: "open('/data/f', 'w')" }, { signal: ctrl.signal }).catch(
+      () => undefined,
+    )
+    expect(calls).toEqual(['stat'])
   }, 30_000)
 
   it('argv[0] is prog when the caller names the program', async () => {

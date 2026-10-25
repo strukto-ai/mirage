@@ -466,7 +466,7 @@ async def test_unknown_size_o_trunc_open_survives_a_failed_hydration(
     # and the replacement is never written. The next read fetches again.
     fs, ops = sizeless_fs
     ops.read_error = OSError(errno.EIO, "backend hiccup")
-    fh = fs.open("/u.json", os.O_WRONLY | os.O_TRUNC)
+    fh = fs.open("/u.json", os.O_RDWR | os.O_TRUNC)
     ops.read_error = None
     assert fs.getattr("/u.json", fh)["st_size"] == 0
     assert fs.read("/u.json", 100, 0, fh) == b""

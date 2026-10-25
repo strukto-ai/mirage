@@ -22,9 +22,10 @@ from mirage.runtime.handles.constants import READ_CHUNK
 class ChunkedHandle:
     """A read-only handle that fetches its file a chunk at a time.
 
-    The read-side twin of ``FileHandle``, for a read-only open of a file
-    larger than one chunk; a smaller file is read whole, since whole is
-    what the file cache keeps. Nothing moves at open: a read fetches the
+    The mount core's window over a file larger than one chunk, and a
+    guest's over bytes that are no mount's (stdin, an interpreter build
+    file); a smaller mount file is read whole, since whole is what the
+    file cache keeps. Nothing moves at open: a read fetches the
     chunk it lands in through the file adapter's ranged read, and that chunk is
     kept so a sequential read of small pieces costs one request per
     chunk. The file ends where a fetch comes back short, not at the size

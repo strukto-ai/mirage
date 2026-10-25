@@ -18,10 +18,8 @@ import {
   BLKSIZE,
   DIR_MODE,
   FILE_MODE,
-  GROW_FLOOR,
+  FLAGS,
   LINK_MODE,
-  O_ACCMODE,
-  O_APPEND,
   SEEK_CUR,
   SEEK_END,
   UMASK,
@@ -32,6 +30,7 @@ import { isMissingPath } from '../../../../errors/fs.ts'
 import { entryName } from '../../../../utils/remnants.ts'
 import { S_IFCHR, S_IFMT } from '../../../../utils/stat_view.ts'
 import { isUnclassified } from '../../../files.ts'
+import { openMode } from '../../../handles/mode.ts'
 import { posixStat } from '../../../stat.ts'
 import type { VFSEntry, VFSStat } from '../../../types.ts'
 import type { MirageMutation, MutationJournal } from './journal.ts'
@@ -49,8 +48,6 @@ import type {
   StreamOps,
   SyncVFS,
 } from './types.ts'
-
-const ENC = new TextEncoder()
 
 // Emscripten's MEMFS makes these three at startup and its own stderr capture
 // reopens /dev/stderr when a run ends (`API.restore_stderr`). Mounting mirage's
@@ -142,10 +139,11 @@ function takeOwner(node: FSNode, stat: VFSStat | VFSEntry): void {
  * fd-relative walk) arrives as the same callback. Nothing is patched
  * inside the interpreter.
  *
- * Callbacks are synchronous: uncached lookups and reads wait for the host
- * through SyncVFS, which needs the worker. Writes enter the journal and
- * flush before a lazy backend read or after the run, preserving guest
- * order.
+ * Callbacks are synchronous: lookups, reads and writes wait for the host
+ * through SyncVFS, which needs the worker. A file's stream reads and
+ * writes through a handle on the run's open-file core, which holds its
+ * bytes as every other runtime's open files are held; names and metadata
+ * enter the journal and land at once, in guest order.
  *
  * The node table lives in `NodeTable`; what is left here is one method
  * per Emscripten callback, plus the errno translation only this layer
@@ -176,6 +174,8 @@ export class PyodideFs {
    *   sync: the worker's blocking way to the mounts.
    *   deferred: the refusals the mount gave a path whose call has not
    *     come yet, shared by every mountpoint as the journal is.
+   *   streams: the file streams that hold a core handle, shared the same
+   *     way, which the run's end closes.
    */
   constructor(
     host: FSHost,
@@ -185,6 +185,7 @@ export class PyodideFs {
     mountOf: (path: string) => string | null,
     private readonly sync: SyncVFS,
     private readonly deferred = new Map<string, FlushFailure>(),
+    private readonly streams = new Set<FSStream>(),
   ) {
     this.host = host
     this.errno = errno
@@ -204,16 +205,16 @@ export class PyodideFs {
     }
     const streamOps: StreamOps = {
       open: this.streamOpen.bind(this),
-      close: (stream) => {
-        stream.node.opens = Math.max(0, (stream.node.opens ?? 1) - 1)
-        if (stream.node.unlinked === true) this.settle()
-        else this.settle(this.nodes.pathOf(stream.node))
-      },
+      close: this.streamClose.bind(this),
       read: this.streamRead.bind(this),
       write: this.streamWrite.bind(this),
       llseek: this.llseek.bind(this),
       getattr: (stream) =>
-        this.attrOf(stream.node, stream.opened ?? this.nodes.pathOf(stream.node)),
+        this.attrOf(
+          stream.node,
+          stream.opened ?? this.nodes.pathOf(stream.node),
+          this.host.isFile(stream.node.mode) ? this.handleOf(stream) : undefined,
+        ),
     }
     this.nodes = new NodeTable(host, prefix, nodeOps, streamOps)
     this.type = { mount: this.nodes.mount.bind(this.nodes) }
@@ -229,38 +230,30 @@ export class PyodideFs {
    * Args:
    *   node: the node to describe.
    *   path: the name its inode is reported under.
+   *   fh: the core handle a stream stats through, which counts what it
+   *     holds; absent stats the node's path.
    */
-  private attrOf(node: FSNode, path: string): FSAttr {
-    const classified = node.unclassified === true
-    if (classified) this.classifyNode(node)
-    // A link sizes as its target string, which is what lstat reports on
-    // every POSIX system and what MEMFS answers for its own links.
-    const size = this.host.isLink(node.mode)
-      ? ENC.encode(node.link ?? '').length
-      : this.host.isDir(node.mode)
-        ? BLKSIZE
-        : (node.usedBytes ?? 0)
-    // The stat every runtime shares, so one path reports one inode
-    // whoever asks; a sandbox owns nothing, so an owner the node lacks
-    // is 0. The times stay the node's, which carry unflushed writes.
+  private attrOf(node: FSNode, path: string, fh?: number): FSAttr {
+    // The core's row, so one path reports one inode whoever asks, what an
+    // open handle wrote and has not landed counted and the policies
+    // judging it as a stat of its path. A device is the tree's own.
     let row: VFSStat = {
-      size,
-      isDir: this.host.isDir(node.mode),
-      isLink: this.host.isLink(node.mode),
+      size: 0,
+      isDir: false,
       mode: node.mode,
       uid: node.uid ?? 0,
       gid: node.gid ?? 0,
       rdev: node.rdev,
       atimeMs: node.atime,
       mtimeMs: node.mtime,
-      ...(node.source === undefined ? {} : { source: node.source }),
     }
-    if (!classified && !isCharDevice(node.mode)) {
-      try {
-        row = this.sync.statCached(this.nodes.pathOf(node), row)
-      } catch (error) {
-        throw errnoError(this.host, this.errno, classify(error) ?? 'EIO')
-      }
+    if (!isCharDevice(node.mode)) {
+      const sync = this.sync
+      row = this.readThrough([], () =>
+        fh === undefined ? sync.stat(this.nodes.pathOf(node)) : sync.fstat(fh),
+      )
+      if (node.unclassified === true) this.classifyNode(node, row)
+      if (row.isDir) row = { ...row, size: BLKSIZE }
     }
     const posix = posixStat(row, path, '/')
     return {
@@ -295,7 +288,6 @@ export class PyodideFs {
     const isDevice = isCharDevice(node.mode)
     const fields = finalizing || isDevice ? null : changedAttrs(node, attr)
     const size = isDevice ? undefined : attr.size
-    if (size !== undefined && size > 0) this.loadContents(node, true)
     if (fields !== null && node.unlinked !== true) {
       // A link's own attrs go to the link, since the tree resolved to
       // the link node itself and the target's row is not what changed.
@@ -308,6 +300,7 @@ export class PyodideFs {
     if (size !== undefined && node.unlinked !== true)
       this.journal.markTruncate(this.nodes.pathOf(node), size)
     if (node.unlinked !== true) this.settle(this.nodes.pathOf(node))
+    else if (size !== undefined) this.resizeHeld(node, size)
     // Once the mount took the guest's own edit, the backend row the policies
     // are shown carries it; the times Emscripten filled in stay out.
     if (fields !== null && node.unlinked !== true && node.source !== undefined) {
@@ -323,13 +316,26 @@ export class PyodideFs {
     if (attr.atime !== undefined) node.atime = attr.atime
     if (attr.mtime !== undefined) node.mtime = attr.mtime
     if (attr.ctime !== undefined) node.ctime = attr.ctime
-    if (size === undefined) return
-    const old = node.contents ?? new Uint8Array(0)
-    const next = new Uint8Array(size)
-    next.set(old.subarray(0, Math.min(old.length, size)))
-    node.contents = next
-    node.usedBytes = size
-    node.loaded = true
+  }
+
+  /**
+   * Resize a file whose name is gone through a stream that writes it: its
+   * bytes are only what the core's handles on it hold.
+   *
+   * Args:
+   *   node: the file with no name left.
+   *   size: the length it is left at.
+   */
+  private resizeHeld(node: FSNode, size: number): void {
+    const writes = FLAGS.O_WRONLY | FLAGS.O_RDWR
+    for (const stream of this.streams) {
+      const fh = stream.fh
+      if (stream.node !== node || fh === undefined || (stream.flags & writes) === 0) continue
+      this.readThrough([], () => {
+        this.sync.ftruncate(fh, size)
+      })
+      return
+    }
   }
 
   private lookup(parent: FSNode, name: string): FSNode {
@@ -370,11 +376,16 @@ export class PyodideFs {
       return device
     }
     const path = this.nodes.pathOf(parent) + '/' + name
-    if (this.host.isDir(mode)) this.journal.markMkdir(path)
+    if (this.host.isDir(mode)) {
+      this.journal.markMkdir(path)
+      this.settle(path)
+    }
     // The create is what carries a file that is made and never written
-    // (`Path.touch()`, `open(p,'w').close()`) through to the mount.
+    // (`Path.touch()`, `open(p,'w').close()`) through to the mount. The
+    // open FS.open makes next takes it back and creates the file itself,
+    // one open with O_CREAT as on every other entry point; a mknod no open
+    // follows lands it with the next call, or at the run's end.
     else this.journal.markCreate(path)
-    this.settle(path)
     const node = this.nodes.makeNode(parent, name, mode & ~UMASK)
     node.rdev = rdev
     // FS.open finalizes a new file with a chmod of its own, right here
@@ -397,7 +408,6 @@ export class PyodideFs {
     }
     const found = this.nodes.childOf(newDir, newName)
     const replaced = found !== node ? found : undefined
-    if (replaced !== undefined) this.keepContents(replaced)
     this.journal.markRename(from, to)
     this.settle(from, to)
     if (replaced !== undefined) this.orphan(replaced)
@@ -407,7 +417,6 @@ export class PyodideFs {
   private unlink(parent: FSNode, name: string): void {
     const path = this.nodes.pathOf(parent) + '/' + name
     const node = this.nodes.childOf(parent, name)
-    if (node !== undefined) this.keepContents(node)
     this.journal.markUnlink(path)
     this.settle(path)
     if (node !== undefined) this.orphan(node)
@@ -415,20 +424,10 @@ export class PyodideFs {
   }
 
   /**
-   * Load a file a stream has open while its path still names it: its name
-   * is about to be removed or replaced, and the stream reads on.
-   *
-   * Args:
-   *   node: the file about to lose its name.
-   */
-  private keepContents(node: FSNode): void {
-    if ((node.opens ?? 0) > 0) this.loadContents(node, node.raw === true)
-  }
-
-  /**
    * A file whose name the mount removed or replaced. One a stream has open
-   * writes nothing to the mount from then on; marked only once the mount
-   * took the change, so a refused removal leaves its writes landing.
+   * reads and writes on through the core, which keeps its bytes; marked
+   * only once the mount took the change, so a refused removal leaves it
+   * named.
    *
    * Args:
    *   node: the file that lost its name.
@@ -526,13 +525,11 @@ export class PyodideFs {
       : undefined
     const mode = stat.isLink ? LINK_MODE : (stat.mode ?? (stat.isDir ? DIR_MODE : FILE_MODE))
     const node = this.nodes.makeNode(parent, name, mode, stat.rdev ?? 0)
-    node.usedBytes = stat.size
     if ('source' in stat) node.source = stat.source
     if (stat.mtimeMs !== undefined) node.atime = node.mtime = node.ctime = stat.mtimeMs
     if (stat.atimeMs !== undefined) node.atime = stat.atimeMs
     takeOwner(node, stat)
     if (target !== undefined) node.link = target
-    else if (this.host.isFile(mode)) node.loaded = false
     // Emscripten's getdents looks up every name it lists, so a row the
     // file adapter could not classify still needs a node; it goes in as a
     // regular file and is asked about before its first stat.
@@ -541,22 +538,20 @@ export class PyodideFs {
   }
 
   /**
-   * Ask the mount what a node placed from an unclassified row is.
+   * Restamp a node placed from an unclassified row with what the mount
+   * said it is.
    *
    * The listing that placed it swallowed a failed stat so the rest of
    * the directory could list; the guest's own stat is where that
-   * failure belongs, so this one asks the mount rather than answering
-   * from the guess. An answer restamps the node, turning it into a
-   * directory if that is what it is; content already loaded or written
-   * keeps its own length.
+   * failure belongs, so that stat asks the mount rather than answering
+   * from the guess. Its answer turns the node into a directory if that
+   * is what it is.
    *
    * Args:
    *   node: the node to classify.
+   *   stat: the row the guest's stat got.
    */
-  private classifyNode(node: FSNode): void {
-    const sync = this.sync
-    const path = this.nodes.pathOf(node)
-    const stat = this.readThrough([path], () => sync.stat(path))
+  private classifyNode(node: FSNode, stat: VFSStat): void {
     node.unclassified = false
     node.source = stat.source
     this.nodes.retype(node, stat.mode)
@@ -564,29 +559,6 @@ export class PyodideFs {
     node.atime = node.mtime = node.ctime = stat.mtimeMs ?? 0
     if (stat.atimeMs !== undefined) node.atime = stat.atimeMs
     takeOwner(node, stat)
-    if (this.host.isFile(stat.mode) && node.loaded === false) node.usedBytes = stat.size
-  }
-
-  /**
-   * Fetch a node's bytes for an open. A writing open reads what is stored,
-   * since its writes land on that; a reading one the rendering. Bytes
-   * already held in the other view are fetched again only when no stream
-   * has the node open and nothing for it is pending (a close lands the
-   * file's writes): a stream opened beside another shares its bytes.
-   */
-  private loadContents(node: FSNode, raw = false): void {
-    const sync = this.sync
-    const path = this.nodes.pathOf(node)
-    if (node.loaded === undefined) return
-    if (node.loaded) {
-      const pending = (node.opens ?? 0) > 0 || this.deferred.has(path)
-      if (node.raw === raw || pending) return
-    }
-    const bytes = this.readThrough([path], () => sync.read(path, raw))
-    node.contents = bytes
-    node.usedBytes = bytes.length
-    node.loaded = true
-    node.raw = raw
   }
 
   /**
@@ -622,10 +594,64 @@ export class PyodideFs {
     return node.link ?? ''
   }
 
+  /**
+   * Open a file's stream on the run's core, which judges, holds and lands
+   * it as it does every runtime's open files. Emscripten made the open's
+   * create and truncate before it got here; what is left is how the
+   * stream reads and writes.
+   */
   private streamOpen(stream: FSStream): void {
-    this.loadContents(stream.node, (stream.flags & O_ACCMODE) !== 0)
-    stream.node.opens = (stream.node.opens ?? 0) + 1
-    stream.opened = this.nodes.pathOf(stream.node)
+    const node = stream.node
+    const path = this.nodes.pathOf(node)
+    stream.opened = path
+    if (this.host.isFile(node.mode)) {
+      const creating = this.journal.takeCreate(path)
+      try {
+        this.handleOf(stream, creating)
+      } catch (error) {
+        // A create the mount refused leaves no file behind.
+        if (creating) this.nodes.detach(node.parent, node.name)
+        throw error
+      }
+    }
+    node.opens = (node.opens ?? 0) + 1
+  }
+
+  /**
+   * The core handle a file's stream reads and writes through. One a run's
+   * end closed opens again, as long as its file still has a name: the
+   * core held the file for that run only. A guest that exited
+   * (`os._exit`, caught) has no files left. `create` makes the file the
+   * open's own mknod named.
+   */
+  private handleOf(stream: FSStream, create = false): number {
+    if (this.journal.sealed) throw errnoError(this.host, this.errno, 'EBADF')
+    if (stream.fh !== undefined) return stream.fh
+    if (stream.node.unlinked === true) throw errnoError(this.host, this.errno, 'EBADF')
+    const path = this.nodes.pathOf(stream.node)
+    const mode = { ...openMode(stream.flags, FLAGS), create }
+    const fh = this.readThrough([path], () => this.sync.open(path, mode))
+    stream.fh = fh
+    this.streams.add(stream)
+    return fh
+  }
+
+  /** Land what the stream wrote and let its handle go. */
+  private streamClose(stream: FSStream): void {
+    const node = stream.node
+    node.opens = Math.max(0, (node.opens ?? 1) - 1)
+    const fh = stream.fh
+    this.streams.delete(stream)
+    delete stream.fh
+    try {
+      if (node.unlinked === true) this.settle()
+      else this.settle(this.nodes.pathOf(node))
+    } finally {
+      if (fh !== undefined)
+        this.readThrough([], () => {
+          this.sync.close(fh)
+        })
+    }
   }
 
   private streamRead(
@@ -642,18 +668,13 @@ export class PyodideFs {
       buffer.fill(0, offset, offset + length)
       return length
     }
-    const used = node.usedBytes ?? 0
-    const size = Math.max(0, Math.min(used - position, length))
-    const retained = (node.contents ?? new Uint8Array(0)).slice(position, position + size)
-    const path = this.nodes.pathOf(node)
-    try {
-      const data = this.sync.readCached(path, retained)
-      const out = data.subarray(0, length)
-      buffer.set(out, offset)
-      return out.length
-    } catch (error) {
-      throw errnoError(this.host, this.errno, classify(error) ?? 'EIO')
-    }
+    const fh = this.handleOf(stream)
+    const out = this.readThrough([], () => this.sync.pread(fh, position, length)).subarray(
+      0,
+      length,
+    )
+    buffer.set(out, offset)
+    return out.length
   }
 
   private streamWrite(
@@ -664,33 +685,14 @@ export class PyodideFs {
     position: number,
   ): number {
     if (length === 0) return 0
-    const node = stream.node
-    if (isCharDevice(node.mode)) return length
-    const used = node.usedBytes ?? 0
-    const need = position + length
-    let contents = node.contents ?? new Uint8Array(0)
-    // Capacity doubles past what the file uses, so a loop of small writes
-    // copies the file a logarithmic number of times, not once per write.
-    if (contents.length < need) {
-      const grown = new Uint8Array(Math.max(need, contents.length * 2, GROW_FLOOR))
-      grown.set(contents.subarray(0, used))
-      contents = grown
-      node.contents = grown
-    }
-    if (position > used) contents.fill(0, used, position)
-    const written = buffer.subarray(offset, offset + length)
-    contents.set(written, position)
-    node.usedBytes = Math.max(used, need)
-    node.mtime = node.ctime = Date.now()
-    // The rule the shared flush plan keeps: a write that starts where the
-    // file ended goes as an append when the file had bytes or the stream
-    // appends, and any other write as the bytes it changed, so another
-    // writer's bytes elsewhere in the file survive.
-    if (node.unlinked === true) return length
-    const path = this.nodes.pathOf(node)
-    const appending = (stream.flags & O_APPEND) !== 0
-    if (position === used && (used > 0 || appending)) this.journal.markAppend(path, used, written)
-    else this.journal.markPwrite(path, position, written)
+    if (isCharDevice(stream.node.mode)) return length
+    const fh = this.handleOf(stream)
+    // A copy: the guest's buffer is a view into WASM memory, and a message
+    // carries a view's whole buffer.
+    const bytes = buffer.slice(offset, offset + length)
+    this.readThrough([], () => {
+      this.sync.pwrite(fh, position, bytes)
+    })
     return length
   }
 
@@ -698,7 +700,8 @@ export class PyodideFs {
     let position = offset
     if (whence === SEEK_CUR) position += stream.position
     else if (whence === SEEK_END && this.host.isFile(stream.node.mode)) {
-      position += stream.node.usedBytes ?? 0
+      const fh = this.handleOf(stream)
+      position += this.readThrough([], () => this.sync.fstat(fh)).size
     }
     if (position < 0) throw errnoError(this.host, this.errno, 'EINVAL')
     return position

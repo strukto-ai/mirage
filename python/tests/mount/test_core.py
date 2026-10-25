@@ -17,15 +17,18 @@ import errno
 import logging
 import os
 import stat
+from dataclasses import replace
 from unittest.mock import AsyncMock
 
 import pytest
 import pytest_asyncio
 
 from mirage.errors import FsCondition, posix_errno
+from mirage.errors.types import OperationNotSupportedError, ReadOnlyError
 from mirage.mount.core import MountCore
 from mirage.policy import Deny, Policy
 from mirage.runtime.handles.constants import READ_CHUNK
+from mirage.runtime.handles.mode import OpenMode, open_mode, parse_mode
 from mirage.types import ContentType, FileStat, FileType, MountMode, PathSpec
 from mirage.utils.stat_view import DIR_SIZE, mtime_ns
 from mirage.vfs.base import BaseVFS
@@ -101,7 +104,7 @@ async def test_release_flushes_buffered_writes(seeded):
     # The macFUSE FSKit shim issues WRITE then RELEASE with no FLUSH in
     # between (the kext always flushes on close); dropping the buffer at
     # release silently lost data written through an fskit mount.
-    fh = await seeded.open("/a.txt")
+    fh = await seeded.open("/a.txt", open_mode(os.O_WRONLY))
     await seeded.write("/a.txt", b"hello world, appended", 0, fh)
     await seeded.release(fh)
     assert (
@@ -116,12 +119,13 @@ async def test_two_handles_writes_land_in_the_order_they_were_made(
 ):
     # The handle opened first writes inside bytes the other holds, and
     # lands first: the later write still wins, however the handles land,
-    # and nothing lands before they do.
-    first = await seeded.open("/a.txt", os.O_WRONLY)
-    second = await seeded.open("/a.txt", os.O_WRONLY)
+    # and nothing lands before they do, though a read sees both at once.
+    first = await seeded.open("/a.txt", open_mode(os.O_WRONLY))
+    second = await seeded.open("/a.txt", open_mode(os.O_WRONLY))
     await seeded.write("/a.txt", b"oldold", 0, second)
     await seeded.write("/a.txt", b"new", 2, first)
-    assert await seeded.read("/a.txt", 100, 0, None) == b"hello world"
+    assert await seeded.files.read("/a.txt") == b"hello world"
+    assert await seeded.read("/a.txt", 100, 0, None) == b"olnewdworld"
     if land == "sync":
         await seeded.sync()
     else:
@@ -136,7 +140,7 @@ async def test_a_write_through_an_unlinked_handle_leaves_its_replacement(
 ):
     # The old handle's file has no name left: the one now at that name is
     # another file, and its writes stay.
-    old = await seeded.open("/a.txt", os.O_WRONLY)
+    old = await seeded.open("/a.txt", open_mode(os.O_WRONLY))
     await seeded.unlink("/a.txt")
     new = await seeded.create("/a.txt")
     await seeded.write("/a.txt", b"new", 0, new)
@@ -152,7 +156,7 @@ async def test_open_with_o_trunc_drops_the_old_body(seeded):
     # separate truncate before an O_TRUNC open; the flag on the open has
     # to do it. Ignoring it left `printf BB > f` holding BB plus the tail
     # of the longer body it replaced (#1032).
-    fh = await seeded.open("/a.txt", os.O_WRONLY | os.O_TRUNC)
+    fh = await seeded.open("/a.txt", open_mode(os.O_WRONLY | os.O_TRUNC))
     assert (await seeded.fgetattr("/a.txt", fh)).size == 0
     await seeded.write("/a.txt", b"BB\n", 0, fh)
     await seeded.release(fh)
@@ -168,13 +172,30 @@ async def test_o_trunc_open_through_a_link_settles_the_targets_handle():
     await ws.shell("tee /a.txt", stdin=b"hello world")
     await ws.shell("ln -s a.txt /lk")
     core = MountCore(ws.vfs)
-    first = await core.open("/a.txt", os.O_WRONLY)
+    first = await core.open("/a.txt", open_mode(os.O_WRONLY))
     await core.write("/a.txt", b"QUEUED", 0, first)
-    second = await core.open("/lk", os.O_WRONLY | os.O_TRUNC)
+    second = await core.open("/lk", open_mode(os.O_WRONLY | os.O_TRUNC))
     await core.write("/lk", b"BB\n", 0, second)
     await core.release(second)
     await core.release(first)
     assert await core.read("/a.txt", 100, 0, None) == b"BB\n"
+
+
+class _LandingRefused:
+    """Files whose writes are refused once a handle has opened: the open
+    is admitted, and the landing is what fails."""
+
+    def __init__(self, ops):
+        self._inner = ops
+
+    def __getattr__(self, name):
+        return getattr(self._inner, name)
+
+    async def pwrite(self, path, data, offset):
+        raise ReadOnlyError(errno.EROFS, "Read-only file system", path)
+
+    async def truncate(self, path, length):
+        raise ReadOnlyError(errno.EROFS, "Read-only file system", path)
 
 
 @pytest.mark.asyncio
@@ -182,14 +203,13 @@ async def test_failed_settlement_keeps_the_other_handles_buffer():
     # When the settling flush is refused, the acknowledged bytes must stay
     # buffered on their handle so its own flush reports the refusal rather
     # than silently succeeding over an empty buffer.
-    res = RAMVFS()
-    seed = Workspace({"/": res}, mode=MountMode.WRITE)
+    seed = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
     await seed.shell("tee /a.txt", stdin=b"seed")
-    core = MountCore(Workspace({"/": res}, mode=MountMode.READ).vfs)
-    first = await core.open("/a.txt", os.O_WRONLY)
+    core = MountCore(_LandingRefused(seed.vfs))
+    first = await core.open("/a.txt", open_mode(os.O_WRONLY))
     await core.write("/a.txt", b"QUEUED", 0, first)
     with pytest.raises(OSError):
-        await core.open("/a.txt", os.O_WRONLY | os.O_TRUNC)
+        await core.open("/a.txt", open_mode(os.O_WRONLY | os.O_TRUNC))
     with pytest.raises(OSError):
         await core.flush("/a.txt", first)
     assert await seed.vfs.read("/a.txt") == b"seed"
@@ -199,11 +219,10 @@ async def test_failed_settlement_keeps_the_other_handles_buffer():
 async def test_a_release_whose_landing_is_refused_still_lets_the_handle_go():
     # As close(2): the refusal is reported and the handle is gone, rather
     # than kept open with bytes nothing will ever land.
-    res = RAMVFS()
-    seed = Workspace({"/": res}, mode=MountMode.WRITE)
+    seed = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
     await seed.shell("tee /a.txt", stdin=b"seed")
-    core = MountCore(Workspace({"/": res}, mode=MountMode.READ).vfs)
-    fh = await core.open("/a.txt", os.O_WRONLY)
+    core = MountCore(_LandingRefused(seed.vfs))
+    fh = await core.open("/a.txt", open_mode(os.O_WRONLY))
     await core.write("/a.txt", b"REFUSED", 0, fh)
     with pytest.raises(OSError):
         await core.release(fh)
@@ -213,7 +232,7 @@ async def test_a_release_whose_landing_is_refused_still_lets_the_handle_go():
 
 @pytest.mark.asyncio
 async def test_open_without_o_trunc_keeps_the_body(seeded):
-    fh = await seeded.open("/a.txt", os.O_RDWR)
+    fh = await seeded.open("/a.txt", open_mode(os.O_RDWR))
     await seeded.write("/a.txt", b"J", 0, fh)
     await seeded.release(fh)
     assert await seeded.read("/a.txt", 100, 0, None) == b"Jello world"
@@ -228,7 +247,7 @@ async def test_a_truncating_open_replaces_a_file_the_store_cannot_truncate():
     ws = Workspace({"/d": _NoTruncateRAM()}, mode=MountMode.WRITE)
     await ws.shell("echo hello > /d/f")
     core = MountCore(ws.vfs)
-    fh = await core.open("/d/f", os.O_WRONLY | os.O_TRUNC)
+    fh = await core.open("/d/f", open_mode(os.O_WRONLY | os.O_TRUNC))
     await core.write("/d/f", b"new", 0, fh)
     await core.release(fh)
     assert await ws.vfs.read("/d/f") == b"new"
@@ -239,7 +258,7 @@ async def test_a_truncating_open_replaces_a_file_the_store_cannot_truncate():
 @pytest.mark.asyncio
 async def test_a_handle_opened_through_a_link_stats_its_target(seeded):
     await seeded.files.symlink("/lnk", "a.txt")
-    fh = await seeded.open("/lnk", os.O_RDONLY)
+    fh = await seeded.open("/lnk", open_mode(os.O_RDONLY))
     attrs = await seeded.fgetattr("/lnk", fh)
     assert stat.S_ISREG(attrs.mode)
     assert attrs.size == len(b"hello world")
@@ -267,7 +286,7 @@ async def test_a_scoped_mount_root_shows_its_own_mode():
 
 @pytest.mark.asyncio
 async def test_a_handle_reads_its_own_unflushed_writes(seeded):
-    fh = await seeded.open("/a.txt", os.O_RDWR)
+    fh = await seeded.open("/a.txt", open_mode(os.O_RDWR))
     assert await seeded.read("/a.txt", 100, 0, fh) == b"hello world"
     await seeded.write("/a.txt", b"HELLO", 0, fh)
     await seeded.write("/a.txt", b"!", 13, fh)
@@ -413,11 +432,16 @@ async def test_o_trunc_open_hydrates_through_the_renderer():
     render(ws.mount("/data/").vfs, ".tally", _read_tally)
     await ws.shell("tee /data/books.tally", stdin=b"0123456789")
     core = MountCore(_Sizeless(ws.vfs))
-    fh = await core.open("/data/books.tally", os.O_WRONLY | os.O_TRUNC)
+    fh = await core.open(
+        "/data/books.tally", open_mode(os.O_WRONLY | os.O_TRUNC)
+    )
     assert await core._files.read("/data/books.tally", raw=True) == b""
+    reader = await core.open("/data/books.tally")
     rendered = b"RENDERED-AND-MUCH-LONGER"
-    assert (await core.fgetattr("/data/books.tally", fh)).size == len(rendered)
-    assert await core.read("/data/books.tally", 100, 0, fh) == rendered
+    attrs = await core.fgetattr("/data/books.tally", reader)
+    assert attrs.size == len(rendered)
+    assert await core.read("/data/books.tally", 100, 0, reader) == rendered
+    await core.release(reader)
     await core.release(fh)
 
 
@@ -453,7 +477,7 @@ async def test_a_write_lands_on_a_file_the_session_may_not_read():
     ws.policies.add(_NoReads())
     core = MountCore(ws.vfs)
     await core.write("/log", b"more\n", 6, None)
-    fh = await core.open("/log", os.O_WRONLY)
+    fh = await core.open("/log", open_mode(os.O_WRONLY))
     await core.write("/log", b"a", 11, fh)
     await core.write("/log", b"b\n", 12, fh)
     await core.release(fh)
@@ -481,14 +505,17 @@ async def test_a_flush_that_fails_after_a_run_landed_still_refreshes():
     ws = Workspace({"/": vfs}, mode=MountMode.WRITE)
     await ws.shell("printf abcdefgh > /f")
     core = MountCore(_SecondPwriteFails(ws.vfs))
-    reader = await core.open("/f", os.O_RDONLY)
+    reader = await core.open("/f", open_mode(os.O_RDONLY))
     assert await core.read("/f", 8, 0, reader) == b"abcdefgh"
-    fh = await core.open("/f", os.O_WRONLY)
+    fh = await core.open("/f", open_mode(os.O_WRONLY))
     await core.write("/f", b"X", 0, fh)
     await core.write("/f", b"Y", 5, fh)
     with pytest.raises(PermissionError):
         await core.flush("/f", fh)
-    assert await core.read("/f", 8, 0, reader) == b"Xbcdefgh"
+    # The run that landed is the file's; the one that failed is still the
+    # writer's, which a read sees until it lands or the handle goes.
+    assert await ws.vfs.read("/f") == b"Xbcdefgh"
+    assert await core.read("/f", 8, 0, reader) == b"XbcdeYgh"
 
 
 @pytest.mark.asyncio
@@ -498,7 +525,7 @@ async def test_a_flush_retry_lands_only_the_runs_that_failed():
     await ws.shell("printf abcdefgh > /f")
     failing = _SecondPwriteFails(ws.vfs)
     core = MountCore(failing)
-    fh = await core.open("/f", os.O_WRONLY)
+    fh = await core.open("/f", open_mode(os.O_WRONLY))
     await core.write("/f", b"Y", 5, fh)
     await core.write("/f", b"X", 0, fh)
     with pytest.raises(PermissionError):
@@ -527,7 +554,7 @@ async def test_buffered_write_flush_lands_in_the_stored_bytes():
     # written over the file on a partial write.
     core = _tally_core()
     await core.write("/data/books.tally", b"0123456789", 0, None)
-    fh = await core.open("/data/books.tally")
+    fh = await core.open("/data/books.tally", open_mode(os.O_WRONLY))
     await core.write("/data/books.tally", b"XY", 4, fh)
     await core.release(fh)
     stored = await core._files.read("/data/books.tally", raw=True)
@@ -553,7 +580,7 @@ async def test_epoch_zero_mtime_lands_instead_of_reading_as_unknown(seeded):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("directory", [False, True])
 async def test_rename_keeps_open_handles_on_the_moved_file(seeded, directory):
-    fh = await seeded.open("/sub/b.txt")
+    fh = await seeded.open("/sub/b.txt", open_mode(os.O_WRONLY))
     await seeded.write("/sub/b.txt", b"BEFORE", 0, fh)
     await seeded.rename("/sub" if directory else "/sub/b.txt", "/moved")
     await seeded.write("/sub/b.txt", b"AFTER", 6, fh)
@@ -625,7 +652,7 @@ async def test_a_write_drops_the_chunk_an_open_handle_kept():
     core = MountCore(ws.vfs)
     reader = await core.open("/f.txt")
     assert await core.read("/f.txt", 3, 0, reader) == b"old"
-    writer = await core.open("/f.txt")
+    writer = await core.open("/f.txt", open_mode(os.O_WRONLY))
     await core.write("/f.txt", b"new", 0, writer)
     await core.release(writer)
     assert await core.read("/f.txt", 3, 0, reader) == b"new"
@@ -780,6 +807,28 @@ class _Held:
 
 
 @pytest.mark.asyncio
+async def test_a_renamed_handle_follows_the_link_the_rename_ran_through():
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
+    await ws.shell("mkdir -p /a /b && printf hello > /f && ln -s a /lk")
+    files = _Held(ws.vfs, "pwrite")
+    core = MountCore(files)
+    fh = await core.open("/f", open_mode(os.O_RDWR))
+    await core.write("/f", b"H", 0, fh)
+    flushing = asyncio.create_task(core.flush("/f", fh))
+    await files.out.wait()
+    renaming = asyncio.create_task(core.rename("/f", "/lk/f"))
+    await ws.shell("rm /lk && ln -s b /lk")
+    files.go.set()
+    await flushing
+    await renaming
+    await core.write("/f", b"J", 1, fh)
+    await core.release(fh)
+    assert await ws.vfs.read("/b/f") == b"HJllo"
+    with pytest.raises(FileNotFoundError):
+        await ws.vfs.stat("/a/f")
+
+
+@pytest.mark.asyncio
 async def test_a_hydration_out_across_a_truncate_reads_again():
     # The first open's read was out when the O_TRUNC open landed; what it
     # fetched is the old body, and installing it would let that handle
@@ -791,7 +840,7 @@ async def test_a_hydration_out_across_a_truncate_reads_again():
     reading = asyncio.create_task(core.open("/data/api.json"))
     await files.out.wait()
     truncating = asyncio.create_task(
-        core.open("/data/api.json", os.O_WRONLY | os.O_TRUNC)
+        core.open("/data/api.json", open_mode(os.O_WRONLY | os.O_TRUNC))
     )
     while await ws.vfs.read("/data/api.json") != b"":
         await asyncio.sleep(0)
@@ -811,12 +860,12 @@ async def test_an_o_trunc_open_waits_for_a_flush_still_landing():
     await ws.shell("echo 'hello world' > /data/greeting.txt")
     files = _Held(ws.vfs, "pwrite")
     core = MountCore(files)
-    first = await core.open("/data/greeting.txt", os.O_WRONLY)
+    first = await core.open("/data/greeting.txt", open_mode(os.O_WRONLY))
     await core.write("/data/greeting.txt", b"QUEUED", 0, first)
     flushing = asyncio.create_task(core.flush("/data/greeting.txt", first))
     await files.out.wait()
     opening = asyncio.create_task(
-        core.open("/data/greeting.txt", os.O_WRONLY | os.O_TRUNC)
+        core.open("/data/greeting.txt", open_mode(os.O_WRONLY | os.O_TRUNC))
     )
     await asyncio.sleep(0.01)
     files.go.set()
@@ -834,7 +883,7 @@ async def test_a_read_sees_what_its_flush_still_landing_wrote():
     await ws.shell("echo 'hello world' > /data/f")
     files = _Held(ws.vfs, "pwrite")
     core = MountCore(files)
-    fh = await core.open("/data/f", os.O_RDWR)
+    fh = await core.open("/data/f", open_mode(os.O_RDWR))
     await core.read("/data/f", 100, 0, fh)
     await core.write("/data/f", b"HELLO", 0, fh)
     flushing = asyncio.create_task(core.flush("/data/f", fh))
@@ -893,7 +942,7 @@ async def test_create_and_mkdir_store_a_mode_that_is_not_the_default(seeded):
 async def test_times_set_on_an_open_file_outlast_its_buffered_writes(seeded):
     # cp -p writes the copy, sets its times on the file it still holds
     # open, then closes it: the writes precede the times in POSIX order.
-    fh = await seeded.open("/a.txt", os.O_WRONLY)
+    fh = await seeded.open("/a.txt", open_mode(os.O_WRONLY))
     await seeded.write("/a.txt", b"copied", 0, fh)
     await seeded.setattr("/a.txt", mtime=10**18)
     await seeded.release(fh)
@@ -916,7 +965,7 @@ async def test_a_link_that_loops_can_still_be_renamed_and_removed():
 
 @pytest.mark.asyncio
 async def test_an_unlinked_files_handle_stats_what_it_wrote(seeded):
-    fh = await seeded.open("/a.txt", os.O_RDWR)
+    fh = await seeded.open("/a.txt", open_mode(os.O_RDWR))
     await seeded.read("/a.txt", 100, 0, fh)
     await seeded.write("/a.txt", b"a longer replacement", 0, fh)
     await seeded.unlink("/a.txt")
@@ -939,7 +988,7 @@ async def test_an_open_while_writes_land_before_a_truncate_breaks_nothing():
     await ws.shell("echo 'hello world' > /data/f; echo other > /data/g")
     files = _Held(ws.vfs, "pwrite")
     core = MountCore(files)
-    fh = await core.open("/data/f", os.O_WRONLY)
+    fh = await core.open("/data/f", open_mode(os.O_WRONLY))
     await core.write("/data/f", b"HELLO", 0, fh)
     truncating = asyncio.create_task(core.truncate("/data/f", 5))
     await files.out.wait()
@@ -1048,7 +1097,7 @@ async def test_a_first_read_a_change_raced_keeps_nothing():
     await ws.shell("printf 'old bytes' > /f")
     files = _Held(ws.vfs, "read", answered=True)
     core = MountCore(files)
-    fh = await core.open("/f", os.O_RDWR)
+    fh = await core.open("/f", open_mode(os.O_RDWR))
     reading = asyncio.create_task(core.read("/f", 100, 0, fh))
     await files.out.wait()
     await core.truncate("/f", 0)
@@ -1063,7 +1112,7 @@ async def test_a_flush_waits_for_the_one_still_landing():
     await ws.shell("printf abc > /f")
     files = _Held(ws.vfs, "pwrite")
     core = MountCore(files)
-    fh = await core.open("/f", os.O_WRONLY)
+    fh = await core.open("/f", open_mode(os.O_WRONLY))
     await core.write("/f", b"X", 0, fh)
     first = asyncio.create_task(core.flush("/f", fh))
     await files.out.wait()
@@ -1101,7 +1150,7 @@ async def test_a_flush_a_rename_moved_queues_under_the_new_name():
     writes = _Held(ws.vfs, "pwrite")
     files = _Held(writes, "rename")
     core = MountCore(files)
-    fh = await core.open("/a", os.O_WRONLY)
+    fh = await core.open("/a", open_mode(os.O_WRONLY))
     await core.write("/a", b"0123456789", 0, fh)
     renaming = asyncio.create_task(core.rename("/a", "/b"))
     await files.out.wait()
@@ -1123,7 +1172,7 @@ async def test_a_detached_handle_never_touches_the_file_at_its_old_name():
     ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
     await ws.shell("printf fresh > /a; printf stale-file > /b")
     core = MountCore(ws.vfs)
-    fh = await core.open("/b", os.O_RDWR)
+    fh = await core.open("/b", open_mode(os.O_RDWR))
     await core.read("/b", 100, 0, fh)
     await core.write("/b", b"STALE", 0, fh)
     await core.rename("/a", "/b")
@@ -1153,7 +1202,7 @@ async def test_a_read_waits_for_a_flush_a_rename_moved():
     writes = _Held(ws.vfs, "pwrite")
     files = _Held(writes, "rename")
     core = MountCore(files)
-    fh = await core.open("/a", os.O_RDWR)
+    fh = await core.open("/a", open_mode(os.O_RDWR))
     await core.read("/a", 100, 0, fh)
     await core.write("/a", b"XYZW", 0, fh)
     renaming = asyncio.create_task(core.rename("/a", "/b"))
@@ -1193,7 +1242,9 @@ async def test_a_rename_waits_for_an_open_already_out():
     await ws.shell("printf fresh > /a; printf old > /b")
     files = _Held(_Sizeless(ws.vfs), "read", answered=True)
     core = MountCore(files)
-    opening = asyncio.create_task(core.open("/b", os.O_RDWR | os.O_TRUNC))
+    opening = asyncio.create_task(
+        core.open("/b", open_mode(os.O_RDWR | os.O_TRUNC))
+    )
     await files.out.wait()
     renaming = asyncio.create_task(core.rename("/a", "/b"))
     await asyncio.sleep(0.01)
@@ -1233,7 +1284,7 @@ async def test_a_flush_onto_a_name_a_rename_replaces_waits_for_it():
     files = _Held(ws.vfs, "read", answered=True)
     core = MountCore(files)
     reader = await core.open("/b")
-    writer = await core.open("/b", os.O_WRONLY)
+    writer = await core.open("/b", open_mode(os.O_RDWR))
     await core.write("/b", b"NEW", 0, writer)
     renaming = asyncio.create_task(core.rename("/a", "/b"))
     await files.out.wait()
@@ -1243,8 +1294,12 @@ async def test_a_flush_onto_a_name_a_rename_replaces_waits_for_it():
     files.go.set()
     await renaming
     await flushing
-    assert files.calls == 1
-    assert await core.read("/b", 100, 0, reader) == b"old-body"
+    # One read of each view the handles hold: the stored bytes for the
+    # writer, the rendering for the reader.
+    assert files.calls == 2
+    # Both handles are on the file the rename took the name from, which
+    # the writer's flush landed on, as POSIX keeps one inode for them.
+    assert await core.read("/b", 100, 0, reader) == b"NEW-body"
     assert await core.read("/b", 100, 0, writer) == b"NEW-body"
     assert await ws.vfs.read("/b") == b"fresh"
 
@@ -1263,9 +1318,9 @@ async def test_a_sessions_handles_meet_through_a_link_the_default_hides():
     )
     core = MountCore(ws.vfs, session=ws.create_session("agent", profile={}))
     assert core.identity("/lk") == core.identity("/a.txt")
-    first = await core.open("/a.txt", os.O_WRONLY)
+    first = await core.open("/a.txt", open_mode(os.O_WRONLY))
     await core.write("/a.txt", b"QUEUED", 0, first)
-    second = await core.open("/lk", os.O_WRONLY | os.O_TRUNC)
+    second = await core.open("/lk", open_mode(os.O_WRONLY | os.O_TRUNC))
     await core.write("/lk", b"BB\n", 0, second)
     await core.release(second)
     await core.release(first)
@@ -1306,7 +1361,7 @@ async def test_a_buffered_size_judges_the_fetched_row_once():
     ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE, policies=[policy])
     await ws.vfs.write("/a.txt", b"ab")
     core = MountCore(ws.vfs)
-    fh = await core.open("/a.txt", os.O_WRONLY)
+    fh = await core.open("/a.txt", open_mode(os.O_WRONLY))
     try:
         await core.write("/a.txt", b"longer", 0, fh)
         policy.stats = 0
@@ -1315,3 +1370,315 @@ async def test_a_buffered_size_judges_the_fetched_row_once():
     finally:
         await core.release(fh)
         await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_two_writers_land_in_the_order_they_wrote(seeded):
+    first = await seeded.open("/a.txt", open_mode(os.O_WRONLY | os.O_TRUNC))
+    await seeded.write("/a.txt", b"0000", 0, first)
+    await seeded.release(first)
+    a = await seeded.open("/a.txt", open_mode(os.O_WRONLY))
+    b = await seeded.open("/a.txt", open_mode(os.O_WRONLY))
+    await seeded.write("/a.txt", b"AAAA", 0, a)
+    await seeded.write("/a.txt", b"BB", 0, b)
+    await seeded.release(b)
+    await seeded.release(a)
+    assert await seeded.read("/a.txt", 100, 0, None) == b"BBAA"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "flags,path,error",
+    [
+        (os.O_WRONLY | os.O_CREAT | os.O_EXCL, "/a.txt", FileExistsError),
+        (os.O_RDONLY, "/missing", FileNotFoundError),
+        (os.O_WRONLY, "/sub", IsADirectoryError),
+        (os.O_RDONLY, "/a.txt/", NotADirectoryError),
+    ],
+)
+async def test_an_open_refuses_as_posix_does(seeded, flags, path, error):
+    with pytest.raises(error):
+        await seeded.open(path, open_mode(flags))
+
+
+@pytest.mark.asyncio
+async def test_an_open_that_creates_lands_the_file_with_its_mode(seeded):
+    fh = await seeded.open(
+        "/new.txt", open_mode(os.O_WRONLY | os.O_CREAT), 0o600
+    )
+    await seeded.write("/new.txt", b"made", 0, fh)
+    await seeded.release(fh)
+    attrs = await seeded.getattr("/new.txt")
+    assert (attrs.mode & 0o777, attrs.size) == (0o600, 4)
+
+
+@pytest.mark.asyncio
+async def test_a_directory_opens_for_a_read(seeded):
+    with pytest.raises(IsADirectoryError):
+        await seeded.open("/sub")
+    fh = await seeded.open(
+        "/sub", replace(open_mode(os.O_RDONLY), directory=True)
+    )
+    assert stat.S_ISDIR((await seeded.fgetattr("/sub", fh)).mode)
+    await seeded.release(fh)
+
+
+@pytest.mark.asyncio
+async def test_a_writable_open_is_admitted_before_its_first_write():
+    seed = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
+    await seed.shell("tee /a.txt", stdin=b"seed")
+    core = MountCore(
+        Workspace({"/": seed.mount("/").vfs}, mode=MountMode.READ).vfs
+    )
+    with pytest.raises(OSError) as refused:
+        await core.open("/a.txt", open_mode(os.O_WRONLY))
+    assert refused.value.errno == errno.EROFS
+    fh = await core.open("/a.txt")
+    assert await core.read("/a.txt", 100, 0, fh) == b"seed"
+    await core.release(fh)
+
+
+@pytest.mark.asyncio
+async def test_a_handle_refuses_the_access_its_open_did_not_ask_for(seeded):
+    reader = await seeded.open("/a.txt")
+    writer = await seeded.open("/a.txt", open_mode(os.O_WRONLY))
+    with pytest.raises(OSError) as wrote:
+        await seeded.write("/a.txt", b"x", 0, reader)
+    with pytest.raises(OSError) as read:
+        await seeded.read("/a.txt", 1, 0, writer)
+    assert (wrote.value.errno, read.value.errno) == (errno.EBADF, errno.EBADF)
+    await seeded.release(reader)
+    await seeded.release(writer)
+
+
+@pytest.mark.asyncio
+async def test_a_writer_reads_the_stored_bytes_a_reader_the_rendering():
+    core = _tally_core()
+    await core.write("/data/books.tally", b"0123456789", 0, None)
+    reader = await core.open("/data/books.tally")
+    writer = await core.open("/data/books.tally", open_mode(os.O_RDWR))
+    assert (
+        await core.read("/data/books.tally", 100, 0, reader)
+        == b"RENDERED-AND-MUCH-LONGER"
+    )
+    assert await core.read("/data/books.tally", 100, 0, writer) == (
+        b"0123456789"
+    )
+    await core.release(reader)
+    await core.release(writer)
+
+
+class _NoAppend:
+    def __init__(self, ops):
+        self._inner = ops
+        self.appends = 0
+
+    def __getattr__(self, name):
+        return getattr(self._inner, name)
+
+    async def append(self, path, data):
+        self.appends += 1
+        raise OperationNotSupportedError("append")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("native", [True, False])
+async def test_an_appending_handle_lands_after_what_others_appended(native):
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
+    await ws.vfs.write("/log", b"one\n")
+    files = ws.vfs if native else _NoAppend(ws.vfs)
+    core = MountCore(files)
+    fh = await core.open("/log", open_mode(os.O_RDWR | os.O_APPEND))
+    await core.write("/log", b"two\n", 0, fh)
+    assert await core.read("/log", 100, 0, fh) == b"one\ntwo\n"
+    await ws.vfs.append("/log", b"other\n")
+    await core.write("/log", b"three\n", 0, fh)
+    await core.release(fh)
+    assert await ws.vfs.read("/log") == b"one\nother\ntwo\nthree\n"
+    again = await core.open("/log", open_mode(os.O_WRONLY | os.O_APPEND))
+    await core.write("/log", b"four\n", 0, again)
+    await core.release(again)
+    assert await ws.vfs.read("/log") == b"one\nother\ntwo\nthree\nfour\n"
+    if not native:
+        assert files.appends == 1
+
+
+@pytest.mark.asyncio
+async def test_an_appending_handle_appends_past_its_own_landed_writes():
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
+    await ws.vfs.write("/log", b"abc")
+    core = MountCore(ws.vfs)
+    fh = await core.open("/log", open_mode(os.O_RDWR | os.O_APPEND))
+    await core.write("/log", b"D", 0, fh)
+    await core.flush("/log", fh)
+    await core.write("/log", b"E", 0, fh)
+    assert await core.read("/log", 100, 0, fh) == b"abcDE"
+    assert (await core.fstat(fh)).size == 5
+    await core.release(fh)
+    assert await ws.vfs.read("/log") == b"abcDE"
+
+
+@pytest.mark.asyncio
+async def test_an_open_through_a_link_keeps_its_file_when_the_link_is_replaced():
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
+    await ws.vfs.write("/a", b"aaaa")
+    await ws.vfs.write("/b", b"bbbb")
+    await ws.shell("ln -s a /lk")
+    core = MountCore(ws.vfs)
+    fh = await core.open("/lk", open_mode(os.O_RDWR))
+    await core.unlink("/lk")
+    await ws.shell("ln -s b /lk")
+    await core.write("/lk", b"A", 0, fh)
+    assert await core.read("/lk", 100, 0, fh) == b"Aaaa"
+    await core.release(fh)
+    assert await ws.vfs.read("/a") == b"Aaaa"
+    assert await ws.vfs.read("/b") == b"bbbb"
+
+
+@pytest.mark.asyncio
+async def test_a_rename_through_a_link_it_moves_carries_the_handle_along():
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
+    await ws.shell("mkdir -p /src /other && printf hello > /src/f")
+    await ws.shell("ln -s /other /src/out")
+    core = MountCore(ws.vfs)
+    fh = await core.open("/src/f", open_mode(os.O_RDWR))
+    await core.rename("/src", "/src/out/moved")
+    await core.write("/src/f", b"X", 0, fh)
+    await core.release(fh)
+    assert await ws.vfs.read("/other/moved/f") == b"Xello"
+
+
+@pytest.mark.asyncio
+async def test_a_read_without_a_handle_lays_others_writes_over_its_range():
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
+    await ws.vfs.write("/f", b"ABCDEFGH")
+    core = MountCore(ws.vfs)
+    fh = await core.open("/f", open_mode(os.O_RDWR))
+    await core.write("/f", b"xy", 0, fh)
+    assert await core.read("/f", 3, 0, None) == b"xyC"
+    assert await core.read("/f", 2, 3, None) == b"DE"
+    assert await core.read("/f", 10, 6, None) == b"GH"
+    assert await core.read("/f", 10, 9, None) == b""
+    await core.release(fh)
+
+
+@pytest.mark.asyncio
+async def test_a_stream_of_writes_folds_into_one_run_another_handle_cuts():
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
+    await ws.vfs.write("/f", b"")
+    core = MountCore(ws.vfs)
+    a = await core.open("/f", open_mode(os.O_RDWR))
+    b = await core.open("/f", open_mode(os.O_RDWR))
+    for i in range(200):
+        await core.write("/f", b"a", i, a)
+    assert len(core.handles.get(a).write_buf) == 1
+    await core.write("/f", b"X", 1, a)
+    await core.write("/f", b"Z", 2, b)
+    await core.write("/f", b"cc", 200, a)
+    written = b"aXZ" + b"a" * 197 + b"cc"
+    assert await core.read("/f", 300, 0, a) == written
+    await core.release(a)
+    await core.release(b)
+    assert await ws.vfs.read("/f") == written
+
+
+@pytest.mark.asyncio
+async def test_handles_on_an_unlinked_file_share_what_it_holds(seeded):
+    reader = await seeded.open("/a.txt")
+    writer = await seeded.open("/a.txt", open_mode(os.O_RDWR))
+    await seeded.unlink("/a.txt")
+    await seeded.write("/a.txt", b"HELLO", 0, writer)
+    await seeded.flush("/a.txt", writer)
+    assert await seeded.read("/a.txt", 100, 0, reader) == b"HELLO world"
+    await seeded.ftruncate(writer, 5)
+    assert await seeded.read("/a.txt", 100, 0, reader) == b"HELLO"
+    assert (await seeded.fstat(reader)).size == 5
+    fresh = await seeded.open("/a.txt", open_mode(os.O_RDWR | os.O_CREAT))
+    assert await seeded.read("/a.txt", 100, 0, fresh) == b""
+    for fh in (reader, writer, fresh):
+        await seeded.release(fh)
+
+
+@pytest.mark.asyncio
+async def test_fstat_counts_what_a_handle_wrote_and_has_not_landed(seeded):
+    fh = await seeded.open("/a.txt", open_mode(os.O_WRONLY))
+    await seeded.write("/a.txt", b"!", 20, fh)
+    row = await seeded.fstat(fh)
+    assert (row.size, row.type) == (21, FileType.FILE)
+    # A stat by path sees it too, as write(2) is seen at once; nothing
+    # landed yet.
+    assert (await seeded.getattr("/a.txt")).size == 21
+    assert len(await seeded.files.read("/a.txt")) == 11
+    await seeded.ftruncate(fh, 3)
+    assert (await seeded.fstat(fh)).size == 3
+    await seeded.release(fh)
+    assert await seeded.read("/a.txt", 100, 0, None) == b"hel"
+    with pytest.raises(OSError) as gone:
+        await seeded.fstat(fh)
+    assert gone.value.errno == errno.EBADF
+
+
+# C fopen's "wx", what a QuickJS or WASI guest opens with: exclusive
+# creation that also carries the truncate fact, which exclusivity must
+# outrank so a refused open leaves the content alone.
+_WX = OpenMode(
+    readable=False,
+    writable=True,
+    truncate=True,
+    append=False,
+    create=True,
+    exclusive=True,
+    binary=False,
+)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "mode, world, effects, kept, refusal",
+    [
+        ("r", "file", [], True, None),
+        ("r", "none", [], False, FileNotFoundError),
+        ("r", "dir", [], False, IsADirectoryError),
+        ("r", "implied", [], False, IsADirectoryError),
+        ("r", "link", [], False, FileNotFoundError),
+        ("w", "file", ["truncate"], False, None),
+        ("w", "none", ["create"], False, None),
+        ("w", "implied", [], False, IsADirectoryError),
+        ("a", "file", [], True, None),
+        ("a", "none", ["create"], False, None),
+        ("a", "implied", [], False, IsADirectoryError),
+        (_WX, "file", [], True, FileExistsError),
+        (_WX, "link", [], False, FileExistsError),
+        (_WX, "implied", [], False, FileExistsError),
+        (_WX, "none", ["create"], False, None),
+    ],
+)
+async def test_an_open_lands_its_modes_effect_before_any_byte_moves(
+    mode, world, effects, kept, refusal
+):
+    ws = Workspace(
+        {"/data/": RAMVFS(), "/data/f/inner/": RAMVFS()}
+        if world == "implied"
+        else {"/data/": RAMVFS()},
+        mode=MountMode.WRITE,
+    )
+    if world == "file":
+        await ws.vfs.write("/data/f", b"body")
+    elif world == "dir":
+        await ws.vfs.mkdir("/data/f")
+    elif world == "link":
+        await ws.vfs.symlink("/data/f", "/data/missing")
+    core = MountCore(ws.vfs)
+    facts = parse_mode(mode) if isinstance(mode, str) else mode
+    before = len(ws.vfs.records)
+    if refusal is None:
+        await core.release(await core.open("/data/f", facts))
+    else:
+        with pytest.raises(refusal):
+            await core.open("/data/f", facts)
+    landed = [
+        r.op for r in ws.vfs.records[before:] if r.op in ("create", "truncate")
+    ]
+    assert landed == effects
+    if world == "file":
+        assert (await ws.vfs.read("/data/f") == b"body") == kept

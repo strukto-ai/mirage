@@ -25,6 +25,7 @@ from mirage import Mount, MountMode, Workspace, WritePolicy
 from mirage.errors.types import StaleWriteError
 from mirage.mount.core import MountCore
 from mirage.observe.context import mark_lost
+from mirage.runtime.handles.mode import open_mode
 from mirage.types import PathSpec
 from mirage.vfs.minio import MinIOConfig, MinIOVFS
 from mirage.vfs.ram import RAMVFS
@@ -1034,7 +1035,7 @@ async def test_a_kernel_mount_write_carries_the_version(fake, workspaces):
     core = MountCore(ws.vfs)
     assert await core.read("/s3/d/a", 100, 0, None) == SEED["d/a"]
     fake.ledger.clear()
-    fh = await core.open("/s3/d/a", os.O_WRONLY | os.O_TRUNC)
+    fh = await core.open("/s3/d/a", open_mode(os.O_WRONLY | os.O_TRUNC))
     await core.write("/s3/d/a", b"A\n", 0, fh)
     await core.release(fh)
     assert fake.buckets["b"]["d/a"] == b"A\n"
@@ -1045,7 +1046,7 @@ async def test_a_kernel_mount_write_carries_the_version(fake, workspaces):
     assert await core.read("/s3/f", 100, 0, None) == SEED["f"]
     _theirs(fake)
     with pytest.raises(StaleWriteError):
-        await core.open("/s3/f", os.O_WRONLY | os.O_TRUNC)
+        await core.open("/s3/f", open_mode(os.O_WRONLY | os.O_TRUNC))
     assert fake.buckets["b"]["f"] == b"theirs\n"
 
 

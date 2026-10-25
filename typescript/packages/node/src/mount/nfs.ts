@@ -21,9 +21,9 @@ import { NFSEngine, type NFSRequest } from '@struktoai/mirage-core/rs/nfs'
 import type { JsonValue } from '@struktoai/mirage-core/types'
 import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
 import { LISTING_CONCURRENCY, OPEN_HANDLES, RESERVED_PORTS } from './constants.ts'
-import type { MountCore } from './core.ts'
+import type { MountCore } from '@struktoai/mirage-core/mount/core'
 import { classifyErrno } from './errors.ts'
-import type { MountAttrs } from './types.ts'
+import type { MountAttrs } from '@struktoai/mirage-core/mount/types'
 
 export const HOST = '127.0.0.1'
 export const LINUX_OPTIONS =

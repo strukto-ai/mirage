@@ -15,7 +15,6 @@
 import { classify } from '../../../errors/index.ts'
 import { normDir } from '../../../utils/slash.ts'
 import { parseMode } from '../../handles/mode.ts'
-import { applyOpen } from '../../open.ts'
 import type { RuntimeFiles } from '../../files.ts'
 import type { MontyFsBits } from './loader.ts'
 import { MAX_URANDOM_BYTES, NOT_A_LINK } from './constants.ts'
@@ -159,8 +158,8 @@ const STRUCTURE = new Set(['Path.mkdir', 'Path.iterdir', 'Path.stat'])
  *
  * Monty hands the callbacks whole-file calls: an open, then reads of the
  * whole file and appends of each new write. So an open applies its
- * mode's effect on the mount (`applyOpen`) and nothing else, and each
- * write after it ships only its own bytes.
+ * mode's effect on the mount (`RuntimeFiles.open`, closed again at once)
+ * and nothing else, and each write after it ships only its own bytes.
  *
  * Args:
  *   bits: the loaded engine's callback pieces (NOT_HANDLED sentinel
@@ -331,12 +330,14 @@ export class MontyFs {
     // raise before any side effect lands on the mount.
     const handle = new this.fileHandle(path, mode)
     const parsed = parseMode(mode)
-    const row = await applyOpen(files, path, parsed)
-    if (parsed.append && row !== null) {
-      const size = row.size
-      return new this.fileHandle(path, mode, { position: size })
+    const fd = await files.open(path, parsed)
+    let size = 0
+    try {
+      if (parsed.append) size = (await files.fstat(fd)).size
+    } finally {
+      await files.close(fd)
     }
-    return handle
+    return parsed.append ? new this.fileHandle(path, mode, { position: size }) : handle
   }
 
   /** Replace a file; the return is python's: characters for text, bytes for bytes. */

@@ -22,7 +22,9 @@ import { ebadf, einval, isMissingPath } from '@struktoai/mirage-core/errors/fs'
 import { posixErrno, posixPhrase } from '@struktoai/mirage-core/errors/posix'
 import type { FsCondition } from '@struktoai/mirage-core/errors/types'
 import { workspaceBridge } from '@struktoai/mirage-core/runtime/binding'
-import { RuntimeFiles } from '@struktoai/mirage-core/runtime/files'
+import { MountCore } from '@struktoai/mirage-core/mount/core'
+import { type Descriptor, RuntimeFiles } from '@struktoai/mirage-core/runtime/files'
+import { openMode } from '@struktoai/mirage-core/runtime/handles/mode'
 import { posixStat } from '@struktoai/mirage-core/runtime/stat'
 import { PrefixResolver } from '@struktoai/mirage-core/runtime/resolver'
 import type { VFSEntry, VFSStat } from '@struktoai/mirage-core/runtime/types'
@@ -38,7 +40,7 @@ import {
   ROUTED_CALLS,
   type RoutedCall,
 } from './constants.ts'
-import { type Descriptor, Descriptors, openFlags, readAt, readOn } from './descriptors.ts'
+import { Descriptors, openFlags } from './descriptors.ts'
 
 type FsObject = Record<string, unknown>
 type Fn = (...args: unknown[]) => unknown
@@ -342,26 +344,32 @@ class HostFs implements Record<RoutedCall, (...args: never[]) => Promise<unknown
     private readonly ws: Workspace,
     private readonly native: FsObject,
   ) {
+    // An op that fails with no condition (an upstream 502 a REST mount
+    // throws as it came) answers EIO, the kernel's word for a device that
+    // failed, as a guest's file adapter does; the original rides along as
+    // the cause.
+    const dispatch: typeof ws.vfs.dispatch = async (name, path, args, kwargs, report) => {
+      try {
+        return await ws.vfs.dispatch(name, path, args, kwargs, report)
+      } catch (err) {
+        if (classify(err) !== null) throw err
+        throw Object.assign(refusal('EIO', name, typeof path === 'string' ? path : path.virtual), {
+          cause: err,
+        })
+      }
+    }
     this.files = new RuntimeFiles(
-      workspaceBridge(async (name, path, args, kwargs) => {
-        try {
-          const [value] = await ws.vfs.dispatch(name, path, args, kwargs)
-          return value
-        } catch (err) {
-          if (classify(err) !== null) throw err
-          // An op that fails with no condition (an upstream 502 a REST
-          // mount throws as it came) answers EIO, the kernel's word for a
-          // device that failed, as a guest's file adapter does; the original
-          // rides along as the cause.
-          throw Object.assign(refusal('EIO', name, path), { cause: err })
-        }
-      }),
+      workspaceBridge(
+        async (name, path, args, kwargs) => (await dispatch(name, path, args, kwargs))[0],
+      ),
       new PrefixResolver(
         () => [],
         (directory) => ws.namespace.linkNamesUnder(directory),
       ),
+      null,
+      new MountCore(ws.vfs.over(dispatch)),
     )
-    this.descriptors = new Descriptors(this.files, native, ws.namespace)
+    this.descriptors = new Descriptors(this.files, native)
   }
 
   /** Whether `path` is under a mount the patch answers for. The synthetic
@@ -602,22 +610,13 @@ class HostFs implements Record<RoutedCall, (...args: never[]) => Promise<unknown
     // A move between a mount and the host is EXDEV, the kernel's answer
     // for two filesystems and the errno a mover retries as copy + delete.
     if (!this.mounted(src) || !this.mounted(dst)) throw refusal('EXDEV', 'rename', src)
-    // Both ends as the walk names them before the rename, which may move a
-    // link the walk takes. A rename onto its own name changes nothing, its
-    // descriptors included.
-    const from = this.descriptors.walked(src, false)
-    const to = this.descriptors.walked(dst, false)
-    const held = from === to ? [] : await this.descriptors.hold(dst)
+    // The descriptors open on either end follow it (the core sees to it).
     await this.files.rename(src, dst)
-    this.descriptors.keep(held)
-    this.descriptors.moved(from, to)
   }
 
   /** Remove a file, the descriptors open on it keeping the bytes it had. */
   private async removeFile(path: string): Promise<void> {
-    const held = await this.descriptors.hold(path)
     await this.files.unlink(path)
-    this.descriptors.keep(held)
   }
 
   async rm(path: string, options?: Options): Promise<void> {
@@ -718,7 +717,6 @@ class HostFs implements Record<RoutedCall, (...args: never[]) => Promise<unknown
     // truncate(2) names a file that is there; the op creates a missing
     // one, as GNU truncate does without -c.
     await this.files.stat(path)
-    await this.descriptors.landPath(path)
     await this.files.truncate(path, length)
   }
 
@@ -727,9 +725,8 @@ class HostFs implements Record<RoutedCall, (...args: never[]) => Promise<unknown
   }
 
   async utimes(path: string, atime: unknown, mtime: unknown): Promise<void> {
-    // Writes a descriptor still owes land first, or landing them at its
-    // close would stamp over the times set here.
-    await this.descriptors.landPath(path)
+    // Writes a descriptor still owes land first (the core sees to it), or
+    // landing them at its close would stamp over the times set here.
     await this.files.setattr(path, { atime: stampOf(atime), mtime: stampOf(mtime) })
   }
 
@@ -743,7 +740,7 @@ class HostFs implements Record<RoutedCall, (...args: never[]) => Promise<unknown
     if (target instanceof MountedFileHandle && !target.live()) throw ebadf(String(target.fd))
     const fd = target instanceof MountedFileHandle ? target.fd : (target as number)
     if (name === 'readFile') {
-      const read = () => readOn(this.descriptors.file(fd, true, false), -1)
+      const read = () => this.descriptors.file(fd, true, false).read(-1)
       const bytes = Buffer.from(await this.descriptors.serial(fd, read))
       const encoding = encodingOf(rest[0] as Options)
       return encoding === undefined ? bytes : bytes.toString(encoding)
@@ -771,22 +768,22 @@ class HostFs implements Record<RoutedCall, (...args: never[]) => Promise<unknown
     length: number,
     position: number | null,
   ): Promise<number> {
-    const handle = this.descriptors.file(fd, true, false)
-    const bytes =
-      position === null ? await readOn(handle, length) : await readAt(handle, position, length)
+    const desc = this.descriptors.file(fd, true, false)
+    const bytes = position === null ? await desc.read(length) : await desc.pread(position, length)
     buffer.set(bytes, offset)
     return bytes.byteLength
   }
 
   /** A write through a mounted descriptor, in its turn on the descriptor. */
   private fdWrite(fd: number, bytes: Uint8Array, position: number | null): Promise<number> {
-    return this.descriptors.serial(fd, () => {
-      const handle = this.descriptors.file(fd, false, true)
+    return this.descriptors.serial(fd, async () => {
+      const desc = this.descriptors.file(fd, false, true)
       // Linux appends a positioned write on an O_APPEND descriptor,
-      // whatever the position, and leaves the position where it was.
-      if (position === null) handle.write(bytes.slice())
-      else handle.pwrite(handle.append ? handle.size : position, bytes.slice())
-      return Promise.resolve(bytes.byteLength)
+      // whatever the position, and leaves the position where it was: the
+      // core writes an appending handle at its end.
+      if (position === null) await desc.write(bytes.slice())
+      else await desc.pwrite(position, bytes.slice())
+      return bytes.byteLength
     })
   }
 
@@ -828,23 +825,18 @@ class HostFs implements Record<RoutedCall, (...args: never[]) => Promise<unknown
           return [await this.fdWrite(fd, joined, position), buffers]
         }
         case 'fstat': {
-          const held = desc.kept !== null ? desc.stat : null
-          const st = held ?? (await this.files.stat(desc.path))
-          const row = { ...st, size: desc.handle?.size ?? st.size }
-          // A fetched row was judged by its stat; a held one is judged here.
-          if (held !== null) await this.files.statCached(desc.path, row)
-          return [this.statsOf(desc.opened, row, rest[0] as Options, desc.kept !== null)]
+          const row = await this.files.fstat(desc.fd)
+          return [this.statsOf(desc.opened, row, rest[0] as Options, this.files.unlinked(desc.fd))]
         }
         case 'ftruncate':
           if (!desc.mode.writable) throw einval(desc.path)
-          await this.descriptors.serial(fd, () => {
-            this.descriptors.file(fd, false, true).truncate(Math.max(0, Number(rest[0] ?? 0)))
-            return Promise.resolve()
-          })
+          await this.descriptors.serial(fd, () =>
+            this.descriptors.file(fd, false, true).truncate(Math.max(0, Number(rest[0] ?? 0))),
+          )
           return []
         case 'fsync':
         case 'fdatasync':
-          await this.descriptors.serial(fd, () => this.descriptors.land(desc))
+          await this.descriptors.serial(fd, () => desc.land())
           return []
         case 'close':
           await this.descriptors.close(fd)
@@ -878,14 +870,15 @@ class HostFs implements Record<RoutedCall, (...args: never[]) => Promise<unknown
     const given = fieldsOf(options).flag
     const flag = typeof given === 'string' ? given : fallback
     const bytes = bytesOf(data, options)
-    if (flag.includes('x') && (await this.files.statOrNull(path, true)) !== null) {
-      throw refusal('EEXIST', 'open', path)
+    // An open, a write and a close through the core, as node's own do, so
+    // the descriptors open on the file see it and an exclusive flag refuses
+    // a name that is there.
+    const fd = await this.files.open(path, openMode(openFlags(flag), constants))
+    try {
+      await this.files.pwrite(fd, 0, bytes)
+    } finally {
+      await this.files.close(fd)
     }
-    // What descriptors on the file still owe lands first, so their older
-    // writes never land over this one.
-    await this.descriptors.landPath(path)
-    if (flag.startsWith('a')) await this.files.append(path, bytes)
-    else await this.files.write(path, bytes)
   }
 }
 

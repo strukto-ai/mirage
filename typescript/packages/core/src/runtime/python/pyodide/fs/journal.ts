@@ -13,25 +13,27 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { type RuntimeFiles } from '../../../files.ts'
+import type { OpenMode } from '../../../handles/mode.ts'
 import type { SetAttrFields } from '../../../../types.ts'
-import { concat } from '../../../../utils/bytes.ts'
+
+// What a create opens: a file made and never written still lands.
+const CREATE: OpenMode = Object.freeze({
+  readable: false,
+  writable: true,
+  truncate: false,
+  append: false,
+  create: true,
+  exclusive: false,
+  binary: true,
+})
 
 /**
- * One guest mutation, recorded in the order the script performed it.
- * `pwrite` and `append` carry their bytes because the drain runs after
- * the script returns, when the filesystem holds only the final state: an
- * atomic-write (write a temp file, rename it into place) would otherwise
- * replay as a read of a path the rename already moved.
+ * One guest change to names or metadata, recorded in the order the script
+ * performed it. A file's bytes are not here: its stream writes through
+ * its core handle (`SyncVFS.pwrite`).
  */
 export type MirageMutation =
   | { readonly kind: 'create'; readonly path: string }
-  | { readonly kind: 'append'; readonly path: string; readonly bytes: Uint8Array }
-  | {
-      readonly kind: 'pwrite'
-      readonly path: string
-      readonly offset: number
-      readonly bytes: Uint8Array
-    }
   | { readonly kind: 'truncate'; readonly path: string; readonly length: number }
   | { readonly kind: 'mkdir'; readonly path: string }
   | { readonly kind: 'unlink'; readonly path: string }
@@ -43,8 +45,8 @@ export type MirageMutation =
 /**
  * The write-ahead log a pyodide guest records into.
  *
- * Every mark is deliberately synchronous: the guest's write(), os.mkdir()
- * and os.rename() run inside sync WASM frames where awaiting a mount op
+ * Every mark is deliberately synchronous: the guest's os.mkdir() and
+ * os.rename() run inside sync WASM frames where awaiting a mount op
  * needs JSPI stack switching, which most engines do not enable. The guest
  * records here and the runtime replays after the script returns, where
  * awaiting is free. This is the one thing pyodide needs that the other
@@ -54,19 +56,10 @@ export type MirageMutation =
 export interface MutationJournal {
   markCreate(path: string): void
   /**
-   * Args:
-   *   path: mount-prefixed path the mutation names.
-   *   offset: where the file ended, which is where the tail lands.
-   *   bytes: the new tail.
+   * Take back the create of `path` the journal ends with, which the open
+   * right after it makes instead; false when it ends with no such create.
    */
-  markAppend(path: string, offset: number, bytes: Uint8Array): void
-  /**
-   * Args:
-   *   path: mount-prefixed path the mutation names.
-   *   offset: where the bytes land inside the file.
-   *   bytes: the bytes written there.
-   */
-  markPwrite(path: string, offset: number, bytes: Uint8Array): void
+  takeCreate(path: string): boolean
   /**
    * Args:
    *   path: mount-prefixed path the mutation names.
@@ -99,58 +92,27 @@ export interface MutationJournal {
    * catches the exit and runs on.
    */
   seal(): void
+  /** Whether the guest exited since the last `reopen`: its streams read and write nothing more either. */
+  readonly sealed: boolean
   /** Record again, for the next run. */
   reopen(): void
 }
 
-// An append or pwrite holds its bytes as parts until the drain, so a loop
-// of small writes costs one copy per write rather than one per byte
-// written so far.
-type Pending =
-  | Exclude<MirageMutation, { kind: 'append' | 'pwrite' }>
-  | { kind: 'append'; path: string; parts: Uint8Array[] }
-  | { kind: 'pwrite'; path: string; offset: number; parts: Uint8Array[]; length: number }
-
 export function createJournal(): MutationJournal {
-  const journal: Pending[] = []
+  const journal: MirageMutation[] = []
   let sealed = false
-  const record = (entry: Pending): void => {
+  const record = (entry: MirageMutation): void => {
     if (!sealed) journal.push(entry)
   }
   return {
     markCreate(path) {
       record({ kind: 'create', path })
     },
-    markAppend(path, offset, bytes) {
-      if (sealed) return
-      // A guest buffer handed over by pyodide can be a view into WASM
-      // memory, which relocates when the heap grows; copy on arrival so
-      // the journal owns bytes that stay valid until the drain.
-      const owned = new Uint8Array(bytes)
-      const last = journal[journal.length - 1]
-      // A tail continues the append before it, or a pwrite that reached
-      // the old end, as one range.
-      if (last?.kind === 'append' && last.path === path) {
-        last.parts.push(owned)
-        return
-      }
-      if (last?.kind === 'pwrite' && last.path === path && last.offset + last.length === offset) {
-        last.parts.push(owned)
-        last.length += owned.length
-        return
-      }
-      record({ kind: 'append', path, parts: [owned] })
-    },
-    markPwrite(path, offset, bytes) {
-      if (sealed) return
-      const owned = new Uint8Array(bytes)
-      const last = journal[journal.length - 1]
-      if (last?.kind === 'pwrite' && last.path === path && last.offset + last.length === offset) {
-        last.parts.push(owned)
-        last.length += owned.length
-        return
-      }
-      record({ kind: 'pwrite', path, offset, parts: [owned], length: owned.length })
+    takeCreate(path) {
+      const last = journal.at(-1)
+      if (last?.kind !== 'create' || last.path !== path) return false
+      journal.pop()
+      return true
     },
     markTruncate(path, length) {
       record({ kind: 'truncate', path, length })
@@ -176,24 +138,14 @@ export function createJournal(): MutationJournal {
     seal() {
       sealed = true
     },
+    get sealed() {
+      return sealed
+    },
     reopen() {
       sealed = false
     },
     takeMutations() {
-      return journal.splice(0, journal.length).map((entry): MirageMutation => {
-        if (entry.kind === 'append') {
-          return { kind: 'append', path: entry.path, bytes: concat(entry.parts) }
-        }
-        if (entry.kind === 'pwrite') {
-          return {
-            kind: 'pwrite',
-            path: entry.path,
-            offset: entry.offset,
-            bytes: concat(entry.parts),
-          }
-        }
-        return entry
-      })
+      return journal.splice(0, journal.length)
     },
   }
 }
@@ -208,14 +160,7 @@ export function createJournal(): MutationJournal {
 export async function applyMutation(files: RuntimeFiles, mutation: MirageMutation): Promise<void> {
   switch (mutation.kind) {
     case 'create':
-      return files.create(mutation.path)
-    // The journal recorded only the tail, so the whole file is not
-    // available here; RuntimeFiles.append reads the base itself when the
-    // mount has no append op.
-    case 'append':
-      return files.append(mutation.path, mutation.bytes)
-    case 'pwrite':
-      return files.pwrite(mutation.path, mutation.offset, mutation.bytes)
+      return files.close(await files.open(mutation.path, CREATE))
     case 'truncate':
       return files.truncate(mutation.path, mutation.length)
     case 'mkdir':

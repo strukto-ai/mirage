@@ -12,22 +12,22 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { constants as fsConstants } from 'node:fs'
-import { posix } from 'node:path'
-import { type Files, readerOf } from '@struktoai/mirage-core/workspace/files'
+import { type Files, readerOf } from '../workspace/files.ts'
 import {
   ChunkedHandle,
   FileTable,
+  READ,
   overlaid,
   writeRuns,
-} from '@struktoai/mirage-core/runtime/handles/index'
-import { READ_CHUNK } from '@struktoai/mirage-core/runtime/handles/constants'
-import { classify } from '@struktoai/mirage-core/errors/index'
-import { FileStat, FileType, LIVE_KEY, PathSpec } from '@struktoai/mirage-core/types'
-import type { SetAttrFields } from '@struktoai/mirage-core/types'
-import { posixNormpath } from '@struktoai/mirage-core/utils/path'
-import { rstripSlash } from '@struktoai/mirage-core/utils/slash'
-import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
+  type OpenMode,
+} from '../runtime/handles/index.ts'
+import { READ_CHUNK } from '../runtime/handles/constants.ts'
+import { classify } from '../errors/index.ts'
+import { FileStat, FileType, LIVE_KEY, PathSpec } from '../types.ts'
+import type { SetAttrFields } from '../types.ts'
+import { posixNormpath } from '../utils/path.ts'
+import { rstripSlash } from '../utils/slash.ts'
+import { compareCodePoints } from '../utils/sort.ts'
 import {
   DIR_MODE,
   DIR_SIZE,
@@ -38,15 +38,21 @@ import {
   isLink,
   mtimeMs,
   posixMode,
-} from '@struktoai/mirage-core/utils/stat_view'
+} from '../utils/stat_view.ts'
+import { callsAs, currentCaller, runWithSession } from '../context/session_context.ts'
+import { skippedAtDispatch } from '../policy/match/rule.ts'
+import type { SessionState } from '../workspace/session/session.ts'
 import {
-  callsAs,
-  currentCaller,
-  runWithSession,
-} from '@struktoai/mirage-core/context/session_context'
-import { skippedAtDispatch } from '@struktoai/mirage-core/policy/match/rule'
-import type { SessionState } from '@struktoai/mirage-core/workspace/session/session'
-import { enoent } from '@struktoai/mirage-core/errors/fs'
+  ebadf,
+  eexist,
+  einval,
+  eisdir,
+  enoent,
+  enotdir,
+  isMissingOp,
+  isMissingPath,
+} from '../errors/fs.ts'
+import { concat, findBytes } from '../utils/bytes.ts'
 import { isMacosMetadata } from './platform/macos.ts'
 import type { MountAttrs, Handle } from './types.ts'
 
@@ -59,6 +65,12 @@ export interface MountCoreOptions {
    * session context, so binding at the op entry point is sufficient.
    */
   session?: SessionState
+  /**
+   * Who owns what the mount shows when a row names its owner by name (the
+   * kernel wants numbers): the mounting user, which a kernel adapter reads
+   * off its process. A guest owns nothing, so it defaults to 0.
+   */
+  owner?: { uid: number; gid: number }
 }
 
 /**
@@ -85,9 +97,12 @@ export class MountCore {
   private readonly now: Date
   private readonly root: string
   readonly handles = new FileTable<Handle>()
-  // Per file identity: the hydration read out (opens share it), a
-  // generation a change under it bumps, the chain of mutations, the chain of
-  // removals, and the opens out that a removal waits for.
+  // The write runs `folded` grew, whose buffers have room past them.
+  private static readonly grown = new WeakSet<Uint8Array>()
+  // Per file identity and view (stored or rendered): the hydration read out
+  // (opens share it) and a generation a change under it bumps. Per identity:
+  // the chain of mutations, the chain of removals, and the opens out that a
+  // removal waits for.
   private readonly hydrations = new Map<string, Promise<Uint8Array | undefined>>()
   private readonly hydrationGen = new Map<string, number>()
   private readonly pending = new Map<string, Promise<void>>()
@@ -95,13 +110,17 @@ export class MountCore {
   private readonly opening = new Map<string, Set<Promise<void>>>()
   private readonly uid: number
   private readonly gid: number
+  // The mounts that refused an append, which land one as a write.
+  private readonly noAppend = new Set<string>()
+  // Names the files whose name went, one per removal.
+  private removed = 0
 
   constructor(files: Files, options: MountCoreOptions = {}) {
     this.files = files
     this.now = new Date()
     this.root = options.rootPrefix !== undefined ? rstripSlash(options.rootPrefix) : ''
-    this.uid = typeof process.getuid === 'function' ? process.getuid() : 0
-    this.gid = typeof process.getgid === 'function' ? process.getgid() : 0
+    this.uid = options.owner?.uid ?? 0
+    this.gid = options.owner?.gid ?? 0
     this.session = options.session ?? null
     const skipped = this.session === null ? [] : skippedAtDispatch(this.session.commands)
     if (this.session !== null && skipped.length > 0) {
@@ -215,10 +234,13 @@ export class MountCore {
       }
     }
     const slash = path.lastIndexOf('/')
-    const parent = slash <= 0 ? '/' : path.slice(0, slash)
+    const from = (slash <= 0 ? '' : posixNormpath(path.slice(0, slash))).split('/').filter(Boolean)
+    const to = posixNormpath(virtualTarget).split('/').filter(Boolean)
+    let shared = 0
+    while (shared < from.length && from[shared] === to[shared]) shared++
     // A target that is the link's own directory is `.`, as Python's relpath
-    // names it; posix.relative answers the empty string.
-    return posix.relative(parent, virtualTarget) || '.'
+    // names it.
+    return [...from.slice(shared).map(() => '..'), ...to.slice(shared)].join('/') || '.'
   }
 
   /**
@@ -239,18 +261,22 @@ export class MountCore {
    * Read a size-unknown file whole for the handle opening it, through the
    * dispatcher, so a caching mount keeps the bytes for the next open and for
    * a stat once this one closes. Undefined when the read fails: open() stays
-   * permissive and the read() that follows surfaces the error. Mirrors
+   * permissive and the read() that follows surfaces the error. Opens of one
+   * view of one file while a read is out share it; `raw` is the stored
+   * bytes, for a handle that writes, rather than the rendering. Mirrors
    * Python's `_hydrate`.
    */
-  private hydrate(path: string): Promise<Uint8Array | undefined> {
-    const key = this.identity(path)
+  private hydrate(path: string, raw: boolean): Promise<Uint8Array | undefined> {
+    const key = MountCore.view(this.identity(path), raw)
     const inflight = this.hydrations.get(key)
     if (inflight !== undefined) return inflight
     const promise = (async (): Promise<Uint8Array | undefined> => {
       try {
         for (;;) {
           const gen = this.hydrationGen.get(key) ?? 0
-          const data = await this.op(() => this.files.read(this.resolve(path)))
+          const data = await this.op(() =>
+            this.files.read(this.resolve(path), MountCore.stored(raw)),
+          )
           // The file changed while this read was out: what came back is
           // stale, so read again rather than hand it over.
           if ((this.hydrationGen.get(key) ?? 0) !== gen) continue
@@ -338,24 +364,73 @@ export class MountCore {
    * Land write runs on the mount, one pwrite each, in order. A pwrite keeps
    * every stored byte the handle did not write, so nothing is read through
    * the dispatcher first: a session that may write a file and not read it writes
-   * through FUSE, as through a write-only descriptor. The runs that landed
-   * leave `runs` in one step, so after a failure `runs` holds only what did
-   * not land and a retry never replays a run over bytes another writer has
-   * since put there. A run that fails still invalidates what the core holds,
-   * since the runs before it have landed.
+   * through FUSE, as through a write-only descriptor. An appending handle's
+   * runs land as appends instead, at the end the file has then, so what
+   * another writer appended meanwhile stays before them, as O_APPEND keeps
+   * it. The runs that landed leave `runs` in one step, so after a failure
+   * `runs` holds only what did not land and a retry never replays a run over
+   * bytes another writer has since put there. A run that fails still
+   * invalidates what the core holds, since the runs before it have landed.
    */
-  private async applyWrites(path: string, runs: [number, Uint8Array][]): Promise<void> {
+  private async applyWrites(
+    path: string,
+    runs: [number, Uint8Array][],
+    append = false,
+  ): Promise<void> {
     const target = this.resolve(path)
     let landed = 0
     try {
       for (const [offset, data] of runs) {
-        await this.op(() => this.files.pwrite(target, data, offset))
+        if (append) await this.appendTo(target, data)
+        else await this.op(() => this.files.pwrite(target, data, offset))
         landed += 1
       }
     } finally {
       runs.splice(0, landed)
       await this.changed(path)
     }
+  }
+
+  /**
+   * Extend a file by `data` at the end it has now. A mount with no append
+   * (S3) takes a write of the whole file, read fresh from the backend
+   * rather than from a copy, so a write another action made since stays; a
+   * mount that declined once is remembered. Mirrors Python's `_append`.
+   */
+  private async appendTo(target: string, data: Uint8Array): Promise<void> {
+    const mount = this.files.mountOf(target) ?? target
+    if (!this.noAppend.has(mount)) {
+      try {
+        await this.op(() => this.files.append(target, data))
+        return
+      } catch (err) {
+        if (!isMissingOp(err, 'append')) throw err
+        this.noAppend.add(mount)
+      }
+    }
+    let base: Uint8Array = new Uint8Array()
+    try {
+      const [stored] = await this.op(() =>
+        this.files.dispatch('read', PathSpec.fromStrPath(target, undefined, '/'), [], {
+          filetype: null,
+          direct: true,
+        }),
+      )
+      base = stored as Uint8Array
+    } catch (err) {
+      if (!isMissingPath(err)) throw err
+    }
+    await this.op(() => this.files.write(target, concat([base, data])))
+  }
+
+  /** The read options for one view: the stored bytes, else the rendering. */
+  private static stored(raw: boolean): { raw: true } | undefined {
+    return raw ? { raw } : undefined
+  }
+
+  /** The key one view of a file's hydration goes by. */
+  private static view(key: string, raw: boolean): string {
+    return `${raw ? 'stored' : 'rendered'}:${key}`
   }
 
   // ── POSIX surface (throws; adapters classify) ────────────────────
@@ -368,15 +443,24 @@ export class MountCore {
    * the link (stat rather than lstat).
    */
   async getattr(path: string, follow = false, ctx: Handle | null = null): Promise<MountAttrs> {
-    let size = ctx?.data?.byteLength ?? null
     if (path === '/') return this.rootAttrs()
     // macOS Finder/Spotlight probes .DS_Store, ._*, .Spotlight-V100, etc.
     // Reject early to avoid hitting the ops layer.
-    const name = path.slice(path.lastIndexOf('/') + 1)
-    if (isMacosMetadata(name)) {
-      throw enoent(path)
+    if (isMacosMetadata(path.slice(path.lastIndexOf('/') + 1))) throw enoent(path)
+    const s = await this.row(path, follow, ctx)
+    if (isLink(s)) {
+      const target = await this.op(() => this.files.readlink(this.resolve(path)))
+      return this.attrs(s, new TextEncoder().encode(this.shownTarget(path, target)).byteLength)
     }
-    const virtual = this.resolve(path)
+    return this.attrs(s)
+  }
+
+  /**
+   * The row a stat of `path` answers, the size an open handle holds and what
+   * it wrote and has not landed counted. Mirrors Python's `_row`.
+   */
+  private async row(path: string, follow: boolean, ctx: Handle | null): Promise<FileStat> {
+    let size = ctx?.data?.byteLength ?? null
     let s: FileStat
     let retained = false
     if (ctx?.detached !== undefined) {
@@ -385,32 +469,31 @@ export class MountCore {
       s = ctx.detached
     } else {
       try {
-        s = await this.op(() => this.files.stat(virtual, undefined, { nofollow: !follow }))
+        s = await this.op(() =>
+          this.files.stat(this.resolve(path), undefined, { nofollow: !follow }),
+        )
       } catch (err) {
         if (size === null || classify(err) !== 'ENOENT') throw err
         // A hide is not an unlink: held metadata still meets the walk.
         retained = true
-        s = new FileStat({ name, type: FileType.FILE })
+        s = new FileStat({ name: path.slice(path.lastIndexOf('/') + 1), type: FileType.FILE })
       }
     }
-    if (isLink(s)) {
-      const target = await this.op(() => this.files.readlink(virtual))
-      return this.attrs(s, new TextEncoder().encode(this.shownTarget(path, target)).byteLength)
-    }
-    if (isDir(s)) return this.attrs(retained ? await this.statCached(path, s) : s)
+    if (isLink(s)) return s
+    if (isDir(s)) return retained ? this.statCached(path, s) : s
     // A size-unknown file stats as 0 rather than be fetched on every ls -l;
     // direct_io keeps its reads whole regardless.
     if (size === null && s.size === null) size = this.heldSize(path)
-    if (ctx?.writeBuf !== undefined && ctx.writeBuf.length > 0) {
+    const writes = this.writesOn(ctx === null ? this.identity(path, follow) : ctx.key, ctx)
+    if (writes.length > 0) {
       let end = size ?? contentSize(s)
-      for (const [offset, data] of ctx.writeBuf) end = Math.max(end, offset + data.byteLength)
+      for (const [offset, data] of writes) end = Math.max(end, offset + data.byteLength)
       size = end
     }
     if (size !== null && size !== s.size) s = s.with({ size })
     // A row the stat above fetched was judged there; a held one is judged
     // here, with the size the handle answers.
-    if (retained) s = await this.statCached(path, s)
-    return this.attrs(s)
+    return retained ? this.statCached(path, s) : s
   }
 
   /**
@@ -421,6 +504,43 @@ export class MountCore {
     const ctx = this.handles.get(fd) ?? null
     if (ctx !== null) await this.settled(ctx)
     return this.getattr(ctx?.path ?? path, ctx !== null, ctx)
+  }
+
+  /**
+   * The row a stat of `path` answers, what the handles open on it wrote and
+   * have not landed counted, as a guest projects it into its own record.
+   * Mirrors Python's `stat`.
+   */
+  async stat(path: string, follow = true): Promise<FileStat> {
+    return this.row(path, follow, null)
+  }
+
+  /**
+   * The row an open handle stats by: its file's, with the size it holds and
+   * what it wrote and has not landed counted, judged as a stat of its path.
+   * A guest projects this into its own record. Mirrors Python's `fstat`.
+   */
+  async fstat(fd: number): Promise<FileStat> {
+    const ctx = this.openHandle(fd)
+    await this.settled(ctx)
+    return this.row(ctx.path, true, ctx)
+  }
+
+  /** The handle `fd` names; EBADF for any other number. */
+  private openHandle(fd: number): Handle {
+    const ctx = this.handles.get(fd)
+    if (ctx === undefined) throw ebadf(String(fd))
+    return ctx
+  }
+
+  /**
+   * Where the file a handle holds ends: its bytes, else the length its open
+   * saw, and past them what it wrote.
+   */
+  private static end(ctx: Handle): number {
+    let end = ctx.data?.byteLength ?? ctx.chunked?.size ?? ctx.size ?? 0
+    for (const [offset, data] of ctx.writeBuf ?? []) end = Math.max(end, offset + data.byteLength)
+    return end
   }
 
   /**
@@ -451,20 +571,32 @@ export class MountCore {
   }
 
   async read(path: string, fd: number, pos: number, len: number): Promise<Uint8Array> {
-    // A rendered read: a filetype registered on the mount shows as text.
     const ctx = this.handles.get(fd)
-    if (ctx !== undefined) await this.settled(ctx)
     if (ctx === undefined) {
       // Whole, as a handle's first read is: the read that fills the cache
       // and records the version a conditional write sends.
       const data = await this.op(() => this.files.read(this.resolve(path)))
+      const writes = this.writesOn(this.identity(path), null)
+      if (writes.length > 0) {
+        return this.readCached(path, overlaid(data.subarray(pos), pos, len, writes))
+      }
       return data.subarray(pos, pos + len)
     }
+    if (!ctx.mode.readable) throw ebadf(ctx.path)
+    if (ctx.lost !== undefined && ctx.data === undefined) throw ctx.lost
+    await this.settled(ctx)
+    // A handle that writes reads the stored bytes its writes land on; one
+    // that only reads sees the rendering.
+    const raw = ctx.mode.writable
     let stored: Uint8Array
     let retained = false
     if (ctx.live === true) {
       stored = await this.op(() =>
-        this.files.read(this.resolve(ctx.path), { offset: pos, size: len }),
+        this.files.read(this.resolve(ctx.path), {
+          offset: pos,
+          size: len,
+          ...MountCore.stored(raw),
+        }),
       )
     } else if (ctx.chunked !== undefined && ctx.data === undefined) {
       // A fetch joins what it brings onto bytes kept at `pos`, so any kept
@@ -477,29 +609,91 @@ export class MountCore {
         // A change landing while this read is out keeps it from holding
         // what it fetched.
         const generation = ctx.generation ?? 0
-        held = await this.op(() => this.files.read(this.resolve(ctx.path)))
+        held = await this.op(() => this.files.read(this.resolve(ctx.path), MountCore.stored(raw)))
         if ((ctx.generation ?? 0) === generation) ctx.data = held
       } else {
         retained = true
       }
       stored = held.subarray(pos, pos + len)
     }
-    const writes = ctx.writeBuf !== undefined && ctx.writeBuf.length > 0
-    const data = writes ? overlaid(stored, pos, len, ctx.writeBuf ?? []) : stored
-    return retained || writes ? this.readCached(ctx.path, data) : data
+    const writes = this.writesOn(ctx.key, ctx)
+    const data = writes.length > 0 ? overlaid(stored, pos, len, writes) : stored
+    return retained || writes.length > 0 ? this.readCached(ctx.path, data) : data
   }
 
-  /** Buffer a write on its handle, or apply it directly when there is none. */
+  /**
+   * What a read of the file `key` names sees that has not landed: every
+   * handle's writes on it, as write(2) is seen by every reader at once.
+   * `supersede` keeps them apart, so they lay over the stored bytes in any
+   * order; an appending handle's are its own, since they land at the end the
+   * file has then, and the reader's own go last. Mirrors Python's
+   * `_writes_on`.
+   */
+  private writesOn(key: string, ctx: Handle | null): [number, Uint8Array][] {
+    const out: [number, Uint8Array][] = []
+    for (const other of this.openOn(key)) {
+      if (other !== ctx && !other.mode.append) out.push(...(other.writeBuf ?? []))
+    }
+    if (ctx !== null) out.push(...(ctx.writeBuf ?? []))
+    return out
+  }
+
+  /**
+   * Buffer a write on its handle, or apply it directly when there is none.
+   * An appending handle writes at the end it holds, whatever `pos` says;
+   * EBADF through a handle opened only to read.
+   */
   async write(path: string, fd: number, data: Uint8Array, pos: number): Promise<void> {
     const ctx = this.handles.get(fd)
-    const key = ctx === undefined ? this.identity(path) : ctx.key
-    this.supersede(key, pos, data.byteLength, ctx)
     if (ctx !== undefined) {
-      ctx.writeBuf ??= []
-      ctx.writeBuf.push([pos, data])
+      if (!ctx.mode.writable) throw ebadf(ctx.path)
+      const at = ctx.mode.append ? MountCore.end(ctx) : pos
+      this.supersede(ctx.key, at, data.byteLength, ctx)
+      MountCore.buffer(ctx, at, data)
       return
     }
+    const key = this.identity(path)
+    this.supersede(key, pos, data.byteLength, undefined)
     await this.mutate(key, () => this.applyWrites(path, [[pos, data]]))
+  }
+
+  /**
+   * Keep a write on its handle, a copy: one that starts inside the last run
+   * or right at its end folds into it, so a stream of writes stays one run;
+   * any other starts a run of its own, laid over the earlier ones in order,
+   * and every 64 of those fold together. Mirrors Python's `_buffer`.
+   */
+  private static buffer(ctx: Handle, pos: number, data: Uint8Array): void {
+    if (data.byteLength === 0) return
+    ctx.writeBuf ??= []
+    const last = ctx.writeBuf.at(-1)
+    if (last !== undefined && last[0] <= pos && pos <= last[0] + last[1].byteLength) {
+      last[1] = MountCore.folded(last[1], pos - last[0], data)
+      return
+    }
+    ctx.writeBuf.push([pos, new Uint8Array(data)])
+    if (ctx.writeBuf.length >= 64) ctx.writeBuf = writeRuns(ctx.writeBuf)
+  }
+
+  /**
+   * `run` with `data` laid at `at`, inside it or right at its end: in place
+   * when the run is one this grew and its buffer has the room, else in a
+   * buffer twice as long, so a stream copies what it holds only as often as
+   * its length doubles, as Python's bytearray grows.
+   */
+  private static folded(run: Uint8Array, at: number, data: Uint8Array): Uint8Array {
+    const length = Math.max(run.byteLength, at + data.byteLength)
+    let out: Uint8Array
+    if (MountCore.grown.has(run) && run.byteOffset + length <= run.buffer.byteLength) {
+      out = new Uint8Array(run.buffer, run.byteOffset, length)
+      MountCore.grown.delete(run)
+    } else {
+      out = new Uint8Array(Math.max(length, 2 * run.byteLength)).subarray(0, length)
+      out.set(run)
+    }
+    out.set(data, at)
+    MountCore.grown.add(out)
+    return out
   }
 
   /**
@@ -510,11 +704,11 @@ export class MountCore {
    * lands here, so a write never waits on one.
    */
   private supersede(key: string, pos: number, size: number, ctx: Handle | undefined): void {
-    // Its name is gone: the handles open there are on another file.
-    if (ctx?.detached !== undefined) return
+    // Its bytes land at the end the file has then, not here.
+    if (ctx?.mode.append === true) return
     const end = pos + size
     for (const other of this.openOn(key)) {
-      if (other === ctx || other.writeBuf === undefined) continue
+      if (other === ctx || other.mode.append || other.writeBuf === undefined) continue
       const kept: [number, Uint8Array][] = []
       for (const [at, run] of other.writeBuf) {
         if (at >= end || at + run.byteLength <= pos) {
@@ -534,12 +728,17 @@ export class MountCore {
    */
   async create(path: string, mode: number | null = null): Promise<number> {
     const key = this.identity(path)
-    await this.mutate(key, async () => {
+    await this.make(path, mode)
+    return this.handles.add({ path, key, mode: { ...READ, writable: true, create: true } })
+  }
+
+  /** Create an empty file in the file's turn. */
+  private async make(path: string, mode: number | null): Promise<void> {
+    await this.mutate(this.identity(path), async () => {
       await this.op(() => this.files.create(this.resolve(path)))
       await this.keepMode(path, mode)
       await this.changed(path)
     })
-    return this.handles.add({ path, key })
   }
 
   /** Create a directory, keeping the mode it was asked for. */
@@ -604,7 +803,7 @@ export class MountCore {
         const named = this.named(path)
         const row = await this.hold(path, named)
         await this.op(() => this.files.unlink(this.resolve(path)))
-        for (const ctx of named) ctx.detached = row
+        this.detach(named, row)
         await this.changed(path, false)
       }),
     )
@@ -627,8 +826,10 @@ export class MountCore {
    */
   private async changed(path: string, rehydrate = true): Promise<void> {
     const key = this.identity(path, rehydrate)
-    if (this.hydrations.has(key)) {
-      this.hydrationGen.set(key, (this.hydrationGen.get(key) ?? 0) + 1)
+    for (const view of [MountCore.view(key, true), MountCore.view(key, false)]) {
+      if (this.hydrations.has(view)) {
+        this.hydrationGen.set(view, (this.hydrationGen.get(view) ?? 0) + 1)
+      }
     }
     if (!rehydrate) return
     const handles = this.openOn(key)
@@ -636,19 +837,63 @@ export class MountCore {
       ctx.generation = (ctx.generation ?? 0) + 1
       ctx.chunked?.drop()
     }
-    const hydrated = handles.filter((ctx) => ctx.data !== undefined)
-    if (hydrated.length === 0) return
-    let data: Uint8Array
+    for (const raw of [true, false]) {
+      const hydrated = handles.filter((ctx) => ctx.data !== undefined && ctx.mode.writable === raw)
+      if (hydrated.length === 0) continue
+      let data: Uint8Array
+      try {
+        data = await this.op(() => this.files.read(this.resolve(path), MountCore.stored(raw)))
+      } catch (err) {
+        // The mutation landed, so a refresh that fails must not fail it; the
+        // next read through these handles fetches and reports.
+        console.warn(`fuse: refresh of ${path} after a change failed: ${String(err)}`)
+        for (const ctx of hydrated) delete ctx.data
+        continue
+      }
+      for (const ctx of hydrated) ctx.data = data
+    }
+    // An appending handle holding no bytes writes at the length its open
+    // saw; the file has another one now.
+    const sized = handles.filter((ctx) => ctx.mode.append && ctx.data === undefined)
+    if (sized.length === 0) return
     try {
-      data = await this.op(() => this.files.read(this.resolve(path)))
+      const s = await this.op(() => this.files.stat(this.resolve(path)))
+      for (const ctx of sized) {
+        ctx.size = contentSize(s)
+        if (ctx.chunked !== undefined) ctx.chunked.size = contentSize(s)
+      }
     } catch (err) {
-      // The mutation landed, so a refresh that fails must not fail it; the
-      // next read through these handles fetches and reports.
-      console.warn(`fuse: refresh of ${path} after a change failed: ${String(err)}`)
-      for (const ctx of hydrated) delete ctx.data
+      console.warn(`fuse: the length of ${path} after a change failed: ${String(err)}`)
+    }
+  }
+
+  /**
+   * Resize the file an open handle is on: through its name, or, on a file
+   * whose name went, the bytes its handles hold. EBADF through a handle
+   * opened only to read, EINVAL for a negative length. Mirrors Python's
+   * `ftruncate`.
+   */
+  async ftruncate(fd: number, length: number): Promise<void> {
+    const ctx = this.openHandle(fd)
+    if (!ctx.mode.writable) throw ebadf(ctx.path)
+    if (length < 0) throw einval(ctx.path)
+    if (ctx.detached === undefined) {
+      await this.truncate(ctx.path, length)
       return
     }
-    for (const ctx of hydrated) ctx.data = data
+    if (ctx.writeBuf !== undefined && ctx.writeBuf.length > 0) this.landHeld(ctx, ctx.detached)
+    const held = ctx.data ?? new Uint8Array()
+    const data = new Uint8Array(length)
+    data.set(held.subarray(0, length))
+    const landed = ctx.detached.with({ size: length })
+    for (const other of this.openOn(ctx.key)) {
+      if (other !== ctx && other.data !== held) continue
+      other.data = data
+      other.detached = landed
+      other.writeBuf = (other.writeBuf ?? [])
+        .filter(([at]) => at < length)
+        .map(([at, run]) => [at, run.subarray(0, length - at)])
+    }
   }
 
   async rename(src: string, dst: string): Promise<void> {
@@ -663,13 +908,18 @@ export class MountCore {
       this.queueAll(this.pending, [moved, this.identity(dst, false)], async () => {
         const replaced = this.named(dst).filter((ctx) => ctx.key !== moved)
         const row = await this.hold(dst, replaced)
+        // Both ends as the links above them lead in this turn, right before
+        // the move: a link the move takes along no longer leads there after.
+        const start = this.identity(src, false)
+        const landing = this.identity(dst, false)
         await this.op(() => this.files.rename(source, target))
-        for (const ctx of replaced) ctx.detached = row
+        this.detach(replaced, row)
         for (const ctx of this.handles.values()) {
           if (ctx.detached !== undefined) continue
-          if (ctx.key === source || ctx.key.startsWith(`${source}/`)) {
-            ctx.key = target + ctx.key.slice(source.length)
-            ctx.path = ctx.key.slice(this.root.length)
+          if (ctx.key === start || ctx.key.startsWith(`${start}/`)) {
+            const rest = ctx.key.slice(start.length)
+            ctx.key = landing + rest
+            ctx.path = this.mountPath(ctx.key, dst + rest)
           }
         }
         await this.changed(src, false)
@@ -682,6 +932,14 @@ export class MountCore {
   // directory itself.
   async rmdir(path: string): Promise<void> {
     await this.op(() => this.files.rmdir(this.resolve(path)))
+  }
+
+  /**
+   * The mount path the file `key` names, or `spelled` where it lies outside
+   * the mount's root.
+   */
+  private mountPath(key: string, spelled: string): string {
+    return key.startsWith(`${this.root}/`) ? key.slice(this.root.length) : spelled
   }
 
   /**
@@ -733,11 +991,54 @@ export class MountCore {
   }
 
   /**
-   * The handles open on the file `key` names. A detached handle is on a file
-   * with no name left, whatever its key says.
+   * The handles open on the file `key` names. The handles left on a file
+   * whose name went share a key of their own (`detach`), so no path names
+   * them.
    */
   private openOn(key: string): Handle[] {
-    return [...this.handles.values()].filter((ctx) => ctx.key === key && ctx.detached === undefined)
+    return [...this.handles.values()].filter((ctx) => ctx.key === key)
+  }
+
+  /**
+   * Leave the handles open on a name that went on the file it had: they
+   * stat by its row from then on, and share a key no path gives, so a write
+   * through one reaches the others and nothing that opens the name later.
+   */
+  private detach(named: Handle[], row: FileStat): void {
+    this.removed += 1
+    const key = `\0${String(this.removed)}`
+    for (const ctx of named) {
+      ctx.detached = row
+      ctx.key = key
+    }
+  }
+
+  /**
+   * Land a handle's writes on a file whose name went: on the bytes it holds,
+   * which every handle open on that file reads, as writes to an unlinked
+   * file stay with it. A handle reading a rendering the stored bytes differ
+   * from keeps its own. Mirrors Python's `_land_held`.
+   */
+  private landHeld(ctx: Handle, row: FileStat): void {
+    const held = ctx.data ?? new Uint8Array()
+    const data = overlaid(held, 0, MountCore.end(ctx), ctx.writeBuf ?? [])
+    ctx.writeBuf = []
+    const landed = row.with({ size: data.byteLength })
+    for (const other of this.openOn(ctx.key)) {
+      if (other !== ctx && other.data !== held) continue
+      other.data = data
+      other.detached = landed
+    }
+  }
+
+  /**
+   * Land what every handle open on `path` wrote, in the file's turn, as a
+   * change of its times by path must come after; `follow` says the change
+   * follows a link at `path`. Mirrors Python's `land`.
+   */
+  async land(path: string, follow = true): Promise<void> {
+    const key = this.identity(path, follow)
+    await this.mutate(key, () => this.landBuffered(key))
   }
 
   /** Land the buffered writes of every handle open on `key`. */
@@ -746,14 +1047,15 @@ export class MountCore {
   }
 
   private async persistBuffered(ctx: Handle): Promise<void> {
-    // A detached handle keeps what it wrote, as writes to an unlinked file
-    // stay with it: there is no name to land them on.
-    if (ctx.writeBuf === undefined || ctx.writeBuf.length === 0 || ctx.detached !== undefined)
+    if (ctx.writeBuf === undefined || ctx.writeBuf.length === 0) return
+    if (ctx.detached !== undefined) {
+      this.landHeld(ctx, ctx.detached)
       return
+    }
     const runs = writeRuns(ctx.writeBuf)
     ctx.writeBuf = []
     try {
-      await this.applyWrites(ctx.path, runs)
+      await this.applyWrites(ctx.path, runs, ctx.mode.append)
     } catch (err) {
       ctx.writeBuf = [...runs, ...ctx.writeBuf]
       throw err
@@ -856,7 +1158,21 @@ export class MountCore {
     await this.op(() => this.files.removexattr(this.resolve(path), name))
   }
 
-  async open(path: string, flags = 0): Promise<number> {
+  /**
+   * Open a path, the open's effect landing before any byte moves. One rule
+   * for every entry point, however it spells the open (open(2) flags, SFTP
+   * pflags, an fopen mode, preview1 oflags): an exclusive create refuses
+   * what exists, a dangling link or a listed directory included; a
+   * directory refuses a mode that would write it; a missing path is created
+   * when the mode creates and refused when it does not; a truncating mode
+   * empties what exists, which CPython's `open('w')` leaves behind even when
+   * nothing is written; and a mode that writes is admitted against the
+   * file's write rules before its first write. A file an API mount cannot
+   * size is then read whole. `perm` is the mode bits a create gives the
+   * file, umask applied; null takes the mount's default. Mirrors Python's
+   * `MountCore.open`.
+   */
+  async open(path: string, mode: OpenMode = READ, perm: number | null = null): Promise<number> {
     for (
       let removal = this.removalOf(path);
       removal !== undefined;
@@ -865,7 +1181,7 @@ export class MountCore {
       await removal
     }
     const keys = new Set([this.identity(path, false), this.identity(path)])
-    const opened = this.openPath(path, flags)
+    const opened = this.openPath(path, mode, perm)
     const out = opened.then(
       () => undefined,
       () => undefined,
@@ -883,30 +1199,109 @@ export class MountCore {
   }
 
   /** The open itself, which a removal of its name waits for. */
-  private async openPath(path: string, flags: number): Promise<number> {
-    const s = await this.op(() => this.files.stat(this.resolve(path)))
-    const ctx: Handle = { path, key: this.identity(path), live: s.extra[LIVE_KEY] === true }
-    if (s.type === FileType.DIRECTORY) return this.handles.add(ctx)
-    if ((flags & fsConstants.O_TRUNC) !== 0) {
-      // libfuse 3 sends no SETATTR ahead of an O_TRUNC open (atomic
-      // O_TRUNC), so the flag is the whole truncation.
-      await this.truncate(path, 0)
+  private async openPath(path: string, mode: OpenMode, perm: number | null): Promise<number> {
+    if (path.endsWith('/') && path !== '/') {
+      const leaf = await this.rowOrNull(rstripSlash(path))
+      if (leaf !== null && !isDir(leaf)) throw enotdir(path)
+      if (leaf === null && mode.create) throw eisdir(path)
     }
-    if (ctx.live === true) return this.handles.add(ctx)
+    // An exclusive create follows no link (O_CREAT|O_EXCL), so a dangling
+    // one is a name that is there. A path with no row may still be a
+    // directory the mount lists, and a create there would put a file at a
+    // directory's name.
+    const s = await this.rowOrNull(path, mode.exclusive)
+    const listed = s !== null ? isDir(s) : await this.listed(path)
+    if (mode.exclusive && (s !== null || listed)) throw eexist(path)
+    const key = this.identity(path)
+    if (listed) {
+      if (mode.writable || mode.create || mode.directory !== true) throw eisdir(path)
+      return this.handles.add({ path, key, mode })
+    }
+    // The handle reads and writes the file the open reached, not the one a
+    // link at `path` names later.
+    const at = this.mountPath(key, path)
+    const emptied = s === null || mode.truncate
+    if (s === null) {
+      if (!mode.create) throw enoent(path)
+      await this.make(path, perm)
+    } else if (mode.truncate) {
+      await this.empty(path)
+    } else if (mode.writable) {
+      await this.op(() =>
+        this.files.dispatch('write', PathSpec.fromStrPath(this.resolve(path), undefined, '/'), [], {
+          admit_only: true,
+        }),
+      )
+    }
+    const ctx: Handle = {
+      path: at,
+      key,
+      mode,
+      live: s?.extra[LIVE_KEY] === true,
+      size: s === null || mode.truncate ? 0 : contentSize(s),
+    }
+    if (ctx.live === true || s === null) return this.handles.add(ctx)
     if (s.size === null) {
       // Hydrate through the rendered read path, after an O_TRUNC too: an
       // extension whose renderer gives an empty file a body is honored
       // rather than shadowed by literal raw emptiness.
-      const data = await this.hydrate(path)
+      const data = await this.hydrate(at, mode.writable)
       if (data !== undefined) ctx.data = data
-    } else if (s.size > READ_CHUNK && (flags & fsConstants.O_TRUNC) === 0) {
+    } else if (s.size > READ_CHUNK && !emptied) {
       // Read a chunk at a time, at the handle's path then (a rename moves
       // it): a `head` must not move the file.
-      ctx.chunked = new ChunkedHandle(path, s.size, (offset, size) =>
-        this.op(() => this.files.read(this.resolve(ctx.path), { offset, size })),
+      ctx.chunked = new ChunkedHandle(at, s.size, (offset, size) =>
+        this.op(() =>
+          this.files.read(this.resolve(ctx.path), {
+            offset,
+            size,
+            ...MountCore.stored(mode.writable),
+          }),
+        ),
       )
     }
     return this.handles.add(ctx)
+  }
+
+  /** The path's row, or null when the mount says it is not there. */
+  private async rowOrNull(path: string, nofollow = false): Promise<FileStat | null> {
+    try {
+      return await this.op(() => this.files.stat(this.resolve(path), undefined, { nofollow }))
+    } catch (err) {
+      if (classify(err) !== 'ENOENT') throw err
+      return null
+    }
+  }
+
+  /**
+   * Whether a path with no row is a directory the mount only implies (the
+   * root above a nested mount), which it lists.
+   */
+  private async listed(path: string): Promise<boolean> {
+    try {
+      await this.op(() => this.files.readdir(this.resolve(path)))
+    } catch (err) {
+      const code = classify(err)
+      if (code === 'ENOENT' || code === 'ENOTDIR') return false
+      throw err
+    }
+    return true
+  }
+
+  /**
+   * Empty a file an open truncates. A mount with no truncate (hf buckets,
+   * databricks volumes) still empties it through an empty create, which is
+   * the effect the open asked for.
+   */
+  private async empty(path: string): Promise<void> {
+    try {
+      // libfuse 3 sends no SETATTR ahead of an O_TRUNC open (atomic
+      // O_TRUNC), so the flag is the whole truncation.
+      await this.truncate(path, 0)
+    } catch (err) {
+      if (classify(err) !== 'ENOTSUP') throw err
+      await this.make(path, null)
+    }
   }
 
   /**
@@ -942,18 +1337,33 @@ export class MountCore {
     } catch (err) {
       console.warn(`fuse: the row of ${path} before it goes failed: ${String(err)}`)
     }
-    const lacking = named.filter((ctx) => ctx.data === undefined && ctx.live !== true)
-    if (lacking.length === 0) return row
-    let data: Uint8Array
-    try {
-      data = await this.op(() => this.files.read(virtual))
-    } catch (err) {
-      console.warn(`fuse: holding ${path} before it goes failed: ${String(err)}`)
-      return row
+    for (const raw of [true, false]) {
+      const lacking = named.filter(
+        (ctx) => ctx.data === undefined && ctx.live !== true && ctx.mode.writable === raw,
+      )
+      if (lacking.length === 0) continue
+      let data: Uint8Array
+      try {
+        data = await this.op(() => this.files.read(virtual, MountCore.stored(raw)))
+      } catch (err) {
+        console.warn(`fuse: holding ${path} before it goes failed: ${String(err)}`)
+        for (const ctx of lacking) ctx.lost = err instanceof Error ? err : new Error(String(err))
+        continue
+      }
+      for (const ctx of lacking) {
+        ctx.data = data
+        delete ctx.chunked
+      }
     }
-    for (const ctx of lacking) {
-      ctx.data = data
-      delete ctx.chunked
+    const copies: Uint8Array[] = []
+    for (const ctx of named) {
+      if (ctx.data === undefined) continue
+      const held = ctx.data
+      const same = copies.find(
+        (copy) => copy.byteLength === held.byteLength && findBytes(copy, held) === 0,
+      )
+      if (same === undefined) copies.push(held)
+      else ctx.data = same
     }
     return row
   }
