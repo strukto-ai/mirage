@@ -1,13 +1,13 @@
 ---
 title: Qdrant
 icon: /images/qdrant-logo.svg
-description: Mount a Qdrant collection as a Mirage filesystem in TypeScript, with payload folders and a semantic search command.
+description: Mount a Qdrant collection as a Mirage filesystem in TypeScript, with payload folders and semantic search through the search CLI.
 ---
 
 `QdrantVFS` exposes a [Qdrant](https://qdrant.tech/) collection as a read-only filesystem: group-by
 payload fields become nested folders, each point is a `.json` payload file (plus
-a `.txt` text file and an optional blob), and semantic search is the `search`
-command. The TypeScript backend mirrors the [Python one](/python/vfs/qdrant)
+a `.txt` text file and an optional blob), and semantic search is the
+[`search` CLI](/typescript/cli/search). The TypeScript backend mirrors the [Python one](/python/vfs/qdrant)
 and returns identical results.
 
 ## Install
@@ -42,7 +42,9 @@ await ws.shell("ls /fashion/Men/Shoes/White");
 ```
 
 This first setup supports filesystem browsing. Configure query embedding in
-[Search embedding](#search-embedding) before running `search`.
+[Search embedding](#search-embedding) and register the
+[`search` CLI](/typescript/cli/search) with `ws.registerCli('search', SEARCH)`
+before running `search`.
 
 ## Config
 
@@ -131,11 +133,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Qdrant mounted at `/<path>`
     by its id: <id>.json (the full payload), <id>.txt (the embedded source text)
     when a text field is configured, and <id>.<ext> (raw blob bytes) when a blob
     field is configured, where <id> is the Qdrant point id. The embedding vector is
-    never shown. For semantic search use the search command, which returns ranked
-    points as their content file paths with a similarity score, e.g.
-    search "red running shoes" /mount then cat one of the returned files.
-    Use ls/cd/cat/tree/find/wc as usual; grep/rg stay lexical. Quote queries that
-    contain spaces.
+    never shown. Use ls/cd/cat/tree/find/wc/grep/rg as usual.
     ```
 
     #### Supported Unix Commands for VFS
@@ -144,7 +142,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Qdrant mounted at `/<path>`
 
     | Path | Supported |
     | --- | --- |
-    | `/<path>` | Commands that read files (`ls`, `cat`, `grep`, `find`, `jq` and the rest). `grep -r` and `rg` use `qdrant` search. Also `search`. |
+    | `/<path>` | Commands that read files (`ls`, `cat`, `grep`, `find`, `jq` and the rest). `grep -r` and `rg` ask `qdrant` which files may match. |
 
     #### Limitations of Unix Commands for VFS
 
@@ -180,11 +178,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Qdrant mounted at `/<path>`
     by its id: <id>.json (the full payload), <id>.txt (the embedded source text)
     when a text field is configured, and <id>.<ext> (raw blob bytes) when a blob
     field is configured, where <id> is the Qdrant point id. The embedding vector is
-    never shown. For semantic search use the search command, which returns ranked
-    points as their content file paths with a similarity score, e.g.
-    search "red running shoes" /mount then cat one of the returned files.
-    Use ls/cd/cat/tree/find/wc as usual; grep/rg stay lexical. Quote queries that
-    contain spaces.
+    never shown. Use ls/cd/cat/tree/find/wc/grep/rg as usual.
     ```
 
     ## Supported Unix Commands for VFS
@@ -193,7 +187,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Qdrant mounted at `/<path>`
 
     | Path | Supported |
     | --- | --- |
-    | `/<path>` | Commands that read files (`ls`, `cat`, `grep`, `find`, `jq` and the rest). `grep -r` and `rg` use `qdrant` search. Also `search`. |
+    | `/<path>` | Commands that read files (`ls`, `cat`, `grep`, `find`, `jq` and the rest). `grep -r` and `rg` ask `qdrant` which files may match. |
 
     ## Limitations of Unix Commands for VFS
 
@@ -246,8 +240,8 @@ The [Python Qdrant docs](/python/vfs/qdrant#integration) list when each search a
 
 ## Supported commands
 
-`ls`, `cd`, `tree`, `cat`, `stat`, `find`, `wc`, `head`, `tail`, and `search`. `grep`/`rg` stay
-lexical; `search "<query>" <path>` is the semantic command, returning ranked
+`ls`, `cd`, `tree`, `cat`, `stat`, `find`, `wc`, `head` and `tail`. `grep`/`rg` stay
+lexical; the `search` CLI's `search "<query>" <path>` is the semantic path, returning ranked
 points as canonical `<id>.txt` (or `<id>.json`) paths plus a score, so results
 compose with `cat`, `wc`, and pipes. Flags: `--top-k`, `--threshold`, `--method semantic`.
 

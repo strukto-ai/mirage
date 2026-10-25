@@ -19,6 +19,7 @@ from build_collection import build_collection, build_lineage_collection, embed
 from qdrant_client import QdrantClient
 
 from mirage import MountMode, Workspace
+from mirage.commands.cli.builtin.search import SEARCH
 from mirage.types import PathSpec
 from mirage.vfs.qdrant import QdrantConfig, QdrantVFS
 
@@ -91,6 +92,7 @@ async def main() -> None:
         },
         mode=MountMode.READ,
     )
+    ws.register_cli("search", SEARCH)
 
     print("=== mounted Qdrant collection 'fashion' at /fashion/ ===")
 

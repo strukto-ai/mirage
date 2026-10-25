@@ -84,9 +84,9 @@ async def test_the_threshold_drops_ranks_in_the_store_s_direction(
 @pytest.mark.parametrize(
     "query,top_k,path,message",
     [
-        ("", 2, "/db/animals", "search: query is required"),
-        ("q", 0, "/db/animals", "search: top-k must be positive"),
-        ("q", 2, "/db", "search: no table to search"),
+        ("", 2, "/db/animals", "query is required"),
+        ("q", 0, "/db/animals", "top-k must be positive"),
+        ("q", 2, "/db", "no table to search"),
     ],
 )
 async def test_a_refused_search_says_why(
@@ -119,10 +119,10 @@ async def test_one_scope_searches_as_a_batch_of_one(tree, accessor):
 @pytest.mark.parametrize(
     "options,message",
     [
-        ({"top_k": 1, "rerank": True}, "search: unknown options: rerank"),
+        ({"top_k": 1, "rerank": True}, "unknown options: rerank"),
         (
             {"method": "hybrid"},
-            "search: only the 'semantic' method is supported",
+            "only the 'semantic' method is supported",
         ),
     ],
 )

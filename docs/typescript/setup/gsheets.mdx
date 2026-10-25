@@ -150,7 +150,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Google Sheets mounted at `/
 
     | Path | Supported |
     | --- | --- |
-    | `/<path>` | Commands that read files (`ls`, `cat`, `grep`, `find`, `jq` and the rest), and `mv`, `rm` and `unlink`. `grep -r` and `rg` with `-w` use `gsheets` search. |
+    | `/<path>` | Commands that read files (`ls`, `cat`, `grep`, `find`, `jq` and the rest), and `mv`, `rm` and `unlink`. `grep -r` and `rg` with `-w` ask `gsheets` which files may match. |
 
     #### Limitations of Unix Commands for VFS
 
@@ -247,7 +247,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Google Sheets mounted at `/
 
     | Path | Supported |
     | --- | --- |
-    | `/<path>` | Commands that read files (`ls`, `cat`, `grep`, `find`, `jq` and the rest), and `mv`, `rm` and `unlink`. `grep -r` and `rg` with `-w` use `gsheets` search. |
+    | `/<path>` | Commands that read files (`ls`, `cat`, `grep`, `find`, `jq` and the rest), and `mv`, `rm` and `unlink`. `grep -r` and `rg` with `-w` ask `gsheets` which files may match. |
 
     ## Limitations of Unix Commands for VFS
 

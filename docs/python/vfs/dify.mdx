@@ -65,24 +65,8 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Dify mounted at `/<path>`.
     This is a Dify Knowledge Base mounted as a read-only filesystem.
 
     All files are plain text assembled from Dify document segments, regardless of
-    their original extension. You can use cat, head, tail, grep, find, ls, wc, and
-    search on these files.
-
-    For semantic or relevance-based queries, use:
-
-    search "<query>" [path ...] [--method semantic|fulltext|hybrid|keyword]
-        [--top-k N] [--threshold F]
-
-    Use grep for exact pattern or regex matching; use search when meaning matters.
-    Search can target multiple files, folders, or globs. Each result is returned as
-    an absolute workspace path, optionally followed by the Dify relevance score,
-    then the matched chunk content. Multiple hits from the same document stay as
-    separate results.
-
-    Scoped search requires documents with the configured slug metadata field
-    (default: slug) or Dify Built-in Fields enabled for name-based documents.
-    Otherwise, scoped searches against name-based paths may return empty
-    results.
+    their original extension. You can use cat, head, tail, grep, find, ls, and wc
+    on these files.
     ```
 
     #### Supported Unix Commands for VFS
@@ -91,7 +75,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Dify mounted at `/<path>`.
 
     | Path | Supported |
     | --- | --- |
-    | `/<path>` | Commands that read files (`ls`, `cat`, `grep`, `find`, `jq` and the rest). Also `search`. |
+    | `/<path>` | Commands that read files (`ls`, `cat`, `grep`, `find`, `jq` and the rest). |
 
     #### Limitations of Unix Commands for VFS
 
@@ -122,24 +106,8 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Dify mounted at `/<path>`.
     This is a Dify Knowledge Base mounted as a read-only filesystem.
 
     All files are plain text assembled from Dify document segments, regardless of
-    their original extension. You can use cat, head, tail, grep, find, ls, wc, and
-    search on these files.
-
-    For semantic or relevance-based queries, use:
-
-    search "<query>" [path ...] [--method semantic|fulltext|hybrid|keyword]
-        [--top-k N] [--threshold F]
-
-    Use grep for exact pattern or regex matching; use search when meaning matters.
-    Search can target multiple files, folders, or globs. Each result is returned as
-    an absolute workspace path, optionally followed by the Dify relevance score,
-    then the matched chunk content. Multiple hits from the same document stay as
-    separate results.
-
-    Scoped search requires documents with the configured slug metadata field
-    (default: slug) or Dify Built-in Fields enabled for name-based documents.
-    Otherwise, scoped searches against name-based paths may return empty
-    results.
+    their original extension. You can use cat, head, tail, grep, find, ls, and wc
+    on these files.
     ```
 
     ## Supported Unix Commands for VFS
@@ -148,7 +116,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Dify mounted at `/<path>`.
 
     | Path | Supported |
     | --- | --- |
-    | `/<path>` | Commands that read files (`ls`, `cat`, `grep`, `find`, `jq` and the rest). Also `search`. |
+    | `/<path>` | Commands that read files (`ls`, `cat`, `grep`, `find`, `jq` and the rest). |
 
     ## Limitations of Unix Commands for VFS
 
@@ -245,8 +213,15 @@ wc /knowledge/guides/quickstart.md
 
 ## Search
 
-The `search` command calls Dify's dataset retrieval API. Use it when meaning
-matters more than exact text matching.
+The [`search` CLI](/python/cli/search) asks Dify's dataset retrieval API. Use
+it when meaning matters more than exact text matching. Register it on the
+workspace:
+
+```python
+from mirage.commands.cli.builtin.search import SEARCH
+
+ws.register_cli("search", SEARCH)
+```
 
 ```bash
 search "how do I reset my password" /knowledge/
@@ -263,7 +238,9 @@ Supported methods:
 | `hybrid` | hybrid search |
 | `keyword` | keyword search |
 
-`top-k` is capped at `100`. `threshold` must be between `0` and `1`.
+`--top-k` defaults to 10 and is capped at `100`. `--threshold` must be between
+`0` and `1`; another value, or another method, exits 1 before Dify ranks
+anything.
 
 Results are emitted one retrieval hit per block:
 
@@ -319,6 +296,7 @@ import os
 from dotenv import load_dotenv
 
 from mirage import MountMode, Workspace
+from mirage.commands.cli.builtin.search import SEARCH
 from mirage.vfs.dify import DifyConfig, DifyVFS
 
 load_dotenv(".env.development")
@@ -334,6 +312,7 @@ vfs = DifyVFS(config=config)
 
 async def main() -> None:
     ws = Workspace({"/knowledge/": vfs}, mode=MountMode.READ)
+    ws.register_cli("search", SEARCH)
 
     r = await ws.shell("ls /knowledge/")
     print(await r.stdout_str())
@@ -362,4 +341,3 @@ A runnable version is available at
 | `grep` | Exact or regex matching over streamed document text |
 | `find` | Search the virtual tree by name, type, depth, and size |
 | `wc` | Count lines, words, bytes, characters, and max line length |
-| `search` | Semantic/full-text/hybrid/keyword retrieval through Dify |

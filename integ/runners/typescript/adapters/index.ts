@@ -61,6 +61,7 @@ import {
   GIT,
   LINEAR,
   NTN,
+  SEARCH,
   SLACK,
   TRELLO,
   HfBucketsVFS,
@@ -260,16 +261,17 @@ export function runId(): string {
 /**
  * Install the CLIs a mount-backed target declares.
  *
- * `git` is the first CLI here that talks to no API: it reads a repository out of
- * a mount, which is what makes it installable from a bare name with no config at
- * all, where every other one needs its mock service to hand over both the tree
- * and the credentials pointing at itself.
+ * `git` and `search` talk to no API: git reads a repository out of a mount and
+ * search asks a mount's own search, which is what makes them installable from a
+ * bare name with no config at all, where every other one needs its mock service
+ * to hand over both the tree and the credentials pointing at itself.
  */
 function installLocalClis(
   ws: { registerCli: (name: string, spec: unknown) => void },
   target: Target,
 ): void {
   if (target.clis?.includes('git') === true) ws.registerCli('git', GIT)
+  if (target.clis?.includes('search') === true) ws.registerCli('search', SEARCH)
   if (target.clis?.includes('scope-probe') === true) ws.registerCli('scope-probe', COMMAND_CLI)
 }
 
@@ -1287,6 +1289,7 @@ async function openLancedb(target: Target): Promise<Open> {
     mounts[mount.path] = mount.mode === 'read' ? [vfs, MountMode.READ] : vfs
   }
   const ws = new Workspace(mounts, { mode: MountMode.WRITE })
+  installLocalClis(ws, target)
   const cleanup = async (): Promise<void> => {
     await ws.close()
     rmSync(uri, { recursive: true, force: true })
@@ -1384,6 +1387,7 @@ async function openQdrant(target: Target): Promise<Open> {
     mounts[mount.path] = mount.mode === 'read' ? [vfs, MountMode.READ] : vfs
   }
   const ws = new Workspace(mounts, { mode: MountMode.WRITE })
+  installLocalClis(ws, target)
   const cleanup = async (): Promise<void> => {
     await ws.close()
     await new QdrantClient({ host, port }).deleteCollection(collection)
@@ -1447,6 +1451,7 @@ async function openChroma(target: Target): Promise<Open> {
     mounts[mount.path] = mount.mode === 'read' ? [vfs, MountMode.READ] : vfs
   }
   const ws = new Workspace(mounts, { mode: MountMode.WRITE })
+  installLocalClis(ws, target)
   const cleanup = async (): Promise<void> => {
     await ws.close()
     await new ChromaClient({ host, port }).deleteCollection({ name: collectionName })
@@ -1666,6 +1671,7 @@ async function openMem0(target: Target): Promise<Open> {
     mounts[mount.path] = mount.mode === 'read' ? [vfs, MountMode.READ] : vfs
   }
   const ws = new Workspace(mounts, { mode: MountMode.WRITE })
+  installLocalClis(ws, target)
   const cleanup = async (): Promise<void> => {
     await ws.close()
     await server.close()
@@ -2177,6 +2183,7 @@ async function openDify(target: Target): Promise<Open> {
     })
   }
   const ws = new Workspace(mounts, { mode: MountMode.WRITE })
+  installLocalClis(ws, target)
   const cleanup = async (): Promise<void> => {
     await ws.close()
     await server.close()

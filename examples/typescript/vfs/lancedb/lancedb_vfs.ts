@@ -16,7 +16,7 @@ import { mkdtempSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { LanceDBVFS, MountMode, patchNodeFs, Workspace } from '@struktoai/mirage-node'
+import { LanceDBVFS, MountMode, patchNodeFs, SEARCH, Workspace } from '@struktoai/mirage-node'
 import { buildTable } from './build_table.ts'
 
 const require = createRequire(import.meta.url)
@@ -40,6 +40,7 @@ async function main(): Promise<void> {
     },
   })
   const ws = new Workspace({ '/fashion/': vfs }, { mode: MountMode.READ })
+  ws.registerCli('search', SEARCH)
   const restore = patchNodeFs(ws)
   try {
     console.log(`=== VFS MODE: LanceDB table 'fashion' (${uri}) at /fashion/ ===`)

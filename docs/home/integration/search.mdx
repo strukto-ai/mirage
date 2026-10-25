@@ -24,11 +24,16 @@ They never call them with these flags, and read every file instead:
 
 - `-v`: print lines that do not match
 - `-f FILE`: read patterns from a file
+
+`grep` only:
+
 - `-i`, when the text has a non-ASCII letter, or in a UTF-8 locale an `i`, `k`
   or `s`
 
 `rg` only:
 
+- `-i`, or `-S` with a lowercase pattern, when the text has a `k`, an `s` or a
+  non-ASCII letter and more than 16 ways to write its case
 - `--passthru`: print every line
 - `--files-without-match`: list files with no match
 - `--json`: print JSON
@@ -67,7 +72,12 @@ Which files under a folder may contain a text.
 | `path` | The folder `grep -r` or `rg` walks. |
 | `text` | A text every match contains. Asked once per text, so `grep -r -e refund -e order` asks twice. |
 | `whole_word` | `True` for `-w` or `-x`: `text` must match as a whole word. |
-| `ignore_case` | `True` for `-i`. |
+| `ignore_case` | `True` for `-i`, and for `rg -S` with a lowercase pattern. |
+
+Under `rg -i`, a text with a `k`, an `s` or a non-ASCII letter is asked once per
+way to write its case, with `ignore_case` `False`, since rg also matches `k` to
+the Kelvin sign `K` and `s` to `ſ`: `rg -i café` asks for `café`, `CAFÉ` and 14
+other spellings.
 
 | Return | Mirage then |
 | --- | --- |
@@ -158,7 +168,7 @@ Which lines of one file may contain a text.
 | --- | --- |
 | `path` | The file `grep` or `rg` would read. |
 | `text` | A text every match contains. Asked once per text. |
-| `ignore_case` | `True` for `-i`. |
+| `ignore_case` | `True` for `-i`, and for `rg -S` with a lowercase pattern. |
 
 | Return | Mirage then |
 | --- | --- |

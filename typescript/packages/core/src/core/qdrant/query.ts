@@ -292,7 +292,7 @@ export async function searchRows(
     else if (config.cloudInference) vector = { text: query, model: config.embeddingModel }
     else {
       throw new Error(
-        'search: the query needs a vector: pass embed, or set cloud_inference for a cluster with inference',
+        'the query needs a vector: pass embed, or set cloud_inference for a cluster with inference',
       )
     }
     const res = (await client.query(table, {

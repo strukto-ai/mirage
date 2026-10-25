@@ -86,9 +86,9 @@ describe('vector search', () => {
   })
 
   it.each([
-    ['', 2, '/db/animals', 'search: query is required'],
-    ['q', 0, '/db/animals', 'search: top-k must be positive'],
-    ['q', 2, '/db', 'search: no table to search'],
+    ['', 2, '/db/animals', 'query is required'],
+    ['q', 0, '/db/animals', 'top-k must be positive'],
+    ['q', 2, '/db', 'no table to search'],
   ])('refuses %j top %i at %s', async (query, topK, path, message) => {
     await expect(
       searchRowsOutput(tree(), new Accessor(), query, [ps(path)], topK, 0, '/db'),
@@ -103,8 +103,8 @@ describe('vector search', () => {
   })
 
   it.each([
-    [{ top_k: 1, rerank: true }, 'search: unknown options: rerank'],
-    [{ method: 'hybrid' }, "search: only the 'semantic' method is supported"],
+    [{ top_k: 1, rerank: true }, 'unknown options: rerank'],
+    [{ method: 'hybrid' }, "only the 'semantic' method is supported"],
   ])('refuses a batch the store cannot rank: %j', async (options, message) => {
     const ops = makeSearch(tree())
     await expect(

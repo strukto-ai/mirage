@@ -3,7 +3,7 @@ import pytest
 from mirage import Workspace
 from mirage.core.dify import tree
 from mirage.vfs.registry import build_vfs
-from tests.commands.builtin.dify.conftest import document
+from tests.vfs.dify.conftest import document
 
 CONFIG = {
     "api_key": "dataset-secret",

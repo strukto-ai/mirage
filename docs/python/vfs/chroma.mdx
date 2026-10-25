@@ -7,7 +7,8 @@ description: Mount a ChromaDB collection as a read-only virtual filesystem.
 The Chroma VFS exposes an existing ChromaDB collection as text files
 mounted at a prefix such as `/knowledge/`. It is useful when you already have a
 chunked knowledge base in Chroma and want agents to use normal filesystem
-commands like `ls`, `cat`, `grep`, `find`, and `chroma-query`.
+commands like `ls`, `cat`, `grep` and `find`, and to rank chunks by meaning
+with the [`search` CLI](/python/cli/search).
 
 For collection setup, see [Chroma Setup](/home/setup/chroma).
 
@@ -70,9 +71,9 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Chroma mounted at `/<path>`
     Chroma is mounted as a read-only virtual filesystem backed by a ChromaDB
     collection.
 
-    Use cat, head, tail, ls, find, tree, grep, and chroma-query to inspect
-    indexed documents. Paths are document slugs from the collection path tree.
-    Writes are not supported.
+    Use cat, head, tail, ls, find, tree, and grep to inspect indexed documents.
+    Paths are document slugs from the collection path tree. Writes are not
+    supported.
     ```
 
     #### Supported Unix Commands for VFS
@@ -81,7 +82,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Chroma mounted at `/<path>`
 
     | Path | Supported |
     | --- | --- |
-    | `/<path>` | Commands that read files (`ls`, `cat`, `grep`, `find`, `jq` and the rest). `grep -r` and `rg` use `chroma` search. Also `chroma-query`. |
+    | `/<path>` | Commands that read files (`ls`, `cat`, `grep`, `find`, `jq` and the rest). `grep -r` and `rg` ask `chroma` which files may match. |
 
     #### Limitations of Unix Commands for VFS
 
@@ -112,9 +113,9 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Chroma mounted at `/<path>`
     Chroma is mounted as a read-only virtual filesystem backed by a ChromaDB
     collection.
 
-    Use cat, head, tail, ls, find, tree, grep, and chroma-query to inspect
-    indexed documents. Paths are document slugs from the collection path tree.
-    Writes are not supported.
+    Use cat, head, tail, ls, find, tree, and grep to inspect indexed documents.
+    Paths are document slugs from the collection path tree. Writes are not
+    supported.
     ```
 
     ## Supported Unix Commands for VFS
@@ -123,7 +124,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Chroma mounted at `/<path>`
 
     | Path | Supported |
     | --- | --- |
-    | `/<path>` | Commands that read files (`ls`, `cat`, `grep`, `find`, `jq` and the rest). `grep -r` and `rg` use `chroma` search. Also `chroma-query`. |
+    | `/<path>` | Commands that read files (`ls`, `cat`, `grep`, `find`, `jq` and the rest). `grep -r` and `rg` ask `chroma` which files may match. |
 
     ## Limitations of Unix Commands for VFS
 
@@ -199,27 +200,32 @@ grep -n "API key" /knowledge/guides/quickstart.md
 
 ## Vector Search
 
-The `chroma-query` command calls Chroma's native vector query API. Use it when
-semantic similarity matters more than exact text matching.
+The [`search` CLI](/python/cli/search) asks Chroma's vector query API. Use it
+when semantic similarity matters more than exact text matching. Register it on
+the workspace:
+
+```python
+from mirage.commands.cli.builtin.search import SEARCH
+
+ws.register_cli("search", SEARCH)
+```
 
 ```bash
-chroma-query "how do I get started" /knowledge/
-chroma-query --top-k 5 "billing policy" /knowledge/policies/
-chroma-query --top-k 3 "API authentication" /knowledge/guides/quickstart.md
-chroma-query --threshold 0.8 "billing policy" /knowledge/
+search "how do I get started" /knowledge/
+search --top-k 5 "billing policy" /knowledge/policies/
+search --top-k 3 "API authentication" /knowledge/guides/quickstart.md
+search --threshold 0.8 "billing policy" /knowledge/
 ```
 
-`--threshold` keeps hits whose score (1 minus Chroma's distance) is at least
-that value. `--method` takes only `semantic`.
+The score is 1 minus Chroma's distance, and `--threshold` keeps the hits that
+reach it. `--top-k` defaults to 10. `--method` takes only `semantic`.
 
-Results are emitted one hit per line:
+Each hit prints its page and score, then the chunk:
 
 ```text
-/knowledge/guides/quickstart.md	0.82	Use an API key to authenticate requests.
+/knowledge/guides/quickstart.md:0.82
+Use an API key to authenticate requests.
 ```
-
-Columns are path, score, and chunk text. The score is derived from Chroma's
-returned distance as `1 - distance`.
 
 ## Cache
 
@@ -242,7 +248,7 @@ What Chroma answers through its own API, so fewer files are read. [Integration](
 
 Runnable examples live under `examples/python/vfs/chroma/`:
 
-- [`chroma.py`](https://github.com/StruktoAI/mirage/blob/main/examples/python/vfs/chroma/chroma.py) — command workflow with `ls`, `tree`, `find`, `cat`, `head`, `tail`, `grep`, and `chroma-query`.
+- [`chroma.py`](https://github.com/StruktoAI/mirage/blob/main/examples/python/vfs/chroma/chroma.py) — command workflow with `ls`, `tree`, `find`, `cat`, `head`, `tail`, `grep`, and `search`.
 - [`chroma_vfs.py`](https://github.com/StruktoAI/mirage/blob/main/examples/python/vfs/chroma/chroma_vfs.py) — in-process VFS workflow with `os.listdir()`, `open()`, and `os.path.*`.
 
 ## Shell Commands
@@ -255,4 +261,3 @@ Runnable examples live under `examples/python/vfs/chroma/`:
 | `cat` | Read full file text assembled from Chroma chunks |
 | `head` / `tail` | Read the first or last lines/bytes |
 | `grep` | Exact or regex matching over assembled file text |
-| `chroma-query` | Vector retrieval through Chroma |

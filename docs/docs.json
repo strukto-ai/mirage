@@ -224,7 +224,8 @@
                   "home/setup/cli/airtable",
                   "home/setup/cli/gh",
                   "home/setup/cli/hf",
-                  "home/setup/cli/git"
+                  "home/setup/cli/git",
+                  "home/setup/cli/search"
                 ]
               }
             ]
@@ -484,7 +485,8 @@
                   "python/cli/airtable",
                   "python/cli/gh",
                   "python/cli/hf",
-                  "python/cli/git"
+                  "python/cli/git",
+                  "python/cli/search"
                 ]
               }
             ]
@@ -677,7 +679,8 @@
                   "typescript/cli/airtable",
                   "typescript/cli/gh",
                   "typescript/cli/hf",
-                  "typescript/cli/git"
+                  "typescript/cli/git",
+                  "typescript/cli/search"
                 ]
               }
             ]

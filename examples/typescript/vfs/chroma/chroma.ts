@@ -15,7 +15,7 @@
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import dotenv from 'dotenv'
-import { ChromaVFS, MountMode, Workspace, type FileStat } from '@struktoai/mirage-node'
+import { ChromaVFS, MountMode, SEARCH, Workspace, type FileStat } from '@struktoai/mirage-node'
 
 const __HERE = fileURLToPath(new URL('.', import.meta.url))
 dotenv.config({ path: resolve(__HERE, '../../../../.env.development'), override: true })
@@ -83,6 +83,7 @@ async function firstDocumentPath(ws: Workspace): Promise<string | null> {
 async function main(): Promise<void> {
   const vfs = buildVfs()
   const ws = new Workspace({ '/knowledge/': vfs }, { mode: MountMode.READ })
+  ws.registerCli('search', SEARCH)
   try {
     console.log('=== Chroma Knowledge ===\n')
 
@@ -120,7 +121,7 @@ async function main(): Promise<void> {
     const query = process.env.CHROMA_EXAMPLE_QUERY ?? 'getting started'
     const quotedQuery = shellQuote(query)
     await run(ws, `grep -in ${quotedQuery} /knowledge/`, 1500)
-    await run(ws, `chroma-query --top-k 5 ${quotedQuery} /knowledge/`, 1500)
+    await run(ws, `search --top-k 5 ${quotedQuery} /knowledge/`, 1500)
 
     console.log('=== Stats ===')
     console.log(

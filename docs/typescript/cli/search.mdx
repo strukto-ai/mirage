@@ -1,0 +1,91 @@
+---
+title: search
+description: "Rank the records of Dify, Chroma, mem0, Qdrant and LanceDB mounts for a query."
+icon: magnifying-glass
+---
+
+`search` asks a mount's own search to rank its records for a query: Dify's
+retrieval API, Chroma's and Qdrant's vector queries, mem0's memory search and
+LanceDB's vector search. Use it when meaning matters; `grep` and `rg` still
+match exact text.
+
+## Setup
+
+`search` has no account config. It searches the mounts it is pointed at, so
+register it on a workspace that mounts a store:
+
+```typescript
+import { ChromaVFS, MountMode, SEARCH, Workspace } from '@struktoai/mirage-node'
+
+const knowledge = new ChromaVFS({ config: { collectionName: 'docs' } })
+const ws = new Workspace({ '/knowledge/': knowledge }, { mode: MountMode.READ })
+ws.registerCli('search', SEARCH)
+await ws.shell('search "how do I get started" /knowledge/')
+```
+
+Mounting a store does not register `search`. For YAML registration, see the
+[CLI overview](/typescript/cli/index#register-a-cli):
+
+```yaml
+clis:
+  search:
+    cli: search
+```
+
+{/* BEGIN GENERATED CLI COMMANDS */}
+## Supported commands
+
+Run `search --help` for the supported flags and operands.
+This list is generated from Mirage's registered command tree.
+
+| Command | Description |
+| --- | --- |
+| `search` | Rank the records of a search mount for a query |
+{/* END GENERATED CLI COMMANDS */}
+
+## Usage
+
+```bash
+search "how do I reset my password" /knowledge/
+search --top-k 5 "billing policy" /knowledge/policies/ /knowledge/guides/
+search --threshold 0.4 "quickstart" /knowledge/guides/*.md
+```
+
+| Argument | Meaning |
+| --- | --- |
+| `QUERY` | The text to rank records by. |
+| `PATH ...` | Folders, files or globs to search; the working directory when none is given. Several are ranked as one query when one mount serves them all. |
+| `--top-k N` | The most hits to print, 1 or more. Absent, the mount's default: 10, or the config's `searchLimit` on Qdrant and LanceDB and `defaultSearchLimit` on mem0. |
+| `--threshold F` | The score a hit must reach, or on LanceDB the largest distance it may have; `0` keeps every hit. |
+| `--method M` | `semantic`, the default. Dify also takes `fulltext`, `hybrid` and `keyword`. |
+
+Each hit prints its path, then its score where the store ranks, then the
+record's text:
+
+```text
+/knowledge/policies/refunds:0.82
+Refunds are allowed within 30 days.
+```
+
+A file the session cannot see is never printed.
+
+## Mounts
+
+| Mount | Searches with | `--threshold` |
+| --- | --- | --- |
+| [Dify](/python/vfs/dify#search) | The dataset retrieval API | Dify's score, from 0 to 1 |
+| [Chroma](/typescript/setup/chroma) | Chroma's vector query | 1 minus Chroma's distance |
+| [mem0](/typescript/setup/mem0) | mem0's memory search | mem0's score, from 0 to 1 |
+| [Qdrant](/typescript/setup/qdrant) | Qdrant's vector query | Qdrant's score |
+| [LanceDB](/typescript/setup/lancedb) | LanceDB's vector search | The largest distance kept |
+
+A [custom VFS](/typescript/vfs/new) joins the list by implementing `search`.
+
+## Errors
+
+| Line | Exit | Prints |
+| --- | --- | --- |
+| No query, an empty one, `--top-k` below 1, an unknown option, or a value that is not a number | 2 | `search: query is required`, `search: top-k must be positive`, or the option error and `Try 'search --help' for more information.` |
+| A value the mount does not take, such as `--method keyword` on Chroma or `--threshold 1.5` on Dify | 1 | The mount's reason, such as `search: only the 'semantic' method is supported` |
+| A path that does not exist | 1 | `search: /knowledge/nope: No such file or directory` |
+| A path on a mount without search | 1 | `search: /data: Operation not supported` |

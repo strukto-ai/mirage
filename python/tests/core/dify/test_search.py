@@ -434,11 +434,11 @@ async def test_search_segments_caps_top_k_at_dify_limit(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_search_segments_validates_arguments():
-    with pytest.raises(ValueError, match="search: query is required"):
+    with pytest.raises(ValueError, match="query is required"):
         await search_segments(accessor(), "", [])
-    with pytest.raises(ValueError, match="search: top-k must be positive"):
+    with pytest.raises(ValueError, match="top-k must be positive"):
         await search_segments(accessor(), "x", [], top_k=0)
-    with pytest.raises(ValueError, match="search: threshold must be in"):
+    with pytest.raises(ValueError, match="threshold must be in"):
         await search_segments(accessor(), "x", [], threshold=1.2)
-    with pytest.raises(ValueError, match="search: method must be one of"):
+    with pytest.raises(ValueError, match="method must be one of"):
         await search_segments(accessor(), "x", [], method="bad")
