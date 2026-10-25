@@ -31,3 +31,19 @@ async def test_a_team_listing_pages_no_further_than_a_walks_limit():
         issues = await list_team_issues(None, "T1", 1)
     assert [issue["id"] for issue in issues] == ["i0"]
     assert asked.await_count == 1
+
+
+# Linear filters a team's issues to the projects named, so a project
+# listing reads no issue outside them; no project asks nothing.
+@pytest.mark.asyncio
+async def test_a_project_scoped_listing_asks_only_for_those_projects():
+    page = _issues_page(0)
+    page["team"]["issues"]["pageInfo"]["hasNextPage"] = False
+    asked = AsyncMock(return_value=page)
+    with patch("mirage.core.linear.client.graphql_request", asked):
+        await list_team_issues(None, "T1", projects=["P1", "P2"])
+        assert await list_team_issues(None, "T1", projects=[]) == []
+    assert asked.await_count == 1
+    assert asked.await_args.args[2]["filter"] == {
+        "project": {"id": {"in": ["P1", "P2"]}}
+    }

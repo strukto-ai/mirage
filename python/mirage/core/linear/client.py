@@ -155,14 +155,18 @@ async def list_team_members(
 
 
 async def list_team_issues(
-    accessor: LinearAccessor, team_id: str, limit: int | None = None
+    accessor: LinearAccessor,
+    team_id: str,
+    limit: int | None = None,
+    projects: list[str] | None = None,
 ) -> list[dict[str, Any]]:
+    if projects == []:
+        return []
+    variables: dict[str, Any] = {"teamId": team_id}
+    if projects is not None:
+        variables["filter"] = {"project": {"id": {"in": projects}}}
     return await paginate_connection(
-        accessor,
-        TEAM_ISSUES_QUERY,
-        {"teamId": team_id},
-        ("team", "issues"),
-        limit,
+        accessor, TEAM_ISSUES_QUERY, variables, ("team", "issues"), limit
     )
 
 

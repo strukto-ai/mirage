@@ -124,3 +124,32 @@ async def test_chroma_query_refuses_an_option_before_asking_chroma(
         assert collection.queries == []
     finally:
         await ws.close()
+
+
+class _DownCollection(FakeCollection):
+    async def query(self, **kwargs):
+        raise RuntimeError("chroma is down")
+
+
+# A failed search reads like any command's failure: the command's name,
+# then the path and its errno text, or the service's message.
+@pytest.mark.asyncio
+async def test_chroma_query_names_itself_in_a_failure():
+    collection = _DownCollection()
+    collection.documents["__path_tree__"] = json.dumps({"a.md": {"size": 1}})
+    vfs = build_vfs("chroma", {"collection_name": "docs"})
+    vfs.accessor._collection = collection
+    ws = Workspace({"/knowledge": Mount(vfs=vfs, mode=MountMode.READ)})
+    try:
+        missing = await ws.shell("chroma-query refunds /knowledge/nope")
+        down = await ws.shell("chroma-query refunds /knowledge")
+        assert (missing.exit_code, await missing.stderr_str()) == (
+            1,
+            "chroma-query: /knowledge/nope: No such file or directory\n",
+        )
+        assert (down.exit_code, await down.stderr_str()) == (
+            1,
+            "chroma-query: chroma is down\n",
+        )
+    finally:
+        await ws.close()

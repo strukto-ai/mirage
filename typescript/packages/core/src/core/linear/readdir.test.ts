@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { LinearAccessor } from '../../accessor/linear.ts'
-import { PathSpec, type DirListing, type FileStat } from '../../types.ts'
+import { FileStat, FileType, PathSpec, type DirListing } from '../../types.ts'
 import { rowsOf } from '../hierarchy/probe.ts'
 import { mountKey } from '../../utils/key_prefix.ts'
 import type { LinearTransport } from './client.ts'
@@ -52,5 +52,50 @@ describe('linear readdir unrecognized paths', () => {
   it('lists the virtual root without calling the api', async () => {
     const out = await readdir(new LinearAccessor(new NoopTransport()), spec('/'))
     expect(names(out)).toEqual(['teams'])
+  })
+})
+
+// Twin of test_readdir_projects_asks_only_for_their_issues.
+describe('linear readdir projects', () => {
+  it('asks only for the issues of the projects it lists', async () => {
+    const asked: Record<string, unknown>[] = []
+    const transport: LinearTransport = {
+      graphql: (query, variables) => {
+        if (query.includes('teams(first')) {
+          return Promise.resolve({
+            teams: {
+              nodes: [{ id: 'TEAM1', key: 'ENG', name: 'Engineering' }],
+              pageInfo: { hasNextPage: false, endCursor: null },
+            },
+          })
+        }
+        if (query.includes('projects(first')) {
+          return Promise.resolve({
+            team: {
+              projects: {
+                nodes: [
+                  { id: 'P1', name: 'Alpha' },
+                  { id: 'P2', name: 'Beta' },
+                ],
+                pageInfo: { hasNextPage: false, endCursor: null },
+              },
+            },
+          })
+        }
+        asked.push(variables ?? {})
+        return Promise.resolve({
+          team: { issues: { nodes: [], pageInfo: { hasNextPage: false, endCursor: null } } },
+        })
+      },
+    }
+    const out = await readdir(
+      new LinearAccessor(transport),
+      spec('/teams/ENG__Engineering__TEAM1/projects'),
+      new FileStat({ name: 'projects', type: FileType.DIRECTORY }),
+    )
+    expect(names(out)).toHaveLength(2)
+    expect(asked.map((variables) => variables.filter)).toEqual([
+      { project: { id: { in: ['P1', 'P2'] } } },
+    ])
   })
 })

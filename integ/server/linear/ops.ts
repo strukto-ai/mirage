@@ -130,9 +130,21 @@ export const teamMembers: Op = async (ctx, vars) => {
   return dataReply({ team: { members: connection(rows.map(userNode)) } })
 }
 
+// Linear's `filter: {project: {id: {in: [...]}}}`, the one filter a team's
+// issues are asked with: only the issues in those projects.
+function projectIdsOf(vars: JsonValue | undefined): string[] | null {
+  const ids = pyDictOr(pyDictOr(pyDictOr(pyDictOr(vars).filter).project).id).in
+  return Array.isArray(ids) ? ids.filter((id): id is string => typeof id === 'string') : null
+}
+
 export const teamIssues: Op = async (ctx, vars) => {
+  const projects = projectIdsOf(vars)
   const rows = await ctx.db.issue.findMany({
-    where: { ...scope(ctx), teamId: teamIdOf(vars) },
+    where: {
+      ...scope(ctx),
+      teamId: teamIdOf(vars),
+      ...(projects === null ? {} : { projectId: { in: projects } }),
+    },
     orderBy: SEQ_ASC,
   })
   const refs = await loadRefs(ctx.db, ctx.tenant)

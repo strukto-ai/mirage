@@ -46,9 +46,11 @@ creator { id name email }
 labels { nodes { id name } }
 `
 
-export const TEAM_ISSUES_QUERY = `query TeamIssues($teamId: String!, $first: Int!, $after: String) {
+export const TEAM_ISSUES_QUERY = `query TeamIssues(
+  $teamId: String!, $first: Int!, $after: String, $filter: IssueFilter
+) {
   team(id: $teamId) {
-    issues(first: $first, after: $after) {
+    issues(first: $first, after: $after, filter: $filter) {
       nodes {${ISSUE_FIELDS}}
       pageInfo { hasNextPage endCursor }
     }
