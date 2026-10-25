@@ -138,7 +138,6 @@ async def unzip_generic(
     dest = parsed.dest
     config: dict[str, JsonValue] = {
         "archive": byte_view(archive.raw_path),
-        "shown": byte_view(archive.virtual),
         "members": [byte_view(member) for member in members],
         "excludes": [byte_view(pattern) for pattern in excludes],
         "base": byte_view(extract_dest(dest, ctx.cwd, True).rstrip("/")),

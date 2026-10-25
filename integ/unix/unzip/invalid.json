@@ -382,6 +382,44 @@
         "p",
         "d"
       ]
+    },
+    {
+      "id": "unzip_skips_a_member_whose_local_header_is_misplaced",
+      "seq": 15100747,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(mkdir -p /data/fcA_ul && printf %s 'WEsDBAoAAAAAAIMYIlifqBf4BAAAAAQAAAAFAAAAYS50eHRvbmUKWEsDBAoAAAAAAIMYIlg5ym62AwAAAAMAAAAHAAAAZS94LnR4dGV4ClBLAwQKAAAAAACDGCJYdAgXlgQAAAAEAAAABQAAAGIudHh0dHdvClBLAQIeAwoAAAAAAIMYIlifqBf4BAAAAAQAAAAFAAAAAAAAAAEAAACkgQAAAABhLnR4dFBLAQIeAwoAAAAAAIMYIlg5ym62AwAAAAMAAAAHAAAAAAAAAAEAAACkgScAAABlL3gudHh0UEsBAh4DCgAAAAAAgxgiWHQIF5YEAAAABAAAAAUAAAAAAAAAAQAAAKSBTwAAAGIudHh0UEsFBgAAAAADAAMAmwAAAHYAAAAAAA==' | base64 -d > /data/fcA_ul/z.zip && printf 'keep\\n' > /data/fcA_ul/a.txt && cd /data/fcA_ul && unzip -t z.zip; echo rc=$?; unzip -p z.zip; echo rc=$?; unzip -o z.zip; echo rc=$?; cat a.txt b.txt; unzip -q -d o z.zip; echo rc=$?; ls o; cd / && rm -r /data/fcA_ul)",
+      "expect": {
+        "exit": 0,
+        "stdout": "Archive:  z.zip\nfile #1:  bad zipfile offset (local header sig):  0\nfile #2:  bad zipfile offset (local header sig):  39\n    testing: b.txt                    OK\nAt least one error was detected in z.zip.\nrc=2\ntwo\nrc=2\nArchive:  z.zip\n extracting: b.txt                   \nrc=2\nkeep\ntwo\nrc=2\nb.txt\n",
+        "stderr": "file #1:  bad zipfile offset (local header sig):  0\nfile #2:  bad zipfile offset (local header sig):  39\nfile #1:  bad zipfile offset (local header sig):  0\nfile #2:  bad zipfile offset (local header sig):  39\nfile #1:  bad zipfile offset (local header sig):  0\nfile #2:  bad zipfile offset (local header sig):  39\n"
+      },
+      "flags": [
+        "t",
+        "p",
+        "o",
+        "q",
+        "d"
+      ]
     }
   ]
 }

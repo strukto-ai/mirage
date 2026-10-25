@@ -17,7 +17,7 @@ fn zip(host: &mut Host, archive: &str, found: Json) -> (i32, String, String) {
 }
 
 fn unzip(host: &mut Host, archive: &str, options: Json) -> (i32, String, String) {
-    let mut config = json!({"archive": archive, "shown": archive, "base": ""});
+    let mut config = json!({"archive": archive, "base": ""});
     for (key, value) in options.as_object().expect("options") {
         config[key] = value.clone();
     }
@@ -301,7 +301,7 @@ fn an_update_matches_names_as_stored() {
 }
 
 #[test]
-fn a_host_lists_names_whole_and_picks_by_place() {
+fn a_host_lists_names_whole_and_reads_picks_framed() {
     let mut host = Host::with(&[("x", "one\n"), ("y", "two\n")], "");
     let read =
         |spelled, path| json!({"spelled": spelled, "kind": "file", "path": path, "operand": 2});
@@ -312,8 +312,12 @@ fn a_host_lists_names_whole_and_picks_by_place() {
     );
     let (status, out, _) = unzip(&mut host, "g.zip", json!({"index": true}));
     assert_eq!((status, out.as_str()), (0, "\u{7}\0a\nb.txt\u{5}\0c.txt"));
-    let (status, out, _) = unzip(&mut host, "g.zip", json!({"p": true, "pick": 1}));
-    assert_eq!((status, out.as_str()), (0, "two\n"));
-    let (status, out, _) = unzip(&mut host, "g.zip", json!({"p": true, "pick": 2}));
-    assert_eq!((status, out.as_str()), (11, ""));
+    let (status, out, _) = unzip(&mut host, "g.zip", json!({"picks": [1, 2, 0]}));
+    let frame = |status: u8, data: &str| {
+        let mut frame = vec![status];
+        frame.extend((data.len() as u64).to_le_bytes());
+        String::from_utf8(frame).expect("ascii") + data
+    };
+    let frames = frame(0, "two\n") + &frame(1, "") + &frame(0, "one\n");
+    assert_eq!((status, out), (0, frames));
 }

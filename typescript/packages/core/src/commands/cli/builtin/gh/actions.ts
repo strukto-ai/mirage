@@ -206,19 +206,13 @@ function quoted(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\/-]/g, '\\$&')
 }
 
-// One entry of a run's log archive: its name, and its bytes on demand.
-interface LogEntry {
-  name: string
-  content: () => Promise<Uint8Array>
-}
-
 // A run's log archive read from memory by mirage-rs's unzip, with its exit
-// status: the names (-Z1), or entry `pick`'s bytes.
+// status: its stored names (index), or the entries it picks.
 async function unzipped(
   archive: Uint8Array,
   config: Record<string, util.JSONType>,
 ): Promise<[number, Uint8Array]> {
-  const engine = await openStream('unzip', { archive: '', shown: '', ...config })
+  const engine = await openStream('unzip', { archive: '', ...config })
   // The engine reads the archive a window at a time, each answered whole.
   const host: RequestHost = {
     errors: { append: () => Promise.resolve() },
@@ -238,10 +232,29 @@ async function unzipped(
   }
 }
 
+// Entries `picks` of a run's log archive, read in one pass over its
+// directory: each by its place, null for one that did not decode whole.
+async function members(
+  archive: Uint8Array,
+  picks: readonly number[],
+): Promise<Map<number, Uint8Array | null>> {
+  const [, framed] = await unzipped(archive, { picks: [...picks] })
+  const view = new DataView(framed.buffer, framed.byteOffset, framed.byteLength)
+  const read = new Map<number, Uint8Array | null>()
+  let at = 0
+  for (const pick of picks) {
+    const end = at + 9 + Number(view.getBigUint64(at + 1, true))
+    read.set(pick, framed[at] === 0 ? framed.subarray(at + 9, end) : null)
+    at = end
+  }
+  return read
+}
+
 // The archive entry gh reads for a job, or one of its steps: the first whose
 // name matches, in the archive's own order.
-function entryFor(entries: readonly LogEntry[], pattern: RegExp): LogEntry | undefined {
-  return entries.find((entry) => pattern.test(entry.name))
+function entryFor(names: readonly string[], pattern: RegExp): number | undefined {
+  const at = names.findIndex((name) => pattern.test(name))
+  return at < 0 ? undefined : at
 }
 
 // A log's lines as bufio.Scanner splits them: at each newline, a carriage
@@ -259,10 +272,11 @@ function logLines(data: Uint8Array): Uint8Array[] {
   return lines
 }
 
+// A job's or step's log: an archive entry by its place, or a fetch.
 interface LogSegment {
   job: string
   step: string
-  read: () => Promise<Uint8Array>
+  read: number | (() => Promise<Uint8Array>)
 }
 
 async function apiJobLog(
@@ -291,7 +305,7 @@ function logSegments(
   transport: GitHubTransport,
   ref: RepoRef,
   jobs: readonly Record<string, unknown>[],
-  entries: readonly LogEntry[],
+  names: readonly string[],
   failedOnly: boolean,
 ): LogSegment[] {
   const segments: LogSegment[] = []
@@ -303,23 +317,23 @@ function logSegments(
     const title = textValue(job.name)
     const name = quoted(logName(title))
     const steps = records(job.steps)
-    const stepFile = (step: Record<string, unknown>): LogEntry | undefined =>
-      entryFor(entries, new RegExp(`^${name}\\/${textValue(step.number)}_.*\\.txt$`))
+    const stepFile = (step: Record<string, unknown>): number | undefined =>
+      entryFor(names, new RegExp(`^${name}\\/${textValue(step.number)}_.*\\.txt$`))
     if (steps.some((step) => stepFile(step) !== undefined)) {
       const ordered = [...steps].sort((a, b) => Number(a.number) - Number(b.number))
       for (const step of ordered) {
         if (failedOnly && !FAILURE_STATES.has(textValue(step.conclusion))) continue
         const file = stepFile(step)
         if (file !== undefined)
-          segments.push({ job: title, step: textValue(step.name), read: file.content })
+          segments.push({ job: title, step: textValue(step.name), read: file })
       }
       continue
     }
     const file =
-      entryFor(entries, new RegExp(`^\\d+_${name}\\.txt$`)) ??
-      entryFor(entries, new RegExp(`^-\\d+_${name}\\.txt$`))
+      entryFor(names, new RegExp(`^\\d+_${name}\\.txt$`)) ??
+      entryFor(names, new RegExp(`^-\\d+_${name}\\.txt$`))
     if (file !== undefined) {
-      segments.push({ job: title, step: 'UNKNOWN STEP', read: file.content })
+      segments.push({ job: title, step: 'UNKNOWN STEP', read: file })
       continue
     }
     const id = Number(job.id)
@@ -370,19 +384,22 @@ async function runLog(
     names.push(new TextDecoder().decode(index.subarray(at + 2, end)))
     at = end
   }
-  const entries = names.map((name, pick) => ({
-    name,
-    content: async () => {
-      const [code, data] = await unzipped(archive, { p: true, pick })
-      if (code !== 0) throw new Error('zip: checksum error')
-      return data
-    },
-  }))
+  const segments = logSegments(transport, ref, jobs, names, failedOnly)
+  const read = await members(
+    archive,
+    segments.flatMap((segment) => (typeof segment.read === 'number' ? [segment.read] : [])),
+  )
   const printed: Uint8Array[] = []
-  for (const segment of logSegments(transport, ref, jobs, entries, failedOnly)) {
+  for (const segment of segments) {
     let data: Uint8Array
     try {
-      data = await segment.read()
+      if (typeof segment.read === 'number') {
+        const member = read.get(segment.read) ?? null
+        if (member === null) throw new Error('zip: checksum error')
+        data = member
+      } else {
+        data = await segment.read()
+      }
     } catch (err) {
       if (!(err instanceof Error) || printed.length === 0) throw err
       throw new PartialOutputError(err.message, concat(printed))

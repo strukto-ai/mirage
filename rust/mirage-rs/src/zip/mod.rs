@@ -90,6 +90,8 @@ fn text_name(stored: &[u8], flags: u16) -> Vec<u8> {
 #[derive(Clone, Default)]
 pub(super) struct Entry {
     pub(super) name: Vec<u8>,
+    /// Its place in the directory, from 1.
+    pub(super) number: usize,
     pub(super) made_by: u16,
     pub(super) flags: u16,
     pub(super) method: u16,
@@ -210,6 +212,7 @@ fn central(directory: &[u8], count: u64, slack: i128) -> Option<Vec<Entry>> {
         let [size, csize, local] = [0, 1, 2].map(|i| wide[i].unwrap_or(u64::from(narrow[i])));
         entries.push(Entry {
             name,
+            number: entries.len() + 1,
             made_by: u16_at(head, 4),
             flags: u16_at(head, 8),
             method: u16_at(head, 10),

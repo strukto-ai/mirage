@@ -138,7 +138,6 @@ export function unzipGeneric(
   const [chosen, excludes] = patterns(fl, members, flags.excludes)
   const config: Record<string, util.JSONType> = {
     archive: byteView(archive.rawPath),
-    shown: byteView(archive.virtual),
     members: chosen.map((member) => byteView(member)),
     excludes: excludes.map((pattern) => byteView(pattern)),
     base: byteView(rstripSlash(extractDest(dest, ctx.cwd.virtual))),

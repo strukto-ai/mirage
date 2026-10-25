@@ -50,8 +50,6 @@ const STDIN: u32 = 1;
 pub(super) struct Config {
     #[serde(deserialize_with = "crate::latin1")]
     archive: Vec<u8>,
-    #[serde(deserialize_with = "crate::latin1")]
-    shown: Vec<u8>,
     #[serde(deserialize_with = "crate::latin1_list")]
     members: Vec<Vec<u8>>,
     #[serde(deserialize_with = "crate::latin1_list")]
@@ -76,9 +74,10 @@ pub(super) struct Config {
     q: bool,
     o: bool,
     n: bool,
-    /// One entry, by its place in the directory, piped whole: how a host
-    /// reads an archive it holds.
-    pick: Option<usize>,
+    /// Entries by their places in the directory, each behind a status byte
+    /// (0 when it decoded whole) and its eight-byte little-endian length:
+    /// how a host reads an archive it holds, its directory read once.
+    picks: Option<Vec<usize>>,
     /// Every entry's stored name behind its two-byte little-endian length,
     /// in directory order: how a host lists an archive it holds.
     index: bool,
@@ -298,6 +297,18 @@ impl Run<'_> {
         })
     }
 
+    /// Info-ZIP's line for a member whose local header is not where the
+    /// directory says, which it skips as an error.
+    async fn misplaced(&mut self, entry: &Entry) -> Option<Vec<u8>> {
+        if let Ok(Some(_)) = self.spool.data_start(entry).await {
+            return None;
+        }
+        self.damaged(ERROR_EXIT);
+        let (number, offset) = (entry.number.to_string(), entry.local.to_string());
+        let line = "file #{}:  bad zipfile offset (local header sig):  {}\n";
+        Some(say(line, &[number.as_bytes(), offset.as_bytes()]))
+    }
+
     /// Decode an entry's data, handing `sink` each window.
     async fn decode<S: Sink>(&mut self, entry: &Entry, sink: &mut S) -> Decoded {
         let unreadable = Decoded::Invalid("inflate");
@@ -337,11 +348,23 @@ trait Sink {
     async fn take(&mut self, host: &Host, window: &[u8]) -> bool;
 }
 
-/// `-t`: nowhere.
+/// `-t`: nowhere, the host given its turn after each window.
 struct Discard;
 
 impl Sink for Discard {
-    async fn take(&mut self, _: &Host, _: &[u8]) -> bool {
+    async fn take(&mut self, host: &Host, _: &[u8]) -> bool {
+        host.pause().await;
+        true
+    }
+}
+
+/// A host's pick: held whole, to go out behind its length.
+struct Hold(Vec<u8>);
+
+impl Sink for Hold {
+    async fn take(&mut self, host: &Host, window: &[u8]) -> bool {
+        self.0.extend_from_slice(window);
+        host.pause().await;
         true
     }
 }
@@ -493,11 +516,17 @@ async fn mode(run: &mut Run<'_>, directory: &Directory, warning: Vec<u8>) -> i32
         }
         return 0;
     }
-    if let Some(at) = run.config.pick {
-        let Some(entry) = directory.entries.get(at) else {
-            return NO_MATCH_EXIT;
-        };
-        pipe(run, entry).await;
+    if let Some(picks) = run.config.picks.clone() {
+        for at in picks {
+            let mut held = Hold(Vec::new());
+            let sound = match directory.entries.get(at) {
+                Some(entry) => matches!(run.decode(entry, &mut held).await, Decoded::Sound),
+                None => false,
+            };
+            run.host.print(&[u8::from(!sound)]);
+            run.host.print(&(held.0.len() as u64).to_le_bytes());
+            run.host.print(&held.0);
+        }
         return 0;
     }
     let config = &run.config;
@@ -523,7 +552,7 @@ async fn mode(run: &mut Run<'_>, directory: &Directory, warning: Vec<u8>) -> i32
         let (rows, header, totals) = listing::layout(letters, filtered);
         if header {
             let count = directory.entries.len() as u64;
-            listing::header(&config.shown, run.spool.size, count, &mut out);
+            listing::header(&config.archive, run.spool.size, count, &mut out);
         }
         for entry in &selected {
             match rows {
@@ -544,7 +573,7 @@ async fn mode(run: &mut Run<'_>, directory: &Directory, warning: Vec<u8>) -> i32
     if (config.l || config.v) && !(config.t || config.p) {
         if config.v {
             listing::verbose(
-                &config.shown,
+                &config.archive,
                 &selected,
                 config.q,
                 &directory.comment,
@@ -600,6 +629,10 @@ async fn test(
     let mut tested = 0;
     let mut out = Vec::new();
     for entry in selected {
+        if let Some(text) = run.misplaced(entry).await {
+            out.extend(text);
+            continue;
+        }
         let verdict = if entry.is_dir() {
             Decoded::Sound
         } else if let Some(text) = run.skips(entry, quiet) {
@@ -661,6 +694,10 @@ async fn test(
 /// `-p`: one member's bytes to the output; what went wrong on stderr in
 /// `-q`'s words.
 async fn pipe(run: &mut Run<'_>, entry: &Entry) {
+    if let Some(text) = run.misplaced(entry).await {
+        run.host.warn(&text);
+        return;
+    }
     if let Some(text) = run.skips(entry, true) {
         run.host.warn(&text);
         return;
@@ -900,6 +937,10 @@ async fn extract(run: &mut Run<'_>, selected: &[&Entry], status: i32, cautions: 
     }
     host.warn(cautions);
     for entry in selected {
+        if let Some(text) = run.misplaced(entry).await {
+            host.warn(&text);
+            continue;
+        }
         let name = after_slashes(&entry.name);
         if name.len() < entry.name.len() {
             host.warn(&say(
@@ -992,10 +1033,10 @@ async fn extract(run: &mut Run<'_>, selected: &[&Entry], status: i32, cautions: 
         }
         state.written.insert(target);
         if !quiet {
-            let verb: &[u8] = if entry.method == 0 {
-                b" extracting"
-            } else {
-                b"  inflating"
+            let verb: &[u8] = match entry.method {
+                0 => b" extracting",
+                12 => b" bunzipping",
+                _ => b"  inflating",
             };
             host.print(&say("{}: {}  \n", &[verb, &padded(&shown, 22)]));
         }
