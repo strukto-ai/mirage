@@ -25,12 +25,12 @@ from mirage import Mount, MountMode, Workspace, WritePolicy
 from mirage.errors.types import StaleWriteError
 from mirage.mount.core import MountCore
 from mirage.observe.context import mark_lost
+from mirage.runtime.handles.mode import open_mode
 from mirage.types import PathSpec
 from mirage.vfs.minio import MinIOConfig, MinIOVFS
 from mirage.vfs.ram import RAMVFS
 from mirage.vfs.s3 import S3VFS, S3Config
 from mirage.workspace.workspace.types import VFSMount
-from mirage.runtime.handles.mode import open_mode
 from tests.e2e.s3_mock import (
     MUTATIONS,
     MultiBucketS3Client,

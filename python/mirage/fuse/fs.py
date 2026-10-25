@@ -26,9 +26,9 @@ from mirage.bridge.sync import on_auxiliary_loop, run_async_from_sync
 from mirage.fuse.constants import XATTR_CREATE, XATTR_REPLACE
 from mirage.fuse.darwin import rename_flags_check
 from mirage.mount.core import MountCore
-from mirage.runtime.handles.mode import open_mode
 from mirage.mount.errors import classify_error
 from mirage.mount.types import MountAttrs
+from mirage.runtime.handles.mode import open_mode
 from mirage.types import JsonValue
 from mirage.workspace.files import Files
 from mirage.workspace.session.session import SessionState
