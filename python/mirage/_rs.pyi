@@ -3,7 +3,7 @@ from typing import TypeAlias
 
 PolicyText: TypeAlias = Sequence[int]
 PolicyRule: TypeAlias = tuple[
-    PolicyText, Sequence[PolicyText], Sequence[PolicyText], PolicyText
+    PolicyText, Sequence[PolicyText], Sequence[PolicyText], PolicyText | None
 ]
 PolicyRules: TypeAlias = tuple[
     Sequence[PolicyText] | None, Sequence[PolicyRule], Sequence[PolicyRule]

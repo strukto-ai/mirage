@@ -140,7 +140,7 @@ def _rule_from_value(value: PolicyRule) -> CommandRule:
         reason=from_units(value[0]),
         commands=tuple(from_units(v) for v in value[1]),
         paths=tuple(from_units(v) for v in value[2]),
-        mount=from_units(value[3]),
+        mount=from_units(value[3]) if value[3] is not None else "",
     )
 
 

@@ -29,7 +29,7 @@ fn scoped(rules: &[Rule], root: &[u32]) -> Vec<Rule> {
             reason: rule.reason.clone(),
             commands: rule.commands.clone(),
             paths: anchored(&rule.paths, root),
-            mount: root.to_vec(),
+            mount: Some(root.to_vec()),
         })
         .collect()
 }
@@ -292,7 +292,7 @@ mod tests {
             vec![&text("mount"), &text("top")]
         );
         assert_eq!(rules.ask[0].paths, vec![text("/repo/*.key")]);
-        assert_eq!(rules.ask[0].mount, text("/repo"));
+        assert_eq!(rules.ask[0].mount, Some(text("/repo")));
         assert_eq!(
             plan.visibility.hidden,
             PathScope {

@@ -62,6 +62,20 @@ def test_resolve_profile_refuses_an_unknown_name():
         resolve_profile(PROFILES, "nope")
 
 
+def test_compile_preserves_empty_mount_through_inline_restrictions():
+    rule = CommandRule(reason="permission", commands=("git push",))
+    base = SessionProfile(commands=CommandsBlock(ask=(rule,)))
+    restricted = with_inline(
+        base, SessionProfile(paths=PathsBlock(hide=("/secret",)))
+    )
+    assert restricted is not None
+    for profile in (base, restricted):
+        compiled = compile_commands(profile)
+        assert compiled is not None
+        assert compiled.ask[0] == rule
+        assert compiled.ask[0].mount == ""
+
+
 def test_with_inline_takes_the_weaker_mode_per_mount():
     base = SessionProfile(mounts={"/a": "rwx", "/b": "r"})
     inline = SessionProfile(mounts={"/a": "rw", "/c": "rwx"})

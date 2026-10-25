@@ -2,7 +2,7 @@ use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use streams::policy::*;
 
-type RuleValue = (Text, Vec<Text>, Vec<Text>, Text);
+type RuleValue = (Text, Vec<Text>, Vec<Text>, Option<Text>);
 type RulesValue = (Option<Vec<Text>>, Vec<RuleValue>, Vec<RuleValue>);
 type ScopeValue = (Vec<Text>, Vec<Text>);
 type ShowValue = (Text, Option<u32>);
@@ -61,7 +61,7 @@ fn rule(value: RuleValue) -> PyResult<Rule> {
         reason: text(value.0)?,
         commands: texts(value.1)?,
         paths: texts(value.2)?,
-        mount: text(value.3)?,
+        mount: value.3.map(text).transpose()?,
     })
 }
 

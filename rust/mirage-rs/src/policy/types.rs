@@ -20,7 +20,7 @@ pub struct Rule {
     pub reason: Text,
     pub commands: Vec<Text>,
     pub paths: Vec<Text>,
-    pub mount: Text,
+    pub mount: Option<Text>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]

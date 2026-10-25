@@ -100,7 +100,7 @@ impl<'a> Reader<'a> {
             reason: self.text()?,
             commands: self.list(Self::text)?,
             paths: self.list(Self::text)?,
-            mount: self.text()?,
+            mount: self.optional(Self::text)?,
         })
     }
     fn rules(&mut self) -> Result<Rules> {
@@ -231,7 +231,7 @@ impl Writer {
         self.text(&rule.reason);
         self.list(&rule.commands, |w, t| w.text(t));
         self.list(&rule.paths, |w, t| w.text(t));
-        self.text(&rule.mount);
+        self.optional(rule.mount.as_ref(), |w, value| w.text(value));
     }
     fn rules(&mut self, rules: &Rules) {
         self.optional(rules.allow.as_ref(), |w, v| w.list(v, |w, t| w.text(t)));

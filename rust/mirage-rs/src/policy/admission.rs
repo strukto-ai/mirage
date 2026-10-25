@@ -110,11 +110,12 @@ impl AdmissionMatcher {
                 .iter()
                 .any(|p| p.len() > 1 && prefix_matches(p, &head))
         }) || self.rules.iter().any(|rule| {
+            let mount = rule.value.mount.as_deref().unwrap_or_default();
             let names =
                 rule.patterns.is_empty() || rule.patterns.iter().any(|p| prefix_matches(p, &head));
             names
                 && (!rule.value.paths.is_empty()
-                    || !rule.value.mount.is_empty()
+                    || !mount.is_empty()
                     || rule
                         .patterns
                         .iter()
@@ -125,7 +126,8 @@ impl AdmissionMatcher {
     pub fn scopes_paths(&self, name: &[u32]) -> bool {
         let head = [name.to_vec()];
         self.rules.iter().any(|rule| {
-            (!rule.value.paths.is_empty() || !rule.value.mount.is_empty())
+            let mount = rule.value.mount.as_deref().unwrap_or_default();
+            (!rule.value.paths.is_empty() || !mount.is_empty())
                 && (rule.patterns.is_empty()
                     || rule.patterns.iter().any(|p| prefix_matches(p, &head)))
         })
@@ -133,8 +135,8 @@ impl AdmissionMatcher {
 
     pub fn rule_applies(&self, id: usize, facts: &CommandFacts) -> bool {
         let rule = &self.rules[id];
-        rule.names(&facts.tokens)
-            && (rule.value.mount.is_empty() || touches(&rule.value.mount, facts))
+        let mount = rule.value.mount.as_deref().unwrap_or_default();
+        rule.names(&facts.tokens) && (mount.is_empty() || touches(mount, facts))
     }
 
     pub fn hidden_depth(&self, id: usize, path: &[u32]) -> usize {
@@ -229,8 +231,8 @@ impl AdmissionMatcher {
             return false;
         }
         if rule.value.paths.is_empty() {
-            return !rule.value.mount.is_empty()
-                && (under(path, &rule.value.mount) || (subtree && under(&rule.value.mount, path)));
+            let mount = rule.value.mount.as_deref().unwrap_or_default();
+            return !mount.is_empty() && (under(path, mount) || (subtree && under(mount, path)));
         }
         if subtree {
             rule.scope.hides_intersect(path)
@@ -406,7 +408,7 @@ mod tests {
             reason: text(value["reason"].as_str().unwrap()),
             commands: strings(&value["commands"]),
             paths: strings(&value["paths"]),
-            mount: text(value["mount"].as_str().unwrap_or("")),
+            mount: value["mount"].as_str().map(text),
         }
     }
     fn path(value: Text) -> PathFact {

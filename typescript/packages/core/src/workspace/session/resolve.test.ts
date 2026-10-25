@@ -17,7 +17,8 @@ import { describe, expect, it } from 'vitest'
 import { DEFAULT_ASK_REASON } from '../../policy/constants.ts'
 import { PolicyError } from '../../policy/errors.ts'
 import { opRuling } from '../../policy/match/rule.ts'
-import type { VfsContext } from '../../policy/types.ts'
+import { covers } from '../../policy/decisions.ts'
+import { Outcome, Scope, type CommandRule, type VfsContext } from '../../policy/types.ts'
 import { DEFAULT_VISIBILITY, MountMode, PathSpec } from '../../types.ts'
 import { DEFAULT_PROCESS_PERMISSIONS } from '../../process/config.ts'
 import { pathHidden, pathVisible } from '../../utils/hidden.ts'
@@ -34,6 +35,7 @@ import { SessionState } from './session.ts'
 import { VarAttr } from '../../shell/variable.ts'
 import { CALLS } from '../../workspace/dispatcher/constants.ts'
 import type { VfsCall } from '../../vfs/types.ts'
+import { ruleFromDict } from './serialize.ts'
 
 function callOf(name: string): VfsCall {
   const call = CALLS.get(name)
@@ -66,6 +68,42 @@ const PROFILES: Record<string, SessionProfile> = {
     env: { ROLE: 'reviewer' },
   }),
 }
+
+it('preserves saved rule mount identity through compilation and inline restrictions', () => {
+  const restored = ruleFromDict({ reason: 'permission', commands: ['git push'] })
+  const omitted: CommandRule = { reason: 'permission', commands: ['git push'] }
+  for (const rule of [restored, omitted]) {
+    const base: SessionProfile = { commands: { ask: [rule] } }
+    const restricted = withInline(base, { paths: { hide: ['/secret'] } })
+    if (restricted === null) throw new Error('Expected a restricted profile')
+    for (const profile of [base, restricted]) {
+      const compiled = compileCommands(profile)?.ask[0]
+      if (compiled === undefined) throw new Error('Expected an ask rule')
+      expect(compiled.mount).toBe(rule.mount)
+      const saved = {
+        id: 'saved',
+        sessionId: 's',
+        command: 'git',
+        argv: ['push'],
+        cwd: '/repo',
+        paths: [],
+        reason: rule.reason,
+        rule,
+        outcome: Outcome.ALLOW,
+        scope: Scope.SESSION,
+        note: '',
+      }
+      expect(covers(saved, compiled, ['git', 'push'], '/repo')).toBe(true)
+      const other: CommandRule = {
+        reason: compiled.reason,
+        commands: compiled.commands ?? [],
+        paths: compiled.paths ?? [],
+        ...(rule.mount === '' ? {} : { mount: '' }),
+      }
+      expect(covers(saved, other, ['git', 'push'], '/repo')).toBe(false)
+    }
+  }
+})
 
 describe('resolveProfile', () => {
   it('names objects and the default', () => {

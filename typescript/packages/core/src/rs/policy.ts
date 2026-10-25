@@ -97,7 +97,9 @@ class Packet {
     this.list(value.paths ?? [], (p, t) => {
       p.text(t)
     })
-    this.text(value.mount ?? '')
+    this.optional(value.mount, (p, mount) => {
+      p.text(mount)
+    })
   }
   rules(value: PolicyCommands): void {
     this.optional(value.allow, (p, v) => {
@@ -258,12 +260,12 @@ class Reply {
     const reason = this.text(),
       commands = this.list((r) => r.text()),
       paths = this.list((r) => r.text()),
-      mount = this.text()
+      mount = this.optional((r) => r.text())
     return {
       reason,
       ...(commands.length === 0 ? {} : { commands }),
       ...(paths.length === 0 ? {} : { paths }),
-      ...(mount === '' ? {} : { mount }),
+      ...(mount === null ? {} : { mount }),
     }
   }
   rules(): AdmissionRules {
@@ -670,13 +672,13 @@ function snapshotRule(rule: CommandRule): CommandRule {
     reason: rule.reason,
     commands: [...(rule.commands ?? [])],
     paths: [...(rule.paths ?? [])],
-    mount: rule.mount ?? '',
+    ...(rule.mount === undefined ? {} : { mount: rule.mount }),
   }
 }
 function sameRule(left: CommandRule, right: CommandRule): boolean {
   return (
     left.reason === right.reason &&
-    (left.mount ?? '') === (right.mount ?? '') &&
+    left.mount === right.mount &&
     sameStrings(left.commands ?? [], right.commands ?? []) &&
     sameStrings(left.paths ?? [], right.paths ?? [])
   )

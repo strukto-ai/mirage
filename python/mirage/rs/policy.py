@@ -47,7 +47,7 @@ if TYPE_CHECKING:
 
 Units: TypeAlias = tuple[int, ...]
 RuleValue: TypeAlias = tuple[
-    Units, tuple[Units, ...], tuple[Units, ...], Units
+    Units, tuple[Units, ...], tuple[Units, ...], Units | None
 ]
 RulesValue: TypeAlias = tuple[
     tuple[Units, ...] | None, tuple[RuleValue, ...], tuple[RuleValue, ...]
