@@ -28,11 +28,7 @@ import type {
 import type { MountMode } from '../../types.ts'
 import { DEFAULT_VISIBILITY, weakerMode } from '../../types.ts'
 import { compilePolicy, restrictPolicy } from '../../rs/policy.ts'
-import {
-  compileProgram,
-  type CompiledProfile,
-  type SessionProfile,
-} from '../../policy/profile.ts'
+import { compileProgram, type CompiledProfile, type SessionProfile } from '../../policy/profile.ts'
 import { DEFAULT_PROFILE } from './constants.ts'
 import { varsFromEntries, type SessionState } from './session.ts'
 import { setCwd } from './shell_dirs.ts'
