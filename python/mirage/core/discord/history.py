@@ -151,12 +151,12 @@ async def listed_messages_for_day(
     chat.jsonl that follows in the same command.
 
     A walk reads a day's chat.jsonl right after it lists the day, so only
-    the last listed day is kept, and only for the command that listed
-    it: that command's read takes it instead of fetching the day again,
-    and a read in a later command, or outside any, asks Discord. A
-    listing nothing reads holds no more than one day, and the mount's
-    read policy bounds how long it is kept, which under ``fresh`` is not
-    at all.
+    the last listed day is kept, only for the command that listed it, and
+    for at most ``LISTING_TRUST_WINDOW`` seconds, the window a fetch
+    still counts as current in (none under ``fresh``). That command's
+    read takes it instead of fetching the day again; any other read, a
+    direct one included, asks Discord. A listing nothing reads holds no
+    more than one day.
 
     Args:
         accessor (DiscordAccessor): Discord accessor.

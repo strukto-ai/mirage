@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import json
+import time
 from contextlib import nullcontext
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -20,6 +21,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from mirage.accessor.discord import DiscordAccessor
+from mirage.cache.index.constants import LISTING_TRUST_WINDOW
 from mirage.cache.index.scope import command_scope
 from mirage.core.discord.history import snowflake_at
 from mirage.core.discord.read import (
@@ -101,15 +103,25 @@ async def test_only_the_last_listed_day_is_kept_for_one_read(api, accessor):
 
 
 # A write past the dispatcher drops the kept day with the mount's caches,
-# and a fresh mount keeps none, so either read fetches the day.
-@pytest.mark.parametrize("drop", ["forget", "fresh"])
-async def test_a_dropped_or_fresh_day_is_fetched_again(api, accessor, drop):
+# a fresh mount keeps none, and a day is kept no longer than a fetch
+# counts as current, so each read fetches the day.
+@pytest.mark.parametrize("drop", ["forget", "fresh", "late"])
+async def test_a_dropped_or_expired_day_is_fetched_again(
+    api, accessor, drop, monkeypatch
+):
+    real = time.monotonic
+    offset = [0.0]
+    monkeypatch.setattr(
+        "mirage.accessor.responses.time.monotonic", lambda: real() + offset[0]
+    )
     if drop == "fresh":
         accessor.govern(ReadSpec(policy=ReadPolicy.FRESH))
     async with command_scope():
         await mounted(DiscordVFS, accessor).readdir(f"/{CHANNEL}/{DAY}")
         if drop == "forget":
             accessor.forget()
+        if drop == "late":
+            offset[0] = LISTING_TRUST_WINDOW
         assert await _read_chat(accessor) == jsonl_bytes(MESSAGES)
     assert api.day_fetches == [("C001", DAY), ("C001", DAY)]
 

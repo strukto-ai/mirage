@@ -15,6 +15,7 @@
 import { mountKey } from '../../utils/key_prefix.ts'
 import { describe, expect, it, vi } from 'vitest'
 import { DiscordAccessor } from '../../accessor/discord.ts'
+import { LISTING_TRUST_WINDOW } from '../../cache/index/constants.ts'
 import { runInCommandScope } from '../../cache/index/scope.ts'
 import { FileStat, FileType, PathSpec, ReadPolicy } from '../../types.ts'
 import type { DiscordMethod, DiscordResponse, DiscordTransport } from './client.ts'
@@ -160,16 +161,24 @@ describe('a read after its day listing', () => {
     expect(other).not.toBe(day)
   })
 
-  // Twin of test_a_dropped_or_fresh_day_is_fetched_again.
-  it.each(['forget', 'fresh'])('fetches the day again after %s', async (drop) => {
+  // Twin of test_a_dropped_or_expired_day_is_fetched_again.
+  it.each(['forget', 'fresh', 'late'])('fetches the day again after %s', async (drop) => {
     const t = history()
     const accessor = new DiscordAccessor(t)
     if (drop === 'fresh') accessor.govern?.({ policy: ReadPolicy.FRESH, ttl: 600 })
-    await runInCommandScope(async () => {
-      await listDay(accessor)
-      if (drop === 'forget') accessor.forget?.()
-      await readChat(accessor)
-    })
+    const realNow = Date.now.bind(Date)
+    try {
+      await runInCommandScope(async () => {
+        await listDay(accessor)
+        if (drop === 'forget') accessor.forget?.()
+        if (drop === 'late') {
+          vi.spyOn(Date, 'now').mockImplementation(() => realNow() + LISTING_TRUST_WINDOW * 1000)
+        }
+        await readChat(accessor)
+      })
+    } finally {
+      vi.restoreAllMocks()
+    }
     expect(fetched(t)).toHaveLength(2)
   })
 

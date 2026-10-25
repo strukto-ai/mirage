@@ -14,6 +14,7 @@
 
 import { Accessor } from './base.ts'
 import { ResponseCache } from './responses.ts'
+import { LISTING_TRUST_WINDOW } from '../cache/index/constants.ts'
 import { TimeRange } from '../core/time_range.ts'
 import type { BaseVFS } from '../vfs/base.ts'
 import { NodeDiscordTransport, type DiscordTransport } from '../core/discord/client.ts'
@@ -21,7 +22,7 @@ import type { DiscordConfig } from '../core/discord/config.ts'
 
 export class DiscordAccessor extends Accessor {
   readonly timeRange: TimeRange
-  readonly listedDay = new ResponseCache<string, Record<string, unknown>[]>()
+  readonly listedDay = new ResponseCache<string, Record<string, unknown>[]>(LISTING_TRUST_WINDOW)
   constructor(
     public readonly transport: DiscordTransport,
     config: { startTime?: string | null; endTime?: string | null } = {},

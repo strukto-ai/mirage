@@ -17,6 +17,7 @@ from typing import Any
 
 from mirage.accessor.base import SessionAccessor
 from mirage.accessor.responses import ResponseCache
+from mirage.cache.index.constants import LISTING_TRUST_WINDOW
 from mirage.core.discord.config import DiscordConfig
 from mirage.core.time_range import TimeRange
 
@@ -30,7 +31,7 @@ class DiscordAccessor(SessionAccessor):
         self.time_range = time_range
         self.listed_day = ResponseCache[
             tuple[int, str, str], list[dict[str, Any]]
-        ]()
+        ](ttl=LISTING_TRUST_WINDOW)
 
     def caches(self) -> Iterable[ResponseCache[Any, Any]]:
         return (self.listed_day,)
