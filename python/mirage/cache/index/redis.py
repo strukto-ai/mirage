@@ -50,7 +50,7 @@ from mirage.cache.index.listing_memo import ListingMemo
 from mirage.cache.index.store import IndexCacheStore
 from mirage.types import FileStat, FileType
 from mirage.utils.clock import Clock
-from mirage.utils.ids import uuid7
+from mirage.utils.ids import IdSource, SystemIdSource
 
 
 def _text(value: str | bytes) -> str:
@@ -618,6 +618,11 @@ class RedisIndexCacheStore(IndexCacheStore):
             allowing multiple stores to coexist on the same server.
         clock (Clock | None): the clock listing expiries are stamped and
             compared on; None means the system clock.
+        ids (IdSource | None): where generation and lease tokens are
+            drawn; None means the system source. The tokens only fence
+            clients of one server apart, so a seeded source, which mints
+            the same tokens on every run, needs a server that is itself
+            part of the replayed run.
     """
 
     def __init__(
@@ -627,8 +632,10 @@ class RedisIndexCacheStore(IndexCacheStore):
         client: Redis | None = None,
         key_prefix: str = DEFAULT_KEY_PREFIX,
         clock: Clock | None = None,
+        ids: IdSource | None = None,
     ) -> None:
         super().__init__(clock)
+        self._ids: IdSource = ids if ids is not None else SystemIdSource()
         self._ttl = ttl
         self._client = (
             client
@@ -675,7 +682,7 @@ class RedisIndexCacheStore(IndexCacheStore):
             self._directory_generation_prefix,
         )
         for _ in range(3):
-            candidate = str(int(uuid7().replace("-", "")[-12:], 16))
+            candidate = str(int(self._ids.uuid7().replace("-", "")[-12:], 16))
             status, raw_token = await cast(
                 Awaitable[tuple[int, str | bytes]],
                 self._client.eval(
@@ -787,7 +794,7 @@ class RedisIndexCacheStore(IndexCacheStore):
                 current = await self._client.get(key)
                 if current is not None:
                     return _text(current)
-                generation = uuid7()
+                generation = self._ids.uuid7()
                 if key == self._generation_key:
                     await self._client.set(key, generation, nx=True)
                 else:
@@ -816,12 +823,9 @@ class RedisIndexCacheStore(IndexCacheStore):
         # cancellation of one waiter must not cancel the others.
         return await asyncio.shield(task)
 
-    async def _directory_generations(
-        self, directories: set[str]
-    ) -> dict[str, str]:
-        if not directories:
+    async def _directory_generations(self, paths: list[str]) -> dict[str, str]:
+        if not paths:
             return {}
-        paths = list(directories)
         keys = [f"{self._directory_generation_prefix}{path}" for path in paths]
         current = await self._client.mget(keys)
         generations = {
@@ -829,7 +833,11 @@ class RedisIndexCacheStore(IndexCacheStore):
             for path, token in zip(paths, current)
             if token is not None
         }
-        missing = {path: uuid7() for path in paths if path not in generations}
+        missing = {
+            path: self._ids.uuid7()
+            for path in paths
+            if path not in generations
+        }
         if missing:
             pipe = self._client.pipeline()
             self._track_paths(pipe, list(missing))
@@ -856,7 +864,7 @@ class RedisIndexCacheStore(IndexCacheStore):
                     for path in children
                 }
                 directory_generations = await self._directory_generations(
-                    set(last_seed)
+                    list(last_seed)
                 )
                 rows = {
                     path: entry
@@ -911,7 +919,9 @@ class RedisIndexCacheStore(IndexCacheStore):
                             self._tombstone_prefix,
                             vfs_path,
                             self._entry_prefix,
-                            uuid7() if last_seed[vfs_path] == number else "",
+                            self._ids.uuid7()
+                            if last_seed[vfs_path] == number
+                            else "",
                         )
                 try:
                     await pipe.execute()
@@ -1006,7 +1016,7 @@ class RedisIndexCacheStore(IndexCacheStore):
             vfs_path,
             fresh.model_dump_json(),
             str(now.timestamp()),
-            uuid7(),
+            self._ids.uuid7(),
         )
         await pipe.execute()
 
@@ -1171,7 +1181,7 @@ class RedisIndexCacheStore(IndexCacheStore):
                     self._tombstone_prefix,
                     self._directory_generation_prefix,
                     "[]",
-                    uuid7(),
+                    self._ids.uuid7(),
                     *(value for row in rows for value in row),
                 ],
             )
@@ -1196,7 +1206,7 @@ class RedisIndexCacheStore(IndexCacheStore):
                     self._tombstone_prefix,
                     self._directory_generation_prefix,
                     json.dumps([p.rstrip("/") for p in excluded]),
-                    uuid7(),
+                    self._ids.uuid7(),
                     *(value for row in rows for value in row),
                 ],
             ),
@@ -1244,7 +1254,7 @@ class RedisIndexCacheStore(IndexCacheStore):
                 self._tombstone_prefix,
                 self._directory_generation_prefix,
                 vfs_path,
-                uuid7(),
+                self._ids.uuid7(),
             ],
         )
 
@@ -1330,7 +1340,7 @@ class RedisIndexCacheStore(IndexCacheStore):
         await self._flush_seed()
         # One atomic generation change expires all listings without racing
         # another client's refill or resurrecting a concurrently removed path.
-        await self._client.set(self._generation_key, uuid7())
+        await self._client.set(self._generation_key, self._ids.uuid7())
 
     @_counts_listing_write
     async def clear(self) -> None:

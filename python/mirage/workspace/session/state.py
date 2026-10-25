@@ -587,7 +587,7 @@ def next_random(session: SessionState, stored: str | None) -> int | None:
         state = seed
         last = 0
     elif session._random_state is None:
-        state = initial_seed(session.session_id)
+        state = initial_seed(session.ids)
         last = 0
     else:
         state = session._random_state

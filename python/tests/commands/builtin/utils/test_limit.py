@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import time
 from collections.abc import AsyncIterator
 
 import pytest
@@ -21,10 +22,12 @@ from mirage.commands.builtin.utils.limit import (
     guard_output,
     maybe_with_timeout,
     run_with_timeout,
+    with_timeout,
 )
 from mirage.errors.types import CommandTimeoutError
 from mirage.io.types import materialize
 from mirage.types import Limit, OnExceed
+from tests.fixtures.held_loop import HeldLoop, run_on_held_loop
 
 _TEN = b"".join(f"line{i}\n".encode() for i in range(10))
 
@@ -238,3 +241,21 @@ async def test_run_with_timeout_cancels_the_call_it_gives_up_on():
     with pytest.raises(CommandTimeoutError):
         await run_with_timeout(follow(), 0.05, "follow")
     assert closed.is_set()
+
+
+async def _slow_chunks(pause: float) -> AsyncIterator[bytes]:
+    yield b"a"
+    time.sleep(pause)
+    yield b"b"
+
+
+async def _drain_slow(loop: HeldLoop) -> list[bytes]:
+    return [
+        chunk async for chunk in with_timeout(_slow_chunks(0.05), 0.01, "cat")
+    ]
+
+
+def test_with_timeout_spends_the_loop_clock_not_real_time():
+    # A loop that keeps virtual time spends none while a source
+    # computes, so a deadline on it must not fire on real time.
+    assert run_on_held_loop(_drain_slow) == [b"a", b"b"]

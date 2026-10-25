@@ -15,6 +15,7 @@
 from mirage.accessor.base import SessionAccessor
 from mirage.core.airtable.config import AirtableConfig
 from mirage.core.api.rate_limit import RateLimiter
+from mirage.utils.clock import Clock
 
 
 class AirtableAccessor(SessionAccessor):
@@ -28,3 +29,11 @@ class AirtableAccessor(SessionAccessor):
         super().__init__()
         self.config = config
         self.limiter = RateLimiter(config.requests_per_second)
+
+    def bind_clock(self, clock: Clock) -> None:
+        """Pace each base's calls on the workspace's clock.
+
+        Args:
+            clock (Clock): the workspace's clock.
+        """
+        self.limiter.bind_clock(clock)

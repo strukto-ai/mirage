@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { makeIntegrationWS } from '../../../tests/workspace/fixtures/integration_fixture.ts'
 import { RANDOM, RANDOM_MAX, RANDOM_UNSET } from '../../shell/constants.ts'
 import { makeVar, type ShellVar } from '../../shell/variable.ts'
@@ -30,6 +30,10 @@ import {
   shadowLocal,
 } from './state.ts'
 import { initialSeed } from './rng.ts'
+import { SeededIdSource } from '../../utils/ids.ts'
+import { RAMVFS } from '../../vfs/ram/ram.ts'
+import { Workspace } from '../workspace/workspace.ts'
+import { getTestParser, stdoutStr } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 
 function stored(s: SessionState): string | undefined {
   const v = s.vars[RANDOM]?.value
@@ -37,13 +41,30 @@ function stored(s: SessionState): string | undefined {
 }
 
 describe('RANDOM generator', () => {
-  it('seeds generators started in one tick apart', () => {
-    const now = vi.spyOn(Date, 'now').mockReturnValue(1_000)
-    try {
-      expect(initialSeed('s')).not.toBe(initialSeed('s'))
-    } finally {
-      now.mockRestore()
+  it('seeds generators from one source apart', () => {
+    const ids = new SeededIdSource(3)
+    expect(initialSeed(ids)).not.toBe(initialSeed(ids))
+  })
+
+  it('replays the first seed from a seeded source', () => {
+    expect(initialSeed(new SeededIdSource(3))).toBe(initialSeed(new SeededIdSource(3)))
+  })
+
+  it('replays RANDOM in every shell of a seeded workspace', async () => {
+    const outputs: string[] = []
+    for (let i = 0; i < 2; i++) {
+      const ws = new Workspace(
+        { '/': new RAMVFS() },
+        { ids: new SeededIdSource(11), shellParser: await getTestParser() },
+      )
+      try {
+        const io = await ws.shell('echo $RANDOM $(echo $RANDOM)')
+        outputs.push(stdoutStr(io))
+      } finally {
+        await ws.close()
+      }
     }
+    expect(outputs[0]).toBe(outputs[1])
   })
 
   it('evaluates the seed word as arithmetic', () => {

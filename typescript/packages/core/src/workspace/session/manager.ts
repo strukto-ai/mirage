@@ -26,6 +26,7 @@ import type { ShellVar } from '../../shell/variable.ts'
 import type { MountMode } from '../../types.ts'
 import { KeyLock } from '../../cache/lock.ts'
 import { SystemClock, type Clock } from '../../utils/clock.ts'
+import { SystemIdSource, type IdSource } from '../../utils/ids.ts'
 
 type StoredSession = Parameters<typeof SessionState.fromDict>[0]
 
@@ -83,31 +84,36 @@ export class SessionManager extends SessionOwner {
   private seedVarsInternal: Record<string, ShellVar>
   private hasManaged: boolean
   private readonly clock: Clock
+  // The workspace's id source, which each session's `$RANDOM` first draws from.
+  private readonly ids: IdSource
 
   /**
    * @param clock the workspace clock a session's `createdAt` is read on;
    *   omitted means the system clock.
+   * @param ids the workspace's id source, which each session's `$RANDOM`
+   *   first draws from; omitted means the system source.
    */
   constructor(
     defaultSessionId: string,
     store?: SessionStore,
     seedVars?: Record<string, ShellVar>,
     clock?: Clock,
+    ids?: IdSource,
   ) {
     super()
     this.clock = clock ?? new SystemClock()
+    this.ids = ids ?? new SystemIdSource()
     this.defaultIdInternal = defaultSessionId
     this.sessionStore = store ?? new RAMSessionStore()
     this.seedVarsInternal = ownRecord(seedVars)
     this.hasManaged = Object.values(this.seedVarsInternal).some((v) => v.managed !== undefined)
-    this.sessions.set(
-      defaultSessionId,
-      new SessionState({
-        sessionId: defaultSessionId,
-        vars: ownRecord(this.seedVarsInternal),
-        createdAt: this.clock.now(),
-      }),
-    )
+    const dflt = new SessionState({
+      sessionId: defaultSessionId,
+      vars: ownRecord(this.seedVarsInternal),
+      createdAt: this.clock.now(),
+    })
+    dflt.ids = this.ids
+    this.sessions.set(defaultSessionId, dflt)
   }
 
   /**
@@ -331,6 +337,7 @@ export class SessionManager extends SessionOwner {
         continue
       }
       if (this.sessions.has(sid)) continue
+      stored.ids = this.ids
       this.sessions.set(sid, stored)
       this.persisted.set(sid, JSON.stringify(stored.toDict()))
       mergeSeedVars(stored, this.seedVarsInternal)
@@ -427,6 +434,7 @@ export class SessionManager extends SessionOwner {
       vars: seeded,
       createdAt: this.clock.now(),
     })
+    session.ids = this.ids
     if (options.profile !== undefined) applyProfile(session, options.profile)
     this.hasManaged = this.hasManaged || holdsManaged(session)
     this.sessions.set(sessionId, session)

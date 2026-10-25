@@ -13,15 +13,24 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
+import { ManualClock } from '../../utils/clock.ts'
 import { RateLimiter } from './rate_limit.ts'
 
 class Clock {
-  now = 100
+  wall = 100
   readonly waits: number[] = []
-  time = (): number => this.now
+  now = (): number => this.wall
+  monotonic = (): number => this.wall
   sleep = (seconds: number): Promise<void> => {
     this.waits.push(seconds)
     return Promise.resolve()
+  }
+}
+
+class YieldingClock extends Clock {
+  override sleep = async (seconds: number): Promise<void> => {
+    this.waits.push(seconds)
+    await Promise.resolve()
   }
 }
 
@@ -31,15 +40,15 @@ class StalledClock extends Clock {
   }
 
   override sleep = async (seconds: number): Promise<void> => {
-    const start = this.now
+    const start = this.wall
     this.waits.push(seconds)
     await Promise.resolve()
-    this.now = Math.max(this.now, start + seconds, this.until)
+    this.wall = Math.max(this.wall, start + seconds, this.until)
   }
 }
 
 function limiter(rate: number, clock: Clock): RateLimiter {
-  return new RateLimiter(rate, { clock: clock.time, sleep: clock.sleep })
+  return new RateLimiter(rate, clock)
 }
 
 describe('RateLimiter', () => {
@@ -63,7 +72,7 @@ describe('RateLimiter', () => {
     const clock = new Clock()
     const limit = limiter(5, clock)
     await limit.acquire('appA')
-    clock.now += 1
+    clock.wall += 1
     await limit.acquire('appA')
     expect(clock.waits).toEqual([])
   })
@@ -81,7 +90,7 @@ describe('RateLimiter', () => {
     const starts: number[] = []
     const call = async (): Promise<void> => {
       await limit.acquire('appA')
-      starts.push(clock.now)
+      starts.push(clock.wall)
     }
     await Promise.all([call(), call(), call()])
     await call()
@@ -92,5 +101,66 @@ describe('RateLimiter', () => {
 
   it('refuses a rate that is not positive', () => {
     expect(() => new RateLimiter(0)).toThrow(RangeError)
+  })
+
+  it('paces and waits on a bound clock', async () => {
+    const limiter = new RateLimiter(5)
+    const clock = new ManualClock()
+    limiter.bindClock(clock)
+    await limiter.acquire('appA')
+    await limiter.acquire('appA')
+    expect(clock.monotonic()).toBeCloseTo(0.2)
+  })
+
+  it('keeps the schedule when the clock in use is bound again', async () => {
+    const clock = new Clock()
+    const l = limiter(5, clock)
+    await l.acquire('appA')
+    l.bindClock(clock)
+    await l.acquire('appA')
+    expect(clock.waits).toEqual([expect.closeTo(0.2)])
+  })
+
+  it('lets a waiting caller finish when a new clock is bound', async () => {
+    const clock = new StalledClock(0)
+    const l = limiter(5, clock)
+    await l.acquire('appA')
+    const waiting = l.acquire('appA')
+    await Promise.resolve()
+    const later = new Clock()
+    later.wall = 200
+    l.bindClock(later)
+    await waiting
+    expect(clock.waits).toEqual([expect.closeTo(0.2)])
+  })
+
+  it('keeps a caller from the old clock off the new schedule', async () => {
+    const clock = new StalledClock(0)
+    const l = limiter(5, clock)
+    await l.acquire('appA')
+    const waiting = l.acquire('appA')
+    await Promise.resolve()
+    const later = new Clock()
+    later.wall = 200
+    l.bindClock(later)
+    await l.acquire('appA')
+    await waiting
+    await l.acquire('appA')
+    expect(later.waits).toEqual([expect.closeTo(0.2)])
+  })
+
+  it('keeps a caller from before a round trip of clocks off the schedule', async () => {
+    const clock = new YieldingClock()
+    const l = limiter(5, clock)
+    await l.acquire('appA')
+    const stale = l.acquire('appA')
+    await Promise.resolve()
+    l.bindClock(new Clock())
+    l.bindClock(clock)
+    clock.wall = 101
+    await l.acquire('appA')
+    const fresh = l.acquire('appA')
+    await Promise.all([stale, fresh])
+    expect(clock.waits).toEqual([expect.closeTo(0.2), expect.closeTo(0.2)])
   })
 })

@@ -436,7 +436,7 @@ class MountRegistry:
             store = NULL_INDEX
         elif store is None:
             store = build_index(
-                index, vfs.index_ttl, self.clock, self.workspace_id
+                index, vfs.index_ttl, self.clock, self.workspace_id, self.ids
             )
         vfs.accessor.bind_clock(self.clock)
         m = MountEntry(

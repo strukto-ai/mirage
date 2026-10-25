@@ -314,7 +314,7 @@ export class Workspace {
     this.registry.diff = this.diffPool
     this.registry.processView = (session) => this.processView(session)
     this.registry.fillEnv = (session, names) => this.fillTreeEnv(session, names)
-    this.jobTable = new JobTable(options.consoleFactory ?? null, this.processes)
+    this.jobTable = new JobTable(options.consoleFactory ?? null, this.processes, null, this.clock)
     const stores = resolveControlStores(this.wsId, options)
     this.ownsStateStore = stores.owned
     this.stateStoreInternal = stores.stateStore
@@ -358,7 +358,13 @@ export class Workspace {
         sourceFor(seeded.managed.source)
       }
     }
-    this.sessionManager = new SessionManager(sessionId, stores.sessions, seedVars, this.clock)
+    this.sessionManager = new SessionManager(
+      sessionId,
+      stores.sessions,
+      seedVars,
+      this.clock,
+      this.ids,
+    )
     this.meta = new WorkspaceMeta(
       this.wsId,
       this.stateStoreInternal,

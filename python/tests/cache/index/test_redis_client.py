@@ -18,11 +18,13 @@ from mirage.cache.index.constants import (
     CHILDREN_PREFIX,
     DEFAULT_KEY_PREFIX,
     ENTRY_PREFIX,
+    GENERATION_KEY,
     REGISTRY_PAGE,
 )
 from mirage.cache.index.redis import RedisIndexCacheStore
 from mirage.cache.manager import CacheManager
 from mirage.types import FileChangeKind, FileStat, FileType, PathSpec
+from mirage.utils.ids import SeededIdSource
 from mirage.workspace.mount.listing import stored_stat
 
 
@@ -1530,3 +1532,68 @@ async def test_authoritative_add_does_not_adopt_a_raced_global_generation(
     monkeypatch.setattr(client, "pipeline", pipeline_after_capture)
     await store.add_entry("/dir/a", FileStat(name="a", type=FileType.FILE))
     assert (await store.list_dir("/dir")).status == LookupStatus.EXPIRED
+
+
+@pytest.mark.asyncio
+async def test_generation_tokens_are_drawn_from_the_id_source():
+    client = FakeRedis(decode_responses=True)
+    store = RedisIndexCacheStore(
+        client=client, key_prefix="ids:", ids=SeededIdSource(5)
+    )
+    try:
+        await store.invalidate()
+        assert await client.get(f"ids:{GENERATION_KEY}") == (
+            SeededIdSource(5).uuid7()
+        )
+    finally:
+        await client.aclose()
+
+
+def _record_nx_sets(client: FakeRedis, nx_sets: list[tuple[str, str]]) -> None:
+    real = client.pipeline
+
+    def pipeline(*args, **kwargs):
+        pipe = real(*args, **kwargs)
+        original = pipe.set
+
+        def recording_set(name, value, *rest, **options):
+            if options.get("nx"):
+                nx_sets.append((name, value))
+            return original(name, value, *rest, **options)
+
+        pipe.set = recording_set
+        return pipe
+
+    client.pipeline = pipeline
+
+
+@pytest.mark.asyncio
+async def test_directory_tokens_are_drawn_in_seed_order():
+    # Drawn in the order a listing names its directories, as the
+    # TypeScript twin does, not in set order, which follows the
+    # process's string hash seed.
+    client = FakeRedis(decode_responses=True)
+    nx_sets: list[tuple[str, str]] = []
+    _record_nx_sets(client, nx_sets)
+    store = RedisIndexCacheStore(
+        client=client, key_prefix="ids:", ids=SeededIdSource(5)
+    )
+    paths = [f"/d{n}" for n in (7, 2, 5, 0, 6, 1, 4, 3)]
+    try:
+        store.seed(
+            {},
+            {path: [] for path in paths},
+            datetime(2100, 1, 1, tzinfo=timezone.utc),
+        )
+        await store.invalidate()
+        prefix = f"ids:{GENERATION_KEY}:"
+        drawn = [
+            (key.removeprefix(prefix), token)
+            for key, token in nx_sets
+            if key.startswith(prefix)
+        ]
+        assert [path for path, _ in drawn] == paths
+        tokens = [token for _, token in drawn]
+        assert tokens == sorted(tokens)
+    finally:
+        await client.aclose()

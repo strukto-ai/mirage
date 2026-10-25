@@ -42,6 +42,8 @@ SDKS = ("aioboto3", "aiobotocore", "boto3", "botocore.session")
 # What only the seam may touch: the session factory the S3 test seam
 # patches, and the kwargs it builds a client from.
 SEAM_NAMES = frozenset({"async_session", "_client_kwargs"})
+# A module naming none of these can open no S3 client, so it is not parsed.
+S3_HINTS = ("boto", *SEAM_NAMES)
 # Modules that open another AWS service's client, each with the reason.
 KEPT = {
     "secrets/aws.py": "Secrets Manager, not S3, through its own aws_session",
@@ -88,7 +90,10 @@ def bypassing_modules(root: Path) -> dict[str, list[str]]:
         name = path.relative_to(root).as_posix()
         if name == SEAM or name in KEPT:
             continue
-        found = s3_bypasses(path.read_text(encoding="utf-8"))
+        source = path.read_text(encoding="utf-8")
+        if not any(hint in source for hint in S3_HINTS):
+            continue
+        found = s3_bypasses(source)
         if found:
             offenders[name] = found
     return offenders

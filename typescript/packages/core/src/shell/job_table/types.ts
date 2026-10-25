@@ -62,7 +62,7 @@ export class Job {
     abort?: AbortController | null
     cwd: string
     sessionId?: string
-    createdAt?: number
+    createdAt: number
     status?: JobStatus
     exitCode?: number
     console?: JobConsole
@@ -73,7 +73,7 @@ export class Job {
     this.abort = init.abort ?? null
     this.cwd = init.cwd
     this.sessionId = init.sessionId ?? ''
-    this.createdAt = init.createdAt ?? Date.now() / 1000
+    this.createdAt = init.createdAt
     this.console = init.console ?? new JobConsole()
     this.simple = init.simple ?? false
     if (init.status !== undefined) this.status = init.status

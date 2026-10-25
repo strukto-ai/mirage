@@ -48,7 +48,14 @@ SEED_7_IDS = [
 MIRAGE_DIR = Path(mirage.__file__).parent
 
 # The packages whose ids and draws come from the workspace IdSource.
-SEAMED_PACKAGES = ("commands", "core", "execution", "process", "workspace")
+SEAMED_PACKAGES = (
+    "cache",
+    "commands",
+    "core",
+    "execution",
+    "process",
+    "workspace",
+)
 
 DIRECT_DRAWS = frozenset(
     {

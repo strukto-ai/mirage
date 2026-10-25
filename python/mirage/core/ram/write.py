@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
-import time
 from contextlib import aclosing
 
 from mirage.accessor.ram import RAMAccessor
@@ -102,7 +101,8 @@ async def write(
         store.modified[p] = now_iso()
     pending: list[bytes] = []
     position = 0
-    last = time.monotonic()
+    loop = asyncio.get_running_loop()
+    last = loop.time()
     later: asyncio.TimerHandle | None = None
 
     def publish() -> None:
@@ -110,7 +110,7 @@ async def write(
         if later is not None:
             later.cancel()
             later = None
-        last = time.monotonic()
+        last = loop.time()
         if not pending:
             return
         data = b"".join(pending)
@@ -131,13 +131,11 @@ async def write(
             async for chunk in source:
                 pending.append(chunk)
                 size += len(chunk)
-                wait = STREAM_PUBLISH_SECONDS - (time.monotonic() - last)
+                wait = STREAM_PUBLISH_SECONDS - (loop.time() - last)
                 if wait <= 0:
                     publish()
                 elif later is None:
-                    later = asyncio.get_running_loop().call_later(
-                        wait, publish
-                    )
+                    later = loop.call_later(wait, publish)
     finally:
         publish()
     record(op, path_spec.virtual, "ram", size, timer)

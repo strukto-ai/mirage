@@ -442,7 +442,13 @@ export class MountRegistry {
     ) {
       return new DevIndex()
     }
-    return buildIndex(config ?? this.indexConfig, vfs.indexTtl, this.clock, this.workspaceId)
+    return buildIndex(
+      config ?? this.indexConfig,
+      vfs.indexTtl,
+      this.clock,
+      this.workspaceId,
+      this.ids,
+    )
   }
 
   /** A removed VFS instance cannot start a second lifecycle. */

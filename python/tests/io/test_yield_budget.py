@@ -1,23 +1,9 @@
-import asyncio
 import sys
 import time
 
 from mirage.io import yield_budget as budget_mod
 from mirage.io.yield_budget import YieldBudget
-
-
-class HeldLoop(asyncio.SelectorEventLoop):
-    def __init__(self) -> None:
-        super().__init__()
-        self.now = 100.0
-
-    def time(self) -> float:
-        return self.now
-
-
-def run_on_held_loop(main):
-    with asyncio.Runner(loop_factory=HeldLoop) as runner:
-        return runner.run(main(runner.get_loop()))
+from tests.fixtures.held_loop import HeldLoop, run_on_held_loop
 
 
 def test_run_yields_only_after_budget_on_the_loop_clock():

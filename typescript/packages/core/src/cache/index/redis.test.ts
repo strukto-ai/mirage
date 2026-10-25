@@ -16,11 +16,12 @@ import { FileChangeKind, FileStat, FileType } from '../../types.ts'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { IndexDirectorySchema, LookupStatus } from './config.ts'
 import { CacheManager } from '../manager.ts'
-import { ENTRY_PREFIX, REGISTRY_PAGE } from './constants.ts'
+import { ENTRY_PREFIX, GENERATION_KEY, REGISTRY_PAGE } from './constants.ts'
 import { RedisIndexCacheStore, type RedisClientLike } from './redis.ts'
 import { runInCommandScope } from './scope.ts'
 import { storedStat } from '../../workspace/mount/listing.ts'
 import { ManualClock } from '../../utils/clock.ts'
+import { SeededIdSource } from '../../utils/ids.ts'
 
 describe('RedisIndexCacheStore default keyPrefix', () => {
   it('namespaces keys under mirage:index: by default', () => {
@@ -1253,6 +1254,17 @@ describe('Redis client protocol', () => {
     }
     return { value, pipeline }
   }
+
+  it('draws generation tokens from the id source', async () => {
+    const { value } = client()
+    const store = new RedisIndexCacheStore({
+      client: value,
+      keyPrefix: 'ids:',
+      ids: new SeededIdSource(5),
+    })
+    await store.invalidate()
+    expect(value.set).toHaveBeenCalledWith(`ids:${GENERATION_KEY}`, new SeededIdSource(5).uuid7())
+  })
 
   it.each([0, 1])('conditional replacement passes exact wire bytes to CAS: %s', async (result) => {
     const { value, pipeline } = client()

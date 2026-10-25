@@ -14,7 +14,6 @@
 
 import asyncio
 import logging
-import time
 from collections.abc import AsyncIterator, Awaitable
 from typing import TypeVar
 
@@ -35,11 +34,12 @@ async def with_timeout(
     command: str,
 ) -> AsyncIterator[bytes]:
     stream = ensure_stream(src)
-    start = time.monotonic()
+    loop = asyncio.get_running_loop()
+    start = loop.time()
     iterator = stream.__aiter__()
     try:
         while True:
-            remaining = seconds - (time.monotonic() - start)
+            remaining = seconds - (loop.time() - start)
             if remaining <= 0:
                 raise CommandTimeoutError(command, seconds)
             try:

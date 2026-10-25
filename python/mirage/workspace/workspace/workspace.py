@@ -329,9 +329,11 @@ class Workspace:
         self._shared_mounts: set[int] = set()
         self._drift = DriftQueue()
         self.processes = ProcessSupervisor(self._ids, bind=run_with_execution)
-        self.job_table = JobTable(console_factory, self.processes)
+        self.job_table = JobTable(
+            console_factory, self.processes, clock=self._clock
+        )
         self._lines: dict[asyncio.Event, tuple[str | None, asyncio.Event]] = {}
-        self._shell_executions: set[ShellExecution] = set()
+        self._shell_executions: dict[ShellExecution, None] = {}
         self._admitting = asyncio.Event()
         self._admitting.set()
         self._capture_lock = asyncio.Lock()
@@ -399,6 +401,7 @@ class Workspace:
             store=stores.sessions,
             seed_vars=seed_vars,
             clock=self._clock,
+            ids=self._ids,
         )
         self._tools: dict[str | None, MirageToolOperations] = {}
         self._reads: dict[str, FileVersionTracker] = {}
@@ -2871,9 +2874,9 @@ class Workspace:
             buffer_bytes=self.io.buffer_bytes,
         )
         if stream:
-            self._shell_executions.add(execution)
+            self._shell_executions[execution] = None
             execution.on_settled(
-                lambda: self._shell_executions.discard(execution)
+                lambda: self._shell_executions.pop(execution, None)
             )
             try:
                 await asyncio.sleep(0)

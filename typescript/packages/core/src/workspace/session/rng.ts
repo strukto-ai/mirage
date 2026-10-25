@@ -16,22 +16,18 @@ import {
   RANDOM_A,
   RANDOM_M,
   RANDOM_MAX,
-  RANDOM_MODULUS,
   RANDOM_Q,
   RANDOM_R,
   RANDOM_ZERO_SEED,
 } from '../../shell/constants.ts'
+import type { IdSource } from '../../utils/ids.ts'
 
-let started = 0
-
-/** A first seed for a generator never assigned one: the clock, stirred
- * with the session id and a count of the generators started, so two
- * started in one tick differ, as bash's mixes in each shell's own pid. */
-export function initialSeed(sessionId: string): number {
-  let hash = 0
-  for (const ch of sessionId) hash = (Math.imul(hash, 31) + (ch.codePointAt(0) ?? 0)) >>> 0
-  started += 1
-  return ((Date.now() % RANDOM_MODULUS) ^ hash ^ Math.imul(started, 0x9e3779b1)) >>> 0
+/** A first seed for a generator never assigned one, drawn from the
+ * workspace's id source, so every generator starts somewhere else, as
+ * bash's mixes in the time and each shell's own pid, and a seeded
+ * workspace replays it. */
+export function initialSeed(ids: IdSource): number {
+  return ids.randomU32()
 }
 
 /** One step of bash's RANDOM generator: Park-Miller through

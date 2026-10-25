@@ -22,6 +22,7 @@ from mirage.shell.console import Channel, JobConsole, RAMConsoleStore
 from mirage.shell.console.types import ConsoleChunk, ReadResult
 from mirage.shell.job_table.table import JobTable
 from mirage.shell.job_table.types import Job, JobStatus
+from mirage.utils.clock import ManualClock
 from mirage.workspace.types import ExecutionNode
 
 
@@ -359,6 +360,7 @@ async def test_load_restores_a_job_into_its_session():
         id=3,
         command="x",
         cwd="/",
+        created_at=0.0,
         status=JobStatus.COMPLETED,
         session_id="a",
     )
@@ -472,3 +474,18 @@ async def test_a_substitution_lists_its_callers_jobs_before_its_own():
     inner = inner_table.submit("inner", _run_forever, cwd="/")
     assert inner_table.listing() == [outer, inner]
     assert inner_table.list_jobs() == [inner]
+
+
+@pytest.mark.asyncio
+async def test_jobs_are_stamped_on_the_table_clock():
+    clock = ManualClock(start=1_000.0)
+    table = JobTable(clock=clock)
+    first = table.submit(command="deaf", run=_run_forever, cwd="/")
+    clock.advance(5)
+    child = table.child()
+    second = child.submit(command="deaf", run=_run_forever, cwd="/")
+    try:
+        assert (first.created_at, second.created_at) == (1_000.0, 1_005.0)
+    finally:
+        await table.kill_all()
+        await child.kill_all()
