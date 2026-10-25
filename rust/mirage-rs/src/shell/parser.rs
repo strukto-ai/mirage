@@ -360,14 +360,8 @@ impl Parser<'_> {
         self.depth = mark.depth;
         self.comments.truncate(mark.comments);
         self.raw_bodies.truncate(mark.raw_bodies);
-        // Each read kept the rest in order, so undoing the reads newest
-        // first puts every heredoc back where it was.
         let reads: Vec<_> = self.taken.drain(mark.taken..).collect();
-        for taken in reads.into_iter().rev() {
-            for (index, heredoc) in taken {
-                self.pending.insert(index.min(self.pending.len()), heredoc);
-            }
-        }
+        self.put_back(reads, mark.pending);
         self.pending.truncate(mark.pending);
     }
 

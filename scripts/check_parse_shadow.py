@@ -496,13 +496,11 @@ def corpus() -> list[str]:
     line of the bash syntax fixture."""
     found: dict[str, None] = {}
     for path in sorted(INTEG.rglob("*.json")):
-        if "node_modules" in path.parts or "generated" in path.parts:
+        skipped = "node_modules" in path.parts or "generated" in path.parts
+        # A TypeScript config is JSON with comments, and holds no case.
+        if skipped or path.name.startswith("tsconfig"):
             continue
-        try:
-            data = json.loads(path.read_text())
-        except (UnicodeDecodeError, ValueError):
-            continue
-        walk(data, None, found)
+        walk(json.loads(path.read_text()), None, found)
     for row in json.loads(SYNTAX.read_text())["lines"]:
         found.setdefault(row["line"], None)
     return list(found)

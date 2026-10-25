@@ -243,6 +243,34 @@ impl Parser<'_> {
         readable
     }
 
+    /// Undo `reads`, newest first, as far as the first `keep` heredocs:
+    /// each read kept the others in order, so its heredocs go back between
+    /// them, and only those among the first `keep` matter.
+    pub(super) fn put_back(&mut self, reads: Vec<Vec<(usize, Pending)>>, keep: usize) {
+        let mut wanted = Vec::with_capacity(reads.len());
+        let mut want = keep;
+        for taken in &reads {
+            wanted.push(want);
+            want -= taken.iter().filter(|(index, _)| *index < want).count();
+        }
+        for (taken, want) in reads.into_iter().zip(wanted).rev() {
+            let mut taken = taken
+                .into_iter()
+                .filter(|(index, _)| *index < want)
+                .peekable();
+            if taken.peek().is_none() {
+                continue;
+            }
+            let mut kept = std::mem::take(&mut self.pending).into_iter();
+            self.pending = (0..want)
+                .filter_map(|at| match taken.next_if(|(index, _)| *index == at) {
+                    Some((_, heredoc)) => Some(heredoc),
+                    None => kept.next(),
+                })
+                .collect();
+        }
+    }
+
     /// The heredoc a newline here reads first, if any: the deepest, the
     /// earliest of those.
     pub(super) fn first_readable(&self) -> Option<&Pending> {
