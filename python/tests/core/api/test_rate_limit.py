@@ -53,6 +53,10 @@ class _Stalled(_Clock):
         self.wall = max(self.wall, start + seconds, self.until)
 
 
+class _System(_Clock, SystemClock):
+    pass
+
+
 def _limiter(rate: float, clock: _Clock) -> RateLimiter:
     return RateLimiter(rate, clock=clock)
 
@@ -192,9 +196,14 @@ def test_a_held_limiter_refuses_another_clock_until_its_owner_lets_go():
     limiter.bind_clock(second, "b")
 
 
-def test_two_system_clocks_agree_while_held():
-    limiter = RateLimiter(5)
-    limiter.bind_clock(SystemClock(), "a")
-    limiter.bind_clock(SystemClock(), "b")
+@pytest.mark.asyncio
+async def test_a_second_system_clock_keeps_the_schedule():
+    first, second = _System(), _System()
+    limiter = _limiter(5, first)
+    limiter.bind_clock(first, "a")
+    await limiter.acquire("appA")
+    limiter.bind_clock(second, "b")
+    await limiter.acquire("appA")
+    assert first.waits + second.waits == pytest.approx([0.2])
     with pytest.raises(ValueError):
         limiter.bind_clock(ManualClock(), "c")

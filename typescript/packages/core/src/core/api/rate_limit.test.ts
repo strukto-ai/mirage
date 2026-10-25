@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { ManualClock, SystemClock } from '../../utils/clock.ts'
+import { ManualClock } from '../../utils/clock.ts'
 import { RateLimiter } from './rate_limit.ts'
 
 class Clock {
@@ -45,6 +45,10 @@ class StalledClock extends Clock {
     await Promise.resolve()
     this.wall = Math.max(this.wall, start + seconds, this.until)
   }
+}
+
+class PlatformClock extends Clock {
+  readonly platform = true
 }
 
 function limiter(rate: number, clock: Clock): RateLimiter {
@@ -175,10 +179,15 @@ describe('RateLimiter', () => {
     l.bindClock(second, 'b')
   })
 
-  it('lets two system clocks agree while held', () => {
-    const l = new RateLimiter(5)
-    l.bindClock(new SystemClock(), 'a')
-    l.bindClock(new SystemClock(), 'b')
+  it('keeps the schedule when a second system clock binds', async () => {
+    const first = new PlatformClock()
+    const second = new PlatformClock()
+    const l = limiter(5, first)
+    l.bindClock(first, 'a')
+    await l.acquire('appA')
+    l.bindClock(second, 'b')
+    await l.acquire('appA')
+    expect([...first.waits, ...second.waits]).toEqual([expect.closeTo(0.2)])
     expect(() => {
       l.bindClock(new ManualClock(), 'c')
     }).toThrow()
