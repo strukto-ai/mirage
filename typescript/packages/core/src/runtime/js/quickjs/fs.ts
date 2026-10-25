@@ -32,6 +32,13 @@ const DEC = new TextDecoder('utf-8', { fatal: false })
 // keeps: guests compare against these, so host errno numbering must not
 // leak.
 const ENOENT = WASI.ENOENT
+// wasi-libc's open flags, as the real engine on WASI names its os.O_*.
+const O_APPEND = 1
+const O_CREAT = 4096
+const O_EXCL = 16384
+const O_TRUNC = 32768
+const O_RDONLY = 0x04000000
+const O_WRONLY = 0x10000000
 
 /**
  * Hand text to the guest. The engine takes a C string, so text holding
@@ -85,7 +92,9 @@ export function installQuickJsFs(
   signal?: AbortSignal,
 ): () => Promise<string[]> {
   const files = signal === undefined ? sourceFiles : (sourceFiles?.withSignal(signal) ?? null)
-  const table = new FileTable<Descriptor>()
+  // 0 to 2 are the standard streams and 3 the preopened root, as qjs on
+  // WASI numbers them, so a guest's first open is 4.
+  const table = new FileTable<Descriptor>(4)
   // qjs-libc's fopen opens a directory for reading, and every read of it
   // then fails: it answers nothing and sets the stream's error flag. A
   // read of zero bytes never reaches the stream, so it leaves the flag.
@@ -149,6 +158,35 @@ export function installQuickJsFs(
     handle.dispose()
   }
 
+  // A descriptor on the run's core for `path`, or -errno. A read-only open
+  // of a directory gives one every read of which fails, as libc's does.
+  const openFd = async (path: string, mode: OpenMode): Promise<number> => {
+    if (files?.serves(path) !== true) return -ENOENT
+    let file: Descriptor
+    let directory = false
+    try {
+      try {
+        file = new Descriptor(files, await files.open(path, mode), mode, path)
+      } catch (err) {
+        if (mode.writable || classify(err) !== 'EISDIR') throw err
+        file = new Descriptor(
+          files,
+          await files.open(path, { ...mode, directory: true }),
+          mode,
+          path,
+          true,
+        )
+        directory = true
+      }
+    } catch (err) {
+      return -errnoFor(err)
+    }
+    const fd = table.add(file)
+    if (directory) directories.add(fd)
+    if (!mode.readable) writeOnly.add(fd)
+    return fd
+  }
+
   defineSync('__mirage_getcwd', () => ctx.newString(cwd.virtual))
 
   defineAsync('__mirage_chdir', async (pathH) => {
@@ -191,7 +229,6 @@ export function installQuickJsFs(
       exclusive: first !== 'r' && spelled.includes('x'),
       binary: spelled.includes('b'),
     }
-    if (files?.serves(path) !== true) return ctx.newNumber(-ENOENT)
     // The open's effect lands through the mount at open, by the rule
     // every entry point shares (`MountCore.open`), so write modes and a
     // read-narrowed session refuse here (the guest gets null), the ledger
@@ -199,29 +236,24 @@ export function installQuickJsFs(
     // it. Any refusal or failure is the guest's null: a transient failure
     // or a policy denial on an existing file must refuse the open, or a
     // create-capable mode would create over content this open never saw.
-    let file: Descriptor
-    let directory = false
-    try {
-      try {
-        file = new Descriptor(files, await files.open(path, mode), mode, path)
-      } catch (err) {
-        if (mode.writable || classify(err) !== 'EISDIR') throw err
-        file = new Descriptor(
-          files,
-          await files.open(path, { ...mode, directory: true }),
-          mode,
-          path,
-          true,
-        )
-        directory = true
-      }
-    } catch (err) {
-      return ctx.newNumber(-errnoFor(err))
+    return ctx.newNumber(await openFd(path, mode))
+  })
+
+  // os.open's flags, in the wasi-libc numbering the real engine on WASI
+  // spells its os.O_* constants in; a descriptor shares std.open's table.
+  defineAsync('__mirage_os_open', async (pathH, flagsH) => {
+    const flags = ctx.getNumber(flagsH)
+    const writable = (flags & O_WRONLY) !== 0
+    const mode: OpenMode = {
+      readable: (flags & O_RDONLY) !== 0 || !writable,
+      writable,
+      truncate: (flags & O_TRUNC) !== 0,
+      append: (flags & O_APPEND) !== 0,
+      create: (flags & O_CREAT) !== 0,
+      exclusive: (flags & O_EXCL) !== 0,
+      binary: true,
     }
-    const fd = table.add(file)
-    if (directory) directories.add(fd)
-    if (!mode.readable) writeOnly.add(fd)
-    return ctx.newNumber(fd)
+    return ctx.newNumber(await openFd(absolute(pathH), mode))
   })
 
   defineAsync('__mirage_flush', async (fdH) => {
@@ -348,6 +380,33 @@ export function installQuickJsFs(
       return ctx.newNumber(0)
     }
     return ctx.newNumber(bytes.length)
+  })
+
+  // os.read and os.write answer -errno where the FILE calls set the
+  // stream's error flag: EBADF for a descriptor that is not open for it.
+  defineAsync('__mirage_os_read', async (fdH, sizeH) => {
+    const fd = ctx.getNumber(fdH)
+    const file = table.get(fd)
+    if (file === undefined || writeOnly.has(fd)) return ctx.newNumber(-WASI.EBADF)
+    if (directories.has(fd)) return ctx.newNumber(-WASI.EISDIR)
+    const size = ctx.getNumber(sizeH)
+    try {
+      return ctx.newArrayBuffer((await file.read(size)).slice(0, size).buffer)
+    } catch (err) {
+      return ctx.newNumber(-errnoFor(err))
+    }
+  })
+
+  defineAsync('__mirage_os_write', async (fdH, bufferH) => {
+    const file = table.get(ctx.getNumber(fdH))
+    if (file?.mode.writable !== true) return ctx.newNumber(-WASI.EBADF)
+    const bytes = ctx.getArrayBuffer(bufferH).consume((view) => view.value.slice())
+    try {
+      await file.write(bytes)
+      return ctx.newNumber(bytes.length)
+    } catch (err) {
+      return ctx.newNumber(-errnoFor(err))
+    }
   })
 
   // 0, or -errno as the real engine's FILE.seek answers: a target before

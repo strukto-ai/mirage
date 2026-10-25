@@ -41,6 +41,16 @@
             "stdout": "hello\n"
           }
         }
+      ],
+      "backends": [
+        "ram",
+        "disk",
+        "ssh",
+        "s3",
+        "redis",
+        "ram+cache",
+        "disk+cache",
+        "redis+cache"
       ]
     },
     {
@@ -77,6 +87,16 @@
             "stdout": "t.txt\nTrue 5\nTrue False\n"
           }
         }
+      ],
+      "backends": [
+        "ram",
+        "disk",
+        "ssh",
+        "s3",
+        "redis",
+        "ram+cache",
+        "disk+cache",
+        "redis+cache"
       ]
     },
     {
@@ -141,6 +161,16 @@
             }
           }
         }
+      ],
+      "backends": [
+        "ram",
+        "disk",
+        "ssh",
+        "s3",
+        "redis",
+        "ram+cache",
+        "disk+cache",
+        "redis+cache"
       ]
     },
     {
@@ -177,6 +207,16 @@
             "stdout": "/data/t.txt EINVAL\n/data/d EINVAL\n/data/missing ENOENT\n/data/d/deep/missing ENOENT\n"
           }
         }
+      ],
+      "backends": [
+        "ram",
+        "disk",
+        "ssh",
+        "s3",
+        "redis",
+        "ram+cache",
+        "disk+cache",
+        "redis+cache"
       ]
     },
     {
@@ -227,6 +267,16 @@
             "stdout": "t.txt\n"
           }
         }
+      ],
+      "backends": [
+        "ram",
+        "disk",
+        "ssh",
+        "s3",
+        "redis",
+        "ram+cache",
+        "disk+cache",
+        "redis+cache"
       ]
     },
     {
@@ -272,6 +322,16 @@
             "stdout": "alias link\nd dir\ndlk link\nlk link\nreal dir\nt.txt file\ndlk link\nlk link\nsub dir\nt.txt file\n"
           }
         }
+      ],
+      "backends": [
+        "ram",
+        "disk",
+        "ssh",
+        "s3",
+        "redis",
+        "ram+cache",
+        "disk+cache",
+        "redis+cache"
       ]
     },
     {
@@ -321,6 +381,16 @@
             "exit": 1
           }
         }
+      ],
+      "backends": [
+        "ram",
+        "disk",
+        "ssh",
+        "s3",
+        "redis",
+        "ram+cache",
+        "disk+cache",
+        "redis+cache"
       ]
     },
     {
@@ -373,6 +443,16 @@
             "stdout": "/data:\nd\n\n/data/d:\nf.txt\n"
           }
         }
+      ],
+      "backends": [
+        "ram",
+        "disk",
+        "ssh",
+        "s3",
+        "redis",
+        "ram+cache",
+        "disk+cache",
+        "redis+cache"
       ]
     }
   ]

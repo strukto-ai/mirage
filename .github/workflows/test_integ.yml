@@ -1850,7 +1850,7 @@ jobs:
             # A case's `backends` runs it once per backend, and the backend
             # folder reads real S3, so either needs MinIO wherever it lands.
             if [[ "$n" == backend/* ]] || \
-                jq -e 'any(.cases[]?; any((.backends // [])[]; . == "s3"))' "$f" >/dev/null; then
+                jq -e 'any(.cases[]?; any((.backends // [])[]; split("+")[0] == "s3"))' "$f" >/dev/null; then
               minio_suites+=("$n")
             fi
             # A case naming a runtime, through a `runtimes` matrix or its
@@ -1862,7 +1862,7 @@ jobs:
             if named wasi; then wasi_suites+=("$n"); fi
             if named docker || named ssh; then box_suites+=("$n"); fi
             # The ssh backend mounts the ssh runtime's box over SFTP.
-            if jq -e 'any(.cases[]?; any((.backends // [])[]; . == "ssh"))' "$f" >/dev/null; then
+            if jq -e 'any(.cases[]?; any((.backends // [])[]; split("+")[0] == "ssh"))' "$f" >/dev/null; then
               ssh_suites+=("$n")
             fi
           done < <(find integ/runtime -name '*.json' | sort)

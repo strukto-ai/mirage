@@ -16,6 +16,7 @@ import { Buffer } from 'node:buffer'
 import { constants } from 'node:fs'
 import { createRequire } from 'node:module'
 import { posix } from 'node:path'
+import { type Interface, createInterface } from 'node:readline'
 import { fileURLToPath } from 'node:url'
 import { classify } from '@struktoai/mirage-core/errors/classify'
 import { ebadf, einval, isMissingPath } from '@struktoai/mirage-core/errors/fs'
@@ -319,6 +320,14 @@ class MountedFileHandle {
   createWriteStream(options?: Options): unknown {
     if (!this.live()) throw ebadf(String(this.fd))
     return (fs.createWriteStream as Fn)(null, { ...fieldsOf(options), fd: this.fd })
+  }
+
+  // node's own reads its lines through createReadStream, as this does.
+  readLines(options?: Options): Interface {
+    return createInterface({
+      input: this.createReadStream(options) as NodeJS.ReadableStream,
+      crlfDelay: Infinity,
+    })
   }
 }
 

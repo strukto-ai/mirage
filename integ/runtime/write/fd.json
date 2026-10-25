@@ -1,0 +1,102 @@
+{
+  "cases": [
+    {
+      "id": "a_descriptor_writes_appends_and_cuts",
+      "note": "Monty has no os.open.",
+      "runtimes": [
+        "wasi",
+        "pyodide",
+        "host"
+      ],
+      "backends": [
+        "ram",
+        "disk",
+        "ssh",
+        "s3",
+        "redis",
+        "ram+cache",
+        "disk+cache",
+        "redis+cache"
+      ],
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "seed.txt": "s"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "program": {
+            "python": "import os\nfd = os.open('/data/n.txt', os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)\nprint(os.write(fd, b'hello'), os.write(fd, b' world'))\nos.close(fd)\nfd = os.open('/data/n.txt', os.O_WRONLY | os.O_APPEND)\nos.write(fd, b'!')\nos.close(fd)\nfd = os.open('/data/n.txt', os.O_RDWR)\nos.lseek(fd, 6, os.SEEK_SET)\nos.write(fd, b'W')\nos.fsync(fd)\nos.ftruncate(fd, 8)\nprint(os.fstat(fd).st_size)\nos.close(fd)\ntry:\n    os.open('/data/n.txt', os.O_WRONLY | os.O_CREAT | os.O_EXCL)\nexcept OSError as e:\n    print(type(e).__name__)\nprint(open('/data/n.txt').read())",
+            "node": "const fsp = require('node:fs').promises\nconst f = await fsp.open('/data/n.txt', 'wx')\nconsole.log((await f.write('hello')).bytesWritten, (await f.write(' world')).bytesWritten)\nawait f.close()\nawait fsp.appendFile('/data/n.txt', '!')\nconst g = await fsp.open('/data/n.txt', 'r+')\nawait g.write('W', 6)\nawait g.sync()\nawait g.truncate(8)\nconsole.log((await g.stat()).size)\nawait g.close()\nawait fsp.open('/data/n.txt', 'wx').catch((e) => console.log(e.code))\nconsole.log(await fsp.readFile('/data/n.txt', 'utf8'))"
+          },
+          "expect": {
+            "python": {
+              "exit": 0,
+              "stdout": "5 6\n8\nFileExistsError\nhello Wo\n"
+            },
+            "node": {
+              "exit": 0,
+              "stdout": "5 6\n8\nEEXIST\nhello Wo\n"
+            }
+          }
+        },
+        {
+          "command": "cat /data/n.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "hello Wo"
+          }
+        }
+      ]
+    },
+    {
+      "id": "a_quickjs_descriptor_writes_and_appends",
+      "runtimes": [
+        "quickjs"
+      ],
+      "backends": [
+        "ram",
+        "disk",
+        "ssh",
+        "s3",
+        "redis",
+        "ram+cache",
+        "disk+cache",
+        "redis+cache"
+      ],
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "seed.txt": "s"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "program": {
+            "js": "const bytes = (s) => new Uint8Array([...s].map((c) => c.charCodeAt(0))).buffer\nconst fd = os.open('/data/n.txt', os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)\nconsole.log(os.write(fd, bytes('hello'), 0, 5), os.write(fd, bytes(' world'), 0, 6))\nconsole.log(os.close(fd), os.open('/data/n.txt', os.O_WRONLY | os.O_CREAT | os.O_EXCL))\nconst ap = os.open('/data/n.txt', os.O_WRONLY | os.O_APPEND)\nos.write(ap, bytes('!'), 0, 1)\nos.close(ap)\nconst rw = os.open('/data/n.txt', os.O_RDWR)\nos.seek(rw, 6, std.SEEK_SET)\nos.write(rw, bytes('W'), 0, 1)\nos.close(rw)\nconst r = std.open('/data/n.txt', 'r')\nconsole.log(r.readAsString())\nr.close()"
+          },
+          "expect": {
+            "exit": 0,
+            "stdout": "5 6\n0 -20\nhello World!\n"
+          }
+        },
+        {
+          "command": "cat /data/n.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "hello World!"
+          }
+        }
+      ]
+    }
+  ]
+}

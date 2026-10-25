@@ -1,0 +1,114 @@
+{
+  "cases": [
+    {
+      "id": "remove_and_unlink_reach_the_mount",
+      "note": "os.remove and os.unlink remove a file, and refuse a missing name and a directory. QuickJS's os.remove is C's remove(), which removes an empty directory too, so its program leaves the directory alone.",
+      "runtimes": [
+        "monty",
+        "wasi",
+        "pyodide",
+        "quickjs",
+        "host"
+      ],
+      "backends": [
+        "ram",
+        "disk",
+        "ssh",
+        "s3",
+        "redis",
+        "ram+cache",
+        "disk+cache",
+        "redis+cache"
+      ],
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "a.txt": "a\n",
+              "d/b.txt": "b\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "program": {
+            "python": "import os\nos.remove('/data/a.txt')\nos.unlink('/data/d/b.txt')\nprint(sorted(os.listdir('/data')), os.listdir('/data/d'))\nfor path in ('/data/a.txt', '/data/d'):\n    try:\n        os.remove(path)\n    except OSError as e:\n        print(type(e).__name__)",
+            "js": "console.log(os.remove('/data/a.txt'), os.remove('/data/d/b.txt'))\nconst [names] = os.readdir('/data')\nconst [inner] = os.readdir('/data/d')\nconsole.log(names.filter((n) => n[0] !== '.').sort().join(','), inner.filter((n) => n[0] !== '.').length)\nconsole.log(os.remove('/data/a.txt'))",
+            "node": "const fsp = require('node:fs').promises\nawait fsp.unlink('/data/a.txt')\nawait fsp.rm('/data/d/b.txt')\nconsole.log(JSON.stringify((await fsp.readdir('/data')).sort()), JSON.stringify(await fsp.readdir('/data/d')))\nfor (const path of ['/data/a.txt', '/data/d']) {\n  try {\n    await fsp.unlink(path)\n  } catch (e) {\n    console.log(e.code)\n  }\n}"
+          },
+          "expect": {
+            "python": {
+              "exit": 0,
+              "stdout": "['d'] []\nFileNotFoundError\nIsADirectoryError\n"
+            },
+            "js": {
+              "exit": 0,
+              "stdout": "0 0\nd 0\n-44\n"
+            },
+            "node": {
+              "exit": 0,
+              "stdout": "[\"d\"] []\nENOENT\nEISDIR\n"
+            }
+          }
+        },
+        {
+          "command": "ls /data; ls /data/d; cat /data/a.txt",
+          "expect": {
+            "exit": 1,
+            "stdout": "d\n",
+            "stderr": "cat: /data/a.txt: No such file or directory\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "pathlib_unlink_takes_missing_ok",
+      "note": "Monty's Path.unlink takes no missing_ok.",
+      "runtimes": [
+        "wasi",
+        "pyodide",
+        "host"
+      ],
+      "backends": [
+        "ram",
+        "disk",
+        "ssh",
+        "s3",
+        "redis",
+        "ram+cache",
+        "disk+cache",
+        "redis+cache"
+      ],
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "a.txt": "a\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "program": {
+            "python": "from pathlib import Path\nPath('/data/a.txt').unlink()\nPath('/data/a.txt').unlink(missing_ok=True)\ntry:\n    Path('/data/a.txt').unlink()\nexcept FileNotFoundError:\n    print('gone')\nprint(Path('/data/a.txt').exists())"
+          },
+          "expect": {
+            "exit": 0,
+            "stdout": "gone\nFalse\n"
+          }
+        },
+        {
+          "command": "ls /data",
+          "expect": {
+            "exit": 0,
+            "stdout": ""
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -149,6 +149,40 @@ it('marks a FILE whose flush failed as in error', async () => {
   }
 })
 
+// The descriptor calls and a FILE's byte calls answer as the real engine on
+// WASI does (pinned through the python runtime's qjs): numbers from 4, a
+// count or -errno, and os.seek the offset, a bigint for a bigint.
+it('answers the descriptor and byte calls as qjs on WASI does', async () => {
+  const rt = new QuickJsRuntime()
+  const ws = new Workspace(
+    { '/data': new RAMVFS() },
+    { mode: MountMode.EXEC, shellParser: await getTestParser(), runtimes: [rt, 'workspace'] },
+  )
+  try {
+    const result = await execute(
+      rt,
+      [
+        "const fd = os.open('/data/z', os.O_RDWR | os.O_CREAT)",
+        'const b = new Uint8Array([104, 105]).buffer',
+        'console.log(fd, os.write(fd, b, 0, 2), os.seek(fd, 0n, std.SEEK_SET), os.seek(fd, -1, std.SEEK_SET))',
+        'const got = new ArrayBuffer(4)',
+        "console.log(os.read(fd, got, 0, 4), new Uint8Array(got, 0, 2).join(','), os.close(fd), os.close(fd), os.isatty(fd))",
+        "const f = std.open('/data/z', 'r+')",
+        'const first = f.getByte()',
+        'f.seek(0, std.SEEK_END)',
+        'console.log(first, f.putByte(321), f.tell())',
+        'f.close()',
+        "console.log(std.loadFile('/data/z'))",
+      ].join('\n'),
+    )
+    expect(new TextDecoder().decode(result.stdout)).toBe(
+      '4 2 0 -28\n2 104,105 0 -8 false\n104 65 3\nhiA\n',
+    )
+  } finally {
+    await ws.close()
+  }
+})
+
 describe('QuickJS compatibility', () => {
   it.each([
     [

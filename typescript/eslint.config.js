@@ -172,6 +172,9 @@ export default tseslint.config(
         __mirage_mkdir: 'readonly',
         __mirage_rename: 'readonly',
         __mirage_utimes: 'readonly',
+        __mirage_os_open: 'readonly',
+        __mirage_os_read: 'readonly',
+        __mirage_os_write: 'readonly',
         // execution.js defines these and filesystem.js, the next part of
         // the same bootstrap, uses them.
         __text: 'readonly',

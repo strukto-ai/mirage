@@ -14,7 +14,10 @@
         "disk",
         "ssh",
         "s3",
-        "redis"
+        "redis",
+        "ram+cache",
+        "disk+cache",
+        "redis+cache"
       ],
       "filesystem": {
         "monty": {
@@ -94,6 +97,16 @@
             }
           }
         }
+      ],
+      "backends": [
+        "ram",
+        "disk",
+        "ssh",
+        "s3",
+        "redis",
+        "ram+cache",
+        "disk+cache",
+        "redis+cache"
       ]
     },
     {
@@ -154,6 +167,16 @@
             "stdout": "0 \"\" false\n\"\" true\nfalse\n"
           }
         }
+      ],
+      "backends": [
+        "ram",
+        "disk",
+        "ssh",
+        "s3",
+        "redis",
+        "ram+cache",
+        "disk+cache",
+        "redis+cache"
       ]
     },
     {
@@ -192,6 +215,16 @@
             }
           }
         }
+      ],
+      "backends": [
+        "ram",
+        "disk",
+        "ssh",
+        "s3",
+        "redis",
+        "ram+cache",
+        "disk+cache",
+        "redis+cache"
       ]
     },
     {
@@ -238,6 +271,16 @@
             }
           }
         }
+      ],
+      "backends": [
+        "ram",
+        "disk",
+        "ssh",
+        "s3",
+        "redis",
+        "ram+cache",
+        "disk+cache",
+        "redis+cache"
       ]
     },
     {
@@ -270,6 +313,16 @@
             "stdout": "201849602136611\n"
           }
         }
+      ],
+      "backends": [
+        "ram",
+        "disk",
+        "ssh",
+        "s3",
+        "redis",
+        "ram+cache",
+        "disk+cache",
+        "redis+cache"
       ]
     }
   ]

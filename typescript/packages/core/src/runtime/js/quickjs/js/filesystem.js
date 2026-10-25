@@ -22,6 +22,15 @@ std.open = (path, mode, errorObj) => {
       const line = __mirage_getline(fd)
       return line === null ? null : __text(line)
     },
+    getByte: () => {
+      const got = new Uint8Array(__mirage_read_bytes(fd, 1))
+      return got.length === 0 ? -1 : got[0]
+    },
+    // fputc writes the value as an unsigned char and answers it, or EOF.
+    putByte: (c) => {
+      const byte = (Number(c) | 0) & 0xff
+      return __mirage_write_bytes(fd, new Uint8Array([byte]).buffer) === 1 ? byte : -1
+    },
     puts: (s) => {
       __mirage_write(fd, __pieces(String(s)))
     },
@@ -92,6 +101,37 @@ os.S_IFDIR = 16384
 os.S_IFCHR = 8192
 os.S_IFREG = 32768
 os.S_IFLNK = 40960
+
+// The descriptor calls, in the real engine's shape: a count or -errno, and
+// os.seek the new offset, a bigint for a bigint offset.
+os.O_APPEND = 1
+os.O_CREAT = 4096
+os.O_EXCL = 16384
+os.O_RDONLY = 67108864
+os.O_RDWR = 335544320
+os.O_TRUNC = 32768
+os.O_WRONLY = 268435456
+os.open = (path, flags) => __mirage_os_open(String(path), Number(flags) | 0)
+// A guest's files and its piped streams are no terminal.
+os.isatty = () => false
+os.close = (fd) => __mirage_close(Number(fd) | 0)
+os.read = (fd, buffer, position, length) => {
+  const [pos, len] = span(buffer, position, length)
+  const got = __mirage_os_read(Number(fd) | 0, len)
+  if (typeof got === 'number') return got
+  const bytes = new Uint8Array(got)
+  new Uint8Array(buffer, pos, bytes.length).set(bytes)
+  return bytes.length
+}
+os.write = (fd, buffer, position, length) => {
+  const [pos, len] = span(buffer, position, length)
+  return __mirage_os_write(Number(fd) | 0, buffer.slice(pos, pos + len))
+}
+os.seek = (fd, offset, whence) => {
+  const moved = __mirage_seek(Number(fd) | 0, Number(offset), whence | 0)
+  const at = moved < 0 ? moved : __mirage_tell(Number(fd) | 0)
+  return typeof offset === 'bigint' ? BigInt(at) : at
+}
 
 os.getcwd = () => [__mirage_getcwd(), 0]
 os.chdir = (path) => __mirage_chdir(String(path))
