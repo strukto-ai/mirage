@@ -13,7 +13,16 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it, vi } from 'vitest'
-import { abortable, atDeadline, fireDue, joinOrAbort, makeAbortError, sleep } from './abort.ts'
+import {
+  SignalStop,
+  abortable,
+  atDeadline,
+  fireDue,
+  joinOrAbort,
+  makeAbortError,
+  sleep,
+  stopSignal,
+} from './abort.ts'
 
 function never(): Promise<never> {
   return new Promise<never>(() => undefined)
@@ -211,5 +220,21 @@ describe('atDeadline', () => {
     await sleep(60)
     fireDue()
     expect(fired).toBe(0)
+  })
+})
+
+describe('SignalStop', () => {
+  it('is the abort a signal check throws, and names its signal', () => {
+    const controller = new AbortController()
+    controller.abort(new SignalStop(15))
+    let thrown: unknown
+    try {
+      controller.signal.throwIfAborted()
+    } catch (err) {
+      thrown = err
+    }
+    expect(thrown instanceof Error && thrown.name === 'AbortError').toBe(true)
+    expect(stopSignal(controller.signal)).toBe(15)
+    expect(stopSignal(AbortSignal.any([controller.signal]))).toBe(15)
   })
 })

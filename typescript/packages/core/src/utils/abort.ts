@@ -128,9 +128,13 @@ export function fireDue(): void {
  * stopped run started gets a stop's grace to finish, a guest landing the
  * file it left open, as one a `kill` stops does through its process's
  * signal. Python cancels the run and joins it whole, so it needs none.
+ * It is an AbortError, as a plain `abort()` is, since `throwIfAborted`
+ * throws the reason itself and every check keys on that name.
  */
-export class SignalStop {
-  constructor(readonly signal: number) {}
+export class SignalStop extends DOMException {
+  constructor(readonly signal: number) {
+    super('execute aborted', 'AbortError')
+  }
 }
 
 /** The signal a stop named, through any signal merged over it; null for a plain abort. */
