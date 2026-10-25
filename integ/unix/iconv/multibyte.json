@@ -101,6 +101,40 @@
         "stdout": "a rc=1\na b rc=1\nA rc=1\na rc=1\n＾ rc=1\na rc=1\nab rc=1\n rc=1\nz rc=1\n  rc=1\nab rc=1\n",
         "stderr": "iconv: illegal input sequence at position 1\niconv: incomplete character or shift sequence at end of buffer\niconv: incomplete character or shift sequence at end of buffer\niconv: illegal input sequence at position 1\niconv: incomplete character or shift sequence at end of buffer\n"
       }
+    },
+    {
+      "id": "iconv_round_trips_cjk_and_counts_positions_across_chunks",
+      "seq": 16100028,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf '北京東京서울\\n' | iconv -f UTF-8 -t GB18030 | iconv -f GB18030 -t UTF-8; printf '東京\\n' | iconv -f UTF-8 -t SJIS | iconv -f SJIS -t EUC-JP | iconv -f EUC-JP -t UTF-8; printf '서울\\n' | iconv -f UTF-8 -t EUC-KR | iconv -f EUC-KR -t UTF-8; printf '北京\\n' | iconv -f UTF-8 -t GBK | iconv -f GBK -t UTF-8; seq 1 20000 > /data/ic28; printf '\\344\\270\\255\\360\\237\\230\\200z' >> /data/ic28; iconv -f UTF-8 -t SJIS /data/ic28 | wc -c; iconv -c -f UTF-8 -t EUC-JP /data/ic28 | tail -c 3 | od -An -tx1; seq 1 20000 > /data/ic28g; printf '\\261' >> /data/ic28g; iconv -f GBK -t UTF-8 /data/ic28g | wc -c; rm /data/ic28 /data/ic28g",
+      "expect": {
+        "exit": 0,
+        "stdout": "北京東京서울\n東京\n서울\n北京\n108896\n c3 e6 7a\n108894\n",
+        "stderr": "iconv: illegal input sequence at position 108897\niconv: incomplete character or shift sequence at end of buffer\n"
+      }
     }
   ]
 }

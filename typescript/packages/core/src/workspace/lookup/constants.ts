@@ -319,9 +319,8 @@ export function changesFiles(name: string, words: readonly (string | PathSpec)[]
   switch (name) {
     case 'sort':
     case 'shuf':
-      return fl.raw('output') !== undefined
     case 'iconv':
-      return fl.raw('o') !== undefined
+      return fl.raw('output') !== undefined
     case 'uniq':
     case 'xxd':
       // A pattern the backend expands may name the output file too; a quoted
