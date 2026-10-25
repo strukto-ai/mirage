@@ -28,6 +28,7 @@ from mirage.commands.builtin.utils.links import (
     mount_view,
     owed_names,
 )
+from mirage.commands.builtin.utils.operands import normalized_read
 from mirage.commands.spec.types import FlagValue
 from mirage.runtime.types import DispatchFn
 from mirage.types import PathSpec
@@ -55,7 +56,6 @@ async def run_zip(
         vfs (Files | None): The symlinks and mount boundaries the
             scan merges into each walk.
     """
-    parsed = parse_flags(flag_kwargs)
     prim = transfer_primitives(dispatch)
     links = link_view(vfs)
     tree = (
@@ -70,8 +70,9 @@ async def run_zip(
     )
     return await zip_cmd(
         flat_scopes(scopes),
-        read_bytes=prim["read_bytes"],
-        write_bytes=prim["write"],
+        stream=normalized_read(prim["read_bytes"]),
+        dispatch=dispatch,
+        cwd=PathSpec.from_str_path("/"),
         stat=prim["stat"],
         walk=relay_walk_of(
             dispatch,
@@ -79,11 +80,7 @@ async def run_zip(
             "zip",
             tree,
         ),
-        r=parsed.recursive,
-        j=parsed.junk_paths,
-        q=parsed.quiet,
-        y=parsed.store_links,
-        x=list(parsed.exclude) or None,
+        flags=parse_flags(flag_kwargs),
         links=links,
         mounts=mount_view(vfs),
     )

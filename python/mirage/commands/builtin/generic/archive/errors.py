@@ -1,2 +1,0 @@
-class ZipUpdateError(ValueError):
-    pass

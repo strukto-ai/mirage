@@ -20,7 +20,7 @@ import { dispatchedReadTree } from '../../../generic_bind/files.ts'
 import { zipGeneric } from '../../zip_cmd.ts'
 import { crossOpts, flatten, statOp, streamOp } from '../utils.ts'
 import type { CrossResult, DispatchFn } from '../types.ts'
-import type { Files } from '../../../../../workspace/files.ts'
+import { Files } from '../../../../../workspace/files.ts'
 import { linkLocation, linkView, mountView, owedNames } from '../../../utils/links.ts'
 
 /**
@@ -50,12 +50,12 @@ export async function runZip(
         )
   const result = await zipGeneric(
     flatten(scopes),
-    { ...crossOpts(flagKwargs), ...(vfs !== undefined ? { vfs } : {}) },
+    {
+      ...crossOpts(flagKwargs),
+      vfs: vfs ?? new Files(dispatch, null, null, { ledger: false }).servedBy(null),
+    },
     {
       stream: streamOp(dispatch),
-      write: async (p, data) => {
-        await dispatch('write', p, [data])
-      },
       stat: statOp(dispatch),
       walk: relayWalkOf(dispatch, (dir: string) => owedNames(vfs, dir), 'zip', tree),
     },

@@ -1,7 +1,6 @@
 from dataclasses import dataclass
 from typing import Literal, TypeAlias
 
-from mirage.io.spool import ByteSlice
 from mirage.types import PathSpec
 
 # What a member is, which is the whole of what an archive records beyond
@@ -95,29 +94,3 @@ class Scan:
     crossings: tuple[str, ...] = ()
     problems: tuple[Problem, ...] = ()
     missing: bool = False
-
-
-@dataclass(frozen=True, slots=True)
-class ZipRecord:
-    """One member as stored: its local record, the header kept apart when
-    it was encoded here rather than copied, and its central record.
-
-    Args:
-        name (str): the member name.
-        local (ByteSlice): the local record, or just its data after
-            ``head``.
-        central (bytes): the central record, its offset not yet set.
-        head (bytes): a new member's local header.
-    """
-
-    name: str
-    local: ByteSlice
-    central: bytes
-    head: bytes = b""
-
-
-@dataclass(frozen=True, slots=True)
-class ZipArchive:
-    records: tuple[ZipRecord, ...]
-    prefix: ByteSlice
-    comment: bytes

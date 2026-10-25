@@ -220,10 +220,13 @@ export class OpenStream {
   }
 
   /** Answer the request taken last with the host's reply and the bytes it carries. */
-  respond(reply: Readonly<Record<string, util.JSONType>>, data: Uint8Array): Uint8Array {
+  respond(
+    reply: Readonly<Record<string, util.JSONType>>,
+    data: Uint8Array | readonly Uint8Array[],
+  ): Uint8Array {
     const header = encoder.encode(JSON.stringify(reply))
     return this.guard(() => {
-      for (const part of [header, data]) {
+      for (const part of [header, ...(data instanceof Uint8Array ? [data] : data)]) {
         for (let offset = 0; offset < part.byteLength; offset += this.capacity) {
           const piece = part.subarray(offset, offset + this.capacity)
           const window = this.exports.mirage_rs_input(this.handle)
@@ -301,7 +304,8 @@ export class OpenStream {
 /** What a host made of one request: the reply, the bytes it carries, and output it wrote doing it. Mirrors Python's Served. */
 export interface Served {
   readonly reply: Record<string, util.JSONType>
-  readonly data?: Uint8Array
+  /** The bytes, or the parts they come in. */
+  readonly data?: Uint8Array | readonly Uint8Array[]
   readonly output?: Uint8Array | AsyncIterable<Uint8Array> | null
 }
 

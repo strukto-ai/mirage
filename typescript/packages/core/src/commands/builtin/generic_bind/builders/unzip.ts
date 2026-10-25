@@ -12,35 +12,16 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { fileStreamOp, statOp } from '../../generic/crossmount/utils.ts'
 import { unzipGeneric } from '../../generic/unzip.ts'
 import type { CommandFn } from '../../../config.ts'
 import type { GenericCommand } from '../adapter.ts'
 import { commandFiles, resolveOrEmpty } from '../files.ts'
-import { dispatchOf } from '../../utils/links.ts'
 
+// Extraction writes wherever cwd or -d says, which need not be this mount,
+// so the dispatcher routes each path to the mount that owns it.
 const unzip: CommandFn = async (_accessor, paths, texts, ctx) => {
   const files = commandFiles(ctx, paths)
-  const resolved = await resolveOrEmpty(files, paths)
-  // Extraction writes wherever cwd or -d says, which need not be this
-  // mount, so the functions are dispatch-relayed and each path routes to the
-  // mount that owns it.
-  const dispatch = dispatchOf(ctx)
-  if (dispatch === undefined) throw new TypeError('unzip: no workspace files')
-  return unzipGeneric(
-    resolved,
-    texts,
-    ctx,
-    fileStreamOp(dispatch),
-    async (p, data) => {
-      await dispatch('write', p, [data])
-    },
-    async (p) => {
-      await dispatch('mkdir', p)
-    },
-    statOp(dispatch),
-    true,
-  )
+  return unzipGeneric(await resolveOrEmpty(files, paths), texts, ctx, files.read)
 }
 
 export const BUILDER: GenericCommand = {

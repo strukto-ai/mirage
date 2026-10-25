@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { ByteSlice } from '../../../../io/spool.ts'
 import type { PathSpec } from '../../../../types.ts'
 
 // What a member is, which is the whole of what an archive records beyond
@@ -67,20 +66,4 @@ export interface Scan {
   crossings: string[]
   problems: Problem[]
   missing: boolean
-}
-
-// One member as stored: its local record (or just its data, after `head`
-// for a member encoded here rather than copied) and its central record,
-// whose offset is not yet set. Mirrors Python's ZipRecord.
-export interface ZipRecord {
-  name: string
-  local: ByteSlice
-  central: Uint8Array
-  head?: Uint8Array
-}
-
-export interface ZipArchive {
-  records: ZipRecord[]
-  prefix: ByteSlice
-  comment: Uint8Array
 }

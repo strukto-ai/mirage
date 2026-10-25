@@ -200,6 +200,44 @@
       "flags": [
         "p"
       ]
+    },
+    {
+      "id": "unzip_reads_a_bzip2_member_in_every_mode",
+      "seq": 15100748,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(mkdir -p /data/fcA_ub && printf %s 'UEsDBC4AAAAMAIMYIlghht3W0wEAANQFAAAFAAAAYi50eHRCWmg2MUFZJlNZWJkuigAA8UgAABB/4FADeAc866KlQNSbU/VG/KhANNNBVPPSaT/1SoRR/qk9R+0qEE/1Umqb/SqbzW5Xb98z5sA8cAWIB0KBQOhALHAHjYB80AHmnAHzYB44AsQDoUCgdCAWOAPGwD5oALaIB82AeOALEA6FAoHQgFjgDxsA+aADrQoFA6EAscAeNgHzQATJkkkkWPaqq/KKq7u7u7JAAAAAAAAAHmc54qttuW221Y9skk++++++2SKumHKumHKumHKumHKumHKumHKumHKumHKumHKut73O7u6pwgAAqsVVttt4huameZm5qZm2VdHGVdHGVdHGVdHGVdHGVdHGa/ak5N6/ayqrmZmZjxsA+aAy7u79J+mVdHGVdHGVdBd0F3QXdBd0F3QXdBd1ve91u7uz0k5JJJP6TJJJ7fe970k/UAAAAAkkmVVZlZmY6EAscC7y7ux6AAAAAA3ve7u/buzsgoHQgu7y7sXJJJJJJJJJJJJJJJJJJlVWZmXmIB0KBRd+9vvST4AAAAADe97uZmexwBYgHV3d3lipJJJJIAAAAru/ffbu7v9JySSSekiSST6e973v379oAAAABQ/xdyRThQkFiZLooFBLAQIeAy4AAAAMAIMYIlghht3W0wEAANQFAAAFAAAAAAAAAAAAAACkgQAAAABiLnR4dFBLBQYAAAAAAQABADMAAAD2AQAAAAA=' | base64 -d > /data/fcA_ub/bz.zip && cd /data/fcA_ub && unzip -t bz.zip; unzip -p bz.zip | tail -n 2; unzip -v bz.zip; unzip -Z bz.zip; unzip -d o bz.zip; tail -n 1 o/b.txt; cd / && rm -r /data/fcA_ub)",
+      "expect": {
+        "exit": 0,
+        "stdout": "Archive:  bz.zip\n    testing: b.txt                    OK\nNo errors detected in compressed data of bz.zip.\n399\n400\nArchive:  bz.zip\n Length   Method    Size  Cmpr    Date    Time   CRC-32   Name\n--------  ------  ------- ---- ---------- ----- --------  ----\n    1492  BZip2       467  69% 2024-01-02 03:04 d6dd8621  b.txt\n--------          -------  ---                            -------\n    1492              467  69%                            1 file\nArchive:  bz.zip\nZip file size: 575 bytes, number of entries: 1\n-rw-r--r--  3.0 unx     1492 b- bzp2 24-Jan-02 03:04 b.txt\n1 file, 1492 bytes uncompressed, 467 bytes compressed:  68.7%\nArchive:  bz.zip\n bunzipping: o/b.txt                 \n400\n",
+        "stderr": ""
+      },
+      "flags": [
+        "t",
+        "p",
+        "v",
+        "Z",
+        "d"
+      ]
     }
   ]
 }

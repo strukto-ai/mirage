@@ -34,7 +34,7 @@ import { GitHubApiError, type GitHubTransport } from '../../../../core/github/cl
 import type { RepoRef } from '../../../../core/github/repo.ts'
 import { viewRepo } from '../../../../core/github/repo.ts'
 import { IOResult, materialize } from '../../../../io/types.ts'
-import { readZipEntries, ZipFormatError, type ZipEntry } from '../../../builtin/generic/unzip.ts'
+import { openStream, serveRequests, type RequestHost } from '../../../../rs/stream.ts'
 import {
   camel,
   ghBool,
@@ -46,6 +46,7 @@ import {
   typedOut,
 } from './accessor.ts'
 import { concat } from '../../../../utils/bytes.ts'
+import type { util } from 'zod'
 
 const RUN_FIELDS = [
   'attempt',
@@ -205,10 +206,64 @@ function quoted(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\/-]/g, '\\$&')
 }
 
+// A run's log archive read from memory by mirage-rs's unzip, with its exit
+// status: its stored names (index), or the entries it picks.
+async function unzipped(
+  archive: Uint8Array,
+  config: Record<string, util.JSONType>,
+): Promise<[number, Uint8Array]> {
+  const engine = await openStream('unzip', { archive: '', ...config })
+  // The engine reads the archive a window at a time, each answered whole.
+  const host: RequestHost = {
+    errors: { append: () => Promise.resolve() },
+    serve: (request) => {
+      if (request.op === 'fill') return Promise.resolve({ reply: { size: archive.length } })
+      if (request.op !== 'read') return Promise.resolve({ reply: {} })
+      const skip = Number(request.skip ?? 0)
+      const data = archive.subarray(skip, skip + Number(request.size ?? 0))
+      return Promise.resolve({ reply: {}, data })
+    },
+  }
+  try {
+    const out = await materialize(serveRequests(engine, host))
+    return [engine.status(), out]
+  } finally {
+    engine.close()
+  }
+}
+
+// Entries `picks` of a run's log archive, read in one pass over its
+// directory a window at a time: each frame a tag (0 a window, 1 the entry
+// whole, 2 not) and its four-byte length. Null for an entry that did not
+// decode whole.
+async function members(
+  archive: Uint8Array,
+  picks: readonly number[],
+): Promise<Map<number, Uint8Array | null>> {
+  const [, framed] = await unzipped(archive, { picks: [...picks] })
+  const view = new DataView(framed.buffer, framed.byteOffset, framed.byteLength)
+  const read = new Map<number, Uint8Array | null>()
+  let at = 0
+  for (const pick of picks) {
+    const windows: Uint8Array[] = []
+    let tag = framed[at]
+    while (tag === 0) {
+      const end = at + 5 + view.getUint32(at + 1, true)
+      windows.push(framed.subarray(at + 5, end))
+      at = end
+      tag = framed[at]
+    }
+    at += 5
+    read.set(pick, tag === 1 ? concat(windows) : null)
+  }
+  return read
+}
+
 // The archive entry gh reads for a job, or one of its steps: the first whose
 // name matches, in the archive's own order.
-function entryFor(entries: readonly ZipEntry[], pattern: RegExp): ZipEntry | undefined {
-  return entries.find((entry) => pattern.test(entry.name))
+function entryFor(names: readonly string[], pattern: RegExp): number | undefined {
+  const at = names.findIndex((name) => pattern.test(name))
+  return at < 0 ? undefined : at
 }
 
 // A log's lines as bufio.Scanner splits them: at each newline, a carriage
@@ -226,10 +281,11 @@ function logLines(data: Uint8Array): Uint8Array[] {
   return lines
 }
 
+// A job's or step's log: an archive entry by its place, or a fetch.
 interface LogSegment {
   job: string
   step: string
-  read: () => Promise<Uint8Array>
+  read: number | (() => Promise<Uint8Array>)
 }
 
 async function apiJobLog(
@@ -258,7 +314,7 @@ function logSegments(
   transport: GitHubTransport,
   ref: RepoRef,
   jobs: readonly Record<string, unknown>[],
-  entries: readonly ZipEntry[],
+  names: readonly string[],
   failedOnly: boolean,
 ): LogSegment[] {
   const segments: LogSegment[] = []
@@ -270,23 +326,23 @@ function logSegments(
     const title = textValue(job.name)
     const name = quoted(logName(title))
     const steps = records(job.steps)
-    const stepFile = (step: Record<string, unknown>): ZipEntry | undefined =>
-      entryFor(entries, new RegExp(`^${name}\\/${textValue(step.number)}_.*\\.txt$`))
+    const stepFile = (step: Record<string, unknown>): number | undefined =>
+      entryFor(names, new RegExp(`^${name}\\/${textValue(step.number)}_.*\\.txt$`))
     if (steps.some((step) => stepFile(step) !== undefined)) {
       const ordered = [...steps].sort((a, b) => Number(a.number) - Number(b.number))
       for (const step of ordered) {
         if (failedOnly && !FAILURE_STATES.has(textValue(step.conclusion))) continue
         const file = stepFile(step)
         if (file !== undefined)
-          segments.push({ job: title, step: textValue(step.name), read: file.content })
+          segments.push({ job: title, step: textValue(step.name), read: file })
       }
       continue
     }
     const file =
-      entryFor(entries, new RegExp(`^\\d+_${name}\\.txt$`)) ??
-      entryFor(entries, new RegExp(`^-\\d+_${name}\\.txt$`))
+      entryFor(names, new RegExp(`^\\d+_${name}\\.txt$`)) ??
+      entryFor(names, new RegExp(`^-\\d+_${name}\\.txt$`))
     if (file !== undefined) {
-      segments.push({ job: title, step: 'UNKNOWN STEP', read: file.content })
+      segments.push({ job: title, step: 'UNKNOWN STEP', read: file })
       continue
     }
     const id = Number(job.id)
@@ -327,18 +383,32 @@ async function runLog(
     if (!(err instanceof GitHubApiError)) throw err
     throw new Error(`failed to get run log: ${err.status === 404 ? 'log not found' : err.message}`)
   }
-  let entries: ZipEntry[]
-  try {
-    entries = readZipEntries(archive).entries
-  } catch (err) {
-    if (!(err instanceof ZipFormatError)) throw err
-    throw new Error('failed to get run log: zip: not a valid zip file')
+  const [status, index] = await unzipped(archive, { index: true })
+  if (status !== 0) throw new Error('failed to get run log: zip: not a valid zip file')
+  // Each stored name behind its two-byte length, so any byte may be in one.
+  const names: string[] = []
+  const view = new DataView(index.buffer, index.byteOffset, index.byteLength)
+  for (let at = 0; at < index.length;) {
+    const end = at + 2 + view.getUint16(at, true)
+    names.push(new TextDecoder().decode(index.subarray(at + 2, end)))
+    at = end
   }
+  const segments = logSegments(transport, ref, jobs, names, failedOnly)
+  const read = await members(
+    archive,
+    segments.flatMap((segment) => (typeof segment.read === 'number' ? [segment.read] : [])),
+  )
   const printed: Uint8Array[] = []
-  for (const segment of logSegments(transport, ref, jobs, entries, failedOnly)) {
+  for (const segment of segments) {
     let data: Uint8Array
     try {
-      data = await segment.read()
+      if (typeof segment.read === 'number') {
+        const member = read.get(segment.read) ?? null
+        if (member === null) throw new Error('zip: checksum error')
+        data = member
+      } else {
+        data = await segment.read()
+      }
     } catch (err) {
       if (!(err instanceof Error) || printed.length === 0) throw err
       throw new PartialOutputError(err.message, concat(printed))

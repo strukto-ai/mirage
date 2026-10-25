@@ -14,9 +14,11 @@
 
 from mirage.commands.builtin.generic.crossmount.types import CrossResult
 from mirage.commands.builtin.generic.crossmount.utils import (
+    flat_scopes,
     transfer_primitives,
 )
 from mirage.commands.builtin.generic.unzip import unzip_generic
+from mirage.commands.builtin.utils.operands import normalized_read
 from mirage.commands.config import Context
 from mirage.commands.spec.types import FlagValue
 from mirage.runtime.types import DispatchFn
@@ -31,11 +33,10 @@ async def run_unzip(
 ) -> CrossResult:
     """Run an unzip whose archive and -d destination span mounts.
 
-    Pure wiring: the shared generic runs on dispatch-relayed calls, so
-    the archive is read from its mount and every extracted path lands
-    on whichever mount owns it. The generic reads every flag itself, so
-    ``-v`` still lists and ``-x`` still excludes when ``-d`` names
-    another mount.
+    Pure wiring: the archive is read from its mount and every extracted
+    path lands on whichever mount owns it. The generic reads every flag
+    itself, so ``-v`` still lists and ``-x`` still excludes when ``-d``
+    names another mount.
 
     Args:
         scopes (list[PathSpec]): Path operands; the archive is first.
@@ -43,14 +44,10 @@ async def run_unzip(
         flag_kwargs (dict): Flags parsed against the shared unzip spec.
         dispatch (DispatchFn): Workspace operation dispatcher.
     """
-    prim = transfer_primitives(dispatch)
     return await unzip_generic(
-        scopes,
+        flat_scopes(scopes),
         list(text_args),
         Context(flags=flag_kwargs),
-        read_bytes=prim["read_bytes"],
-        write_bytes=prim["write"],
-        mkdir_fn=prim["mkdir"],
-        stat=prim["stat"],
-        relay=True,
+        normalized_read(transfer_primitives(dispatch)["read_bytes"]),
+        dispatch,
     )

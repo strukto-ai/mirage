@@ -1,5 +1,5 @@
 {
-  "baseline": 3073,
+  "baseline": 3029,
  "modules": {
   "vfs/ram/store": {
    "python_only": {
@@ -901,12 +901,6 @@
    },
    "typescript_only": {
     "handedOf": "TypeScript carries a call's handed stats in its keyword bag and reads them off it; Python passes them to the backend function as keywords."
-   }
-  },
-  "commands/builtin/generic/unzip": {
-   "typescript_only": {
-    "readSpooledZipEntries": "TypeScript parses ZIP central records; Python delegates indexing to stdlib zipfile.",
-    "spooledEntryContent": "Validates TypeScript ZIP metadata; Python zipfile validates its own entries."
    }
   },
   "core/box/client": {

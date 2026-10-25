@@ -14,17 +14,22 @@
 
 
 from mirage.accessor.base import Accessor
-from mirage.commands.builtin.generic.zip_cmd import zip_generic
+from mirage.commands.builtin.generic.zip_cmd import parse_flags, zip_cmd
 from mirage.commands.builtin.generic_bind.adapter import GenericCommand
 from mirage.commands.builtin.generic_bind.archive_io import walk_of
 from mirage.commands.builtin.generic_bind.files import command_files
-from mirage.commands.builtin.utils.links import dispatch_of
+from mirage.commands.builtin.utils.links import (
+    dispatch_of,
+    links_of,
+    mount_view,
+)
+from mirage.commands.builtin.utils.operands import normalized_read
 from mirage.commands.config import Context
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import PathSpec
 
 
-async def zip_cmd(
+async def zip_builder(
     accessor: Accessor,
     paths: list[PathSpec],
     texts: list[str],
@@ -33,16 +38,17 @@ async def zip_cmd(
     files = command_files(ctx, paths)
     if not paths:
         raise ValueError("zip: usage: zip archive.zip file1 [file2 ...]")
-    resolved = await files.resolve_glob(paths)
-    return await zip_generic(
-        resolved,
-        list(texts),
-        ctx,
-        files.read,
-        files.write,
-        files.stat,
-        walk_of(files, dispatch_of(ctx), "zip"),
+    return await zip_cmd(
+        await files.resolve_glob(paths),
+        stream=normalized_read(files.read),
+        dispatch=dispatch_of(ctx),
+        cwd=ctx.cwd,
+        stat=files.stat,
+        walk=walk_of(files, dispatch_of(ctx), "zip"),
+        flags=parse_flags(ctx.flags),
+        links=links_of(ctx),
+        mounts=mount_view(ctx.vfs),
     )
 
 
-BUILDER = GenericCommand("zip", zip_cmd, write=True)
+BUILDER = GenericCommand("zip", zip_builder, write=True)

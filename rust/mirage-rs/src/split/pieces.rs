@@ -42,7 +42,11 @@ impl Input {
     /// Ask for the next chunk.
     pub(super) fn pull(&mut self, io: &mut Io) {
         let open = self.open.take();
-        io.push(Request::Read { fd: self.fd, open });
+        io.push(Request::Read {
+            fd: self.fd,
+            open,
+            least: 0,
+        });
     }
 
     /// Take the host's answer to a read; a failure comes back for the run
