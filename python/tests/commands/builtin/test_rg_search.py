@@ -12,30 +12,21 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import re
-from unittest.mock import patch
 
 import pytest
 
-from mirage.commands.builtin.generic.rg import parse_flags, rg_matcher
+from mirage.commands.builtin.generic.rg import parse_flags
 from mirage.commands.builtin.rg_search import (
-    ByteCursor,
-    NonmatchStop,
     RgBinary,
     RgFlags,
     Tally,
-    expand,
-    replace_all,
-    rust_matches,
-    search_haystack,
     smart_case_folds,
     transcoded,
 )
-from mirage.commands.builtin.rg_stream import open_rg, search_input
+from mirage.commands.builtin.rg_stream import open_rg, stream_haystack
 from mirage.commands.errors import UsageError
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
-from mirage.io.async_line_iterator import AsyncLineIterator
 
 
 def _flags(**flags) -> RgFlags:
@@ -53,48 +44,18 @@ async def _search(
     tally = Tally()
     chunks = [
         c
-        async for c in search_input(
+        async for c in stream_haystack(
             _source(data),
-            open_rg(pattern, False, f)
-            if f.engine == "default"
-            else rg_matcher(pattern, False, f),
+            open_rg(pattern, False, f),
             f,
             "f",
             label,
             tally,
+            True,
+            False,
         )
     ]
     return b"".join(chunks).decode(), tally.selected
-
-
-def test_rust_matches_skip_the_empty_match_a_match_ends_at():
-    # `b*` over `abc` is empty, `b`, empty: finditer also yields the
-    # empty match right after `b`.
-    spans = [m.span() for m in rust_matches(re.compile("b*"), "abc")]
-    assert spans == [(0, 0), (1, 2), (3, 3)]
-
-
-@pytest.mark.parametrize(
-    "template, want",
-    [
-        ("<$1>", "<b>"),
-        ("<${1}>", "<b>"),
-        ("<$name>", "<b>"),
-        ("<$1x>", "<>"),
-        ("<$$>", "<$>"),
-        ("<$>", "<$>"),
-        ("<$9>", "<>"),
-    ],
-)
-def test_expand_reads_groups_as_rusts_captures_expand(template, want):
-    m = re.search("a(?P<name>b)", "ab")
-    assert m is not None
-    assert expand(template, m) == want
-
-
-def test_replace_all_reports_where_each_replacement_landed():
-    text, spans = replace_all(re.compile("o"), "foo", "XY")
-    assert (text, spans) == ("fXYXY", [(1, 3), (3, 5)])
 
 
 @pytest.mark.parametrize(
@@ -112,26 +73,6 @@ def test_replace_all_reports_where_each_replacement_landed():
 )
 def test_smart_case_folds_only_an_all_lowercase_pattern(pattern, fixed, folds):
     assert smart_case_folds(pattern, fixed) is folds
-
-
-def test_byte_cursor_counts_each_step_from_the_last():
-    cursor = ByteCursor("café abc abc")
-    assert [cursor.at(5), cursor.at(9)] == [6, 10]
-
-
-def test_nonmatch_stop_arms_after_the_first_selection():
-    stop = NonmatchStop(True, False)
-    assert not stop.armed
-    stop.select()
-    assert stop.armed
-
-
-def test_an_inverted_nonmatch_stop_passes_one_line_over():
-    stop = NonmatchStop(True, True)
-    assert not stop.passes_over()
-    stop.select()
-    assert stop.passes_over() and stop.armed
-    assert not stop.passes_over()
 
 
 @pytest.mark.asyncio
@@ -236,130 +177,6 @@ async def test_null_data_anchors_match_embedded_newlines(flags):
     assert selected
 
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "pattern",
-    ["needle", "needle|qqzzyy", "nee.le", r"\bneedle\b", "(?:needle|other)+"],
-)
-@pytest.mark.parametrize(
-    "flags",
-    [
-        {"count": True},
-        {"files_with_matches": True},
-        {},
-        {"ignore_case": True, "count": True},
-        {"ignore_case": True, "files_with_matches": True},
-        {"ignore_case": True},
-        {"word_regexp": True, "count": True},
-        {"line_regexp": True, "count": True},
-        {"null_data": True, "count": True},
-        {"null_data": True},
-    ],
-)
-async def test_block_search_skips_records(pattern, flags, monkeypatch):
-    reads = 0
-    read_until = AsyncLineIterator.read_until
-
-    async def counted(self, delimiter):
-        nonlocal reads
-        reads += 1
-        return await read_until(self, delimiter)
-
-    monkeypatch.setattr(AsyncLineIterator, "read_until", counted)
-    data = (b"abcdefg" + (b"\0" if flags.get("null_data") else b"\n")) * 40000
-    assert await _search(data, pattern, **flags) == ("", False)
-    assert reads < 50
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("size", [1, 7, 16384, 65536])
-async def test_block_search_preserves_records(size):
-    data = (
-        ("abcdefg\n" * (200 if size < 10 else 9000))
-        + "é NEEDLE\nother\n"
-        + ("abcdefg\n" * (200 if size < 10 else 9000))
-        + "needle"
-    ).encode()
-
-    async def source():
-        for at in range(0, len(data), size):
-            yield data[at : at + size]
-
-    for flags in [
-        {"line_number": True, "byte_offset": True, "ignore_case": True},
-        {"count": True, "ignore_case": True},
-        {"files_with_matches": True, "ignore_case": True},
-        {"after_context": 1, "before_context": 1, "ignore_case": True},
-        {"invert_match": True, "count": True},
-        {"stop_on_nonmatch": True, "ignore_case": True},
-    ]:
-        f = _flags(**flags)
-        pat = rg_matcher("needle|other", False, f)
-        fast, slow = Tally(), Tally()
-        actual = b"".join(
-            [
-                c
-                async for c in search_haystack(
-                    source(), pat, f, "f", None, fast
-                )
-            ]
-        )
-        with patch.object(
-            AsyncLineIterator, "skip_nonmatching_lines", return_value=(0, 0)
-        ):
-            expected = b"".join(
-                [
-                    c
-                    async for c in search_haystack(
-                        source(), pat, f, "f", None, slow
-                    )
-                ]
-            )
-        assert (actual, fast) == (expected, slow)
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "flags",
-    [
-        {},
-        {"count": True},
-        {"count_matches": True},
-        {"files_with_matches": True},
-        {"files_without_match": True},
-        {"quiet": True},
-        {"max_count": 1},
-        {"invert_match": True},
-        {"context": 2},
-        {"passthru": True},
-        {"stop_on_nonmatch": True},
-        {"null_data": True},
-        {"only_matching": True},
-        {"word_regexp": True},
-    ],
-)
-async def test_rg_prefilter_preserves_output_and_offsets(flags):
-    data = (
-        "abc\n" * 200
-        + "NEEDLE\nnone\nneedle needle\nſ\nK\nİ\nı\n"
-        + "abc\n" * 200
-        + "needle"
-    ).encode()
-    opts = dict(flags, ignore_case=True, line_number=True, byte_offset=True)
-    for pattern in [
-        "needle|qqzzyy",
-        "nee.le",
-        r"\bneedle\b",
-        "(?:needle)?",
-        "s|k|i",
-    ]:
-        with patch.object(
-            AsyncLineIterator, "skip_nonmatching_lines", return_value=(0, 0)
-        ):
-            expected = await _search(data, pattern, **opts)
-        assert await _search(data, pattern, **opts) == expected
-
-
 # ripgrep 14.1.1 through PCRE2: `rg -oP`, `-r`, `-b` and `--column`
 # report the match from its last `\K`.
 @pytest.mark.asyncio
@@ -401,11 +218,14 @@ def test_the_engine_is_the_last_one_the_line_names():
     )
 
 
-def test_auto_falls_back_to_pcre2_only_when_the_default_refuses():
-    auto = _flags(engine="auto")
-    assert rg_matcher(r"(a)\1", False, auto).search("aa")
+@pytest.mark.asyncio
+async def test_auto_falls_back_to_pcre2_only_when_the_default_refuses():
+    assert await _search(b"aa\nab\n", r"(a)\1", engine="auto") == (
+        "aa\n",
+        True,
+    )
     with pytest.raises(UsageError) as caught:
-        rg_matcher(r"(a)\1", False, _flags())
+        open_rg(r"(a)\1", False, _flags())
     assert "backreferences are not supported" in str(caught.value)
 
 

@@ -45,7 +45,7 @@ def stream_config(
     """The mirage-rs grep stream's configuration for a command line.
 
     Args:
-        f (GrepFlags): parsed flags; -P never reaches the stream.
+        f (GrepFlags): parsed flags.
         pattern (str | None): the newline-separated pattern list, None
             for a -f list of no patterns, which matches nothing.
         utf8 (bool): lines are text under a UTF-8 locale.
@@ -53,6 +53,8 @@ def stream_config(
     patterns = [] if pattern is None else encode_text(pattern).split(b"\n")
     if f.fixed_string:
         syntax = "fixed"
+    elif f.syntax is RegexSyntax.PERL:
+        syntax = "perl"
     elif f.syntax is RegexSyntax.EXTENDED:
         syntax = "extended"
     else:

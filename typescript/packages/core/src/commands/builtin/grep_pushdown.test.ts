@@ -20,7 +20,7 @@ import {
   searchTerms,
   wholeWordLiterals,
 } from './grep_pushdown.ts'
-import { compilePosixRegex } from '../../utils/posix.ts'
+import { LineRegex } from '../../rs/regex.ts'
 
 describe('classifyPattern', () => {
   it('newlines and regex are REGEX, plain text is SIMPLE, fixed is EXACT', () => {
@@ -86,12 +86,9 @@ describe('searchTerms', () => {
     // word with s or k is dropped when case folds by Unicode (the long s
     // folds to s), and a mount's folding of a non-ASCII literal is not
     // trusted.
-    const matcher = new RegExp(pattern.replaceAll('\n', '|'), flags)
-    expect(searchTerms(pattern, matcher, false, w, false, i)).toEqual(expected)
-  })
-  it("asks grep's ASCII-folding words under a UTF-8 locale", () => {
-    expect(
-      searchTerms('sun', compilePosixRegex('sun', 'i', true), false, true, false, true),
-    ).toEqual([['sun'], true])
+    const matcher = new LineRegex(pattern.split('\n'), 'extended', i, flags.includes('u'))
+    expect(searchTerms(pattern, matcher.needles, matcher.unicodeFolds, false, w, false, i)).toEqual(
+      expected,
+    )
   })
 })

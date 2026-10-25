@@ -14,11 +14,23 @@ const WORK: usize = 16 * 1024;
 const INPUT_LIMIT: usize = 96 * 1024;
 const BASE64: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
+/// Which regex engine runs the patterns: Rust's, PCRE2's (-P), or Rust's
+/// with PCRE2 taking any pattern it refuses (--engine auto).
+#[derive(Deserialize, Clone, Copy, PartialEq, Eq, Default)]
+#[serde(rename_all = "lowercase")]
+enum Engine {
+    #[default]
+    Default,
+    Pcre2,
+    Auto,
+}
+
 #[derive(Deserialize)]
 #[serde(default, deny_unknown_fields)]
 struct Config {
     pattern: String,
     never_match: bool,
+    engine: Engine,
     ignore_case: bool,
     smart_case: bool,
     whole_word: bool,
@@ -81,6 +93,7 @@ impl Default for Config {
         Self {
             pattern: String::new(),
             never_match: false,
+            engine: Engine::Default,
             ignore_case: false,
             smart_case: false,
             whole_word: false,
@@ -190,6 +203,9 @@ struct Tally {
     matched_lines: u64,
     searched: u64,
     nul: Option<u64>,
+    /// What ended the search early, in ripgrep's words: a -P search that
+    /// gave up at the backtracking limit.
+    error: Option<&'static str>,
 }
 
 #[derive(Clone)]
@@ -2186,7 +2202,16 @@ pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
         regex_size_limit: config.regex_size_limit,
         dfa_size_limit: config.dfa_size_limit,
     };
-    let program = Program::with_options(&patterns, options)?;
+    let program = match config.engine {
+        _ if patterns.is_empty() => Program::with_options(&patterns, options)?,
+        Engine::Default => Program::with_options(&patterns, options)?,
+        Engine::Pcre2 => Program::pcre(&pcre_patterns(&patterns, options.fixed), options)?,
+        Engine::Auto => match Program::with_options(&patterns, options) {
+            Ok(program) => program,
+            Err(refused) => Program::pcre(&pcre_patterns(&patterns, options.fixed), options)
+                .map_err(|_| refused)?,
+        },
+    };
     config.multiline = program.is_multiline();
     config.record_context = program.uses_record_context();
     if config.json {
@@ -2202,6 +2227,27 @@ pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
         program,
         input: None,
     }))
+}
+
+/// The patterns PCRE2 is handed: under -F each literal escaped, every
+/// ASCII character but a letter or digit behind a backslash.
+fn pcre_patterns(patterns: &[String], fixed: bool) -> Vec<String> {
+    if !fixed {
+        return patterns.to_vec();
+    }
+    patterns
+        .iter()
+        .map(|pattern| {
+            let mut out = String::with_capacity(pattern.len());
+            for ch in pattern.chars() {
+                if ch.is_ascii() && !ch.is_ascii_alphanumeric() {
+                    out.push('\\');
+                }
+                out.push(ch);
+            }
+            out
+        })
+        .collect()
 }
 
 impl Rg {
@@ -2280,6 +2326,11 @@ impl Rg {
                 }
                 budget -= 1;
                 let mut search = input.search.take().unwrap();
+                if search.exceeded() {
+                    input.tally.error = Some("PCRE2: error matching: match limit exceeded");
+                    input.done = true;
+                    continue;
+                }
                 let mut matches = search.take_matches();
                 let mut data = search.take_haystack();
                 let mut cr_selected = false;
@@ -2754,6 +2805,64 @@ mod tests {
         let mut metadata = Vec::new();
         stream.metadata(&mut metadata);
         (out, serde_json::from_slice(&metadata).unwrap(), calls)
+    }
+
+    #[test]
+    fn pcre2_prints_keep_trimmed_matches_and_groups() {
+        let (out, metadata, _) = run(
+            b"id=42 id=7\nnone\n",
+            json!({"pattern":"id=\\K(?<n>\\d)(\\d)?","engine":"pcre2","only_matching":true,
+                   "replace":"[$n|$2]"}),
+        );
+        assert_eq!(out, b"[4|2]\n[7|]\n");
+        assert_eq!(metadata["selected"], true);
+    }
+
+    #[test]
+    fn pcre2_wraps_the_list_for_word_and_line() {
+        let word = json!({"pattern":"ab\nx","engine":"pcre2","whole_word":true});
+        assert_eq!(run(b"ab\nabc\nx y\n", word).0, b"ab\nx y\n");
+        let line = json!({"pattern":"a|ab","engine":"pcre2","line_regexp":true});
+        assert_eq!(run(b"ab\nabc\n", line).0, b"ab\n");
+        let fixed = json!({"pattern":"a.b","engine":"pcre2","fixed_string":true});
+        assert_eq!(run(b"axb\na.b\n", fixed).0, b"a.b\n");
+    }
+
+    #[test]
+    fn pcre2_refusals_count_into_the_joined_pattern() {
+        let err = open(br#"{"pattern":"a(","engine":"pcre2"}"#).err().unwrap();
+        assert_eq!(
+            err.to_string(),
+            "PCRE2: error compiling pattern at offset 6: missing closing parenthesis"
+        );
+    }
+
+    #[test]
+    fn auto_takes_pcre2_only_for_what_the_default_engine_refuses() {
+        let behind = json!({"pattern":"(?<=a)b","engine":"auto","only_matching":true});
+        assert_eq!(run(b"ab cb\n", behind).0, b"b\n");
+        let plain = json!({"pattern":"a+","engine":"auto","only_matching":true});
+        assert_eq!(run(b"caab\n", plain).0, b"aa\n");
+        assert!(open(br#"{"pattern":"(","engine":"auto"}"#).is_err());
+    }
+
+    #[test]
+    fn pcre2_ends_the_input_where_a_search_gives_up() {
+        let mut data = vec![b'a'; 40];
+        data.extend_from_slice(b"xc\nok\n");
+        let (out, metadata, _) = run(&data, json!({"pattern":"^(a|a)+\\1c|^ok","engine":"pcre2"}));
+        assert_eq!(out, b"");
+        assert_eq!(
+            metadata["error"],
+            "PCRE2: error matching: match limit exceeded"
+        );
+    }
+
+    #[test]
+    fn pcre2_multiline_spans_lines() {
+        let config =
+            json!({"pattern":"a\\nb","engine":"pcre2","multiline":true,"only_matching":true});
+        assert_eq!(run(b"xa\nb\n", config).0, b"a\nb\n");
     }
 
     #[test]

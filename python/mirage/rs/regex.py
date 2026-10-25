@@ -29,7 +29,7 @@ from mirage.types import JsonValue
 Span: TypeAlias = tuple[int, int]
 Groups: TypeAlias = list[Span | None]
 PosixDialect: TypeAlias = Literal["sed", "posix"]
-LineSyntax: TypeAlias = Literal["basic", "extended", "fixed"]
+LineSyntax: TypeAlias = Literal["basic", "extended", "fixed", "perl"]
 
 _UNSET = 0xFFFFFFFF
 _SPECIAL = frozenset("\\.[]()*+?{}|^$")
@@ -252,7 +252,8 @@ class LineRegex:
 
     Args:
         patterns (Sequence[str]): the patterns as byte views.
-        syntax (LineSyntax): ``basic``, ``extended`` or ``fixed``.
+        syntax (LineSyntax): ``basic``, ``extended``, ``fixed`` or
+            ``perl`` (one PCRE2 pattern).
         ignore_case (bool): -i.
         utf8 (bool): the lines are text under a UTF-8 locale.
         word (bool): -w.

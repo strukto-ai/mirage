@@ -4,6 +4,7 @@ import pytest
 
 from mirage.commands.builtin import grep_pushdown
 from mirage.commands.builtin.constants import PatternType
+from mirage.rs.regex import LineRegex
 
 
 def test_classify_pattern_newline_list_is_regex():
@@ -86,8 +87,15 @@ def test_search_terms_ask_words_or_the_text_every_match_holds(
     # needle or word with s, k or i is dropped when case folds by Unicode
     # (the long s folds to s), and a mount's folding of a non-ASCII
     # literal is not trusted.
-    matcher = re.compile(pattern.replace("\n", "|"), flags)
+    matcher = LineRegex(
+        pattern.split("\n"),
+        "extended",
+        ignore_case=i,
+        utf8=not flags & re.ASCII,
+    )
     assert (
-        grep_pushdown.search_terms(pattern, matcher, False, w, False, i)
+        grep_pushdown.search_terms(
+            pattern, matcher.needles, matcher.unicode_folds, False, w, False, i
+        )
         == expected
     )

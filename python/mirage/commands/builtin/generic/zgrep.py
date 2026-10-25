@@ -1,4 +1,3 @@
-import re
 from collections.abc import AsyncIterator, Mapping, Sequence
 from dataclasses import dataclass
 from functools import partial
@@ -8,7 +7,6 @@ from mirage.commands.builtin.generic.grep import listing_mode, max_count
 from mirage.commands.builtin.grep_binary import valid_utf8
 from mirage.commands.builtin.grep_offsets import prefix_of
 from mirage.commands.builtin.grep_pattern import (
-    NEVER_MATCH,
     compile_pattern,
     line_pieces,
     line_selected,
@@ -31,6 +29,7 @@ from mirage.commands.spec.types import FlagValue
 from mirage.io.async_line_iterator import AsyncLineIterator
 from mirage.io.stream import OutputStream, close_quietly
 from mirage.io.types import ByteSource, IOResult, materialize
+from mirage.rs.regex import LineRegex
 from mirage.shell.bytes import byte_view, encode_text, text_view
 from mirage.types import PathSpec, PolymorphicReadFn, StatFn
 
@@ -125,7 +124,7 @@ async def zgrep_generic(
     compiled = (
         None
         if f.max_count == 0
-        else re.compile(NEVER_MATCH)
+        else LineRegex([], "basic", utf8=utf8)
         if never_match
         else compile_pattern(
             byte_view(pattern, utf8),

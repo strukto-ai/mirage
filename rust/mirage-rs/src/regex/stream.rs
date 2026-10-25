@@ -138,7 +138,10 @@ pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
                 extents: true,
             };
             let compiled = Regex::compile(&patterns, &options).map_err(StreamError::new)?;
-            let needles = line_needles(&patterns, syntax, ignore_case, utf8);
+            let needles = match compiled.regex.perl_regular() {
+                Some(regular) => super::perl_needles(regular, ignore_case, utf8),
+                None => line_needles(&patterns, syntax, ignore_case, utf8),
+            };
             Matcher::Lines {
                 regex: Box::new(compiled.regex),
                 warnings: compiled.warnings,
@@ -363,6 +366,25 @@ mod tests {
             String::from_utf8(meta)
                 .unwrap()
                 .contains(r#""needles":["ab","abcd","x"]"#)
+        );
+    }
+
+    #[test]
+    fn perl_lines_select_and_find_needles_past_their_assertions() {
+        let mut stream = open(
+            br#"{"mode":"lines","patterns":["(?<=id=)value\\d+|key=\\Kvalue"],"syntax":"perl"}"#,
+        )
+        .unwrap();
+        assert_eq!(ask(stream.as_mut(), r#"{"op":"test"}"#, b"id=value1"), [1]);
+        assert_eq!(ask(stream.as_mut(), r#"{"op":"test"}"#, b"value1"), [0]);
+        let out = ask(stream.as_mut(), r#"{"op":"extents"}"#, b"key=value");
+        assert_eq!(words(&out), [4, 9]);
+        let mut meta = Vec::new();
+        stream.metadata(&mut meta);
+        assert!(
+            String::from_utf8(meta)
+                .unwrap()
+                .contains(r#""needles":["value","key=value"]"#)
         );
     }
 }

@@ -15,11 +15,11 @@
 import { byteView, decodeText, encodeText, textView, utf8Locale } from '../../../shell/bytes.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
+import { LineRegex } from '../../../rs/regex.ts'
 import { IOResult, materialize } from '../../../io/types.ts'
 import type { PathSpec, StatFn } from '../../../types.ts'
 import type { CommandFnResult, Context } from '../../config.ts'
 import {
-  NEVER_MATCH,
   compilePattern,
   linePieces,
   lineSelected,
@@ -133,7 +133,7 @@ export async function zgrepGeneric(
     maxCount === 0
       ? null
       : neverMatch
-        ? new RegExp(NEVER_MATCH)
+        ? new LineRegex([], 'basic', false, utf8)
         : compilePattern(
             byteView(rawPattern, utf8),
             parsed.ignoreCase,

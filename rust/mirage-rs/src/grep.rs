@@ -159,6 +159,9 @@ struct Input {
     after_until: u64,
     before: VecDeque<Held>,
     notified: bool,
+    /// A -P search gave up at the backtracking limit: the input ends
+    /// there and exits 2.
+    failed: bool,
     stop: Stop,
     /// A scan that ran out of steps, which `drain` goes on with.
     scan: Option<Scan>,
@@ -523,6 +526,19 @@ impl Grep {
         input.offset += wide(until - from);
     }
 
+    /// End the input where a -P search gave up, in GNU grep's words.
+    fn give_up(&mut self) {
+        let Some(input) = self.input.as_mut() else {
+            return;
+        };
+        self.stderr.extend_from_slice(b"grep: ");
+        self.stderr.extend_from_slice(&input.label);
+        self.stderr
+            .extend_from_slice(b": exceeded PCRE's backtracking limit\n");
+        input.failed = true;
+        input.stop = Stop::Return;
+    }
+
     fn reading(&self) -> bool {
         self.input
             .as_ref()
@@ -560,6 +576,9 @@ impl Grep {
             match found {
                 Step::Paused => return false,
                 Step::Done(None) => {
+                    if self.regex.exceeded() {
+                        self.give_up();
+                    }
                     self.spend(matches.end - at);
                     return true;
                 }
@@ -627,6 +646,10 @@ impl Grep {
                     match self.regex.matches(hay, start, end, &mut self.budget) {
                         Step::Paused => return false,
                         Step::Done(true) => break Some((start, end)),
+                        Step::Done(false) if self.regex.exceeded() => {
+                            self.give_up();
+                            return true;
+                        }
                         Step::Done(false) => {
                             self.spend(end + 1 - start);
                             scan.test = end + 1;
@@ -757,6 +780,7 @@ impl Stream for Grep {
             after_until: 0,
             before: VecDeque::new(),
             notified: false,
+            failed: false,
             stop,
             scan: None,
             finishing: false,
@@ -845,7 +869,10 @@ impl Stream for Grep {
     }
 
     fn status(&self) -> i32 {
-        i32::from(self.input.as_ref().is_none_or(|input| input.count == 0))
+        match &self.input {
+            Some(input) if input.failed => 2,
+            input => i32::from(input.as_ref().is_none_or(|input| input.count == 0)),
+        }
     }
 
     fn take_stderr(&mut self, err: &mut Vec<u8>) {
@@ -880,6 +907,51 @@ mod tests {
         stream.take_stderr(&mut err);
         let text = |bytes: Vec<u8>| String::from_utf8_lossy(&bytes).into_owned();
         (text(out), text(err), stream.status())
+    }
+
+    #[test]
+    fn perl_patterns_print_their_keep_trimmed_matches() {
+        let config = r#"{"patterns":["id=\\K\\d+"],"syntax":"perl","only_matching":true}"#;
+        let (out, _, status) = grep(config, &[b"id=42 id=7\nnone\n"]);
+        assert_eq!(out, "42\n7\n");
+        assert_eq!(status, 0);
+    }
+
+    #[test]
+    fn perl_word_and_line_wrap_the_pattern_as_gnu_does() {
+        let word = r#"{"patterns":["ab"],"syntax":"perl","word":true}"#;
+        assert_eq!(grep(word, &[b"ab\nabc\nx ab y\n"]).0, "ab\nx ab y\n");
+        let line = r#"{"patterns":["a|ab"],"syntax":"perl","line":true}"#;
+        assert_eq!(grep(line, &[b"ab\nabc\n"]).0, "ab\n");
+    }
+
+    #[test]
+    fn perl_takes_one_pattern_and_refuses_in_pcre2s_words() {
+        let two = r#"{"patterns":["a","b"],"syntax":"perl"}"#;
+        assert_eq!(
+            open("grep", two.as_bytes())
+                .err()
+                .map(|err| err.to_string()),
+            Some("the -P option only supports a single pattern".to_string())
+        );
+        let bad = r#"{"patterns":["a("],"syntax":"perl"}"#;
+        assert_eq!(
+            open("grep", bad.as_bytes())
+                .err()
+                .map(|err| err.to_string()),
+            Some("missing closing parenthesis".to_string())
+        );
+    }
+
+    #[test]
+    fn perl_ends_the_input_where_a_search_gives_up() {
+        let config = r#"{"patterns":["^(a|a)+\\1c|^ok"],"syntax":"perl"}"#;
+        let mut hay = vec![b'a'; 40];
+        hay.extend_from_slice(b"xc\nok\n");
+        let (out, err, status) = grep(config, &[&hay]);
+        assert_eq!(out, "");
+        assert_eq!(err, "grep: in: exceeded PCRE's backtracking limit\n");
+        assert_eq!(status, 2);
     }
 
     #[test]

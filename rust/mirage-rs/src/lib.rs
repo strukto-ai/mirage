@@ -23,6 +23,7 @@ pub mod nfs;
 mod nl;
 mod numfmt;
 mod paste;
+mod pcre;
 mod printf;
 mod records;
 mod reflow;

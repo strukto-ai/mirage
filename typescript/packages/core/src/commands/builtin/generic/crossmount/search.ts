@@ -21,7 +21,6 @@ import { filenameMode, lineWarnings, parseFlags } from '../grep.ts'
 import {
   labelFlags,
   parseFlags as parseRgFlags,
-  rgMatcher,
   walkFilter,
   filtersFiles,
   haystacks,
@@ -32,7 +31,8 @@ import {
   sortHaystacks,
 } from '../rg.ts'
 import type { FlagSet } from '../../grep_binary.ts'
-import { patternArg, compilePattern, type LineMatcher } from '../../grep_pattern.ts'
+import { patternArg, compilePattern } from '../../grep_pattern.ts'
+import type { LineRegex } from '../../../../rs/regex.ts'
 import { dirAdmitted, fileAdmitted } from '../../grep_select.ts'
 import { isStdin, resolveSource } from '../../utils/stream.ts'
 import { BINARY_EXTENSIONS, getExtension } from '../../../../utils/filetype.ts'
@@ -101,7 +101,7 @@ export async function runSearch(
           filtersFiles(rg) ||
           ignores?.empty === false)))
   if (rg?.typeList) return runSingle(name, paths.slice(0, 1), [...texts], bag)
-  let matcher: LineMatcher | null = null
+  let matcher: LineRegex | null = null
   if (grep !== null) {
     const pattern = patternArg(texts, view)
     if (pattern !== null)
@@ -118,10 +118,8 @@ export async function runSearch(
   if (rg !== null && !rg.listFiles) {
     const pattern = patternArg(texts, view)
     if (pattern !== null) {
-      if (rg.engine === 'default') {
-        const program = await openRg(pattern, false, rg)
-        program.stream.close()
-      } else rgMatcher(pattern, false, rg)
+      const program = await openRg(pattern, false, rg)
+      program.stream.close()
     }
   }
   const quiet = grep?.quiet ?? rg?.quiet ?? false
@@ -340,21 +338,13 @@ async function oneFooter(
   }
   if (!found) return [parts, new Uint8Array()]
   const total = (performance.now() - started) / 1000
-  if (summary)
-    return [
-      parts,
-      f.engine === 'default'
-        ? await formatTotals(totals, 'summary', total)
-        : totals.summaryRecord(total),
-    ]
+  if (summary) return [parts, await formatTotals(totals, 'summary', total)]
   const printed = parts.some((d) => d.length > 0)
   return [
     parts,
     concat([
       blank && printed ? encodeText('\n') : new Uint8Array(),
-      f.engine === 'default'
-        ? await formatTotals(totals, 'stats', total)
-        : totals.statsBlock(total),
+      await formatTotals(totals, 'stats', total),
     ]),
   ]
 }

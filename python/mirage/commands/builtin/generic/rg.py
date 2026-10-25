@@ -11,11 +11,7 @@ from collections.abc import (
 from functools import partial
 
 from mirage.commands.builtin.constants import UINTMAX
-from mirage.commands.builtin.grep_pattern import (
-    NEVER_MATCH,
-    resolve_pattern,
-    rust_escape,
-)
+from mirage.commands.builtin.grep_pattern import resolve_pattern
 from mirage.commands.builtin.grep_scan import exit_code_for
 from mirage.commands.builtin.rg_filetypes import FileTypes, type_listing
 from mirage.commands.builtin.rg_glob import (
@@ -37,19 +33,15 @@ from mirage.commands.builtin.rg_search import (
     RgFlags,
     Tally,
     Totals,
-    json_line,
-    json_text,
     prints_context,
     record_end,
-    smart_case_folds,
 )
 from mirage.commands.builtin.rg_stream import (
-    RgPattern,
     RgProgram,
     format_output,
     latin1,
     open_rg,
-    search_input,
+    stream_haystack,
     totals_config,
 )
 from mirage.commands.builtin.utils.constants import STDIN_OPERAND
@@ -61,13 +53,6 @@ from mirage.commands.builtin.utils.links import (
     mounts_of,
 )
 from mirage.commands.builtin.utils.output import format_records
-from mirage.commands.builtin.utils.pcre import PcreError, translate_pcre
-from mirage.commands.builtin.utils.rust_regex import (
-    RustRegexError,
-    translate_rust,
-    whole_line,
-    whole_word,
-)
 from mirage.commands.builtin.utils.stream import is_stdin, stdin_stream
 from mirage.commands.builtin.utils.wrap import (
     call_readdir,
@@ -81,7 +66,6 @@ from mirage.commands.errors import UsageError, WalkLimitError
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagBag, FlagView
 from mirage.commands.spec.types import FlagValue
-from mirage.concurrency.worker import Worker
 from mirage.errors.constants import FS_ERRORS, WALK_ERRORS
 from mirage.errors.fs import walk_refusal
 from mirage.io.stream import close_quietly, yield_bytes
@@ -103,7 +87,6 @@ GZIP_RULE = "-" * 79
 # The status a line answers for a command it cannot find, which ripgrep
 # reports as a --pre command that could not start.
 COMMAND_NOT_FOUND = 127
-NEWLINE_REFUSAL = "rg: a newline in the pattern requires --multiline (-U)"
 # ripgrep's own words for a line with no pattern, exit 2 (14.1.1).
 RG_NO_PATTERN = "rg: ripgrep requires at least one pattern to execute a search"
 # What ripgrep says when a line that named no path searched nothing,
@@ -847,142 +830,6 @@ def engine_flag(fl: FlagView) -> str:
     return value
 
 
-def rust_matcher(
-    patterns: list[str], fold: bool, f: RgFlags
-) -> re.Pattern[str]:
-    """The default engine's matcher, or its refusal in ripgrep's words.
-
-    Args:
-        patterns (list[str]): the patterns, escaped under -F.
-        fold (bool): case-insensitive.
-        f (RgFlags): the parsed flags.
-
-    Raises:
-        UsageError: regex-syntax refuses the pattern.
-    """
-    lines = f.null_data or f.multiline
-    try:
-        translated = translate_rust(
-            patterns,
-            fold,
-            lines,
-            f.unicode,
-            f.multiline and f.multiline_dotall,
-            f.multiline and f.crlf,
-        )
-    except RustRegexError as exc:
-        raise UsageError(f"rg: {exc}") from exc
-    if translated.newline and not lines:
-        raise UsageError(NEWLINE_REFUSAL)
-    source = translated.source
-    if f.line_regexp:
-        source = whole_line(source, lines, f.multiline and f.crlf)
-    elif f.whole_word:
-        source = whole_word(source, f.unicode)
-    return re.compile(source, re.IGNORECASE if translated.ignore_case else 0)
-
-
-def pcre_matcher(
-    patterns: list[str], fold: bool, f: RgFlags
-) -> re.Pattern[str]:
-    """The PCRE2 engine's matcher, or its refusal in ripgrep's words.
-
-    ripgrep hands PCRE2 the list joined as ``(?:a)|(?:b)``, wrapped for
-    -w and -x, and the offset in its refusal counts into that string.
-
-    Args:
-        patterns (list[str]): the patterns, escaped under -F.
-        fold (bool): case-insensitive.
-        f (RgFlags): the parsed flags.
-
-    Raises:
-        UsageError: PCRE2 refuses the pattern.
-    """
-    display = "|".join(f"(?:{p})" for p in patterns)
-    if f.line_regexp:
-        display = f"(?m:^)(?:{display})(?m:$)"
-    elif f.whole_word:
-        display = f"(?<!\\w)(?:{display})(?!\\w)"
-    try:
-        translated = translate_pcre(
-            display,
-            f.unicode,
-            fold,
-            f.null_data or f.multiline,
-            f.multiline and f.multiline_dotall,
-            f.crlf and f.multiline,
-        )
-    except PcreError as exc:
-        raise UsageError(
-            f"rg: PCRE2: error compiling pattern at offset "
-            f"{exc.offset}: {exc.message}"
-        ) from exc
-    flags = re.IGNORECASE if translated.ignore_case else 0
-    if not f.unicode:
-        flags |= re.ASCII
-    return re.compile(translated.source, flags)
-
-
-def rg_matcher(pattern: str, never_match: bool, f: RgFlags) -> re.Pattern[str]:
-    """The pattern list compiled the way the flags and engine ask.
-
-    -w and -x, whichever the line gave last, bound the whole list: -x to
-    the line, -w to ripgrep's half word boundaries (no word character
-    just before the match or just after it, which ``\\b`` would also
-    demand inside it). -S folds case only when the pattern is all
-    lowercase. ``auto`` runs the default engine and falls back to PCRE2
-    only when that refuses the pattern.
-
-    Args:
-        pattern (str): the newline-joined pattern list.
-        never_match (bool): the zero-pattern sentinel from
-            ``resolve_pattern``; it is a regex, so it suppresses -F.
-        f (RgFlags): the parsed flags.
-    """
-    if never_match:
-        return re.compile(NEVER_MATCH)
-    fold = folds_case(pattern, f.fixed_string, f)
-    parts = pattern.split("\n")
-    pcre = f.engine == "pcre2"
-    if f.fixed_string:
-        parts = [pcre_escape(p) if pcre else rust_escape(p) for p in parts]
-    if pcre:
-        return pcre_matcher(parts, fold, f)
-    if f.engine != "auto":
-        return rust_matcher(parts, fold, f)
-    try:
-        return rust_matcher(parts, fold, f)
-    except UsageError as refused:
-        try:
-            return pcre_matcher(parts, fold, f)
-        except UsageError as also:
-            logger.debug("rg --engine auto: PCRE2 refused too: %s", also)
-            raise refused from None
-
-
-def pcre_escape(text: str) -> str:
-    """A literal as a PCRE2 pattern.
-
-    Args:
-        text (str): the literal.
-    """
-    return "".join(
-        "\\" + ch if ch.isascii() and not ch.isalnum() else ch for ch in text
-    )
-
-
-def folds_case(pattern: str, fixed: bool, f: RgFlags) -> bool:
-    """Whether the search ignores case: -i, or -S over a pattern with no
-    uppercase literal in it.
-
-    Args:
-        pattern (str): the newline-joined pattern list.
-        fixed (bool): the patterns are literals (-F).
-        f (RgFlags): the parsed flags.
-    """
-    return f.ignore_case or (f.smart_case and smart_case_folds(pattern, fixed))
-
-
 def walk_filter(
     f: RgFlags,
     types: FileTypes | None = None,
@@ -1159,7 +1006,7 @@ async def rg_generic(
     walk = walk_filter(
         f, types, await ignore_rules(fl, dispatch_of(ctx), notes)
     )
-    pat: RgPattern | None = None
+    pat: RgProgram | None = None
     if not f.list_files:
         pattern, never_match = await resolve_pattern(
             texts,
@@ -1167,16 +1014,12 @@ async def rg_generic(
             operand_stream,
             RG_NO_PATTERN,
         )
-        pat = (
-            open_rg(
-                pattern,
-                never_match,
-                f,
-                size_flag(fl, "regex_size_limit"),
-                size_flag(fl, "dfa_size_limit"),
-            )
-            if f.engine == "default"
-            else rg_matcher(pattern, never_match, f)
+        pat = open_rg(
+            pattern,
+            never_match,
+            f,
+            size_flag(fl, "regex_size_limit"),
+            size_flag(fl, "dfa_size_limit"),
         )
 
     if not paths:
@@ -1302,7 +1145,7 @@ async def _replay(found: list[Haystack]) -> AsyncIterator[Haystack]:
 
 async def _search_single(
     p: PathSpec,
-    pat: RgPattern,
+    pat: RgProgram,
     f: RgFlags,
     st: Callable[[str], Awaitable[FileStat]],
     rd: Callable[[str], Awaitable[list[str]]],
@@ -1313,7 +1156,7 @@ async def _search_single(
 
     Args:
         p (PathSpec): the operand.
-        pat (re.Pattern[str]): the compiled pattern.
+        pat (RgProgram): the compiled pattern.
         f (RgFlags): the parsed flags.
         st (Callable): the wrapped stat.
         rd (Callable): the wrapped readdir.
@@ -1341,14 +1184,15 @@ async def _search_single(
     io = IOResult(exit_code=1)
     tally = Tally()
     return _settled(
-        search_input(
-            operand_stream(p), pat, f, name, label, tally, pipe=is_stdin(p)
+        stream_haystack(
+            operand_stream(p), pat, f, name, label, tally, True, is_stdin(p)
         ),
         f,
         label,
         tally,
         io,
         p.raw_path,
+        name,
     ), io
 
 
@@ -1371,6 +1215,7 @@ async def _settled(
     tally: Tally,
     io: IOResult,
     shown: str,
+    name: str,
 ) -> AsyncIterator[bytes]:
     """One streamed haystack's output, headed when --heading names it,
     with the exit status settled however the output ends.
@@ -1382,6 +1227,8 @@ async def _settled(
         tally (Tally): what the search selected.
         io (IOResult): receives the exit status.
         shown (str): the operand as typed, which a failed read names.
+        name (str): the haystack as rg prints it, which a search that
+            gave up names.
     """
     printed = failed = False
     try:
@@ -1404,6 +1251,12 @@ async def _settled(
         io.exit_code = 2
     finally:
         await close_quietly(chunks)
+        if tally.error is not None and not failed:
+            # A -P search that gave up ends the file with PCRE2's error.
+            failed = True
+            if not f.no_messages:
+                io.stderr = f"rg: {name}: {tally.error}\n".encode()
+            io.exit_code = 2
         if not failed:
             listed = printed if f.files_without_match and not f.quiet else None
             selected = tally.selected if listed is None else listed
@@ -1674,7 +1527,7 @@ async def preprocessed(
 async def _search_all(
     found: AsyncIterator[Haystack],
     paths: list[PathSpec],
-    pat: RgPattern,
+    pat: RgProgram,
     f: RgFlags,
     operand_stream: Callable[[PathSpec], AsyncIterator[bytes]],
     warnings: list[str],
@@ -1695,7 +1548,7 @@ async def _search_all(
         found (AsyncIterator[Haystack]): the haystacks, closed with the
             output.
         paths (list[PathSpec]): the operands.
-        pat (re.Pattern[str]): the compiled pattern.
+        pat (RgProgram): the compiled pattern.
         f (RgFlags): the parsed flags.
         operand_stream (Callable): each file's reader, stdin's for `-`.
         warnings (list[str]): collects what could not be read.
@@ -1717,7 +1570,6 @@ async def _search_all(
     searched = 0
     records = json_summary(f)
     totals = Totals()
-    worker = None if f.engine == "default" else Worker()
     started = time.perf_counter()
     try:
         async for h in found:
@@ -1765,16 +1617,8 @@ async def _search_all(
                     and not stdin
                 ):
                     source = _up_to_damage(gunzip_stream(source), faults)
-                matches = search_input(
-                    source,
-                    pat,
-                    f,
-                    name,
-                    label,
-                    tally,
-                    not walked,
-                    stdin,
-                    worker,
+                matches = stream_haystack(
+                    source, pat, f, name, label, tally, not walked, stdin
                 )
                 try:
                     async for c in matches:
@@ -1816,22 +1660,15 @@ async def _search_all(
                 damaged = True
                 if f.count_only or f.count_matches or f.files_without_match:
                     chunks.clear()
+            if tally.error is not None:
+                warnings.append(f"rg: {name}: {tally.error}")
             elapsed = time.perf_counter() - began
             selected = selected or tally.selected
             skipped = skipped or tally.skipped
             if records:
                 if chunks:
-                    begin = (
-                        format_output(
-                            pat, {"kind": "begin", "name": latin1(name)}
-                        )
-                        if isinstance(pat, RgProgram)
-                        else json_line(
-                            {
-                                "type": "begin",
-                                "data": {"path": json_text(name)},
-                            }
-                        )
+                    begin = format_output(
+                        pat, {"kind": "begin", "name": latin1(name)}
                     )
                     sent = len(begin) + sum(len(c) for c in chunks)
                     yield begin
@@ -1839,23 +1676,19 @@ async def _search_all(
                         yield chunk
                     if not damaged:
                         totals.add(tally, sent, elapsed)
-                        yield (
-                            format_output(
-                                pat,
-                                {
-                                    "kind": "end",
-                                    "name": latin1(name),
-                                    "nul": tally.nul,
-                                    "selected": tally.selected,
-                                    "matches": tally.matches,
-                                    "matched_lines": tally.matched_lines,
-                                    "searched": tally.searched,
-                                    "printed": sent,
-                                    "elapsed": elapsed,
-                                },
-                            )
-                            if isinstance(pat, RgProgram)
-                            else totals.end_record(name, tally, sent, elapsed)
+                        yield format_output(
+                            pat,
+                            {
+                                "kind": "end",
+                                "name": latin1(name),
+                                "nul": tally.nul,
+                                "selected": tally.selected,
+                                "matches": tally.matches,
+                                "matched_lines": tally.matched_lines,
+                                "searched": tally.searched,
+                                "printed": sent,
+                                "elapsed": elapsed,
+                            },
                         )
                 elif f.quiet and tally.selected and not damaged:
                     totals.add(tally, 0, elapsed)
@@ -1883,39 +1716,29 @@ async def _search_all(
             if f.quiet and tally.selected and not (f.stats or f.json):
                 break
         if records:
-            yield (
-                format_output(
-                    pat,
-                    {
-                        "kind": "summary",
-                        "totals": totals_config(totals),
-                        "total": time.perf_counter() - started,
-                    },
-                )
-                if isinstance(pat, RgProgram)
-                else totals.summary_record(time.perf_counter() - started)
+            yield format_output(
+                pat,
+                {
+                    "kind": "summary",
+                    "totals": totals_config(totals),
+                    "total": time.perf_counter() - started,
+                },
             )
         elif f.stats:
             # ripgrep's parallel searcher gives the last --heading group its
             # blank line too; one thread, as for a lone file, does not.
             if printed and headed(f) and runs_parallel(f) and not lone:
                 yield b"\n"
-            yield (
-                format_output(
-                    pat,
-                    {
-                        "kind": "stats",
-                        "totals": totals_config(totals),
-                        "total": time.perf_counter() - started,
-                    },
-                )
-                if isinstance(pat, RgProgram)
-                else totals.stats_block(time.perf_counter() - started)
+            yield format_output(
+                pat,
+                {
+                    "kind": "stats",
+                    "totals": totals_config(totals),
+                    "total": time.perf_counter() - started,
+                },
             )
     finally:
         await close_quietly(found)
-        if worker is not None:
-            await worker.close()
         if f.files_without_match and not f.quiet:
             # ripgrep's status under --files-without-match follows the
             # listing, not the matching: 0 when a file was listed, 1 when

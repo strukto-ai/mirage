@@ -1,6 +1,5 @@
 import { z } from 'zod'
 
-import type { Worker } from '../../concurrency/worker.ts'
 import { closeQuietly, discardStreams } from '../../io/stream.ts'
 import { YieldBudget } from '../../io/yield_budget.ts'
 import { StreamRefusal } from '../../rs/errors.ts'
@@ -11,7 +10,7 @@ import type { JsonValue } from '../../types.ts'
 import { UsageError } from '../errors.ts'
 import {
   RgBinary,
-  searchHaystack,
+  foldsCase,
   transcoded,
   type RgFlags,
   type Tally,
@@ -33,6 +32,7 @@ const TALLY = z.object({
   matched_lines: z.number().nonnegative(),
   searched: z.number().nonnegative(),
   nul: z.number().nonnegative().nullable(),
+  error: z.string().nullable(),
 })
 const BLOCK_BYTES = 64 * 1024
 const DEC = new TextDecoder()
@@ -41,8 +41,6 @@ const ENC = new TextEncoder()
 export class RgProgram {
   constructor(readonly stream: OpenStream) {}
 }
-
-export type RgPattern = RegExp | RgProgram
 
 export function latin1(text: string): string {
   const data = encodeText(text)
@@ -59,14 +57,18 @@ export function streamConfig(
   regexSizeLimit: number | null = null,
   dfaSizeLimit: number | null = null,
 ): Record<string, JsonValue> {
+  // PCRE2 folds as -S reads the pattern here, which the default engine works
+  // out itself; --engine auto hands it the same answer.
+  const pcre = f.engine !== 'default'
   return {
     pattern,
     never_match: neverMatch,
+    engine: f.engine,
     ban_nul: !(f.text || f.nullData),
     regex_size_limit: regexSizeLimit,
     dfa_size_limit: dfaSizeLimit,
-    ignore_case: f.ignoreCase,
-    smart_case: f.smartCase,
+    ignore_case: pcre ? foldsCase(pattern, f.fixedString, f) : f.ignoreCase,
+    smart_case: f.smartCase && !pcre,
     whole_word: f.wholeWord,
     line_regexp: f.lineRegexp,
     fixed_string: f.fixedString,
@@ -138,6 +140,7 @@ export function settle(stream: OpenStream, tally: Tally): void {
   tally.matchedLines = progress.matched_lines
   tally.searched = progress.searched
   tally.nul = progress.nul
+  if (progress.error !== null) tally.error = progress.error
 }
 
 async function* drained(
@@ -165,7 +168,7 @@ export function binaryMetadata(binary: RgBinary): Record<string, JsonValue> {
   }
 }
 
-async function* streamHaystack(
+export async function* streamHaystack(
   source: AsyncIterable<Uint8Array>,
   program: RgProgram,
   f: RgFlags,
@@ -221,29 +224,6 @@ async function* streamHaystack(
     settle(stream, tally)
     await closeQuietly(reader)
     await closeQuietly(source)
-  }
-}
-
-export async function* searchInput(
-  source: AsyncIterable<Uint8Array>,
-  pat: RgPattern,
-  f: RgFlags,
-  name: string,
-  label: string | null,
-  tally: Tally,
-  signal?: AbortSignal,
-  named = true,
-  pipe = false,
-  worker?: Worker,
-): AsyncGenerator<Uint8Array> {
-  const result =
-    pat instanceof RgProgram
-      ? streamHaystack(source, pat, f, name, label, tally, signal, named, pipe)
-      : searchHaystack(source, pat, f, name, label, tally, signal, named, pipe, worker)
-  try {
-    yield* result
-  } finally {
-    await closeQuietly(result)
   }
 }
 

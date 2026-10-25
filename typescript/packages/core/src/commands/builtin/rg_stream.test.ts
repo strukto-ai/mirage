@@ -21,7 +21,7 @@ import { FlagView } from '../spec/flag_view.ts'
 import type { FlagValue } from '../spec/types.ts'
 import { parseFlags } from './generic/rg.ts'
 import type { RgFlags, Tally } from './rg_search.ts'
-import { openRg, requiredTerms, searchInput, type SearchHints } from './rg_stream.ts'
+import { openRg, requiredTerms, streamHaystack, type SearchHints } from './rg_stream.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
@@ -78,7 +78,9 @@ it('preserves byte offsets across chunks and settles counts', async () => {
     yield await Promise.resolve(data.subarray(65536))
   }
   try {
-    const output = await materialize(searchInput(source(), program, f, 'f', null, tally))
+    const output = await materialize(
+      streamHaystack(source(), program, f, 'f', null, tally, undefined, true, false),
+    )
     expect(DEC.decode(output)).toBe('1:65538:needle\n2:65545:needle\n')
     expect(tally).toEqual({
       selected: true,
@@ -111,7 +113,9 @@ it('closes a quiet match source without reading the next chunk', async () => {
     }
   }
   try {
-    const output = await materialize(searchInput(source(), program, f, 'f', null, tally))
+    const output = await materialize(
+      streamHaystack(source(), program, f, 'f', null, tally, undefined, true, false),
+    )
     expect(output.byteLength).toBe(0)
     expect(tally.selected).toBe(true)
     expect(reads).toBe(1)
@@ -130,7 +134,9 @@ it.each([false, true])('searches without retaining unused captures (quiet=%s)', 
     yield await Promise.resolve(data)
   }
   try {
-    const output = await materialize(searchInput(source(), program, f, 'f', null, tally))
+    const output = await materialize(
+      streamHaystack(source(), program, f, 'f', null, tally, undefined, true, false),
+    )
     expect(output).toEqual(quiet ? new Uint8Array() : data)
     expect(tally.selected).toBe(true)
   } finally {
@@ -154,7 +160,9 @@ it('settles final counts without repeated metadata during empty progress', async
     yield await Promise.resolve(data)
   }
   try {
-    const output = await materialize(searchInput(source(), program, f, 'f', null, tally))
+    const output = await materialize(
+      streamHaystack(source(), program, f, 'f', null, tally, undefined, true, false),
+    )
     expect(output.byteLength).toBe(0)
     expect(tally).toEqual({
       selected: false,
@@ -185,7 +193,7 @@ it('keeps the current tally when the consumer closes after visible output', asyn
       closed = true
     }
   }
-  const output = searchInput(source(), program, f, 'f', null, tally)
+  const output = streamHaystack(source(), program, f, 'f', null, tally, undefined, true, false)
   try {
     const first = await output.next()
     if (first.done === true) throw new Error('search ended before its selected record')

@@ -32,9 +32,10 @@ import { FlagView } from '../../spec/flag_view.ts'
 import type { FlagValue } from '../../spec/types.ts'
 
 import { directoriesAction, parseFlags as parseGrepFlags } from '../generic/grep.ts'
-import { encodingFlag, foldsCase, parseFlags as parseRgFlags, rgMatcher } from '../generic/rg.ts'
+import { encodingFlag, parseFlags as parseRgFlags } from '../generic/rg.ts'
 import { searchTerms } from '../grep_pushdown.ts'
-import { openRg, requiredTerms } from '../rg_stream.ts'
+import { foldsCase } from '../rg_search.ts'
+import { openRg, requiredTerms, type SearchHints } from '../rg_stream.ts'
 import { compilePattern, patternArg } from '../grep_pattern.ts'
 import type { SearchTerms } from '../types.ts'
 import { linksOf, mountRoot, mountsOf } from '../utils/links.ts'
@@ -70,7 +71,8 @@ export function grepTerms(
   )
   const found = searchTerms(
     pattern,
-    matcher,
+    matcher.needles,
+    matcher.unicodeFolds,
     f.fixedString,
     f.wholeWord,
     f.lineRegexp,
@@ -148,9 +150,17 @@ export async function rgTerms(
     }
   }
   const ignoreCase = foldsCase(pattern, f.fixedString, f)
+  const pcre = await openRg(pattern, false, f)
+  let terms: SearchHints | null
+  try {
+    terms = requiredTerms(pcre)
+  } finally {
+    pcre.stream.close()
+  }
   const found = searchTerms(
     pattern,
-    rgMatcher(pattern, false, f),
+    terms === null ? null : terms.texts,
+    ignoreCase && f.unicode,
     f.fixedString,
     f.wholeWord,
     f.lineRegexp,

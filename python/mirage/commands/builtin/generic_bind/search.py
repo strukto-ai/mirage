@@ -22,11 +22,7 @@ from mirage.commands.builtin.generic.grep import (
 from mirage.commands.builtin.generic.grep import (
     parse_flags as parse_grep_flags,
 )
-from mirage.commands.builtin.generic.rg import (
-    encoding_flag,
-    folds_case,
-    rg_matcher,
-)
+from mirage.commands.builtin.generic.rg import encoding_flag
 from mirage.commands.builtin.generic.rg import parse_flags as parse_rg_flags
 from mirage.commands.builtin.generic_bind.files import CommandFiles
 from mirage.commands.builtin.grep_pattern import (
@@ -36,6 +32,7 @@ from mirage.commands.builtin.grep_pattern import (
 from mirage.commands.builtin.grep_pushdown import (
     search_terms,
 )
+from mirage.commands.builtin.rg_search import folds_case
 from mirage.commands.builtin.rg_stream import open_rg, required_terms
 from mirage.commands.builtin.types import SearchTerms
 from mirage.commands.builtin.utils.links import (
@@ -94,7 +91,8 @@ def grep_terms(
     )
     found = search_terms(
         pattern,
-        matcher,
+        matcher.needles,
+        matcher.unicode_folds,
         f.fixed_string,
         f.whole_word,
         f.line_regexp,
@@ -170,9 +168,11 @@ def rg_terms(fl: FlagView, texts: list[str]) -> SearchTerms | None:
             reads_binary=f.text or f.null_data or f.binary,
         )
     ignore_case = folds_case(pattern, f.fixed_string, f)
+    pcre = required_terms(open_rg(pattern, False, f))
     found = search_terms(
         pattern,
-        rg_matcher(pattern, False, f),
+        None if pcre is None else tuple(t.encode() for t in pcre.texts),
+        ignore_case and f.unicode,
         f.fixed_string,
         f.whole_word,
         f.line_regexp,

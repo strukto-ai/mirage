@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { Worker } from '../../../concurrency/worker.ts'
 import { GzipDataError, gunzipStream } from '../../../utils/compress.ts'
 import { encodingFor } from '../../../utils/encoding.ts'
 import { mountParentReaddir, mountParentStat, toPathspec } from '../utils/wrap.ts'
@@ -27,7 +26,7 @@ import { FlagView, flagOccurrences } from '../../spec/flag_view.ts'
 import type { FlagValue, ParsedFlagValue } from '../../spec/types.ts'
 import { decodeText, encodeText } from '../../../shell/bytes.ts'
 import { UINTMAX } from '../constants.ts'
-import { NEVER_MATCH, resolvePattern, rustEscape } from '../grep_pattern.ts'
+import { resolvePattern } from '../grep_pattern.ts'
 import { exitCodeFor } from '../grep_scan.ts'
 import { FileTypes, typeListing, type TypeChange, type TypeSelection } from '../rg_filetypes.ts'
 import { IgnoreRules, Overrides, Verdict, walkCandidate } from '../rg_glob.ts'
@@ -42,32 +41,20 @@ import {
   walkErrorLine,
   walkHaystacks,
 } from '../rg_scan.ts'
+import { Totals, recordEnd, printsContext, type RgFlags, type Tally } from '../rg_search.ts'
 import {
-  jsonLine,
-  jsonText,
-  Totals,
-  recordEnd,
-  printsContext,
-  type RgFlags,
-  smartCaseFolds,
-  type Tally,
-} from '../rg_search.ts'
-import {
-  RgProgram,
+  type RgProgram,
   formatOutput,
   latin1,
   openRg,
-  searchInput,
+  streamHaystack,
   totalsConfig,
-  type RgPattern,
 } from '../rg_stream.ts'
 import { OutputStream, ensureStream } from '../../../io/stream.ts'
 import { STDIN_OPERAND } from '../utils/constants.ts'
 import { type LinkResolver, linkResolver, mountsOf, dispatchOf, mountRoot } from '../utils/links.ts'
 import { formatRecords } from '../utils/output.ts'
 import { isStdin, stdinStream } from '../utils/stream.ts'
-import { PcreError, hostFlags, translatePcre } from '../utils/pcre.ts'
-import { RustRegexError, translateRust, wholeLine, wholeWord } from '../utils/rust_regex.ts'
 import { concat } from '../../../utils/bytes.ts'
 
 const ENC = new TextEncoder()
@@ -80,7 +67,6 @@ const GZIP_RULE = '-'.repeat(79)
 // The status a line answers for a command it cannot find, which ripgrep
 // reports as a --pre command that could not start.
 const COMMAND_NOT_FOUND = 127
-const NEWLINE_REFUSAL = 'rg: a newline in the pattern requires --multiline (-U)'
 // What ripgrep says when a line that named no path searched nothing, exit 2
 // (14.1.1).
 export const NOTHING_SEARCHED =
@@ -606,12 +592,6 @@ export function parseFlags(fl: FlagView): RgFlags {
   }
 }
 
-// Whether the search ignores case: -i, or -S over a pattern with no
-// uppercase literal in it.
-export function foldsCase(pattern: string, fixed: boolean, f: RgFlags): boolean {
-  return f.ignoreCase || (f.smartCase && smartCaseFolds(pattern, fixed))
-}
-
 /**
  * The regex engine the line asks for, the last of -P, --no-pcre2, --engine
  * and the deprecated --auto-hybrid-regex pair winning (ripgrep 14.1.1: `rg -P
@@ -636,98 +616,6 @@ export function engineFlag(fl: FlagView): string {
     throw flagError('--engine', `unrecognized regex engine '${value}'`)
   }
   return value
-}
-
-// The default engine's matcher, or its refusal in ripgrep's words.
-function rustMatcher(patterns: readonly string[], fold: boolean, f: RgFlags): RegExp {
-  const lines = f.nullData || f.multiline === true
-  const crlf = f.multiline === true && f.crlf === true
-  let translated
-  try {
-    translated = translateRust(
-      patterns,
-      fold,
-      lines,
-      f.unicode,
-      f.multiline === true && f.multilineDotall === true,
-      crlf,
-    )
-  } catch (err) {
-    if (err instanceof RustRegexError) throw new UsageError(`rg: ${err.message}`)
-    throw err
-  }
-  if (translated.newline === true && !lines) throw new UsageError(NEWLINE_REFUSAL)
-  let source = translated.source
-  if (f.lineRegexp) source = wholeLine(source, lines, crlf)
-  else if (f.wholeWord) source = wholeWord(source, f.unicode)
-  return new RegExp(source, translated.ignoreCase ? 'iu' : 'u')
-}
-
-// The PCRE2 engine's matcher, or its refusal in ripgrep's words. ripgrep
-// hands PCRE2 the list joined as `(?:a)|(?:b)`, wrapped for -w and -x, and
-// the offset in its refusal counts into that string.
-function pcreMatcher(patterns: readonly string[], fold: boolean, f: RgFlags): RegExp {
-  let display = patterns.map((p) => `(?:${p})`).join('|')
-  if (f.lineRegexp) display = `(?m:^)(?:${display})(?m:$)`
-  else if (f.wholeWord) display = `(?<!\\w)(?:${display})(?!\\w)`
-  let translated
-  try {
-    translated = translatePcre(
-      display,
-      f.unicode,
-      fold,
-      f.nullData || f.multiline === true,
-      f.multiline === true && f.multilineDotall === true,
-      f.crlf === true && f.multiline === true,
-    )
-  } catch (err) {
-    if (err instanceof PcreError) {
-      throw new UsageError(
-        `rg: PCRE2: error compiling pattern at offset ${String(err.offset)}: ${err.message}`,
-      )
-    }
-    throw err
-  }
-  return new RegExp(translated.source, hostFlags(translated.source, translated.ignoreCase))
-}
-
-// A literal as a PCRE2 pattern: every ASCII character that is not a letter
-// or a digit escaped, which PCRE2 reads as that character.
-function pcreEscape(text: string): string {
-  return Array.from(text, (ch) =>
-    (ch.codePointAt(0) ?? 0) < 0x80 && !/^[0-9A-Za-z]$/.test(ch) ? '\\' + ch : ch,
-  ).join('')
-}
-
-/**
- * The pattern list compiled the way the flags and engine ask. -w and -x,
- * whichever the line gave last, bound the whole list: -x to the line, -w to
- * ripgrep's half word boundaries (no word character just before the match or
- * just after it, which `\b` would also demand inside it). -S folds case only
- * when the pattern is all lowercase. `auto` runs the default engine and falls
- * back to PCRE2 only when that refuses the pattern. `neverMatch` is the
- * zero-pattern sentinel from `resolvePattern`; it is a regex, so it
- * suppresses -F.
- */
-export function rgMatcher(pattern: string, neverMatch: boolean, f: RgFlags): RegExp {
-  if (neverMatch) return new RegExp(NEVER_MATCH)
-  const fold = foldsCase(pattern, f.fixedString, f)
-  const pcre = f.engine === 'pcre2'
-  let parts = pattern.split('\n')
-  if (f.fixedString) parts = parts.map(pcre ? pcreEscape : rustEscape)
-  if (pcre) return pcreMatcher(parts, fold, f)
-  if (f.engine !== 'auto') return rustMatcher(parts, fold, f)
-  try {
-    return rustMatcher(parts, fold, f)
-  } catch (refused) {
-    if (!(refused instanceof UsageError)) throw refused
-    try {
-      return pcreMatcher(parts, fold, f)
-    } catch (also) {
-      if (!(also instanceof UsageError)) throw also
-      throw refused
-    }
-  }
 }
 
 // What the walk keeps, the globs and types compiled; a glob or a type
@@ -846,23 +734,20 @@ export async function rgGeneric(
   if (f.typeList) return [formatRecords(typeListing(types.definitions)), new IOResult()]
   const notes: string[] = []
   const walk = walkFilter(f, types, await ignoreRules(fl, dispatchOf(ctx), notes))
-  let pat: RgPattern | null = null
+  let pat: RgProgram | null = null
   if (!f.listFiles) {
     const resolution = await resolvePattern('rg', texts, fl, stream)
     if (resolution.error !== null) {
       return [null, new IOResult({ exitCode: 2, stderr: ENC.encode(resolution.error) })]
     }
     if (resolution.pattern === null) return usage(RG_NO_PATTERN)
-    pat =
-      f.engine === 'default'
-        ? await openRg(
-            resolution.pattern,
-            resolution.neverMatch,
-            f,
-            sizeFlag(fl, 'regex_size_limit'),
-            sizeFlag(fl, 'dfa_size_limit'),
-          )
-        : rgMatcher(resolution.pattern, resolution.neverMatch, f)
+    pat = await openRg(
+      resolution.pattern,
+      resolution.neverMatch,
+      f,
+      sizeFlag(fl, 'regex_size_limit'),
+      sizeFlag(fl, 'dfa_size_limit'),
+    )
   }
   try {
     // A line that names no path searches a piped stdin as an implicit `-`
@@ -870,7 +755,7 @@ export async function rgGeneric(
     // (ripgrep's Paths::from_low_args, 14.1.1).
     if (paths.length === 0) {
       if (ctx.stdin === null) {
-        if (pat instanceof RgProgram) pat.stream.close()
+        pat?.stream.close()
         return usage(RG_NO_PATTERN)
       }
       paths = [STDIN_OPERAND]
@@ -942,16 +827,16 @@ export async function rgGeneric(
           )
     return await noted(owned(pat, [out, io]), notes, f)
   } catch (error) {
-    if (pat instanceof RgProgram) pat.stream.close()
+    pat?.stream.close()
     throw error
   }
 }
 
 function owned(
-  pat: RgPattern | null,
+  pat: RgProgram | null,
   result: [ByteSource | null, IOResult],
 ): [ByteSource | null, IOResult] {
-  if (!(pat instanceof RgProgram)) return result
+  if (pat === null) return result
   const [output, io] = result
   if (output === null || output instanceof Uint8Array) {
     pat.stream.close()
@@ -1016,7 +901,7 @@ function refused(line: string, f: RgFlags): CommandFnResult {
 // walk has to answer.
 async function searchSingle(
   p: PathSpec,
-  pat: RgPattern,
+  pat: RgProgram,
   f: RgFlags,
   st: (path: string) => Promise<FileStat>,
   rd: (path: string) => Promise<string[]>,
@@ -1048,12 +933,13 @@ async function searchSingle(
   const tally: Tally = { selected: false }
   return [
     settled(
-      searchInput(stream(p), pat, f, name, label, tally, signal, true, isStdin(p)),
+      streamHaystack(stream(p), pat, f, name, label, tally, signal, true, isStdin(p)),
       f,
       label,
       tally,
       io,
       p.rawPath,
+      name,
     ),
     io,
   ]
@@ -1069,6 +955,8 @@ async function* settled(
   io: IOResult,
   // The operand as typed, which a failed read names.
   shown: string,
+  // The haystack as rg prints it, which a search that gave up names.
+  name: string,
 ): AsyncGenerator<Uint8Array> {
   let printed = false
   let failed = false
@@ -1087,6 +975,12 @@ async function* settled(
     io.stderr = f.noMessages ? null : ENC.encode(`${openErrorLine(shown, err)}\n`)
     io.exitCode = 2
   } finally {
+    if (tally.error !== undefined && !failed) {
+      // A -P search that gave up ends the file with PCRE2's error.
+      failed = true
+      if (!f.noMessages) io.stderr = ENC.encode(`rg: ${name}: ${tally.error}\n`)
+      io.exitCode = 2
+    }
     const listed = f.filesWithoutMatch && !f.quiet ? printed : null
     if (!failed) io.exitCode = (listed ?? tally.selected) ? 0 : 1
   }
@@ -1299,7 +1193,7 @@ async function preprocessed(
 async function* searchAll(
   found: AsyncIterable<Haystack>,
   paths: readonly PathSpec[],
-  pat: RgPattern,
+  pat: RgProgram,
   f: RgFlags,
   stream: Stream,
   warnings: string[],
@@ -1326,7 +1220,6 @@ async function* searchAll(
   const listingOrCount = f.countOnly || f.countMatches || f.filesOnly || f.filesWithoutMatch
   const records = jsonSummary(f)
   const totals = new Totals()
-  const worker = f.engine === 'default' ? undefined : new Worker()
   const started = performance.now()
   try {
     for await (const h of found) {
@@ -1373,7 +1266,7 @@ async function* searchAll(
         ) {
           source = upToDamage(gunzipStream(opened), faults)
         }
-        for await (const c of searchInput(
+        for await (const c of streamHaystack(
           source,
           pat,
           f,
@@ -1383,7 +1276,6 @@ async function* searchAll(
           signal,
           !walked,
           pipe,
-          worker,
         )) {
           if (!progressive) {
             chunks.push(c)
@@ -1421,33 +1313,29 @@ async function* searchAll(
           continue
         }
       }
+      if (tally.error !== undefined) warnings.push(`rg: ${name}: ${tally.error}`)
       const elapsed = (performance.now() - began) / 1000
       selected ||= tally.selected
       skipped ||= tally.skipped === true
       if (records) {
         if (chunks.length > 0) {
-          const begin =
-            pat instanceof RgProgram
-              ? formatOutput(pat, { kind: 'begin', name: latin1(name) })
-              : jsonLine({ type: 'begin', data: { path: jsonText(name) } })
+          const begin = formatOutput(pat, { kind: 'begin', name: latin1(name) })
           const sent = begin.length + chunks.reduce((sum, c) => sum + c.length, 0)
           yield begin
           yield* chunks
           if (!damaged) {
             totals.add(tally, sent, elapsed)
-            yield pat instanceof RgProgram
-              ? formatOutput(pat, {
-                  kind: 'end',
-                  name: latin1(name),
-                  nul: tally.nul ?? null,
-                  selected: tally.selected,
-                  matches: tally.matches ?? 0,
-                  matched_lines: tally.matchedLines ?? 0,
-                  searched: tally.searched ?? 0,
-                  printed: sent,
-                  elapsed,
-                })
-              : totals.endRecord(name, tally, sent, elapsed)
+            yield formatOutput(pat, {
+              kind: 'end',
+              name: latin1(name),
+              nul: tally.nul ?? null,
+              selected: tally.selected,
+              matches: tally.matches ?? 0,
+              matched_lines: tally.matchedLines ?? 0,
+              searched: tally.searched ?? 0,
+              printed: sent,
+              elapsed,
+            })
           }
         } else if (f.quiet && tally.selected && !damaged) {
           totals.add(tally, 0, elapsed)
@@ -1468,20 +1356,14 @@ async function* searchAll(
       if (f.quiet && tally.selected && f.stats !== true && f.json !== true) break
     }
     const total = (performance.now() - started) / 1000
-    if (records)
-      yield pat instanceof RgProgram
-        ? formatOutput(pat, { kind: 'summary', totals: totalsConfig(totals), total })
-        : totals.summaryRecord(total)
+    if (records) yield formatOutput(pat, { kind: 'summary', totals: totalsConfig(totals), total })
     else if (f.stats === true) {
       // ripgrep's parallel searcher gives the last --heading group its blank
       // line too; one thread, as for a lone file, does not.
       if (printed && headed(f) && runsParallel(f) && !lone) yield ENC.encode('\n')
-      yield pat instanceof RgProgram
-        ? formatOutput(pat, { kind: 'stats', totals: totalsConfig(totals), total })
-        : totals.statsBlock(total)
+      yield formatOutput(pat, { kind: 'stats', totals: totalsConfig(totals), total })
     }
   } finally {
-    await worker?.close()
     // ripgrep's status under --files-without-match follows the listing, not
     // the matching: 0 when a file was listed, 1 when every file matched
     // (14.1.1; GNU grep keeps the match status). A walked binary file it

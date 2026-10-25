@@ -1,5 +1,5 @@
 {
-  "baseline": 3077,
+  "baseline": 3043,
  "modules": {
   "vfs/ram/store": {
    "python_only": {
@@ -129,12 +129,6 @@
     "synchronous": "Shares the current embedded Wasm instance between synchronous utilities and asynchronous command streams.",
     "movables": "The matcher streams each instance holds, which close with it when it retires; the wasm instance loader; Python imports mirage-rs as a native PyO3 module, so it has no instance to compile, size or recycle.",
     "retire": "Drops a grown or trapped instance and closes the matcher streams still on it; the wasm instance loader; Python imports mirage-rs as a native PyO3 module, so it has no instance to compile, size or recycle."
-   }
-  },
-  "utils/regex": {
-   "python_only": {
-    "Pattern": "Python union of a native pattern and its prepared asynchronous facade; TypeScript subclasses RegExp.",
-    "RegexMatch": "Python union of re.Match and its serializable twin; TypeScript RegExpExecArray is structured-cloneable."
    }
   },
   "fuse/constants": {

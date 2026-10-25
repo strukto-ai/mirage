@@ -22,7 +22,7 @@ import { openStreamSync } from './stream.ts'
 export type Span = [number, number]
 export type Groups = (Span | null)[]
 export type PosixDialect = 'sed' | 'posix'
-export type LineSyntax = 'basic' | 'extended' | 'fixed'
+export type LineSyntax = 'basic' | 'extended' | 'fixed' | 'perl'
 
 const UNSET = 0xffffffff
 const SPECIAL = /[\\.[\]()*+?{}|^$]/g

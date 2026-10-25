@@ -22,7 +22,7 @@ from mirage.commands.builtin.rg_stream import (
     SearchHints,
     open_rg,
     required_terms,
-    search_input,
+    stream_haystack,
 )
 from mirage.commands.errors import UsageError
 from mirage.commands.spec import SPECS
@@ -77,7 +77,9 @@ async def test_streaming_preserves_byte_offsets_and_settles_counts() -> None:
 
     chunks = [
         chunk
-        async for chunk in search_input(source(), program, f, "f", None, tally)
+        async for chunk in stream_haystack(
+            source(), program, f, "f", None, tally, True, False
+        )
     ]
     assert b"".join(chunks) == b"1:65538:needle\n2:65545:needle\n"
     assert tally == Tally(
@@ -105,7 +107,9 @@ async def test_quiet_match_closes_source_before_the_next_chunk() -> None:
 
     chunks = [
         chunk
-        async for chunk in search_input(source(), program, f, "f", None, tally)
+        async for chunk in stream_haystack(
+            source(), program, f, "f", None, tally, True, False
+        )
     ]
     assert b"".join(chunks) == b""
     assert tally.selected
@@ -128,7 +132,9 @@ async def test_unused_capture_groups_do_not_block_an_ordinary_search(
 
     chunks = [
         chunk
-        async for chunk in search_input(source(), program, f, "f", None, tally)
+        async for chunk in stream_haystack(
+            source(), program, f, "f", None, tally, True, False
+        )
     ]
     assert b"".join(chunks) == (b"" if quiet else data)
     assert tally.selected
@@ -162,7 +168,9 @@ async def test_empty_progress_settles_final_counts_without_repeated_metadata(
 
     output = [
         chunk
-        async for chunk in search_input(source(), program, f, "f", None, tally)
+        async for chunk in stream_haystack(
+            source(), program, f, "f", None, tally, True, False
+        )
     ]
     assert output == []
     assert tally == Tally(searched=len(data))
@@ -184,7 +192,9 @@ async def test_closing_after_visible_output_keeps_current_tally() -> None:
         finally:
             closed = True
 
-    output = search_input(source(), program, f, "f", None, tally)
+    output = stream_haystack(
+        source(), program, f, "f", None, tally, True, False
+    )
     assert await anext(output) == b"needle\n"
     assert tally.selected
     assert tally.matches == 1
