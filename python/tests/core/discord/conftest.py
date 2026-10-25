@@ -17,13 +17,13 @@ from datetime import datetime, timezone
 import aiohttp
 import pytest
 
+import mirage.core.discord.history as history_mod
 import mirage.core.discord.read as read_mod
 import mirage.core.discord.readdir as readdir_mod
 from mirage.accessor.discord import DiscordAccessor
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.core.discord.config import DiscordConfig
 from mirage.core.discord.history import snowflake_at
-from mirage.core.render.json import jsonl_bytes
 
 GUILD = {"id": "G001", "name": "My Server"}
 CHANNELS = [
@@ -114,13 +114,6 @@ class FakeDiscordApi:
             return [dict(m) for m in MESSAGES]
         return []
 
-    async def get_history_jsonl(self, accessor, channel_id, date_str, scope):
-        return jsonl_bytes(
-            await self.list_messages_for_day(
-                accessor, channel_id, date_str, scope
-            )
-        )
-
     async def download_file(self, accessor, url, offset=0, size=None):
         self.downloads.append((url, offset, size))
         data = b"0123456789"
@@ -135,9 +128,8 @@ def api(monkeypatch):
     monkeypatch.setattr(readdir_mod, "list_channels", fake.list_channels)
     monkeypatch.setattr(readdir_mod, "list_members", fake.list_members)
     monkeypatch.setattr(
-        readdir_mod, "list_messages_for_day", fake.list_messages_for_day
+        history_mod, "list_messages_for_day", fake.list_messages_for_day
     )
-    monkeypatch.setattr(read_mod, "get_history_jsonl", fake.get_history_jsonl)
     monkeypatch.setattr(read_mod, "list_members", fake.list_members)
     monkeypatch.setattr(read_mod, "download_file", fake.download_file)
     return fake

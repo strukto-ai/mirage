@@ -17,7 +17,7 @@ import asyncio
 import pytest
 
 from mirage.core.api.rate_limit import RateLimiter
-from mirage.utils.clock import ManualClock
+from mirage.utils.clock import ManualClock, SystemClock
 
 
 class _Clock:
@@ -51,6 +51,10 @@ class _Stalled(_Clock):
         self.waits.append(seconds)
         await asyncio.sleep(0)
         self.wall = max(self.wall, start + seconds, self.until)
+
+
+class _System(_Clock, SystemClock):
+    pass
 
 
 def _limiter(rate: float, clock: _Clock) -> RateLimiter:
@@ -120,7 +124,7 @@ def test_a_rate_must_be_positive():
 async def test_a_bound_clock_paces_and_waits_on_its_own_time():
     limiter = RateLimiter(5)
     clock = ManualClock()
-    limiter.bind_clock(clock)
+    limiter.bind_clock(clock, "ws")
     await limiter.acquire("appA")
     await limiter.acquire("appA")
     assert clock.monotonic() == pytest.approx(0.2)
@@ -131,7 +135,7 @@ async def test_rebinding_the_clock_in_use_keeps_the_schedule():
     clock = _Clock()
     limiter = _limiter(5, clock)
     await limiter.acquire("appA")
-    limiter.bind_clock(clock)
+    limiter.bind_clock(clock, "ws")
     await limiter.acquire("appA")
     assert clock.waits == pytest.approx([0.2])
 
@@ -145,7 +149,7 @@ async def test_a_new_clock_under_a_waiting_caller_lets_it_finish():
     await asyncio.sleep(0)
     later = _Clock()
     later.wall = 200.0
-    limiter.bind_clock(later)
+    limiter.bind_clock(later, "ws")
     await waiting
     assert clock.waits == pytest.approx([0.2])
 
@@ -159,7 +163,7 @@ async def test_a_caller_from_the_old_clock_leaves_the_new_schedule_alone():
     await asyncio.sleep(0)
     later = _Clock()
     later.wall = 200.0
-    limiter.bind_clock(later)
+    limiter.bind_clock(later, "ws")
     await limiter.acquire("appA")
     await waiting
     await limiter.acquire("appA")
@@ -173,10 +177,33 @@ async def test_a_caller_from_before_a_round_trip_leaves_the_schedule_alone():
     await limiter.acquire("appA")
     stale = asyncio.create_task(limiter.acquire("appA"))
     await asyncio.sleep(0)
-    limiter.bind_clock(_Clock())
-    limiter.bind_clock(clock)
+    limiter.bind_clock(_Clock(), "ws")
+    limiter.bind_clock(clock, "ws")
     clock.wall = 101.0
     await limiter.acquire("appA")
     fresh = asyncio.create_task(limiter.acquire("appA"))
     await asyncio.gather(stale, fresh)
     assert clock.waits == pytest.approx([0.2, 0.2])
+
+
+def test_a_held_limiter_refuses_another_clock_until_its_owner_lets_go():
+    limiter = RateLimiter(5)
+    first, second = ManualClock(), ManualClock()
+    limiter.bind_clock(first, "a")
+    with pytest.raises(ValueError, match="another clock"):
+        limiter.bind_clock(second, "b")
+    limiter.release_clock("a")
+    limiter.bind_clock(second, "b")
+
+
+@pytest.mark.asyncio
+async def test_a_second_system_clock_keeps_the_schedule():
+    first, second = _System(), _System()
+    limiter = _limiter(5, first)
+    limiter.bind_clock(first, "a")
+    await limiter.acquire("appA")
+    limiter.bind_clock(second, "b")
+    await limiter.acquire("appA")
+    assert first.waits + second.waits == pytest.approx([0.2])
+    with pytest.raises(ValueError):
+        limiter.bind_clock(ManualClock(), "c")

@@ -22,8 +22,17 @@ from mirage.utils.clock import ManualClock
 async def test_a_bound_clock_paces_every_base_call():
     accessor = AirtableAccessor(AirtableConfig(token="t"))
     clock = ManualClock()
-    accessor.bind_clock(clock)
+    accessor.bind_clock(clock, "ws")
     rate = accessor.config.requests_per_second
     await accessor.limiter.acquire("appA")
     await accessor.limiter.acquire("appA")
     assert clock.monotonic() == pytest.approx(1 / rate)
+
+
+def test_another_clock_binds_once_the_holder_lets_go():
+    accessor = AirtableAccessor(AirtableConfig(token="t"))
+    accessor.bind_clock(ManualClock(), "a")
+    with pytest.raises(ValueError, match="another clock"):
+        accessor.bind_clock(ManualClock(), "b")
+    accessor.release_clock("a")
+    accessor.bind_clock(ManualClock(), "b")

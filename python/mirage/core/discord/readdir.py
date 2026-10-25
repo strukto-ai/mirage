@@ -28,7 +28,7 @@ from mirage.core.discord.entry import (
 )
 from mirage.core.discord.files import file_blob_name, is_listed
 from mirage.core.discord.guilds import list_guilds
-from mirage.core.discord.history import list_messages_for_day
+from mirage.core.discord.history import listed_messages_for_day
 from mirage.core.discord.members import list_members
 from mirage.core.discord.scope import detect_scope
 from mirage.core.hierarchy.readdir import Listed, cut_listing, make_readdir
@@ -159,8 +159,8 @@ async def _day_listing(
         date_str (str): the day, ``YYYY-MM-DD``.
     """
     try:
-        messages = await list_messages_for_day(
-            accessor, channel_id, date_str, accessor.time_range
+        messages = await listed_messages_for_day(
+            accessor, channel_id, date_str
         )
     except aiohttp.ClientResponseError as e:
         if _is_soft_error(e):
