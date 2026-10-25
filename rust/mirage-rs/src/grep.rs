@@ -957,6 +957,27 @@ mod tests {
     }
 
     #[test]
+    fn perl_searches_charge_their_backtracking_between_steps() {
+        let config = r#"{"patterns":["^(a|a)+\\1c|x$"],"syntax":"perl","count":true}"#;
+        let mut stream = open("grep", config.as_bytes()).expect("opens");
+        stream.begin(br#"{"label":"in"}"#).expect("begins");
+        let mut out = Vec::new();
+        let data = format!("{}x\n", "a".repeat(16)).repeat(64);
+        stream.feed(data.as_bytes(), &mut out).expect("feeds");
+        let mut calls = 1;
+        while stream.busy() {
+            stream.drain(&mut out).expect("drains");
+            calls += 1;
+        }
+        stream.finish(&mut out).expect("finishes");
+        while stream.busy() {
+            stream.drain(&mut out).expect("drains");
+        }
+        assert!(calls > 8, "64 costly lines took {calls} calls");
+        assert_eq!(out, b"64\n");
+    }
+
+    #[test]
     fn context_groups_are_separated() {
         let config = r#"{"patterns":["a"],"syntax":"basic","line_numbers":true,"after":1,"separator":"--\n"}"#;
         let (out, _, status) = grep(config, &[b"a\nb\nc\nd\na\n"]);

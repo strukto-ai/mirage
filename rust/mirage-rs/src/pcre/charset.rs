@@ -103,7 +103,6 @@ impl CharSet {
         self.intersect(&other.negate().union(&surrogates))
     }
 
-    #[cfg(test)]
     pub(crate) fn contains(&self, cp: u32) -> bool {
         self.ranges
             .binary_search_by(|&(start, end)| {

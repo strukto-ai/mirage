@@ -170,6 +170,11 @@ impl Config {
     fn granular(&self) -> bool {
         self.column || self.vimgrep || self.replace.is_some() || self.only_matching
     }
+    /// Whether the output reads every match of a selected line rather than
+    /// whether it has one, which decides how far a -P search goes on it.
+    fn needs_every_match(&self) -> bool {
+        self.granular() || self.counts() || self.count_matches
+    }
 }
 
 #[derive(Default, Deserialize)]
@@ -2635,8 +2640,12 @@ impl Rg {
             input.tally.searched = input.offset;
             input.scan = 0;
             input.record_end = None;
-            let all = !(config.quiet || config.files_only || config.files_without_match)
-                || config.counts();
+            let all = if program.runs_pcre() {
+                config.needs_every_match()
+            } else {
+                !(config.quiet || config.files_only || config.files_without_match)
+                    || config.counts()
+            };
             input.search = Some(if let Some(mut scratch) = input.scratch.take() {
                 scratch.reset(data, all);
                 scratch
@@ -2871,6 +2880,50 @@ mod tests {
             metadata["error"],
             "PCRE2: error matching: match limit exceeded"
         );
+    }
+
+    #[test]
+    fn pcre2_reads_a_lines_first_match_unless_the_output_needs_every_one() {
+        let mut data = b"ok".to_vec();
+        data.extend_from_slice(&[b'a'; 40]);
+        data.extend_from_slice(b"xc\nok2\n");
+        let pattern = "^ok|(a|a)+\\1c";
+        let (out, metadata, _) = run(
+            &data,
+            json!({"pattern":pattern,"engine":"pcre2","count_only":true}),
+        );
+        assert_eq!(
+            (out.as_slice(), &metadata["error"]),
+            (b"2\n".as_slice(), &Value::Null)
+        );
+        let (out, metadata, _) = run(
+            &data,
+            json!({"pattern":pattern,"engine":"pcre2","only_matching":true}),
+        );
+        assert_eq!(out, b"");
+        assert_eq!(
+            metadata["error"],
+            "PCRE2: error matching: match limit exceeded"
+        );
+    }
+
+    #[test]
+    fn pcre2_searches_charge_their_backtracking_between_steps() {
+        let data = format!("{}x\n", "a".repeat(16)).repeat(64);
+        let config = json!({"pattern":"^(a|a)+\\1c|x$","engine":"pcre2","count_only":true});
+        let (out, _, calls) = run(data.as_bytes(), config);
+        assert_eq!(out, b"64\n");
+        assert!(calls > 8, "64 costly lines took {calls} calls");
+    }
+
+    #[test]
+    fn pcre2_null_data_matches_across_records_as_one() {
+        let replace = json!({"pattern":"a\\x00b","engine":"pcre2","multiline":true,
+                             "null_data":true,"replace":"X"});
+        assert_eq!(run(b"a\0b\0", replace).0, b"X\0");
+        let only = json!({"pattern":"a\\x00b","engine":"pcre2","multiline":true,
+                          "null_data":true,"only_matching":true});
+        assert_eq!(run(b"a\0b\0", only).0, b"a\0b\0");
     }
 
     #[test]

@@ -851,6 +851,78 @@
       "flags": [
         "pcre2"
       ]
+    },
+    {
+      "id": "rg_P_selects_a_line_on_its_first_match",
+      "seq": 15200203,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "for f in -cP -P -oP; do printf 'okaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaxc\\nok2\\n' | rg $f '^ok|(a|a)+\\1c'; echo \"status $?\"; done",
+      "expect": {
+        "exit": 0,
+        "stdout": "2\nstatus 0\nokaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaxc\nok2\nstatus 0\nstatus 2\n",
+        "stderr": "rg: <stdin>: PCRE2: error matching: match limit exceeded\n"
+      },
+      "flags": [
+        "pcre2",
+        "count",
+        "only_matching"
+      ]
+    },
+    {
+      "id": "rg_P_null_data_match_spans_records",
+      "seq": 15200204,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "for f in '-r X' -o ''; do printf 'a\\0b\\0' | rg -UP --null-data $f 'a\\x00b' | tr '\\0' '@'; echo \" status $?\"; done",
+      "expect": {
+        "exit": 0,
+        "stdout": "X@ status 0\na@b@ status 0\na@b@ status 0\n",
+        "stderr": ""
+      },
+      "flags": [
+        "pcre2",
+        "multiline",
+        "null_data",
+        "replace",
+        "only_matching"
+      ]
     }
   ]
 }

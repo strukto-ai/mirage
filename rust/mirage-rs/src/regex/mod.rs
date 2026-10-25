@@ -561,8 +561,9 @@ pub(crate) fn perl_needles(regular: &str, ignore_case: bool, utf8: bool) -> Opti
 }
 
 /// A -P pattern's leftmost match in the record `hay[begin..to]` at or after
-/// `at`. A search is one step of `budget` however long it runs; one that
-/// gives up at the backtracking limit sets `exceeded` and finds nothing.
+/// `at`. A search charges `budget` the backtracking steps it can have
+/// taken; one that gives up at the backtracking limit sets `exceeded` and
+/// finds nothing.
 fn perl_extent(
     pcre: &Pcre,
     exceeded: &mut bool,
@@ -575,8 +576,9 @@ fn perl_extent(
     if *budget == 0 {
         return Step::Paused;
     }
-    *budget -= 1;
-    match pcre.find(&hay[begin..to], at - begin) {
+    let (found, steps) = pcre.find(&hay[begin..to], at - begin);
+    *budget = budget.saturating_sub(u64::try_from(steps).unwrap_or(u64::MAX));
+    match found {
         Ok(found) => Step::Done(found.map(|(start, end)| (begin + start, begin + end))),
         Err(pcre::Exceeded) => {
             *exceeded = true;

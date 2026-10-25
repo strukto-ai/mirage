@@ -8,6 +8,8 @@
 // Compile error texts from PCRE2 10.43 and 10.46 (BSD-3-Clause WITH
 // PCRE2-exception; see licenses/third_party/pcre2.txt).
 
+use std::cell::Cell;
+
 use super::charset::{
     self, ASCII_DIGIT, ASCII_SPACE, ASCII_WORD, CharSet, NEWLINE_SEQUENCE, PCRE_HSPACE, PCRE_VSPACE,
 };
@@ -92,6 +94,8 @@ pub(crate) struct Translated {
     pub(crate) source: String,
     pub(crate) fold: bool,
     pub(crate) regular: String,
+    /// Whether a match can hold a NUL.
+    pub(crate) nul: bool,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -208,6 +212,8 @@ struct Translator {
     /// The whole pattern folds outside the translation: sets still fold
     /// before they are negated, literals stay as written.
     folded: bool,
+    /// An emitted atom can match a NUL.
+    nul: Cell<bool>,
 }
 
 fn is_digit(ch: char) -> bool {
@@ -259,6 +265,7 @@ impl Translator {
             all_names,
             backrefs: Vec::new(),
             folded: false,
+            nul: Cell::new(false),
         }
     }
 
@@ -310,6 +317,7 @@ impl Translator {
             source: joined.text,
             fold: false,
             regular: joined.regular,
+            nul: self.nul.get(),
         })
     }
 
@@ -428,6 +436,7 @@ impl Translator {
                 return;
             }
         }
+        self.nul.set(self.nul.get() || cp == 0);
         let piece = Piece::new(self.char_text(cp), ere_char(cp));
         self.atom(piece, (1, Some(1)));
     }
@@ -1470,6 +1479,7 @@ impl Translator {
         } else {
             cs.intersect(&charset::all())
         };
+        self.nul.set(self.nul.get() || cs.contains(0));
         if let Some(single) = cs.single() {
             return Piece::new(self.char_text(single), ere_char(single));
         }

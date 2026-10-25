@@ -10,7 +10,7 @@ fn only_in(pattern: &str, text: &str, mode: Mode) -> Vec<String> {
     let mut found = Vec::new();
     let mut at = 0;
     while at <= hay.len() {
-        let Some((start, end)) = pcre.find(hay, at).unwrap() else {
+        let Some((start, end)) = pcre.find(hay, at).0.unwrap() else {
             break;
         };
         if end > start {
@@ -172,7 +172,7 @@ fn keep_of_an_unmatched_branch_is_skipped() {
 fn groups_number_as_the_pattern_does() {
     let pcre = compile(r"a\K(b)(?<n>c)", Mode::default()).unwrap();
     let mut groups = Vec::new();
-    assert_eq!(pcre.captures(b"abc", 0, &mut groups), Ok(true));
+    assert_eq!(pcre.captures(b"abc", 0, &mut groups).0, Ok(true));
     assert_eq!(groups, [Some((1, 3)), Some((1, 2)), Some((2, 3))]);
     assert_eq!(pcre.capture_names().collect::<Vec<_>>(), [("n", 2)]);
 }
@@ -296,15 +296,15 @@ fn bytes_mode_matches_a_byte_per_dot() {
         },
     )
     .unwrap();
-    assert_eq!(pcre.find(b"\xff", 0), Ok(Some((0, 1))));
-    assert_eq!(pcre.find("é".as_bytes(), 0), Ok(None));
+    assert_eq!(pcre.find(b"\xff", 0).0, Ok(Some((0, 1))));
+    assert_eq!(pcre.find("é".as_bytes(), 0).0, Ok(None));
 }
 
 #[test]
 fn utf8_mode_matches_a_character_per_dot_and_skips_invalid_bytes() {
     let pcre = compile("^.$", Mode::default()).unwrap();
-    assert_eq!(pcre.find("é".as_bytes(), 0), Ok(Some((0, 2))));
-    assert_eq!(pcre.find(b"\xff", 0), Ok(None));
+    assert_eq!(pcre.find("é".as_bytes(), 0).0, Ok(Some((0, 2))));
+    assert_eq!(pcre.find(b"\xff", 0).0, Ok(None));
 }
 
 #[test]
@@ -312,9 +312,19 @@ fn a_runaway_search_stops_at_the_limit() {
     let pcre = compile("^(a|a)+\\1c", Mode::default()).unwrap();
     let mut hay = vec![b'a'; 40];
     hay.extend_from_slice(b"xc");
-    assert_eq!(pcre.find(&hay, 0), Err(Exceeded));
+    assert_eq!(pcre.find(&hay, 0), (Err(Exceeded), 10_000_000));
     let linear = compile("(a+)+$", Mode::default()).unwrap();
-    assert_eq!(linear.find(&[b'a'; 40], 0), Ok(Some((0, 40))));
+    assert_eq!(linear.find(&[b'a'; 40], 0), (Ok(Some((0, 40))), 1 << 8));
+}
+
+#[test]
+fn a_costly_search_reports_the_limit_it_climbed_to() {
+    let pcre = compile("^(a|a)+\\1c|x$", Mode::default()).unwrap();
+    let mut hay = vec![b'a'; 16];
+    hay.push(b'x');
+    let (found, steps) = pcre.find(&hay, 0);
+    assert_eq!(found, Ok(Some((16, 17))));
+    assert!((1 << 16..10_000_000).contains(&steps), "{steps}");
 }
 
 #[test]

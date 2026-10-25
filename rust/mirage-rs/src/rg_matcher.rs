@@ -26,6 +26,10 @@ struct SearchMemoryLimit(usize);
 
 const SEARCH_MEMORY_LIMIT: SearchMemoryLimit = SearchMemoryLimit(64 * 1024 * 1024);
 
+/// The backtracking steps of a -P search that weigh as much as one byte of
+/// rg's work, so a search past every quick limit ends a step of it.
+const PCRE_STEPS_PER_UNIT: usize = 16;
+
 impl SearchMemoryLimit {
     fn check(&self, nfa: &NFA) -> Result<(), StreamError> {
         let states = nfa.states().len();
@@ -305,6 +309,7 @@ impl Program {
                         ignore_case: options.ignore_case,
                     })
                 });
+        let record_context = options.multiline && options.null_data && !compiled.matches_nul;
         Ok(Self {
             nfa: NFA::never_match(),
             filters: LiteralFilters::default(),
@@ -312,7 +317,7 @@ impl Program {
             pcre_groups,
             multiline: options.multiline,
             cr_selects: false,
-            record_context: options.multiline && options.null_data,
+            record_context,
             required_terms,
         })
     }
@@ -647,12 +652,15 @@ impl Search {
                 self.phase = Phase::Done;
                 break;
             }
-            let found = if self.group_count > 1 {
-                pcre.captures(&self.haystack, self.at, &mut self.groups)
-                    .map(|found| found.then(|| self.groups[0].expect("a match spans group 0")))
+            let (found, steps) = if self.group_count > 1 {
+                let (found, steps) = pcre.captures(&self.haystack, self.at, &mut self.groups);
+                let found = found
+                    .map(|found| found.then(|| self.groups[0].expect("a match spans group 0")));
+                (found, steps)
             } else {
                 pcre.find(&self.haystack, self.at)
             };
+            *budget = budget.saturating_sub(steps / PCRE_STEPS_PER_UNIT);
             let (start, end) = match found {
                 Ok(Some(span)) => span,
                 Ok(None) => {
