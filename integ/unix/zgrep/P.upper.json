@@ -33,6 +33,19 @@
         "P",
         "o"
       ]
+    },
+    {
+      "id": "zgrep_P_match_limit_ends_the_input",
+      "seq": 15200200,
+      "command": "printf 'ok\\naaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaxc\\nok2\\n' | gzip | zgrep -P '^(a|a)+\\1c|^ok'",
+      "expect": {
+        "exit": 2,
+        "stdout": "ok\n",
+        "stderr": "grep: (standard input): exceeded PCRE's backtracking limit\n"
+      },
+      "flags": [
+        "P"
+      ]
     }
   ]
 }

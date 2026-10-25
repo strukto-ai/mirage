@@ -205,6 +205,9 @@ struct Translator {
     names: Vec<String>,
     all_names: Vec<String>,
     backrefs: Vec<(usize, usize)>,
+    /// The whole pattern folds outside the translation: sets still fold
+    /// before they are negated, literals stay as written.
+    folded: bool,
 }
 
 fn is_digit(ch: char) -> bool {
@@ -255,6 +258,7 @@ impl Translator {
             names: Vec::new(),
             all_names,
             backrefs: Vec::new(),
+            folded: false,
         }
     }
 
@@ -416,7 +420,7 @@ impl Translator {
     }
 
     fn literal(&mut self, cp: u32) {
-        if self.flags.i {
+        if self.flags.i && !self.folded {
             let folded = charset::fold(&CharSet::chars(&[cp]), self.mode.bytes);
             if folded.single().is_none() {
                 let piece = self.class_piece(&folded);
@@ -1638,23 +1642,18 @@ fn has_inline_case(pattern: &[char]) -> bool {
 
 /// Translate a PCRE2 pattern, given as the characters PCRE2 reads.
 pub(crate) fn translate(pattern: &[char], mode: Mode) -> Result<Translated, PcreError> {
-    if mode.ignore_case && !has_inline_case(pattern) {
-        let flags = Flags {
-            m: mode.multi_line,
-            s: mode.dotall,
-            ..Flags::default()
-        };
-        let mut translated = Translator::new(pattern.to_vec(), mode, flags).translate()?;
-        translated.fold = true;
-        return Ok(translated);
-    }
     let flags = Flags {
         i: mode.ignore_case,
         m: mode.multi_line,
         s: mode.dotall,
         ..Flags::default()
     };
-    Translator::new(pattern.to_vec(), mode, flags).translate()
+    let folded = mode.ignore_case && !has_inline_case(pattern);
+    let mut translator = Translator::new(pattern.to_vec(), mode, flags);
+    translator.folded = folded;
+    let mut translated = translator.translate()?;
+    translated.fold = folded;
+    Ok(translated)
 }
 
 /// The source fancy-regex compiles: the translation, folded throughout

@@ -35,7 +35,7 @@ import { directoriesAction, parseFlags as parseGrepFlags } from '../generic/grep
 import { encodingFlag, parseFlags as parseRgFlags } from '../generic/rg.ts'
 import { searchTerms } from '../grep_pushdown.ts'
 import { foldsCase } from '../rg_search.ts'
-import { openRg, requiredTerms, type SearchHints } from '../rg_stream.ts'
+import { compiledTerms, openRg, type Compiled } from '../rg_stream.ts'
 import { compilePattern, patternArg } from '../grep_pattern.ts'
 import type { SearchTerms } from '../types.ts'
 import { linksOf, mountRoot, mountsOf } from '../utils/links.ts'
@@ -123,40 +123,36 @@ export async function rgTerms(
     return null
   }
   if (pattern === null || fl.raw('file') !== undefined) return null
-  if (f.engine === 'default') {
-    const program = await openRg(pattern, false, f)
-    try {
-      const terms = requiredTerms(program)
-      if (terms === null || terms.texts.some((term) => term.includes('\n'))) return null
-      return {
-        texts: terms.texts,
-        wholeWord: terms.whole_word,
-        ignoreCase: terms.ignore_case,
-        lineOutput: !(
-          f.lineNumbers ||
-          f.byteOffsets ||
-          f.column ||
-          f.vimgrep ||
-          f.contextAfter > 0 ||
-          f.contextBefore > 0 ||
-          f.stopOnNonmatch ||
-          f.nullData ||
-          f.multiline === true
-        ),
-        readsBinary: f.text || f.nullData || f.binary,
-      }
-    } finally {
-      program.stream.close()
+  const program = await openRg(pattern, false, f)
+  let compiled: Compiled
+  try {
+    compiled = compiledTerms(program)
+  } finally {
+    program.stream.close()
+  }
+  if (!compiled.pcre) {
+    const terms = compiled.terms
+    if (terms === null || terms.texts.some((term) => term.includes('\n'))) return null
+    return {
+      texts: terms.texts,
+      wholeWord: terms.whole_word,
+      ignoreCase: terms.ignore_case,
+      lineOutput: !(
+        f.lineNumbers ||
+        f.byteOffsets ||
+        f.column ||
+        f.vimgrep ||
+        f.contextAfter > 0 ||
+        f.contextBefore > 0 ||
+        f.stopOnNonmatch ||
+        f.nullData ||
+        f.multiline === true
+      ),
+      readsBinary: f.text || f.nullData || f.binary,
     }
   }
   const ignoreCase = foldsCase(pattern, f.fixedString, f)
-  const pcre = await openRg(pattern, false, f)
-  let terms: SearchHints | null
-  try {
-    terms = requiredTerms(pcre)
-  } finally {
-    pcre.stream.close()
-  }
+  const terms = compiled.terms
   const found = searchTerms(
     pattern,
     terms === null ? null : terms.texts,

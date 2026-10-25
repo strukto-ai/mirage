@@ -139,6 +139,27 @@ fn caseless_back_references_fold() {
     assert_eq!(only_in("é", "Éé", unicode_caseless), ["É", "é"]);
 }
 
+// ripgrep 14.1.1 -iP (with and without --no-pcre2-unicode) and grep 3.11
+// -iP: a caseless negated set leaves out both cases of what it names.
+#[test]
+fn caseless_negated_sets_exclude_both_cases() {
+    for (unicode, bytes) in [(true, false), (false, false), (false, true)] {
+        let mode = Mode {
+            unicode,
+            bytes,
+            ignore_case: true,
+            ..Mode::default()
+        };
+        assert_eq!(only_in("[^a]+", "aAbB", mode), ["bB"]);
+    }
+    let unicode_caseless = Mode {
+        unicode: true,
+        ignore_case: true,
+        ..Mode::default()
+    };
+    assert_eq!(only_in(r"[^\x{e9}]+", "aÉéb", unicode_caseless), ["a", "b"]);
+}
+
 #[test]
 fn keep_of_an_unmatched_branch_is_skipped() {
     assert_eq!(

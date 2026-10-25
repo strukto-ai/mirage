@@ -33,7 +33,7 @@ from mirage.commands.builtin.grep_pushdown import (
     search_terms,
 )
 from mirage.commands.builtin.rg_search import folds_case
-from mirage.commands.builtin.rg_stream import open_rg, required_terms
+from mirage.commands.builtin.rg_stream import compiled_terms, open_rg
 from mirage.commands.builtin.types import SearchTerms
 from mirage.commands.builtin.utils.links import (
     links_of,
@@ -146,8 +146,9 @@ def rg_terms(fl: FlagView, texts: list[str]) -> SearchTerms | None:
         return None
     if pattern is None or fl.raw("file"):
         return None
-    if f.engine == "default":
-        terms = required_terms(open_rg(pattern, False, f))
+    compiled = compiled_terms(open_rg(pattern, False, f))
+    if not compiled.pcre:
+        terms = compiled.terms
         if terms is None or any("\n" in term for term in terms.texts):
             return None
         return SearchTerms(
@@ -168,7 +169,7 @@ def rg_terms(fl: FlagView, texts: list[str]) -> SearchTerms | None:
             reads_binary=f.text or f.null_data or f.binary,
         )
     ignore_case = folds_case(pattern, f.fixed_string, f)
-    pcre = required_terms(open_rg(pattern, False, f))
+    pcre = compiled.terms
     found = search_terms(
         pattern,
         None if pcre is None else tuple(t.encode() for t in pcre.texts),

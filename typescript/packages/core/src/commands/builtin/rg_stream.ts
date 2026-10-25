@@ -21,9 +21,10 @@ const COMPILED = z.object({
   terms: z
     .object({ texts: z.array(z.string()), whole_word: z.boolean(), ignore_case: z.boolean() })
     .nullable(),
+  pcre: z.boolean(),
 })
 export type SearchHints = NonNullable<z.infer<typeof COMPILED>['terms']>
-type Compiled = z.infer<typeof COMPILED>
+export type Compiled = z.infer<typeof COMPILED>
 const TALLY = z.object({
   selected: z.boolean(),
   binary: z.boolean(),
@@ -256,7 +257,6 @@ export async function formatTotals(
   }
 }
 
-export function requiredTerms(program: RgProgram): SearchHints | null {
-  const compiled: Compiled = COMPILED.parse(JSON.parse(DEC.decode(program.stream.metadata())))
-  return compiled.terms
+export function compiledTerms(program: RgProgram): Compiled {
+  return COMPILED.parse(JSON.parse(DEC.decode(program.stream.metadata())))
 }

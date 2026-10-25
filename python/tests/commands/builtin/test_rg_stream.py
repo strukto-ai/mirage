@@ -20,8 +20,8 @@ from mirage.commands.builtin.generic.rg import parse_flags
 from mirage.commands.builtin.rg_search import RgFlags, Tally
 from mirage.commands.builtin.rg_stream import (
     SearchHints,
+    compiled_terms,
     open_rg,
-    required_terms,
     stream_haystack,
 )
 from mirage.commands.errors import UsageError
@@ -50,7 +50,7 @@ def test_compiled_terms_describe_safe_backend_candidates(
     pattern: str, flags: dict[str, FlagValue], want: SearchHints | None
 ) -> None:
     program = open_rg(pattern, False, _flags(**flags))
-    assert required_terms(program) == want
+    assert compiled_terms(program).terms == want
 
 
 def test_invalid_native_pattern_is_a_usage_error() -> None:

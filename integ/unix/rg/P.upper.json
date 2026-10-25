@@ -749,6 +749,108 @@
       "flags": [
         "pcre2"
       ]
+    },
+    {
+      "id": "rg_P_caseless_negated_set_excludes_both_cases",
+      "seq": 15200197,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "printf 'a\\nA\\nb\\nB\\n' | rg -iP '^[^a]$'",
+      "expect": {
+        "exit": 0,
+        "stdout": "b\nB\n",
+        "stderr": ""
+      },
+      "flags": [
+        "pcre2",
+        "ignore_case"
+      ]
+    },
+    {
+      "id": "rg_no_pcre2_unicode_reads_the_pattern_as_bytes",
+      "seq": 15200198,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "printf '\\304\\200\\nx\\n\\304z\\n' | rg -cP --no-pcre2-unicode '[Ā]'",
+      "expect": {
+        "exit": 0,
+        "stdout": "2\n",
+        "stderr": ""
+      },
+      "flags": [
+        "pcre2",
+        "no_pcre2_unicode",
+        "count"
+      ]
+    },
+    {
+      "id": "rg_P_refusal_offset_counts_bytes",
+      "seq": 15200199,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "printf 'a\\n' | rg -P 'Ā('",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "rg: PCRE2: error compiling pattern at offset 7: missing closing parenthesis\n"
+      },
+      "flags": [
+        "pcre2"
+      ]
     }
   ]
 }

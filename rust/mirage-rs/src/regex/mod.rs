@@ -65,6 +65,9 @@ struct Engine {
     resume: Option<(usize, Option<(usize, usize)>)>,
 }
 
+/// GNU grep's words for a -P search that gave up at PCRE2's match limit.
+pub(crate) const EXCEEDED: &str = "exceeded PCRE's backtracking limit";
+
 /// grep's basic, extended and fixed-string patterns, matched over records
 /// of bytes or, under UTF-8, of characters. A record matches when any
 /// pattern of the list does; where a match lies, for -o, is the leftmost

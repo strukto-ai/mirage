@@ -2755,11 +2755,13 @@ impl Stream for Rg {
             #[derive(Serialize)]
             struct Compiled<'a> {
                 terms: &'a Option<crate::rg_matcher::SearchHints>,
+                pcre: bool,
             }
             serde_json::to_writer(
                 out,
                 &Compiled {
                     terms: &self.program.required_terms,
+                    pcre: self.program.runs_pcre(),
                 },
             )
             .expect("rg prefixes serialize");
@@ -2835,6 +2837,19 @@ mod tests {
             err.to_string(),
             "PCRE2: error compiling pattern at offset 6: missing closing parenthesis"
         );
+        let err = open("{\"pattern\":\"Ā(\",\"engine\":\"pcre2\"}".as_bytes())
+            .err()
+            .unwrap();
+        assert_eq!(
+            err.to_string(),
+            "PCRE2: error compiling pattern at offset 7: missing closing parenthesis"
+        );
+    }
+
+    #[test]
+    fn pcre2_without_unicode_reads_the_pattern_as_bytes() {
+        let config = json!({"pattern":"[Ā]","engine":"pcre2","unicode":false});
+        assert_eq!(run(b"\xc4\x80\nx\n\xc4z\n", config).0, b"\xc4\x80\n\xc4z\n");
     }
 
     #[test]

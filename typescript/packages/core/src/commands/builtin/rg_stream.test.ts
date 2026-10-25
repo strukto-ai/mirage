@@ -21,7 +21,7 @@ import { FlagView } from '../spec/flag_view.ts'
 import type { FlagValue } from '../spec/types.ts'
 import { parseFlags } from './generic/rg.ts'
 import type { RgFlags, Tally } from './rg_search.ts'
-import { openRg, requiredTerms, streamHaystack, type SearchHints } from './rg_stream.ts'
+import { compiledTerms, openRg, streamHaystack, type SearchHints } from './rg_stream.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
@@ -51,7 +51,7 @@ it.each<{
   async ({ pattern, flags, want }) => {
     const program = await openRg(pattern, false, flagsOf(flags))
     try {
-      expect(requiredTerms(program)).toEqual(want)
+      expect(compiledTerms(program).terms).toEqual(want)
     } finally {
       program.stream.close()
     }

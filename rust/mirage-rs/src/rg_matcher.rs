@@ -273,11 +273,19 @@ impl Program {
             crlf: options.crlf && options.multiline,
             whole_line: false,
         };
-        let chars: Vec<char> = display.chars().collect();
+        let chars = pcre::pattern_chars(display.as_bytes(), mode.bytes);
         let compiled = Pcre::new(&chars, mode).map_err(|err| {
+            let offset = if mode.bytes {
+                err.offset
+            } else {
+                chars[..err.offset.min(chars.len())]
+                    .iter()
+                    .map(|ch| ch.len_utf8())
+                    .sum()
+            };
             StreamError::new(format!(
-                "PCRE2: error compiling pattern at offset {}: {}",
-                err.offset, err.message
+                "PCRE2: error compiling pattern at offset {offset}: {}",
+                err.message
             ))
         })?;
         let pcre_groups = match options.capture_requirement {
@@ -321,6 +329,11 @@ impl Program {
 
     pub(crate) fn is_multiline(&self) -> bool {
         self.multiline
+    }
+
+    /// Whether PCRE2 searches: -P, or --engine auto past a refusal.
+    pub(crate) fn runs_pcre(&self) -> bool {
+        self.pcre.is_some()
     }
 
     pub(crate) fn uses_record_context(&self) -> bool {

@@ -533,8 +533,10 @@ impl Grep {
         };
         self.stderr.extend_from_slice(b"grep: ");
         self.stderr.extend_from_slice(&input.label);
+        self.stderr.extend_from_slice(b": ");
         self.stderr
-            .extend_from_slice(b": exceeded PCRE's backtracking limit\n");
+            .extend_from_slice(crate::regex::EXCEEDED.as_bytes());
+        self.stderr.push(b'\n');
         input.failed = true;
         input.stop = Stop::Return;
     }

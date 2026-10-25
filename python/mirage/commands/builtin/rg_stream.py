@@ -32,6 +32,7 @@ class SearchHints:
 @dataclass(frozen=True, slots=True)
 class Compiled:
     terms: SearchHints | None
+    pcre: bool
 
 
 COMPILED = TypeAdapter(Compiled)
@@ -264,5 +265,5 @@ def format_totals(
     )
 
 
-def required_terms(program: RgProgram) -> SearchHints | None:
-    return COMPILED.validate_json(program.stream.metadata()).terms
+def compiled_terms(program: RgProgram) -> Compiled:
+    return COMPILED.validate_json(program.stream.metadata())
