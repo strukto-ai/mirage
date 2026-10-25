@@ -341,7 +341,7 @@ function _resolveSymlinks(
       throw new CycleError(path)
     }
     if (target.startsWith('/')) resolved.length = 0
-    pending.push(...target.split('/').reverse())
+    for (const part of target.split('/').reverse()) pending.push(part)
   }
   const landing = '/' + resolved.join('/')
   if (hops > 0) trace?.push({ kind: 'landing', path: landing })

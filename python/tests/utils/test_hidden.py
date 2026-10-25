@@ -530,3 +530,14 @@ def test_long_relevant_trace_preserves_the_scalar_result():
     links = {"/link": "/a" * 4096}
     path = "/link" + "".join(f"/c{index}/.." for index in range(2100))
     assert not leads_hidden(_vis(["/secret"]), path, links)
+
+
+def test_link_targets_with_many_redundant_separators():
+    scope = _vis(["/secret"])
+    links = {"/link": "/" * 200000 + "public"}
+    assert not leads_hidden(scope, "/link", links)
+    assert resolve_symlinks("/link", links) == "/public"
+    assert visible_links(scope, ("/link",), links) == (True,)
+    links["/link"] = "/" * 200000 + "secret"
+    assert leads_hidden(scope, "/link", links)
+    assert visible_links(scope, ("/link",), links) == (False,)

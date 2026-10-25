@@ -410,6 +410,17 @@ describe('leadsHidden', () => {
       '/link' + Array.from({ length: 2100 }, (_, index) => `/c${String(index)}/..`).join('')
     expect(leadsHidden(vis(classifyPaths(['/secret'])), path, links)).toBe(false)
   })
+  it('handles targets with many redundant separators', () => {
+    const scope = vis(classifyPaths(['/secret']))
+    const links = new Map([['/link', '/'.repeat(200000) + 'public']])
+    expect(leadsHidden(scope, '/link', links)).toBe(false)
+    expect(resolveSymlinks('/link', links)).toBe('/public')
+    expect(visibleLinks(scope, ['/link'], links)).toEqual([true])
+    links.set('/link', '/'.repeat(200000) + 'secret')
+    expect(leadsHidden(scope, '/link', links)).toBe(true)
+    expect(visibleLinks(scope, ['/link'], links)).toEqual([false])
+  })
+
   it('reads only reached links and observes same-size mutations', () => {
     class LookupLinks extends Map<string, string> {
       override [Symbol.iterator](): MapIterator<[string, string]> {
