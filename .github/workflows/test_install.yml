@@ -28,6 +28,7 @@ concurrency:
 jobs:
   changes:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     if: github.event_name == 'pull_request'
     permissions:
       pull-requests: read
@@ -56,6 +57,7 @@ jobs:
     needs: changes
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.hit == 'true') }}
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     # Each check runs from python/, whose mirage/ would shadow the installed
     # package, native module and all, were the current directory on
     # sys.path; PYTHONSAFEPATH (3.11 and later) keeps it off.
@@ -174,6 +176,7 @@ jobs:
     needs: changes
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.hit == 'true') }}
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
 
@@ -243,6 +246,7 @@ jobs:
   gate:
     name: test-install-gate
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     needs: [changes, python-install, ts-install]
     if: always()
     steps:

@@ -52,6 +52,7 @@ env:
 jobs:
   changes:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     if: github.event_name == 'pull_request'
     permissions:
       pull-requests: read
@@ -88,6 +89,7 @@ jobs:
     needs: changes
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.hit == 'true') }}
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     services:
       redis:
         image: redis:7
@@ -243,6 +245,7 @@ jobs:
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.hit == 'true') }}
     name: runtime, isolated installs and audit
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     env:
       WASI_BUILD: python-3.14.7-wasi_sdk-24
       QUICKJS_BUILD: v0.16.2
@@ -407,6 +410,7 @@ jobs:
   gate:
     name: test-python-gate
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     needs: [changes, test, runtime]
     if: always()
     steps:
