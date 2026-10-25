@@ -109,25 +109,38 @@ export class StreamHost {
   /**
    * Open an input by name: `-` or `/dev/stdin` is stdin; `operand` is the
    * operand, from 1, the name came from; `file` is a file a script names,
-   * which no spelling of stdin stands for; `asOperand` is a name standing in
-   * for an operand (unzip's `X.zip` for `X`), read as an operand is.
+   * which no spelling of stdin stands for; `asOperand` is the operand, from 1,
+   * a name stands in for (unzip's `X.zip` for `X`): found beside it and read
+   * as it is.
    */
   openInput(
     name: string,
     operand: number | null,
     file = false,
-    asOperand = false,
+    asOperand: number | null = null,
   ): AsyncIterable<Uint8Array> {
     if (file) return this.readPath(name)
     const path =
       this.operand(name, operand) ??
-      (asOperand ? PathSpec.fromStrPath(name, undefined, this.ctx.cwd) : undefined)
+      (asOperand === null ? undefined : this.standIn(name, asOperand))
     if (path !== undefined) {
       if (isStdin(path, this.dash)) return this.stdinView()
       return this.readPath(path, this.local(path))
     }
     if (STDIN_NAMES.has(name)) return this.stdinView()
     return this.readPath(name)
+  }
+
+  /**
+   * The path a name standing in for an operand names: the operand's resolved
+   * path with what the name adds to its spelling, so it does not hang on the
+   * host's working directory.
+   */
+  private standIn(name: string, operand: number): PathSpec {
+    const spec = operand > 0 ? this.operands[operand - 1] : undefined
+    if (spec !== undefined && name.startsWith(spec.rawPath))
+      return PathSpec.fromStrPath(spec.virtual + name.slice(spec.rawPath.length))
+    return PathSpec.fromStrPath(name, undefined, this.ctx.cwd)
   }
 
   /** The operand a name is, when it still holds its spelling. */
@@ -234,7 +247,8 @@ export class StreamHost {
     if (named !== undefined) this.named.set(fd, named)
     // Each pull loses to the abort, and a producer left mid-pull is closed
     // without a wait.
-    const opened = this.openInput(name, operand, request.file === true, request.as_operand === true)
+    const standIn = typeof request.as_operand === 'number' ? request.as_operand : null
+    const opened = this.openInput(name, operand, request.file === true, standIn)
     return chunks(opened, this.ctx.signal, false)
   }
 

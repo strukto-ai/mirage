@@ -21,14 +21,18 @@ async def _chunks(*parts: bytes) -> AsyncIterator[bytes]:
         yield part
 
 
-def _host(files: dict[str, bytes], stdin: bytes = b"") -> StreamHost:
+def _host(
+    files: dict[str, bytes],
+    stdin: bytes = b"",
+    operand: PathSpec | None = None,
+) -> StreamHost:
     async def stream(path: PathSpec) -> AsyncIterator[bytes]:
         if path.virtual not in files:
             raise FileNotFoundError(path.virtual)
         yield files[path.virtual]
 
     return StreamHost(
-        [_spec("/a.txt")],
+        [operand or _spec("/a.txt")],
         stream,
         _chunks(*stdin.split(b"|")) if stdin else None,
         None,
@@ -56,14 +60,17 @@ async def test_an_operand_as_typed_reads_through_the_mount() -> None:
 
 @pytest.mark.asyncio
 async def test_a_name_standing_in_for_an_operand_reads_as_one() -> None:
-    # Outside a workspace only the operand's reader can serve a name.
-    host = _host({"/a.txt.zip": b"stored\n"})
-    named: dict[str, JsonValue] = {"op": "read", "fd": 1, "path": "/a.txt.zip"}
+    # Outside a workspace only the operand's reader can serve a name, and
+    # the stand-in is found beside the operand, typed under /src, while
+    # the host's working directory is /.
+    operand = PathSpec.from_str_path("a", cwd="/src")
+    host = _host({"/src/a.zip": b"stored\n"}, operand=operand)
+    named: dict[str, JsonValue] = {"op": "read", "fd": 1, "path": "a.zip"}
     assert (await host.serve(named, b"")).reply == {
         "error": "No such file or directory",
         "errno": "ENOENT",
     }
-    stand_in: dict[str, JsonValue] = {**named, "fd": 2, "as_operand": True}
+    stand_in: dict[str, JsonValue] = {**named, "fd": 2, "as_operand": 1}
     assert await host.serve(stand_in, b"") == ({}, b"stored\n", None)
 
 
