@@ -163,11 +163,11 @@ export function linkTraceWire(trace: readonly LinkStep[]): util.JSONType[] {
 
 const byValue = new Map<string, PolicyMatcher>()
 
-// One matcher per configuration as it reads now, however many objects
-// spell it, the least recently asked dropped first.
-function cached(config: Wire): PolicyMatcher {
-  const text = JSON.stringify(config)
-  const matcher = byValue.get(text) ?? new PolicyMatcher(config)
+// One matcher per configuration as its JSON reads now, however many
+// objects spell it, the least recently asked dropped first; the wire is
+// built only for a configuration not seen yet.
+function cached(text: string, config: () => Wire): PolicyMatcher {
+  const matcher = byValue.get(text) ?? new PolicyMatcher(config())
   byValue.delete(text)
   byValue.set(text, matcher)
   if (byValue.size > CACHE_SIZE) {
@@ -183,10 +183,14 @@ function cached(config: Wire): PolicyMatcher {
  * admission_matcher.
  */
 export function admissionMatcher(rules: AdmissionRules | null): PolicyMatcher {
-  return cached(rules === null ? {} : { rules: rulesWire(rules) })
+  return cached(JSON.stringify({ rules }), () =>
+    rules === null ? {} : { rules: rulesWire(rules) },
+  )
 }
 
 /** The compiled matcher for a visibility, shared by every caller asking the same. Mirrors Python's visibility_matcher. */
 export function visibilityMatcher(vis: Visibility | null): PolicyMatcher {
-  return cached(vis === null ? {} : { visibility: visibilityWire(vis) })
+  return cached(JSON.stringify({ visibility: vis }), () =>
+    vis === null ? {} : { visibility: visibilityWire(vis) },
+  )
 }
