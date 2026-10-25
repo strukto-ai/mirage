@@ -334,11 +334,14 @@ export async function* serveRequests(
     const served = await host.serve(...taken)
     if (served.output !== undefined && served.output !== null) yield* chunks(served.output, signal)
     const output = stream.respond(served.reply, served.data ?? new Uint8Array())
+    // Each diagnostic is collected before the output that follows it, so a
+    // reader that closes on that output still leaves it reported.
+    await host.errors.append(stream.takeStderr())
     if (output.byteLength > 0) yield output
   }
   const tail = stream.finish()
-  if (tail.byteLength > 0) yield tail
   await host.errors.append(stream.takeStderr())
+  if (tail.byteLength > 0) yield tail
 }
 
 /** Open the mirage-rs stream `kind`. Mirrors Python's open_stream. */

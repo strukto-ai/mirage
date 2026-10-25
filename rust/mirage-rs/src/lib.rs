@@ -22,6 +22,7 @@ mod look;
 pub mod nfs;
 mod nl;
 mod numfmt;
+mod od;
 mod paste;
 mod pcre;
 mod printf;
@@ -337,6 +338,7 @@ pub fn open(kind: &str, config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
         "look" => look::open(config),
         "nl" => nl::open(config),
         "numfmt" => numfmt::open(config),
+        "od" => od::open(config),
         "paste" => paste::open(config),
         "printf" => printf::open(config),
         "regex" => regex::stream::open(config),

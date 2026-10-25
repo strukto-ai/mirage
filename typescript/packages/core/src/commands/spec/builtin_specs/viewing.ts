@@ -96,13 +96,28 @@ export const SPECS: Record<string, CommandSpec> = {
       PATHS_OPERAND,
     ],
   }),
+  // GNU names the option as typed when it refuses its value (`invalid -j
+  // argument`, `invalid --skip-bytes argument`), so each spelling of one is
+  // its own entry. Each traditional letter adds a type.
   od: new CommandSpec({
     arguments: [
       new Argument(['-A', '--address-radix']),
-      new Argument(['-j', '--skip-bytes']),
-      new Argument(['-N', '--read-bytes']),
+      new Argument('-j'),
+      new Argument('--skip-bytes'),
+      new Argument('-N'),
+      new Argument('--read-bytes'),
+      new Argument('-S'),
+      new Argument('--strings', { nargs: '?', attachedOnly: true }),
       new Argument(['-t', '--format'], { action: 'append' }),
-      new Argument('-c', { action: 'store_true' }),
+      new Argument(['-v', '--output-duplicates'], { action: 'store_true' }),
+      new Argument('-w', { nargs: '?', attachedOnly: true }),
+      new Argument('--width', { nargs: '?', attachedOnly: true }),
+      new Argument('--endian'),
+      new Argument('--traditional', { action: 'store_true' }),
+      ...Array.from(
+        'abcdfhilosxBDeFHILOX',
+        (letter) => new Argument(`-${letter}`, { action: 'store_true' }),
+      ),
       PATHS_OPERAND,
     ],
   }),
