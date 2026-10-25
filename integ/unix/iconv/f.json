@@ -65,10 +65,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "printf 'caf\\303\\251\\n' | iconv -c -f utf-8 -t ascii; echo rc=$?; printf 'caf\\351\\n' | iconv -c -f utf-8 -t ascii; echo rc=$?; printf 'a\\342\\202\\254b\\n' | iconv -c -f utf-8 -t latin1 | od -An -tx1; printf 'a\\200b\\n' | iconv -c -f ascii -t utf-8; echo rc=$?",
+      "command": "printf 'caf\\303\\251\\n' | iconv -c -f utf-8 -t ascii; echo rc=$?; printf 'caf\\351\\n' | iconv -c -f utf-8 -t ascii; echo rc=$?; printf 'a\\342\\202\\254b\\n' | iconv -c -f utf-8 -t latin1 | od -An -tx1; printf 'a\\200b\\n' | iconv -c -f ascii -t utf-8; echo rc=$?; printf 'a\\377' | iconv -c -f utf-8 -t ascii | head -c 1; echo \" ${PIPESTATUS[*]}\"",
       "expect": {
         "exit": 0,
-        "stdout": "caf\nrc=1\ncaf\nrc=1\n 61 62 0a\nab\nrc=1\n",
+        "stdout": "caf\nrc=1\ncaf\nrc=1\n 61 62 0a\nab\nrc=1\na 0 1 0\n",
         "stderr": ""
       }
     },

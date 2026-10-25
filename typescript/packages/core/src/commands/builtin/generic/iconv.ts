@@ -105,16 +105,14 @@ export async function iconvGeneric(
   }
   async function* output(): AsyncIterable<Uint8Array> {
     try {
-      try {
-        yield* mergeOutput(converter, readInput, ctx.signal)
-      } catch (err) {
-        if (!(err instanceof StreamRefusal)) throw err
-        await report(concat([fromByteView(err.message), NEWLINE]))
-        if (err.output.byteLength > 0) yield err.output
-      }
+      yield* mergeOutput(converter, readInput, ctx.signal)
+    } catch (err) {
+      if (!(err instanceof StreamRefusal)) throw err
+      await report(concat([fromByteView(err.message), NEWLINE]))
+      if (err.output.byteLength > 0) yield err.output
+    } finally {
       await report(converter.takeStderr())
       if (converter.status() !== 0) io.exitCode = 1
-    } finally {
       for (const { reader } of operands) await reader.discard()
       await closeStream(converter)
     }

@@ -30,6 +30,16 @@ fn convert(from: &str, to: &str, omit: bool, inputs: &[&[&[u8]]]) -> String {
 }
 
 const ILLEGAL_0: &str = "iconv: illegal input sequence at position 0";
+
+/// How many lines a table's text has, and the first 16 hex digits of its
+/// SHA-256.
+fn digest(lines: Vec<String>) -> String {
+    let hash: String = Sha256::digest(lines.concat())[..8]
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect();
+    format!("{} {hash}", lines.len())
+}
 const INCOMPLETE: &str = "iconv: incomplete character or shift sequence at end of buffer;";
 
 /// Each table's size and digest, both directions, checked against glibc
@@ -42,13 +52,6 @@ fn the_multibyte_tables_match_the_pinned_digests() {
         EUC-KR 8227 f1f8fe46cc836ea0 8388 96d8b6b82ea1a6de
         SJIS 6879 9e31ef626b7726f0 7075 152ab23536e0befb
         EUC-JP 13009 0a3c10912de393e1 13169 af425d9e826f2b95";
-    let digest = |lines: Vec<String>| {
-        let hash: String = Sha256::digest(lines.concat())[..8]
-            .iter()
-            .map(|b| format!("{b:02x}"))
-            .collect();
-        format!("{} {hash}", lines.len())
-    };
     for pin in pins.lines() {
         let name = pin.split_whitespace().next().unwrap();
         let (Charset::Multi(spec), (Codec::Multi(table), _)) =
@@ -84,6 +87,62 @@ fn the_multibyte_tables_match_the_pinned_digests() {
     }
 }
 
+/// Each single-byte table's size and digest as glibc 2.41 decodes every
+/// byte on debian:stable-slim, and its reverse the exact inverse, as
+/// glibc's encoders were over the whole BMP.
+#[test]
+fn the_single_byte_tables_match_glibc() {
+    let pins = "IBM866 256 f0e477a17e55d494
+        ISO-8859-2 256 1017a40df39e0791
+        ISO-8859-3 249 f737c4d989fdc594
+        ISO-8859-4 256 624ae534ccca42cc
+        ISO-8859-5 256 5672ede991b13231
+        ISO-8859-6 211 b706857ea5f5c738
+        ISO-8859-7 253 ff75295760abd942
+        ISO-8859-8 220 7a7f2e484df311f5
+        ISO-8859-9 256 6477b0518d907fa3
+        ISO-8859-10 256 a7a983582fe3bfc3
+        ISO-8859-11 248 faf69df11ec9b9db
+        ISO-8859-13 256 d62f9c731bc2a748
+        ISO-8859-14 256 39f1f371467d63cc
+        ISO-8859-15 256 bb469b0b05af843a
+        ISO-8859-16 256 06c2b5c5cbc6f755
+        TIS-620 215 78be353a31084ed3
+        KOI8-R 256 7c9f4340282b59be
+        KOI8-U 256 0cacfb542d71f03c
+        CP874 225 c945caf17e875de4
+        CP1250 251 f1c88533b871dd58
+        CP1251 255 4f7f9bf04f37b2b1
+        CP1252 251 e37fa2f14f99e5a3
+        CP1253 239 e7f1b413ccac6450
+        CP1254 249 aa77fa2004a84366
+        CP1256 256 eace550e9544ef0e
+        CP1257 244 0fbfeed821a2259a";
+    for pin in pins.lines() {
+        let name = pin.split_whitespace().next().unwrap();
+        let (Codec::Single(table), _) = codec(lookup(name.as_bytes()).unwrap()) else {
+            panic!("{name} has no single-byte table");
+        };
+        let mapped: Vec<(u32, u32)> = (0..256)
+            .zip(table.decode.iter().copied())
+            .filter(|&(_, cp)| cp != u32::MAX)
+            .collect();
+        let lines = mapped
+            .iter()
+            .map(|(byte, cp)| format!("{byte:x}:{cp:x}\n"))
+            .collect();
+        assert_eq!(format!("{name} {}", digest(lines)), pin.trim());
+        let inverse = mapped
+            .iter()
+            .all(|&(byte, cp)| table.reverse.get(cp) == Some(byte));
+        let extra = (0..0x10000)
+            .filter(|&cp| table.reverse.get(cp).is_some())
+            .count()
+            != mapped.len();
+        assert!(inverse && !extra, "{name} reverse");
+    }
+}
+
 #[test]
 fn positions_count_from_each_input_across_its_chunks() {
     let position = |n| format!("iconv: illegal input sequence at position {n}");
@@ -97,6 +156,20 @@ fn positions_count_from_each_input_across_its_chunks() {
         convert("UTF-8", "ASCII", false, &[&[b"xy"], second]),
         format!("xyz||0|{}", position(1))
     );
+}
+
+/// A byte outside a three- or four-byte sequence's ranges maps to no cell,
+/// though its index would land on a real one (`8F AF FF` on `8F B0 A1`).
+#[test]
+fn a_wide_sequence_with_a_stray_byte_is_refused() {
+    let run = |charset, input: &[u8], omit| convert(charset, "UTF-8", omit, &[&[input]]);
+    assert_eq!(
+        run("EUC-JP", b"\x8f\xaf\xff", false),
+        format!("||0|{ILLEGAL_0}")
+    );
+    assert_eq!(run("EUC-JP", b"\x8f\xaf\xff", true), "||1|");
+    assert_eq!(run("EUC-JP", b"\x8f\xb0\x7fa", true), "\\x7fa||1|");
+    assert_eq!(run("GB18030", b"\x84\x31\xa5\x30a", true), "a||1|");
 }
 
 #[test]

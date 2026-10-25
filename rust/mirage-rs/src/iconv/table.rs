@@ -172,18 +172,22 @@ pub(crate) struct Multibyte {
 }
 
 impl Grammar {
-    /// The index of a three- or four-byte sequence in `wide`.
+    /// The index of a three- or four-byte sequence in `wide`, None for one
+    /// with a byte outside its ranges, which no cell holds.
     fn wide_index(self, seq: &[u8]) -> Option<usize> {
-        let at = |i: usize, base: u8| usize::from(seq[i].wrapping_sub(base));
-        match (self, seq.len()) {
-            (Grammar::EucJp, 3) => Some(at(1, 0xA1) * 94 + at(2, 0xA1)),
-            (Grammar::Gb18030, 4) => {
-                let index =
-                    (at(0, 0x81) * 10 + at(1, 0x30)) * 1260 + at(2, 0x81) * 10 + at(3, 0x30);
-                (index < GB_BMP).then_some(index)
+        let ranges: &[(u8, u8)] = match (self, seq.len()) {
+            (Grammar::EucJp, 3) => &[(0x8F, 0x8F), (0xA1, 0xFE), (0xA1, 0xFE)],
+            (Grammar::Gb18030, 4) => &[(0x81, 0xFE), (0x30, 0x39), (0x81, 0xFE), (0x30, 0x39)],
+            _ => return None,
+        };
+        let mut index = 0;
+        for (&byte, &(low, high)) in seq.iter().zip(ranges) {
+            if !(low..=high).contains(&byte) {
+                return None;
             }
-            _ => None,
+            index = index * usize::from(high - low + 1) + usize::from(byte - low);
         }
+        (index < self.wide_len()).then_some(index)
     }
 
     fn wide_len(self) -> usize {

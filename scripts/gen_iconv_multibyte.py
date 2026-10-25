@@ -16,6 +16,7 @@ import bisect
 import hashlib
 import itertools
 import pathlib
+import subprocess
 import urllib.request
 from typing import NamedTuple
 
@@ -470,6 +471,8 @@ def main() -> None:
             }
         )
     )
+    # rustfmt lays the tables out as `cargo fmt --check` wants them.
+    subprocess.run(["rustfmt", "--edition", "2024", str(RS_OUT)], check=True)
 
 
 if __name__ == "__main__":

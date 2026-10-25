@@ -98,11 +98,11 @@ async def iconv_generic(
             if refusal.output:
                 yield refusal.output
         finally:
+            await report(stream.take_stderr())
+            if stream.status():
+                io.exit_code = 1
             for _, reader in operands:
                 await reader.discard()
-        await report(stream.take_stderr())
-        if stream.status():
-            io.exit_code = 1
 
     converted = output()
     output_path = fl.as_path("output")
