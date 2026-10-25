@@ -139,13 +139,15 @@ export async function runWholeLine(
   } catch (err) {
     if (signal?.aborted) throw makeAbortError()
     if (isControlFlowError(err)) throw err
-    // A failed run is still a result, which post_execute sees.
+    // A failed run is still a result, which post_execute sees, after the
+    // stderr it had written.
     data = new Uint8Array()
+    const said = await materialize(io.stderr)
     if (err instanceof CommandTimeoutError) {
-      io.stderr = encodeText(`${err.message}\n`)
+      io.stderr = concat([said, encodeText(`${err.message}\n`)])
       io.exitCode = 124
     } else {
-      io.stderr = encodeText(err instanceof Error ? err.message : String(err))
+      io.stderr = concat([said, encodeText(err instanceof Error ? err.message : String(err))])
       io.exitCode = 1
     }
   }

@@ -665,10 +665,18 @@ describe('whole-line runtimes', () => {
 
   it('hands a runtime that failed to post_execute as its result', async () => {
     // A failed run is still the line's result: a policy reading
-    // post_execute sees its status and its error.
+    // post_execute sees its status, what it wrote and its error.
     class BrokenBox extends LineBox {
-      override runLine(): Promise<RunResult> {
-        return Promise.reject(new Error('box broke'))
+      override async runLine(
+        _e: unknown,
+        _p: PathSpec[],
+        _t: string[],
+        _ctx: Context,
+        _output?: OutputFn,
+        errors?: OutputFn,
+      ): Promise<RunResult> {
+        await errors?.(ENC.encode('warning\n'))
+        throw new Error('box broke')
       }
     }
     const seen: [number, string][] = []
@@ -694,10 +702,10 @@ describe('whole-line runtimes', () => {
     try {
       const result = await ws.shell('anything')
       expect(result.exitCode).toBe(1)
-      expect(DEC.decode(result.stderr)).toBe('box broke')
+      expect(DEC.decode(result.stderr)).toBe('warning\nbox broke')
       expect(seen).toHaveLength(1)
       expect(seen[0]?.[0]).toBe(1)
-      expect(seen[0]?.[1]).toContain('box broke')
+      expect(seen[0]?.[1]).toContain('warning\\nbox broke')
     } finally {
       await ws.close()
     }
