@@ -118,9 +118,9 @@ async function dropRow(store: IndexCacheStore, key: string): Promise<void> {
 function countListDirs(store: IndexCacheStore): string[] {
   const reads: string[] = []
   const listDir = store.listDir.bind(store)
-  vi.spyOn(store, 'listDir').mockImplementation((path: string) => {
+  vi.spyOn(store, 'listDir').mockImplementation((path: string, child?: string) => {
     reads.push(path)
-    return listDir(path)
+    return listDir(path, child)
   })
   return reads
 }

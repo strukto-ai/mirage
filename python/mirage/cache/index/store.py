@@ -138,7 +138,23 @@ class IndexCacheStore:
         """
         return False
 
-    async def list_dir(self, vfs_path: str) -> ListResult:
+    async def list_dir(
+        self, vfs_path: str, child: str | None = None
+    ) -> ListResult:
+        """A directory's listing.
+
+        Given ``child``, the one key a lookup asks about, its entries are
+        narrowed to that key, kept where the listing names it, so a stat
+        of each child of a large directory costs no scan or copy of the
+        whole listing, which made ``ls`` of one quadratic
+        (strukto-ai/mirage#1840). A custom store may answer the whole
+        listing instead: callers check the key against the entries
+        either way.
+
+        Args:
+            vfs_path (str): the directory's key.
+            child (str | None): the key to narrow the entries to.
+        """
         raise NotImplementedError
 
     async def set_dir(

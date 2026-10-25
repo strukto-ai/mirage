@@ -1039,7 +1039,9 @@ class RedisIndexCacheStore(IndexCacheStore):
         finally:
             self._listings.row_wrote(vfs_path)
 
-    async def list_dir(self, vfs_path: str) -> ListResult:
+    async def list_dir(
+        self, vfs_path: str, child: str | None = None
+    ) -> ListResult:
         """A folder's listing, read from Redis at most once per command.
 
         Inside a shell command, a later call for the same folder is
@@ -1053,9 +1055,10 @@ class RedisIndexCacheStore(IndexCacheStore):
 
         Args:
             vfs_path (str): the listed folder's key.
+            child (str | None): the key to narrow the entries to.
         """
         return await self._listings.read(
-            vfs_path, lambda: self._read_listing(vfs_path)
+            vfs_path, lambda: self._read_listing(vfs_path), child
         )
 
     async def _read_listing(

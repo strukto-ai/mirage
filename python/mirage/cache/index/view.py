@@ -158,8 +158,10 @@ class IndexView(IndexCacheStore):
                 if self._owns(path) and path in rows
             }
 
-    async def list_dir(self, vfs_path: str) -> ListResult:
-        result = await self._fenced_list_dir(vfs_path)
+    async def list_dir(
+        self, vfs_path: str, child: str | None = None
+    ) -> ListResult:
+        result = await self._fenced_list_dir(vfs_path, child)
         # Asked outside the fence, since a gate may reach the backend, and
         # only about a listing the store has: a NOT_FOUND must stay one.
         # A refusal leaves the listing stored for the re-list to diff.
@@ -174,11 +176,13 @@ class IndexView(IndexCacheStore):
             return ListResult(status=LookupStatus.EXPIRED)
         return result
 
-    async def _fenced_list_dir(self, vfs_path: str) -> ListResult:
+    async def _fenced_list_dir(
+        self, vfs_path: str, child: str | None
+    ) -> ListResult:
         async with self._fence():
             if not self._owns(vfs_path):
                 return ListResult(status=LookupStatus.NOT_FOUND)
-            result = await self._store.list_dir(vfs_path)
+            result = await self._store.list_dir(vfs_path, child)
             if not self._owns(vfs_path):
                 return ListResult(status=LookupStatus.NOT_FOUND)
             # A child of a folder this mount owns is its own too, unless a

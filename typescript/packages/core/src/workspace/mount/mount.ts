@@ -1174,7 +1174,7 @@ export class MountEntry {
     if (
       row === null &&
       listed.length > 0 &&
-      (await index.listDir(folderOf(key))).status === LookupStatus.NOT_FOUND
+      (await index.listDir(folderOf(key), key)).status === LookupStatus.NOT_FOUND
     ) {
       row = await entryAt(index, key, warm)
     }

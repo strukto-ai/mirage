@@ -1940,7 +1940,7 @@ class MountEntry:
             row is None
             and listed
             and index is not NULL_INDEX
-            and (await index.list_dir(folder_of(key))).status
+            and (await index.list_dir(folder_of(key), key)).status
             is LookupStatus.NOT_FOUND
         ):
             row = await entry_at(index, key, warm)

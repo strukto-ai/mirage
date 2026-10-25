@@ -891,8 +891,8 @@ describe('the listing gate', () => {
     const owned = new Set(['/data'])
     await store.setDir('/data', [['a', row('a')]])
     const original = store.listDir.bind(store)
-    vi.spyOn(store, 'listDir').mockImplementation(async (key) => {
-      const result = await original(key)
+    vi.spyOn(store, 'listDir').mockImplementation(async (key, child) => {
+      const result = await original(key, child)
       owned.clear()
       return result
     })

@@ -839,6 +839,30 @@ async def test_narrow_mutation_keeps_siblings_and_demotes_parent(
 
 
 @pytest.mark.asyncio
+async def test_a_lookup_of_one_child_narrows_to_it_as_listed_now(store):
+    await store.set_dir(
+        "/dir",
+        [("a", entry()), ("b", entry("b"))],
+        version="v1",
+        window=True,
+    )
+    named = await store.list_dir("/dir", "/dir/a")
+    assert (named.entries, named.version, named.window) == (
+        ["/dir/a"],
+        "v1",
+        True,
+    )
+    assert (await store.list_dir("/dir", "/dir/z")).entries == []
+    await store.invalidate_entry("/dir/a")
+    assert (await store.list_dir("/dir", "/dir/a")).partial_entries == []
+    await store.add_entry("/dir/c", entry("c"))
+    listing = await store.list_dir("/dir", "/dir/c")
+    assert listing.partial_entries == ["/dir/c"]
+    missing = await store.list_dir("/none", "/none/a")
+    assert missing.status == LookupStatus.NOT_FOUND
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("state", ["deadline", "generation"])
 async def test_narrow_mutation_does_not_revive_stale_parent(store, state):
     deadline = datetime.now(timezone.utc) + timedelta(
