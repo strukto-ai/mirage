@@ -26,10 +26,7 @@ from mirage.vfs.mem0.config import Mem0Config
 
 VFS_MD = """\
 {prefix}
-  <memory-id>.json
-  search "<query>" [path ...] ranks memories by meaning: --method takes only
-  semantic, --top-k N caps the hits and --threshold F keeps those scoring at
-  least F, from 0 to 1."""
+  <memory-id>.json"""
 
 
 class Mem0VFS(BaseVFS):

@@ -37,11 +37,7 @@ collection.
 
 Use cat, head, tail, ls, find, tree, grep, and chroma-query to inspect
 indexed documents. Paths are document slugs from the collection path tree.
-Writes are not supported.
-
-chroma-query "<query>" [path ...] ranks chunks by meaning: --method takes only
-semantic, --top-k N caps the hits and --threshold F keeps those scoring at
-least F, a score being 1 minus Chroma's distance.`
+Writes are not supported.`
 
 export interface ChromaVFSOptions {
   config: ChromaConfig
