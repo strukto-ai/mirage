@@ -6,7 +6,7 @@
     "name": "Strukto.AI",
     "url": "https://github.com/strukto-ai"
   },
-  "homepage": "https://docs.mirage.strukto.ai/typescript/agents/codex",
+  "homepage": "https://docs.mirage.strukto.ai/home/agents/codex",
   "repository": "https://github.com/strukto-ai/mirage",
   "license": "Apache-2.0",
   "keywords": ["mirage", "filesystem", "mcp", "coding-agent"],

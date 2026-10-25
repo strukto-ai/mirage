@@ -141,6 +141,27 @@ cat events.txt | mirage shell -w demo -c 'head -n 10'
 mirage shell -w demo -c 'ls /data' --json | jq .stdout
 ```
 
+### `mirage-bash`
+
+`mirage-bash -c LINE` runs a line as `mirage shell`, for a coding agent that
+takes a shell path, such as [Claude Code](/home/agents/claude-code#shell).
+Both packages install it beside `mirage`.
+
+| Variable | Does |
+| --- | --- |
+| `MIRAGE_WORKSPACE` | The workspace the line runs in. Required. |
+| `MIRAGE_SESSION` | The session it runs as; the default session when unset. |
+
+- The line runs in the process's working directory, which must be a path in
+  the workspace.
+- It takes only `-c LINE`; other bash options are read and dropped.
+- It exits with the line's code, and with `2` when the arguments or
+  `MIRAGE_WORKSPACE` are missing.
+
+```bash
+MIRAGE_WORKSPACE=demo mirage-bash -c 'ls /data | wc -l'
+```
+
 ### `mirage vfs`
 
 - Calls are spelled with dashes: `mirage vfs is-dir /data -w demo`.
@@ -161,7 +182,7 @@ mirage vfs read /data/hi.txt -w demo
 | `mirage mcp [CONFIG] [-w ID] [-s S] [--all-calls]` | Serve a session's [MCP](/home/access/mcp) tools on stdio. `--all-calls` adds the [VFS calls](/home/access/mcp#vfs-calls). |
 | `mirage rpc [CONFIG] [-w ID] [-s S]` | Serve [RPC](/home/access/rpc) on stdio. |
 | `mirage ssh-proxy ID` | Carry [SSH](/home/access/ssh#over-https) to workspace `ID` over the server's HTTPS port, for ssh's `ProxyCommand`. |
-| `mirage codex-exec ID [--listen HOST:PORT]` | Serve workspace `ID` on a local port to [`codex exec-server forward`](/python/agents/codex#exec-server-forward). |
+| `mirage codex-exec ID [--listen HOST:PORT]` | Serve workspace `ID` on a local port to [`codex exec-server forward`](/home/agents/codex#exec-server-forward). |
 
 With `-w`, `mcp` and `rpc` serve a workspace the server already holds. Without
 it, they create one from `CONFIG`, then `MIRAGE_MCP_CONFIG` (`MIRAGE_RPC_CONFIG`)

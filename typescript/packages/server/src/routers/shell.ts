@@ -284,6 +284,14 @@ export function registerShellRoutes(app: FastifyInstance, deps: ShellRoutesDeps)
       if (entry === null) {
         return reply.status(404).send({ detail: 'workspace not found' })
       }
+      try {
+        await sessionOf(entry.runner.ws, req.query.session_id)
+      } catch (err) {
+        if (req.headers['content-type']?.startsWith('multipart/') === true) {
+          reply.header('connection', 'close')
+        }
+        return failure(reply, err)
+      }
       const background = req.query.background === 'true'
       let upload: ShellUpload
       try {

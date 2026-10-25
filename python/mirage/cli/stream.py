@@ -1,6 +1,7 @@
 import asyncio
 import base64
 import json
+import logging
 import os
 import stat
 import sys
@@ -14,6 +15,8 @@ from mirage.cli.output import exit_code_from_response
 from mirage.io.cooperative import CHUNK_SIZE
 from mirage.types import Refusal
 from mirage.workspace.tools.io_text import refusal_line
+
+logger = logging.getLogger(__name__)
 
 MAX_RECORD_BYTES = 1024 * 1024
 
@@ -216,7 +219,18 @@ async def stream_shell(
                 if response.status == 499:
                     return 130
                 if response.status >= 400:
-                    detail = await response.text()
+                    text = await response.text()
+                    detail = text
+                    # The daemon answers {"detail": ...}; any other body,
+                    # such as a proxy's error page, is printed as it came.
+                    if response.content_type == "application/json":
+                        try:
+                            answer = json.loads(text)
+                        except json.JSONDecodeError as e:
+                            logger.debug("error body is not JSON: %s", e)
+                        else:
+                            if isinstance(answer, dict):
+                                detail = answer.get("detail", text)
                     raise RuntimeError(
                         f"daemon error {response.status}: {detail}"
                     )

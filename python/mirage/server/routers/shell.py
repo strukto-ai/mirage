@@ -112,6 +112,7 @@ async def shell(
         )
     if explain:
         return await _explained(entry, request, session_id, background)
+    await session_of(entry, session_id)
     jobs = request.app.state.jobs
     content_type = request.headers.get("content-type", "")
     upload: asyncio.Task[None] | None = None
@@ -136,8 +137,6 @@ async def shell(
             stdin = LoopStdin(part, asyncio.get_running_loop())
     else:
         req_obj = await _parse_json_body(request)
-    if not entry.runner.ws.sessions_loaded:
-        await entry.runner.call(entry.runner.ws.ensure_sessions_loaded())
     kwargs = _build_shell_kwargs(req_obj, stdin)
     session_id = session_id or entry.runner.ws.default_session_id
     kwargs["session_id"] = session_id

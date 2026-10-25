@@ -387,6 +387,24 @@ async def test_unknown_workspace_404():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("stream", [False, True])
+async def test_unknown_session_404(stream):
+    app = build_app(idle_grace_seconds=10.0)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(
+        transport=transport, base_url="http://test"
+    ) as client:
+        wid = await _create_workspace(client)
+        r = await client.post(
+            f"/v1/workspaces/{wid}/shell",
+            params={"session_id": "nope", "stream": str(stream).lower()},
+            json={"command": "echo hi"},
+        )
+        assert r.status_code == 404
+        assert r.json() == {"detail": "session not found"}
+
+
+@pytest.mark.asyncio
 async def test_unknown_job_404():
     app = build_app(idle_grace_seconds=10.0)
     transport = ASGITransport(app=app)

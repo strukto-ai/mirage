@@ -6,19 +6,9 @@ icon: robot
 
 ## Coding Agents
 
-Run the agent as it is, on a workspace the `mirage` CLI creates.
+Claude Code, Codex and Grok Build run as they are, on a workspace the `mirage` CLI creates, whatever language you build in. Their guides are under [Agents](/home/agents#coding-agents).
 
-| Agent | CLI | SSH | FUSE |
-| --- | :-: | :-: | :-: |
-| [Claude Code](/typescript/agents/claude-code) | ✓ | | ✓ |
-| [Codex](/typescript/agents/codex) | ✓ | ✓ | ✓ |
-| [Grok Build](/typescript/agents/grok-build) | ✓ | | ✓ |
-
-- **CLI**: the agent adds Mirage's seven tools from `mirage mcp`.
-- **SSH**: the agent's own tools run in the workspace.
-- **FUSE**: the agent's own tools work on the workspace, mounted as a folder.
-
-Or load Mirage into the agent as a plugin, which replaces its own file and shell tools:
+To replace an agent's own file and shell tools instead, load Mirage into it as a plugin:
 
 | Agent | Plugin |
 | --- | --- |
@@ -54,5 +44,5 @@ The provider runs the agent, and the workspace is its environment: its own shell
 
 | API | Hand it | The agent gets |
 | --- | --- | --- |
-| [OpenAI Agents API](/typescript/agents/openai-agents-api) | a `self_hosted` environment, through [exec-server forward](/typescript/agents/codex#exec-server-forward) | its shell, file and patch tools, run in Mirage |
+| [OpenAI Agents API](/typescript/agents/openai-agents-api) | a `self_hosted` environment, through [exec-server forward](/home/agents/codex#exec-server-forward) | its shell, file and patch tools, run in Mirage |
 | [Claude Managed Agents](/typescript/agents/claude-managed-agents) | `mirageTools(ws)`, in an `EnvironmentWorker` | its `bash`, `read`, `write`, `edit`, `glob` and `grep`, run in Mirage |
