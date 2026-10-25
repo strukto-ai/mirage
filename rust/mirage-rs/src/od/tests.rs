@@ -51,3 +51,12 @@ fn a_chunk_is_dumped_a_window_at_a_time() {
     }
     assert_eq!(drains, 4);
 }
+
+#[test]
+fn a_width_too_wide_to_write_whole_is_refused() {
+    let mut host = Host::with(&[("a", "a")], "");
+    let mut stream = od(json!([["w", "100000000"], ["format", "x1z"]]), &["a"]);
+    assert_eq!(host.drive(stream.as_mut()), 1);
+    assert_eq!(host.out, b"");
+    assert_eq!(host.err, b"od: -w argument '100000000' too large\n");
+}

@@ -111,11 +111,10 @@ pub(super) fn parse(spec: &[u8], formats: &mut Vec<Format>) -> Result<(), Vec<u8
                     Some(b'L') => 8,
                     _ => 0,
                 };
-                let size = sized(spec, &mut at, named, 4)?;
-                if ![1, 2, 4, 8].contains(&size) {
-                    return Err(unsupported(spec, size, "integral"));
+                match sized(spec, &mut at, named, 4)? {
+                    size @ (1 | 2 | 4 | 8) => Format::new(kind, size as usize),
+                    size => return Err(unsupported(spec, size, "integral")),
                 }
-                Format::new(kind, size)
             }
             b'f' => {
                 let (kind, named) = match spec.get(at) {
@@ -128,7 +127,7 @@ pub(super) fn parse(spec: &[u8], formats: &mut Vec<Format>) -> Result<(), Vec<u8
                 };
                 match sized(spec, &mut at, named, 8)? {
                     2 if kind == Kind::Float => Format::new(Kind::Half, 2),
-                    size @ (2 | 4 | 8 | 16) => Format::new(kind, size),
+                    size @ (2 | 4 | 8 | 16) => Format::new(kind, size as usize),
                     size => return Err(unsupported(spec, size, "floating point")),
                 }
             }
@@ -148,8 +147,9 @@ pub(super) fn parse(spec: &[u8], formats: &mut Vec<Format>) -> Result<(), Vec<u8
 }
 
 /// A type's size: the one its letter names, the digits given, or
-/// `default` for neither.
-fn sized(spec: &[u8], at: &mut usize, named: usize, default: usize) -> Result<usize, Vec<u8>> {
+/// `default` for neither. GNU reads digits past INT_MAX as no size at all,
+/// on every target.
+fn sized(spec: &[u8], at: &mut usize, named: u64, default: u64) -> Result<u64, Vec<u8>> {
     if named > 0 {
         *at += 1;
         return Ok(named);
@@ -161,19 +161,31 @@ fn sized(spec: &[u8], at: &mut usize, named: usize, default: usize) -> Result<us
     if digits == 0 {
         return Ok(default);
     }
-    let size = spec[*at..*at + digits].iter().try_fold(0usize, |n, d| {
-        n.checked_mul(10)?.checked_add(usize::from(d - b'0'))
-    });
+    let size = spec[*at..*at + digits]
+        .iter()
+        .try_fold(0u64, |n, d| {
+            n.checked_mul(10)?.checked_add(u64::from(d - b'0'))
+        })
+        .filter(|&size| size <= i32::MAX as u64);
     *at += digits;
     size.ok_or_else(|| format!("od: invalid type string '{}'", quoted(spec)).into_bytes())
 }
 
-fn unsupported(spec: &[u8], size: usize, what: &str) -> Vec<u8> {
+fn unsupported(spec: &[u8], size: u64, what: &str) -> Vec<u8> {
     format!(
         "od: invalid type string '{}';\nthis system doesn't provide a {size}-byte {what} type",
         quoted(spec)
     )
     .into_bytes()
+}
+
+/// The text the lines over `width` bytes take at most: each type's
+/// values, `z` column and newline.
+pub(super) fn text(formats: &[Format], width: u64) -> u128 {
+    let width = u128::from(width);
+    let span = |format: &Format| (format.width() as u128 + 1) * (width / format.size as u128);
+    let widest = formats.iter().map(span).max().unwrap_or(0);
+    (widest + width + 8) * formats.len() as u128
 }
 
 /// The values a line holds at most for their padding to be worked out

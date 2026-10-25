@@ -22,6 +22,10 @@ use self::format::{Format, Kind, Layout};
 const HINT: &str = "Try 'od --help' for more information.";
 /// The input one `drain` dumps.
 const WINDOW: usize = 16 * 1024;
+/// The most text the lines over one block may take. GNU writes a line of
+/// any width; mirage writes each line whole, so a width past this is
+/// refused as too large.
+const LINE: u128 = 1 << 24;
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -411,6 +415,8 @@ struct Settings {
     limit: Option<u64>,
     strings: Option<u64>,
     width: Option<u64>,
+    /// The refusal of a width too large to dump, as typed.
+    wide: String,
     formats: Vec<Format>,
     duplicates: bool,
     big: bool,
@@ -464,6 +470,7 @@ impl Settings {
             }
             // GNU 9.7 aborts on a width of 0 or below; mirage refuses it.
             "w" | "width" => {
+                self.wide = format!("od: {label} argument '{}' too large", latin1(&raw));
                 self.width = Some(match bare {
                     true => 32,
                     false => match count(&raw, &label, false)? {
@@ -532,6 +539,9 @@ fn plan(config: Config) -> Result<Od, Vec<u8>> {
         warning =
             format!("od: warning: invalid width {width}; using {unit} instead\n").into_bytes();
         width = unit;
+    }
+    if format::text(&formats, width) > LINE {
+        return Err(bytes(&s.wide));
     }
     let width = usize::try_from(width).unwrap_or(usize::MAX);
     let mut files: VecDeque<_> = (0..files)
