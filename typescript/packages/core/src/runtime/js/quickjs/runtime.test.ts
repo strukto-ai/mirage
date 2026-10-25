@@ -125,3 +125,50 @@ describe('QuickJS compatibility', () => {
     expect(result.exitCode).toBe(exitCode)
   })
 })
+
+// A reader that holds the program's prints back does not hold its deadline
+// back: the run still times out.
+describe('QuickJS output', () => {
+  it('times out while its reader holds the prints back', async () => {
+    const rt = new QuickJsRuntime()
+    const run = rt.execute(
+      [],
+      [],
+      context({ flags: { c: 'console.log(1); console.log(2)' }, timeoutSeconds: 0.3005 }),
+      { output: () => new Promise<void>(() => undefined) },
+    )
+    await expect(run).rejects.toThrow('timed out')
+  }, 10_000)
+
+  it('times out in a queued job while its reader holds the prints back', async () => {
+    const rt = new QuickJsRuntime()
+    const run = rt.execute(
+      [],
+      [],
+      context({
+        flags: { c: 'Promise.resolve().then(() => console.log(1))' },
+        timeoutSeconds: 0.3005,
+      }),
+      { output: () => new Promise<void>(() => undefined) },
+    )
+    await expect(run).rejects.toThrow('timed out')
+  }, 10_000)
+
+  // Input left open does not hold back the stop of a run.
+  it('stops at an abort while its input stays open', async () => {
+    const rt = new QuickJsRuntime()
+    const stop = new AbortController()
+    const open: AsyncIterable<Uint8Array> = {
+      [Symbol.asyncIterator]: () => ({ next: () => new Promise(() => undefined) }),
+    }
+    const run = rt.execute(
+      [],
+      [],
+      context({ flags: { c: 'console.log(1)' }, stdin: open, signal: stop.signal }),
+    )
+    setTimeout(() => {
+      stop.abort()
+    }, 100)
+    await expect(run).rejects.toMatchObject({ name: 'AbortError' })
+  }, 10_000)
+})

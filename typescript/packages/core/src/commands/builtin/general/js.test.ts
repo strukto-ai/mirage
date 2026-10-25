@@ -90,6 +90,20 @@ describe('node/js: quickjs runtime', () => {
     await ws.close()
   }, 60_000)
 
+  // A program's writes reach its reader as it runs, so one that never ends
+  // stops once its reader has what it wanted, as SIGPIPE stops it.
+  it('an endless writer stops once its reader has enough', async () => {
+    const { ws } = await makeWorkspace()
+    try {
+      const io = await ws.shell(
+        'js -e "for (;;) console.log(\'y\')" | head -n 2; echo "${PIPESTATUS[@]}"',
+      )
+      expect(stdoutStr(io)).toBe('y\ny\n141 0\n')
+    } finally {
+      await ws.close()
+    }
+  }, 60_000)
+
   it('syntax error → exit 1 on stderr', async () => {
     const { ws } = await makeWorkspace()
     const io = await ws.shell('js -e "this is not js"')

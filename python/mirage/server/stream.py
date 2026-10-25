@@ -7,74 +7,62 @@ from starlette.requests import Request
 from starlette.responses import Response
 from starlette.types import Receive, Scope, Send
 
-from mirage.concurrency.limiter import settle
+from mirage.concurrency.limiter import on_loop, settle
 from mirage.execution.types import ExecutionRecord
 from mirage.io.cooperative import CHUNK_SIZE
-from mirage.io.pipe import CAPACITY, BytePipe
 from mirage.io.types import StreamName
 from mirage.server.jobs import ExecutionTable
 from mirage.server.stdin import UploadStdin
+from mirage.workspace.shell_execution import ShellExecution
 
 logger = logging.getLogger(__name__)
 PAYLOAD_SIZE = CHUNK_SIZE // 2
 
 
-class ShellOutput:
-    """A streamed shell's output records, written on the server loop.
+def record(stream: StreamName, data: bytes) -> bytes:
+    """One output event as wire records, a line each, every one holding
+    at most PAYLOAD_SIZE bytes of it.
 
-    Each encoded record fits one pipe chunk, so cancelling a blocked write
-    cannot leave an incomplete record among the accepted output bytes.
+    Args:
+        stream (StreamName): the stream the bytes were written to.
+        data (bytes): the bytes.
     """
-
-    def __init__(self, capacity: int = CAPACITY) -> None:
-        self.pipe = BytePipe(capacity)
-        self._loop = asyncio.get_running_loop()
-        self._write_lock = asyncio.Lock()
-
-    async def emit(self, stream: StreamName, data: bytes) -> None:
-        if asyncio.get_running_loop() is self._loop:
-            await self._emit(stream, data)
-        else:
-            await asyncio.wrap_future(
-                asyncio.run_coroutine_threadsafe(
-                    self._emit(stream, data), self._loop
-                )
+    return b"".join(
+        (
+            json.dumps(
+                {
+                    "stream": stream,
+                    "data": base64.b64encode(
+                        data[offset : offset + PAYLOAD_SIZE]
+                    ).decode("ascii"),
+                },
+                separators=(",", ":"),
             )
-
-    async def _emit(self, stream: StreamName, data: bytes) -> None:
-        async with self._write_lock:
-            for offset in range(0, len(data), PAYLOAD_SIZE):
-                await self.pipe.write(
-                    (
-                        json.dumps(
-                            {
-                                "stream": stream,
-                                "data": base64.b64encode(
-                                    data[offset : offset + PAYLOAD_SIZE]
-                                ).decode("ascii"),
-                            },
-                            separators=(",", ":"),
-                        )
-                        + "\n"
-                    ).encode()
-                )
+            + "\n"
+        ).encode()
+        for offset in range(0, len(data), PAYLOAD_SIZE)
+    )
 
 
 class ShellResponse(Response):
     """Stream one job and join its cleanup if the HTTP caller disappears.
 
-    The upload owns ASGI receive until it ends; only then does the
-    disconnect watcher read it. Output and input may progress concurrently.
-    The final record goes out as soon as the job settles: stdin the line
-    did not read never ends a line, as ``ssh host cmd`` returns while its
-    input is still open. The body then ends only once the rest of the
-    upload is discarded or the caller hangs up, so the caller finishes
-    sending before the connection closes.
+    The job opens the line's execution and waits for its status; the
+    response reads the execution's events where the workspace runs and
+    sends each as its records, so a caller that reads slowly holds the
+    line back. The upload owns ASGI receive until it ends; only then does
+    the disconnect watcher read it. Output and input may progress
+    concurrently. The final record goes out as soon as the job settles:
+    stdin the line did not read never ends a line, as ``ssh host cmd``
+    returns while its input is still open. The body then ends only once
+    the rest of the upload is discarded or the caller hangs up, so the
+    caller finishes sending before the connection closes.
     """
 
     def __init__(
         self,
-        output: ShellOutput,
+        execution: "asyncio.Future[ShellExecution | None]",
+        loop: asyncio.AbstractEventLoop,
         jobs: ExecutionTable,
         job: ExecutionRecord,
         request: Request,
@@ -86,7 +74,8 @@ class ShellResponse(Response):
             headers={"X-Mirage-Job-Id": job.id, "Connection": "close"},
         )
         del self.headers["content-length"]
-        self._output = output
+        self._execution = execution
+        self._loop = loop
         self._jobs = jobs
         self._job = job
         self._request = request
@@ -94,12 +83,12 @@ class ShellResponse(Response):
         self._part = part
 
     async def _completed(self) -> ExecutionRecord:
-        try:
-            finished = await self._jobs.wait(self._job.id)
-            await self._jobs.drain(self._job.id)
-            return finished
-        finally:
-            self._output.pipe.end()
+        finished = await self._jobs.wait(self._job.id)
+        await self._jobs.drain(self._job.id)
+        # A job cancelled before its work started never opened the line.
+        if not self._execution.done():
+            self._execution.set_result(None)
+        return finished
 
     async def _disconnected(self) -> None:
         if self._upload is not None:
@@ -121,11 +110,25 @@ class ShellResponse(Response):
                 "headers": self.raw_headers,
             }
         )
-        async for chunk in self._output.pipe.stream():
+        # Shielded: a hang-up cancels this task, and the handover must
+        # still reach _close, which closes the line.
+        execution = await asyncio.shield(self._execution)
+        while execution is not None:
+            try:
+                event = await on_loop(
+                    anext(execution.events, None), self._loop
+                )
+            except Exception:
+                # The line failed or was stopped: its status says so in
+                # the final record.
+                logger.debug("streamed shell output ended", exc_info=True)
+                break
+            if event is None:
+                break
             await send(
                 {
                     "type": "http.response.body",
-                    "body": chunk,
+                    "body": record(event.stream, event.data),
                     "more_body": True,
                 }
             )
@@ -198,17 +201,21 @@ class ShellResponse(Response):
         sender: asyncio.Task[None],
         disconnected: asyncio.Task[None],
     ) -> None:
-        self._output.pipe.close_reader()
+        self._jobs.cancel(self._job.id)
         if self._part is not None:
             await self._part.discard()
         sender.cancel()
         disconnected.cancel()
         if self._upload is not None:
             self._upload.cancel()
-        self._jobs.cancel(self._job.id)
         try:
             await self._jobs.drain(self._job.id)
         finally:
+            # The job has handed over its execution or never will: what
+            # the caller left unread goes with it.
+            execution = await settle(self._execution)
+            if execution is not None:
+                await on_loop(execution.aclose(), self._loop)
             completed.cancel()
             tasks = [sender, disconnected, completed]
             if self._upload is not None:

@@ -15,7 +15,8 @@
 import { CommandTimeoutError } from '../../../errors/types.ts'
 import { mainFilename } from '../execution.ts'
 import type { Context } from '../../../commands/config.ts'
-import type { Program, RunResult } from '../../types.ts'
+import { materialize } from '../../../io/types.ts'
+import type { OutputFn, Program, RunResult } from '../../types.ts'
 import {
   loadMontyModule,
   type MontyModuleLike,
@@ -26,8 +27,12 @@ import { DEFAULT_PROG, LIMITS } from './constants.ts'
 import { displayError } from './errors.ts'
 import { MontyFs } from './fs.ts'
 import type { RuntimeFiles } from '../../files.ts'
+import { concat } from '../../../utils/bytes.ts'
 
 const INTERRUPTED = Symbol('interrupted')
+const ENC = new TextEncoder()
+
+type Stream = 'stdout' | 'stderr'
 
 interface RunInterruption {
   promise: Promise<typeof INTERRUPTED>
@@ -80,8 +85,17 @@ export class MontyExecution {
    * @param ctx the run's context: working directory, environment, signal
    *   and limit.
    * @param files the run's file adapter; null outside a workspace.
+   * @param output receives stdout as it is printed; absent returns it in
+   *   the result.
+   * @param errors the same for stderr.
    */
-  async run(program: Program, ctx: Context, files: RuntimeFiles | null): Promise<RunResult> {
+  async run(
+    program: Program,
+    ctx: Context,
+    files: RuntimeFiles | null,
+    output?: OutputFn,
+    errors?: OutputFn,
+  ): Promise<RunResult> {
     // A script is Monty's own script_name, which it keeps the last part of
     // for `__file__`, under the directory a feed starts in.
     const session = await this.checkout(
@@ -93,10 +107,25 @@ export class MontyExecution {
     // CommandTimeoutError, kill -> exit 1 like the local runtime.
     const workerPid = session.workerPid
     const interruption = this.installInterruption(ctx.signal, ctx.timeoutSeconds)
+    const prints = new Prints(output, errors)
     try {
-      const run = this.feedOne(session, program, ctx, files)
+      // The prints are handed on inside the race, so a deadline or a kill
+      // still stops a run whose reader holds its last writes back.
+      const run = this.feedOne(session, program, ctx, files, prints).then(async (outcome) => {
+        await prints.end()
+        return outcome
+      })
       const winner = await Promise.race([run, interruption.promise])
-      if (winner !== INTERRUPTED) return winner
+      if (winner !== INTERRUPTED) {
+        const [exitCode, note] = winner
+        const [stdout, stderr] = prints.streams()
+        return {
+          stdout,
+          stderr: note === '' ? stderr : concat([stderr ?? new Uint8Array(), ENC.encode(note)]),
+          exitCode,
+        }
+      }
+      prints.stop()
       run.catch(() => undefined)
       killWorker(workerPid)
       if (interruption.timedOut.value && ctx.timeoutSeconds !== undefined) {
@@ -197,56 +226,98 @@ export class MontyExecution {
     })
   }
 
-  private result(out: string[], err: string[], exitCode: number): RunResult {
-    const enc = new TextEncoder()
-    return {
-      stdout: enc.encode(out.join('')),
-      stderr: err.length > 0 ? enc.encode(err.join('')) : null,
-      exitCode,
-    }
-  }
-
+  /** Feed the program to a worker; its status and what to add to its stderr. */
   private async feedOne(
     session: MontySessionLike,
     program: Program,
     ctx: Context,
     files: RuntimeFiles | null,
-  ): Promise<RunResult> {
+    prints: Prints,
+  ): Promise<[number, string]> {
     const module = await this.loadModule()
-    const out: string[] = []
-    const err: string[] = []
+    // Monty has no `sys.stdin`, so piped bytes ride in as a global the
+    // same way argv does: raw bytes, null when nothing was piped.
+    const stdin = program.stdin === null ? null : await materialize(program.stdin)
     const options: Record<string, unknown> = {
       // argv[0] is the program's own name when the caller has one (a
       // CLI install's head word), else the interpreter's placeholder.
       // `??`, not `||`: "" is CPython's own argv[0] for a program piped in
       // with no operand, so an empty prog is an answer.
-      inputs: { argv: [program.prog ?? DEFAULT_PROG, ...program.args], stdin: program.stdin },
+      inputs: { argv: [program.prog ?? DEFAULT_PROG, ...program.args], stdin },
       cwd: ctx.cwd.virtual,
-      printCallback: (stream: 'stdout' | 'stderr', text: string) => {
-        if (stream === 'stderr') err.push(text)
-        else out.push(text)
-      },
+      printCallback: prints.write,
       os: new MontyFs(module, ctx.env ?? {}, files).handle,
     }
-    let exitCode = 0
     try {
       await session.feedRun(program.code, options)
     } catch (caught) {
-      exitCode = 1
       if (caught instanceof module.MontySyntaxError || caught instanceof module.MontyRuntimeError) {
         const inner = (caught as { exception?: { typeName: string; message: string } }).exception
         if (inner?.typeName === 'SystemExit') {
-          if (inner.message) err.push(inner.message + '\n')
-          exitCode = inner.message ? 1 : 0
-        } else {
-          err.push(displayError(caught) + '\n')
+          return inner.message ? [1, inner.message + '\n'] : [0, '']
         }
-      } else if (caught instanceof module.MontyCrashedError) {
-        err.push(`${this.name}: worker ${caught.timedOut ? 'timed out' : 'crashed'}\n`)
-      } else {
-        throw caught
+        return [1, displayError(caught) + '\n']
       }
+      if (caught instanceof module.MontyCrashedError) {
+        return [1, `${this.name}: worker ${caught.timedOut ? 'timed out' : 'crashed'}\n`]
+      }
+      throw caught
     }
-    return this.result(out, err, exitCode)
+    return [0, '']
+  }
+}
+
+/**
+ * What a program prints, in the order it printed it: each write handed to
+ * its stream's sink as it comes, or kept for the result where the stream
+ * has none.
+ *
+ * Monty calls back without waiting, so a write for a sink is chained
+ * behind the one before it; the first that fails stops the rest, and
+ * `end` reports it.
+ */
+class Prints {
+  private readonly sinks: Record<Stream, OutputFn | undefined>
+  private readonly kept: Record<Stream, string[]> = { stdout: [], stderr: [] }
+  private writing: Promise<void> = Promise.resolve()
+  private failure: { error: unknown } | null = null
+  private stopped = false
+
+  /**
+   * @param output where stdout goes; absent keeps it.
+   * @param errors where stderr goes; absent keeps it.
+   */
+  constructor(output?: OutputFn, errors?: OutputFn) {
+    this.sinks = { stdout: output, stderr: errors }
+  }
+
+  readonly write = (stream: Stream, text: string): void => {
+    const sink = this.sinks[stream]
+    if (sink === undefined) {
+      this.kept[stream].push(text)
+      return
+    }
+    this.writing = this.writing
+      .then(() => (this.failure === null && !this.stopped ? sink(ENC.encode(text)) : undefined))
+      .catch((error: unknown) => {
+        this.failure ??= { error }
+      })
+  }
+
+  /** Skip the writes still queued once the run is interrupted. */
+  stop(): void {
+    this.stopped = true
+  }
+
+  /** Wait until every write has been handed on. */
+  async end(): Promise<void> {
+    await this.writing
+    if (this.failure !== null) throw this.failure.error
+  }
+
+  /** The stdout and stderr kept for the result, null for no stderr. */
+  streams(): [Uint8Array, Uint8Array | null] {
+    const err = this.kept.stderr
+    return [ENC.encode(this.kept.stdout.join('')), err.length > 0 ? ENC.encode(err.join('')) : null]
   }
 }

@@ -19,7 +19,7 @@ from typing import BinaryIO, Protocol
 
 from fastapi import HTTPException
 
-from mirage.concurrency.limiter import run_blocking
+from mirage.concurrency.limiter import on_loop, run_blocking
 from mirage.io.cooperative import CHUNK_SIZE
 from mirage.io.pipe import CAPACITY
 from mirage.server.constants import MAX_STDIN_BYTES
@@ -53,9 +53,7 @@ class LoopStdin:
         return self
 
     async def __anext__(self) -> bytes:
-        data = await asyncio.wrap_future(
-            asyncio.run_coroutine_threadsafe(self._source.read(), self._loop)
-        )
+        data = await on_loop(self._source.read(), self._loop)
         if not data:
             raise StopAsyncIteration
         return data

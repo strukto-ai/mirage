@@ -56,6 +56,7 @@ from mirage.runtime.wasm.errors import (
     ELOOP,
     ENOENT,
     ENOTDIR,
+    EPIPE,
     ESPIPE,
     LINK_REFUSAL,
     OK,
@@ -209,6 +210,16 @@ class WasiFs:
     (iovecs, filestats, dirents) for the router. Installed over the
     linker's native WASI so only filesystem imports are shadowed;
     clocks, args, env, and randomness stay native.
+
+    Args:
+        fs (WasmView): the files the guest sees.
+        stdin (bytes): the guest's whole input.
+        cancelled (threading.Event | None): set once the run is
+            cancelled.
+        output (Callable[[bytes], None] | None): takes each stdout write
+            as the guest makes it, the guest waiting until it is taken;
+            None keeps stdout in ``stdout``.
+        errors (Callable[[bytes], None] | None): the same for stderr.
     """
 
     def __init__(
@@ -216,9 +227,13 @@ class WasiFs:
         fs: WasmView,
         stdin: bytes,
         cancelled: threading.Event | None = None,
+        output: Callable[[bytes], None] | None = None,
+        errors: Callable[[bytes], None] | None = None,
     ) -> None:
         self._cancelled = cancelled or threading.Event()
         self._fs = fs
+        self._output = output
+        self._errors = errors
         self.exit_code: int | None = None
         self.stdout = bytearray()
         self.stderr = bytearray()
@@ -594,10 +609,17 @@ class WasiFs:
         total = 0
         for bptr, blen in self._iovs(caller, iovs, count):
             data = self._load(caller, bptr, blen)
-            if entry.kind == "stdout":
-                self.stdout += data
-            elif entry.kind == "stderr":
-                self.stderr += data
+            if entry.kind in ("stdout", "stderr"):
+                stdout = entry.kind == "stdout"
+                sink = self._output if stdout else self._errors
+                if sink is None:
+                    (self.stdout if stdout else self.stderr).extend(data)
+                else:
+                    try:
+                        sink(data)
+                    except Exception as exc:
+                        logger.debug("guest %s closed: %r", entry.kind, exc)
+                        return EPIPE
             elif entry.kind == "file" and entry.handle is not None:
                 if not entry.handle.writable:
                     return EBADF

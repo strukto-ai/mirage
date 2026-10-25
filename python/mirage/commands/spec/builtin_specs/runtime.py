@@ -33,17 +33,15 @@ from mirage.commands.spec.types import Argument, CommandSpec
 # the script file's first line, and is answered by the one program
 # resolver (runtime/source.py) because every engine reads the same
 # resolved text; the init switches ride in ctx.flags and are honored
-# by whichever engine can; -u is a structural no-op, since mirage
-# buffers every stream and returns it whole. Pinned against CPython
-# 3.12.11.
+# by whichever engine can; -u reaches a spawned CPython, the one engine
+# that buffers its output. Pinned against CPython 3.12.11.
 _PYTHON_OPTIONS: tuple[Argument, ...] = (
     Argument("-c", help="Run the next argument as a program."),
     Argument("-m", help="Run the named module as __main__."),
     Argument(
         "-u",
         action="store_true",
-        help="(Ignored) Unbuffered output. Mirage buffers "
-        "every stream and returns it whole.",
+        help="Force the stdout and stderr streams to be unbuffered.",
     ),
     Argument(
         "-b",

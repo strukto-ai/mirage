@@ -904,6 +904,7 @@ async def run_prepared_line(
                         "post_execute", effective_session.session_id
                     )
                     else None,
+                    sink,
                 )
                 if io.refusal is None:
                     io.refusal = nested.latest

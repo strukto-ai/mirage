@@ -187,10 +187,11 @@ export async function resolveProgram(
     code = decoder.decode(bytes)
     if (flags.x === true) code = skipFirstLine(code)
   }
-  let stdin = ctx.stdin === null ? null : await materialize(ctx.stdin)
+  let stdin = ctx.stdin
   if (code === null) {
-    if (stdin === null || stdin.length === 0) return failed(`${label}: no input\n`)
-    code = decoder.decode(stdin)
+    const source = stdin === null ? null : await materialize(stdin)
+    if (source === null || source.length === 0) return failed(`${label}: no input\n`)
+    code = decoder.decode(source)
     stdin = null
   }
   const scriptCli = flags.scriptCli === true

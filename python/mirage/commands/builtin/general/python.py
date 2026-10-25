@@ -18,7 +18,7 @@ from mirage.accessor.base import Accessor
 from mirage.commands.builtin.general.interpreter import (
     exec_refusal,
     not_bound,
-    run_output,
+    run_interpreter,
     runtime_version,
 )
 from mirage.commands.config import Context, command
@@ -48,10 +48,10 @@ async def _python3(
         return await runtime_version(runtime, ctx.env)
     # The runtime's switches, keyed by CPython's own letter, which is how
     # mirage.runtime.python.flags reads them; the one long switch is
-    # keyed by its canonical spelling, having no letter. -u and -q are
-    # absent because mirage buffers every stream and prints no banner,
-    # so no engine can differ on them.
+    # keyed by its canonical spelling, having no letter. -q is absent
+    # because mirage prints no banner, so no engine can differ on it.
     switches: dict[str, FlagValue] = {
+        "u": fl.as_bool("u"),
         "b": fl.as_int("b") or 0,
         "B": fl.as_bool("B"),
         "E": fl.as_bool("E"),
@@ -76,9 +76,7 @@ async def _python3(
     )
     if refusal is not None:
         return refusal
-    return run_output(
-        await runtime.execute(paths, texts, replace(ctx, flags=switches))
-    )
+    return run_interpreter(runtime, paths, texts, replace(ctx, flags=switches))
 
 
 python3 = command("python3", vfs=None, spec=SPECS["python3"], write=True)(

@@ -64,9 +64,16 @@ export class SandlockRuntime
     _paths: PathSpec[],
     _texts: string[],
     ctx: Context,
+    output?: OutputFn,
+    errors?: OutputFn,
   ): Promise<RunResult> {
     const line = ctx.flags.c
-    return this.executeProcess(['/bin/sh', '-c', typeof line === 'string' ? line : ''], ctx)
+    return this.executeProcess(
+      ['/bin/sh', '-c', typeof line === 'string' ? line : ''],
+      ctx,
+      output,
+      errors,
+    )
   }
 
   runProcess(

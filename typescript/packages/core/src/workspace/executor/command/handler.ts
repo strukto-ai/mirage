@@ -69,8 +69,6 @@ export interface RunHandlerOpts {
    * its recorder and activity to the stream).
    */
   scope?: (result: [ByteSource | null, IOResult]) => [ByteSource | null, IOResult]
-  /** False leaves a script leaf's output as its runtime worded it. */
-  frame?: boolean
   /** The caller's abort, which stops waiting for the body. */
   signal?: AbortSignal
   /** Aborted when the limit trips, so a runtime can kill what it spawned. */
@@ -263,13 +261,8 @@ export async function runHandler(
   const source = out[0]
   out[1].producer = producer
   const [stream, io] = opts.scope !== undefined ? opts.scope(out) : out
-  let pulled: AsyncIterator<Uint8Array>
-  if (opts.frame === false || stream === null || (stream instanceof Uint8Array && !voice.splits)) {
-    if (drop === undefined || stream === null || stream instanceof Uint8Array) return [stream, io]
-    pulled = stream[Symbol.asyncIterator]()
-  } else {
-    pulled = framed(stream, io, voice)
-  }
+  if (stream === null || (stream instanceof Uint8Array && !voice.splits)) return [stream, io]
+  const pulled = framed(stream, io, voice)
   const lazy = !(stream instanceof Uint8Array)
   return [
     new OutputStream(pulled, async () => {
@@ -323,6 +316,7 @@ async function* framed(
     if (printed !== null) yield* chunks(printed)
     io.stderr = concat([await io.materializeStderr(), stderr])
     io.exitCode = exitCode
+    io.output?.finish()
   } finally {
     await closeQuietly(source)
   }

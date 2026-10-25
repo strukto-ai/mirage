@@ -114,15 +114,24 @@ export abstract class RemoteSandbox<C extends SandboxConfig = SandboxConfig>
    * @param _texts unused.
    * @param ctx the line in `flags.c`, the bytes piped into it, the session
    *   environment and working directory, the signal that stops it.
+   * @param output receives stdout as it arrives.
+   * @param errors receives stderr as it arrives.
    */
   runLine(
     _engine: undefined,
     _paths: PathSpec[],
     _texts: string[],
     ctx: Context,
+    output?: OutputFn,
+    errors?: OutputFn,
   ): Promise<RunResult> {
     const line = ctx.flags.c
-    return this.runArgv(['/bin/sh', '-c', typeof line === 'string' ? line : ''], ctx, null, null)
+    return this.runArgv(
+      ['/bin/sh', '-c', typeof line === 'string' ? line : ''],
+      ctx,
+      output ?? null,
+      errors ?? null,
+    )
   }
 
   runProcess(

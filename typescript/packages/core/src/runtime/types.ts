@@ -60,6 +60,11 @@ export interface CommandRuntime {
    * a workspace, where `execAllowed` decides.
    */
   readonly execPathAllowed?: (virtual: string) => boolean
+  /**
+   * What the workspace does once the program's run ends, since the program
+   * may have written past the dispatcher; absent outside a workspace.
+   */
+  readonly settle?: () => Promise<void>
 }
 
 /**
@@ -221,8 +226,11 @@ export interface Program {
    * operand).
    */
   readonly prog?: string
-  /** The input left after any read as source. */
-  readonly stdin: Uint8Array | null
+  /**
+   * The input left after any read as source, still unread; an engine that
+   * takes its input whole collects it.
+   */
+  readonly stdin: ByteSource | null
   /** The script the program was read from, `rawPath` as typed. */
   readonly scriptPath?: PathSpec
   /** An installed script CLI, which also finds its argv and stdin as program globals. */

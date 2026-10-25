@@ -86,7 +86,9 @@ class DelayedProcessProbe(ProcessProbe):
 class InProcessPython(PythonRuntime):
     name = "inproc"
 
-    async def interpret(self, engine, program: Program, ctx) -> RunResult:
+    async def interpret(
+        self, engine, program: Program, ctx, output=None, errors=None
+    ) -> RunResult:
         return RunResult(stdout=b"", stderr=None, exit_code=0)
 
 
@@ -339,7 +341,9 @@ class ShellProbe(Runtime, LineExecutorMixin):
         super().__init__(**options)
         self.lines: list[str] = []
 
-    async def run_line(self, engine, paths, texts, ctx):
+    async def run_line(
+        self, engine, paths, texts, ctx, output=None, errors=None
+    ):
         self.lines.append(ctx.flags["c"])
         return RunResult(stdout=b"ok\n", stderr=None, exit_code=0)
 
@@ -804,3 +808,71 @@ async def test_streamed_stderr_stays_in_the_command_record():
         result = await ws.shell("native-tool")
         assert await result.stderr_str() == "streamed\n"
     assert '"stderr": "streamed\\n"' in seen.results[0]
+
+
+class WarnsThenFails(ProcessProbe):
+    async def run_process(
+        self, engine, paths, texts, ctx, output, errors=None
+    ) -> RunResult:
+        assert errors is not None
+        await errors(b"warning\n")
+        raise RuntimeError("provider unavailable")
+
+
+# The record keeps what the program wrote and why it failed, with or
+# without a sink for its stderr.
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line", ["warn-tool", "warn-tool && echo done > /out"]
+)
+async def test_the_record_keeps_streamed_and_returned_stderr(line):
+    seen = SeesResults()
+    async with workspace(
+        {"/": RAMVFS()},
+        mode=MountMode.EXEC,
+        runtimes=[WarnsThenFails()],
+        policies=[seen],
+    ) as ws:
+        await ws.shell(line)
+    said = '"warning\\nwarn-tool: provider unavailable\\n"'
+    assert any(said in results for results in seen.results)
+
+
+class EndlessProbe(ProcessProbe):
+    async def run_process(
+        self, engine, paths, texts, ctx, output, errors=None
+    ) -> RunResult:
+        while True:
+            await output(b"y\n")
+
+
+# A reader that stops early stops the program, as SIGPIPE stops it.
+@pytest.mark.asyncio
+async def test_a_program_its_reader_stopped_exits_141():
+    async with workspace(
+        {"/": RAMVFS()}, mode=MountMode.EXEC, runtimes=[EndlessProbe()]
+    ) as ws:
+        result = await ws.shell(
+            'endless-tool | head -n 1; echo "${PIPESTATUS[@]}"'
+        )
+        assert await result.stdout_str() == "y\n141 0\n"
+
+
+# An output cap stops the program the same way, and the command's record,
+# which post_execute policies read, keeps the status it settled with.
+@pytest.mark.asyncio
+async def test_a_program_its_cap_stopped_is_recorded_as_141(monkeypatch):
+    monkeypatch.setitem(
+        DEFAULT_COMMAND_LIMITS, "endless-tool", Limit(max_lines=1)
+    )
+    seen = SeesResults()
+    async with workspace(
+        {"/": RAMVFS()},
+        mode=MountMode.EXEC,
+        runtimes=[EndlessProbe()],
+        policies=[seen],
+    ) as ws:
+        result = await ws.shell("endless-tool")
+        assert await result.stdout_str() == "y\n"
+        assert result.exit_code == 141
+    assert '"exit_code": 141' in seen.results[0]
