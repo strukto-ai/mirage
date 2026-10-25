@@ -301,15 +301,6 @@ export class PyodideFs {
       // the link node itself and the target's row is not what changed.
       if (this.host.isLink(node.mode)) fields.nofollow = true
       this.journal.markSetattr(this.nodes.pathOf(node), fields)
-      // The guest's own edit is now the file's: the backend row the policies
-      // are shown carries it, while the times Emscripten filled in stay out.
-      if (node.source !== undefined) {
-        node.source = new FileStat(node.source).with({
-          ...(fields.mode !== undefined ? { mode: fields.mode } : {}),
-          ...(fields.mtime !== undefined ? { modified: fields.mtime } : {}),
-          ...(fields.atime !== undefined ? { atime: fields.atime } : {}),
-        })
-      }
     }
     // A resize goes as a truncate to the new length. Recording here rather
     // than at close is what makes a bare `os.truncate(path, n)`, which
@@ -317,6 +308,15 @@ export class PyodideFs {
     if (size !== undefined && node.unlinked !== true)
       this.journal.markTruncate(this.nodes.pathOf(node), size)
     if (node.unlinked !== true) this.settle(this.nodes.pathOf(node))
+    // Once the mount took the guest's own edit, the backend row the policies
+    // are shown carries it; the times Emscripten filled in stay out.
+    if (fields !== null && node.unlinked !== true && node.source !== undefined) {
+      node.source = new FileStat(node.source).with({
+        ...(fields.mode !== undefined ? { mode: fields.mode } : {}),
+        ...(fields.mtime !== undefined ? { modified: fields.mtime } : {}),
+        ...(fields.atime !== undefined ? { atime: fields.atime } : {}),
+      })
+    }
     // The chmod that finalizes a create carries the mode the create asked
     // for, so the umask comes off it as it did off the node.
     if (attr.mode !== undefined) node.mode = finalizing ? attr.mode & ~UMASK : attr.mode

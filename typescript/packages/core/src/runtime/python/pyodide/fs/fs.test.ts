@@ -517,6 +517,49 @@ _stamped.close()
     expect(seen.at(-1)?.source?.modified).toBe('1970-01-01T00:33:20Z')
   })
 
+  it("keeps a refused time edit out of a retained stat's policy", async () => {
+    const p = prefix()
+    const path = `${p}unstamped.txt`
+    store.set(path, enc.encode('abc'))
+    const sync = storeSync()
+    const seen: VFSStat[] = []
+    mountOver(p, {
+      ...sync,
+      stat: (name) => {
+        const row = sync.stat(name)
+        return name === path
+          ? {
+              ...row,
+              source: new FileStat({ name: 'unstamped.txt', type: FileType.FILE, size: 3 }),
+            }
+          : row
+      },
+      statCached: (name, row) => {
+        if (name === path) seen.push(row)
+        return row
+      },
+      flush: (mutations) => {
+        if (mutations.some((m) => m.kind === 'setattr')) {
+          throw Object.assign(new Error('sealed'), { code: 'EACCES' })
+        }
+        return sync.flush(mutations)
+      },
+    })
+    await py.runPythonAsync(`
+import os
+_unstamped = open('${path}', 'rb', buffering=0)
+try:
+    os.utime('${path}', (1000, 2000))
+    _utime_refused = False
+except PermissionError:
+    _utime_refused = True
+os.fstat(_unstamped.fileno())
+_unstamped.close()
+`)
+    expect(py.globals.get('_utime_refused')).toBe(true)
+    expect(seen.at(-1)?.source?.atime ?? null).toBeNull()
+  })
+
   it('checks written retained bytes without flushing the pending write', async () => {
     const p = prefix()
     const path = `${p}overlay.txt`
