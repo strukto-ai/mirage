@@ -13,8 +13,12 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import AsyncIterator
-from contextlib import AsyncExitStack, asynccontextmanager
-from typing import Any
+from contextlib import (
+    AbstractAsyncContextManager,
+    AsyncExitStack,
+    asynccontextmanager,
+)
+from typing import Any, cast
 
 import aioboto3
 from botocore.config import Config
@@ -103,6 +107,26 @@ def _client_kwargs(config: S3Config) -> dict[str, Any]:
 
 def async_session(config: S3Config) -> aioboto3.Session:
     return aioboto3.Session(profile_name=config.aws_profile or None)
+
+
+def create_s3_client(config: S3Config) -> AbstractAsyncContextManager[Any]:
+    """Build the S3 client for ``config``, the one way any module does.
+
+    Every S3 client, a mount's and the record stores', is built here
+    from ``async_session``, so patching that one name serves every
+    caller. The seam TS ``createS3Client`` is, though that one hands
+    back an open client and this the manager that opens it.
+
+    Args:
+        config (S3Config): the bucket, endpoint and credentials.
+
+    Returns:
+        AbstractAsyncContextManager[Any]: enters to the open client.
+    """
+    return cast(
+        AbstractAsyncContextManager[Any],
+        async_session(config).client(**_client_kwargs(config)),
+    )
 
 
 @asynccontextmanager

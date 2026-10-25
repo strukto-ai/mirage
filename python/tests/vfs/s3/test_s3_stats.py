@@ -19,6 +19,7 @@ import pytest
 from mirage.accessor.s3 import S3Accessor
 from mirage.types import PathSpec
 from mirage.vfs.s3 import S3Config
+from tests.e2e.s3_mock import S3_SESSION
 
 
 @pytest.fixture
@@ -35,7 +36,7 @@ def s3_accessor(s3_config):
 async def test_get_bytes(s3_accessor):
     from mirage.core.s3.read import read
 
-    with patch("mirage.core.s3.read.async_session") as mock_session:
+    with patch(S3_SESSION) as mock_session:
         mock_client = AsyncMock()
         mock_body = AsyncMock()
         mock_body.read.return_value = b"hello world\nfoo bar\nbaz"
@@ -58,7 +59,7 @@ async def test_get_bytes(s3_accessor):
 async def test_range_get(s3_accessor):
     from mirage.core.s3.read import read
 
-    with patch("mirage.core.s3.read.async_session") as mock_session:
+    with patch(S3_SESSION) as mock_session:
         mock_client = AsyncMock()
         mock_body = AsyncMock()
         mock_body.read.return_value = b"hello"
@@ -87,7 +88,7 @@ async def test_range_get(s3_accessor):
 async def test_put_bytes(s3_accessor):
     from mirage.core.s3.write import write
 
-    with patch("mirage.core.s3.driver.async_session") as mock_session:
+    with patch(S3_SESSION) as mock_session:
         mock_client = AsyncMock()
         # A bare AsyncMock answers a MagicMock, which _put would read as
         # the object's ETag; give it the shape a real PutObject returns.

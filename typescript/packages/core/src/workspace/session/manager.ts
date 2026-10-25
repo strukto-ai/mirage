@@ -25,6 +25,7 @@ import type { EnvEntries } from '../../secrets/config.ts'
 import type { ShellVar } from '../../shell/variable.ts'
 import type { MountMode } from '../../types.ts'
 import { KeyLock } from '../../cache/lock.ts'
+import { SystemClock, type Clock } from '../../utils/clock.ts'
 
 type StoredSession = Parameters<typeof SessionState.fromDict>[0]
 
@@ -81,16 +82,31 @@ export class SessionManager extends SessionOwner {
   // each session gets its own record.
   private seedVarsInternal: Record<string, ShellVar>
   private hasManaged: boolean
+  private readonly clock: Clock
 
-  constructor(defaultSessionId: string, store?: SessionStore, seedVars?: Record<string, ShellVar>) {
+  /**
+   * @param clock the workspace clock a session's `createdAt` is read on;
+   *   omitted means the system clock.
+   */
+  constructor(
+    defaultSessionId: string,
+    store?: SessionStore,
+    seedVars?: Record<string, ShellVar>,
+    clock?: Clock,
+  ) {
     super()
+    this.clock = clock ?? new SystemClock()
     this.defaultIdInternal = defaultSessionId
     this.sessionStore = store ?? new RAMSessionStore()
     this.seedVarsInternal = ownRecord(seedVars)
     this.hasManaged = Object.values(this.seedVarsInternal).some((v) => v.managed !== undefined)
     this.sessions.set(
       defaultSessionId,
-      new SessionState({ sessionId: defaultSessionId, vars: ownRecord(this.seedVarsInternal) }),
+      new SessionState({
+        sessionId: defaultSessionId,
+        vars: ownRecord(this.seedVarsInternal),
+        createdAt: this.clock.now(),
+      }),
     )
   }
 
@@ -409,6 +425,7 @@ export class SessionManager extends SessionOwner {
       sessionId,
       mountModes: options.mountModes ?? null,
       vars: seeded,
+      createdAt: this.clock.now(),
     })
     if (options.profile !== undefined) applyProfile(session, options.profile)
     this.hasManaged = this.hasManaged || holdsManaged(session)

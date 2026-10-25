@@ -26,11 +26,11 @@ from mirage.vfs.ram import RAMVFS
 from mirage.vfs.s3 import S3VFS, S3Config
 from mirage.workspace import Workspace
 from tests.commands.native.conftest import (
-    _CORE_MODULES,
     BUCKET,
     REGION,
     MockAsyncSession,
 )
+from tests.e2e.s3_mock import S3_SESSION
 
 
 def _run(ws, cmd):
@@ -170,10 +170,7 @@ def cross(request, tmp_path):
     if p1_type == "s3" or p2_type == "s3":
         mock_session = MockAsyncSession(shared_s3_objects)
         stack = ExitStack()
-        for mod in _CORE_MODULES:
-            stack.enter_context(
-                patch(f"{mod}.async_session", return_value=mock_session)
-            )
+        stack.enter_context(patch(S3_SESSION, return_value=mock_session))
         with stack:
             yield env
     else:

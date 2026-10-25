@@ -20,6 +20,7 @@ import { Outcome, Scope } from '../../policy/types.ts'
 import { ScriptSource } from '../../runtime/types.ts'
 import { MountMode, type Visibility } from '../../types.ts'
 import { SessionManager } from './manager.ts'
+import { ManualClock } from '../../utils/clock.ts'
 import { compileProfile } from './resolve.ts'
 import { RAMSessionStore } from './ram.ts'
 import { SessionState, varsFromEntries } from './session.ts'
@@ -47,6 +48,15 @@ describe('SessionManager', () => {
     expect(m.defaultId).toBe('def')
     expect(m.get('def').sessionId).toBe('def')
     expect(m.list()).toHaveLength(1)
+  })
+
+  it('stamps sessions on its clock', () => {
+    const clock = new ManualClock(1_000)
+    const m = new SessionManager('def', undefined, undefined, clock)
+    clock.advance(5)
+    const created = m.create('other')
+    expect(m.get('def').createdAt).toBe(1_000)
+    expect(created.createdAt).toBe(1_005)
   })
 
   it('adoptDefault re-keys the placeholder before hydration', () => {
