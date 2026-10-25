@@ -13,16 +13,20 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import dataclasses
 
 import pytest
 from pydantic import BaseModel, Field
 
 from mirage.accessor.base import Accessor, NOOPAccessor
 from mirage.commands.cli.builtin.discord import DISCORD
+from mirage.commands.cli.builtin.gws import GWS, google_api_accessor
 from mirage.commands.cli.builtin.slack import SLACK
 from mirage.commands.cli.types import CLI, CLIHandler
 from mirage.commands.spec.types import CommandSpec
+from mirage.core.google.config import GoogleConfig
 from mirage.io import IOResult
+from mirage.utils.clock import ManualClock
 from mirage.workspace.cli.registry import CLIRegistry
 
 
@@ -346,3 +350,33 @@ def test_account_clis_refuse_a_mount_time_scope(name, spec):
                 "end_time": "2026-06-02T00:00:00Z",
             },
         )
+
+
+def test_releasing_clocks_lets_every_install_go():
+    registry = CLIRegistry(clock=ManualClock())
+    install = registry.install(
+        "gws", GWS, {"client_id": "c", "refresh_token": "r"}
+    )
+    registry.bind_clocks()
+    with pytest.raises(ValueError, match="another clock"):
+        install.accessor.bind_clock(ManualClock(), "later")
+    registry.release_clocks()
+    later = ManualClock()
+    install.accessor.bind_clock(later, "later")
+    assert install.accessor.token_manager.clock is later
+
+
+@pytest.mark.asyncio
+async def test_each_install_holds_its_client_on_its_own():
+    shared = google_api_accessor(
+        GoogleConfig(client_id="c", refresh_token="r")
+    )
+    spec = dataclasses.replace(GWS, accessor=lambda _config: shared)
+    registry = CLIRegistry(clock=ManualClock())
+    registry.install("a", spec, {"client_id": "c", "refresh_token": "r"})
+    registry.install("b", spec, {"client_id": "c", "refresh_token": "r"})
+    registry.bind_clocks()
+    await registry.uninstall("a")
+    with pytest.raises(ValueError, match="another clock"):
+        shared.bind_clock(ManualClock(), "later")
+    await registry.close()

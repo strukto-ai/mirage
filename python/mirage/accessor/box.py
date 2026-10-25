@@ -12,28 +12,16 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.accessor.base import Accessor
+from mirage.accessor.base import TokenAccessor
 from mirage.core.box.client import BoxTokenManager
-from mirage.utils.clock import Clock
 from mirage.vfs.box.config import BoxConfig
 
 
-class BoxAccessor(Accessor):
+class BoxAccessor(TokenAccessor):
+    token_manager: BoxTokenManager
+
     def __init__(
         self, config: BoxConfig, token_manager: BoxTokenManager
     ) -> None:
         self.config = config
         self.token_manager = token_manager
-
-    async def close(self) -> None:
-        """Drain the token manager's connection pool. Idempotent."""
-        await self.token_manager.close()
-
-    def bind_clock(self, clock: Clock) -> None:
-        """Read token expiry and the upload commit's wait on the workspace's
-        clock.
-
-        Args:
-            clock (Clock): the workspace's clock.
-        """
-        self.token_manager.bind_clock(clock)

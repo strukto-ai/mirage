@@ -87,6 +87,10 @@ function sessionFollow(
     new Files(
       dispatch,
       namespace.readers(() => session.visibility),
+      null,
+      {
+        clock: namespace.clock,
+      },
     ),
   )
   return links === undefined ? null : (path: string) => links.resolve(path)

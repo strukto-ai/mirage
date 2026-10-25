@@ -17,7 +17,7 @@ import { dirname, join, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import ts from 'typescript'
 import { describe, expect, it } from 'vitest'
-import { type Clock, ManualClock, SystemClock } from './clock.ts'
+import { type Clock, isSystemClock, ManualClock, SystemClock } from './clock.ts'
 
 const SRC_DIR = join(dirname(fileURLToPath(import.meta.url)), '..')
 
@@ -89,6 +89,20 @@ describe('SystemClock', () => {
     const started = performance.now()
     await new SystemClock().sleep(0.02)
     expect(performance.now() - started).toBeGreaterThanOrEqual(15)
+  })
+})
+
+describe('isSystemClock', () => {
+  it('knows a platform clock, even one from another copy of this module', () => {
+    expect(isSystemClock(new SystemClock())).toBe(true)
+    const copy = {
+      platform: true,
+      now: () => 0,
+      monotonic: () => 0,
+      sleep: () => Promise.resolve(),
+    }
+    expect(isSystemClock(copy)).toBe(true)
+    expect(isSystemClock(new ManualClock())).toBe(false)
   })
 })
 

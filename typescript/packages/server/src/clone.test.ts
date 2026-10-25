@@ -15,6 +15,8 @@
 import { describe, expect, it } from 'vitest'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { MountMode } from '@struktoai/mirage-core/types'
+import { ManualClock } from '@struktoai/mirage-core/utils/clock'
+import { GoogleDriveVFS } from '@struktoai/mirage-core/vfs/gdrive/gdrive'
 import { Workspace, buildVfs, type SlackVFS } from '@struktoai/mirage-node'
 import { z } from '@struktoai/mirage-core/vfs/secrets'
 import type { SecretEntries } from '@struktoai/mirage-core/secrets/config'
@@ -38,6 +40,23 @@ function brokenBootstrap(source: string): SecretEntries {
 }
 
 describe('cloneWorkspaceWithOverride', () => {
+  it('runs the clone on the source clock', async () => {
+    const vfs = new GoogleDriveVFS({ clientId: 'c', refreshToken: 'r' })
+    const clock = new ManualClock()
+    const src = new Workspace({ '/g': vfs }, { mode: MountMode.WRITE, clock })
+    try {
+      const clone = await cloneWorkspaceWithOverride(src, null)
+      try {
+        expect(clone.clock).toBe(clock)
+        expect(vfs.accessor.tokenManager.clock).toBe(clock)
+      } finally {
+        await clone.close()
+      }
+    } finally {
+      await src.close()
+    }
+  })
+
   it('produces an independent workspace whose writes do not touch the source', async () => {
     const src = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })
     await src.shell('echo source-only > /file.txt')

@@ -154,16 +154,180 @@ describe('the workspace clock', () => {
     }
   })
 
-  it('a VFS mounted again follows the later workspace clock', async () => {
-    const vfs = new GoogleDriveVFS({ clientId: 'c', refreshToken: 'r' })
-    const second = new ManualClock()
-    const a = new Workspace({ '/g': vfs }, { mode: MountMode.WRITE, clock: new ManualClock() })
-    const b = new Workspace({ '/g': vfs }, { mode: MountMode.WRITE, clock: second })
+  it('refuses a VFS another workspace holds on another clock', async () => {
+    const vfs = drive()
+    const first = new Workspace({ '/g': vfs }, { mode: MountMode.WRITE, clock: new ManualClock() })
     try {
-      expect(vfs.accessor.tokenManager.clock).toBe(second)
+      expect(
+        () => new Workspace({ '/g': vfs }, { mode: MountMode.WRITE, clock: new ManualClock() }),
+      ).toThrow(/another clock/)
+      expect(() => new Workspace({ '/g': vfs }, { mode: MountMode.WRITE })).toThrow(/another clock/)
     } finally {
-      await b.close()
-      await a.close()
+      await first.close()
+    }
+  })
+
+  it('lets two workspaces share a VFS on one clock', async () => {
+    const vfs = drive()
+    const clock = new ManualClock()
+    const first = new Workspace({ '/g': vfs }, { mode: MountMode.WRITE, clock })
+    const second = new Workspace({ '/g': vfs }, { mode: MountMode.WRITE, clock })
+    try {
+      expect(vfs.accessor.tokenManager.clock).toBe(clock)
+    } finally {
+      await second.close()
+      await first.close()
+    }
+  })
+
+  it('lets go of the clock when the workspace closes', async () => {
+    const vfs = drive()
+    const ws = new Workspace({ '/g': vfs }, { mode: MountMode.WRITE, clock: new ManualClock() })
+    await ws.close()
+    const later = new ManualClock()
+    vfs.accessor.bindClock(later, 'later')
+    expect(vfs.accessor.tokenManager.clock).toBe(later)
+  })
+
+  it('lets go of the clock on unmount', async () => {
+    const vfs = drive()
+    const ws = new Workspace({ '/g': vfs }, { mode: MountMode.WRITE, clock: new ManualClock() })
+    try {
+      await ws.unmount('/g')
+      const later = new ManualClock()
+      vfs.accessor.bindClock(later, 'later')
+      expect(vfs.accessor.tokenManager.clock).toBe(later)
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('a refused workspace lets go of what it placed', async () => {
+    const free = drive()
+    const held = drive()
+    const holder = new Workspace(
+      { '/h': held },
+      { mode: MountMode.WRITE, clock: new ManualClock() },
+    )
+    try {
+      expect(
+        () =>
+          new Workspace(
+            { '/a': free, '/b': held },
+            { mode: MountMode.WRITE, clock: new ManualClock() },
+          ),
+      ).toThrow(/another clock/)
+      const later = new ManualClock()
+      free.accessor.bindClock(later, 'later')
+      expect(free.accessor.tokenManager.clock).toBe(later)
+    } finally {
+      await holder.close()
+    }
+  })
+
+  it('a workspace failing after its mounts holds no clock', () => {
+    const vfs = drive()
+    expect(
+      () =>
+        new Workspace(
+          { '/g': vfs },
+          {
+            mode: MountMode.WRITE,
+            clock: new ManualClock(),
+            clis: { x: ['no-such-cli', null] },
+          },
+        ),
+    ).toThrow()
+    const later = new ManualClock()
+    vfs.accessor.bindClock(later, 'later')
+    expect(vfs.accessor.tokenManager.clock).toBe(later)
+  })
+
+  it("closing one workspace keeps another's hold", async () => {
+    const vfs = drive()
+    const clock = new ManualClock()
+    const first = new Workspace({ '/g': vfs }, { mode: MountMode.WRITE, clock })
+    const second = new Workspace({ '/g': vfs }, { mode: MountMode.WRITE, clock })
+    try {
+      await first.close()
+      expect(() => {
+        vfs.accessor.bindClock(new ManualClock(), 'later')
+      }).toThrow(/another clock/)
+    } finally {
+      await second.close()
+    }
+  })
+
+  it('unmounting one of two mounts of a VFS keeps the clock', async () => {
+    const vfs = drive()
+    const ws = new Workspace({ '/g': vfs }, { mode: MountMode.WRITE, clock: new ManualClock() })
+    try {
+      ws.addMount('/h', vfs, MountMode.WRITE)
+      await ws.unmount('/h')
+      expect(() => {
+        vfs.accessor.bindClock(new ManualClock(), 'later')
+      }).toThrow(/another clock/)
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('a mount added later takes the workspace clock', async () => {
+    const clock = new ManualClock()
+    const vfs = drive()
+    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE, clock })
+    try {
+      ws.addMount('/g', vfs, MountMode.WRITE)
+      expect(vfs.accessor.tokenManager.clock).toBe(clock)
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('adding a VFS held on another clock holds nothing', async () => {
+    const vfs = drive()
+    const holder = new Workspace({ '/g': vfs }, { mode: MountMode.WRITE, clock: new ManualClock() })
+    const ws = new Workspace(
+      { '/data': new RAMVFS() },
+      { mode: MountMode.WRITE, clock: new ManualClock() },
+    )
+    try {
+      expect(() => ws.addMount('/g', vfs, MountMode.WRITE)).toThrow(/another clock/)
+      await holder.close()
+      const later = new ManualClock()
+      vfs.accessor.bindClock(later, 'later')
+      expect(vfs.accessor.tokenManager.clock).toBe(later)
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('an unmount holds the clock until its calls finish', async () => {
+    const vfs = drive()
+    const ws = new Workspace({ '/g': vfs }, { mode: MountMode.WRITE, clock: new ManualClock() })
+    try {
+      const done = ws.mount('/g').activity.acquire()
+      const unmounting = ws.unmount('/g')
+      try {
+        while (ws.mounts().some((m) => m.prefix === '/g/')) {
+          await new Promise((resolve) => setTimeout(resolve, 0))
+        }
+        expect(() => {
+          vfs.accessor.bindClock(new ManualClock(), 'later')
+        }).toThrow(/another clock/)
+      } finally {
+        done()
+        await unmounting
+      }
+      const later = new ManualClock()
+      vfs.accessor.bindClock(later, 'later')
+      expect(vfs.accessor.tokenManager.clock).toBe(later)
+    } finally {
+      await ws.close()
     }
   })
 })
+
+function drive(): GoogleDriveVFS {
+  return new GoogleDriveVFS({ clientId: 'c', refreshToken: 'r' })
+}

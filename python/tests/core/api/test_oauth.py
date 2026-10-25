@@ -17,6 +17,7 @@ import asyncio
 import pytest
 
 from mirage.core.api.oauth import TokenManager
+from mirage.utils.clock import ManualClock, SystemClock
 
 
 class _FakeManager(TokenManager):
@@ -104,3 +105,52 @@ async def test_the_pool_is_inert_until_a_session_is_asked_for():
     tm = _FakeManager(expires_in=3600, buffer_seconds=300)
     assert tm.pool._session is None
     await tm.close()
+
+
+def test_a_held_manager_refuses_another_clock():
+    tm = _FakeManager(expires_in=3600, buffer_seconds=300)
+    first = ManualClock()
+    tm.bind_clock(first, "a")
+    with pytest.raises(ValueError, match="another clock"):
+        tm.bind_clock(ManualClock(), "b")
+    assert tm.clock is first
+
+
+def test_another_clock_binds_once_every_owner_lets_go():
+    tm = _FakeManager(expires_in=3600, buffer_seconds=300)
+    first, second = ManualClock(), ManualClock()
+    tm.bind_clock(first, "a")
+    tm.bind_clock(first, "b")
+    tm.release_clock("a")
+    with pytest.raises(ValueError):
+        tm.bind_clock(second, "c")
+    tm.release_clock("b")
+    tm.bind_clock(second, "c")
+    assert tm.clock is second
+
+
+def test_letting_go_twice_keeps_another_owner_s_hold():
+    tm = _FakeManager(expires_in=3600, buffer_seconds=300)
+    tm.bind_clock(ManualClock(), "a")
+    tm.bind_clock(tm.clock, "b")
+    tm.release_clock("a")
+    tm.release_clock("a")
+    with pytest.raises(ValueError):
+        tm.bind_clock(ManualClock(), "c")
+
+
+def test_an_owner_holding_again_changes_nothing():
+    tm = _FakeManager(expires_in=3600, buffer_seconds=300)
+    clock = ManualClock()
+    tm.bind_clock(clock, "a")
+    tm.bind_clock(clock, "a")
+    tm.release_clock("a")
+    tm.bind_clock(ManualClock(), "b")
+
+
+def test_two_system_clocks_agree_while_held():
+    tm = _FakeManager(expires_in=3600, buffer_seconds=300)
+    tm.bind_clock(SystemClock(), "a")
+    tm.bind_clock(SystemClock(), "b")
+    with pytest.raises(ValueError):
+        tm.bind_clock(ManualClock(), "c")

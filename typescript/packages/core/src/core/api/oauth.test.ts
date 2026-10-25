@@ -14,6 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { TokenManager } from './oauth.ts'
+import { ManualClock, SystemClock } from '../../utils/clock.ts'
 
 class FakeManager extends TokenManager {
   calls = 0
@@ -52,5 +53,61 @@ describe('TokenManager', () => {
     const tokens = await Promise.all([tm.getToken(), tm.getToken(), tm.getToken()])
     expect(tokens).toEqual(['tok1', 'tok1', 'tok1'])
     expect(tm.calls).toBe(1)
+  })
+})
+
+describe('TokenManager clock binding', () => {
+  it('refuses another clock while held', () => {
+    const tm = new FakeManager(3600, 300)
+    const first = new ManualClock()
+    tm.bindClock(first, 'a')
+    expect(() => {
+      tm.bindClock(new ManualClock(), 'b')
+    }).toThrow(/another clock/)
+    expect(tm.clock).toBe(first)
+  })
+
+  it('takes another clock once every owner lets go', () => {
+    const tm = new FakeManager(3600, 300)
+    const first = new ManualClock()
+    const second = new ManualClock()
+    tm.bindClock(first, 'a')
+    tm.bindClock(first, 'b')
+    tm.releaseClock('a')
+    expect(() => {
+      tm.bindClock(second, 'c')
+    }).toThrow()
+    tm.releaseClock('b')
+    tm.bindClock(second, 'c')
+    expect(tm.clock).toBe(second)
+  })
+
+  it("keeps another owner's hold when one lets go twice", () => {
+    const tm = new FakeManager(3600, 300)
+    tm.bindClock(new ManualClock(), 'a')
+    tm.bindClock(tm.clock, 'b')
+    tm.releaseClock('a')
+    tm.releaseClock('a')
+    expect(() => {
+      tm.bindClock(new ManualClock(), 'c')
+    }).toThrow()
+  })
+
+  it('changes nothing when an owner holds again', () => {
+    const tm = new FakeManager(3600, 300)
+    const clock = new ManualClock()
+    tm.bindClock(clock, 'a')
+    tm.bindClock(clock, 'a')
+    tm.releaseClock('a')
+    tm.bindClock(new ManualClock(), 'b')
+  })
+
+  it('lets two system clocks agree while held', () => {
+    const tm = new FakeManager(3600, 300)
+    tm.bindClock(new SystemClock(), 'a')
+    tm.bindClock(new SystemClock(), 'b')
+    expect(() => {
+      tm.bindClock(new ManualClock(), 'c')
+    }).toThrow()
   })
 })

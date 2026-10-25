@@ -57,6 +57,10 @@ export async function handleTest(
     new Files(
       dispatch,
       namespace.readers(() => session.visibility),
+      null,
+      {
+        clock: namespace.clock,
+      },
     ),
   )
   const ctx: CondContext = {

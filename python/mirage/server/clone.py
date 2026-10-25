@@ -144,4 +144,8 @@ async def clone(
         src_ws, state, skip=set(override_mounts)
     )
     merged = {**existing, **override_mounts}
-    return await Workspace._from_state(state, mounts=merged, secrets=secrets)
+    # The clone shares the source's remote mounts, whose clients run on
+    # the source's clock, so it runs on that clock too.
+    return await Workspace._from_state(
+        state, mounts=merged, secrets=secrets, clock=src_ws.clock
+    )

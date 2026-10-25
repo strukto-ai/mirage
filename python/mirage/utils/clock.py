@@ -114,3 +114,12 @@ class ManualClock:
         return (
             f"ManualClock(now={self._wall!r}, monotonic={self._monotonic!r})"
         )
+
+
+def is_system_clock(clock: Clock) -> bool:
+    """Whether ``clock`` reads the platform clock, so any two such agree.
+
+    Args:
+        clock (Clock): the clock to ask about.
+    """
+    return isinstance(clock, SystemClock)

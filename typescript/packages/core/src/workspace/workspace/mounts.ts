@@ -201,13 +201,17 @@ export async function unmountPrefix(deps: UnmountDeps, prefix: string): Promise<
 async function closeVfs(deps: UnmountDeps, entry: MountEntry): Promise<void> {
   const vfs = entry.vfs
   const shared = deps.sharedMounts.has(vfs)
-  await entry.activity.wait()
   try {
-    if (!shared) {
-      deps.registry.retiredMounts.add(vfs)
-      await vfs.close()
+    await entry.activity.wait()
+    try {
+      if (!shared) {
+        deps.registry.retiredMounts.add(vfs)
+        await vfs.close()
+      }
+    } finally {
+      await entry.indexStore.close()
     }
   } finally {
-    await entry.indexStore.close()
+    deps.registry.releaseClock(vfs)
   }
 }

@@ -14,6 +14,7 @@
 
 import type { ReadSpec } from '../types.ts'
 import type { Clock } from '../utils/clock.ts'
+import type { TokenManager } from '../core/api/oauth.ts'
 import type { ResponseCache } from './responses.ts'
 
 export class Accessor {
@@ -45,10 +46,40 @@ export class Accessor {
   }
 
   /**
-   * Read time and wait on the clock of the workspace it serves; one that
+   * Read time and wait on the clock of a workspace that mounts it; one that
    * does not say reads none.
    */
-  bindClock?(clock: Clock): void
+  bindClock?(clock: Clock, owner: unknown): void
+
+  /**
+   * Let `owner` go, as it unmounts the accessor or closes; one that does not
+   * say holds none.
+   */
+  releaseClock?(owner: unknown): void
+}
+
+/**
+ * An accessor whose calls a `TokenManager` signs. The manager reads token
+ * expiry and times retry waits on the clock of the workspace that mounts the
+ * accessor. Mirrors Python's `TokenAccessor`.
+ */
+export abstract class TokenAccessor extends Accessor {
+  abstract readonly tokenManager: TokenManager
+
+  /**
+   * Read token expiry and retry waits on `clock`.
+   *
+   * @param owner who holds it, released by the same key.
+   * @throws Error when a workspace on another clock mounts it.
+   */
+  override bindClock(clock: Clock, owner: unknown): void {
+    this.tokenManager.bindClock(clock, owner)
+  }
+
+  /** Let `owner` go. */
+  override releaseClock(owner: unknown): void {
+    this.tokenManager.releaseClock(owner)
+  }
 }
 
 /** The accessor of a mount or CLI with no client of its own. */

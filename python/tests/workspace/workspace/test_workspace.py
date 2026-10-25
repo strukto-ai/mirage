@@ -17,6 +17,7 @@ import inspect
 import io
 import itertools
 import uuid
+from typing import Any
 
 import pytest
 
@@ -24,13 +25,14 @@ from mirage.cache.index import IndexConfig
 from mirage.cache.index.config import LookupStatus
 from mirage.commands.cli.builtin.gws import GWS
 from mirage.context import reset_current_session, set_current_session
-from mirage.types import MountMode
+from mirage.types import MountBackend, MountMode
 from mirage.utils.clock import ManualClock
 from mirage.utils.ids import SeededIdSource, SystemIdSource
 from mirage.vfs.gdrive.config import GoogleDriveConfig
 from mirage.vfs.gdrive.gdrive import GoogleDriveVFS
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Session, Workspace
+from mirage.workspace.mount.spec import Mount
 from mirage.workspace.session import RAMSessionStore
 from mirage.workspace.shell_execution import ShellExecution
 from mirage.workspace.snapshot import apply_state_dict, read_tar
@@ -475,17 +477,189 @@ async def test_a_manual_clock_workspace_keeps_one_time_domain_in_history():
         await ws.close()
 
 
+def _drive() -> GoogleDriveVFS:
+    return GoogleDriveVFS(GoogleDriveConfig(client_id="c", refresh_token="r"))
+
+
 @pytest.mark.asyncio
-async def test_a_vfs_mounted_again_follows_the_later_workspace_clock():
-    vfs = GoogleDriveVFS(GoogleDriveConfig(client_id="c", refresh_token="r"))
-    first, second = ManualClock(), ManualClock()
-    a = Workspace({"/g": vfs}, mode=MountMode.WRITE, clock=first)
-    b = Workspace({"/g": vfs}, mode=MountMode.WRITE, clock=second)
+async def test_a_vfs_held_on_another_workspace_clock_is_refused():
+    vfs = _drive()
+    first = Workspace({"/g": vfs}, mode=MountMode.WRITE, clock=ManualClock())
     try:
-        assert vfs.accessor.token_manager.clock is second
+        with pytest.raises(ValueError, match="another clock"):
+            Workspace({"/g": vfs}, mode=MountMode.WRITE, clock=ManualClock())
+        with pytest.raises(ValueError, match="another clock"):
+            Workspace({"/g": vfs}, mode=MountMode.WRITE)
     finally:
-        await b.close()
-        await a.close()
+        await first.close()
+
+
+@pytest.mark.asyncio
+async def test_two_workspaces_may_share_a_vfs_on_one_clock():
+    vfs, clock = _drive(), ManualClock()
+    first = Workspace({"/g": vfs}, mode=MountMode.WRITE, clock=clock)
+    second = Workspace({"/g": vfs}, mode=MountMode.WRITE, clock=clock)
+    try:
+        assert vfs.accessor.token_manager.clock is clock
+    finally:
+        await second.close()
+        await first.close()
+
+
+@pytest.mark.asyncio
+async def test_closing_a_workspace_lets_go_of_its_clock():
+    vfs = _drive()
+    ws = Workspace({"/g": vfs}, mode=MountMode.WRITE, clock=ManualClock())
+    await ws.close()
+    later = ManualClock()
+    vfs.accessor.bind_clock(later, "later")
+    assert vfs.accessor.token_manager.clock is later
+
+
+@pytest.mark.asyncio
+async def test_unmounting_lets_go_of_the_clock():
+    vfs = _drive()
+    ws = Workspace({"/g": vfs}, mode=MountMode.WRITE, clock=ManualClock())
+    try:
+        await ws.unmount("/g")
+        later = ManualClock()
+        vfs.accessor.bind_clock(later, "later")
+        assert vfs.accessor.token_manager.clock is later
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_refused_workspace_lets_go_of_what_it_placed():
+    free, held = _drive(), _drive()
+    holder = Workspace({"/h": held}, mode=MountMode.WRITE, clock=ManualClock())
+    try:
+        with pytest.raises(ValueError, match="another clock"):
+            Workspace(
+                {"/a": free, "/b": held},
+                mode=MountMode.WRITE,
+                clock=ManualClock(),
+            )
+        later = ManualClock()
+        free.accessor.bind_clock(later, "later")
+        assert free.accessor.token_manager.clock is later
+    finally:
+        await holder.close()
+
+
+@pytest.mark.asyncio
+async def test_a_workspace_failing_after_its_mounts_holds_no_clock():
+    vfs = _drive()
+    with pytest.raises(ValueError, match="unknown cli"):
+        Workspace(
+            {"/g": vfs},
+            mode=MountMode.WRITE,
+            clock=ManualClock(),
+            clis={"x": ("no-such-cli", None)},
+        )
+    later = ManualClock()
+    vfs.accessor.bind_clock(later, "later")
+    assert vfs.accessor.token_manager.clock is later
+
+
+@pytest.mark.asyncio
+async def test_closing_one_workspace_keeps_another_s_hold():
+    vfs, clock = _drive(), ManualClock()
+    first = Workspace({"/g": vfs}, mode=MountMode.WRITE, clock=clock)
+    second = Workspace({"/g": vfs}, mode=MountMode.WRITE, clock=clock)
+    try:
+        await first.close()
+        with pytest.raises(ValueError, match="another clock"):
+            vfs.accessor.bind_clock(ManualClock(), "later")
+    finally:
+        await second.close()
+
+
+@pytest.mark.asyncio
+async def test_unmounting_one_of_two_mounts_of_a_vfs_keeps_the_clock():
+    vfs = _drive()
+    ws = Workspace({"/g": vfs}, mode=MountMode.WRITE, clock=ManualClock())
+    try:
+        ws.add_mount("/h", vfs, MountMode.WRITE)
+        await ws.unmount("/h")
+        with pytest.raises(ValueError, match="another clock"):
+            vfs.accessor.bind_clock(ManualClock(), "later")
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_mount_added_later_takes_the_workspace_clock():
+    clock, vfs = ManualClock(), _drive()
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.WRITE, clock=clock)
+    try:
+        ws.add_mount("/g", vfs, MountMode.WRITE)
+        assert vfs.accessor.token_manager.clock is clock
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_adding_a_vfs_held_on_another_clock_holds_nothing():
+    vfs = _drive()
+    holder = Workspace({"/g": vfs}, mode=MountMode.WRITE, clock=ManualClock())
+    ws = Workspace(
+        {"/data": RAMVFS()}, mode=MountMode.WRITE, clock=ManualClock()
+    )
+    try:
+        with pytest.raises(ValueError, match="another clock"):
+            ws.add_mount("/g", vfs, MountMode.WRITE)
+        await holder.close()
+        later = ManualClock()
+        vfs.accessor.bind_clock(later, "later")
+        assert vfs.accessor.token_manager.clock is later
+    finally:
+        await ws.close()
+
+
+def _refuse_fuse(*_args: Any, **_kwargs: Any) -> None:
+    raise RuntimeError("no FUSE here")
+
+
+@pytest.mark.asyncio
+async def test_a_failing_kernel_mount_lets_go_of_the_clock(monkeypatch):
+    monkeypatch.setattr(Workspace, "add_fuse_mount", _refuse_fuse)
+    vfs = _drive()
+    with pytest.raises(RuntimeError, match="no FUSE here"):
+        Workspace(
+            {
+                "/g": Mount(
+                    vfs, backend=MountBackend.FUSE, mountpoint="/tmp/mnt-g"
+                )
+            },
+            mode=MountMode.WRITE,
+            clock=ManualClock(),
+        )
+    later = ManualClock()
+    vfs.accessor.bind_clock(later, "later")
+    assert vfs.accessor.token_manager.clock is later
+
+
+@pytest.mark.asyncio
+async def test_an_unmount_holds_the_clock_until_its_calls_finish():
+    vfs = _drive()
+    ws = Workspace({"/g": vfs}, mode=MountMode.WRITE, clock=ManualClock())
+    try:
+        done = ws.mount("/g").activity.acquire()
+        unmounting = asyncio.create_task(ws.unmount("/g"))
+        try:
+            while any(m.prefix == "/g/" for m in ws.mounts()):
+                await asyncio.sleep(0)
+            with pytest.raises(ValueError, match="another clock"):
+                vfs.accessor.bind_clock(ManualClock(), "later")
+        finally:
+            done()
+            await unmounting
+        later = ManualClock()
+        vfs.accessor.bind_clock(later, "later")
+        assert vfs.accessor.token_manager.clock is later
+    finally:
+        await ws.close()
 
 
 async def _replay(seed: int) -> list[str]:

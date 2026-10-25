@@ -20,7 +20,12 @@ from pathlib import Path
 import pytest
 
 import mirage
-from mirage.utils.clock import Clock, ManualClock, SystemClock
+from mirage.utils.clock import (
+    Clock,
+    ManualClock,
+    SystemClock,
+    is_system_clock,
+)
 
 MIRAGE_DIR = Path(mirage.__file__).parent
 
@@ -177,6 +182,11 @@ async def test_manual_clock_sleep_of_nothing_advances_nothing(seconds):
     await clock.sleep(seconds)
     assert clock.now() == 10.0
     assert clock.monotonic() == 0.0
+
+
+def test_only_a_platform_clock_is_a_system_clock():
+    assert is_system_clock(SystemClock())
+    assert not is_system_clock(ManualClock())
 
 
 def test_manual_clock_repr_names_both_readings():
