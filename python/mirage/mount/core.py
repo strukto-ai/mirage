@@ -956,8 +956,11 @@ class MountCore:
             new (str): mount path it moves to.
         """
         source, target = self.resolve(old), self.resolve(new)
+        # Both ends as the links above them lead now: a link the rename
+        # moves no longer leads there after it.
         moved = self.identity(old, follow=False)
-        keys = [moved, self.identity(new, follow=False)]
+        landing = self.identity(new, follow=False)
+        keys = [moved, landing]
 
         async def replace() -> None:
             replaced = [c for c in self._named(new) if c.key != moved]
@@ -967,9 +970,10 @@ class MountCore:
             for ctx in self._handles.values():
                 if ctx.detached is not None:
                     continue
-                if ctx.key == source or ctx.key.startswith(source + "/"):
-                    ctx.key = target + ctx.key[len(source) :]
-                    ctx.path = ctx.key[len(self._root) :]
+                if ctx.key == moved or ctx.key.startswith(moved + "/"):
+                    rest = ctx.key[len(moved) :]
+                    ctx.key = landing + rest
+                    ctx.path = self._mount_path(ctx.key, new + rest)
             await self._changed(old, rehydrate=False)
             await self._changed(new, rehydrate=False)
 
@@ -1327,11 +1331,7 @@ class MountCore:
             return self._handles.add(Handle(path=path, key=key, mode=mode))
         # The handle reads and writes the file the open reached, not the
         # one a link at ``path`` names later.
-        at = (
-            key[len(self._root) :]
-            if key.startswith(self._root + "/")
-            else path
-        )
+        at = self._mount_path(key, path)
         emptied = s is None or mode.truncate
         if s is None:
             if not mode.create:
@@ -1590,6 +1590,18 @@ class MountCore:
                 await self.flush(ctx.path, fh)
         finally:
             self._handles.pop(fh)
+
+    def _mount_path(self, key: str, spelled: str) -> str:
+        """The mount path the file ``key`` names, or ``spelled`` where it
+        lies outside the mount's root.
+
+        Args:
+            key (str): the file's identity.
+            spelled (str): the mount path to fall back on.
+        """
+        if key.startswith(self._root + "/"):
+            return key[len(self._root) :]
+        return spelled
 
     def identity(self, path: str, follow: bool = True) -> str:
         """Where a mount path really points: the mount-resolved path with

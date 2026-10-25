@@ -1514,6 +1514,19 @@ async def test_an_open_through_a_link_keeps_its_file_when_the_link_is_replaced()
 
 
 @pytest.mark.asyncio
+async def test_a_rename_through_a_link_it_moves_carries_the_handle_along():
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
+    await ws.shell("mkdir -p /src /other && printf hello > /src/f")
+    await ws.shell("ln -s /other /src/out")
+    core = MountCore(ws.vfs)
+    fh = await core.open("/src/f", open_mode(os.O_RDWR))
+    await core.rename("/src", "/src/out/moved")
+    await core.write("/src/f", b"X", 0, fh)
+    await core.release(fh)
+    assert await ws.vfs.read("/other/moved/f") == b"Xello"
+
+
+@pytest.mark.asyncio
 async def test_a_read_without_a_handle_lays_others_writes_over_its_range():
     ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
     await ws.vfs.write("/f", b"ABCDEFGH")

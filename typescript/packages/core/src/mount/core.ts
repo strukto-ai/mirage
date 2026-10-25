@@ -903,18 +903,22 @@ export class MountCore {
     // source's backend.
     const source = this.resolve(src)
     const target = this.resolve(dst)
+    // Both ends as the links above them lead now: a link the rename moves
+    // no longer leads there after it.
     const moved = this.identity(src, false)
+    const landing = this.identity(dst, false)
     await this.removing([src, dst], () =>
-      this.queueAll(this.pending, [moved, this.identity(dst, false)], async () => {
+      this.queueAll(this.pending, [moved, landing], async () => {
         const replaced = this.named(dst).filter((ctx) => ctx.key !== moved)
         const row = await this.hold(dst, replaced)
         await this.op(() => this.files.rename(source, target))
         this.detach(replaced, row)
         for (const ctx of this.handles.values()) {
           if (ctx.detached !== undefined) continue
-          if (ctx.key === source || ctx.key.startsWith(`${source}/`)) {
-            ctx.key = target + ctx.key.slice(source.length)
-            ctx.path = ctx.key.slice(this.root.length)
+          if (ctx.key === moved || ctx.key.startsWith(`${moved}/`)) {
+            const rest = ctx.key.slice(moved.length)
+            ctx.key = landing + rest
+            ctx.path = this.mountPath(ctx.key, dst + rest)
           }
         }
         await this.changed(src, false)
@@ -927,6 +931,14 @@ export class MountCore {
   // directory itself.
   async rmdir(path: string): Promise<void> {
     await this.op(() => this.files.rmdir(this.resolve(path)))
+  }
+
+  /**
+   * The mount path the file `key` names, or `spelled` where it lies outside
+   * the mount's root.
+   */
+  private mountPath(key: string, spelled: string): string {
+    return key.startsWith(`${this.root}/`) ? key.slice(this.root.length) : spelled
   }
 
   /**
@@ -1206,7 +1218,7 @@ export class MountCore {
     }
     // The handle reads and writes the file the open reached, not the one a
     // link at `path` names later.
-    const at = key.startsWith(`${this.root}/`) ? key.slice(this.root.length) : path
+    const at = this.mountPath(key, path)
     const emptied = s === null || mode.truncate
     if (s === null) {
       if (!mode.create) throw enoent(path)

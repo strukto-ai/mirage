@@ -1623,6 +1623,18 @@ describe('MountCore opens', () => {
     expect(dec.decode(await ws.vfs.read('/data/b'))).toBe('bbbb')
   })
 
+  it('carries a handle along a rename through a link the rename moves', async () => {
+    const ws = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
+    await ws.shell('mkdir -p /data/src /data/other && printf hello > /data/src/f')
+    await ws.shell('ln -s /data/other /data/src/out')
+    const core = new MountCore(ws.vfs)
+    const fh = await core.open('/data/src/f', flags(fsConstants.O_RDWR))
+    await core.rename('/data/src', '/data/src/out/moved')
+    await core.write('/data/src/f', fh, enc.encode('X'), 0)
+    await core.release(fh)
+    expect(dec.decode(await ws.vfs.read('/data/other/moved/f'))).toBe('Xello')
+  })
+
   it("reads a range of a file without a handle, another's writes laid over it", async () => {
     const ws = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
     await ws.vfs.write('/data/f', 'ABCDEFGH')
