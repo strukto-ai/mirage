@@ -12,8 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { Accessor } from './base.ts'
-import type { Clock } from '../utils/clock.ts'
+import { TokenAccessor } from './base.ts'
 import { CalendarClient, type CalendarApi } from '../core/gcal/api.ts'
 import { DocsClient, type DocsApi } from '../core/gdocs/api.ts'
 import { DriveClient, type DriveApi } from '../core/gdrive/api.ts'
@@ -22,17 +21,12 @@ import type { TokenManager } from '../core/google/client.ts'
 import { SheetsClient, type SheetsApi } from '../core/gsheets/api.ts'
 import { SlidesClient, type SlidesApi } from '../core/gslides/api.ts'
 
-export class GoogleApiAccessor extends Accessor {
-  readonly tokenManager: TokenManager
+export class GoogleApiAccessor extends TokenAccessor {
+  override readonly tokenManager: TokenManager
 
   constructor(opts: { tokenManager: TokenManager }) {
     super()
     this.tokenManager = opts.tokenManager
-  }
-
-  /** Read token expiry and retry waits on the workspace's clock. */
-  override bindClock(clock: Clock): void {
-    this.tokenManager.bindClock(clock)
   }
 
   /** The one door every Drive request goes through. */

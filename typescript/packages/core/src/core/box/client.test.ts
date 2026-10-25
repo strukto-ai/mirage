@@ -214,7 +214,7 @@ it.each([false, true])(
 it('upload session waits out a pending commit on its clock', async () => {
   const clock = new ManualClock()
   const tm = new BoxTokenManager({ accessToken: 'token' })
-  tm.bindClock(clock)
+  tm.bindClock(clock, 'ws')
   const spool = new ByteSpool()
   await spool.append(new TextEncoder().encode('abc'))
   const base = 'https://example.test/session'

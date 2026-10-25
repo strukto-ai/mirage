@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import Iterable
+from collections.abc import Hashable, Iterable
 from types import TracebackType
 from typing import Any, Self
 
@@ -21,6 +21,7 @@ from pydantic import BaseModel
 
 from mirage.accessor.responses import ResponseCache
 from mirage.core.api.client import SessionPool
+from mirage.core.api.oauth import TokenManager
 from mirage.types import JsonValue, ReadSpec
 from mirage.utils.clock import Clock
 
@@ -67,14 +68,60 @@ class Accessor:
         for cache in self.caches():
             cache.clear()
 
-    def bind_clock(self, clock: Clock) -> None:
-        """Read time and wait on the clock of the workspace it serves;
+    def bind_clock(self, clock: Clock, owner: Hashable) -> None:
+        """Read time and wait on the clock of a workspace that mounts it;
         the default reads none.
 
         Args:
             clock (Clock): the workspace's clock.
+            owner (Hashable): who holds it, released by the same key.
         """
         return None
+
+    def release_clock(self, owner: Hashable) -> None:
+        """Let ``owner`` go, as it unmounts the accessor or closes; the
+        default holds none.
+
+        Args:
+            owner (Hashable): the key it was bound with.
+        """
+        return None
+
+
+class TokenAccessor(Accessor):
+    """An accessor whose calls a ``TokenManager`` signs.
+
+    The manager reads token expiry and times retry waits on the clock of
+    the workspace that mounts the accessor, and owns the connection pool
+    its calls ride, which ``close`` drains. A subclass sets
+    ``token_manager``.
+    """
+
+    token_manager: TokenManager
+
+    async def close(self) -> None:
+        """Drain the token manager's connection pool. Idempotent."""
+        await self.token_manager.close()
+
+    def bind_clock(self, clock: Clock, owner: Hashable) -> None:
+        """Read token expiry and retry waits on ``clock``.
+
+        Args:
+            clock (Clock): the workspace's clock.
+            owner (Hashable): who holds it, released by the same key.
+
+        Raises:
+            ValueError: a workspace on another clock mounts it.
+        """
+        self.token_manager.bind_clock(clock, owner)
+
+    def release_clock(self, owner: Hashable) -> None:
+        """Let ``owner`` go.
+
+        Args:
+            owner (Hashable): the key it was bound with.
+        """
+        self.token_manager.release_clock(owner)
 
 
 class SessionAccessor(Accessor):

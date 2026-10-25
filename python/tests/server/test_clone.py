@@ -23,6 +23,9 @@ from mirage.server.clone import (
     build_override_mounts,
     clone_workspace_with_override,
 )
+from mirage.utils.clock import ManualClock
+from mirage.vfs.gdrive.config import GoogleDriveConfig
+from mirage.vfs.gdrive.gdrive import GoogleDriveVFS
 from mirage.vfs.ram import RAMVFS
 from mirage.vfs.slack import SlackConfig, SlackVFS
 
@@ -261,3 +264,19 @@ async def test_an_override_mount_with_a_null_write_keeps_the_saved_policy():
         {"mounts": {"/r": {"vfs": "ram", "write": None}}}, None
     )
     assert built["/r/"].write is None
+
+
+@pytest.mark.asyncio
+async def test_a_clone_runs_on_the_source_clock():
+    vfs = GoogleDriveVFS(GoogleDriveConfig(client_id="c", refresh_token="r"))
+    clock = ManualClock()
+    src = Workspace({"/g": vfs}, mode=MountMode.WRITE, clock=clock)
+    try:
+        cloned = await clone_workspace_with_override(src, None)
+        try:
+            assert cloned.clock is clock
+            assert vfs.accessor.token_manager.clock is clock
+        finally:
+            await cloned.close()
+    finally:
+        await src.close()

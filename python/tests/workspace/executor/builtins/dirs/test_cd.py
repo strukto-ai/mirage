@@ -13,12 +13,17 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from functools import partial
+from typing import Any
 
 import pytest
 
+import mirage.workspace.executor.builtins.dirs.cd as cd_module
+from mirage import RAMVFS, MountMode, Workspace
 from mirage.types import ContentType, FileStat, FileType, PathSpec
+from mirage.utils.clock import Clock, ManualClock
 from mirage.utils.path import resolve_symlinks
 from mirage.workspace.executor.builtins.dirs import handle_cd
+from mirage.workspace.files import Files
 from mirage.workspace.session import SessionState
 from mirage.workspace.session.session import vars_from_env
 
@@ -294,3 +299,26 @@ async def test_cd_reports_eloop_on_a_symlink_cycle():
     assert io.exit_code == 1
     assert io.stderr == b"bash: cd: /a: Too many levels of symbolic links\n"
     assert sess.cwd == "/data"
+
+
+class _ClockSeen(Files):
+    seen: list[Clock | None] = []
+
+    def __init__(self, *args: Any, clock: Clock | None = None, **kwargs: Any):
+        _ClockSeen.seen.append(clock)
+        super().__init__(*args, clock=clock, **kwargs)
+
+
+@pytest.mark.asyncio
+async def test_cd_reads_links_on_the_workspace_clock(monkeypatch):
+    monkeypatch.setattr(cd_module, "Files", _ClockSeen)
+    _ClockSeen.seen = []
+    clock = ManualClock()
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.WRITE, clock=clock)
+    try:
+        await ws.shell(
+            "mkdir /data/d && ln -s /data/d /data/link && cd /data/link"
+        )
+    finally:
+        await ws.close()
+    assert _ClockSeen.seen and all(c is clock for c in _ClockSeen.seen)

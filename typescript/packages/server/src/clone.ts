@@ -107,5 +107,7 @@ async function clone(src: CoreWorkspace, override: OverrideShape | null): Promis
   const overrideMounts = await buildOverrideMounts(override, secrets)
   const existing = existingRedactedMounts(src, state, new Set(Object.keys(overrideMounts)))
   const merged = { ...existing, ...overrideMounts }
-  return Workspace.fromState(state, { secrets }, merged)
+  // The clone shares the source's remote mounts, whose clients run on the
+  // source's clock, so it runs on that clock too.
+  return Workspace.fromState(state, { secrets, clock: src.clock }, merged)
 }

@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { SystemClock, type Clock } from '../../utils/clock.ts'
+import { isSystemClock, SystemClock, type Clock } from '../../utils/clock.ts'
 
 /**
  * Caches a short-lived access token, refreshing before expiry.
@@ -24,7 +24,8 @@ import { SystemClock, type Clock } from '../../utils/clock.ts'
  *
  * Expiry is read on `clock`, which also times the waits between retries of
  * the calls the manager signs. A mount hands it the workspace's clock
- * through `bindClock`; absent is the system clock.
+ * through `bindClock` and gives it back through `releaseClock`; absent is
+ * the system clock.
  */
 export abstract class TokenManager {
   private accessToken: string | null = null
@@ -32,6 +33,7 @@ export abstract class TokenManager {
   private inflight: Promise<string> | null = null
   private readonly bufferSeconds: number
   clock: Clock
+  private readonly holders = new Set<unknown>()
 
   constructor(bufferSeconds = 300, clock?: Clock) {
     this.bufferSeconds = bufferSeconds
@@ -39,17 +41,36 @@ export abstract class TokenManager {
   }
 
   /**
-   * Read expiry and time retry waits on `clock` from now on. The manager
-   * keeps one clock: a VFS mounted in a second workspace follows that
-   * workspace's. A refreshed token's expiry was read on the clock it
-   * replaces, so it is dropped and the next call refreshes, unless both are
-   * the system clock; a seeded token that never expires is kept.
+   * Read expiry and time retry waits on `clock` while `owner` holds the
+   * manager. A workspace holds it from the moment its mounts take its clock
+   * until it unmounts the VFS or closes; holding again, or letting go twice,
+   * changes nothing. Expiry and waits can follow one clock only, so while
+   * another owner holds the manager a different clock is refused; two system
+   * clocks agree. A refreshed token's expiry was read on the clock it
+   * replaces, so it is dropped and the next call refreshes; a seeded token
+   * that never expires is kept.
+   *
+   * @param owner who holds it, released by the same key.
+   * @throws Error when another owner holds the manager on another clock.
    */
-  bindClock(clock: Clock): void {
-    const same =
-      clock === this.clock || (clock instanceof SystemClock && this.clock instanceof SystemClock)
-    this.clock = clock
-    if (!same && this.expiresAt !== Number.POSITIVE_INFINITY) this.expiresAt = 0
+  bindClock(clock: Clock, owner: unknown): void {
+    const same = clock === this.clock || (isSystemClock(clock) && isSystemClock(this.clock))
+    if (!same) {
+      if ([...this.holders].some((held) => held !== owner)) {
+        throw new Error(
+          'this client is held by a workspace on another clock; ' +
+            'unmount or uninstall it there, or give both one clock',
+        )
+      }
+      this.clock = clock
+      if (this.expiresAt !== Number.POSITIVE_INFINITY) this.expiresAt = 0
+    }
+    this.holders.add(owner)
+  }
+
+  /** Let `owner` go; once none holds, another clock may bind. */
+  releaseClock(owner: unknown): void {
+    this.holders.delete(owner)
   }
 
   /** Fetch a fresh token as `[accessToken, expiresInSeconds]`. */

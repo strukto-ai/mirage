@@ -109,10 +109,10 @@ class CLIRegistry:
             )
         validated = self._validate_config(name, spec, config)
         accessor = spec.accessor(validated)
-        accessor.bind_clock(self._clock)
         accessor.join(
             [*self._peers(), *(i.accessor for i in self._installs.values())]
         )
+        accessor.bind_clock(self._clock, self)
         install = CLIInstall(
             name=name, cli=spec, config=validated, accessor=accessor
         )
@@ -197,6 +197,12 @@ class CLIRegistry:
             # cut, the way `build_vfs` reports its config class.
             raise ValueError(f"CLI {name!r}: {error_summary(exc)}") from None
 
+    def release_clocks(self) -> None:
+        """Let go of the workspace clock on every install's accessor, as
+        the workspace closes or fails to come to be."""
+        for install in self._installs.values():
+            install.accessor.release_clock(self)
+
     async def uninstall(self, name: str) -> None:
         """Remove an installed CLI now and close its accessor once the
         lines running on it and their output streams are done; its head
@@ -208,6 +214,7 @@ class CLIRegistry:
         install = self._installs.pop(name, None)
         if install is None:
             raise KeyError(f"CLI name {name!r} is not installed")
+        install.accessor.release_clock(self)
         identity = id(install)
         closing = asyncio.create_task(_retire(install, self._shutdown))
         self._retiring[identity] = closing
@@ -235,6 +242,7 @@ class CLIRegistry:
         installs = list(self._installs.values())
         self._installs.clear()
         for install in installs:
+            install.accessor.release_clock(self)
             self._retiring[id(install)] = asyncio.create_task(
                 _close_after_grace(install)
             )

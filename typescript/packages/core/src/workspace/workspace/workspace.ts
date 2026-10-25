@@ -197,7 +197,8 @@ export class Workspace {
   readonly processes: ProcessSupervisor
   readonly jobTable: JobTable
   readonly cache: FileCache & BaseVFS
-  private readonly clock: Clock
+  /** The clock this workspace reads time and waits on; a rebuild that shares its mounts runs on it too. */
+  readonly clock: Clock
   private readonly ids: IdSource
   readonly namespace: Namespace
   private readonly dispatcher: Dispatcher
@@ -446,9 +447,14 @@ export class Workspace {
     // Installed CLIs, fully separate from mounts: a spec name resolves
     // against the named registry and every entry installs through the
     // same fail-loud path as registerCli.
-    for (const [cliName, [specOrKey, cliConfig]] of Object.entries(options.clis ?? {})) {
-      const cliSpec = typeof specOrKey === 'string' ? cliSpecFor(specOrKey) : specOrKey
-      this.registry.clis.install(cliName, cliSpec, cliConfig)
+    try {
+      for (const [cliName, [specOrKey, cliConfig]] of Object.entries(options.clis ?? {})) {
+        const cliSpec = typeof specOrKey === 'string' ? cliSpecFor(specOrKey) : specOrKey
+        this.registry.clis.install(cliName, cliSpec, cliConfig)
+      }
+    } catch (err) {
+      this.registry.releaseClocks()
+      throw err
     }
     this.observer = new Observer(stores.observe, this.clock)
     this.registry.observer = this.observer
@@ -575,6 +581,7 @@ export class Workspace {
     if (options.routePolicy !== undefined) {
       this.registry.policies.place(new PlacementPolicy(options.routePolicy, this.scriptPolicy))
     }
+    this.registry.bindClocks()
   }
 
   /**
@@ -2084,10 +2091,15 @@ export class Workspace {
     // A caller's own profile table or default is a document the state did
     // not record, so the restored sessions keep the narrowing it gave
     // them, as a checkout's do, rather than the recorded one.
-    await applyStateDict(ws, state, {
-      builtForState: options.profiles === undefined && options.profile === undefined,
-      shared,
-    })
+    try {
+      await applyStateDict(ws, state, {
+        builtForState: options.profiles === undefined && options.profile === undefined,
+        shared,
+      })
+    } catch (err) {
+      ws.registry.releaseClocks()
+      throw err
+    }
     return ws
   }
 
@@ -2227,6 +2239,7 @@ export class Workspace {
       // stop a settled runner resuming onto a released VFS, so a
       // teardown that raises must still close the entry point behind it.
       this.closed = true
+      this.registry.releaseClocks()
     }
   }
 }

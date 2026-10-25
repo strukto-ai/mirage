@@ -79,6 +79,7 @@ async def handle_test(
             Files(
                 dispatch,
                 namespace.readers(lambda _session: session.visibility),
+                clock=namespace.clock,
             )
         ),
     )

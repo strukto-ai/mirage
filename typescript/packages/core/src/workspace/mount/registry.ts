@@ -167,6 +167,9 @@ export class MountRegistry {
   // storage was mounted). The registry object is just the vehicle that
   // already reaches every dispatch site, same as the runtime fields.
   readonly clis: CLIRegistry
+  // Whether mounts take the workspace clock as they are placed: false while
+  // the workspace is being built, which binds them all at the end.
+  private clocksBound = false
 
   /**
    * Drop what a write past the dispatcher may have made stale.
@@ -352,7 +355,6 @@ export class MountRegistry {
           ids: this.ids,
         },
         list,
-        this.clock,
       ),
     )
     seen.add(DEV_PREFIX)
@@ -381,7 +383,6 @@ export class MountRegistry {
             ids: this.ids,
           },
           list,
-          this.clock,
         ),
       )
     }
@@ -399,8 +400,7 @@ export class MountRegistry {
    * built it. Mirrors the Python registry, whose constructor mounts
    * through `mount()` as well.
    */
-  private static place(init: MountInit, siblings: readonly MountEntry[], clock: Clock): MountEntry {
-    init.vfs.accessor.bindClock?.(clock)
+  private static place(init: MountInit, siblings: readonly MountEntry[]): MountEntry {
     const alias = siblings.find((existing) => existing.vfs === init.vfs)
     const m = new MountEntry(
       alias === undefined ? init : { ...init, indexConfig: alias.indexConfig },
@@ -474,29 +474,64 @@ export class MountRegistry {
         throw new Error(`duplicate mount prefix: ${norm}`)
       }
     }
-    const index = this.indexFor(vfs, placement.index, this.mountList)
-    const vfsRef = placement.vfsRef ?? null
-    const m = MountRegistry.place(
-      {
-        prefix: norm,
-        vfs,
-        mode,
-        read: read ?? this.defaultRead,
-        write: placement.write ?? this.defaultWrite,
-        index,
-        vfsRef,
-        indexConfig: placement.index ?? this.indexConfig,
-        ids: this.ids,
-      },
-      this.mountList,
-      this.clock,
-    )
-    this.attachManager(m)
-    this.mountList.push(m)
-    this.mountList.sort((a, b) => b.prefix.length - a.prefix.length)
-    this.rowCache = null
-    if (norm === '/') this.rootRef = m
-    return m
+    const alias = this.mountList.some((existing) => existing.vfs === vfs)
+    if (this.clocksBound) vfs.accessor.bindClock?.(this.clock, this)
+    try {
+      const index = this.indexFor(vfs, placement.index, this.mountList)
+      const vfsRef = placement.vfsRef ?? null
+      const m = MountRegistry.place(
+        {
+          prefix: norm,
+          vfs,
+          mode,
+          read: read ?? this.defaultRead,
+          write: placement.write ?? this.defaultWrite,
+          index,
+          vfsRef,
+          indexConfig: placement.index ?? this.indexConfig,
+          ids: this.ids,
+        },
+        this.mountList,
+      )
+      this.attachManager(m)
+      this.mountList.push(m)
+      this.mountList.sort((a, b) => b.prefix.length - a.prefix.length)
+      this.rowCache = null
+      if (norm === '/') this.rootRef = m
+      return m
+    } catch (err) {
+      if (this.clocksBound && !alias) vfs.accessor.releaseClock?.(this)
+      throw err
+    }
+  }
+
+  /**
+   * Hand every mount's accessor the workspace clock, once the workspace is
+   * built; a mount placed later takes it as it is placed. Mirrors Python's
+   * `MountRegistry.bind_clocks`.
+   *
+   * @throws Error when another workspace holds one of the VFSes on another
+   *   clock; nothing stays bound.
+   */
+  bindClocks(): void {
+    try {
+      for (const m of this.mountList) m.vfs.accessor.bindClock?.(this.clock, this)
+    } catch (err) {
+      this.releaseClocks()
+      throw err
+    }
+    this.clocksBound = true
+  }
+
+  /**
+   * Let go of the workspace clock on every mount and CLI install, as the
+   * workspace closes or fails to come to be, so another workspace may mount
+   * its VFSes on its own. Mirrors Python's `MountRegistry.release_clocks`.
+   */
+  releaseClocks(): void {
+    this.clocksBound = false
+    for (const m of this.mountList) m.vfs.accessor.releaseClock?.(this)
+    this.clis.releaseClocks()
   }
 
   /**
@@ -517,6 +552,9 @@ export class MountRegistry {
     this.rowCache = null
     if (removed === undefined) {
       throw new Error(`no mount at prefix: ${norm}`)
+    }
+    if (!this.mountList.some((m) => m.vfs === removed.vfs)) {
+      removed.vfs.accessor.releaseClock?.(this)
     }
     if (removed === this.rootRef) this.rootRef = null
     return removed

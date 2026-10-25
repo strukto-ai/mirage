@@ -14,8 +14,7 @@
 
 from typing import TYPE_CHECKING
 
-from mirage.accessor.base import Accessor
-from mirage.utils.clock import Clock
+from mirage.accessor.base import TokenAccessor
 
 if TYPE_CHECKING:
     from mirage.core.dropbox.client import DropboxTokenManager
@@ -37,22 +36,12 @@ def normalize_dropbox_root_path(value: str | None) -> str:
     return "/" + "/".join(parts) if parts else ""
 
 
-class DropboxAccessor(Accessor):
+class DropboxAccessor(TokenAccessor):
+    token_manager: "DropboxTokenManager"
+
     def __init__(
         self, config: "DropboxConfig", token_manager: "DropboxTokenManager"
     ) -> None:
         self.config = config
         self.token_manager = token_manager
         self.root_path = normalize_dropbox_root_path(config.root_path)
-
-    async def close(self) -> None:
-        """Drain the token manager's connection pool. Idempotent."""
-        await self.token_manager.close()
-
-    def bind_clock(self, clock: Clock) -> None:
-        """Read token expiry on the workspace's clock.
-
-        Args:
-            clock (Clock): the workspace's clock.
-        """
-        self.token_manager.bind_clock(clock)
