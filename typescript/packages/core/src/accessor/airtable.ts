@@ -44,8 +44,18 @@ export class AirtableAccessor extends Accessor {
     this.fetchFn = options.fetchFn
   }
 
-  /** Pace each base's calls on the workspace's clock. */
-  override bindClock(clock: Clock): void {
-    this.limiter.bindClock(clock)
+  /**
+   * Pace each base's calls on the workspace's clock.
+   *
+   * @param owner who holds it, released by the same key.
+   * @throws Error when a workspace on another clock mounts it.
+   */
+  override bindClock(clock: Clock, owner: unknown): void {
+    this.limiter.bindClock(clock, owner)
+  }
+
+  /** Let `owner` go. */
+  override releaseClock(owner: unknown): void {
+    this.limiter.releaseClock(owner)
   }
 }

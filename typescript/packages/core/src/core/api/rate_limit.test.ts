@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { ManualClock } from '../../utils/clock.ts'
+import { ManualClock, SystemClock } from '../../utils/clock.ts'
 import { RateLimiter } from './rate_limit.ts'
 
 class Clock {
@@ -106,7 +106,7 @@ describe('RateLimiter', () => {
   it('paces and waits on a bound clock', async () => {
     const limiter = new RateLimiter(5)
     const clock = new ManualClock()
-    limiter.bindClock(clock)
+    limiter.bindClock(clock, 'ws')
     await limiter.acquire('appA')
     await limiter.acquire('appA')
     expect(clock.monotonic()).toBeCloseTo(0.2)
@@ -116,7 +116,7 @@ describe('RateLimiter', () => {
     const clock = new Clock()
     const l = limiter(5, clock)
     await l.acquire('appA')
-    l.bindClock(clock)
+    l.bindClock(clock, 'ws')
     await l.acquire('appA')
     expect(clock.waits).toEqual([expect.closeTo(0.2)])
   })
@@ -129,7 +129,7 @@ describe('RateLimiter', () => {
     await Promise.resolve()
     const later = new Clock()
     later.wall = 200
-    l.bindClock(later)
+    l.bindClock(later, 'ws')
     await waiting
     expect(clock.waits).toEqual([expect.closeTo(0.2)])
   })
@@ -142,7 +142,7 @@ describe('RateLimiter', () => {
     await Promise.resolve()
     const later = new Clock()
     later.wall = 200
-    l.bindClock(later)
+    l.bindClock(later, 'ws')
     await l.acquire('appA')
     await waiting
     await l.acquire('appA')
@@ -155,12 +155,32 @@ describe('RateLimiter', () => {
     await l.acquire('appA')
     const stale = l.acquire('appA')
     await Promise.resolve()
-    l.bindClock(new Clock())
-    l.bindClock(clock)
+    l.bindClock(new Clock(), 'ws')
+    l.bindClock(clock, 'ws')
     clock.wall = 101
     await l.acquire('appA')
     const fresh = l.acquire('appA')
     await Promise.all([stale, fresh])
     expect(clock.waits).toEqual([expect.closeTo(0.2), expect.closeTo(0.2)])
+  })
+
+  it('refuses another clock while held, until its owner lets go', () => {
+    const l = new RateLimiter(5)
+    const second = new ManualClock()
+    l.bindClock(new ManualClock(), 'a')
+    expect(() => {
+      l.bindClock(second, 'b')
+    }).toThrow(/another clock/)
+    l.releaseClock('a')
+    l.bindClock(second, 'b')
+  })
+
+  it('lets two system clocks agree while held', () => {
+    const l = new RateLimiter(5)
+    l.bindClock(new SystemClock(), 'a')
+    l.bindClock(new SystemClock(), 'b')
+    expect(() => {
+      l.bindClock(new ManualClock(), 'c')
+    }).toThrow()
   })
 })
