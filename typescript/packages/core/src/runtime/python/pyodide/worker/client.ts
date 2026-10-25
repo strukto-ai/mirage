@@ -206,7 +206,9 @@ export class PyodideWorkerClient {
     // The run's caller, which each call the guest makes runs as.
     const caller = currentCaller()
     const responses = new Set<Promise<void>>()
-    const processes = new GuestProcessTable(ctx, files)
+    // A child's program is found through the guest's view, so none starts
+    // once the run is cancelled.
+    const processes = new GuestProcessTable(ctx, live)
     // The core handles the guest's streams hold open.
     const handles = new Set<number>()
     const cap = request.config.maxMemory ?? null

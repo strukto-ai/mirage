@@ -316,6 +316,47 @@ describe('Pyodide concurrency', { timeout: 120_000 }, () => {
       await rt.close()
     }
   })
+
+  it('starts no child once the flush before it revokes the run', async () => {
+    const rt = new PyodideRuntime()
+    const controller = new AbortController()
+    const calls: string[] = []
+    const missing = (): Promise<never> =>
+      Promise.reject(Object.assign(new Error('missing'), { code: 'ENOENT' }))
+    let made = false
+    bindOver(
+      rt,
+      (op, path, _bytes, _dst, attrs) => {
+        if (attrs?.retained !== undefined) return Promise.resolve(attrs.retained)
+        calls.push(`${op} ${path}`)
+        if (op === 'create') made = true
+        if (op === 'pwrite') controller.abort()
+        if (op === 'readdir' || (op === 'stat' && !made)) return missing()
+        if (op === 'stat')
+          return Promise.resolve(new FileStat({ name: path, type: FileType.FILE, size: 0 }))
+        return Promise.resolve(undefined)
+      },
+      new PrefixResolver(() => ['/data/']),
+    )
+    try {
+      await interpret(
+        rt,
+        {
+          code: [
+            'import os, subprocess',
+            "fd = os.open('/data/out', os.O_WRONLY | os.O_CREAT)",
+            "os.write(fd, b'kept')",
+            "subprocess.run(['/data/tool'])",
+          ].join('\n'),
+        },
+        { signal: controller.signal },
+      ).catch(() => undefined)
+      expect(calls).toContain('pwrite /data/out')
+      expect(calls).not.toContain('stat /data/tool')
+    } finally {
+      await rt.close()
+    }
+  })
 })
 
 describe('Python guest module', { timeout: 120_000 }, () => {
