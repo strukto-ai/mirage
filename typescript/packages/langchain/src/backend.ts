@@ -13,11 +13,15 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { ensureParents } from '@struktoai/mirage-core/workspace/tools/tool_operations'
+import { TRUNCATION_NOTICE } from '@struktoai/mirage-core/commands/builtin/utils/limit'
 import type { Workspace } from '@struktoai/mirage-node'
 import type { ExecuteResult } from '@struktoai/mirage-core/workspace/workspace/types'
 import type { Files } from '@struktoai/mirage-core/workspace/files'
 import { Session } from '@struktoai/mirage-core/workspace/workspace/workspace'
+import picomatch from 'picomatch'
+import { normalizeReadPagination } from 'deepagents'
 import type {
+  DeleteResult,
   EditResult,
   ExecuteResponse,
   FileData,
@@ -33,7 +37,7 @@ import type {
   WriteResult,
 } from 'deepagents'
 import { ioToExecuteResponse, ioToFileInfos, ioToGrepMatches } from './convert.ts'
-import { decode, replaceText } from '@struktoai/mirage-core/workspace/tools/io_text'
+import { decode, replaceText, withRefusal } from '@struktoai/mirage-core/workspace/tools/io_text'
 
 const TEXT_EXTENSIONS = new Set([
   'txt',
@@ -78,6 +82,21 @@ const TEXT_EXTENSIONS = new Set([
 function shellQuote(s: string): string {
   if (/^[A-Za-z0-9_./-]+$/.test(s)) return s
   return `'${s.replaceAll(`'`, `'\\''`)}'`
+}
+
+function commandError(io: ExecuteResult): string | undefined {
+  if (io.exitCode === 0) return undefined
+  const stderr = withRefusal(io.stderrText.trim(), io.refusal).trim()
+  return stderr || `Command failed with exit code ${String(io.exitCode)}`
+}
+
+function capped(io: ExecuteResult): boolean {
+  return io.stderrText.includes(TRUNCATION_NOTICE)
+}
+
+function relativeTo(root: string, path: string): string {
+  const prefix = `${root.replace(/\/+$/, '')}/`
+  return path.startsWith(prefix) ? path.slice(prefix.length) : (path.split('/').pop() ?? path)
 }
 
 function extOf(path: string): string {
@@ -185,15 +204,26 @@ export class LangchainWorkspace implements SandboxBackendProtocol {
         error: `Binary file '${filePath}' (${mimeType}, ${String(bytes.length)} bytes). Use shell commands (head, file, wc, od) via execute() to inspect.`,
       }
     }
+    const window = normalizeReadPagination(offset, limit)
     const text = new TextDecoder('utf-8').decode(bytes)
     const lines = text.split('\n')
-    if (offset >= lines.length) {
+    const totalLines = lines[lines.length - 1] === '' ? lines.length - 1 : lines.length
+    if (window.offset > 0 && window.offset >= totalLines) {
       return {
-        error: `Line offset ${String(offset)} exceeds file length (${String(lines.length)} lines)`,
+        error: `Line offset ${String(window.offset)} exceeds file length (${String(totalLines)} lines)`,
       }
     }
-    const end = Math.min(offset + limit, lines.length)
-    return { content: lines.slice(offset, end).join('\n'), mimeType }
+    const content = lines.slice(window.offset, window.offset + window.limit).join('\n')
+    const end = Math.min(window.offset + window.limit, totalLines)
+    if (end <= window.offset) return { content, mimeType }
+    return {
+      content,
+      mimeType,
+      totalLines,
+      startLine: window.offset + 1,
+      endLine: end,
+      ...(end < totalLines ? { nextOffset: end } : {}),
+    }
   }
 
   async readRaw(filePath: string): Promise<ReadRawResult> {
@@ -273,15 +303,32 @@ export class LangchainWorkspace implements SandboxBackendProtocol {
     const io = await this.exec(parts.join(' '))
     const matches = ioToGrepMatches(io)
     if (maxCount === undefined || maxCount === null || matches.length <= maxCount) {
-      return { matches }
+      return capped(io) ? { matches, truncated: true } : { matches }
     }
     return { matches: matches.slice(0, maxCount), truncated: true }
   }
 
+  /**
+   * The files under `path` that `pattern` matches, as Deep Agents' own
+   * backends match them: against the path relative to `path`, dotfiles
+   * included, regular files only. A listing the workspace's output cap cut
+   * short is reported truncated.
+   */
   async glob(pattern: string, path = '/'): Promise<GlobResult> {
-    const name = pattern.includes('/') ? (pattern.split('/').pop() ?? pattern) : pattern
-    const io = await this.exec(`find ${shellQuote(path)} -name ${shellQuote(name)}`)
-    return { files: ioToFileInfos(io) }
+    const matches = picomatch(pattern, { dot: true })
+    const io = await this.exec(`find ${shellQuote(path)} -type f`)
+    const error = commandError(io)
+    if (error !== undefined) return { error }
+    const files = ioToFileInfos(io).filter((info) => matches(relativeTo(path, info.path)))
+    return capped(io) ? { files, truncated: true } : { files }
+  }
+
+  /** Remove a file, or a directory with everything under it. */
+  async delete(filePath: string): Promise<DeleteResult> {
+    const io = await this.exec(`rm -r -- ${shellQuote(filePath)}`)
+    const error = commandError(io)
+    if (error !== undefined) return { error }
+    return { path: filePath }
   }
 
   async uploadFiles(
