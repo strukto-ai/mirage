@@ -388,15 +388,20 @@ async function supervise(
       })
     })
   }
-  // What the stopped run still does as it ends (a guest landing what it
-  // wrote) is done before timeout answers, as Python joins the cancelled
-  // run; one that will not end is let go after a stop's grace.
-  const stopped = async (): Promise<void> => {
+  // What the stopped run printed up to the stop is its output. What it
+  // still does as it ends (a guest landing what it wrote) is done before
+  // timeout answers, as Python joins the cancelled run, but what it prints
+  // then is lost: a JS run goes on past its abort, where a cancelled Python
+  // task stops at its next await. One that will not end is let go after a
+  // stop's grace.
+  const stop = async (said: readonly string[], exitCode: number): Promise<Result> => {
+    const out = await ended(sink, held, said, exitCode)
     try {
       await joinOrAbort(run, abort.signal, STOP_WAIT_SECONDS * 1000)
     } catch (err) {
       console.debug(`timeout: the stopped run ended: ${String(err)}`)
     }
+    return out
   }
   try {
     const result =
@@ -425,23 +430,20 @@ async function supervise(
       }
       await kill.at
       say(SIGKILL)
-      await stopped()
-      return await ended(sink, held, said, 137)
+      return await stop(said, 137)
     }
     if (carriesOn) {
       const late = kill.at === null ? await run : await Promise.race([run, kill.at])
       if (late === TIMED_OUT) {
         say(SIGKILL)
-        await stopped()
-        return await ended(sink, held, said, 137)
+        return await stop(said, 137)
       }
       return await ended(sink, held, said, how.preserve ? late.exitCode : 124, true)
     }
-    await stopped()
     if (SELF_KILLING_SIGNALS.has(signal) && (!foreground || signal === SIGKILL)) {
-      return await ended(sink, held, said, 128 + signal)
+      return await stop(said, 128 + signal)
     }
-    return await ended(sink, held, said, how.preserve ? 128 + signal : 124)
+    return await stop(said, how.preserve ? 128 + signal : 124)
   } finally {
     kill.cancel()
   }
