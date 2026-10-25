@@ -18,6 +18,7 @@
 import type { util } from 'zod'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
+import type { FlagValue } from '../../spec/types.ts'
 import { IOResult } from '../../../io/types.ts'
 import type { PathSpec, StatFn } from '../../../types.ts'
 import type { CommandFnResult, Context } from '../../config.ts'
@@ -41,6 +42,25 @@ export interface ZipDeps {
   walk: WalkFn
 }
 
+interface ZipFlags {
+  readonly recursive: boolean
+  readonly junkPaths: boolean
+  readonly quiet: boolean
+  readonly storeLinks: boolean
+  readonly exclude: readonly string[]
+}
+
+function parseFlags(bag: Record<string, FlagValue>): ZipFlags {
+  const fl = new FlagView(bag, specOf('zip'))
+  return {
+    recursive: fl.asBool('r'),
+    junkPaths: fl.asBool('j'),
+    quiet: fl.asBool('q'),
+    storeLinks: fl.asBool('y'),
+    exclude: fl.asList('x'),
+  }
+}
+
 /**
  * Walk the operands and hand what they hold to mirage-rs's zip, which names
  * each member, refuses a name two paths share, deflates them and writes the
@@ -54,7 +74,7 @@ export async function zipGeneric(
   ctx: Context,
   deps: ZipDeps,
 ): Promise<CommandFnResult> {
-  const fl = new FlagView(ctx.flags, specOf('zip'))
+  const flags = parseFlags(ctx.flags)
   const archive = paths[0]
   if (archive === undefined) {
     const stderr = new TextEncoder().encode('zip: usage: zip archive.zip file1 [file2 ...]\n')
@@ -78,8 +98,8 @@ export async function zipGeneric(
       links: linksOf(ctx) ?? null,
       // Every mount nested under an operand bounds the scan, a relayed run's too.
       mounts: mountView(ctx.vfs) ?? null,
-      dereference: !fl.asBool('y'),
-      recurse: fl.asBool('r'),
+      dereference: !flags.storeLinks,
+      recurse: flags.recursive,
     })
     for (const problem of scan.problems) {
       // Info-ZIP stores a directory it could not open and says nothing about
@@ -119,9 +139,9 @@ export async function zipGeneric(
     output: byteView(archive.virtual),
     found,
     warnings,
-    exclude: fl.asList('x').map((pattern) => byteView(pattern)),
-    junk: fl.asBool('j'),
-    quiet: fl.asBool('q'),
+    exclude: flags.exclude.map((pattern) => byteView(pattern)),
+    junk: flags.junkPaths,
+    quiet: flags.quiet,
   }
   const host = new StreamHost(reads, deps.stream, ctx, false)
   const io = new IOResult()

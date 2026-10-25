@@ -245,7 +245,8 @@ async fn original(spool: &mut Spool<'_>) -> Option<Original> {
             return None;
         }
         records.push(Record {
-            name: entry.name.clone(),
+            // Matched as stored: two names read alike as text stay two.
+            name: record[46..46 + name_len].to_vec(),
             head: Vec::new(),
             spool: ARCHIVE,
             skip: entry.local,

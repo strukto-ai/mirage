@@ -52,6 +52,27 @@ const LETTERS: Record<string, string> = {
   n: 'n',
 }
 
+// The flags unzip reads, parsed once. Mirrors unzip.py's UnzipFlags.
+interface UnzipFlags {
+  readonly letters: Readonly<Record<string, boolean>>
+  readonly dest: PathSpec | null
+  readonly typed: boolean
+  readonly excludes: readonly string[]
+}
+
+function parseFlags(fl: FlagView): UnzipFlags {
+  return {
+    letters: Object.freeze(
+      Object.fromEntries(
+        Object.entries(LETTERS).map(([letter, flag]) => [letter, fl.asBool(flag)]),
+      ),
+    ),
+    dest: fl.asPath('d') ?? null,
+    typed: fl.raw('d') !== undefined,
+    excludes: fl.asList('x'),
+  }
+}
+
 /**
  * The member patterns and the -x patterns, as Info-ZIP reads them: -x takes
  * every operand typed after it, up to a -d, so the operands are placed by
@@ -99,8 +120,8 @@ export function unzipGeneric(
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
 ): CommandFnResult {
   const fl = new FlagView(ctx.flags, specOf('unzip'))
-  const letters: Record<string, boolean> = {}
-  for (const [letter, flag] of Object.entries(LETTERS)) letters[letter] = fl.asBool(flag)
+  const flags = parseFlags(fl)
+  const { letters, dest } = flags
   const archive = paths[0]
   if (archive === undefined) {
     // Info-ZIP answers -v without an archive with its version banner, and
@@ -114,17 +135,16 @@ export function unzipGeneric(
         throw new UsageError(`unzip: -${letter} is a ZipInfo option and needs -Z`, USAGE_EXIT)
     }
   }
-  const [chosen, excludes] = patterns(fl, members, fl.asList('x'))
-  const dest = fl.asPath('d')
+  const [chosen, excludes] = patterns(fl, members, flags.excludes)
   const config: Record<string, util.JSONType> = {
     archive: byteView(archive.rawPath),
     shown: byteView(archive.virtual),
     members: chosen.map((member) => byteView(member)),
     excludes: excludes.map((pattern) => byteView(pattern)),
-    base: byteView(rstripSlash(extractDest(dest ?? null, ctx.cwd.virtual))),
+    base: byteView(rstripSlash(extractDest(dest, ctx.cwd.virtual))),
     ...letters,
   }
-  if (fl.raw('d') !== undefined) config.dest = byteView(dest?.rawPath ?? '')
+  if (flags.typed) config.dest = byteView(dest?.rawPath ?? '')
   const host = new StreamHost([archive], stream, ctx, false)
   const io = new IOResult()
   return [hostedStream('unzip', config, host, io, ctx.signal), io]

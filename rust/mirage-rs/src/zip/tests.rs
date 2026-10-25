@@ -258,6 +258,19 @@ fn an_update_replaces_every_record_of_its_name() {
     assert_eq!(out, "new\nnew\n");
 }
 
+/// Clear every header's UTF-8 flag, as an archiver that never sets it.
+fn unflag(host: &mut Host, archive: &str) {
+    let archive = host.files.get_mut(archive).expect("written");
+    for at in 0..archive.len() - 4 {
+        let flags = match archive[at..at + 4] {
+            [0x50, 0x4b, 3, 4] => at + 6,
+            [0x50, 0x4b, 1, 2] => at + 8,
+            _ => continue,
+        };
+        archive[flags + 1] &= !0x08;
+    }
+}
+
 #[test]
 fn an_unflagged_name_reads_as_code_page_437_unless_it_is_utf8() {
     let mut host = Host::with(&[("x", "x")], "");
@@ -267,21 +280,22 @@ fn an_unflagged_name_reads_as_code_page_437_unless_it_is_utf8() {
         "n.zip",
         json!([read("caf\u{82}.txt"), read("\u{c3}\u{a9}.txt")]),
     );
-    let archive = host.files.get_mut("n.zip").expect("written");
-    for at in 0..archive.len() - 4 {
-        let head = u32::from_le_bytes([
-            archive[at],
-            archive[at + 1],
-            archive[at + 2],
-            archive[at + 3],
-        ]);
-        let flags = match head {
-            0x0403_4b50 => at + 6,
-            0x0201_4b50 => at + 8,
-            _ => continue,
-        };
-        archive[flags + 1] &= !0x08;
-    }
+    unflag(&mut host, "n.zip");
     let (_, names, _) = unzip(&mut host, "n.zip", json!({"Z": true, "1": true}));
     assert_eq!(names, "café.txt\né.txt\n");
+}
+
+#[test]
+fn an_update_matches_names_as_stored() {
+    let mut host = Host::with(&[("x", "old\n"), ("y", "cp437\n")], "");
+    let read =
+        |spelled, path| json!({"spelled": spelled, "kind": "file", "path": path, "operand": 2});
+    let found = json!([read("\u{c3}\u{a9}.txt", "x"), read("\u{82}.txt", "y")]);
+    zip(&mut host, "u.zip", found);
+    unflag(&mut host, "u.zip");
+    host.files.insert("x".into(), b"new\n".to_vec());
+    let (_, out, _) = zip(&mut host, "u.zip", json!([read("\u{c3}\u{a9}.txt", "x")]));
+    assert_eq!(out, "updating: \u{e9}.txt\n");
+    let (_, out, _) = unzip(&mut host, "u.zip", json!({"p": true}));
+    assert_eq!(out, "new\ncp437\n");
 }

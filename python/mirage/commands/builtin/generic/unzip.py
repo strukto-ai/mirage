@@ -3,6 +3,7 @@
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+from types import MappingProxyType
 
 from mirage.commands.builtin.generic.archive.extract import extract_dest
 from mirage.commands.builtin.utils.stream_host import (
@@ -46,7 +47,7 @@ LETTERS = {
 
 @dataclass(frozen=True, slots=True)
 class UnzipFlags:
-    letters: dict[str, bool]
+    letters: Mapping[str, bool]
     dest: PathSpec | str | None = None
     excludes: tuple[str, ...] = ()
 
@@ -55,7 +56,9 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> UnzipFlags:
     fl = FlagView(flags, spec=SPECS["unzip"])
     dest = fl.raw("d")
     return UnzipFlags(
-        letters={key: fl.as_bool(dest) for key, dest in LETTERS.items()},
+        letters=MappingProxyType(
+            {key: fl.as_bool(flag) for key, flag in LETTERS.items()}
+        ),
         dest=dest if isinstance(dest, (PathSpec, str)) else None,
         excludes=tuple(fl.as_list("x")),
     )
