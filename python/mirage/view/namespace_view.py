@@ -18,7 +18,11 @@ from typing import Any
 from mirage.context import get_admission, session_visibility
 from mirage.errors.fs import eloop
 from mirage.types import FileStat, FileType, PathSpec, Visibility
-from mirage.utils.hidden import hidden_under, leads_hidden, path_visible
+from mirage.utils.hidden import (
+    hidden_under,
+    path_visible,
+    visible_links,
+)
 from mirage.utils.path import CycleError, norm_dir
 from mirage.view.types import LinkView, NamespaceLinks
 
@@ -111,14 +115,14 @@ def _link_names(
         return []
     targets = links.symlink_targets()
     below = norm_dir(parent)
+    candidates = [path for path in targets if path.startswith(below)]
+    shown = visible_links(vis, candidates, targets)
     return visible_child_segments(
         vis,
         [
-            p
-            for p in targets
-            if p.startswith(below)
-            and path_visible(vis, p)
-            and not leads_hidden(vis, p, targets)
+            path
+            for path, visible in zip(candidates, shown, strict=True)
+            if visible
         ],
         parent,
     )

@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.policy.constants import WILDCARD
 from mirage.policy.match.pattern import (
     pattern_matches,
     pattern_reaches,
@@ -24,7 +23,7 @@ def test_split_pattern_drops_trailing_wildcards_only():
     assert split_pattern("git push") == ("git", "push")
     assert split_pattern("git *") == ("git",)
     assert split_pattern("git * *") == ("git",)
-    assert split_pattern("git * --hard") == ("git", WILDCARD, "--hard")
+    assert split_pattern("git * --hard") == ("git", "*", "--hard")
     assert split_pattern("  rm  ") == ("rm",)
     assert split_pattern("*") == ()
 

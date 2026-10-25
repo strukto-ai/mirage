@@ -12,8 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { CommandContext, AdmissionRules } from '../types.ts'
-import { patternMatches, patternReaches } from './pattern.ts'
+import { admissionMatcher, units } from '../../rs/policy.ts'
+import type { AdmissionRules, CommandContext } from '../types.ts'
 
 /**
  * Whether a session's allow list has a pattern for a command name. A
@@ -23,18 +23,15 @@ import { patternMatches, patternReaches } from './pattern.ts'
  * `head_allowed`.
  */
 export function headAllowed(name: string, rules: AdmissionRules | null): boolean {
-  if (rules?.allow == null) return true
-  return rules.allow.some((p) => patternReaches(p, [name]))
+  return admissionMatcher(rules).ask('head_allowed', { name: units(name) }) === true
 }
-
 /**
  * The tokens a pattern reads: the entry point's normalization when it set one,
  * else the name and the raw argv (a context built by hand).
  */
 export function lineTokens(ctx: CommandContext): readonly string[] {
-  return ctx.tokens !== undefined && ctx.tokens.length > 0 ? ctx.tokens : [ctx.command, ...ctx.argv]
+  return (ctx.tokens?.length ?? 0) > 0 ? (ctx.tokens ?? []) : [ctx.command, ...ctx.argv]
 }
-
 /**
  * Whether the profile's allow list has a pattern for the whole line. A
  * word that is not a tool (`ctx.tool` cleared by the entry point: the agent's
@@ -42,8 +39,10 @@ export function lineTokens(ctx: CommandContext): readonly string[] {
  * is the only thing that can refuse it.
  */
 export function lineAllowed(ctx: CommandContext, rules: AdmissionRules | null): boolean {
-  if (ctx.tool === false) return true
-  if (rules?.allow == null) return true
-  const tokens = lineTokens(ctx)
-  return rules.allow.some((p) => patternMatches(p, tokens))
+  return (
+    admissionMatcher(rules).ask('line_allowed', {
+      tokens: lineTokens(ctx).map(units),
+      tool: ctx.tool ?? true,
+    }) === true
+  )
 }

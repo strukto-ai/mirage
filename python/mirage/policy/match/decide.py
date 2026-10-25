@@ -12,48 +12,16 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from dataclasses import replace
 
-from mirage.policy.constants import VERB_ORDER
-from mirage.policy.match.allow import line_allowed
-from mirage.policy.match.rule import (
-    matched_operand,
-    rule_applies,
-    rule_at,
-    rule_reach,
-    rule_scope,
-    subjects,
-    written,
-)
+from mirage.policy.match.rule import command_facts
 from mirage.policy.types import (
     AdmissionRules,
     CommandContext,
     CommandRule,
-    LiveRules,
     Outcome,
     Ruling,
 )
-
-
-def outranks(current: tuple[int, int], verb: int, depth: int) -> bool:
-    """Whether one subject's decision outranks the line's best so far:
-    the stronger verb first, then the deeper anchor.
-
-    The mirror image of :func:`better_match`, and deliberately so. Two
-    rules about *one* subject are a question of specificity, so depth
-    leads there. Two subjects of one line are a question of severity:
-    every path a line names has to survive it, so a deny anywhere
-    refuses the line however deeply another path was carved out.
-
-    Args:
-        current (tuple[int, int]): the chosen (verb, depth) so far.
-        verb (int): the candidate subject's verb.
-        depth (int): the candidate subject's anchor depth.
-    """
-    best_verb, best_depth = current
-    if verb != best_verb:
-        return verb < best_verb
-    return depth > best_depth
+from mirage.rs.policy import admission_matcher, from_units
 
 
 def decide(ctx: CommandContext, rules: AdmissionRules | None) -> Ruling:
@@ -64,7 +32,7 @@ def decide(ctx: CommandContext, rules: AdmissionRules | None) -> Ruling:
     wherever it was written: it is off the path axis entirely, so one
     in a mount section scores 0 exactly as a top-level one does.
     Writing it under ``mounts./repo`` scopes it to lines working inside
-    that mount (``rule_applies`` reads ``rule.mount``); it does not
+    that mount (the rule reads ``rule.mount``); it does not
     make it more specific than a rule about the whole session. That is
     what keeps "denied generally, asked inside one mount" inexpressible
     for a pathless rule, which in practice means an account CLI: such a
@@ -77,8 +45,8 @@ def decide(ctx: CommandContext, rules: AdmissionRules | None) -> Ruling:
     operand cannot lend it specificity. The allow list is asked first,
     since a line no list covers never reaches a rule.
 
-    All of which is settled *per subject*, and only then across them
-    (:func:`outranks`), because a line names more than one path and a
+    All of which is settled *per subject*, and only then across them,
+    because a line names more than one path and a
     carve-out written for one of them must not answer for the rest:
     with ``deny cp /protected/*`` and a deeper ``ask cp /review/deep/*``,
     ``cp /protected/secret /review/deep/out`` is the source's deny, and
@@ -105,38 +73,21 @@ def decide(ctx: CommandContext, rules: AdmissionRules | None) -> Ruling:
     """
     if rules is None:
         return Ruling(Outcome.ALLOW)
-    if not line_allowed(ctx, rules):
-        return Ruling(Outcome.DENY, source="commands.allow")
-    live: LiveRules = [
-        (outcome, rule)
-        for outcome, rule in written(rules)
-        if rule_applies(rule, ctx)
-    ]
-    best: tuple[int, int] | None = None
-    chosen = Ruling(Outcome.ALLOW)
-    asked: list[CommandRule] = []
-    for subject in subjects(ctx):
-        spoke = rule_at(
-            live, lambda rule: rule_reach(rule, rule_scope(rule), subject)
-        )
-        if spoke is None:
-            continue
-        outcome, rule, depth = spoke
-        if outcome is Outcome.ASK and rule not in asked:
-            asked.append(rule)
-        verb = VERB_ORDER[outcome]
-        if best is not None and not outranks(best, verb, depth):
-            continue
-        best = (verb, depth)
-        chosen = Ruling(
-            outcome=outcome,
-            rule=rule,
-            matched_path=matched_operand(rule, subject),
-            source=source_of(rule),
-        )
-    if chosen.outcome is not Outcome.ASK:
-        return chosen
-    return replace(chosen, asks=tuple(asked))
+    result = admission_matcher(rules).ask("decide", facts=command_facts(ctx))
+    listed = (*rules.deny, *rules.ask)
+    rule = None if result["rule"] is None else listed[result["rule"]]
+    matched = result["matched_path"]
+    return Ruling(
+        outcome=Outcome(result["outcome"]),
+        rule=rule,
+        matched_path=None if matched is None else from_units(matched),
+        source="commands.allow"
+        if result["allow_list"]
+        else source_of(rule)
+        if rule is not None
+        else "",
+        asks=tuple(listed[index] for index in result["asks"]),
+    )
 
 
 def source_of(rule: CommandRule) -> str:

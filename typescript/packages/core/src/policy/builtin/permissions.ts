@@ -93,7 +93,7 @@ export class PermissionsPolicy implements Policy, SessionScoped {
   /**
    * Whether this session's rules speak at `method`: always at command
    * admission, and at the dispatcher only through a pure path rule, the one kind
-   * an op can meet (`opReach`).
+   * an op can meet (`opRuling`).
    */
   wantsFor(method: PolicyMethod, sessionId: string): Promise<boolean> {
     if (method !== 'preVfs') return Promise.resolve(true)

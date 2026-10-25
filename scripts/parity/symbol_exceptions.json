@@ -965,6 +965,23 @@
     "on_loop": "A hosted Python workspace runs on its runner's own event loop thread while the server's transports live on the server's, so work hops between the two; a JavaScript process has one event loop and nothing to hop between.",
     "owned_task": "asyncio starts a task a turn of the loop later and settles it through shield's callbacks, so owned work that never waits would still cost turns; Python 3.12 starts it eagerly. A TypeScript promise starts at once and an await that is already settled takes no turn."
    }
+  },
+  "rs/policy": {
+   "typescript_only": {
+    "byValue": "The compiled-matcher map behind admissionMatcher and visibilityMatcher, keyed by configuration; Python's functools.lru_cache holds the same entries.",
+    "cached": "Looks a matcher up by its configuration, least recently asked dropped first; Python's functools.lru_cache does the same over the frozen value.",
+    "finalizer": "Closes Wasm slots for abandoned synchronous matcher objects; Python releases native streams by reference counting."
+   }
+  },
+  "workspace/session/resolve": {
+   "typescript_only": {
+    "PathsReply": "Names the JSON reply shape a profile compile or restriction answers, which TypeScript reads typed; Python reads the same JSON as mappings.",
+    "PlanReply": "Names the JSON reply shape a profile compile or restriction answers, which TypeScript reads typed; Python reads the same JSON as mappings.",
+    "ProfileReply": "Names the JSON reply shape a profile compile or restriction answers, which TypeScript reads typed; Python reads the same JSON as mappings.",
+    "ReasonReply": "Names the JSON reply shape a profile compile or restriction answers, which TypeScript reads typed; Python reads the same JSON as mappings.",
+    "RuleReply": "Names the JSON reply shape a profile compile or restriction answers, which TypeScript reads typed; Python reads the same JSON as mappings.",
+    "RulesReply": "Names the JSON reply shape a profile compile or restriction answers, which TypeScript reads typed; Python reads the same JSON as mappings."
+   }
   }
  }
 }

@@ -113,6 +113,7 @@ from mirage.utils.hidden import (
     leads_hidden,
     move_reveals,
     path_visible,
+    visible_links,
 )
 from mirage.utils.key_prefix import mount_key, under_path
 from mirage.utils.path import (
@@ -2880,10 +2881,16 @@ class Dispatcher:
         owner = self._namespace.try_mount_for(path.virtual)
         links = self._namespace.symlink_targets()
         merged = dict(tree)
-        for virtual, row in self._namespace.link_stats_below(path.virtual):
-            if self._namespace.try_mount_for(
-                virtual
-            ) is not owner or leads_hidden(vis, virtual, links):
+        candidates = [
+            (virtual, row)
+            for virtual, row in self._namespace.link_stats_below(path.virtual)
+            if self._namespace.try_mount_for(virtual) is owner
+        ]
+        visible = visible_links(
+            vis, [virtual for virtual, _ in candidates], links
+        )
+        for (virtual, row), shown in zip(candidates, visible, strict=True):
+            if not shown:
                 continue
             rel = virtual[len(base) + 1 :]
             if rel in merged:

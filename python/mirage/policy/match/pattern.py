@@ -12,9 +12,10 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+
 from collections.abc import Sequence
 
-from mirage.policy.constants import WILDCARD
+from mirage.rs.policy import admission_matcher, from_units, units
 
 
 def split_pattern(pattern: str) -> tuple[str, ...]:
@@ -27,10 +28,12 @@ def split_pattern(pattern: str) -> tuple[str, ...]:
     Args:
         pattern (str): the pattern as written in the document.
     """
-    tokens = tuple(pattern.split())
-    while tokens and tokens[-1] == WILDCARD:
-        tokens = tokens[:-1]
-    return tokens
+    return tuple(
+        from_units(v)
+        for v in admission_matcher(None).ask(
+            "split_pattern", pattern=units(pattern)
+        )
+    )
 
 
 def pattern_matches(pattern: str, tokens: Sequence[str]) -> bool:
@@ -41,10 +44,14 @@ def pattern_matches(pattern: str, tokens: Sequence[str]) -> bool:
         tokens (Sequence[str]): the line as the entry point normalized it,
             command name first.
     """
-    want = split_pattern(pattern)
-    if len(want) > len(tokens):
-        return False
-    return all(w == WILDCARD or w == t for w, t in zip(want, tokens))
+    return (
+        admission_matcher(None).ask(
+            "pattern_matches",
+            pattern=units(pattern),
+            tokens=[units(v) for v in tokens],
+        )
+        is True
+    )
 
 
 def pattern_reaches(pattern: str, path: Sequence[str]) -> bool:
@@ -61,5 +68,11 @@ def pattern_reaches(pattern: str, path: Sequence[str]) -> bool:
         pattern (str): the pattern as written.
         path (Sequence[str]): the node's canonical words, head first.
     """
-    want = split_pattern(pattern)
-    return all(w == WILDCARD or w == t for w, t in zip(want, path))
+    return (
+        admission_matcher(None).ask(
+            "pattern_reaches",
+            pattern=units(pattern),
+            tokens=[units(v) for v in path],
+        )
+        is True
+    )

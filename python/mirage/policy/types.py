@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any, ClassVar, Literal, Protocol
@@ -555,12 +555,6 @@ class AdmissionRules:
     allow: tuple[str, ...] | None = None
     ask: tuple[CommandRule, ...] = ()
     deny: tuple[CommandRule, ...] = ()
-
-
-# The rules that apply to one line, each with the verb it carries, deny
-# before ask and in the order written. Built once per line by ``decide``
-# and read again at every subject of it.
-LiveRules = Sequence[tuple[Outcome, CommandRule]]
 
 
 @dataclass(frozen=True, slots=True)

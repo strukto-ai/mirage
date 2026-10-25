@@ -16,6 +16,8 @@ import errno
 import os
 import posixpath
 from collections.abc import Callable, Iterable, Iterator, Mapping
+from dataclasses import dataclass
+from typing import TypeAlias
 
 from mirage.utils.fnmatch import fnmatch
 
@@ -299,6 +301,30 @@ def walk_nodes(
 MAX_SYMLINK_HOPS = 40
 
 
+@dataclass(frozen=True, slots=True)
+class LinkFollow:
+    path: str
+
+
+@dataclass(frozen=True, slots=True)
+class LinkEnter:
+    path: str
+    next_is_parent: bool
+
+
+@dataclass(frozen=True, slots=True)
+class LinkLanding:
+    path: str
+
+
+@dataclass(frozen=True, slots=True)
+class LinkHopLimit:
+    pass
+
+
+LinkStep: TypeAlias = LinkFollow | LinkEnter | LinkLanding | LinkHopLimit
+
+
 class CycleError(OSError):
     """Raised when symlink resolution exceeds the maximum hop count.
 
@@ -331,6 +357,24 @@ def resolve_symlinks(path: str, links: Mapping[str, str]) -> str:
         CycleError: If resolution exceeds ``MAX_SYMLINK_HOPS`` (a loop or
             unbounded expansion), matching POSIX ELOOP.
     """
+    return _resolve_symlinks(path, links, None)
+
+
+def trace_symlinks(
+    path: str, links: Mapping[str, str]
+) -> tuple[LinkStep, ...]:
+    trace: list[LinkStep] = []
+    try:
+        _resolve_symlinks(path, links, trace)
+    except CycleError:
+        if not trace or not isinstance(trace[-1], LinkHopLimit):
+            raise
+    return tuple(trace)
+
+
+def _resolve_symlinks(
+    path: str, links: Mapping[str, str], trace: list[LinkStep] | None
+) -> str:
     pending = list(reversed(path.split("/")))
     resolved: list[str] = []
     hops = 0
@@ -345,16 +389,34 @@ def resolve_symlinks(path: str, links: Mapping[str, str]) -> str:
         candidate = "/" + "/".join([*resolved, part])
         target = links.get(candidate)
         if target is None:
+            if trace is not None and hops > 0:
+                next_part = next(
+                    (
+                        part
+                        for part in reversed(pending)
+                        if part not in ("", ".")
+                    ),
+                    None,
+                )
+                if next_part == "..":
+                    trace.append(LinkEnter(candidate, True))
             resolved.append(part)
             continue
+        if trace is not None:
+            trace.append(LinkFollow(candidate))
         hops += 1
         if hops > MAX_SYMLINK_HOPS:
+            if trace is not None:
+                trace.append(LinkHopLimit())
             raise CycleError(path)
         if target.startswith("/"):
             resolved.clear()
         pending.extend(reversed(target.split("/")))
+    landing = "/" + "/".join(resolved)
+    if trace is not None and hops > 0:
+        trace.append(LinkLanding(landing))
     suffix = "/" if resolved and path.endswith("/") else ""
-    return "/" + "/".join(resolved) + suffix
+    return landing + suffix
 
 
 def expand_tilde(word: str, home: str | None) -> str:

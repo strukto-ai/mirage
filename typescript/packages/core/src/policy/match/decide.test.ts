@@ -15,7 +15,6 @@
 import { describe, expect, it } from 'vitest'
 
 import { PathSpec } from '../../types.ts'
-import { ASK_SECOND, DENY_FIRST } from '../constants.ts'
 import {
   CommandWord,
   Outcome,
@@ -24,7 +23,7 @@ import {
   type AdmissionRules,
 } from '../types.ts'
 import { WordKind } from '../../commands/spec/types.ts'
-import { decide, outranks, sourceOf } from './decide.ts'
+import { decide, sourceOf } from './decide.ts'
 
 function path(virtual: string): PathSpec {
   return new PathSpec({
@@ -63,6 +62,15 @@ describe('decide', () => {
     // refusal with no operator reason to print.
     expect(refused.outcome).toBe(Outcome.DENY)
     expect(refused.rule).toBeNull()
+    expect(refused.source).toBe('commands.allow')
+  })
+
+  it('answers unrestricted and refused allow lists before inspecting mv arguments', () => {
+    const malformed = { ...ctx('mv', '/repo'), argv: ['--not-a-mv-option'] }
+    expect(decide(malformed, null).outcome).toBe(Outcome.ALLOW)
+    expect(decide(malformed, { allow: null, deny: [], ask: [] }).outcome).toBe(Outcome.ALLOW)
+    const refused = decide(malformed, { allow: [], deny: [], ask: [] })
+    expect(refused.outcome).toBe(Outcome.DENY)
     expect(refused.source).toBe('commands.allow')
   })
 
@@ -130,15 +138,6 @@ describe('decide', () => {
     expect(decision.rule).toBe(inside)
     expect(decision.source).toBe('mounts./a')
     expect(sourceOf(top)).toBe('top')
-  })
-
-  it('reads the verb first in outranks where betterMatch reads depth', () => {
-    // Two subjects of one line are a question of severity, so a deny at
-    // depth 0 outranks an ask at depth 3.
-    expect(outranks([ASK_SECOND, 3], DENY_FIRST, 0)).toBe(true)
-    expect(outranks([DENY_FIRST, 0], ASK_SECOND, 3)).toBe(false)
-    expect(outranks([DENY_FIRST, 1], DENY_FIRST, 2)).toBe(true)
-    expect(outranks([DENY_FIRST, 2], DENY_FIRST, 2)).toBe(false)
   })
 
   it("reports every subject's ask, not just the winner", () => {

@@ -28,8 +28,8 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, TypeVar
 
 from mirage.errors.fs import eacces, enoent, erofs
+from mirage.rs.policy import from_units, units, visibility_matcher
 from mirage.types import (
-    MOUNT_MODE_RANK,
     MountMode,
     PathSpec,
     Refusal,
@@ -38,12 +38,8 @@ from mirage.types import (
     weaker_mode,
 )
 from mirage.utils.hidden import (
-    anchor_depth,
-    is_glob,
     leads_hidden,
     path_visible,
-    show_head,
-    shown_mode,
 )
 from mirage.utils.path import norm, parent
 from mirage.view.types import SessionAccess
@@ -944,37 +940,14 @@ def _path_mode_under(
     cap = (
         sess.mount_modes.get(prefix) if sess.mount_modes is not None else None
     )
-    best_depth = anchor_depth(prefix) if cap is not None else None
-    best_mode = cap
-    deepest = shown_mode(
-        sess.visibility.shown if sess.visibility is not None else None, virtual
-    )
-    if deepest is not None:
-        depth, mode = deepest
-        if best_depth is None or depth > best_depth:
-            best_depth, best_mode = depth, mode
-        elif depth == best_depth and best_mode is not None:
-            best_mode = weaker_mode(best_mode, mode)
-    if best_mode is None:
-        return mount_mode
-    return weaker_mode(mount_mode, best_mode)
-
-
-def _reaches_under(head: str, prefix: str) -> bool:
-    """Whether a show anchor could cover any path under a mount prefix:
-    the anchor lies at or under the prefix, or the prefix inside the
-    anchor's subtree.
-
-    Args:
-        head (str): the show entry's anchor, normalized.
-        prefix (str): the mount prefix, normalized.
-    """
-    return (
-        head == "/"
-        or prefix == "/"
-        or head == prefix
-        or head.startswith(prefix + "/")
-        or prefix.startswith(head + "/")
+    return MountMode(
+        visibility_matcher(sess.visibility).ask(
+            "effective_mode",
+            path=units(virtual),
+            prefix=units(prefix),
+            configured=mount_mode,
+            cap=cap,
+        )
     )
 
 
@@ -992,24 +965,18 @@ def strongest_under_session(
         mount_prefix (str): the mount's prefix.
         mount_mode (MountMode): the mount's configured mode.
     """
-    cap = (
-        sess.mount_modes.get(norm(mount_prefix), MountMode.EXEC)
-        if sess.mount_modes is not None
-        else MountMode.EXEC
-    )
-    best = weaker_mode(mount_mode, cap)
-    shown = sess.visibility.shown if sess.visibility is not None else None
-    if shown is None:
-        return best
     prefix = norm(mount_prefix)
-    for entry in shown.entries:
-        if entry.mode is None:
-            continue
-        if _reaches_under(show_head(entry.path), prefix):
-            reached = weaker_mode(mount_mode, entry.mode)
-            if MOUNT_MODE_RANK[reached] > MOUNT_MODE_RANK[best]:
-                best = reached
-    return best
+    cap = (
+        sess.mount_modes.get(prefix) if sess.mount_modes is not None else None
+    )
+    return MountMode(
+        visibility_matcher(sess.visibility).ask(
+            "strongest_mode",
+            prefix=units(prefix),
+            configured=mount_mode,
+            cap=cap,
+        )
+    )
 
 
 def strongest_mode_under(
@@ -1078,33 +1045,20 @@ def _readonly_below_under(
     mount_prefix: str,
     mount_mode: MountMode,
 ) -> str | None:
-    shown = (
-        sess.visibility.shown
-        if sess is not None and sess.visibility is not None
-        else None
-    )
-    if shown is None:
+    if sess is None:
         return None
-    v = "/" + virtual.strip("/")
-    for entry in shown.entries:
-        if entry.mode is None:
-            continue
-        if is_glob(entry.path):
-            if entry.mode == MountMode.READ and _reaches_under(
-                show_head(entry.path), v
-            ):
-                return virtual
-            continue
-        anchor = "/" + entry.path.strip("/")
-        below = anchor != "/" if v == "/" else anchor.startswith(v + "/")
-        if not below:
-            continue
-        if (
-            _path_mode_under(sess, anchor, mount_prefix, mount_mode)
-            == MountMode.READ
-        ):
-            return anchor
-    return None
+    prefix = norm(mount_prefix)
+    cap = (
+        sess.mount_modes.get(prefix) if sess.mount_modes is not None else None
+    )
+    result = visibility_matcher(sess.visibility).ask(
+        "readonly_below",
+        path=units(virtual),
+        prefix=units(prefix),
+        configured=mount_mode,
+        cap=cap,
+    )
+    return None if result is None else from_units(result)
 
 
 def require_paths_writable(
