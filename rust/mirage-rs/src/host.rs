@@ -91,7 +91,11 @@ impl Host {
         if let Some(spool) = request["spool"].as_u64() {
             let skip = request["skip"].as_u64().unwrap_or(0) as usize;
             let held = self.spools.get(&spool).cloned().unwrap_or_default();
-            let held = held.get(skip..).unwrap_or_default().to_vec();
+            let mut held = held.get(skip..).unwrap_or_default().to_vec();
+            if let Some(size) = request["size"].as_u64() {
+                held.truncate(size as usize);
+                return (json!({}), held);
+            }
             self.inputs.insert(fd, (held, None));
         }
         if let Some(path) = path {
@@ -147,10 +151,19 @@ impl Host {
         if path.starts_with("/denied/") {
             return failure("EACCES", "Permission denied");
         }
-        if let (Some(fd), Some(size)) = (request["spool"].as_u64(), request["size"].as_u64()) {
-            let skip = request["skip"].as_u64().unwrap_or(0) as usize;
-            let window = self.spools[&fd][skip..skip + size as usize].to_vec();
-            self.files.insert(path, window);
+        let window = match (request["spool"].as_u64(), request["size"].as_u64()) {
+            (Some(fd), Some(size)) => {
+                let skip = request["skip"].as_u64().unwrap_or(0) as usize;
+                Some(self.spools[&fd][skip..skip + size as usize].to_vec())
+            }
+            _ => None,
+        };
+        if let (Some(window), true) = (&window, request["create"] == json!(true)) {
+            self.files.insert(path, window.clone());
+            return json!({});
+        }
+        if request["whole"] == json!(true) {
+            self.files.insert(path, data);
             return json!({});
         }
         if request["atomic"] == json!(true) || request["create"] == json!(true) {
@@ -162,6 +175,7 @@ impl Host {
             self.files.insert(path.clone(), Vec::new());
         }
         let data = match request["spool"].as_u64() {
+            Some(_) if window.is_some() => window.unwrap_or_default(),
             Some(fd) => {
                 let skip = request["skip"].as_u64().unwrap_or(0) as usize;
                 let spool = self.spools.remove(&fd).unwrap_or_default();
@@ -191,6 +205,25 @@ impl Host {
                 (json!({}), Vec::new())
             }
             "write" => (self.write(&request, data), Vec::new()),
+            "stat" => {
+                let path = text(&request["path"]);
+                let kind = if self.directories.contains(&path) {
+                    json!({"kind": "dir"})
+                } else if self.files.contains_key(&path) {
+                    json!({"kind": "file"})
+                } else {
+                    json!({})
+                };
+                (kind, Vec::new())
+            }
+            "mkdir" => {
+                let path = text(&request["path"]);
+                if path.starts_with("/denied") || self.files.contains_key(&path) {
+                    return (failure("EACCES", "Permission denied"), Vec::new());
+                }
+                self.directories.push(path);
+                (json!({}), Vec::new())
+            }
             "unlink" => match self.files.remove(&text(&request["path"])) {
                 Some(_) => (json!({}), Vec::new()),
                 None => (failure("ENOENT", "No such file or directory"), Vec::new()),
@@ -274,6 +307,8 @@ impl Host {
         }
         stream.finish(&mut self.out).expect("finishes");
         stream.take_stderr(&mut self.err);
+        self.spools.clear();
+        self.inputs.clear();
         stream.status()
     }
 }

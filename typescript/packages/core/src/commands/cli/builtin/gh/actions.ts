@@ -34,7 +34,7 @@ import { GitHubApiError, type GitHubTransport } from '../../../../core/github/cl
 import type { RepoRef } from '../../../../core/github/repo.ts'
 import { viewRepo } from '../../../../core/github/repo.ts'
 import { IOResult, materialize } from '../../../../io/types.ts'
-import { readZipEntries, ZipFormatError, type ZipEntry } from '../../../builtin/generic/unzip.ts'
+import { openStream, serveRequests, type RequestHost } from '../../../../rs/stream.ts'
 import {
   camel,
   ghBool,
@@ -46,6 +46,7 @@ import {
   typedOut,
 } from './accessor.ts'
 import { concat } from '../../../../utils/bytes.ts'
+import type { util } from 'zod'
 
 const RUN_FIELDS = [
   'attempt',
@@ -205,9 +206,44 @@ function quoted(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\/-]/g, '\\$&')
 }
 
+// One entry of a run's log archive: its name, and its bytes on demand.
+interface LogEntry {
+  name: string
+  content: () => Promise<Uint8Array>
+}
+
+// A run's log archive read from memory by mirage-rs's unzip, with its exit
+// status: the names (-Z1), or entry `pick`'s bytes.
+async function unzipped(
+  archive: Uint8Array,
+  config: Record<string, util.JSONType>,
+): Promise<[number, Uint8Array]> {
+  const engine = await openStream('unzip', { archive: '', shown: '', ...config })
+  const ended = new Set<util.JSONType>()
+  const host: RequestHost = {
+    errors: { append: () => Promise.resolve() },
+    serve: (request) => {
+      if (request.op === 'fill') return Promise.resolve({ reply: { size: archive.length } })
+      if (request.op !== 'read' || ended.has(request.fd ?? null)) {
+        return Promise.resolve({ reply: { end: request.op === 'read' } })
+      }
+      ended.add(request.fd ?? null)
+      const skip = Number(request.skip ?? 0)
+      const data = archive.subarray(skip, skip + Number(request.size ?? archive.length))
+      return Promise.resolve({ reply: {}, data })
+    },
+  }
+  try {
+    const out = await materialize(serveRequests(engine, host))
+    return [engine.status(), out]
+  } finally {
+    engine.close()
+  }
+}
+
 // The archive entry gh reads for a job, or one of its steps: the first whose
 // name matches, in the archive's own order.
-function entryFor(entries: readonly ZipEntry[], pattern: RegExp): ZipEntry | undefined {
+function entryFor(entries: readonly LogEntry[], pattern: RegExp): LogEntry | undefined {
   return entries.find((entry) => pattern.test(entry.name))
 }
 
@@ -258,7 +294,7 @@ function logSegments(
   transport: GitHubTransport,
   ref: RepoRef,
   jobs: readonly Record<string, unknown>[],
-  entries: readonly ZipEntry[],
+  entries: readonly LogEntry[],
   failedOnly: boolean,
 ): LogSegment[] {
   const segments: LogSegment[] = []
@@ -270,7 +306,7 @@ function logSegments(
     const title = textValue(job.name)
     const name = quoted(logName(title))
     const steps = records(job.steps)
-    const stepFile = (step: Record<string, unknown>): ZipEntry | undefined =>
+    const stepFile = (step: Record<string, unknown>): LogEntry | undefined =>
       entryFor(entries, new RegExp(`^${name}\\/${textValue(step.number)}_.*\\.txt$`))
     if (steps.some((step) => stepFile(step) !== undefined)) {
       const ordered = [...steps].sort((a, b) => Number(a.number) - Number(b.number))
@@ -327,13 +363,13 @@ async function runLog(
     if (!(err instanceof GitHubApiError)) throw err
     throw new Error(`failed to get run log: ${err.status === 404 ? 'log not found' : err.message}`)
   }
-  let entries: ZipEntry[]
-  try {
-    entries = readZipEntries(archive).entries
-  } catch (err) {
-    if (!(err instanceof ZipFormatError)) throw err
-    throw new Error('failed to get run log: zip: not a valid zip file')
-  }
+  const [status, listing] = await unzipped(archive, { Z: true, '1': true })
+  if (status !== 0) throw new Error('failed to get run log: zip: not a valid zip file')
+  const names = new TextDecoder().decode(listing).split('\n').slice(0, -1)
+  const entries = names.map((name, pick) => ({
+    name,
+    content: async () => (await unzipped(archive, { p: true, pick }))[1],
+  }))
   const printed: Uint8Array[] = []
   for (const segment of logSegments(transport, ref, jobs, entries, failedOnly)) {
     let data: Uint8Array

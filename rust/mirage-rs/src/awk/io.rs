@@ -182,7 +182,14 @@ impl Reader {
         }
         let open = self.open.take();
         let opens = open.is_some();
-        Some((Request::Read { fd: self.fd, open }, opens))
+        Some((
+            Request::Read {
+                fd: self.fd,
+                open,
+                least: 0,
+            },
+            opens,
+        ))
     }
 
     /// Whether the host still holds the input open.

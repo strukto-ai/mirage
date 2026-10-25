@@ -25,7 +25,7 @@ import { ByteWriter } from '../../../io/writer.ts'
 import { openStream, serveRequests, type Served } from '../../../rs/stream.ts'
 import { byteView, textView } from '../../../shell/bytes.ts'
 import { shellJoin } from '../../../shell/join.ts'
-import { PathSpec } from '../../../types.ts'
+import { FileType, PathSpec, type FileStat } from '../../../types.ts'
 import type { Context } from '../../config.ts'
 import { quoteText } from '../../quote.ts'
 import { callerStream } from '../generic_bind/dispatch.ts'
@@ -162,7 +162,9 @@ export class StreamHost {
       case 'write':
         return this.write(request, data)
       case 'unlink':
-        return this.unlink(typeof request.path === 'string' ? request.path : '')
+      case 'mkdir':
+      case 'stat':
+        return this.pathOp(request.op, typeof request.path === 'string' ? request.path : '')
       case 'fill':
         if (typeof request.into === 'number') return this.fill(request.into, request)
         break
@@ -259,6 +261,13 @@ export class StreamHost {
     fd: number,
     request: Readonly<Record<string, util.JSONType>>,
   ): Promise<Served> {
+    if (typeof request.spool === 'number' && typeof request.size === 'number') {
+      // A window comes whole, and nothing stays open.
+      const held = this.spools.get(request.spool)
+      const skip = typeof request.skip === 'number' ? request.skip : 0
+      if (held === undefined || skip >= held.size) return { reply: {} }
+      return { reply: {}, data: await held.read(skip, Math.min(request.size, held.size - skip)) }
+    }
     let source = this.inputs.get(fd)
     if (source === undefined) {
       source = this.open(fd, request)
@@ -266,27 +275,37 @@ export class StreamHost {
     }
     if (source === undefined) return { reply: { end: true } }
     let next: IteratorResult<Uint8Array>
+    const parts: Uint8Array[] = []
     try {
       next = await source.next()
+      // A file read whole gathers chunks to `least` bytes a reply.
+      const least = typeof request.least === 'number' ? request.least : 0
+      for (let size = 0; next.done !== true; next = await source.next()) {
+        parts.push(next.value)
+        size += next.value.byteLength
+        if (size >= least) break
+      }
     } catch (err) {
       this.inputs.delete(fd)
       return this.failed(fd, err)
     }
-    if (next.done === true) {
+    if (parts.length === 0) {
       this.inputs.delete(fd)
       this.named.delete(fd)
       return { reply: { end: true } }
     }
-    return { reply: {}, data: next.value }
+    const [only, ...more] = parts
+    return { reply: {}, data: only !== undefined && more.length === 0 ? only : parts }
   }
 
   /**
    * Write to a file: `append` adds to it, otherwise it is emptied first,
    * every held write committed before; `atomic` replaces it whole, once
    * flushed, with what this and later writes carry, and `create` writes it
-   * whole as they carry it; `spool` writes that spool's bytes past its
-   * first `skip` and drops it, or, with `size`, writes the file whole from
-   * that many and keeps it.
+   * whole as they carry it, `whole` from this write's bytes alone; `spool`
+   * writes that spool's bytes past its first `skip` and drops it, or, with
+   * `size`, that many of them and keeps it, with `create` the file whole
+   * from them.
    */
   private async write(
     request: Readonly<Record<string, util.JSONType>>,
@@ -305,12 +324,22 @@ export class StreamHost {
         return { reply: { error: refused, line: refused } }
       }
     }
+    if (request.whole === true) {
+      try {
+        await dispatch('write', path, [data])
+      } catch (error) {
+        if (!isWalkError(error)) throw error
+        return { reply: failure(error) }
+      }
+      return { reply: {} }
+    }
     const skip = typeof request.skip === 'number' ? request.skip : 0
-    if (typeof request.spool === 'number' && typeof request.size === 'number') {
+    const size = typeof request.size === 'number' ? request.size : undefined
+    if (request.create === true && typeof request.spool === 'number' && size !== undefined) {
       // A window of a spool is the whole file, written as one call.
       const held = this.spools.get(request.spool)
       try {
-        await dispatch('write', path, [held?.stream(skip, request.size) ?? new Uint8Array()])
+        await dispatch('write', path, [held?.stream(skip, size) ?? new Uint8Array()])
       } catch (error) {
         if (!isWalkError(error)) throw error
         return { reply: failure(error) }
@@ -318,7 +347,7 @@ export class StreamHost {
       return { reply: {} }
     }
     const spool = typeof request.spool === 'number' ? this.spools.get(request.spool) : undefined
-    if (typeof request.spool === 'number') this.spools.delete(request.spool)
+    if (typeof request.spool === 'number' && size === undefined) this.spools.delete(request.spool)
     try {
       const atomic = request.atomic === true
       if (atomic || request.create === true) {
@@ -350,27 +379,30 @@ export class StreamHost {
       }
       if (writer !== undefined && data.byteLength > 0) await writer.write(data)
       if (writer !== undefined && spool !== undefined) {
-        for await (const chunk of spool.stream(skip)) await writer.write(chunk)
+        for await (const chunk of spool.stream(skip, size)) await writer.write(chunk)
       }
     } catch (error) {
       if (!isWalkError(error)) throw error
       return { reply: failure(error) }
     } finally {
-      await spool?.close()
+      if (size === undefined) await spool?.close()
     }
     return { reply: {} }
   }
 
-  private async unlink(name: string): Promise<Served> {
+  /** Unlink, make (one level) or stat a path; a stat answers what stands there, `dir` or `file`, and nothing when it fails. */
+  private async pathOp(op: 'unlink' | 'mkdir' | 'stat', name: string): Promise<Served> {
     const dispatch = dispatchOf(this.ctx)
     if (dispatch === undefined) return { reply: { fatal: 'file output requires a workspace' } }
+    let found: unknown
     try {
-      await dispatch('unlink', PathSpec.fromStrPath(textView(name), undefined, this.ctx.cwd))
+      ;[found] = await dispatch(op, PathSpec.fromStrPath(textView(name), undefined, this.ctx.cwd))
     } catch (error) {
       if (!isWalkError(error)) throw error
-      return { reply: failure(error) }
+      return { reply: op === 'stat' ? {} : failure(error) }
     }
-    return { reply: {} }
+    if (op !== 'stat' || found === null || found === undefined) return { reply: {} }
+    return { reply: { kind: (found as FileStat).type === FileType.DIRECTORY ? 'dir' : 'file' } }
   }
 
   /**
