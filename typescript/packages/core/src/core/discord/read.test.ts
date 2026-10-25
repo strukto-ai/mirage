@@ -153,9 +153,9 @@ describe('a read after its day listing', () => {
   it.each(['forget', 'fresh'])('fetches the day again after %s', async (drop) => {
     const t = history()
     const accessor = new DiscordAccessor(t)
-    if (drop === 'fresh') accessor.govern({ policy: ReadPolicy.FRESH, ttl: 600 })
+    if (drop === 'fresh') accessor.govern?.({ policy: ReadPolicy.FRESH, ttl: 600 })
     await listDay(accessor)
-    if (drop === 'forget') accessor.forget()
+    if (drop === 'forget') accessor.forget?.()
     await readChat(accessor)
     expect(fetched(t)).toHaveLength(2)
   })
