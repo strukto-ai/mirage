@@ -122,6 +122,12 @@ fn heredocs_after_a_line_are_read_in_order() {
         tree.contains("(heredoc_body=b\n) (heredoc_end=B) (heredoc_body=a\n) (heredoc_end=A)"),
         "{tree}"
     );
+    // A newline inside a substitution reads only the heredocs opened in it.
+    let tree = read("cat <<A; echo $(echo b\necho c)\na\nA");
+    assert!(
+        tree.ends_with("(heredoc_body=a\n) (heredoc_end=A))"),
+        "{tree}"
+    );
 }
 
 #[test]
@@ -227,4 +233,76 @@ fn backtracking_over_nested_input_is_bounded() {
     let nested = format!("{}a{}", "[ $(".repeat(40), ")".repeat(40));
     let tree = parse(nested.as_bytes());
     assert!(tree.error.is_some());
+}
+
+#[test]
+fn an_empty_regex_comes_before_and_and() {
+    assert_eq!(
+        read("[[ a =~ && b ]]"),
+        "(program (test_command (binary_expression left: (binary_expression left: (word=a) \
+         right: (regex=)) right: (word=b))))"
+    );
+    assert_eq!(
+        read("[[ a =~ x.&&y ]]"),
+        "(program (test_command (binary_expression left: (binary_expression left: (word=a) \
+         right: (regex=x.)) right: (word=y))))"
+    );
+    read("[[ a =~ || ]]");
+    refused("[[ a =~ || b ]]");
+    refused("[[ a =~ x&y ]]");
+}
+
+#[test]
+fn an_extglob_group_takes_blanks_quotes_and_expansions() {
+    assert_eq!(
+        read("[[ $a == @(x\ny) ]]"),
+        "(program (test_command (binary_expression left: (simple_expansion (variable_name=a)) \
+         right: (extglob_pattern=@(x\ny)))))"
+    );
+    assert_eq!(
+        read("[[ $a != \"q\"@(x $(echo y)) ]]"),
+        "(program (test_command (binary_expression left: (simple_expansion (variable_name=a)) \
+         right: (concatenation (string (string_content=q)) (extglob_pattern=@(x ) \
+         (command_substitution (command name: (command_name (word=echo)) argument: (word=y))) \
+         (extglob_pattern=))))))"
+    );
+    refused("[[ $a == x(y z) ]]");
+    refused("[[ -n @(x\ny) ]]");
+}
+
+#[test]
+fn a_process_substitution_opening_a_subshell_is_read_when_it_runs() {
+    assert_eq!(
+        read("cat <((a) b)"),
+        "(program (command name: (command_name (word=cat)) argument: (process_substitution (word=(a) b))))"
+    );
+    refused("cat <((echo a) # )\n)");
+    refused("cat <(( $(if) ))");
+}
+
+#[test]
+fn a_heredoc_pending_across_an_array_is_read_again() {
+    // The body read at the array's newline becomes the delimiter of a
+    // second read, which ends only at the end of the input...
+    assert_eq!(
+        read("cat <<EOF; x=(1\nbody\nEOF\n2)\nfi"),
+        "(program (redirected_statement body: (command name: (command_name (word=cat))) \
+         redirect: (heredoc_redirect (heredoc_start=EOF))) (variable_assignment name: (variable_name=x) \
+         value: (array (number=1) (number=2))) (heredoc_body=fi))"
+    );
+    // ...unless that body was empty.
+    assert_eq!(
+        read("cat <<EOF; x=(1\nEOF\n2)\necho a\n\necho b"),
+        "(program (redirected_statement body: (command name: (command_name (word=cat))) \
+         redirect: (heredoc_redirect (heredoc_start=EOF))) (variable_assignment name: (variable_name=x) \
+         value: (array (number=1) (number=2))) (heredoc_body=echo a\n) (heredoc_end=) \
+         (command name: (command_name (word=echo)) argument: (word=b)))"
+    );
+    // An empty delimiter ends the body at the first empty line.
+    assert_eq!(
+        read("cat <<''\n\necho x"),
+        "(program (redirected_statement body: (command name: (command_name (word=cat))) \
+         redirect: (heredoc_redirect (heredoc_start='') (heredoc_body=) (heredoc_end=))) \
+         (command name: (command_name (word=echo)) argument: (word=x)))"
+    );
 }

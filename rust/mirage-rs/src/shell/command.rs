@@ -359,7 +359,7 @@ impl Parser<'_> {
     pub(super) fn array(&mut self) -> R<Syn> {
         let mut children = vec![self.expect("(")?];
         loop {
-            self.skip_space_bodies(&mut children)?;
+            self.array_space()?;
             if self.peek() == b')' {
                 break;
             }

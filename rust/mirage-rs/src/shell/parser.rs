@@ -58,6 +58,8 @@ pub(super) struct Mark {
     i: usize,
     comments: usize,
     pending: usize,
+    saved: usize,
+    depth: usize,
 }
 
 /// What ends a statement list.
@@ -86,10 +88,11 @@ pub(super) struct Parser<'a> {
     pub in_backtick: bool,
     /// Heredocs whose bodies start after the next newline.
     pub pending: Vec<super::heredoc::Pending>,
+    /// `pending` as it was before each read of bodies, for a reset to
+    /// restore.
+    pub saved: Vec<Vec<super::heredoc::Pending>>,
     /// How many command substitutions enclose the cursor.
     pub comsub: usize,
-    /// How many heredocs at the front of `pending` a substitution opened.
-    pub promoted: usize,
     /// A heredoc's delimiter line ended mid-line: what follows on it is
     /// a new command.
     pub line_break: bool,
@@ -157,8 +160,8 @@ fn parse_pass(source: &[u8]) -> Pass {
         depth: 0,
         in_backtick: false,
         pending: Vec::new(),
+        saved: Vec::new(),
         comsub: 0,
-        promoted: 0,
         line_break: false,
         braces: 0,
         work: &work,
@@ -327,13 +330,21 @@ impl Parser<'_> {
             i: self.i,
             comments: self.comments.len(),
             pending: self.pending.len(),
+            saved: self.saved.len(),
+            depth: self.depth,
         }
     }
 
-    /// Go back to `mark`, forgetting the comments and heredocs read since.
+    /// Go back to `mark`: the comments and heredocs read since are
+    /// forgotten, heredocs whose bodies were read since are pending again,
+    /// and the constructs a failed parse entered are left.
     pub(super) fn reset(&mut self, mark: Mark) {
         self.i = mark.i;
+        self.depth = mark.depth;
         self.comments.truncate(mark.comments);
+        if let Some(pending) = self.saved.drain(mark.saved..).next() {
+            self.pending = pending;
+        }
         self.pending.truncate(mark.pending);
     }
 
@@ -557,7 +568,7 @@ impl Parser<'_> {
             self.i += 1;
             items.push(Syn::token("&", at, at + 1));
         } else if self.peek() == b'\n' {
-            self.i = self.newline_end();
+            self.i = self.body_newline_end(self.first_readable());
             items.push(Syn::hidden(at, self.i));
             if !self.pending.is_empty() {
                 items.extend(self.pending_bodies()?);

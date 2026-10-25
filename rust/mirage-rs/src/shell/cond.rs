@@ -118,6 +118,11 @@ impl Cond<'_, '_> {
                         }
                     }
                     Some(b'\\') => close += 1,
+                    Some(&quote @ (b'\'' | b'"' | b'`')) => {
+                        close = super::lex::quote_end(s, close, quote)
+                            .ok_or_else(|| self.parser.unexpected(s.len()))?
+                            - 1;
+                    }
                     _ => {}
                 }
                 close += 1;
@@ -221,15 +226,15 @@ impl Cond<'_, '_> {
         }
     }
 
-    /// The word after `=~`: up to a blank outside parentheses, where a
-    /// `;`, `&` or redirection operator outside them is refused.
+    /// The word after `=~`: up to a blank or `&` outside parentheses,
+    /// where a `;` or redirection operator outside them is refused. A
+    /// `&&` right after the operator leaves the regex empty.
     fn regex(&mut self) -> R<Token> {
         let s = self.parser.s;
         while self.at < self.end && is_blank(s[self.at]) {
             self.at += 1;
         }
-        let rest = &s[self.at..self.end];
-        if rest.starts_with(b"&&") || rest.starts_with(b"||") {
+        if s[self.at..self.end].starts_with(b"&&") {
             return self.next();
         }
         let start = self.at;
@@ -255,7 +260,7 @@ impl Cond<'_, '_> {
                 }
                 b'(' => depth += 1,
                 b')' if depth > 0 => depth -= 1,
-                b')' => break,
+                b')' | b'&' if depth == 0 => break,
                 b';' | b'<' | b'>' if depth == 0 => return self.fail(self.at),
                 byte if is_space(byte) && depth == 0 => break,
                 _ => {}

@@ -187,7 +187,7 @@ impl Parser<'_> {
     /// The newline after the operator line, the body and the delimiter.
     fn heredoc_finish(&mut self, mut children: Vec<Syn>, pending: Pending) -> R<Syn> {
         if self.peek() == b'\n' {
-            let end = self.newline_end();
+            let end = self.body_newline_end(Some(&pending));
             children.push(Syn::hidden(self.i, end));
             self.i = end;
         }
@@ -203,14 +203,95 @@ impl Parser<'_> {
 
     /// Read the bodies of every pending heredoc after a newline, in order.
     pub(super) fn pending_bodies(&mut self) -> R<Vec<Syn>> {
-        let mut pending = std::mem::take(&mut self.pending);
-        pending.sort_by_key(|heredoc| std::cmp::Reverse(heredoc.depth));
-        self.promoted = 0;
-        let mut nodes = Vec::new();
+        let pending = self.take_readable();
+        let mut nodes: Vec<Syn> = Vec::new();
         for heredoc in &pending {
+            // An empty delimiter's line is its own newline.
+            if nodes
+                .last()
+                .is_some_and(|end| end.is("heredoc_end") && end.start == end.end)
+                && self.peek() == b'\n'
+            {
+                self.i += 1;
+            }
             nodes.extend(self.heredoc_body(heredoc)?);
         }
         Ok(nodes)
+    }
+
+    /// Take the pending heredocs a newline here reads, the deepest first:
+    /// inside a substitution, only those opened in it.
+    fn take_readable(&mut self) -> Vec<Pending> {
+        let all = std::mem::take(&mut self.pending);
+        self.saved.push(all.clone());
+        let comsub = self.comsub;
+        let (mut readable, outer): (Vec<_>, Vec<_>) =
+            all.into_iter().partition(|heredoc| heredoc.depth >= comsub);
+        self.pending = outer;
+        readable.sort_by_key(|heredoc| std::cmp::Reverse(heredoc.depth));
+        readable
+    }
+
+    /// The heredoc a newline here reads first, if any: the deepest, the
+    /// earliest of those.
+    pub(super) fn first_readable(&self) -> Option<&Pending> {
+        self.pending
+            .iter()
+            .filter(|heredoc| heredoc.depth >= self.comsub)
+            .rev()
+            .max_by_key(|heredoc| heredoc.depth)
+    }
+
+    /// Where the newline token before heredoc bodies ends, `first` the
+    /// heredoc read first: the grammar lexes the blank lines after it into
+    /// the token, but an empty delimiter ends a body at the first of them.
+    pub(super) fn body_newline_end(&self, first: Option<&Pending>) -> usize {
+        if first.is_some_and(|heredoc| heredoc.delimiter.is_empty()) {
+            self.i + 1
+        } else {
+            self.newline_end()
+        }
+    }
+
+    /// The blanks, comments and newlines between an array's elements.
+    /// bash reads the pending heredocs' bodies at a newline there, then
+    /// keeps them pending with each body's text as the delimiter: the next
+    /// newline reads them again, and that body is the one the redirect
+    /// gets.
+    pub(super) fn array_space(&mut self) -> R<()> {
+        loop {
+            self.skip_blank();
+            if self.peek() != b'\n' {
+                return Ok(());
+            }
+            self.i += 1;
+            let mut pending = self.take_readable();
+            for heredoc in &mut pending {
+                let start = self.i;
+                let nodes = self.heredoc_body(heredoc)?;
+                let end = match nodes.last() {
+                    Some(node) if node.is("heredoc_end") => {
+                        memchr::memrchr(b'\n', &self.s[start..node.start])
+                            .map_or(start, |offset| start + offset + 1)
+                    }
+                    _ => self.s.len(),
+                };
+                let mut text = Vec::new();
+                for line in self.s[start..end].split_inclusive(|byte| *byte == b'\n') {
+                    let tabs = if heredoc.dash {
+                        line.iter().take_while(|byte| **byte == b'\t').count()
+                    } else {
+                        0
+                    };
+                    text.extend_from_slice(&line[tabs..]);
+                }
+                heredoc.delimiter = text;
+                if end < self.s.len() && self.peek() == b'\n' {
+                    self.i += 1;
+                }
+            }
+            self.pending.extend(pending);
+        }
     }
 
     /// One body and its delimiter line, as tree-sitter-bash's scanner
@@ -346,6 +427,9 @@ impl Parser<'_> {
     /// is the delimiter. Inside a command substitution bash also ends the
     /// body at a line that only starts with it, and the line goes on.
     fn delimiter_end(&self, heredoc: &Pending) -> Option<usize> {
+        if heredoc.delimiter.contains(&b'\n') {
+            return None;
+        }
         let rest = &self.s[self.i..];
         let end = self.i + heredoc.delimiter.len();
         let whole = matches!(self.s.get(end), None | Some(b'\n'));
@@ -397,6 +481,12 @@ impl Parser<'_> {
                         self.i += 1;
                     }
                 }
+                b'\n' if heredoc.delimiter.is_empty() && column0(self.i, self.s) => {
+                    return Content::End {
+                        start: if advanced { start } else { self.i },
+                        end: self.i,
+                    };
+                }
                 b'\n' => {
                     self.i += 1;
                     if !advanced {
@@ -415,7 +505,7 @@ impl Parser<'_> {
                             }
                             return Content::End { start, end: self.i };
                         }
-                        if !advanced && !skipped {
+                        if !advanced && !skipped && !heredoc.delimiter.is_empty() {
                             // The first line's leading blanks are no part of
                             // the body's span, as the grammar scans it.
                             skipped = true;

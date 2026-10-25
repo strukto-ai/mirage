@@ -12,6 +12,7 @@
   "negated-compound": {"line": "! { false; }; echo $?", "status": 0, "declared": "f () \n{ \n    ! { \n        false\n    };\n    echo $?\n}", "output": "0"},
   "orphaned-dollar": {"line": "a=x b=y; echo $a/$b.c", "status": 0, "declared": "f () \n{ \n    a=x b=y;\n    echo $a/$b.c\n}", "output": "x/y.c"},
   "positional-digit": {"line": "set -- a; echo $10 $1a", "status": 0, "declared": "f () \n{ \n    set -- a;\n    echo $10 $1a\n}", "output": "a0 aa"},
+  "regex-ampersand": {"line": "[[ ab =~ b&&a ]]; echo $?", "status": 0, "declared": "f () \n{ \n    [[ ab =~ b && -n a ]];\n    echo $?\n}", "output": "0"},
   "regex-argument": {"line": "x=1; (echo == $x)", "status": 0, "declared": "f () \n{ \n    x=1;\n    ( echo == $x )\n}", "output": "== 1"},
   "reserved-prefix": {"line": "done`a`elif", "status": 0, "declared": "f () \n{ \n    done`a`elif\n}", "output": "bash: line 1: a: command not found\nbash: line 1: doneelif: command not found"},
   "special-in-value": {"line": "set -- p q; echo ${u:-$*}", "status": 0, "declared": "f () \n{ \n    set -- p q;\n    echo ${u:-$*}\n}", "output": "p q"},

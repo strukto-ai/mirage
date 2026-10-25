@@ -169,6 +169,18 @@ def regex_argument(data: bytes, ts: Tree, rs: Tree) -> bool:
     )
 
 
+def regex_ampersand(data: bytes, ts: Tree, rs: Tree) -> bool:
+    for n in nodes(ts):
+        if n[0] != "regex":
+            continue
+        depth = 0
+        for byte in text(data, n):
+            depth += (byte == ord("(")) - (byte == ord(")"))
+            if byte == ord("&") and depth == 0:
+                return True
+    return False
+
+
 def negated_compound(data: bytes, ts: Tree, rs: Tree) -> bool:
     simple = ("command", "test_command", "subshell", "variable_assignment")
     return any(
@@ -339,6 +351,12 @@ REASONS: dict[str, tuple[str, str, Rule]] = {
         "x=1; (echo == $x)",
         regex_argument,
     ),
+    "regex-ampersand": (
+        "A regex after `=~` takes an `&` outside parentheses; bash ends the"
+        " regex there and reads `&&` as the and operator.",
+        "[[ ab =~ b&&a ]]; echo $?",
+        regex_ampersand,
+    ),
     "negated-compound": (
         "`!` takes only a simple command, a test or a subshell; bash negates"
         " any pipeline.",
@@ -389,18 +407,6 @@ REASONS: dict[str, tuple[str, str, Rule]] = {
         " word.",
         "done`a`elif",
         reserved_prefix,
-    ),
-}
-
-# Lines bash reads and the parser refuses, each with what bash does there.
-GAPS: dict[str, str] = {
-    "[[ a =~ && b ]]": "bash takes an empty regex before `&&`.",
-    "[[ $a == @(x\ny) ]] && echo ": "bash reads a newline inside an extglob.",
-    "cat <(( a # ))": "bash reads `<((` as a process substitution of a subshell.",
-    "cat <((a) b)": "bash parses a `<((` substitution when it runs it.",
-    "cat <<EOF; x=(1\nbody\nEOF\n2)\nfi": (
-        "bash loses track of the heredoc's delimiter inside a multi-line"
-        " array and reads to the end."
     ),
 }
 
@@ -514,8 +520,6 @@ def classify(line: str, status: dict[str, int]) -> tuple[str, str]:
     if bash is None:
         return "unpinned", "no pinned bash status; run with --pin"
     if rs_error != (bash != 0):
-        if line in GAPS:
-            return "gap", ""
         return "unexplained", f"parser error={rs_error}, bash status {bash}"
     if rs_error:
         return "both-refuse", ""

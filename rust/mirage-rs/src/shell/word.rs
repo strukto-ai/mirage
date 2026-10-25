@@ -436,20 +436,42 @@ impl Parser<'_> {
         Ok(Syn::node("command_substitution", children))
     }
 
-    /// `<(...)` or `>(...)`.
+    /// `<(...)` or `>(...)`. bash reads `<((` to the parenthesis that
+    /// matches its first and parses that text when it runs it: a body
+    /// that does not parse to there is one raw word.
     pub(super) fn process_substitution(&mut self) -> R<Syn> {
         self.enter()?;
         let at = self.i;
         let op = if self.peek() == b'<' { "<(" } else { ">(" };
+        let raw_end = if self.at(2) == b'(' {
+            Some(
+                paren_end(self.s, at + 1).ok_or_else(|| super::parser::Fail {
+                    at: self.s.len(),
+                    message: "unexpected EOF while looking for matching `)'".into(),
+                })?,
+            )
+        } else {
+            None
+        };
         self.i += 2;
         let mut children = vec![Syn::token(op, at, at + 2)];
+        let mark = self.mark();
         let saved = self.in_backtick;
         self.in_backtick = false;
         self.comsub += 1;
         let body = self.statements(Close::Paren, None, false);
         self.comsub -= 1;
         self.in_backtick = saved;
-        children.extend(body?);
+        match (body, raw_end) {
+            (Ok(body), Some(end)) if self.i + 1 == end => children.extend(body),
+            (body, None) => children.extend(body?),
+            (_, Some(end)) => {
+                self.reset(mark);
+                self.check_raw(at + 2, end - 1, false)?;
+                children.push(Syn::leaf("word", at + 2, end - 1));
+                self.i = end - 1;
+            }
+        }
         children.push(self.expect(")")?);
         self.leave();
         Ok(Syn::node("process_substitution", children))
@@ -471,7 +493,8 @@ impl Parser<'_> {
                 let Some(end) = paren_end(self.s, at + 1) else {
                     return Err(fail);
                 };
-                self.forget(mark);
+                self.reset(mark);
+                self.check_raw(at + 2, end - 1, false)?;
                 self.i = end;
                 Ok(Syn::node(
                     "command_substitution",
@@ -561,8 +584,8 @@ impl Parser<'_> {
             depth: self.depth,
             in_backtick: false,
             pending: Vec::new(),
+            saved: Vec::new(),
             comsub: self.comsub,
-            promoted: 0,
             line_break: false,
             braces: self.braces,
             work: self.work,
