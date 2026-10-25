@@ -22,6 +22,7 @@ from mirage.core.s3.stat import stat
 from mirage.types import ContentType, FileType, PathSpec
 from mirage.utils.key_prefix import mount_key
 from mirage.vfs.s3 import S3Config
+from tests.e2e.s3_mock import S3_SESSION
 
 
 @pytest.fixture
@@ -43,7 +44,7 @@ def _mock_client_ctx(mock_client):
 class TestStatDirectoryFallback:
     @pytest.mark.asyncio
     async def test_stat_file_returns_filestat(self, s3_accessor):
-        with patch("mirage.core.s3.driver.async_session") as mock_session:
+        with patch(S3_SESSION) as mock_session:
             mock_client = AsyncMock()
             mock_client.head_object.return_value = {
                 "ContentLength": 1024,
@@ -66,7 +67,7 @@ class TestStatDirectoryFallback:
 
     @pytest.mark.asyncio
     async def test_stat_directory_prefix_fallback(self, s3_accessor):
-        with patch("mirage.core.s3.driver.async_session") as mock_session:
+        with patch(S3_SESSION) as mock_session:
             mock_client = AsyncMock()
             err = Exception("not found")
             err.response = {"Error": {"Code": "404"}}
@@ -89,7 +90,7 @@ class TestStatDirectoryFallback:
 
     @pytest.mark.asyncio
     async def test_stat_directory_prefix_with_contents(self, s3_accessor):
-        with patch("mirage.core.s3.driver.async_session") as mock_session:
+        with patch(S3_SESSION) as mock_session:
             mock_client = AsyncMock()
             err = Exception("not found")
             err.response = {"Error": {"Code": "NoSuchKey"}}
@@ -112,7 +113,7 @@ class TestStatDirectoryFallback:
 
     @pytest.mark.asyncio
     async def test_stat_nonexistent_raises(self, s3_accessor):
-        with patch("mirage.core.s3.driver.async_session") as mock_session:
+        with patch(S3_SESSION) as mock_session:
             mock_client = AsyncMock()
             err = Exception("not found")
             err.response = {"Error": {"Code": "404"}}

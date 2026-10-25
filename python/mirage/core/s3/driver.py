@@ -27,9 +27,8 @@ from mirage.core.object_store.driver import (
 )
 from mirage.core.object_store.errors import ConditionLostError
 from mirage.core.s3.client import (
-    _client_kwargs,
-    async_session,
     closing_body,
+    create_s3_client,
     is_condition_lost,
     is_key_gone,
     is_not_found,
@@ -60,9 +59,7 @@ async def _connect(accessor: S3Accessor) -> AsyncIterator[S3Conn]:
     # accessor". Opening one per operation cost ~49ms against ~2ms for a
     # reused one, so a battery of small ops paid the client, not the request.
     client = await accessor.cached_client(
-        lambda: async_session(accessor.config).client(
-            **_client_kwargs(accessor.config)
-        )
+        lambda: create_s3_client(accessor.config)
     )
     yield S3Conn(client=client, config=accessor.config)
 

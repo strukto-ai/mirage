@@ -17,6 +17,8 @@ from unittest.mock import patch
 
 from botocore.exceptions import ClientError
 
+from tests.e2e.s3_mock import S3_SESSION
+
 
 class _Body:
     def __init__(self, data: bytes) -> None:
@@ -110,6 +112,4 @@ class FakeSession:
 def patch_record_s3(client: FakeConditionalS3Client):
     """Patch the record stores' session factory to serve ``client``."""
     session = FakeSession(client)
-    return patch(
-        "mirage.workspace.record.s3.async_session", lambda config: session
-    )
+    return patch(S3_SESSION, lambda config: session)
