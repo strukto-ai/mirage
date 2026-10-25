@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
-import { MountMode } from '@struktoai/mirage-core/types'
+import { Limit, MountMode } from '@struktoai/mirage-core/types'
 import { Workspace } from '@struktoai/mirage-node'
 import { parseSessionProfile } from '@struktoai/mirage-core/policy/profile'
 import { LangchainWorkspace } from './backend.ts'
@@ -274,6 +274,33 @@ describe('LangchainWorkspace.glob', () => {
     const r = await new LangchainWorkspace(ws).glob(pattern, '/src')
     expect(r.error).toBeUndefined()
     expect((r.files ?? []).map((i) => i.path).sort()).toEqual(expected)
+  })
+
+  it('matches under a root spelled with trailing slashes', async () => {
+    const ws = mkWs()
+    await ws.vfs.mkdir('/src')
+    await ws.vfs.mkdir('/src/app')
+    await ws.vfs.write('/src/app/main.ts', 'm')
+    const r = await new LangchainWorkspace(ws).glob('app/*.ts', '/src//')
+    expect((r.files ?? []).map((i) => i.path)).toEqual(['/src/app/main.ts'])
+  })
+
+  it('reports a listing the output cap cut short as truncated', async () => {
+    const ws = new Workspace(
+      { '/': new RAMVFS() },
+      {
+        mode: MountMode.WRITE,
+        commandLimits: { find: new Limit({ maxLines: 1 }), grep: new Limit({ maxLines: 1 }) },
+      },
+    )
+    await ws.vfs.mkdir('/src')
+    await ws.vfs.write('/src/a.txt', 'needle')
+    await ws.vfs.write('/src/b.ts', 'needle')
+    const lw = new LangchainWorkspace(ws)
+    expect((await lw.glob('*.ts', '/src')).truncated).toBe(true)
+    const grep = await lw.grep('needle', '/src')
+    expect(grep.truncated).toBe(true)
+    expect(grep.matches).toHaveLength(1)
   })
 
   it('reports a missing root', async () => {

@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { ensureParents } from '@struktoai/mirage-core/workspace/tools/tool_operations'
+import { TRUNCATION_NOTICE } from '@struktoai/mirage-core/commands/builtin/utils/limit'
 import type { Workspace } from '@struktoai/mirage-node'
 import type { ExecuteResult } from '@struktoai/mirage-core/workspace/workspace/types'
 import type { Files } from '@struktoai/mirage-core/workspace/files'
@@ -89,8 +90,12 @@ function commandError(io: ExecuteResult): string | undefined {
   return stderr || `Command failed with exit code ${String(io.exitCode)}`
 }
 
+function capped(io: ExecuteResult): boolean {
+  return io.stderrText.includes(TRUNCATION_NOTICE)
+}
+
 function relativeTo(root: string, path: string): string {
-  const prefix = root.endsWith('/') ? root : `${root}/`
+  const prefix = `${root.replace(/\/+$/, '')}/`
   return path.startsWith(prefix) ? path.slice(prefix.length) : (path.split('/').pop() ?? path)
 }
 
@@ -298,7 +303,7 @@ export class LangchainWorkspace implements SandboxBackendProtocol {
     const io = await this.exec(parts.join(' '))
     const matches = ioToGrepMatches(io)
     if (maxCount === undefined || maxCount === null || matches.length <= maxCount) {
-      return { matches }
+      return capped(io) ? { matches, truncated: true } : { matches }
     }
     return { matches: matches.slice(0, maxCount), truncated: true }
   }
@@ -306,14 +311,16 @@ export class LangchainWorkspace implements SandboxBackendProtocol {
   /**
    * The files under `path` that `pattern` matches, as Deep Agents' own
    * backends match them: against the path relative to `path`, dotfiles
-   * included, regular files only.
+   * included, regular files only. A listing the workspace's output cap cut
+   * short is reported truncated.
    */
   async glob(pattern: string, path = '/'): Promise<GlobResult> {
     const matches = picomatch(pattern, { dot: true })
     const io = await this.exec(`find ${shellQuote(path)} -type f`)
     const error = commandError(io)
     if (error !== undefined) return { error }
-    return { files: ioToFileInfos(io).filter((info) => matches(relativeTo(path, info.path))) }
+    const files = ioToFileInfos(io).filter((info) => matches(relativeTo(path, info.path)))
+    return capped(io) ? { files, truncated: true } : { files }
   }
 
   /** Remove a file, or a directory with everything under it. */

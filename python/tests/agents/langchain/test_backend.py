@@ -22,6 +22,7 @@ import pytest
 from mirage import RAMVFS, MountMode, Workspace
 from mirage.agents.langchain.backend import LangchainWorkspace
 from mirage.policy import CommandContext, Deny, Policy
+from mirage.types import Limit
 
 CONTENTION_REPRO = """
 import asyncio
@@ -573,6 +574,32 @@ async def test_aglob_matches_files_as_deep_agents_does(
     assert result.error is None
     assert sorted(e["path"] for e in result.matches) == expected
     assert not any(e["is_dir"] for e in result.matches)
+
+
+@pytest.mark.asyncio
+async def test_capped_glob_and_grep_report_truncation():
+    ws = Workspace(
+        {"/": RAMVFS()},
+        mode=MountMode.WRITE,
+        command_limits={
+            "find": Limit(max_lines=1),
+            "grep": Limit(max_lines=1),
+        },
+    )
+    backend = LangchainWorkspace(ws)
+    try:
+        await backend.awrite("/src/a.txt", "needle")
+        await backend.awrite("/src/b.py", "needle")
+
+        glob = await backend.aglob("*.py", path="/src")
+        grep = await backend.agrep("needle", path="/src")
+
+        assert glob.truncated is True
+        assert glob.truncation_reason == "budget"
+        assert grep.truncated is True
+        assert len(grep.matches) == 1
+    finally:
+        await ws.close()
 
 
 @pytest.mark.asyncio

@@ -61,7 +61,7 @@ options = ClaudeAgentOptions(
 
 ## Shell
 
-To keep Claude's own tools and run its Bash tool in a workspace instead, point the SDK at `mirage-bash`, as for [Claude Code](/home/agents/claude-code#shell). The workspace is one the Mirage daemon serves:
+To keep Claude's own Bash tool and run it in a workspace, point the SDK at `mirage-bash`, as for [Claude Code](/home/agents/claude-code#shell), and give it Mirage's other tools over [`mirage mcp`](/home/access/mcp) in place of Claude's file tools. Both reach one workspace that the Mirage daemon serves:
 
 ```bash
 mirage workspace create workspace.yaml --id demo
@@ -77,14 +77,18 @@ options = ClaudeAgentOptions(
     env={
         "CLAUDE_CODE_SHELL": shutil.which("mirage-bash"),
         "MIRAGE_WORKSPACE": "demo",
-        "MIRAGE_SESSION": "agent",
     },
+    mcp_servers={
+        "mirage": {"type": "stdio", "command": "mirage", "args": ["mcp", "-w", "demo"]},
+    },
+    allowed_tools=["Bash", "mcp__mirage__*"],
+    disallowed_tools=["Read", "Edit", "Write", "Glob", "Grep", "mcp__mirage__shell"],
 )
 ```
 
-- `MIRAGE_SESSION` is optional; without it commands run as the workspace's default session.
-- Mount the project and `/tmp` at their own paths, as the [Claude Code page](/home/agents/claude-code#shell) shows, so `cd` carries over and Claude's Read and Edit see the same files.
-- Claude's Read, Edit, Write, Glob and Grep still run on the host.
+- Bash runs in the workspace, and Mirage's `read`, `write`, `edit`, `ls`, `grep` and `glob` take the place of Claude's Read, Edit, Write, Glob and Grep, so every file the agent touches goes through Mirage.
+- Mount the project and `/tmp` at their own paths, as the [Claude Code page](/home/agents/claude-code#shell) shows, so `cd` carries over.
+- To run under a [profile](/home/profiles), create a session with `mirage session create demo --id agent -p reviewer`, then set `MIRAGE_SESSION` to `agent` and add `-s agent` to the `mirage mcp` arguments.
 
 ## Tools
 

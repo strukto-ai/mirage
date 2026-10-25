@@ -47,6 +47,7 @@ from mirage.agents.langchain.convert import (
     io_to_grep_matches,
 )
 from mirage.bridge.sync import on_owner_loop
+from mirage.commands.builtin.utils.limit import TRUNCATION_NOTICE
 from mirage.io.types import IOResult
 from mirage.workspace.files import Files
 from mirage.workspace.tools.io_text import replace_text, with_refusal
@@ -123,6 +124,10 @@ def _relative_to(root: str, path: str) -> str:
     if path.startswith(prefix):
         return path[len(prefix) :]
     return PurePosixPath(path).name
+
+
+async def _capped(io: IOResult) -> bool:
+    return TRUNCATION_NOTICE in await io.stderr_str()
 
 
 async def _command_error(
@@ -339,7 +344,8 @@ class LangchainWorkspace(SandboxBackendProtocol):
 
         ``glob`` follows Deep Agents' include-glob rules: without a ``/``
         it matches the basename at any depth, with one the path relative
-        to ``path``. A basename glob narrows the command line too.
+        to ``path``. A basename glob narrows the command line too. A
+        search the workspace's output cap cut short is reported truncated.
 
         Args:
             pattern (str): literal text to search for.
@@ -370,7 +376,7 @@ class LangchainWorkspace(SandboxBackendProtocol):
                 m for m in matches if included(_relative_to(root, m["path"]))
             ]
         if max_count is None or len(matches) <= max_count:
-            return GrepResult(matches=matches)
+            return GrepResult(matches=matches, truncated=await _capped(io))
         return GrepResult(matches=matches[:max_count], truncated=True)
 
     # ── glob ─────────────────────────────────────────────────
@@ -384,7 +390,8 @@ class LangchainWorkspace(SandboxBackendProtocol):
 
         Matching is Deep Agents' own: without a ``/`` the pattern matches
         the basename at any depth, with one the path relative to ``path``,
-        and only regular files are returned.
+        and only regular files are returned. A listing the workspace's
+        output cap cut short is reported truncated.
 
         Args:
             pattern (str): the glob pattern.
@@ -400,12 +407,15 @@ class LangchainWorkspace(SandboxBackendProtocol):
         error = await _command_error(io)
         if error:
             return GlobResult(error=error)
+        capped = await _capped(io)
         return GlobResult(
             matches=[
                 info
                 for info in io_to_file_infos(io)
                 if matches(_relative_to(root, info["path"]))
-            ]
+            ],
+            truncated=capped,
+            truncation_reason="budget" if capped else None,
         )
 
     # ── delete ───────────────────────────────────────────────

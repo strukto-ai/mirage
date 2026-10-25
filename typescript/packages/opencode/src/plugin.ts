@@ -16,7 +16,7 @@ import { ensureParents } from '@struktoai/mirage-core/workspace/tools/tool_opera
 import { tool, type Plugin, type ToolContext, type ToolDefinition } from '@opencode-ai/plugin'
 import type { Workspace } from '@struktoai/mirage-node'
 import { encodeBase64 } from '@struktoai/mirage-core/utils/base64'
-import { shellQuote } from '@struktoai/mirage-core/utils/quote'
+import { singleQuote } from '@struktoai/mirage-core/utils/quote'
 import { FileVersionTracker } from '@struktoai/mirage-core/workspace/tools/file_version'
 import { Session } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import { readWorkspaceFile } from '@struktoai/mirage-core/workspace/tools/read_file'
@@ -235,7 +235,7 @@ export function mirageTools(
     execute: async ({ pattern, path }, ctx) => {
       const w = await resolveWs(ws, ctx)
       const root = path ?? '/'
-      const io = await w.shell(`find ${shellQuote(root)} -name ${shellQuote(pattern)}`, {
+      const io = await w.shell(`find ${singleQuote(root)} -name ${singleQuote(pattern)}`, {
         ...shellOptions,
         signal: ctx.abort,
       })
@@ -252,7 +252,7 @@ export function mirageTools(
     execute: async ({ pattern, path }, ctx) => {
       const w = await resolveWs(ws, ctx)
       const root = path ?? '/'
-      const io = await w.shell(`grep -rn -e ${shellQuote(pattern)} ${shellQuote(root)}`, {
+      const io = await w.shell(`grep -rn -e ${singleQuote(pattern)} ${singleQuote(root)}`, {
         ...shellOptions,
         signal: ctx.abort,
       })

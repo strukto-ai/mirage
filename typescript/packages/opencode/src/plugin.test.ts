@@ -249,6 +249,19 @@ describe('opencode tools under a path with a space', () => {
   })
 })
 
+describe('opencode tools keep shell syntax literal', () => {
+  it('glob and grep pass braces through unexpanded', async () => {
+    const ws = mkWs()
+    await ws.vfs.write('/item{1,2}.txt', 'item{1,2}')
+    await ws.vfs.write('/item1.txt', 'item1')
+    const tools = mirageTools(ws)
+    expect(await callTool(tools.glob, { pattern: 'item{1,2}.txt' })).toBe('/item{1,2}.txt')
+    expect(await callTool(tools.grep, { pattern: 'item{1,2}', path: '/item{1,2}.txt' })).toBe(
+      '1:item{1,2}',
+    )
+  })
+})
+
 describe('opencode mirageTools.bash abort', () => {
   it('stops the line when OpenCode aborts the call', async () => {
     const controller = new AbortController()
