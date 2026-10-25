@@ -94,6 +94,22 @@ describe('LangchainWorkspace.read', () => {
     const lw = new LangchainWorkspace(ws)
     const r = await lw.read('/n.txt', 1, 2)
     expect(r.content).toBe('b\nc')
+    expect([r.totalLines, r.startLine, r.endLine, r.nextOffset]).toEqual([4, 2, 3, 3])
+  })
+
+  it('leaves nextOffset off the last window', async () => {
+    const ws = mkWs()
+    await ws.vfs.write('/n.txt', 'a\nb\nc\n')
+    const r = await new LangchainWorkspace(ws).read('/n.txt', 1)
+    expect(r.content).toBe('b\nc\n')
+    expect([r.startLine, r.endLine, r.nextOffset]).toEqual([2, 3, undefined])
+  })
+
+  it('reports an offset past the end', async () => {
+    const ws = mkWs()
+    await ws.vfs.write('/n.txt', 'a\nb\n')
+    const r = await new LangchainWorkspace(ws).read('/n.txt', 2)
+    expect(r.error).toBe('Line offset 2 exceeds file length (2 lines)')
   })
 
   it('returns error for missing file', async () => {
@@ -240,6 +256,51 @@ describe('LangchainWorkspace.glob', () => {
     expect(paths).toContain('/a.csv')
     expect(paths).toContain('/b.csv')
     expect(paths).not.toContain('/c.txt')
+  })
+
+  it.each([
+    ['*.ts', ['/src/top.ts']],
+    ['app/*.ts', ['/src/app/main.ts']],
+    ['**/*.ts', ['/src/app/main.ts', '/src/top.ts']],
+    ['**/.env', ['/src/.env']],
+    ['app', []],
+  ])('matches %s against the path under the root, files only', async (pattern, expected) => {
+    const ws = mkWs()
+    await ws.vfs.mkdir('/src')
+    await ws.vfs.write('/src/top.ts', 't')
+    await ws.vfs.write('/src/.env', 'e')
+    await ws.vfs.mkdir('/src/app')
+    await ws.vfs.write('/src/app/main.ts', 'm')
+    const r = await new LangchainWorkspace(ws).glob(pattern, '/src')
+    expect(r.error).toBeUndefined()
+    expect((r.files ?? []).map((i) => i.path).sort()).toEqual(expected)
+  })
+
+  it('reports a missing root', async () => {
+    const r = await new LangchainWorkspace(mkWs()).glob('*.ts', '/missing')
+    expect(r.files).toBeUndefined()
+    expect(r.error).toBeDefined()
+  })
+})
+
+describe('LangchainWorkspace.delete', () => {
+  it('removes a file and a tree', async () => {
+    const ws = mkWs()
+    await ws.vfs.write('/one.txt', '1')
+    await ws.vfs.mkdir('/tree')
+    await ws.vfs.mkdir('/tree/a')
+    await ws.vfs.write('/tree/a/b.txt', 'b')
+    const lw = new LangchainWorkspace(ws)
+    expect(await lw.delete('/one.txt')).toEqual({ path: '/one.txt' })
+    expect(await lw.delete('/tree')).toEqual({ path: '/tree' })
+    expect(await ws.vfs.exists('/one.txt')).toBe(false)
+    expect(await ws.vfs.exists('/tree')).toBe(false)
+  })
+
+  it('reports a missing path', async () => {
+    const r = await new LangchainWorkspace(mkWs()).delete('/missing')
+    expect(r.path).toBeUndefined()
+    expect(r.error).toBeDefined()
   })
 })
 

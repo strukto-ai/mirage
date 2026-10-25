@@ -29,8 +29,8 @@ export interface BuildOptionsOptions {
 /**
  * Returns ready-to-use query `Options` backed by a workspace: the
  * `MirageServer` tools as the `mirage` MCP server, preapproved, and a system
- * prompt describing the mounts. The SDK's built-in tools stay available
- * under its usual permission rules.
+ * prompt describing the mounts. The SDK's built-in tools are disabled, so
+ * the Mirage tools are the agent's only file access layer.
  */
 export async function buildOptions(
   workspace: Workspace,
@@ -44,6 +44,7 @@ export async function buildOptions(
       ),
     },
     allowedTools: ['mcp__mirage__*'],
+    tools: [],
     systemPrompt:
       opts.systemPrompt ?? (await buildSystemPrompt({ workspace, sessionId: opts.sessionId })),
   }
