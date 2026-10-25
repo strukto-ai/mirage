@@ -243,6 +243,7 @@ flowchart LR
     DB["mongodb · postgres · chroma · qdrant<br/>python layers, the search CLI,<br/>integ/vfs/&lt;name&gt;, integ/runners, targets.json"] --> database
     OB["langfuse · jaeger layers<br/>integ/vfs/observability, seeds,<br/>integ/runners, targets.json"] --> observability
     FS["fuse and mount core modules,<br/>workspace fuse and nfs wiring<br/>integ/fuse, check_json.py"] --> fuse
+    FP["shared Rust policy and glob,<br/>native and Wasm bindings,<br/>rs/policy, hidden, path and session context adapters"] --> fuse
     RT["python/** and typescript/**<br/>minus the runtime drop list<br/>integ/runtime, integ/fixtures/runtime"] --> runtime
     core --> J1["integ"]
     ts --> J2["integ-ts"]

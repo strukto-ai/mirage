@@ -20,6 +20,32 @@ type Span = (usize, usize);
 type Positions = Arc<Vec<Span>>;
 type Key = (usize, usize, usize);
 
+pub(crate) struct CompiledGlob {
+    program: Program,
+    flat: Option<Flat>,
+}
+
+impl CompiledGlob {
+    pub(crate) fn new(pattern: Vec<u32>) -> Self {
+        let mut compiler = Compiler::new(pattern, Dialect::Shell, false);
+        while !compiler.done() {
+            compiler.step();
+        }
+        let flat = Flat::new(&compiler.program);
+        Self {
+            program: compiler.program,
+            flat,
+        }
+    }
+
+    pub(crate) fn matches(&self, subject: &[u32]) -> bool {
+        match &self.flat {
+            Some(flat) => flat.matches(subject, false),
+            None => Evaluator::matches(&self.program, subject, false),
+        }
+    }
+}
+
 fn yes() -> bool {
     true
 }

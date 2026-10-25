@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { Outcome, type ScriptMethod } from './types.ts'
+import type { ScriptMethod } from './types.ts'
 
 /**
  * A whole-command refusal exits as bash does for a command it found but
@@ -21,35 +21,11 @@ import { Outcome, type ScriptMethod } from './types.ts'
 export const POLICY_DENIED_EXIT = 126
 
 /**
- * Which verb wins when two rules speak about the same subject at the
- * same anchor depth: deny before ask. Both gates order by it, which is
- * what keeps the entry gate from contradicting the admission gate.
- */
-export const DENY_FIRST = 0
-export const ASK_SECOND = 1
-
-/**
- * The same ordering as the outcome a rule produces, for the gate that
- * has already named the verb. ALLOW is absent because only a rule ties
- * against a rule, and nothing in the document says allow at a path.
- */
-export const VERB_ORDER: Readonly<Record<string, number>> = {
-  [Outcome.DENY]: DENY_FIRST,
-  [Outcome.ASK]: ASK_SECOND,
-}
-
-/**
  * The reason a bare command pattern under `commands.deny` carries, and
  * the one a bare pattern under `commands.ask` carries.
  */
 export const DEFAULT_DENY_REASON = 'denied by policy'
 export const DEFAULT_ASK_REASON = 'no standing approval'
-
-/**
- * The one pattern token that matches any one line token; trailing, it
- * matches whatever follows, which a prefix already does.
- */
-export const WILDCARD = '*'
 
 /**
  * Ops that act on a whole subtree at once, so a pure path rule refuses

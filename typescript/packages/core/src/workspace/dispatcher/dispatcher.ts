@@ -144,7 +144,13 @@ import {
   sessionAccess,
 } from '../../context/session_context.ts'
 import { asyncContextIsolatesTasks } from '../../utils/async_context.ts'
-import { hiddenUnder, leadsHidden, moveReveals, pathVisible } from '../../utils/hidden.ts'
+import {
+  hiddenUnder,
+  leadsHidden,
+  moveReveals,
+  pathVisible,
+  visibleLinks,
+} from '../../utils/hidden.ts'
 import { removeRemnants, visibleBelow, type RemnantChannel } from '../../utils/remnants.ts'
 import { encodeText } from '../../shell/bytes.ts'
 
@@ -2577,9 +2583,16 @@ export class Dispatcher {
     const owner = this.namespace.tryMountFor(path.virtual)
     const links = this.namespace.symlinkTargets()
     const merged = new Map(tree)
-    for (const [virtual, row] of this.namespace.linkStatsBelow(path.virtual)) {
-      if (this.namespace.tryMountFor(virtual) !== owner || leadsHidden(vis, virtual, links))
-        continue
+    const candidates = this.namespace
+      .linkStatsBelow(path.virtual)
+      .filter(([virtual]) => this.namespace.tryMountFor(virtual) === owner)
+    const visible = visibleLinks(
+      vis,
+      candidates.map(([virtual]) => virtual),
+      links,
+    )
+    for (const [index, [virtual, row]] of candidates.entries()) {
+      if (!visible[index]) continue
       const rel = virtual.slice(base.length + 1)
       if (merged.has(rel)) {
         for (const key of [...merged.keys()]) if (key.startsWith(`${rel}/`)) merged.delete(key)

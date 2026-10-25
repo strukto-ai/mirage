@@ -12,8 +12,9 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.policy.match.pattern import pattern_reaches, split_pattern
-from mirage.policy.types import AdmissionRules, CommandRule
+
+from mirage.policy.types import AdmissionRules
+from mirage.rs.policy import admission_matcher, units
 
 
 def has_rules(rules: AdmissionRules | None) -> bool:
@@ -25,28 +26,6 @@ def has_rules(rules: AdmissionRules | None) -> bool:
     """
     return rules is not None and (
         rules.allow is not None or bool(rules.ask) or bool(rules.deny)
-    )
-
-
-def _rule_reads_args(rule: CommandRule, name: str) -> bool:
-    """Whether a rule needs a line's words past the command name to
-    decide about a command: it names the command (or every command)
-    and reads paths, a mount, or a token after the name.
-
-    Args:
-        rule (CommandRule): an ask or deny rule.
-        name (str): the command name.
-    """
-    names = not rule.commands or any(
-        pattern_reaches(p, (name,)) for p in rule.commands
-    )
-    if not names:
-        return False
-    if rule.paths or rule.mount:
-        return True
-    return any(
-        pattern_reaches(p, (name,)) and len(split_pattern(p)) > 1
-        for p in rule.commands
     )
 
 
@@ -64,16 +43,10 @@ def reads_args(rules: AdmissionRules | None, name: str) -> bool:
         rules (AdmissionRules | None): the session's admission rules.
         name (str): the command name, as typed.
     """
-    if rules is None:
-        return False
-    for pattern in rules.allow or ():
-        if (
-            pattern_reaches(pattern, (name,))
-            and len(split_pattern(pattern)) > 1
-        ):
-            return True
-    return any(
-        _rule_reads_args(rule, name) for rule in (*rules.ask, *rules.deny)
+    return (
+        rules is not None
+        and admission_matcher(rules).ask("reads_args", name=units(name))
+        is True
     )
 
 
@@ -93,13 +66,8 @@ def scopes_paths(rules: AdmissionRules | None, name: str) -> bool:
         rules (AdmissionRules | None): the session's admission rules.
         name (str): the command name, as typed.
     """
-    if rules is None:
-        return False
-    for rule in (*rules.ask, *rules.deny):
-        if not rule.paths and not rule.mount:
-            continue
-        if not rule.commands or any(
-            pattern_reaches(p, (name,)) for p in rule.commands
-        ):
-            return True
-    return False
+    return (
+        rules is not None
+        and admission_matcher(rules).ask("scopes_paths", name=units(name))
+        is True
+    )

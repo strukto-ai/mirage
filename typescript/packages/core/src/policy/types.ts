@@ -415,13 +415,6 @@ export interface AdmissionRules {
 }
 
 /**
- * The rules that apply to one line, each with the verb it carries, deny
- * before ask and in the order written. Built once per line by `decide`
- * and read again at every subject of it.
- */
-export type LiveRules = readonly (readonly [Outcome, CommandRule])[]
-
-/**
  * The one session question the permissions policy asks. The
  * SessionManager satisfies it structurally, so the policy reads the
  * rules by session id without this package importing the workspace.

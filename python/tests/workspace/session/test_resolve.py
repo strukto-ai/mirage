@@ -25,7 +25,7 @@ from mirage.types import (
     ShowEntry,
     ShownPaths,
 )
-from mirage.utils.hidden import path_hidden, path_visible
+from mirage.utils.hidden import path_visible
 from mirage.workspace.dispatcher.constants import CALLS
 from mirage.workspace.session.resolve import (
     apply_profile,
@@ -60,6 +60,20 @@ def test_resolve_profile_names_objects_and_the_default():
 def test_resolve_profile_refuses_an_unknown_name():
     with pytest.raises(PolicyError, match="unknown profile 'nope'"):
         resolve_profile(PROFILES, "nope")
+
+
+def test_compile_preserves_empty_mount_through_inline_restrictions():
+    rule = CommandRule(reason="permission", commands=("git push",))
+    base = SessionProfile(commands=CommandsBlock(ask=(rule,)))
+    restricted = with_inline(
+        base, SessionProfile(paths=PathsBlock(hide=("/secret",)))
+    )
+    assert restricted is not None
+    for profile in (base, restricted):
+        compiled = compile_commands(profile)
+        assert compiled is not None
+        assert compiled.ask[0] == rule
+        assert compiled.ask[0].mount == ""
 
 
 def test_with_inline_takes_the_weaker_mode_per_mount():
@@ -300,12 +314,12 @@ def test_compile_profile_collects_the_hides_of_every_mount_section():
     assert out.visibility.paths == HiddenPaths(
         paths=("/shared/finance", "/repo/.env"), patterns=("/repo/*.pem",)
     )
-    assert path_hidden(out.visibility.paths, "/repo/deep/key.pem")
-    assert not path_hidden(out.visibility.paths, "/scratch/key.pem")
+    assert not path_visible(out.visibility, "/repo/deep/key.pem")
+    assert path_visible(out.visibility, "/scratch/key.pem")
     profile = compile_profile(
         SessionProfile(paths=PathsBlock(hide=("*.pem",)))
     )
-    assert path_hidden(profile.visibility.paths, "/scratch/key.pem")
+    assert not path_visible(profile.visibility, "/scratch/key.pem")
 
 
 def test_compile_profile_of_a_bare_or_absent_role_states_nothing():
