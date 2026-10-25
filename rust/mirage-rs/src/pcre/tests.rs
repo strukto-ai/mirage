@@ -355,3 +355,80 @@ fn utf8_refusals_name_the_surrogates_and_long_lookbehinds() {
     );
     assert!(compile("(?<=a{300})b", Mode::default()).is_ok());
 }
+
+// grep 3.11 -P under C.UTF-8 and C and ripgrep 14.1.1 -P over k s K ſ K(U+212A)
+// é -: case folding leaves type escapes alone, folds a POSIX class by ASCII
+// only without UCP, and reads \p{Lu}, \p{Ll} and \p{Lt} as any cased letter.
+#[test]
+fn caseless_sets_fold_as_pcre2_does() {
+    let lines = ["k", "s", "K", "ſ", "\u{212A}", "é", "-"];
+    let utf = Mode::default();
+    let bytes = Mode {
+        bytes: true,
+        ..Mode::default()
+    };
+    let ucp = Mode {
+        unicode: true,
+        ..Mode::default()
+    };
+    let rows: &[(&str, bool, Mode, &[usize])] = &[
+        (r"(?i)^\W$", false, utf, &[3, 4, 5, 6]),
+        (r"(?i)^[^\w]$", false, utf, &[3, 4, 5, 6]),
+        (r"(?i)^\w$", false, utf, &[0, 1, 2]),
+        (r"(?i)^[^[:alpha:]]$", false, utf, &[3, 4, 5, 6]),
+        (r"(?i)^\P{Ll}$", false, utf, &[6]),
+        (r"^\W$", true, utf, &[3, 4, 5, 6]),
+        (r"^[^[:lower:]]$", true, utf, &[3, 4, 5, 6]),
+        (r"^\p{Lu}$", true, utf, &[0, 1, 2, 3, 4, 5]),
+        (r"^[[:upper:]]$", true, utf, &[0, 1, 2]),
+        (r"(?i)^\W$", false, bytes, &[6]),
+        (r"(?i)^\w$", false, bytes, &[0, 1, 2]),
+        (r"^\p{Lu}$", true, bytes, &[0, 1, 2]),
+        (r"^[^[:lower:]]$", true, bytes, &[6]),
+        (r"(?i)^\W$", false, ucp, &[6]),
+        (r"(?i)^\w$", false, ucp, &[0, 1, 2, 3, 4, 5]),
+        (r"(?i)^[^[:alpha:]]$", false, ucp, &[6]),
+        (r"^[^[:lower:]]$", true, ucp, &[2, 4, 6]),
+        (r"^[[:upper:]]$", true, ucp, &[2, 4]),
+        (r"^\P{Ll}$", true, ucp, &[6]),
+    ];
+    for &(pattern, ignore_case, mode, want) in rows {
+        let mode = Mode {
+            ignore_case,
+            ..mode
+        };
+        let pcre = compile(pattern, mode).unwrap_or_else(|err| panic!("{pattern}: {err:?}"));
+        let got: Vec<usize> = (0..lines.len())
+            .filter(|&i| pcre.find(lines[i].as_bytes(), 0).0.unwrap().is_some())
+            .collect();
+        assert_eq!(got, want, "{pattern} ignore_case={ignore_case} {mode:?}");
+    }
+}
+
+// grep 3.11 -P under C.UTF-8 with the pattern in a -f file.
+#[test]
+fn a_pattern_that_is_not_utf8_is_refused_in_pcre2s_words() {
+    let rows: &[(&[u8], &str)] = &[
+        (b"a\xffb", "illegal byte (0xfe or 0xff)"),
+        (b"a\xc3", "1 byte missing at end"),
+        (b"\xe3", "2 bytes missing at end"),
+        (b"\xe3\x81A", "byte 3 top bits not 0x80"),
+        (
+            b"\xf8\x88\x80\x80\x80",
+            "5-byte character is not allowed (RFC 3629)",
+        ),
+        (b"\xf8\x80\x80\x80\x80", "overlong 5-byte sequence"),
+        (
+            b"\xf4\x90\x80\x80",
+            "code points greater than 0x10ffff are not defined",
+        ),
+        (b"\xed\xa0\x80", "code points 0xd800-0xdfff are not defined"),
+        (b"\xc1\xbf", "overlong 2-byte sequence"),
+        (b"ok\xbf", "isolated byte with 0x80 bit set"),
+    ];
+    for &(pattern, want) in rows {
+        let err = pattern_chars(pattern, false).expect_err("a refusal");
+        assert_eq!(err.message, format!("UTF-8 error: {want}"));
+        assert!(pattern_chars(pattern, true).is_ok());
+    }
+}

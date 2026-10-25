@@ -996,6 +996,40 @@
         "files_without_match",
         "stats"
       ]
+    },
+    {
+      "id": "rg_P_caseless_posix_class_follows_ucp",
+      "seq": 15200207,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "box"
+      ],
+      "command": "printf 'k\\ns\\nK\\n\\305\\277\\n\\342\\204\\252\\n\\303\\251\\n-\\n' | rg -iP '^[^[:lower:]]$'",
+      "expect": {
+        "exit": 0,
+        "stdout": "K\nK\n-\n",
+        "stderr": ""
+      },
+      "flags": [
+        "pcre2",
+        "ignore_case"
+      ]
     }
   ]
 }

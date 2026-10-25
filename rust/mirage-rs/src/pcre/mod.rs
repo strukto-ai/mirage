@@ -45,13 +45,16 @@ fn build(source: &str, bytes: bool, limit: usize) -> Result<Regex, fancy_regex::
         .build()
 }
 
-/// The characters PCRE2 reads `pattern` as: one per byte without UTF,
-/// else the UTF-8 characters (an invalid byte stands for itself).
-pub(crate) fn pattern_chars(pattern: &[u8], bytes: bool) -> Vec<char> {
+/// The characters PCRE2 reads `pattern` as: one per byte without UTF, else
+/// its UTF-8 characters, refused in PCRE2's words when it is not UTF-8.
+pub(crate) fn pattern_chars(pattern: &[u8], bytes: bool) -> Result<Vec<char>, PcreError> {
     if bytes {
-        return pattern.iter().map(|&b| char::from(b)).collect();
+        return Ok(pattern.iter().map(|&b| char::from(b)).collect());
     }
-    String::from_utf8_lossy(pattern).chars().collect()
+    if let Some(message) = translate::utf8_error(pattern) {
+        return Err(PcreError { message, offset: 0 });
+    }
+    Ok(String::from_utf8_lossy(pattern).chars().collect())
 }
 
 impl Pcre {

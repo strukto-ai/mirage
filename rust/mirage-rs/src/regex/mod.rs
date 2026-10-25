@@ -417,7 +417,7 @@ impl Regex {
             return Err(PERL_SINGLE.to_string());
         };
         let bytes = !options.utf8;
-        let mut chars = pcre::pattern_chars(pattern, bytes);
+        let mut chars = pcre::pattern_chars(pattern, bytes).map_err(|err| err.message)?;
         if options.word && !options.line {
             chars = "(?<!\\w)(?:"
                 .chars()

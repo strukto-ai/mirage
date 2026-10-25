@@ -277,7 +277,8 @@ impl Program {
             crlf: options.crlf && options.multiline,
             whole_line: false,
         };
-        let chars = pcre::pattern_chars(display.as_bytes(), mode.bytes);
+        let chars = pcre::pattern_chars(display.as_bytes(), mode.bytes)
+            .map_err(|err| StreamError::new(err.message))?;
         let compiled = Pcre::new(&chars, mode).map_err(|err| {
             let offset = if mode.bytes {
                 err.offset

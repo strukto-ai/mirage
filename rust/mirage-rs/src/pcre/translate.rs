@@ -441,12 +441,6 @@ impl Translator {
         self.atom(piece, (1, Some(1)));
     }
 
-    fn set_atom(&mut self, cs: &CharSet) {
-        let folded = self.caseless(cs);
-        let piece = self.class_piece(&folded);
-        self.atom(piece, (1, Some(1)));
-    }
-
     /// A set folded when `i` is in force: by Unicode over UTF-8, by
     /// ASCII over bytes.
     fn caseless(&self, cs: &CharSet) -> CharSet {
@@ -940,7 +934,8 @@ impl Translator {
             return Ok(());
         }
         if let Some(cs) = self.class_escape(ch)? {
-            self.set_atom(&cs);
+            let piece = self.class_piece(&cs);
+            self.atom(piece, (1, Some(1)));
             return Ok(());
         }
         let cp = self.char_escape(ch, false)?;
@@ -1174,6 +1169,14 @@ impl Translator {
         let Some(cs) = charset::pcre_property(bare) else {
             return Err(self.fail(unsupported(&format!("\\p{{{name}}}")), None));
         };
+        let cased = ["Lu", "Ll", "Lt"]
+            .iter()
+            .any(|each| charset::category(each).ranges() == cs.ranges());
+        let cs = if self.flags.i && cased {
+            charset::category("LC")
+        } else {
+            cs
+        };
         Ok(if negated { cs.negate() } else { cs })
     }
 
@@ -1297,6 +1300,7 @@ impl Translator {
             self.pos += 1;
         }
         let mut cs = CharSet::default();
+        let mut fixed = CharSet::default();
         let mut first = true;
         loop {
             if self.flags.xx {
@@ -1328,7 +1332,7 @@ impl Translator {
                 continue;
             }
             if let Some(posix) = self.posix_class()? {
-                cs = cs.union(&posix);
+                fixed = fixed.union(&posix);
                 continue;
             }
             let low = self.class_char()?;
@@ -1338,7 +1342,7 @@ impl Translator {
                     if ranged && !self.starts_with(self.pos + 1, "\\E") {
                         return Err(self.fail(RANGE_BAD, Some(self.pos + 1)));
                     }
-                    cs = cs.union(&set);
+                    fixed = fixed.union(&set);
                     continue;
                 }
                 Member::Char(low) => low,
@@ -1360,7 +1364,7 @@ impl Translator {
             }
             cs = cs.union(&CharSet::of(&[(low, high)]));
         }
-        let cs = self.caseless(&cs);
+        let cs = self.caseless(&cs).union(&fixed);
         Ok(if negated { cs.negate() } else { cs })
     }
 
@@ -1394,6 +1398,11 @@ impl Translator {
             return Err(self.fail(POSIX_UNKNOWN, Some(close + 2)));
         };
         self.pos = close + 2;
+        let cs = if self.flags.i && !self.mode.unicode {
+            charset::fold(&cs, true)
+        } else {
+            cs
+        };
         Ok(Some(if negated { cs.negate() } else { cs }))
     }
 
@@ -1650,6 +1659,79 @@ fn has_inline_case(pattern: &[char]) -> bool {
     })
 }
 
+/// A set the pattern names that case folding leaves alone (a type escape,
+/// a property, a word boundary or a POSIX class), so the whole pattern
+/// cannot fold outside the translation.
+fn has_fixed_set(pattern: &[char]) -> bool {
+    pattern
+        .windows(2)
+        .any(|pair| (pair[0] == '\\' && "dDsSwWhHvVpPbB".contains(pair[1])) || pair == ['[', ':'])
+}
+
+/// The first sequence of `pattern` that is not UTF-8, worded as PCRE2's
+/// check of a UTF pattern words it.
+pub(crate) fn utf8_error(pattern: &[u8]) -> Option<String> {
+    let mut at = 0;
+    while at < pattern.len() {
+        let lead = pattern[at];
+        at += 1;
+        if lead < 0x80 {
+            continue;
+        }
+        if lead < 0xC0 {
+            return Some("UTF-8 error: isolated byte with 0x80 bit set".into());
+        }
+        if lead >= 0xFE {
+            return Some("UTF-8 error: illegal byte (0xfe or 0xff)".into());
+        }
+        let extra = match lead {
+            0xC0..=0xDF => 1,
+            0xE0..=0xEF => 2,
+            0xF0..=0xF7 => 3,
+            0xF8..=0xFB => 4,
+            _ => 5,
+        };
+        let left = pattern.len() - at;
+        if left < extra {
+            let missing = extra - left;
+            let plural = if missing == 1 { "" } else { "s" };
+            return Some(format!(
+                "UTF-8 error: {missing} byte{plural} missing at end"
+            ));
+        }
+        let tail = &pattern[at..at + extra];
+        if let Some(k) = tail.iter().position(|&b| b & 0xC0 != 0x80) {
+            return Some(format!("UTF-8 error: byte {} top bits not 0x80", k + 2));
+        }
+        let second = tail[0];
+        let overlong = match extra {
+            1 => lead & 0x3E == 0,
+            2 => lead == 0xE0 && second & 0x20 == 0,
+            3 => lead == 0xF0 && second & 0x30 == 0,
+            4 => lead == 0xF8 && second & 0x38 == 0,
+            _ => lead == 0xFC && second & 0x3C == 0,
+        };
+        if overlong {
+            return Some(format!("UTF-8 error: overlong {}-byte sequence", extra + 1));
+        }
+        match extra {
+            2 if lead == 0xED && second >= 0xA0 => {
+                return Some("UTF-8 error: code points 0xd800-0xdfff are not defined".into());
+            }
+            3 if lead > 0xF4 || (lead == 0xF4 && second > 0x8F) => {
+                return Some(
+                    "UTF-8 error: code points greater than 0x10ffff are not defined".into(),
+                );
+            }
+            4 => return Some("UTF-8 error: 5-byte character is not allowed (RFC 3629)".into()),
+            5 => return Some("UTF-8 error: 6-byte character is not allowed (RFC 3629)".into()),
+            _ => {}
+        }
+        at += extra;
+    }
+    None
+}
+
 /// Translate a PCRE2 pattern, given as the characters PCRE2 reads.
 pub(crate) fn translate(pattern: &[char], mode: Mode) -> Result<Translated, PcreError> {
     let flags = Flags {
@@ -1658,7 +1740,7 @@ pub(crate) fn translate(pattern: &[char], mode: Mode) -> Result<Translated, Pcre
         s: mode.dotall,
         ..Flags::default()
     };
-    let folded = mode.ignore_case && !has_inline_case(pattern);
+    let folded = mode.ignore_case && !has_inline_case(pattern) && !has_fixed_set(pattern);
     let mut translator = Translator::new(pattern.to_vec(), mode, flags);
     translator.folded = folded;
     let mut translated = translator.translate()?;
