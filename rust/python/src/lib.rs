@@ -1,3 +1,5 @@
+mod shell;
+
 use pyo3::create_exception;
 use pyo3::exceptions::PyException;
 use pyo3::prelude::*;
@@ -211,6 +213,8 @@ impl NFSServer {
 fn mirage_rs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Stream>()?;
     m.add_class::<NFSServer>()?;
+    m.add_class::<shell::ShellTree>()?;
+    m.add_class::<shell::ShellNode>()?;
     m.add("StreamError", m.py().get_type::<StreamError>())?;
     Ok(())
 }

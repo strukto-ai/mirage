@@ -80,6 +80,13 @@ export function compiledModule(): Promise<WebAssembly.Module> {
   return compiled
 }
 
+/** The compiled module, compiled now if no one has yet, for a caller that cannot wait. */
+export function moduleSync(): WebAssembly.Module {
+  compiledSync ??= new WebAssembly.Module(decodeBase64(MIRAGE_RS_WASM) as BufferSource)
+  compiled ??= Promise.resolve(compiledSync)
+  return compiledSync
+}
+
 /** Run on the module the page compiled: a browser worker's bundle leaves the bytes out. */
 export function adoptModule(module: WebAssembly.Module): void {
   compiledSync ??= module
@@ -367,9 +374,7 @@ export function openStreamSync(
   config: Readonly<Record<string, util.JSONType>>,
   movable = false,
 ): OpenStream {
-  compiledSync ??= new WebAssembly.Module(decodeBase64(MIRAGE_RS_WASM) as BufferSource)
-  compiled ??= Promise.resolve(compiledSync)
-  synchronous ??= new WebAssembly.Instance(compiledSync, {}).exports as unknown as Exports
+  synchronous ??= new WebAssembly.Instance(moduleSync(), {}).exports as unknown as Exports
   return open(synchronous, kind, config, movable)
 }
 

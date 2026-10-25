@@ -37,6 +37,7 @@ mod rg_grapheme;
 mod rg_matcher;
 mod sed;
 mod seq;
+pub mod shell;
 mod sort;
 mod split;
 mod strings;

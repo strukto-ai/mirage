@@ -113,6 +113,20 @@
     "Exports": "The raw ABI mirage-rs-wasm exports for its NFS server; the NFS engine runs on a wasm instance of its own; Python imports mirage-rs as a native PyO3 module, so it has no instance to compile."
    }
   },
+  "rs/shell": {
+   "typescript_only": {
+    "RECYCLE_BYTES": "The wasm instance loader and its node table's layout; Python imports mirage-rs as a native PyO3 module, so it has no instance to compile, read or recycle.",
+    "ShellTree": "Python's tree and node are mirage-rs's own PyO3 classes (mirage._rs.ShellTree and ShellNode); TypeScript wraps the wasm node table in classes of its own.",
+    "ShellTreeNode": "Python's tree and node are mirage-rs's own PyO3 classes (mirage._rs.ShellTree and ShellNode); TypeScript wraps the wasm node table in classes of its own.",
+    "WORDS": "The wasm instance loader and its node table's layout; Python imports mirage-rs as a native PyO3 module, so it has no instance to compile, read or recycle.",
+    "bytesAt": "The wasm instance loader and its node table's layout; Python imports mirage-rs as a native PyO3 module, so it has no instance to compile, read or recycle.",
+    "exports": "The wasm instance loader and its node table's layout; Python imports mirage-rs as a native PyO3 module, so it has no instance to compile, read or recycle.",
+    "fields": "The wasm instance loader and its node table's layout; Python imports mirage-rs as a native PyO3 module, so it has no instance to compile, read or recycle.",
+    "instance": "The wasm instance loader and its node table's layout; Python imports mirage-rs as a native PyO3 module, so it has no instance to compile, read or recycle.",
+    "kinds": "The wasm instance loader and its node table's layout; Python imports mirage-rs as a native PyO3 module, so it has no instance to compile, read or recycle.",
+    "trees": "The wasm instance loader and its node table's layout; Python imports mirage-rs as a native PyO3 module, so it has no instance to compile, read or recycle."
+   }
+  },
   "rs/stream": {
    "typescript_only": {
     "Exports": "The raw ABI mirage-rs-wasm exports; the wasm instance loader; Python imports mirage-rs as a native PyO3 module, so it has no instance to compile, size or recycle.",
@@ -124,6 +138,7 @@
     "compiledSync": "Caches the embedded Wasm module for synchronous pure utilities; Python loads its native extension.",
     "compiledModule": "Hands the compiled module to the browser workers a page starts without a copy; Python imports mirage-rs as a native PyO3 module, so it has no module to compile or share.",
     "adoptModule": "Runs a browser worker on the module its page compiled; Python imports mirage-rs as a native PyO3 module, so it has no module to compile or share.",
+    "moduleSync": "Compiles the module for a caller that cannot wait, as the shell parser's own instance does; Python imports mirage-rs as a native PyO3 module, so it has no module to compile.",
     "open": "Shares Wasm argument allocation between asynchronous and synchronous stream openers; Python constructs the native stream directly.",
     "openStreamSync": "Synchronous pure utilities lazily initialize embedded Wasm; Python native streams open synchronously.",
     "synchronous": "Shares the current embedded Wasm instance between synchronous utilities and asynchronous command streams.",
