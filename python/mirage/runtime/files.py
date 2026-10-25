@@ -669,6 +669,7 @@ class RuntimeFiles:
 
     def write(self, path: str, data: bytes) -> None:
         self.call("write", path, data=data)
+        self._restat(path)
 
     def stat(self, path: str, *, nofollow: bool = False) -> VFSStat:
         """One path's metadata, projected for a guest encoder.
@@ -981,6 +982,18 @@ class RuntimeFiles:
             mtime=mtime,
             nofollow=nofollow,
         )
+        self._restat(path, not nofollow)
+
+    def _restat(self, path: str, follow: bool = True) -> None:
+        """Have the files open on ``path`` stat it afresh after a change
+        by path that went past the core.
+
+        Args:
+            path (str): guest-absolute virtual path.
+            follow (bool): the change followed a link at ``path``.
+        """
+        if self._core is not None:
+            self._on_core(lambda core: core.restat(path, follow))
 
     def append(self, path: str, data: bytes) -> None:
         """Extend `path` by `data`, falling back to a whole-file write.
@@ -1000,6 +1013,7 @@ class RuntimeFiles:
             data (bytes): only the newly appended bytes.
         """
         if self._append_delta(path, data):
+            self._restat(path)
             return
         try:
             whole = self.read(path, raw=True, direct=True) + data

@@ -1146,9 +1146,7 @@ class MountCore:
                     nofollow=not follow,
                 )
             )
-            for ctx in self._open_on(key):
-                ctx.row = None
-                ctx.restats += 1
+            self._restat(key)
 
         await (self._mutate(key, run) if timed else run())
 
@@ -1299,6 +1297,28 @@ class MountCore:
         """
         key = self.identity(path, follow)
         await self._mutate(key, lambda: self._land_buffered(key))
+
+    async def restat(self, path: str, follow: bool = True) -> None:
+        """Have the handles open on ``path`` stat it afresh, after a
+        change by path made past the core (a runtime's setattr or
+        whole-file write), so their next fstat agrees with stat.
+
+        Args:
+            path (str): mount path that changed.
+            follow (bool): the change followed a link at ``path``.
+        """
+        self._restat(self.identity(path, follow))
+
+    def _restat(self, key: str) -> None:
+        """Drop the stat rows the handles open on ``key`` keep, and
+        outdate a stat of theirs still out.
+
+        Args:
+            key (str): the file identity.
+        """
+        for ctx in self._open_on(key):
+            ctx.row = None
+            ctx.restats += 1
 
     async def _land_buffered(self, key: str) -> None:
         """Land the buffered writes of every handle open on ``key``.
@@ -1782,9 +1802,7 @@ class MountCore:
             rehydrate (bool): refresh the handles open on the file.
         """
         key = self.identity(path, follow=rehydrate)
-        for ctx in self._open_on(key):
-            ctx.row = None
-            ctx.restats += 1
+        self._restat(key)
         for view in ((key, True), (key, False)):
             if view in self._hydrations:
                 self._hydration_gen[view] = (

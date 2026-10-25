@@ -18,13 +18,16 @@ import logging
 
 import pytest
 
+from mirage import MountMode, Workspace
 from mirage.errors.types import OperationNotSupportedError
 from mirage.runtime.constants import LISTING_ENTRY_CONCURRENCY
 from mirage.runtime.errors import CrossMountError
 from mirage.runtime.files import RuntimeFiles
+from mirage.runtime.handles import parse_mode
 from mirage.runtime.resolver import PrefixResolver
 from mirage.runtime.types import VFSEntry, VFSStat
 from mirage.types import DEVICE_NUMBERS_KEY, ContentType, FileStat, FileType
+from mirage.utils.dates import ns_to_iso
 from mirage.utils.stat_view import (
     CHAR_MODE,
     DIR_MODE,
@@ -32,6 +35,7 @@ from mirage.utils.stat_view import (
     FILE_MODE,
     LINK_MODE,
 )
+from mirage.vfs.ram import RAMVFS
 
 
 class ListingVFS(RuntimeFiles):
@@ -643,3 +647,34 @@ async def test_readdir_is_one_hop_that_stats_at_most_the_cap_at_once():
     assert [entry.path for entry in entries] == names
     assert peak == LISTING_ENTRY_CONCURRENCY
     assert tasks <= 2 * LISTING_ENTRY_CONCURRENCY + 4
+
+
+@pytest.mark.asyncio
+async def test_an_fstat_sees_a_change_by_path_at_once():
+    # A change by path the guest makes past the core's own ops (os.utime,
+    # chmod, a whole-file write) reaches the files open there at once, as
+    # fstat after utime(2) does.
+    with Workspace({"/data": RAMVFS()}, mode=MountMode.WRITE) as ws:
+        await ws.vfs.write("/data/a.txt", b"abc")
+        files = RuntimeFiles.of(ws.runtime_context().ctx, ws._runtime_binding)
+        assert files is not None
+        fh = await asyncio.to_thread(
+            files.open, "/data/a.txt", parse_mode("r")
+        )
+        try:
+            await asyncio.to_thread(files.fstat, fh)
+            stamp = ns_to_iso(981173106 * 10**9)
+            await asyncio.to_thread(
+                files.setattr, "/data/a.txt", mode=0o600, mtime=stamp
+            )
+            row = await asyncio.to_thread(files.fstat, fh)
+            assert (row.mode & 0o777, row.mtime_ns) == (
+                0o600,
+                981173106 * 10**9,
+            )
+            await asyncio.to_thread(files.write, "/data/a.txt", b"abcdef")
+            assert (await asyncio.to_thread(files.fstat, fh)).size == 6
+            await asyncio.to_thread(files.append, "/data/a.txt", b"gh")
+            assert (await asyncio.to_thread(files.fstat, fh)).size == 8
+        finally:
+            await asyncio.to_thread(files.close, fh)

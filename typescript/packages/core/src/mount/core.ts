@@ -899,10 +899,7 @@ export class MountCore {
    */
   private async changed(path: string, rehydrate = true): Promise<void> {
     const key = this.identity(path, rehydrate)
-    for (const ctx of this.openOn(key)) {
-      delete ctx.row
-      ctx.restats = (ctx.restats ?? 0) + 1
-    }
+    this.restatKey(key)
     for (const view of [MountCore.view(key, true), MountCore.view(key, false)]) {
       if (this.hydrations.has(view)) {
         this.hydrationGen.set(view, (this.hydrationGen.get(view) ?? 0) + 1)
@@ -1118,6 +1115,27 @@ export class MountCore {
     await this.mutate(key, () => this.landBuffered(key))
   }
 
+  /**
+   * Have the handles open on `path` stat it afresh, after a change by path
+   * made past the core (a runtime's setattr or whole-file write), so their
+   * next fstat agrees with stat; `follow` says the change followed a link
+   * at `path`. Mirrors Python's `restat`.
+   */
+  restat(path: string, follow = true): void {
+    this.restatKey(this.identity(path, follow))
+  }
+
+  /**
+   * Drop the stat rows the handles open on `key` keep, and outdate a stat
+   * of theirs still out. Mirrors Python's `_restat`.
+   */
+  private restatKey(key: string): void {
+    for (const ctx of this.openOn(key)) {
+      delete ctx.row
+      ctx.restats = (ctx.restats ?? 0) + 1
+    }
+  }
+
   /** Land the buffered writes of every handle open on `key`. */
   private async landBuffered(key: string): Promise<void> {
     for (const ctx of this.openOn(key)) await this.persistBuffered(ctx)
@@ -1200,10 +1218,7 @@ export class MountCore {
       // writes land first, or they would stamp over them.
       if (timed) await this.landBuffered(key)
       await this.op(() => this.files.setattr(this.resolve(path), fields))
-      for (const ctx of this.openOn(key)) {
-        delete ctx.row
-        ctx.restats = (ctx.restats ?? 0) + 1
-      }
+      this.restatKey(key)
     }
     await (timed ? this.mutate(key, run) : run())
   }

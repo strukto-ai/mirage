@@ -525,6 +525,7 @@ export class RuntimeFiles {
     if (out !== undefined) {
       throw new TypeError(`runtime files: write ${path} expected void, got ${typeof out}`)
     }
+    this.core?.restat(path)
   }
 
   /**
@@ -806,6 +807,8 @@ export class RuntimeFiles {
       if (this.core !== null) await this.onCore((core) => core.land(path, attrs.nofollow !== true))
     }
     await this.dispatch('setattr', path, undefined, undefined, attrs)
+    // The files open there stat it afresh: the change went past the core.
+    this.core?.restat(path, attrs.nofollow !== true)
   }
 
   /**
@@ -831,7 +834,10 @@ export class RuntimeFiles {
    *   tail: only the newly appended bytes.
    */
   async append(path: string, tail: Uint8Array): Promise<void> {
-    if (await this.appendDelta(path, tail)) return
+    if (await this.appendDelta(path, tail)) {
+      this.core?.restat(path)
+      return
+    }
     let base: Uint8Array = new Uint8Array()
     try {
       base = await this.read(path, { raw: true, direct: true })

@@ -135,6 +135,42 @@
           }
         }
       ]
+    },
+    {
+      "id": "a_change_of_times_by_path_shows_in_an_open_files_fstat",
+      "note": "monty has no os.open or os.fstat; quickjs has no fstat.",
+      "runtimes": [
+        "wasi",
+        "pyodide",
+        "host"
+      ],
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "t.txt": "hello\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "program": {
+            "python": "import os\nf = os.open('/data/t.txt', os.O_RDONLY)\nos.fstat(f)\nos.utime('/data/t.txt', (100.0, 200.0))\nprint(os.fstat(f).st_mtime == os.stat('/data/t.txt').st_mtime, int(os.fstat(f).st_mtime))\nos.close(f)",
+            "node": "const fs = require('node:fs').promises\nconst f = await fs.open('/data/t.txt', 'r')\nawait f.stat()\nawait fs.utimes('/data/t.txt', 100, 200)\nconst a = (await f.stat()).mtimeMs\nconsole.log(a === (await fs.stat('/data/t.txt')).mtimeMs, a / 1000)\nawait f.close()"
+          },
+          "expect": {
+            "exit": 0,
+            "stdout": "True 200\n"
+          },
+          "expect_on": {
+            "host@typescript": {
+              "stdout": "true 200\n"
+            }
+          }
+        }
+      ]
     }
   ]
 }
