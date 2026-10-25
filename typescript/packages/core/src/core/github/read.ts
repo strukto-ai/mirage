@@ -16,8 +16,14 @@ import type { GitHubAccessor } from '../../accessor/github.ts'
 import { record, recordStream, startOp } from '../../observe/context.ts'
 import { FileType, type FileStat, type PathSpec, VFSName } from '../../types.ts'
 import { eisdir, enoent } from '../../errors/fs.ts'
+import { sha1Hex } from '../../utils/hash.ts'
 import { stripSlash } from '../../utils/slash.ts'
+import type { Handed } from '../../vfs/types.ts'
 import { fetchBlob, streamBlob } from './client.ts'
+import { BLOB_TEXT } from './constants.ts'
+import { graphqlData } from './repo.ts'
+
+const ENC = new TextEncoder()
 
 /**
  * Read a file's blob and record the sha it was fetched by.
@@ -40,6 +46,65 @@ export async function read(
   const data = await fetchBlob(accessor.account.transport, accessor.owner, accessor.repo, sha)
   record('read', path.virtual, VFSName.GITHUB, data.length, timer, { fingerprint: sha })
   return data
+}
+
+/**
+ * Several files' blobs in one GraphQL query.
+ *
+ * Each blob is asked by the sha its row names, as `read` asks it. GraphQL
+ * hands a blob over as text, so a file is kept only when that text, encoded
+ * as UTF-8, hashes to the sha the way git hashes a blob, which proves the
+ * bytes are the ones a read returns. A binary, truncated or non-UTF-8 blob, a
+ * file past `limit` bytes, and a path with no file row are left out for
+ * their own read. Each file kept is recorded as `read` records it. Mirrors
+ * Python's `read_many`.
+ */
+export async function readMany(
+  accessor: GitHubAccessor,
+  paths: readonly PathSpec[],
+  limit: number,
+  handed: readonly Handed[] = [],
+): Promise<Map<string, Uint8Array>> {
+  const asked = new Map<string, [string, string]>()
+  for (const [i, path] of paths.entries()) {
+    const entry = handed[i]?.entry ?? null
+    if (entry === null || entry.type === FileType.DIRECTORY || (entry.size ?? 0) > limit) continue
+    asked.set(`f${String(asked.size)}`, [path.virtual, String(entry.extra.sha)])
+  }
+  const answers = new Map<string, Uint8Array>()
+  if (asked.size === 0) return answers
+  const aliases = [...asked.keys()]
+  const declared = aliases.map((alias) => `, $${alias}: GitObjectID!`).join('')
+  const fields = aliases
+    .map((alias) => `${alias}: object(oid: $${alias}) { ${BLOB_TEXT} }`)
+    .join(' ')
+  const timer = startOp()
+  const data = await graphqlData(
+    accessor.account.transport,
+    `query($owner: String!, $repo: String!${declared}) ` +
+      `{ repository(owner: $owner, name: $repo) { ${fields} } }`,
+    {
+      owner: accessor.owner,
+      repo: accessor.repo,
+      ...Object.fromEntries([...asked].map(([alias, [, sha]]) => [alias, sha])),
+    },
+  )
+  const blobs = (data.repository ?? {}) as Record<string, unknown>
+  for (const [alias, [virtual, sha]] of asked) {
+    const blob = blobs[alias] as { text?: unknown; isTruncated?: unknown } | null | undefined
+    if (blob === null || blob === undefined || blob.isTruncated === true) continue
+    if (typeof blob.text !== 'string') continue
+    const body = ENC.encode(blob.text)
+    if (body.byteLength > limit) continue
+    const header = ENC.encode(`blob ${String(body.byteLength)}\0`)
+    const framed = new Uint8Array(header.byteLength + body.byteLength)
+    framed.set(header)
+    framed.set(body, header.byteLength)
+    if ((await sha1Hex(framed)) !== sha) continue
+    record('read', virtual, VFSName.GITHUB, body.byteLength, timer, { fingerprint: sha })
+    answers.set(virtual, body)
+  }
+  return answers
 }
 
 /**

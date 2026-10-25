@@ -16,6 +16,7 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 from mirage.accessor.slack import SlackAccessor
+from mirage.core.hierarchy.readdir import held_pages
 from mirage.core.slack.paginate import cursor_pages
 
 
@@ -50,21 +51,23 @@ async def list_channels(
     accessor: SlackAccessor,
     types: str = "public_channel,private_channel",
     limit: int = 200,
+    stop_at: int | None = None,
 ) -> list[dict[str, Any]]:
-    """List channels via conversations.list (eager; collects all pages).
+    """List channels via conversations.list (eager; collects all pages,
+    and none past the one that brings ``stop_at``).
 
     Args:
         accessor (SlackAccessor): Slack accessor.
         types (str): channel types to list.
         limit (int): max per page.
+        stop_at (int | None): the most channels a walk can still keep.
 
     Returns:
         list[dict]: channel metadata dicts.
     """
-    out: list[dict[str, Any]] = []
-    async for page in list_channels_stream(accessor, types=types, limit=limit):
-        out.extend(page)
-    return out
+    return await held_pages(
+        list_channels_stream(accessor, types=types, limit=limit), stop_at
+    )
 
 
 async def list_dms(

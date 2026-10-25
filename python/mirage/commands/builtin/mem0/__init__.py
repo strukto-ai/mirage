@@ -12,8 +12,19 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.builtin.generic.search import make_search
+from mirage.commands.builtin.generic.search import (
+    make_search,
+    semantic_options,
+    unit_threshold,
+)
+from mirage.commands.spec.flag_view import FlagView
+from mirage.types import JsonValue
+
+
+def _options(fl: FlagView) -> dict[str, JsonValue]:
+    return {**semantic_options(fl), "threshold": unit_threshold(fl)}
+
 
 COMMANDS = [
-    make_search("mem0"),
+    make_search("mem0", _options),
 ]

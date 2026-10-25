@@ -83,6 +83,18 @@ async def test_pagination_and_no_shared_cursor() -> None:
     ] == [None, "next", None]
 
 
+# A walk's limit stops the paging at the page that brings that many, even
+# under a page budget the whole listing would pass.
+@pytest.mark.asyncio
+async def test_a_walks_limit_pages_no_further() -> None:
+    client = WandbClient(
+        WandbConfig(entities=["lab"], page_size=1, max_pages=1), SessionPool()
+    )
+    client.request = AsyncMock(return_value=connection("next", True))
+    assert len(await client.projects("lab", 1)) == 1
+    assert client.request.call_count == 1
+
+
 @pytest.mark.asyncio
 async def test_repeated_cursor_fails() -> None:
     client = WandbClient(WandbConfig(entities=["lab"]), SessionPool())

@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { SlackAccessor } from '../../accessor/slack.ts'
+import { heldPages } from '../hierarchy/readdir.ts'
 import { cursorPages } from './paginate.ts'
 import { compactJsonBytes } from '../render/json.ts'
 
@@ -47,13 +48,9 @@ export async function* listUsersStream(
 
 export async function listUsers(
   accessor: SlackAccessor,
-  options: { limit?: number } = {},
+  options: { limit?: number; stopAt?: number | undefined } = {},
 ): Promise<SlackUser[]> {
-  const out: SlackUser[] = []
-  for await (const page of listUsersStream(accessor, options)) {
-    out.push(...page)
-  }
-  return out
+  return heldPages(listUsersStream(accessor, options), options.stopAt)
 }
 
 // The single renderer behind both read and the readdir-time size.

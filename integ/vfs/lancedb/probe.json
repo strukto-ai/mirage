@@ -51,6 +51,19 @@
         "stdout": "",
         "stderr": "sed: -i not supported on this backend: Permission denied\n"
       }
+    },
+    {
+      "id": "lancedb_search_option_refusals",
+      "seq": 650040,
+      "targets": [
+        "lancedb"
+      ],
+      "command": "search --top-k 0 dog /db/animals; echo rc=$?; search --top-k many dog /db/animals; echo rc=$?; search --threshold high dog /db/animals; echo rc=$?; search --bogus dog /db/animals; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=2\nrc=2\nrc=2\nrc=2\n",
+        "stderr": "search: top-k must be positive\nsearch: invalid int value: 'many' for '--top-k'\nTry 'search --help' for more information.\nsearch: invalid float value: 'high' for '--threshold'\nTry 'search --help' for more information.\nsearch: unrecognized option '--bogus'\nTry 'search --help' for more information.\n"
+      }
     }
   ]
 }

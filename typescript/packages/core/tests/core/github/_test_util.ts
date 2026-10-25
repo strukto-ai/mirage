@@ -171,6 +171,8 @@ export class FakeGitHub {
   // The shallow tree of `ref` waits on it before answering, while other
   // requests are served.
   holdDir: Promise<void> | null = null
+  // The most bytes of a blob GraphQL answers as text.
+  graphqlTextLimit = 1 << 20
   readonly log: [string, string][] = []
   readonly history = new Map<string, Snapshot>()
   readonly trees = new Map<string, [Snapshot, string]>()
@@ -373,6 +375,36 @@ export class FakeGitHub {
     return json(200, { sha, size: data.length, encoding: 'base64', content: btoa(binary) })
   }
 
+  // GraphQL answers a repository's `object(oid:)` aliases with each blob's
+  // text, which is not measured: a blob that is not UTF-8 comes back with
+  // each bad byte replaced, and `isTruncated` is set past `graphqlTextLimit`
+  // bytes, its text cut there.
+  private async graphql(body: unknown): Promise<Response> {
+    const variables = (body as { variables: Record<string, string> }).variables
+    const oids = Object.entries(variables).filter(([k]) => k !== 'owner' && k !== 'repo')
+    this.log.push(['graphql', oids.map(([, sha]) => sha).join(',')])
+    const refused = this.refused('graphql')
+    if (refused !== null) return refused
+    for (const data of this.files.values()) {
+      const known = await blobSha(data)
+      if (!this.blobs.has(known)) this.blobs.set(known, data)
+    }
+    const objects: Record<string, unknown> = {}
+    for (const [alias, sha] of oids) {
+      const data = this.blobs.get(sha)
+      if (data === undefined) {
+        objects[alias] = null
+        continue
+      }
+      const cut = data.subarray(0, this.graphqlTextLimit)
+      objects[alias] = {
+        text: new TextDecoder().decode(cut),
+        isTruncated: cut.byteLength < data.byteLength,
+      }
+    }
+    return json(200, { data: { repository: objects } })
+  }
+
   // Code search reads `q` the way the REST endpoint does: the words
   // outside `repo:` and `path:` must each appear as a whole word, in any
   // case, in a file under 384 KB below `path:`; one page of `per_page`
@@ -422,6 +454,7 @@ export class FakeGitHub {
     if (blob !== null)
       return this.blob(blob[1] ?? '', (req.headers.get('accept') ?? '').includes('raw'))
     if (path === '/search/code') return this.searchCode(url)
+    if (path === '/graphql' && req.method === 'POST') return this.graphql(await req.json())
     throw new Error(`FakeGitHub: unrouted ${req.method} ${req.url}`)
   }
 }

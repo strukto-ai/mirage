@@ -66,7 +66,11 @@ class WandbClient:
         return data
 
     async def pages(
-        self, query: str, variables: Mapping[str, Any], keys: tuple[str, ...]
+        self,
+        query: str,
+        variables: Mapping[str, Any],
+        keys: tuple[str, ...],
+        limit: int | None = None,
     ) -> list[dict[str, Any]]:
         cursor = None
         seen: set[str] = set()
@@ -87,18 +91,29 @@ class WandbClient:
             rows.extend(edge["node"] for edge in data["edges"])
             if not data["pageInfo"]["hasNextPage"]:
                 return rows
+            if limit is not None and len(rows) >= limit:
+                return rows
             cursor = data["pageInfo"]["endCursor"]
             if not cursor or cursor in seen:
                 raise WandbAPIError("W&B pagination did not advance")
             seen.add(cursor)
         raise WandbAPIError("W&B pagination limit exceeded")
 
-    async def projects(self, entity: str) -> list[dict[str, Any]]:
-        return await self.pages(PROJECTS, {"entity": entity}, ("models",))
-
-    async def runs(self, entity: str, project: str) -> list[dict[str, Any]]:
+    async def projects(
+        self, entity: str, limit: int | None = None
+    ) -> list[dict[str, Any]]:
         return await self.pages(
-            RUNS, {"entity": entity, "project": project}, ("project", "runs")
+            PROJECTS, {"entity": entity}, ("models",), limit
+        )
+
+    async def runs(
+        self, entity: str, project: str, limit: int | None = None
+    ) -> list[dict[str, Any]]:
+        return await self.pages(
+            RUNS,
+            {"entity": entity, "project": project},
+            ("project", "runs"),
+            limit,
         )
 
     async def run(self, variables: RunVariables, query: str = RUN) -> Run:

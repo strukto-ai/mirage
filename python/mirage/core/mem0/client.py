@@ -22,13 +22,16 @@ async def get_all_memories(
     client: AsyncMemoryClient,
     filters: dict[str, str],
     page_size: int = 100,
+    limit: int | None = None,
 ) -> list[dict[str, Any]]:
-    """Fetch all memories for a scope, following pagination.
+    """Fetch all memories for a scope, following pagination, and no page
+    past the one that brings ``limit`` memories.
 
     Args:
         client (AsyncMemoryClient): mem0 async client.
         filters (dict): mem0 entity filter, e.g. {"user_id": "alex"}.
         page_size (int): page size per request.
+        limit (int | None): the most memories a walk can still keep.
     """
     results: list[dict[str, Any]] = []
     page = 1
@@ -42,6 +45,8 @@ async def get_all_memories(
         batch = resp.get("results", [])
         results.extend(batch)
         if not resp.get("next") or not batch:
+            break
+        if limit is not None and len(results) >= limit:
             break
         page += 1
     return results

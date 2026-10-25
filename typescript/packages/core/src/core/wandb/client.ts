@@ -31,7 +31,12 @@ export class WandbClient {
       throw new WandbAPIError('W&B response has no data')
     return result.data
   }
-  async pages<T>(query: string, variables: Record<string, unknown>, keys: string[]): Promise<T[]> {
+  async pages<T>(
+    query: string,
+    variables: Record<string, unknown>,
+    keys: string[],
+    limit?: number,
+  ): Promise<T[]> {
     let cursor: string | null = null
     const seen = new Set<string>()
     const rows: T[] = []
@@ -48,17 +53,18 @@ export class WandbClient {
       const connection = data as Connection<T>
       rows.push(...connection.edges.map((edge) => edge.node))
       if (!connection.pageInfo.hasNextPage) return rows
+      if (limit !== undefined && rows.length >= limit) return rows
       cursor = connection.pageInfo.endCursor
       if (!cursor || seen.has(cursor)) throw new WandbAPIError('W&B pagination did not advance')
       seen.add(cursor)
     }
     throw new WandbAPIError('W&B pagination limit exceeded')
   }
-  projects(entity: string): Promise<Named[]> {
-    return this.pages(PROJECTS, { entity }, ['models'])
+  projects(entity: string, limit?: number): Promise<Named[]> {
+    return this.pages(PROJECTS, { entity }, ['models'], limit)
   }
-  runs(entity: string, project: string): Promise<Named[]> {
-    return this.pages(RUNS, { entity, project }, ['project', 'runs'])
+  runs(entity: string, project: string, limit?: number): Promise<Named[]> {
+    return this.pages(RUNS, { entity, project }, ['project', 'runs'], limit)
   }
   async run(variables: RunVariables, query = RUN): Promise<Run> {
     const data = await this.request<{ project: { run: Run | null } | null }>(query, {

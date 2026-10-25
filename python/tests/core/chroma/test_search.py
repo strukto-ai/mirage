@@ -1,7 +1,7 @@
 import pytest
 
 from mirage.core.chroma import search
-from mirage.types import PathSpec
+from mirage.types import PathSpec, SearchQuery
 from mirage.utils.key_prefix import mount_key
 
 
@@ -97,3 +97,22 @@ async def test_files_containing_asks_only_the_walked_pages_below_the_root(
     assert chroma_accessor.collection.get_calls[-1]["where"] == {
         "page_slug": {"$in": ["api/reference"]}
     }
+
+
+@pytest.mark.asyncio
+async def test_search_segments_drops_a_hit_scored_below_the_threshold(
+    chroma_accessor,
+):
+    result = await search.search_segments(
+        chroma_accessor, "setup", [], mount_prefix="/knowledge/", threshold=0.8
+    )
+
+    assert [path for path, _ in result] == ["/knowledge/guides/quickstart"]
+
+
+@pytest.mark.asyncio
+async def test_search_many_refuses_any_method_but_semantic(chroma_accessor):
+    with pytest.raises(ValueError, match="only the 'semantic' method"):
+        await search.search_many(
+            chroma_accessor, [], SearchQuery("setup", {"method": "hybrid"})
+        )

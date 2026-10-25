@@ -51,7 +51,7 @@ export class WandbVFS extends BaseVFS {
   }
 
   override readdir(path: PathSpec, handed?: Handed): Promise<FileStat[] | DirListing> {
-    return readdir(this.accessor, path, handed?.index)
+    return readdir(this.accessor, path, handed?.index, handed?.limit)
   }
 
   // eslint-disable-next-line @typescript-eslint/require-await

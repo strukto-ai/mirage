@@ -20,6 +20,7 @@ vi.mock('../../core/chroma/client.ts', async () => {
   return { ...actual, fetchPathTree: vi.fn() }
 })
 
+import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import * as clientMod from '../../core/chroma/client.ts'
 import { DEFAULT_READ_TTL, MountMode, ReadPolicy, type FileStat } from '../../types.ts'
 import { Mount } from '../../workspace/mount/spec.ts'
@@ -87,6 +88,41 @@ describe('chroma stat through a mount', () => {
       const names = await ws.readdir('/knowledge/guides')
       for (const name of names) expect(((await ws.stat(name)) as FileStat).size).toBe(0)
       expect(scans).toHaveLength(1)
+    } finally {
+      await ws.close()
+    }
+  })
+})
+
+describe('chroma-query refusals', () => {
+  it.each([
+    [
+      'chroma-query --top-k many refunds /knowledge',
+      "chroma-query: invalid int value: 'many' for '--top-k'\n" +
+        "Try 'chroma-query --help' for more information.\n",
+    ],
+    [
+      'chroma-query --bogus refunds /knowledge',
+      "chroma-query: unrecognized option '--bogus'\n" +
+        "Try 'chroma-query --help' for more information.\n",
+    ],
+    ['chroma-query --top-k 0 refunds /knowledge', 'search: top-k must be positive\n'],
+    [
+      'chroma-query --method keyword refunds /knowledge',
+      "search: only the 'semantic' method is supported\n",
+    ],
+  ])('refuses %s before asking chroma', async (cmd, stderr) => {
+    const vfs = new ChromaVFS({ collectionName: 'docs' })
+    const asked = vi.spyOn(vfs.accessor, 'getCollection')
+    const ws = new Workspace(
+      { '/knowledge': new Mount(vfs, { mode: MountMode.READ }) },
+      { shellParser: await getTestParser() },
+    )
+    try {
+      const result = await ws.shell(cmd)
+      expect(result.exitCode).toBe(2)
+      expect(result.stderrText).toBe(stderr)
+      expect(asked).not.toHaveBeenCalled()
     } finally {
       await ws.close()
     }

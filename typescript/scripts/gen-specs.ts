@@ -346,13 +346,12 @@ function emitVfsNames(
   console.log(`emitted ${payload.registry.length} registry names to ${path}`)
 }
 
-// Every registered command SPECS does not declare. A backend verb
-// (`chroma-query`) carries its spec inline, so the SPECS loop never sees it and
-// the parity gate could not tell a flag one language dropped. Each name gets
-// the spec its registrations share; two registrations of one name with
-// different specs is itself a failure. The directory is rewritten whole so a
-// removed verb leaves no file behind. Mirrors `_emit_vfs_commands` in
-// scripts/gen_specs.py.
+// Every registered command SPECS does not declare. A backend verb carries its
+// spec inline, so the SPECS loop never sees it and the parity gate could not
+// tell a flag one language dropped. Each name gets the spec its registrations
+// share; two registrations of one name with different specs is itself a
+// failure. The directory is rewritten whole so a removed verb leaves no file
+// behind. Mirrors `_emit_vfs_commands` in scripts/gen_specs.py.
 function emitVfsCommands(name: string, registry: Record<string, Command[]>): void {
   const outDir = resolve(SPEC_ROOT, name, 'vfs_commands')
   rmSync(outDir, { recursive: true, force: true })

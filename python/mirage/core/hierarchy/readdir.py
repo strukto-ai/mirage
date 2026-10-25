@@ -12,14 +12,17 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from dataclasses import replace
-from typing import Any, Literal
+from typing import Any, Literal, TypeVar
 
 from mirage.core.hierarchy.probe import A, ReaddirFn
 from mirage.core.hierarchy.scope import INVALID, ROOT, DetectFn, ScopeMatch
 from mirage.errors.fs import enoent, enotdir
+from mirage.io.stream import close_quietly
 from mirage.types import ContentType, DirListing, FileStat, FileType, PathSpec
+
+T = TypeVar("T")
 
 Listed = list[FileStat] | DirListing
 Lister = Callable[[A, ScopeMatch], Awaitable["Listed | None"]]
@@ -27,6 +30,40 @@ EntryLister = Callable[[A, ScopeMatch, FileStat], Awaitable[Listed]]
 Guard = Callable[[A, ScopeMatch, str], Awaitable[None]]
 PatternTest = Callable[[str], bool]
 ExtraFn = Callable[[ScopeMatch], dict[str, str]]
+
+
+async def held_pages(
+    pages: AsyncIterator[list[T]], limit: int | None
+) -> list[T]:
+    """What a paged listing's pages hold, and no page past the one that
+    brings ``limit`` rows; the pages are closed there.
+
+    Args:
+        pages (AsyncIterator[list[T]]): the listing's pages, in order.
+        limit (int | None): the most rows a walk can still keep.
+    """
+    held: list[T] = []
+    try:
+        async for page in pages:
+            held.extend(page)
+            if limit is not None and len(held) >= limit:
+                break
+    finally:
+        await close_quietly(pages)
+    return held
+
+
+def cut_listing(rows: list[FileStat], limit: int | None) -> Listed:
+    """A paged listing's rows, partial once they reach a walk's ``limit``:
+    its lister stopped paging there, so a row past them may exist.
+
+    Args:
+        rows (list[FileStat]): the rows the pages held.
+        limit (int | None): the most entries the walk can still keep.
+    """
+    if limit is not None and len(rows) >= limit:
+        return DirListing(rows, partial=True)
+    return rows
 
 
 def make_readdir(
@@ -55,7 +92,8 @@ def make_readdir(
     A lister may answer None instead of a listing: the directory's
     container does not exist, reported as ENOENT on the virtual path.
     A lister may answer a ``DirListing`` to seed descendant listings its
-    fetch already proved, or to mark a view or a window.
+    fetch already proved, or to mark a view or a window. A walk's
+    ``limit`` reaches every lister in ``ScopeMatch.limit``.
 
     An entry lister is for a directory whose existence and contents are
     already proven by its parent's listing: it is handed the row that
@@ -136,6 +174,7 @@ def make_readdir(
         path_spec: PathSpec,
         entry: FileStat | None = None,
         parent: FileStat | None = None,
+        limit: int | None = None,
     ) -> list[FileStat] | DirListing:
         virtual = path_spec.virtual
         path = (path_spec.dir if path_spec.pattern else path_spec).mount_path
@@ -150,6 +189,8 @@ def make_readdir(
             and pushable(path_spec.pattern)
         ):
             match = replace(match, pattern=path_spec.pattern)
+        if limit is not None:
+            match = replace(match, limit=limit)
         if match.kind == ROOT and static_root is not None:
             return shown(
                 [

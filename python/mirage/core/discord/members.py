@@ -18,6 +18,7 @@ from typing import Any, cast
 from mirage.accessor.discord import DiscordAccessor
 from mirage.core.discord.client import discord_get
 from mirage.core.discord.paginate import after_id_pages
+from mirage.core.hierarchy.readdir import held_pages
 
 
 def _member_user_id(m: dict[str, Any]) -> str:
@@ -50,22 +51,26 @@ def list_members_stream(
 
 
 async def list_members(
-    accessor: DiscordAccessor, guild_id: str, page_size: int = 1000
+    accessor: DiscordAccessor,
+    guild_id: str,
+    page_size: int = 1000,
+    stop_at: int | None = None,
 ) -> list[dict[str, Any]]:
-    """List all guild members (paginated).
+    """List all guild members (paginated), and no page past the one that
+    brings ``stop_at``.
 
     Args:
         accessor (DiscordAccessor): Discord accessor.
         guild_id (str): guild ID.
         page_size (int): per-page limit.
+        stop_at (int | None): the most members a walk can still keep.
 
     Returns:
         list[dict]: member dicts.
     """
-    out: list[dict[str, Any]] = []
-    async for page in list_members_stream(accessor, guild_id, page_size):
-        out.extend(page)
-    return out
+    return await held_pages(
+        list_members_stream(accessor, guild_id, page_size), stop_at
+    )
 
 
 async def search_members(

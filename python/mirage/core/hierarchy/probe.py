@@ -32,6 +32,7 @@ class ReaddirFn(Protocol[A_contra]):
         /,
         entry: FileStat | None = ...,
         parent: FileStat | None = ...,
+        limit: int | None = ...,
     ) -> Awaitable[list[FileStat] | DirListing]: ...
 
 

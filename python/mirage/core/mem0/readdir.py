@@ -15,13 +15,13 @@
 from typing import Any
 
 from mirage.accessor.mem0 import Mem0Accessor
-from mirage.core.hierarchy.readdir import make_readdir
+from mirage.core.hierarchy.readdir import cut_listing, make_readdir
 from mirage.core.hierarchy.scope import ScopeMatch
 from mirage.core.mem0.client import get_all_memories
 from mirage.core.mem0.scope import detect_scope
 from mirage.core.render.json import json_bytes
 from mirage.errors.fs import enoent
-from mirage.types import ContentType, FileStat, FileType, PathSpec
+from mirage.types import ContentType, DirListing, FileStat, FileType, PathSpec
 
 
 def memory_row(memory: dict[str, Any]) -> FileStat:
@@ -49,13 +49,14 @@ def memory_row(memory: dict[str, Any]) -> FileStat:
 
 async def _list_memories(
     accessor: Mem0Accessor, match: ScopeMatch
-) -> list[FileStat]:
+) -> list[FileStat] | DirListing:
     memories = await get_all_memories(
         accessor.client,
         filters=accessor.config.scope_filter,
         page_size=accessor.config.default_page_size,
+        limit=match.limit,
     )
-    return [memory_row(m) for m in memories]
+    return cut_listing([memory_row(m) for m in memories], match.limit)
 
 
 readdir = make_readdir(

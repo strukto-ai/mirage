@@ -14,7 +14,7 @@
 
 import type { LinearAccessor } from '../../accessor/linear.ts'
 import { ContentType, FileStat, FileType } from '../../types.ts'
-import { makeReaddir } from '../hierarchy/readdir.ts'
+import { cutListing, type Listed, makeReaddir } from '../hierarchy/readdir.ts'
 import type { ScopeMatch } from '../hierarchy/scope.ts'
 import { entryStat } from '../hierarchy/stat.ts'
 import {
@@ -131,9 +131,9 @@ async function listMembers(
   accessor: LinearAccessor,
   match: ScopeMatch,
   _entry: FileStat,
-): Promise<FileStat[]> {
-  const users = await listTeamMembers(accessor.transport, match.slots.team_id ?? '')
-  return users.map((user) => {
+): Promise<Listed> {
+  const users = await listTeamMembers(accessor.transport, match.slots.team_id ?? '', match.limit)
+  const rows = users.map((user) => {
     const rendered = toJsonBytes(normalizeUser(user))
     return MEMBER(memberFilename(user), pickString(user, 'id'), {
       size: rendered.length,
@@ -141,15 +141,16 @@ async function listMembers(
       extra: keptText(rendered),
     })
   })
+  return cutListing(rows, match.limit)
 }
 
 async function listIssues(
   accessor: LinearAccessor,
   match: ScopeMatch,
   _entry: FileStat,
-): Promise<FileStat[]> {
-  const issues = await listTeamIssues(accessor.transport, match.slots.team_id ?? '')
-  return issues.map((issue) =>
+): Promise<Listed> {
+  const issues = await listTeamIssues(accessor.transport, match.slots.team_id ?? '', match.limit)
+  const rows = issues.map((issue) =>
     ISSUE(issueDirname(issue), pickString(issue, 'id'), {
       modified: pickString(issue, 'updatedAt'),
       extra: {
@@ -159,6 +160,7 @@ async function listIssues(
       },
     }),
   )
+  return cutListing(rows, match.limit)
 }
 
 async function listIssue(
@@ -193,11 +195,11 @@ async function listProjects(
   accessor: LinearAccessor,
   match: ScopeMatch,
   entry: FileStat,
-): Promise<FileStat[]> {
+): Promise<Listed> {
   const teamId = match.slots.team_id ?? ''
-  const projects = await listTeamProjects(accessor.transport, teamId)
+  const projects = await listTeamProjects(accessor.transport, teamId, match.limit)
   const teamIssues = await listTeamIssues(accessor.transport, teamId)
-  return projects.map((project) => {
+  const rows = projects.map((project) => {
     const projectId = pickString(project, 'id')
     const projectIssues: NormalizedProjectIssue[] = []
     for (const issue of teamIssues) {
@@ -223,16 +225,17 @@ async function listProjects(
       extra: keptText(rendered),
     })
   })
+  return cutListing(rows, match.limit)
 }
 
 async function listCycles(
   accessor: LinearAccessor,
   match: ScopeMatch,
   _entry: FileStat,
-): Promise<FileStat[]> {
+): Promise<Listed> {
   const teamId = match.slots.team_id ?? ''
-  const cycles = await listTeamCycles(accessor.transport, teamId)
-  return cycles.map((cycle) => {
+  const cycles = await listTeamCycles(accessor.transport, teamId, match.limit)
+  const rows = cycles.map((cycle) => {
     const rendered = toJsonBytes(normalizeCycle(cycle, teamId))
     return CYCLE(cycleFilename(cycle), pickString(cycle, 'id'), {
       size: rendered.length,
@@ -240,15 +243,20 @@ async function listCycles(
       extra: keptText(rendered),
     })
   })
+  return cutListing(rows, match.limit)
 }
 
 async function listDocuments(
   accessor: LinearAccessor,
   match: ScopeMatch,
   _entry: FileStat,
-): Promise<FileStat[]> {
-  const documents = await listTeamDocuments(accessor.transport, match.slots.team_id ?? '')
-  return documents.map((document) => {
+): Promise<Listed> {
+  const documents = await listTeamDocuments(
+    accessor.transport,
+    match.slots.team_id ?? '',
+    match.limit,
+  )
+  const rows = documents.map((document) => {
     const rendered = toJsonBytes(normalizeDocument(document))
     return DOCUMENT(documentFilename(document), pickString(document, 'id'), {
       size: rendered.length,
@@ -256,6 +264,7 @@ async function listDocuments(
       extra: keptText(rendered),
     })
   })
+  return cutListing(rows, match.limit)
 }
 
 export const readdir = makeReaddir<LinearAccessor>(detectScope, {

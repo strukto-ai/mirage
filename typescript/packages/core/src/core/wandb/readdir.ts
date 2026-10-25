@@ -64,13 +64,14 @@ export async function readdir(
   accessor: WandbAccessor,
   pathSpec: PathSpec,
   index?: IndexCacheStore,
+  limit?: number,
 ): Promise<FileStat[] | DirListing> {
   const path = pathSpec.pattern ? pathSpec.dir : pathSpec
   const ps = parts(accessor, path)
   if (ps.length === 0) return [...new Set(accessor.config.entities)].map((e) => row(e, true))
   let nodes: Named[]
-  if (ps.length === 1) nodes = await accessor.client.projects(ps[0] ?? '')
-  else if (ps.length === 2) nodes = await accessor.client.runs(ps[0] ?? '', ps[1] ?? '')
+  if (ps.length === 1) nodes = await accessor.client.projects(ps[0] ?? '', limit)
+  else if (ps.length === 2) nodes = await accessor.client.runs(ps[0] ?? '', ps[1] ?? '', limit)
   else if (ps.length === 3) {
     // A run the stored listing of its project names is not asked about again.
     const key = rstripSlash(path.virtual)
@@ -82,8 +83,11 @@ export async function readdir(
     return runFiles(path, ps.slice(4).join('/'), files)
   } else if (LEAVES.includes(ps[3] ?? '')) throw enotdir(path)
   else throw enoent(path)
-  return nodes.map((node) => {
+  const rows = nodes.map((node) => {
     if (!safeName(node.name)) throw new WandbAPIError('W&B unsafe object name')
     return row(node.name, true)
   })
+  if (limit !== undefined && rows.length >= limit)
+    return new DirListing({ entries: rows, partial: true })
+  return rows
 }

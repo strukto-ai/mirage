@@ -13,14 +13,20 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import base64
+import hashlib
+import logging
 from collections.abc import AsyncIterator
 from contextlib import aclosing
 
 from mirage.accessor.github import GitHubAccessor, GitHubAccount
 from mirage.core.github.client import blob_path, github_get, stream_blob
+from mirage.core.github.constants import BLOB_TEXT
+from mirage.core.github.repo import graphql_data
 from mirage.errors.fs import eisdir, enoent
 from mirage.observe.context import record, record_stream, start_op
 from mirage.types import FileStat, FileType, PathSpec, VFSName
+
+logger = logging.getLogger(__name__)
 
 
 async def read_bytes(
@@ -70,6 +76,79 @@ async def read(
         fingerprint=sha,
     )
     return data
+
+
+async def read_many(
+    accessor: GitHubAccessor,
+    paths: list[PathSpec],
+    limit: int,
+    entries: list[FileStat | None],
+) -> dict[str, bytes]:
+    """Several files' blobs in one GraphQL query.
+
+    Each blob is asked by the sha its row names, as ``read`` asks it.
+    GraphQL hands a blob over as text, so a file is kept only when that
+    text, encoded as UTF-8, hashes to the sha the way git hashes a blob,
+    which proves the bytes are the ones a read returns. A binary,
+    truncated or non-UTF-8 blob, a file past ``limit`` bytes, and a path
+    with no file row are left out for their own read. Each file kept is
+    recorded as ``read`` records it.
+
+    Args:
+        accessor (GitHubAccessor): backend handle.
+        paths (list[PathSpec]): the files.
+        limit (int): the most bytes worth reading for one file.
+        entries (list[FileStat | None]): what is at each path, as its
+            folder's listing names it.
+    """
+    asked: dict[str, tuple[str, str]] = {}
+    for path, entry in zip(paths, entries, strict=True):
+        if (
+            entry is None
+            or entry.type is FileType.DIRECTORY
+            or (entry.size or 0) > limit
+        ):
+            continue
+        asked[f"f{len(asked)}"] = (path.virtual, str(entry.extra["sha"]))
+    if not asked:
+        return {}
+    declared = "".join(f", ${alias}: GitObjectID!" for alias in asked)
+    fields = " ".join(
+        f"{alias}: object(oid: ${alias}) {{ {BLOB_TEXT} }}" for alias in asked
+    )
+    timer = start_op()
+    data = await graphql_data(
+        accessor.account,
+        f"query($owner: String!, $repo: String!{declared}) "
+        f"{{ repository(owner: $owner, name: $repo) {{ {fields} }} }}",
+        {
+            "owner": accessor.owner,
+            "repo": accessor.repo,
+            **{alias: sha for alias, (_, sha) in asked.items()},
+        },
+    )
+    blobs = data.get("repository") or {}
+    answers: dict[str, bytes] = {}
+    for alias, (virtual, sha) in asked.items():
+        blob = blobs.get(alias)
+        if not isinstance(blob, dict) or blob.get("isTruncated"):
+            continue
+        text = blob.get("text")
+        if not isinstance(text, str):
+            continue
+        try:
+            body = text.encode()
+        except UnicodeEncodeError as exc:
+            logger.debug("%s left to its own read: %s", virtual, exc)
+            continue
+        header = f"blob {len(body)}\0".encode()
+        if len(body) > limit or hashlib.sha1(header + body).hexdigest() != sha:
+            continue
+        record(
+            "read", virtual, VFSName.GITHUB, len(body), timer, fingerprint=sha
+        )
+        answers[virtual] = body
+    return answers
 
 
 async def read_stream(

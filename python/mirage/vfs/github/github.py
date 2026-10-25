@@ -18,6 +18,7 @@ from mirage.accessor.github import GitHubAccessor, GitHubAccount
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.github.config import GhConfig, GitHubConfig
 from mirage.core.github.constants import COMMIT_SHA
+from mirage.core.github.read import read_many as _read_many
 from mirage.core.github.read import read_stream as _read_stream
 from mirage.core.github.readdir import readdir as _readdir
 from mirage.core.github.search import files_containing as _files_containing
@@ -159,6 +160,16 @@ class GitHubVFS(BaseVFS):
         self, path: PathSpec, entry: FileStat | None = None
     ) -> ByteSource:
         return _read_stream(self.accessor, path, entry)
+
+    async def read_many(
+        self,
+        paths: list[PathSpec],
+        limit: int,
+        entries: list[FileStat | None] | None = None,
+    ) -> dict[str, bytes]:
+        return await _read_many(
+            self.accessor, paths, limit, entries or [None] * len(paths)
+        )
 
     async def stat(
         self,

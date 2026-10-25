@@ -84,6 +84,19 @@
           }
         }
       }
+    },
+    {
+      "id": "df_search_option_refusals",
+      "seq": 580035,
+      "targets": [
+        "dify"
+      ],
+      "command": "search --method vector anything /knowledge; echo rc=$?; search --threshold 1.5 anything /knowledge; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=2\nrc=2\n",
+        "stderr": "search: method must be one of semantic, fulltext, hybrid, keyword\nsearch: threshold must be in [0, 1]\n"
+      }
     }
   ]
 }

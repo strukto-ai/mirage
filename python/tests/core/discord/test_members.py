@@ -67,3 +67,21 @@ async def test_search_members(accessor):
         "/guilds/G001/members/search",
         params={"query": "ali", "limit": 100},
     )
+
+
+# A walk's limit stops the paging at the page that brings that many.
+@pytest.mark.asyncio
+async def test_list_members_pages_no_further_than_stop_at(accessor):
+    pages = [
+        [{"user": {"id": "U001", "username": "alice"}}],
+        [{"user": {"id": "U002", "username": "bob"}}],
+    ]
+    with patch(
+        "mirage.core.discord.paginate.discord_get",
+        new_callable=AsyncMock,
+        side_effect=pages,
+    ) as asked:
+        result = await list_members(accessor, "G001", page_size=1, stop_at=1)
+
+    assert [m["user"]["username"] for m in result] == ["alice"]
+    assert asked.await_count == 1

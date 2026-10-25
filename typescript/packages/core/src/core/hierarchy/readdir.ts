@@ -41,6 +41,33 @@ export type PatternTest = (pattern: string) => boolean
 export type ExtraFn = (match: ScopeMatch) => Record<string, string>
 
 /**
+ * What a paged listing's pages hold, and no page past the one that brings
+ * `limit` rows; the pages are closed there. Mirrors Python's `held_pages`.
+ */
+export async function heldPages<T>(
+  pages: AsyncIterable<T[]>,
+  limit: number | undefined,
+): Promise<T[]> {
+  const held: T[] = []
+  for await (const page of pages) {
+    held.push(...page)
+    if (limit !== undefined && held.length >= limit) break
+  }
+  return held
+}
+
+/**
+ * A paged listing's rows, partial once they reach a walk's `limit`: its
+ * lister stopped paging there, so a row past them may exist. Mirrors
+ * Python's `cut_listing`.
+ */
+export function cutListing(rows: FileStat[], limit: number | undefined): Listed {
+  if (limit !== undefined && rows.length >= limit)
+    return new DirListing({ entries: rows, partial: true })
+  return rows
+}
+
+/**
  * Build a hierarchy readdir: dispatch, guards, rows as stat answers.
  *
  * A lister fetches one directory kind and answers its children's stats;
@@ -54,7 +81,8 @@ export type ExtraFn = (match: ScopeMatch) => Record<string, string>
  * absent. A lister may answer null instead of a listing: the directory's
  * container does not exist, reported as ENOENT on the virtual path. A lister
  * may answer a `DirListing` to seed descendant listings its fetch already
- * proved, or to mark a view or a window.
+ * proved, or to mark a view or a window. A walk's `limit` reaches every
+ * lister in `ScopeMatch.limit`.
  *
  * An entry lister is for a directory whose existence and contents are
  * already proven by its parent's listing: it is handed the row that listing
@@ -127,6 +155,7 @@ export function makeReaddir<A extends Accessor>(
     pathSpec: PathSpec,
     entry: FileStat | null = null,
     parent: FileStat | null = null,
+    limit?: number,
   ): Promise<FileStat[] | DirListing> {
     const virtual = pathSpec.virtual
     const path = (pathSpec.pattern !== null ? pathSpec.dir : pathSpec).mountPath
@@ -135,7 +164,10 @@ export function makeReaddir<A extends Accessor>(
     if (detected.kind === INVALID) throw enoent(virtual)
     const pushable = patternKinds[detected.kind]
     const globbed = pathSpec.pattern !== null && pushable?.(pathSpec.pattern) === true
-    const match = globbed ? { ...detected, pattern: pathSpec.pattern } : detected
+    const match = {
+      ...(globbed ? { ...detected, pattern: pathSpec.pattern } : detected),
+      ...(limit === undefined ? {} : { limit }),
+    }
     if (match.kind === ROOT && staticRoot !== undefined) {
       return shown(
         staticRoot.map((name) => new FileStat({ name, type: FileType.DIRECTORY })),

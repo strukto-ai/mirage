@@ -84,3 +84,43 @@ async def test_an_ops_entry_point_burst_under_fresh_fetches_the_tree_once(
         assert fetch.await_count == 1
     finally:
         await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "cmd,stderr",
+    [
+        (
+            "chroma-query --top-k many refunds /knowledge",
+            "chroma-query: invalid int value: 'many' for '--top-k'\n"
+            "Try 'chroma-query --help' for more information.\n",
+        ),
+        (
+            "chroma-query --bogus refunds /knowledge",
+            "chroma-query: unrecognized option '--bogus'\n"
+            "Try 'chroma-query --help' for more information.\n",
+        ),
+        (
+            "chroma-query --top-k 0 refunds /knowledge",
+            "search: top-k must be positive\n",
+        ),
+        (
+            "chroma-query --method keyword refunds /knowledge",
+            "search: only the 'semantic' method is supported\n",
+        ),
+    ],
+)
+async def test_chroma_query_refuses_an_option_before_asking_chroma(
+    cmd, stderr
+):
+    collection = FakeCollection()
+    vfs = build_vfs("chroma", {"collection_name": "docs"})
+    vfs.accessor._collection = collection
+    ws = Workspace({"/knowledge": Mount(vfs=vfs, mode=MountMode.READ)})
+    try:
+        result = await ws.shell(cmd)
+        assert result.exit_code == 2
+        assert await result.stderr_str() == stderr
+        assert collection.queries == []
+    finally:
+        await ws.close()

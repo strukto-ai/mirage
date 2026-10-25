@@ -193,7 +193,7 @@ export class LinearVFS extends BaseVFS {
   }
 
   override readdir(path: PathSpec, handed?: Handed): Promise<FileStat[] | DirListing> {
-    return linearReaddir(this.accessor, path, handed?.entry)
+    return linearReaddir(this.accessor, path, handed?.entry, null, handed?.limit)
   }
 
   override async read(path: PathSpec, handed?: Handed): Promise<Uint8Array> {

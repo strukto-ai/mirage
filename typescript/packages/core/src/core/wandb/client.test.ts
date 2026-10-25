@@ -76,6 +76,13 @@ describe('W&B client', () => {
     expect(await c.projects('other')).toHaveLength(1)
     expect(request.mock.calls.map((call) => call[1].cursor)).toEqual([null, 'next', null])
   })
+  // Twin of test_a_walks_limit_pages_no_further.
+  it('pages no further than a walk limit', async () => {
+    const c = client({ page_size: 1, max_pages: 1 })
+    const request = vi.spyOn(c, 'request').mockResolvedValue(connection('next', true))
+    expect(await c.projects('lab', 1)).toHaveLength(1)
+    expect(request).toHaveBeenCalledTimes(1)
+  })
   it('refuses a repeated cursor', async () => {
     const c = client()
     const request = vi.spyOn(c, 'request').mockResolvedValue(connection('same', true))

@@ -719,17 +719,20 @@ FLOAT_VALUE = re.compile(
 )
 
 # GNU usage-error exit codes, pinned against debian coreutils/grep/diffutils
-# and hostname 3.25 (plus ripgrep and jq upstream docs). Everything else
-# exits 1. Keys are plain strings, not CommandName members: types.py (the
-# enum's home) imports this module for flag_kwarg_name, so importing the
-# enum here would be a cycle; StrEnum members hash as their values, so
-# lookups with CommandName still hit.
+# and hostname 3.25 (plus ripgrep and jq upstream docs). search and
+# chroma-query, mirage's own, exit 2 like argparse. Everything else exits
+# 1. Keys are plain strings, not CommandName members: types.py (the enum's
+# home) imports this module for flag_kwarg_name, so importing the enum
+# here would be a cycle; StrEnum members hash as their values, so lookups
+# with CommandName still hit.
 USAGE_EXIT = {
     "grep": 2,
     "egrep": 2,
     "fgrep": 2,
     "zgrep": 2,
     "rg": 2,
+    "search": 2,
+    "chroma-query": 2,
     "ls": 2,
     "sort": 2,
     "diff": 2,

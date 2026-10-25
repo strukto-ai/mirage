@@ -15,6 +15,16 @@
 from mirage.commands.spec.constants import PATHS_OPERAND, TEXT_OPERAND
 from mirage.commands.spec.types import Argument, CommandSpec
 
+SEARCH = CommandSpec(
+    arguments=(
+        Argument("--method"),
+        Argument("--top-k", type="int"),
+        Argument("--threshold", type="float"),
+        TEXT_OPERAND,
+        PATHS_OPERAND,
+    )
+)
+
 SPECS: dict[str, CommandSpec] = {
     "grep": CommandSpec(
         arguments=(
@@ -86,15 +96,8 @@ SPECS: dict[str, CommandSpec] = {
             PATHS_OPERAND,
         )
     ),
-    "search": CommandSpec(
-        arguments=(
-            Argument("--method"),
-            Argument("--top-k"),
-            Argument("--threshold"),
-            TEXT_OPERAND,
-            PATHS_OPERAND,
-        )
-    ),
+    "search": SEARCH,
+    "chroma-query": SEARCH,
     "rg": CommandSpec(
         # ripgrep's parser (lexopt) takes a long flag only as spelled.
         allow_abbrev=False,

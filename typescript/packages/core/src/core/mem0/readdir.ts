@@ -13,9 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { Mem0Accessor } from '../../accessor/mem0.ts'
-import { ContentType, FileStat, FileType, type PathSpec } from '../../types.ts'
+import { ContentType, type DirListing, FileStat, FileType, type PathSpec } from '../../types.ts'
 import { enoent } from '../../errors/fs.ts'
-import { makeReaddir } from '../hierarchy/readdir.ts'
+import { cutListing, makeReaddir } from '../hierarchy/readdir.ts'
 import type { ScopeMatch } from '../hierarchy/scope.ts'
 import { jsonBytes } from '../render/json.ts'
 import { getAllMemories } from './client.ts'
@@ -44,8 +44,11 @@ export function memoryRow(memory: Record<string, unknown>): FileStat {
   })
 }
 
-async function listMemories(accessor: Mem0Accessor, _match: ScopeMatch): Promise<FileStat[]> {
-  return (await getAllMemories(accessor)).map(memoryRow)
+async function listMemories(
+  accessor: Mem0Accessor,
+  match: ScopeMatch,
+): Promise<FileStat[] | DirListing> {
+  return cutListing((await getAllMemories(accessor, match.limit)).map(memoryRow), match.limit)
 }
 
 export const readdir = makeReaddir<Mem0Accessor>(detectScope, {

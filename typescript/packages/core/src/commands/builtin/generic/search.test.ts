@@ -17,7 +17,7 @@ import type { DispatchFn } from '../../../runtime/types.ts'
 import { PathSpec } from '../../../types.ts'
 import { UsageError } from '../../errors.ts'
 import { FlagView } from '../../spec/flag_view.ts'
-import { searchResources, semanticOptions } from './search.ts'
+import { searchResources, semanticOptions, unitThreshold } from './search.ts'
 
 const path = new PathSpec({ virtual: '/data', directory: '/', vfsPath: '' })
 
@@ -26,6 +26,15 @@ describe('semanticOptions', () => {
     expect(semanticOptions(new FlagView({}))).toEqual({ method: 'semantic', threshold: 0 })
     expect(() => semanticOptions(new FlagView({ method: '' }))).toThrow(UsageError)
   })
+})
+
+// Twin of test_a_threshold_outside_zero_to_one_is_a_usage_error.
+it.each(['-0.1', '1.5'])('refuses a threshold of %s as a usage error', (value) => {
+  expect(unitThreshold(new FlagView({}))).toBe(0)
+  expect(unitThreshold(new FlagView({ threshold: '0.4' }))).toBe(0.4)
+  expect(() => unitThreshold(new FlagView({ threshold: value }))).toThrow(
+    new UsageError('search: threshold must be in [0, 1]'),
+  )
 })
 
 describe('searchResources', () => {

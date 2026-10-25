@@ -16,11 +16,15 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ListingCheckStore } from '../../cache/index/ram.ts'
 import { runWithRecording } from '../../observe/context.ts'
 import { FileStat, FileType, PathSpec } from '../../types.ts'
+import type { Handed } from '../../vfs/types.ts'
 import { entryAt } from '../../../tests/workspace/fixtures/handed.ts'
-import { read, readStream } from './read.ts'
+import { read, readMany, readStream } from './read.ts'
 import { readdir } from './readdir.ts'
 import { stat } from './stat.ts'
 import { FakeGitHub, blobSha, servedAccessor } from '../../../tests/core/github/_test_util.ts'
+import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
+import { GitHubVFS } from '../../vfs/github/github.ts'
+import { Workspace } from '../../workspace/workspace/workspace.ts'
 
 const DEC = new TextDecoder()
 
@@ -110,5 +114,67 @@ describe('a read against the wire', () => {
     const probe = await stat(accessor, path, null, new ListingCheckStore())
     expect(probe.fingerprint).toBe(await blobSha('live'))
     expect(probe.fingerprint).not.toBe(records[0]?.fingerprint)
+  })
+
+  // Twin of test_read_many_reads_a_batch_in_one_query_and_records_each.
+  it('reads a batch in one query and records each file kept', async () => {
+    const gh = serve({
+      'a.txt': 'alpha\n',
+      'b.txt': 'beta\r\n',
+      'long.txt': 'x'.repeat(64),
+    })
+    gh.set('latin.txt', new Uint8Array([0x63, 0x61, 0x66, 0xe9, 0x0a]))
+    gh.graphqlTextLimit = 32
+    const accessor = servedAccessor()
+    const paths = ['a.txt', 'b.txt', 'latin.txt', 'long.txt'].map((rel) => at(rel, '/gh'))
+    const handed: Handed[] = []
+    for (const path of paths) handed.push({ entry: await entryAt(readdir, accessor, path) })
+    const [got, records] = await runWithRecording(() => readMany(accessor, paths, 1 << 20, handed))
+    expect([...got].map(([path, data]) => [path, DEC.decode(data)])).toEqual([
+      ['/gh/a.txt', 'alpha\n'],
+      ['/gh/b.txt', 'beta\r\n'],
+    ])
+    expect([gh.count('graphql'), gh.count('blob')]).toEqual([1, 0])
+    expect(records.map((r) => [r.op, r.path, r.fingerprint])).toEqual([
+      ['read', '/gh/a.txt', await blobSha('alpha\n')],
+      ['read', '/gh/b.txt', await blobSha('beta\r\n')],
+    ])
+  })
+
+  // Twin of test_read_many_asks_nothing_for_a_file_it_leaves_out.
+  it('asks nothing for a file it leaves out', async () => {
+    const gh = serve({ 'a.txt': 'alpha', 'src/b.txt': 'b' })
+    const accessor = servedAccessor()
+    const a = at('a.txt', '/gh')
+    const src = at('src', '/gh')
+    const handed = [
+      { entry: await entryAt(readdir, accessor, a) },
+      { entry: await entryAt(readdir, accessor, src) },
+      {},
+    ]
+    expect((await readMany(accessor, [a, src, at('gone.txt', '/gh')], 4, handed)).size).toBe(0)
+    expect(gh.count('graphql')).toBe(0)
+  })
+
+  // Twin of test_cat_reads_ahead_its_operands_in_one_query.
+  it('lets cat read ahead its operands in one query', async () => {
+    const gh = serve(
+      Object.fromEntries(['a', 'b', 'c', 'd'].map((name) => [`${name}.txt`, `${name}\n`])),
+    )
+    const vfs = await GitHubVFS.create({
+      token: 't',
+      owner: 'o',
+      repo: 'r',
+      ref: 'main',
+      baseUrl: gh.url,
+    })
+    const ws = new Workspace({ '/gh': vfs }, { shellParser: await getTestParser() })
+    try {
+      const result = await ws.shell('cat /gh/a.txt /gh/b.txt /gh/c.txt /gh/d.txt')
+      expect(result.stdoutText).toBe('a\nb\nc\nd\n')
+    } finally {
+      await ws.close()
+    }
+    expect([gh.count('blob'), gh.count('graphql')]).toEqual([1, 1])
   })
 })

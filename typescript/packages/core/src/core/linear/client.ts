@@ -132,6 +132,7 @@ async function paginate(
   query: string,
   variables: Record<string, unknown>,
   path: readonly string[],
+  limit?: number,
 ): Promise<Record<string, unknown>[]> {
   const merged: Record<string, unknown> = { first: 50, after: null, ...variables }
   const nodes: Record<string, unknown>[] = []
@@ -140,6 +141,7 @@ async function paginate(
     const conn = navigate(data, path)
     nodes.push(...conn.nodes)
     if (!conn.pageInfo.hasNextPage) return nodes
+    if (limit !== undefined && nodes.length >= limit) return nodes
     merged.after = conn.pageInfo.endCursor
   }
 }
@@ -151,29 +153,33 @@ export async function listTeams(transport: LinearTransport): Promise<Record<stri
 export async function listTeamMembers(
   transport: LinearTransport,
   teamId: string,
+  limit?: number,
 ): Promise<Record<string, unknown>[]> {
-  return paginate(transport, TEAM_MEMBERS_QUERY, { teamId }, ['team', 'members'])
+  return paginate(transport, TEAM_MEMBERS_QUERY, { teamId }, ['team', 'members'], limit)
 }
 
 export async function listTeamIssues(
   transport: LinearTransport,
   teamId: string,
+  limit?: number,
 ): Promise<Record<string, unknown>[]> {
-  return paginate(transport, TEAM_ISSUES_QUERY, { teamId }, ['team', 'issues'])
+  return paginate(transport, TEAM_ISSUES_QUERY, { teamId }, ['team', 'issues'], limit)
 }
 
 export async function listTeamProjects(
   transport: LinearTransport,
   teamId: string,
+  limit?: number,
 ): Promise<Record<string, unknown>[]> {
-  return paginate(transport, TEAM_PROJECTS_QUERY, { teamId }, ['team', 'projects'])
+  return paginate(transport, TEAM_PROJECTS_QUERY, { teamId }, ['team', 'projects'], limit)
 }
 
 export async function listTeamCycles(
   transport: LinearTransport,
   teamId: string,
+  limit?: number,
 ): Promise<Record<string, unknown>[]> {
-  return paginate(transport, TEAM_CYCLES_QUERY, { teamId }, ['team', 'cycles'])
+  return paginate(transport, TEAM_CYCLES_QUERY, { teamId }, ['team', 'cycles'], limit)
 }
 
 export async function listTeamLabels(
@@ -186,8 +192,9 @@ export async function listTeamLabels(
 export async function listTeamDocuments(
   transport: LinearTransport,
   teamId: string,
+  limit?: number,
 ): Promise<Record<string, unknown>[]> {
-  return paginate(transport, TEAM_DOCUMENTS_QUERY, { teamId }, ['documents'])
+  return paginate(transport, TEAM_DOCUMENTS_QUERY, { teamId }, ['documents'], limit)
 }
 
 export async function resolveTeam(

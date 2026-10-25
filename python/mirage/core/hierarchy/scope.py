@@ -106,6 +106,10 @@ class ScopeMatch:
             filtering its own; every other consumer ignores the field,
             the way a command ignores the ``Context`` facts it does
             not read.
+        limit (int | None): the most entries a walk can still keep of the
+            directory's listing, None outside a walk. A lister that pages
+            may stop once it holds that many and answer a partial
+            ``DirListing``; any other ignores it, as it does ``pattern``.
     """
 
     kind: str
@@ -113,6 +117,7 @@ class ScopeMatch:
     slots: dict[str, str] = field(default_factory=dict)
     scope: Scope | None = None
     pattern: str | None = None
+    limit: int | None = None
 
 
 def decode_slot(slot: Slot, part: str) -> dict[str, str] | None:

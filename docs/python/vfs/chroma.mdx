@@ -206,7 +206,11 @@ semantic similarity matters more than exact text matching.
 chroma-query "how do I get started" /knowledge/
 chroma-query --top-k 5 "billing policy" /knowledge/policies/
 chroma-query --top-k 3 "API authentication" /knowledge/guides/quickstart.md
+chroma-query --threshold 0.8 "billing policy" /knowledge/
 ```
+
+`--threshold` keeps hits whose score (1 minus Chroma's distance) is at least
+that value. `--method` takes only `semantic`.
 
 Results are emitted one hit per line:
 

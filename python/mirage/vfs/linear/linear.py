@@ -178,9 +178,12 @@ class LinearVFS(BaseVFS):
         )
 
     async def readdir(
-        self, path: PathSpec, entry: FileStat | None = None
+        self,
+        path: PathSpec,
+        entry: FileStat | None = None,
+        limit: int | None = None,
     ) -> list[FileStat] | DirListing:
-        return await _readdir(self.accessor, path, entry)
+        return await _readdir(self.accessor, path, entry, limit=limit)
 
     async def read(
         self, path: PathSpec, parent: FileStat | None = None

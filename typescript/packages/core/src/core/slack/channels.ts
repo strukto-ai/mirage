@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { SlackAccessor } from '../../accessor/slack.ts'
+import { heldPages } from '../hierarchy/readdir.ts'
 import { cursorPages } from './paginate.ts'
 
 export interface SlackChannel {
@@ -27,6 +28,7 @@ export interface SlackChannel {
 export interface ListChannelsOptions {
   types?: string
   limit?: number
+  stopAt?: number | undefined
 }
 
 function channelBaseParams(types: string, limit: number): Record<string, string> {
@@ -51,11 +53,7 @@ export async function listChannels(
   accessor: SlackAccessor,
   options: ListChannelsOptions = {},
 ): Promise<SlackChannel[]> {
-  const out: SlackChannel[] = []
-  for await (const page of listChannelsStream(accessor, options)) {
-    out.push(...page)
-  }
-  return out
+  return heldPages(listChannelsStream(accessor, options), options.stopAt)
 }
 
 export function listDms(

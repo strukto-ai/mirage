@@ -69,7 +69,7 @@ export class DiscordVFSBase extends BaseVFS<DiscordAccessor> {
   } as const
 
   override readdir(path: PathSpec, handed?: Handed): Promise<FileStat[] | DirListing> {
-    return discordReaddir(this.accessor, path, handed?.entry)
+    return discordReaddir(this.accessor, path, handed?.entry, null, handed?.limit)
   }
 
   override read(

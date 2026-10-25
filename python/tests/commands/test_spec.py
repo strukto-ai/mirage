@@ -261,6 +261,7 @@ def test_all_commands_have_specs():
         "nl",
         "grep",
         "search",
+        "chroma-query",
         "rg",
         "sort",
         "uniq",

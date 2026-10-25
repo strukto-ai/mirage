@@ -11,7 +11,12 @@ from mirage.core.slug_tree.search import (
 from mirage.types import PathSpec, SearchQuery
 from mirage.utils.key_prefix import mount_prefix_of, mounted_path
 from mirage.utils.score import score_from_distance
-from mirage.vfs.search import int_option, validate_options
+from mirage.vfs.search import (
+    float_option,
+    int_option,
+    text_option,
+    validate_options,
+)
 
 
 async def search_segments(
@@ -20,6 +25,7 @@ async def search_segments(
     paths: list[PathSpec],
     top_k: int = 10,
     mount_prefix: str = "",
+    threshold: float = 0.0,
 ) -> list[tuple[str, str]]:
     validate_query(query, top_k)
     if not mount_prefix and paths:
@@ -42,7 +48,11 @@ async def search_segments(
     collection = await accessor.get_collection()
     response = await collection.query(**kwargs)
     return render_records(
-        response, accessor.config.slug_field, mount_prefix, scoped_slugs
+        response,
+        accessor.config.slug_field,
+        mount_prefix,
+        scoped_slugs,
+        threshold,
     )
 
 
@@ -51,6 +61,7 @@ def render_records(
     slug_field: str,
     mount_prefix: str,
     scoped_slugs: set[str] | None = None,
+    threshold: float = 0.0,
 ) -> list[tuple[str, str]]:
     documents = first_result_list(response.get("documents"))
     metadatas = first_result_list(response.get("metadatas"))
@@ -69,6 +80,8 @@ def render_records(
         score = score_from_distance(
             distances[index] if index < len(distances) else None
         )
+        if threshold > 0 and float(score) < threshold:
+            continue
         path = "/" + slug_value
         prefix = mount_prefix.rstrip("/")
         if prefix:
@@ -91,8 +104,11 @@ async def search_many(
     paths: list[PathSpec],
     query: SearchQuery,
 ) -> list[tuple[str, str]]:
-    validate_options(query, {"top_k"})
+    validate_options(query, {"top_k", "method", "threshold"})
     top_k = int_option(query, "top_k", 10)
+    threshold = float_option(query, "threshold", 0.0)
+    if text_option(query, "method", "semantic") != "semantic":
+        raise ValueError("search: only the 'semantic' method is supported")
     targets, prefix = await search_scope(CHROMA_TREE, accessor, paths)
     return await search_segments(
         accessor,
@@ -100,6 +116,7 @@ async def search_many(
         targets,
         top_k=top_k,
         mount_prefix=prefix,
+        threshold=threshold,
     )
 
 

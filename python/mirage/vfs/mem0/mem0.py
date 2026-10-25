@@ -45,8 +45,10 @@ class Mem0VFS(BaseVFS):
         self.walk_limit = config.walk_limit
         self.accessor = Mem0Accessor(self.config)
 
-    async def readdir(self, path: PathSpec) -> list[FileStat] | DirListing:
-        return await _readdir(self.accessor, path)
+    async def readdir(
+        self, path: PathSpec, limit: int | None = None
+    ) -> list[FileStat] | DirListing:
+        return await _readdir(self.accessor, path, limit=limit)
 
     async def read(
         self, path: PathSpec, entry: FileStat | None = None

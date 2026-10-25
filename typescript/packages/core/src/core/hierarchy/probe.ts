@@ -24,6 +24,7 @@ export type ReaddirFn<A extends Accessor> = (
   pathSpec: PathSpec,
   entry?: FileStat | null,
   parent?: FileStat | null,
+  limit?: number,
 ) => Promise<FileStat[] | DirListing>
 
 /** The PathSpec of the directory holding `path`, on the same mount. */

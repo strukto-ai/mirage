@@ -137,6 +137,11 @@ class FakeGitHub:
     measured: no single directory in the sampled repositories was large
     enough to truncate.
 
+    GraphQL answers a repository's ``object(oid:)`` aliases with each
+    blob's text, which is not measured: a blob that is not UTF-8 comes back
+    with each bad byte replaced, and ``isTruncated`` is set past
+    ``graphql_text_limit`` bytes, its text cut there.
+
     Args:
         files (dict): repo-relative path to bytes, on ``ref``.
         symlinks (set): paths among ``files`` that are symlinks, whose
@@ -161,6 +166,8 @@ class FakeGitHub:
             waits on it, off the fake's loop, so other requests are served
             meanwhile.
         fail (dict): route name to ``(status, message)`` it answers.
+        graphql_text_limit (int): the most bytes of a blob GraphQL
+            answers as text.
         log (list): ``(route, raw segment)`` for every request.
         history (dict): commit sha to the files it named.
         trees (dict): tree sha to the files and the folder it named.
@@ -177,6 +184,7 @@ class FakeGitHub:
     after_head: Callable[[], None] | None = None
     hold_dir: threading.Event | None = None
     fail: dict[str, tuple[int, str]] = field(default_factory=dict)
+    graphql_text_limit: int = 1 << 20
     log: list[tuple[str, str]] = field(default_factory=list)
     blobs: dict[str, bytes] = field(default_factory=dict)
     history: dict[str, Snapshot] = field(default_factory=dict)
@@ -443,6 +451,30 @@ class FakeGitHub:
             }
         )
 
+    async def graphql(self, request: web.Request) -> web.Response:
+        variables = (await request.json())["variables"]
+        oids = {
+            k: v for k, v in variables.items() if k not in ("owner", "repo")
+        }
+        self.log.append(("graphql", ",".join(oids.values())))
+        refused = self._failure("graphql")
+        if refused is not None:
+            return refused
+        for data in self.files.values():
+            self.blobs.setdefault(blob_sha(data), data)
+        objects: dict[str, Any] = {}
+        for alias, sha in oids.items():
+            data = self.blobs.get(sha)
+            if data is None:
+                objects[alias] = None
+                continue
+            cut = data[: self.graphql_text_limit]
+            objects[alias] = {
+                "text": cut.decode(errors="replace"),
+                "isTruncated": len(cut) < len(data),
+            }
+        return web.json_response({"data": {"repository": objects}})
+
 
 def _app(hub: FakeGitHub) -> web.Application:
     app = web.Application()
@@ -451,6 +483,7 @@ def _app(hub: FakeGitHub) -> web.Application:
     app.router.add_get(repo + "/git/trees/{segment:[^/]+}", hub.tree)
     app.router.add_get(repo + "/git/blobs/{sha}", hub.blob)
     app.router.add_get("/search/code", hub.search_code)
+    app.router.add_post("/graphql", hub.graphql)
     return app
 
 
