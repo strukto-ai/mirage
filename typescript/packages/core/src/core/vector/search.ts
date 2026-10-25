@@ -41,11 +41,11 @@ export async function searchRowsOutput<A extends Accessor>(
   threshold: number,
   mountPrefix: string,
 ): Promise<[string, string][]> {
-  if (query === '') throw new Error('search: query is required')
-  if (topK <= 0) throw new Error('search: top-k must be positive')
+  if (query === '') throw new Error('query is required')
+  if (topK <= 0) throw new Error('top-k must be positive')
   const pinned = tree.pinned(accessor)
   const table = targetTable(pinned, paths)
-  if (table === null) throw new Error('search: no table to search')
+  if (table === null) throw new Error('no table to search')
   const blocks: [string, string][] = []
   for (const row of await tree.searchRows(accessor, table, query, topK)) {
     const rank = row[tree.rankKey]
@@ -71,10 +71,10 @@ export function makeSearch<A extends Accessor>(tree: VectorTree<A>): SearchOps<A
     validateOptions(query, ['top_k', 'threshold', 'method'])
     const topK = intOption(query, 'top_k', tree.searchLimit(accessor))
     const first = paths[0]
-    if (first === undefined) throw new Error('search: at least one scope is required')
+    if (first === undefined) throw new Error('at least one scope is required')
     const method = textOption(query, 'method', 'semantic')
     const threshold = floatOption(query, 'threshold', 0)
-    if (method !== 'semantic') throw new Error("search: only the 'semantic' method is supported")
+    if (method !== 'semantic') throw new Error("only the 'semantic' method is supported")
     const output = await searchRowsOutput(
       tree,
       accessor,

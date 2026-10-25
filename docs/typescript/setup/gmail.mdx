@@ -145,7 +145,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Gmail mounted at `/<path>`.
 
     | Path | Supported |
     | --- | --- |
-    | `/<path>` | Commands that read files (`ls`, `cat`, `grep`, `find`, `jq` and the rest). `grep -r` and `rg` use `gmail` search. |
+    | `/<path>` | Commands that read files (`ls`, `cat`, `grep`, `find`, `jq` and the rest). `grep -r` and `rg` ask `gmail` which files may match. |
 
     #### Limitations of Unix Commands for VFS
 
@@ -153,7 +153,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Gmail mounted at `/<path>`.
 
     | Path | Limitations |
     | --- | --- |
-    | `/<path>` | Read only: no command changes files. `gmail` search covers only `*/*/*.gmail.json`; `grep -r` and `rg` read every other file. `grep -r`, `find` and `du` stop after 1000 files; a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. |
+    | `/<path>` | Read only: no command changes files. `gmail` answers only for `*/*/*.gmail.json`; `grep -r` and `rg` read every other file. `grep -r`, `find` and `du` stop after 1000 files; a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. |
 
     Run `man` to list every command, and `man <cmd>` or `<cmd> --help` for one command's usage.
   </Tab>
@@ -239,7 +239,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Gmail mounted at `/<path>`.
 
     | Path | Supported |
     | --- | --- |
-    | `/<path>` | Commands that read files (`ls`, `cat`, `grep`, `find`, `jq` and the rest). `grep -r` and `rg` use `gmail` search. |
+    | `/<path>` | Commands that read files (`ls`, `cat`, `grep`, `find`, `jq` and the rest). `grep -r` and `rg` ask `gmail` which files may match. |
 
     ## Limitations of Unix Commands for VFS
 
@@ -247,7 +247,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Gmail mounted at `/<path>`.
 
     | Path | Limitations |
     | --- | --- |
-    | `/<path>` | Read only: no command changes files. `gmail` search covers only `*/*/*.gmail.json`; `grep -r` and `rg` read every other file. `grep -r`, `find` and `du` stop after 1000 files; a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. |
+    | `/<path>` | Read only: no command changes files. `gmail` answers only for `*/*/*.gmail.json`; `grep -r` and `rg` read every other file. `grep -r`, `find` and `du` stop after 1000 files; a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. |
 
     Run `man` to list every command, and `man <cmd>` or `<cmd> --help` for one command's usage.
     ````

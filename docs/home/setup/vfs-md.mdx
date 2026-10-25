@@ -71,9 +71,9 @@ hides, is never mentioned. Each VFS page shows its VFS.md, such as
   shows `read`, whatever mode it is mounted with.
 - **Layout**: how its files are organized and what they hold, for a VFS that
   has one. A VFS sets it with [`vfs_md`](/home/setup/custom-vfs#attributes).
-- **Supported commands**: the Unix commands that work there, which of them
-  use the service's own search, and the path's own commands, such as
-  `chroma-query` on Chroma.
+- **Supported commands**: the Unix commands that work there, and which of them
+  ask the service which files may match. CLIs such as
+  [`search`](/home/setup/cli/search) are in SKILL.md, not here.
 - **Limitations**: where it differs from a local filesystem, such as being
   read only, or the [`walk_limit`](/home/integration/search#walk_limit) on
   large folders.

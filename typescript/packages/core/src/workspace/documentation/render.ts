@@ -277,7 +277,9 @@ function supported(
   const searches = SEARCHES.filter((c) => runs([...c.split(' '), ...word])).map(code)
   if (searches.length > 0 && mount.answers('files_containing')) {
     const wordText = word.length > 0 ? ' with `-w`' : ''
-    parts.push(`${listing(searches)}${wordText} ${agree(searches, 'use')} ${name} search.`)
+    parts.push(
+      `${listing(searches)}${wordText} ${agree(searches, 'ask')} ${name} which files may match.`,
+    )
   }
   const finds = FINDS.filter((c) => runs([c])).map(code)
   if (finds.length > 0 && mount.answers('lines_containing'))
@@ -326,7 +328,7 @@ function limitations(
     if (vfs.wholeWordSearch) parts.push(`Without \`-w\`, ${reads} every file.`)
     if (vfs.searchable !== null)
       parts.push(
-        `${code(vfs.name)} search covers only ${listing(vfs.searchable.map(code))}; ` +
+        `${code(vfs.name)} answers only for ${listing(vfs.searchable.map(code))}; ` +
           `${reads} every other file.`,
       )
   }

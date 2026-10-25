@@ -5,6 +5,7 @@ import shlex
 from dotenv import load_dotenv
 
 from mirage import MountMode, Workspace
+from mirage.commands.cli.builtin.search import SEARCH
 from mirage.types import PathSpec
 from mirage.vfs.dify import DifyConfig, DifyVFS
 
@@ -53,6 +54,7 @@ async def first_document_path(ws: Workspace) -> str | None:
 async def main() -> None:
     vfs = build_vfs()
     ws = Workspace({"/knowledge/": vfs}, mode=MountMode.READ)
+    ws.register_cli("search", SEARCH)
 
     print("=== Dify Knowledge ===\n")
 

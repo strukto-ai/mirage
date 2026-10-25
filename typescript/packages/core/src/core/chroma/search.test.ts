@@ -3,7 +3,6 @@ import type { ChromaAccessor } from '../../accessor/chroma.ts'
 import { onMount, vfsOver } from '../../test-utils.ts'
 import { ChromaVFS } from '../../vfs/chroma/chroma.ts'
 import { PathSpec } from '../../types.ts'
-import { searchResources } from '../../commands/builtin/generic/search.ts'
 import { filesContaining, searchMany, searchSegments } from './search.ts'
 
 it('ranks a batch through the dispatcher once and preserves the mount prefix', async () => {
@@ -19,16 +18,17 @@ it('ranks a batch through the dispatcher once and preserves the mount prefix', a
     getCollection: () => Promise.resolve({ query }),
   } as unknown as ChromaAccessor
   const root = new PathSpec({ virtual: '/data', directory: '/', vfsPath: '' })
-  const result = await onMount(
+  const [records] = await onMount(
     vfsOver(ChromaVFS, accessor),
     (files) =>
-      searchResources(files.dispatch, [root, root], {
-        query: 'question',
-        options: { top_k: 2 },
+      files.dispatch('search', root, [{ query: 'question', options: { top_k: 2 } }], {
+        scopes: [root],
       }),
     '/data',
   )
-  expect(new TextDecoder().decode(result)).toContain('/data/doc.txt:')
+  expect((records as [string, string][]).map(([, record]) => record).join('\n')).toContain(
+    '/data/doc.txt:',
+  )
   expect(query).toHaveBeenCalledOnce()
   expect(query).toHaveBeenCalledWith(
     expect.objectContaining({ queryTexts: ['question'], nResults: 2 }),
@@ -122,5 +122,5 @@ it('refuses any method but semantic', async () => {
   const accessor = { config: { slugField: 'page_slug' } } as unknown as ChromaAccessor
   await expect(
     searchMany(accessor, [], { query: 'setup', options: { method: 'hybrid' } }),
-  ).rejects.toThrow("search: only the 'semantic' method is supported")
+  ).rejects.toThrow("only the 'semantic' method is supported")
 })

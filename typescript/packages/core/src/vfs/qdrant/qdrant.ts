@@ -36,11 +36,7 @@ fields; descending narrows a filter. Each matching point appears as files named
 by its id: <id>.json (the full payload), <id>.txt (the embedded source text)
 when a text field is configured, and <id>.<ext> (raw blob bytes) when a blob
 field is configured, where <id> is the Qdrant point id. The embedding vector is
-never shown. For semantic search use the search command, which returns ranked
-points as their content file paths with a similarity score, e.g.
-search "red running shoes" /mount then cat one of the returned files.
-Use ls/cd/cat/tree/find/wc as usual; grep/rg stay lexical. Quote queries that
-contain spaces.`
+never shown. Use ls/cd/cat/tree/find/wc/grep/rg as usual.`
 
 export interface QdrantVFSOptions {
   config: QdrantConfig

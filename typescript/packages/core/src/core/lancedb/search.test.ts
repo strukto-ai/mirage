@@ -15,7 +15,6 @@
 import { expect, it } from 'vitest'
 
 import { LanceDBAccessor } from '../../accessor/lancedb.ts'
-import { LANCEDB_COMMANDS } from '../../commands/builtin/lancedb/index.ts'
 import { resolveLanceDBConfig } from '../../vfs/lancedb/config.ts'
 import { PathSpec } from '../../types.ts'
 import { searchRowsOutput } from '../vector/search.ts'
@@ -51,19 +50,6 @@ it('spells a group value in the canonical path the way the listing does', async 
     '/db/docs/⁄/2.md:0.2000',
     '/db/docs/⁄.env/3.md:0.3000',
   ])
-})
-
-it.each([
-  [[], {}, 'search: query is required'],
-  [[''], {}, 'search: query is required'],
-  [['dog'], { method: 'hybrid' }, "search: only the 'semantic' method is supported"],
-  [['dog'], { top_k: '0' }, 'search: top-k must be positive'],
-])('refuses %j %j as a usage error', async (texts, flags, message) => {
-  const cmd = LANCEDB_COMMANDS.find((c) => c.name === 'search')
-  if (cmd === undefined) throw new Error('search not registered')
-  const accessor = new LanceDBAccessor({} as LanceDriver, resolveLanceDBConfig({ uri: '/tmp/db' }))
-  const opts = { stdin: null, flags, cwd: PathSpec.fromStrPath('/') }
-  await expect(cmd.fn(accessor, [], texts, opts)).rejects.toMatchObject({ exitCode: 2, message })
 })
 
 const ANIMALS = [

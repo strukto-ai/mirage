@@ -840,6 +840,83 @@
         "q",
         "d"
       ]
+    },
+    {
+      "id": "unzip_reads_a_zip64_end_beside_an_ordinary_one_that_fits",
+      "seq": 15100749,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(mkdir -p /data/fcA_u64 && printf %s 'UEsDBBQAAAAAAIMYIljsbmCfBgAAAAYAAAAFAAAAYS50eHRhbHBoYQpQSwMEFAAAAAgAgxgiWAp6/08KAAAAZAAAAAUAAABiLnR4dEtKLUnkSqItAQBQSwECFAMUAAAAAACDGCJY7G5gnwYAAAAGAAAABQAAAAAAAAAAAAAApIEAAAAAYS50eHRQSwECFAMUAAAACACDGCJYCnr/TwoAAABkAAAABQAAAAAAAAAAAAAApIEpAAAAYi50eHRQSwYGLAAAAAAAAAAtAC0AAAAAAAAAAAACAAAAAAAAAAIAAAAAAAAAZgAAAAAAAABWAAAAAAAAAFBLBgcAAAAAvAAAAAAAAAABAAAAUEsFBgAAAAACAAIAZgAAAFYAAAAAAA==' | base64 -d > /data/fcA_u64/w64.zip && cd /data/fcA_u64 && unzip -v w64.zip; unzip -t w64.zip; unzip -p w64.zip | head -n 2; unzip -Z w64.zip; unzip -q -d o w64.zip; cat o/a.txt; printf 'ALPHA\\n' > a.txt && printf 'gamma\\n' > c.txt && zip -q w64.zip a.txt c.txt && unzip -Z1 w64.zip && unzip -p w64.zip a.txt c.txt && unzip -tq w64.zip; cd / && rm -r /data/fcA_u64)",
+      "expect": {
+        "exit": 0,
+        "stdout": "Archive:  w64.zip\n Length   Method    Size  Cmpr    Date    Time   CRC-32   Name\n--------  ------  ------- ---- ---------- ----- --------  ----\n       6  Stored        6   0% 2024-01-02 03:04 9f606eec  a.txt\n     100  Defl:N       10  90% 2024-01-02 03:04 4fff7a0a  b.txt\n--------          -------  ---                            -------\n     106               16  85%                            2 files\nArchive:  w64.zip\n    testing: a.txt                    OK\n    testing: b.txt                    OK\nNo errors detected in compressed data of w64.zip.\nalpha\nbeta\nArchive:  w64.zip\nZip file size: 286 bytes, number of entries: 2\n-rw-r--r--  2.0 unx        6 b- stor 24-Jan-02 03:04 a.txt\n-rw-r--r--  2.0 unx      100 b- defN 24-Jan-02 03:04 b.txt\n2 files, 106 bytes uncompressed, 16 bytes compressed:  84.9%\nalpha\na.txt\nb.txt\nc.txt\nALPHA\ngamma\nNo errors detected in compressed data of w64.zip.\n",
+        "stderr": ""
+      },
+      "flags": [
+        "v",
+        "t",
+        "p",
+        "Z",
+        "q",
+        "d"
+      ]
+    },
+    {
+      "id": "unzip_reads_past_a_zip64_locator_that_points_at_no_record",
+      "seq": 15100750,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(mkdir -p /data/fcA_uf && printf %s 'UEsDBBQAAAAAAIMYIljsbmCfBgAAAAYAAAAFAAAAYS50eHRhbHBoYQpQSwMEFAAAAAAAgxgiWHWn4+YFAAAABQAAAAUAAABiLnR4dGJldGEKUEsBAhQDFAAAAAAAgxgiWOxuYJ8GAAAABgAAAAUAAAAAAAAAAAAAAKSBAAAAAGEudHh0UEsBAhQDFAAAAAAAgxgiWHWn4+YFAAAABQAAAAUAAABMAAAAAAAAAKSBKQAAAGIudHh0UEsGBgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABQSwYHAAAAAAAAAAAAAAAAAAAAAFBLBQYAAAAAAgACALIAAABRAAAAAAA=' | base64 -d > /data/fcA_uf/fake.zip && cd /data/fcA_uf && unzip -t fake.zip; unzip -tq fake.zip; unzip -p fake.zip; unzip -Z fake.zip; unzip -Z1 fake.zip; unzip -q -d o fake.zip; ls o; cd / && rm -r /data/fcA_uf)",
+      "expect": {
+        "exit": 0,
+        "stdout": "Archive:  fake.zip\nerror: End-of-centdir-64 signature not where expected (prepended bytes?)\n  (attempting to process anyway)\n    testing: a.txt                    OK\n    testing: b.txt                    OK\nNo errors detected in compressed data of fake.zip.\n[fake.zip]\nerror: End-of-centdir-64 signature not where expected (prepended bytes?)\n  (attempting to process anyway)\nNo errors detected in compressed data of fake.zip.\nalpha\nbeta\nArchive:  fake.zip\n[fake.zip]\nerror: End-of-centdir-64 signature not where expected (prepended bytes?)\n  (attempting to process anyway)\nZip file size: 281 bytes, number of entries: 2\n-rw-r--r--  2.0 unx        6 b- stor 24-Jan-02 03:04 a.txt\n-rw-r--r--  2.0 unx        5 b- stor 24-Jan-02 03:04 b.txt\n2 files, 11 bytes uncompressed, 11 bytes compressed:  0.0%\na.txt\nb.txt\na.txt\nb.txt\n",
+        "stderr": "[fake.zip]\nerror: End-of-centdir-64 signature not where expected (prepended bytes?)\n  (attempting to process anyway)\n[fake.zip]\nerror: End-of-centdir-64 signature not where expected (prepended bytes?)\n  (attempting to process anyway)\n[fake.zip]\nerror: End-of-centdir-64 signature not where expected (prepended bytes?)\n  (attempting to process anyway)\n"
+      },
+      "flags": [
+        "t",
+        "q",
+        "p",
+        "Z",
+        "d"
+      ]
     }
   ]
 }

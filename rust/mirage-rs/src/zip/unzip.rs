@@ -534,7 +534,7 @@ pub(super) async fn run(host: Host, mut config: Config) -> i32 {
             match fault {
                 Fault::Corrupt(count) if config.zipinfo && archive_line => {
                     let mut out = Vec::new();
-                    listing::header(&config.archive, size, count, &mut out);
+                    listing::header(&config.archive, b"", size, count, &mut out);
                     host.print(&out);
                 }
                 _ if archive_line => host.print(&say("Archive:  {}\n", &[&config.archive])),
@@ -555,7 +555,7 @@ pub(super) async fn run(host: Host, mut config: Config) -> i32 {
     // Bytes before the archive, or missing from it, shift every offset:
     // a warning, on stdout under -t, and the run goes on.
     let archive = config.archive.as_slice();
-    let (warning, floor) = match directory.slack {
+    let (mut warning, floor) = match directory.slack {
         0 => (Vec::new(), 0),
         slack if slack < 0 => (
             say(
@@ -576,6 +576,10 @@ pub(super) async fn run(host: Host, mut config: Config) -> i32 {
             WARN_EXIT,
         ),
     };
+    // zipinfo says it under its header instead.
+    if directory.misplaced && !config.zipinfo {
+        warning.splice(0..0, stray_locator(&config));
+    }
     if !stdout {
         host.warn(&warning);
     }
@@ -593,6 +597,20 @@ pub(super) async fn run(host: Host, mut config: Config) -> i32 {
         (0, _) => SKIPPED_EXIT,
         (worst, _) => worst,
     }
+}
+
+/// UnZip's complaint about a ZIP64 locator that points at no record,
+/// behind the archive's name where no `Archive:` line comes first.
+fn stray_locator(config: &Config) -> Vec<u8> {
+    let mut text = if config.zipinfo || config.q > 0 || config.p {
+        say("[{}]\n", &[&config.archive])
+    } else {
+        Vec::new()
+    };
+    text.extend_from_slice(
+        b"error: End-of-centdir-64 signature not where expected (prepended bytes?)\n  (attempting to process anyway)\n",
+    );
+    text
 }
 
 fn read_failure(archive: &[u8], reply: &Reply) -> Vec<u8> {
@@ -613,26 +631,15 @@ fn opening(config: &Config, comment: &[u8]) -> Vec<u8> {
     out
 }
 
-/// An archive of no entries, which every mode reports and exits 1 on:
-/// zipinfo under its header, the rest in a warning.
+/// An archive of no entries, which every mode but zipinfo reports in a
+/// warning, exiting 1.
 fn empty(run: &Run<'_>, directory: &Directory, warning: Vec<u8>) -> i32 {
     let config = &run.config;
-    let (archive_line, stdout) = config.report();
-    let mut out = Vec::new();
-    if config.zipinfo {
-        if archive_line {
-            listing::header(&config.archive, run.spool.size, 0, &mut out);
-        }
-        out.extend(warning);
-        out.extend_from_slice(b"Empty zipfile.\n");
-        run.host.print(&out);
-        return WARN_EXIT;
-    }
-    out.extend(opening(config, &directory.comment));
+    let mut out = opening(config, &directory.comment);
     out.extend(warning);
     run.host.print(&out);
     let text = say("warning [{}]:  zipfile is empty\n", &[&config.archive]);
-    tell(run.host, stdout, &text);
+    tell(run.host, config.report().1, &text);
     WARN_EXIT
 }
 
@@ -656,10 +663,10 @@ async fn mode(run: &mut Run<'_>, directory: &Directory, warning: Vec<u8>) -> i32
         }
         return 0;
     }
-    if directory.entries.is_empty() {
+    let config = &run.config;
+    if directory.entries.is_empty() && !config.zipinfo {
         return empty(run, directory, warning);
     }
-    let config = &run.config;
     let (selected, cautions, unmatched) =
         select(&directory.entries, &config.members, &config.excludes);
     let filtered = config.filtered();
@@ -671,11 +678,23 @@ async fn mode(run: &mut Run<'_>, directory: &Directory, warning: Vec<u8>) -> i32
     let mut out = Vec::new();
     if config.zipinfo {
         let (rows, header, totals) = config.layout();
+        let stray = if directory.misplaced {
+            stray_locator(config)
+        } else {
+            Vec::new()
+        };
         if header {
             let count = directory.entries.len() as u64;
-            listing::header(&config.archive, run.spool.size, count, &mut out);
+            listing::header(&config.archive, &stray, run.spool.size, count, &mut out);
+        } else {
+            run.host.warn(&stray);
         }
         out.extend(warning);
+        if directory.entries.is_empty() {
+            out.extend_from_slice(b"Empty zipfile.\n");
+            run.host.print(&out);
+            return WARN_EXIT;
+        }
         for entry in &selected {
             match rows {
                 Rows::None => {}

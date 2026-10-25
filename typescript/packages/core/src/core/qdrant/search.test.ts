@@ -19,7 +19,6 @@ import { expect, it, vi } from 'vitest'
 import { QdrantAccessor } from '../../accessor/qdrant.ts'
 import { onMount, vfsOver } from '../../test-utils.ts'
 import { QdrantVFS } from '../../vfs/qdrant/qdrant.ts'
-import { searchResources } from '../../commands/builtin/generic/search.ts'
 import { resolveQdrantConfig, type QdrantConfig } from '../../vfs/qdrant/config.ts'
 import { PathSpec } from '../../types.ts'
 import { searchRowsOutput } from '../vector/search.ts'
@@ -70,16 +69,18 @@ it('uses one native ranking for a batch and carries the requested limit', async 
     { id: 17, score: 0.81, payload: { text: 'answer' } },
   ])
   const root = new PathSpec({ virtual: '/data', directory: '/', vfsPath: '' })
-  const result = await onMount(
+  const [records] = await onMount(
     vfsOver(QdrantVFS, accessor),
     (files) =>
-      searchResources(files.dispatch, [root, root], {
-        query: 'question',
-        options: { top_k: 2, threshold: 0.5 },
-      }),
+      files.dispatch(
+        'search',
+        root,
+        [{ query: 'question', options: { top_k: 2, threshold: 0.5 } }],
+        { scopes: [root] },
+      ),
     '/data',
   )
-  expect(new TextDecoder().decode(result)).toBe('/data/17.txt:0.8100\nanswer\n')
+  expect(records).toEqual([['/data/17.txt', '/data/17.txt:0.8100\nanswer']])
   expect(query).toHaveBeenCalledOnce()
   expect(query.mock.calls[0]?.[1]).toMatchObject({ limit: 2 })
 })

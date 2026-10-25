@@ -27,29 +27,29 @@
       }
     },
     {
-      "id": "chroma_query_option_refusals",
+      "id": "chroma_search_option_refusals",
       "seq": 630059,
       "targets": [
         "chroma"
       ],
-      "command": "chroma-query --top-k many refunds /knowledge/; echo rc=$?; chroma-query --bogus refunds /knowledge/; echo rc=$?",
+      "command": "search --top-k many refunds /knowledge/; echo rc=$?; search --bogus refunds /knowledge/; echo rc=$?",
       "expect": {
         "exit": 0,
         "stdout": "rc=2\nrc=2\n",
-        "stderr": "chroma-query: invalid int value: 'many' for '--top-k'\nTry 'chroma-query --help' for more information.\nchroma-query: unrecognized option '--bogus'\nTry 'chroma-query --help' for more information.\n"
+        "stderr": "search: invalid int value: 'many' for '--top-k'\nTry 'search --help' for more information.\nsearch: unrecognized option '--bogus'\nTry 'search --help' for more information.\n"
       }
     },
     {
-      "id": "chroma_query_names_itself_in_a_failure",
+      "id": "chroma_search_names_itself_in_a_failure",
       "seq": 630060,
       "targets": [
         "chroma"
       ],
-      "command": "chroma-query refunds /knowledge/nope; echo rc=$?",
+      "command": "search refunds /knowledge/nope; echo rc=$?",
       "expect": {
         "exit": 0,
         "stdout": "rc=1\n",
-        "stderr": "chroma-query: /knowledge/nope: No such file or directory\n"
+        "stderr": "search: /knowledge/nope: No such file or directory\n"
       }
     }
   ]

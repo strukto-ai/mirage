@@ -339,8 +339,8 @@ def supported(
     if searches and mount.answers("files_containing"):
         word_text = " with `-w`" if word else ""
         parts.append(
-            f"{listing(searches)}{word_text} {agree(searches, 'use')} "
-            f"{name} search."
+            f"{listing(searches)}{word_text} {agree(searches, 'ask')} "
+            f"{name} which files may match."
         )
     finds = [code(c) for c in FINDS if runs((c,))]
     if finds and mount.answers("lines_containing"):
@@ -406,7 +406,7 @@ def limitations(
         if vfs.searchable is not None:
             globs = listing([code(g) for g in vfs.searchable])
             parts.append(
-                f"{code(vfs.name)} search covers only {globs}; "
+                f"{code(vfs.name)} answers only for {globs}; "
                 f"{reads} every other file."
             )
     if vfs.walk_limit >= 0:

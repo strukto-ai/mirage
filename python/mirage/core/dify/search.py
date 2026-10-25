@@ -84,10 +84,10 @@ def validate_args(
 ) -> str:
     validate_query(query, top_k)
     if threshold < 0 or threshold > 1:
-        raise ValueError("search: threshold must be in [0, 1]")
+        raise ValueError("threshold must be in [0, 1]")
     if method not in METHODS:
         raise ValueError(
-            "search: method must be one of semantic, fulltext, hybrid, keyword"
+            "method must be one of semantic, fulltext, hybrid, keyword"
         )
     return METHODS[method]
 
@@ -214,6 +214,7 @@ async def search_many(
     top_k = int_option(query, "top_k", 10)
     method = text_option(query, "method", "semantic")
     threshold = float_option(query, "threshold", 0.0)
+    validate_args(query.query, method, top_k, threshold)
     targets, prefix = await search_scope(DIFY_TREE, accessor, paths)
     return await search_segments(
         accessor,

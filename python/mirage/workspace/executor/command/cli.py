@@ -803,14 +803,19 @@ async def run_walked(
 
     # Most CLIs never read the files: an API client has no filesystem,
     # while `git` is nothing but one. None outside a workspace, so a verb
-    # that needs them refuses there on its own.
+    # that needs them refuses there on its own. A leaf at the root is the
+    # program itself, so its spec takes the name it is installed under.
     ctx = Context(
         stdin=stdin,
         flags=walked.flags,
         cwd=PathSpec.from_str_path(session.cwd),
         env=env_snapshot(session),
         argv=walked.argv,
-        spec=walked.leaf,
+        spec=(
+            walked.leaf
+            if walked.path
+            else replace(walked.leaf, name=walked.prog)
+        ),
         vfs=context.vfs,
         session=context.session,
         processes=context.processes,
