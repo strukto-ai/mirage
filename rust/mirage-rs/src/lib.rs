@@ -15,6 +15,7 @@ mod glob;
 mod grep;
 #[cfg(test)]
 mod host;
+mod iconv;
 mod join;
 mod jq;
 mod look;
@@ -327,6 +328,7 @@ pub fn open(kind: &str, config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
         "diff" => diff::open(config),
         "glob" => glob::open(config),
         "grep" => grep::open(config),
+        "iconv" => iconv::open(config),
         "join" => join::open(config),
         "jq_scan" => jq::open_scan(config),
         "jq_format" => jq::open_format(config),

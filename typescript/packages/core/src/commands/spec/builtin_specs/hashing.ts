@@ -80,11 +80,12 @@ export const SPECS: Record<string, CommandSpec> = {
   }),
   iconv: new CommandSpec({
     arguments: [
-      new Argument('-f'),
-      new Argument('-t'),
+      new Argument(['-f', '--from-code']),
+      new Argument(['-t', '--to-code']),
       new Argument('-c', { action: 'store_true' }),
-      new Argument('-o', { type: 'path' }),
+      new Argument(['-o', '--output'], { type: 'path' }),
       new Argument(['-l', '--list'], { action: 'store_true' }),
+      new Argument(['-s', '--silent'], { action: 'store_true' }),
       PATHS_OPERAND,
     ],
   }),
