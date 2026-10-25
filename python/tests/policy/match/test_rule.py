@@ -357,6 +357,11 @@ def test_io_refusal_applies_the_gate_precedence_to_an_entry():
     # it, passed with one, and the later rule never gets a say.
     assert io_refusal(rules, tokens, "/data/both/a", ()) == "needs a nod"
     assert io_refusal(rules, tokens, "/data/both/a", (ask,)) is None
+    # A grant is the rule's value: the same rule compiled again still holds it.
+    again = CommandRule(
+        reason="needs a nod", commands=("rm",), paths=("/data/both/*",)
+    )
+    assert io_refusal(rules, tokens, "/data/both/a", (again,)) is None
     assert io_refusal(rules, tokens, "/data/both/a", (later,)) == "needs a nod"
     # An entry no rule holds passes; so does one a whole-line rule names.
     assert io_refusal(rules, tokens, "/data/open/a", ()) is None

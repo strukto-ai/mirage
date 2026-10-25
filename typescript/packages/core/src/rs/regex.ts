@@ -165,15 +165,16 @@ export class PosixRegex {
       word,
     }
     this.stream = open(this.config)
-    finalizer.register(this, this.stream)
+    finalizer.register(this, this.stream, this)
     this.groups = posixMeta.parse(JSON.parse(decoder.decode(this.stream.metadata()))).groups
   }
 
   // The stream, opened again when the instance it was on retired.
   private live(): OpenStream {
     if (!this.stream.live) {
+      finalizer.unregister(this)
       this.stream = open(this.config)
-      finalizer.register(this, this.stream)
+      finalizer.register(this, this.stream, this)
     }
     return this.stream
   }
@@ -295,7 +296,7 @@ export class LineRegex {
       line,
     }
     this.stream = open(this.config)
-    finalizer.register(this, this.stream)
+    finalizer.register(this, this.stream, this)
     this.unicodeFolds = ignoreCase && utf8
     const meta = lineMeta.parse(JSON.parse(decoder.decode(this.stream.metadata())))
     this.warnings = meta.warnings
@@ -305,8 +306,9 @@ export class LineRegex {
   // The stream, opened again when the instance it was on retired.
   private live(): OpenStream {
     if (!this.stream.live) {
+      finalizer.unregister(this)
       this.stream = open(this.config)
-      finalizer.register(this, this.stream)
+      finalizer.register(this, this.stream, this)
     }
     return this.stream
   }

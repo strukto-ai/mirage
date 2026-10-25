@@ -19,6 +19,7 @@ import { WordKind } from '../../commands/spec/types.ts'
 import { admissionMatcher, units } from '../../rs/policy.ts'
 import type { PathSpec } from '../../types.ts'
 import { METADATA_OPS, SUBTREE_COMMANDS, SUBTREE_OPS } from '../constants.ts'
+import { sameRule } from '../decisions.ts'
 import type { AdmissionRules, CommandContext, CommandRule, VfsContext } from '../types.ts'
 import { lineTokens } from './allow.ts'
 
@@ -118,7 +119,9 @@ export function ioReach(
 }
 function grantIndices(rules: AdmissionRules, granted: readonly CommandRule[]): number[] {
   if (granted.length === 0) return []
-  return [...rules.deny, ...rules.ask].flatMap((rule, id) => (granted.includes(rule) ? [id] : []))
+  return [...rules.deny, ...rules.ask].flatMap((rule, id) =>
+    granted.some((nod) => sameRule(nod, rule)) ? [id] : [],
+  )
 }
 function ruleAt(rules: AdmissionRules, id: number): CommandRule {
   const rule = [...rules.deny, ...rules.ask][id]

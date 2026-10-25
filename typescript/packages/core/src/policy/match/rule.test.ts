@@ -316,6 +316,8 @@ describe('rules', () => {
     // it, passed with one, and the later rule never gets a say.
     expect(ioRefusal(rules, tokens, '/data/both/a', [])).toBe('needs a nod')
     expect(ioRefusal(rules, tokens, '/data/both/a', [ask])).toBeNull()
+    // A grant is the rule's value: the same rule compiled again still holds it.
+    expect(ioRefusal(rules, tokens, '/data/both/a', [{ ...ask }])).toBeNull()
     expect(ioRefusal(rules, tokens, '/data/both/a', [later])).toBe('needs a nod')
     // An entry no rule holds passes; so does one a whole-line rule names.
     expect(ioRefusal(rules, tokens, '/data/open/a', [])).toBeNull()

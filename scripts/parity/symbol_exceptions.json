@@ -959,9 +959,8 @@
   },
   "rs/policy": {
    "typescript_only": {
-    "byObject": "Finds a session's own compiled matcher without serializing its rules on every check; Python's functools.lru_cache hashes the frozen value instead.",
     "byValue": "The compiled-matcher map behind admissionMatcher and visibilityMatcher, keyed by configuration; Python's functools.lru_cache holds the same entries.",
-    "cached": "Looks a matcher up by object then by configuration; Python's functools.lru_cache does both in one hash of the frozen value.",
+    "cached": "Looks a matcher up by its configuration, least recently asked dropped first; Python's functools.lru_cache does the same over the frozen value.",
     "finalizer": "Closes Wasm slots for abandoned synchronous matcher objects; Python releases native streams by reference counting."
    }
   },

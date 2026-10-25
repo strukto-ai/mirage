@@ -62,6 +62,14 @@ describe('policy stream', () => {
     expect(visibilityMatcher(hidden(['/secret']))).not.toBe(visibilityMatcher(hidden(['/other'])))
   })
 
+  it('answers for a rule set as it reads now', () => {
+    const deny: CommandRule[] = []
+    const rules: AdmissionRules = { allow: null, ask: [], deny }
+    expect(admissionMatcher(rules).ask('has_rules')).toBe(false)
+    deny.push({ reason: 'no', commands: ['rm'] })
+    expect(admissionMatcher(rules).ask('has_rules')).toBe(true)
+  })
+
   it('keeps component depth and surrogate text', () => {
     const vis: Visibility = {
       paths: { paths: [], patterns: ['secret', '*.key'] },

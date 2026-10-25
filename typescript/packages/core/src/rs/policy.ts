@@ -41,14 +41,15 @@ export class PolicyMatcher {
 
   constructor(private readonly config: Readonly<Wire>) {
     this.stream = open(config)
-    finalizer.register(this, this.stream)
+    finalizer.register(this, this.stream, this)
   }
 
   // The stream, opened again when the instance it was on retired.
   private live(): OpenStream {
     if (!this.stream.live) {
+      finalizer.unregister(this)
       this.stream = open(this.config)
-      finalizer.register(this, this.stream)
+      finalizer.register(this, this.stream, this)
     }
     return this.stream
   }
@@ -161,23 +162,18 @@ export function linkTraceWire(trace: readonly LinkStep[]): util.JSONType[] {
 }
 
 const byValue = new Map<string, PolicyMatcher>()
-const byObject = new WeakMap<object, PolicyMatcher>()
 
-// One matcher per configuration, however many objects spell it: a session
-// keeps its own, and a merged visibility built per call finds the same one.
-function cached(key: object | null, config: () => Wire): PolicyMatcher {
-  const known = key === null ? undefined : byObject.get(key)
-  if (known !== undefined) return known
-  const wire = config()
-  const text = JSON.stringify(wire)
-  const matcher = byValue.get(text) ?? new PolicyMatcher(wire)
+// One matcher per configuration as it reads now, however many objects
+// spell it, the least recently asked dropped first.
+function cached(config: Wire): PolicyMatcher {
+  const text = JSON.stringify(config)
+  const matcher = byValue.get(text) ?? new PolicyMatcher(config)
   byValue.delete(text)
   byValue.set(text, matcher)
   if (byValue.size > CACHE_SIZE) {
     const oldest = byValue.keys().next()
     if (oldest.done !== true) byValue.delete(oldest.value)
   }
-  if (key !== null) byObject.set(key, matcher)
   return matcher
 }
 
@@ -187,10 +183,10 @@ function cached(key: object | null, config: () => Wire): PolicyMatcher {
  * admission_matcher.
  */
 export function admissionMatcher(rules: AdmissionRules | null): PolicyMatcher {
-  return cached(rules, () => (rules === null ? {} : { rules: rulesWire(rules) }))
+  return cached(rules === null ? {} : { rules: rulesWire(rules) })
 }
 
 /** The compiled matcher for a visibility, shared by every caller asking the same. Mirrors Python's visibility_matcher. */
 export function visibilityMatcher(vis: Visibility | null): PolicyMatcher {
-  return cached(vis, () => (vis === null ? {} : { visibility: visibilityWire(vis) }))
+  return cached(vis === null ? {} : { visibility: visibilityWire(vis) })
 }
