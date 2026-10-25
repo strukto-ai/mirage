@@ -7,7 +7,6 @@ from mirage.commands.builtin.grep_pattern import (
     matcher_syntax,
     merge_pattern_list,
     pattern_warnings,
-    rust_escape,
 )
 from mirage.commands.builtin.types import RegexSyntax
 from mirage.commands.errors import UsageError
@@ -202,7 +201,3 @@ def test_perl_refusals_are_pcre2s():
     with pytest.raises(UsageError) as caught:
         compile_pattern("(", syntax=RegexSyntax.PERL)
     assert str(caught.value) == "grep: missing closing parenthesis"
-
-
-def test_rust_escape_is_regex_escape():
-    assert rust_escape("a.b-c~d") == "a\\.b\\-c\\~d"

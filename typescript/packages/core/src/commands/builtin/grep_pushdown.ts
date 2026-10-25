@@ -13,8 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { PatternType } from './constants.ts'
-import { UNICODE_FOLDED, foldsByUnicode, requiredNeedles } from './grep_prefilter.ts'
-import { LineRegex } from '../../rs/regex.ts'
 
 // Classify a grep pattern for API push-down decisions.
 export function classifyPattern(pattern: string, fixedString: boolean): PatternType {
@@ -25,6 +23,10 @@ export function classifyPattern(pattern: string, fixedString: boolean): PatternT
 }
 
 const MIN_SEARCH_LITERAL = 3
+// The ASCII letters a non-ASCII character matches under Unicode case folding
+// (the Kelvin sign for k, `ſ` for s): a lowercased search for a word holding
+// one could miss a line.
+const UNICODE_FOLDED = /[ks]/
 
 // Whether the pattern is searched verbatim, with no regex extraction.
 // Push-down against a whole-word search index is only complete when the term
@@ -70,20 +72,21 @@ export function wholeWordLiterals(
  */
 export function searchTerms(
   pattern: string | null,
-  matcher: RegExp | LineRegex,
+  // Texts one of which every match holds, null when none are known.
+  needles: string[] | null,
+  // Case folds by Unicode, so `ſ` matches `s`.
+  unicodeFolds: boolean,
   fixedString: boolean,
   wholeWord: boolean,
   lineRegexp: boolean,
   ignoreCase: boolean,
 ): [string[], boolean] | null {
   const words = wholeWordLiterals(pattern, fixedString, wholeWord, lineRegexp)
-  const unicode = matcher instanceof LineRegex ? matcher.unicodeFolds : foldsByUnicode(matcher)
   const untrusted = (w: string): boolean =>
-    /[\u0080-\uffff]/.test(w) || (unicode && UNICODE_FOLDED.test(w.toLowerCase()))
+    /[\u0080-\uffff]/.test(w) || (unicodeFolds && UNICODE_FOLDED.test(w.toLowerCase()))
   if (words !== null && !(ignoreCase && words.some(untrusted))) {
     return [words, true]
   }
-  const needles = matcher instanceof LineRegex ? matcher.needles : requiredNeedles(matcher)
   if (needles === null || needles.some((n) => n.length < MIN_SEARCH_LITERAL)) return null
   return [needles, false]
 }

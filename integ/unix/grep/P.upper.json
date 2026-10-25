@@ -835,6 +835,419 @@
       "flags": [
         "P"
       ]
+    },
+    {
+      "id": "grep_P_variable_length_lookbehind",
+      "seq": 13470105,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'abc bc xc\\n' | grep -oP '(?<=a?b)c'",
+      "expect": {
+        "exit": 0,
+        "stdout": "c\nc\n",
+        "stderr": ""
+      },
+      "flags": [
+        "P",
+        "o"
+      ]
+    },
+    {
+      "id": "grep_P_lookbehind_branch_past_255_is_too_long",
+      "seq": 13470106,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'ab\\n' | grep -cP '(?<=a{1,256})b'",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "grep: branch too long in variable-length lookbehind assertion\n"
+      },
+      "flags": [
+        "P",
+        "c"
+      ]
+    },
+    {
+      "id": "grep_P_caseless_back_reference_in_a_case_sensitive_pattern",
+      "seq": 13470107,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'aAa\\naaA\\nAaA\\n' | grep -P 'a(?i)(a)\\1'",
+      "expect": {
+        "exit": 0,
+        "stdout": "aAa\naaA\n",
+        "stderr": ""
+      },
+      "flags": [
+        "P"
+      ]
+    },
+    {
+      "id": "grep_P_utf8_takes_wide_escapes",
+      "seq": 13470108,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "( export LC_ALL=C.UTF-8; printf '\\304\\200\\nA\\n' | grep -P '\\x{100}|\\N{U+41}' )",
+      "expect": {
+        "exit": 0,
+        "stdout": "Ā\nA\n",
+        "stderr": ""
+      },
+      "flags": [
+        "P"
+      ]
+    },
+    {
+      "id": "grep_P_utf8_refuses_a_surrogate_escape",
+      "seq": 13470109,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "LC_ALL=C.UTF-8 grep -P '\\x{d800}' /dev/null",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "grep: disallowed Unicode code point (>= 0xd800 && <= 0xdfff)\n"
+      },
+      "flags": [
+        "P"
+      ]
+    },
+    {
+      "id": "grep_P_utf8_inline_caseless_folds_non_ascii",
+      "seq": 13470110,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "( export LC_ALL=C.UTF-8; printf '\\303\\211\\n' | grep -P '(?i)\\x{e9}' )",
+      "expect": {
+        "exit": 0,
+        "stdout": "É\n",
+        "stderr": ""
+      },
+      "flags": [
+        "P"
+      ]
+    },
+    {
+      "id": "grep_P_backtracking_limit_ends_the_input",
+      "seq": 13470111,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaxc\\nac\\n' | grep -P '^(a|a)+\\1c|^ac'",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "grep: (standard input): exceeded PCRE's backtracking limit\n"
+      },
+      "flags": [
+        "P"
+      ]
+    },
+    {
+      "id": "grep_P_invert_prints_nothing_before_the_limit",
+      "seq": 13470112,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'ok\\naaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaxc\\nok2\\n' | grep -vP '^(a|a)+\\1c'",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "grep: (standard input): exceeded PCRE's backtracking limit\n"
+      },
+      "flags": [
+        "P",
+        "v"
+      ]
+    },
+    {
+      "id": "grep_P_only_matching_steps_past_an_empty_first_alternative",
+      "seq": 13470113,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "echo bbb | grep -oP 'a*|b+'; echo \"status $?\"; echo bbb | rg -oP 'a*|b+' | wc -l",
+      "expect": {
+        "exit": 0,
+        "stdout": "status 0\n4\n",
+        "stderr": ""
+      },
+      "flags": [
+        "P",
+        "o"
+      ]
+    },
+    {
+      "id": "grep_P_caseless_type_escapes_and_posix_classes_fold_as_pcre2",
+      "seq": 13470114,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "( export LC_ALL=C.UTF-8; printf 'k\\ns\\nK\\n\\305\\277\\n\\342\\204\\252\\n\\303\\251\\n-\\n' | grep -P '(?i)^\\W$'; printf 'k\\ns\\nK\\n\\305\\277\\n\\342\\204\\252\\n\\303\\251\\n-\\n' | grep -iP '^[[:upper:]]$' )",
+      "expect": {
+        "exit": 0,
+        "stdout": "ſ\nK\né\n-\nk\ns\nK\n",
+        "stderr": ""
+      },
+      "flags": [
+        "P",
+        "i"
+      ]
+    },
+    {
+      "id": "grep_P_refuses_a_pattern_that_is_not_utf8",
+      "seq": 13470115,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/pcreu; printf 'a\\377b\\n' > /data/pcreu/pat; printf 'axb\\n' | ( export LC_ALL=C.UTF-8; grep -P -f /data/pcreu/pat ); echo \"status $?\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "status 2\n",
+        "stderr": "grep: UTF-8 error: illegal byte (0xfe or 0xff)\n"
+      },
+      "flags": [
+        "P",
+        "f"
+      ]
     }
   ]
 }

@@ -12,13 +12,9 @@ from functools import partial
 
 from mirage.commands.builtin.grep_binary import (
     GrepFlags,
-    grep_input,
     name_end,
 )
 from mirage.commands.builtin.grep_pattern import (
-    NEVER_MATCH,
-    LineMatcher,
-    compile_perl,
     matcher_syntax,
     pattern_warnings,
     resolve_pattern,
@@ -35,7 +31,6 @@ from mirage.commands.builtin.grep_stream import (
     stream_config,
     stream_input,
 )
-from mirage.commands.builtin.types import RegexSyntax
 from mirage.commands.builtin.utils.constants import GREP_STDIN_LABEL
 from mirage.commands.builtin.utils.links import (
     links_of,
@@ -65,13 +60,13 @@ from mirage.commands.spec.usage import (
     word_refusal_line,
 )
 from mirage.commands.spec.word_choice import WordMatch, match_word
-from mirage.concurrency.worker import Worker
 from mirage.errors.constants import FS_ERRORS, WALK_ERRORS
 from mirage.errors.fs import fs_strerror, walk_refusal
 from mirage.errors.posix import posix_phrase
 from mirage.errors.types import FsCondition
 from mirage.io.types import ByteSource, IOResult, materialize
-from mirage.shell.bytes import byte_view, utf8_locale
+from mirage.rs.regex import LineRegex
+from mirage.shell.bytes import utf8_locale
 from mirage.types import FileStat, FileType, PathSpec, PolymorphicReadFn
 from mirage.utils.filetype import BINARY_EXTENSIONS, get_extension
 from mirage.utils.path import respell_one
@@ -325,13 +320,13 @@ def parse_flags(fl: FlagView, never_match: bool) -> GrepFlags:
     )
 
 
-def line_warnings(fl: FlagView, matcher: LineMatcher | None) -> bytes:
+def line_warnings(fl: FlagView, matcher: LineRegex | None) -> bytes:
     """What grep warns once for the line, before it reads a file: an
     obsolete -u, then the pattern's compile-time warnings.
 
     Args:
         fl (FlagView): spec-validated view over the raw flag kwargs.
-        matcher (LineMatcher | None): the compiled pattern list, None
+        matcher (LineRegex | None): the compiled pattern list, None
             when it matches nothing.
     """
     warning = b"" if matcher is None else pattern_warnings(matcher)
@@ -361,29 +356,12 @@ async def grep_generic(
     if never_match:
         f = replace(f, fixed_string=False)
     utf8 = utf8_locale(ctx.env)
-    worker: Worker | None = None
-    # -G, -E and -F run in mirage-rs, which compiles the list once for
-    # every input; -P stays with the host's PCRE translation.
-    if f.syntax is RegexSyntax.PERL:
-        pat = (
-            re.compile(NEVER_MATCH)
-            if never_match
-            else compile_perl(
-                byte_view(pattern, utf8),
-                f.ignore_case,
-                f.whole_word,
-                utf8,
-                f.line_regexp,
-            )
-        )
-        stream = None
-        warning = line_warnings(fl, None)
-    else:
-        stream, warning = open_grep(
-            stream_config(f, None if never_match else pattern, utf8)
-        )
-        if fl.as_bool("unix_byte_offsets"):
-            warning = UNIX_BYTE_OFFSETS + warning
+    # mirage-rs compiles the list once for every input.
+    stream, warning = open_grep(
+        stream_config(f, None if never_match else pattern, utf8)
+    )
+    if fl.as_bool("unix_byte_offsets"):
+        warning = UNIX_BYTE_OFFSETS + warning
 
     def search(
         source: AsyncIterator[bytes],
@@ -393,21 +371,8 @@ async def grep_generic(
         after_output: bool = False,
         size: int | None = None,
     ) -> AsyncGenerator[bytes, None]:
-        if stream is not None:
-            return stream_input(
-                source, stream, label, show, file_io, after_output, size
-            )
-        return grep_input(
-            source,
-            pat,
-            f,
-            label,
-            show,
-            file_io,
-            after_output,
-            utf8,
-            size,
-            worker,
+        return stream_input(
+            source, stream, label, show, file_io, after_output, size
         )
 
     io = IOResult(exit_code=1, stderr=warning or None)
@@ -420,8 +385,6 @@ async def grep_generic(
             io,
         ), io
 
-    if stream is None:
-        worker = Worker()
     mounts = mounts_of(ctx)
     rd = mount_parent_readdir(
         partial(call_readdir, readdir), mounts, mount_root(ctx)
@@ -452,7 +415,7 @@ async def grep_generic(
     async def scan(
         p: PathSpec, walked: bool = False, chain: tuple[str, ...] = ()
     ) -> AsyncGenerator[bytes, None]:
-        nonlocal matched, printed
+        nonlocal failed, matched, printed
         try:
             # The probes below go by `virtual`, which cannot carry the
             # walk's verdict on an operand it refused.
@@ -551,6 +514,8 @@ async def grep_generic(
                         yield chunk
             finally:
                 matched = matched or file_io.exit_code == 0
+                # A -P search that gave up ends its file with an error.
+                failed = failed or file_io.exit_code == 2
                 update_status(file_io)
                 if file_io.stderr:
                     diagnostics.append(await materialize(file_io.stderr))
@@ -569,8 +534,6 @@ async def grep_generic(
                 if f.quiet and matched:
                     break
         finally:
-            if worker is not None:
-                await worker.close()
             if diagnostics:
                 io.stderr = (await materialize(io.stderr)) + b"".join(
                     diagnostics

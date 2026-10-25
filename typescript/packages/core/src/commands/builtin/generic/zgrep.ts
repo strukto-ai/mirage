@@ -15,11 +15,12 @@
 import { byteView, decodeText, encodeText, textView, utf8Locale } from '../../../shell/bytes.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
+import { SearchLimit } from '../../../rs/errors.ts'
+import { LineRegex } from '../../../rs/regex.ts'
 import { IOResult, materialize } from '../../../io/types.ts'
 import type { PathSpec, StatFn } from '../../../types.ts'
 import type { CommandFnResult, Context } from '../../config.ts'
 import {
-  NEVER_MATCH,
   compilePattern,
   linePieces,
   lineSelected,
@@ -133,7 +134,7 @@ export async function zgrepGeneric(
     maxCount === 0
       ? null
       : neverMatch
-        ? new RegExp(NEVER_MATCH)
+        ? new LineRegex([], 'basic', false, utf8)
         : compilePattern(
             byteView(rawPattern, utf8),
             parsed.ignoreCase,
@@ -169,6 +170,7 @@ export async function zgrepGeneric(
       let count = 0
       let number = 0
       let binary = false
+      let gaveUp: string | null = null
       const fname = showFilename ? operandLabel(p, GREP_STDIN_LABEL) : null
       try {
         for (;;) {
@@ -179,19 +181,31 @@ export async function zgrepGeneric(
           // Keep reading after selection stops to validate the gzip trailer.
           if (
             pattern === null ||
+            gaveUp !== null ||
             (maxCount !== null && count >= maxCount) ||
-            ((filesOnly || filesWithoutMatch) && count > 0)
+            ((filesOnly || filesWithoutMatch || quiet) && count > 0)
           )
             continue
           const line = byteView(raw, utf8)
           // Whether the line is selected is its own question: an empty match
-          // selects it and gives -o nothing to print.
-          const hit = lineSelected(pattern, line) !== parsed.invert
+          // selects it and gives -o nothing to print. A -P search past
+          // PCRE2's match limit ends the input after the matches it found.
+          let hit = false
           let selected: [number, string][] = []
-          if (!hit) selected = []
-          else if (pieces && !parsed.invert && !(filesOnly || filesWithoutMatch))
-            selected = linePieces(pattern, line)
-          else selected = [[0, line]]
+          try {
+            hit = lineSelected(pattern, line) !== parsed.invert
+            if (!hit) selected = []
+            else if (
+              pieces &&
+              !(parsed.invert || parsed.count || quiet || filesOnly || filesWithoutMatch)
+            )
+              selected = linePieces(pattern, line)
+            else selected = [[0, line]]
+          } catch (err) {
+            if (!(err instanceof SearchLimit)) throw err
+            gaveUp = err.message
+            selected = err.spans.map(([start, end]) => [start, line.slice(start, end)])
+          }
           if (hit) {
             count++
             anyMatch = true
@@ -213,14 +227,15 @@ export async function zgrepGeneric(
         await reader.discard()
       }
       let diagnostic = decodeText(await io.materializeStderr())
+      if (gaveUp !== null) diagnostic += `grep: ${operandLabel(p, GREP_STDIN_LABEL)}: ${gaveUp}\n`
       if (binary) diagnostic += `grep: ${operandLabel(p, GREP_STDIN_LABEL)}: binary file matches\n`
       if (diagnostic !== '')
         result.stderr = encodeText(decodeText(await materialize(result.stderr)) + diagnostic)
-      failed ||= io.exitCode === 1
+      failed ||= io.exitCode === 1 || gaveUp !== null
       result.exitCode = exitCodeFor(anyMatch, failed, false)
       if (pattern === null) {
         if (filesWithoutMatch) yield encodeText(p.rawPath + '\n')
-      } else if (!quiet) {
+      } else if (!quiet && gaveUp === null) {
         if (filesOnly || filesWithoutMatch) {
           if (count > 0 === filesOnly) yield encodeText(p.rawPath + '\n')
         } else if (parsed.count)

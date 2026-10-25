@@ -13,6 +13,7 @@ use regex_syntax::hir::Hir;
 use self::backtrack::{Program, Scratch, Shape, unit_at};
 use self::hir::Lower;
 use self::parse::{Ast, Dialect, TOO_BIG, Unit};
+use crate::pcre::{self, Pcre};
 
 /// What a search that may run out of steps comes back with.
 #[derive(Debug, PartialEq, Eq)]
@@ -28,7 +29,12 @@ pub(crate) enum Syntax {
     Basic,
     Extended,
     Fixed,
+    /// -P: one PCRE2 pattern.
+    Perl,
 }
+
+/// What grep says of a -P pattern list longer than one.
+const PERL_SINGLE: &str = "the -P option only supports a single pattern";
 
 pub(crate) struct Options {
     pub(crate) syntax: Syntax,
@@ -59,16 +65,32 @@ struct Engine {
     resume: Option<(usize, Option<(usize, usize)>)>,
 }
 
+/// GNU grep's words for a -P search that gave up at PCRE2's match limit.
+pub(crate) const EXCEEDED: &str = "exceeded PCRE's backtracking limit";
+
 /// grep's basic, extended and fixed-string patterns, matched over records
 /// of bytes or, under UTF-8, of characters. A record matches when any
 /// pattern of the list does; where a match lies, for -o, is the leftmost
-/// one and the longest there, across the whole list.
+/// one and the longest there, across the whole list. A -P pattern is
+/// PCRE2's, its matches leftmost-first.
 pub(crate) struct Regex {
+    matcher: Matcher,
+    utf8: bool,
+    /// A -P search gave up at the backtracking limit.
+    exceeded: bool,
+}
+
+enum Matcher {
+    Posix(Box<Engines>),
+    Perl(Box<Pcre>),
+}
+
+/// The automata and backtracker grep's own dialects run on.
+struct Engines {
     select: Engine,
     /// Where -o reads matches when that differs from selecting lines.
     extent: Option<Engine>,
     scratch: Scratch,
-    utf8: bool,
 }
 
 pub(crate) struct Compiled {
@@ -335,10 +357,10 @@ impl Engine {
 }
 
 impl Regex {
-    pub(crate) fn compile(
-        patterns: &[Vec<u8>],
-        options: &Options,
-    ) -> Result<Compiled, &'static str> {
+    pub(crate) fn compile(patterns: &[Vec<u8>], options: &Options) -> Result<Compiled, String> {
+        if options.syntax == Syntax::Perl && !patterns.is_empty() {
+            return Self::perl(patterns, options);
+        }
         let mut selects = Vec::new();
         let mut extents = Vec::new();
         let mut warnings = Vec::new();
@@ -376,19 +398,57 @@ impl Regex {
         };
         Ok(Compiled {
             regex: Regex {
-                select,
-                extent,
-                scratch: Scratch::default(),
+                matcher: Matcher::Posix(Box::new(Engines {
+                    select,
+                    extent,
+                    scratch: Scratch::default(),
+                })),
                 utf8: options.utf8,
+                exceeded: false,
             },
             warnings,
         })
     }
 
-    /// Whether one search may span many records: the backtracker takes one
-    /// at a time.
+    /// grep -P's one pattern, wrapped for -w as GNU grep wraps it (so a
+    /// refusal's offset counts the wrapper), and spanning the record for -x.
+    fn perl(patterns: &[Vec<u8>], options: &Options) -> Result<Compiled, String> {
+        let [pattern] = patterns else {
+            return Err(PERL_SINGLE.to_string());
+        };
+        let bytes = !options.utf8;
+        let mut chars = pcre::pattern_chars(pattern, bytes).map_err(|err| err.message)?;
+        if options.word && !options.line {
+            chars = "(?<!\\w)(?:"
+                .chars()
+                .chain(chars)
+                .chain(")(?!\\w)".chars())
+                .collect();
+        }
+        let mode = pcre::Mode {
+            bytes,
+            ignore_case: options.ignore_case,
+            whole_line: options.line,
+            ..pcre::Mode::default()
+        };
+        let compiled = Pcre::new(&chars, mode).map_err(|err| err.message)?;
+        Ok(Compiled {
+            regex: Regex {
+                matcher: Matcher::Perl(Box::new(compiled)),
+                utf8: options.utf8,
+                exceeded: false,
+            },
+            warnings: Vec::new(),
+        })
+    }
+
+    /// Whether one search may span many records: the backtracker and a -P
+    /// pattern take one at a time.
     pub(crate) fn spans_records(&self) -> bool {
-        self.select.programs.is_empty()
+        match &self.matcher {
+            Matcher::Posix(posix) => posix.select.programs.is_empty(),
+            Matcher::Perl(_) => false,
+        }
     }
 
     /// Where the leftmost match in `hay[from..to]` starts; `hay[to]` is the
@@ -402,8 +462,20 @@ impl Regex {
         to: usize,
         budget: &mut u64,
     ) -> Step<Option<usize>> {
-        self.select
-            .find(hay, from, to, self.utf8, &mut self.scratch, budget)
+        match &mut self.matcher {
+            Matcher::Posix(posix) => {
+                let Engines {
+                    select, scratch, ..
+                } = posix.as_mut();
+                select.find(hay, from, to, self.utf8, scratch, budget)
+            }
+            Matcher::Perl(pcre) => {
+                match perl_extent(pcre, &mut self.exceeded, hay, from, from, to, budget) {
+                    Step::Done(found) => Step::Done(found.map(|(start, _)| start)),
+                    Step::Paused => Step::Paused,
+                }
+            }
+        }
     }
 
     /// Whether the one record `hay[from..to]` matches, spending `budget`
@@ -415,12 +487,25 @@ impl Regex {
         to: usize,
         budget: &mut u64,
     ) -> Step<bool> {
-        self.select
-            .any(hay, from, to, self.utf8, &mut self.scratch, budget)
+        match &mut self.matcher {
+            Matcher::Posix(posix) => {
+                let Engines {
+                    select, scratch, ..
+                } = posix.as_mut();
+                select.any(hay, from, to, self.utf8, scratch, budget)
+            }
+            Matcher::Perl(pcre) => {
+                match perl_extent(pcre, &mut self.exceeded, hay, from, from, to, budget) {
+                    Step::Done(found) => Step::Done(found.is_some()),
+                    Step::Paused => Step::Paused,
+                }
+            }
+        }
     }
 
     /// The leftmost-longest match in the record `hay[begin..to]` that
-    /// starts at or after `at`, spending `budget` as `find` does.
+    /// starts at or after `at`, spending `budget` as `find` does; a -P
+    /// pattern's is the leftmost-first, its start past any `\K`.
     pub(crate) fn extent(
         &mut self,
         hay: &[u8],
@@ -429,13 +514,76 @@ impl Regex {
         to: usize,
         budget: &mut u64,
     ) -> Step<Option<(usize, usize)>> {
-        let engine = self.extent.as_mut().unwrap_or(&mut self.select);
-        engine.extent(hay, begin, at, to, self.utf8, &mut self.scratch, budget)
+        match &mut self.matcher {
+            Matcher::Posix(posix) => {
+                let Engines {
+                    select,
+                    extent,
+                    scratch,
+                } = posix.as_mut();
+                let engine = extent.as_mut().unwrap_or(select);
+                engine.extent(hay, begin, at, to, self.utf8, scratch, budget)
+            }
+            Matcher::Perl(pcre) => {
+                perl_extent(pcre, &mut self.exceeded, hay, begin, at, to, budget)
+            }
+        }
+    }
+
+    /// Whether a -P search gave up at the backtracking limit since the
+    /// last call; the input ends there, as GNU grep's does.
+    pub(crate) fn exceeded(&mut self) -> bool {
+        std::mem::take(&mut self.exceeded)
+    }
+
+    /// A -P pattern's regular approximation, which its needles come from.
+    pub(crate) fn perl_regular(&self) -> Option<&str> {
+        match &self.matcher {
+            Matcher::Perl(pcre) => Some(&pcre.regular),
+            Matcher::Posix(_) => None,
+        }
     }
 
     /// The length of the unit at `pos`, for stepping past an empty match.
     pub(crate) fn unit_len(&self, hay: &[u8], pos: usize, to: usize) -> usize {
-        unit_at(hay, pos, to, self.utf8).map_or(1, |(_, len)| len)
+        match &self.matcher {
+            Matcher::Perl(pcre) => pcre.unit_len(&hay[..to], pos),
+            Matcher::Posix(_) => unit_at(hay, pos, to, self.utf8).map_or(1, |(_, len)| len),
+        }
+    }
+}
+
+/// A -P pattern's needles, from the extended expression every match of it
+/// also matches.
+pub(crate) fn perl_needles(regular: &str, ignore_case: bool, utf8: bool) -> Option<Vec<Vec<u8>>> {
+    let parsed = parse::parse(regular.as_bytes(), true, utf8, Dialect::Grep).ok()?;
+    posix::needles(&[&parsed.ast], ignore_case, utf8)
+}
+
+/// A -P pattern's leftmost match in the record `hay[begin..to]` at or after
+/// `at`. A search charges `budget` the backtracking steps it can have
+/// taken; one that gives up at the backtracking limit sets `exceeded` and
+/// finds nothing.
+fn perl_extent(
+    pcre: &Pcre,
+    exceeded: &mut bool,
+    hay: &[u8],
+    begin: usize,
+    at: usize,
+    to: usize,
+    budget: &mut u64,
+) -> Step<Option<(usize, usize)>> {
+    if *budget == 0 {
+        return Step::Paused;
+    }
+    let (found, steps) = pcre.find(&hay[begin..to], at - begin);
+    *budget = budget.saturating_sub(u64::try_from(steps).unwrap_or(u64::MAX));
+    match found {
+        Ok(found) => Step::Done(found.map(|(start, end)| (begin + start, begin + end))),
+        Err(pcre::Exceeded) => {
+            *exceeded = true;
+            Step::Done(None)
+        }
     }
 }
 
@@ -598,12 +746,12 @@ mod tests {
         assert!(Regex::compile(&[deep(100)], &options).is_ok());
         assert_eq!(
             Regex::compile(&[deep(20000)], &options).err(),
-            Some(parse::STACK_OVERFLOW)
+            Some(parse::STACK_OVERFLOW.to_string())
         );
         let stars = format!("a{}", "*".repeat(100_000)).into_bytes();
         assert_eq!(
             Regex::compile(&[stars], &options).err(),
-            Some(parse::STACK_OVERFLOW)
+            Some(parse::STACK_OVERFLOW.to_string())
         );
     }
 }

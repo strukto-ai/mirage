@@ -1,4 +1,3 @@
-import re
 from collections.abc import AsyncIterator, Mapping, Sequence
 from dataclasses import dataclass
 from functools import partial
@@ -8,7 +7,6 @@ from mirage.commands.builtin.generic.grep import listing_mode, max_count
 from mirage.commands.builtin.grep_binary import valid_utf8
 from mirage.commands.builtin.grep_offsets import prefix_of
 from mirage.commands.builtin.grep_pattern import (
-    NEVER_MATCH,
     compile_pattern,
     line_pieces,
     line_selected,
@@ -31,6 +29,8 @@ from mirage.commands.spec.types import FlagValue
 from mirage.io.async_line_iterator import AsyncLineIterator
 from mirage.io.stream import OutputStream, close_quietly
 from mirage.io.types import ByteSource, IOResult, materialize
+from mirage.rs.errors import SearchLimit
+from mirage.rs.regex import LineRegex
 from mirage.shell.bytes import byte_view, encode_text, text_view
 from mirage.types import PathSpec, PolymorphicReadFn, StatFn
 
@@ -125,7 +125,7 @@ async def zgrep_generic(
     compiled = (
         None
         if f.max_count == 0
-        else re.compile(NEVER_MATCH)
+        else LineRegex([], "basic", utf8=utf8)
         if never_match
         else compile_pattern(
             byte_view(pattern, utf8),
@@ -162,6 +162,7 @@ async def zgrep_generic(
             count = 0
             number = 0
             binary = False
+            gave_up: str | None = None
             fname = (
                 operand_label(p, GREP_STDIN_LABEL) if show_filename else None
             )
@@ -176,25 +177,41 @@ async def zgrep_generic(
                     # a corrupt gzip remains zgrep's exit 2 beside a match.
                     if (
                         compiled is None
+                        or gave_up is not None
                         or (f.max_count is not None and count >= f.max_count)
-                        or ((f.files_only or f.files_without_match) and count)
+                        or (
+                            (f.files_only or f.files_without_match or f.quiet)
+                            and count
+                        )
                     ):
                         continue
                     line = byte_view(raw, utf8)
                     # Whether the line is selected is its own question: an
                     # empty match selects it and gives -o nothing to print.
-                    hit = line_selected(compiled, line) != f.invert
+                    # A -P search past PCRE2's match limit ends the input
+                    # after the matches it found.
+                    hit = False
                     selected: list[tuple[int, str]] = []
-                    if not hit:
-                        pass
-                    elif (
-                        f.only_matching
-                        and not f.invert
-                        and not (f.files_only or f.files_without_match)
-                    ):
-                        selected = line_pieces(compiled, line)
-                    else:
-                        selected = [(0, line)]
+                    try:
+                        hit = line_selected(compiled, line) != f.invert
+                        if not hit:
+                            pass
+                        elif f.only_matching and not (
+                            f.invert
+                            or f.count
+                            or f.quiet
+                            or f.files_only
+                            or f.files_without_match
+                        ):
+                            selected = line_pieces(compiled, line)
+                        else:
+                            selected = [(0, line)]
+                    except SearchLimit as exc:
+                        gave_up = exc.message
+                        selected = [
+                            (start, line[start:end])
+                            for start, end in exc.spans
+                        ]
                     if hit:
                         count += 1
                         any_match = True
@@ -224,6 +241,10 @@ async def zgrep_generic(
             finally:
                 await reader.discard()
             diagnostic = await io.materialize_stderr()
+            if gave_up is not None:
+                diagnostic += encode_text(
+                    f"grep: {operand_label(p, GREP_STDIN_LABEL)}: {gave_up}\n"
+                )
             if binary:
                 diagnostic += encode_text(
                     f"grep: {operand_label(p, GREP_STDIN_LABEL)}: "
@@ -231,12 +252,12 @@ async def zgrep_generic(
                 )
             if diagnostic:
                 result.stderr = await materialize(result.stderr) + diagnostic
-            failed = failed or io.exit_code == 1
+            failed = failed or io.exit_code == 1 or gave_up is not None
             result.exit_code = exit_code_for(any_match, failed, False)
             if compiled is None:
                 if f.files_without_match:
                     yield encode_text(p.raw_path + "\n")
-            elif not f.quiet:
+            elif not f.quiet and gave_up is None:
                 if f.files_only or f.files_without_match:
                     if bool(count) == f.files_only:
                         yield encode_text(p.raw_path + "\n")

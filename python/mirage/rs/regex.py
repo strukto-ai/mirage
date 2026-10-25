@@ -21,7 +21,7 @@ from functools import lru_cache
 from itertools import accumulate
 from typing import Literal, TypeAlias
 
-from mirage.rs.errors import RegexError, StreamRefusal
+from mirage.rs.errors import RegexError, SearchLimit, StreamRefusal
 from mirage.rs.stream import OpenStream, open_stream
 from mirage.shell.bytes import encode_text, from_byte_view
 from mirage.types import JsonValue
@@ -29,7 +29,7 @@ from mirage.types import JsonValue
 Span: TypeAlias = tuple[int, int]
 Groups: TypeAlias = list[Span | None]
 PosixDialect: TypeAlias = Literal["sed", "posix"]
-LineSyntax: TypeAlias = Literal["basic", "extended", "fixed"]
+LineSyntax: TypeAlias = Literal["basic", "extended", "fixed", "perl"]
 
 _UNSET = 0xFFFFFFFF
 _SPECIAL = frozenset("\\.[]()*+?{}|^$")
@@ -83,6 +83,14 @@ class _Subject:
 
 def _words(data: bytes) -> tuple[int, ...]:
     return struct.unpack(f"<{len(data) // 4}I", data)
+
+
+def _spans(subject: _Subject, data: bytes) -> list[Span]:
+    words = _words(data)
+    return [
+        (subject.index(words[at]), subject.index(words[at + 1]))
+        for at in range(0, len(words), 2)
+    ]
 
 
 def _open(config: Mapping[str, JsonValue]) -> OpenStream:
@@ -252,7 +260,8 @@ class LineRegex:
 
     Args:
         patterns (Sequence[str]): the patterns as byte views.
-        syntax (LineSyntax): ``basic``, ``extended`` or ``fixed``.
+        syntax (LineSyntax): ``basic``, ``extended``, ``fixed`` or
+            ``perl`` (one PCRE2 pattern).
         ignore_case (bool): -i.
         utf8 (bool): the lines are text under a UTF-8 locale.
         word (bool): -w.
@@ -308,18 +317,29 @@ class LineRegex:
 
         Args:
             line (str): the line as a byte view.
+
+        Raises:
+            SearchLimit: a -P search gave up at PCRE2's match limit.
         """
-        return self._ask(_Subject(line, self._utf8), "test") == b"\x01"
+        try:
+            return self._ask(_Subject(line, self._utf8), "test") == b"\x01"
+        except StreamRefusal as exc:
+            raise SearchLimit(exc.message, []) from exc
 
     def extents(self, line: str) -> list[Span]:
         """Each match grep -o prints from the line.
 
         Args:
             line (str): the line as a byte view.
+
+        Raises:
+            SearchLimit: a -P search gave up at PCRE2's match limit, after
+                the matches it carries.
         """
         subject = _Subject(line, self._utf8)
-        words = _words(self._ask(subject, "extents"))
-        return [
-            (subject.index(words[at]), subject.index(words[at + 1]))
-            for at in range(0, len(words), 2)
-        ]
+        try:
+            return _spans(subject, self._ask(subject, "extents"))
+        except StreamRefusal as exc:
+            raise SearchLimit(
+                exc.message, _spans(subject, exc.output)
+            ) from exc

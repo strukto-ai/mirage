@@ -32,9 +32,10 @@ import { FlagView } from '../../spec/flag_view.ts'
 import type { FlagValue } from '../../spec/types.ts'
 
 import { directoriesAction, parseFlags as parseGrepFlags } from '../generic/grep.ts'
-import { encodingFlag, foldsCase, parseFlags as parseRgFlags, rgMatcher } from '../generic/rg.ts'
+import { encodingFlag, parseFlags as parseRgFlags } from '../generic/rg.ts'
 import { searchTerms } from '../grep_pushdown.ts'
-import { openRg, requiredTerms } from '../rg_stream.ts'
+import { foldsCase } from '../rg_search.ts'
+import { compiledTerms, openRg, type Compiled } from '../rg_stream.ts'
 import { compilePattern, patternArg } from '../grep_pattern.ts'
 import type { SearchTerms } from '../types.ts'
 import { linksOf, mountRoot, mountsOf } from '../utils/links.ts'
@@ -70,7 +71,8 @@ export function grepTerms(
   )
   const found = searchTerms(
     pattern,
-    matcher,
+    matcher.needles,
+    matcher.unicodeFolds,
     f.fixedString,
     f.wholeWord,
     f.lineRegexp,
@@ -121,36 +123,40 @@ export async function rgTerms(
     return null
   }
   if (pattern === null || fl.raw('file') !== undefined) return null
-  if (f.engine === 'default') {
-    const program = await openRg(pattern, false, f)
-    try {
-      const terms = requiredTerms(program)
-      if (terms === null || terms.texts.some((term) => term.includes('\n'))) return null
-      return {
-        texts: terms.texts,
-        wholeWord: terms.whole_word,
-        ignoreCase: terms.ignore_case,
-        lineOutput: !(
-          f.lineNumbers ||
-          f.byteOffsets ||
-          f.column ||
-          f.vimgrep ||
-          f.contextAfter > 0 ||
-          f.contextBefore > 0 ||
-          f.stopOnNonmatch ||
-          f.nullData ||
-          f.multiline === true
-        ),
-        readsBinary: f.text || f.nullData || f.binary,
-      }
-    } finally {
-      program.stream.close()
+  const program = await openRg(pattern, false, f)
+  let compiled: Compiled
+  try {
+    compiled = compiledTerms(program)
+  } finally {
+    program.stream.close()
+  }
+  if (!compiled.pcre) {
+    const terms = compiled.terms
+    if (terms === null || terms.texts.some((term) => term.includes('\n'))) return null
+    return {
+      texts: terms.texts,
+      wholeWord: terms.whole_word,
+      ignoreCase: terms.ignore_case,
+      lineOutput: !(
+        f.lineNumbers ||
+        f.byteOffsets ||
+        f.column ||
+        f.vimgrep ||
+        f.contextAfter > 0 ||
+        f.contextBefore > 0 ||
+        f.stopOnNonmatch ||
+        f.nullData ||
+        f.multiline === true
+      ),
+      readsBinary: f.text || f.nullData || f.binary,
     }
   }
   const ignoreCase = foldsCase(pattern, f.fixedString, f)
+  const terms = compiled.terms
   const found = searchTerms(
     pattern,
-    rgMatcher(pattern, false, f),
+    terms === null ? null : terms.texts,
+    ignoreCase && f.unicode,
     f.fixedString,
     f.wholeWord,
     f.lineRegexp,

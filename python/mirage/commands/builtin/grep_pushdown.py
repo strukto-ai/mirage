@@ -15,12 +15,6 @@
 import re
 
 from mirage.commands.builtin.constants import PatternType
-from mirage.commands.builtin.grep_prefilter import (
-    UNICODE_FOLDED,
-    folds_by_unicode,
-    required_needles,
-)
-from mirage.rs.regex import LineRegex
 
 
 def classify_pattern(
@@ -46,6 +40,10 @@ def classify_pattern(
 
 
 _MIN_SEARCH_LITERAL = 3
+# The ASCII letters a non-ASCII character matches under Unicode case
+# folding (`ı` and `İ` for i, the Kelvin sign for k, `ſ` for s): a
+# lowercased search for a word holding one could miss a line.
+UNICODE_FOLDED = frozenset("iks")
 
 
 def is_literal_pattern(pattern: str, fixed_string: bool) -> bool:
@@ -107,7 +105,8 @@ def whole_word_literals(
 
 def search_terms(
     pattern: str | None,
-    matcher: re.Pattern[str] | LineRegex,
+    needles: tuple[bytes, ...] | None,
+    unicode_folds: bool,
     fixed_string: bool,
     whole_word: bool,
     line_regexp: bool,
@@ -124,31 +123,25 @@ def search_terms(
 
     Args:
         pattern (str | None): the newline-joined patterns.
-        matcher (re.Pattern[str] | LineRegex): the compiled line matcher.
+        needles (tuple[bytes, ...] | None): texts one of which every match
+            holds, None when none are known.
+        unicode_folds (bool): case folds by Unicode, so ``ſ`` matches
+            ``s``.
         fixed_string (bool): True if -F is set.
         whole_word (bool): True if -w is set.
         line_regexp (bool): True if -x is set.
         ignore_case (bool): the match folds case.
     """
     words = whole_word_literals(pattern, fixed_string, whole_word, line_regexp)
-    unicode = (
-        matcher.unicode_folds
-        if isinstance(matcher, LineRegex)
-        else folds_by_unicode(matcher)
-    )
     if words is not None and not (
         ignore_case
         and not all(
-            w.isascii() and not (unicode and UNICODE_FOLDED & set(w.lower()))
+            w.isascii()
+            and not (unicode_folds and UNICODE_FOLDED & set(w.lower()))
             for w in words
         )
     ):
         return tuple(words), True
-    needles = (
-        matcher.needles
-        if isinstance(matcher, LineRegex)
-        else required_needles(matcher)
-    )
     if needles is None or any(len(n) < _MIN_SEARCH_LITERAL for n in needles):
         return None
     return tuple(n.decode("ascii") for n in needles), False
