@@ -65,7 +65,7 @@ class _ArgvSpy:
     def __init__(self) -> None:
         self.argv: list[str] = []
 
-    async def run(self, *, argv, stdin, env, fs):
+    async def run(self, *, argv, stdin, env, fs, output=None, errors=None):
         self.argv = list(argv)
         return b"", b"", 0
 
@@ -234,6 +234,59 @@ async def test_quickjs_node_command_end_to_end():
     assert r2.exit_code == 0
     assert (await r2.stdout_str()) == "42\n"
     await ws.close()
+
+
+# A run cancelled while its sink holds a write waits for that write to
+# finish its own cleanup, so neither outlives the run.
+@live
+@pytest.mark.asyncio
+async def test_quickjs_cancelled_run_waits_for_the_write_its_sink_holds():
+    entered, cleaned = asyncio.Event(), asyncio.Event()
+
+    async def output(data: bytes) -> None:
+        entered.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            await asyncio.sleep(0.1)
+            cleaned.set()
+            raise
+
+    rt = QuickJsRuntime()
+    run = asyncio.ensure_future(
+        rt.execute(
+            [], [], Context(flags={"c": "console.log(1)"}), output=output
+        )
+    )
+    try:
+        await asyncio.wait_for(entered.wait(), 30)
+        run.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await run
+        assert cleaned.is_set()
+    finally:
+        await rt.close()
+
+
+# A program's writes reach its reader as it runs, so one that never ends
+# stops once its reader has what it wanted, as SIGPIPE stops it.
+@live
+@pytest.mark.asyncio
+async def test_quickjs_endless_writer_stops_once_its_reader_has_enough():
+    ws = Workspace(
+        {"/ram": RAMVFS()}, mode=MountMode.EXEC, runtimes=["quickjs"]
+    )
+    try:
+        r = await asyncio.wait_for(
+            ws.shell(
+                "js -e \"for (;;) console.log('y')\" | head -n 2;"
+                ' echo "${PIPESTATUS[@]}"'
+            ),
+            30,
+        )
+        assert (await r.stdout_str()) == "y\ny\n141 0\n"
+    finally:
+        await ws.close()
 
 
 @live

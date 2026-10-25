@@ -301,6 +301,34 @@ describe('LocalRuntime', () => {
     }
   })
 
+  // A program's prints reach its reader as it runs, so one that never ends
+  // stops once its reader has what it wanted.
+  it('stops an endless printer once its reader has enough', async () => {
+    const ws = new Workspace(
+      { '/': new RAMVFS() },
+      { mode: MountMode.EXEC, runtimes: [new LocalRuntime(), 'workspace'] },
+    )
+    try {
+      const io = await ws.shell("python3 -c 'while True: print(1)' | head -n 2")
+      expect(DEC.decode(io.stdout)).toBe('1\n1\n')
+    } finally {
+      await ws.close()
+    }
+  }, 30_000)
+
+  it('hands unbuffered output to its reader before the program ends', async () => {
+    const ws = new Workspace(
+      { '/': new RAMVFS() },
+      { mode: MountMode.EXEC, runtimes: [new LocalRuntime(), 'workspace'] },
+    )
+    try {
+      const io = await ws.shell("python3 -u -c 'import time; print(1); time.sleep(60)' | head -n 1")
+      expect(DEC.decode(io.stdout)).toBe('1\n')
+    } finally {
+      await ws.close()
+    }
+  }, 30_000)
+
   it('names a script after its file, as CPython does', async () => {
     const rt = new LocalRuntime()
     const result = await interpret(

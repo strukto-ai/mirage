@@ -44,7 +44,7 @@ from mirage.context import (
 )
 from mirage.context.session_context import RedirectResult, redirect_syntax_for
 from mirage.io import IOResult
-from mirage.io.types import ByteSource, materialize
+from mirage.io.types import ByteSource, OutputState, materialize
 from mirage.observe.context import command_records
 from mirage.policy import (
     CommandResultContext,
@@ -417,6 +417,7 @@ async def execute_command(
     if refused and sink is not None:
         await sink.emit(Channel.STDERR, refused)
         refused = b""
+    settling: OutputState | None = None
     try:
         stdout, io, exec_node = await _dispatch_command_body(
             recurse,
@@ -439,6 +440,15 @@ async def execute_command(
         )
         if refused:
             io.stderr = refused + (await materialize(io.stderr))
+        # A run that starts as its output is read still runs under the
+        # prefix, so the lines it shells out see it: the prefix ends as
+        # that output settles.
+        if (
+            prefix_assignments
+            and io.output is not None
+            and not io.output.settled
+        ):
+            settling = io.output
         return stdout, io, exec_node
     except TooManyMatches as exc:
         # The command a glob was given to does not run, as exec(2)
@@ -453,7 +463,10 @@ async def execute_command(
         frames = session._local_frames
         if frames and frames[-1] is saved_env_overrides:
             frames.pop()
-        restore(saved_env_overrides)
+        if settling is not None:
+            settling.callbacks.append(partial(restore, saved_env_overrides))
+        else:
+            restore(saved_env_overrides)
 
 
 def _unmet(

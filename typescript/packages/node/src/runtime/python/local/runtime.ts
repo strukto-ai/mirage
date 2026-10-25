@@ -141,7 +141,13 @@ export class LocalRuntime extends PythonRuntime<undefined> implements ProcessExe
     return this.spawnProgram(await this.interpreter(), ['--version'], {}, null, signal)
   }
 
-  async interpret(_engine: undefined, program: Program, ctx: Context): Promise<RunResult> {
+  async interpret(
+    _engine: undefined,
+    program: Program,
+    ctx: Context,
+    output?: OutputFn,
+    errors?: OutputFn,
+  ): Promise<RunResult> {
     // Honoring the init switches is just handing them back to the real
     // interpreter, which is why this tier gets them exactly right
     // (sys.flags included) where an in-process engine cannot.
@@ -151,6 +157,9 @@ export class LocalRuntime extends PythonRuntime<undefined> implements ProcessExe
       ctx.env ?? {},
       program.stdin,
       ctx.signal,
+      undefined,
+      output,
+      errors,
     )
   }
 

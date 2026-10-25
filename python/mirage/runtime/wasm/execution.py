@@ -13,12 +13,16 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import concurrent.futures
 import logging
 import threading
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
 from mirage.concurrency.limiter import settle
+from mirage.io.types import ByteSource, materialize
+from mirage.runtime.types import OutputFn
 from mirage.runtime.wasm.fs import WasiFs, install_wasi_fs
 from mirage.runtime.wasm.loader import wasmtime
 from mirage.runtime.wasm.view import WasmView
@@ -47,6 +51,26 @@ async def _join_cancelled(task: asyncio.Task[Any]) -> None:
         await settle(task)
     except Exception:
         logger.debug("WASM cleanup failed", exc_info=True)
+
+
+async def _written(
+    sink: OutputFn, chunk: bytes, writes: set[asyncio.Task[Any]]
+) -> None:
+    """Hand one guest write to its sink, on the loop, held in ``writes``
+    until it ends so a cancelled run can wait for it.
+
+    Args:
+        sink (OutputFn): where the stream goes.
+        chunk (bytes): what the guest wrote.
+        writes (set[asyncio.Task[Any]]): the run's writes on the loop.
+    """
+    task = asyncio.current_task()
+    assert task is not None
+    writes.add(task)
+    try:
+        await sink(chunk)
+    finally:
+        writes.discard(task)
 
 
 class WasmExecution:
@@ -159,18 +183,30 @@ class WasmExecution:
     async def run(
         self,
         argv: list[str],
-        stdin: bytes | None,
+        stdin: ByteSource | None,
         env: list[tuple[str, str]],
         fs: WasmView,
+        output: OutputFn | None = None,
+        errors: OutputFn | None = None,
     ) -> tuple[bytes, bytes | None, int]:
         """Run the module once and return (stdout, stderr, exit_code).
 
+        A guest write to a stream with a sink waits on its worker thread
+        until the sink takes it, so a reader that falls behind holds the
+        guest back, as a full pipe would; that stream then comes back
+        empty.
+
         Args:
             argv (list[str]): full argv, including the program name.
-            stdin (bytes | None): bytes fed to the run's stdin.
+            stdin (ByteSource | None): the run's stdin, collected whole
+                before the guest starts.
             env (list[tuple[str, str]]): environment as (name, value) pairs.
             fs (WasmView): path router serving the run's filesystem.
+            output (OutputFn | None): receives stdout as the guest writes
+                it; None returns it.
+            errors (OutputFn | None): the same for stderr.
         """
+        data = None if stdin is None else await materialize(stdin)
         compilation = asyncio.create_task(asyncio.to_thread(self._checkout))
         try:
             engine, module = await asyncio.shield(compilation)
@@ -181,16 +217,42 @@ class WasmExecution:
                 self._checkin(engine, module)
             raise
         canceled = threading.Event()
+        loop = asyncio.get_running_loop()
+        writing: list[concurrent.futures.Future[None]] = []
+        writes: set[asyncio.Task[Any]] = set()
+
+        def emitter(sink: OutputFn | None) -> Callable[[bytes], None] | None:
+            if sink is None:
+                return None
+
+            def emit(chunk: bytes) -> None:
+                future: concurrent.futures.Future[None] = (
+                    asyncio.run_coroutine_threadsafe(
+                        _written(sink, chunk, writes), loop
+                    )
+                )
+                writing.append(future)
+                if canceled.is_set():
+                    future.cancel()
+                try:
+                    future.result()
+                finally:
+                    writing.remove(future)
+
+            return emit
+
         worker = asyncio.create_task(
             asyncio.to_thread(
                 self._run_sync,
                 engine,
                 module,
                 argv,
-                stdin,
+                data,
                 env,
                 fs,
                 canceled,
+                emitter(output),
+                emitter(errors),
             )
         )
         try:
@@ -198,12 +260,15 @@ class WasmExecution:
         except asyncio.CancelledError:
             canceled.set()
             engine.increment_epoch()
+            for future in list(writing):
+                future.cancel()
 
             async def stop() -> None:
                 try:
                     await fs.abort()
                 finally:
                     await worker
+                    await asyncio.gather(*writes, return_exceptions=True)
 
             await _join_cancelled(asyncio.create_task(stop()))
             raise
@@ -229,6 +294,8 @@ class WasmExecution:
         env: list[tuple[str, str]],
         fs: WasmView,
         canceled: threading.Event,
+        output: Callable[[bytes], None] | None,
+        errors: Callable[[bytes], None] | None,
     ) -> tuple[bytes, bytes | None, int]:
         with (
             wasmtime.Linker(engine) as linker,
@@ -240,7 +307,7 @@ class WasmExecution:
                 store.set_limits(memory_size=self._max_memory)
             if canceled.is_set():
                 return b"", None, 130
-            wasi_fs = WasiFs(fs, stdin or b"", canceled)
+            wasi_fs = WasiFs(fs, stdin or b"", canceled, output, errors)
             install_wasi_fs(linker, store, wasi_fs)
             wasi = wasmtime.WasiConfig()
             wasi.argv = argv

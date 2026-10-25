@@ -121,7 +121,7 @@ export abstract class Runtime<E = unknown> {
    * @param ctx the run's context.
    * @param opts `kind`: code in the runtime's language (the default), a
    *   whole line (`sh -c` with `ctx.flags.c`), or a process; `output`:
-   *   where a streamed process writes its output, absent to collect it in
+   *   where the run writes its output as it comes, absent to collect it in
    *   the result; `errors`: the same for its stderr.
    */
   async execute(
@@ -168,8 +168,9 @@ export abstract class Runtime<E = unknown> {
     errors: OutputFn | undefined,
   ): Promise<RunResult> {
     if (kind === 'process' && texts.length === 0) throw new Error('process argv must not be empty')
-    if (kind === 'code') return this.run(engine, paths, texts, ctx)
-    if (kind === 'line' && isLineExecutor(this)) return this.runLine(engine, paths, texts, ctx)
+    if (kind === 'code') return this.run(engine, paths, texts, ctx, output, errors)
+    if (kind === 'line' && isLineExecutor(this))
+      return this.runLine(engine, paths, texts, ctx, output, errors)
     if (kind === 'process' && isProcessExecutor(this))
       return this.runProcess(engine, paths, texts, ctx, output, errors)
     throw new UnsupportedExecutionError(`${this.name}: ${kind} execution is unsupported`)
@@ -182,8 +183,18 @@ export abstract class Runtime<E = unknown> {
    * @param _paths the script operand, if any.
    * @param _texts the program's argv.
    * @param _ctx the run's context.
+   * @param _output receives stdout as it comes; undefined returns it in
+   *   the result.
+   * @param _errors the same for stderr.
    */
-  run(_engine: E, _paths: PathSpec[], _texts: string[], _ctx: Context): Promise<RunResult> {
+  run(
+    _engine: E,
+    _paths: PathSpec[],
+    _texts: string[],
+    _ctx: Context,
+    _output?: OutputFn,
+    _errors?: OutputFn,
+  ): Promise<RunResult> {
     return Promise.reject(
       new UnsupportedExecutionError(`${this.name}: code execution is unsupported`),
     )

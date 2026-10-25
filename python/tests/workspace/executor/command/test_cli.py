@@ -441,7 +441,9 @@ class FakePyRuntime(LanguageRuntime):
         self.seen: list[SimpleNamespace] = []
         self.result = RunResult(stdout=b"ran\n", stderr=None, exit_code=0)
 
-    async def interpret(self, engine, program: Program, ctx) -> RunResult:
+    async def interpret(
+        self, engine, program: Program, ctx, output=None, errors=None
+    ) -> RunResult:
         self.seen.append(_seen(program, ctx))
         return self.result
 
@@ -458,7 +460,9 @@ class FakeJsRuntime(FakePyRuntime):
 class CrashingRuntime(FakePyRuntime):
     name = "crashpy"
 
-    async def interpret(self, engine, program: Program, ctx) -> RunResult:
+    async def interpret(
+        self, engine, program: Program, ctx, output=None, errors=None
+    ) -> RunResult:
         raise RuntimeError("engine exploded")
 
 
@@ -466,13 +470,22 @@ class SleepingRuntime(FakePyRuntime):
     name = "sleepy"
     cancelled = False
 
-    async def interpret(self, engine, program: Program, ctx) -> RunResult:
+    async def interpret(
+        self, engine, program: Program, ctx, output=None, errors=None
+    ) -> RunResult:
         try:
             await asyncio.sleep(0.5)
         except asyncio.CancelledError:
             self.cancelled = True
             raise
         return self.result
+
+
+async def drained(*args, **kwargs):
+    """A CLI line run to the end of its output, which a script's run
+    settles its status and stderr by."""
+    stdout, io, node = await handle_cli(*args, **kwargs)
+    return await materialize(stdout), io, node
 
 
 def script_install(
@@ -496,7 +509,7 @@ async def test_script_selects_by_language_and_runs():
     # verbatim so it can re-parse natively.
     py, js = FakePyRuntime(), FakeJsRuntime()
     install = script_install()
-    stdout, io, node = await handle_cli(
+    stdout, io, node = await drained(
         install,
         ["pager", "report.txt", "x"],
         SessionState("t"),
@@ -519,7 +532,7 @@ async def test_script_declared_options_still_pass_verbatim():
     # binary could also honor.
     py = FakePyRuntime()
     install = script_install(options=(Argument("-n", "--lines", type="int"),))
-    _, io, _ = await handle_cli(
+    _, io, _ = await drained(
         install,
         ["pager", "-n", "3", "report.txt"],
         SessionState("t"),
@@ -539,7 +552,7 @@ async def test_script_module_bit_reaches_the_runtime_as_a_flag():
         script=ScriptSource("export const x = 1", language="js", module=True),
     )
     install = CLIInstall(name="pager", cli=spec, config=None)
-    _, io, _ = await handle_cli(
+    _, io, _ = await drained(
         install, ["pager"], SessionState("t"), context=CLIContext(entries=[js])
     )
     assert io.exit_code == 0
@@ -549,7 +562,7 @@ async def test_script_module_bit_reaches_the_runtime_as_a_flag():
 @pytest.mark.asyncio
 async def test_script_without_the_module_bit_sends_no_module_flag():
     py = FakePyRuntime()
-    await handle_cli(
+    await drained(
         script_install(),
         ["pager"],
         SessionState("t"),
@@ -570,7 +583,7 @@ async def test_script_env_carries_mirage_config_json():
     # carries exported names only, the way a child process's environ
     # does. A plain shell variable is deliberately not in it.
     set_attr(session, "EDITOR", VarAttr.EXPORT)
-    _, io, _ = await handle_cli(
+    _, io, _ = await drained(
         install, ["pager"], session, context=CLIContext(entries=[py])
     )
     assert io.exit_code == 0
@@ -585,7 +598,7 @@ async def test_script_env_carries_mirage_config_json():
 @pytest.mark.asyncio
 async def test_script_env_omits_mirage_config_without_config():
     py = FakePyRuntime()
-    _, _, _ = await handle_cli(
+    _, _, _ = await drained(
         script_install(),
         ["pager"],
         SessionState("t"),
@@ -600,7 +613,7 @@ async def test_script_is_named_by_its_installed_head_word():
     # 'pager:' and two installs of one program are distinguishable.
     py = FakePyRuntime()
     install = CLIInstall(name="renamed", cli=script_install().cli, config=None)
-    await handle_cli(
+    await drained(
         install,
         ["renamed", "report.txt"],
         SessionState("t"),
@@ -612,9 +625,9 @@ async def test_script_is_named_by_its_installed_head_word():
 
 
 @pytest.mark.asyncio
-async def test_script_stdin_materializes_to_bytes():
+async def test_script_stdin_reaches_the_program():
     py = FakePyRuntime()
-    await handle_cli(
+    await drained(
         script_install(),
         ["pager"],
         SessionState("t"),
@@ -629,7 +642,7 @@ async def test_script_help_reaches_a_program_that_declared_nothing():
     # A grammarless script root answers its own --help: mirage would
     # render a page documenting only --help, which documents nothing.
     py = FakePyRuntime()
-    _, io, _ = await handle_cli(
+    _, io, _ = await drained(
         script_install(),
         ["pager", "--help"],
         SessionState("t"),
@@ -664,7 +677,7 @@ async def test_script_undeclared_flag_reaches_the_program():
     # refused on its behalf: a yaml clis entry declares no grammar at
     # all, which would leave the tier operand-only.
     py = FakePyRuntime()
-    _, io, _ = await handle_cli(
+    _, io, _ = await drained(
         script_install(),
         ["pager", "--width", "80", "-n", "x"],
         SessionState("t"),
@@ -695,7 +708,7 @@ async def test_script_runtime_pin_is_honored():
     # even when an earlier entry speaks the same language.
     first, pinned = FakePyRuntime(), OtherPyRuntime()
     install = script_install(runtime="otherpy")
-    _, io, _ = await handle_cli(
+    _, io, _ = await drained(
         install,
         ["pager"],
         SessionState("t"),
@@ -712,7 +725,9 @@ class TierPyRuntime(PythonRuntime):
         self.name = name
         self.seen: list[SimpleNamespace] = []
 
-    async def interpret(self, engine, program: Program, ctx) -> RunResult:
+    async def interpret(
+        self, engine, program: Program, ctx, output=None, errors=None
+    ) -> RunResult:
         self.seen.append(_seen(program, ctx))
         return RunResult(stdout=b"ran\n", stderr=None, exit_code=0)
 
@@ -727,7 +742,7 @@ async def test_script_runs_where_the_line_runs_its_interpreter():
     # python3 on the second entry places the script there too.
     first, second = TierPyRuntime("first"), TierPyRuntime("second")
     routing = RouteDecision(bindings={"python3": second, "python": second})
-    _, io, _ = await handle_cli(
+    _, io, _ = await drained(
         script_install(),
         ["pager"],
         SessionState("t"),
@@ -795,7 +810,7 @@ async def test_script_is_refused_where_the_line_runs_python3_without_python():
 @pytest.mark.asyncio
 async def test_script_runs_on_the_first_entry_where_the_workspace_serves_python3():
     py = TierPyRuntime("first")
-    _, io, _ = await handle_cli(
+    _, io, _ = await drained(
         script_install(),
         ["pager"],
         SessionState("t"),
@@ -869,7 +884,7 @@ async def test_script_outside_a_workspace_exits_127():
 @pytest.mark.asyncio
 async def test_script_crash_reports_prog_prefixed_exit_1():
     crash = CrashingRuntime()
-    _, io, _ = await handle_cli(
+    _, io, node = await drained(
         script_install(),
         ["pager"],
         SessionState("t"),
@@ -877,19 +892,21 @@ async def test_script_crash_reports_prog_prefixed_exit_1():
     )
     assert io.exit_code == 1
     assert io.stderr == b"pager: engine exploded\n"
+    assert node.exit_code == 1
+    assert node.stderr == b"pager: engine exploded\n"
 
 
 @pytest.mark.asyncio
 async def test_script_exit_code_and_stderr_surface():
     py = FakePyRuntime()
     py.result = RunResult(stdout=b"", stderr=b"boom\n", exit_code=3)
-    stdout, io, node = await handle_cli(
+    stdout, io, node = await drained(
         script_install(),
         ["pager"],
         SessionState("t"),
         context=CLIContext(entries=[py]),
     )
-    assert stdout is None
+    assert stdout == b""
     assert io.exit_code == 3
     assert io.stderr == b"boom\n"
     assert node.exit_code == 3
@@ -905,7 +922,7 @@ async def test_script_limit_bounds_the_run():
     )
     install = CLIInstall(name="pager", cli=spec, config=None)
     with pytest.raises(CommandTimeoutError, match="pager"):
-        await handle_cli(
+        await drained(
             install,
             ["pager"],
             SessionState("t"),
@@ -922,7 +939,7 @@ async def test_script_settles_its_runtime_however_the_program_ends():
         settled.append(runtime)
 
     py, sleepy = FakePyRuntime(), SleepingRuntime()
-    await handle_cli(
+    await drained(
         script_install(),
         ["pager"],
         SessionState("t"),
@@ -934,7 +951,7 @@ async def test_script_settles_its_runtime_however_the_program_ends():
         script=ScriptSource("print('hi')"),
     )
     with pytest.raises(CommandTimeoutError):
-        await handle_cli(
+        await drained(
             CLIInstall(name="pager", cli=spec, config=None),
             ["pager"],
             SessionState("t"),
@@ -1330,6 +1347,38 @@ async def test_invocation_shell_is_revoked_after_handler_settles(fails):
     with pytest.raises(RuntimeError, match="no longer active"):
         await saved[0]("echo late")
     assert calls == ["echo allowed"]
+
+
+class ShellingRuntime(FakePyRuntime):
+    name = "shellpy"
+
+    async def interpret(self, engine, program: Program, ctx) -> RunResult:
+        self.shell = ctx.shell
+        await ctx.shell("echo nested")
+        return self.result
+
+
+# A script's run starts as its output is read, after the leaf returned,
+# so its shell stays live until that output settles.
+@pytest.mark.asyncio
+async def test_a_script_reaches_the_shell_while_its_output_is_read():
+    calls = []
+
+    async def evaluate(line, stdin=None):
+        calls.append(line)
+        return IOResult()
+
+    shelling = ShellingRuntime()
+    _, io, _ = await drained(
+        script_install(),
+        ["pager"],
+        SessionState("t"),
+        context=CLIContext(entries=[shelling], shell=evaluate),
+    )
+    assert io.exit_code == 0
+    assert calls == ["echo nested"]
+    with pytest.raises(RuntimeError, match="no longer active"):
+        await shelling.shell("echo late")
 
 
 @pytest.mark.asyncio

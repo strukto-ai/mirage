@@ -21,6 +21,7 @@ from enum import Enum
 import asyncssh
 from asyncssh.editor import SSHLineEditorChannel
 
+from mirage.concurrency.limiter import on_loop
 from mirage.io.types import IOResult
 from mirage.shell.bytes import encode_text
 from mirage.shell.console.types import Channel
@@ -436,9 +437,7 @@ def loop_sender(
     """
 
     async def send(data: bytes, stderr: bool) -> None:
-        await asyncio.wrap_future(
-            asyncio.run_coroutine_threadsafe(output.write(data, stderr), loop)
-        )
+        await on_loop(output.write(data, stderr), loop)
 
     return send
 

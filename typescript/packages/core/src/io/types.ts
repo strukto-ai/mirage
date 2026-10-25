@@ -26,14 +26,18 @@ export interface OutputEvent {
 
 export type CommandOutput = [ByteSource | null, IOResult]
 
-/** Settlement of a result whose fields fill in as its output drains. */
+/**
+ * Settlement of a result whose fields fill in as its output drains.
+ * `finish` runs every callback each time it is called, so a field changed
+ * after the output ended (a failure framed onto stderr) is settled again.
+ */
 export class OutputState {
   settled = false
   readonly callbacks: (() => void)[] = []
 
   finish(): void {
     this.settled = true
-    for (const callback of this.callbacks.splice(0)) callback()
+    for (const callback of this.callbacks) callback()
   }
 }
 

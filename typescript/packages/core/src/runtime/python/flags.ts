@@ -16,10 +16,11 @@ import type { FlagValue } from '../../commands/spec/types.ts'
 
 // The interpreter-init switches, keyed by CPython's own letter. These
 // configure the interpreter rather than selecting what it runs, so they
-// ride in the run's `ctx.flags` and each engine answers the ones it can. `-u`
-// and `-q` are deliberately absent: mirage buffers every stream and
-// prints no banner, so they are structural no-ops in every runtime
-// rather than something one engine honors and another does not.
+// ride in the run's `ctx.flags` and each engine answers the ones it can. `-q`
+// is deliberately absent: mirage prints no banner, so it is a no-op in every
+// runtime. `-u` is absent too, since only a spawned CPython buffers its
+// output: initArgv hands it back there, and every other engine already hands
+// each write over as it comes, so none reports it.
 const BOOL_FLAGS: readonly string[] = ['B', 'E', 'I', 'P', 's', 'S']
 const COUNT_FLAGS: readonly string[] = ['O', 'b']
 const LIST_FLAGS: readonly string[] = ['W', 'X']
@@ -82,12 +83,13 @@ function words(value: FlagValue | undefined): string[] {
  * For the engines that spawn a real interpreter, honoring these is just
  * handing them back to CPython in its own spelling. `-O` and `-b` repeat
  * rather than taking a number, so level 2 is `-O -O`, which CPython reads
- * exactly as `-OO`. Mirrors Python's init_argv.
+ * exactly as `-OO`. `-u` goes back first: a spawned CPython buffers stdout
+ * on a pipe, as it would anywhere. Mirrors Python's init_argv.
  *
  * @param flags the run's interpreter switches (`ctx.flags`).
  */
 export function initArgv(flags: Readonly<Record<string, FlagValue>>): string[] {
-  const argv: string[] = []
+  const argv: string[] = flags.u === true ? ['-u'] : []
   for (const key of BOOL_FLAGS) {
     if (flags[key] === true) argv.push(`-${key}`)
   }

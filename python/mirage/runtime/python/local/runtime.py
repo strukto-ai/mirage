@@ -128,7 +128,12 @@ class LocalRuntime(PythonRuntime[None], ProcessExecutorMixin[None]):
         return await self._spawn(self._python, ["--version"], {})
 
     async def interpret(
-        self, engine: None, program: Program, ctx: Context
+        self,
+        engine: None,
+        program: Program,
+        ctx: Context,
+        output: OutputFn | None = None,
+        errors: OutputFn | None = None,
     ) -> RunResult:
         # Honoring the init switches is just handing them back to the
         # real interpreter, which is why this tier gets them exactly
@@ -143,6 +148,8 @@ class LocalRuntime(PythonRuntime[None], ProcessExecutorMixin[None]):
             ],
             ctx.env or {},
             program.stdin,
+            output=output,
+            errors=errors,
         )
 
     async def run_process(
@@ -151,7 +158,7 @@ class LocalRuntime(PythonRuntime[None], ProcessExecutorMixin[None]):
         paths: list[PathSpec],
         texts: list[str],
         ctx: Context,
-        output: OutputFn | None,
+        output: OutputFn | None = None,
         errors: OutputFn | None = None,
     ) -> RunResult:
         name = texts[0]

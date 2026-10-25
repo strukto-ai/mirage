@@ -12,21 +12,16 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import asyncio
 import logging
 import shlex
-from collections.abc import AsyncIterator
 from typing import Any
 
 from mirage.commands.builtin.general.interpreter import run_output
 from mirage.commands.builtin.utils.limit import run_with_timeout
 from mirage.commands.config import Context
-from mirage.context.session_context import current_caller, with_caller
 from mirage.errors.types import CommandTimeoutError
 from mirage.io import IOResult
-from mirage.io.pipe import BytePipe
-from mirage.io.stream import OutputStream, close_quietly
-from mirage.io.types import ByteSource, OutputState, materialize
+from mirage.io.types import ByteSource
 from mirage.policy import resolve_limit
 from mirage.runtime.base import Runtime
 from mirage.runtime.constants import EXTERNAL_COMMANDS
@@ -61,11 +56,12 @@ async def run_external(
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Execute one admitted program; its surrounding shell stays in Mirage.
 
-    A program a process runtime streams writes its stderr into ``sink``
-    as it arrives, where the statement it runs in writes (a job's
-    console, a redirect, a compound body), so it lands beside its stdout
-    and stays when the program is stopped; without one it comes back in
-    the result.
+    Its output is handed over as it runs (``run_output``), within the
+    program's deadline, kept alive until the output is closed. A program
+    writes its stderr into ``sink`` as it arrives, where the statement it
+    runs in writes (a job's console, a redirect, a compound body), so it
+    lands beside its stdout and stays when the program is stopped;
+    without one it lands on the result, kept as it arrives all the same.
     """
     bindings = routing.bindings
     entry = bindings.get(argv.name, bindings.get(EXTERNAL_COMMANDS))
@@ -79,157 +75,74 @@ async def run_external(
             ExecutionNode(command=command, exit_code=126, stderr=err),
         )
     runtime = Runtime.require(entry)
-    cwd = PathSpec.from_str_path(session.cwd)
-    env = env_snapshot(session)
     guard = resolve_limit(
         argv.name,
         registry.mounts(),
         workspace_limits=registry.command_limits,
         profile_limits=session.command_limits,
     )
-
-    if isinstance(runtime, ProcessExecutorMixin):
-        return _stream_external(
-            runtime,
-            argv,
-            stdin,
-            cwd,
-            env,
-            registry,
-            guard.timeout_seconds if guard is not None else None,
-            sink,
-        )
-
-    async def execute() -> RunResult:
-        data = await materialize(stdin) if stdin is not None else None
-        ctx = Context(cwd=cwd, env=env, stdin=data, flags={"c": command})
-        return await _execute_program(runtime, argv.name, [], ctx, "line")
-
-    try:
-        result = await run_with_timeout(
-            execute(),
-            guard.timeout_seconds if guard is not None else None,
-            argv.name,
-        )
-    finally:
-        await registry.settle(runtime)
-    stdout, io = run_output(
-        result,
-        Producer(
-            command=argv.name,
-            prefixes=tuple(m.prefix for m in registry.mounts()),
-        ),
+    timeout = guard.timeout_seconds if guard is not None else None
+    # A runtime that runs an argv gets one; a line runtime gets the
+    # program as one quoted line.
+    process = isinstance(runtime, ProcessExecutorMixin)
+    kind: ExecutionKind = "process" if process else "line"
+    ctx = Context(
+        cwd=PathSpec.from_str_path(session.cwd),
+        env=env_snapshot(session),
+        stdin=stdin,
+        flags={} if process else {"c": command},
     )
-    return (
-        stdout,
-        io,
-        ExecutionNode(
-            command=command,
-            exit_code=result.exit_code,
-            stderr=result.stderr or b"",
-        ),
-    )
-
-
-def _stream_external(
-    runtime: Runtime[Any],
-    argv: Argv,
-    stdin: ByteSource | None,
-    cwd: PathSpec,
-    env: dict[str, str],
-    registry: MountRegistry,
-    timeout: float | None,
-    sink: JobConsole | None,
-) -> tuple[ByteSource, IOResult, ExecutionNode]:
-    """Keep a process and its deadline alive until its bounded output is closed."""
-    pipe = BytePipe()
-    caller = current_caller()
-    io = IOResult(
-        producer=Producer(
-            command=argv.name,
-            prefixes=tuple(m.prefix for m in registry.mounts()),
-            native=True,
-        )
-    )
-    io.output = state = OutputState()
-    node = ExecutionNode(command=shlex.join(argv.tokens), exit_code=0)
-    task: asyncio.Task[None] | None = None
-    settled = False
-    closing: asyncio.Task[None] | None = None
+    node = ExecutionNode(command=command, exit_code=0)
     said: list[bytes] = []
 
-    async def errors(chunk: bytes) -> None:
-        # Stdout written before this chunk reaches the sink first, so the
-        # two keep the order the program wrote them in (`> f 2>&1`); the
-        # command's record keeps a copy for the policies that read it.
-        said.append(chunk)
+    async def to_sink(chunk: bytes) -> None:
         assert sink is not None
-        await pipe.drain()
         await sink.emit(Channel.STDERR, chunk)
 
-    async def execute() -> None:
-        nonlocal settled
+    async def run(output: OutputFn, errors: OutputFn) -> RunResult:
+        async def told(chunk: bytes) -> None:
+            # The command's record keeps a copy for the policies that
+            # read it.
+            said.append(chunk)
+            await errors(chunk)
+
         try:
             result = await run_with_timeout(
                 _execute_program(
                     runtime,
                     argv.name,
-                    list(argv.tokens),
-                    Context(cwd=cwd, env=env, stdin=stdin),
-                    "process",
-                    pipe.write,
-                    errors if sink is not None else None,
+                    list(argv.tokens) if process else [],
+                    ctx,
+                    kind,
+                    output,
+                    told,
                 ),
                 timeout,
                 argv.name,
             )
-            if result.stdout:
-                await pipe.write(result.stdout)
-            io.exit_code = node.exit_code = result.exit_code
-            io.stderr = result.stderr or b""
-            node.stderr = b"".join(said) or io.stderr
-            pipe.end()
-        except BaseException as exc:
-            pipe.end(exc)
-            raise
         finally:
-            settled = True
             await registry.settle(runtime)
+        node.stderr = b"".join(said) + (result.stderr or b"")
+        return result
 
-    async def finalize() -> None:
-        pipe.close_reader()
-        if task is not None:
-            if not task.done() and not settled:
-                task.cancel()
-            try:
-                await task
-            except asyncio.CancelledError:
-                current = asyncio.current_task()
-                if current is not None and current.cancelling():
-                    raise
-                io.exit_code = node.exit_code = 141
-            except Exception as exc:
-                logger.debug("external stream ended: %s", exc)
-        await close_quietly(stdin)
-        state.finish()
+    def settled() -> None:
+        # The record takes the status the output settles with: 141 for a
+        # reader that stopped early.
+        node.exit_code = io.exit_code
 
-    async def close() -> None:
-        nonlocal closing
-        if closing is None:
-            closing = asyncio.create_task(finalize())
-        await closing
-
-    async def output() -> AsyncIterator[bytes]:
-        nonlocal task
-        task = asyncio.create_task(execute())
-        try:
-            async for chunk in pipe.stream():
-                yield chunk
-            await task
-        finally:
-            await close()
-
-    return OutputStream(with_caller(output(), caller), close), io, node
+    stdout, io = run_output(
+        run,
+        Producer(
+            command=argv.name,
+            prefixes=tuple(m.prefix for m in registry.mounts()),
+            native=True,
+        ),
+        to_sink if sink is not None else None,
+        stdin,
+    )
+    if io.output is not None:
+        io.output.callbacks.append(settled)
+    return stdout, io, node
 
 
 async def _execute_program(

@@ -60,6 +60,11 @@ def test_the_order_is_bools_counts_lists_then_the_long_switch():
     ) == ["-B", "-S", "-O", "-X", "dev", "--check-hash-based-pycs", "always"]
 
 
+def test_unbuffered_goes_back_first_and_is_never_reported():
+    assert init_argv({"u": True, "B": True}) == ["-u", "-B"]
+    assert unhonored({"u": True}) == []
+
+
 def test_an_engine_that_honors_nothing_reports_every_switch_present():
     flags = {
         "B": True,

@@ -13,6 +13,10 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
+import type { Context } from '../../commands/config.ts'
+import { materialize } from '../../io/types.ts'
+import { LanguageRuntime } from '../../runtime/language.ts'
+import type { RunResult } from '../../runtime/types.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { MountMode } from '../../types.ts'
 import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
@@ -83,4 +87,36 @@ describe('a link loop', () => {
     expect(text(r.stdout)).toBe('a\nb\n')
     expect(text(r.stderr)).toBe('cat: /data/l1: Too many levels of symbolic links\n')
   })
+})
+
+class ShellsOut extends LanguageRuntime {
+  readonly language = 'python'
+  readonly name = 'shellsout'
+  constructor() {
+    super({ captures: ['python3'] })
+  }
+  async interpret(_engine: unknown, _program: unknown, ctx: Context): Promise<RunResult> {
+    const nested = await ctx.shell?.('printenv TOKEN')
+    return { stdout: await materialize(nested?.stdout ?? null), stderr: null, exitCode: 0 }
+  }
+}
+
+// A run starts as its output is read, after dispatch returned, and the lines
+// it shells out still run under its prefix assignment.
+describe('a prefix assignment', () => {
+  it.each(['TOKEN=one python3 -c x', 'TOKEN=one python3 -c x | cat'])(
+    'reaches the lines %s shells out',
+    async (line) => {
+      const ws = new Workspace(
+        { '/data': new RAMVFS() },
+        { mode: MountMode.EXEC, shellParser: await getTestParser(), runtimes: [new ShellsOut()] },
+      )
+      try {
+        expect(text((await ws.shell(line)).stdout)).toBe('one\n')
+        expect(text((await ws.shell('echo "[$TOKEN]"')).stdout)).toBe('[]\n')
+      } finally {
+        await ws.close()
+      }
+    },
+  )
 })

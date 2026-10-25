@@ -47,8 +47,19 @@ export interface LineExecutor<E = unknown> {
    * @param texts unused.
    * @param ctx the line in `flags.c`, its stdin, the session environment
    *   and working directory, the signal that stops it.
+   * @param output receives stdout as it arrives, each write awaited, which
+   *   the result then leaves out; undefined, or a transport that cannot
+   *   stream, returns it whole.
+   * @param errors the same for stderr.
    */
-  runLine(engine: E, paths: PathSpec[], texts: string[], ctx: Context): Promise<RunResult>
+  runLine(
+    engine: E,
+    paths: PathSpec[],
+    texts: string[],
+    ctx: Context,
+    output?: OutputFn,
+    errors?: OutputFn,
+  ): Promise<RunResult>
 }
 
 /** Whether this runtime carries the whole-line capability. */
@@ -83,7 +94,7 @@ export interface ProcessExecutor<E = unknown> {
     paths: PathSpec[],
     texts: string[],
     ctx: Context,
-    output: OutputFn | undefined,
+    output?: OutputFn,
     errors?: OutputFn,
   ): Promise<RunResult>
 }
