@@ -14,7 +14,6 @@
 
 import asyncio
 import logging
-import sys
 from collections.abc import (
     AsyncGenerator,
     AsyncIterator,
@@ -128,23 +127,21 @@ async def settle(task: asyncio.Future[_R]) -> _R:
 
 
 def owned_task(coro: Coroutine[Any, Any, _R]) -> asyncio.Task[_R]:
-    """Start work its caller will ``settle``, eagerly where Python can.
+    """Start work its caller will ``settle``, eagerly.
 
-    From Python 3.12 the task runs up to its first wait before this
-    returns, so work that never waits is already done: settling it
-    takes no turn of the event loop, where a task started on the next
-    turn costs three (its start and ``shield``'s two callbacks), each a
-    slice of whatever else runs on the loop. Work that does wait goes on
-    as an ordinary task, which the caller's cancellation still cannot
-    cut short. Python 3.11 starts it on the next turn.
+    The task runs up to its first wait before this returns, so work that
+    never waits is already done: settling it takes no turn of the event
+    loop, where a task started on the next turn costs three (its start
+    and ``shield``'s two callbacks), each a slice of whatever else runs
+    on the loop. Work that does wait goes on as an ordinary task, which
+    the caller's cancellation still cannot cut short.
 
     Args:
         coro (Coroutine): the owned work.
     """
-    loop = asyncio.get_running_loop()
-    if sys.version_info >= (3, 12):
-        return asyncio.Task(coro, loop=loop, eager_start=True)
-    return loop.create_task(coro)
+    return asyncio.Task(
+        coro, loop=asyncio.get_running_loop(), eager_start=True
+    )
 
 
 async def on_loop(work: Awaitable[_R], loop: asyncio.AbstractEventLoop) -> _R:
