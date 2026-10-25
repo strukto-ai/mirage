@@ -857,7 +857,7 @@ def _mount_doc(entry: ProfileMount) -> dict[str, Any]:
 
 def _paths_doc(block: PathsBlock) -> dict[str, Any]:
     # A path shown twice answers with the weaker of its modes, and an
-    # entry without one states visibility only (``shown_mode``), so the
+    # entry without one states visibility only (it sets no mode), so the
     # mapping keeps that answer for each path.
     show: dict[str, MountMode | None] = {}
     for e in block.show:

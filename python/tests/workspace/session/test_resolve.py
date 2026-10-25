@@ -25,7 +25,7 @@ from mirage.types import (
     ShowEntry,
     ShownPaths,
 )
-from mirage.utils.hidden import path_hidden, path_visible
+from mirage.utils.hidden import path_visible
 from mirage.workspace.dispatcher.constants import CALLS
 from mirage.workspace.session.resolve import (
     apply_profile,
@@ -314,12 +314,12 @@ def test_compile_profile_collects_the_hides_of_every_mount_section():
     assert out.visibility.paths == HiddenPaths(
         paths=("/shared/finance", "/repo/.env"), patterns=("/repo/*.pem",)
     )
-    assert path_hidden(out.visibility.paths, "/repo/deep/key.pem")
-    assert not path_hidden(out.visibility.paths, "/scratch/key.pem")
+    assert not path_visible(out.visibility, "/repo/deep/key.pem")
+    assert path_visible(out.visibility, "/scratch/key.pem")
     profile = compile_profile(
         SessionProfile(paths=PathsBlock(hide=("*.pem",)))
     )
-    assert path_hidden(profile.visibility.paths, "/scratch/key.pem")
+    assert not path_visible(profile.visibility, "/scratch/key.pem")
 
 
 def test_compile_profile_of_a_bare_or_absent_role_states_nothing():

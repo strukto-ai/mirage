@@ -1,10 +1,11 @@
 mod admission;
 mod pattern;
 mod profile;
+pub(crate) mod stream;
 mod types;
 mod visibility;
 
-pub use admission::{AdmissionMatcher, subjects};
+pub use admission::AdmissionMatcher;
 pub use pattern::{pattern_matches, pattern_reaches, split_pattern};
 pub use types::*;
 

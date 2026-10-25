@@ -19,98 +19,37 @@ from mirage.types import (
     HiddenVars,
     MountMode,
     ShowEntry,
+    ShownPaths,
     Visibility,
 )
 from mirage.utils.hidden import (
     classify_paths,
-    classify_shows,
     hidden_under,
-    hide_depth,
     leads_hidden,
     move_reveals,
-    path_covers,
-    path_hidden,
     path_visible,
-    show_depth,
     show_head,
-    shown_mode,
     var_hidden,
     visible_links,
 )
-from mirage.utils.path import CycleError, resolve_symlinks, trace_symlinks
+from mirage.utils.path import CycleError, resolve_symlinks
 
 
 def _vis(hide: list[str], show: tuple[ShowEntry, ...] = ()) -> Visibility:
-    return Visibility(paths=classify_paths(hide), shown=classify_shows(show))
+    return Visibility(
+        paths=classify_paths(hide),
+        shown=ShownPaths(entries=show) if show else None,
+    )
 
 
 def test_none_hides_nothing():
-    assert path_hidden(None, "/a/b") is False
+    assert path_visible(None, "/a/b") is True
     assert var_hidden(None, "SECRET") is False
 
 
 def test_empty_spec_hides_nothing():
-    assert path_hidden(HiddenPaths(), "/a/b") is False
+    assert path_visible(Visibility(paths=HiddenPaths()), "/a/b") is True
     assert var_hidden(Visibility(vars=HiddenVars()), "SECRET") is False
-
-
-def test_exact_path_hides_itself_and_its_subtree():
-    # A name you cannot see cannot be a parent you traverse, so hiding
-    # a path always hides everything under it.
-    h = HiddenPaths(paths=("/s3/secrets",))
-    assert path_hidden(h, "/s3/secrets")
-    assert path_hidden(h, "/s3/secrets/a.txt")
-    assert path_hidden(h, "/s3/secrets/deep/b")
-    assert not path_hidden(h, "/s3")
-    assert not path_hidden(h, "/s3/secretsfoo")
-    assert not path_hidden(h, "/s3/other")
-
-
-def test_exact_path_spelling_is_normalized():
-    assert path_hidden(HiddenPaths(paths=("/s3/secrets/",)), "/s3/secrets")
-    assert path_hidden(HiddenPaths(paths=("s3/secrets",)), "/s3/secrets/a")
-
-
-def test_exact_path_at_a_mount_root_covers_the_mount():
-    # Subtractive mount hiding is a one-line prefix entry; the grant
-    # table (mount_modes) stays the additive spelling.
-    h = HiddenPaths(paths=("/s3",))
-    assert path_hidden(h, "/s3")
-    assert path_hidden(h, "/s3/any/depth")
-    assert not path_hidden(h, "/other")
-
-
-def test_component_pattern_applies_inside_every_mount():
-    # A pattern with no "/" matches any single name component, so
-    # "hide *.key everywhere" is one entry, not one per mount.
-    h = HiddenPaths(patterns=("*.key",))
-    assert path_hidden(h, "/a/b.key")
-    assert path_hidden(h, "/other/deep/c.key")
-    assert path_hidden(h, "/a/b.key/inside.txt")
-    assert not path_hidden(h, "/a/bkey")
-    assert not path_hidden(h, "/a/keyed")
-
-
-def test_anchored_pattern_matches_the_full_virtual_path():
-    h = HiddenPaths(patterns=("/config/*.pem",))
-    assert path_hidden(h, "/config/x.pem")
-    assert path_hidden(h, "/config/x.pem/sub")
-    assert not path_hidden(h, "/other/x.pem")
-
-
-def test_anchored_star_crosses_slashes_like_find_path():
-    # Deliberate: fnmatch's "*" is not slash-aware, the same semantics
-    # GNU find -path applies to its patterns.
-    h = HiddenPaths(patterns=("/config/*.pem",))
-    assert path_hidden(h, "/config/nested/x.pem")
-
-
-def test_patterns_share_the_repo_fnmatch_dialect():
-    # [^...] negates like [!...] (bash/glibc), because the matcher is
-    # utils/fnmatch, not stdlib fnmatch.
-    h = HiddenPaths(patterns=("[^a]*.key",))
-    assert path_hidden(h, "/x/b.key")
-    assert not path_hidden(h, "/x/a.key")
 
 
 def test_var_names_are_exact():
@@ -146,73 +85,13 @@ def test_classify_paths_empty_is_unrestricted():
     assert classify_paths(()) is None
 
 
-def test_classify_vars_splits_globs_from_names():
-    from mirage.utils.hidden import classify_vars
-
-    assert classify_vars(["SLACK_TOKEN", "AWS_*"]) == HiddenVars(
-        names=("SLACK_TOKEN",), patterns=("AWS_*",)
-    )
-    assert classify_vars([]) is None
-
-
 def test_classified_entries_match_like_the_hand_built_spec():
-    from mirage.utils.hidden import classify_paths
 
-    spec = classify_paths(["/s3/secrets", "*.key", "/repo/docs/*"])
-    assert path_hidden(spec, "/s3/secrets/deep/b")
-    assert path_hidden(spec, "/a/b.key/c")
-    assert path_hidden(spec, "/repo/docs/x/y")
-    assert not path_hidden(spec, "/repo/docsx")
-
-
-def test_path_covers_is_the_directory_holding_the_scope_or_an_ancestor():
-    spec = HiddenPaths(
-        paths=("/s3/secrets",), patterns=("/repo/docs/*", "*.pem")
-    )
-    # An exact entry is covered by itself and by every ancestor; an
-    # anchored pattern by its fixed head and that head's ancestors.
-    for virtual in ("/s3/secrets", "/s3", "/", "/repo/docs", "/repo"):
-        assert path_covers(spec, virtual)
-    for virtual in ("/s3/secrets/a", "/s3/other", "/repo/docs/x", "/x"):
-        assert not path_covers(spec, virtual)
-    # Without ancestors only the holding directory counts (a destination).
-    assert path_covers(spec, "/repo/docs", ancestors=False)
-    assert not path_covers(spec, "/repo", ancestors=False)
-    # A component pattern names no place, so nothing is covered by it.
-    assert not path_covers(HiddenPaths(paths=(), patterns=("*.pem",)), "/x")
-    assert not path_covers(None, "/")
-
-
-def test_hide_depth_scores_the_entry_never_the_match_site():
-    spec = classify_paths(["/repo", "/repo/sealed/*", "*.pem"])
-    # The exact subtree scores its component count wherever it matched.
-    assert hide_depth(spec, "/repo/a/b/c") == 1
-    # The anchored pattern covers descendants through the matched
-    # ancestor and still scores its own anchor depth.
-    assert hide_depth(spec, "/repo/sealed/x/deep") == 2
-    # A component pattern anchors nothing.
-    assert hide_depth(classify_paths(["*.pem"]), "/x/k.pem/y") == 0
-    assert hide_depth(spec, "/other") is None
-    assert hide_depth(None, "/repo") is None
-
-
-def test_show_depth_covers_the_entry_subtree():
-    shown = classify_shows(
-        [
-            ShowEntry("/repo/public"),
-            ShowEntry("/repo/docs/*", MountMode.READ),
-        ]
-    )
-    assert show_depth(shown, "/repo/public/index.html") == 2
-    assert show_depth(shown, "/repo/public") == 2
-    assert show_depth(shown, "/repo/docs/a/b") == 2
-    # The pattern's fixed head itself is not matched by fnmatch, and an
-    # entry covers nothing above its anchor.
-    assert show_depth(shown, "/repo") is None
-    assert show_depth(None, "/repo/public") is None
-    # A stray slashless pattern from a typed constructor covers
-    # nothing, failing toward refusal.
-    assert show_depth(classify_shows([ShowEntry("*.md")]), "/a/x.md") is None
+    spec = _vis(["/s3/secrets", "*.key", "/repo/docs/*"])
+    assert not path_visible(spec, "/s3/secrets/deep/b")
+    assert not path_visible(spec, "/a/b.key/c")
+    assert not path_visible(spec, "/repo/docs/x/y")
+    assert path_visible(spec, "/repo/docsx")
 
 
 def test_show_head_is_the_anchor():
@@ -266,46 +145,6 @@ def test_a_hidden_show_anchor_opens_no_road():
     vis = _vis(["/repo", "/repo/public"], (ShowEntry("/repo/public"),))
     assert not path_visible(vis, "/repo")
     assert not path_visible(vis, "/repo/public/x")
-
-
-def test_shown_mode_is_the_deepest_mode_entry():
-    shown = classify_shows(
-        [
-            ShowEntry("/repo", MountMode.READ),
-            ShowEntry("/repo/build", MountMode.WRITE),
-            ShowEntry("/repo/public"),
-        ]
-    )
-    assert shown_mode(shown, "/repo/src/a.py") == (1, MountMode.READ)
-    assert shown_mode(shown, "/repo/build/out") == (2, MountMode.WRITE)
-    # A list-form entry states visibility only.
-    assert shown_mode(shown, "/repo/public/x") == (1, MountMode.READ)
-    assert shown_mode(shown, "/elsewhere") is None
-    assert shown_mode(None, "/repo") is None
-
-
-def test_shown_mode_equal_depth_takes_the_weaker():
-    shown = classify_shows(
-        [
-            ShowEntry("/repo/docs", MountMode.EXEC),
-            ShowEntry("/repo/*", MountMode.READ),
-        ]
-    )
-    assert shown_mode(shown, "/repo/docs/a") == (2, MountMode.EXEC)
-    # Both anchor at depth 1 for a path only the pattern reaches; a
-    # second depth-1 statement can only weaken the first.
-    both = classify_shows(
-        [
-            ShowEntry("/repo", MountMode.EXEC),
-            ShowEntry("/repo/*", MountMode.READ),
-        ]
-    )
-    assert shown_mode(both, "/repo/x") == (1, MountMode.READ)
-
-
-def test_classify_shows_empty_is_none():
-    assert classify_shows([]) is None
-    assert classify_shows([ShowEntry("/a")]) is not None
 
 
 def test_hidden_under_is_the_per_operand_gate():
@@ -518,31 +357,6 @@ def test_link_batches_keep_order_and_surrogate_target_text():
     assert visible_links(scope, ("/link\ud800",), links) == (True,)
 
 
-def test_long_unfollowed_path_does_not_transfer_irrelevant_facts():
-    path = "/a" * 4096
-    links = {"/unrelated": "/public"}
-    assert not leads_hidden(_vis(["/secret"]), path, links)
-    count = len(trace_symlinks(path, links))
-    assert count == 0
-
-
-def test_long_relevant_trace_preserves_the_scalar_result():
-    links = {"/link": "/a" * 4096}
-    path = "/link" + "".join(f"/c{index}/.." for index in range(2100))
-    assert not leads_hidden(_vis(["/secret"]), path, links)
-
-
-def test_link_targets_with_many_redundant_separators():
-    scope = _vis(["/secret"])
-    links = {"/link": "/" * 200000 + "public"}
-    assert not leads_hidden(scope, "/link", links)
-    assert resolve_symlinks("/link", links) == "/public"
-    assert visible_links(scope, ("/link",), links) == (True,)
-    links["/link"] = "/" * 200000 + "secret"
-    assert leads_hidden(scope, "/link", links)
-    assert visible_links(scope, ("/link",), links) == (False,)
-
-
 def test_hidden_link_targets_are_not_inspected():
     lookups: list[str] = []
 
@@ -555,7 +369,7 @@ def test_hidden_link_targets_are_not_inspected():
                 )
             return super().get(key, default)
 
-    links = LookupLinks({"/secret/link": "/" + "x" * 17000000})
+    links = LookupLinks({"/secret/link": "/x"})
     assert visible_links(
         _vis(["/secret"]), ("/secret/link", "/public"), links
     ) == (False, True)

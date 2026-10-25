@@ -15,23 +15,64 @@
 
 from collections.abc import Sequence
 
-from mirage.rs.policy import from_units, policy_pattern, units
+from mirage.rs.policy import admission_matcher, from_units, units
 
 
 def split_pattern(pattern: str) -> tuple[str, ...]:
+    """A command pattern's tokens.
+
+    Whitespace-split; trailing wildcards are dropped because a pattern
+    is a prefix and already matches any continuation (``git *`` and
+    ``git`` are the same rule; a bare ``*`` is every command).
+
+    Args:
+        pattern (str): the pattern as written in the document.
+    """
     return tuple(
-        from_units(value)
-        for value in policy_pattern(units(pattern), (), False)[0]
+        from_units(v)
+        for v in admission_matcher(None).ask(
+            "split_pattern", pattern=units(pattern)
+        )
     )
 
 
 def pattern_matches(pattern: str, tokens: Sequence[str]) -> bool:
-    return policy_pattern(
-        units(pattern), tuple(units(v) for v in tokens), False
-    )[1]
+    """Whether a pattern is a prefix of a line's tokens.
+
+    Args:
+        pattern (str): the pattern as written.
+        tokens (Sequence[str]): the line as the entry point normalized it,
+            command name first.
+    """
+    return (
+        admission_matcher(None).ask(
+            "pattern_matches",
+            pattern=units(pattern),
+            tokens=[units(v) for v in tokens],
+        )
+        is True
+    )
 
 
 def pattern_reaches(pattern: str, path: Sequence[str]) -> bool:
-    return policy_pattern(
-        units(pattern), tuple(units(v) for v in path), False
-    )[2]
+    """Whether a pattern can match some line running the node at a path.
+
+    Neither side has to be the longer one, which is what separates this
+    from :func:`pattern_matches`: only the words the two share are read.
+    A pattern that runs past the path narrows what is reachable below it
+    (``linear issue list`` reaches ``linear issue``, because one line of
+    that group is allowed); a path that runs past the pattern is already
+    covered (``linear issue`` reaches ``linear issue list``).
+
+    Args:
+        pattern (str): the pattern as written.
+        path (Sequence[str]): the node's canonical words, head first.
+    """
+    return (
+        admission_matcher(None).ask(
+            "pattern_reaches",
+            pattern=units(pattern),
+            tokens=[units(v) for v in path],
+        )
+        is True
+    )

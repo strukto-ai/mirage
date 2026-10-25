@@ -100,7 +100,7 @@ class PermissionsPolicy(Policy, SessionScopedMixin):
     async def wants_for(self, method: str, session_id: str) -> bool:
         """Whether this session's rules speak at ``method``: always at the
         command admission, and at the dispatcher only through a pure path
-        rule, the one kind an op can meet (``op_reach``).
+        rule, the one kind an op can meet (``op_ruling``).
 
         Args:
             method (str): the method in python spelling.

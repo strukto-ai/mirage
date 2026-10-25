@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { visibilityMatcher } from '../rs/policy.ts'
+import { fromUnits, units, visibilityMatcher } from '../rs/policy.ts'
 import { mergeSignals } from '../utils/abort.ts'
 import type { SessionAccess } from '../view/types.ts'
 import { createAsyncContext } from '../utils/async_context.ts'
@@ -848,7 +848,12 @@ function pathModeUnder(
   const prefix = norm(mountPrefix)
   const cap = sess.mountModes?.get(prefix) ?? null
   if (cap === null && sess.visibility?.shown == null) return mountMode
-  return visibilityMatcher(sess.visibility ?? null).effectiveMode(virtual, prefix, mountMode, cap)
+  return visibilityMatcher(sess.visibility ?? null).ask('effective_mode', {
+    path: units(virtual),
+    prefix: units(prefix),
+    configured: mountMode,
+    cap,
+  }) as MountMode
 }
 
 export function effectivePathMode(
@@ -878,7 +883,11 @@ export function strongestUnderSession(
   const prefix = norm(mountPrefix)
   const cap = sess.mountModes?.get(prefix) ?? null
   if (cap === null && sess.visibility?.shown == null) return mountMode
-  return visibilityMatcher(sess.visibility ?? null).strongestMode(prefix, mountMode, cap)
+  return visibilityMatcher(sess.visibility ?? null).ask('strongest_mode', {
+    prefix: units(prefix),
+    configured: mountMode,
+    cap,
+  }) as MountMode
 }
 
 /**
@@ -927,12 +936,13 @@ function readonlyBelowUnder(
 ): string | null {
   if (sess.visibility?.shown == null) return null
   const prefix = norm(mountPrefix)
-  return visibilityMatcher(sess.visibility).readonlyBelow(
-    virtual,
-    prefix,
-    mountMode,
-    sess.mountModes?.get(prefix) ?? null,
-  )
+  const found = visibilityMatcher(sess.visibility).ask('readonly_below', {
+    path: units(virtual),
+    prefix: units(prefix),
+    configured: mountMode,
+    cap: sess.mountModes?.get(prefix) ?? null,
+  }) as number[] | null
+  return found === null ? null : fromUnits(found)
 }
 
 export function readonlyBelow(

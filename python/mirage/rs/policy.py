@@ -12,26 +12,15 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-
 from __future__ import annotations
 
-from collections.abc import Iterable, Sequence
+import json
+import threading
+from collections.abc import Iterable, Mapping
 from functools import lru_cache
-from typing import TYPE_CHECKING, TypeAlias, assert_never
+from typing import TYPE_CHECKING, Any, TypeAlias, assert_never
 
-from mirage._rs import (
-    PolicyAdmission,
-    PolicyVisibility,
-)
-from mirage._rs import policy_anchor_depth as policy_anchor_depth
-from mirage._rs import policy_compile as policy_compile
-from mirage._rs import policy_is_glob as policy_is_glob
-from mirage._rs import policy_paths as policy_paths
-from mirage._rs import policy_pattern as policy_pattern
-from mirage._rs import policy_restrict as policy_restrict
-from mirage._rs import policy_show_head as policy_show_head
-from mirage._rs import policy_subjects as policy_subjects
-from mirage._rs import policy_vars as policy_vars
+from mirage.rs.stream import OpenStream, open_stream
 from mirage.types import (
     HiddenPaths,
     HiddenVars,
@@ -52,164 +41,211 @@ from mirage.utils.path import (
 if TYPE_CHECKING:
     from mirage.policy.types import AdmissionRules, CommandRule
 
-Units: TypeAlias = tuple[int, ...]
-LinkStepValue: TypeAlias = tuple[int, Units, bool]
-RuleValue: TypeAlias = tuple[
-    Units, tuple[Units, ...], tuple[Units, ...], Units | None
-]
-RulesValue: TypeAlias = tuple[
-    tuple[Units, ...] | None, tuple[RuleValue, ...], tuple[RuleValue, ...]
-]
-ShowValue: TypeAlias = tuple[Units, int | None]
-ReasonValue: TypeAlias = tuple[tuple[Units, ...], Units]
-PathsValue: TypeAlias = tuple[
-    tuple[Units, ...], tuple[ShowValue, ...], tuple[ReasonValue, ...]
-]
-MountValue: TypeAlias = tuple[
-    Units, int | None, RulesValue | None, PathsValue | None
-]
-ProfileValue: TypeAlias = tuple[
-    RulesValue | None,
-    PathsValue | None,
-    tuple[Units, ...] | None,
-    tuple[MountValue, ...] | None,
-]
-PathValue: TypeAlias = tuple[Units, Units]
-FactsValue: TypeAlias = tuple[
-    Units,
-    tuple[Units, ...],
-    bool,
-    Units,
-    tuple[PathValue, ...],
-    tuple[PathValue, ...],
-    bool,
-    Units | None,
-]
+Wire: TypeAlias = dict[str, Any]
 
-MODES = (MountMode.READ, MountMode.WRITE, MountMode.EXEC)
+CACHE_SIZE = 1024
 
 
-@lru_cache(maxsize=4096)
-def _short_units(value: str) -> Units:
-    return tuple(map(ord, value))
+def _open(config: Mapping[str, Any]) -> OpenStream:
+    return open_stream("policy", {**config, "dialect": "python"})
 
 
-def units(value: str) -> Units:
-    return _short_units(value) if len(value) <= 256 else tuple(map(ord, value))
+class PolicyMatcher:
+    """A profile's rules and visibility, compiled once by mirage-rs's
+    ``policy`` stream and asked one request at a time. Mirrors
+    TypeScript's PolicyMatcher.
+
+    Args:
+        config (Mapping[str, Any]): the ``rules`` and ``visibility`` to
+            compile, in the stream's wire shape; empty for neither.
+    """
+
+    def __init__(self, config: Mapping[str, Any]) -> None:
+        self._lock = threading.Lock()
+        self._stream = _open(config)
+
+    def ask(self, op: str, **args: Any) -> Any:
+        """The answer to one request, decoded from its JSON.
+
+        Args:
+            op (str): the request's name, e.g. ``"path_visible"``.
+            **args (Any): its fields in the wire shape, text as code
+                points.
+        """
+        data = json.dumps({"op": op, **args}).encode()
+        with self._lock:
+            self._stream.feed(data)
+            return json.loads(self._stream.finish())
 
 
-def from_units(value: Sequence[int]) -> str:
+def units(value: str) -> list[int]:
+    """Text as the code points the stream reads, lone surrogates kept.
+
+    Args:
+        value (str): the text.
+    """
+    return [*map(ord, value)]
+
+
+def from_units(value: Iterable[int]) -> str:
+    """Code points from the stream back as text.
+
+    Args:
+        value (Iterable[int]): the code points.
+    """
     return "".join(map(chr, value))
 
 
-def link_trace_value(trace: Iterable[LinkStep]) -> tuple[LinkStepValue, ...]:
-    out: list[LinkStepValue] = []
-    for step in trace:
-        if isinstance(step, LinkFollow):
-            out.append((0, units(step.path), False))
-        elif isinstance(step, LinkEnter):
-            out.append((1, units(step.path), step.next_is_parent))
-        elif isinstance(step, LinkLanding):
-            out.append((2, units(step.path), False))
-        elif isinstance(step, LinkHopLimit):
-            out.append((3, (), False))
-        else:
-            assert_never(step)
-    return tuple(out)
+def rule_wire(rule: CommandRule) -> Wire:
+    """One rule in the stream's wire shape.
+
+    Args:
+        rule (CommandRule): the rule.
+    """
+    return {
+        "reason": units(rule.reason),
+        "commands": [units(v) for v in rule.commands],
+        "paths": [units(v) for v in rule.paths],
+        "mount": units(rule.mount),
+    }
 
 
-@lru_cache(maxsize=1024)
-def rule_value(rule: CommandRule) -> RuleValue:
-    return (
-        units(rule.reason),
-        tuple(units(value) for value in rule.commands),
-        tuple(units(value) for value in rule.paths),
-        units(rule.mount),
-    )
+def rules_wire(rules: AdmissionRules) -> Wire:
+    """A rule set in the stream's wire shape.
+
+    Args:
+        rules (AdmissionRules): the allow list and the deny and ask
+            rules.
+    """
+    return {
+        "allow": None
+        if rules.allow is None
+        else [units(v) for v in rules.allow],
+        "deny": [rule_wire(rule) for rule in rules.deny],
+        "ask": [rule_wire(rule) for rule in rules.ask],
+    }
 
 
-def rules_value(rules: AdmissionRules | None) -> RulesValue:
-    if rules is None:
-        return None, (), ()
-    return (
-        None if rules.allow is None else tuple(units(v) for v in rules.allow),
-        tuple(rule_value(rule) for rule in rules.deny),
-        tuple(rule_value(rule) for rule in rules.ask),
-    )
+def visibility_wire(vis: Visibility) -> Wire:
+    """A session's visibility in the stream's wire shape.
+
+    Args:
+        vis (Visibility): the hides, shows and hidden variables.
+    """
+    hidden, shown, variables = vis.paths, vis.shown, vis.vars
+    return {
+        "hidden": {
+            "paths": [units(v) for v in hidden.paths],
+            "patterns": [units(v) for v in hidden.patterns],
+        }
+        if hidden is not None
+        else {},
+        "shown": [
+            {
+                "path": units(entry.path),
+                "mode": None if entry.mode is None else entry.mode.value,
+            }
+            for entry in shown.entries
+        ]
+        if shown is not None
+        else [],
+        "vars": {
+            "names": [units(v) for v in variables.names],
+            "patterns": [units(v) for v in variables.patterns],
+        }
+        if variables is not None
+        else {},
+    }
 
 
-@lru_cache(maxsize=1024)
-def admission_matcher(rules: AdmissionRules | None) -> PolicyAdmission:
-    return PolicyAdmission(rules_value(rules), False)
-
-
-@lru_cache(maxsize=1024)
-def rule_matcher(rule: CommandRule) -> PolicyAdmission:
-    return PolicyAdmission((None, (rule_value(rule),), ()), False)
-
-
-@lru_cache(maxsize=1024)
-def visibility_matcher(vis: Visibility | None) -> PolicyVisibility:
-    hidden = vis.paths if vis is not None else None
-    shown = vis.shown if vis is not None else None
-    variables = vis.vars if vis is not None else None
-    return PolicyVisibility(
-        (
-            (
-                tuple(units(v) for v in hidden.paths) if hidden else (),
-                tuple(units(v) for v in hidden.patterns) if hidden else (),
-            ),
-            tuple(
-                (
-                    units(v.path),
-                    MODES.index(v.mode) if v.mode is not None else None,
-                )
-                for v in shown.entries
-            )
-            if shown
-            else (),
-            (
-                tuple(units(v) for v in variables.names) if variables else (),
-                tuple(units(v) for v in variables.patterns)
-                if variables
-                else (),
-            ),
-        )
-    )
-
-
-def visibility_from_value(
-    value: tuple[
-        tuple[Sequence[Sequence[int]], Sequence[Sequence[int]]],
-        Sequence[tuple[Sequence[int], int | None]],
-        tuple[Sequence[Sequence[int]], Sequence[Sequence[int]]],
-    ],
-    processes: ProcessScope = "session",
+def visibility_from(
+    value: Mapping[str, Any], processes: ProcessScope = "session"
 ) -> Visibility:
-    paths, shown, variables = value
+    """A compiled visibility from the stream's wire shape.
+
+    Args:
+        value (Mapping[str, Any]): the ``visibility`` a compile answered.
+        processes (ProcessScope): which processes the session sees.
+    """
+    hidden, shown, variables = value["hidden"], value["shown"], value["vars"]
     return Visibility(
         paths=HiddenPaths(
-            paths=tuple(from_units(v) for v in paths[0]),
-            patterns=tuple(from_units(v) for v in paths[1]),
+            paths=tuple(from_units(v) for v in hidden["paths"]),
+            patterns=tuple(from_units(v) for v in hidden["patterns"]),
         )
-        if paths[0] or paths[1]
+        if hidden["paths"] or hidden["patterns"]
         else None,
         shown=ShownPaths(
             entries=tuple(
                 ShowEntry(
-                    path=from_units(path),
-                    mode=None if mode is None else MODES[mode],
+                    path=from_units(entry["path"]),
+                    mode=None
+                    if entry["mode"] is None
+                    else MountMode(entry["mode"]),
                 )
-                for path, mode in shown
+                for entry in shown
             )
         )
         if shown
         else None,
         vars=HiddenVars(
-            names=tuple(from_units(v) for v in variables[0]),
-            patterns=tuple(from_units(v) for v in variables[1]),
+            names=tuple(from_units(v) for v in variables["names"]),
+            patterns=tuple(from_units(v) for v in variables["patterns"]),
         )
-        if variables[0] or variables[1]
+        if variables["names"] or variables["patterns"]
         else None,
         processes=processes,
+    )
+
+
+def link_trace_wire(trace: Iterable[LinkStep]) -> list[Any]:
+    """A symlink walk's steps in the stream's wire shape.
+
+    Args:
+        trace (Iterable[LinkStep]): the steps ``trace_symlinks`` took.
+    """
+    out: list[Any] = []
+    for step in trace:
+        if isinstance(step, LinkFollow):
+            out.append({"follow": units(step.path)})
+        elif isinstance(step, LinkEnter):
+            out.append(
+                {
+                    "enter": {
+                        "path": units(step.path),
+                        "next_is_parent": step.next_is_parent,
+                    }
+                }
+            )
+        elif isinstance(step, LinkLanding):
+            out.append({"landing": units(step.path)})
+        elif isinstance(step, LinkHopLimit):
+            out.append("hop_limit")
+        else:
+            assert_never(step)
+    return out
+
+
+@lru_cache(maxsize=CACHE_SIZE)
+def admission_matcher(rules: AdmissionRules | None) -> PolicyMatcher:
+    """The compiled matcher for a rule set, shared by every caller asking
+    the same; None answers the requests no profile scopes.
+
+    Args:
+        rules (AdmissionRules | None): the rules, None for none.
+    """
+    return PolicyMatcher({} if rules is None else {"rules": rules_wire(rules)})
+
+
+@lru_cache(maxsize=CACHE_SIZE)
+def visibility_matcher(vis: Visibility | None) -> PolicyMatcher:
+    """The compiled matcher for a visibility, shared by every caller
+    asking the same.
+
+    Args:
+        vis (Visibility | None): the visibility, None for an unrestricted
+            one.
+    """
+    return PolicyMatcher(
+        {} if vis is None else {"visibility": visibility_wire(vis)}
     )

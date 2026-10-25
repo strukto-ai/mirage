@@ -12,15 +12,37 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { admissionMatcher } from '../../rs/policy.ts'
+import { admissionMatcher, units } from '../../rs/policy.ts'
 import type { AdmissionRules, CommandContext } from '../types.ts'
 
+/**
+ * Whether a session's allow list has a pattern for a command name. A
+ * profile without an allow list allows everything; a profile with one
+ * allows the names its patterns start with, builtins included. Shell
+ * functions are the caller's exemption, not this one's. Mirrors Python's
+ * `head_allowed`.
+ */
 export function headAllowed(name: string, rules: AdmissionRules | null): boolean {
-  return rules === null || admissionMatcher(rules).headAllowed(name)
+  return admissionMatcher(rules).ask('head_allowed', { name: units(name) }) === true
 }
+/**
+ * The tokens a pattern reads: the entry point's normalization when it set one,
+ * else the name and the raw argv (a context built by hand).
+ */
 export function lineTokens(ctx: CommandContext): readonly string[] {
   return (ctx.tokens?.length ?? 0) > 0 ? (ctx.tokens ?? []) : [ctx.command, ...ctx.argv]
 }
+/**
+ * Whether the profile's allow list has a pattern for the whole line. A
+ * word that is not a tool (`ctx.tool` cleared by the entry point: the agent's
+ * own function, an executed path) is always allowed here; a deny rule
+ * is the only thing that can refuse it.
+ */
 export function lineAllowed(ctx: CommandContext, rules: AdmissionRules | null): boolean {
-  return rules === null || admissionMatcher(rules).lineAllowed(lineTokens(ctx), ctx.tool ?? true)
+  return (
+    admissionMatcher(rules).ask('line_allowed', {
+      tokens: lineTokens(ctx).map(units),
+      tool: ctx.tool ?? true,
+    }) === true
+  )
 }

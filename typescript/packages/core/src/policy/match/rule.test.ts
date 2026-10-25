@@ -25,17 +25,7 @@ import {
 } from '../types.ts'
 import { WordKind } from '../../commands/spec/types.ts'
 import { decide } from './decide.ts'
-import {
-  ioReach,
-  ioRefusal,
-  matchIo,
-  opRuling,
-  ruleReach,
-  ruleScope,
-  skippedAtDispatch,
-  subjects,
-  type Subject,
-} from './rule.ts'
+import { ioReach, ioRefusal, opRuling, skippedAtDispatch } from './rule.ts'
 import { CALLS } from '../../workspace/dispatcher/constants.ts'
 import { Effect, Target, type VfsCall } from '../../vfs/types.ts'
 
@@ -60,10 +50,6 @@ function ctx(
   extra: Partial<Omit<CommandContext, 'command'>> = {},
 ): CommandContext {
   return { command, paths: [], argv: [], cwd: '/', ...extra }
-}
-
-function subject(virtual: string): Subject {
-  return { path: path(virtual), holds: false, ancestors: true }
 }
 
 /**
@@ -244,46 +230,6 @@ describe('rules', () => {
     expect(verdict(named, subtreeCtx('mv', '/x', '/y'))).toEqual(ALLOW)
   })
 
-  it("subjects are the line's paths, then its subtree operands", () => {
-    // A reader is asked one question per path: does it lie inside a
-    // scope. A subtree command is asked a second, per operand: does it
-    // hold one. `mv`'s destination is the operand where an ancestor of
-    // the scope does not count.
-    expect(subjects(subtreeCtx('cat', '/a', '/b')).map((s) => [s.path?.virtual, s.holds])).toEqual([
-      ['/a', false],
-      ['/b', false],
-    ])
-    expect(
-      subjects(subtreeCtx('mv', '/a', '/b')).map((s) => [s.path?.virtual, s.holds, s.ancestors]),
-    ).toEqual([
-      ['/a', false, true],
-      ['/b', false, true],
-      ['/a', true, true],
-      ['/b', true, false],
-    ])
-    // A line naming no path is one subject, itself.
-    const bare = subjects(ctx('git', { tokens: ['git', 'push'] }))
-    expect(bare.length).toBe(1)
-    expect(bare[0]?.path).toBeNull()
-  })
-
-  it('ruleReach scores the entry that reached and no other', () => {
-    const inside: CommandRule = { reason: 'x', paths: ['/a/*', '/deep/b/c/*'] }
-    const scope = ruleScope(inside)
-    expect(ruleReach(inside, scope, subject('/a/x'))).toBe(1)
-    expect(ruleReach(inside, scope, subject('/deep/b/c/x'))).toBe(3)
-    expect(ruleReach(inside, scope, subject('/elsewhere'))).toBeNull()
-    // A rule naming no paths reaches every subject at depth 0, which is
-    // off the path axis, and a line's own subject only through one.
-    const pathless: CommandRule = { reason: 'x' }
-    expect(ruleReach(pathless, null, subject('/a/x'))).toBe(0)
-    expect(ruleReach(pathless, null, { path: null, holds: false, ancestors: true })).toBe(0)
-    expect(ruleReach(inside, scope, { path: null, holds: false, ancestors: true })).toBeNull()
-    // Holding the scope is the subtree operand's question alone.
-    expect(ruleReach(inside, scope, subject('/'))).toBeNull()
-    expect(ruleReach(inside, scope, { ...subject('/'), holds: true })).toBe(3)
-  })
-
   it('a subtree op on the directory holding the scope is refused', () => {
     const rule: CommandRule = { reason: 'frozen', paths: ['/data/locked/*'] }
     for (const [op, virtual] of [
@@ -348,38 +294,6 @@ describe('rules', () => {
         prefix: '/data/',
       }),
     ).toBe(true)
-  })
-
-  it('matchIo names the line and holds the entry', () => {
-    const pure: CommandRule = { reason: 'sealed', paths: ['/data/sealed'] }
-    const scope = ruleScope(pure)
-    expect(matchIo(pure, scope, ['grep', '-r', 'x', '/data'], '/data/sealed/deep/f')).toBe(true)
-    expect(matchIo(pure, scope, ['du', '/data'], '/data/sealed')).toBe(true)
-    expect(matchIo(pure, scope, ['du', '/data'], '/data/open/f')).toBe(false)
-    // A command-scoped rule reads the line's tokens, so a pattern with a
-    // token after the name applies only to the line that carries it.
-    const scoped: CommandRule = { reason: 'no', commands: ['grep -r'], paths: ['/data/private'] }
-    expect(
-      matchIo(scoped, ruleScope(scoped), ['grep', '-r', 'k', '/data'], '/data/private/k'),
-    ).toBe(true)
-    expect(matchIo(scoped, ruleScope(scoped), ['grep', 'k', '/data'], '/data/private/k')).toBe(
-      false,
-    )
-    expect(matchIo(scoped, ruleScope(scoped), ['cat', '/data'], '/data/private/k')).toBe(false)
-    // A whole-line rule spoke at admission and says nothing at an entry;
-    // the directory holding a children pattern is not in it.
-    const whole: CommandRule = { reason: 'no', commands: ['rm'] }
-    expect(matchIo(whole, ruleScope(whole), ['rm', '/data/x'], '/data/x')).toBe(false)
-    const children: CommandRule = { reason: 'frozen', paths: ['/data/locked/*'] }
-    expect(matchIo(children, ruleScope(children), ['ls', '/data'], '/data/locked')).toBe(false)
-    expect(matchIo(children, ruleScope(children), ['ls', '/data'], '/data/locked/y')).toBe(true)
-  })
-
-  it('ruleScope is null for a whole-line rule and remembered per rule', () => {
-    const whole: CommandRule = { reason: 'no', commands: ['rm'] }
-    expect(ruleScope(whole)).toBeNull()
-    const scoped: CommandRule = { reason: 'no', paths: ['/data/*'] }
-    expect(ruleScope(scoped)).toBe(ruleScope(scoped))
   })
 
   it('ioRefusal applies the gate precedence to an entry', () => {

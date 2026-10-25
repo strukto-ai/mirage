@@ -28,8 +28,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, TypeVar
 
 from mirage.errors.fs import eacces, enoent, erofs
-from mirage.rs.policy import MODES, from_units, units
-from mirage.rs.policy import visibility_matcher as policy_visibility
+from mirage.rs.policy import from_units, units, visibility_matcher
 from mirage.types import (
     MountMode,
     PathSpec,
@@ -941,14 +940,15 @@ def _path_mode_under(
     cap = (
         sess.mount_modes.get(prefix) if sess.mount_modes is not None else None
     )
-    return MODES[
-        policy_visibility(sess.visibility).effective_mode(
-            units(virtual),
-            units(prefix),
-            MODES.index(mount_mode),
-            None if cap is None else MODES.index(cap),
+    return MountMode(
+        visibility_matcher(sess.visibility).ask(
+            "effective_mode",
+            path=units(virtual),
+            prefix=units(prefix),
+            configured=mount_mode.value,
+            cap=None if cap is None else cap.value,
         )
-    ]
+    )
 
 
 def strongest_under_session(
@@ -969,13 +969,14 @@ def strongest_under_session(
     cap = (
         sess.mount_modes.get(prefix) if sess.mount_modes is not None else None
     )
-    return MODES[
-        policy_visibility(sess.visibility).strongest_mode(
-            units(prefix),
-            MODES.index(mount_mode),
-            None if cap is None else MODES.index(cap),
+    return MountMode(
+        visibility_matcher(sess.visibility).ask(
+            "strongest_mode",
+            prefix=units(prefix),
+            configured=mount_mode.value,
+            cap=None if cap is None else cap.value,
         )
-    ]
+    )
 
 
 def strongest_mode_under(
@@ -1050,11 +1051,12 @@ def _readonly_below_under(
     cap = (
         sess.mount_modes.get(prefix) if sess.mount_modes is not None else None
     )
-    result = policy_visibility(sess.visibility).readonly_below(
-        units(virtual),
-        units(prefix),
-        MODES.index(mount_mode),
-        None if cap is None else MODES.index(cap),
+    result = visibility_matcher(sess.visibility).ask(
+        "readonly_below",
+        path=units(virtual),
+        prefix=units(prefix),
+        configured=mount_mode.value,
+        cap=None if cap is None else cap.value,
     )
     return None if result is None else from_units(result)
 

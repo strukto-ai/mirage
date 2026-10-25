@@ -21,14 +21,30 @@ import { checkRules } from './validate.ts'
 import { PolicyError } from '../../policy/errors.ts'
 import type {
   AdmissionRules,
+  CommandRule,
+  HideReason,
   ProfileScript,
   ProfileScripts,
   ScriptMethod,
 } from '../../policy/types.ts'
 import type { MountMode } from '../../types.ts'
 import { DEFAULT_VISIBILITY, weakerMode } from '../../types.ts'
-import { compilePolicy, restrictPolicy } from '../../rs/policy.ts'
-import { compileProgram, type CompiledProfile, type SessionProfile } from '../../policy/profile.ts'
+import { StreamRefusal } from '../../rs/errors.ts'
+import {
+  admissionMatcher,
+  fromUnits,
+  rulesWire,
+  units,
+  visibilityFrom,
+  type Wire,
+} from '../../rs/policy.ts'
+import {
+  compileProgram,
+  type CompiledProfile,
+  type PathsBlock,
+  type ProfileMount,
+  type SessionProfile,
+} from '../../policy/profile.ts'
 import { DEFAULT_PROFILE } from './constants.ts'
 import { varsFromEntries, type SessionState } from './session.ts'
 import { setCwd } from './shell_dirs.ts'
@@ -52,15 +68,154 @@ export function resolveProfile(
   return found
 }
 
+interface RuleReply {
+  readonly reason: number[]
+  readonly commands: number[][]
+  readonly paths: number[][]
+  readonly mount: number[] | null
+}
+interface RulesReply {
+  readonly allow: number[][] | null
+  readonly deny: readonly RuleReply[]
+  readonly ask: readonly RuleReply[]
+}
+interface ReasonReply {
+  readonly patterns: number[][]
+  readonly reason: number[]
+}
+interface PathsReply {
+  readonly hide: number[][]
+  readonly show: readonly { readonly path: number[]; readonly mode: MountMode | null }[]
+  readonly reasons: readonly ReasonReply[]
+}
+interface ProfileReply {
+  readonly commands: RulesReply | null
+  readonly paths: PathsReply | null
+  readonly vars: number[][] | null
+  readonly mounts:
+    | readonly {
+        readonly prefix: number[]
+        readonly mode: MountMode | null
+        readonly commands: RulesReply | null
+        readonly paths: PathsReply | null
+      }[]
+    | null
+}
+interface PlanReply {
+  readonly commands: RulesReply | null
+  readonly visibility: Parameters<typeof visibilityFrom>[0]
+  readonly mount_modes: readonly [number[], MountMode][]
+  readonly hide_reasons: readonly ReasonReply[]
+}
+type ProfileFields = Pick<SessionProfile, 'commands' | 'paths' | 'vars' | 'mounts'>
+
+function pathsWire(block: PathsBlock | null | undefined): Wire | null {
+  if (block == null) return null
+  return {
+    hide: block.hide.map(units),
+    show: (block.show ?? []).map((entry) => ({ path: units(entry.path), mode: entry.mode })),
+    reasons: (block.reasons ?? []).map((group) => ({
+      patterns: group.patterns.map(units),
+      reason: units(group.reason),
+    })),
+  }
+}
+
+function profileWire(profile: SessionProfile): Wire {
+  const block = profile.commands
+  return {
+    commands: block == null ? null : rulesWire(block),
+    paths: pathsWire(profile.paths),
+    vars: profile.vars == null ? null : profile.vars.hide.map(units),
+    mounts:
+      profile.mounts == null
+        ? null
+        : [...profile.mounts].map(([prefix, entry]) => ({
+            prefix: units(prefix),
+            mode: entry.mode ?? null,
+            commands: entry.commands == null ? null : rulesWire(entry.commands),
+            paths: pathsWire(entry.paths),
+          })),
+  }
+}
+
+function ruleFrom(value: RuleReply): CommandRule {
+  return {
+    reason: fromUnits(value.reason),
+    ...(value.commands.length === 0 ? {} : { commands: value.commands.map(fromUnits) }),
+    ...(value.paths.length === 0 ? {} : { paths: value.paths.map(fromUnits) }),
+    ...(value.mount === null ? {} : { mount: fromUnits(value.mount) }),
+  }
+}
+
+function rulesFrom(value: RulesReply | null): AdmissionRules | null {
+  if (value === null) return null
+  return {
+    allow: value.allow === null ? null : value.allow.map(fromUnits),
+    deny: value.deny.map(ruleFrom),
+    ask: value.ask.map(ruleFrom),
+  }
+}
+
+function reasonFrom(value: ReasonReply): HideReason {
+  return { patterns: value.patterns.map(fromUnits), reason: fromUnits(value.reason) }
+}
+
+function pathsFrom(value: PathsReply | null): PathsBlock | null {
+  if (value === null) return null
+  const show = value.show.map((entry) => ({ path: fromUnits(entry.path), mode: entry.mode }))
+  const reasons = value.reasons.map(reasonFrom)
+  return {
+    hide: value.hide.map(fromUnits),
+    ...(show.length === 0 ? {} : { show }),
+    ...(reasons.length === 0 ? {} : { reasons }),
+  }
+}
+
+function profileFields(value: ProfileReply): ProfileFields {
+  return {
+    commands: rulesFrom(value.commands),
+    paths: pathsFrom(value.paths),
+    vars: value.vars === null ? null : { hide: value.vars.map(fromUnits) },
+    mounts:
+      value.mounts === null
+        ? null
+        : new Map(
+            value.mounts.map((mount): [string, ProfileMount] => {
+              const rules = rulesFrom(mount.commands)
+              const paths = pathsFrom(mount.paths)
+              return [
+                fromUnits(mount.prefix),
+                {
+                  ...(mount.mode === null ? {} : { mode: mount.mode }),
+                  ...(rules === null ? {} : { commands: { ask: rules.ask, deny: rules.deny } }),
+                  ...(paths === null ? {} : { paths }),
+                },
+              ]
+            }),
+          ),
+  }
+}
+
 function restrictMatching(
   base: SessionProfile | null,
   inline: SessionProfile | null,
-): ReturnType<typeof restrictPolicy> {
+): ProfileFields | null {
+  let value: ProfileReply | null
   try {
-    return restrictPolicy(base, inline)
+    value = admissionMatcher(null).ask('restrict', {
+      base: base === null ? null : profileWire(base),
+      inline: inline === null ? null : profileWire(inline),
+    }) as ProfileReply | null
   } catch (error) {
-    throw new PolicyError(error instanceof Error ? error.message : String(error))
+    if (error instanceof StreamRefusal) throw new PolicyError(error.message)
+    throw error
   }
+  return value === null ? null : profileFields(value)
+}
+
+function compilePlan(profile: SessionProfile): PlanReply {
+  return admissionMatcher(null).ask('compile', { profile: profileWire(profile) }) as PlanReply
 }
 
 /**
@@ -105,8 +260,14 @@ export function withInline(
   }
 }
 
+/**
+ * A profile's admission rules: its own, plus every mount section's, in one
+ * list; null when the profile states none. Mount rules come first so the
+ * section closest to the data speaks first when several rules match at
+ * the same anchor depth and only the message differs.
+ */
 export function compileCommands(profile: SessionProfile): AdmissionRules | null {
-  return compilePolicy(profile).commands
+  return rulesFrom(compilePlan(profile).commands)
 }
 
 /**
@@ -152,8 +313,8 @@ export function compileProfile(effective: SessionProfile | null, name = ''): Com
       profile,
     }
   }
-  const plan = compilePolicy(effective)
-  const commands = plan.commands
+  const plan = compilePlan(effective)
+  const commands = rulesFrom(plan.commands)
   checkRules(commands)
   const processes =
     effective.processes == null
@@ -161,18 +322,18 @@ export function compileProfile(effective: SessionProfile | null, name = ''): Com
       : parseProcessPermissions(effective.processes)
   return {
     setup: { env: effective.env ?? null, cwd: effective.cwd ?? null },
-    visibility: {
-      ...plan.visibility,
-      processes: processes.list,
-    },
+    visibility: visibilityFrom(plan.visibility, processes.list),
     policies: {
-      mountModes: plan.mountModes,
+      mountModes:
+        plan.mount_modes.length === 0
+          ? null
+          : new Map(plan.mount_modes.map(([prefix, mode]) => [fromUnits(prefix), mode])),
       commands,
       scripts: compileScripts(effective, name),
       commandLimits: effective.commandLimits ?? null,
       processes,
     },
-    hideReasons: plan.hideReasons,
+    hideReasons: plan.hide_reasons.map(reasonFrom),
     profile,
   }
 }

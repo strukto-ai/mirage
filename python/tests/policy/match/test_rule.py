@@ -15,15 +15,10 @@
 from mirage.commands.spec.types import WordKind
 from mirage.policy.match.decide import decide
 from mirage.policy.match.rule import (
-    Subject,
     io_reach,
     io_refusal,
-    match_io,
     op_ruling,
-    rule_reach,
-    rule_scope,
     skipped_at_dispatch,
-    subjects,
 )
 from mirage.policy.types import (
     AdmissionRules,
@@ -280,45 +275,6 @@ def test_a_subtree_command_on_the_directory_holding_the_scope_matches():
     assert _verdict(named, _subtree_ctx("mv", "/x", "/y")) == ALLOW
 
 
-def test_subjects_are_the_lines_paths_then_its_subtree_operands():
-    # A reader is asked one question per path: does it lie inside a
-    # scope. A subtree command is asked a second, per operand: does it
-    # hold one. `mv`'s destination is the operand where an ancestor of
-    # the scope does not count.
-    read = subjects(_subtree_ctx("cat", "/a", "/b"))
-    assert [(s.path.virtual, s.holds) for s in read] == [
-        ("/a", False),
-        ("/b", False),
-    ]
-    moved = subjects(_subtree_ctx("mv", "/a", "/b"))
-    assert [(s.path.virtual, s.holds, s.ancestors) for s in moved] == [
-        ("/a", False, True),
-        ("/b", False, True),
-        ("/a", True, True),
-        ("/b", True, False),
-    ]
-    # A line naming no path is one subject, itself.
-    bare = subjects(_ctx("git", tokens=("git", "push")))
-    assert len(bare) == 1 and bare[0].path is None
-
-
-def test_rule_reach_scores_the_entry_that_reached_and_no_other():
-    inside = CommandRule(reason="x", paths=("/a/*", "/deep/b/c/*"))
-    scope = rule_scope(inside)
-    assert rule_reach(inside, scope, Subject(_path("/a/x"))) == 1
-    assert rule_reach(inside, scope, Subject(_path("/deep/b/c/x"))) == 3
-    assert rule_reach(inside, scope, Subject(_path("/elsewhere"))) is None
-    # A rule naming no paths reaches every subject at depth 0, which is
-    # off the path axis, and a line's own subject only through one.
-    pathless = CommandRule(reason="x")
-    assert rule_reach(pathless, None, Subject(_path("/a/x"))) == 0
-    assert rule_reach(pathless, None, Subject(None)) == 0
-    assert rule_reach(inside, scope, Subject(None)) is None
-    # Holding the scope is the subtree operand's question alone.
-    assert rule_reach(inside, scope, Subject(_path("/"))) is None
-    assert rule_reach(inside, scope, Subject(_path("/"), holds=True)) == 3
-
-
 def test_a_subtree_op_on_the_directory_holding_the_scope_is_refused():
     rule = CommandRule(reason="frozen", paths=("/data/locked/*",))
     for op, virtual in (
@@ -380,53 +336,6 @@ def test_a_metadata_op_is_let_through():
             write=False,
             prefix="/data/",
         ),
-    )
-
-
-def test_match_io_names_the_line_and_holds_the_entry():
-    pure = CommandRule(reason="sealed", paths=("/data/sealed",))
-    scope = rule_scope(pure)
-    assert match_io(
-        pure, scope, ("grep", "-r", "x", "/data"), "/data/sealed/deep/f"
-    )
-    assert match_io(pure, scope, ("du", "/data"), "/data/sealed")
-    assert not match_io(pure, scope, ("du", "/data"), "/data/open/f")
-    # A command-scoped rule reads the line's tokens, so a pattern with a
-    # token after the name applies only to the line that carries it.
-    scoped = CommandRule(
-        reason="no", commands=("grep -r",), paths=("/data/private",)
-    )
-    assert match_io(
-        scoped,
-        rule_scope(scoped),
-        ("grep", "-r", "k", "/data"),
-        "/data/private/k",
-    )
-    assert not match_io(
-        scoped, rule_scope(scoped), ("grep", "k", "/data"), "/data/private/k"
-    )
-    assert not match_io(
-        scoped, rule_scope(scoped), ("cat", "/data"), "/data/private/k"
-    )
-    # A whole-line rule spoke at admission and says nothing at an entry;
-    # the directory holding a children pattern is not in it.
-    whole = CommandRule(reason="no", commands=("rm",))
-    assert not match_io(whole, rule_scope(whole), ("rm", "/data/x"), "/data/x")
-    children = CommandRule(reason="frozen", paths=("/data/locked/*",))
-    assert not match_io(
-        children, rule_scope(children), ("ls", "/data"), "/data/locked"
-    )
-    assert match_io(
-        children, rule_scope(children), ("ls", "/data"), "/data/locked/y"
-    )
-
-
-def test_rule_scope_is_none_for_a_whole_line_rule_and_remembered():
-    whole = CommandRule(reason="no", commands=("rm",))
-    assert rule_scope(whole) is None
-    scoped = CommandRule(reason="no", paths=("/data/*",))
-    assert rule_scope(scoped) is rule_scope(
-        CommandRule(reason="no", paths=("/data/*",))
     )
 
 

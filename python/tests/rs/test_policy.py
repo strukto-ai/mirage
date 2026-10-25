@@ -12,17 +12,12 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-
 import json
-import sys
 from pathlib import Path
-from threading import Event, Thread
 
 import pytest
 
-from mirage._rs import PolicyAdmission, PolicyVisibility
 from mirage.commands.spec.types import WordKind
-from mirage.policy.match.allow import line_allowed
 from mirage.policy.match.decide import decide
 from mirage.policy.match.pattern import (
     pattern_matches,
@@ -35,14 +30,11 @@ from mirage.policy.types import (
     CommandRule,
     CommandWord,
 )
-from mirage.rs.policy import (
-    _short_units,
-    admission_matcher,
-    units,
-    visibility_matcher,
-)
+from mirage.rs.errors import StreamRefusal
+from mirage.rs.policy import admission_matcher, units, visibility_matcher
 from mirage.types import (
     HiddenPaths,
+    HiddenVars,
     MountMode,
     PathSpec,
     ShowEntry,
@@ -51,14 +43,10 @@ from mirage.types import (
 )
 from mirage.utils.hidden import (
     classify_paths,
-    classify_shows,
-    classify_vars,
     hidden_under,
-    hide_depth,
+    is_glob,
     move_reveals,
     path_visible,
-    show_depth,
-    shown_mode,
     var_hidden,
 )
 from mirage.workspace.session.session import SessionState
@@ -66,6 +54,22 @@ from mirage.workspace.session.session import SessionState
 CORPUS = (
     Path(__file__).resolve().parents[3] / "integ" / "policy" / "matching.json"
 )
+
+
+def _path(value: str) -> PathSpec:
+    return PathSpec(
+        virtual=value,
+        directory=value.rsplit("/", 1)[0] or "/",
+        vfs_path=value,
+        resolved=True,
+        raw_path=value,
+    )
+
+
+def _rule(value) -> CommandRule:
+    return CommandRule(
+        **{k: tuple(v) if isinstance(v, list) else v for k, v in value.items()}
+    )
 
 
 def test_shared_matching_corpus():
@@ -79,26 +83,24 @@ def test_shared_matching_corpus():
             pattern_reaches(case["pattern"], case["tokens"]) == case["reaches"]
         )
     for case in corpus["visibility"]:
+        shown = tuple(
+            ShowEntry(
+                path=v["path"],
+                mode=MountMode(v["mode"]) if v["mode"] else None,
+            )
+            for v in case["show"]
+        )
         vis = Visibility(
             paths=classify_paths(case["hide"]),
-            shown=classify_shows(
-                ShowEntry(
-                    path=v["path"],
-                    mode=MountMode(v["mode"]) if v["mode"] else None,
-                )
-                for v in case["show"]
+            shown=ShownPaths(entries=shown) if shown else None,
+            vars=HiddenVars(
+                names=tuple(v for v in case["vars"] if not is_glob(v)),
+                patterns=tuple(v for v in case["vars"] if is_glob(v)),
             ),
-            vars=classify_vars(case["vars"]),
         )
         for query in case["queries"]:
             path = query["path"]
             assert path_visible(vis, path) == query["visible"]
-            assert hide_depth(vis.paths, path) == query["hide_depth"]
-            assert show_depth(vis.shown, path) == query["show_depth"]
-            mode = shown_mode(vis.shown, path)
-            assert (
-                None if mode is None else [mode[0], mode[1].value]
-            ) == query["mode"]
             assert hidden_under(vis, path) == query["hidden_under"]
         for move in case["moves"]:
             assert (
@@ -118,10 +120,9 @@ def test_shared_matching_corpus():
             ask=ask,
         )
         facts = case["facts"]
-        paths = tuple(_path(v) for v in facts["paths"])
         ctx = CommandContext(
             command=facts["command"],
-            paths=paths,
+            paths=tuple(_path(v) for v in facts["paths"]),
             argv=tuple(facts["paths"]),
             cwd=facts["cwd"],
             tokens=tuple(facts["tokens"]),
@@ -151,48 +152,17 @@ def test_shared_matching_corpus():
         ] == expected["asks"]
 
 
-def _path(value: str) -> PathSpec:
-    return PathSpec(
-        virtual=value,
-        directory=value.rsplit("/", 1)[0] or "/",
-        vfs_path=value,
-        resolved=True,
-        raw_path=value,
-    )
-
-
-def _rule(value) -> CommandRule:
-    return CommandRule(
-        **{k: tuple(v) if isinstance(v, list) else v for k, v in value.items()}
-    )
-
-
-def test_native_boundaries_reject_invalid_units_modes_and_rule_indices():
-    with pytest.raises(ValueError, match="past U\\+10FFFF"):
-        PolicyAdmission((None, (((), (), (), (0x110000,)),), ()), False)
-    with pytest.raises(ValueError, match="invalid policy mode"):
-        PolicyVisibility((((), ()), (((47,), 9),), ((), ())))
-    matcher = PolicyAdmission((None, (), ()), False)
-    with pytest.raises(ValueError, match="invalid policy rule index"):
-        matcher.posix_level(0)
-
-
-def test_native_answers_keep_original_rule_objects_and_cached_plan_lifetimes():
+def test_answers_keep_the_hosts_own_rule_objects():
     rule = CommandRule(reason="review", paths=("/repo/*",))
-    rules = AdmissionRules(ask=(rule,))
     ctx = CommandContext(
         command="cat", paths=(_path("/repo/x"),), argv=(), cwd="/"
     )
-    result = decide(ctx, rules)
+    result = decide(ctx, AdmissionRules(ask=(rule,)))
     assert result.rule is rule
     assert result.asks[0] is rule
-    retained = admission_matcher(rules)
-    admission_matcher.cache_clear()
-    assert retained.head_allowed((99, 97, 116))
-    assert decide(ctx, rules).rule is rule
 
 
-def test_restored_visibility_retains_component_depth_and_surrogate_text():
+def test_restored_visibility_keeps_component_depth_and_surrogate_text():
     vis = Visibility(
         paths=HiddenPaths(patterns=("secret", "*.key")),
         shown=ShownPaths(entries=(ShowEntry("/secret"),)),
@@ -200,118 +170,33 @@ def test_restored_visibility_retains_component_depth_and_surrogate_text():
     stored = SessionState(session_id="restored", visibility=vis).to_dict()
     restored = SessionState.from_dict(stored)
     assert restored.visibility is not None
-    assert hide_depth(restored.visibility.paths, "/secret/x") == 0
     assert path_visible(restored.visibility, "/secret/x")
     assert not path_visible(restored.visibility, "/\ud800.key")
     assert not path_visible(restored.visibility, "/\U0001f600.key")
-    retained = visibility_matcher(restored.visibility)
-    visibility_matcher.cache_clear()
-    assert retained.path_visible((47, 111, 112, 101, 110))
 
 
-@pytest.mark.parametrize("kind", ("visibility", "admission"))
-def test_native_matching_allows_another_python_thread_to_run(kind):
-    patterns = ((42, 122),) * 1000
-    if kind == "visibility":
-        matcher = PolicyVisibility((((), patterns), (), ((), ())))
-        evaluate = matcher.path_visible
-        expected = True
-    else:
-        matcher = PolicyAdmission((patterns, (), ()), False)
-        evaluate = matcher.head_allowed
-        expected = False
-    path = (47, *((97,) * 10000))
-    ready = Event()
-    start = Event()
-    progressed = Event()
-
-    def worker():
-        ready.set()
-        if start.wait(5):
-            progressed.set()
-
-    previous = sys.getswitchinterval()
-    thread = Thread(target=worker)
-    try:
-        sys.setswitchinterval(1000)
-        thread.start()
-        assert ready.wait(5)
-        start.set()
-        assert evaluate(path) == expected
-        assert progressed.is_set()
-    finally:
-        sys.setswitchinterval(previous)
-        start.set()
-        thread.join(5)
-    assert not thread.is_alive()
-
-
-@pytest.mark.parametrize("length", (255, 256, 257))
-def test_text_cache_retains_only_short_queries(length):
-    _short_units.cache_clear()
-    value = "x" * length
-    first = units(value)
-    assert first == (120,) * length
-    before = _short_units.cache_info()
-    second = units(value)
-    assert second == first
-    after = _short_units.cache_info()
-    if length <= 256:
-        assert second is first
-        assert after.currsize == 1
-        assert after.hits == before.hits + 1
-    else:
-        assert after == before
-        assert after.currsize == 0
-    _short_units.cache_clear()
-
-
-def test_large_inline_query_keeps_surrogates_without_retaining_text():
-    _short_units.cache_clear()
-    value = "x" * 100000 + "\U0001f600\ud800"
-    expected = (120,) * 100000 + (0x1F600, 0xD800)
-    assert units(value) == expected
-    assert units(value) == expected
-    assert _short_units.cache_info().currsize == 0
-    rules = AdmissionRules(allow=("cat *",))
-    context = CommandContext(command="cat", argv=(value,), paths=(), cwd="/")
-    assert line_allowed(context, rules)
-    before = _short_units.cache_info()
-    assert line_allowed(context, rules)
-    after = _short_units.cache_info()
-    assert after.currsize == before.currsize
-    assert after.misses == before.misses
-    _short_units.cache_clear()
-
-
-@pytest.mark.parametrize(
-    "step", ((4, (), False), (3, (47,), False), (0, (), True))
-)
-def test_native_link_facts_reject_invalid_variants(step):
-    matcher = PolicyVisibility((((), ()), (), ((), ())))
-    with pytest.raises(ValueError, match="invalid policy link step"):
-        matcher.link_trace_hidden((step,))
-
-
-def test_native_link_trace_keeps_landing_nonterminal_and_hop_limit_terminal():
+def test_link_trace_keeps_landing_nonterminal_and_hop_limit_terminal():
     matcher = visibility_matcher(
         Visibility(paths=HiddenPaths(paths=("/secret",)))
     )
-    assert not matcher.link_trace_hidden(((2, units("/secret"), False),))
-    assert matcher.link_trace_hidden(
-        (
-            (0, units("/open"), False),
-            (2, units("/open"), False),
-            (1, units("/secret"), True),
-        )
+
+    def hidden(*trace) -> bool:
+        return matcher.ask("link_trace_hidden", trace=list(trace)) is True
+
+    assert not hidden({"landing": units("/secret")})
+    assert hidden(
+        {"follow": units("/open")},
+        {"landing": units("/open")},
+        {"enter": {"path": units("/secret"), "next_is_parent": True}},
     )
-    assert not matcher.link_trace_hidden(
-        (
-            (0, units("/open"), False),
-            (3, (), False),
-            (0, units("/secret"), False),
-        )
+    assert not hidden(
+        {"follow": units("/open")}, "hop_limit", {"follow": units("/secret")}
     )
-    assert matcher.link_trace_hidden(
-        ((0, units("/secret"), False), (3, (), False))
-    )
+    assert hidden({"follow": units("/secret")}, "hop_limit")
+
+
+def test_a_bad_request_is_a_stream_refusal():
+    with pytest.raises(StreamRefusal, match="bad policy request"):
+        admission_matcher(None).ask("no_such_op")
+    with pytest.raises(StreamRefusal, match="rule index is out of range"):
+        admission_matcher(None).ask("posix_level", rule=0)

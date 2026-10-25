@@ -25,7 +25,7 @@ mod numfmt;
 mod od;
 mod paste;
 mod pcre;
-pub mod policy;
+mod policy;
 mod printf;
 mod records;
 mod reflow;
@@ -343,6 +343,7 @@ pub fn open(kind: &str, config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
         "numfmt" => numfmt::open(config),
         "od" => od::open(config),
         "paste" => paste::open(config),
+        "policy" => policy::stream::open(config),
         "printf" => printf::open(config),
         "regex" => regex::stream::open(config),
         "rev" => rev::open(config),

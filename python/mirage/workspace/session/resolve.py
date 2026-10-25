@@ -16,7 +16,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import TYPE_CHECKING
+from typing import Any
 
 from mirage.policy.errors import PolicyError
 from mirage.policy.profile import (
@@ -39,16 +39,14 @@ from mirage.policy.types import (
     ProfileScripts,
 )
 from mirage.process.config import ProcessPermissions
+from mirage.rs.errors import StreamRefusal
 from mirage.rs.policy import (
-    MODES,
-    PathsValue,
-    ProfileValue,
+    Wire,
+    admission_matcher,
     from_units,
-    policy_compile,
-    policy_restrict,
-    rule_value,
+    rules_wire,
     units,
-    visibility_from_value,
+    visibility_from,
 )
 from mirage.types import MountMode, ShowEntry, weaker_mode
 from mirage.workspace.session.constants import DEFAULT_PROFILE
@@ -56,14 +54,28 @@ from mirage.workspace.session.session import SessionState, vars_from_entries
 from mirage.workspace.session.shell_dirs import set_cwd
 from mirage.workspace.session.validate import check_rules
 
-if TYPE_CHECKING:
-    from mirage._rs import PolicyPaths, PolicyProfile, PolicyRule, PolicyRules
-
 
 def resolve_profile(
     profiles: Mapping[str, SessionProfile],
     profile: str | SessionProfile | None,
 ) -> SessionProfile | None:
+    """The profile a session is created from.
+
+    A name is looked up as written; a profile object is itself; None
+    picks ``profiles.default`` when the workspace defines one and
+    leaves the session unrestricted otherwise. There is no inheritance
+    chain: a profile is the whole document, so nothing is assembled from
+    somewhere else before it is read.
+
+    Args:
+        profiles (Mapping[str, SessionProfile]): the workspace's named
+            profiles.
+        profile (str | SessionProfile | None): what ``create_session``
+            was given.
+
+    Raises:
+        PolicyError: the name is not a profile the workspace defines.
+    """
     if profile is None:
         return profiles.get(DEFAULT_PROFILE)
     if not isinstance(profile, str):
@@ -73,140 +85,138 @@ def resolve_profile(
     return profiles[profile]
 
 
-def _profile_value(profile: SessionProfile) -> ProfileValue:
-    block = profile.commands
-    commands = (
-        (
-            None
-            if block.allow is None
-            else tuple(units(v) for v in block.allow),
-            tuple(rule_value(rule) for rule in block.deny),
-            tuple(rule_value(rule) for rule in block.ask),
-        )
-        if block is not None
-        else None
-    )
-    paths = _paths_value(profile.paths)
-    mounts = (
-        tuple(
-            (
-                units(prefix),
-                MODES.index(entry.mode) if entry.mode is not None else None,
-                (
-                    None,
-                    tuple(rule_value(rule) for rule in entry.commands.deny),
-                    tuple(rule_value(rule) for rule in entry.commands.ask),
-                )
-                if entry.commands is not None
-                else None,
-                _paths_value(entry.paths),
-            )
-            for prefix, entry in profile.mounts.items()
-        )
-        if profile.mounts is not None
-        else None
-    )
-    return (
-        commands,
-        paths,
-        tuple(units(v) for v in profile.vars.hide)
-        if profile.vars is not None
-        else None,
-        mounts,
-    )
-
-
-def _paths_value(block: PathsBlock | None) -> PathsValue | None:
+def _paths_wire(block: PathsBlock | None) -> Wire | None:
     if block is None:
         return None
-    return (
-        tuple(units(v) for v in block.hide),
-        tuple(
-            (
-                units(v.path),
-                MODES.index(v.mode) if v.mode is not None else None,
-            )
-            for v in block.show
-        ),
-        tuple(
-            (tuple(units(v) for v in group.patterns), units(group.reason))
+    return {
+        "hide": [units(v) for v in block.hide],
+        "show": [
+            {
+                "path": units(entry.path),
+                "mode": None if entry.mode is None else entry.mode.value,
+            }
+            for entry in block.show
+        ],
+        "reasons": [
+            {
+                "patterns": [units(v) for v in group.patterns],
+                "reason": units(group.reason),
+            }
             for group in block.reasons
+        ],
+    }
+
+
+def _profile_wire(profile: SessionProfile) -> Wire:
+    block = profile.commands
+    return {
+        "commands": None
+        if block is None
+        else rules_wire(
+            AdmissionRules(allow=block.allow, deny=block.deny, ask=block.ask)
         ),
-    )
+        "paths": _paths_wire(profile.paths),
+        "vars": None
+        if profile.vars is None
+        else [units(v) for v in profile.vars.hide],
+        "mounts": None
+        if profile.mounts is None
+        else [
+            {
+                "prefix": units(prefix),
+                "mode": None if entry.mode is None else entry.mode.value,
+                "commands": None
+                if entry.commands is None
+                else rules_wire(
+                    AdmissionRules(
+                        deny=entry.commands.deny, ask=entry.commands.ask
+                    )
+                ),
+                "paths": _paths_wire(entry.paths),
+            }
+            for prefix, entry in profile.mounts.items()
+        ],
+    }
 
 
-def _rule_from_value(value: PolicyRule) -> CommandRule:
+def _rule_from(value: Mapping[str, Any]) -> CommandRule:
     return CommandRule(
-        reason=from_units(value[0]),
-        commands=tuple(from_units(v) for v in value[1]),
-        paths=tuple(from_units(v) for v in value[2]),
-        mount=from_units(value[3]) if value[3] is not None else "",
+        reason=from_units(value["reason"]),
+        commands=tuple(from_units(v) for v in value["commands"]),
+        paths=tuple(from_units(v) for v in value["paths"]),
+        mount=from_units(value["mount"]) if value["mount"] is not None else "",
     )
 
 
-def _commands_from_value(value: PolicyRules | None) -> AdmissionRules | None:
+def _rules_from(value: Mapping[str, Any] | None) -> AdmissionRules | None:
     if value is None:
         return None
     return AdmissionRules(
         allow=None
-        if value[0] is None
-        else tuple(from_units(v) for v in value[0]),
-        deny=tuple(_rule_from_value(v) for v in value[1]),
-        ask=tuple(_rule_from_value(v) for v in value[2]),
+        if value["allow"] is None
+        else tuple(from_units(v) for v in value["allow"]),
+        deny=tuple(_rule_from(v) for v in value["deny"]),
+        ask=tuple(_rule_from(v) for v in value["ask"]),
     )
 
 
-def _paths_from_value(value: PolicyPaths | None) -> PathsBlock | None:
+def _reason_from(value: Mapping[str, Any]) -> HideReason:
+    return HideReason(
+        patterns=tuple(from_units(v) for v in value["patterns"]),
+        reason=from_units(value["reason"]),
+    )
+
+
+def _paths_from(value: Mapping[str, Any] | None) -> PathsBlock | None:
     if value is None:
         return None
     return PathsBlock(
-        hide=tuple(from_units(v) for v in value[0]),
+        hide=tuple(from_units(v) for v in value["hide"]),
         show=tuple(
             ShowEntry(
-                path=from_units(v), mode=None if mode is None else MODES[mode]
+                path=from_units(entry["path"]),
+                mode=None
+                if entry["mode"] is None
+                else MountMode(entry["mode"]),
             )
-            for v, mode in value[1]
+            for entry in value["show"]
         ),
-        reasons=tuple(
-            HideReason(
-                patterns=tuple(from_units(v) for v in patterns),
-                reason=from_units(reason),
-            )
-            for patterns, reason in value[2]
-        ),
+        reasons=tuple(_reason_from(v) for v in value["reasons"]),
     )
 
 
 def _profile_fields(
-    value: PolicyProfile,
+    value: Mapping[str, Any],
 ) -> tuple[
     CommandsBlock | None,
     PathsBlock | None,
     VarsBlock | None,
     dict[str, ProfileMount] | None,
 ]:
-    rules = _commands_from_value(value[0])
+    rules = _rules_from(value["commands"])
     mounts = None
-    if value[3] is not None:
+    if value["mounts"] is not None:
         mounts = {}
-        for prefix, mode, commands, paths in value[3]:
-            mount_rules = _commands_from_value(commands)
-            mounts[from_units(prefix)] = ProfileMount(
-                mode=None if mode is None else MODES[mode],
+        for mount in value["mounts"]:
+            mount_rules = _rules_from(mount["commands"])
+            mounts[from_units(mount["prefix"])] = ProfileMount(
+                mode=None
+                if mount["mode"] is None
+                else MountMode(mount["mode"]),
                 commands=MountCommandsBlock(
                     deny=mount_rules.deny, ask=mount_rules.ask
                 )
                 if mount_rules is not None
                 else None,
-                paths=_paths_from_value(paths),
+                paths=_paths_from(mount["paths"]),
             )
     return (
         CommandsBlock(allow=rules.allow, deny=rules.deny, ask=rules.ask)
         if rules is not None
         else None,
-        _paths_from_value(value[1]),
-        VarsBlock(hide=tuple(from_units(v) for v in value[2]))
-        if value[2] is not None
+        _paths_from(value["paths"]),
+        VarsBlock(hide=tuple(from_units(v) for v in value["vars"]))
+        if value["vars"] is not None
         else None,
         mounts,
     )
@@ -214,19 +224,47 @@ def _profile_fields(
 
 def _restrict_matching(
     base: SessionProfile | None, inline: SessionProfile | None
-) -> PolicyProfile | None:
+) -> Mapping[str, Any] | None:
     try:
-        return policy_restrict(
-            _profile_value(base) if base is not None else None,
-            _profile_value(inline) if inline is not None else None,
+        restricted: Mapping[str, Any] | None = admission_matcher(None).ask(
+            "restrict",
+            base=_profile_wire(base) if base is not None else None,
+            inline=_profile_wire(inline) if inline is not None else None,
         )
-    except ValueError as exc:
-        raise PolicyError(str(exc)) from exc
+    except StreamRefusal as exc:
+        raise PolicyError(exc.message) from exc
+    return restricted
+
+
+def _compile_plan(profile: SessionProfile) -> Mapping[str, Any]:
+    plan: Mapping[str, Any] = admission_matcher(None).ask(
+        "compile", profile=_profile_wire(profile)
+    )
+    return plan
 
 
 def with_inline(
     base: SessionProfile | None, inline: SessionProfile | None
 ) -> SessionProfile | None:
+    """A profile with the inline document of one ``create_session`` added.
+
+    The one rule about combining two documents: an inline document may
+    add ask and deny rules and hides, never an allow list and never a
+    script, and that holds even when there is no profile to add to.
+    Modes take the weaker of the two, ``cwd`` and ``env`` are the
+    inline document's when it states them (they are session presets,
+    not permissions). Either side None returns the other unchanged; the
+    profile's policy survives the merge, since the inline document can
+    only add rules beside it.
+
+    Args:
+        base (SessionProfile | None): the resolved profile.
+        inline (SessionProfile | None): what ``create_session`` added.
+
+    Raises:
+        PolicyError: the inline document states an allow list or a
+            script.
+    """
     if inline is None:
         return base
     value = _restrict_matching(base, inline)
@@ -271,7 +309,17 @@ def with_inline(
 
 
 def compile_commands(profile: SessionProfile) -> AdmissionRules | None:
-    return _commands_from_value(policy_compile(_profile_value(profile))[0])
+    """A profile's admission rules: its own, plus every mount entry's,
+    in one list; None when the profile states none.
+
+    Mount rules come first so the entry closest to the data speaks
+    first when several rules match at the same anchor depth and only
+    the message differs.
+
+    Args:
+        profile (SessionProfile): the resolved profile.
+    """
+    return _rules_from(_compile_plan(profile)["commands"])
 
 
 def compile_scripts(effective: SessionProfile, name: str) -> ProfileScripts:
@@ -317,8 +365,8 @@ def compile_profile(
     """
     if effective is None:
         return CompiledProfile(profile=name or None)
-    value = policy_compile(_profile_value(effective))
-    commands = _commands_from_value(value[0])
+    value = _compile_plan(effective)
+    commands = _rules_from(value["commands"])
     check_rules(commands)
     processes = effective.processes or ProcessPermissions()
     return CompiledProfile(
@@ -326,10 +374,11 @@ def compile_profile(
             env=dict(effective.env) if effective.env is not None else None,
             cwd=effective.cwd,
         ),
-        visibility=visibility_from_value(value[1], processes.list),
+        visibility=visibility_from(value["visibility"], processes.list),
         policies=ProfilePolicies(
             mount_modes={
-                from_units(prefix): MODES[mode] for prefix, mode in value[2]
+                from_units(prefix): MountMode(mode)
+                for prefix, mode in value["mount_modes"]
             }
             or None,
             commands=commands,
@@ -337,13 +386,7 @@ def compile_profile(
             command_limits=effective.command_limits,
             processes=processes,
         ),
-        hide_reasons=tuple(
-            HideReason(
-                patterns=tuple(from_units(v) for v in patterns),
-                reason=from_units(reason),
-            )
-            for patterns, reason in value[3]
-        ),
+        hide_reasons=tuple(_reason_from(v) for v in value["hide_reasons"]),
         profile=name or None,
     )
 

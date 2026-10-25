@@ -271,37 +271,36 @@ impl AdmissionMatcher {
         rule.commands.is_empty() && !rule.paths.is_empty()
     }
 
-    pub fn op_reach(&self, id: usize, op: &[u32], path: &[u32]) -> Option<usize> {
-        if !self.posix_level(id) || named(op, "stat") || named(op, "exists") {
+    pub fn op_reach(&self, id: usize, subtree: bool, path: &[u32]) -> Option<usize> {
+        if !self.posix_level(id) {
             return None;
         }
         let rule = &self.rules[id];
         if let Some(depth) = rule.scope.hide_depth(path) {
             return Some(depth);
         }
-        if (named(op, "rename") || named(op, "rmdir") || named(op, "rm_r"))
-            && rule.scope.path_covers(path, true)
-        {
+        if subtree && rule.scope.path_covers(path, true) {
             return Some(self.covers_depth(id, path, true));
         }
         None
     }
 
-    pub fn op_ruling(&self, op: &[u32], path: &[u32], granted: &[usize]) -> Option<(usize, bool)> {
-        self.ungranted(self.winner(|id| self.op_reach(id, op, path)), granted)
+    pub fn op_ruling(
+        &self,
+        subtree: bool,
+        path: &[u32],
+        granted: &[usize],
+    ) -> Option<(usize, bool)> {
+        self.ungranted(self.winner(|id| self.op_reach(id, subtree, path)), granted)
+    }
+
+    pub fn rule_count(&self) -> usize {
+        self.rules.len()
     }
 }
 
-fn named(text: &[u32], name: &str) -> bool {
-    text.iter().copied().eq(name.bytes().map(u32::from))
-}
-
-fn subtree(command: &[u32]) -> bool {
-    named(command, "rm") || named(command, "rmdir") || named(command, "mv")
-}
-
 fn destination(facts: &CommandFacts) -> Option<&PathFact> {
-    (named(&facts.command, "mv") && facts.operands.len() >= 2 && facts.move_target.is_none())
+    (facts.moves && facts.operands.len() >= 2 && facts.move_target.is_none())
         .then(|| facts.operands.last())
         .flatten()
 }
@@ -319,7 +318,7 @@ pub fn subjects(facts: &CommandFacts) -> Vec<Subject> {
             ..Subject::default()
         })
         .collect();
-    if subtree(&facts.command) {
+    if facts.subtree {
         let dst = destination(facts);
         let count = facts.operands.len() - usize::from(dst.is_some());
         subjects.extend(facts.operands[..count].iter().cloned().map(|path| Subject {
@@ -358,7 +357,7 @@ fn touches(mount: &[u32], facts: &CommandFacts) -> bool {
     if facts.walks {
         return facts.paths.iter().any(|p| under(mount, &p.virtual_path));
     }
-    if !subtree(&facts.command) {
+    if !facts.subtree {
         return false;
     }
     let mut targets: Vec<&[u32]> = facts.move_target.as_deref().into_iter().collect();
@@ -433,14 +432,16 @@ mod tests {
                 Whitespace::Python,
             );
             let facts = &case["facts"];
+            let command = facts["command"].as_str().unwrap();
             let result = matcher.decide(&CommandFacts {
-                command: text(facts["command"].as_str().unwrap()),
                 tokens: strings(&facts["tokens"]),
                 tool: facts["tool"].as_bool().unwrap(),
                 cwd: text(facts["cwd"].as_str().unwrap()),
                 paths: strings(&facts["paths"]).into_iter().map(path).collect(),
                 operands: strings(&facts["operands"]).into_iter().map(path).collect(),
                 walks: facts["walks"].as_bool().unwrap(),
+                subtree: matches!(command, "rm" | "rmdir" | "mv"),
+                moves: command == "mv",
                 move_target: None,
             });
             let expected = &case["expected"];
@@ -477,7 +478,7 @@ mod tests {
     }
 
     #[test]
-    fn grant_only_satisfies_the_winning_ask_and_metadata_is_exempt() {
+    fn grant_only_satisfies_the_winning_ask() {
         let matcher = AdmissionMatcher::new(
             Rules {
                 deny: vec![Rule {
@@ -493,20 +494,21 @@ mod tests {
             Whitespace::Python,
         );
         assert_eq!(
-            matcher.op_ruling(&text("write"), &text("/repo/outbox/x"), &[]),
+            matcher.op_ruling(false, &text("/repo/outbox/x"), &[]),
             Some((1, true))
         );
         assert_eq!(
-            matcher.op_ruling(&text("write"), &text("/repo/outbox/x"), &[1]),
+            matcher.op_ruling(false, &text("/repo/outbox/x"), &[1]),
             None
         );
         assert_eq!(
-            matcher.op_ruling(&text("write"), &text("/repo/sealed"), &[1]),
+            matcher.op_ruling(false, &text("/repo/sealed"), &[1]),
             Some((0, false))
         );
+        assert_eq!(matcher.op_ruling(false, &text("/repo"), &[]), None);
         assert_eq!(
-            matcher.op_ruling(&text("stat"), &text("/repo/sealed"), &[]),
-            None
+            matcher.op_ruling(true, &text("/repo"), &[]),
+            Some((1, true))
         );
         assert_eq!(
             matcher.io_refusal(&[text("cp")], &text("/repo/outbox/x"), &[1]),

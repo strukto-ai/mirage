@@ -464,6 +464,82 @@ mod tests {
     }
 
     #[test]
+    fn hides_read_exact_subtrees_component_names_and_anchored_paths() {
+        let hidden = |hide: &[&str], path: &str| !matcher(hide, &[]).path_visible(&text(path));
+        for path in ["/s3/secrets", "/s3/secrets/a.txt", "/s3/secrets/deep/b"] {
+            assert!(hidden(&["/s3/secrets"], path));
+        }
+        for path in ["/s3", "/s3/secretsfoo", "/s3/other"] {
+            assert!(!hidden(&["/s3/secrets"], path));
+        }
+        assert!(hidden(&["/s3/secrets/"], "/s3/secrets"));
+        assert!(hidden(&["s3/secrets"], "/s3/secrets/a"));
+        assert!(hidden(&["/s3"], "/s3/any/depth"));
+        assert!(hidden(&["*.key"], "/other/deep/c.key"));
+        assert!(hidden(&["*.key"], "/a/b.key/inside.txt"));
+        assert!(!hidden(&["*.key"], "/a/keyed"));
+        assert!(hidden(&["/config/*.pem"], "/config/x.pem/sub"));
+        assert!(hidden(&["/config/*.pem"], "/config/nested/x.pem"));
+        assert!(!hidden(&["/config/*.pem"], "/other/x.pem"));
+        let vars = VisibilityMatcher::new(Visibility {
+            vars: classify_vars(&[text("SLACK_TOKEN"), text("AWS_*")]),
+            ..Visibility::default()
+        });
+        assert!(vars.var_hidden(&text("SLACK_TOKEN")));
+        assert!(!vars.var_hidden(&text("SLACK_TOKEN2")));
+        assert!(vars.var_hidden(&text("AWS_ACCESS_KEY_ID")));
+        assert!(!vars.var_hidden(&text("HOME")));
+    }
+
+    #[test]
+    fn covers_scores_and_shown_modes_read_the_anchor() {
+        let vis = matcher(&["/s3/secrets", "/repo/docs/*", "*.pem"], &[]);
+        for path in ["/s3/secrets", "/s3", "/", "/repo/docs", "/repo"] {
+            assert!(vis.path_covers(&text(path), true), "{path}");
+        }
+        for path in ["/s3/secrets/a", "/s3/other", "/repo/docs/x", "/x"] {
+            assert!(!vis.path_covers(&text(path), true), "{path}");
+        }
+        assert!(!vis.path_covers(&text("/repo"), false));
+        let scored = matcher(&["/repo", "/repo/sealed/*", "*.pem"], &[]);
+        assert_eq!(scored.hide_depth(&text("/repo/a/b/c")), Some(1));
+        assert_eq!(scored.hide_depth(&text("/repo/sealed/x/deep")), Some(2));
+        assert_eq!(scored.hide_depth(&text("/x/k.pem/y")), Some(0));
+        assert_eq!(scored.hide_depth(&text("/other")), None);
+        let shown = matcher(
+            &[],
+            &[
+                ("/repo", Some(Mode::Read)),
+                ("/repo/build", Some(Mode::Write)),
+                ("/repo/public", None),
+            ],
+        );
+        assert_eq!(
+            shown.shown_mode(&text("/repo/src/a.py")),
+            Some((1, Mode::Read))
+        );
+        assert_eq!(
+            shown.shown_mode(&text("/repo/build/out")),
+            Some((2, Mode::Write))
+        );
+        assert_eq!(
+            shown.shown_mode(&text("/repo/public/x")),
+            Some((1, Mode::Read))
+        );
+        assert_eq!(shown.show_depth(&text("/repo/public/x")), Some(2));
+        assert_eq!(shown.shown_mode(&text("/elsewhere")), None);
+        let tied = matcher(
+            &[],
+            &[("/repo", Some(Mode::Exec)), ("/repo/*", Some(Mode::Read))],
+        );
+        assert_eq!(tied.shown_mode(&text("/repo/x")), Some((1, Mode::Read)));
+        assert_eq!(
+            matcher(&[], &[("*.md", None)]).show_depth(&text("/a/x.md")),
+            None
+        );
+    }
+
+    #[test]
     fn hydrated_component_patterns_keep_zero_anchor_depth() {
         let matcher = VisibilityMatcher::new(Visibility {
             hidden: PathScope {

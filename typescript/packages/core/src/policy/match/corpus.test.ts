@@ -1,3 +1,17 @@
+// ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+// ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { z } from 'zod'
@@ -5,14 +19,10 @@ import { WordKind } from '../../commands/spec/types.ts'
 import { MountMode, PathSpec, type Visibility } from '../../types.ts'
 import {
   classifyPaths,
-  classifyShows,
-  classifyVars,
   hiddenUnder,
-  hideDepth,
+  isGlob,
   moveReveals,
   pathVisible,
-  showDepth,
-  shownMode,
   varHidden,
 } from '../../utils/hidden.ts'
 import { CommandWord } from '../types.ts'
@@ -46,9 +56,6 @@ const corpus = z
           z.object({
             path: z.string(),
             visible: z.boolean(),
-            hide_depth: z.number().nullable(),
-            show_depth: z.number().nullable(),
-            mode: z.tuple([z.number(), mode]).nullable(),
             hidden_under: z.boolean(),
           }),
         ),
@@ -110,15 +117,15 @@ describe('shared policy compatibility cases', () => {
   it.each(corpus.visibility)('preserves visibility for $hide', (row) => {
     const visibility: Visibility = {
       paths: classifyPaths(row.hide),
-      shown: classifyShows(row.show),
-      vars: classifyVars(row.vars),
+      shown: row.show.length === 0 ? null : { entries: row.show },
+      vars: {
+        names: row.vars.filter((name) => !isGlob(name)),
+        patterns: row.vars.filter((name) => isGlob(name)),
+      },
       processes: 'session',
     }
     for (const query of row.queries) {
       expect(pathVisible(visibility, query.path)).toBe(query.visible)
-      expect(hideDepth(visibility.paths, query.path)).toBe(query.hide_depth)
-      expect(showDepth(visibility.shown, query.path)).toBe(query.show_depth)
-      expect(shownMode(visibility.shown, query.path)).toEqual(query.mode)
       expect(hiddenUnder(visibility, query.path)).toBe(query.hidden_under)
     }
     for (const move of row.moves)

@@ -21,7 +21,7 @@ import { covers } from '../../policy/decisions.ts'
 import { Outcome, Scope, type CommandRule, type VfsContext } from '../../policy/types.ts'
 import { DEFAULT_VISIBILITY, MountMode, PathSpec } from '../../types.ts'
 import { DEFAULT_PROCESS_PERMISSIONS } from '../../process/config.ts'
-import { pathHidden, pathVisible } from '../../utils/hidden.ts'
+import { pathVisible } from '../../utils/hidden.ts'
 import { parseSessionProfile, type SessionProfile } from '../../policy/profile.ts'
 import {
   applyProfile,
@@ -324,11 +324,11 @@ describe('compileProfile', () => {
       paths: ['/shared/finance', '/repo/.env'],
       patterns: ['/repo/*.pem'],
     })
-    expect(pathHidden(out.visibility.paths, '/repo/deep/key.pem')).toBe(true)
-    expect(pathHidden(out.visibility.paths, '/scratch/key.pem')).toBe(false)
+    expect(pathVisible(out.visibility, '/repo/deep/key.pem')).toBe(false)
+    expect(pathVisible(out.visibility, '/scratch/key.pem')).toBe(true)
     // The profile's own hide is not a mount section's and stays global.
     const profile = compileProfile(parseSessionProfile({ paths: { hide: ['*.pem'] } }))
-    expect(pathHidden(profile.visibility.paths, '/scratch/key.pem')).toBe(true)
+    expect(pathVisible(profile.visibility, '/scratch/key.pem')).toBe(false)
   })
 
   it('of a bare or absent profile states nothing', () => {
