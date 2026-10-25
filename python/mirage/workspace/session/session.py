@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import time
 from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 from types import MappingProxyType
@@ -57,6 +56,7 @@ from mirage.types import (
     ShownPaths,
     Visibility,
 )
+from mirage.utils.clock import SystemClock
 from mirage.workspace.session.constants import (
     INHERITED_FIELDS,
     STARTUP_VALUES,
@@ -282,7 +282,8 @@ class SessionState:
     # and an array in another, and an attribute cannot drift from the
     # value it describes.
     vars: dict[str, ShellVar] = field(default_factory=dict)
-    created_at: float = field(default_factory=time.time)
+    # The manager stamps it on the workspace clock.
+    created_at: float = field(default_factory=SystemClock().now)
     functions: dict[str, str] = field(default_factory=dict)
     # The functions `readonly -f` has frozen. A set beside `functions`
     # rather than a flag on the source because readonly is the

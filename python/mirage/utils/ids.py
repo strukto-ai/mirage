@@ -14,12 +14,11 @@
 import random
 import secrets
 import threading
-import time
 import uuid
-from collections.abc import MutableSequence
+from collections.abc import Callable, MutableSequence
 from typing import Protocol, TypeVar
 
-from mirage.utils.clock import Clock, ManualClock
+from mirage.utils.clock import Clock, ManualClock, SystemClock
 
 TIMESTAMP_BITS = 48
 TIMESTAMP_MASK = (1 << TIMESTAMP_BITS) - 1
@@ -45,13 +44,11 @@ UINT64_MASK = (1 << 64) - 1
 
 T = TypeVar("T")
 
-_lock = threading.Lock()
-_last_ms = -1
-_counter = 0
 
-
-def _stamp() -> tuple[int, int]:
-    """Reserve one id's millisecond and counter value, atomically.
+def _stamp(
+    last_ms: int, counter: int, now_ms: int, fresh: Callable[[], int]
+) -> tuple[int, int]:
+    """The millisecond and counter of the next id after ``last_ms``.
 
     Two ids minted in the same millisecond are ordered by the counter,
     which is the whole reason the counter exists: the obvious
@@ -63,32 +60,50 @@ def _stamp() -> tuple[int, int]:
     are database keys, so a timestamp ahead of the clock is wrong data,
     not a rounding artifact.
 
-    A millisecond whose counter is exhausted waits for the next one
-    rather than borrowing. That needs more than ~3800 ids inside one
-    millisecond, roughly seven times the observed burst rate.
+    A millisecond whose counter is exhausted borrows the next one. On a
+    running clock that takes more than ~3800 ids inside one millisecond,
+    roughly seven times the observed burst rate. On a clock that stands
+    still or went back (a manual clock, NTP) waiting for it would never
+    end, and the stamp runs ahead by one millisecond per exhausted
+    counter, so ordering wins and the drift stays bounded by the burst.
 
-    The clock moving backwards (NTP) is the one case where the stamp
-    stays ahead of the wall clock: ordering wins there, and the drift is
-    bounded by the size of the jump rather than growing per call.
+    Args:
+        last_ms (int): the previous id's millisecond, -1 before the
+            first.
+        counter (int): the previous id's counter.
+        now_ms (int): the clock's reading, in unix milliseconds.
+        fresh (Callable[[], int]): draws the counter that starts a new
+            millisecond.
 
     Returns:
         tuple[int, int]: the unix-millisecond timestamp and the counter.
     """
-    global _last_ms, _counter
-    with _lock:
-        now_ms = time.time_ns() // 1_000_000
-        if now_ms > _last_ms:
-            _last_ms = now_ms
-            _counter = secrets.randbits(COUNTER_SEED_BITS)
-            return _last_ms, _counter
-        if _counter < COUNTER_MAX:
-            _counter += 1
-            return _last_ms, _counter
-        while now_ms <= _last_ms:
-            now_ms = time.time_ns() // 1_000_000
-        _last_ms = now_ms
-        _counter = secrets.randbits(COUNTER_SEED_BITS)
-        return _last_ms, _counter
+    if now_ms > last_ms:
+        return now_ms, fresh()
+    if counter < COUNTER_MAX:
+        return last_ms, counter + 1
+    return last_ms + 1, fresh()
+
+
+def _layout(timestamp_ms: int, counter: int, random_bits: int) -> str:
+    """Lay out a UUIDv7 in canonical lowercase hyphenated form.
+
+    Args:
+        timestamp_ms (int): the unix-millisecond timestamp.
+        counter (int): the 12-bit counter that orders ids inside one
+            millisecond.
+        random_bits (int): the 62 random bits.
+    """
+    value = (timestamp_ms & TIMESTAMP_MASK) << 80
+    value |= VERSION << 76
+    value |= (counter & COUNTER_MAX) << 64
+    value |= VARIANT << 62
+    value |= random_bits
+    return str(uuid.UUID(int=value))
+
+
+def _crypto_u32() -> int:
+    return secrets.randbits(WORD_BITS)
 
 
 def uuid7() -> str:
@@ -97,19 +112,13 @@ def uuid7() -> str:
     The first 48 bits are a unix-millisecond timestamp, so ids sort by
     creation time and stay index-friendly as database primary keys; the
     next 12 bits order ids minted inside one millisecond, and the last
-    62 bits are random.
+    62 bits are random. Stamped by the process's own `SystemIdSource`.
 
     Returns:
         str: canonical UUID string, e.g.
             ``0198c0de-6f3a-7d21-9c4e-8b1f2a3c4d5e``.
     """
-    timestamp_ms, counter = _stamp()
-    value = (timestamp_ms & TIMESTAMP_MASK) << 80
-    value |= VERSION << 76
-    value |= (counter & COUNTER_MAX) << 64
-    value |= VARIANT << 62
-    value |= secrets.randbits(RANDOM_BITS)
-    return str(uuid.UUID(int=value))
+    return _SYSTEM_IDS.uuid7()
 
 
 def new_workspace_id() -> str:
@@ -142,19 +151,70 @@ class IdSource(Protocol):
         ...
 
 
+class _Floor:
+    """The last id's millisecond and counter, which the next id follows."""
+
+    __slots__ = ("counter", "last_ms", "lock")
+
+    def __init__(self) -> None:
+        self.lock = threading.Lock()
+        self.last_ms = -1
+        self.counter = 0
+
+
+_SYSTEM_FLOOR = _Floor()
+
+
 class SystemIdSource:
-    """Platform randomness used when no source is supplied."""
+    """Platform randomness used when no source is supplied.
+
+    A UUIDv7 is stamped from ``clock`` and ordered inside one
+    millisecond by a counter, as `SeededIdSource` orders its ids. Every
+    source on the system clock shares the process's floor, so ids
+    minted anywhere in the process sort by when they were made. A
+    source on another clock keeps a floor of its own, so a manual clock
+    never shares one with the system clock.
+
+    Args:
+        clock (Clock | None): the clock ids are stamped from; None is
+            the system clock.
+    """
+
+    __slots__ = ("_clock", "_floor")
+
+    def __init__(self, clock: Clock | None = None) -> None:
+        self._clock: Clock = clock if clock is not None else SystemClock()
+        self._floor = (
+            _SYSTEM_FLOOR if isinstance(self._clock, SystemClock) else _Floor()
+        )
 
     def uuid7(self) -> str:
-        """A fresh UUIDv7 stamped from the system clock."""
-        return uuid7()
+        """A fresh UUIDv7 stamped from the source's clock."""
+        floor = self._floor
+        with floor.lock:
+            floor.last_ms, floor.counter = _stamp(
+                floor.last_ms,
+                floor.counter,
+                int(self._clock.now() * 1000),
+                self._fresh_counter,
+            )
+            timestamp_ms, counter = floor.last_ms, floor.counter
+        high = _crypto_u32() >> (2 * WORD_BITS - RANDOM_BITS)
+        low = _crypto_u32()
+        return _layout(timestamp_ms, counter, (high << WORD_BITS) | low)
+
+    def _fresh_counter(self) -> int:
+        return _crypto_u32() >> (WORD_BITS - COUNTER_SEED_BITS)
 
     def random_u32(self) -> int:
         """A uniform 32-bit integer from the process generator."""
         return random.getrandbits(WORD_BITS)
 
     def __repr__(self) -> str:
-        return "SystemIdSource()"
+        return f"SystemIdSource(clock={self._clock!r})"
+
+
+_SYSTEM_IDS = SystemIdSource()
 
 
 def _splitmix64(state: int) -> tuple[int, int]:
@@ -229,27 +289,18 @@ class SeededIdSource:
 
     def uuid7(self) -> str:
         """The next UUIDv7 of the seeded sequence, stamped from the clock."""
-        now_ms = int(self._clock.now() * 1000)
-        if now_ms > self._last_ms:
-            self._last_ms = now_ms
-            self._counter = self.random_u32() >> (
-                WORD_BITS - COUNTER_SEED_BITS
-            )
-        elif self._counter < COUNTER_MAX:
-            self._counter += 1
-        else:
-            self._last_ms += 1
-            self._counter = self.random_u32() >> (
-                WORD_BITS - COUNTER_SEED_BITS
-            )
+        self._last_ms, self._counter = _stamp(
+            self._last_ms,
+            self._counter,
+            int(self._clock.now() * 1000),
+            self._fresh_counter,
+        )
         high = self.random_u32() >> (2 * WORD_BITS - RANDOM_BITS)
         low = self.random_u32()
-        value = (self._last_ms & TIMESTAMP_MASK) << 80
-        value |= VERSION << 76
-        value |= self._counter << 64
-        value |= VARIANT << 62
-        value |= (high << WORD_BITS) | low
-        return str(uuid.UUID(int=value))
+        return _layout(self._last_ms, self._counter, (high << WORD_BITS) | low)
+
+    def _fresh_counter(self) -> int:
+        return self.random_u32() >> (WORD_BITS - COUNTER_SEED_BITS)
 
     def __repr__(self) -> str:
         return f"SeededIdSource(seed={self._seed!r})"

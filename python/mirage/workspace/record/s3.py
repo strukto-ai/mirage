@@ -18,8 +18,7 @@ from collections.abc import Iterable
 from typing import Any
 
 from mirage.core.s3.client import (
-    _client_kwargs,
-    async_session,
+    create_s3_client,
     is_condition_lost,
     is_not_found,
 )
@@ -48,10 +47,7 @@ class S3RecordClient:
     async def client(self) -> Any:
         async with self._client_lock:
             if self._client is None:
-                session = async_session(self._config)
-                self._client_cm = session.client(
-                    **_client_kwargs(self._config)
-                )
+                self._client_cm = create_s3_client(self._config)
                 self._client = await self._client_cm.__aenter__()
         return self._client
 

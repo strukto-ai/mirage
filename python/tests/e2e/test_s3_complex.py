@@ -28,20 +28,13 @@ from mirage.utils.key_prefix import mount_key
 from mirage.vfs.ram import RAMVFS
 from mirage.vfs.s3 import S3VFS, S3Config
 from mirage.workspace import Workspace
+from tests.e2e.s3_mock import S3_SESSION
 from tests.fixtures.mount_commands import command_files
 
 DATA_DIR = Path(__file__).resolve().parents[3] / "data"
 
 s3_cat = generic("cat").fn
 LAST_MODIFIED = datetime(2026, 3, 26, tzinfo=timezone.utc)
-
-# Every kit-derived op reaches the store through the driver's single
-# connect seam; only read and stream keep a native session of their own.
-_CORE_MODULES = [
-    "mirage.core.s3.driver",
-    "mirage.core.s3.read",
-    "mirage.core.s3.stream",
-]
 
 
 class MockS3Error(Exception):
@@ -210,10 +203,7 @@ def _s3_backend() -> S3VFS:
 def _patch_async_session(objects):
     mock_session = MockAsyncSession(objects)
     stack = ExitStack()
-    for mod in _CORE_MODULES:
-        stack.enter_context(
-            patch(f"{mod}.async_session", return_value=mock_session)
-        )
+    stack.enter_context(patch(S3_SESSION, return_value=mock_session))
     return stack
 
 

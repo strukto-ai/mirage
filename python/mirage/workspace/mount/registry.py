@@ -116,7 +116,8 @@ class MountRegistry:
             builds reads time through; None means the system clock.
         ids (IdSource | None): where the mounts this registry places
             and the commands it runs draw generated ids and random
-            values; None means the system source.
+            values; None means the system source, stamping ids from
+            ``clock``.
     """
 
     def __init__(
@@ -127,7 +128,9 @@ class MountRegistry:
     ) -> None:
         self.io = io if io is not None else IOConfig()
         self.clock: Clock = clock if clock is not None else SystemClock()
-        self.ids: IdSource = ids if ids is not None else SystemIdSource()
+        self.ids: IdSource = (
+            ids if ids is not None else SystemIdSource(self.clock)
+        )
         # Scopes the redis index stores this registry builds; the
         # workspace sets it.
         self.workspace_id: str | None = None

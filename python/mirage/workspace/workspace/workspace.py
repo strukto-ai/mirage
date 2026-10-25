@@ -275,7 +275,9 @@ class Workspace:
         ids: IdSource | None = None,
     ) -> None:
         self._clock: Clock = clock if clock is not None else SystemClock()
-        self._ids: IdSource = ids if ids is not None else SystemIdSource()
+        self._ids: IdSource = (
+            ids if ids is not None else SystemIdSource(self._clock)
+        )
         # Minted before any mount, so a seeded source hands out the same
         # draws in the same order on both hosts.
         self._workspace_id = (
@@ -393,7 +395,10 @@ class Workspace:
         if profile is not None and profile not in self._profiles:
             raise PolicyError(f"unknown profile {profile!r}")
         self._session_mgr = SessionManager(
-            session_id, store=stores.sessions, seed_vars=seed_vars
+            session_id,
+            store=stores.sessions,
+            seed_vars=seed_vars,
+            clock=self._clock,
         )
         self._tools: dict[str | None, MirageToolOperations] = {}
         self._reads: dict[str, FileVersionTracker] = {}

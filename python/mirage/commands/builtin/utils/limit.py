@@ -24,6 +24,8 @@ from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.types import Limit, OnExceed
 
 logger = logging.getLogger(__name__)
+
+TRUNCATION_NOTICE = "output truncated at limit"
 T = TypeVar("T")
 
 
@@ -142,7 +144,7 @@ def _build_notice(limit: Limit) -> bytes:
         parts.append(f"{limit.max_bytes} bytes")
     detail = " / ".join(parts)
     return (
-        f"output truncated at limit ({detail}); "
+        f"{TRUNCATION_NOTICE} ({detail}); "
         "narrow the selection or raise command_limits for this command\n"
     ).encode()
 

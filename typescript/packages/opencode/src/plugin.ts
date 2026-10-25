@@ -16,6 +16,7 @@ import { ensureParents } from '@struktoai/mirage-core/workspace/tools/tool_opera
 import { tool, type Plugin, type ToolContext, type ToolDefinition } from '@opencode-ai/plugin'
 import type { Workspace } from '@struktoai/mirage-node'
 import { encodeBase64 } from '@struktoai/mirage-core/utils/base64'
+import { singleQuote } from '@struktoai/mirage-core/utils/quote'
 import { FileVersionTracker } from '@struktoai/mirage-core/workspace/tools/file_version'
 import { Session } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import { readWorkspaceFile } from '@struktoai/mirage-core/workspace/tools/read_file'
@@ -217,7 +218,7 @@ export function mirageTools(
     },
     execute: async ({ command }, ctx) => {
       const w = await resolveWs(ws, ctx)
-      const io = await w.shell(command, shellOptions)
+      const io = await w.shell(command, { ...shellOptions, signal: ctx.abort })
       const parts: string[] = []
       if (io.stdoutText.length > 0) parts.push(io.stdoutText)
       if (io.stderrText.length > 0) parts.push(io.stderrText)
@@ -234,10 +235,10 @@ export function mirageTools(
     execute: async ({ pattern, path }, ctx) => {
       const w = await resolveWs(ws, ctx)
       const root = path ?? '/'
-      const io = await w.shell(
-        `find ${root} -name '${pattern.replace(/'/g, "'\\''")}'`,
-        shellOptions,
-      )
+      const io = await w.shell(`find ${singleQuote(root)} -name ${singleQuote(pattern)}`, {
+        ...shellOptions,
+        signal: ctx.abort,
+      })
       return io.stdoutText.trim()
     },
   })
@@ -251,8 +252,10 @@ export function mirageTools(
     execute: async ({ pattern, path }, ctx) => {
       const w = await resolveWs(ws, ctx)
       const root = path ?? '/'
-      const escaped = pattern.replace(/'/g, "'\\''")
-      const io = await w.shell(`grep -rn '${escaped}' ${root}`, shellOptions)
+      const io = await w.shell(`grep -rn -e ${singleQuote(pattern)} ${singleQuote(root)}`, {
+        ...shellOptions,
+        signal: ctx.abort,
+      })
       return io.stdoutText.trim()
     },
   })

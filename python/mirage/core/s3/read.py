@@ -17,10 +17,9 @@ from typing import Any, cast
 from mirage.accessor.s3 import S3Accessor
 from mirage.cache.context import publish_read
 from mirage.core.s3.client import (
-    _client_kwargs,
     _key,
-    async_session,
     closing_body,
+    create_s3_client,
 )
 from mirage.errors.fs import enoent
 from mirage.observe.context import record, revision_for, start_op
@@ -77,9 +76,7 @@ async def read(
     # The accessor's cached client, not a fresh one: opening a client costs
     # ~160ms against ~2ms for a reused one, so a read-heavy battery paid the
     # client rather than the request.
-    client = await accessor.cached_client(
-        lambda: async_session(config).client(**_client_kwargs(config))
-    )
+    client = await accessor.cached_client(lambda: create_s3_client(config))
     timer = start_op()
     try:
         resp = await client.get_object(**kwargs)

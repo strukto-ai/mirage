@@ -12,16 +12,15 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { v7 as uuidV7 } from 'uuid'
-import { type Clock, ManualClock } from './clock.ts'
+import { type Clock, ManualClock, SystemClock } from './clock.ts'
 
 const MAX_SEED = Number.MAX_SAFE_INTEGER
 const WORD_BITS = 32
 const WORD_MASK = 0xffffffff
 const TIMESTAMP_BITS = 48n
 const TIMESTAMP_MASK = (1n << TIMESTAMP_BITS) - 1n
-// rand_a carries the intra-millisecond counter, seeded from the top bits of
-// one draw so a burst has room to climb, as `uuid7` in ids.py does.
+// rand_a carries the intra-millisecond counter (RFC 9562 section 6.2), seeded
+// well below its maximum so a burst has room to climb, as ids.py does.
 const COUNTER_MAX = 0xfff
 const COUNTER_SEED_BITS = 8
 const RANDOM_BITS = 62
@@ -33,14 +32,51 @@ const SPLITMIX_MUL2 = 0x94d049bb133111ebn
 const UINT64_MASK = (1n << 64n) - 1n
 
 /**
+ * The millisecond and counter of the next id after `lastMs`. Two ids minted in
+ * the same millisecond are ordered by the counter. A millisecond whose counter
+ * is exhausted borrows the next one: on a clock that stands still or went back,
+ * waiting would never end. `_stamp` in ids.py is the twin and says why.
+ */
+function stamp(
+  lastMs: number,
+  counter: number,
+  nowMs: number,
+  fresh: () => number,
+): [number, number] {
+  if (nowMs > lastMs) return [nowMs, fresh()]
+  if (counter < COUNTER_MAX) return [lastMs, counter + 1]
+  return [lastMs + 1, fresh()]
+}
+
+/** Lay out a UUIDv7 in canonical lowercase hyphenated form. */
+function layout(timestampMs: number, counter: number, high: number, low: number): string {
+  const value =
+    ((BigInt(timestampMs) & TIMESTAMP_MASK) << 80n) |
+    (VERSION << 76n) |
+    (BigInt(counter) << 64n) |
+    (VARIANT << 62n) |
+    (BigInt(high) << BigInt(WORD_BITS)) |
+    BigInt(low)
+  const digits = value.toString(16).padStart(32, '0')
+  return [
+    digits.slice(0, 8),
+    digits.slice(8, 12),
+    digits.slice(12, 16),
+    digits.slice(16, 20),
+    digits.slice(20),
+  ].join('-')
+}
+
+/**
  * Mint an RFC 9562 UUIDv7 in canonical lowercase hyphenated form.
  *
  * The first 48 bits are a unix-millisecond timestamp, so ids sort by
  * creation time and stay index-friendly as database primary keys; the
- * remaining 74 bits are random.
+ * next 12 bits order ids minted inside one millisecond, and the last 62
+ * bits are random. Stamped by the process's own `SystemIdSource`.
  */
 export function uuid7(): string {
-  return uuidV7()
+  return SYSTEM_IDS.uuid7()
 }
 
 /** Mint a fresh workspace id (UUIDv7). */
@@ -61,17 +97,57 @@ export interface IdSource {
   randomU32(): number
 }
 
-/** Platform randomness used when no source is supplied. */
+/** The last id's millisecond and counter, which the next id follows. */
+interface Floor {
+  lastMs: number
+  counter: number
+}
+
+const SYSTEM_FLOOR: Floor = { lastMs: -1, counter: 0 }
+
+/**
+ * Platform randomness used when no source is supplied. A UUIDv7 is stamped
+ * from `clock` and ordered inside one millisecond by a counter, as
+ * `SeededIdSource` orders its ids. Every source on the system clock shares the
+ * process's floor, so ids minted anywhere in the process sort by when they
+ * were made. A source on another clock keeps a floor of its own, so a manual
+ * clock never shares one with the system clock.
+ */
 export class SystemIdSource implements IdSource {
-  /** A fresh UUIDv7 stamped from the system clock. */
+  private readonly clock: Clock
+  private readonly floor: Floor
+
+  /** @param clock the clock ids are stamped from; omitted means the system clock. */
+  constructor(clock?: Clock) {
+    this.clock = clock ?? new SystemClock()
+    this.floor = this.clock instanceof SystemClock ? SYSTEM_FLOOR : { lastMs: -1, counter: 0 }
+  }
+
+  /** A fresh UUIDv7 stamped from the source's clock. */
   uuid7(): string {
-    return uuid7()
+    const floor = this.floor
+    const [ms, counter] = stamp(
+      floor.lastMs,
+      floor.counter,
+      Math.floor(this.clock.now() * 1000),
+      () => cryptoU32() >>> (WORD_BITS - COUNTER_SEED_BITS),
+    )
+    floor.lastMs = ms
+    floor.counter = counter
+    const high = cryptoU32() >>> (2 * WORD_BITS - RANDOM_BITS)
+    return layout(ms, counter, high, cryptoU32())
   }
 
   /** A uniform 32-bit integer from the platform generator. */
   randomU32(): number {
     return Math.floor(Math.random() * 2 ** WORD_BITS)
   }
+}
+
+const SYSTEM_IDS = new SystemIdSource()
+
+function cryptoU32(): number {
+  return globalThis.crypto.getRandomValues(new Uint32Array(1))[0] ?? 0
 }
 
 function splitmix64(state: bigint): [bigint, bigint] {
@@ -140,33 +216,16 @@ export class SeededIdSource implements IdSource {
 
   /** The next UUIDv7 of the seeded sequence, stamped from the clock. */
   uuid7(): string {
-    const nowMs = Math.floor(this.clock.now() * 1000)
-    if (nowMs > this.lastMs) {
-      this.lastMs = nowMs
-      this.counter = this.randomU32() >>> (WORD_BITS - COUNTER_SEED_BITS)
-    } else if (this.counter < COUNTER_MAX) {
-      this.counter += 1
-    } else {
-      this.lastMs += 1
-      this.counter = this.randomU32() >>> (WORD_BITS - COUNTER_SEED_BITS)
-    }
+    const [ms, counter] = stamp(
+      this.lastMs,
+      this.counter,
+      Math.floor(this.clock.now() * 1000),
+      () => this.randomU32() >>> (WORD_BITS - COUNTER_SEED_BITS),
+    )
+    this.lastMs = ms
+    this.counter = counter
     const high = this.randomU32() >>> (2 * WORD_BITS - RANDOM_BITS)
-    const low = this.randomU32()
-    const value =
-      ((BigInt(this.lastMs) & TIMESTAMP_MASK) << 80n) |
-      (VERSION << 76n) |
-      (BigInt(this.counter) << 64n) |
-      (VARIANT << 62n) |
-      (BigInt(high) << BigInt(WORD_BITS)) |
-      BigInt(low)
-    const digits = value.toString(16).padStart(32, '0')
-    return [
-      digits.slice(0, 8),
-      digits.slice(8, 12),
-      digits.slice(12, 16),
-      digits.slice(16, 20),
-      digits.slice(20),
-    ].join('-')
+    return layout(this.lastMs, this.counter, high, this.randomU32())
   }
 }
 

@@ -46,12 +46,12 @@
     "@struktoai/mirage-core": "workspace:*"
   },
   "peerDependencies": {
-    "ai": "^7.0.66"
+    "ai": "^7.0.153"
   },
   "devDependencies": {
     "@struktoai/mirage-node": "workspace:*",
     "@types/node": "^22.0.0",
-    "ai": "^7.0.66",
+    "ai": "^7.0.153",
     "tsup": "^8.5.0",
     "typescript": "^6.0.0",
     "vitest": "^4.1.12"

@@ -181,15 +181,10 @@ describe('MirageServer', () => {
     for (const [name, schema] of Object.entries(expected)) {
       const advertised = listed.get(name)?.inputSchema
       expect([...(advertised?.required ?? [])].sort()).toEqual([...schema.required].sort())
-      // The SDK renders zod's int() and min() as a bare number; the shape
-      // still enforces them when it parses a call.
       const want = Object.fromEntries(
         Object.entries(
           schema.properties as Record<string, { type: string; description: string }>,
-        ).map(([key, prop]) => [
-          key,
-          { type: prop.type === 'integer' ? 'number' : prop.type, description: prop.description },
-        ]),
+        ).map(([key, prop]) => [key, { type: prop.type, description: prop.description }]),
       )
       expect(advertised?.properties).toMatchObject(want)
     }

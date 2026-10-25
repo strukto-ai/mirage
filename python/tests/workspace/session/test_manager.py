@@ -40,6 +40,7 @@ from mirage.types import (
     ShownPaths,
     Visibility,
 )
+from mirage.utils.clock import ManualClock
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 from mirage.workspace.session import RAMSessionStore, SessionManager
@@ -55,6 +56,15 @@ def test_manager_default_session():
     mgr = SessionManager("default")
     s = mgr.get("default")
     assert s.session_id == "default"
+
+
+def test_manager_stamps_sessions_on_its_clock():
+    clock = ManualClock(start=1_000.0)
+    mgr = SessionManager("default", clock=clock)
+    clock.advance(5)
+    created = mgr.create("other")
+    assert mgr.get("default").created_at == 1_000.0
+    assert created.created_at == 1_005.0
 
 
 def test_manager_default_cwd():

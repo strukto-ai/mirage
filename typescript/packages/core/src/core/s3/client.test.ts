@@ -13,6 +13,11 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { S3Client } from '@aws-sdk/client-s3'
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { dirname, join, sep } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import ts from 'typescript'
 import { describe, expect, it } from 'vitest'
 import type { S3HttpAgents } from '../../vfs/s3/config.ts'
 import { LOST_CODES, sdkError } from '../../../tests/core/s3/_test_util.ts'
@@ -119,5 +124,99 @@ describe('isConditionLost', () => {
     ['transport', new Error('socket hang up'), false],
   ] as const)('%s', (_name, err, lost) => {
     expect(isConditionLost(err)).toBe(lost)
+  })
+})
+
+const SRC_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', '..')
+// The one place an S3 client is built, which every test seam stubs.
+const SEAM = 'core/s3/client.ts'
+
+/** What one module does to open an S3 client past the seam. */
+function s3Bypasses(source: string): string[] {
+  const found = new Set<string>()
+  const visit = (node: ts.Node): void => {
+    if (
+      (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) &&
+      node.moduleSpecifier !== undefined &&
+      ts.isStringLiteral(node.moduleSpecifier) &&
+      node.moduleSpecifier.text.startsWith('@aws-sdk/')
+    ) {
+      const typeOnly = ts.isImportDeclaration(node)
+        ? node.importClause?.phaseModifier === ts.SyntaxKind.TypeKeyword
+        : node.isTypeOnly
+      if (!typeOnly) found.add(`import ${node.moduleSpecifier.text}`)
+    } else if (
+      ts.isCallExpression(node) &&
+      node.expression.kind === ts.SyntaxKind.ImportKeyword &&
+      node.arguments[0] !== undefined &&
+      ts.isStringLiteral(node.arguments[0]) &&
+      node.arguments[0].text.startsWith('@aws-sdk/')
+    ) {
+      found.add(`import(${node.arguments[0].text})`)
+    } else if (ts.isNewExpression(node)) {
+      const callee = node.expression
+      const name = ts.isPropertyAccessExpression(callee) ? callee.name : callee
+      if (ts.isIdentifier(name) && name.text === 'S3Client') found.add('new S3Client')
+    }
+    ts.forEachChild(node, visit)
+  }
+  visit(ts.createSourceFile('m.ts', source, ts.ScriptTarget.Latest))
+  return [...found].sort()
+}
+
+function bypassingModules(root: string): Record<string, string[]> {
+  const offenders: Record<string, string[]> = {}
+  for (const name of readdirSync(root, { recursive: true, encoding: 'utf8' })) {
+    if (!name.endsWith('.ts') || name.endsWith('.test.ts')) continue
+    const module = name.split(sep).join('/')
+    if (module === SEAM || module.startsWith('generated/')) continue
+    const found = s3Bypasses(readFileSync(join(root, name), 'utf8'))
+    if (found.length > 0) offenders[module] = found
+  }
+  return offenders
+}
+
+describe('the S3 client seam', () => {
+  it.each([
+    ["import { S3Client } from '@aws-sdk/client-s3'", ['import @aws-sdk/client-s3']],
+    ["import * as s3 from '@aws-sdk/client-s3'", ['import @aws-sdk/client-s3']],
+    ["import '@aws-sdk/client-s3'", ['import @aws-sdk/client-s3']],
+    ["export { S3Client } from '@aws-sdk/client-s3'", ['import @aws-sdk/client-s3']],
+    ["await import('@aws-sdk/client-s3')", ['import(@aws-sdk/client-s3)']],
+    ['new mod.S3Client({})', ['new S3Client']],
+    ['new S3Client({})', ['new S3Client']],
+  ])('catches a planted bypass: %s', (source, expected) => {
+    expect(s3Bypasses(source)).toEqual(expected)
+  })
+
+  it.each([
+    "import type { S3Client } from '@aws-sdk/client-s3'",
+    "import { createS3Client } from './client.ts'",
+    'await createS3Client(config)',
+  ])('leaves what opens through the seam: %s', (source) => {
+    expect(s3Bypasses(source)).toEqual([])
+  })
+
+  it('fails on a planted module and spares the seam', () => {
+    const root = mkdtempSync(join(tmpdir(), 's3-seam-'))
+    try {
+      mkdirSync(join(root, 'core', 's3'), { recursive: true })
+      writeFileSync(join(root, 'core', 's3', 'planted.ts'), 'new mod.S3Client({})\n')
+      writeFileSync(join(root, SEAM), "await import('@aws-sdk/client-s3')\n")
+      expect(bypassingModules(root)).toEqual({ 'core/s3/planted.ts': ['new S3Client'] })
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('still sees the seam open its client', () => {
+    expect(s3Bypasses(readFileSync(join(SRC_DIR, SEAM), 'utf8'))).toEqual([
+      'import(@aws-sdk/client-s3)',
+      'new S3Client',
+    ])
+  })
+
+  it('opens every S3 client through createS3Client', () => {
+    expect(bypassingModules(SRC_DIR)).toEqual({})
   })
 })
