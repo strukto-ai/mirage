@@ -119,11 +119,11 @@ class ProcessSupervisor:
                 lambda signal: self.terminate_children(pid, signal),
                 self._bind,
             )
-            queued = self.queued()
+            eager = started is not None and not self.queued()
             self._live[pid] = (self._generations.get(session_id, 0), handle)
         if started is not None:
             started(handle.info)
-        handle.start(eager=started is not None and not queued)
+        handle.start(eager=eager)
         return handle
 
     def terminate_children(self, pid: int, signal: int = 9) -> None:

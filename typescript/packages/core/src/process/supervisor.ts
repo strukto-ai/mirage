@@ -28,6 +28,12 @@ export class ProcessSupervisor {
     private readonly ids?: IdSource,
   ) {}
 
+  /** Whether a runner that was started has yet to begin. */
+  queued(): boolean {
+    for (const { handle } of this.runners.values()) if (!handle.begun) return true
+    return false
+  }
+
   /**
    * Host-only: the supplied runner must admit commands before effects.
    * `limit` is the most runners the session may hold, this one included;
@@ -95,10 +101,10 @@ export class ProcessSupervisor {
       },
       this.bind,
     )
-    const queued = [...this.runners.values()].some(({ handle: live }) => !live.begun)
+    const eager = init.started !== undefined && !this.queued()
     this.runners.set(pid, { generation: this.generations.get(init.sessionId) ?? 0, handle })
     init.started?.(handle.info)
-    handle.start(init.started !== undefined && !queued)
+    handle.start(eager)
     return handle
   }
 
