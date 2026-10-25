@@ -59,6 +59,37 @@ options = ClaudeAgentOptions(
 )
 ```
 
+## Shell
+
+To keep Claude's own Bash tool and run it in a workspace, point the SDK at `mirage-bash`, as for [Claude Code](/home/agents/claude-code#shell), and give it Mirage's other tools over [`mirage mcp`](/home/access/mcp) in place of Claude's file tools. Both reach one workspace that the Mirage daemon serves:
+
+```bash
+mirage workspace create workspace.yaml --id demo
+```
+
+```python
+import shutil
+
+from claude_agent_sdk import ClaudeAgentOptions
+
+options = ClaudeAgentOptions(
+    cwd="/Users/me/project",
+    env={
+        "CLAUDE_CODE_SHELL": shutil.which("mirage-bash"),
+        "MIRAGE_WORKSPACE": "demo",
+    },
+    mcp_servers={
+        "mirage": {"type": "stdio", "command": "mirage", "args": ["mcp", "-w", "demo"]},
+    },
+    allowed_tools=["Bash", "mcp__mirage__*"],
+    disallowed_tools=["Read", "Edit", "Write", "Glob", "Grep", "mcp__mirage__shell"],
+)
+```
+
+- Bash runs in the workspace, and Mirage's `read`, `write`, `edit`, `ls`, `grep` and `glob` take the place of Claude's Read, Edit, Write, Glob and Grep, so every file the agent touches goes through Mirage.
+- Mount the project and `/tmp` at their own paths, as the [Claude Code page](/home/agents/claude-code#shell) shows, so `cd` carries over.
+- To run under a [profile](/home/profiles), create a session with `mirage session create demo --id agent -p reviewer`, then set `MIRAGE_SESSION` to `agent` and add `-s agent` to the `mirage mcp` arguments.
+
 ## Tools
 
 The server serves the session's seven tools, [`session.tools`](/python/access/in-app#session-tools): `shell`, `read`, `write`, `edit`, `ls`, `grep` and `glob`, named `mcp__mirage__<tool>` in the SDK. It carries the ones the session's profile leaves it (`session.tools.names()`).

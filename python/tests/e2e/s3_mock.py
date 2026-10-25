@@ -23,13 +23,9 @@ from unittest.mock import patch
 
 LAST_MODIFIED = datetime(2026, 3, 31, tzinfo=timezone.utc)
 
-# Every kit-derived op reaches the store through the driver's single
-# connect seam; read and stream keep a native session of their own.
-_CORE_MODULES = [
-    "mirage.core.s3.driver",
-    "mirage.core.s3.read",
-    "mirage.core.s3.stream",
-]
+# Every S3 client, a mount's and the record stores', opens through
+# create_s3_client, which builds its session from this one name.
+S3_SESSION = "mirage.core.s3.client.async_session"
 
 
 class _AsyncMockBody:
@@ -448,10 +444,7 @@ class MultiBucketSession:
 
 def patch_s3_session(session: MultiBucketSession) -> ExitStack:
     stack = ExitStack()
-    for mod in _CORE_MODULES:
-        stack.enter_context(
-            patch(f"{mod}.async_session", return_value=session)
-        )
+    stack.enter_context(patch(S3_SESSION, return_value=session))
     return stack
 
 

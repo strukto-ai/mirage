@@ -25,6 +25,9 @@ const ENC = new TextEncoder()
 
 const TIMED_OUT = Symbol('timed-out')
 
+/** The start of the notice a command's capped output ends its stderr with. */
+export const TRUNCATION_NOTICE = 'output truncated at limit'
+
 function withDeadline<T>(promise: Promise<T>, ms: number): Promise<T | typeof TIMED_OUT> {
   return new Promise<T | typeof TIMED_OUT>((resolve, reject) => {
     const timer = setTimeout(() => {
@@ -154,7 +157,7 @@ function buildNotice(limit: Limit): Uint8Array {
   if (limit.maxBytes !== null) parts.push(`${String(limit.maxBytes)} bytes`)
   const detail = parts.join(' / ')
   return ENC.encode(
-    `output truncated at limit (${detail}); narrow the selection or raise command_limits for this command\n`,
+    `${TRUNCATION_NOTICE} (${detail}); narrow the selection or raise command_limits for this command\n`,
   )
 }
 

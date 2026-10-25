@@ -53,5 +53,5 @@ reason = "File-level copyleft in part, used unmodified as a separate package. Re
 [[npm]]
 name = "@anthropic-ai/claude-agent-sdk*"
 license = "LicenseRef-Unknown"
-version = "0.3.233"
+version = "0.3.310"
 reason = "Anthropic's commercial terms ('SEE LICENSE IN README.md'). A peer of @struktoai/mirage-claude-agent-sdk, which Mirage neither bundles nor installs; pnpm lists it because the workspace installs peers for its own tests."

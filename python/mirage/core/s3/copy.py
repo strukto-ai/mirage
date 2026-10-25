@@ -15,9 +15,8 @@
 from mirage.accessor.s3 import S3Accessor
 from mirage.core.object_store.copy import make_copy, settle_copy
 from mirage.core.s3.client import (
-    _client_kwargs,
     _key,
-    async_session,
+    create_s3_client,
     is_not_found,
 )
 from mirage.core.s3.driver import DRIVER
@@ -71,9 +70,7 @@ async def copy_from(
     config = accessor.config
     if _service(config) != _service(source.config):
         raise exdev(dst)
-    client = await accessor.cached_client(
-        lambda: async_session(config).client(**_client_kwargs(config))
-    )
+    client = await accessor.cached_client(lambda: create_s3_client(config))
     timer = start_op()
     try:
         await client.copy_object(

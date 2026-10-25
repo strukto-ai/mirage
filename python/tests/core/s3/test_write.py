@@ -16,10 +16,10 @@ import asyncio
 import hashlib
 
 from mirage.accessor.s3 import S3Accessor
-from mirage.core.s3 import driver as s3_driver
 from mirage.core.s3.write import write
 from mirage.types import PathSpec
 from mirage.vfs.s3.config import S3Config
+from tests.e2e.s3_mock import S3_SESSION
 
 
 class _FakeClient:
@@ -55,9 +55,7 @@ async def _write(
     monkeypatch, mount_path: str, content_type: str | None = None
 ) -> list[tuple[str, bytes, str | None]]:
     puts: list[tuple[str, bytes, str | None]] = []
-    monkeypatch.setattr(
-        s3_driver, "async_session", lambda config: _FakeSession(puts)
-    )
+    monkeypatch.setattr(S3_SESSION, lambda config: _FakeSession(puts))
     await write(
         S3Accessor(S3Config(bucket="b", default_content_type=content_type)),
         PathSpec(

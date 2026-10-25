@@ -461,7 +461,7 @@ pub(super) async fn run(host: Host, config: Config) -> i32 {
     // Bytes before the archive, or missing from it, shift every offset:
     // a warning, on stdout under -t, and the run goes on.
     let archive = config.archive.as_slice();
-    let (warning, floor) = match directory.slack {
+    let (mut warning, floor) = match directory.slack {
         0 => (Vec::new(), 0),
         slack if slack < 0 => (
             say(
@@ -482,6 +482,10 @@ pub(super) async fn run(host: Host, config: Config) -> i32 {
             WARN_EXIT,
         ),
     };
+    // zipinfo says it under its header instead.
+    if directory.misplaced && !config.zipinfo {
+        warning.splice(0..0, stray_locator(&config));
+    }
     let on_stdout = config.t && !config.zipinfo;
     if !on_stdout {
         host.warn(&warning);
@@ -500,6 +504,20 @@ pub(super) async fn run(host: Host, config: Config) -> i32 {
         (0, _) => SKIPPED_EXIT,
         (worst, _) => worst,
     }
+}
+
+/// UnZip's complaint about a ZIP64 locator that points at no record,
+/// behind the archive's name where no `Archive:` line comes first.
+fn stray_locator(config: &Config) -> Vec<u8> {
+    let mut text = if config.zipinfo || config.q || config.p {
+        say("[{}]\n", &[&config.archive])
+    } else {
+        Vec::new()
+    };
+    text.extend_from_slice(
+        b"error: End-of-centdir-64 signature not where expected (prepended bytes?)\n  (attempting to process anyway)\n",
+    );
+    text
 }
 
 fn read_failure(archive: &[u8], reply: &Reply) -> Vec<u8> {
@@ -550,9 +568,16 @@ async fn mode(run: &mut Run<'_>, directory: &Directory, warning: Vec<u8>) -> i32
             totals: config.t,
         };
         let (rows, header, totals) = listing::layout(letters, filtered);
+        let stray = if directory.misplaced {
+            stray_locator(config)
+        } else {
+            Vec::new()
+        };
         if header {
             let count = directory.entries.len() as u64;
-            listing::header(&config.archive, run.spool.size, count, &mut out);
+            listing::header(&config.archive, &stray, run.spool.size, count, &mut out);
+        } else {
+            run.host.warn(&stray);
         }
         for entry in &selected {
             match rows {

@@ -280,7 +280,7 @@ export class Workspace {
     const index = options.index === undefined ? undefined : normalizeIndexConfig(options.index)
     // Before the mounts: the write verdict asks whether the cache keeps anything.
     this.clock = options.clock ?? new SystemClock()
-    this.ids = options.ids ?? new SystemIdSource()
+    this.ids = options.ids ?? new SystemIdSource(this.clock)
     // Minted before any mount, so a seeded source hands out the same draws in
     // the same order on both hosts.
     this.wsId = options.workspaceId ?? this.ids.uuid7()
@@ -358,7 +358,7 @@ export class Workspace {
         sourceFor(seeded.managed.source)
       }
     }
-    this.sessionManager = new SessionManager(sessionId, stores.sessions, seedVars)
+    this.sessionManager = new SessionManager(sessionId, stores.sessions, seedVars, this.clock)
     this.meta = new WorkspaceMeta(
       this.wsId,
       this.stateStoreInternal,

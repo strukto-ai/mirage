@@ -27,14 +27,18 @@ function mkWs(): Workspace {
   return new Workspace({ '/': ram }, { mode: MountMode.WRITE })
 }
 
-async function callTool(t: unknown, input: unknown): Promise<ToolResult> {
+async function callTool(
+  t: unknown,
+  input: unknown,
+  abort = new AbortController().signal,
+): Promise<ToolResult> {
   const exec = (t as { execute?: (input: unknown, ctx: unknown) => unknown }).execute
   if (typeof exec !== 'function') throw new Error('tool has no execute')
   const ctx = {
     sessionID: 's',
     messageID: 'm',
     agent: 'a',
-    abort: new AbortController().signal,
+    abort,
   }
   const result = await exec(input, ctx)
   return result as ToolResult
@@ -229,6 +233,42 @@ describe('opencode mirageTools.grep', () => {
     const out = await callTool(mirageTools(ws).grep, { pattern: 'hello' })
     expect(out).toContain('/a.txt')
     expect(out).toContain('hello')
+  })
+})
+
+describe('opencode tools under a path with a space', () => {
+  it('glob and grep quote the root', async () => {
+    const ws = mkWs()
+    await ws.vfs.mkdir('/my dir')
+    await ws.vfs.write('/my dir/a.txt', '-x marks')
+    const tools = mirageTools(ws)
+    expect(await callTool(tools.glob, { pattern: '*.txt', path: '/my dir' })).toBe('/my dir/a.txt')
+    expect(await callTool(tools.grep, { pattern: '-x', path: '/my dir' })).toBe(
+      '/my dir/a.txt:1:-x marks',
+    )
+  })
+})
+
+describe('opencode tools keep shell syntax literal', () => {
+  it('glob and grep pass braces through unexpanded', async () => {
+    const ws = mkWs()
+    await ws.vfs.write('/item{1,2}.txt', 'item{1,2}')
+    await ws.vfs.write('/item1.txt', 'item1')
+    const tools = mirageTools(ws)
+    expect(await callTool(tools.glob, { pattern: 'item{1,2}.txt' })).toBe('/item{1,2}.txt')
+    expect(await callTool(tools.grep, { pattern: 'item{1,2}', path: '/item{1,2}.txt' })).toBe(
+      '1:item{1,2}',
+    )
+  })
+})
+
+describe('opencode mirageTools.bash abort', () => {
+  it('stops the line when OpenCode aborts the call', async () => {
+    const controller = new AbortController()
+    controller.abort()
+    await expect(
+      callTool(mirageTools(mkWs()).bash, { command: 'sleep 5' }, controller.signal),
+    ).rejects.toThrow('execute aborted')
   })
 })
 

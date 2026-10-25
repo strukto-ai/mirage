@@ -22,6 +22,7 @@ import pytest
 from mirage import RAMVFS, MountMode, Workspace
 from mirage.agents.langchain.backend import LangchainWorkspace
 from mirage.policy import CommandContext, Deny, Policy
+from mirage.types import Limit
 
 CONTENTION_REPRO = """
 import asyncio
@@ -360,6 +361,7 @@ async def test_aexecute_failing_command(backend):
         ("edit", ("/file", "old", "new")),
         ("grep", ("pattern",)),
         ("glob", ("*",)),
+        ("delete", ("/file",)),
         ("upload_files", ([("/file", b"text")],)),
         ("download_files", (["/file"],)),
     ],
@@ -396,6 +398,35 @@ async def test_aread_paginates_text_without_line_numbers(backend):
         "content": "one\ntwo\n",
         "encoding": "utf-8",
     }
+    assert (
+        result.total_lines,
+        result.start_line,
+        result.end_line,
+        result.next_offset,
+    ) == (4, 2, 3, 3)
+
+
+@pytest.mark.asyncio
+async def test_aread_last_window_has_no_next_offset(backend):
+    await backend.awrite("/lines.txt", "zero\none\ntwo\n")
+
+    result = await backend.aread("/lines.txt", offset=1)
+
+    assert (result.start_line, result.end_line, result.next_offset) == (
+        2,
+        3,
+        None,
+    )
+
+
+@pytest.mark.asyncio
+async def test_aread_zero_limit_inspects_nothing(backend):
+    await backend.awrite("/lines.txt", "zero\n")
+
+    result = await backend.aread("/lines.txt", limit=0)
+
+    assert result.no_lines_requested is True
+    assert result.start_line is None
 
 
 @pytest.mark.asyncio
@@ -518,6 +549,96 @@ async def test_aglob(backend):
     paths = [e["path"] for e in entries]
     assert any("a.txt" in p for p in paths)
     assert not any("b.py" in p for p in paths)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("pattern", "expected"),
+    [
+        ("*.py", ["/src/app/main.py", "/src/top.py"]),
+        ("app/*.py", ["/src/app/main.py"]),
+        ("**/*.py", ["/src/app/main.py", "/src/top.py"]),
+        ("/*.py", ["/src/top.py"]),
+        ("app", []),
+    ],
+)
+async def test_aglob_matches_files_as_deep_agents_does(
+    backend, pattern, expected
+):
+    await backend.awrite("/src/top.py", "t")
+    await backend.awrite("/src/app/main.py", "m")
+    await backend.awrite("/src/app/notes.txt", "n")
+
+    result = await backend.aglob(pattern, path="/src")
+
+    assert result.error is None
+    assert sorted(e["path"] for e in result.matches) == expected
+    assert not any(e["is_dir"] for e in result.matches)
+
+
+@pytest.mark.asyncio
+async def test_capped_glob_and_grep_report_truncation():
+    ws = Workspace(
+        {"/": RAMVFS()},
+        mode=MountMode.WRITE,
+        command_limits={
+            "find": Limit(max_lines=1),
+            "grep": Limit(max_lines=1),
+        },
+    )
+    backend = LangchainWorkspace(ws)
+    try:
+        await backend.awrite("/src/a.txt", "needle")
+        await backend.awrite("/src/b.py", "needle")
+
+        glob = await backend.aglob("*.py", path="/src")
+        grep = await backend.agrep("needle", path="/src")
+
+        assert glob.truncated is True
+        assert glob.truncation_reason == "budget"
+        assert grep.truncated is True
+        assert len(grep.matches) == 1
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_aglob_refuses_a_traversal(backend):
+    result = await backend.aglob("../*.py", path="/src")
+
+    assert result.matches is None
+    assert "traversal" in result.error
+
+
+@pytest.mark.asyncio
+async def test_agrep_glob_with_a_slash_matches_the_relative_path(backend):
+    await backend.awrite("/src/app/main.py", "needle")
+    await backend.awrite("/src/main.py", "needle")
+
+    result = await backend.agrep("needle", path="/src", glob="app/*.py")
+
+    assert result.error is None
+    assert [m["path"] for m in result.matches] == ["/src/app/main.py"]
+
+
+@pytest.mark.asyncio
+async def test_adelete_removes_a_file_and_a_tree(backend):
+    await backend.awrite("/one.txt", "1")
+    await backend.awrite("/tree/a/b.txt", "b")
+
+    assert (await backend.adelete("/one.txt")).path == "/one.txt"
+    assert (await backend.adelete("/tree")).path == "/tree"
+    paths = [e["path"] for e in (await backend.als("/")).entries]
+    assert "/one.txt" not in paths
+    assert "/tree" not in paths
+
+
+@pytest.mark.asyncio
+async def test_adelete_reports_a_missing_path(backend):
+    result = await backend.adelete("/missing")
+
+    assert result.path is None
+    assert result.error is not None
 
 
 @pytest.mark.asyncio

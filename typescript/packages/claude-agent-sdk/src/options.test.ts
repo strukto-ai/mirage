@@ -35,6 +35,11 @@ describe('buildOptions', () => {
     expect(options.allowedTools).toContain('mcp__mirage__*')
   })
 
+  it('disables the built-in tools', async () => {
+    const options = await buildOptions(mkWs())
+    expect(options.tools).toEqual([])
+  })
+
   it('uses the default system prompt', async () => {
     const options = await buildOptions(mkWs())
     expect(typeof options.systemPrompt).toBe('string')
