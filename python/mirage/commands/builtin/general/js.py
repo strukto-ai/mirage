@@ -18,7 +18,7 @@ from mirage.accessor.base import Accessor
 from mirage.commands.builtin.general.interpreter import (
     exec_refusal,
     not_bound,
-    run_output,
+    run_interpreter,
     runtime_version,
 )
 from mirage.commands.config import Context, command
@@ -57,9 +57,7 @@ async def _js(
     switches["module"] = fl.as_bool("module") or (
         script is not None and script.virtual.endswith(".mjs")
     )
-    return run_output(
-        await runtime.execute(paths, texts, replace(ctx, flags=switches))
-    )
+    return run_interpreter(runtime, paths, texts, replace(ctx, flags=switches))
 
 
 js = command("js", vfs=None, spec=SPECS["js"], write=True)(_js)

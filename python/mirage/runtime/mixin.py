@@ -42,7 +42,13 @@ class LineExecutorMixin(ABC, Generic[E]):
 
     @abstractmethod
     async def run_line(
-        self, engine: E, paths: list[PathSpec], texts: list[str], ctx: Context
+        self,
+        engine: E,
+        paths: list[PathSpec],
+        texts: list[str],
+        ctx: Context,
+        output: OutputFn | None = None,
+        errors: OutputFn | None = None,
     ) -> RunResult:
         """Execute one raw command line wholesale, ``sh -c`` with it.
 
@@ -52,6 +58,12 @@ class LineExecutorMixin(ABC, Generic[E]):
             texts (list[str]): unused.
             ctx (Context): the line in ``flags["c"]``, its stdin, the
                 session environment and working directory.
+            output (OutputFn | None): receives stdout as it arrives,
+                each write awaited, which the result then leaves out;
+                None, or a transport that cannot stream, returns it
+                whole. A runtime that leaves both sinks out of its
+                signature is never handed them.
+            errors (OutputFn | None): the same for stderr.
         """
 
 
@@ -67,7 +79,7 @@ class ProcessExecutorMixin(ABC, Generic[E]):
         paths: list[PathSpec],
         texts: list[str],
         ctx: Context,
-        output: OutputFn | None,
+        output: OutputFn | None = None,
         errors: OutputFn | None = None,
     ) -> RunResult:
         """Run the program ``texts`` names, with ``ctx``'s working

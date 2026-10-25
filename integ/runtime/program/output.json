@@ -23,6 +23,27 @@
       ]
     },
     {
+      "id": "endless_writer_stops_at_its_reader",
+      "runtimes": [
+        "monty",
+        "wasi",
+        "quickjs",
+        "local"
+      ],
+      "steps": [
+        {
+          "command": {
+            "python": "python3 -c \"while True: print('y')\" | head -n 2",
+            "js": "node -e \"for (;;) console.log('y')\" | head -n 2"
+          },
+          "expect": {
+            "exit": 0,
+            "stdout": "y\ny\n"
+          }
+        }
+      ]
+    },
+    {
       "id": "output_survives_failure_and_reuse",
       "runtimes": [
         "monty",

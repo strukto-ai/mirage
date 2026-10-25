@@ -26,6 +26,7 @@ from mirage.runtime.python.flags import init_argv
 from mirage.runtime.python.wasi.config import WasiConfig
 from mirage.runtime.types import (
     FilesystemOperation,
+    OutputFn,
     Program,
     RunResult,
     RuntimeReach,
@@ -143,7 +144,12 @@ class WasiRuntime(PythonRuntime[WasmExecution]):
         await engine.close()
 
     async def interpret(
-        self, engine: WasmExecution, program: Program, ctx: Context
+        self,
+        engine: WasmExecution,
+        program: Program,
+        ctx: Context,
+        output: OutputFn | None = None,
+        errors: OutputFn | None = None,
     ) -> RunResult:
         files = RuntimeFiles.of(ctx, self._binding)
         hiding = _stdlib_mount(files.prefixes()) if files is not None else None
@@ -202,5 +208,7 @@ class WasiRuntime(PythonRuntime[WasmExecution]):
                 ("PYTHONDONTWRITEBYTECODE", "1"),
             ],
             fs=fs,
+            output=output,
+            errors=errors,
         )
         return RunResult(stdout=stdout, stderr=stderr, exit_code=exit_code)

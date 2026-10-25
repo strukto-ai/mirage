@@ -178,11 +178,12 @@ async def resolve_program(
         code = data.decode(errors="replace") if isinstance(data, bytes) else ""
         if flags.get("x"):
             code = skip_first_line(code)
-    stdin = None if ctx.stdin is None else await materialize(ctx.stdin)
+    stdin = ctx.stdin
     if code is None:
-        if not stdin:
+        source = None if stdin is None else await materialize(stdin)
+        if not source:
             return _failed(f"{label}: no input\n")
-        code = stdin.decode(errors="replace")
+        code = source.decode(errors="replace")
         stdin = None
     script_cli = bool(flags.get("script_cli"))
     if script_cli and ctx.spec is not None:

@@ -94,7 +94,11 @@ impl LineReader {
     fn pull(&mut self, io: &mut Io) {
         if !std::mem::replace(&mut self.waiting, true) {
             let open = self.open.take();
-            io.push(Request::Read { fd: self.fd, open });
+            io.push(Request::Read {
+                fd: self.fd,
+                open,
+                least: 0,
+            });
         }
     }
 

@@ -22,12 +22,12 @@ import { specOf } from '../../spec/builtins.ts'
 import { FlagView } from '../../spec/flag_view.ts'
 import { execRefusal, notBound, runInterpreter, runtimeVersion } from './interpreter.ts'
 
-async function js(
+function js(
   _accessor: Accessor,
   paths: PathSpec[],
   texts: string[],
   ctx: Context,
-): Promise<CommandFnResult> {
+): CommandFnResult {
   const named = ctx.spec?.name ?? ''
   const label = named === '' ? 'js' : named
   const runtime = ctx.runtime?.bound

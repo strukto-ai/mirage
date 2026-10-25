@@ -55,6 +55,11 @@ describe('initArgv', () => {
       initArgv({ check_hash_based_pycs: 'always', X: ['dev'], O: 1, S: true, B: true }),
     ).toEqual(['-B', '-S', '-O', '-X', 'dev', '--check-hash-based-pycs', 'always'])
   })
+
+  it('hands -u back first and never reports it', () => {
+    expect(initArgv({ u: true, B: true })).toEqual(['-u', '-B'])
+    expect(unhonoredNotice({ u: true }, 'pyodide').length).toBe(0)
+  })
 })
 
 describe('unhonoredNotice', () => {

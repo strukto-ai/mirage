@@ -17,6 +17,8 @@ import asyncio
 import pytest
 
 from mirage.runtime.python.monty.execution import MontyExecution
+from mirage.runtime.python.monty.fs import MontyFs
+from mirage.runtime.types import Program
 
 
 @pytest.mark.asyncio
@@ -89,3 +91,75 @@ async def test_close_survives_a_pool_that_fails_while_it_waits(monkeypatch):
     with pytest.raises(RuntimeError, match="not installed"):
         await opening
     await closing
+
+
+# A sink that has not taken a print yet holds the program back, as a
+# full pipe would: the program asks nothing more of the host until then.
+class _Asking(MontyFs):
+    def __init__(self) -> None:
+        super().__init__(None, {})
+        self.asked: list[str] = []
+
+    def getenv(self, key: str, default: str | None = None) -> str | None:
+        self.asked.append(key)
+        return super().getenv(key, default)
+
+
+@pytest.mark.asyncio
+async def test_a_sink_that_waits_holds_the_program_back():
+    execution = MontyExecution()
+    fs = _Asking()
+    taken: list[bytes] = []
+    gate = asyncio.Event()
+
+    async def output(data: bytes) -> None:
+        taken.append(data)
+        await gate.wait()
+
+    code = "import os\nprint(1)\nos.getenv('X')\nprint(2)\n"
+    try:
+        run = asyncio.ensure_future(
+            execution.run(Program(code=code), None, fs, output)
+        )
+        while not taken:
+            await asyncio.sleep(0.01)
+        await asyncio.sleep(0.3)
+        assert fs.asked == []
+        gate.set()
+        result = await asyncio.wait_for(run, 30)
+        assert result.exit_code == 0
+        assert fs.asked == ["X"]
+        assert b"".join(taken) == b"1\n2\n"
+    finally:
+        await execution.close()
+
+
+# A run cancelled while its sink holds a print cancels that write and
+# waits for it, so neither the write nor Monty's callback outlives the run.
+@pytest.mark.asyncio
+async def test_a_cancelled_run_cancels_the_write_its_sink_holds():
+    execution = MontyExecution()
+    entered, cancelled = asyncio.Event(), asyncio.Event()
+
+    async def output(data: bytes) -> None:
+        entered.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            await asyncio.sleep(0.1)
+            cancelled.set()
+            raise
+
+    try:
+        run = asyncio.ensure_future(
+            execution.run(
+                Program(code="print(1)\n"), None, MontyFs(None, {}), output
+            )
+        )
+        await entered.wait()
+        run.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await run
+        assert cancelled.is_set()
+    finally:
+        await execution.close()

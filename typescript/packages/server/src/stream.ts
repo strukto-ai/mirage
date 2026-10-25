@@ -1,63 +1,41 @@
-import { abortable } from '@struktoai/mirage-core/utils/abort'
 import { Buffer } from 'node:buffer'
 import { Readable } from 'node:stream'
 import type { FastifyReply } from 'fastify'
 import { CHUNK_SIZE } from '@struktoai/mirage-core/io/cooperative'
-import { CAPACITY, BytePipe } from '@struktoai/mirage-core/io/pipe'
 import type { StreamName } from '@struktoai/mirage-core/io/types'
+import type { ShellExecution } from '@struktoai/mirage-core/workspace/shell_execution'
 import type { ExecutionTable } from './jobs.ts'
 import type { ExecutionRecord } from '@struktoai/mirage-core/execution/types'
 import { UploadStdin } from './stdin.ts'
 
-const PAYLOAD_SIZE = CHUNK_SIZE / 2
+export const PAYLOAD_SIZE = CHUNK_SIZE / 2
 
 /**
- * A streamed shell's output records; each encoded record fits one pipe
- * chunk, so cancelling a blocked write cannot leave an incomplete record.
+ * One output event as wire records, a line each, every one holding at most
+ * PAYLOAD_SIZE bytes of it. Mirrors Python's `record`.
  */
-export class ShellOutput {
-  readonly pipe: BytePipe
-  private writing: Promise<void> = Promise.resolve()
-
-  constructor(capacity = CAPACITY) {
-    this.pipe = new BytePipe(capacity)
+export function record(stream: StreamName, data: Uint8Array): Uint8Array {
+  const lines: string[] = []
+  for (let offset = 0; offset < data.byteLength; offset += PAYLOAD_SIZE) {
+    const part = Buffer.from(data.subarray(offset, offset + PAYLOAD_SIZE)).toString('base64')
+    lines.push(JSON.stringify({ stream, data: part }) + '\n')
   }
-
-  async emit(stream: StreamName, data: Uint8Array, signal?: AbortSignal): Promise<void> {
-    const previous = this.writing
-    let release!: () => void
-    this.writing = new Promise((resolve) => {
-      release = resolve
-    })
-    try {
-      await abortable(previous, signal)
-      for (let offset = 0; offset < data.byteLength; offset += PAYLOAD_SIZE) {
-        await this.pipe.write(
-          Buffer.from(
-            JSON.stringify({
-              stream,
-              data: Buffer.from(data.subarray(offset, offset + PAYLOAD_SIZE)).toString('base64'),
-            }) + '\n',
-          ),
-          signal,
-        )
-      }
-    } finally {
-      release()
-    }
-  }
+  return Buffer.from(lines.join(''))
 }
 
 /**
  * Stream one job and retain its existing owner through disconnect cleanup.
- * The final record goes out as soon as the job settles: stdin the line did
- * not read never ends a line, as `ssh host cmd` returns while its input is
- * still open. The body then ends only once the rest of the upload is
- * discarded or the caller hangs up, so the caller finishes sending before
- * the connection closes.
+ * The job opens the line's execution and waits for its status; the body
+ * reads the execution's events and sends each as its records, so a caller
+ * that reads slowly holds the line back. The final record goes out as soon
+ * as the job settles: stdin the line did not read never ends a line, as
+ * `ssh host cmd` returns while its input is still open. The body then ends
+ * only once the rest of the upload is discarded or the caller hangs up, so
+ * the caller finishes sending before the connection closes. Mirrors
+ * Python's `ShellResponse`.
  */
 export function shellResponse(
-  output: ShellOutput,
+  execution: Promise<ShellExecution | null>,
   jobs: ExecutionTable,
   job: ExecutionRecord,
   reply: FastifyReply,
@@ -65,22 +43,23 @@ export function shellResponse(
   stdin: UploadStdin | Uint8Array | undefined,
 ): FastifyReply {
   const finished = jobs.wait(job.id)
-  const completed = jobs
-    .drain(job.id)
-    .then(() => finished)
-    .finally(() => {
-      output.pipe.end()
-    })
+  const completed = jobs.drain(job.id).then(() => finished)
   void completed.catch((error: unknown) => {
     reply.log.error(error, 'streamed shell completion failed')
   })
+  let shell: ShellExecution | null = null
+  void execution.then((opened) => {
+    shell = opened
+  })
   const disconnected = (): void => {
-    output.pipe.closeReader()
+    // The job is cancelled first, so it ends as cancelled rather than as
+    // the failure its closed execution would report.
+    jobs.cancel(job.id)
+    void shell?.close()
     if (stdin instanceof UploadStdin)
       void stdin.discard().catch((error: unknown) => {
         reply.log.error(error, 'stdin cleanup failed')
       })
-    jobs.cancel(job.id)
   }
   reply.raw.once('close', disconnected)
   let uploadError: unknown
@@ -93,7 +72,16 @@ export function shellResponse(
   })
   async function* body(): AsyncGenerator<Uint8Array> {
     try {
-      yield* output.pipe.stream()
+      const opened = await execution
+      if (opened !== null) {
+        try {
+          for await (const event of opened.events) yield record(event.stream, event.data)
+        } catch (error) {
+          // The line failed or was stopped: its status says so in the
+          // final record.
+          reply.log.debug(error, 'streamed shell output ended')
+        }
+      }
       const result = await completed
       if (stdin instanceof UploadStdin && stdin.error !== undefined) uploadError = stdin.error
       yield Buffer.from(
@@ -111,12 +99,12 @@ export function shellResponse(
       if (stdin instanceof UploadStdin) await stdin.discard()
       await failed
     } finally {
-      output.pipe.closeReader()
       if (stdin instanceof UploadStdin) await stdin.discard()
       jobs.cancel(job.id)
       try {
         await jobs.drain(job.id)
       } finally {
+        await (await execution)?.close()
         reply.raw.off('close', disconnected)
       }
     }

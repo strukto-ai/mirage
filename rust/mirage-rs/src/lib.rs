@@ -41,6 +41,7 @@ mod sort;
 mod split;
 mod strings;
 mod tac;
+mod task;
 mod tr;
 mod tsort;
 mod uniq;
@@ -48,6 +49,7 @@ mod utf8;
 mod wc;
 mod width;
 mod xxd;
+mod zip;
 
 use std::fmt;
 
@@ -355,8 +357,10 @@ pub fn open(kind: &str, config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
         "tsort" => tsort::open(config),
         "unexpand" => expand::open_unexpand(config),
         "uniq" => uniq::open(config),
+        "unzip" => zip::open_unzip(config),
         "wc" => wc::open(config),
         "xxd" => xxd::open(config),
+        "zip" => zip::open_zip(config),
         _ => Err(StreamError::new(format!("unknown stream: {kind}"))),
     }
 }

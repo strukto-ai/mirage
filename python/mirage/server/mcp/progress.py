@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 import anyio
 
-from mirage.concurrency.limiter import settle
+from mirage.concurrency.limiter import on_loop, settle
 from mirage.io.types import IOResult, OutputEvent, StreamName
 from mirage.workspace.tools.io_text import io_to_str
 from mirage.workspace.tools.tool_operations import (
@@ -98,14 +98,7 @@ class OutputProgress:
                 notification = self._notify(
                     self._progress, f"[{stream}] {text}"
                 )
-                if asyncio.get_running_loop() is self._loop:
-                    await notification
-                else:
-                    await asyncio.wrap_future(
-                        asyncio.run_coroutine_threadsafe(
-                            notification, self._loop
-                        )
-                    )
+                await on_loop(notification, self._loop)
 
     async def close(self) -> None:
         self._closed = True

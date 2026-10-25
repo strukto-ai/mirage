@@ -803,6 +803,43 @@
         "t",
         "x"
       ]
+    },
+    {
+      "id": "unzip_reads_an_unflagged_name_as_code_page_437",
+      "seq": 601497,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(mkdir -p /data/fcA_ucp && printf %s 'UEsDBBQAAAAAAAAAIQAgMDo2BgAAAAYAAAAIAAAAY2Fmgi50eHRoZWxsbwpQSwMEFAAAAAAAAAAhACAwOjYGAAAABgAAAAkAAABuYYt2ZS50eHRoZWxsbwpQSwECFAAUAAAAAAAAACEAIDA6NgYAAAAGAAAACAAAAAAAAAAAACAAAAAAAAAAY2Fmgi50eHRQSwECFAMUAAAAAAAAACEAIDA6NgYAAAAGAAAACQAAAAAAAAAAAAAApIEsAAAAbmGLdmUudHh0UEsFBgAAAAACAAIAbQAAAFkAAAAAAA==' | base64 -d > /data/fcA_ucp/n.zip && cd /data/fcA_ucp && unzip -Z1 n.zip; unzip -q -d o n.zip; echo rc=$?; ls o; cd / && rm -r /data/fcA_ucp)",
+      "expect": {
+        "exit": 0,
+        "stdout": "café.txt\nnaïve.txt\nrc=0\ncafé.txt\nnaïve.txt\n",
+        "stderr": ""
+      },
+      "flags": [
+        "Z",
+        "1",
+        "q",
+        "d"
+      ]
     }
   ]
 }

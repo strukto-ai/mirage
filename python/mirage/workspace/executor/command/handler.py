@@ -212,7 +212,6 @@ async def run_handler(
     voice: HandlerVoice,
     drop: Callable[[], Awaitable[None]] | None = None,
     scope: Callable[[CommandOutput], CommandOutput] | None = None,
-    frame: bool = True,
     vfs: Files | None = None,
 ) -> CommandFnResult:
     """Run one handler body: a mount command's, or a CLI leaf's.
@@ -247,8 +246,6 @@ async def run_handler(
         scope (Callable[[CommandOutput], CommandOutput] | None): what the
             caller wraps an answer in before it is framed (a mount binds
             its recorder and revisions to the stream).
-        frame (bool): whether to frame the answer's stream; a script
-            leaf's comes back from its runtime already worded.
         vfs (Files | None): the handler's files, whose session's hides
             filter the rows it hands over; None filters none.
     """
@@ -277,17 +274,9 @@ async def run_handler(
     source = out[0]
     stream, io = scope(out) if scope is not None else out
     io.producer = producer
-    pulled: AsyncIterator[bytes]
-    if (
-        not frame
-        or stream is None
-        or (isinstance(stream, bytes) and not voice.splits)
-    ):
-        if drop is None or stream is None or isinstance(stream, bytes):
-            return stream, io
-        pulled = stream
-    else:
-        pulled = _framed(stream, io, voice)
+    if stream is None or (isinstance(stream, bytes) and not voice.splits):
+        return stream, io
+    pulled = _framed(stream, io, voice)
     lazy = not isinstance(stream, bytes)
 
     async def close() -> None:
@@ -355,5 +344,7 @@ async def _framed(
                 yield chunk
         io.stderr = await io.materialize_stderr() + stderr
         io.exit_code = code
+        if io.output is not None:
+            io.output.finish()
     finally:
         await close_quietly(source)

@@ -15,6 +15,7 @@
 import asyncio
 import json
 import logging
+from collections.abc import Callable
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, Request, Response
@@ -29,9 +30,10 @@ from mirage.server.multipart import MAX_REQUEST_PART, PartEvent, part_events
 from mirage.server.registry import WorkspaceEntry
 from mirage.server.routers.vfs import require_entry, session_of
 from mirage.server.stdin import LoopStdin, UploadStdin
-from mirage.server.stream import ShellOutput, ShellResponse
+from mirage.server.stream import ShellResponse
 from mirage.types import JsonValue
 from mirage.workspace.execution import ExecutionScope
+from mirage.workspace.shell_execution import ShellExecution
 from mirage.workspace.workspace import Workspace
 
 logger = logging.getLogger(__name__)
@@ -74,17 +76,22 @@ async def _invoke_shell(
     ws: Workspace,
     kwargs: dict[str, Any],
     scope: ExecutionScope,
-    output: ShellOutput | None = None,
+    opened: Callable[[ShellExecution | None], None] | None = None,
 ) -> JsonValue:
-    if output is None:
+    if opened is None:
         result = await ws.shell(**kwargs, execution_scope=scope)
     else:
-        async with await ws.shell(
+        execution = await ws.shell(
             **kwargs, execution_scope=scope, stream=True
-        ) as execution:
-            async for chunk in execution.events:
-                await output.emit(chunk.stream, chunk.data)
+        )
+        # The response reads the events and closes the execution; the job
+        # waits for its status, and a cancelled job stops it.
+        opened(execution)
+        try:
             result = await execution.wait()
+        except asyncio.CancelledError:
+            execution.cancel()
+            raise
     return await io_result_to_dict(result)
 
 
@@ -134,12 +141,28 @@ async def shell(
     kwargs = _build_shell_kwargs(req_obj, stdin)
     session_id = session_id or entry.runner.ws.default_session_id
     kwargs["session_id"] = session_id
-    output = ShellOutput(entry.runner.ws.io.buffer_bytes) if stream else None
+    loop = asyncio.get_running_loop()
+    opened: asyncio.Future[ShellExecution | None] = loop.create_future()
+
+    def hand(execution: ShellExecution | None) -> None:
+        # From the workspace's loop to this one; the first hand-over
+        # stands, so a job that ended first hands over nothing.
+        def give() -> None:
+            if not opened.done():
+                opened.set_result(execution)
+
+        loop.call_soon_threadsafe(give)
 
     async def run(scope: ExecutionScope) -> JsonValue:
-        return await entry.runner.call(
-            _invoke_shell(entry.runner.ws, kwargs, scope, output)
-        )
+        try:
+            return await entry.runner.call(
+                _invoke_shell(
+                    entry.runner.ws, kwargs, scope, hand if stream else None
+                )
+            )
+        finally:
+            if stream:
+                hand(None)
 
     if background and upload is not None:
         await upload
@@ -149,8 +172,10 @@ async def shell(
         factory=run,
         session_id=session_id,
     )
-    if output is not None:
-        return ShellResponse(output, jobs, job, request, upload, part)
+    if stream:
+        return ShellResponse(
+            opened, entry.runner.loop, jobs, job, request, upload, part
+        )
     if background:
         return Response(
             content=BackgroundResponse(

@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import inspect
 import logging
 from abc import ABC
 from collections.abc import Sequence
@@ -167,8 +168,8 @@ class Runtime(ABC, Generic[E]):
             kind (ExecutionKind): code in the runtime's language, a
                 whole line (``sh -c`` with ``ctx.flags["c"]``), or a
                 process.
-            output (OutputFn | None): where a streamed process writes
-                its output; None collects it in the result.
+            output (OutputFn | None): where the run writes its output
+                as it comes; None collects it in the result.
             errors (OutputFn | None): the same for its stderr.
         """
         release = self.admit()
@@ -237,15 +238,27 @@ class Runtime(ABC, Generic[E]):
             paths (list[PathSpec]): the path operands.
             texts (list[str]): the text operands.
             ctx (Context): the run's context.
-            output (OutputFn | None): a streamed process's output.
-            errors (OutputFn | None): a streamed process's stderr.
+            output (OutputFn | None): where the run writes its output.
+            errors (OutputFn | None): where it writes its stderr.
         """
         if kind == "process" and not texts:
             raise ValueError("process argv must not be empty")
         if kind == "code":
-            return await self.run(engine, paths, texts, ctx)
+            return await self.run(
+                engine,
+                paths,
+                texts,
+                ctx,
+                **self._sinks(self.run, output, errors),
+            )
         if kind == "line" and isinstance(self, LineExecutorMixin):
-            return await self.run_line(engine, paths, texts, ctx)
+            return await self.run_line(
+                engine,
+                paths,
+                texts,
+                ctx,
+                **self._sinks(self.run_line, output, errors),
+            )
         if kind == "process" and isinstance(self, ProcessExecutorMixin):
             return await self.run_process(
                 engine, paths, texts, ctx, output, errors
@@ -255,7 +268,13 @@ class Runtime(ABC, Generic[E]):
         )
 
     async def run(
-        self, engine: E, paths: list[PathSpec], texts: list[str], ctx: Context
+        self,
+        engine: E,
+        paths: list[PathSpec],
+        texts: list[str],
+        ctx: Context,
+        output: OutputFn | None = None,
+        errors: OutputFn | None = None,
     ) -> RunResult:
         """Run code in this runtime's language; only a language runtime
         has one.
@@ -265,10 +284,40 @@ class Runtime(ABC, Generic[E]):
             paths (list[PathSpec]): the script operand, if any.
             texts (list[str]): the program's argv.
             ctx (Context): the run's context.
+            output (OutputFn | None): receives stdout as it comes; None
+                returns it in the result.
+            errors (OutputFn | None): the same for stderr.
         """
         raise UnsupportedExecutionError(
             f"{self.name}: code execution is unsupported"
         )
+
+    @staticmethod
+    def _sinks(
+        method: Callable[..., Any],
+        output: OutputFn | None,
+        errors: OutputFn | None,
+    ) -> dict[str, OutputFn | None]:
+        """The sinks ``method`` names, passed by name.
+
+        A runtime written without them returns its output whole in its
+        RunResult, as a TypeScript one ignores the arguments it does not
+        declare.
+
+        Args:
+            method (Callable[..., Any]): the run method about to be called.
+            output (OutputFn | None): where the run writes its output.
+            errors (OutputFn | None): where it writes its stderr.
+        """
+        params = inspect.signature(method).parameters
+        named = any(
+            p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()
+        )
+        return {
+            name: sink
+            for name, sink in (("output", output), ("errors", errors))
+            if named or name in params
+        }
 
     async def open_engine(self) -> E:
         """Build the engine every run reuses, once; the default is None."""

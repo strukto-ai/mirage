@@ -123,6 +123,8 @@ class RemoteSandbox(
         paths: list[PathSpec],
         texts: list[str],
         ctx: Context,
+        output: OutputFn | None = None,
+        errors: OutputFn | None = None,
     ) -> RunResult:
         """Run one raw line in the sandbox, connecting once.
 
@@ -137,13 +139,15 @@ class RemoteSandbox(
             texts (list[str]): unused.
             ctx (Context): the line in ``flags["c"]``, the bytes piped
                 into it, the session environment and working directory.
+            output (OutputFn | None): receives stdout as it arrives.
+            errors (OutputFn | None): receives stderr as it arrives.
         """
         line = ctx.flags.get("c")
         return await self._run_argv(
             ("/bin/sh", "-c", line if isinstance(line, str) else ""),
             ctx,
-            None,
-            None,
+            output,
+            errors,
         )
 
     async def run_process(
@@ -152,7 +156,7 @@ class RemoteSandbox(
         paths: list[PathSpec],
         texts: list[str],
         ctx: Context,
-        output: OutputFn | None,
+        output: OutputFn | None = None,
         errors: OutputFn | None = None,
     ) -> RunResult:
         return await self._run_argv(tuple(texts), ctx, output, errors)

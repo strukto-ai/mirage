@@ -147,6 +147,54 @@ def owned_task(coro: Coroutine[Any, Any, _R]) -> asyncio.Task[_R]:
     return loop.create_task(coro)
 
 
+async def on_loop(work: Awaitable[_R], loop: asyncio.AbstractEventLoop) -> _R:
+    """Await ``work`` on ``loop``, its result handed back to this one.
+
+    The one hop between event loops: a hosted workspace runs on its
+    runner's loop while a server's transports live on the server's. On
+    ``loop`` itself the work is awaited in place. A cancelled caller
+    cancels the work there and returns only once it has settled, so
+    nothing it holds outlives the call.
+
+    Args:
+        work (Awaitable[_R]): the work, not yet started.
+        loop (asyncio.AbstractEventLoop): the loop it runs on.
+    """
+    if asyncio.get_running_loop() is loop:
+        return await work
+    task: asyncio.Task[Any] | None = None
+    canceled = False
+
+    async def run() -> _R:
+        nonlocal task
+        if canceled:
+            if isinstance(work, Coroutine):
+                work.close()
+            raise asyncio.CancelledError()
+        task = asyncio.current_task()
+        return await work
+
+    def cancel() -> None:
+        nonlocal canceled
+        canceled = True
+        if task is not None:
+            task.cancel()
+
+    result = asyncio.wrap_future(asyncio.run_coroutine_threadsafe(run(), loop))
+    try:
+        return await asyncio.shield(result)
+    except asyncio.CancelledError:
+        loop.call_soon_threadsafe(cancel)
+        try:
+            await settle(result)
+        except Exception:
+            logger.debug(
+                "a call on another loop failed during cancellation",
+                exc_info=True,
+            )
+        raise
+
+
 async def bounded_map_stream(
     items: AsyncIterator[_T], fn: Callable[[_T], Awaitable[_R]], workers: int
 ) -> AsyncGenerator[_R, None]:

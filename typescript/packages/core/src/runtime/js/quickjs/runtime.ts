@@ -16,7 +16,9 @@ import type { Context } from '../../../commands/config.ts'
 import { CommandTimeoutError } from '../../../errors/types.ts'
 import { HOME_CONFIG_KEYS, type RuntimeOptions } from '../../config.ts'
 import { JsRuntime } from '../base.ts'
-import type { Program, RunResult } from '../../types.ts'
+import type { OutputFn, Program, RunResult } from '../../types.ts'
+import { materialize } from '../../../io/types.ts'
+import { abortable, mergeSignals } from '../../../utils/abort.ts'
 import { RuntimeFiles } from '../../files.ts'
 import { fromGuestText, installQuickJsFs, toGuestText } from './fs.ts'
 import { cwdPreamble } from './execution.ts'
@@ -79,12 +81,23 @@ export class QuickJsRuntime extends JsRuntime<NewAsyncModule> {
    * @param newAsyncModule the install's module factory.
    * @param program the source and argv to run.
    * @param ctx the run's context.
+   * @param output receives stdout as it is written; absent returns it in
+   *   the result.
+   * @param errors the same for stderr.
    */
   async interpret(
     newAsyncModule: NewAsyncModule,
     program: Program,
     ctx: Context,
+    output?: OutputFn,
+    errors?: OutputFn,
   ): Promise<RunResult> {
+    // Read through the run's signal: input left open must not hold back
+    // the stop of a run that is cancelled or past its deadline.
+    const stdin =
+      program.stdin === null
+        ? new Uint8Array()
+        : await abortable(materialize(program.stdin), ctx.signal)
     const QuickJS = await newAsyncModule()
     // Module-owned context, not newRuntime(): the async module's runtime
     // disposer unregisters callbacks before QTS_FreeRuntime, so a runtime
@@ -104,7 +117,23 @@ export class QuickJsRuntime extends JsRuntime<NewAsyncModule> {
     // that can still fire (python's epoch interruption on a thread).
     const timedOut = this.installInterrupt(runtime, ctx.signal, ctx.timeoutSeconds, exit)
     try {
-      this.installGlobals(vm, program, ctx, out, err, exit)
+      // A guest waiting on a slow reader is suspended, out of the hook's
+      // reach, so the deadline also runs as a timer that stops the wait:
+      // whole milliseconds, at most the longest delay a timer takes.
+      const deadline =
+        ctx.timeoutSeconds !== undefined && ctx.timeoutSeconds > 0
+          ? AbortSignal.timeout(Math.min(Math.ceil(ctx.timeoutSeconds * 1000), 2 ** 31 - 1))
+          : undefined
+      this.installGlobals(
+        vm,
+        program,
+        stdin,
+        ctx,
+        exit,
+        [out, output],
+        [err, errors],
+        mergeSignals(ctx.signal, deadline),
+      )
       const files = RuntimeFiles.of(ctx, this.binding)
       const closeAll = installQuickJsFs(vm, files, ctx.signal)
 
@@ -128,11 +157,6 @@ export class QuickJsRuntime extends JsRuntime<NewAsyncModule> {
       }
       let exitCode = 0
       if (result.error) {
-        if (timedOut.value && ctx.timeoutSeconds !== undefined) {
-          result.error.dispose()
-          await closeAll()
-          throw new CommandTimeoutError(this.name, ctx.timeoutSeconds)
-        }
         if (exit.called) {
           exitCode = exit.code
         } else {
@@ -160,6 +184,12 @@ export class QuickJsRuntime extends JsRuntime<NewAsyncModule> {
         }
         if (exit.called) exitCode = exit.code
         result.value.dispose()
+      }
+      // Past the deadline is a timeout however the run ended, a queued job
+      // it was running included.
+      if ((timedOut.value || deadline?.aborted === true) && ctx.timeoutSeconds !== undefined) {
+        await closeAll()
+        throw new CommandTimeoutError(this.name, ctx.timeoutSeconds)
       }
       // Files the guest left open still owe the mount their writes, however
       // the program ended.
@@ -201,23 +231,52 @@ export class QuickJsRuntime extends JsRuntime<NewAsyncModule> {
     return timedOut
   }
 
+  /**
+   * Define the host side of the bootstrap's globals. A stream with a sink
+   * suspends the guest on each write until the sink takes it, so a reader
+   * that falls behind holds the program back; one without keeps what is
+   * written for the result.
+   */
   private installGlobals(
     ctx: QuickJSAsyncContext,
     program: Program,
+    stdin: Uint8Array,
     run: Context,
-    out: string[],
-    err: string[],
     exit: { code: number; called: boolean },
+    out: [string[], OutputFn | undefined],
+    err: [string[], OutputFn | undefined],
+    stop: AbortSignal | undefined,
   ): void {
     const setGlobal = (name: string, handle: QuickJSHandle): void => {
       ctx.setProp(ctx.global, name, handle)
       handle.dispose()
     }
-    const hostLog = (sink: string[]): QuickJSHandle =>
-      ctx.newFunction('', (h) => {
-        run.signal?.throwIfAborted()
-        sink.push(fromGuestText(ctx, h))
-      })
+    const hostLog = ([kept, sink]: [string[], OutputFn | undefined]): QuickJSHandle =>
+      sink === undefined
+        ? ctx.newFunction('', (h) => {
+            run.signal?.throwIfAborted()
+            kept.push(fromGuestText(ctx, h))
+          })
+        : ctx.newAsyncifiedFunction('', async (h) => {
+            if (exit.called) return
+            run.signal?.throwIfAborted()
+            // A reader that went away ends the program at once, 141, as
+            // SIGPIPE ends one.
+            await abortable(sink(ENC.encode(fromGuestText(ctx, h))), stop).catch(
+              (error: unknown) => {
+                if (stop?.aborted === true) {
+                  // Stopped while it waited: the program ends at its next
+                  // step, as an interrupted one does.
+                  exit.code = 1
+                  exit.called = true
+                  return
+                }
+                console.debug(`${this.name}: the reader went away: ${String(error)}`)
+                exit.code = 141
+                exit.called = true
+              },
+            )
+          })
     setGlobal(
       '__mirage_atob',
       ctx.newFunction('atob', (h) => toGuestText(ctx, atob(fromGuestText(ctx, h)))),
@@ -235,7 +294,6 @@ export class QuickJsRuntime extends JsRuntime<NewAsyncModule> {
         exit.called = true
       }),
     )
-    const stdin = program.stdin ?? new Uint8Array()
     let position = 0
     setGlobal(
       '__mirage_readStdin',

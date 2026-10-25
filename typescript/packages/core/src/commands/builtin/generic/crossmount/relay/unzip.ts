@@ -14,37 +14,30 @@
 
 import type { PathSpec } from '../../../../../types.ts'
 import { IOResult } from '../../../../../io/types.ts'
+import { Files } from '../../../../../workspace/files.ts'
 import { unzipGeneric } from '../../unzip.ts'
-import { crossOpts, statOp, streamOp } from '../utils.ts'
+import { crossOpts, flatten, streamOp } from '../utils.ts'
 import type { CrossResult, DispatchFn } from '../types.ts'
 import type { FlagValue } from '../../../../spec/types.ts'
 
 /**
  * Run an unzip whose archive and -d destination span mounts.
  *
- * Pure wiring: the shared generic runs on dispatch-relayed calls, so
- * the archive is read from its mount and every extracted path lands on
- * whichever mount owns it.
+ * Pure wiring: the archive is read from its mount and every extracted path
+ * lands on whichever mount owns it.
  */
-export async function runUnzip(
+export function runUnzip(
   scopes: PathSpec[],
   textArgs: string[],
   flagKwargs: Record<string, FlagValue>,
   dispatch: DispatchFn,
-): Promise<CrossResult> {
-  const result = await unzipGeneric(
-    scopes,
+): CrossResult {
+  const vfs = new Files(dispatch, null, null, { ledger: false }).servedBy(null)
+  const result = unzipGeneric(
+    flatten(scopes),
     textArgs,
-    crossOpts(flagKwargs),
+    { ...crossOpts(flagKwargs), vfs },
     streamOp(dispatch),
-    async (p, data) => {
-      await dispatch('write', p, [data])
-    },
-    async (p) => {
-      await dispatch('mkdir', p)
-    },
-    statOp(dispatch),
-    true,
   )
   return result ?? [null, new IOResult()]
 }

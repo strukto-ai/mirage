@@ -27,15 +27,14 @@ import { PATHS_OPERAND, REMAINDER_OPERAND, TEXTS_OPERAND, TEXT_OPERAND } from '.
 // the script file's first line, and is answered where the program is
 // resolved (resolveProgram) because every engine reads the same resolved
 // text; the init switches are handed to the runtime in its ctx.flags and honored
-// by whichever engine can; -u is a structural no-op, since mirage
-// buffers every stream and returns it whole. Pinned against CPython
-// 3.12.11.
+// by whichever engine can; -u reaches a spawned CPython, the one engine
+// that buffers its output. Pinned against CPython 3.12.11.
 const PYTHON_OPTIONS: readonly Argument[] = [
   new Argument('-c', { help: 'Run the next argument as a program.' }),
   new Argument('-m', { help: 'Run the named module as __main__.' }),
   new Argument('-u', {
     action: 'store_true',
-    help: '(Ignored) Unbuffered output. Mirage buffers every stream and returns it whole.',
+    help: 'Force the stdout and stderr streams to be unbuffered.',
   }),
   new Argument('-b', {
     action: 'count',
