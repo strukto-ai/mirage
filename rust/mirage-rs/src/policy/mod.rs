@@ -1,8 +1,10 @@
+mod admission;
 mod pattern;
 mod profile;
 mod types;
 mod visibility;
 
+pub use admission::{AdmissionMatcher, subjects};
 pub use pattern::{pattern_matches, pattern_reaches, split_pattern};
 pub use types::*;
 
