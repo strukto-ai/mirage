@@ -1311,8 +1311,16 @@ class Dispatcher:
             )
             == MountMode.READ
         )
+        # A content shortcut stands in for a read and is admitted as one,
+        # as a warm read is, so a policy that judges reads judges it; the
+        # backend still answers the shortcut.
+        admitted = (
+            declared(type(mount.vfs), "read") or CALLS["read"]
+            if name in READ_SHORTCUT_OPS
+            else mark
+        )
         boundary = await self._admit(
-            call, mount, mark, judge_mode=not looks_up
+            call, mount, admitted, judge_mode=not looks_up
         )
         if looks_up:
             await _mkdir_on_read_only(

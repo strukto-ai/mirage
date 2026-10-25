@@ -634,6 +634,7 @@ it('preserves unknown source metadata and checks logical changes in retained sta
   )
   expect(seen[1]).toMatchObject({
     size: 7,
+    mode: 0o100600,
     uid: 'owner',
     modified: source.modified,
     extra: source.extra,

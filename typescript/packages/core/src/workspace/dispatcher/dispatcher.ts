@@ -977,7 +977,13 @@ export class Dispatcher {
       }
       const mark = declared(owner.vfs.constructor, name) ?? CALLS.get(name) ?? null
       if (mark === null) throw enotsup(owner.vfs.name, name, call.path)
-      await this.admit(call, boundary, mark)
+      // A content shortcut stands in for a read and is admitted as one, as a
+      // warm read is, so a policy that judges reads judges it; the backend
+      // still answers the shortcut.
+      const admitted = READ_SHORTCUT_OPS.has(name)
+        ? (declared(owner.vfs.constructor, 'read') ?? CALLS.get('read') ?? mark)
+        : mark
+      await this.admit(call, boundary, admitted)
       if (name === 'copy' && (await this.copyReadsFirst(call))) {
         await this.dispatchAdmitted('read', call.path, [], {})
       }

@@ -712,7 +712,7 @@ def test_stat_cached_preserves_unknown_source_and_checks_logical_changes():
         "/data/unknown", replace(projected, size=7, mode=0o100600)
     )
     assert (checked.size, checked.mode) == (7, 0o100600)
-    assert seen[-1].size == 7
+    assert (seen[-1].size, seen[-1].mode) == (7, 0o100600)
     assert seen[-1].uid == "owner"
     assert seen[-1].modified == row.modified
     assert seen[-1].extra == row.extra

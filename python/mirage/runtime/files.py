@@ -36,6 +36,7 @@ from mirage.runtime.handles import FlushStep, Kept
 from mirage.runtime.resolver import MountResolver
 from mirage.runtime.types import DispatchFn, VFSEntry, VFSStat
 from mirage.types import FileStat, FileType, PathSpec
+from mirage.utils.dates import timestamp_iso
 from mirage.utils.path import CycleError, norm, resolve_path
 from mirage.utils.remnants import entry_name
 from mirage.utils.stat_view import (
@@ -446,7 +447,8 @@ class RuntimeFiles:
     def stat_cached(self, path: str, row: VFSStat) -> VFSStat:
         """Judge a descriptor's held row as a stat of its path, and
         answer it; nothing is fetched. The policies see the backend's row
-        with the descriptor's own size, so an unknown size stays unknown.
+        with what the descriptor changed (size, mode, times), so an
+        unknown size and a named owner stay as the backend gave them.
 
         Args:
             path (str): the descriptor's current virtual path.
@@ -461,8 +463,19 @@ class RuntimeFiles:
             else FileType.FILE,
             mode=row.mode,
         )
+        updates: dict[str, Any] = {}
         if row.size != content_size(held):
-            held = held.model_copy(update={"size": row.size})
+            updates["size"] = row.size
+        if row.mode != posix_mode(held):
+            updates["mode"] = row.mode
+        for key, ns, was in (
+            ("modified", row.mtime_ns, mtime_ns(held)),
+            ("atime", row.atime_ns, atime_ns(held)),
+        ):
+            if ns is not None and ns != was:
+                updates[key] = timestamp_iso(ns / 1_000_000_000)
+        if updates:
+            held = held.model_copy(update=updates)
         self.call("stat", path, retained=held, nofollow=row.is_link)
         return row
 

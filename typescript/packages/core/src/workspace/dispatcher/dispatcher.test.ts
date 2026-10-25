@@ -4107,8 +4107,9 @@ it.each([
 })
 
 it('has a preVfs policy judge a shortcut without a whole read', async () => {
-  // preVfs judges the shortcut's own call; only a postVfs policy, which judges
-  // bytes a count or a checksum does not carry, sends it to a whole read.
+  // preVfs judges the shortcut as the read it stands in for; only a postVfs
+  // policy, which judges bytes a count or a checksum does not carry, sends it
+  // to a whole read.
   const vfs = new StandInRAM()
   vfs.store.dirs.add('/')
   vfs.store.files.set('/cold', ENC.encode('a\n'))
@@ -4124,7 +4125,8 @@ it('has a preVfs policy judge a shortcut without a whole read', async () => {
     const [answer] = await ws.vfs.dispatch('first_lines', '/m/cold', [1])
     expect(answer).toEqual(ENC.encode('stand-in\n'))
     expect(vfs.asked).toEqual(['first_lines'])
-    expect(seen).toContain('first_lines')
+    expect(seen).toContain('read')
+    expect(seen).not.toContain('first_lines')
   } finally {
     await ws.close()
   }
@@ -4143,6 +4145,27 @@ it('leaves the rest of a live pipe to the next reader under a postVfs policy', a
       'f() { head -c 1 "$1"; echo; cat "$1"; }; f <(printf a; sleep 1; printf rest)',
     )
     expect(DEC.decode(result.stdout)).toBe('a\nrest')
+  } finally {
+    await ws.close()
+  }
+})
+
+it('has a policy refusing reads refuse their shortcuts', async () => {
+  const vfs = new StandInRAM()
+  vfs.store.dirs.add('/')
+  vfs.store.files.set('/cold', ENC.encode('a\n'))
+  const policy: Policy = {
+    preVfs: (ctx) => (ctx.call.name === 'read' ? { kind: 'deny', reason: 'no reads' } : null),
+  }
+  const ws = new Workspace({ '/m': vfs }, { policies: [policy] })
+  try {
+    for (const [name, args] of [
+      ['first_lines', [1]],
+      ['line_count', []],
+    ] as [string, unknown[]][]) {
+      await expect(ws.vfs.dispatch(name, '/m/cold', args)).rejects.toMatchObject({ code: 'EACCES' })
+    }
+    expect(vfs.asked).toEqual([])
   } finally {
     await ws.close()
   }

@@ -372,8 +372,9 @@ export class RuntimeFiles {
 
   /**
    * Judge a descriptor's held row as a stat of its path, and answer it;
-   * nothing is fetched. The policies see the backend's row with the
-   * descriptor's own size, so an unknown size stays unknown.
+   * nothing is fetched. The policies see the backend's row with what the
+   * descriptor changed (size, mode, times), so an unknown size and a named
+   * owner stay as the backend gave them.
    */
   async statCached(path: string, row: VFSStat): Promise<VFSStat> {
     // A row that crossed a worker boundary is a plain object again.
@@ -388,7 +389,18 @@ export class RuntimeFiles {
         mode: row.mode,
       },
     )
-    if (row.size !== contentSize(held)) held = held.with({ size: row.size })
+    const mtime = mtimeMs(held)
+    const atime = atimeMs(held)
+    held = held.with({
+      ...(row.size !== contentSize(held) ? { size: row.size } : {}),
+      ...(row.mode !== posixMode(held) ? { mode: row.mode } : {}),
+      ...(row.mtimeMs !== undefined && row.mtimeMs !== mtime
+        ? { modified: new Date(row.mtimeMs).toISOString() }
+        : {}),
+      ...(row.atimeMs !== undefined && row.atimeMs !== atime
+        ? { atime: new Date(row.atimeMs).toISOString() }
+        : {}),
+    })
     await this.dispatch('stat', path, undefined, undefined, {
       retained: held,
       ...(row.isLink === true ? { nofollow: true } : {}),

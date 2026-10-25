@@ -3997,9 +3997,9 @@ class _SeesCalls(Policy):
 
 @pytest.mark.asyncio
 async def test_a_pre_vfs_policy_judges_a_shortcut_without_a_whole_read():
-    # pre_vfs judges the shortcut's own call; only a post_vfs policy,
-    # which judges bytes a count or a checksum does not carry, sends it
-    # to a whole read.
+    # pre_vfs judges the shortcut as the read it stands in for; only a
+    # post_vfs policy, which judges bytes a count or a checksum does not
+    # carry, sends it to a whole read.
     vfs = _StandInRAM()
     vfs._store.dirs.add("/")
     vfs._store.files["/cold"] = b"a\n"
@@ -4011,6 +4011,28 @@ async def test_a_pre_vfs_policy_judges_a_shortcut_without_a_whole_read():
         )
         assert answer == b"stand-in\n"
         assert vfs.asked == ["first_lines"]
-        assert "first_lines" in policy.seen
+        assert "read" in policy.seen and "first_lines" not in policy.seen
+    finally:
+        await ws.close()
+
+
+class _RefusesReads(Policy):
+    async def pre_vfs(self, ctx: VfsContext) -> Action | None:
+        return Deny("no reads") if ctx.call.name == "read" else None
+
+
+@pytest.mark.asyncio
+async def test_a_policy_refusing_reads_refuses_their_shortcuts():
+    vfs = _StandInRAM()
+    vfs._store.dirs.add("/")
+    vfs._store.files["/cold"] = b"a\n"
+    ws = Workspace({"/m": vfs}, policies=[_RefusesReads()])
+    try:
+        for name, kwargs in (("first_lines", {"n": 1}), ("line_count", {})):
+            with pytest.raises(PermissionError):
+                await ws.vfs.dispatch(
+                    name, PathSpec.from_str_path("/m/cold"), **kwargs
+                )
+        assert vfs.asked == []
     finally:
         await ws.close()
