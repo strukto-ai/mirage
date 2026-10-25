@@ -443,3 +443,26 @@ async def test_a_group_stopped_with_a_signal_passes_it_to_every_child():
     assert root.terminate(15)
     assert ((await root.join()).exit_code, child.signal) == (143, 15)
     assert (await child.join()).exit_code == 143
+
+
+# A caller's setup from the new process's identity (the session's
+# $BASHPID) runs before the runner does, with the process already live,
+# so a runner that starts at once sees both.
+@pytest.mark.asyncio
+async def test_started_runs_before_the_runner_with_the_process_live():
+    supervisor = ProcessSupervisor()
+    order: list[str] = []
+
+    async def run() -> int:
+        order.append(f"run {[p.info.pid for p in supervisor.live()]}")
+        return 0
+
+    handle = supervisor.start(
+        session_id="s",
+        command="probe",
+        cwd=PathSpec.from_str_path("/"),
+        run=run,
+        started=lambda info: order.append(f"started {info.pid}"),
+    )
+    await handle.join()
+    assert order == ["started 1", "run [1]"]

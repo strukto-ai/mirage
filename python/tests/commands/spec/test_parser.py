@@ -751,13 +751,12 @@ def test_word_choice_survives_the_copy_the_registry_parses():
     assert parsed.invalid_value_options == []
 
 
-# compile_spec caches on a frozen dataclass, so its key is STRUCTURAL: a
-# spec built to look exactly like tee's shares the builtin's CompiledSpec
-# object. The word-choice decision is therefore read off the spec and never
-# stored in there -- stored, it would be whichever of the two compiled
-# first, and the order is whatever the process happened to do. Both
-# directions are checked because the wrong one is order-dependent: the
-# clone inheriting the word choice, and the real tee losing it.
+# A spec built to look exactly like tee's is equal to it field for field
+# but compiles to tables of its own, as compile_spec caches per spec object.
+# The word-choice decision is read off the spec all the same, so the clone
+# never inherits it and the real tee never loses it, whichever of the two
+# compiled first. Both directions are checked because the wrong one is
+# order-dependent.
 def test_a_structural_twin_of_a_builtin_spec_shares_no_word_choice():
     tee = SPECS["tee"]
     twin = CommandSpec(
@@ -775,7 +774,8 @@ def test_a_structural_twin_of_a_builtin_spec_shares_no_word_choice():
         ),
     )
     assert twin == tee and twin is not tee
-    assert compile_spec(twin) is compile_spec(tee)
+    assert compile_spec(twin) is compile_spec(twin)
+    assert compile_spec(twin) is not compile_spec(tee)
     assert parse_command(
         twin, ["--output-error=exit-n"], "/", "tee"
     ).invalid_value_options == [

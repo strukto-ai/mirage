@@ -1,7 +1,7 @@
 # The repository's width since before Ruff formatted it. Ruff's default of 88
 # would rewrap every long line in the tree.
 line-length = 79
-target-version = "py311"
+target-version = "py312"
 force-exclude = true
 # Test data, not code: the fake services serve these bytes, and the goldens
 # hold their sizes, line counts and blob hashes.

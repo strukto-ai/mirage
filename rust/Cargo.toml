@@ -38,7 +38,7 @@ regex-syntax = { version = "=0.8.11", default-features = false, features = [
 ] }
 serde = { version = "1", default-features = false, features = ["derive", "std"] }
 serde_json = { version = "1", default-features = false, features = ["std"] }
-pyo3 = { version = "0.30", features = ["abi3-py311"] }
+pyo3 = { version = "0.30", features = ["abi3-py312"] }
 
 [profile.release]
 opt-level = 3

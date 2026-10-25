@@ -5,7 +5,7 @@ description = "A unified virtual filesystem for AI agents. Mount S3, Google Driv
 readme = "README.md"
 license = "Apache-2.0"
 license-files = ["LICENSE", "THIRD_PARTY_NOTICES"]
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 authors = [
     { name = "Zecheng Zhang", email = "zecheng@strukto.ai" },
 ]
@@ -27,7 +27,6 @@ classifiers = [
     "Operating System :: POSIX :: Linux",
     "Operating System :: MacOS :: MacOS X",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Topic :: Software Development :: Libraries :: Python Modules",
     "Topic :: System :: Filesystems",

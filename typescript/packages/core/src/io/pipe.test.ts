@@ -5,9 +5,14 @@ import { CAPACITY, BytePipe, SEALED } from './pipe.ts'
 import { concat } from '../utils/bytes.ts'
 
 describe('BytePipe', () => {
-  it.each([CHUNK_SIZE, CAPACITY, 262144])(
-    'waits at capacity %i and preserves a large write in bounded chunks',
-    async (capacity) => {
+  it.each(
+    [CHUNK_SIZE, CAPACITY, 262144].flatMap((capacity) =>
+      [false, true].map((joined) => [capacity, joined] as const),
+    ),
+  )(
+    'waits at capacity %i (joined %s) and preserves a large write in bounded reads',
+    async (capacity, joined) => {
+      const read = joined ? capacity : CHUNK_SIZE
       const pipe = new BytePipe(capacity)
       const data = new Uint8Array(capacity * 3 + 7).fill(97)
       let finished = false
@@ -18,13 +23,14 @@ describe('BytePipe', () => {
       expect(pipe.bufferedBytes).toBe(capacity)
       expect(finished).toBe(false)
       const parts: Uint8Array[] = []
-      for await (const part of pipe.stream()) {
-        expect(part.byteLength).toBeLessThanOrEqual(CHUNK_SIZE)
+      for await (const part of pipe.stream(joined)) {
+        expect(part.byteLength).toBeLessThanOrEqual(read)
         expect(pipe.bufferedBytes).toBeLessThanOrEqual(capacity)
         parts.push(part)
       }
       await writing
       expect(concat(parts)).toEqual(data)
+      expect(parts[0]?.byteLength).toBe(read)
     },
   )
 

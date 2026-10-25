@@ -74,7 +74,8 @@ class OpenStream:
         return self._stream.cancel()
 
     def drain(self) -> bytes:
-        """One bounded step of the work ``busy`` reports, and its output."""
+        """Bounded steps of the work ``busy`` reports, up to a piece of
+        output, and that output."""
         try:
             return self._stream.drain()
         except StreamError as exc:

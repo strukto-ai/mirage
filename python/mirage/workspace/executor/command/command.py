@@ -14,7 +14,6 @@
 
 import functools
 from collections.abc import Sequence
-from dataclasses import replace
 from typing import Any
 
 from mirage.commands.builtin.find_parse import (
@@ -315,7 +314,7 @@ def made_by_command(dispatch: DispatchFn) -> DispatchFn:
     async def made(
         name: str, path: PathSpec, /, **kwargs: Any
     ) -> tuple[Any, IOResult]:
-        caller = replace(current_caller(), rule_gate=gate)
+        caller = current_caller().changed({"rule_gate": gate})
         return await dispatch(name, path, caller=caller, **kwargs)
 
     return made

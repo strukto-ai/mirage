@@ -15,7 +15,6 @@
 import logging
 from collections.abc import Awaitable, Callable, Iterator
 from contextlib import contextmanager
-from dataclasses import replace
 from typing import Literal, TypeVar
 
 from mirage.cache.types import (
@@ -86,7 +85,9 @@ async def capture_read(
         fetch (Callable): whole-file backend reader.
     """
     facts: list[tuple[bytes, str | None]] = []
-    token = bind_caller(replace(current_caller(), read_facts=(path, facts)))
+    token = bind_caller(
+        current_caller().changed({"read_facts": (path, facts)})
+    )
     try:
         data = await fetch()
         return data, [fp for body, fp in facts if body is data]
@@ -141,7 +142,7 @@ def own_write_version(
             read, or ABSENT when its read found no file.
     """
     token = bind_caller(
-        replace(current_caller(), own_version=(path.virtual, version))
+        current_caller().changed({"own_version": (path.virtual, version)})
     )
     try:
         yield

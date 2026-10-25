@@ -533,11 +533,14 @@ async def test_python3_mount_limit_follows_script_path(restore_defaults):
     ],
 )
 async def test_large_ram_command_honors_caller_cancel(command):
+    # Large enough that every command outlasts several yield slices: a
+    # line starts eagerly, so one done within its first slice ends before
+    # the cancel's timer can fire, and the cancel must land mid-run.
     from mirage.utils.abort import MirageAbortError
 
     ram = RAMVFS()
-    ram.accessor.store.files["/big"] = b"line\n" * 200_000
-    ram.accessor.store.files["/blank"] = b"\n" * 1_000_000
+    ram.accessor.store.files["/big"] = b"line\n" * 2_000_000
+    ram.accessor.store.files["/blank"] = b"\n" * 10_000_000
     ws = Workspace({"/": ram})
     cancel = asyncio.Event()
     loop = asyncio.get_running_loop()

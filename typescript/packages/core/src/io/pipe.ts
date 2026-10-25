@@ -1,4 +1,5 @@
 import { makeAbortError } from '../utils/abort.ts'
+import { concat } from '../utils/bytes.ts'
 import { CHUNK_SIZE } from './cooperative.ts'
 import { PipeClosed } from './errors.ts'
 
@@ -76,6 +77,18 @@ export class BytePipe {
     }
   }
 
+  private merged(taken: Uint8Array[]): Uint8Array {
+    const [first, ...rest] = taken
+    if (first === undefined) return new Uint8Array()
+    if (rest.length === 0) return first
+    let end = first.byteOffset + first.byteLength
+    for (const chunk of rest) {
+      if (chunk.buffer !== first.buffer || chunk.byteOffset !== end) return concat(taken)
+      end += chunk.byteLength
+    }
+    return new Uint8Array(first.buffer, first.byteOffset, end - first.byteOffset)
+  }
+
   /** Wait until the reader consumes accepted writes or closes. */
   async drain(): Promise<void> {
     while (this.accepted < this.delivered && !this.readerClosed) await this.changed()
@@ -110,19 +123,26 @@ export class BytePipe {
     while (!this.reading && !this.readerClosed) await this.changed()
   }
 
-  /** Read once; abandoning the iterator closes its endpoint. */
-  async *stream(): AsyncGenerator<Uint8Array> {
+  /**
+   * Read once; abandoning the iterator closes its endpoint. Each read is one
+   * chunk as written, unless `joined`: then it takes everything buffered, as
+   * a kernel pipe's read does, for a reader that keeps no write boundaries,
+   * which behind a writer that filled the pipe wakes once for the lot rather
+   * than once per chunk. Chunks side by side in one buffer (a sealed write)
+   * pass as one view of it; others are copied together.
+   */
+  async *stream(joined = false): AsyncGenerator<Uint8Array> {
     if (this.reading) throw new Error('byte pipe already has a reader')
     this.reading = true
     this.notify()
     try {
       while (!this.readerClosed) {
-        const chunk = this.chunks.shift()
-        if (chunk !== undefined) {
-          this.bytes -= chunk.byteLength
+        const taken = joined ? this.chunks.splice(0) : this.chunks.splice(0, 1)
+        if (taken.length > 0) {
+          for (const chunk of taken) this.bytes -= chunk.byteLength
           this.notify()
-          yield chunk
-          this.accepted += 1
+          yield this.merged(taken)
+          this.accepted += taken.length
           this.notify()
         } else if (this.ended) {
           if (this.failure !== undefined) throw this.failure

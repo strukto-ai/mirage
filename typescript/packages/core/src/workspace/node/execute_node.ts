@@ -1337,6 +1337,9 @@ async function executeNodeBody(
           abort.abort()
         },
         limit: session.processes.max,
+        started: (info) => {
+          child.session.processId = info.pid
+        },
         run: async () => {
           const body = () =>
             handleSubshell(
@@ -1367,8 +1370,6 @@ async function executeNodeBody(
         throw new ExitSignal(FORK_FAILED_STATUS, encodeText(FORK_FAILED))
       throw error
     }
-    child.session.processId = process.info.pid
-
     await process.task
     if (result === undefined) throw new Error('subshell completed without a result')
     return result

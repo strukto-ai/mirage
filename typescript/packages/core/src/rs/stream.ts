@@ -150,7 +150,7 @@ export class OpenStream {
     return this.guard(() => this.exports.mirage_rs_cancel(this.handle) === 1)
   }
 
-  /** One bounded step of the work `busy` reports, and its output. */
+  /** Bounded steps of the work `busy` reports, up to a piece of output, and that output. */
   drain(): Uint8Array {
     return this.guard(() => this.collect(this.exports.mirage_rs_drain(this.handle), []))
   }

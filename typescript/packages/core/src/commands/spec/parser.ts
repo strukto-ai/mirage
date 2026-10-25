@@ -102,13 +102,10 @@ const WORD_CHOICE_ARGUMENTS = wordChoiceArguments()
  * --help/--version, once per backend), while every declared Argument stays the
  * same object.
  *
- * Read off the spec rather than cached on its CompiledSpec so that the two
- * languages answer alike: python's `compile_spec` caches on a frozen
- * dataclass, so its key is structural and a spec that merely LOOKED like
- * tee's would share the builtin's compiled tables. This WeakMap is keyed by
- * reference and would not, and a fact that depended on which cache it sat in
- * is exactly the kind that drifts. `_word_choice_dests` in parser.py is the
- * twin.
+ * Read off the spec rather than kept on its CompiledSpec, as
+ * `_word_choice_dests` in parser.py reads it: the tables describe the
+ * grammar, and whether a choice set is tee's is a fact about which Argument
+ * objects the spec holds.
  */
 function wordChoiceDests(spec: CommandSpec): ReadonlySet<string> {
   const dests = new Set<string>()

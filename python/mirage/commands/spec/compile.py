@@ -14,7 +14,6 @@
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from functools import lru_cache
 
 from mirage.commands.spec.constants import FLOAT_VALUE, INT_VALUE
 from mirage.commands.spec.types import Argument, CommandSpec, ValueType
@@ -433,13 +432,20 @@ def expand_table_long(
     return (first,) if len(listed) == 1 else listed
 
 
-@lru_cache(maxsize=512)
 def compile_spec(spec: CommandSpec) -> CompiledSpec:
-    """Lower a CommandSpec into parser lookup tables.
+    """Lower a CommandSpec into parser lookup tables, cached per spec.
+
+    The tables ride on the spec object, as TypeScript keys its cache by
+    reference: a cache keyed on the frozen spec would hash every field of
+    it, each Argument's too, on every one of the dozens of parses a line
+    makes.
 
     Args:
         spec (CommandSpec): the declarative spec to compile.
     """
+    cached = spec.__dict__.get("_compiled")
+    if isinstance(cached, CompiledSpec):
+        return cached
     seen_spellings: set[str] = set()
     bool_spellings: set[str] = set()
     value_spellings: list[str] = []
@@ -571,7 +577,7 @@ def compile_spec(spec: CommandSpec) -> CompiledSpec:
     value_spellings.sort(key=len, reverse=True)
     attach_spellings.sort(key=len, reverse=True)
 
-    return CompiledSpec(
+    compiled = CompiledSpec(
         options=options,
         positional=positional,
         rest=rest,
@@ -610,3 +616,5 @@ def compile_spec(spec: CommandSpec) -> CompiledSpec:
         base_dest=base_dest,
         remainder=rest is not None and rest.nargs == "REMAINDER",
     )
+    object.__setattr__(spec, "_compiled", compiled)
+    return compiled

@@ -332,6 +332,21 @@ function buildWs(): Workspace {
   )
 }
 
+// Runners begin in the order they were started: a job begins before the
+// substitution after it in its line, and before the next line, so each
+// reads what the job's redirect wrote.
+it.each([
+  [['echo hi > /m/a & echo "$(cat /m/a)"; wait']],
+  [['echo hi > /m/a &', 'cat /m/a; wait']],
+])('begins a job before what its line runs next: %j', async (lines) => {
+  const ws = buildWs()
+  const results = []
+  for (const line of lines) results.push(await ws.shell(line))
+  const result = results.at(-1)
+  expect([result?.stdoutText, result?.stderrText]).toEqual(['hi\n', ''])
+  await ws.close()
+})
+
 const BODY_SHAPES = [
   'for i in 1; do false & done',
   'for ((k=0;k<1;k++)); do false & done',

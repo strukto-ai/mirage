@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 import asyncio
-import dataclasses
 import logging
 from collections.abc import Awaitable, Callable
 from contextlib import aclosing
@@ -912,9 +911,7 @@ async def _handle_redirect(
     )
     leave = route.record(recorder)
     session.job_output = route
-    enclosing = bind_caller(
-        dataclasses.replace(current_caller(), enclosing=recorder)
-    )
+    enclosing = bind_caller(current_caller().changed({"enclosing": recorder}))
     unbound = {
         field: value
         for fd, fields in EXEC_STREAM_UNBOUND.items()

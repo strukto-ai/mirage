@@ -1063,7 +1063,7 @@ def set_op_call(
         session_id (str): the session the call runs as.
     """
     return bind_caller(
-        dataclasses.replace(current_caller(), call=(owner, handed, session_id))
+        current_caller().changed({"call": (owner, handed, session_id)})
     )
 
 

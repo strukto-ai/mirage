@@ -64,11 +64,11 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      # Its own entry: these installs resolve fresh from PyPI on 3.11 as
-      # well as 3.12, wheels the shared entry never holds. The lock does
-      # not pin a fresh resolution and an entry is never re-saved, so the
-      # key also turns over weekly: a release is cached within the week
-      # rather than fetched on every run until the lock next changes.
+      # Its own entry: these installs resolve fresh from PyPI, wheels the
+      # shared entry never holds. The lock does not pin a fresh resolution and
+      # an entry is never re-saved, so the key also turns over weekly: a
+      # release is cached within the week rather than fetched on every run
+      # until the lock next changes.
       - name: Name the week's install cache
         id: week
         run: echo "week=$(date -u +%G-%V)" >> "$GITHUB_OUTPUT"
@@ -78,10 +78,10 @@ jobs:
         with:
           cache-suffix: install-${{ steps.week.outputs.week }}
 
-      - name: Base install (no extras) on 3.11 and 3.12
+      - name: Base install (no extras)
         working-directory: python
         run: |
-          for ver in 3.11 3.12; do
+          for ver in 3.12; do
             rm -rf .venv-min
             uv venv --python "$ver" .venv-min
             uv pip install --python .venv-min/bin/python .
@@ -151,7 +151,7 @@ jobs:
           failed=()
           for entry in "${entries[@]}"; do
             IFS=: read -r extra module pyver <<< "$entry"
-            pyver="${pyver:-3.11}"
+            pyver="${pyver:-3.12}"
             echo "::group::${extra} (${pyver})"
             rm -rf .venv-x
             if uv venv --python "$pyver" .venv-x \

@@ -54,6 +54,6 @@ export class PipeConsole extends JobConsole {
   }
 
   stream(): AsyncGenerator<Uint8Array> {
-    return this.pipe.stream()
+    return this.pipe.stream(true)
   }
 }

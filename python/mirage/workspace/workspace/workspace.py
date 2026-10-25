@@ -2395,7 +2395,7 @@ class Workspace:
         self._writes += 1
         self._writes_idle.clear()
         try:
-            yield replace(caller, write_held=True)
+            yield caller.changed({"write_held": True})
         finally:
             self._writes -= 1
             if self._writes == 0:
@@ -2540,7 +2540,10 @@ class Workspace:
         """
         caller = current_caller()
         return await self.dispatch(
-            name, path, caller=replace(caller, rule_gate=caller.gate), **kwargs
+            name,
+            path,
+            caller=caller.changed({"rule_gate": caller.gate}),
+            **kwargs,
         )
 
     async def stat(self, path: str) -> FileStat:
@@ -2913,7 +2916,7 @@ class Workspace:
         if handed is None:
             stop = asyncio.Event()
             self._lines[stop] = (session_id, ended)
-            token = bind_caller(replace(current_caller(), stop=stop))
+            token = bind_caller(current_caller().changed({"stop": stop}))
 
         async def line() -> IOResult:
             result = await self._serialize_line(
@@ -2945,6 +2948,12 @@ class Workspace:
         try:
             if stop is not None:
                 await self._admit_line(stop, cancel)
+            if self.processes.queued():
+                # A job started before this line (an earlier line's, or
+                # the enclosing line's when this one is its substitution)
+                # begins first, as its fork already runs: what its
+                # redirect opens is there for the line to read.
+                await asyncio.sleep(0)
             result = await run_cancellable(line(), cancel, stop)
         except (MirageAbortError, asyncio.CancelledError):
             # An abandoned invocation is the caller's outcome, not the
