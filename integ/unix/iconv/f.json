@@ -65,10 +65,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "printf 'caf\\303\\251\\n' | iconv -c -f utf-8 -t ascii; echo rc=$?; printf 'caf\\351\\n' | iconv -c -f utf-8 -t ascii; echo rc=$?; printf 'a\\342\\202\\254b\\n' | iconv -c -f utf-8 -t latin1 | od -An -tx1; printf 'a\\200b\\n' | iconv -c -f ascii -t utf-8; echo rc=$?",
+      "command": "printf 'caf\\303\\251\\n' | iconv -c -f utf-8 -t ascii; echo rc=$?; printf 'caf\\351\\n' | iconv -c -f utf-8 -t ascii; echo rc=$?; printf 'a\\342\\202\\254b\\n' | iconv -c -f utf-8 -t latin1 | od -An -tx1; printf 'a\\200b\\n' | iconv -c -f ascii -t utf-8; echo rc=$?; printf 'a\\377' | iconv -c -f utf-8 -t ascii | head -c 1; echo \" ${PIPESTATUS[*]}\"",
       "expect": {
         "exit": 0,
-        "stdout": "caf\nrc=1\ncaf\nrc=1\n 61 62 0a\nab\nrc=1\n",
+        "stdout": "caf\nrc=1\ncaf\nrc=1\n 61 62 0a\nab\nrc=1\na 0 1 0\n",
         "stderr": ""
       }
     },
@@ -313,6 +313,142 @@
         "f",
         "t"
       ]
+    },
+    {
+      "id": "iconv_converts_utf32_and_ucs4_as_glibc_does",
+      "seq": 16100024,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'a' | iconv -f UTF-8 -t UTF-32 | od -An -tx1; printf 'a' | iconv -f UTF-8 -t UCS-4 | od -An -tx1; printf '\\000\\000\\376\\377\\000\\000\\000a' | iconv -f UTF-32 -t UTF-8; echo; printf '\\000\\021\\000\\000' | iconv -f UCS-4 -t UTF-8 | od -An -tx1; printf '\\370\\210\\200\\200\\200' | iconv -f UTF-8 -t UCS-4LE | od -An -tx1; printf '\\000\\000\\330\\000' | iconv -f UCS-4 -t UCS-4LE | od -An -tx1; printf '\\000\\021\\000\\000' | iconv -f UCS-4 -t UTF-16 | od -An -tx1; printf '\\000\\021\\000\\000' | iconv -f UTF-32BE -t UTF-8; echo rc=$?; printf '\\200\\000\\000\\000\\000\\000\\000a' | iconv -c -f UCS-4 -t UTF-8; echo \" rc=$?\"; printf '\\334\\000\\000a' | iconv -c -f UCS-2BE -t UTF-8; echo \" rc=$?\"; printf '\\000\\334a\\000' | iconv -c -f UCS-2 -t UTF-8; echo \" rc=$?\"",
+      "expect": {
+        "exit": 0,
+        "stdout": " ff fe 00 00 61 00 00 00\n 00 00 00 61\na\n f4 90 80 80\n 00 00 20 00\n 00 d8 00 00\n ff fe\nrc=1\na rc=0\na rc=0\na rc=1\n",
+        "stderr": "iconv: illegal input sequence at position 0\niconv: illegal input sequence at position 0\n"
+      }
+    },
+    {
+      "id": "iconv_reads_single_byte_charsets_as_glibc_does",
+      "seq": 16100025,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf '\\241\\265\\271\\n' | iconv -f ISO-8859-2 -t UTF-8; printf '\\200\\n' | iconv -f CP1252 -t UTF-8; printf 'a\\201b' | iconv -f WINDOWS-1252 -t UTF-8; echo \" rc=$?\"; printf '\\200\\320' | iconv -f LATIN5 -t UTF-8 | od -An -tx1; printf '\\256\\244\\n' | iconv -f KOI8-U -t UTF-8; printf '\\241\\n' | iconv -f TIS-620 -t UTF-8; printf '\\240' | iconv -f TIS-620 -t UTF-8; echo rc=$?; printf '\\316\\251\\303\\251\\342\\202\\254' | iconv -f UTF-8 -t ISO-8859-7 | od -An -tx1; printf '\\320\\226' | iconv -f UTF-8 -t KOI8-R | od -An -tx1; printf '\\320\\226' | iconv -f UTF-8 -t CP866 | od -An -tx1; printf '\\320\\226' | iconv -f UTF-8 -t ISO-8859-5 | od -An -tx1; printf '\\342\\202\\254' | iconv -f UTF-8 -t CP1250 | od -An -tx1; printf '\\302\\201' | iconv -f UTF-8 -t CP1250; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "Ąľš\n€\na rc=1\n c2 80 c4 9e\n╝є\nก\nrc=1\n d9\n f6\n 86\n b6\n 80\nrc=1\n",
+        "stderr": "iconv: illegal input sequence at position 1\niconv: illegal input sequence at position 0\niconv: illegal input sequence at position 2\niconv: illegal input sequence at position 0\n"
+      }
+    },
+    {
+      "id": "iconv_keeps_one_byte_order_and_goes_on_after_an_incomplete_end",
+      "seq": 16100026,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf '\\377\\376a\\000' > /data/ic26a; printf '\\376\\377\\000a' > /data/ic26b; iconv -f UTF-16 -t UTF-8 /data/ic26a /data/ic26a | od -An -tx1; iconv -f UTF-16 -t UTF-8 /data/ic26b /data/ic26a | od -An -tx1; printf 'x\\303' > /data/ic26c; printf 'y' > /data/ic26d; iconv -f UTF-8 -t ASCII /data/ic26c /data/ic26d /data/ic26c; echo \" rc=$?\"; printf '\\201' > /data/ic26e; iconv -c -f GBK -t UTF-8 /data/ic26e /data/ic26d; echo \" rc=$?\"; printf 'a' | iconv -f UTF-8 -t UTF-16 - /data/ic26d | od -An -tx1; rm /data/ic26a /data/ic26b /data/ic26c /data/ic26d /data/ic26e",
+      "expect": {
+        "exit": 0,
+        "stdout": " 61 ef bb bf 61\n 61 ef bf be e6 84 80\nxyx rc=1\ny rc=1\n ff fe 61 00 79 00\n",
+        "stderr": "iconv: incomplete character or shift sequence at end of buffer\niconv: incomplete character or shift sequence at end of buffer\niconv: incomplete character or shift sequence at end of buffer\n"
+      }
+    },
+    {
+      "id": "iconv_takes_glibc_long_options",
+      "seq": 16100027,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf 'caf\\303\\251\\n' | iconv --from-code=UTF-8 --to-code=LATIN1 | od -An -tx1; printf 'caf\\303\\251\\n' | iconv --from=UTF-8 --to=ASCII -s; echo rc=$?; printf 'hi\\n' | iconv -f UTF-8 -t UTF-16LE --output=/data/ic27 && od -An -tx1 /data/ic27; rm /data/ic27",
+      "expect": {
+        "exit": 0,
+        "stdout": " 63 61 66 e9 0a\ncafrc=1\n 68 00 69 00 0a 00\n",
+        "stderr": "iconv: illegal input sequence at position 3\n"
+      }
     }
   ]
 }

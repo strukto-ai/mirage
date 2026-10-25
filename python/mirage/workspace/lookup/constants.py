@@ -529,10 +529,8 @@ def changes_files(name: str, words: Sequence[str | PathSpec]) -> bool:
     flags = parse_to_kwargs(parsed)
     fl = FlagView(flags, spec=spec)
     operands = len(parsed.args)
-    if name in ("sort", "shuf"):
+    if name in ("sort", "shuf", "iconv"):
         return fl.raw("output") is not None
-    if name == "iconv":
-        return fl.raw("o") is not None
     if name in ("uniq", "xxd"):
         # A pattern the backend expands may name the output file too; a
         # quoted name is no pattern.

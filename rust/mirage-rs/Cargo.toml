@@ -12,6 +12,7 @@ publish = false
 blake2 = { version = "0.11", default-features = false }
 byteorder = "1.5"
 bzip2 = "0.6.1"
+encoding_rs = "0.8.35"
 flate2 = { version = "1.1.10", default-features = false, features = ["zlib-rs"] }
 grep-regex.workspace = true
 lzma-rust2 = { version = "0.23.0", default-features = false, features = ["std", "encoder", "xz"] }
