@@ -458,7 +458,11 @@ export class MountRegistry {
   /**
    * Add a mount dynamically. Mirrors Python's `registry.mount(...)`.
    * Registers the VFS's commands and ops on the new mount and
-   * re-sorts mounts by prefix length (longest first).
+   * re-sorts mounts by prefix length (longest first). Once the workspace is
+   * built, the VFS takes the workspace clock before anything is placed.
+   *
+   * @throws Error when the prefix is taken, or another workspace holds the
+   *   VFS on another clock.
    */
   mount(
     prefix: string,
@@ -506,8 +510,8 @@ export class MountRegistry {
   }
 
   /**
-   * Hand every mount's accessor the workspace clock, once the workspace is
-   * built; a mount placed later takes it as it is placed. Mirrors Python's
+   * Hand every mount's and CLI install's accessor the workspace clock, once
+   * the workspace is built; a mount placed later takes it as it is placed. Mirrors Python's
    * `MountRegistry.bind_clocks`.
    *
    * @throws Error when another workspace holds one of the VFSes on another
@@ -516,11 +520,21 @@ export class MountRegistry {
   bindClocks(): void {
     try {
       for (const m of this.mountList) m.vfs.accessor.bindClock?.(this.clock, this)
+      this.clis.bindClocks()
     } catch (err) {
       this.releaseClocks()
       throw err
     }
     this.clocksBound = true
+  }
+
+  /**
+   * Let go of the workspace clock on `vfs` once no mount of it remains, as an
+   * unmounted mount finishes its last call. Mirrors Python's
+   * `MountRegistry.release_clock`.
+   */
+  releaseClock(vfs: BaseVFS): void {
+    if (!this.mountList.some((m) => m.vfs === vfs)) vfs.accessor.releaseClock?.(this)
   }
 
   /**
@@ -552,9 +566,6 @@ export class MountRegistry {
     this.rowCache = null
     if (removed === undefined) {
       throw new Error(`no mount at prefix: ${norm}`)
-    }
-    if (!this.mountList.some((m) => m.vfs === removed.vfs)) {
-      removed.vfs.accessor.releaseClock?.(this)
     }
     if (removed === this.rootRef) this.rootRef = null
     return removed

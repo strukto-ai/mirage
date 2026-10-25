@@ -1906,13 +1906,17 @@ class Workspace:
             clock=clock,
             ids=ids,
         )
-        await install_fingerprints(
-            ws._registry,
-            ws._cache,
-            ws._drift,
-            state.get(StateKey.FINGERPRINTS) or [],
-            drift_policy,
-        )
+        try:
+            await install_fingerprints(
+                ws._registry,
+                ws._cache,
+                ws._drift,
+                state.get(StateKey.FINGERPRINTS) or [],
+                drift_policy,
+            )
+        except BaseException:
+            ws._registry.release_clocks()
+            raise
         live_only = state.get(StateKey.LIVE_ONLY_MOUNTS) or []
         if live_only:
             logger.warning(

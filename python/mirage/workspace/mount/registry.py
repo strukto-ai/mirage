@@ -407,7 +407,8 @@ class MountRegistry:
         driver: its index store (shared with any earlier mount of the
         same instance, else ``store``, else built from ``index`` or the
         driver's ``index_ttl``), the driver's op and command tables, and
-        the reference it was built from.
+        the reference it was built from. Once the workspace is built, the
+        VFS takes the workspace clock before anything is placed.
 
         Args:
             prefix (str): the virtual prefix.
@@ -518,8 +519,9 @@ class MountRegistry:
         return m
 
     def bind_clocks(self) -> None:
-        """Hand every mount's accessor the workspace clock, once the
-        workspace is built; a mount placed later takes it as it is placed.
+        """Hand every mount's and CLI install's accessor the workspace
+        clock, once the workspace is built; a mount placed later takes it
+        as it is placed.
 
         Raises:
             ValueError: another workspace holds one of the VFSes on
@@ -528,10 +530,21 @@ class MountRegistry:
         try:
             for m in self._mounts:
                 m.vfs.accessor.bind_clock(self.clock, self)
+            self.clis.bind_clocks()
         except BaseException:
             self.release_clocks()
             raise
         self._clocks_bound = True
+
+    def release_clock(self, vfs: BaseVFS) -> None:
+        """Let go of the workspace clock on ``vfs`` once no mount of it
+        remains, as an unmounted mount finishes its last call.
+
+        Args:
+            vfs (BaseVFS): the driver an unmount removed.
+        """
+        if not any(m.vfs is vfs for m in self._mounts):
+            vfs.accessor.release_clock(self)
 
     def release_clocks(self) -> None:
         """Let go of the workspace clock on every mount and CLI install,
@@ -559,8 +572,6 @@ class MountRegistry:
         for i, m in enumerate(self._mounts):
             if m.prefix == norm_prefix:
                 del self._mounts[i]
-                if not any(e.vfs is m.vfs for e in self._mounts):
-                    m.vfs.accessor.release_clock(self)
                 self._rows = None
                 if m is self._root:
                     self._root = None

@@ -301,6 +301,26 @@ describe('the workspace clock', () => {
       await ws.close()
     }
   })
+
+  it('an unmount holds the clock until its calls finish', async () => {
+    const vfs = drive()
+    const ws = new Workspace({ '/g': vfs }, { mode: MountMode.WRITE, clock: new ManualClock() })
+    try {
+      const done = ws.mount('/g').activity.acquire()
+      const unmounting = ws.unmount('/g')
+      await Promise.resolve()
+      expect(() => {
+        vfs.accessor.bindClock(new ManualClock(), 'later')
+      }).toThrow(/another clock/)
+      done()
+      await unmounting
+      const later = new ManualClock()
+      vfs.accessor.bindClock(later, 'later')
+      expect(vfs.accessor.tokenManager.clock).toBe(later)
+    } finally {
+      await ws.close()
+    }
+  })
 })
 
 function drive(): GoogleDriveVFS {

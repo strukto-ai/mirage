@@ -447,14 +447,9 @@ export class Workspace {
     // Installed CLIs, fully separate from mounts: a spec name resolves
     // against the named registry and every entry installs through the
     // same fail-loud path as registerCli.
-    try {
-      for (const [cliName, [specOrKey, cliConfig]] of Object.entries(options.clis ?? {})) {
-        const cliSpec = typeof specOrKey === 'string' ? cliSpecFor(specOrKey) : specOrKey
-        this.registry.clis.install(cliName, cliSpec, cliConfig)
-      }
-    } catch (err) {
-      this.registry.releaseClocks()
-      throw err
+    for (const [cliName, [specOrKey, cliConfig]] of Object.entries(options.clis ?? {})) {
+      const cliSpec = typeof specOrKey === 'string' ? cliSpecFor(specOrKey) : specOrKey
+      this.registry.clis.install(cliName, cliSpec, cliConfig)
     }
     this.observer = new Observer(stores.observe, this.clock)
     this.registry.observer = this.observer
@@ -2025,7 +2020,12 @@ export class Workspace {
     cliOverrides: CLIOverrides = {},
   ): Promise<InstanceType<T>> {
     const ws = await this._fromState(state, options, overrides, cliOverrides)
-    await ws.installDriftState(state, options.driftPolicy ?? DriftPolicy.STRICT)
+    try {
+      await ws.installDriftState(state, options.driftPolicy ?? DriftPolicy.STRICT)
+    } catch (err) {
+      ws.registry.releaseClocks()
+      throw err
+    }
     return ws
   }
 

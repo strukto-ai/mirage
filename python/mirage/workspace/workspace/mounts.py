@@ -345,19 +345,24 @@ async def unmount(
         shared = identity in shared_mounts
         if not shared:
             registry.retired_mounts[identity] = removed.vfs
-        closing = asyncio.create_task(_close_vfs(removed, shared))
+        closing = asyncio.create_task(_close_vfs(registry, removed, shared))
         registry.retiring_mounts[identity] = closing
         closing.add_done_callback(partial(_release_vfs, registry, identity))
         await asyncio.shield(closing)
 
 
-async def _close_vfs(entry: MountEntry, shared: bool) -> None:
-    await entry.activity.wait()
+async def _close_vfs(
+    registry: MountRegistry, entry: MountEntry, shared: bool
+) -> None:
     try:
-        if not shared:
-            await entry.vfs.close()
+        await entry.activity.wait()
+        try:
+            if not shared:
+                await entry.vfs.close()
+        finally:
+            await entry.index_store.close()
     finally:
-        await entry.index_store.close()
+        registry.release_clock(entry.vfs)
 
 
 def _release_vfs(

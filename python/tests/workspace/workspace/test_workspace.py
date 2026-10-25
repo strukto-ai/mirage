@@ -615,12 +615,13 @@ async def test_adding_a_vfs_held_on_another_clock_holds_nothing():
         await ws.close()
 
 
+def _refuse_fuse(*_args: Any, **_kwargs: Any) -> None:
+    raise RuntimeError("no FUSE here")
+
+
 @pytest.mark.asyncio
 async def test_a_failing_kernel_mount_lets_go_of_the_clock(monkeypatch):
-    def refuse(*_args: Any, **_kwargs: Any) -> None:
-        raise RuntimeError("no FUSE here")
-
-    monkeypatch.setattr(Workspace, "add_fuse_mount", refuse)
+    monkeypatch.setattr(Workspace, "add_fuse_mount", _refuse_fuse)
     vfs = _drive()
     with pytest.raises(RuntimeError, match="no FUSE here"):
         Workspace(
@@ -635,6 +636,25 @@ async def test_a_failing_kernel_mount_lets_go_of_the_clock(monkeypatch):
     later = ManualClock()
     vfs.accessor.bind_clock(later, "later")
     assert vfs.accessor.token_manager.clock is later
+
+
+@pytest.mark.asyncio
+async def test_an_unmount_holds_the_clock_until_its_calls_finish():
+    vfs = _drive()
+    ws = Workspace({"/g": vfs}, mode=MountMode.WRITE, clock=ManualClock())
+    try:
+        done = ws.mount("/g").activity.acquire()
+        unmounting = asyncio.create_task(ws.unmount("/g"))
+        await asyncio.sleep(0)
+        with pytest.raises(ValueError, match="another clock"):
+            vfs.accessor.bind_clock(ManualClock(), "later")
+        done()
+        await unmounting
+        later = ManualClock()
+        vfs.accessor.bind_clock(later, "later")
+        assert vfs.accessor.token_manager.clock is later
+    finally:
+        await ws.close()
 
 
 async def _replay(seed: int) -> list[str]:

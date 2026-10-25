@@ -22,7 +22,7 @@ import { CLI, type CLIAccessorFn, type CLIConfigModel } from '../../commands/cli
 import { IOResult } from '../../io/types.ts'
 import { DISCORD } from '../../commands/cli/builtin/discord/index.ts'
 import { GIT } from '../../commands/cli/builtin/git/index.ts'
-import { GWS } from '../../commands/cli/builtin/gws/index.ts'
+import { GWS, googleApiAccessor } from '../../commands/cli/builtin/gws/index.ts'
 import type { GoogleApiAccessor } from '../../accessor/google_api.ts'
 import { ManualClock } from '../../utils/clock.ts'
 import { LINEAR } from '../../commands/cli/builtin/linear/index.ts'
@@ -419,6 +419,7 @@ describe('CLIRegistry clock release', () => {
   it('lets every install go', () => {
     const registry = new CLIRegistry(() => [], new ManualClock())
     const install = registry.install('gws', GWS, { client_id: 'c', refresh_token: 'r' })
+    registry.bindClocks()
     const accessor = install.accessor as GoogleApiAccessor
     expect(() => {
       accessor.bindClock(new ManualClock(), 'later')
@@ -427,5 +428,24 @@ describe('CLIRegistry clock release', () => {
     const later = new ManualClock()
     accessor.bindClock(later, 'later')
     expect(accessor.tokenManager.clock).toBe(later)
+  })
+
+  it('holds a shared client per install', async () => {
+    const shared = googleApiAccessor({ client_id: 'c', refresh_token: 'r' })
+    const spec = new CLI({
+      spec: GWS.spec,
+      handlers: GWS.handlers,
+      configModel: GWS.configModel,
+      accessor: () => shared,
+    })
+    const registry = new CLIRegistry(() => [], new ManualClock())
+    registry.install('a', spec, { client_id: 'c', refresh_token: 'r' })
+    registry.install('b', spec, { client_id: 'c', refresh_token: 'r' })
+    registry.bindClocks()
+    await registry.uninstall('a')
+    expect(() => {
+      shared.bindClock(new ManualClock(), 'later')
+    }).toThrow(/another clock/)
+    await registry.close()
   })
 })
