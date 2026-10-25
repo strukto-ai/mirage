@@ -1,5 +1,5 @@
 {
-  "baseline": 2984,
+  "baseline": 3025,
  "modules": {
   "vfs/ram/store": {
    "python_only": {
@@ -128,7 +128,8 @@
     "openStreamSync": "Synchronous pure utilities lazily initialize embedded Wasm; Python native streams open synchronously.",
     "synchronous": "Shares the current embedded Wasm instance between synchronous utilities and asynchronous command streams.",
     "movables": "The matcher streams each instance holds, which close with it when it retires; the wasm instance loader; Python imports mirage-rs as a native PyO3 module, so it has no instance to compile, size or recycle.",
-    "retire": "Drops a grown or trapped instance and closes the matcher streams still on it; the wasm instance loader; Python imports mirage-rs as a native PyO3 module, so it has no instance to compile, size or recycle."
+    "retire": "Drops a grown or trapped instance and closes the matcher streams still on it; the wasm instance loader; Python imports mirage-rs as a native PyO3 module, so it has no instance to compile, size or recycle.",
+    "compiledModuleSync": "The browser embeds a Wasm module and lazily shares its synchronous compiled module with the dedicated policy instance; Python imports its native extension."
    }
   },
   "fuse/constants": {
@@ -955,6 +956,93 @@
    "python_only": {
     "on_loop": "A hosted Python workspace runs on its runner's own event loop thread while the server's transports live on the server's, so work hops between the two; a JavaScript process has one event loop and nothing to hop between.",
     "owned_task": "asyncio starts a task a turn of the loop later and settles it through shield's callbacks, so owned work that never waits would still cost turns; Python 3.12 starts it eagerly. A TypeScript promise starts at once and an await that is already settled takes no turn."
+   }
+  },
+  "rs/policy": {
+   "python_only": {
+    "FactsValue": "PyO3 extracts typed native tuples of ordinal arrays; TypeScript retains typed string facts and writes its private u32 packet at the Wasm boundary.",
+    "MountValue": "PyO3 extracts typed native tuples of ordinal arrays; TypeScript retains typed string facts and writes its private u32 packet at the Wasm boundary.",
+    "PathValue": "PyO3 extracts typed native tuples of ordinal arrays; TypeScript retains typed string facts and writes its private u32 packet at the Wasm boundary.",
+    "ReasonValue": "PyO3 extracts typed native tuples of ordinal arrays; TypeScript retains typed string facts and writes its private u32 packet at the Wasm boundary.",
+    "ShowValue": "PyO3 extracts typed native tuples of ordinal arrays; TypeScript retains typed string facts and writes its private u32 packet at the Wasm boundary.",
+    "from_units": "PyO3 exchanges ordinal arrays directly; TypeScript encodes and decodes text inside its private Packet and Reply classes.",
+    "rule_value": "Python projects frozen host values into PyO3 tuples and reconstructs native results; TypeScript keeps these conversions in its private Packet and Reply classes.",
+    "rules_value": "Python projects frozen host values into PyO3 tuples and reconstructs native results; TypeScript keeps these conversions in its private Packet and Reply classes.",
+    "units": "PyO3 exchanges ordinal arrays directly; TypeScript encodes and decodes text inside its private Packet and Reply classes.",
+    "visibility_from_value": "Python projects frozen host values into PyO3 tuples and reconstructs native results; TypeScript keeps these conversions in its private Packet and Reply classes.",
+    "PathsValue": "PyO3 extracts typed native tuple projections of validated profile fields; TypeScript writes its independent matching-subset DTO through a private u32 packet.",
+    "ProfileValue": "PyO3 extracts typed native tuple projections of validated profile fields; TypeScript writes its independent matching-subset DTO through a private u32 packet."
+   },
+   "typescript_only": {
+    "CACHE_LIMIT": "Raw Wasm owns instance generations, packet buffers and explicitly dropped bounded matcher handles; Python uses owned PyO3 objects and bounded lru_cache eviction without a Wasm lifecycle.",
+    "Handle": "Raw Wasm owns instance generations, packet buffers and explicitly dropped bounded matcher handles; Python uses owned PyO3 objects and bounded lru_cache eviction without a Wasm lifecycle.",
+    "MAX_UNITS": "Raw Wasm owns instance generations, packet buffers and explicitly dropped bounded matcher handles; Python uses owned PyO3 objects and bounded lru_cache eviction without a Wasm lifecycle.",
+    "MatcherCache": "Raw Wasm owns instance generations, packet buffers and explicitly dropped bounded matcher handles; Python uses owned PyO3 objects and bounded lru_cache eviction without a Wasm lifecycle.",
+    "Packet": "Raw Wasm owns instance generations, packet buffers and explicitly dropped bounded matcher handles; Python uses owned PyO3 objects and bounded lru_cache eviction without a Wasm lifecycle.",
+    "PolicyFacts": "The Wasm adapter names its typed string facts and replies; Python describes the corresponding native tuple inputs and outputs in mirage._rs.pyi.",
+    "PolicyPath": "The Wasm adapter names its typed string facts and replies; Python describes the corresponding native tuple inputs and outputs in mirage._rs.pyi.",
+    "PolicyPlan": "The Wasm adapter names its typed string facts and replies; Python describes the corresponding native tuple inputs and outputs in mirage._rs.pyi.",
+    "PolicyProfile": "The Wasm adapter names its typed string facts and replies; Python describes the corresponding native tuple inputs and outputs in mirage._rs.pyi.",
+    "PolicyRuling": "The Wasm adapter names its typed string facts and replies; Python describes the corresponding native tuple inputs and outputs in mirage._rs.pyi.",
+    "PolicySubject": "The Wasm adapter names its typed string facts and replies; Python describes the corresponding native tuple inputs and outputs in mirage._rs.pyi.",
+    "Reply": "Raw Wasm owns instance generations, packet buffers and explicitly dropped bounded matcher handles; Python uses owned PyO3 objects and bounded lru_cache eviction without a Wasm lifecycle.",
+    "admissions": "Raw Wasm owns instance generations, packet buffers and explicitly dropped bounded matcher handles; Python uses owned PyO3 objects and bounded lru_cache eviction without a Wasm lifecycle.",
+    "clearCaches": "Raw Wasm owns instance generations, packet buffers and explicitly dropped bounded matcher handles; Python uses owned PyO3 objects and bounded lru_cache eviction without a Wasm lifecycle.",
+    "closePolicyMatchers": "Raw Wasm owns instance generations, packet buffers and explicitly dropped bounded matcher handles; Python uses owned PyO3 objects and bounded lru_cache eviction without a Wasm lifecycle.",
+    "compilePolicy": "The Wasm adapter converts profile values through Packet and Reply; Python calls native policy_compile/policy_restrict and converts tuples in its session resolver.",
+    "current": "Raw Wasm owns instance generations, packet buffers and explicitly dropped bounded matcher handles; Python uses owned PyO3 objects and bounded lru_cache eviction without a Wasm lifecycle.",
+    "exported": "Raw Wasm owns instance generations, packet buffers and explicitly dropped bounded matcher handles; Python uses owned PyO3 objects and bounded lru_cache eviction without a Wasm lifecycle.",
+    "generation": "Raw Wasm owns instance generations, packet buffers and explicitly dropped bounded matcher handles; Python uses owned PyO3 objects and bounded lru_cache eviction without a Wasm lifecycle.",
+    "hidden": "Raw Wasm owns instance generations, packet buffers and explicitly dropped bounded matcher handles; Python uses owned PyO3 objects and bounded lru_cache eviction without a Wasm lifecycle.",
+    "hiddenMatcher": "Raw Wasm owns instance generations, packet buffers and explicitly dropped bounded matcher handles; Python uses owned PyO3 objects and bounded lru_cache eviction without a Wasm lifecycle.",
+    "instance": "Raw Wasm owns instance generations, packet buffers and explicitly dropped bounded matcher handles; Python uses owned PyO3 objects and bounded lru_cache eviction without a Wasm lifecycle.",
+    "invoke": "Raw Wasm owns instance generations, packet buffers and explicitly dropped bounded matcher handles; Python uses owned PyO3 objects and bounded lru_cache eviction without a Wasm lifecycle.",
+    "policyAnchorDepth": "Raw Wasm needs a typed packet call here; Python reexports the equivalent PyO3 function from mirage._rs without a Python function declaration.",
+    "policyClassifyPaths": "Raw Wasm needs a typed packet call here; Python reexports the equivalent PyO3 function from mirage._rs without a Python function declaration.",
+    "policyClassifyVars": "Raw Wasm needs a typed packet call here; Python reexports the equivalent PyO3 function from mirage._rs without a Python function declaration.",
+    "policyIsGlob": "Raw Wasm needs a typed packet call here; Python reexports the equivalent PyO3 function from mirage._rs without a Python function declaration.",
+    "policyPatternMatches": "Raw Wasm needs a typed packet call here; Python reexports the equivalent PyO3 function from mirage._rs without a Python function declaration.",
+    "policyPatternReaches": "Raw Wasm needs a typed packet call here; Python reexports the equivalent PyO3 function from mirage._rs without a Python function declaration.",
+    "policyShowHead": "Raw Wasm needs a typed packet call here; Python reexports the equivalent PyO3 function from mirage._rs without a Python function declaration.",
+    "policySplitPattern": "Raw Wasm needs a typed packet call here; Python reexports the equivalent PyO3 function from mirage._rs without a Python function declaration.",
+    "policySubjects": "Raw Wasm needs a typed packet call here; Python reexports the equivalent PyO3 function from mirage._rs without a Python function declaration.",
+    "restrictPolicy": "The Wasm adapter converts profile values through Packet and Reply; Python calls native policy_compile/policy_restrict and converts tuples in its session resolver.",
+    "rules": "Raw Wasm owns instance generations, packet buffers and explicitly dropped bounded matcher handles; Python uses owned PyO3 objects and bounded lru_cache eviction without a Wasm lifecycle.",
+    "shown": "Raw Wasm owns instance generations, packet buffers and explicitly dropped bounded matcher handles; Python uses owned PyO3 objects and bounded lru_cache eviction without a Wasm lifecycle.",
+    "shownMatcher": "Raw Wasm owns instance generations, packet buffers and explicitly dropped bounded matcher handles; Python uses owned PyO3 objects and bounded lru_cache eviction without a Wasm lifecycle.",
+    "unrestrictedRules": "Raw Wasm owns instance generations, packet buffers and explicitly dropped bounded matcher handles; Python uses owned PyO3 objects and bounded lru_cache eviction without a Wasm lifecycle.",
+    "unrestrictedVisibility": "Raw Wasm owns instance generations, packet buffers and explicitly dropped bounded matcher handles; Python uses owned PyO3 objects and bounded lru_cache eviction without a Wasm lifecycle.",
+    "variables": "Raw Wasm owns instance generations, packet buffers and explicitly dropped bounded matcher handles; Python uses owned PyO3 objects and bounded lru_cache eviction without a Wasm lifecycle.",
+    "varsMatcher": "Raw Wasm owns instance generations, packet buffers and explicitly dropped bounded matcher handles; Python uses owned PyO3 objects and bounded lru_cache eviction without a Wasm lifecycle.",
+    "visibilities": "Raw Wasm owns instance generations, packet buffers and explicitly dropped bounded matcher handles; Python uses owned PyO3 objects and bounded lru_cache eviction without a Wasm lifecycle.",
+    "PolicyCommands": "The rawWasm boundary accepts an independent matching-subset DTO to avoid importing host profile schemas; Python projects its models to typed native tuples in the session resolver.",
+    "PolicyMount": "The rawWasm boundary accepts an independent matching-subset DTO to avoid importing host profile schemas; Python projects its models to typed native tuples in the session resolver.",
+    "PolicyPaths": "The rawWasm boundary accepts an independent matching-subset DTO to avoid importing host profile schemas; Python projects its models to typed native tuples in the session resolver.",
+    "sameEntries": "Public TypeScript aggregates and array aliases are mutable, so the bounded Wasm cache owns and compares complete snapshots before reusing a handle; Python frozen tuple values are safe lru_cache keys.",
+    "sameHidden": "Public TypeScript aggregates and array aliases are mutable, so the bounded Wasm cache owns and compares complete snapshots before reusing a handle; Python frozen tuple values are safe lru_cache keys.",
+    "sameOptional": "Public TypeScript aggregates and array aliases are mutable, so the bounded Wasm cache owns and compares complete snapshots before reusing a handle; Python frozen tuple values are safe lru_cache keys.",
+    "sameRule": "Public TypeScript aggregates and array aliases are mutable, so the bounded Wasm cache owns and compares complete snapshots before reusing a handle; Python frozen tuple values are safe lru_cache keys.",
+    "sameRules": "Public TypeScript aggregates and array aliases are mutable, so the bounded Wasm cache owns and compares complete snapshots before reusing a handle; Python frozen tuple values are safe lru_cache keys.",
+    "sameShown": "Public TypeScript aggregates and array aliases are mutable, so the bounded Wasm cache owns and compares complete snapshots before reusing a handle; Python frozen tuple values are safe lru_cache keys.",
+    "sameStrings": "Public TypeScript aggregates and array aliases are mutable, so the bounded Wasm cache owns and compares complete snapshots before reusing a handle; Python frozen tuple values are safe lru_cache keys.",
+    "sameVars": "Public TypeScript aggregates and array aliases are mutable, so the bounded Wasm cache owns and compares complete snapshots before reusing a handle; Python frozen tuple values are safe lru_cache keys.",
+    "sameVisibility": "Public TypeScript aggregates and array aliases are mutable, so the bounded Wasm cache owns and compares complete snapshots before reusing a handle; Python frozen tuple values are safe lru_cache keys.",
+    "snapshotHidden": "Public TypeScript aggregates and array aliases are mutable, so the bounded Wasm cache owns and compares complete snapshots before reusing a handle; Python frozen tuple values are safe lru_cache keys.",
+    "snapshotRule": "Public TypeScript aggregates and array aliases are mutable, so the bounded Wasm cache owns and compares complete snapshots before reusing a handle; Python frozen tuple values are safe lru_cache keys.",
+    "snapshotRules": "Public TypeScript aggregates and array aliases are mutable, so the bounded Wasm cache owns and compares complete snapshots before reusing a handle; Python frozen tuple values are safe lru_cache keys.",
+    "snapshotShown": "Public TypeScript aggregates and array aliases are mutable, so the bounded Wasm cache owns and compares complete snapshots before reusing a handle; Python frozen tuple values are safe lru_cache keys.",
+    "snapshotVars": "Public TypeScript aggregates and array aliases are mutable, so the bounded Wasm cache owns and compares complete snapshots before reusing a handle; Python frozen tuple values are safe lru_cache keys.",
+    "snapshotVisibility": "Public TypeScript aggregates and array aliases are mutable, so the bounded Wasm cache owns and compares complete snapshots before reusing a handle; Python frozen tuple values are safe lru_cache keys."
+   }
+  },
+  "workspace/session/resolve": {
+   "python_only": {
+    "_commands_from_value": "PyO3 returns typed tuples which the resolver reconstructs into existing frozen profile models; TypeScript performs the corresponding value conversion in its private Wasm Reply class.",
+    "_paths_from_value": "PyO3 returns typed tuples which the resolver reconstructs into existing frozen profile models; TypeScript performs the corresponding value conversion in its private Wasm Reply class.",
+    "_profile_fields": "PyO3 returns typed tuples which the resolver reconstructs into existing frozen profile models; TypeScript performs the corresponding value conversion in its private Wasm Reply class.",
+    "_rule_from_value": "PyO3 returns typed tuples which the resolver reconstructs into existing frozen profile models; TypeScript performs the corresponding value conversion in its private Wasm Reply class.",
+    "_paths_value": "Python projects its validated profile models into typed PyO3 tuple inputs here to keep profile schemas out of the native bridge; TypeScript projects its independent DTO in the private Wasm Packet class.",
+    "_profile_value": "Python projects its validated profile models into typed PyO3 tuple inputs here to keep profile schemas out of the native bridge; TypeScript projects its independent DTO in the private Wasm Packet class."
    }
   }
  }
