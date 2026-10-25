@@ -292,6 +292,7 @@ remain covered by the same whole-host filters on both hosts.
 | `integ/runners/`, `integ/targets.json`                                                                               | database, observability           |
 | the FUSE and mount core modules and the FUSE and NFS wiring in either language; `integ/fuse/`, `integ/check_json.py` | fuse                              |
 | generated document accessor/core/command/VFS modules and `workspace/documentation/` in either language               | fuse                              |
+| Discord accessor/core/VFS modules; dispatcher, policy and runtime handle modules in either language                  | fuse                              |
 | `rust/`, the shared command streams, jq scanner and output formatter both hosts run                                  | core, ts, data, database, runtime |
 | `data/`                                                                                                              | core only                         |
 | `test_integ.yml`                                                                                                     | every filter                      |
@@ -304,6 +305,12 @@ the backends and account CLIs no runtime case mounts or runs (the python
 VFS registry imports a backend only when one is mounted). A typescript
 backend stays in, since the core barrel imports every VFS, and so do FUSE
 and every command, which the workspace and the command tables import.
+
+`integ/runtime/policy/cached_reads.json` checks warm reads through commands, Git,
+facade calls, host descriptors, MountCore and FUSE callbacks on RAM and disk.
+Guest programs also check live hook changes and session-revocation cancellation.
+`integ/fuse/discord_cases.json` runs the real Discord backend over local HTTP
+through MountCore and FUSE callbacks, without a kernel mount.
 
 Keep the filters and this section in step with the code: a new or moved
 backend, CLI or package belongs in the filter that tests it, a module joins

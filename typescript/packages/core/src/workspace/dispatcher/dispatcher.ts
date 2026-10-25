@@ -125,6 +125,7 @@ import {
   NO_FOLLOW_OPS,
   POLICY_WRITE_OPS,
   READ_AHEAD_BYTES,
+  READ_SHORTCUT_OPS,
   READ_STAND_IN_OPS,
   SERIAL_WRITE_OPS,
   SETATTR_KEYS,
@@ -138,7 +139,6 @@ import {
   explaining,
   getCurrentSession,
   hiddenRefusal,
-  lineRunning,
   runWithCaller,
   sessionVisibility,
   sessionAccess,
@@ -736,11 +736,6 @@ export class Dispatcher {
     return this.caller === null ? explaining() : this.caller.explaining
   }
 
-  /** Whether the op is a running line's: the caller's, else the async context's. */
-  private lineRunning(): boolean {
-    return this.caller === null ? lineRunning() : this.caller.refusals !== null
-  }
-
   /**
    * The namespace's own answer for a path no backend serves.
    *
@@ -779,7 +774,10 @@ export class Dispatcher {
       // borrow the newest binding, which can belong to a wider concurrent
       // session.
       const run = (): ReturnType<DispatchFn> =>
-        name === 'read' && kwargs?.warm !== true
+        name === 'read' &&
+        kwargs?.warm !== true &&
+        kwargs?.admit_only !== true &&
+        !('retained' in (kwargs ?? {}))
           ? this.readRefusingDirs(path, args, kwargs, report)
           : this.dispatchAdmitted(name, path, args, kwargs, report)
       if (this.admitWrite === null || !POLICY_WRITE_OPS.has(name)) return await run()
@@ -806,10 +804,25 @@ export class Dispatcher {
     // what the backend holds now, past the file cache, a read of what the file
     // cache alone holds, and a stat of what the backend holds now, past the
     // mount's index.
-    const admitOnly = (name === 'write' || name === 'stat') && kwargs?.admit_only === true
+    const admitOnly =
+      (name === 'read' || name === 'write' || name === 'stat') && kwargs?.admit_only === true
     if (admitOnly) {
       kwargs = { ...kwargs }
       delete kwargs.admit_only
+    }
+    const retained = kwargs?.retained
+    if (
+      'retained' in (kwargs ?? {}) &&
+      !(
+        (name === 'read' && retained instanceof Uint8Array) ||
+        (name === 'stat' && retained instanceof FileStat)
+      )
+    ) {
+      throw new TypeError('retained is only valid for read bytes or a stat row')
+    }
+    if (retained !== undefined) {
+      kwargs = { ...kwargs }
+      delete kwargs.retained
     }
     const { stream, direct, warm, fresh, ...own } = (kwargs ?? {}) as {
       stream?: unknown
@@ -868,9 +881,9 @@ export class Dispatcher {
     call.fresh = name === 'stat' && fresh === true
     await this.refuseRename(call)
     if (report) report.path = call.path.virtual
-    if (admitOnly) {
+    if (admitOnly || retained !== undefined) {
       this.follow(call)
-      if (name === 'stat') {
+      if (name === 'stat' && retained === undefined) {
         const serving = this.namespace.tryMountFor(call.path.virtual)
         if (report && serving !== null) {
           report.store = `${String(this.storeId(serving.vfs))}:${mountKey(call.path.virtual, rstripSlash(serving.prefix))}`
@@ -879,10 +892,25 @@ export class Dispatcher {
         return [null, new IOResult()]
       }
       const owner = this.namespace.tryMountFor(call.path.virtual)
-      if (owner === null) throw enoent(call.path)
-      const writeCall = CALLS.get('write')
-      if (writeCall === undefined) throw new Error('missing write call definition')
-      await this.admit(call, this.boundary(owner), writeCall)
+      if (name === 'read' || name === 'stat') {
+        const mark =
+          (owner === null ? undefined : declared(owner.vfs.constructor, name)) ?? CALLS.get(name)
+        if (mark === undefined) throw new Error(`missing ${name} call definition`)
+        const boundary = this.boundary(owner)
+        await this.admit(call, boundary, mark)
+        if (retained !== undefined) {
+          memoryAnswered(report, retained instanceof Uint8Array ? retained.byteLength : 0)
+          return [
+            await boundary.complete(mark, call.path, call.write, retained, call.issuer),
+            new IOResult(),
+          ]
+        }
+      } else {
+        if (owner === null) throw enoent(call.path)
+        const writeCall = CALLS.get('write')
+        if (writeCall === undefined) throw new Error('missing write call definition')
+        await this.admit(call, this.boundary(owner), writeCall)
+      }
       memoryAnswered(report)
       return [null, new IOResult()]
     }
@@ -912,11 +940,15 @@ export class Dispatcher {
     if (name === 'before_full_walk' && (owner === null || !guardsWalks(owner.vfs))) {
       return [null, new IOResult()]
     }
-    // The cache stage answers first where the file cache decides: a call
-    // standing in for a read gives way to the read for a file it holds,
-    // which is judged, and a warm read answers whether it holds one, judged
-    // as the read it stands in for.
-    if (READ_STAND_IN_OPS.has(name) && (await this.held(call, owner))) {
+    // Content shortcuts give way to checked reads when file hooks need
+    // the canonical call and bytes, whether cold or cached. Without hooks,
+    // whole-file shortcuts still use a held copy.
+    if (
+      (READ_SHORTCUT_OPS.has(name) &&
+        ((await this.policies.wantsFor('preVfs', this.sessionId())) ||
+          (await this.policies.wantsFor('postVfs', this.sessionId())))) ||
+      (READ_STAND_IN_OPS.has(name) && (await this.held(call, owner)))
+    ) {
       memoryAnswered(report)
       return [null, new IOResult()]
     }
@@ -1267,10 +1299,7 @@ export class Dispatcher {
    * Python's Dispatcher._read_many.
    */
   private async readMany(typed: readonly PathSpec[], issuer: symbol | undefined): Promise<void> {
-    if (
-      this.explaining() !== null ||
-      (await this.policies.wantsFor('preVfs', this.sessionId(), this.lineRunning()))
-    ) {
+    if (this.explaining() !== null || (await this.policies.wantsFor('preVfs', this.sessionId()))) {
       return
     }
     await this.prepare()
@@ -1690,12 +1719,10 @@ export class Dispatcher {
    *
    * A backend's find, du, search, tree copy or tree removal answers for
    * every entry under its path in one call, past the checks each entry would
-   * meet on its own. So when the command's path rules or, for a `ws.vfs`
-   * call, a coded preVfs policy reach below one of its paths, it is declined
-   * and the caller walks, entry by entry, through calls that are each judged.
-   * Inside a running line only the profile's path rules judge an entry, so a
-   * coded policy declines no walk there. A path rule declines no
-   * `files_containing`: its answer only rules files out of a walk that still
+   * meet on its own. Path rules and file policies decline that shortcut so
+   * the caller walks through calls that are each judged, including inside
+   * commands. A path rule declines no `files_containing` on its own: its
+   * answer only rules files out of a walk that still
    * lists every one, and each file it rules out meets the rule as a warm read,
    * so one the rule refuses reports `Permission denied` as its read would. A
    * hide declines the copies and the removal, which would reach hidden
@@ -1719,13 +1746,17 @@ export class Dispatcher {
     if (!HIDE_FILTERED_OPS.has(call.name) && paths.some((p) => hiddenUnder(call.vis, p.virtual))) {
       return true
     }
-    if (call.ruleGate !== null) {
-      return (
-        call.name !== 'files_containing' &&
-        paths.some((p) => call.ruleGate?.scopes(p.virtual) === true)
-      )
-    }
-    return this.policies.wantsFor('preVfs', this.sessionId(), this.lineRunning())
+    if (
+      call.ruleGate !== null &&
+      call.name !== 'files_containing' &&
+      paths.some((p) => call.ruleGate?.scopes(p.virtual) === true)
+    )
+      return true
+    return (
+      (await this.policies.wantsFor('preVfs', this.sessionId())) ||
+      ((COPY_OPS.has(call.name) || call.name === 'files_containing') &&
+        (await this.policies.wantsFor('postVfs', this.sessionId())))
+    )
   }
 
   /**
@@ -1816,8 +1847,7 @@ export class Dispatcher {
    * streams as the VFS's `read` answers it, a stream as it is pulled and bytes
    * as one chunk. A window, a rendering, a VFS with no `read` of its own and a
    * postVfs policy that may read the result each get the whole bytes instead,
-   * which are a stream of one chunk. A read a running
-   * line makes reaches no postVfs policy, so it streams either way. Mirrors
+   * which are a stream of one chunk, including inside commands and runtimes. Mirrors
    * Python's Dispatcher._streams.
    */
   private async streams(call: Call, mount: MountEntry, vfs: BaseVFS): Promise<boolean> {
@@ -1831,7 +1861,7 @@ export class Dispatcher {
     ) {
       return false
     }
-    return this.lineRunning() || !(await this.policies.wantsFor('postVfs', this.sessionId()))
+    return !(await this.policies.wantsFor('postVfs', this.sessionId()))
   }
 
   /**

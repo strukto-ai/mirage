@@ -1,0 +1,1534 @@
+{
+  "cases": [
+    {
+      "id": "head_uses_native_shortcut_without_hooks",
+      "world": {
+        "track_reads": true,
+        "mounts": {
+          "/data": {
+            "vfs": "shortcuts",
+            "files": {
+              "secret.txt": "TOPSECRET plans\nsecond\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "head -n 1 /data/secret.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "TOPSECRET plans\n",
+            "stderr": "",
+            "native_calls": [
+              "first_lines"
+            ],
+            "backend_reads": {
+              "/data/secret.txt": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "head_pre_hook_cold",
+      "world": {
+        "track_reads": true,
+        "mounts": {
+          "/data": {
+            "vfs": "shortcuts",
+            "files": {
+              "secret.txt": "TOPSECRET plans\nsecond\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "add_policies": [
+            {
+              "name": "seal_reads",
+              "suffix": "secret.txt"
+            }
+          ]
+        },
+        {
+          "command": "head -n 1 /data/secret.txt",
+          "expect": {
+            "exit": 1,
+            "stdout": "",
+            "stderr_contains": "Permission denied",
+            "native_calls": [],
+            "backend_reads": {
+              "/data/secret.txt": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "head_pre_hook_warm",
+      "world": {
+        "track_reads": true,
+        "mounts": {
+          "/data": {
+            "vfs": "shortcuts",
+            "files": {
+              "secret.txt": "TOPSECRET plans\nsecond\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "facade": {
+            "method": "read",
+            "path": "/data/secret.txt"
+          },
+          "expect": {
+            "value": "TOPSECRET plans\nsecond\n",
+            "backend_reads": {
+              "/data/secret.txt": 1
+            }
+          }
+        },
+        {
+          "add_policies": [
+            {
+              "name": "seal_reads",
+              "suffix": "secret.txt"
+            }
+          ]
+        },
+        {
+          "command": "head -n 1 /data/secret.txt",
+          "expect": {
+            "exit": 1,
+            "stdout": "",
+            "stderr_contains": "Permission denied",
+            "native_calls": [],
+            "backend_reads": {
+              "/data/secret.txt": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "head_post_hook_cold",
+      "world": {
+        "track_reads": true,
+        "mounts": {
+          "/data": {
+            "vfs": "shortcuts",
+            "files": {
+              "secret.txt": "TOPSECRET plans\nsecond\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "add_policies": [
+            {
+              "name": "redact_reads",
+              "marker": "TOPSECRET"
+            }
+          ]
+        },
+        {
+          "command": "head -n 1 /data/secret.txt",
+          "expect": {
+            "exit": 1,
+            "stdout": "",
+            "stderr_contains": "Permission denied",
+            "native_calls": [],
+            "backend_reads": {
+              "/data/secret.txt": 1
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "head_post_hook_warm",
+      "world": {
+        "track_reads": true,
+        "mounts": {
+          "/data": {
+            "vfs": "shortcuts",
+            "files": {
+              "secret.txt": "TOPSECRET plans\nsecond\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "facade": {
+            "method": "read",
+            "path": "/data/secret.txt"
+          },
+          "expect": {
+            "value": "TOPSECRET plans\nsecond\n",
+            "backend_reads": {
+              "/data/secret.txt": 1
+            }
+          }
+        },
+        {
+          "add_policies": [
+            {
+              "name": "redact_reads",
+              "marker": "TOPSECRET"
+            }
+          ]
+        },
+        {
+          "command": "head -n 1 /data/secret.txt",
+          "expect": {
+            "exit": 1,
+            "stdout": "",
+            "stderr_contains": "Permission denied",
+            "native_calls": [],
+            "backend_reads": {
+              "/data/secret.txt": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "tail_uses_native_shortcut_without_hooks",
+      "world": {
+        "track_reads": true,
+        "mounts": {
+          "/data": {
+            "vfs": "shortcuts",
+            "files": {
+              "secret.txt": "TOPSECRET plans\nsecond\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "tail -n 1 /data/secret.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "second\n",
+            "stderr": "",
+            "native_calls": [
+              "last_lines"
+            ],
+            "backend_reads": {
+              "/data/secret.txt": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "tail_pre_hook_cold",
+      "world": {
+        "track_reads": true,
+        "mounts": {
+          "/data": {
+            "vfs": "shortcuts",
+            "files": {
+              "secret.txt": "TOPSECRET plans\nsecond\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "add_policies": [
+            {
+              "name": "seal_reads",
+              "suffix": "secret.txt"
+            }
+          ]
+        },
+        {
+          "command": "tail -n 1 /data/secret.txt",
+          "expect": {
+            "exit": 1,
+            "stdout": "",
+            "stderr_contains": "Permission denied",
+            "native_calls": [],
+            "backend_reads": {
+              "/data/secret.txt": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "tail_pre_hook_warm",
+      "world": {
+        "track_reads": true,
+        "mounts": {
+          "/data": {
+            "vfs": "shortcuts",
+            "files": {
+              "secret.txt": "TOPSECRET plans\nsecond\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "facade": {
+            "method": "read",
+            "path": "/data/secret.txt"
+          },
+          "expect": {
+            "value": "TOPSECRET plans\nsecond\n",
+            "backend_reads": {
+              "/data/secret.txt": 1
+            }
+          }
+        },
+        {
+          "add_policies": [
+            {
+              "name": "seal_reads",
+              "suffix": "secret.txt"
+            }
+          ]
+        },
+        {
+          "command": "tail -n 1 /data/secret.txt",
+          "expect": {
+            "exit": 1,
+            "stdout": "",
+            "stderr_contains": "Permission denied",
+            "native_calls": [],
+            "backend_reads": {
+              "/data/secret.txt": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "tail_post_hook_cold",
+      "world": {
+        "track_reads": true,
+        "mounts": {
+          "/data": {
+            "vfs": "shortcuts",
+            "files": {
+              "secret.txt": "TOPSECRET plans\nsecond\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "add_policies": [
+            {
+              "name": "redact_reads",
+              "marker": "TOPSECRET"
+            }
+          ]
+        },
+        {
+          "command": "tail -n 1 /data/secret.txt",
+          "expect": {
+            "exit": 1,
+            "stdout": "",
+            "stderr_contains": "Permission denied",
+            "native_calls": [],
+            "backend_reads": {
+              "/data/secret.txt": 1
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "tail_post_hook_warm",
+      "world": {
+        "track_reads": true,
+        "mounts": {
+          "/data": {
+            "vfs": "shortcuts",
+            "files": {
+              "secret.txt": "TOPSECRET plans\nsecond\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "facade": {
+            "method": "read",
+            "path": "/data/secret.txt"
+          },
+          "expect": {
+            "value": "TOPSECRET plans\nsecond\n",
+            "backend_reads": {
+              "/data/secret.txt": 1
+            }
+          }
+        },
+        {
+          "add_policies": [
+            {
+              "name": "redact_reads",
+              "marker": "TOPSECRET"
+            }
+          ]
+        },
+        {
+          "command": "tail -n 1 /data/secret.txt",
+          "expect": {
+            "exit": 1,
+            "stdout": "",
+            "stderr_contains": "Permission denied",
+            "native_calls": [],
+            "backend_reads": {
+              "/data/secret.txt": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "wc_uses_native_shortcut_without_hooks",
+      "world": {
+        "track_reads": true,
+        "mounts": {
+          "/data": {
+            "vfs": "shortcuts",
+            "files": {
+              "secret.txt": "TOPSECRET plans\nsecond\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "wc -l /data/secret.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "2 /data/secret.txt\n",
+            "stderr": "",
+            "native_calls": [
+              "line_count"
+            ],
+            "backend_reads": {
+              "/data/secret.txt": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "wc_pre_hook_cold",
+      "world": {
+        "track_reads": true,
+        "mounts": {
+          "/data": {
+            "vfs": "shortcuts",
+            "files": {
+              "secret.txt": "TOPSECRET plans\nsecond\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "add_policies": [
+            {
+              "name": "seal_reads",
+              "suffix": "secret.txt"
+            }
+          ]
+        },
+        {
+          "command": "wc -l /data/secret.txt",
+          "expect": {
+            "exit": 1,
+            "stdout": "",
+            "stderr_contains": "Permission denied",
+            "native_calls": [],
+            "backend_reads": {
+              "/data/secret.txt": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "wc_pre_hook_warm",
+      "world": {
+        "track_reads": true,
+        "mounts": {
+          "/data": {
+            "vfs": "shortcuts",
+            "files": {
+              "secret.txt": "TOPSECRET plans\nsecond\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "facade": {
+            "method": "read",
+            "path": "/data/secret.txt"
+          },
+          "expect": {
+            "value": "TOPSECRET plans\nsecond\n",
+            "backend_reads": {
+              "/data/secret.txt": 1
+            }
+          }
+        },
+        {
+          "add_policies": [
+            {
+              "name": "seal_reads",
+              "suffix": "secret.txt"
+            }
+          ]
+        },
+        {
+          "command": "wc -l /data/secret.txt",
+          "expect": {
+            "exit": 1,
+            "stdout": "",
+            "stderr_contains": "Permission denied",
+            "native_calls": [],
+            "backend_reads": {
+              "/data/secret.txt": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "wc_post_hook_cold",
+      "world": {
+        "track_reads": true,
+        "mounts": {
+          "/data": {
+            "vfs": "shortcuts",
+            "files": {
+              "secret.txt": "TOPSECRET plans\nsecond\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "add_policies": [
+            {
+              "name": "redact_reads",
+              "marker": "TOPSECRET"
+            }
+          ]
+        },
+        {
+          "command": "wc -l /data/secret.txt",
+          "expect": {
+            "exit": 1,
+            "stdout": "",
+            "stderr_contains": "Permission denied",
+            "native_calls": [],
+            "backend_reads": {
+              "/data/secret.txt": 1
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "wc_post_hook_warm",
+      "world": {
+        "track_reads": true,
+        "mounts": {
+          "/data": {
+            "vfs": "shortcuts",
+            "files": {
+              "secret.txt": "TOPSECRET plans\nsecond\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "facade": {
+            "method": "read",
+            "path": "/data/secret.txt"
+          },
+          "expect": {
+            "value": "TOPSECRET plans\nsecond\n",
+            "backend_reads": {
+              "/data/secret.txt": 1
+            }
+          }
+        },
+        {
+          "add_policies": [
+            {
+              "name": "redact_reads",
+              "marker": "TOPSECRET"
+            }
+          ]
+        },
+        {
+          "command": "wc -l /data/secret.txt",
+          "expect": {
+            "exit": 1,
+            "stdout": "",
+            "stderr_contains": "Permission denied",
+            "native_calls": [],
+            "backend_reads": {
+              "/data/secret.txt": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "checksum_uses_native_shortcut_without_hooks",
+      "world": {
+        "track_reads": true,
+        "mounts": {
+          "/data": {
+            "vfs": "shortcuts",
+            "files": {
+              "secret.txt": "TOPSECRET plans\nsecond\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "md5sum /data/secret.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "8645d0a0ba4021def3736227d4860612  /data/secret.txt\n",
+            "stderr": "",
+            "native_calls": [
+              "checksum"
+            ],
+            "backend_reads": {
+              "/data/secret.txt": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "checksum_pre_hook_cold",
+      "world": {
+        "track_reads": true,
+        "mounts": {
+          "/data": {
+            "vfs": "shortcuts",
+            "files": {
+              "secret.txt": "TOPSECRET plans\nsecond\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "add_policies": [
+            {
+              "name": "seal_reads",
+              "suffix": "secret.txt"
+            }
+          ]
+        },
+        {
+          "command": "md5sum /data/secret.txt",
+          "expect": {
+            "exit": 1,
+            "stdout": "",
+            "stderr_contains": "Permission denied",
+            "native_calls": [],
+            "backend_reads": {
+              "/data/secret.txt": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "checksum_pre_hook_warm",
+      "world": {
+        "track_reads": true,
+        "mounts": {
+          "/data": {
+            "vfs": "shortcuts",
+            "files": {
+              "secret.txt": "TOPSECRET plans\nsecond\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "facade": {
+            "method": "read",
+            "path": "/data/secret.txt"
+          },
+          "expect": {
+            "value": "TOPSECRET plans\nsecond\n",
+            "backend_reads": {
+              "/data/secret.txt": 1
+            }
+          }
+        },
+        {
+          "add_policies": [
+            {
+              "name": "seal_reads",
+              "suffix": "secret.txt"
+            }
+          ]
+        },
+        {
+          "command": "md5sum /data/secret.txt",
+          "expect": {
+            "exit": 1,
+            "stdout": "",
+            "stderr_contains": "Permission denied",
+            "native_calls": [],
+            "backend_reads": {
+              "/data/secret.txt": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "checksum_post_hook_cold",
+      "world": {
+        "track_reads": true,
+        "mounts": {
+          "/data": {
+            "vfs": "shortcuts",
+            "files": {
+              "secret.txt": "TOPSECRET plans\nsecond\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "add_policies": [
+            {
+              "name": "redact_reads",
+              "marker": "TOPSECRET"
+            }
+          ]
+        },
+        {
+          "command": "md5sum /data/secret.txt",
+          "expect": {
+            "exit": 1,
+            "stdout": "",
+            "stderr_contains": "Permission denied",
+            "native_calls": [],
+            "backend_reads": {
+              "/data/secret.txt": 1
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "checksum_post_hook_warm",
+      "world": {
+        "track_reads": true,
+        "mounts": {
+          "/data": {
+            "vfs": "shortcuts",
+            "files": {
+              "secret.txt": "TOPSECRET plans\nsecond\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "facade": {
+            "method": "read",
+            "path": "/data/secret.txt"
+          },
+          "expect": {
+            "value": "TOPSECRET plans\nsecond\n",
+            "backend_reads": {
+              "/data/secret.txt": 1
+            }
+          }
+        },
+        {
+          "add_policies": [
+            {
+              "name": "redact_reads",
+              "marker": "TOPSECRET"
+            }
+          ]
+        },
+        {
+          "command": "md5sum /data/secret.txt",
+          "expect": {
+            "exit": 1,
+            "stdout": "",
+            "stderr_contains": "Permission denied",
+            "native_calls": [],
+            "backend_reads": {
+              "/data/secret.txt": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "grep_uses_native_shortcut_without_hooks",
+      "world": {
+        "track_reads": true,
+        "mounts": {
+          "/data": {
+            "vfs": "shortcuts",
+            "files": {
+              "secret.txt": "TOPSECRET plans\nsecond\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "grep -F TOPSECRET /data/secret.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "TOPSECRET plans\n",
+            "stderr": "",
+            "native_calls": [
+              "lines_containing"
+            ],
+            "backend_reads": {
+              "/data/secret.txt": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "grep_pre_hook_cold",
+      "world": {
+        "track_reads": true,
+        "mounts": {
+          "/data": {
+            "vfs": "shortcuts",
+            "files": {
+              "secret.txt": "TOPSECRET plans\nsecond\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "add_policies": [
+            {
+              "name": "seal_reads",
+              "suffix": "secret.txt"
+            }
+          ]
+        },
+        {
+          "command": "grep -F TOPSECRET /data/secret.txt",
+          "expect": {
+            "exit": 2,
+            "stdout": "",
+            "stderr_contains": "Permission denied",
+            "native_calls": [],
+            "backend_reads": {
+              "/data/secret.txt": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "grep_pre_hook_warm",
+      "world": {
+        "track_reads": true,
+        "mounts": {
+          "/data": {
+            "vfs": "shortcuts",
+            "files": {
+              "secret.txt": "TOPSECRET plans\nsecond\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "facade": {
+            "method": "read",
+            "path": "/data/secret.txt"
+          },
+          "expect": {
+            "value": "TOPSECRET plans\nsecond\n",
+            "backend_reads": {
+              "/data/secret.txt": 1
+            }
+          }
+        },
+        {
+          "add_policies": [
+            {
+              "name": "seal_reads",
+              "suffix": "secret.txt"
+            }
+          ]
+        },
+        {
+          "command": "grep -F TOPSECRET /data/secret.txt",
+          "expect": {
+            "exit": 2,
+            "stdout": "",
+            "stderr_contains": "Permission denied",
+            "native_calls": [],
+            "backend_reads": {
+              "/data/secret.txt": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "grep_post_hook_cold",
+      "world": {
+        "track_reads": true,
+        "mounts": {
+          "/data": {
+            "vfs": "shortcuts",
+            "files": {
+              "secret.txt": "TOPSECRET plans\nsecond\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "add_policies": [
+            {
+              "name": "redact_reads",
+              "marker": "TOPSECRET"
+            }
+          ]
+        },
+        {
+          "command": "grep -F TOPSECRET /data/secret.txt",
+          "expect": {
+            "exit": 2,
+            "stdout": "",
+            "stderr_contains": "Permission denied",
+            "native_calls": [],
+            "backend_reads": {
+              "/data/secret.txt": 1
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "grep_post_hook_warm",
+      "world": {
+        "track_reads": true,
+        "mounts": {
+          "/data": {
+            "vfs": "shortcuts",
+            "files": {
+              "secret.txt": "TOPSECRET plans\nsecond\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "facade": {
+            "method": "read",
+            "path": "/data/secret.txt"
+          },
+          "expect": {
+            "value": "TOPSECRET plans\nsecond\n",
+            "backend_reads": {
+              "/data/secret.txt": 1
+            }
+          }
+        },
+        {
+          "add_policies": [
+            {
+              "name": "redact_reads",
+              "marker": "TOPSECRET"
+            }
+          ]
+        },
+        {
+          "command": "grep -F TOPSECRET /data/secret.txt",
+          "expect": {
+            "exit": 2,
+            "stdout": "",
+            "stderr_contains": "Permission denied",
+            "native_calls": [],
+            "backend_reads": {
+              "/data/secret.txt": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "follow_uses_native_shortcut_without_hooks",
+      "world": {
+        "track_reads": true,
+        "mounts": {
+          "/data": {
+            "vfs": "shortcuts",
+            "files": {
+              "secret.txt": "TOPSECRET plans\nsecond\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "tail -f /data/secret.txt | head -n 1",
+          "expect": {
+            "exit": 0,
+            "stdout": "TOPSECRET plans\n",
+            "stderr": "",
+            "native_calls": [
+              "follow",
+              "follow_closed"
+            ],
+            "backend_reads": {
+              "/data/secret.txt": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "follow_pre_hook_cold",
+      "world": {
+        "track_reads": true,
+        "mounts": {
+          "/data": {
+            "vfs": "shortcuts",
+            "files": {
+              "secret.txt": "TOPSECRET plans\nsecond\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "add_policies": [
+            {
+              "name": "seal_reads",
+              "suffix": "secret.txt"
+            }
+          ]
+        },
+        {
+          "command": "tail -f /data/secret.txt | head -n 1",
+          "expect": {
+            "exit": 0,
+            "stdout": "",
+            "stderr_contains": "Permission denied",
+            "native_calls": [],
+            "backend_reads": {
+              "/data/secret.txt": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "follow_pre_hook_warm",
+      "world": {
+        "track_reads": true,
+        "mounts": {
+          "/data": {
+            "vfs": "shortcuts",
+            "files": {
+              "secret.txt": "TOPSECRET plans\nsecond\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "facade": {
+            "method": "read",
+            "path": "/data/secret.txt"
+          },
+          "expect": {
+            "value": "TOPSECRET plans\nsecond\n",
+            "backend_reads": {
+              "/data/secret.txt": 1
+            }
+          }
+        },
+        {
+          "add_policies": [
+            {
+              "name": "seal_reads",
+              "suffix": "secret.txt"
+            }
+          ]
+        },
+        {
+          "command": "tail -f /data/secret.txt | head -n 1",
+          "expect": {
+            "exit": 0,
+            "stdout": "",
+            "stderr_contains": "Permission denied",
+            "native_calls": [],
+            "backend_reads": {
+              "/data/secret.txt": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "follow_post_hook_cold",
+      "world": {
+        "track_reads": true,
+        "mounts": {
+          "/data": {
+            "vfs": "shortcuts",
+            "files": {
+              "secret.txt": "TOPSECRET plans\nsecond\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "add_policies": [
+            {
+              "name": "redact_reads",
+              "marker": "TOPSECRET"
+            }
+          ]
+        },
+        {
+          "command": "tail -f /data/secret.txt | head -n 1",
+          "expect": {
+            "exit": 0,
+            "stdout": "",
+            "stderr_contains": "Permission denied",
+            "native_calls": [],
+            "backend_reads": {
+              "/data/secret.txt": 1
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "follow_post_hook_warm",
+      "world": {
+        "track_reads": true,
+        "mounts": {
+          "/data": {
+            "vfs": "shortcuts",
+            "files": {
+              "secret.txt": "TOPSECRET plans\nsecond\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "facade": {
+            "method": "read",
+            "path": "/data/secret.txt"
+          },
+          "expect": {
+            "value": "TOPSECRET plans\nsecond\n",
+            "backend_reads": {
+              "/data/secret.txt": 1
+            }
+          }
+        },
+        {
+          "add_policies": [
+            {
+              "name": "redact_reads",
+              "marker": "TOPSECRET"
+            }
+          ]
+        },
+        {
+          "command": "tail -f /data/secret.txt | head -n 1",
+          "expect": {
+            "exit": 0,
+            "stdout": "",
+            "stderr_contains": "Permission denied",
+            "native_calls": [],
+            "backend_reads": {
+              "/data/secret.txt": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "grep_recursive_uses_native_shortcut_without_hooks",
+      "world": {
+        "track_reads": true,
+        "mounts": {
+          "/data": {
+            "vfs": "shortcuts",
+            "files": {
+              "secret.txt": "TOPSECRET plans\nsecond\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "grep -rF TOPSECRET /data",
+          "expect": {
+            "exit": 0,
+            "stdout": "/data/secret.txt:TOPSECRET plans\n",
+            "stderr": "",
+            "native_calls": [
+              "files_containing",
+              "lines_containing"
+            ],
+            "backend_reads": {
+              "/data/secret.txt": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "grep_recursive_post_hook_cold",
+      "world": {
+        "track_reads": true,
+        "mounts": {
+          "/data": {
+            "vfs": "shortcuts",
+            "files": {
+              "secret.txt": "TOPSECRET plans\nsecond\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "add_policies": [
+            {
+              "name": "redact_reads",
+              "marker": "TOPSECRET"
+            }
+          ]
+        },
+        {
+          "command": "grep -rF TOPSECRET /data",
+          "expect": {
+            "exit": 2,
+            "stdout": "",
+            "stderr_contains": "Permission denied",
+            "native_calls": [],
+            "backend_reads": {
+              "/data/secret.txt": 1
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "grep_recursive_post_hook_warm",
+      "world": {
+        "track_reads": true,
+        "mounts": {
+          "/data": {
+            "vfs": "shortcuts",
+            "files": {
+              "secret.txt": "TOPSECRET plans\nsecond\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "facade": {
+            "method": "read",
+            "path": "/data/secret.txt"
+          },
+          "expect": {
+            "value": "TOPSECRET plans\nsecond\n",
+            "backend_reads": {
+              "/data/secret.txt": 1
+            }
+          }
+        },
+        {
+          "add_policies": [
+            {
+              "name": "redact_reads",
+              "marker": "TOPSECRET"
+            }
+          ]
+        },
+        {
+          "command": "grep -rF TOPSECRET /data",
+          "expect": {
+            "exit": 2,
+            "stdout": "",
+            "stderr_contains": "Permission denied",
+            "native_calls": [],
+            "backend_reads": {
+              "/data/secret.txt": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "grep_inverse_reads_without_hooks",
+      "world": {
+        "track_reads": true,
+        "mounts": {
+          "/data": {
+            "vfs": "shortcuts",
+            "files": {
+              "secret.txt": "TOPSECRET plans\nsecond\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "grep -rvF absent /data",
+          "expect": {
+            "exit": 0,
+            "stdout": "/data/secret.txt:TOPSECRET plans\n/data/secret.txt:second\n",
+            "stderr": "",
+            "native_calls": [],
+            "backend_reads": {
+              "/data/secret.txt": 1
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "grep_inverse_post_hook_cold",
+      "world": {
+        "track_reads": true,
+        "mounts": {
+          "/data": {
+            "vfs": "shortcuts",
+            "files": {
+              "secret.txt": "TOPSECRET plans\nsecond\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "add_policies": [
+            {
+              "name": "redact_reads",
+              "marker": "TOPSECRET"
+            }
+          ]
+        },
+        {
+          "command": "grep -rvF absent /data",
+          "expect": {
+            "exit": 2,
+            "stdout": "",
+            "stderr_contains": "Permission denied",
+            "native_calls": [],
+            "backend_reads": {
+              "/data/secret.txt": 1
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "grep_inverse_post_hook_warm",
+      "world": {
+        "track_reads": true,
+        "mounts": {
+          "/data": {
+            "vfs": "shortcuts",
+            "files": {
+              "secret.txt": "TOPSECRET plans\nsecond\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "facade": {
+            "method": "read",
+            "path": "/data/secret.txt"
+          },
+          "expect": {
+            "value": "TOPSECRET plans\nsecond\n",
+            "backend_reads": {
+              "/data/secret.txt": 1
+            }
+          }
+        },
+        {
+          "add_policies": [
+            {
+              "name": "redact_reads",
+              "marker": "TOPSECRET"
+            }
+          ]
+        },
+        {
+          "command": "grep -rvF absent /data",
+          "expect": {
+            "exit": 2,
+            "stdout": "",
+            "stderr_contains": "Permission denied",
+            "native_calls": [],
+            "backend_reads": {
+              "/data/secret.txt": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "grep_without_matches_uses_native_shortcut_without_hooks",
+      "world": {
+        "track_reads": true,
+        "mounts": {
+          "/data": {
+            "vfs": "shortcuts",
+            "files": {
+              "secret.txt": "TOPSECRET plans\nsecond\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "grep -rLF absent /data",
+          "expect": {
+            "exit": 1,
+            "stdout": "/data/secret.txt\n",
+            "stderr": "",
+            "native_calls": [
+              "files_containing"
+            ],
+            "backend_reads": {
+              "/data/secret.txt": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "grep_without_matches_post_hook_cold",
+      "world": {
+        "track_reads": true,
+        "mounts": {
+          "/data": {
+            "vfs": "shortcuts",
+            "files": {
+              "secret.txt": "TOPSECRET plans\nsecond\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "add_policies": [
+            {
+              "name": "redact_reads",
+              "marker": "TOPSECRET"
+            }
+          ]
+        },
+        {
+          "command": "grep -rLF absent /data",
+          "expect": {
+            "exit": 2,
+            "stdout": "",
+            "stderr_contains": "Permission denied",
+            "native_calls": [],
+            "backend_reads": {
+              "/data/secret.txt": 1
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "grep_without_matches_post_hook_warm",
+      "world": {
+        "track_reads": true,
+        "mounts": {
+          "/data": {
+            "vfs": "shortcuts",
+            "files": {
+              "secret.txt": "TOPSECRET plans\nsecond\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "facade": {
+            "method": "read",
+            "path": "/data/secret.txt"
+          },
+          "expect": {
+            "value": "TOPSECRET plans\nsecond\n",
+            "backend_reads": {
+              "/data/secret.txt": 1
+            }
+          }
+        },
+        {
+          "add_policies": [
+            {
+              "name": "redact_reads",
+              "marker": "TOPSECRET"
+            }
+          ]
+        },
+        {
+          "command": "grep -rLF absent /data",
+          "expect": {
+            "exit": 2,
+            "stdout": "",
+            "stderr_contains": "Permission denied",
+            "native_calls": [],
+            "backend_reads": {
+              "/data/secret.txt": 0
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -869,7 +869,7 @@ class VfsContext:
 
     Fires at the dispatcher (the ``ws.vfs`` facade, which also serves
     FUSE), before any backend or cache I/O, so it holds however the
-    mount is reached. A running line's own ops never reach a user method.
+    mount is reached, including a command or runtime's own file calls.
 
     Args:
         call (VfsCall): the function called, as ``vfs_call`` declares

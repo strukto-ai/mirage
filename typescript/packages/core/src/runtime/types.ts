@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { ByteSource, IOResult, OpReport } from '../io/types.ts'
-import type { PathSpec, SetAttrFields } from '../types.ts'
+import type { FileStat, PathSpec, SetAttrFields } from '../types.ts'
 
 /** The runtime metadata shared by routing and capability checks. */
 export interface RuntimeIdentity {
@@ -149,6 +149,8 @@ export type BridgeOpAttrs = SetAttrFields & {
   raw?: boolean
   /** A read of what the backend holds now, past the file cache. */
   direct?: boolean
+  /** A retained read or stat answer, checked without backend I/O. */
+  retained?: Uint8Array | FileStat
 }
 
 /**
@@ -342,4 +344,6 @@ export interface VFSStat {
   // Numeric owner and group, absent when unknown or stored as a name.
   uid?: number
   gid?: number
+  /** Original row, preserving unknown size and backend metadata for retained stats. */
+  source?: FileStat
 }

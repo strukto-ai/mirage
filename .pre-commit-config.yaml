@@ -143,7 +143,7 @@ repos:
         # list: the list had already fallen five fakes behind
         # tsconfig.check.json, so editing one of those skipped the hook that
         # type checks it.
-        files: ^integ/(runtime/microsandbox/.*\.ts|server/.*\.ts|hosting/.*\.ts|access/.*\.ts|events/.*\.ts|wandb/.*\.ts|slack_atlas\.ts|airtable_atlas\.ts|scripts/capture_airtable_atlas\.ts|tsconfig(\.check)?\.json)$
+        files: ^integ/(runtime/(run\.ts|microsandbox/.*\.ts)|fuse/discord\.ts|server/.*\.ts|hosting/.*\.ts|access/.*\.ts|events/.*\.ts|wandb/.*\.ts|slack_atlas\.ts|airtable_atlas\.ts|scripts/capture_airtable_atlas\.ts|tsconfig(\.check)?\.json)$
         pass_filenames: false
       - id: py-mypy
         name: Type check (mypy)

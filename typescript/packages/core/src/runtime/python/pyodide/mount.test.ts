@@ -32,7 +32,8 @@ function makeBridge(): {
 } {
   const calls: { op: string; path: string; bytes?: Uint8Array }[] = []
   const files = new Map<string, Uint8Array>()
-  const dispatch: BridgeDispatchFn = (op, path, bytes) => {
+  const dispatch: BridgeDispatchFn = (op, path, bytes, _dst, attrs) => {
+    if (attrs?.retained !== undefined) return Promise.resolve(attrs.retained)
     const normalizedBytes = bytes ? new Uint8Array(bytes) : undefined
     const entry: { op: string; path: string; bytes?: Uint8Array } =
       normalizedBytes !== undefined ? { op, path, bytes: normalizedBytes } : { op, path }
@@ -178,7 +179,8 @@ describe('PyodideRuntime mount visibility', () => {
   }, 60_000)
 
   it('a refused create fails the open with the mount errno', async () => {
-    const dispatch: BridgeDispatchFn = (op) => {
+    const dispatch: BridgeDispatchFn = (op, _path, _bytes, _dst, attrs) => {
+      if (attrs?.retained !== undefined) return Promise.resolve(attrs.retained)
       if (op === 'stat')
         return Promise.reject(Object.assign(new Error('missing'), { code: 'ENOENT' }))
       if (op === 'create')
@@ -206,7 +208,8 @@ describe('PyodideRuntime mount visibility', () => {
 
   it('a failed mutation stops the replay instead of applying later entries', async () => {
     const attempted: string[] = []
-    const dispatch: BridgeDispatchFn = (op, path) => {
+    const dispatch: BridgeDispatchFn = (op, path, _bytes, _dst, attrs) => {
+      if (attrs?.retained !== undefined) return Promise.resolve(attrs.retained)
       attempted.push(`${op} ${path}`)
       if (op === 'stat')
         return Promise.reject(Object.assign(new Error('missing'), { code: 'ENOENT' }))
@@ -239,7 +242,8 @@ describe('PyodideRuntime mount visibility', () => {
     // The mount lists the file, so it exists, but will not hand over its
     // content. Leaving it out of the guest's tree would read as absence,
     // and the append would then ship its tail as the whole file.
-    const dispatch: BridgeDispatchFn = (op, path, bytes) => {
+    const dispatch: BridgeDispatchFn = (op, path, bytes, _dst, attrs) => {
+      if (attrs?.retained !== undefined) return Promise.resolve(attrs.retained)
       if (op === 'read' && path === '/ram/log.txt') {
         return Promise.reject(new Error('backend unavailable'))
       }
@@ -271,7 +275,8 @@ describe('PyodideRuntime mount visibility', () => {
 describe('PyodideRuntime writes', () => {
   it('a dirty close flushes to the mount and the script exits 0', async () => {
     const calls: { op: string; path: string; bytes?: Uint8Array }[] = []
-    const dispatch: BridgeDispatchFn = async (op, path, bytes) => {
+    const dispatch: BridgeDispatchFn = async (op, path, bytes, _dst, attrs) => {
+      if (attrs?.retained !== undefined) return Promise.resolve(attrs.retained)
       // settle on a macrotask so a run_sync anywhere in the path would
       // have to suspend, not ride an already-resolved promise
       await new Promise((resolve) => setTimeout(resolve, 1))
@@ -299,7 +304,8 @@ describe('PyodideRuntime writes', () => {
 
   it('mutations reach the mount in guest order', async () => {
     const calls: { op: string; path: string; dst?: string }[] = []
-    const dispatch: BridgeDispatchFn = async (op, path, _bytes, dst) => {
+    const dispatch: BridgeDispatchFn = async (op, path, _bytes, dst, attrs) => {
+      if (attrs?.retained !== undefined) return Promise.resolve(attrs.retained)
       await new Promise((resolve) => setTimeout(resolve, 1))
       calls.push(dst === undefined ? { op, path } : { op, path, dst })
       if (op === 'stat') throw Object.assign(new Error('missing'), { code: 'ENOENT' })
@@ -340,7 +346,8 @@ describe('PyodideRuntime writes', () => {
     // holds: shipping an empty buffer whole would drop that.
     const files = new Map<string, Uint8Array>()
     const writes: { path: string; text: string }[] = []
-    const dispatch: BridgeDispatchFn = async (op, path, bytes) => {
+    const dispatch: BridgeDispatchFn = async (op, path, bytes, _dst, attrs) => {
+      if (attrs?.retained !== undefined) return Promise.resolve(attrs.retained)
       await new Promise((resolve) => setTimeout(resolve, 1))
       if (op === 'read') {
         const found = files.get(path)

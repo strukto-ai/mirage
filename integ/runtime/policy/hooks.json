@@ -71,9 +71,9 @@
         {
           "command": "mkdir -p /ram/locked && echo hi > /ram/locked/f.txt && cat /ram/locked/f.txt",
           "expect": {
-            "exit": 0,
-            "stdout": "hi\n",
-            "stderr": ""
+            "exit": 1,
+            "stdout": "",
+            "stderr_contains": "Permission denied"
           }
         },
         {
@@ -129,7 +129,7 @@
       ]
     },
     {
-      "id": "hook_pre_vfs_does_not_judge_a_scripts_own_read",
+      "id": "hook_pre_vfs_judges_a_scripts_own_read",
       "world": {
         "mounts": {
           "/ram": {
@@ -150,9 +150,9 @@
         {
           "command": "python3 /ram/run.sealed.py",
           "expect": {
-            "exit": 0,
-            "stdout": "1\n",
-            "stderr": ""
+            "exit": 1,
+            "stdout": "",
+            "stderr_contains": "Permission denied"
           }
         },
         {

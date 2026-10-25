@@ -460,7 +460,7 @@ export class Files {
       if (op === 'write' || op === 'append')
         await closeQuietly((args[0] ?? kwargs.data ?? null) as ByteSource | null)
     }
-    if (op === 'write' && kwargs.admit_only === true) {
+    if ((op === 'read' || op === 'write' || op === 'stat') && kwargs.admit_only === true) {
       await settle(undefined, false)
       return result
     }

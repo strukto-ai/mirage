@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 
 from mirage.errors.fs import einval
@@ -50,6 +50,8 @@ class FileHandle:
         extent (int): the length the last truncate set, the floor under
             what the stored bytes and the ranges reach.
         truncated (bool): whether a truncate ran since open.
+        read_cached (Callable[[bytes], bytes] | None): judge retained bytes
+            before returning them; None for handles such as stdin.
     """
 
     path: str
@@ -62,6 +64,7 @@ class FileHandle:
     cut: int | None = None
     extent: int = 0
     truncated: bool = False
+    read_cached: Callable[[bytes], bytes] | None = None
 
     @classmethod
     def opened(
@@ -72,6 +75,7 @@ class FileHandle:
         size: int,
         writable: bool,
         append: bool,
+        read_cached: Callable[[bytes], bytes] | None = None,
     ) -> "FileHandle":
         """A handle over a file, positioned by the open mode.
 
@@ -88,6 +92,8 @@ class FileHandle:
             writable (bool): whether writes are accepted.
             append (bool): every write lands at the end; the initial
                 position remains zero.
+            read_cached (Callable[[bytes], bytes] | None): judge retained
+                bytes without fetching; None when no policy applies.
         """
         base = None
         if fetch is not None:
@@ -105,6 +111,7 @@ class FileHandle:
             writable=writable,
             append=append,
             base_len=0 if base is None else size,
+            read_cached=read_cached,
         )
         return handle
 
@@ -173,10 +180,13 @@ class FileHandle:
         """
         if size <= 0:
             return b""
-        out = bytearray()
+        stored = b""
+        retained = True
         if self.base is not None and (self.cut is None or offset < self.cut):
             want = size if self.cut is None else min(size, self.cut - offset)
-            out += self.base.pread(offset, want)
+            retained = self.base.holds(offset, want)
+            stored = self.base.pread(offset, want)
+        out = bytearray(stored)
         reach = min(offset + size, max(self._runs_end(), self.extent))
         if offset + len(out) < reach:
             out += bytes(reach - offset - len(out))
@@ -187,7 +197,10 @@ class FileHandle:
                 out[low - offset : high - offset] = data[
                     low - start : high - start
                 ]
-        return bytes(out)
+        result = bytes(out)
+        if self.read_cached is not None and (retained or result != stored):
+            return self.read_cached(result)
+        return result
 
     def read(self, size: int | None = None) -> bytes:
         """Read from the position, advancing it by what was read.
@@ -201,11 +214,13 @@ class FileHandle:
             self.pos += len(chunk)
             return chunk
         out = bytearray()
+        at = self.pos
         while True:
-            chunk = self.pread(self.pos, READ_CHUNK)
+            chunk = self.pread(at, READ_CHUNK)
             out += chunk
-            self.pos += len(chunk)
+            at += len(chunk)
             if len(chunk) < READ_CHUNK:
+                self.pos = at
                 return bytes(out)
 
     def pwrite(self, offset: int, data: bytes) -> None:

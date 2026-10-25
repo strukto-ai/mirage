@@ -32,6 +32,28 @@ describe('RuntimeFiles transport', () => {
     expect(Array.from(out)).toEqual([1, 2, 3])
   })
 
+  it('guards a live view before and after operations while leaving cleanup available', async () => {
+    const controller = new AbortController()
+    const data = enc.encode('body')
+    const dispatch = vi.fn<BridgeDispatchFn>(() => {
+      controller.abort(new Error('revoked'))
+      return Promise.resolve(data)
+    })
+    const files = new RuntimeFiles(dispatch)
+    const live = files.withSignal(controller.signal)
+    await expect(live.read('/ram/x')).rejects.toThrow('revoked')
+    await expect(live.write('/ram/y', data)).rejects.toThrow('revoked')
+    expect(dispatch).toHaveBeenCalledTimes(1)
+    expect(await files.read('/ram/x')).toBe(data)
+  })
+
+  it('forwards retained bytes through the same read boundary', async () => {
+    const retained = enc.encode('held')
+    const dispatch = vi.fn<BridgeDispatchFn>(() => Promise.resolve(retained))
+    expect(await new RuntimeFiles(dispatch).readCached('/ram/x.txt', retained)).toBe(retained)
+    expect(dispatch).toHaveBeenCalledWith('read', '/ram/x.txt', undefined, undefined, { retained })
+  })
+
   it('forwards a ranged and a raw read as the read attrs', async () => {
     const dispatch = vi.fn<BridgeDispatchFn>(() => Promise.resolve(new Uint8Array([2])))
     const files = new RuntimeFiles(dispatch)
@@ -112,7 +134,7 @@ describe('RuntimeFiles transport', () => {
         }),
       ),
     )
-    expect(await new RuntimeFiles(dispatch).stat('/ram/a.txt')).toEqual({
+    expect(await new RuntimeFiles(dispatch).stat('/ram/a.txt')).toMatchObject({
       size: 4,
       isDir: false,
       mode: (FILE_MODE & ~0o7777) | 0o700,
@@ -139,7 +161,7 @@ describe('RuntimeFiles transport', () => {
         }),
       ),
     )
-    expect(await new RuntimeFiles(dispatch).stat('/dev/zero')).toEqual({
+    expect(await new RuntimeFiles(dispatch).stat('/dev/zero')).toMatchObject({
       size: 0,
       isDir: false,
       mode: CHAR_MODE,
@@ -158,7 +180,7 @@ describe('RuntimeFiles transport', () => {
     expect(dispatch).toHaveBeenCalledWith('stat', '/ram/lnk', undefined, undefined, {
       nofollow: true,
     })
-    expect(st).toEqual({ size: 8, isDir: false, mode: LINK_MODE, isLink: true })
+    expect(st).toMatchObject({ size: 8, isDir: false, mode: LINK_MODE, isLink: true })
   })
 
   // A backend that slash-marks its directories has already said what the
@@ -580,5 +602,41 @@ describe('RuntimeFiles flush', () => {
       ['pwrite', '/a/x', enc.encode('z'), undefined, { offset: 4 }],
       ['append', '/a/x', enc.encode('!')],
     ])
+  })
+})
+
+it('preserves unknown source metadata and checks logical changes in retained stat', async () => {
+  const source = new FileStat({
+    name: 'unknown',
+    type: FileType.FILE,
+    uid: 'owner',
+    modified: '2026-07-15T00:00:00Z',
+    extra: { policy_tag: 'secret' },
+  })
+  const seen: FileStat[] = []
+  const dispatch: BridgeDispatchFn = (op, path, _bytes, _dst, attrs) => {
+    expect(op).toBe('stat')
+    expect(path).toBe('/data/unknown')
+    if (attrs?.retained !== undefined) {
+      expect(attrs.retained).toBeInstanceOf(FileStat)
+      seen.push(attrs.retained as FileStat)
+      return Promise.resolve(attrs.retained)
+    }
+    return Promise.resolve(source)
+  }
+  const files = new RuntimeFiles(dispatch)
+  const row = await files.stat('/data/unknown')
+  expect(await files.statCached('/data/unknown', row)).toEqual(row)
+  expect(seen[0]).toEqual(source)
+  expect(seen[0]?.size).toBeNull()
+  expect((await files.statCached('/data/unknown', { ...row, size: 7, mode: 0o100600 })).size).toBe(
+    7,
+  )
+  expect(seen[1]).toMatchObject({
+    size: 7,
+    mode: 0o100600,
+    uid: 'owner',
+    modified: source.modified,
+    extra: source.extra,
   })
 })

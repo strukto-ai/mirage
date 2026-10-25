@@ -330,9 +330,13 @@ export class PyodideWorkerClient {
       case 'process':
         return processes.call(request.payload ?? '{}')
       case 'read':
-        return files.read(request.path, request.raw === true ? { raw: true } : {})
+        return request.retained === undefined
+          ? files.read(request.path, request.raw === true ? { raw: true } : {})
+          : files.readCached(request.path, request.retained)
       case 'stat':
-        return files.stat(request.path, true)
+        return request.retainedStat === undefined
+          ? files.stat(request.path, true)
+          : files.statCached(request.path, request.retainedStat)
       case 'readdir':
         return files.readdir(request.path, request.classify ?? true)
       case 'readlink':

@@ -1170,13 +1170,14 @@ class HostFs:
 
     def fstat(self, fd: int) -> _real_os.stat_result:
         desc = self._descriptors[fd]
-        st = (
-            desc.stat
-            if desc.kept is not None and desc.stat is not None
-            else self._adapter.stat(desc.path)
-        )
-        if desc.handle is not None:
+        retained = desc.kept is not None and desc.stat is not None
+        st = desc.stat if retained else self._adapter.stat(desc.path)
+        assert st is not None
+        if desc.handle is not None and desc.handle.size != st.size:
             st = dataclasses.replace(st, size=desc.handle.size)
+            retained = True
+        if retained:
+            st = self._adapter.stat_cached(desc.path, st)
         return self._stat_of(desc.opened, st, desc.kept is not None)
 
     def fsync(self, fd: int) -> None:

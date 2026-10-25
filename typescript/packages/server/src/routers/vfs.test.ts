@@ -143,7 +143,7 @@ it('keeps the session gate for custom functions and streamed reads', async () =>
     expect(reply.statusCode, reply.body).toBe(200)
     expect(reply.json()).toBeNull()
     expect(backend.calls).toBe(2)
-    for (const reserved of ['session_id', 'report', 'admit_only', 'stream']) {
+    for (const reserved of ['session_id', 'report', 'admit_only', 'retained', 'stream']) {
       reply = await app.inject({
         method: 'POST',
         url: base + '/peek?session_id=agent',

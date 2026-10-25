@@ -828,12 +828,16 @@ class HostFs implements Record<RoutedCall, (...args: never[]) => Promise<unknown
           return [await this.fdWrite(fd, joined, position), buffers]
         }
         case 'fstat': {
-          const st =
+          let retained = desc.kept !== null && desc.stat !== null
+          let st =
             desc.kept !== null && desc.stat !== null ? desc.stat : await this.files.stat(desc.path)
           const size = desc.handle?.size ?? st.size
-          return [
-            this.statsOf(desc.opened, { ...st, size }, rest[0] as Options, desc.kept !== null),
-          ]
+          if (size !== st.size) {
+            st = { ...st, size }
+            retained = true
+          }
+          if (retained) st = await this.files.statCached(desc.path, st)
+          return [this.statsOf(desc.opened, st, rest[0] as Options, desc.kept !== null)]
         }
         case 'ftruncate':
           if (!desc.mode.writable) throw einval(desc.path)

@@ -1279,3 +1279,55 @@ it('makes a flush onto a name a rename replaces wait for it', async () => {
   expect(dec.decode(await core.read('/data/b', writer, 0, 100))).toBe('NEW-body')
   expect(dec.decode(await ws.vfs.read('/data/b'))).toBe('fresh')
 })
+
+describe('MountCore cached chunks and session revocation', () => {
+  it.each(['hide', 'deny'] as const)(
+    'rechecks %s before serving a warmed chunk',
+    async (restriction) => {
+      const path = '/data/chunked.bin'
+      const ws = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
+      await ws.vfs.write(path, new Uint8Array(READ_CHUNK + 17).fill(23))
+      const session = ws.createSession('chunk-reader')
+      const core = new MountCore(ws.vfs, { session })
+      const read = vi.spyOn(ws.vfs, 'read')
+      const fd = await core.open(path)
+      try {
+        expect(await core.read(path, fd, 0, 8)).toEqual(new Uint8Array(8).fill(23))
+        const calls = read.mock.calls.length
+        expect(calls).toBe(1)
+        await ws.setSessionProfile(
+          'chunk-reader',
+          restriction === 'hide'
+            ? { paths: { hide: [path] } }
+            : { commands: { deny: [{ reason: 'sealed', paths: [path] }] } },
+        )
+        await expect(core.read(path, fd, 1, 8)).rejects.toMatchObject({
+          code: restriction === 'hide' ? 'ENOENT' : 'EACCES',
+        })
+        if (restriction === 'hide')
+          await expect(core.fgetattr(path, fd)).rejects.toMatchObject({ code: 'ENOENT' })
+        expect(read).toHaveBeenCalledTimes(calls)
+        await ws.setSessionProfile('chunk-reader', {})
+        expect(await core.read(path, fd, 1, 8)).toEqual(new Uint8Array(8).fill(23))
+        expect(read).toHaveBeenCalledTimes(calls)
+      } finally {
+        await core.release(fd)
+        expect(core.handles.has(fd)).toBe(false)
+        await ws.close()
+      }
+    },
+  )
+})
+
+it('does not replace a hidden mount root with synthetic attributes', async () => {
+  const ws = new Workspace({ '/data': new RAMVFS() })
+  const session = ws.createSession('reader', { profile: { paths: { hide: ['/data'] } } })
+  const core = new MountCore(ws.vfs, { rootPrefix: '/data', session })
+  try {
+    await expect(core.getattr('/')).rejects.toMatchObject({ code: 'ENOENT' })
+    await ws.setSessionProfile('reader', {})
+    expect((await core.getattr('/')).mode & 0o170000).toBe(0o040000)
+  } finally {
+    await ws.close()
+  }
+})

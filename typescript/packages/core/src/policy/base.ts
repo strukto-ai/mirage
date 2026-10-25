@@ -64,8 +64,8 @@ export interface Policy {
    * Admit, hold or refuse one command or CLI, once, as it runs. A Deny
    * refuses it (`<command>: Permission denied`, exit 126, or the
    * operand's own error for an operand refusal); an Ask holds it until
-   * the host approves. Its own file I/O meets the hides, the mount mode
-   * and the profile's path rules, never `preVfs`.
+   * the host approves. Its file I/O also passes the dispatcher's
+   * `preVfs` and `postVfs` gates.
    */
   preCommand?(ctx: CommandContext): Action | Action[] | null | Promise<Action | Action[] | null>
   /**
@@ -80,9 +80,9 @@ export interface Policy {
   /**
    * Admit, hold or refuse one `ws.vfs` / `session.vfs` call. Fires at the
    * dispatcher before any backend or cache I/O, for the host's and the
-   * agent's file calls (and FUSE): never for a running line's own I/O,
-   * which `preCommand` judged. A Deny is EACCES; an Ask holds the call
-   * until the host approves.
+   * agent's file calls, including commands, runtimes and FUSE. A Deny
+   * is EACCES; an Ask holds a standalone call until the host approves
+   * and refuses inside a running command.
    */
   preVfs?(ctx: VfsContext): Action | Action[] | null | Promise<Action | Action[] | null>
   /**

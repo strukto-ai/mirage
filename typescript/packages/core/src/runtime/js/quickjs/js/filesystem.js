@@ -15,18 +15,15 @@ std.open = (path, mode, errorObj) => {
   const methods = {
     readAsString: (max) => {
       const size = max === undefined ? -1 : toIndex(max)
-      fill(size)
       return __text(__mirage_read(fd, size))
     },
     read: (buffer, position, length) => {
       const [pos, len] = span(buffer, position, length)
-      fill(len)
       const got = new Uint8Array(__mirage_read_bytes(fd, len))
       new Uint8Array(buffer, pos, got.length).set(got)
       return got.length
     },
     getline: () => {
-      while (__mirage_lacks_line(fd)) __mirage_fill(fd, 0)
       const line = __mirage_getline(fd)
       return line === null ? null : __text(line)
     },

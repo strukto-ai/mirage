@@ -37,6 +37,7 @@ function makeCountingBridge(seed: Record<string, string>): CountingBridge {
   const dirs = new Set<string>()
   const ops: [op: string, path: string, bytes: number][] = []
   const dispatch: BridgeDispatchFn = (op, path, bytes, dst, attrs) => {
+    if (attrs?.retained !== undefined) return Promise.resolve(attrs.retained)
     if (attrs?.admitOnly) return Promise.resolve(undefined)
     ops.push([op, path, bytes?.length ?? 0])
     if (op === 'read') {

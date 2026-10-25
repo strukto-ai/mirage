@@ -215,9 +215,10 @@ async def pre_vfs_gate(
     call, so a refusal is byte-identical however the mount is reached:
     PermissionError with errno EACCES and the virtual path as filename,
     which the shell renders as "<cmd>: <path>: Permission denied" and
-    FUSE translates to -EACCES. A running line's own I/O, and a method's
-    own read, meet the hides, path rules and mount mode alone; a method's
-    write is refused. An Ask is a question only where no line is running and the entry
+    FUSE translates to -EACCES. Commands and runtimes pass the same
+    file gates. A policy method's own read meets the hides, path rules
+    and mount mode alone; its write is refused. An Ask is a question only
+    where no line is running and the entry
     point holds the ledger (a file tool, the host's facade): the ledger
     answers it from a standing grant or records it, and an unanswered
     one refuses with the ask id on the record. Inside a line an Ask
@@ -277,7 +278,7 @@ async def pre_vfs_gate(
         raise erofs(path.virtual)
     if not (policies.wants("pre_vfs") or (write and mode is not None)):
         return
-    answer = await _apart(policies.pre_vfs(ctx, rules_only=line or deciding))
+    answer = await _apart(policies.pre_vfs(ctx, rules_only=deciding))
     await _refuse_op(ctx, answer, None if line else decisions, caller)
 
 
@@ -373,8 +374,8 @@ async def post_vfs_gate(
     approved, drops the result with EACCES.
 
     Nothing cuts what a call returns: a call that asks for a range, as
-    a kernel or protocol mount does, must get it whole. Not fired for a
-    running line's own I/O or a method's own read.
+    a kernel or protocol mount does, must get it whole. Commands and
+    runtimes pass the same gate; a policy method's own read is exempt.
 
     Args:
         policies (Policies): the workspace's admission policies.
@@ -393,10 +394,8 @@ async def post_vfs_gate(
     """
     if caller is None:
         caller = current_caller()
-    if (
-        caller.refusals is not None
-        or caller.explaining is DryRun.DECIDING
-        or not await policies.wants_for("post_vfs", session_id)
+    if caller.explaining is DryRun.DECIDING or not await policies.wants_for(
+        "post_vfs", session_id
     ):
         return None
     ctx = VfsResultContext(
@@ -410,7 +409,10 @@ async def post_vfs_gate(
         result=result,
     )
     await _refuse_op(
-        ctx, await _apart(policies.post_vfs(ctx)), decisions, caller
+        ctx,
+        await _apart(policies.post_vfs(ctx)),
+        None if caller.refusals is not None else decisions,
+        caller,
     )
 
 
@@ -750,8 +752,8 @@ class Policies:
             placed (bool): the caller placed the line itself.
             rules_only (bool): ask the profile's rules alone
                 (``PermissionsPolicy``), not the policies registered in
-                code or a profile's script: the line's passes, which
-                judge a line before it runs, and a command's own I/O.
+                code or a profile's script. Used for preliminary rule
+                passes and a policy's own file reads to avoid recursion.
         """
         # A snapshot, so the order holds if the host edits registrations
         # while a method awaits. Changes take effect at the next gate.

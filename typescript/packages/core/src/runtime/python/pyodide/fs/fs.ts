@@ -231,7 +231,8 @@ export class PyodideFs {
    *   path: the name its inode is reported under.
    */
   private attrOf(node: FSNode, path: string): FSAttr {
-    if (node.unclassified === true) this.classifyNode(node)
+    const classified = node.unclassified === true
+    if (classified) this.classifyNode(node)
     // A link sizes as its target string, which is what lstat reports on
     // every POSIX system and what MEMFS answers for its own links.
     const size = this.host.isLink(node.mode)
@@ -242,23 +243,37 @@ export class PyodideFs {
     // The stat every runtime shares, so one path reports one inode
     // whoever asks; a sandbox owns nothing, so an owner the node lacks
     // is 0. The times stay the node's, which carry unflushed writes.
-    const posix = posixStat(
-      { size, isDir: this.host.isDir(node.mode), mode: node.mode },
-      path,
-      '/',
-      { uid: node.uid ?? 0, gid: node.gid ?? 0 },
-    )
+    let row: VFSStat = {
+      size,
+      isDir: this.host.isDir(node.mode),
+      isLink: this.host.isLink(node.mode),
+      mode: node.mode,
+      uid: node.uid ?? 0,
+      gid: node.gid ?? 0,
+      rdev: node.rdev,
+      atimeMs: node.atime,
+      mtimeMs: node.mtime,
+      ...(node.source === undefined ? {} : { source: node.source }),
+    }
+    if (!classified && !isCharDevice(node.mode)) {
+      try {
+        row = this.sync.statCached(this.nodes.pathOf(node), row)
+      } catch (error) {
+        throw errnoError(this.host, this.errno, classify(error) ?? 'EIO')
+      }
+    }
+    const posix = posixStat(row, path, '/')
     return {
       dev: posix.dev,
       ino: posix.ino,
-      mode: node.mode,
-      nlink: posix.nlink,
+      mode: posix.mode,
+      nlink: node.unlinked === true ? 0 : posix.nlink,
       uid: posix.uid,
       gid: posix.gid,
-      rdev: node.rdev,
-      size,
-      atime: new Date(node.atime),
-      mtime: new Date(node.mtime),
+      rdev: posix.rdev,
+      size: posix.size,
+      atime: new Date(posix.atimeMs),
+      mtime: new Date(posix.mtimeMs),
       ctime: new Date(node.ctime),
       blksize: posix.blksize,
       blocks: posix.blocks,
@@ -503,6 +518,7 @@ export class PyodideFs {
     const mode = stat.isLink ? LINK_MODE : (stat.mode ?? (stat.isDir ? DIR_MODE : FILE_MODE))
     const node = this.nodes.makeNode(parent, name, mode, stat.rdev ?? 0)
     node.usedBytes = stat.size
+    if ('source' in stat) node.source = stat.source
     if (stat.mtimeMs !== undefined) node.atime = node.mtime = node.ctime = stat.mtimeMs
     if (stat.atimeMs !== undefined) node.atime = stat.atimeMs
     takeOwner(node, stat)
@@ -533,6 +549,7 @@ export class PyodideFs {
     const path = this.nodes.pathOf(node)
     const stat = this.readThrough([path], () => sync.stat(path))
     node.unclassified = false
+    node.source = stat.source
     this.nodes.retype(node, stat.mode)
     node.rdev = stat.rdev ?? 0
     node.atime = node.mtime = node.ctime = stat.mtimeMs ?? 0
@@ -609,6 +626,7 @@ export class PyodideFs {
     length: number,
     position: number,
   ): number {
+    if (length === 0) return 0
     const node = stream.node
     if (isCharDevice(node.mode)) {
       if (EOF_ON_READ_RDEV.has(node.rdev)) return 0
@@ -616,10 +634,17 @@ export class PyodideFs {
       return length
     }
     const used = node.usedBytes ?? 0
-    if (position >= used) return 0
-    const size = Math.min(used - position, length)
-    buffer.set((node.contents ?? new Uint8Array(0)).subarray(position, position + size), offset)
-    return size
+    const size = Math.max(0, Math.min(used - position, length))
+    const retained = (node.contents ?? new Uint8Array(0)).slice(position, position + size)
+    const path = this.nodes.pathOf(node)
+    try {
+      const data = this.sync.readCached(path, retained)
+      const out = data.subarray(0, length)
+      buffer.set(out, offset)
+      return out.length
+    } catch (error) {
+      throw errnoError(this.host, this.errno, classify(error) ?? 'EIO')
+    }
   }
 
   private streamWrite(

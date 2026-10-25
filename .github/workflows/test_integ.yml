@@ -204,6 +204,11 @@ jobs:
               - 'python/mirage/workspace/documentation/**'
               - 'typescript/packages/core/src/{accessor,core,commands/builtin,vfs}/document{.ts,/**}'
               - 'typescript/packages/core/src/workspace/documentation/**'
+              - 'python/mirage/{accessor,core,vfs}/discord{.py,/**}'
+              - 'typescript/packages/core/src/{accessor,core}/discord{.ts,/**}'
+              - 'typescript/packages/node/src/vfs/discord/**'
+              - 'python/mirage/{workspace/dispatcher,policy,runtime/handles}/**'
+              - 'typescript/packages/core/src/{workspace/dispatcher,policy,runtime/handles}/**'
               - 'integ/fuse/**'
               - 'integ/check_json.py'
               - 'integ/package.json'
@@ -250,7 +255,7 @@ jobs:
               - '!python/mirage/agents/{agno,claude_agent_sdk,claude_managed_agents,langchain,openai_agents,pydantic_ai}/**'
               - '!typescript/packages/{browser,dsh,opencode}/**'
               - '!python/mirage/{accessor,core,ops,vfs,commands/builtin,commands/cli/builtin}/{airtable,aliyun,backblaze,box,ceph,chroma,databricks_volume,dify,digitalocean,discord,dropbox,email,gcal,gcs}{.py,/**}'
-              - '!python/mirage/{accessor,core,ops,vfs,commands/builtin,commands/cli/builtin}/{gdocs,gdrive,gh,git,github,gmail,google,google_api,gridfs,gsheets,gslides,gws,hf,hf_buckets,hf_datasets}{.py,/**}'
+              - '!python/mirage/{accessor,core,ops,vfs,commands/builtin,commands/cli/builtin}/{gdocs,gdrive,gh,github,gmail,google,google_api,gridfs,gsheets,gslides,gws,hf,hf_buckets,hf_datasets}{.py,/**}'
               - '!python/mirage/{accessor,core,ops,vfs,commands/builtin,commands/cli/builtin}/{hf_hub,hf_models,hf_spaces,himalaya,jaeger,lancedb,langfuse,linear,mem0,minio,msgraph,nextcloud,notion,ntn}{.py,/**}'
               - '!python/mirage/{accessor,core,ops,vfs,commands/builtin,commands/cli/builtin}/{oci,onedrive,postgres,qdrant,qingstor,r2,scaleway,seaweedfs,sharepoint,slack,supabase,tencent,trello,wandb,wasabi}{.py,/**}'
 
@@ -1433,6 +1438,11 @@ jobs:
           github-token: ${{ github.token }}
           name: integ-typescript-dist
           path: typescript/packages
+
+      - name: Run Discord HTTP policy and retained-handle scenarios (both hosts)
+        run: |
+          ./python/.venv/bin/python integ/fuse/discord.py
+          ./integ/node_modules/.bin/tsx integ/fuse/discord.ts
 
       - name: Run TypeScript FUSE mount and check (real libfuse)
         working-directory: integ

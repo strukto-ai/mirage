@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { FlagValue } from '../../../../commands/spec/types.ts'
-import type { Program, RunResult, BridgeDispatchFn } from '../../../types.ts'
+import type { Program, RunResult, BridgeDispatchFn, VFSStat } from '../../../types.ts'
 import type { PyodideConfig } from '../config.ts'
 import type { MirageMutation } from '../fs/journal.ts'
 
@@ -31,6 +31,8 @@ export interface VfsRequest {
   payload?: string
   classify?: boolean
   raw?: boolean
+  retained?: Uint8Array
+  retainedStat?: VFSStat
 }
 /**
  * One run the main thread hands the worker: the program it resolved, and

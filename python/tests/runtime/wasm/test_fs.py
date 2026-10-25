@@ -25,14 +25,19 @@ pytest.importorskip("wasmtime")
 import wasmtime
 
 from mirage import MountMode, Workspace
+from mirage.context import reset_current_session, set_current_session
+from mirage.policy import Deny, Policy
 from mirage.runtime.files import RuntimeFiles
 from mirage.runtime.handles import FileHandle
+from mirage.runtime.resolver import PrefixResolver
 from mirage.runtime.wasm import fs
 from mirage.runtime.wasm.constants import (
     FST_ATIM,
     FST_ATIM_NOW,
     FST_MTIM,
     FST_MTIM_NOW,
+    LOOKUP_SYMLINK_FOLLOW,
+    RIGHT_FD_READ,
 )
 from mirage.runtime.wasm.errors import EINVAL, EIO, ENOENT
 from mirage.runtime.wasm.execution import epoch_engine
@@ -233,3 +238,92 @@ def test_set_times_lands_every_fd_on_the_file_first():
     assert wasi_fs.fd_filestat_set_times(None, fd, 0, stamp, FST_MTIM) == 0
     assert wasi_fs.fd_close(None, other_fd) == 0
     assert mtime_ns(asyncio.run(ws.vfs.stat("/data/f.txt"))) == stamp
+
+
+class _RetainedPolicy(Policy):
+    def __init__(self):
+        self.stage = None
+        self.reads = []
+
+    async def pre_vfs(self, ctx):
+        if ctx.call.name == "read":
+            self.reads.append(("pre", None))
+            if self.stage == "pre":
+                return Deny("read sealed")
+        return None
+
+    async def post_vfs(self, ctx):
+        if ctx.call.name == "read":
+            self.reads.append(("post", ctx.result))
+            if self.stage == "post":
+                return Deny("result sealed")
+        return None
+
+
+@pytest.mark.parametrize("restriction", ["hide", "pre", "post"])
+@pytest.mark.parametrize("vectored", [False, True])
+def test_wasi_open_wires_retained_read_checks(
+    restriction, vectored, monkeypatch
+):
+    path = "/data/f"
+    policy = _RetainedPolicy()
+    ws = Workspace(
+        {"/data/": RAMVFS()}, mode=MountMode.WRITE, policies=[policy]
+    )
+    loop = asyncio.new_event_loop()
+    loop.run_until_complete(ws.vfs.write(path, b"secret"))
+    token = set_current_session(ws.create_session("reader"))
+    prefixes = ["/data/"]
+    files = RuntimeFiles(
+        ws.vfs.dispatch, loop, PrefixResolver(lambda: prefixes)
+    )
+    view = WasmView(files=files)
+    wasi = WasiFs(view, b"stdin")
+    memory = {}
+    monkeypatch.setattr(wasi, "_path_arg", lambda *args: path)
+    monkeypatch.setattr(
+        wasi, "_store", lambda caller, at, data: memory.__setitem__(at, data)
+    )
+    iovs = [(16, 1)]
+    monkeypatch.setattr(wasi, "_iovs", lambda *args: iovs)
+    try:
+        assert (
+            wasi.path_open(
+                None, 3, LOOKUP_SYMLINK_FOLLOW, 0, 0, 0, RIGHT_FD_READ, 0, 0, 0
+            )
+            == 0
+        )
+        fd = struct.unpack("<I", memory[0])[0]
+        assert wasi.fd_read(None, fd, 0, 1, 8) == 0
+        assert memory[16] == b"s"
+        assert policy.reads == [("pre", None), ("post", b"secret")]
+        if restriction == "hide":
+            loop.run_until_complete(
+                ws.set_session_profile("reader", {"paths": {"hide": [path]}})
+            )
+        else:
+            policy.stage = restriction
+        memory.clear()
+        iovs[:] = [(16, 1), (32, 1)] if vectored else [(16, 2)]
+        with pytest.raises(OSError):
+            wasi.fd_read(None, fd, 0, 1, 8)
+        assert memory == {}
+        assert wasi._fds.get(fd).handle.pos == 1
+        # stdin is a delivered input stream, not a mounted file.
+        assert wasi.fd_read(None, 0, 0, 1, 8) == 0
+        assert memory[16] == (b"s" if vectored else b"st")
+        if vectored:
+            assert memory[32] == b"t"
+        policy.stage = None
+        loop.run_until_complete(ws.set_session_profile("reader", {}))
+        assert wasi.fd_read(None, fd, 0, 1, 8) == 0
+        assert memory[16] == (b"e" if vectored else b"ec")
+        if vectored:
+            assert memory[32] == b"c"
+        assert policy.reads[-1] == ("post", b"ec")
+        assert wasi.fd_close(None, fd) == 0
+    finally:
+        wasi.close_all()
+        reset_current_session(token)
+        loop.run_until_complete(ws.close())
+        loop.close()

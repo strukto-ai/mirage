@@ -446,7 +446,7 @@ class Files:
         finally:
             if token is not None:
                 reset_caller(token)
-        if op == "write" and kwargs.get("admit_only"):
+        if op in {"read", "write", "stat"} and kwargs.get("admit_only"):
             self._hand_over(own, seen, mine, outer)
             return result
 

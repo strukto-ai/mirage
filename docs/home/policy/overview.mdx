@@ -14,7 +14,7 @@ policy is a class with a pair of methods for each thing an agent does, or
 | --- | --- |
 | runs a line | `pre_execute`, `post_execute` |
 | runs a command or CLI | `pre_command`, `post_command` |
-| calls the VFS directly: a file tool, `session.vfs`, FUSE, SFTP | `pre_vfs`, `post_vfs`; see [Lifecycle](/home/policy/policies#lifecycle) |
+| uses files: commands, file CLIs, runtime file APIs, file tools, `session.vfs`, FUSE, SFTP | `pre_vfs`, `post_vfs`; see [Lifecycle](/home/policy/policies#lifecycle) |
 | sets a variable: `export`, `X=1`, `unset` | `pre_session`, `post_session` |
 
 A `pre_` method answers before the action runs, a `post_` method after,
@@ -36,7 +36,7 @@ filesystem, so it sees what that string only implies.
 | | Tool-call check | Mirage policy |
 | --- | --- | --- |
 | Commands | the raw string; `$( )`, `xargs`, `find -exec`, `eval` and variables hide what runs | every command after expansion, nested ones included |
-| Files | the paths written in the string | declarative profile rules see every path a command reaches, such as each one `grep -r`, `tar` or `cp -r` reaches |
+| Files | the paths written in the string | profile rules and file hooks check paths a command reaches, such as each one `grep -r`, `tar` or `cp -r` reaches |
 | Ways in | that harness's own tools | every session and entry point: the SDK, MCP, HTTP, RPC, SSH, FUSE |
 
 ## In this section

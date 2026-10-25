@@ -62,7 +62,8 @@ function fetchFor(
       return files.read(place.path, size === null ? { offset, raw } : { offset, size, raw })
     }
     try {
-      return Promise.resolve(
+      return files.readCached(
+        place.path,
         keptView(place.kept, place.raw).slice(offset, size === null ? undefined : offset + size),
       )
     } catch (err) {
@@ -115,12 +116,14 @@ export function fromGuestText(ctx: QuickJSAsyncContext, handle: QuickJSHandle): 
  * each file left open still owes the mount its writes.
  *
  * @param ctx - the asyncified quickjs context
- * @param files - the runtime's mount vocabulary, or null when no mounts are wired
+ * @param sourceFiles - the runtime's mount vocabulary, or null when no mounts are wired
  */
 export function installQuickJsFs(
   ctx: QuickJSAsyncContext,
-  files: RuntimeFiles | null,
+  sourceFiles: RuntimeFiles | null,
+  signal?: AbortSignal,
 ): () => Promise<string[]> {
+  const files = signal === undefined ? sourceFiles : (sourceFiles?.withSignal(signal) ?? null)
   const table = new FileTable<FileHandle>()
   const places = new Map<number, Place>()
   // qjs-libc's fopen opens a directory for reading, and every read of it
@@ -190,15 +193,25 @@ export function installQuickJsFs(
     fn: (...args: QuickJSHandle[]) => Promise<QuickJSHandle>,
   ): void => {
     const handle = ctx.newAsyncifiedFunction(name, async (...args) => {
+      signal?.throwIfAborted()
       await budget.run()
-      return fn(...args)
+      signal?.throwIfAborted()
+      const out = await fn(...args)
+      if (signal?.aborted === true) {
+        out.dispose()
+        signal.throwIfAborted()
+      }
+      return out
     })
     ctx.setProp(ctx.global, name, handle)
     handle.dispose()
   }
 
   const defineSync = (name: string, fn: (...args: QuickJSHandle[]) => QuickJSHandle): void => {
-    const handle = ctx.newFunction(name, fn)
+    const handle = ctx.newFunction(name, (...args) => {
+      signal?.throwIfAborted()
+      return fn(...args)
+    })
     ctx.setProp(ctx.global, name, handle)
     handle.dispose()
   }
@@ -275,6 +288,7 @@ export function installQuickJsFs(
         size: row?.size ?? 0,
         writable: mode.writable,
         append: mode.append,
+        readCached: (data) => files.readCached(place.path, data),
       })
     } catch (err) {
       return ctx.newNumber(-errnoFor(err))
@@ -339,20 +353,12 @@ export function installQuickJsFs(
 
   defineAsync('__mirage_readdir', (pathH) => readdir(ctx, files, absolute(pathH)))
 
-  // A file answers a read only from the bytes it holds, so the bootstrap
-  // asks whether a read lacks bytes and fills until it does not; every
-  // read below then answers synchronously.
+  // An EOF probe may fetch ahead; delivery still checks current read policy.
   defineSync('__mirage_lacks', (fdH, sizeH) => {
     const fd = ctx.getNumber(fdH)
     const file = table.get(fd)
     const lacks =
       !unreadable.has(fd) && !writeOnly.has(fd) && file?.lacks(ctx.getNumber(sizeH)) === true
-    return lacks ? ctx.true : ctx.false
-  })
-
-  defineSync('__mirage_lacks_line', (fdH) => {
-    const fd = ctx.getNumber(fdH)
-    const lacks = !unreadable.has(fd) && !writeOnly.has(fd) && table.get(fd)?.lacksLine() === true
     return lacks ? ctx.true : ctx.false
   })
 
@@ -368,37 +374,56 @@ export function installQuickJsFs(
     return ctx.undefined
   })
 
-  defineSync('__mirage_read', (fdH, maxH) => {
+  defineAsync('__mirage_read', async (fdH, maxH) => {
     const fd = ctx.getNumber(fdH)
     const file = table.get(fd)
     const size = ctx.getNumber(maxH)
     if (file === undefined || readFails(fd, size)) return ctx.newString('')
-    const bytes = file.read(size)
-    if ((size < 0 && file.eof) || bytes.length < size) ended.add(fd)
-    return toGuestText(ctx, DEC.decode(bytes))
+    try {
+      const bytes = await file.readChecked(size)
+      if ((size < 0 && file.eof) || bytes.length < size) ended.add(fd)
+      return toGuestText(ctx, DEC.decode(bytes))
+    } catch (err) {
+      console.debug(`quickjs: read of fd ${String(fd)} failed: ${String(err)}`)
+      unreadable.add(fd)
+      failed.add(fd)
+      return ctx.newString('')
+    }
   })
 
-  defineSync('__mirage_read_bytes', (fdH, maxH) => {
+  defineAsync('__mirage_read_bytes', async (fdH, maxH) => {
     const fd = ctx.getNumber(fdH)
     const file = table.get(fd)
     const size = ctx.getNumber(maxH)
-    const bytes = file === undefined || readFails(fd, size) ? new Uint8Array(0) : file.read(size)
-    if (file !== undefined && !readFails(fd, size) && bytes.length < size) ended.add(fd)
+    let bytes = new Uint8Array(0)
+    if (file !== undefined && !readFails(fd, size)) {
+      try {
+        bytes = (await file.readChecked(size)).slice(0, size)
+        if (bytes.length < size) ended.add(fd)
+      } catch (err) {
+        console.debug(`quickjs: read of fd ${String(fd)} failed: ${String(err)}`)
+        unreadable.add(fd)
+        failed.add(fd)
+      }
+    }
     return ctx.newArrayBuffer(bytes.slice().buffer)
   })
 
-  defineSync('__mirage_getline', (fdH) => {
+  defineAsync('__mirage_getline', async (fdH) => {
     const fd = ctx.getNumber(fdH)
     const file = table.get(fd)
     const before = file?.pos ?? 0
-    const line = readFails(fd) ? null : (file?.readLine() ?? null)
-    if (
-      file !== undefined &&
-      !readFails(fd) &&
-      (line === null || file.pos === before + line.length)
-    )
-      ended.add(fd)
-    return line === null ? ctx.null : toGuestText(ctx, DEC.decode(line))
+    if (file === undefined || readFails(fd)) return ctx.null
+    try {
+      const line = await file.readLineChecked()
+      if (line === null || file.pos === before + line.length) ended.add(fd)
+      return line === null ? ctx.null : toGuestText(ctx, DEC.decode(line))
+    } catch (err) {
+      console.debug(`quickjs: read of fd ${String(fd)} failed: ${String(err)}`)
+      unreadable.add(fd)
+      failed.add(fd)
+      return ctx.null
+    }
   })
 
   defineSync('__mirage_ferror', (fdH) => (failed.has(ctx.getNumber(fdH)) ? ctx.true : ctx.false))
@@ -528,9 +553,9 @@ export function installQuickJsFs(
     const failures: string[] = []
     for (const [fd, place] of places) {
       const file = table.get(fd)
-      if (file?.dirty !== true || files === null || place.kept !== null) continue
+      if (file?.dirty !== true || sourceFiles === null || place.kept !== null) continue
       try {
-        await files.flush(place.path, file.flushPlan())
+        await sourceFiles.flush(place.path, file.flushPlan())
       } catch (err) {
         failures.push(`${place.path}: ${err instanceof Error ? err.message : String(err)}`)
       }

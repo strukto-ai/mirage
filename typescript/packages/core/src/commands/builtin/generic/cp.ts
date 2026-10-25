@@ -1026,7 +1026,12 @@ async function copyEntry(
   try {
     await strategy.copy(src, dst)
   } catch (err) {
-    if ((err as { code?: string }).code !== 'EXDEV' || copies === undefined) throw err
+    if (
+      copies === undefined ||
+      ((err as { code?: string }).code !== 'EXDEV' &&
+        (err as Partial<WalkDeclinedError>).declined !== true)
+    )
+      throw err
     const data = await primeStream(copies.relay.read(src))
     try {
       await copies.relay.write(dst, data)
@@ -1785,7 +1790,7 @@ export async function cpGeneric(
       if (!(await transferFile(copier, src, target, 'cp', errors))) continue
     } else {
       try {
-        await copier.copy(src, target)
+        await copyEntry(copier, copies, src, target)
       } catch (err) {
         if (!isFsError(err)) throw err
         errors.push(

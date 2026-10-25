@@ -3866,3 +3866,329 @@ describe('hides answer before any policy', () => {
     }
   })
 })
+
+describe('read admission for held bytes', () => {
+  it('never fetches or records a successful admission', async () => {
+    const seen: [string, string][] = []
+    const policy: Policy = {
+      preVfs: (ctx: VfsContext) => {
+        seen.push([ctx.call.name, ctx.path.virtual])
+        return null
+      },
+    }
+    const ws = new Workspace(
+      { '/data': new RAMVFS() },
+      { mode: MountMode.WRITE, policies: [policy] },
+    )
+    const call = vi
+      .spyOn(MountEntry.prototype, 'callKeyed')
+      .mockRejectedValue(new Error('unexpected backend call'))
+    try {
+      const before = [...ws.vfs.records]
+      for (const name of ['read', 'stat', 'write']) {
+        const [result] = await ws.vfs.dispatch(name, '/data/not-created', [], { admit_only: true })
+        expect(result).toBeNull()
+      }
+      const [result] = await ws.vfs.dispatch('read', '/unmounted', [], { admit_only: true })
+      expect(result).toBeNull()
+      expect(seen).toEqual([
+        ['read', '/data/not-created'],
+        ['write', '/data/not-created'],
+        ['read', '/unmounted'],
+      ])
+      expect(call).not.toHaveBeenCalled()
+      expect(ws.vfs.records).toEqual(before)
+    } finally {
+      call.mockRestore()
+      await ws.close()
+    }
+  })
+
+  it.each(['/data/file', '/unmounted'])(
+    'judges read denial at %s even when stat is allowed',
+    async (path) => {
+      let sealed = false
+      const seen: [string, string][] = []
+      const policy: Policy = {
+        preVfs: (ctx: VfsContext): Action | null => {
+          seen.push([ctx.call.name, ctx.path.virtual])
+          return sealed && ctx.call.name === 'read' ? { kind: 'deny', reason: 'read sealed' } : null
+        },
+      }
+      const ws = new Workspace(
+        { '/data': new RAMVFS() },
+        { mode: MountMode.WRITE, policies: [policy] },
+      )
+      try {
+        await ws.vfs.write('/data/file', ENC.encode('secret'))
+        sealed = true
+        expect((await ws.vfs.stat('/data/file')).size).toBe(6)
+        seen.length = 0
+        const call = vi
+          .spyOn(MountEntry.prototype, 'callKeyed')
+          .mockRejectedValue(new Error('unexpected backend call'))
+        try {
+          await expect(
+            ws.vfs.dispatch('read', path, [], { admit_only: true }),
+          ).rejects.toMatchObject({
+            refusal: { reason: 'read sealed' },
+          })
+          expect(seen).toEqual([['read', path]])
+          expect(call).not.toHaveBeenCalled()
+        } finally {
+          call.mockRestore()
+        }
+      } finally {
+        await ws.close()
+      }
+    },
+  )
+
+  it('hides aliases and restores admission without fetching', async () => {
+    const seen: [string, string][] = []
+    const policy: Policy = {
+      preVfs: (ctx: VfsContext) => {
+        seen.push([ctx.call.name, ctx.path.virtual])
+        return null
+      },
+    }
+    const ws = new Workspace(
+      { '/data': new RAMVFS() },
+      { mode: MountMode.WRITE, policies: [policy] },
+    )
+    try {
+      await ws.vfs.symlink('/data/alias', '/data/secret')
+      const session = ws.createSession('reader', { profile: { paths: { hide: ['/data/secret'] } } })
+      seen.length = 0
+      const call = vi
+        .spyOn(MountEntry.prototype, 'callKeyed')
+        .mockRejectedValue(new Error('unexpected backend call'))
+      try {
+        await runWithSession(session, async () => {
+          for (const path of ['/data/secret', '/data/alias']) {
+            await expect(
+              ws.vfs.dispatch('read', path, [], { admit_only: true }),
+            ).rejects.toMatchObject({ code: 'ENOENT' })
+          }
+          expect(seen).toEqual([])
+          await ws.setSessionProfile('reader', {})
+          const before = [...ws.vfs.records]
+          const [result] = await ws.vfs.dispatch('read', '/data/alias', [], { admit_only: true })
+          expect(result).toBeNull()
+          expect(seen).toEqual([['read', '/data/secret']])
+          expect(ws.vfs.records).toEqual(before)
+        })
+        expect(call).not.toHaveBeenCalled()
+      } finally {
+        call.mockRestore()
+      }
+    } finally {
+      await ws.close()
+    }
+  })
+})
+
+describe('retained reads use the shared policy boundary', () => {
+  it.each(['/data/file', '/unmounted'])(
+    'checks pre and post policy at %s without fetching',
+    async (path) => {
+      let stage = ''
+      const seen: [string, string | null][] = []
+      const policy: Policy = {
+        preVfs(ctx) {
+          if (ctx.call.name !== 'read') return null
+          seen.push(['pre', null])
+          return stage === 'pre' ? { kind: 'deny', reason: 'pre sealed' } : null
+        },
+        postVfs(ctx) {
+          if (ctx.call.name !== 'read') return null
+          expect(ctx.result).toBeInstanceOf(Uint8Array)
+          seen.push(['post', DEC.decode(ctx.result as Uint8Array)])
+          return stage === 'post' ? { kind: 'deny', reason: 'post sealed' } : null
+        },
+      }
+      const ws = new Workspace({ '/data': new RAMVFS() }, { policies: [policy] })
+      const call = vi
+        .spyOn(MountEntry.prototype, 'callKeyed')
+        .mockRejectedValue(new Error('unexpected backend call'))
+      try {
+        for (stage of ['pre', 'post', '']) {
+          seen.length = 0
+          const read = ws.vfs.dispatch('read', path, [], { retained: ENC.encode('secret') })
+          if (stage) await expect(read).rejects.toMatchObject({ code: 'EACCES' })
+          else expect((await read)[0]).toEqual(ENC.encode('secret'))
+          expect(seen).toEqual(
+            stage === 'pre'
+              ? [['pre', null]]
+              : [
+                  ['pre', null],
+                  ['post', 'secret'],
+                ],
+          )
+        }
+        expect(call).not.toHaveBeenCalled()
+      } finally {
+        call.mockRestore()
+        await ws.close()
+      }
+    },
+  )
+
+  it('refuses a hidden retained read before policy and restores it', async () => {
+    const seen: string[] = []
+    const ws = new Workspace(
+      { '/data': new RAMVFS() },
+      {
+        policies: [
+          {
+            preVfs(ctx) {
+              seen.push(ctx.call.name)
+              return null
+            },
+          },
+        ],
+      },
+    )
+    const session = ws.createSession('reader', { profile: { paths: { hide: ['/data/f'] } } })
+    const call = vi
+      .spyOn(MountEntry.prototype, 'callKeyed')
+      .mockRejectedValue(new Error('unexpected backend call'))
+    try {
+      await runWithSession(session, async () => {
+        await expect(
+          ws.vfs.dispatch('read', '/data/f', [], { retained: ENC.encode('secret') }),
+        ).rejects.toMatchObject({ code: 'ENOENT' })
+        expect(seen).toEqual([])
+        await ws.setSessionProfile('reader', {})
+        expect(
+          (await ws.vfs.dispatch('read', '/data/f', [], { retained: ENC.encode('secret') }))[0],
+        ).toEqual(ENC.encode('secret'))
+        expect(ws.vfs.records.map((r) => [r.source, r.bytes])).toEqual([['ram', 6]])
+      })
+      expect(call).not.toHaveBeenCalled()
+    } finally {
+      call.mockRestore()
+      await ws.close()
+    }
+  })
+
+  it.each([
+    ['read', null],
+    ['read', 'secret'],
+    ['write', ENC.encode('secret')],
+  ])('rejects invalid retained arguments for %s', async (op, retained) => {
+    const ws = new Workspace({ '/': new RAMVFS() })
+    try {
+      await expect(ws.vfs.dispatch(op, '/file', [], { retained })).rejects.toThrow(
+        'retained is only valid',
+      )
+    } finally {
+      await ws.close()
+    }
+  })
+})
+
+class NativeCopyRAM extends RAMVFS {
+  nativeCopies = 0
+
+  override async copy(src: PathSpec, dst: PathSpec): Promise<void> {
+    this.nativeCopies += 1
+    await super.copy(src, dst)
+  }
+
+  override copyFrom(): Promise<void> {
+    this.nativeCopies += 1
+    return Promise.reject(new Error('copyFrom bypassed the source read policy'))
+  }
+}
+
+it.each([false, true])(
+  'checks source post-read policy before native copy (cross-mount: %s)',
+  async (crossMount) => {
+    let sealed = true
+    const policy: Policy = {
+      postVfs(ctx) {
+        return sealed && ctx.call.name === 'read' && ctx.path.virtual === '/data/secret'
+          ? { kind: 'deny', reason: 'sensitive source' }
+          : null
+      },
+    }
+    const parser = await getTestParser()
+    const source = new NativeCopyRAM()
+    const other = new NativeCopyRAM()
+    const ws = new Workspace(
+      { '/data/': source, '/other/': other },
+      {
+        mode: MountMode.WRITE,
+        policies: [policy],
+        shellParserFactory: () => Promise.resolve(parser),
+      },
+    )
+    const destination = crossMount ? '/other/copied' : '/data/copied'
+    try {
+      await ws.vfs.write('/data/secret', ENC.encode('secret'))
+      const refused = await ws.shell(`cp /data/secret ${destination}`)
+      expect(refused.exitCode).toBe(1)
+      expect(DEC.decode(refused.stderr)).toContain('Permission denied')
+      await expect(ws.vfs.stat(destination)).rejects.toMatchObject({ code: 'ENOENT' })
+      expect(source.nativeCopies + other.nativeCopies).toBe(0)
+      sealed = false
+      const restored = await ws.shell(`cp /data/secret ${destination}`)
+      expect(restored.exitCode).toBe(0)
+      expect(await ws.vfs.read(destination)).toEqual(ENC.encode('secret'))
+      expect(source.nativeCopies + other.nativeCopies).toBe(0)
+    } finally {
+      await ws.close()
+    }
+  },
+)
+
+it.each(['/data/file', '/unmounted'])(
+  'checks retained stat policy at %s without backend calls',
+  async (path) => {
+    let stage = ''
+    const seen: string[] = []
+    const row = new FileStat({ name: 'file', type: FileType.FILE, extra: { tag: 'kept' } })
+    const policy: Policy = {
+      preVfs(ctx) {
+        if (ctx.call.name !== 'stat') return null
+        seen.push('pre')
+        return stage === 'pre' ? { kind: 'deny', reason: 'stat sealed' } : null
+      },
+      postVfs(ctx) {
+        if (ctx.call.name !== 'stat') return null
+        seen.push('post')
+        expect(ctx.result).toEqual(row)
+        return stage === 'post' ? { kind: 'deny', reason: 'stat result sealed' } : null
+      },
+    }
+    const ws = new Workspace({ '/data': new RAMVFS() }, { policies: [policy] })
+    const session = ws.createSession('reader')
+    const call = vi
+      .spyOn(MountEntry.prototype, 'callKeyed')
+      .mockRejectedValue(new Error('retained stat reached backend'))
+    try {
+      await runWithSession(session, async () => {
+        for (stage of ['pre', 'post', '']) {
+          seen.length = 0
+          const result = ws.vfs.dispatch('stat', path, [], { retained: row })
+          if (stage) await expect(result).rejects.toMatchObject({ code: 'EACCES' })
+          else expect((await result)[0]).toEqual(row)
+          expect(seen).toEqual(stage === 'pre' ? ['pre'] : ['pre', 'post'])
+        }
+        await ws.setSessionProfile('reader', { paths: { hide: [path] } })
+        seen.length = 0
+        await expect(ws.vfs.dispatch('stat', path, [], { retained: row })).rejects.toMatchObject({
+          code: 'ENOENT',
+        })
+        expect(seen).toEqual([])
+        await ws.setSessionProfile('reader', {})
+        expect((await ws.vfs.dispatch('stat', path, [], { retained: row }))[0]).toEqual(row)
+      })
+      expect(call).not.toHaveBeenCalled()
+    } finally {
+      call.mockRestore()
+      await ws.close()
+    }
+  },
+)

@@ -19,7 +19,10 @@ import io
 import pytest
 
 from mirage import MountMode, Workspace
+from mirage.context import reset_current_session, set_current_session
+from mirage.policy import Deny, Policy
 from mirage.runtime.handles.constants import READ_CHUNK
+from mirage.runtime.python.host.fs import HostFs
 from mirage.runtime.python.host.open import make_open
 from mirage.types import PathSpec
 from mirage.vfs.ram import RAMVFS
@@ -331,3 +334,78 @@ class TestChunks:
         assert asyncio.run(ws.vfs.read("/data/books.tally", raw=True)) == (
             b"STORED+"
         )
+
+
+class _RetainedReadPolicy(Policy):
+    def __init__(self):
+        self.stage = None
+        self.reads = []
+
+    async def pre_vfs(self, ctx):
+        if ctx.call.name == "read":
+            self.reads.append(("pre", None))
+            if self.stage == "pre":
+                return Deny("read sealed")
+        return None
+
+    async def post_vfs(self, ctx):
+        if ctx.call.name == "read":
+            self.reads.append(("post", ctx.result))
+            if self.stage == "post":
+                return Deny("result sealed")
+        return None
+
+
+@pytest.mark.parametrize("restriction", ["hide", "pre", "post"])
+@pytest.mark.parametrize("detached", [False, True])
+def test_unbuffered_reads_recheck_retained_bytes_and_preserve_position(
+    restriction, detached, monkeypatch
+):
+    policy = _RetainedReadPolicy()
+    ws = Workspace(
+        {"/data/": RAMVFS()}, mode=MountMode.WRITE, policies=[policy]
+    )
+    loop = asyncio.new_event_loop()
+    loop.run_until_complete(ws.vfs.write("/data/f", b"secret"))
+    session = ws.create_session("reader")
+    token = set_current_session(session)
+    router = HostFs(ws.vfs, loop)
+    stream = make_open(ws.vfs, loop, router)("/data/f", "rb", buffering=0)
+    try:
+        assert stream.read(1) == b"s"
+        assert policy.reads == [("pre", None), ("post", b"secret")]
+        if detached:
+            router.unlink("/data/f")
+            # The first detached fetch reads held bytes through policy too.
+            assert stream.read(1) == b"e"
+        before = stream.tell()
+        policy.reads.clear()
+        if restriction == "hide":
+            loop.run_until_complete(
+                ws.set_session_profile(
+                    "reader", {"paths": {"hide": ["/data/f"]}}
+                )
+            )
+        else:
+            policy.stage = restriction
+
+        def no_fetch(*args, **kwargs):
+            raise AssertionError("retained read reached the backend")
+
+        monkeypatch.setattr(RAMVFS, "read", no_fetch)
+        with pytest.raises(OSError) as failure:
+            stream.read(2)
+        assert failure.value.errno == (
+            errno.ENOENT if restriction == "hide" else errno.EACCES
+        )
+        assert stream.tell() == before
+        if restriction == "post":
+            assert policy.reads[-1] == ("post", b"secret"[before : before + 2])
+        policy.stage = None
+        loop.run_until_complete(ws.set_session_profile("reader", {}))
+        assert stream.read(2) == b"secret"[before : before + 2]
+    finally:
+        stream.close()
+        reset_current_session(token)
+        loop.run_until_complete(ws.close())
+        loop.close()

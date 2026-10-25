@@ -37,7 +37,7 @@ import { CallerResolver, workspaceBridge, type WorkspaceBinding } from './bindin
 import { linkView } from '../commands/builtin/utils/links.ts'
 import type { Context } from '../commands/config.ts'
 import { awaitsAs, callsAs, currentCaller } from '../context/session_context.ts'
-import { PathSpec, type FileStat, type SetAttrFields } from '../types.ts'
+import { DEVICE_NUMBERS_KEY, FileStat, FileType, PathSpec, type SetAttrFields } from '../types.ts'
 import { concat } from '../utils/bytes.ts'
 import { entryName } from '../utils/remnants.ts'
 import type { VFSEntry, VFSStat } from './types.ts'
@@ -82,6 +82,7 @@ function statRow(st: FileStat): VFSStat {
     ...(atime !== null ? { atimeMs: atime } : {}),
     ...(typeof st.uid === 'number' ? { uid: st.uid } : {}),
     ...(typeof st.gid === 'number' ? { gid: st.gid } : {}),
+    source: st,
   }
 }
 
@@ -180,6 +181,20 @@ export class RuntimeFiles {
       awaitsAs(caller, bridge),
       new CallerResolver(binding.resolver, caller),
       links === undefined ? null : callsAs(caller, links.resolve.bind(links)),
+    )
+  }
+
+  /** A live guest view that stops issuing operations once its run is cancelled. */
+  withSignal(signal: AbortSignal): RuntimeFiles {
+    return new RuntimeFiles(
+      async (...args) => {
+        signal.throwIfAborted()
+        const out = await this.bridge(...args)
+        signal.throwIfAborted()
+        return out
+      },
+      this.resolver,
+      this.resolve,
     )
   }
 
@@ -310,6 +325,15 @@ export class RuntimeFiles {
     return out
   }
 
+  /** Check a logical read of bytes a runtime handle already holds. */
+  async readCached(path: string, data: Uint8Array): Promise<Uint8Array> {
+    const out = await this.dispatch('read', path, undefined, undefined, { retained: data })
+    if (!(out instanceof Uint8Array)) {
+      throw new TypeError(`runtime files: read ${path} expected Uint8Array, got ${typeof out}`)
+    }
+    return out
+  }
+
   async write(path: string, bytes: Uint8Array): Promise<void> {
     const out = await this.dispatch('write', path, bytes)
     if (out !== undefined) {
@@ -347,6 +371,53 @@ export class RuntimeFiles {
       throw new TypeError(`runtime files: stat ${path} bad shape`)
     }
     return statRow(out as FileStat)
+  }
+
+  /** Judge a descriptor's retained metadata without fetching its name. */
+  async statCached(path: string, row: VFSStat): Promise<VFSStat> {
+    const source =
+      row.source === undefined
+        ? new FileStat({
+            name: entryName(path),
+            type: row.isDir
+              ? FileType.DIRECTORY
+              : row.isLink
+                ? FileType.SYMLINK
+                : (row.mode & 0o170000) === 0o020000
+                  ? FileType.CHAR_DEVICE
+                  : (row.mode & 0o170000) === 0o010000
+                    ? FileType.FIFO
+                    : FileType.FILE,
+            size: row.size,
+            mode: row.mode,
+            uid: row.uid ?? null,
+            gid: row.gid ?? null,
+            modified: row.mtimeMs === undefined ? null : new Date(row.mtimeMs).toISOString(),
+            atime: row.atimeMs === undefined ? null : new Date(row.atimeMs).toISOString(),
+            extra: { [DEVICE_NUMBERS_KEY]: [(row.rdev ?? 0) >> 8, (row.rdev ?? 0) & 255] },
+          })
+        : new FileStat(row.source).with({
+            ...(row.size !== contentSize(row.source) ? { size: row.size } : {}),
+            ...(row.mode !== posixMode(row.source) ? { mode: row.mode } : {}),
+            ...(row.uid !== (typeof row.source.uid === 'number' ? row.source.uid : undefined)
+              ? { uid: row.uid ?? null }
+              : {}),
+            ...(row.gid !== (typeof row.source.gid === 'number' ? row.source.gid : undefined)
+              ? { gid: row.gid ?? null }
+              : {}),
+            ...((row.mtimeMs ?? null) !== mtimeMs(row.source)
+              ? { modified: row.mtimeMs === undefined ? null : new Date(row.mtimeMs).toISOString() }
+              : {}),
+            ...((row.atimeMs ?? null) !== atimeMs(row.source)
+              ? { atime: row.atimeMs === undefined ? null : new Date(row.atimeMs).toISOString() }
+              : {}),
+          })
+    return statRow(
+      (await this.dispatch('stat', path, undefined, undefined, {
+        retained: source,
+        ...(row.isLink === true ? { nofollow: true } : {}),
+      })) as FileStat,
+    )
   }
 
   /**
