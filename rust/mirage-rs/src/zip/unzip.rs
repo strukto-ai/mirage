@@ -79,6 +79,9 @@ pub(super) struct Config {
     /// One entry, by its place in the directory, piped whole: how a host
     /// reads an archive it holds.
     pick: Option<usize>,
+    /// Every entry's stored name behind its two-byte little-endian length,
+    /// in directory order: how a host lists an archive it holds.
+    index: bool,
 }
 
 /// Info-ZIP's refusal of an archive it cannot open, and its exit.
@@ -483,7 +486,17 @@ fn read_failure(archive: &[u8], reply: &Reply) -> Vec<u8> {
 /// One mode over the opened archive. Every filespec and `-x` pattern that
 /// matched nothing is reported, and a filter that leaves nothing exits 11.
 async fn mode(run: &mut Run<'_>, directory: &Directory, warning: Vec<u8>) -> i32 {
-    if let Some(entry) = run.config.pick.and_then(|at| directory.entries.get(at)) {
+    if run.config.index {
+        for entry in &directory.entries {
+            run.host.print(&entry.record[28..30]);
+            run.host.print(entry.stored());
+        }
+        return 0;
+    }
+    if let Some(at) = run.config.pick {
+        let Some(entry) = directory.entries.get(at) else {
+            return NO_MATCH_EXIT;
+        };
         pipe(run, entry).await;
         return 0;
     }

@@ -360,9 +360,16 @@ async function runLog(
     if (!(err instanceof GitHubApiError)) throw err
     throw new Error(`failed to get run log: ${err.status === 404 ? 'log not found' : err.message}`)
   }
-  const [status, listing] = await unzipped(archive, { Z: true, '1': true })
+  const [status, index] = await unzipped(archive, { index: true })
   if (status !== 0) throw new Error('failed to get run log: zip: not a valid zip file')
-  const names = new TextDecoder().decode(listing).split('\n').slice(0, -1)
+  // Each stored name behind its two-byte length, so any byte may be in one.
+  const names: string[] = []
+  const view = new DataView(index.buffer, index.byteOffset, index.byteLength)
+  for (let at = 0; at < index.length;) {
+    const end = at + 2 + view.getUint16(at, true)
+    names.push(new TextDecoder().decode(index.subarray(at + 2, end)))
+    at = end
+  }
   const entries = names.map((name, pick) => ({
     name,
     content: async () => {

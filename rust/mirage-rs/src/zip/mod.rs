@@ -113,6 +113,11 @@ impl Entry {
         (self.made_by >> 8) as u8
     }
 
+    /// The name as the archive stores it, before any decoding.
+    pub(super) fn stored(&self) -> &[u8] {
+        &self.record[46..46 + usize::from(u16_at(&self.record, 28))]
+    }
+
     pub(super) fn is_dir(&self) -> bool {
         self.name.ends_with(b"/")
     }

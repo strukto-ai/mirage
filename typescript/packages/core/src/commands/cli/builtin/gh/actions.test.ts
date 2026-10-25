@@ -164,6 +164,25 @@ describe('gh run view --log', () => {
     await expect(runViewCmd(...args(['7'], { log: true }))).rejects.toThrow('zip: checksum error')
   })
 
+  it('finds each entry by its whole stored name, newlines and all', async () => {
+    ROUTES.set(`GET ${RUN}/jobs`, {
+      jobs: [
+        { id: 1, name: 'a\nb', conclusion: 'failure', steps: [] },
+        { id: 2, name: 'c', conclusion: 'failure', steps: [] },
+      ],
+    })
+    ROUTES.set(
+      `GET ${RUN}/logs`,
+      storedZip([
+        ['0_a\nb.txt', 'first\n'],
+        ['1_c.txt', 'second\n'],
+      ]),
+    )
+    expect(text(await runViewCmd(...args(['7'], { log: true })))).toBe(
+      'a\nb\tUNKNOWN STEP\tfirst\nc\tUNKNOWN STEP\tsecond\n',
+    )
+  })
+
   it('keeps only failed jobs and their failed steps under --log-failed', async () => {
     ROUTES.set(`GET ${RUN}/jobs`, {
       jobs: [
