@@ -67,7 +67,9 @@ def open_mode(flags: int) -> OpenMode:
     Args:
         flags (int): the ``os.O_*`` flags.
     """
-    access = flags & os.O_ACCMODE
+    # Windows' os has no O_ACCMODE; the access bits are these three there
+    # too.
+    access = flags & (os.O_RDONLY | os.O_WRONLY | os.O_RDWR)
     writable = access in (os.O_WRONLY, os.O_RDWR)
     create = bool(flags & os.O_CREAT)
     return OpenMode(

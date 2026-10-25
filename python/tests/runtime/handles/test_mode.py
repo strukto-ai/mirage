@@ -12,9 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import os
+
 import pytest
 
-from mirage.runtime.handles.mode import parse_mode
+from mirage.runtime.handles.mode import open_mode, parse_mode
 
 
 def test_parse_mode_reads_the_facts():
@@ -79,3 +81,19 @@ def test_refusal_matches_cpython(mode):
     with pytest.raises(ValueError) as guest:
         parse_mode(mode)
     assert str(guest.value) == str(native.value)
+
+
+def test_open_mode_reads_the_access_bits_where_os_has_no_accmode(
+    monkeypatch,
+):
+    # Windows' os has no O_ACCMODE, and a FUSE open there reads its
+    # flags all the same.
+    monkeypatch.delattr(os, "O_ACCMODE", raising=False)
+    read = open_mode(os.O_RDONLY)
+    assert read.readable and not read.writable
+    write = open_mode(os.O_WRONLY | os.O_CREAT | os.O_TRUNC)
+    assert write.writable and not write.readable
+    assert write.create and write.truncate
+    both = open_mode(os.O_RDWR | os.O_APPEND)
+    assert both.readable and both.writable and both.append
+    assert not both.truncate

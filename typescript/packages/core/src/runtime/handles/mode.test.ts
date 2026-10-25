@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { parseMode } from './mode.ts'
+import { openMode, parseMode } from './mode.ts'
 
 describe('parseMode', () => {
   it('reads the facts', () => {
@@ -70,5 +70,29 @@ describe('parseMode', () => {
     const mode = parseMode('rt')
     expect(mode.binary).toBe(false)
     expect(mode.readable).toBe(true)
+  })
+})
+
+describe('openMode', () => {
+  // The host's own flag numbers, as Emscripten numbers them.
+  const bits = { O_WRONLY: 1, O_RDWR: 2, O_CREAT: 64, O_EXCL: 128, O_TRUNC: 512, O_APPEND: 1024 }
+
+  it('reads the access bits and what the open does', () => {
+    const read = openMode(0, bits)
+    expect([read.readable, read.writable]).toEqual([true, false])
+    const write = openMode(bits.O_WRONLY | bits.O_CREAT | bits.O_TRUNC, bits)
+    expect([write.readable, write.writable, write.create, write.truncate]).toEqual([
+      false,
+      true,
+      true,
+      true,
+    ])
+    const both = openMode(bits.O_RDWR | bits.O_APPEND, bits)
+    expect([both.readable, both.writable, both.append, both.truncate]).toEqual([
+      true,
+      true,
+      true,
+      false,
+    ])
   })
 })
