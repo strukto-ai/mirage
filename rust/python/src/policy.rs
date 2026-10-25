@@ -248,36 +248,42 @@ impl PolicyAdmission {
 #[pymethods]
 impl PolicyAdmission {
     #[new]
-    fn new(value: RulesValue, ecma: bool) -> PyResult<Self> {
+    fn new(py: Python<'_>, value: RulesValue, ecma: bool) -> PyResult<Self> {
         let rules = rules(value)?;
         let count = rules.deny.len() + rules.ask.len();
         Ok(Self {
-            inner: AdmissionMatcher::new(
-                rules,
-                if ecma {
-                    Whitespace::EcmaScript
-                } else {
-                    Whitespace::Python
-                },
-            ),
+            inner: py.detach(|| {
+                AdmissionMatcher::new(
+                    rules,
+                    if ecma {
+                        Whitespace::EcmaScript
+                    } else {
+                        Whitespace::Python
+                    },
+                )
+            }),
             count,
         })
     }
 
-    fn head_allowed(&self, name: Text) -> PyResult<bool> {
-        Ok(self.inner.head_allowed(&text(name)?))
+    fn head_allowed(&self, py: Python<'_>, name: Text) -> PyResult<bool> {
+        let name = text(name)?;
+        Ok(py.detach(|| self.inner.head_allowed(&name)))
     }
-    fn line_allowed(&self, tokens: Vec<Text>, tool: bool) -> PyResult<bool> {
-        Ok(self.inner.line_allowed(&texts(tokens)?, tool))
+    fn line_allowed(&self, py: Python<'_>, tokens: Vec<Text>, tool: bool) -> PyResult<bool> {
+        let tokens = texts(tokens)?;
+        Ok(py.detach(|| self.inner.line_allowed(&tokens, tool)))
     }
     fn has_rules(&self) -> bool {
         self.inner.has_rules()
     }
-    fn reads_args(&self, name: Text) -> PyResult<bool> {
-        Ok(self.inner.reads_args(&text(name)?))
+    fn reads_args(&self, py: Python<'_>, name: Text) -> PyResult<bool> {
+        let name = text(name)?;
+        Ok(py.detach(|| self.inner.reads_args(&name)))
     }
-    fn scopes_paths(&self, name: Text) -> PyResult<bool> {
-        Ok(self.inner.scopes_paths(&text(name)?))
+    fn scopes_paths(&self, py: Python<'_>, name: Text) -> PyResult<bool> {
+        let name = text(name)?;
+        Ok(py.detach(|| self.inner.scopes_paths(&name)))
     }
     fn decide(&self, py: Python<'_>, value: FactsValue) -> PyResult<RulingValue> {
         let facts = facts(value)?;
@@ -290,60 +296,97 @@ impl PolicyAdmission {
             ruling.asks,
         ))
     }
-    fn rule_applies(&self, id: usize, value: FactsValue) -> PyResult<bool> {
-        Ok(self.inner.rule_applies(self.id(id)?, &facts(value)?))
+    fn rule_applies(&self, py: Python<'_>, id: usize, value: FactsValue) -> PyResult<bool> {
+        let id = self.id(id)?;
+        let facts = facts(value)?;
+        Ok(py.detach(|| self.inner.rule_applies(id, &facts)))
     }
-    fn rule_reach(&self, id: usize, value: SubjectValue) -> PyResult<Option<usize>> {
-        Ok(self.inner.rule_reach(
-            self.id(id)?,
-            &Subject {
-                path: value.0.map(path).transpose()?,
-                holds: value.1,
-                ancestors: value.2,
-            },
-        ))
+    fn rule_reach(
+        &self,
+        py: Python<'_>,
+        id: usize,
+        value: SubjectValue,
+    ) -> PyResult<Option<usize>> {
+        let id = self.id(id)?;
+        let subject = Subject {
+            path: value.0.map(path).transpose()?,
+            holds: value.1,
+            ancestors: value.2,
+        };
+        Ok(py.detach(|| self.inner.rule_reach(id, &subject)))
     }
-    fn hidden_depth(&self, id: usize, value: Text) -> PyResult<usize> {
-        Ok(self.inner.hidden_depth(self.id(id)?, &text(value)?))
+    fn hidden_depth(&self, py: Python<'_>, id: usize, value: Text) -> PyResult<usize> {
+        let id = self.id(id)?;
+        let value = text(value)?;
+        Ok(py.detach(|| self.inner.hidden_depth(id, &value)))
     }
-    fn covers_depth(&self, id: usize, value: Text, ancestors: bool) -> PyResult<usize> {
-        Ok(self
-            .inner
-            .covers_depth(self.id(id)?, &text(value)?, ancestors))
+    fn covers_depth(
+        &self,
+        py: Python<'_>,
+        id: usize,
+        value: Text,
+        ancestors: bool,
+    ) -> PyResult<usize> {
+        let id = self.id(id)?;
+        let value = text(value)?;
+        Ok(py.detach(|| self.inner.covers_depth(id, &value, ancestors)))
     }
-    fn match_io(&self, id: usize, tokens: Vec<Text>, value: Text, subtree: bool) -> PyResult<bool> {
-        Ok(self
-            .inner
-            .match_io(self.id(id)?, &texts(tokens)?, &text(value)?, subtree))
+    fn match_io(
+        &self,
+        py: Python<'_>,
+        id: usize,
+        tokens: Vec<Text>,
+        value: Text,
+        subtree: bool,
+    ) -> PyResult<bool> {
+        let id = self.id(id)?;
+        let tokens = texts(tokens)?;
+        let value = text(value)?;
+        Ok(py.detach(|| self.inner.match_io(id, &tokens, &value, subtree)))
     }
-    fn io_reach(&self, tokens: Vec<Text>, value: Text) -> PyResult<bool> {
-        Ok(self.inner.io_reach(&texts(tokens)?, &text(value)?))
+    fn io_reach(&self, py: Python<'_>, tokens: Vec<Text>, value: Text) -> PyResult<bool> {
+        let tokens = texts(tokens)?;
+        let value = text(value)?;
+        Ok(py.detach(|| self.inner.io_reach(&tokens, &value)))
     }
     fn io_refusal(
         &self,
+        py: Python<'_>,
         tokens: Vec<Text>,
         value: Text,
         granted: Vec<usize>,
     ) -> PyResult<Option<usize>> {
-        Ok(self
-            .inner
-            .io_refusal(&texts(tokens)?, &text(value)?, &self.granted(granted)?))
+        let tokens = texts(tokens)?;
+        let value = text(value)?;
+        let granted = self.granted(granted)?;
+        Ok(py.detach(|| self.inner.io_refusal(&tokens, &value, &granted)))
     }
     fn posix_level(&self, id: usize) -> PyResult<bool> {
         Ok(self.inner.posix_level(self.id(id)?))
     }
-    fn op_reach(&self, id: usize, op: Text, value: Text) -> PyResult<Option<usize>> {
-        Ok(self.inner.op_reach(self.id(id)?, &text(op)?, &text(value)?))
+    fn op_reach(
+        &self,
+        py: Python<'_>,
+        id: usize,
+        op: Text,
+        value: Text,
+    ) -> PyResult<Option<usize>> {
+        let id = self.id(id)?;
+        let op = text(op)?;
+        let value = text(value)?;
+        Ok(py.detach(|| self.inner.op_reach(id, &op, &value)))
     }
     fn op_ruling(
         &self,
+        py: Python<'_>,
         op: Text,
         value: Text,
         granted: Vec<usize>,
     ) -> PyResult<Option<(usize, bool)>> {
-        Ok(self
-            .inner
-            .op_ruling(&text(op)?, &text(value)?, &self.granted(granted)?))
+        let op = text(op)?;
+        let value = text(value)?;
+        let granted = self.granted(granted)?;
+        Ok(py.detach(|| self.inner.op_ruling(&op, &value, &granted)))
     }
 }
 
@@ -355,37 +398,48 @@ struct PolicyVisibility {
 #[pymethods]
 impl PolicyVisibility {
     #[new]
-    fn new(value: VisibilityValue) -> PyResult<Self> {
+    fn new(py: Python<'_>, value: VisibilityValue) -> PyResult<Self> {
+        let value = visibility(value)?;
         Ok(Self {
-            inner: VisibilityMatcher::new(visibility(value)?),
+            inner: py.detach(|| VisibilityMatcher::new(value)),
         })
     }
-    fn hide_depth(&self, value: Text) -> PyResult<Option<usize>> {
-        Ok(self.inner.hide_depth(&text(value)?))
+    fn hide_depth(&self, py: Python<'_>, value: Text) -> PyResult<Option<usize>> {
+        let value = text(value)?;
+        Ok(py.detach(|| self.inner.hide_depth(&value)))
     }
-    fn show_depth(&self, value: Text) -> PyResult<Option<usize>> {
-        Ok(self.inner.show_depth(&text(value)?))
+    fn show_depth(&self, py: Python<'_>, value: Text) -> PyResult<Option<usize>> {
+        let value = text(value)?;
+        Ok(py.detach(|| self.inner.show_depth(&value)))
     }
-    fn path_visible(&self, value: Text) -> PyResult<bool> {
-        Ok(self.inner.path_visible(&text(value)?))
+    fn path_visible(&self, py: Python<'_>, value: Text) -> PyResult<bool> {
+        let value = text(value)?;
+        Ok(py.detach(|| self.inner.path_visible(&value)))
     }
-    fn shown_mode(&self, value: Text) -> PyResult<Option<(usize, u32)>> {
-        Ok(self
-            .inner
-            .shown_mode(&text(value)?)
-            .map(|(depth, mode)| (depth, mode as u32)))
+    fn shown_mode(&self, py: Python<'_>, value: Text) -> PyResult<Option<(usize, u32)>> {
+        let value = text(value)?;
+        Ok(py.detach(|| {
+            self.inner
+                .shown_mode(&value)
+                .map(|(depth, mode)| (depth, mode as u32))
+        }))
     }
-    fn path_covers(&self, value: Text, ancestors: bool) -> PyResult<bool> {
-        Ok(self.inner.path_covers(&text(value)?, ancestors))
+    fn path_covers(&self, py: Python<'_>, value: Text, ancestors: bool) -> PyResult<bool> {
+        let value = text(value)?;
+        Ok(py.detach(|| self.inner.path_covers(&value, ancestors)))
     }
-    fn hides_intersect(&self, value: Text) -> PyResult<bool> {
-        Ok(self.inner.hides_intersect(&text(value)?))
+    fn hides_intersect(&self, py: Python<'_>, value: Text) -> PyResult<bool> {
+        let value = text(value)?;
+        Ok(py.detach(|| self.inner.hides_intersect(&value)))
     }
-    fn move_reveals(&self, src: Text, dst: Text) -> PyResult<bool> {
-        Ok(self.inner.move_reveals(&text(src)?, &text(dst)?))
+    fn move_reveals(&self, py: Python<'_>, src: Text, dst: Text) -> PyResult<bool> {
+        let src = text(src)?;
+        let dst = text(dst)?;
+        Ok(py.detach(|| self.inner.move_reveals(&src, &dst)))
     }
     fn leads_hidden(
         &self,
+        py: Python<'_>,
         value: Text,
         links: Vec<(Text, Text)>,
         max_hops: usize,
@@ -394,51 +448,59 @@ impl PolicyVisibility {
             .into_iter()
             .map(|(name, target)| Ok((text(name)?, text(target)?)))
             .collect::<PyResult<Vec<_>>>()?;
-        Ok(self.inner.leads_hidden(&text(value)?, &links, max_hops))
+        let value = text(value)?;
+        Ok(py.detach(|| self.inner.leads_hidden(&value, &links, max_hops)))
     }
-    fn var_hidden(&self, value: Text) -> PyResult<bool> {
-        Ok(self.inner.var_hidden(&text(value)?))
+    fn var_hidden(&self, py: Python<'_>, value: Text) -> PyResult<bool> {
+        let value = text(value)?;
+        Ok(py.detach(|| self.inner.var_hidden(&value)))
     }
     fn effective_mode(
         &self,
+        py: Python<'_>,
         value: Text,
         prefix: Text,
         configured: u32,
         cap: Option<u32>,
     ) -> PyResult<u32> {
-        Ok(self.inner.effective_mode(
-            &text(value)?,
-            &text(prefix)?,
-            mode(configured)?,
-            cap.map(mode).transpose()?,
-        ) as u32)
+        let value = text(value)?;
+        let prefix = text(prefix)?;
+        let configured = mode(configured)?;
+        let cap = cap.map(mode).transpose()?;
+        Ok(py.detach(|| self.inner.effective_mode(&value, &prefix, configured, cap)) as u32)
     }
-    fn strongest_mode(&self, prefix: Text, configured: u32, cap: Option<u32>) -> PyResult<u32> {
-        Ok(self.inner.strongest_mode(
-            &text(prefix)?,
-            mode(configured)?,
-            cap.map(mode).transpose()?,
-        ) as u32)
+    fn strongest_mode(
+        &self,
+        py: Python<'_>,
+        prefix: Text,
+        configured: u32,
+        cap: Option<u32>,
+    ) -> PyResult<u32> {
+        let prefix = text(prefix)?;
+        let configured = mode(configured)?;
+        let cap = cap.map(mode).transpose()?;
+        Ok(py.detach(|| self.inner.strongest_mode(&prefix, configured, cap)) as u32)
     }
     fn readonly_below(
         &self,
+        py: Python<'_>,
         value: Text,
         prefix: Text,
         configured: u32,
         cap: Option<u32>,
     ) -> PyResult<Option<Text>> {
-        Ok(self.inner.readonly_below(
-            &text(value)?,
-            &text(prefix)?,
-            mode(configured)?,
-            cap.map(mode).transpose()?,
-        ))
+        let value = text(value)?;
+        let prefix = text(prefix)?;
+        let configured = mode(configured)?;
+        let cap = cap.map(mode).transpose()?;
+        Ok(py.detach(|| self.inner.readonly_below(&value, &prefix, configured, cap)))
     }
 }
 
 #[pyfunction]
-fn policy_compile(value: ProfileValue) -> PyResult<PlanValue> {
-    let plan = compile_profile(&profile(value)?);
+fn policy_compile(py: Python<'_>, value: ProfileValue) -> PyResult<PlanValue> {
+    let value = profile(value)?;
+    let plan = py.detach(|| compile_profile(&value));
     Ok((
         plan.commands.map(rules_value),
         visibility_value(plan.visibility),
@@ -452,18 +514,24 @@ fn policy_compile(value: ProfileValue) -> PyResult<PlanValue> {
 
 #[pyfunction]
 fn policy_restrict(
+    py: Python<'_>,
     base: Option<ProfileValue>,
     inline: Option<ProfileValue>,
 ) -> PyResult<Option<ProfileValue>> {
     let base = base.map(profile).transpose()?;
     let inline = inline.map(profile).transpose()?;
-    restrict_profile(base.as_ref(), inline.as_ref())
+    py.detach(|| restrict_profile(base.as_ref(), inline.as_ref()))
         .map(|value| value.map(profile_value))
         .map_err(PyValueError::new_err)
 }
 
 #[pyfunction]
-fn policy_pattern(value: Text, tokens: Vec<Text>, ecma: bool) -> PyResult<(Vec<Text>, bool, bool)> {
+fn policy_pattern(
+    py: Python<'_>,
+    value: Text,
+    tokens: Vec<Text>,
+    ecma: bool,
+) -> PyResult<(Vec<Text>, bool, bool)> {
     let value = text(value)?;
     let tokens = texts(tokens)?;
     let dialect = if ecma {
@@ -471,22 +539,26 @@ fn policy_pattern(value: Text, tokens: Vec<Text>, ecma: bool) -> PyResult<(Vec<T
     } else {
         Whitespace::Python
     };
-    Ok((
-        split_pattern(&value, dialect),
-        pattern_matches(&value, &tokens, dialect),
-        pattern_reaches(&value, &tokens, dialect),
-    ))
+    Ok(py.detach(|| {
+        (
+            split_pattern(&value, dialect),
+            pattern_matches(&value, &tokens, dialect),
+            pattern_reaches(&value, &tokens, dialect),
+        )
+    }))
 }
 
 #[pyfunction]
-fn policy_paths(value: Vec<Text>) -> PyResult<ScopeValue> {
-    let scope = classify_paths(&texts(value)?);
+fn policy_paths(py: Python<'_>, value: Vec<Text>) -> PyResult<ScopeValue> {
+    let value = texts(value)?;
+    let scope = py.detach(|| classify_paths(&value));
     Ok((scope.paths, scope.patterns))
 }
 
 #[pyfunction]
-fn policy_vars(value: Vec<Text>) -> PyResult<ScopeValue> {
-    let scope = classify_vars(&texts(value)?);
+fn policy_vars(py: Python<'_>, value: Vec<Text>) -> PyResult<ScopeValue> {
+    let value = texts(value)?;
+    let scope = py.detach(|| classify_vars(&value));
     Ok((scope.names, scope.patterns))
 }
 

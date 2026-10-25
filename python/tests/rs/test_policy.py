@@ -14,7 +14,9 @@
 
 
 import json
+import sys
 from pathlib import Path
+from threading import Event, Thread
 
 import pytest
 
@@ -199,3 +201,40 @@ def test_restored_visibility_retains_component_depth_and_surrogate_text():
     retained = visibility_matcher(restored.visibility)
     visibility_matcher.cache_clear()
     assert retained.path_visible((47, 111, 112, 101, 110))
+
+
+@pytest.mark.parametrize("kind", ("visibility", "admission"))
+def test_native_matching_allows_another_python_thread_to_run(kind):
+    patterns = ((42, 122),) * 1000
+    if kind == "visibility":
+        matcher = PolicyVisibility((((), patterns), (), ((), ())))
+        evaluate = matcher.path_visible
+        expected = True
+    else:
+        matcher = PolicyAdmission((patterns, (), ()), False)
+        evaluate = matcher.head_allowed
+        expected = False
+    path = (47, *((97,) * 10000))
+    ready = Event()
+    start = Event()
+    progressed = Event()
+
+    def worker():
+        ready.set()
+        if start.wait(5):
+            progressed.set()
+
+    previous = sys.getswitchinterval()
+    thread = Thread(target=worker)
+    try:
+        sys.setswitchinterval(1000)
+        thread.start()
+        assert ready.wait(5)
+        start.set()
+        assert evaluate(path) == expected
+        assert progressed.is_set()
+    finally:
+        sys.setswitchinterval(previous)
+        start.set()
+        thread.join(5)
+    assert not thread.is_alive()
