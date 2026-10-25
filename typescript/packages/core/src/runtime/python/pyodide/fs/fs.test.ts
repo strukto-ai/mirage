@@ -487,6 +487,36 @@ except OSError as error:
     )
   })
 
+  it("shows a retained stat's policy the guest's own time edit", async () => {
+    const p = prefix()
+    const path = `${p}stamped.txt`
+    store.set(path, enc.encode('abc'))
+    const sync = storeSync()
+    const seen: VFSStat[] = []
+    mountOver(p, {
+      ...sync,
+      stat: (name) => {
+        const row = sync.stat(name)
+        return name === path
+          ? { ...row, source: new FileStat({ name: 'stamped.txt', type: FileType.FILE, size: 3 }) }
+          : row
+      },
+      statCached: (name, row) => {
+        if (name === path) seen.push(row)
+        return row
+      },
+    })
+    await py.runPythonAsync(`
+import os
+_stamped = open('${path}', 'rb', buffering=0)
+os.utime('${path}', (1000, 2000))
+os.fstat(_stamped.fileno())
+_stamped.close()
+`)
+    expect(seen.at(-1)?.source?.atime).toBe('1970-01-01T00:16:40Z')
+    expect(seen.at(-1)?.source?.modified).toBe('1970-01-01T00:33:20Z')
+  })
+
   it('checks written retained bytes without flushing the pending write', async () => {
     const p = prefix()
     const path = `${p}overlay.txt`

@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { epochToIso } from '../../../../utils/dates.ts'
-import type { SetAttrFields } from '../../../../types.ts'
+import { FileStat, type SetAttrFields } from '../../../../types.ts'
 import {
   BLKSIZE,
   DIR_MODE,
@@ -301,6 +301,15 @@ export class PyodideFs {
       // the link node itself and the target's row is not what changed.
       if (this.host.isLink(node.mode)) fields.nofollow = true
       this.journal.markSetattr(this.nodes.pathOf(node), fields)
+      // The guest's own edit is now the file's: the backend row the policies
+      // are shown carries it, while the times Emscripten filled in stay out.
+      if (node.source !== undefined) {
+        node.source = new FileStat(node.source).with({
+          ...(fields.mode !== undefined ? { mode: fields.mode } : {}),
+          ...(fields.mtime !== undefined ? { modified: fields.mtime } : {}),
+          ...(fields.atime !== undefined ? { atime: fields.atime } : {}),
+        })
+      }
     }
     // A resize goes as a truncate to the new length. Recording here rather
     // than at close is what makes a bare `os.truncate(path, n)`, which
