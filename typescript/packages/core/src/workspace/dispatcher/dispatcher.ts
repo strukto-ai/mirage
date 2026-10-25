@@ -984,9 +984,6 @@ export class Dispatcher {
         ? (declared(owner.vfs.constructor, 'read') ?? CALLS.get('read') ?? mark)
         : mark
       await this.admit(call, boundary, admitted)
-      if (name === 'copy' && (await this.copyReadsFirst(call))) {
-        await this.dispatchAdmitted('read', call.path, [], {})
-      }
       if (looksUp) {
         await mkdirOnReadOnly(
           dispatchStat(this.dispatch),
@@ -1750,30 +1747,17 @@ export class Dispatcher {
       paths.some((p) => call.ruleGate?.scopes(p.virtual) === true)
     )
       return true
-    // A file copy names both its ends, and admission judges each; a file hook
-    // meets its bytes as the source's read before it runs.
-    if (call.name === 'copy') return false
+    // A file copy names both its ends, and admission judges each, the source
+    // as a read. Only a postVfs hook needs the bytes, and then the caller moves
+    // them through a read and a write, so the bytes it judges are the bytes
+    // that land.
+    if (call.name === 'copy') return this.policies.wantsFor('postVfs', this.sessionId())
     // Inside a line the gate above answered for the profile's path rules,
     // scoped to these paths; only a coded hook is left to ask.
     return (
       (await this.policies.wantsFor('preVfs', this.sessionId(), call.ruleGate !== null)) ||
       ((call.name === 'dir_copy' || call.name === 'files_containing') &&
         (await this.policies.wantsFor('postVfs', this.sessionId())))
-    )
-  }
-
-  /**
-   * Whether a file copy reads its source through the gate first. The
-   * backend's copy moves bytes no read passes, so a file hook meets them as
-   * the source's read, and the copy then keeps the backend's own kind of file
-   * (a document stays a document). Inside a line the gate answered for the
-   * profile's path rules already. Mirrors Python's
-   * Dispatcher._copy_reads_first.
-   */
-  private async copyReadsFirst(call: Call): Promise<boolean> {
-    return (
-      (await this.policies.wantsFor('preVfs', this.sessionId(), call.ruleGate !== null)) ||
-      (await this.policies.wantsFor('postVfs', this.sessionId()))
     )
   }
 
@@ -1797,8 +1781,13 @@ export class Dispatcher {
     // that defines it.
     call.write = call.write || WRITE_EFFECTS.includes(mark.effect)
     const gate = call.ruleGate === null ? {} : { gate: call.ruleGate }
+    // A file copy reads its source, whatever the backend does with it, so the
+    // source is admitted as the read a policy judges reads by.
+    const owner = call.name === 'copy' ? this.namespace.tryMountFor(call.path.virtual) : null
+    const source =
+      owner === null ? mark : (declared(owner.vfs.constructor, 'read') ?? CALLS.get('read') ?? mark)
     await boundary.admit(
-      mark,
+      source,
       call.path,
       call.write && !COPY_OPS.has(call.name),
       { final: call.dst === null, ...gate },

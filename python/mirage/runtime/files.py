@@ -447,8 +447,9 @@ class RuntimeFiles:
     def stat_cached(self, path: str, row: VFSStat) -> VFSStat:
         """Judge a descriptor's held row as a stat of its path, and
         answer it; nothing is fetched. The policies see the backend's row
-        with what the descriptor changed (size, mode, times), so an
-        unknown size and a named owner stay as the backend gave them.
+        with what the descriptor changed (size, mode, and a time the row
+        has), so an unknown size, a named owner and a time the backend
+        never gave stay as they were.
 
         Args:
             path (str): the descriptor's current virtual path.
@@ -472,7 +473,7 @@ class RuntimeFiles:
             ("modified", row.mtime_ns, mtime_ns(held)),
             ("atime", row.atime_ns, atime_ns(held)),
         ):
-            if ns is not None and ns != was:
+            if ns is not None and was is not None and ns != was:
                 updates[key] = timestamp_iso(ns / 1_000_000_000)
         if updates:
             held = held.model_copy(update=updates)

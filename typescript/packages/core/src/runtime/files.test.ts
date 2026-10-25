@@ -640,3 +640,21 @@ it('preserves unknown source metadata and checks logical changes in retained sta
     extra: source.extra,
   })
 })
+
+it('leaves out of a retained stat the times the backend never gave', async () => {
+  // A runtime fills a missing time for its guest; the policy sees the
+  // backend's row without it.
+  const source = new FileStat({ name: 'f', type: FileType.FILE, size: 3 })
+  const seen: FileStat[] = []
+  const dispatch: BridgeDispatchFn = (_op, _path, _bytes, _dst, attrs) => {
+    if (attrs?.retained !== undefined) {
+      seen.push(attrs.retained as FileStat)
+      return Promise.resolve(attrs.retained)
+    }
+    return Promise.resolve(source)
+  }
+  const files = new RuntimeFiles(dispatch)
+  const row = { ...(await files.stat('/data/f')), mtimeMs: 1, atimeMs: 1 }
+  expect(await files.statCached('/data/f', row)).toEqual(row)
+  expect([seen[0]?.modified ?? null, seen[0]?.atime ?? null]).toEqual([null, null])
+})

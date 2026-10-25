@@ -1333,8 +1333,6 @@ class Dispatcher:
             )
             await boundary.complete(mark, call.path, call.write, None)
             return None, IOResult()
-        if name == "copy" and await self._copy_reads_first(call):
-            await self._dispatch("read", call.path, caller)
         if across is not None:
             await self._copy_across(call, mount, across)
             await boundary.complete(mark, call.path, call.write, None)
@@ -1993,10 +1991,14 @@ class Dispatcher:
             and any(call.rule_gate.scopes(p.virtual) for p in paths)
         ):
             return True
-        # A file copy names both its ends, and admission judges each; a
-        # file hook meets its bytes as the source's read before it runs.
+        # A file copy names both its ends, and admission judges each, the
+        # source as a read. Only a post_vfs hook needs the bytes, and then
+        # the caller moves them through a read and a write, so the bytes it
+        # judges are the bytes that land.
         if call.name == "copy":
-            return False
+            return await self._namespace.registry.policies.wants_for(
+                "post_vfs", _session_id(call.caller)
+            )
         # Inside a line the gate above answered for the profile's path
         # rules, scoped to these paths; only a coded hook is left to ask.
         policies = self._namespace.registry.policies
@@ -2008,23 +2010,6 @@ class Dispatcher:
             call.name in {"dir_copy", "files_containing"}
             and await policies.wants_for("post_vfs", _session_id(call.caller))
         )
-
-    async def _copy_reads_first(self, call: _Call) -> bool:
-        """Whether a file copy reads its source through the gate first.
-
-        The backend's copy moves bytes no read passes, so a file hook
-        meets them as the source's read, and the copy then keeps the
-        backend's own kind of file (a document stays a document). Inside
-        a line the gate answered for the profile's path rules already.
-
-        Args:
-            call (_Call): the admitted copy.
-        """
-        policies = self._namespace.registry.policies
-        session_id = _session_id(call.caller)
-        return await policies.wants_for(
-            "pre_vfs", session_id, coded_only=call.rule_gate is not None
-        ) or await policies.wants_for("post_vfs", session_id)
 
     async def _admit(
         self,
@@ -2061,8 +2046,15 @@ class Dispatcher:
         boundary = self._boundary(mount, call.caller)
         if not judge_mode:
             boundary = dataclasses.replace(boundary, mode=None)
+        # A file copy reads its source, whatever the backend does with it,
+        # so the source is admitted as the read a policy judges reads by.
+        source = (
+            declared(type(mount.vfs), "read") or CALLS["read"]
+            if call.name == "copy"
+            else mark
+        )
         await boundary.admit(
-            mark,
+            source,
             call.path,
             call.write and call.name not in COPY_OPS,
             final=call.dst is None,

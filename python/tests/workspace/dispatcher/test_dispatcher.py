@@ -3863,12 +3863,45 @@ async def test_native_copy_meets_source_post_read_policy_before_writing(
         restored = await ws.shell(f"cp /data/secret {destination}")
         assert restored.exit_code == 0
         assert await ws.vfs.read(destination) == b"secret"
-        # Once the source's read passes, the backend's own copy runs.
-        assert (source.native_copies, other.native_copies) == (
-            (0, 1) if cross_mount else (1, 0)
-        )
+        # A post_vfs hook judges the bytes, so they move through a read
+        # and a write: the bytes it judged are the bytes that landed.
+        assert source.native_copies == other.native_copies == 0
     finally:
         await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("refused", [False, True])
+async def test_a_copy_is_admitted_as_a_read_of_its_source(refused):
+    # A pre_vfs hook needs no bytes: the source is judged as a read and
+    # the backend's own copy runs, so a document stays a document.
+    vfs = _NativeCopyRAM()
+    policies = [_RefusesReads()] if refused else [_SeesCalls()]
+    with Workspace({"/data/": vfs}, mode=MountMode.WRITE) as ws:
+        await ws.vfs.write("/data/a", b"a")
+        for policy in policies:
+            ws.policies.add(policy)
+        ran = await ws.shell("cp /data/a /data/b")
+        assert ran.exit_code == (1 if refused else 0)
+    assert vfs.native_copies == (0 if refused else 1)
+
+
+class _SeesResults(Policy):
+    async def pre_vfs(self, ctx: VfsContext) -> Action | None:
+        return None
+
+    async def post_vfs(self, ctx: VfsResultContext) -> Action | None:
+        return None
+
+
+@pytest.mark.asyncio
+async def test_a_copy_from_a_pipe_keeps_its_bytes_under_file_hooks():
+    with Workspace(
+        {"/ram/": RAMVFS()}, mode=MountMode.WRITE, policies=[_SeesResults()]
+    ) as ws:
+        ran = await ws.shell("cp <(printf x) /ram/out")
+        assert ran.exit_code == 0
+        assert await ws.vfs.read("/ram/out") == b"x"
 
 
 class _NoopReads(Policy):

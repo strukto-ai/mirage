@@ -4015,8 +4015,9 @@ it.each([false, true])(
       const restored = await ws.shell(`cp /data/secret ${destination}`)
       expect(restored.exitCode).toBe(0)
       expect(await ws.vfs.read(destination)).toEqual(ENC.encode('secret'))
-      // Once the source's read passes, the backend's own copy runs.
-      expect([source.nativeCopies, other.nativeCopies]).toEqual(crossMount ? [0, 1] : [1, 0])
+      // A postVfs hook judges the bytes, so they move through a read and a
+      // write: the bytes it judged are the bytes that landed.
+      expect(source.nativeCopies + other.nativeCopies).toBe(0)
     } finally {
       await ws.close()
     }
@@ -4166,6 +4167,52 @@ it('has a policy refusing reads refuse their shortcuts', async () => {
       await expect(ws.vfs.dispatch(name, '/m/cold', args)).rejects.toMatchObject({ code: 'EACCES' })
     }
     expect(vfs.asked).toEqual([])
+  } finally {
+    await ws.close()
+  }
+})
+
+it.each([false, true])('admits a copy as a read of its source (refused: %s)', async (refused) => {
+  // A preVfs hook needs no bytes: the source is judged as a read and the
+  // backend's own copy runs, so a document stays a document.
+  const parser = await getTestParser()
+  const vfs = new NativeCopyRAM()
+  const policy: Policy = {
+    preVfs: (ctx) =>
+      refused && ctx.call.name === 'read' ? { kind: 'deny', reason: 'no reads' } : null,
+  }
+  const ws = new Workspace(
+    { '/data/': vfs },
+    {
+      mode: MountMode.WRITE,
+      policies: [policy],
+      shellParserFactory: () => Promise.resolve(parser),
+    },
+  )
+  try {
+    await ws.vfs.write('/data/a', ENC.encode('a'))
+    const ran = await ws.shell('cp /data/a /data/b')
+    expect(ran.exitCode).toBe(refused ? 1 : 0)
+    expect(vfs.nativeCopies).toBe(refused ? 0 : 1)
+  } finally {
+    await ws.close()
+  }
+})
+
+it('keeps the bytes of a copy from a pipe under file hooks', async () => {
+  const parser = await getTestParser()
+  const ws = new Workspace(
+    { '/ram': new RAMVFS() },
+    {
+      mode: MountMode.WRITE,
+      policies: [{ preVfs: () => null, postVfs: () => null }],
+      shellParserFactory: () => Promise.resolve(parser),
+    },
+  )
+  try {
+    const ran = await ws.shell('cp <(printf x) /ram/out')
+    expect(ran.exitCode).toBe(0)
+    expect(DEC.decode(await ws.vfs.read('/ram/out'))).toBe('x')
   } finally {
     await ws.close()
   }

@@ -716,3 +716,20 @@ def test_stat_cached_preserves_unknown_source_and_checks_logical_changes():
     assert seen[-1].uid == "owner"
     assert seen[-1].modified == row.modified
     assert seen[-1].extra == row.extra
+
+
+def test_stat_cached_leaves_out_times_the_backend_never_gave():
+    # A runtime fills a missing time for its guest; the policy sees the
+    # backend's row without it.
+    row = FileStat(name="f", type=FileType.FILE, size=3)
+    files = RuntimeFiles(None, None)
+    seen = []
+
+    def dispatch(op, path, **kwargs):
+        seen.append(kwargs["retained"])
+        return kwargs["retained"]
+
+    files.call = dispatch
+    filled = replace(stat_row(row), mtime_ns=1, atime_ns=1)
+    assert files.stat_cached("/data/f", filled) == filled
+    assert (seen[-1].modified, seen[-1].atime) == (None, None)
