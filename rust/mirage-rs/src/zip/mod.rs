@@ -62,6 +62,30 @@ fn u64_at(data: &[u8], at: usize) -> u64 {
     })
 }
 
+/// IBM code page 437's upper half.
+const CP437: &str = "ÇüéâäàåçêëèïîìÄÅÉæÆôöòûùÿÖÜ¢£¥₧ƒáíóúñÑªº¿⌐¬½¼¡«»░▒▓│┤╡╢╖╕╣║╗╝╜╛┐\
+└┴┬├─┼╞╟╚╔╩╦╠═╬╧╨╤╥╙╘╒╓╫╪┘┌█▄▌▐▀αßΓπΣσµτΦΘΩδ∞φε∩≡±≥≤⌠⌡÷≈°∙·√ⁿ²■\u{a0}";
+
+/// A stored name as text: UTF-8 when flagged so or already valid (as
+/// Info-ZIP's Zip 3.0 stores Unix names unflagged), else code page 437,
+/// as APPNOTE reads an unflagged name. Divergence: Info-ZIP on Unix keeps
+/// such a name's bytes, Latin-1 for a FAT host's, which no path holds.
+fn text_name(stored: &[u8], flags: u16) -> Vec<u8> {
+    if flags & 0x800 != 0 || std::str::from_utf8(stored).is_ok() {
+        return stored.to_vec();
+    }
+    let high: Vec<char> = CP437.chars().collect();
+    let text: String = stored
+        .iter()
+        .map(|&b| {
+            high.get(usize::from(b).wrapping_sub(0x80))
+                .copied()
+                .unwrap_or(char::from(b))
+        })
+        .collect();
+    text.into_bytes()
+}
+
 /// One central-directory record.
 #[derive(Clone, Default)]
 pub(super) struct Entry {
@@ -174,7 +198,7 @@ fn central(directory: &[u8], count: u64, slack: i128) -> Option<Vec<Entry>> {
         if next > directory.len() {
             return None;
         }
-        let name = directory[at + 46..at + 46 + name_len].to_vec();
+        let name = text_name(&directory[at + 46..at + 46 + name_len], u16_at(head, 8));
         let extra = &directory[at + 46 + name_len..at + 46 + name_len + extra_len];
         let narrow = [u32_at(head, 24), u32_at(head, 20), u32_at(head, 42)];
         let wide = zip64_fields(extra, narrow.map(|v| u64::from(v) == ZIP32));
@@ -295,10 +319,12 @@ impl<'h> Spool<'h> {
             .map_err(Fault::Read)?;
         let mut end = end_record(&tail, base, exact).ok_or(Fault::NoEnd)?;
         let saturated = end.count == 0xFFFF || end.size == ZIP32 || end.offset == ZIP32;
-        let locator = end.at.checked_sub(20).filter(|&at| at >= base);
-        if let (true, Some(at)) = (saturated, locator) {
-            let record = at.checked_sub(56);
-            if let (LOCATOR64, Some(record)) = (u32_at(&tail, (at - base) as usize), record) {
+        // The ZIP64 record ends where its locator starts, which a long
+        // comment can push before the tail.
+        let at = end.at.checked_sub(20).filter(|_| saturated);
+        if let Some((at, record)) = at.and_then(|at| Some((at, at.checked_sub(56)?))) {
+            let locator = self.read(at, 20).await.map_err(Fault::Read)?;
+            if u32_at(&locator, 0) == LOCATOR64 {
                 let wide = self.read(record, 56).await.map_err(Fault::Read)?;
                 if u32_at(&wide, 0) == END64 {
                     end.at = record;

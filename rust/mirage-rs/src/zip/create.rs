@@ -9,7 +9,7 @@ use flate2::{Compress, Compression, Crc, FlushCompress, Status};
 use serde::Deserialize;
 
 use super::{
-    ARCHIVE, CENTRAL, END, END64, Entry, GATHER, LOCAL, LOCATOR64, Spool, WINDOW, ZIP32, central,
+    ARCHIVE, CENTRAL, END, END64, GATHER, LOCAL, LOCATOR64, Spool, WINDOW, ZIP32, central,
     end_record, failed, failure_text, say, u16_at, u32_at, wildcard,
 };
 use crate::request::{Opening, Reply, Request, WriteMode};
@@ -33,9 +33,6 @@ const FILE_MODE: u64 = 0o100644 << 16;
 const LINK_MODE: u64 = 0o120777 << 16;
 /// The stamp every member carries: 1980-01-01 00:00, the DOS epoch.
 const EPOCH: u64 = (1 << 5) | 1;
-/// IBM code page 437's upper half, how a name without the UTF-8 flag reads.
-const CP437: &str = "ÇüéâäàåçêëèïîìÄÅÉæÆôöòûùÿÖÜ¢£¥₧ƒáíóúñÑªº¿⌐¬½¼¡«»░▒▓│┤╡╢╖╕╣║╗╝╜╛┐\
-└┴┬├─┼╞╟╚╔╩╦╠═╬╧╨╤╥╙╘╒╓╫╪┘┌█▄▌▐▀αßΓπΣσµτΦΘΩδ∞φε∩≡±≥≤⌠⌡÷≈°∙·√ⁿ²■\u{a0}";
 
 #[derive(Deserialize, Clone, Copy, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
@@ -154,6 +151,7 @@ fn plan(config: &Config) -> (Vec<(Vec<u8>, &Found)>, Vec<u8>) {
 
 /// A member's stored bytes in a spool: a new member's after its header,
 /// an old one's whole record.
+#[derive(Clone)]
 struct Record {
     name: Vec<u8>,
     head: Vec<u8>,
@@ -168,26 +166,6 @@ struct Original {
     records: Vec<Record>,
     prefix: u64,
     comment: Vec<u8>,
-}
-
-/// A name as Unicode: UTF-8 when flagged so, else code page 437.
-fn utf8_name(entry: &Entry) -> Option<Vec<u8>> {
-    if entry.flags & 0x800 != 0 {
-        return std::str::from_utf8(&entry.name)
-            .is_ok()
-            .then(|| entry.name.clone());
-    }
-    let high: Vec<char> = CP437.chars().collect();
-    let text: String = entry
-        .name
-        .iter()
-        .map(|&b| {
-            high.get(usize::from(b).wrapping_sub(0x80))
-                .copied()
-                .unwrap_or(char::from(b))
-        })
-        .collect();
-    Some(text.into_bytes())
 }
 
 /// Whether an extra field is whole and holds no ZIP64 field.
@@ -235,7 +213,14 @@ async fn original(spool: &mut Spool<'_>) -> Option<Original> {
             .first()
             .copied()
             .unwrap_or(start);
-        if u16_at(record, 34) != 0 || wide || !plain_extra(extra) || entry.local + 30 > limit {
+        let flagged = entry.flags & 0x800 != 0;
+        let unreadable = flagged && std::str::from_utf8(&entry.name).is_err();
+        if u16_at(record, 34) != 0
+            || wide
+            || unreadable
+            || !plain_extra(extra)
+            || entry.local + 30 > limit
+        {
             return None;
         }
         let head = spool.read(entry.local, 30).await.ok()?;
@@ -260,7 +245,7 @@ async fn original(spool: &mut Spool<'_>) -> Option<Original> {
             return None;
         }
         records.push(Record {
-            name: utf8_name(entry)?,
+            name: entry.name.clone(),
             head: Vec::new(),
             spool: ARCHIVE,
             skip: entry.local,
@@ -588,10 +573,10 @@ pub(super) async fn run(host: Host, config: Config) -> i32 {
     }
     // A member replacing an old one keeps its place; new ones follow.
     let old_records = old.as_ref().map_or(&[][..], |old| &old.records[..]);
-    let order: HashMap<&[u8], usize> = old_records
+    let order: HashMap<Vec<u8>, usize> = old_records
         .iter()
         .enumerate()
-        .map(|(i, r)| (r.name.as_slice(), i))
+        .map(|(i, r)| (r.name.clone(), i))
         .collect();
     members.sort_by_key(|(name, _)| order.get(name.as_slice()).copied().unwrap_or(order.len()));
     let mut added = Vec::new();
@@ -619,18 +604,23 @@ pub(super) async fn run(host: Host, config: Config) -> i32 {
         lines.extend(say("{}: {}\n", &[verb, name]));
         added.push(record);
     }
-    let (prefix, comment, mut records) = match old {
+    let (prefix, comment, old_records) = match old {
         Some(old) => (old.prefix, old.comment, old.records),
         None => (0, Vec::new(), Vec::new()),
     };
-    let mut fresh = Vec::new();
-    for record in added {
-        match records.iter_mut().find(|r| r.name == record.name) {
-            Some(slot) => *slot = record,
-            None => fresh.push(record),
-        }
-    }
-    records.extend(fresh);
+    // A new member takes the place of every old record of its name, as
+    // an archive appended to can repeat one.
+    let fresh: HashMap<&[u8], &Record> = added.iter().map(|r| (r.name.as_slice(), r)).collect();
+    let mut records: Vec<Record> = old_records
+        .into_iter()
+        .map(|old| fresh.get(old.name.as_slice()).map_or(old, |&r| r.clone()))
+        .collect();
+    records.extend(
+        added
+            .iter()
+            .filter(|r| !order.contains_key(r.name.as_slice()))
+            .cloned(),
+    );
     let mut pieces = Vec::new();
     keep(&mut pieces, ARCHIVE, 0, prefix);
     let mut offset = prefix;

@@ -296,16 +296,17 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(mkdir -p /data/fcA_uc/o && cd /data/fcA_uc && printf %s 'UEsDBBQAAAAAAAAAIQAhMDo2BgAAAAYAAAAFAAAAYS50eHRoZWxsbwpQSwMEFAAAAAgAAAAhACE52zkQAAAAIQAAAAUAAABiLnR4dCvPL8pJUSjPTEnlKsfKBABQSwMEFAAAAAAAAAAhACAwOjYGAAAABgAAAAUAAABjLnR4dGhlbGxvClBLAQIUAxQAAAAAAAAAIQAhMDo2BgAAAAYAAAAFAAAAAAAAAAAAAACkgQAAAABhLnR4dFBLAQIUAxQAAAAIAAAAIQAhOds5EAAAACEAAAAFAAAAAAAAAAAAAACkgSkAAABiLnR4dFBLAQIUAxQAAAAAAAAAIQAgMDo2BgAAAAYAAAAFAAAAAAAAAAAAAACkgVwAAABjLnR4dFBLBQYAAAAAAwADAJkAAACFAAAAAAA=' | base64 -d > c.zip && unzip -t c.zip; echo rc=$?; unzip -tq c.zip; echo rc=$?; unzip -p c.zip; echo rc=$?; cd o && unzip -q ../c.zip; echo rc=$?; cat a.txt b.txt; cd / && rm -r /data/fcA_uc)",
+      "command": "(mkdir -p /data/fcA_uc && printf %s 'UEsDBBQAAAAAAAAAIQAhMDo2BgAAAAYAAAAFAAAAYS50eHRoZWxsbwpQSwMEFAAAAAgAAAAhACE52zkQAAAAIQAAAAUAAABiLnR4dCvPL8pJUSjPTEnlKsfKBABQSwMEFAAAAAAAAAAhACAwOjYGAAAABgAAAAUAAABjLnR4dGhlbGxvClBLAQIUAxQAAAAAAAAAIQAhMDo2BgAAAAYAAAAFAAAAAAAAAAAAAACkgQAAAABhLnR4dFBLAQIUAxQAAAAIAAAAIQAhOds5EAAAACEAAAAFAAAAAAAAAAAAAACkgSkAAABiLnR4dFBLAQIUAxQAAAAAAAAAIQAgMDo2BgAAAAYAAAAFAAAAAAAAAAAAAACkgVwAAABjLnR4dFBLBQYAAAAAAwADAJkAAACFAAAAAAA=' | base64 -d > /data/fcA_uc/c.zip && cd /data/fcA_uc && unzip -t c.zip; echo rc=$?; unzip -tq c.zip; echo rc=$?; unzip -p c.zip; echo rc=$?; unzip -q -d o c.zip; echo rc=$?; cat o/a.txt o/b.txt; cd / && rm -r /data/fcA_uc)",
       "expect": {
         "exit": 0,
         "stdout": "Archive:  c.zip\n    testing: a.txt                    bad CRC 363a3020  (should be 363a3021)\n    testing: b.txt                    bad CRC 39db39de  (should be 39db3921)\n    testing: c.txt                    OK\nAt least one error was detected in c.zip.\nrc=2\na.txt                   bad CRC 363a3020  (should be 363a3021)\nb.txt                   bad CRC 39db39de  (should be 39db3921)\nAt least one error was detected in c.zip.\nrc=2\nhello\nworld wide\nworld wide\nworld wide\nhello\nrc=2\nrc=2\nhello\nworld wide\nworld wide\nworld wide\n",
-        "stderr": "a.txt                   bad CRC 363a3020  (should be 363a3021)\nb.txt                   bad CRC 39db39de  (should be 39db3921)\na.txt                   bad CRC 363a3020  (should be 363a3021)\nb.txt                   bad CRC 39db39de  (should be 39db3921)\n"
+        "stderr": "a.txt                   bad CRC 363a3020  (should be 363a3021)\nb.txt                   bad CRC 39db39de  (should be 39db3921)\no/a.txt                 bad CRC 363a3020  (should be 363a3021)\no/b.txt                 bad CRC 39db39de  (should be 39db3921)\n"
       },
       "flags": [
         "t",
         "q",
-        "p"
+        "p",
+        "d"
       ]
     },
     {
@@ -332,16 +333,54 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(mkdir -p /data/fcA_us/o && cd /data/fcA_us && printf %s 'UEsDBBQAAAAOAAAAIQAAAAAACQAAAAQAAAAFAAAAbC5iaW4AAAAAAAAAAABQSwMEFAABAAAAAAAhACAwOjYSAAAABgAAAAUAAABlLnR4dAAAAAAAAAAAAAAAAAAAAAAAAFBLAwQUAAAACAAAACEAIDA6NgQAAAAGAAAABQAAAHgudHh0/////1BLAwQUAAAAAAAAACEAIDA6NgYAAAAGAAAABQAAAGMudHh0aGVsbG8KUEsBAhQDFAAAAA4AAAAhAAAAAAAJAAAABAAAAAUAAAAAAAAAAAAAAKSBAAAAAGwuYmluUEsBAhQDFAABAAAAAAAhACAwOjYSAAAABgAAAAUAAAAAAAAAAAAAAKSBLAAAAGUudHh0UEsBAhQDFAAAAAgAAAAhACAwOjYEAAAABgAAAAUAAAAAAAAAAAAAAKSBYQAAAHgudHh0UEsBAhQDFAAAAAAAAAAhACAwOjYGAAAABgAAAAUAAAAAAAAAAAAAAKSBiAAAAGMudHh0UEsFBgAAAAAEAAQAzAAAALEAAAAAAA==' | base64 -d > s.zip && unzip -t s.zip; echo rc=$?; unzip -p s.zip; echo rc=$?; unzip -t s.zip l.bin; echo rc=$?; cd o && unzip -q ../s.zip; echo rc=$?; ls; cd / && rm -r /data/fcA_us)",
+      "command": "(mkdir -p /data/fcA_us && printf %s 'UEsDBBQAAAAOAAAAIQAAAAAACQAAAAQAAAAFAAAAbC5iaW4AAAAAAAAAAABQSwMEFAABAAAAAAAhACAwOjYSAAAABgAAAAUAAABlLnR4dAAAAAAAAAAAAAAAAAAAAAAAAFBLAwQUAAAACAAAACEAIDA6NgQAAAAGAAAABQAAAHgudHh0/////1BLAwQUAAAAAAAAACEAIDA6NgYAAAAGAAAABQAAAGMudHh0aGVsbG8KUEsBAhQDFAAAAA4AAAAhAAAAAAAJAAAABAAAAAUAAAAAAAAAAAAAAKSBAAAAAGwuYmluUEsBAhQDFAABAAAAAAAhACAwOjYSAAAABgAAAAUAAAAAAAAAAAAAAKSBLAAAAGUudHh0UEsBAhQDFAAAAAgAAAAhACAwOjYEAAAABgAAAAUAAAAAAAAAAAAAAKSBYQAAAHgudHh0UEsBAhQDFAAAAAAAAAAhACAwOjYGAAAABgAAAAUAAAAAAAAAAAAAAKSBiAAAAGMudHh0UEsFBgAAAAAEAAQAzAAAALEAAAAAAA==' | base64 -d > /data/fcA_us/s.zip && cd /data/fcA_us && unzip -t s.zip; echo rc=$?; unzip -p s.zip; echo rc=$?; unzip -t s.zip l.bin; echo rc=$?; unzip -q -d o s.zip; echo rc=$?; ls o; cd / && rm -r /data/fcA_us)",
       "expect": {
         "exit": 0,
         "stdout": "Archive:  s.zip\n   skipping: l.bin                   `LZMA' method not supported\n   skipping: e.txt                   unable to get password\n    testing: x.txt                   \n  error:  invalid compressed data to inflate\n    testing: c.txt                    OK\nAt least one error was detected in s.zip.\n1 file skipped because of unsupported compression or encoding.\nrc=5\nhello\nrc=5\nArchive:  s.zip\n   skipping: l.bin                   `LZMA' method not supported\nCaution:  zero files tested in s.zip.\n1 file skipped because of unsupported compression or encoding.\nrc=81\nrc=5\nc.txt\nx.txt\n",
-        "stderr": "   skipping: e.txt                   unable to get password\n  error:  invalid compressed data to inflate x.txt\n   skipping: e.txt                   unable to get password\n  error:  invalid compressed data to inflate x.txt\n"
+        "stderr": "   skipping: e.txt                   unable to get password\n  error:  invalid compressed data to inflate x.txt\n   skipping: e.txt                   unable to get password\n  error:  invalid compressed data to inflate o/x.txt\n"
       },
       "flags": [
         "t",
         "p",
-        "q"
+        "q",
+        "d"
+      ]
+    },
+    {
+      "id": "unzip_stored_size_mismatch_warns_and_reads_the_compressed_size",
+      "seq": 15100745,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(mkdir -p /data/fcA_uw && printf %s 'UEsDBBQAAAAIAAAAIQAgMDo2CAAAAAoAAAAFAAAAZC50eHTLSM3JyecCAFBLAwQUAAAAAAAAACEAIDA6NgYAAAAKAAAABQAAAHMudHh0aGVsbG8KUEsDBBQAAAAAAAAAIQAgMDo2BgAAAAYAAAAFAAAAYy50eHRoZWxsbwpQSwECFAMUAAAACAAAACEAIDA6NggAAAAKAAAABQAAAAAAAAAAAAAApIEAAAAAZC50eHRQSwECFAMUAAAAAAAAACEAIDA6NgYAAAAKAAAABQAAAAAAAAAAAAAApIErAAAAcy50eHRQSwECFAMUAAAAAAAAACEAIDA6NgYAAAAGAAAABQAAAAAAAAAAAAAApIFUAAAAYy50eHRQSwUGAAAAAAMAAwCZAAAAfQAAAAAA' | base64 -d > /data/fcA_uw/w.zip && cd /data/fcA_uw && unzip -t w.zip; echo rc=$?; unzip -tq w.zip; echo rc=$?; unzip -p w.zip | od -An -c; unzip -q -d o w.zip; echo rc=$?; cat o/d.txt o/s.txt; cd / && rm -r /data/fcA_uw)",
+      "expect": {
+        "exit": 0,
+        "stdout": "Archive:  w.zip\n    testing: d.txt                    OK\ns.txt:  ucsize 10 <> csize 6 for STORED entry\n         continuing with \"compressed\" size value\n    testing: s.txt                    OK\n    testing: c.txt                    OK\nAt least one warning-error was detected in w.zip.\nrc=1\ns.txt:  ucsize 10 <> csize 6 for STORED entry\n         continuing with \"compressed\" size value\nAt least one warning-error was detected in w.zip.\nrc=1\n   h   e   l   l   o  \\n   h   e   l   l   o  \\n   h   e   l   l\n   o  \\n\nrc=1\nhello\nhello\n",
+        "stderr": "s.txt:  ucsize 10 <> csize 6 for STORED entry\n         continuing with \"compressed\" size value\ns.txt:  ucsize 10 <> csize 6 for STORED entry\n         continuing with \"compressed\" size value\n"
+      },
+      "flags": [
+        "t",
+        "q",
+        "p",
+        "d"
       ]
     }
   ]

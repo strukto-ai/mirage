@@ -219,17 +219,14 @@ async function unzipped(
   config: Record<string, util.JSONType>,
 ): Promise<[number, Uint8Array]> {
   const engine = await openStream('unzip', { archive: '', shown: '', ...config })
-  const ended = new Set<util.JSONType>()
+  // The engine reads the archive a window at a time, each answered whole.
   const host: RequestHost = {
     errors: { append: () => Promise.resolve() },
     serve: (request) => {
       if (request.op === 'fill') return Promise.resolve({ reply: { size: archive.length } })
-      if (request.op !== 'read' || ended.has(request.fd ?? null)) {
-        return Promise.resolve({ reply: { end: request.op === 'read' } })
-      }
-      ended.add(request.fd ?? null)
+      if (request.op !== 'read') return Promise.resolve({ reply: {} })
       const skip = Number(request.skip ?? 0)
-      const data = archive.subarray(skip, skip + Number(request.size ?? archive.length))
+      const data = archive.subarray(skip, skip + Number(request.size ?? 0))
       return Promise.resolve({ reply: {}, data })
     },
   }
@@ -368,7 +365,11 @@ async function runLog(
   const names = new TextDecoder().decode(listing).split('\n').slice(0, -1)
   const entries = names.map((name, pick) => ({
     name,
-    content: async () => (await unzipped(archive, { p: true, pick }))[1],
+    content: async () => {
+      const [code, data] = await unzipped(archive, { p: true, pick })
+      if (code !== 0) throw new Error('zip: checksum error')
+      return data
+    },
   }))
   const printed: Uint8Array[] = []
   for (const segment of logSegments(transport, ref, jobs, entries, failedOnly)) {

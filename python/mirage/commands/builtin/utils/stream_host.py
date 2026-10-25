@@ -330,14 +330,14 @@ class StreamHost:
 
     async def _path_op(self, op: str, name: str) -> Served:
         """Unlink, make (one level) or stat a path; a stat answers what
-        stands there, ``dir`` or ``file``, and nothing when it fails."""
+        stands there, ``dir`` or ``file``, or why it found nothing."""
         if self.dispatch is None:
             return Served({"fatal": "file output requires a workspace"})
         path = PathSpec.from_str_path(text_view(name), cwd=self.cwd.virtual)
         try:
             found, _ = await self.dispatch(op, path)
         except WALK_ERRORS as exc:
-            return Served({} if op == "stat" else _failure(exc))
+            return Served(_failure(exc))
         if op != "stat" or found is None:
             return Served({})
         kind = "dir" if found.type == FileType.DIRECTORY else "file"

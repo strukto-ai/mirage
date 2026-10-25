@@ -150,6 +150,20 @@ describe('gh run view --log', () => {
     expect(CALLS).toEqual([`GET ${RUN}`, `GET ${RUN}/jobs?per_page=100&page=1`, `GET ${RUN}/logs`])
   })
 
+  it('reads a log archive past one 64 KiB window, and refuses a damaged entry', async () => {
+    ROUTES.set(`GET ${RUN}/jobs`, {
+      jobs: [{ id: 1, name: 'big', conclusion: 'failure', steps: [] }],
+    })
+    const line = 'x'.repeat(70000)
+    const archive = storedZip([['0_big.txt', `${line}\n`]])
+    ROUTES.set(`GET ${RUN}/logs`, archive)
+    expect(text(await runViewCmd(...args(['7'], { log: true })))).toBe(
+      `big\tUNKNOWN STEP\t${line}\n`,
+    )
+    archive[40] = (archive[40] ?? 0) ^ 1
+    await expect(runViewCmd(...args(['7'], { log: true }))).rejects.toThrow('zip: checksum error')
+  })
+
   it('keeps only failed jobs and their failed steps under --log-failed', async () => {
     ROUTES.set(`GET ${RUN}/jobs`, {
       jobs: [

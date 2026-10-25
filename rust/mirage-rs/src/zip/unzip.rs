@@ -208,13 +208,15 @@ enum Voice {
     Extracting,
 }
 
-fn damage(entry: &Entry, verdict: &Decoded, voice: Voice) -> Vec<u8> {
-    let name = padded(&entry.name, 22);
+/// What a member's damage says, naming it as Info-ZIP does: by member
+/// name, or by the path extraction gave it.
+fn damage(named: &[u8], expected: u32, verdict: &Decoded, voice: Voice) -> Vec<u8> {
+    let name = padded(named, 22);
     let invalid = "  error:  invalid compressed data to {}";
     match verdict {
         Decoded::Sound => Vec::new(),
         Decoded::BadCrc(found) => {
-            let crc = format!("bad CRC {found:08x}  (should be {:08x})\n", entry.crc);
+            let crc = format!("bad CRC {found:08x}  (should be {expected:08x})\n");
             match voice {
                 Voice::Quiet => say("{}  {}", &[&name, crc.as_bytes()]),
                 Voice::Testing => say("    testing: {}   {}", &[&name, crc.as_bytes()]),
@@ -224,7 +226,7 @@ fn damage(entry: &Entry, verdict: &Decoded, voice: Voice) -> Vec<u8> {
         Decoded::Invalid(verb) => {
             let invalid = say(invalid, &[verb.as_bytes()]);
             match voice {
-                Voice::Quiet => say("{} {}\n", &[&invalid, &entry.name]),
+                Voice::Quiet => say("{} {}\n", &[&invalid, named]),
                 Voice::Testing => say("    testing: {}  \n{}\n", &[&name, &invalid]),
                 Voice::Extracting => say("\n{}\n", &[&invalid]),
             }
@@ -245,6 +247,18 @@ struct Run<'h> {
 impl Run<'_> {
     fn damaged(&mut self, status: i32) {
         self.damage = self.damage.max(status);
+    }
+
+    /// Info-ZIP's warning for a stored member whose two sizes disagree;
+    /// the compressed size is the one read.
+    fn sized(&mut self, entry: &Entry) -> Vec<u8> {
+        if entry.method != 0 || entry.size == entry.csize {
+            return Vec::new();
+        }
+        self.damaged(WARN_EXIT);
+        let (size, csize) = (entry.size.to_string(), entry.csize.to_string());
+        let warning = "{}:  ucsize {} <> csize {} for STORED entry\n         continuing with \"compressed\" size value\n";
+        say(warning, &[&entry.name, size.as_bytes(), csize.as_bytes()])
     }
 
     /// Whether Info-ZIP skips this member, and what it says: a method
@@ -579,6 +593,7 @@ async fn test(
             out.extend(text);
             continue;
         } else {
+            out.extend(run.sized(entry));
             run.decode(entry, &mut Discard).await
         };
         tested += 1;
@@ -590,14 +605,19 @@ async fn test(
             _ => {
                 run.damaged(ERROR_EXIT);
                 let voice = if quiet { Voice::Quiet } else { Voice::Testing };
-                out.extend(damage(entry, &verdict, voice));
+                out.extend(damage(&entry.name, entry.crc, &verdict, voice));
             }
         }
     }
     let skipped = run.skipped;
     out.extend(cautions);
-    out.extend(if run.damage > 0 {
+    out.extend(if run.damage > WARN_EXIT {
         say("At least one error was detected in {}.\n", &[&archive])
+    } else if run.damage == WARN_EXIT {
+        say(
+            "At least one warning-error was detected in {}.\n",
+            &[&archive],
+        )
     } else if tested == 0 {
         say("Caution:  zero files tested in {}.\n", &[&archive])
     } else if filtered || skipped > 0 {
@@ -632,10 +652,13 @@ async fn pipe(run: &mut Run<'_>, entry: &Entry) {
         run.host.warn(&text);
         return;
     }
+    let warning = run.sized(entry);
+    run.host.warn(&warning);
     let verdict = run.decode(entry, &mut Print).await;
     if !matches!(verdict, Decoded::Sound) {
         run.damaged(ERROR_EXIT);
-        run.host.warn(&damage(entry, &verdict, Voice::Quiet));
+        run.host
+            .warn(&damage(&entry.name, entry.crc, &verdict, Voice::Quiet));
     }
 }
 
@@ -932,6 +955,8 @@ async fn extract(run: &mut Run<'_>, selected: &[&Entry], status: i32, cautions: 
             created: false,
             failed: None,
         };
+        let warning = run.sized(entry);
+        host.warn(&warning);
         let verdict = run.decode(entry, &mut file).await;
         if file.failed.is_none() {
             file.close(host).await;
@@ -968,7 +993,7 @@ async fn extract(run: &mut Run<'_>, selected: &[&Entry], status: i32, cautions: 
             } else {
                 Voice::Extracting
             };
-            host.warn(&damage(entry, &verdict, voice));
+            host.warn(&damage(&shown, entry.crc, &verdict, voice));
         }
     }
     if state.create_failed {

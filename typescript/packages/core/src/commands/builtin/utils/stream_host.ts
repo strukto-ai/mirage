@@ -390,7 +390,7 @@ export class StreamHost {
     return { reply: {} }
   }
 
-  /** Unlink, make (one level) or stat a path; a stat answers what stands there, `dir` or `file`, and nothing when it fails. */
+  /** Unlink, make (one level) or stat a path; a stat answers what stands there, `dir` or `file`, or why it found nothing. */
   private async pathOp(op: 'unlink' | 'mkdir' | 'stat', name: string): Promise<Served> {
     const dispatch = dispatchOf(this.ctx)
     if (dispatch === undefined) return { reply: { fatal: 'file output requires a workspace' } }
@@ -399,7 +399,7 @@ export class StreamHost {
       ;[found] = await dispatch(op, PathSpec.fromStrPath(textView(name), undefined, this.ctx.cwd))
     } catch (error) {
       if (!isWalkError(error)) throw error
-      return { reply: op === 'stat' ? {} : failure(error) }
+      return { reply: failure(error) }
     }
     if (op !== 'stat' || found === null || found === undefined) return { reply: {} }
     return { reply: { kind: (found as FileStat).type === FileType.DIRECTORY ? 'dir' : 'file' } }

@@ -224,11 +224,64 @@ fn a_zip64_end_record_is_read() {
     wide.extend(0x0605_4b50u32.to_le_bytes());
     wide.extend([0, 0, 0, 0, 0xFF, 0xFF, 0xFF, 0xFF]);
     wide.extend([0xFF; 8]);
-    wide.extend([0, 0]);
+    // The longest comment puts the locator before the tail searched.
+    wide.extend([0xFF, 0xFF]);
+    wide.extend([b'c'; 0xFFFF]);
     host.files.insert("z.zip".into(), wide);
     let (status, out, err) = unzip(&mut host, "z.zip", json!({"Z": true, "1": true}));
     assert_eq!(
         (status, out.as_str(), err.as_str()),
         (0, "a.txt\nd/\nd/b.txt\n", "")
     );
+}
+
+#[test]
+fn an_update_replaces_every_record_of_its_name() {
+    let mut host = Host::with(&[("a.txt", "one\n"), ("b.txt", "two\n")], "");
+    zip(
+        &mut host,
+        "z.zip",
+        json!([file("a.txt", 2), file("b.txt", 3)]),
+    );
+    let archive = host.files.get_mut("z.zip").expect("written");
+    for at in 0..archive.len() - 4 {
+        if &archive[at..at + 5] == b"b.txt" {
+            archive[at] = b'a';
+        }
+    }
+    host.files.insert("a.txt".into(), b"new\n".to_vec());
+    assert_eq!(
+        zip(&mut host, "z.zip", json!([file("a.txt", 2)])).1,
+        "updating: a.txt\n"
+    );
+    let (_, out, _) = unzip(&mut host, "z.zip", json!({"p": true}));
+    assert_eq!(out, "new\nnew\n");
+}
+
+#[test]
+fn an_unflagged_name_reads_as_code_page_437_unless_it_is_utf8() {
+    let mut host = Host::with(&[("x", "x")], "");
+    let read = |spelled| json!({"spelled": spelled, "kind": "file", "path": "x", "operand": 2});
+    zip(
+        &mut host,
+        "n.zip",
+        json!([read("caf\u{82}.txt"), read("\u{c3}\u{a9}.txt")]),
+    );
+    let archive = host.files.get_mut("n.zip").expect("written");
+    for at in 0..archive.len() - 4 {
+        let head = u32::from_le_bytes([
+            archive[at],
+            archive[at + 1],
+            archive[at + 2],
+            archive[at + 3],
+        ]);
+        let flags = match head {
+            0x0403_4b50 => at + 6,
+            0x0201_4b50 => at + 8,
+            _ => continue,
+        };
+        archive[flags + 1] &= !0x08;
+    }
+    let (_, names, _) = unzip(&mut host, "n.zip", json!({"Z": true, "1": true}));
+    assert_eq!(names, "café.txt\né.txt\n");
 }
