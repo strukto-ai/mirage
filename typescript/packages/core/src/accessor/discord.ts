@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { Accessor } from './base.ts'
+import { ResponseCache } from './responses.ts'
 import { TimeRange } from '../core/time_range.ts'
 import type { BaseVFS } from '../vfs/base.ts'
 import { NodeDiscordTransport, type DiscordTransport } from '../core/discord/client.ts'
@@ -20,12 +21,17 @@ import type { DiscordConfig } from '../core/discord/config.ts'
 
 export class DiscordAccessor extends Accessor {
   readonly timeRange: TimeRange
+  readonly listedDay = new ResponseCache<string, Record<string, unknown>[]>()
   constructor(
     public readonly transport: DiscordTransport,
     config: { startTime?: string | null; endTime?: string | null } = {},
   ) {
     super()
     this.timeRange = new TimeRange(config.startTime, config.endTime)
+  }
+
+  override caches(): readonly ResponseCache<unknown, unknown>[] {
+    return [this.listedDay]
   }
 }
 

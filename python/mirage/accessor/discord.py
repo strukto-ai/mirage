@@ -12,7 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import Iterable
+from typing import Any
+
 from mirage.accessor.base import SessionAccessor
+from mirage.accessor.responses import ResponseCache
 from mirage.core.discord.config import DiscordConfig
 from mirage.core.time_range import TimeRange
 
@@ -24,3 +28,9 @@ class DiscordAccessor(SessionAccessor):
         super().__init__()
         self.config = config
         self.time_range = time_range
+        self.listed_day = ResponseCache[
+            tuple[str, str], list[dict[str, Any]]
+        ]()
+
+    def caches(self) -> Iterable[ResponseCache[Any, Any]]:
+        return (self.listed_day,)

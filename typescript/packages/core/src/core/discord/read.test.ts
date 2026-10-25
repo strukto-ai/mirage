@@ -15,10 +15,11 @@
 import { mountKey } from '../../utils/key_prefix.ts'
 import { describe, expect, it, vi } from 'vitest'
 import { DiscordAccessor } from '../../accessor/discord.ts'
-import { FileStat, FileType, PathSpec } from '../../types.ts'
+import { FileStat, FileType, PathSpec, ReadPolicy } from '../../types.ts'
 import type { DiscordMethod, DiscordResponse, DiscordTransport } from './client.ts'
 import { snowflakeAt } from './history.ts'
 import { follow, read, readMany, readStream } from './read.ts'
+import { readdir } from './readdir.ts'
 
 interface RecordedCall {
   method: DiscordMethod
@@ -101,6 +102,62 @@ describe('read history jsonl branch', () => {
     await expect(read(new DiscordAccessor(t), spec(CHAT, '/mnt/discord'))).rejects.toMatchObject({
       code: 'ENOENT',
     })
+  })
+})
+
+describe('a read after its day listing', () => {
+  const DAY = '/mnt/discord/My Server__G1/channels/general__C1/2024-01-15'
+  const OTHER = '/mnt/discord/My Server__G1/channels/general__C1/2024-01-14'
+  const otherRow = new FileStat({
+    name: '2024-01-14',
+    type: FileType.DIRECTORY,
+    extra: { channel_id: 'C1' },
+  })
+  const history = () =>
+    new FakeDiscordTransport((_m, endpoint) =>
+      endpoint === '/channels/C1/messages'
+        ? [{ id: '1196300000000000000', content: 'hello' }]
+        : null,
+    )
+  const fetched = (t: FakeDiscordTransport) =>
+    t.calls.filter((c) => c.endpoint === '/channels/C1/messages').map((c) => c.params?.after)
+  const listDay = (accessor: DiscordAccessor, day = DAY, row = dayRow) =>
+    readdir(accessor, spec(day, '/mnt/discord'), row)
+  const readChat = (accessor: DiscordAccessor) =>
+    read(accessor, spec(CHAT, '/mnt/discord'), chatRow, dayRow)
+
+  // Twin of test_a_read_takes_the_day_its_listing_fetched.
+  it('takes the messages the listing fetched', async () => {
+    const t = history()
+    const accessor = new DiscordAccessor(t)
+    await listDay(accessor)
+    expect(decoder.decode(await readChat(accessor))).toContain('hello')
+    expect(fetched(t)).toHaveLength(1)
+  })
+
+  // Twin of test_only_the_last_listed_day_is_kept_for_one_read.
+  it('keeps only the last listed day, for one read', async () => {
+    const t = history()
+    const accessor = new DiscordAccessor(t)
+    await listDay(accessor)
+    await readChat(accessor)
+    await readChat(accessor)
+    await listDay(accessor, OTHER, otherRow)
+    await readChat(accessor)
+    const [day, , other] = fetched(t)
+    expect(fetched(t)).toEqual([day, day, other, day])
+    expect(other).not.toBe(day)
+  })
+
+  // Twin of test_a_dropped_or_fresh_day_is_fetched_again.
+  it.each(['forget', 'fresh'])('fetches the day again after %s', async (drop) => {
+    const t = history()
+    const accessor = new DiscordAccessor(t)
+    if (drop === 'fresh') accessor.govern({ policy: ReadPolicy.FRESH, ttl: 600 })
+    await listDay(accessor)
+    if (drop === 'forget') accessor.forget()
+    await readChat(accessor)
+    expect(fetched(t)).toHaveLength(2)
   })
 })
 

@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import AsyncGenerator
+from functools import partial
 from typing import Any
 
 from mirage.accessor.discord import DiscordAccessor
@@ -114,23 +115,62 @@ async def list_messages_for_day(
     return out
 
 
+async def listed_messages_for_day(
+    accessor: DiscordAccessor, channel_id: str, date_str: str
+) -> list[dict[str, Any]]:
+    """A channel-day's messages for its listing, kept for the read of its
+    chat.jsonl that follows.
+
+    A walk reads a day's chat.jsonl right after it lists the day, so only
+    the last listed day is kept: the read takes it instead of fetching
+    the day again, and a listing nothing reads holds no more than one
+    day. The mount's read policy bounds how long it is kept, which under
+    ``fresh`` is not at all.
+
+    Args:
+        accessor (DiscordAccessor): Discord accessor.
+        channel_id (str): channel ID.
+        date_str (str): YYYY-MM-DD.
+    """
+    accessor.listed_day.clear()
+    return await accessor.listed_day.get(
+        (channel_id, date_str),
+        partial(
+            list_messages_for_day,
+            accessor,
+            channel_id,
+            date_str,
+            accessor.time_range,
+        ),
+    )
+
+
 async def get_history_jsonl(
-    accessor: DiscordAccessor, channel_id: str, date_str: str, scope: TimeRange
+    accessor: DiscordAccessor, channel_id: str, date_str: str
 ) -> bytes:
-    """Fetch channel messages for a date as JSONL.
+    """A channel-day's messages as JSONL: the ones its listing just
+    fetched (``listed_messages_for_day``), else fetched now. Either way
+    the day is no longer kept.
 
     Args:
         accessor (DiscordAccessor): Discord accessor.
         channel_id (str): channel ID.
         date_str (str): date in YYYY-MM-DD format.
-        scope (TimeRange): the mount's time scope, clipping the day.
 
     Returns:
         bytes: JSONL-encoded messages.
     """
-    messages = await list_messages_for_day(
-        accessor, channel_id, date_str, scope
+    messages = await accessor.listed_day.get(
+        (channel_id, date_str),
+        partial(
+            list_messages_for_day,
+            accessor,
+            channel_id,
+            date_str,
+            accessor.time_range,
+        ),
     )
+    accessor.listed_day.clear()
     return jsonl_bytes(messages)
 
 

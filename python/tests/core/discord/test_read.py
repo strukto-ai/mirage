@@ -28,7 +28,13 @@ from mirage.core.discord.read import (
 )
 from mirage.core.discord.readdir import readdir
 from mirage.core.render.json import jsonl_bytes
-from mirage.types import FileStat, FileType, PathSpec
+from mirage.types import (
+    FileStat,
+    FileType,
+    PathSpec,
+    ReadPolicy,
+    ReadSpec,
+)
 from mirage.vfs.discord import DiscordVFS
 from tests.core.discord.conftest import DAY, MESSAGES, SEALED_DAY
 from tests.fixtures.handed import call, entry_at, parent_of
@@ -57,6 +63,50 @@ async def test_read_jsonl(api, accessor):
     # to the day itself.
     result = await read(accessor, spec(CHAT))
     assert result == jsonl_bytes(MESSAGES)
+
+
+# The mount lists the day before it reads chat.jsonl, and the read takes
+# the messages that listing fetched instead of fetching the day again.
+async def test_a_read_takes_the_day_its_listing_fetched(api, accessor):
+    assert await read(accessor, spec(CHAT)) == jsonl_bytes(MESSAGES)
+    assert api.day_fetches == [("C001", DAY)]
+
+
+async def _read_chat(accessor: DiscordAccessor) -> bytes:
+    chat = FileStat(
+        name="chat.jsonl", type=FileType.FILE, extra={"channel_id": "C001"}
+    )
+    return b"".join([c async for c in read_stream(accessor, spec(CHAT), chat)])
+
+
+# Only the last listed day is kept, and one read takes it: reading the
+# day again, or after another day was listed, fetches it.
+async def test_only_the_last_listed_day_is_kept_for_one_read(api, accessor):
+    m = mounted(DiscordVFS, accessor)
+    await m.readdir(f"/{CHANNEL}/{DAY}")
+    assert await _read_chat(accessor) == jsonl_bytes(MESSAGES)
+    assert await _read_chat(accessor) == jsonl_bytes(MESSAGES)
+    await m.readdir(f"/{CHANNEL}/2024-01-14")
+    assert await m.read(CHAT) == jsonl_bytes(MESSAGES)
+    assert api.day_fetches == [
+        ("C001", DAY),
+        ("C001", DAY),
+        ("C001", "2024-01-14"),
+        ("C001", DAY),
+    ]
+
+
+# A write past the dispatcher drops the kept day with the mount's caches,
+# and a fresh mount keeps none, so either read fetches the day.
+@pytest.mark.parametrize("drop", ["forget", "fresh"])
+async def test_a_dropped_or_fresh_day_is_fetched_again(api, accessor, drop):
+    if drop == "fresh":
+        accessor.govern(ReadSpec(policy=ReadPolicy.FRESH))
+    await mounted(DiscordVFS, accessor).readdir(f"/{CHANNEL}/{DAY}")
+    if drop == "forget":
+        accessor.forget()
+    assert await _read_chat(accessor) == jsonl_bytes(MESSAGES)
+    assert api.day_fetches == [("C001", DAY), ("C001", DAY)]
 
 
 async def test_read_jsonl_bogus_channel_is_enoent(api, accessor):

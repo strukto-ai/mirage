@@ -80,12 +80,40 @@ export async function listMessagesForDay(
   return out
 }
 
+/**
+ * A channel-day's messages for its listing, kept for the read of its
+ * chat.jsonl that follows. A walk reads a day's chat.jsonl right after it
+ * lists the day, so only the last listed day is kept: the read takes it
+ * instead of fetching the day again, and a listing nothing reads holds no
+ * more than one day. The mount's read policy bounds how long it is kept,
+ * which under `fresh` is not at all. Mirrors Python's
+ * `listed_messages_for_day`.
+ */
+export async function listedMessagesForDay(
+  accessor: DiscordAccessor,
+  channelId: string,
+  dateStr: string,
+): Promise<DiscordMessage[]> {
+  accessor.listedDay.clear()
+  return (await accessor.listedDay.get(`${channelId}/${dateStr}`, () =>
+    listMessagesForDay(accessor, channelId, dateStr),
+  )) as DiscordMessage[]
+}
+
+/**
+ * A channel-day's messages as JSONL: the ones its listing just fetched
+ * (`listedMessagesForDay`), else fetched now. Either way the day is no
+ * longer kept. Mirrors Python's `get_history_jsonl`.
+ */
 export async function getHistoryJsonl(
   accessor: DiscordAccessor,
   channelId: string,
   dateStr: string,
 ): Promise<Uint8Array> {
-  const messages = await listMessagesForDay(accessor, channelId, dateStr)
+  const messages = await accessor.listedDay.get(`${channelId}/${dateStr}`, () =>
+    listMessagesForDay(accessor, channelId, dateStr),
+  )
+  accessor.listedDay.clear()
   return jsonlBytes(messages)
 }
 
