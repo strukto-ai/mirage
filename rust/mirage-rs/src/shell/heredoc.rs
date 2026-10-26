@@ -14,9 +14,12 @@ pub(super) struct Pending {
     pub word_start: usize,
     pub word_end: usize,
     pub delimiter: Vec<u8>,
-    /// How many substitutions enclose its operator: bash reads the bodies
-    /// of the innermost first.
+    /// How many substitutions enclose it: those of its operator, less one
+    /// for each that closed with it unread.
     pub depth: usize,
+    /// A substitution closed with it unread and handed it out: a newline
+    /// reads such bodies before those opened where it stands.
+    pub carried: bool,
     /// A quoted delimiter: the body is not expanded, and a backslash
     /// ending one of its lines continues nothing.
     pub raw: bool,
@@ -69,6 +72,7 @@ impl Parser<'_> {
             word_end: end,
             delimiter,
             depth: self.comsub,
+            carried: false,
             raw,
             dash,
         });
@@ -144,8 +148,8 @@ impl Parser<'_> {
         }
     }
 
-    /// Take the pending heredocs a newline here reads, the deepest first:
-    /// inside a substitution, only those opened in it.
+    /// Take the pending heredocs a newline here reads, those substitutions
+    /// handed out first: inside a substitution, only those opened in it.
     fn take_readable(&mut self) -> Vec<Pending> {
         let comsub = self.comsub;
         if !self.pending.iter().any(|heredoc| heredoc.depth >= comsub) {
@@ -163,7 +167,7 @@ impl Parser<'_> {
         self.pending = kept;
         let mut readable: Vec<Pending> = taken.iter().map(|(_, heredoc)| heredoc.clone()).collect();
         self.taken.push(taken);
-        readable.sort_by_key(|heredoc| std::cmp::Reverse(heredoc.depth));
+        readable.sort_by_key(|heredoc| !heredoc.carried);
         readable
     }
 
@@ -268,10 +272,10 @@ impl Parser<'_> {
     }
 }
 
-/// Past the bodies a newline ending at `start` reads for `heredocs`, the
-/// deepest first, as the parser reads them.
+/// Past the bodies a newline ending at `start` reads for `heredocs`, those
+/// substitutions handed out first, as the parser reads them.
 pub(super) fn bodies_end(s: &[u8], start: usize, heredocs: &mut [Pending]) -> usize {
-    heredocs.sort_by_key(|heredoc| std::cmp::Reverse(heredoc.depth));
+    heredocs.sort_by_key(|heredoc| !heredoc.carried);
     heredocs
         .iter()
         .fold(start, |at, heredoc| read_lines(s, at, heredoc, false).end)

@@ -443,7 +443,8 @@ impl Parser<'_> {
 
     /// `read` inside a `$(...)` or `<(...)`, where a backtick is text and
     /// a newline reads only the heredocs opened inside. Those still to read
-    /// at its close are noted with it: their bodies follow the line.
+    /// at its close are noted with it and handed out, those its own
+    /// substitutions handed it first: their bodies follow the line.
     fn substituted<T>(&mut self, read: impl FnOnce(&mut Self) -> T) -> T {
         let saved = self.in_backtick;
         self.in_backtick = false;
@@ -453,16 +454,21 @@ impl Parser<'_> {
         let body = read(self);
         self.frames.pop();
         self.nesting -= 1;
-        let opened: Vec<usize> = self
-            .pending
-            .iter()
-            .filter(|heredoc| heredoc.depth >= self.comsub)
-            .map(|heredoc| heredoc.operator)
-            .collect();
-        if !opened.is_empty() {
+        let (mut unread, kept): (Vec<_>, Vec<_>) = std::mem::take(&mut self.pending)
+            .into_iter()
+            .partition(|heredoc| heredoc.depth >= self.comsub);
+        self.pending = kept;
+        unread.sort_by_key(|heredoc| !heredoc.carried);
+        if !unread.is_empty() {
+            let opened = unread.iter().map(|heredoc| heredoc.operator).collect();
             self.closes.push((self.i, opened));
         }
         self.comsub -= 1;
+        for mut heredoc in unread {
+            heredoc.depth = self.comsub;
+            heredoc.carried = true;
+            self.pending.push(heredoc);
+        }
         self.in_backtick = saved;
         body
     }

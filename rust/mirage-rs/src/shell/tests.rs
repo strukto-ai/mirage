@@ -641,3 +641,42 @@ fn only_a_substitution_carries_its_heredoc_bodies_inlined() {
         .collect();
     assert_eq!(carriers, ["command_substitution"]);
 }
+
+#[test]
+fn heredocs_read_as_bash_orders_and_keeps_them() {
+    let bodies = |source: &[u8]| {
+        parse(source)
+            .heredocs
+            .iter()
+            .map(|heredoc| String::from_utf8_lossy(&heredoc.body).into_owned())
+            .collect::<Vec<_>>()
+    };
+    // A quoted body the joined line brings to light keeps its continuation.
+    assert_eq!(
+        bodies(b"i\\\nf true; then cat <<'E'\na\\\nb\nE\nfi"),
+        ["a\\\nb\n"]
+    );
+    // Siblings hand their heredocs out in the order they close, however
+    // deep each sits; a substitution's come before the line's own.
+    assert_eq!(
+        bodies(b"echo \"$(cat <<A)\" \"$(echo $(cat <<B))\"\na\nA\nb\nB"),
+        ["a\n", "b\n"]
+    );
+    assert_eq!(
+        bodies(b"cat <<OUT; echo \"$(cat <<IN)\"\nin\nIN\nout\nOUT"),
+        ["out\n", "in\n"]
+    );
+}
+
+#[test]
+fn a_case_pattern_takes_an_extglob_group_only_with_extglob_on() {
+    let line = b"case a in @(a)) echo yes;; esac";
+    let off = Options {
+        extglob: false,
+        ..Options::default()
+    };
+    let refusal = parse_with(line, &off).error.expect("a refusal");
+    assert_eq!(refusal.message, b"mirage: syntax error near '('\n");
+    assert_eq!(parse(line).error, None);
+    assert_eq!(parse_with(b"[[ a == @(a) ]]", &off).error, None);
+}

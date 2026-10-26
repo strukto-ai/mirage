@@ -274,6 +274,14 @@ impl Parser<'_> {
     /// group or the grammar's scanner stops short of it, as the scanner
     /// reads it otherwise.
     fn case_pattern(&mut self) -> R<Vec<Syn>> {
+        // With extglob off a `(` ends the pattern's word, and bash refuses
+        // it there.
+        if !self.options.extglob {
+            let end = self.scan_word(self.i)?;
+            if self.s.get(end) == Some(&b'(') {
+                return self.fail(end);
+            }
+        }
         let mark = self.mark();
         if let Some((word, group)) = self.pattern_word()? {
             if group || !word.is("extglob_pattern") {

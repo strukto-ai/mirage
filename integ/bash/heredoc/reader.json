@@ -2751,6 +2751,70 @@
         "gdrive",
         "gdrive-folder"
       ]
+    },
+    {
+      "id": "heredoc_reader_quoted_body_found_after_a_join_keeps_its_continuation",
+      "command": "i\\\nf true; then cat <<'E'\na\\\nb\nE\nfi",
+      "expect": {
+        "exit": 0,
+        "stdout": "a\\\nb\n",
+        "stderr": ""
+      },
+      "seq": 509986,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder"
+      ]
+    },
+    {
+      "id": "heredoc_reader_sibling_substitutions_read_in_closing_order",
+      "command": "echo \"$(cat <<A)\" \"$(echo $(cat <<B))\"\na\nA\nb\nB",
+      "expect": {
+        "exit": 0,
+        "stdout": "a b\n",
+        "stderr": "mirage: line 1: warning: command substitution: 1 unterminated here-document\nmirage: line 3: warning: command substitution: 1 unterminated here-document\n"
+      },
+      "seq": 509987,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder"
+      ]
     }
   ]
 }

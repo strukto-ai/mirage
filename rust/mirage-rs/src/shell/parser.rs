@@ -231,27 +231,33 @@ fn joined(
     mut closes: Vec<(usize, Vec<usize>)>,
     source: &[u8],
 ) -> Tree {
-    let dropped = continuations(&text, &pass);
+    let mut dropped = continuations(&text, &pass);
     let text = if dropped.is_empty() {
         text
     } else {
-        let mut logical = Vec::with_capacity(text.len());
-        let mut kept = Vec::with_capacity(text.len() + 1);
-        let mut next = dropped.iter().peekable();
-        for (at, byte) in text.iter().enumerate() {
-            if next.peek() == Some(&&at) {
-                next.next();
-                continue;
+        let (mut logical, mut places) = without(&text, &dropped);
+        pass = parse_pass(&logical, options, ended);
+        // A quoted heredoc the joined line brings to light reads its body
+        // as typed: the continuations in it stay.
+        loop {
+            let quoted: Vec<(usize, usize)> = pass
+                .bodies
+                .iter()
+                .filter(|body| body.heredoc.raw)
+                .map(|body| (places[body.start], places[body.end.min(logical.len())]))
+                .collect();
+            let before = dropped.len();
+            dropped.retain(|at| !quoted.iter().any(|(from, to)| from <= at && at < to));
+            if dropped.len() == before {
+                break;
             }
-            logical.push(*byte);
-            kept.push(offsets[at]);
+            (logical, places) = without(&text, &dropped);
+            pass = parse_pass(&logical, options, ended);
         }
-        kept.push(offsets[text.len()]);
-        offsets = kept;
+        offsets = places.iter().map(|at| offsets[*at]).collect();
         for heredoc in &mut heredocs {
             heredoc.at -= dropped.partition_point(|&at| at < heredoc.at);
         }
-        pass = parse_pass(&logical, options, ended);
         let mut text = logical;
         // A heredoc a continuation split (`$\⏎(cat <<E)`, `<\⏎<E`) comes to
         // light only now: fold its body in as the first pass folds the
@@ -313,6 +319,23 @@ fn joined(
     tree.heredocs = heredocs;
     tree.closes = closes;
     tree
+}
+
+/// `text` less the bytes at `dropped` (sorted), and where each byte left
+/// stood in it, then its end.
+fn without(text: &[u8], dropped: &[usize]) -> (Vec<u8>, Vec<usize>) {
+    let mut kept = Vec::with_capacity(text.len());
+    let mut places = Vec::with_capacity(text.len() + 1);
+    let mut next = dropped.iter().peekable();
+    for (at, byte) in text.iter().enumerate() {
+        if next.next_if(|drop| **drop == at).is_some() {
+            continue;
+        }
+        kept.push(*byte);
+        places.push(at);
+    }
+    places.push(text.len());
+    (kept, places)
 }
 
 struct Pass {
