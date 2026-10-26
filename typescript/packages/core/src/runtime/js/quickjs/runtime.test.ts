@@ -106,7 +106,8 @@ it('a deadline joins the landing of what a stopped guest wrote', async () => {
   // plain abort's grace: the stop names a signal, so the line waits for it,
   // as a kill's does. What qjs's own stdio still held is lost with the
   // guest, as a killed process's is, so the file is there and empty; the
-  // stderr the guest wrote before the stop is kept.
+  // stderr the guest wrote before the stop is kept. A first run has the
+  // engine up, so the deadline lands in the loop, not in a cold start.
   const ws = new Workspace(
     { '/data': new SlowRAMVFS() },
     {
@@ -115,6 +116,7 @@ it('a deadline joins the landing of what a stopped guest wrote', async () => {
     },
   )
   try {
+    await ws.shell('node -e 0')
     const io = await ws.shell(
       `timeout 1 node -e "std.err.puts('warn\\n'); const f = std.open('/data/o', 'w'); f.puts('kept'); for (;;) {}"; cat /data/o`,
     )
