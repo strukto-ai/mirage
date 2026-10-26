@@ -242,14 +242,14 @@ async def test_primitive_write_failure_reports_cannot_create():
     assert files["/src/a.txt"] == b"AAA"
 
 
+async def _no_copy(src: PathSpec, dst: PathSpec) -> None:
+    raise enotsup("tidb_filesystem", "copy", dst)
+
+
 @pytest.mark.asyncio
 async def test_a_store_with_no_copy_moves_the_bytes():
     files = {"/src/a.txt": b"AAA"}
     _, strategy = _make_primitive(files, {"/src", "/d"})
-
-    async def no_copy(src, dst) -> None:
-        raise enotsup("tidb_filesystem", "copy", dst)
-
     errors: list[str] = []
     copied = await transfer_file(
         PrimitiveCopy(
@@ -257,7 +257,7 @@ async def test_a_store_with_no_copy_moves_the_bytes():
             write=strategy.write,
             mkdir=strategy.mkdir,
             readdir=strategy.readdir,
-            copy=no_copy,
+            copy=_no_copy,
         ),
         _spec("/src/a.txt"),
         _spec("/d/a.txt"),

@@ -43,9 +43,12 @@ it.each([0, 13, 2000000])('spills, replays and reads windows with budget %s', as
   expect(closed).toBe(limit < expected.length ? 1 : 0)
 })
 
+function later(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 1))
+}
+
 it('answers concurrent reads of a spilled spool each from its own window', async () => {
   let stored: Uint8Array = new Uint8Array()
-  const later = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 1))
   setSpoolFactory(() =>
     Promise.resolve({
       append: async (part) => {
