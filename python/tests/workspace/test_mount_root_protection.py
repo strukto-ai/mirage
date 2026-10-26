@@ -32,6 +32,8 @@ that the user can navigate but not accidentally destroy.
 
 import asyncio
 
+import pytest
+
 from mirage.types import MountMode
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
@@ -172,6 +174,107 @@ def test_mv_into_mount_root_is_allowed():
         assert r.exit_code == 0
 
     _run(go())
+
+
+@pytest.mark.parametrize(
+    "line,named",
+    [
+        ("mv /ram/payload /r2 /ram/dst", "'/r2' to '/ram/dst/r2'"),
+        ("mv -t /ram/dst /ram/payload /r2", "'/r2' to '/ram/dst/r2'"),
+        ("mv --target-directory=/ram/dst /r2", "'/r2' to '/ram/dst/r2'"),
+        ("mv /ram/payload /r2 /ram/dst/", "'/r2' to '/ram/dst/r2'"),
+        ("mv /r2 /ram/x > /ram/log", "'/r2' to '/ram/x'"),
+        ("cd /ram && mv payload ../r2 dst", "'../r2' to 'dst/r2'"),
+        ("cd /ram && mv ../r2 x", "'../r2' to 'x'"),
+        ("mv /ram/payload /r2/ /ram/dst", "'/r2/' to '/ram/dst/r2'"),
+        ("mv /r2", "'/r2' to '?'"),
+        ("mv /r2 /ram/dst", "'/r2' to '/ram/dst'"),
+        ("cd /ram && mv -t dst ../r2", "'../r2' to '/ram/dst/r2'"),
+    ],
+)
+def test_mv_refuses_a_mount_root_as_any_source(line, named):
+    # A mount root after the first source would be copied out and its
+    # mount emptied; -t makes the last operand a source too. The rows
+    # also pin how the refusal names operands: as typed, except the
+    # documented divergences (two operands name DST, -t is resolved) and
+    # a lone operand, which has no destination to name ('?').
+    async def go():
+        ws = _ws_two_mounts()
+        await _exec(ws, "touch /ram/payload /r2/keep && mkdir /ram/dst")
+        r = await _exec(ws, line)
+        assert r.exit_code == 1
+        assert r.stderr == (
+            f"mv: cannot move {named}: Device or resource busy\n".encode()
+        )
+        assert (await _exec(ws, "ls /r2")).stdout == b"keep\n"
+
+    _run(go())
+
+
+@pytest.mark.asyncio
+async def test_mv_of_several_sources_into_a_mount_root_is_allowed():
+    ws = _ws_two_mounts()
+    await _exec(ws, "touch /ram/a /ram/b")
+    assert (await _exec(ws, "mv /ram/a /ram/b /r2")).exit_code == 0
+    assert (await _exec(ws, "ls /r2")).stdout == b"a\nb\n"
+
+
+@pytest.mark.asyncio
+async def test_mv_refuses_a_mount_root_reached_through_a_link():
+    # The policy sees a source as typed; a parent link resolves it to a
+    # mount root only for the handler, which refuses it before copying.
+    ws = Workspace(
+        {
+            "/ram": (RAMVFS(), MountMode.WRITE),
+            "/data": (RAMVFS(), MountMode.WRITE),
+            "/data/inner": (RAMVFS(), MountMode.WRITE),
+        }
+    )
+    await _exec(ws, "touch /ram/payload /data/inner/keep && mkdir /ram/dst")
+    await _exec(ws, "ln -s /data /ram/alias")
+    r = await _exec(ws, "mv /ram/payload /ram/alias/inner /ram/dst")
+    assert r.exit_code == 1
+    assert r.stderr == (
+        b"mv: cannot move '/ram/alias/inner' to '/ram/dst/inner': "
+        b"Device or resource busy\n"
+    )
+    assert (await _exec(ws, "ls /data/inner")).stdout == b"keep\n"
+    assert (await _exec(ws, "ls /ram/dst")).stdout == b"payload\n"
+
+
+@pytest.mark.asyncio
+async def test_mv_across_mounts_leaves_a_nested_mount_root():
+    # GNU 9.7: the copy takes the nested mount's files and removes them,
+    # but its mountpoint is busy, so it stays and mv exits 1.
+    ws = Workspace(
+        {
+            "/data": (RAMVFS(), MountMode.WRITE),
+            "/data/dir/inner": (RAMVFS(), MountMode.WRITE),
+            "/ram": (RAMVFS(), MountMode.WRITE),
+        }
+    )
+    await _exec(ws, "mkdir -p /data/dir && echo f > /data/dir/f")
+    await _exec(ws, "echo i > /data/dir/inner/i")
+    r = await _exec(ws, "mv -v /data/dir /ram/")
+    assert r.exit_code == 1
+    # No `removed directory` line: the folders holding the root stay.
+    assert r.stdout == (
+        b"created directory '/ram/dir'\n"
+        b"copied '/data/dir/f' -> '/ram/dir/f'\n"
+        b"created directory '/ram/dir/inner'\n"
+        b"copied '/data/dir/inner/i' -> '/ram/dir/inner/i'\n"
+        b"removed '/data/dir/inner/i'\n"
+        b"removed '/data/dir/f'\n"
+    )
+    assert r.stderr == (
+        b"mv: cannot remove '/data/dir/inner': Device or resource busy\n"
+    )
+    assert (await _exec(ws, "cat /ram/dir/f /ram/dir/inner/i")).stdout == (
+        b"f\ni\n"
+    )
+    assert (await _exec(ws, "ls /data/dir")).stdout == b"inner\n"
+    await _exec(ws, "echo later > /data/dir/inner/later")
+    assert (await _exec(ws, "ls /data/dir/inner")).stdout == b"later\n"
 
 
 # ── mkdir ──────────────────────────────────────────

@@ -50,7 +50,7 @@ def operand_paths(ctx: CommandContext) -> list[PathSpec]:
     ]
 
 
-def _target_directory(ctx: CommandContext) -> str | None:
+def target_directory(ctx: CommandContext) -> str | None:
     """The target directory an ``mv`` line names by option (``-t``,
     ``--target-directory``), as its grammar reads the line, so a
     ``-S.txt`` suffix is no target; None when it names none.
@@ -81,7 +81,7 @@ def command_facts(ctx: CommandContext) -> dict[str, Any]:
         ctx (CommandContext): the classified command.
     """
     moves = ctx.command == "mv"
-    target = _target_directory(ctx) if moves and ctx.paths else None
+    target = target_directory(ctx) if moves and ctx.paths else None
     return {
         "tokens": [units(v) for v in line_tokens(ctx)],
         "tool": ctx.tool,

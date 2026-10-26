@@ -107,6 +107,98 @@ describe('mount-root protection — mv', () => {
     expect(r.stderrText).toMatch(/Device or resource busy/)
     await ws.close()
   })
+
+  // A mount root after the first source would be copied out and its mount
+  // emptied; -t makes the last operand a source too. The rows also pin how
+  // the refusal names operands: as typed, except the documented divergences
+  // (two operands name DST, -t is resolved) and a lone operand, which has no
+  // destination to name ('?').
+  it.each([
+    ['mv /ram/payload /r2 /ram/dst', "'/r2' to '/ram/dst/r2'"],
+    ['mv -t /ram/dst /ram/payload /r2', "'/r2' to '/ram/dst/r2'"],
+    ['mv --target-directory=/ram/dst /r2', "'/r2' to '/ram/dst/r2'"],
+    ['mv /ram/payload /r2 /ram/dst/', "'/r2' to '/ram/dst/r2'"],
+    ['mv /r2 /ram/x > /ram/log', "'/r2' to '/ram/x'"],
+    ['cd /ram && mv payload ../r2 dst', "'../r2' to 'dst/r2'"],
+    ['cd /ram && mv ../r2 x', "'../r2' to 'x'"],
+    ['mv /ram/payload /r2/ /ram/dst', "'/r2/' to '/ram/dst/r2'"],
+    ['mv /r2', "'/r2' to '?'"],
+    ['mv /r2 /ram/dst', "'/r2' to '/ram/dst'"],
+    ['cd /ram && mv -t dst ../r2', "'../r2' to '/ram/dst/r2'"],
+  ])('mv refuses a mount root as any source: %s', async (line, named) => {
+    const ws = twoMountWs()
+    await ws.shell('touch /ram/payload /r2/keep && mkdir /ram/dst')
+    const r = await ws.shell(line)
+    expect(r.exitCode).toBe(1)
+    expect(r.stderrText).toBe(`mv: cannot move ${named}: Device or resource busy\n`)
+    expect((await ws.shell('ls /r2')).stdoutText).toBe('keep\n')
+    await ws.close()
+  })
+
+  it('mv of several sources into a mount root is allowed', async () => {
+    const ws = twoMountWs()
+    await ws.shell('touch /ram/a /ram/b')
+    expect((await ws.shell('mv /ram/a /ram/b /r2')).exitCode).toBe(0)
+    expect((await ws.shell('ls /r2')).stdoutText).toBe('a\nb\n')
+    await ws.close()
+  })
+
+  it('mv refuses a mount root reached through a link', async () => {
+    // The policy sees a source as typed; a parent link resolves it to a mount
+    // root only for the handler, which refuses it before copying.
+    const ws = new Workspace(
+      {
+        '/': new RAMVFS(),
+        '/ram': new RAMVFS(),
+        '/data': new RAMVFS(),
+        '/data/inner': new RAMVFS(),
+      },
+      { mode: MountMode.WRITE },
+    )
+    await ws.shell('touch /ram/payload /data/inner/keep && mkdir /ram/dst')
+    await ws.shell('ln -s /data /ram/alias')
+    const r = await ws.shell('mv /ram/payload /ram/alias/inner /ram/dst')
+    expect(r.exitCode).toBe(1)
+    expect(r.stderrText).toBe(
+      "mv: cannot move '/ram/alias/inner' to '/ram/dst/inner': Device or resource busy\n",
+    )
+    expect((await ws.shell('ls /data/inner')).stdoutText).toBe('keep\n')
+    expect((await ws.shell('ls /ram/dst')).stdoutText).toBe('payload\n')
+    await ws.close()
+  })
+
+  it('mv across mounts leaves a nested mount root', async () => {
+    // GNU 9.7: the copy takes the nested mount's files and removes them,
+    // but its mountpoint is busy, so it stays and mv exits 1.
+    const ws = new Workspace(
+      {
+        '/': new RAMVFS(),
+        '/data': new RAMVFS(),
+        '/data/dir/inner': new RAMVFS(),
+        '/ram': new RAMVFS(),
+      },
+      { mode: MountMode.WRITE },
+    )
+    await ws.shell('mkdir -p /data/dir && echo f > /data/dir/f')
+    await ws.shell('echo i > /data/dir/inner/i')
+    const r = await ws.shell('mv -v /data/dir /ram/')
+    expect(r.exitCode).toBe(1)
+    // No `removed directory` line: the folders holding the root stay.
+    expect(r.stdoutText).toBe(
+      "created directory '/ram/dir'\n" +
+        "copied '/data/dir/f' -> '/ram/dir/f'\n" +
+        "created directory '/ram/dir/inner'\n" +
+        "copied '/data/dir/inner/i' -> '/ram/dir/inner/i'\n" +
+        "removed '/data/dir/inner/i'\n" +
+        "removed '/data/dir/f'\n",
+    )
+    expect(r.stderrText).toBe("mv: cannot remove '/data/dir/inner': Device or resource busy\n")
+    expect((await ws.shell('cat /ram/dir/f /ram/dir/inner/i')).stdoutText).toBe('f\ni\n')
+    expect((await ws.shell('ls /data/dir')).stdoutText).toBe('inner\n')
+    await ws.shell('echo later > /data/dir/inner/later')
+    expect((await ws.shell('ls /data/dir/inner')).stdoutText).toBe('later\n')
+    await ws.close()
+  })
 })
 
 describe('mount-root protection — mkdir', () => {

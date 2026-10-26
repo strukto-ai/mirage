@@ -19,7 +19,7 @@ from mirage.commands.spec.compile import expand_table_long
 from mirage.commands.spec.long_options import GNU_LONG_OPTIONS
 from mirage.errors.fs import ebusy, eexist, einval, eisdir
 from mirage.policy.base import Policy
-from mirage.policy.match import operand_paths
+from mirage.policy.match import operand_paths, target_directory
 from mirage.policy.types import (
     Action,
     CommandContext,
@@ -236,6 +236,30 @@ def first_root(
     return None
 
 
+def mv_destination(
+    operands: Sequence[PathSpec], source: PathSpec, target: str | None
+) -> str:
+    """Where mv's refusal says a source was going, as typed.
+
+    Several sources, or ``-t``, land inside the destination under their
+    own names, as GNU names them. Two operands name the destination
+    itself: GNU names DST/NAME when DST is a directory, which the policy
+    cannot tell before anything is stat'd. A ``-t`` value is read back
+    from argv already resolved, so it is named absolute. A lone operand
+    has no destination and names ``?``.
+
+    Args:
+        operands (Sequence[PathSpec]): the line's positional operands.
+        source (PathSpec): the refused source.
+        target (str | None): the ``-t`` directory, None without one.
+    """
+    if target is None and len(operands) < 3:
+        return operands[1].raw_path if len(operands) == 2 else "?"
+    parent = target if target is not None else operands[-1].raw_path
+    name = source.raw_path.rstrip("/").rsplit("/", 1)[-1]
+    return f"{parent.rstrip('/')}/{name}"
+
+
 class MountRootPolicy(Policy):
     """The built-in rule: a mount root is not an ordinary directory.
 
@@ -289,14 +313,23 @@ class MountRootPolicy(Policy):
                         error=ebusy(p),
                     )
         elif cmd == "mv":
-            # The source is a slot, so it is read off the positionals:
-            # `mv -t /mnt f` moves INTO a mount root, which is ordinary.
-            if operands and names_root(self._registry, operands[0]):
-                dst = ctx.paths[1].virtual if len(ctx.paths) > 1 else "?"
+            # Sources are read off the positionals: `mv f /mnt` and
+            # `mv -t /mnt f` move INTO a mount root, which is ordinary.
+            # The refusal stops the whole line, as rm's does; GNU would
+            # move the other sources.
+            target = target_directory(ctx)
+            sources = (
+                operands
+                if target is not None or len(operands) < 2
+                else operands[:-1]
+            )
+            root = first_root(self._registry, sources)
+            if root is not None:
                 return Deny(
-                    f"cannot move '{operands[0].virtual}' to '{dst}': "
+                    f"cannot move '{root.raw_path}' to "
+                    f"'{mv_destination(operands, root, target)}': "
                     f"Device or resource busy",
-                    error=ebusy(operands[0]),
+                    error=ebusy(root),
                 )
         elif cmd == "mkdir":
             # GNU mkdir -p makes "already exists" a no-op.
