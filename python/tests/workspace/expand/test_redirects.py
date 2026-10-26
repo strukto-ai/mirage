@@ -87,8 +87,7 @@ async def test_heredoc_expands_braced_var_and_cmdsub():
 
 @pytest.mark.asyncio
 async def test_heredoc_expands_arithmetic():
-    # In heredoc bodies tree-sitter parses $((...)) as a command
-    # substitution wrapping a subshell; it must still evaluate as math.
+    # A heredoc body expands $((...)) as arithmetic.
     ws = await _workspace_at("/data")
     out = await _stdout(ws, "cat <<END\nmath=$((2 + 3))\nEND")
     assert out == "math=5\n"
@@ -259,10 +258,9 @@ async def test_herestring_single_quoted_body_into_redirect():
     assert await _stdout(ws, "cat /data/HS") == "hi\n"
 
 
-# tree-sitter-bash 0.25.1 splits a later unbraced `$var` out of a word
-# when a name-terminating character follows it, so `> /api/$c/$id.json`
-# used to write a file literally named `$` under /api/<c>. parse()
-# repairs the tree; these pin the end-to-end behavior.
+# A later unbraced `$var` followed by a name-terminating character stays
+# in its word: `> /api/$c/$id.json` once wrote a file literally named `$`
+# under /api/<c>. These pin the end-to-end behavior.
 
 
 @pytest.mark.asyncio
@@ -309,10 +307,8 @@ async def test_assignment_second_unbraced_var_stays_assignment():
     )
 
 
-# tree-sitter-bash used to lex a heredoc body line opening with a backslash
-# as more words of the operator line, and to skip the first line's leading
-# whitespace; parse() shields such bodies so the workspace reads them as
-# bash does (issue #1050).
+# A heredoc body line opening with a backslash is body text, and the first
+# line keeps its leading whitespace, as bash reads them (issue #1050).
 
 
 @pytest.mark.asyncio
@@ -427,9 +423,8 @@ async def test_heredoc_leading_empty_line_round_trips_through_a_file():
 
 
 # A backslash before a newline in the delimiter is the reader's line
-# continuation rather than quoting, so the body it opens expands, and the
-# terminator line tree-sitter leaves in that body is not body text
-# (issue #1050).
+# continuation rather than quoting, so the body it opens expands, and its
+# terminator line is not body text (issue #1050).
 
 
 @pytest.mark.asyncio

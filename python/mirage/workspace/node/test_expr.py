@@ -55,13 +55,13 @@ async def expand_test_expr(
     """Expand a test_command ``[ ... ]`` into flat argv, tokens in
     source order.
 
-    tree-sitter nests ``-a``/``-o`` chains unpredictably, so the shape
+    The parser nests ``-a``/``-o`` chains by its own precedence, so the shape
     is discarded: every operator token and expanded operand is
     re-serialized and the flat bash arity rules take over. Unquoted
     expansions word-split like bash (an empty one drops out of argv).
 
     Args:
-        node (TSNodeLike): tree-sitter test_command node.
+        node (TSNodeLike): the test_command node.
         context (EvaluationContext): the evaluation expanding it.
         execute_fn (ExecuteFn): workspace execute for command substitutions.
         cs (CallStack | None): call stack for positional parameters.
@@ -96,12 +96,12 @@ async def expand_double_bracket(
 ) -> CondNode:
     """Build a structured condition tree from a ``[[ ... ]]`` node.
 
-    tree-sitter nests the expression by its own precedence (``=~``
+    The parser nests the expression by its own precedence (``=~``
     looser than ``||``, ``!`` tighter than ``=~``), so its tokens are
     read again as bash parses them.
 
     Args:
-        node (TSNodeLike): tree-sitter test_command node opened with ``[[``.
+        node (TSNodeLike): the test_command node opened with ``[[``.
         context (EvaluationContext): the evaluation expanding it.
         execute_fn (ExecuteFn): workspace execute for command substitutions.
         cs (CallStack | None): call stack for positional parameters.
@@ -173,7 +173,7 @@ async def _comparison(
     Args:
         op (str): the operator.
         left_text (str): the expanded left operand.
-        right_node (TSNodeLike): the right operand's tree-sitter node.
+        right_node (TSNodeLike): the right operand's parsed node.
         context (EvaluationContext): the evaluation expanding it.
         execute_fn (ExecuteFn): workspace execute for command substitutions.
         cs (CallStack | None): call stack for positional parameters.

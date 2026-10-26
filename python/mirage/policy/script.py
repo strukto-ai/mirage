@@ -137,7 +137,9 @@ def script_context(
 
     The live handles become data: the session its ``cwd``, ``env`` and
     ``profile``, the files the ``mounts`` the session sees, which are
-    otherwise the program's own ``open()``, reading as the session.
+    otherwise the program's own ``open()``, reading as the session. Each
+    of a line's ``commands`` also holds the ``env`` it runs with, its own
+    ``NAME=value`` prefix included.
 
     Args:
         ctx (CommandContext | RouteContext | VfsContext | SessionContext):
@@ -145,6 +147,16 @@ def script_context(
     """
     data = _plain(ctx)
     assert isinstance(data, dict)
+    if isinstance(ctx, RouteContext):
+        commands = data["commands"]
+        assert isinstance(commands, list)
+        for command, entry in zip(ctx.commands, commands, strict=True):
+            assert isinstance(entry, dict)
+            entry["env"] = (
+                dict(command.session.snapshot())
+                if command.session is not None
+                else {}
+            )
     session, vfs = ctx.session, ctx.vfs
     if session is not None:
         data["cwd"] = session.cwd()

@@ -359,6 +359,10 @@ def test_a_line_lists_each_command_as_pre_command_reads_it():
     assert data["line"] == "cat /repo/sealed/k"
     assert [c["command"] for c in data["commands"]] == ["cat"]
     assert "session" not in data["commands"][0]
+    assert data["commands"][0]["env"] == {
+        "TEAM": "core",
+        "HOME": "/home/agent",
+    }
     assert data["cwd"] == "/data"
 
 

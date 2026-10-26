@@ -131,7 +131,7 @@ describe('hf_buckets under read: fresh', () => {
       // file" drops the overlay; a plain cat never reaches it.
       const cp = await w.shell('cp /m/a.txt /r/x')
       expect(cp.exitCode).toBe(1)
-      expect(DEC.decode(cp.stderr)).toBe('cp: /m/a.txt: Permission denied\n')
+      expect(DEC.decode(cp.stderr)).toBe("cp: cannot stat '/m/a.txt': Permission denied\n")
       b.hub.fail.clear()
       expect(w.namespace.metaFor('/m/a.txt')?.mode).toBe(0o600)
     } finally {

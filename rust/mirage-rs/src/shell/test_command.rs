@@ -42,17 +42,16 @@ impl Parser<'_> {
             ("[", "]", Closer::Single)
         };
         let mut children = vec![self.expect(open)?];
-        let inside = self.i;
-        self.skip_space();
+        if double {
+            self.check_conditional(self.i)?;
+        }
+        self.test_space(closer);
         if !self.at_test_close(closer) {
             children.push(self.test_expression(closer, 0)?);
-            self.skip_space();
+            self.test_space(closer);
         }
         if !self.at_test_close(closer) {
             return self.fail(self.i);
-        }
-        if double {
-            self.check_conditional(inside, self.i)?;
         }
         children.push(self.expect(close)?);
         self.leave();
@@ -77,17 +76,17 @@ impl Parser<'_> {
         self.enter()?;
         let mut left = self.test_unary(closer)?;
         loop {
-            self.skip_space();
+            self.test_space(closer);
             if self.at_test_close(closer) || self.eof() {
                 break;
             }
             if self.peek() == b'?' && TERNARY >= min {
                 let question = self.expect("?")?;
-                self.skip_space();
+                self.test_space(closer);
                 let consequence = self.test_expression(closer, 0)?;
-                self.skip_space();
+                self.test_space(closer);
                 let colon = self.expect(":")?;
-                self.skip_space();
+                self.test_space(closer);
                 let alternative = self.test_expression(closer, TERNARY + 1)?;
                 left = Syn::node(
                     "ternary_expression",
@@ -120,7 +119,7 @@ impl Parser<'_> {
                 break;
             }
             let op = op.with_field("operator");
-            self.skip_space();
+            self.test_space(closer);
             let right = match op.kind {
                 "=~" => self.regex_operand(closer)?,
                 "==" | "!=" => self.pattern_operand(closer, prec)?,
@@ -165,13 +164,13 @@ impl Parser<'_> {
     /// word, `--`, `-1` and `~/x` among them.
     fn test_unary(&mut self, closer: Closer) -> R<Syn> {
         let at = self.i;
-        let operator = self.test_operator_end().filter(|end| {
-            !closer.conditional() || super::cond::UNARY.contains(&&self.s[at + 1..*end])
-        });
+        let operator = self
+            .test_operator_end()
+            .filter(|end| !closer.conditional() || super::cond::UNARY.contains(&&self.s[at..*end]));
         if let Some(end) = operator {
             self.i = end;
             let op = Syn::leaf("test_operator", at, end).with_field("operator");
-            self.skip_space();
+            self.test_space(closer);
             if self.at_test_close(closer) {
                 self.i = at;
                 return self.test_operand(closer);
@@ -207,7 +206,7 @@ impl Parser<'_> {
         if let Some((text, prec)) = prefix {
             self.i += text.len();
             let op = Syn::token(text, at, self.i).with_field("operator");
-            self.skip_space();
+            self.test_space(closer);
             let operand = if text == "!" {
                 self.test_expression(closer, UNARY)?
             } else {
@@ -253,12 +252,23 @@ impl Parser<'_> {
         }
     }
 
+    /// The blanks and newlines between a test's tokens. Inside `[[ ]]` a
+    /// newline reads the bodies of the heredocs pending there, as it does
+    /// between commands.
+    fn test_space(&mut self, closer: Closer) {
+        if closer.conditional() {
+            self.skip_space_bodies();
+        } else {
+            self.skip_space();
+        }
+    }
+
     /// `(expression)` in a test, up to `closer`.
     fn parenthesized(&mut self, closer: Closer) -> R<Syn> {
         let open = self.expect("(")?;
-        self.skip_space();
+        self.test_space(closer);
         let inner = self.test_expression(closer, 0)?;
-        self.skip_space();
+        self.test_space(closer);
         let close = self.expect(")")?;
         Ok(Syn::node(
             "parenthesized_expression",

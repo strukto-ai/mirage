@@ -14,7 +14,10 @@
 
 import asyncio
 import concurrent.futures
+import hashlib
 import logging
+import os
+import tempfile
 import threading
 from collections.abc import Callable
 from pathlib import Path
@@ -120,6 +123,14 @@ class WasmExecution:
         checks are compiled in, so a cache produced with different
         engine settings fails deserialization and is recompiled; an
         unwritable directory just skips the disk cache.
+
+        Deserializing trusts the bytes, so a cache is used only when it
+        is whole: the SHA-256 of the compiled bytes follows them, and a
+        cache read back whose digest does not match (torn by a crash or
+        a power cut, or written before the digest was) is compiled
+        again. A new cache is written to a temp file beside it, synced
+        and renamed into place, so a process reading it meanwhile meets
+        the old one or the new one.
         """
         with self._compile_lock:
             if self._closed:
@@ -133,16 +144,24 @@ class WasmExecution:
                     >= self._wasm.stat().st_mtime
                 ):
                     try:
-                        with wasmtime.Module.deserialize_file(
-                            engine, str(self._cache)
-                        ):
-                            pass
                         cached = self._cache.read_bytes()
-                        self._serialized = cached
-                        return cached
-                    except wasmtime.WasmtimeError as exc:
+                        body = cached[: -hashlib.sha256().digest_size]
+                        if (
+                            hashlib.sha256(body).digest()
+                            != cached[len(body) :]
+                        ):
+                            raise ValueError("digest does not match")
+                        with wasmtime.Module.deserialize(engine, body):
+                            pass
+                        self._serialized = body
+                        return body
+                    except (
+                        OSError,
+                        ValueError,
+                        wasmtime.WasmtimeError,
+                    ) as exc:
                         logger.debug(
-                            "stale %s cache, recompiling: %s",
+                            "unusable %s cache, recompiling: %s",
                             self._cache.name,
                             exc,
                         )
@@ -151,12 +170,28 @@ class WasmExecution:
                 ) as module:
                     serialized = bytes(module.serialize())
                 self._serialized = serialized
+                staged: str | None = None
                 try:
-                    self._cache.write_bytes(serialized)
+                    fd, staged = tempfile.mkstemp(
+                        dir=self._cache.parent, prefix=f".{self._cache.name}."
+                    )
+                    with os.fdopen(fd, "wb") as f:
+                        f.write(serialized)
+                        f.write(hashlib.sha256(serialized).digest())
+                        f.flush()
+                        os.fsync(f.fileno())
+                    os.replace(staged, self._cache)
+                    staged = None
                 except OSError as exc:
                     logger.debug(
                         "cannot write %s cache: %s", self._cache.name, exc
                     )
+                finally:
+                    if staged is not None:
+                        try:
+                            os.unlink(staged)
+                        except OSError as exc:
+                            logger.debug("cannot remove %s: %s", staged, exc)
                 return serialized
 
     def _checkout(self) -> tuple[Any, Any]:

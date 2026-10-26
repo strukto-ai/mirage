@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -54,6 +55,35 @@ async def test_rm(ws):
     await ws.shell("rm /data/del.txt")
     result = await ws.shell("stat /data/del.txt")
     assert result.exit_code != 0
+
+
+@pytest.mark.skipif(
+    os.geteuid() == 0, reason="root ignores the permission bits under test"
+)
+@pytest.mark.asyncio
+async def test_cp_names_the_operand_it_may_not_use(ws, tmp_path):
+    # GNU (coreutils 9.7) opens the source for reading, then creates the
+    # destination, and names whichever one refused.
+    (tmp_path / "secret").write_text("x\n")
+    (tmp_path / "plain").write_text("y\n")
+    (tmp_path / "ro").mkdir()
+    (tmp_path / "secret").chmod(0)
+    (tmp_path / "ro").chmod(0o555)
+    try:
+        unreadable = await ws.shell("cp /data/secret /data/copy")
+        unwritable = await ws.shell("cp /data/plain /data/ro/x")
+    finally:
+        (tmp_path / "secret").chmod(0o644)
+        (tmp_path / "ro").chmod(0o755)
+    assert unreadable.exit_code == 1
+    assert unreadable.stderr == (
+        b"cp: cannot open '/data/secret' for reading: Permission denied\n"
+    )
+    assert not (tmp_path / "copy").exists()
+    assert unwritable.exit_code == 1
+    assert unwritable.stderr == (
+        b"cp: cannot create regular file '/data/ro/x': Permission denied\n"
+    )
 
 
 @pytest.mark.asyncio

@@ -12,10 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { readFileSync } from 'node:fs'
-import { createRequire } from 'node:module'
-import { Language, Parser } from 'web-tree-sitter'
-import { assert, beforeAll, describe, expect, it } from 'vitest'
+import { assert, describe, expect, it } from 'vitest'
 import type { TSNodeLike } from './types.ts'
 import {
   braceExpands,
@@ -36,7 +33,6 @@ import {
   getPipelineStages,
   getProcessSubBody,
   getRedirects,
-  takeContinuation,
   getText,
   getWhileParts,
   isBackgrounded,
@@ -261,7 +257,7 @@ describe('getPipelineStages', () => {
   it.each<[string, boolean, StagesShape]>([
     ['a | b', false, [['a', 'b'], [false], [[], []], false, null]],
     ['! a | b', false, [['a', 'b'], [false], [[], []], true, null]],
-    // tree-sitter reads these as pipeline(redirected(<chain>, r), ...).
+    // The parser reads these as pipeline(redirected(<chain>, r), ...).
     ['a | b < f | c', false, [['a', 'b', 'c'], [false, false], [[], ['f'], []], false, null]],
     ['a | b < f |& c', false, [['a', 'b', 'c'], [false, true], [[], ['f'], []], false, null]],
     ['! a < f | b', false, [['a', 'b'], [false], [['f'], []], true, null]],
@@ -478,82 +474,57 @@ describe('a descriptor touching its operator', () => {
   })
 })
 
-// ── heredoc operator-line tail ───────────────────────────────────────────
+// ── heredoc ──────────────────────────────────────────────────────────────
 
-describe('heredocTail', () => {
-  let rawParser: Parser
-  beforeAll(async () => {
-    // These helpers consume native tree-sitter heredoc nodes. The workspace
-    // parser lowers heredocs before parsing and covers execution in integration.
-    const require = createRequire(import.meta.url)
-    await Parser.init({
-      wasmBinary: readFileSync(require.resolve('web-tree-sitter/web-tree-sitter.wasm')),
-    })
-    const language = await Language.load(
-      new Uint8Array(readFileSync(require.resolve('tree-sitter-bash/tree-sitter-bash.wasm'))),
-    )
-    rawParser = new Parser()
-    rawParser.setLanguage(language)
-  })
-  const heredoc = (line: string): TSNodeLike => {
-    const stmt = rawParser.parse(line)?.rootNode.children[0]
-    if (stmt?.type !== NT.REDIRECTED_STATEMENT) throw new Error(line)
-    return stmt
+describe('heredoc redirects', () => {
+  const heredoc = (line: string): Redirect => {
+    const statement = parse(line).namedChildren[0]
+    if (statement === undefined) throw new Error(line)
+    const [, redirects] = getRedirects(statement)
+    const found = redirects.find((redirect) => redirect.kind === RedirectKind.HEREDOC)
+    if (found === undefined) throw new Error(line)
+    return found
   }
-  const first = (redirects: Redirect[]): Redirect => {
-    const only = redirects[0]
-    if (only === undefined) throw new Error('no redirect')
-    return only
-  }
-  const steps = (redirect: Redirect): [string, string][] =>
-    (redirect.continuation as readonly (readonly [string, TSNodeLike])[]).map(([op, right]) => [
-      op,
-      getText(right),
-    ])
 
-  it('a list step is a continuation, not a pipe', () => {
-    // tree-sitter parses `|| echo recovered` inside the heredoc_redirect;
-    // a bare command there used to be taken for a pipeline stage.
-    const [, redirects] = getRedirects(heredoc("false <<'EOF' || echo recovered\nignored\nEOF"))
-    expect(redirects).toHaveLength(1)
-    expect(first(redirects).pipeline).toBeNull()
-    expect(steps(first(redirects))).toEqual([['||', 'echo recovered']])
+  it('carries its body in a double-quoted word under the redirect', () => {
+    const redirect = heredoc('cat <<EOF\nhello\nworld\nEOF')
+    expect(redirect.target).toBe('hello\nworld\n')
+    expect(redirect.expandVars).toBe(true)
+    const word = redirect.targetNode as TSNodeLike
+    expect(word.type).toBe(NT.STRING)
+    expect(word.parent?.heredoc?.delimiter).toBe('EOF')
   })
 
-  it('unwinds a list along its left spine', () => {
-    // `false <<EOF || echo a && echo b` is `(false || echo a) && echo b`.
-    const [, redirects] = getRedirects(heredoc('false <<EOF || echo a && echo b\nx\nEOF'))
-    expect(steps(first(redirects))).toEqual([
-      ['||', 'echo a'],
-      ['&&', 'echo b'],
-    ])
+  it.each([
+    ["python3 <<PYEOF\nprint('hello')\nPYEOF", "print('hello')\n", true],
+    ["python3 <<'SCRIPT'\nprint('hi')\nSCRIPT", "print('hi')\n", false],
+    ['python3 <<"EOF"\nimport sys\nEOF', 'import sys\n', false],
+    ["cat <<EN'D'\nx=$v\nEND\n", 'x=$v\n', false],
+    ['cat <<\\END\nx=$v\nEND\n', 'x=$v\n', false],
+    // A backslash before a newline is the reader's line continuation, so
+    // `EO\<newline>F` names EOF and its body still expands.
+    ['cat <<EO\\\nF\nx=$v\nEOF\n', 'x=$v\n', true],
+    ['cat <<EO\\\nF\\G\nx=$v\nEOFG\n', 'x=$v\n', false],
+    ['cat <<EOF\n\nfoo\nEOF', '\nfoo\n', true],
+    ['cat <<-EOF\n\n\tfoo\nEOF', '\nfoo\n', true],
+  ])('reads %j', (line, body, expands) => {
+    const redirect = heredoc(line)
+    expect(redirect.target).toBe(body)
+    expect(redirect.expandVars).toBe(expands)
   })
 
-  it('a pipe then a list', () => {
-    const [, redirects] = getRedirects(heredoc('cat <<EOF | tr a-z A-Z && echo done\nabc\nEOF'))
-    const only = first(redirects)
-    expect(getText(only.pipeline as TSNodeLike)).toBe('tr a-z A-Z')
-    expect(steps(only)).toEqual([['&&', 'echo done']])
-  })
-
-  it('a plain pipe keeps the pipeline node', () => {
-    const [, redirects] = getRedirects(heredoc('cat <<EOF | tr a-z A-Z\nabc\nEOF'))
-    const only = first(redirects)
-    expect((only.pipeline as TSNodeLike).type).toBe(NT.PIPELINE)
-    expect(only.continuation).toEqual([])
-  })
-
-  it('after a hoisted file redirect', () => {
-    const [, redirects] = getRedirects(heredoc('cat <<EOF > /o && cat /o\ninner\nEOF'))
-    expect(redirects.map((r) => r.kind)).toEqual([RedirectKind.HEREDOC, RedirectKind.STDOUT])
-    expect(steps(first(redirects))).toEqual([['&&', 'cat /o']])
-  })
-
-  it('takeContinuation detaches the steps', () => {
-    const [, redirects] = getRedirects(heredoc('false <<EOF || echo a && echo b\nx\nEOF'))
-    expect(takeContinuation(redirects).map(([op]) => op)).toEqual(['||', '&&'])
-    expect(first(redirects).continuation).toEqual([])
-    expect(takeContinuation(redirects)).toEqual([])
+  it('goes on with its line as any line does', () => {
+    const statement = parse('cat <<EOF | tr a-z A-Z && echo done\nabc\nEOF').namedChildren[0]
+    if (statement === undefined) throw new Error('no statement')
+    const [left, op, right] = getListParts(statement)
+    expect([op, getText(right)]).toEqual(['&&', 'echo done'])
+    const [[first, second]] = getPipelineCommands(left)
+    if (first === undefined || second === undefined) throw new Error('no stages')
+    const [command, redirects] = getRedirects(first)
+    if (command === null) throw new Error('no command')
+    expect(getCommandName(command)).toBe('cat')
+    expect(redirects[0]?.target).toBe('abc\n')
+    expect(getCommandName(second)).toBe('tr')
   })
 })
 
@@ -592,7 +563,7 @@ describe('sourceParts', () => {
     ],
     ['echo "a\\\n $x"', ['', ['string_content', 'a '], ['simple_expansion', '$x'], '']],
   ])('keeps the text between the children of %j', (line, parts) => {
-    // web-tree-sitter counts offsets in UTF-16 code units, so a surrogate
+    // The parser counts offsets here in UTF-16 code units, so a surrogate
     // pair before a gap must not shift the slice. The reader joins a line
     // continuation before the grammar sees it.
     expect(spelled(quotedParts(argument(line)))).toEqual(parts)

@@ -17,13 +17,18 @@ import { encodeText } from './bytes.ts'
 import { FD_BOTH, FD_CLOSE, FD_STDERR, FD_STDIN, FD_STDOUT } from './constants.ts'
 import { decodeAnsiC, unescapeDquoted, unescapeUnquoted } from './escapes.ts'
 import { ProgramNode } from './parse/program.ts'
-import { HeredocNode } from './parse/heredoc/node.ts'
-import { bodyPrefix, cleanDelimiter, delimiterQuoted } from './parse/heredoc/index.ts'
 import type { PipelineStages, TSNodeLike } from './types.ts'
 import { NodeType as NT, ProcessSubDirection, Redirect, RedirectKind } from './types.ts'
 
 export function getText(node: TSNodeLike): string {
   return node.text
+}
+
+/** The root of the tree `node` belongs to. */
+export function treeRoot(node: TSNodeLike): TSNodeLike {
+  let root = node
+  while (root.parent != null) root = root.parent
+  return root
 }
 
 /**
@@ -58,12 +63,12 @@ export function readRow(node: TSNodeLike): number {
  * A node's children with the source text between them, the twin of
  * python's `source_parts`.
  *
- * tree-sitter-bash's scanner consumes some text without giving it a node:
+ * The parser consumes some text without giving it a node:
  * whitespace and newlines inside a double-quoted string, and the whitespace
  * or line continuation opening a `${v:-word}` operand. Only the node's own
  * source still holds that text, so it is sliced out between child extents
  * rather than rebuilt from row or byte counts, which lose tabs, newlines and
- * escapes. web-tree-sitter counts `startIndex` in UTF-16 code units, the
+ * escapes. The parser counts `startIndex` here in UTF-16 code units, the
  * units `text.slice` takes.
  */
 export function* sourceParts(node: TSNodeLike): Generator<string | TSNodeLike> {
@@ -96,9 +101,10 @@ export function* quotedParts(node: TSNodeLike): Generator<string | TSNodeLike> {
  * Where an index into a node's text falls in the parser's offsets, the twin
  * of python's `byte_offset`.
  *
- * tree-sitter places a node by the bytes of the UTF-8 source, so an index
- * counted in code units reads one place too early for every multibyte
- * character before it. `grep -ob` reads the same answer for the same reason.
+ * The Python parser places a node by the bytes of the UTF-8 source, so an
+ * index counted in code units reads one place too early for every
+ * multibyte character before it. `grep -ob` reads the same answer for the
+ * same reason.
  * `encodeText` rather than `TextEncoder` because a byte that is not valid
  * UTF-8 rides as a surrogate escape and stands for one byte. That is a
  * requirement on the caller, not a hope: grep's family decodes every line
@@ -255,7 +261,7 @@ export function getPipelineCommands(node: TSNodeLike): [TSNodeLike[], boolean[]]
  * A pipeline's stages as bash reads them, whatever shape the parse gave
  * them.
  *
- * tree-sitter-bash lets a redirect close over everything to its left up
+ * The parser lets a redirect close over everything to its left up
  * to the next pipe, so `a && b | c < f | d` parses as a pipeline whose
  * first stage is `redirected(a && b | c, < f)`, and `! a < f | b` as one
  * whose first stage is `redirected(! a, < f)`. Bash reads them as
@@ -320,9 +326,7 @@ function pipelineHead(stage: TSNodeLike): PipelineStages {
   let hoisted: readonly Redirect[] = []
   if (stage.type === NT.REDIRECTED_STATEMENT) {
     const [found, parsed] = getRedirects(stage)
-    // A heredoc's `&&`/`||` tail wraps the whole statement, which only
-    // the statement's own arm folds in.
-    if (found === null || parsed.some((r) => r.continuation.length > 0)) return single
+    if (found === null) return single
     body = found
     hoisted = parsed
   }
@@ -407,7 +411,7 @@ export function getCforParts(node: TSNodeLike): [TSNodeLike[][], TSNodeLike[]] {
 /**
  * Whether a statement's terminator is `&`.
  *
- * tree-sitter puts the `&` beside the statement it ends, inside whatever
+ * The parser puts the `&` beside the statement it ends, inside whatever
  * body holds them both, so a body read as named children (every
  * extractor above) never sees it. Asking the statement about its own
  * next sibling is what lets a loop body, an if/case arm, a brace group
@@ -420,7 +424,6 @@ export function isBackgrounded(node: TSNodeLike): boolean {
 
 export const REDIRECT_NODE_TYPES: ReadonlySet<string> = new Set([
   NT.FILE_REDIRECT,
-  NT.HEREDOC_REDIRECT,
   NT.HERESTRING_REDIRECT,
 ])
 
@@ -577,30 +580,7 @@ export function getRedirects(node: TSNodeLike): [TSNodeLike | null, Redirect[]] 
 
   for (let i = command === null ? 0 : 1; i < nc.length; i++) {
     const child = nc[i]
-    if (child?.type === NT.HEREDOC_REDIRECT) {
-      const [body, , quoted] = getHeredocMeta(child)
-      const [pipeNode, continuation] = heredocTail(child)
-      const descriptor = child.namedChildren.find((c) => c.type === NT.FILE_DESCRIPTOR)
-      redirects.push(
-        new Redirect({
-          fd: descriptor === undefined ? 0 : parseInt(getText(descriptor), 10),
-          target: body,
-          targetNode: child,
-          kind: RedirectKind.HEREDOC,
-          pipeline: pipeNode,
-          expandVars: !quoted,
-          continuation,
-        }),
-      )
-      // A file redirect written before the heredoc body starts
-      // (`cat <<END > out.txt`) parses INSIDE the heredoc_redirect
-      // node; hoist it to a sibling.
-      for (const hc of child.namedChildren) {
-        if (hc.type === NT.FILE_REDIRECT) {
-          redirects.push(parseFileRedirect(hc))
-        }
-      }
-    } else if (child?.type === NT.FILE_REDIRECT) {
+    if (child?.type === NT.FILE_REDIRECT) {
       redirects.push(parseFileRedirect(child))
     } else if (child?.type === NT.HERESTRING_REDIRECT) {
       redirects.push(parseHerestringRedirect(child))
@@ -635,94 +615,6 @@ export function commandRedirects(node: TSNodeLike): Redirect[] {
 export function withOwnRedirects(command: TSNodeLike, redirects: readonly Redirect[]): Redirect[] {
   const own = command.type === NT.COMMAND ? commandRedirects(command) : []
   return [...own, ...redirects]
-}
-
-/**
- * The leftmost operand of a `&&`/`||` list and the steps after it.
- *
- * tree-sitter nests a list to the left (`a || b && c` is
- * `list(list(a || b) && c)`), which is bash's own associativity, so
- * walking the left spine yields the first operand and then each operator
- * with its right operand in the order bash applies them.
- */
-export function listSpine(node: TSNodeLike): [TSNodeLike, [string, TSNodeLike][]] {
-  const steps: [string, TSNodeLike][] = []
-  let current = node
-  while (current.type === NT.LIST) {
-    const [left, op, right] = getListParts(current)
-    steps.push([op ?? '&&', right])
-    current = left
-  }
-  steps.reverse()
-  return [current, steps]
-}
-
-/**
- * What the operator line carries past a heredoc's delimiter word.
- *
- * Bash reads the body at the newline and then goes on with the line, so
- * `cat <<EOF | tr a-z A-Z && echo done` is the pipeline `cat | tr` and
- * then `&& echo done`. tree-sitter-bash parses that tail inside the
- * heredoc_redirect node instead: a `pipeline` child holding the stage the
- * command feeds, and an `&&` or `||` token followed by its right operand.
- * The stage or operand it hands over can itself be a `list`, wrapping
- * what bash would have bound to the left (`false <<EOF || echo a && echo
- * b` is `(false || echo a) && echo b`, not `false || (echo a && echo b)`),
- * so a list is unwound along its left spine: its first operand takes the
- * stage or operand slot, and the rest become further steps.
- *
- * Returns the node the command's stdout pipes into, or null, and the
- * `[operator, right]` steps applied to the statement after that, in order.
- */
-export function heredocTail(redirectNode: TSNodeLike): [TSNodeLike | null, [string, TSNodeLike][]] {
-  let pipeNode: TSNodeLike | null = null
-  const steps: [string, TSNodeLike][] = []
-  const children = redirectNode.children
-  for (let index = 0; index < children.length; index++) {
-    const child = children[index]
-    if (child === undefined) continue
-    if (child.type === NT.PIPELINE && pipeNode === null && steps.length === 0) {
-      const stages = child.namedChildren
-      const only = stages[0]
-      if (stages.length === 1 && only?.type === NT.LIST) {
-        const [leaf, spine] = listSpine(only)
-        pipeNode = leaf
-        steps.push(...spine)
-      } else {
-        pipeNode = child
-      }
-      continue
-    }
-    const next = children[index + 1]
-    if ((child.type === NT.AND || child.type === NT.OR) && next?.isNamed === true) {
-      const [right, spine] = listSpine(next)
-      steps.push([child.type, right], ...spine)
-      index += 1
-    }
-  }
-  return [pipeNode, steps]
-}
-
-/**
- * Detach the `&&`/`||` steps a heredoc's operator line carried.
- *
- * The steps apply to the whole redirected statement, so the executor
- * takes them off the redirects before running it and folds them in
- * around the result, the way a `list` node wraps its left operand.
- */
-export function takeContinuation(redirects: readonly Redirect[]): [string, TSNodeLike][] {
-  const steps: [string, TSNodeLike][] = []
-  for (const r of redirects) {
-    if (r.continuation.length > 0) {
-      steps.push(
-        ...(r.continuation as readonly (readonly [string, TSNodeLike])[]).map(
-          ([op, right]) => [op, right] as [string, TSNodeLike],
-        ),
-      )
-      r.continuation = []
-    }
-  }
-  return steps
 }
 
 export function getListParts(node: TSNodeLike): [TSNodeLike, string | null, TSNodeLike] {
@@ -882,58 +774,6 @@ export function getNegatedCommand(node: TSNodeLike): TSNodeLike | null {
   return node.namedChildren[0] ?? null
 }
 
-// The body opens with the empty lines tree-sitter dropped before its
-// heredoc_body node (see bodyPrefix); bash keeps them.
-function getHeredocParts(redirectNode: TSNodeLike): [string, string] {
-  let delimiter = ''
-  let body = ''
-  for (const c of redirectNode.namedChildren) {
-    if (c.type === NT.HEREDOC_START) delimiter = getText(c)
-    else if (c.type === NT.HEREDOC_BODY) body = getText(c)
-  }
-  return [delimiter, bodyPrefix(redirectNode) + body]
-}
-
-function getHeredocMeta(redirectNode: TSNodeLike): [string, boolean, boolean] {
-  const [delimiter, rawBody] = getHeredocParts(redirectNode)
-  const quoted = delimiterQuoted(delimiter)
-  let dash = false
-  for (const c of redirectNode.children) {
-    if (c.type === '<<-') {
-      dash = true
-      break
-    }
-  }
-  let body = rawBody
-  if (dash && body !== '') {
-    body = body
-      .split('\n')
-      .map((line) => line.replace(/^\t+/, ''))
-      .join('\n')
-  }
-  return [normalizeHeredocBody(body, delimiter), dash, quoted]
-}
-
-/**
- * Repair tree-sitter quirks on concatenated delimiters (<<EN'D').
- *
- * tree-sitter sometimes fails to match the closing line against a
- * concatenated delimiter: the body swallows the delimiter line, or
- * loses its final newline to heredoc_end. Bash strips quoting from
- * the delimiter before matching and bodies always end with a newline.
- */
-export function normalizeHeredocBody(body: string, delimiter: string): string {
-  const clean = cleanDelimiter(delimiter)
-  const suffix = clean + '\n'
-  let out = body
-  if (out.endsWith(suffix)) {
-    const head = out.slice(0, -suffix.length)
-    if (head === '' || head.endsWith('\n')) out = head
-  }
-  if (out !== '' && !out.endsWith('\n')) out += '\n'
-  return out
-}
-
 export function getProcessSubDirection(node: TSNodeLike): ProcessSubDirection | null {
   const open = node.children[0]?.type ?? ''
   if (open === '<(') return ProcessSubDirection.INPUT
@@ -995,7 +835,7 @@ export function getFunctionName(node: TSNodeLike): string {
 /**
  * The redirects a function definition carries: its own, and those of a
  * statement it is the body of (`f() { ...; } >o 2>&1`, whose second
- * redirect tree-sitter hangs on a redirected_statement around it).
+ * redirect the parser hangs on a redirected_statement around it).
  */
 export function getFunctionRedirects(node: TSNodeLike): TSNodeLike[] {
   const redirects = node.namedChildren.filter((c) => REDIRECT_NODE_TYPES.has(c.type))
@@ -1016,7 +856,7 @@ export function getFunctionRedirects(node: TSNodeLike): TSNodeLike[] {
  * redirect's span, and the body sits after whatever else the line goes on
  * to say.
  */
-function syntaxEnd(node: TSNodeLike, offsets: readonly number[] | undefined): number {
+function syntaxEnd(node: TSNodeLike, offsets: ArrayLike<number> | undefined): number {
   if (node.heredoc !== undefined) return node.heredoc.wordEnd
   if (node.children.length > 0) {
     let end = 0
@@ -1034,16 +874,10 @@ export function getFunctionSource(node: TSNodeLike): string {
   const source = node.parent?.type === NT.REDIRECTED_STATEMENT ? node.parent : node
   if (source.startIndex === undefined || source.endIndex === undefined)
     return source.sourceText ?? source.text
-  let root = source
-  while (root.parent != null) root = root.parent
+  const root = treeRoot(source)
   const original =
     source instanceof ProgramNode ? source.program.original : (root.sourceText ?? root.text)
-  const offsets =
-    source instanceof ProgramNode
-      ? source.program.offsets
-      : root instanceof HeredocNode
-        ? root.offsets
-        : undefined
+  const offsets = source instanceof ProgramNode ? source.program.offsets : root.offsets
   const start = offsets?.[source.startIndex] ?? source.startIndex
   const end = syntaxEnd(source, offsets)
   let text = original.slice(start, end)

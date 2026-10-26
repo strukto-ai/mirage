@@ -37,7 +37,7 @@ function spelled(token: ExprToken): string {
 
 describe('test tokens', () => {
   it('flat tokens are the words test is given', () => {
-    // A `-N` tree-sitter splits is one operand again, as test reads it.
+    // A `-N` the parser splits is one operand again, as test reads it.
     const node = testNode('[ -e x -o ! 1 -lt -2 ]')
     expect(flatTokens(node).map(spelled)).toEqual(['-e', 'x', '-o', '!', '1', '-lt', '-2'])
   })

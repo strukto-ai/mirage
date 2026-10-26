@@ -419,7 +419,7 @@ class _BraceParse:
 
     ``subscript`` is the raw text between the brackets and serves the
     literal checks (``@``/``*``) and the arithmetic path, which wants
-    the unexpanded spelling; ``subscript_nodes`` are the tree-sitter
+    the unexpanded spelling; ``subscript_nodes`` are the parsed
     children behind it, which the associative path expands properly
     (``${m[$k]}``, ``${m["a b"]}``) since a key is a word, not an
     expression.
@@ -572,7 +572,7 @@ def _pattern_text(
     """Render an opaque pattern token with bash quoting semantics.
 
     Pattern operands (``${f%$ext}``, ``${v#x"a*"}``) arrive as opaque
-    ``regex`` nodes tree-sitter does not parse further, but bash still
+    ``regex`` nodes the parser does not parse further, but bash still
     honors quoting inside them: quoted segments (single, double, or
     ANSI-C) match literally, a backslash binds the next character, an
     unquoted ``$``-reference splices a live pattern while a
@@ -1014,7 +1014,7 @@ async def _substring(
     return val[offset : offset + length]
 
 
-_SUBSCRIPT_LITERAL_TYPES = frozenset({NT.WORD, NT.NUMBER, NT.ERROR})
+_SUBSCRIPT_LITERAL_TYPES = frozenset({NT.WORD, NT.NUMBER})
 
 # The operators whose word bash expands only once the parameter's state
 # selects it (a default, an alternate, an assignment, a message).
@@ -1158,7 +1158,7 @@ async def expand_braces(
     through the session view before the next bound expands.
 
     Args:
-        node (TSNodeLike): the ``expansion`` tree-sitter node.
+        node (TSNodeLike): the ``expansion`` parsed node.
         session (SessionState): shell session (env, arrays, positionals).
         call_stack (CallStack | None): function-call scope, if any.
         expand_child (ExpandChild): callback that expands a nested node

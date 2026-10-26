@@ -6,7 +6,7 @@ use super::lex::{
     blank_end, digits_end, is_blank, is_name, is_name_start, is_space, name_end, number_end,
     word_end,
 };
-use super::parser::{Close, Fail, Parser, R};
+use super::parser::{Close, Parser, R};
 use super::tree::Syn;
 
 /// What closes the construct a word sits in, which ends the word.
@@ -40,12 +40,16 @@ impl Parser<'_> {
     pub(super) fn word_from(&mut self, first: Syn, ctx: Ctx) -> R<Syn> {
         let mut pieces = vec![first];
         loop {
-            // bash reads an extglob group in any word; the extglob option
-            // only decides whether it may run, which the syntax check knows.
+            // With extglob on, bash reads a group in any word.
             let word = pieces
                 .last()
                 .is_some_and(|last| last.is("word") && last.end == self.i);
-            if self.peek() == b'(' && word && !ctx.conditional && self.at_extglob_group() {
+            if self.peek() == b'('
+                && word
+                && !ctx.conditional
+                && self.options.extglob
+                && self.at_extglob_group()
+            {
                 self.extglob_group(&mut pieces, "word")?;
                 continue;
             }
@@ -77,7 +81,7 @@ impl Parser<'_> {
         let mut run = self.i;
         loop {
             if self.eof() {
-                return Err(Fail::eof(self.s.len(), ')'));
+                return Err(self.matching(self.s.len(), ')'));
             }
             let at = self.i;
             let piece = match self.peek() {
@@ -268,7 +272,7 @@ impl Parser<'_> {
                 self.i = at + 1 + offset + 1;
                 Ok(Syn::leaf("raw_string", at, self.i))
             }
-            None => Err(Fail::eof(at, '\'')),
+            None => Err(self.matching(at, '\'')),
         }
     }
 
@@ -276,7 +280,7 @@ impl Parser<'_> {
     fn ansi_c_string(&mut self) -> R<Syn> {
         let at = self.i;
         let Some(end) = super::lex::ansi_c_end(self.s, at) else {
-            return Err(Fail::eof(at, '\''));
+            return Err(self.matching(at, '\''));
         };
         self.i = end;
         Ok(Syn::leaf("ansi_c_string", at, end))
@@ -308,7 +312,7 @@ impl Parser<'_> {
                 }
             }
             if self.eof() {
-                return Err(Fail::eof(open_at, '"'));
+                return Err(self.matching(open_at, '"'));
             }
             match self.peek() {
                 b'"' => {
@@ -364,7 +368,7 @@ impl Parser<'_> {
             b'(' if self.at(2) == b'(' => self.arithmetic_or_substitution().map(Some),
             b'(' => self.command_substitution().map(Some),
             b'[' => self.bracket_arithmetic().map(Some),
-            b'`' => self.dollar_backtick().map(Some),
+            b'`' => self.backtick().map(Some),
             byte if is_name(byte) || SPECIAL.contains(&byte) => Ok(self.simple_expansion()),
             _ => Ok(None),
         }
@@ -418,6 +422,7 @@ impl Parser<'_> {
     /// `$(...)` or `$(< file)`.
     pub(super) fn command_substitution(&mut self) -> R<Syn> {
         self.enter()?;
+        self.nest(b"$(")?;
         let open = self.expect("$(")?;
         let mut children = vec![open];
         let body = self.substituted(|parser| parser.substitution_body(Close::Paren));
@@ -427,14 +432,43 @@ impl Parser<'_> {
         Ok(Syn::node("command_substitution", children))
     }
 
+    /// Refuse a substitution nested `MAX_NESTING` deep at its `opener`.
+    fn nest(&self, opener: &[u8]) -> R<()> {
+        if self.nesting < super::parser::MAX_NESTING {
+            return Ok(());
+        }
+        let line = super::parser::line(&[b"syntax error near unexpected token `", opener, b"'"]);
+        Err(self.refusal(self.i, self.i + opener.len(), vec![line], false))
+    }
+
     /// `read` inside a `$(...)` or `<(...)`, where a backtick is text and
-    /// a newline reads only the heredocs opened inside.
+    /// a newline reads only the heredocs opened inside. Those still to read
+    /// at its close are noted with it and handed out, those its own
+    /// substitutions handed it first: their bodies follow the line.
     fn substituted<T>(&mut self, read: impl FnOnce(&mut Self) -> T) -> T {
         let saved = self.in_backtick;
         self.in_backtick = false;
         self.comsub += 1;
+        self.nesting += 1;
+        self.frames.push(super::parser::Frame::Substitution);
         let body = read(self);
+        self.frames.pop();
+        self.nesting -= 1;
+        let (mut unread, kept): (Vec<_>, Vec<_>) = std::mem::take(&mut self.pending)
+            .into_iter()
+            .partition(|heredoc| heredoc.depth >= self.comsub);
+        self.pending = kept;
+        unread.sort_by_key(|heredoc| !heredoc.carried);
+        if !unread.is_empty() {
+            let opened = unread.iter().map(|heredoc| heredoc.operator).collect();
+            self.closes.push((self.i, opened));
+        }
         self.comsub -= 1;
+        for mut heredoc in unread {
+            heredoc.depth = self.comsub;
+            heredoc.carried = true;
+            self.pending.push(heredoc);
+        }
         self.in_backtick = saved;
         body
     }
@@ -455,26 +489,36 @@ impl Parser<'_> {
         self.statements(close, None, false)
     }
 
-    /// `` `...` ``.
+    /// `` `...` `` or `` $`...` ``.
     /// bash reads a backtick substitution's text when it runs it: what
-    /// the grammar cannot read here is one raw word.
+    /// the grammar cannot read here, or a body that reads the body of a
+    /// heredoc opened before it or leaves one open, is one raw word.
     pub(super) fn backtick(&mut self) -> R<Syn> {
         if self.in_backtick {
             return self.fail(self.i);
         }
         self.enter()?;
-        let at = self.i;
+        let open = if self.peek() == b'$' { "$`" } else { "`" };
+        let at = self.i + open.len() - 1;
         let Some(end) = super::lex::quote_end(self.s, at, b'`') else {
-            return Err(Fail::eof(at, '`'));
+            return Err(self.matching(at, '`'));
         };
         let mark = self.mark();
-        let open = self.expect("`")?;
+        let (pending, reads) = (self.pending.len(), self.taken.len());
+        let open = self.expect(open)?;
         let mut children = vec![open];
         self.in_backtick = true;
         let body = self.statements(Close::Backtick, None, false);
         self.in_backtick = false;
+        let own = self.pending.len() == pending
+            && self
+                .taken
+                .iter()
+                .skip(reads)
+                .flatten()
+                .all(|(index, _)| *index >= pending);
         match body {
-            Ok(body) if self.i == end - 1 => children.extend(body),
+            Ok(body) if self.i == end - 1 && own => children.extend(body),
             _ => {
                 self.forget(mark);
                 if end - 1 > at + 1 {
@@ -488,20 +532,6 @@ impl Parser<'_> {
         Ok(Syn::node("command_substitution", children))
     }
 
-    /// `` $`...` ``.
-    fn dollar_backtick(&mut self) -> R<Syn> {
-        self.enter()?;
-        let open = self.expect("$`")?;
-        let mut children = vec![open];
-        self.in_backtick = true;
-        let body = self.statements(Close::Backtick, None, false);
-        self.in_backtick = false;
-        children.extend(body?);
-        children.push(self.expect("`")?);
-        self.leave();
-        Ok(Syn::node("command_substitution", children))
-    }
-
     /// `<(...)` or `>(...)`. bash reads `<((` to the parenthesis that
     /// matches its first and parses that text when it runs it: a body
     /// that does not parse to there is one raw word.
@@ -509,11 +539,9 @@ impl Parser<'_> {
         self.enter()?;
         let at = self.i;
         let op = if self.peek() == b'<' { "<(" } else { ">(" };
+        self.nest(op.as_bytes())?;
         let raw_end = if self.at(2) == b'(' {
-            Some(
-                super::lex::pair_end(self.s, at + 1, b'(', b')')
-                    .ok_or_else(|| Fail::eof(self.s.len(), ')'))?,
-            )
+            Some(self.scan_matched(at + 2, at, b'(', b')')? + 1)
         } else {
             None
         };
@@ -541,56 +569,44 @@ impl Parser<'_> {
     /// first command is a subshell. bash parses that text when it runs it,
     /// so a body that does not parse to there is one raw word.
     pub(super) fn arithmetic_or_substitution(&mut self) -> R<Syn> {
+        let start = self.i;
+        let end = self.scan_matched(self.joined(start + 2) + 1, start, b'(', b')')?;
+        if self.s.get(end + 1) != Some(&b')') {
+            self.scan_matched(start + 2, start, b'(', b')')?;
+        }
         if self.double_paren_end(self.i + 1).is_some() {
             return self.arithmetic_expansion();
         }
-        let at = self.i;
+        let end = self.scan_matched(start + 2, start, b'(', b')')? + 1;
         let mark = self.mark();
         let parsed = self.command_substitution();
-        let Some(end) = self.paren_end(at + 1) else {
-            parsed?;
-            return Err(Fail::eof(self.s.len(), ')'));
-        };
         if parsed.is_ok() && self.i == end {
             return parsed;
         }
         self.reset(mark);
-        self.check_raw(at + 2, end - 1, false)?;
+        self.check_raw(start + 2, end - 1, false)?;
         self.i = end;
         Ok(Syn::node(
             "command_substitution",
             vec![
-                Syn::token("$(", at, at + 2),
-                Syn::leaf("word", at + 2, end - 1),
+                Syn::token("$(", start, start + 2),
+                Syn::leaf("word", start + 2, end - 1),
                 Syn::token(")", end - 1, end),
             ],
         ))
     }
 
     /// Past the `))` closing the `((` at `at`, if the pair closes with
-    /// one.
+    /// one; each `$(...)` inside is read by the parser, so a `)` of a case
+    /// pattern there does not close the outer pair.
     pub(super) fn double_paren_end(&self, at: usize) -> Option<usize> {
-        let end = self.paren_end(at + 1)?;
-        (self.s.get(end) == Some(&b')')).then_some(end + 1)
-    }
-
-    /// Past the `)` closing the `(` at `at`; each `$(...)` and double-quoted
-    /// string inside is read by the parser, so a `)` of a case pattern
-    /// there does not close it.
-    fn paren_end(&self, at: usize) -> Option<usize> {
         let mut depth = 0usize;
-        let mut end = at;
+        let mut end = at + 2;
         while end < self.s.len() {
             match self.s[end] {
                 b'\\' => end += 1,
-                b'\'' | b'`' => {
+                b'\'' | b'"' | b'`' => {
                     end = super::lex::quote_end(self.s, end, self.s[end])?;
-                    continue;
-                }
-                b'"' => {
-                    let mut probe = self.probe(end);
-                    probe.string().ok()?;
-                    end = probe.i;
                     continue;
                 }
                 b'$' if self.s.get(end + 1) == Some(&b'\'') => {
@@ -606,11 +622,9 @@ impl Parser<'_> {
                     continue;
                 }
                 b'(' => depth += 1,
+                b')' if depth > 0 => depth -= 1,
                 b')' => {
-                    depth -= 1;
-                    if depth == 0 {
-                        return Some(end + 1);
-                    }
+                    return (self.s.get(end + 1) == Some(&b')')).then_some(end + 2);
                 }
                 _ => {}
             }
@@ -665,7 +679,9 @@ impl Parser<'_> {
             depth: self.depth,
             comsub: self.comsub,
             braces: self.braces,
-            ..Parser::new(self.s, self.work, self.aliases)
+            frames: self.frames.clone(),
+            nesting: self.nesting,
+            ..Parser::new(self.s, self.budget, self.options)
         }
     }
 }

@@ -37,6 +37,10 @@ const ALLOWED: Record<string, string> = {
     "only when the name resolves where it did before the caller's " +
     '`view.set` gated it; a write that re-aimed a `declare -n` ' +
     'reference marks its new target through `view.mark`',
+  'workspace/node/explain.ts::seeded':
+    "the line pass's preview of a command's own prefix, on a fork of the " +
+    'walked session that only policies read and nothing runs in; the run ' +
+    "seeds it again through `executeCommand`'s gated loop",
   'workspace/node/command_dispatch.ts::executeCommand':
     'the prefix-assignment loop calls `preSessionGate` explicitly ' +
     'before seeding, since `seedVar` is the ungated entry point',

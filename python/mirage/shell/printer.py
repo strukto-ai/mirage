@@ -16,7 +16,8 @@ import re
 from collections.abc import Sequence
 from functools import partial
 
-from mirage.shell.bytes import decode_text, encode_text
+from mirage._rs import ShellHeredoc
+from mirage.shell.bytes import decode_text
 from mirage.shell.escapes import decode_ansi_c
 from mirage.shell.helpers import (
     REDIRECT_NODE_TYPES,
@@ -27,8 +28,6 @@ from mirage.shell.helpers import (
     parse_function,
 )
 from mirage.shell.parse.constants import BASH_KEYWORDS
-from mirage.shell.parse.heredoc.reader import delimiter_end
-from mirage.shell.parse.heredoc.types import Heredoc
 from mirage.shell.parse.scope import ParseScope
 from mirage.shell.types import FunctionBody, TSNodeLike
 from mirage.shell.types import NodeType as NT
@@ -522,8 +521,8 @@ class _Printer:
             None,
         )
         document = getattr(node, "heredoc", None)
-        if document is not None or node.type == NT.HEREDOC_REDIRECT:
-            return self._heredoc(node, fd, document)
+        if document is not None:
+            return self._heredoc(fd, document)
         text = get_text(node)
         op = next(
             (
@@ -555,32 +554,14 @@ class _Printer:
             shown = ""
         return f"{shown}{op} {word}"
 
-    def _heredoc(
-        self, node: TSNodeLike, fd: str | None, document: Heredoc | None
-    ) -> str:
-        source = getattr(node, "source_text", node.text) or b""
-        text = decode_text(source)
-        operator = "<<-" if text.startswith("<<-") else "<<"
-        start = len(operator)
-        while start < len(text) and text[start] in " \t":
-            start += 1
-        end = delimiter_end(encode_text(text), start) or start
-        word = text[start:end]
-        if document is not None:
-            body = decode_text(document.body)
-            delimiter, quoted = document.delimiter, document.quoted
-        else:
-            body = get_text(
-                next(
-                    (c for c in node.children if c.type == "heredoc_body"),
-                    node,
-                )
-            )
-            delimiter = word.strip("'\"")
-            quoted = delimiter != word
-        self.deferred.append(body + delimiter + "\n")
+    def _heredoc(self, fd: str | None, document: ShellHeredoc) -> str:
+        delimiter = decode_text(document.delimiter)
+        self.deferred.append(decode_text(document.body) + delimiter + "\n")
         shown = fd if fd is not None and fd.lstrip("0") != "" else ""
-        return shown + operator + (single_quote(delimiter) if quoted else word)
+        operator = "<<-" if document.dash else "<<"
+        if document.quoted:
+            return shown + operator + single_quote(delimiter)
+        return shown + operator + decode_text(document.word)
 
     def word(self, node: TSNodeLike) -> str:
         """A word as typed, but for what bash rewrites: ``$'...'`` decoded

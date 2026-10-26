@@ -31,11 +31,6 @@ from mirage.shell.escapes import (
     unescape_dquoted,
     unescape_unquoted,
 )
-from mirage.shell.parse.heredoc import (
-    body_prefix,
-    clean_delimiter,
-    delimiter_quoted,
-)
 from mirage.shell.parse.program import ProgramNode
 from mirage.shell.types import (
     FunctionBody,
@@ -70,6 +65,17 @@ def same_line(root: TSNodeLike, before: TSNodeLike, after: TSNodeLike) -> bool:
     return b"\n" not in text[before.end_byte - base : after.start_byte - base]
 
 
+def tree_root(node: TSNodeLike) -> TSNodeLike:
+    """The root of the tree ``node`` belongs to.
+
+    Args:
+        node (TSNodeLike): any node of the tree.
+    """
+    while node.parent is not None:
+        node = node.parent
+    return node
+
+
 def read_row(node: TSNodeLike) -> int:
     """The row the shell began reading ``node``'s command on.
 
@@ -94,12 +100,12 @@ def read_row(node: TSNodeLike) -> int:
 def source_parts(node: TSNodeLike) -> Iterator[str | TSNodeLike]:
     """A node's children with the source text between them.
 
-    tree-sitter-bash's scanner consumes some text without giving it a
-    node: whitespace and newlines inside a double-quoted string, and
-    the whitespace or line continuation opening a ``${v:-word}``
-    operand. Only the node's own source still holds that text, so it
-    is sliced out between child extents rather than rebuilt from row
-    or byte counts, which lose tabs, newlines and escapes.
+    The parser consumes some text without giving it a node: whitespace
+    and newlines inside a double-quoted string, and the whitespace or
+    line continuation opening a ``${v:-word}`` operand. Only the node's
+    own source still holds that text, so it is sliced out between child
+    extents rather than rebuilt from row or byte counts, which lose
+    tabs, newlines and escapes.
 
     Args:
         node (TSNodeLike): the parent node.
@@ -139,7 +145,7 @@ def quoted_parts(node: TSNodeLike) -> Iterator[str | TSNodeLike]:
 def byte_offset(text: str, index: int) -> int:
     """Where an index into a node's text falls in the parser's offsets.
 
-    tree-sitter places a node by the bytes of the UTF-8 source, so an
+    The parser places a node by the bytes of the UTF-8 source, so an
     index counted in code points reads one place too early for every
     multibyte character before it. ``grep -ob`` reads the same answer
     for the same reason.
@@ -325,7 +331,7 @@ def get_pipeline_stages(
     """A pipeline's stages as bash reads them, whatever shape the parse
     gave them.
 
-    tree-sitter-bash lets a redirect close over everything to its left
+    The parser lets a redirect close over everything to its left
     up to the next pipe, so ``a && b | c < f | d`` parses as a pipeline
     whose first stage is ``redirected(a && b | c, < f)``, and ``! a < f
     | b`` as one whose first stage is ``redirected(! a, < f)``. Bash
@@ -392,9 +398,7 @@ def _pipeline_head(stage: TSNodeLike) -> PipelineStages:
     hoisted: tuple[Redirect, ...] = ()
     if stage.type == NT.REDIRECTED_STATEMENT:
         found, parsed = get_redirects(stage)
-        # A heredoc's `&&`/`||` tail wraps the whole statement, which only
-        # the statement's own arm folds in.
-        if found is None or any(r.continuation for r in parsed):
+        if found is None:
             return single
         body, hoisted = found, tuple(parsed)
     if body.type == NT.NEGATED_COMMAND:
@@ -494,7 +498,7 @@ def get_cfor_parts(
 def is_backgrounded(node: TSNodeLike) -> bool:
     """Whether a statement's terminator is ``&``.
 
-    tree-sitter puts the ``&`` beside the statement it ends, inside
+    The parser puts the ``&`` beside the statement it ends, inside
     whatever body holds them both, so a body read as named children
     (every extractor above) never sees it. Asking the statement about
     its own next sibling is what lets a loop body, an if/case arm, a
@@ -511,7 +515,6 @@ def is_backgrounded(node: TSNodeLike) -> bool:
 REDIRECT_NODE_TYPES = frozenset(
     {
         NT.FILE_REDIRECT,
-        NT.HEREDOC_REDIRECT,
         NT.HERESTRING_REDIRECT,
     }
 )
@@ -684,108 +687,6 @@ def _parse_herestring_redirect(child: TSNodeLike) -> Redirect:
     )
 
 
-def list_spine(
-    node: TSNodeLike,
-) -> tuple[TSNodeLike, tuple[tuple[str, TSNodeLike], ...]]:
-    """The leftmost operand of a ``&&``/``||`` list and the steps after it.
-
-    tree-sitter nests a list to the left (``a || b && c`` is
-    ``list(list(a || b) && c)``), which is bash's own associativity, so
-    walking the left spine yields the first operand and then each
-    operator with its right operand in the order bash applies them.
-
-    Args:
-        node (TSNodeLike): a ``list`` node, or any operand.
-
-    Returns:
-        tuple[TSNodeLike, tuple[tuple[str, TSNodeLike], ...]]:
-        the leftmost operand and the ``(operator, right)`` steps.
-    """
-    steps: list[tuple[str, TSNodeLike]] = []
-    while node.type == NT.LIST:
-        left, op, right = get_list_parts(node)
-        steps.append((op, right))
-        node = left
-    steps.reverse()
-    return node, tuple(steps)
-
-
-def heredoc_tail(
-    redirect_node: TSNodeLike,
-) -> tuple[TSNodeLike | None, tuple[tuple[str, TSNodeLike], ...]]:
-    """What the operator line carries past a heredoc's delimiter word.
-
-    Bash reads the body at the newline and then goes on with the line,
-    so ``cat <<EOF | tr a-z A-Z && echo done`` is the pipeline
-    ``cat | tr`` and then ``&& echo done``. tree-sitter-bash parses that
-    tail inside the heredoc_redirect node instead: a ``pipeline`` child
-    holding the stage the command feeds, and an ``&&`` or ``||`` token
-    followed by its right operand. The stage or operand it hands over
-    can itself be a ``list``, wrapping what bash would have bound to
-    the left (``false <<EOF || echo a && echo b`` is
-    ``(false || echo a) && echo b``, not ``false || (echo a && echo b)``),
-    so a list is unwound along its left spine: its first operand takes
-    the stage or operand slot, and the rest become further steps.
-
-    Args:
-        redirect_node (TSNodeLike): a ``heredoc_redirect`` node.
-
-    Returns:
-        tuple[TSNodeLike | None, tuple[tuple[str, Node], ...]]: the
-        node the command's stdout pipes into, or None, and the
-        ``(operator, right)`` steps applied to the statement after that,
-        in order.
-    """
-    pipe_node: TSNodeLike | None = None
-    steps: list[tuple[str, TSNodeLike]] = []
-    children = redirect_node.children
-    index = 0
-    while index < len(children):
-        child = children[index]
-        if child.type == NT.PIPELINE and pipe_node is None and not steps:
-            stages = child.named_children
-            if len(stages) == 1 and stages[0].type == NT.LIST:
-                pipe_node, spine = list_spine(stages[0])
-                steps.extend(spine)
-            else:
-                pipe_node = child
-        elif (
-            child.type in (NT.AND, NT.OR)
-            and index + 1 < len(children)
-            and children[index + 1].is_named
-        ):
-            right, spine = list_spine(children[index + 1])
-            steps.append((child.type, right))
-            steps.extend(spine)
-            index += 1
-        index += 1
-    return pipe_node, tuple(steps)
-
-
-def take_continuation(
-    redirects: list[Redirect],
-) -> tuple[tuple[str, TSNodeLike], ...]:
-    """Detach the ``&&``/``||`` steps a heredoc's operator line carried.
-
-    The steps apply to the whole redirected statement, so the executor
-    takes them off the redirects before running it and folds them in
-    around the result, the way a ``list`` node wraps its left operand.
-
-    Args:
-        redirects (list[Redirect]): the statement's redirects, whose
-            heredocs are left with no continuation.
-
-    Returns:
-        tuple[tuple[str, TSNodeLike], ...]: the steps, in order.
-    """
-    steps: list[tuple[str, TSNodeLike]] = []
-    for r in redirects:
-        if r.continuation:
-            steps.extend(r.continuation)
-            r.continuation = ()
-    return tuple(steps)
-
-
 def get_redirects(
     node: TSNodeLike,
 ) -> tuple[TSNodeLike | None, list[Redirect]]:
@@ -799,34 +700,7 @@ def get_redirects(
     command = nc[0] if nc and nc[0].type not in REDIRECT_NODE_TYPES else None
     redirects: list[Redirect] = []
     for child in nc if command is None else nc[1:]:
-        if child.type == NT.HEREDOC_REDIRECT:
-            body, _, quoted = get_heredoc_meta(child)
-            pipe_node, continuation = heredoc_tail(child)
-            redirects.append(
-                Redirect(
-                    fd=next(
-                        (
-                            int(get_text(c))
-                            for c in child.named_children
-                            if c.type == NT.FILE_DESCRIPTOR
-                        ),
-                        0,
-                    ),
-                    target=body,
-                    target_node=child,
-                    kind=RedirectKind.HEREDOC,
-                    pipeline=pipe_node,
-                    expand_vars=not quoted,
-                    continuation=continuation,
-                )
-            )
-            # A file redirect written before the heredoc body starts
-            # (`cat <<END > out.txt`) parses INSIDE the
-            # heredoc_redirect node; hoist it to a sibling.
-            for hc in child.named_children:
-                if hc.type == NT.FILE_REDIRECT:
-                    redirects.append(_parse_file_redirect(hc))
-        elif child.type == NT.FILE_REDIRECT:
+        if child.type == NT.FILE_REDIRECT:
             redirects.append(_parse_file_redirect(child))
         elif child.type == NT.HERESTRING_REDIRECT:
             redirects.append(_parse_herestring_redirect(child))
@@ -998,61 +872,6 @@ def get_negated_command(node: TSNodeLike) -> TSNodeLike | None:
     return node.named_children[0] if node.named_children else None
 
 
-def get_heredoc_parts(redirect_node: TSNodeLike) -> tuple[str, str]:
-    """Get (delimiter, body) from heredoc_redirect.
-
-    The body opens with the empty lines tree-sitter dropped before its
-    heredoc_body node (see body_prefix); bash keeps them.
-    """
-    delimiter = ""
-    body = ""
-    for c in redirect_node.named_children:
-        if c.type == NT.HEREDOC_START:
-            delimiter = get_text(c)
-        elif c.type == NT.HEREDOC_BODY:
-            body = get_text(c)
-    return delimiter, body_prefix(redirect_node) + body
-
-
-def get_heredoc_meta(redirect_node: TSNodeLike) -> tuple[str, bool, bool]:
-    """Get (body, dash, quoted) from heredoc_redirect.
-
-    - dash: True if operator was `<<-` (strip leading tabs from body lines)
-    - quoted: True if any part of the delimiter was quoted (no var
-      expansion), which a line continuation in it is not
-    """
-    delimiter, body = get_heredoc_parts(redirect_node)
-    quoted = delimiter_quoted(delimiter)
-    dash = False
-    for c in redirect_node.children:
-        if c.type == "<<-":
-            dash = True
-            break
-    if dash and body:
-        body = "\n".join(line.lstrip("\t") for line in body.split("\n"))
-    body = normalize_heredoc_body(body, delimiter)
-    return body, dash, quoted
-
-
-def normalize_heredoc_body(body: str, delimiter: str) -> str:
-    """Repair tree-sitter quirks on concatenated delimiters (<<EN'D').
-
-    tree-sitter sometimes fails to match the closing line against a
-    concatenated delimiter: the body swallows the delimiter line, or
-    loses its final newline to heredoc_end. Bash strips quoting from
-    the delimiter before matching and bodies always end with a newline.
-    """
-    clean = clean_delimiter(delimiter)
-    suffix = clean + "\n"
-    if body.endswith(suffix):
-        head = body[: -len(suffix)]
-        if not head or head.endswith("\n"):
-            body = head
-    if body and not body.endswith("\n"):
-        body += "\n"
-    return body
-
-
 def get_process_sub_direction(node: TSNodeLike) -> ProcessSubDirection | None:
     """Return the direction marker on a process_substitution node.
 
@@ -1128,7 +947,7 @@ def get_function_name(node: TSNodeLike) -> str:
 def get_function_redirects(node: TSNodeLike) -> list[TSNodeLike]:
     """The redirects a function definition carries: its own, and those of
     a statement it is the body of (``f() { ...; } >o 2>&1``, whose second
-    redirect tree-sitter hangs on a redirected_statement around it).
+    redirect the parser hangs on a redirected_statement around it).
 
     Args:
         node (TSNodeLike): the function_definition node.
@@ -1180,9 +999,7 @@ def get_function_source(node: TSNodeLike) -> str:
     parent = node.parent
     if parent is not None and parent.type == NT.REDIRECTED_STATEMENT:
         node = parent
-    root = node
-    while root.parent is not None:
-        root = root.parent
+    root = tree_root(node)
     if isinstance(node, ProgramNode):
         original = encode_text(node.program.original)
         offsets = node.program.offsets

@@ -307,9 +307,7 @@ it.each([
 
 it.each([
   // A substring offset or length is arithmetic: it draws, seeds, and
-  // assigns, and the second operand sees the first's write. Parenthesized
-  // because tree-sitter-bash emits an ERROR node for a bare `=` inside
-  // `${v:...}`; the parenthesized form is the same expression to bash.
+  // assigns, and the second operand sees the first's write.
   ['RANDOM=42; v=abcdefghij; echo ${v:RANDOM%10:1} $RANDOM', 'c 26794\n'],
   ['v=abcdef; echo ${v:(x=1):(y=x+1)} $x $y', 'bc 1 2\n'],
   ['RANDOM=1; v=abc; echo ${v:(RANDOM=42,1)} ${v:RANDOM%3}', 'bc abc\n'],

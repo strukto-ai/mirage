@@ -153,7 +153,7 @@ export async function expandArrayItems(
   return resolved.map((w) => wordText(w))
 }
 
-const SUBSCRIPT_LITERAL_TYPES: ReadonlySet<string> = new Set([NT.WORD, NT.NUMBER, NT.ERROR])
+const SUBSCRIPT_LITERAL_TYPES: ReadonlySet<string> = new Set([NT.WORD, NT.NUMBER])
 
 /**
  * The expanded subscript text of one `name[...]=` assignment.

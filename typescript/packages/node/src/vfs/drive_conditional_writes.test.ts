@@ -625,7 +625,7 @@ describe('conditional writes only Dropbox has', () => {
     })
     const missing =
       verb === 'cp'
-        ? "cp: cannot create regular file '/dbx/g'"
+        ? "cp: cannot open '/dbx/f' for reading"
         : "mv: cannot move '/dbx/f' to '/dbx/g'"
     expect(await run(ws, `${verb} /dbx/f /dbx/g`)).toEqual([
       1,

@@ -226,3 +226,15 @@ export function unescapeDquoted(text: string): string {
   out = out.replaceAll('\\\n', '')
   return out.replaceAll(NUL, '\\')
 }
+
+/**
+ * Whether an odd run of backslashes ends `text`, so its last backslash
+ * escapes what follows: the newline it continues, or the end of the input it
+ * quotes. An even run is escaped backslashes only. Mirrors Python's
+ * ends_escaped.
+ */
+export function endsEscaped(text: string): boolean {
+  let run = 0
+  while (run < text.length && text.charCodeAt(text.length - 1 - run) === 92) run += 1
+  return run % 2 === 1
+}

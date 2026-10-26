@@ -77,9 +77,7 @@ async function expandTarget(
       kind: r.kind,
       append: r.append,
       clobber: r.clobber,
-      pipeline: r.pipeline,
       expandVars: r.expandVars,
-      continuation: r.continuation,
     })
   }
   if (typeof r.target === 'number') return r
@@ -100,7 +98,6 @@ async function expandTarget(
         target: r.target,
         targetNode: r.targetNode,
         kind: RedirectKind.AMBIGUOUS,
-        pipeline: r.pipeline,
       })
     }
     targetScope = targets[0]
@@ -112,8 +109,6 @@ async function expandTarget(
     kind: r.kind,
     append: r.append,
     clobber: r.clobber,
-    pipeline: r.pipeline,
     expandVars: r.expandVars,
-    continuation: r.continuation,
   })
 }

@@ -11,7 +11,8 @@ from typing import Any
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "python"))
 
-from mirage.shell.parse import check_syntax  # noqa: E402
+from mirage.shell.bytes import decode_text  # noqa: E402
+from mirage.shell.parse import parse, syntax_refusal  # noqa: E402
 
 FIXTURE = REPO / "integ" / "fixtures" / "shell" / "bash_syntax.json"
 IMAGE = "debian:stable-slim"
@@ -175,13 +176,17 @@ def dumped(corpus: dict[str, Any]) -> str:
 
 
 def checked(line: str) -> tuple[int, str]:
-    """mirage's status and stderr for a line.
+    """mirage's status and stderr for a line, read with extglob off as
+    `bash -n` reads it.
 
     Args:
         line (str): the line.
     """
-    found = check_syntax(line)
-    return (0, "") if found is None else (found.status, found.message)
+    io = syntax_refusal(parse(line, extglob=False))
+    if io is None:
+        return (0, "")
+    assert isinstance(io.stderr, bytes)
+    return (io.exit_code, decode_text(io.stderr))
 
 
 def mutations(seed: str, rng: random.Random, count: int) -> set[str]:

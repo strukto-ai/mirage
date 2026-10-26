@@ -806,6 +806,41 @@
       }
     },
     {
+      "id": "cmdsub_nested_twelve_deep_in_expansions",
+      "seq": 1346149,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(unset x; echo ${x:-$(echo ${x:-$(echo ${x:-$(echo ${x:-$(echo ${x:-$(echo ${x:-$(echo ${x:-$(echo ${x:-$(echo ${x:-$(echo ${x:-$(echo ${x:-$(echo ${x:-$(echo ok)})})})})})})})})})})})})",
+      "expect": {
+        "exit": 0,
+        "stdout": "ok\n",
+        "stderr": ""
+      }
+    },
+    {
       "id": "cmdsub_dparen_reads_to_matching_paren",
       "seq": 18500007,
       "targets": [

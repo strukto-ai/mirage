@@ -12,11 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { IOResult } from '../io/types.ts'
 import { ManualClock } from '../utils/clock.ts'
 import { EVENT_COMMAND, LogEntry } from './log_entry.ts'
-import { Observer } from './observer.ts'
+import { Observer, logger } from './observer.ts'
 import { OpRecord } from './record.ts'
 import { RAMObserverStore } from './store.ts'
 
@@ -301,10 +301,22 @@ describe('a damaged history file', () => {
     await store.append(path, torn.slice(0, -1))
     await logCommand(o, 'second', 's1', NEW_YEAR + 1)
     await logCommand(o, 'third', 's1', NEW_YEAR + 2)
-    const shown = await o.sessionCommandEvents('s1')
-    expect(shown.map((e) => e.command)).toEqual(['first', 'third'])
-    const every = await o.commandEvents()
-    expect(every.map((e) => e.command)).toEqual(['first', 'third'])
+    const printed = vi.spyOn(console, 'debug')
+    const debug = vi.fn()
+    try {
+      const shown = await o.sessionCommandEvents('s1')
+      expect(shown.map((e) => e.command)).toEqual(['first', 'third'])
+      logger.debug = debug
+      const every = await o.commandEvents()
+      expect(every.map((e) => e.command)).toEqual(['first', 'third'])
+      expect(printed).not.toHaveBeenCalled()
+      expect(debug).toHaveBeenCalledWith(
+        expect.stringContaining(`skipping unparseable history line in ${path}`),
+      )
+    } finally {
+      delete logger.debug
+      printed.mockRestore()
+    }
   })
 
   it('keeps an entry whose command holds a line separator', async () => {

@@ -33,7 +33,6 @@ from mirage.shell.escapes import (
 )
 from mirage.shell.helpers import byte_offset, get_text, quoted_parts
 from mirage.shell.parameter import scan_parameter
-from mirage.shell.parse import parse
 from mirage.shell.types import NodeType as NT
 from mirage.shell.types import TSNodeLike
 from mirage.utils.glob_walk import mark_escaped_globs, mark_globs, unmark_globs
@@ -56,7 +55,7 @@ from mirage.workspace.session.shell_dirs import home_dir
 
 
 def _folded_whitespace(node: TSNodeLike) -> str:
-    """Whitespace tree-sitter folds into an expansion's opening token.
+    """Whitespace the parser folds into an expansion's opening token.
 
     Inside a double-quoted string, a run of whitespace between two
     expansions is not emitted as string content: it lands inside the
@@ -96,9 +95,9 @@ async def _expand_backtick_region(
         if not segment.command:
             parts.append(segment.text)
             continue
-        # Each pair is its own place on the line: the node holds every
-        # touching pair, so the span within it says which one runs,
-        # measured as the parser measures the node.
+        # The command is its own place on the line: the span within
+        # the node says where it stands, measured as the parser
+        # measures the node.
         io = await child_line(
             context,
             execute_fn,
@@ -146,7 +145,7 @@ async def child_line(
         execute_fn (Callable[..., Any]): the workspace's nested-line
             executor.
         text (str): the line the substitution holds.
-        node (Any): the tree-sitter node the substitution stands under.
+        node (Any): the parsed node the substitution stands under.
         call_stack (CallStack | None): the caller's frames.
         span (tuple[int, int] | None): the pair's byte span within the
             node, for a backtick region holding several.
@@ -166,16 +165,6 @@ async def child_line(
         sink=sink,
         call_stack=(call_stack or CallStack()).fork(paren=False),
     )
-
-
-def _find_first(node: TSNodeLike, ntype: str) -> TSNodeLike | None:
-    if node.type == ntype:
-        return node
-    for child in node.named_children:
-        found = _find_first(child, ntype)
-        if found is not None:
-            return found
-    return None
 
 
 async def expand_arith(
@@ -336,7 +325,7 @@ async def expand_node(
     call_stack: CallStack | None = None,
     view: SessionView | None = None,
 ) -> str:
-    """Expand a tree-sitter node to the string it stands for.
+    """Expand a parsed node to the string it stands for.
 
     Args:
         ts_node (TSNodeLike): the node to expand.
@@ -656,9 +645,8 @@ async def _substitution(
     )
     raw = decode_text(source)[len(prefix) :]
     if raw.startswith("`") and raw.endswith("`"):
-        # Backtick regions are re-lexed here rather than trusted from
-        # the grammar, which merges adjacent pairs (see
-        # split_backtick_region).
+        # A backtick body loses its backslashes before it is parsed, so
+        # it is lexed again here (see split_backtick_region).
         return await _expand_backtick_region(
             raw,
             context,
@@ -667,18 +655,6 @@ async def _substitution(
             len(encode_text(prefix)),
             call_stack,
         )
-    if raw.startswith("$((") and raw.endswith("))"):
-        # Inside heredoc bodies tree-sitter parses `$((expr))` as a
-        # command substitution wrapping a subshell; reparse in
-        # command context so it routes to the arithmetic branch.
-        sub = ts_node.named_children
-        if len(sub) == 1 and sub[0].type == NT.SUBSHELL:
-            reparsed = parse("echo " + raw)
-            arith = _find_first(reparsed, NT.ARITHMETIC_EXPANSION)
-            if arith is not None:
-                return await expand_node(
-                    arith, context, execute_fn, call_stack, view=view
-                )
     # The whole body goes to the evaluator: bash substitutes the
     # full statement list, and picking child nodes dropped every
     # statement after a `;` and every non-command statement

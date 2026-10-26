@@ -19,6 +19,7 @@ from mirage.context import reset_program_invocation, set_program_invocation
 from mirage.io.types import ByteSource
 from mirage.shell.bytes import encode_text
 from mirage.shell.join import shell_join
+from mirage.shell.variable import ShellVar
 from mirage.workspace.executor.builtins.env.constants import ENV_HELP_HINT
 from mirage.workspace.executor.builtins.shared import fail, ok
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
@@ -32,26 +33,17 @@ def _env_error(message: str) -> Result:
     return fail("env", f"{message}\n{ENV_HELP_HINT}", 125)
 
 
-async def handle_env(
-    execute_fn: Callable[..., Any],
-    args: list[str],
-    session: SessionState,
-    stdin: ByteSource | None = None,
-) -> Result:
-    """Run the ``env`` builtin (print environment or run a command).
-
-    Usage: ``env [-i] [-u NAME]... [NAME=VALUE]... [command [arg]...]``.
-    With no command it prints the (optionally modified) environment in
-    ``environ`` order, unsorted, terminated per entry by newline or NUL
-    (``-0``). With a command it runs it under the modified environment,
-    forwarding stdin, then restores the session environment. Missing
-    commands fail like GNU with the shell's own exit 127.
+def env_child(
+    args: list[str], session: SessionState
+) -> tuple[list[str], dict[str, str], bool, bool] | str:
+    """What ``env`` runs and the environment it runs it in, read off its
+    words: the command's words, the environment in ``environ`` order,
+    whether ``-i`` cleared it and whether ``-0`` was given; or the
+    message for words env refuses.
 
     Args:
-        execute_fn (Callable): shell evaluator for the inner command.
         args (list[str]): words after the ``env`` name.
-        session (SessionState): shell session state.
-        stdin (ByteSource | None): piped input forwarded to the command.
+        session (SessionState): the session env starts from.
     """
     ignore_env = False
     null = False
@@ -77,7 +69,7 @@ async def handle_env(
             continue
         if tok == "--unset":
             if i + 1 >= len(args):
-                return _env_error("env: option '--unset' requires an argument")
+                return "env: option '--unset' requires an argument"
             unset.append(args[i + 1])
             i += 2
             continue
@@ -86,7 +78,7 @@ async def handle_env(
             i += 1
             continue
         if tok.startswith("--"):
-            return _env_error(f"env: unrecognized option '{tok}'")
+            return f"env: unrecognized option '{tok}'"
         if tok.startswith("-") and len(tok) > 1:
             j = 1
             consumed_next = False
@@ -104,12 +96,10 @@ async def handle_env(
                         unset.append(args[i + 1])
                         consumed_next = True
                     else:
-                        return _env_error(
-                            "env: option requires an argument -- 'u'"
-                        )
+                        return "env: option requires an argument -- 'u'"
                     break
                 else:
-                    return _env_error(f"env: invalid option -- '{ch}'")
+                    return f"env: invalid option -- '{ch}'"
                 j += 1
             i += 2 if consumed_next else 1
             continue
@@ -122,8 +112,57 @@ async def handle_env(
         key, _, value = args[i].partition("=")
         base[key] = value
         i += 1
+    return args[i:], base, ignore_env, null
 
-    command = args[i:]
+
+def env_vars(
+    session: SessionState, base: dict[str, str]
+) -> dict[str, ShellVar]:
+    """The session's variables as ``env``'s command sees them.
+
+    Only the scalars are replaced: arrays were never part of the env
+    the old two-container store swapped, and bash does not put one in
+    a child's environment either. A still-unfetched managed entry is
+    a scalar in waiting, so it is replaced too: surviving the swap
+    would let the inner line fetch and read a name `-i` or `-u` just
+    cleared.
+
+    Args:
+        session (SessionState): the session env runs in.
+        base (dict[str, str]): the command's environment.
+    """
+    return {
+        name: var
+        for name, var in session.vars.items()
+        if not isinstance(var.value, str) and var.managed is None
+    } | vars_from_env(base)
+
+
+async def handle_env(
+    execute_fn: Callable[..., Any],
+    args: list[str],
+    session: SessionState,
+    stdin: ByteSource | None = None,
+) -> Result:
+    """Run the ``env`` builtin (print environment or run a command).
+
+    Usage: ``env [-i] [-u NAME]... [NAME=VALUE]... [command [arg]...]``.
+    With no command it prints the (optionally modified) environment in
+    ``environ`` order, unsorted, terminated per entry by newline or NUL
+    (``-0``). With a command it runs it under the modified environment,
+    forwarding stdin, then restores the session environment. Missing
+    commands fail like GNU with the shell's own exit 127.
+
+    Args:
+        execute_fn (Callable): shell evaluator for the inner command.
+        args (list[str]): words after the ``env`` name.
+        session (SessionState): shell session state.
+        stdin (ByteSource | None): piped input forwarded to the command.
+    """
+    child = env_child(args, session)
+    if isinstance(child, str):
+        return _env_error(child)
+    command, base, ignore_env, null = child
     if command and null:
         return _env_error("env: cannot specify --null (-0) with command")
     if not command:
@@ -131,19 +170,8 @@ async def handle_env(
         out = encode_text("".join(f"{k}={v}{sep}" for k, v in base.items()))
         return ok("env", out)
 
-    # `env NAME=v cmd` runs the command with a replaced environment.
-    # Only the scalars are replaced: arrays were never part of the env
-    # the old two-container store swapped, and bash does not put one in
-    # a child's environment either. A still-unfetched managed entry is
-    # a scalar in waiting, so it is replaced too: surviving the swap
-    # would let the inner line fetch and read a name `-i` or `-u` just
-    # cleared.
     saved = session.vars
-    session.vars = {
-        name: var
-        for name, var in saved.items()
-        if not isinstance(var.value, str) and var.managed is None
-    } | vars_from_env(base)
+    session.vars = env_vars(session, base)
     # The command gets its own copy of the functions `export -f` marked,
     # empty under `-i`: they are part of bash's environment, as its
     # `BASH_FUNC_NAME%%` entries.

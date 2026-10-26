@@ -19,7 +19,9 @@ import { LanguageRuntime } from '../../runtime/language.ts'
 import type { RunResult } from '../../runtime/types.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { MountMode } from '../../types.ts'
+import { parse, syntaxRefusal } from '../../shell/parse/parse.ts'
 import { Workspace } from '../workspace/workspace.ts'
+import { parserAliases } from './command_dispatch.ts'
 
 const DEC = new TextDecoder()
 
@@ -115,3 +117,43 @@ describe('a prefix assignment', () => {
     },
   )
 })
+
+// Pinned against bash 5.2.37: a name stays reserved only inside the text its
+// alias put there, a trailing blank's chained one included. Spans are in the
+// line as typed, which a continuation shifts.
+it.each([
+  ['echo F; fi', [['fi', 0, 10]], 'fi'],
+  ['echo F; fi', [['fi', 0, 7]], null],
+  [
+    'echo C; fi echo F',
+    [
+      ['c', 0, 11],
+      ['fi', 11, 17],
+    ],
+    null,
+  ],
+  [
+    'echo C; echo F; fi',
+    [
+      ['c', 0, 8],
+      ['fi', 8, 18],
+    ],
+    'fi',
+  ],
+  ['echo F \\\n; fi', [['fi', 0, 13]], 'fi'],
+  ['echo F \\\n; fi', [['fi', 0, 10]], null],
+] as [string, [string, number, number][], string | null][])(
+  'reads %j with alias text %j as %j',
+  (line, spans, word) => {
+    const owners = Array.from(
+      { length: line.length },
+      (_, at) =>
+        new Set(spans.filter(([, start, end]) => start <= at && at < end).map(([name]) => name)),
+    )
+    const aliases = parserAliases(line, new Set(spans.map(([name]) => name)), owners)
+    const io = syntaxRefusal(parse(line, aliases))
+    expect(io === null ? null : new TextDecoder().decode(io.stderr as Uint8Array)).toBe(
+      word === null ? null : `mirage: syntax error near '${word}'\n`,
+    )
+  },
+)

@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import os
+
 import pytest
 
 from mirage.accessor.disk import DiskAccessor
@@ -71,6 +73,43 @@ async def test_copy_blames_the_source_when_it_is_the_missing_operand(accessor):
             PathSpec.from_str_path("/dst"),
         )
     assert excinfo.value.filename == "/nope"
+
+
+@pytest.mark.skipif(
+    os.geteuid() == 0, reason="root ignores the permission bits under test"
+)
+@pytest.mark.asyncio
+async def test_copy_blames_the_source_when_it_is_unreadable(accessor):
+    (accessor.root / "src").chmod(0)
+    try:
+        with pytest.raises(PermissionError) as excinfo:
+            await copy(
+                accessor,
+                PathSpec.from_str_path("/src"),
+                PathSpec.from_str_path("/dst"),
+            )
+    finally:
+        (accessor.root / "src").chmod(0o644)
+    assert excinfo.value.filename == "/src"
+
+
+@pytest.mark.skipif(
+    os.geteuid() == 0, reason="root ignores the permission bits under test"
+)
+@pytest.mark.asyncio
+async def test_copy_blames_the_destination_when_it_is_unwritable(accessor):
+    (accessor.root / "ro").mkdir()
+    (accessor.root / "ro").chmod(0o555)
+    try:
+        with pytest.raises(PermissionError) as excinfo:
+            await copy(
+                accessor,
+                PathSpec.from_str_path("/src"),
+                PathSpec.from_str_path("/ro/dst"),
+            )
+    finally:
+        (accessor.root / "ro").chmod(0o755)
+    assert excinfo.value.filename == "/ro/dst"
 
 
 @pytest.mark.asyncio

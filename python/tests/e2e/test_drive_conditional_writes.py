@@ -670,7 +670,7 @@ async def test_a_dropbox_source_gone_before_the_retry_is_named(
     await _run(ws, "cat /dbx/g")
     drive.fake.hooks["delete"] = lambda: drive.drop("f")
     missing = {
-        "cp": "cp: cannot create regular file '/dbx/g'",
+        "cp": "cp: cannot open '/dbx/f' for reading",
         "mv": "mv: cannot move '/dbx/f' to '/dbx/g'",
     }[verb]
     assert await _run(ws, f"{verb} /dbx/f /dbx/g") == (

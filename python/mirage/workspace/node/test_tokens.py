@@ -39,11 +39,11 @@ PATTERN_OPS = frozenset({"=", "==", "!=", "=~"})
 def _negative_number_child(node: TSNodeLike) -> TSNodeLike | None:
     """Detect a unary_expression that is really a negative number word.
 
-    tree-sitter parses ``-1`` inside a test as unary_expression with a
+    The parser reads ``-1`` inside a test as a unary_expression with a
     bare ``-`` token; the flat argv needs it back as one operand.
 
     Args:
-        node: tree-sitter container node.
+        node: the container node.
     """
     if node.type != NT.UNARY_EXPRESSION:
         return None
@@ -94,7 +94,7 @@ def _cond_into(node: TSNodeLike, out: list[ExprToken]) -> None:
     """Append the tokens of a ``[[ ]]`` node to ``out`` in source order.
 
     Args:
-        node (TSNodeLike): tree-sitter node to flatten.
+        node (TSNodeLike): parsed node to flatten.
         out (list[ExprToken]): accumulator.
     """
     for child in node.children:
@@ -115,11 +115,9 @@ def _cond_into(node: TSNodeLike, out: list[ExprToken]) -> None:
 def flat_tokens(node: TSNodeLike) -> list[ExprToken]:
     """The tokens of a ``[ ]`` node in source order, the words ``[`` is
     given once each operand is expanded: every reader of the test reads
-    these. tree-sitter nests ``-a``/``-o`` chains unpredictably, so the
-    shape is discarded and test's own arity rules read the words. A
-    statement separator inside an ERROR recovery node means tree-sitter
-    swallowed the rest of the line into the test, so the tokens end
-    there.
+    these. The parser nests ``-a``/``-o`` chains by its own precedence,
+    so the shape is discarded and test's own arity rules read the
+    words.
 
     Args:
         node (TSNodeLike): the test_command node opened with ``[``.
@@ -129,23 +127,16 @@ def flat_tokens(node: TSNodeLike) -> list[ExprToken]:
     return out
 
 
-def _flat_into(node: TSNodeLike, out: list[ExprToken]) -> bool:
-    """Append the flat tokens of one test-expression node to ``out``;
-    False once a statement separator ends them.
+def _flat_into(node: TSNodeLike, out: list[ExprToken]) -> None:
+    """Append the flat tokens of one test-expression node to ``out``.
 
     Args:
-        node (TSNodeLike): tree-sitter node to serialize.
+        node (TSNodeLike): parsed node to serialize.
         out (list[ExprToken]): accumulator.
     """
     for child in node.children:
         ctype = child.type
         if ctype in _BRACKETS:
-            continue
-        if ctype == NT.ERROR:
-            if any(not g.is_named and g.type == ";" for g in child.children):
-                return False
-            if not _flat_into(child, out):
-                return False
             continue
         if not child.is_named:
             if ctype not in _FLAT_SKIP_TOKENS:
@@ -156,14 +147,12 @@ def _flat_into(node: TSNodeLike, out: list[ExprToken]) -> bool:
             if negative is not None:
                 out.append(ExprToken(operand=negative, negative=True))
                 continue
-            if not _flat_into(child, out):
-                return False
+            _flat_into(child, out)
             continue
         if ctype == NT.TEST_OPERATOR:
             out.append(ExprToken(op=get_text(child)))
             continue
         out.append(ExprToken(operand=child))
-    return True
 
 
 class CondParser:

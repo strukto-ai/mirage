@@ -43,7 +43,7 @@ def node(text: str) -> FakeNode:
 def bg(text: str) -> FakeNode:
     """A body statement whose terminator is ``&``.
 
-    Its text is bytes, as a tree-sitter node's is, because the job
+    Its text is bytes, as a parsed node's is, because the job
     launcher names the job through ``get_text``.
     """
     return FakeNode(

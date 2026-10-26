@@ -42,17 +42,19 @@ import {
 } from '../../shell/helpers.ts'
 import { opaqueReads, referencedNames } from '../../shell/parse/index.ts'
 import { NodeType, type TSNodeLike } from '../../shell/types.ts'
+import { VarAttr } from '../../shell/variable.ts'
 import { PathSpec, type Refusal } from '../../types.ts'
 import { isGlob } from '../../utils/hidden.ts'
 import { resolvePath } from '../../utils/path.ts'
 import { commandWords } from '../executor/command/routing.ts'
+import { envChild, envVars } from '../executor/builtins/env/env.ts'
 import { classifyBarePath } from '../expand/classify/path.ts'
 import { lineFlags, readsSubtrees } from '../lookup/index.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
 import type { SessionState } from '../session/session.ts'
 import { homeDir } from '../session/shell_dirs.ts'
-import { envSnapshot } from '../session/state.ts'
+import { envIsReadonly, envSnapshot, seedVar, setAttr } from '../session/state.ts'
 import { sessionAccess } from '../../context/session_context.ts'
 import {
   classifiedWords,
@@ -538,12 +540,22 @@ async function* judgeWords(
     ctx,
     session,
   }
+  // env's command runs in the environment env builds for it, and a nested
+  // shell's line in a new shell started from this one.
+  const child = name === 'env' && inners.length > 0 ? envChild(args, session) : null
+  let innerSession = session
+  if (child !== null && typeof child !== 'string') {
+    innerSession = session.fork()
+    innerSession.vars = envVars(session, child[1])
+  } else if ((name === 'sh' || name === 'bash') && inners.length > 0) {
+    innerSession = session.newShell()
+  }
   for (const inner of inners) {
     if (!innerReadable(inner)) continue
     if (inner.line !== null) {
       yield* judgeLine(
         reparse(inner.line),
-        session,
+        innerSession,
         registry,
         namespace,
         reparse,
@@ -560,7 +572,7 @@ async function* judgeWords(
       yield* judgeWords(
         inner.argv,
         within,
-        session,
+        innerSession,
         registry,
         namespace,
         reparse,
@@ -582,6 +594,34 @@ async function* judgeWords(
 function wordsOf(node: TSNodeLike, home: string | null): Word[] {
   const [, parts] = splitEnvPrefix(getParts(node))
   return parts.map((part) => readWord(part, home))
+}
+
+/**
+ * The session a command runs in: `session` with the command's own
+ * `NAME=value` prefix exported, as the executor seeds it before the
+ * command's gate, so `preExecute` reads the environment `preCommand`
+ * will. A value only the run expands is read as typed, as the command's
+ * words are, and a readonly name is left as it is.
+ */
+function seeded(node: TSNodeLike, session: SessionState, home: string | null): SessionState {
+  const [assigned] = splitEnvPrefix(getParts(node))
+  if (assigned.length === 0) return session
+  const forked = session.fork()
+  for (const part of assigned) {
+    const text = getText(part)
+    const eq = text.indexOf('=')
+    if (eq < 0) continue
+    const key = text.slice(0, eq)
+    if (envIsReadonly(forked, key, false)) continue
+    const value = part.namedChildren.find((c) => c.type !== NodeType.VARIABLE_NAME)
+    seedVar(
+      forked,
+      key,
+      value !== undefined ? wordValue(readWord(value, home)) : text.slice(eq + 1),
+    )
+    setAttr(forked, key, VarAttr.Export)
+  }
+  return forked
 }
 
 /**
@@ -669,10 +709,10 @@ function* walkNode(
         words,
         redirects: statementRedirects(node, home),
         stdin: statementStdin(node),
-        session,
+        session: seeded(node, session, home),
         occurrence: occurrenceIn(node, frame),
         lost,
-        elsewhere,
+        elsewhere: elsewhere.map((e) => seeded(node, e, home)),
       }
       walked = afterCd(words, session, lost, elsewhere)
     }
@@ -689,9 +729,9 @@ function* walkNode(
     // here exactly where that line will place them.
     const segments = segmentFrames(node, frame)
     if (segments.length > 0) {
-      // A backtick region is read as the evaluator runs it: one line per
-      // pair, parsed on its own, because tree-sitter lexes touching pairs
-      // as one node whose subtree is not what runs.
+      // A backtick region is read as the evaluator runs it: its body
+      // parsed again once its backslashes are gone, because the node's
+      // subtree is not what runs.
       for (const inner of segments) {
         yield* walkSubstitution(reparse(inner.text), session, home, inner, reparse, lost, elsewhere)
       }
