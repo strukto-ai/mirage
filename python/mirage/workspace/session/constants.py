@@ -67,6 +67,7 @@ INHERITED_FIELDS: tuple[str, ...] = (
     "tty",
     "job_output",
     "job_waits",
+    "job_table",
     "descriptors",
     "exec_stdout",
     "exec_stdout_append",

@@ -231,6 +231,16 @@ describe('MirageSandboxClient', () => {
     expect(outputOf(finished)).toBe('done\n')
   })
 
+  it('runs a command beside a background one', async () => {
+    const session = await new MirageSandboxClient(mkWs()).create()
+    const started = await session.exec({ cmd: 'sleep 30', yieldTimeMs: 100 })
+    expect(started.sessionId).toBeDefined()
+    const quick = await session.exec({ cmd: 'echo fast' })
+    expect(quick.exitCode).toBe(0)
+    expect(quick.output).toBe('fast\n')
+    await session.close()
+  })
+
   it('answers a quick command at once with both streams', async () => {
     const session = await new MirageSandboxClient(mkWs()).create()
     const result = await session.exec({ cmd: 'echo out; echo err >&2' })

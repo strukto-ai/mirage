@@ -49,6 +49,7 @@ import { PermissionsPolicy } from '../../policy/builtin/permissions.ts'
 import { PlacementPolicy } from '../../policy/builtin/placement.ts'
 import { PolicyError } from '../../policy/errors.ts'
 import { Decisions } from '../../policy/decisions.ts'
+import { Terminal } from '../../shell/console/terminal.ts'
 import { JobTable } from '../../shell/job_table/index.ts'
 import { buildFileCache } from './cache.ts'
 import { DriftQueue, installDriftState } from '../snapshot/drift.ts'
@@ -148,6 +149,9 @@ import { normDir, rstripSlash } from '../../utils/slash.ts'
 import type { EventRuntime } from '../../events/base.ts'
 import { resolveControlStores } from './build.ts'
 import { executeLine, type ExecuteEnv } from './execute.ts'
+import { forkForCall } from './utils.ts'
+import { recordStatus } from '../executor/statement.ts'
+import { newStatusWriter, runWithLineAbort } from '../abort.ts'
 import { fillEnv } from './fill.ts'
 import { closeWorkspace } from './lifecycle.ts'
 import { WorkspaceMeta } from './meta.ts'
@@ -1911,12 +1915,82 @@ export class Workspace {
     // A line admitted before close may still recurse through eval/source/$(),
     // but no continuation can start after teardown has finished.
     if (this.closed) throw new Error('Workspace is closed')
+    if (
+      options.handed === undefined &&
+      options.session === undefined &&
+      (options.cwd !== undefined || options.env !== undefined)
+    ) {
+      return this.runBeside(command, options)
+    }
     return this.serializeLine(
       options.sessionId,
       options.signal,
       () => executeLine(this.executeEnv(), command, options),
       options.session,
     )
+  }
+
+  /**
+   * Run a line given a cwd or env of its own as a subshell of the session,
+   * beside the session's other lines rather than after them.
+   *
+   * Beside them on the workspace's event loop, not in another OS process:
+   * each line is a task that hands the loop over whenever it waits, so an
+   * agent's quick line runs while its long one waits on its runtime:
+   *
+   *     python3 train.py  [running ==========================] done
+   *     nvidia-smi          [runs]
+   *
+   * As `( ... )` does, it runs on a fork of the session, so what it changes
+   * stays on the fork; its jobs are its own, which its `wait` waits on, a
+   * callback fired in it included; it has its own entry in the workspace's
+   * process table (`ps`, `kill`); and its status is the session's `$?` once
+   * it ends. It writes to a terminal of its own, as a typed line does to its
+   * session's: it answers with what waited on the session's terminal first,
+   * then with what it and its jobs write, and once it ends, what its jobs
+   * still write goes on to the session's terminal for the next line. A line
+   * nested in one of the session's (a host callback fired mid-line)
+   * continues in that line instead, as `serializeLine` runs it.
+   *
+   * @param command the line.
+   * @param options the caller's options, with the `cwd` or `env`.
+   */
+  private async runBeside(command: string, options: ExecuteOptions): Promise<ExecuteResult> {
+    const ambient = asyncContextIsolatesTasks ? getCurrentSessionFor(this.sessionManager) : null
+    if (
+      ambient !== null &&
+      (options.sessionId === undefined || options.sessionId === ambient.sessionId)
+    ) {
+      return executeLine(this.executeEnv(), command, options)
+    }
+    await abortable(this.ensureSessionsLoaded(), options.signal)
+    if (this.isShuttingDown()) throw new Error('Workspace is closed')
+    const source = this.sessionManager.get(options.sessionId ?? this.sessionManager.defaultId)
+    const session = forkForCall(source, options.cwd, options.env)
+    session.processId = null
+    session.jobTable = this.jobTable.child()
+    session.tty = new Terminal()
+    session.tty.chunks = source.tty.chunks
+    source.tty.chunks = []
+    let result: ExecuteResult
+    try {
+      result = await executeLine(this.executeEnv(), command, {
+        ...options,
+        session,
+        tty: session.tty,
+      })
+    } finally {
+      await session.tty.attach(source.tty.jobs)
+    }
+    // Stamped in a frame of its own, so the status is never credited to a
+    // line still waiting on the session: where tasks share one frame stack
+    // (a browser) that line's frame is live here too, and its abort would
+    // put back what it found over this status.
+    await runWithLineAbort(options.signal, [source], newStatusWriter(), () => {
+      recordStatus(source, result.exitCode)
+      return Promise.resolve()
+    })
+    return result
   }
 
   /**

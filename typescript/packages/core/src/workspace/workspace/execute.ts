@@ -318,7 +318,7 @@ async function runLine(
   // A typed line writes to its session's terminal, and so do the jobs it
   // starts, as they write; the line answers with whatever reached the
   // terminal while it ran, a job's output from before it first.
-  const tty = options.session === undefined && !inPlace ? targetSession.tty : null
+  const tty = options.tty ?? (options.session === undefined && !inPlace ? targetSession.tty : null)
   const lineOptions: ExecuteOptions = {
     ...options,
     executionScope,
@@ -413,6 +413,9 @@ async function runPreparedLine(
   frame: LineFrame,
   argv?: readonly string[],
 ): Promise<ExecuteResult> {
+  if (options.jobTable === undefined && targetSession.jobTable !== null) {
+    options = { ...options, jobTable: targetSession.jobTable }
+  }
   const stdin = options.stdin ?? null
   frame.statusBefore = snapshotStatus(targetSession)
   // The line runs as its own fork of the session, and everything that

@@ -18,6 +18,7 @@ import errno
 import logging
 import shutil
 import tempfile
+from collections import deque
 from collections.abc import (
     AsyncIterator,
     Awaitable,
@@ -112,7 +113,7 @@ from mirage.secrets.types import ResolvedSource
 from mirage.shell import parse
 from mirage.shell.bytes import decode_text
 from mirage.shell.call_stack import CallStack
-from mirage.shell.console import Channel, JobConsole
+from mirage.shell.console import Channel, JobConsole, Terminal
 from mirage.shell.constants import BIN_PREFIX
 from mirage.shell.job_table import ConsoleFactory, JobTable
 from mirage.shell.literal import literal_tree
@@ -145,7 +146,10 @@ from mirage.workspace.dispatcher.dispatcher import Dispatcher
 from mirage.workspace.documentation.documents import Documents
 from mirage.workspace.execution import ExecutionScope
 from mirage.workspace.executor.builtins.alias.alias import expanding_aliases
-from mirage.workspace.executor.statement import restore_status
+from mirage.workspace.executor.statement import (
+    record_status,
+    restore_status,
+)
 from mirage.workspace.expand.classify.path import classify_bare_path
 from mirage.workspace.expand.globs import GlobOptions, resolve_globs
 from mirage.workspace.files import Files, WorkspaceFiles
@@ -231,6 +235,7 @@ from mirage.workspace.workspace.mounts import (
 )
 from mirage.workspace.workspace.mounts import unmount as unmount_prefix
 from mirage.workspace.workspace.types import VFSMount
+from mirage.workspace.workspace.utils import fork_for_call
 
 logger = logging.getLogger(__name__)
 T = TypeVar("T")
@@ -2700,6 +2705,72 @@ class Workspace:
                 raise RuntimeError("Workspace is closed")
             return await run()
 
+    async def _run_beside(
+        self,
+        session_id: str | None,
+        cwd: str | None,
+        env: dict[str, str] | None,
+        run: Callable[..., Awaitable[IOResult]],
+    ) -> tuple[IOResult, SessionState | None]:
+        """Run a line given a cwd or env of its own as a subshell of the
+        session, beside the session's other lines rather than after them.
+
+        Beside them on the workspace's loop, not in another OS process:
+        each line is a task that hands the loop over whenever it waits,
+        so an agent's quick line runs while its long one waits on its
+        runtime::
+
+            python3 train.py  [running ==========================] done
+            nvidia-smi          [runs]
+
+        As ``( ... )`` does, it runs on a fork of the session, so what it
+        changes stays on the fork; its jobs are its own, which its
+        ``wait`` waits on, a callback fired in it included; it has its
+        own entry in the workspace's process table (``ps``, ``kill``);
+        and its status is the session's ``$?`` once it ends, which the
+        caller stamps after the last of its output is delivered. It
+        writes to a terminal of its own, as a typed line does to its
+        session's: it answers with what waited on the session's terminal
+        first, then with what it and its jobs write, and once it ends,
+        what its jobs still write goes on to the session's terminal for
+        the next line. A line nested in one of the session's (a callback
+        fired mid-line) continues in that line instead, as
+        ``_serialize_line`` runs it.
+
+        Args:
+            session_id (str | None): the session the caller named, or
+                None for the default.
+            cwd (str | None): the line's own working directory.
+            env (dict[str, str] | None): the variables it sets for itself.
+            run (Callable[..., Awaitable[IOResult]]): the line, which
+                takes the terminal it writes to.
+
+        Returns:
+            tuple[IOResult, SessionState | None]: the line's result, and
+                the session whose ``$?`` its status becomes; None for a
+                nested line.
+        """
+        ambient = get_current_session_for(self._session_mgr)
+        if ambient is not None and session_id in (None, ambient.session_id):
+            return await run(), None
+        await self.ensure_sessions_loaded()
+        if self._shutting_down:
+            raise RuntimeError("Workspace is closed")
+        source = self._session_mgr.get(
+            session_id or self._session_mgr.default_id
+        )
+        session = fork_for_call(source, cwd, env)
+        session.process_id = None
+        session.job_table = self.job_table.child()
+        session.tty = Terminal()
+        session.tty.chunks, source.tty.chunks = source.tty.chunks, deque()
+        token = set_current_session(session, self._session_mgr)
+        try:
+            return await run(tty=session.tty), source
+        finally:
+            reset_current_session(token)
+            await session.tty.attach(source.tty.jobs)
+
     @overload
     async def shell(
         self,
@@ -2796,13 +2867,15 @@ class Workspace:
             session_id: Session whose persistent state hosts the command.
             stdin: Optional stdin payload (bytes or async byte iterator).
             cwd: Per-call working directory override. When provided, the
-                command runs in an ephemeral session clone (bash subshell
-                semantics): the persistent session's cwd is unchanged and
-                any `cd` inside the command does not leak.
+                command runs in a subshell of its own (an ephemeral clone
+                of the session), beside the session's other lines rather
+                than after them: the persistent session's cwd is
+                unchanged, any `cd` inside the command does not leak, and
+                its jobs are its own.
             env: Per-call environment overrides layered on top of the
-                session's env. Like cwd, these apply only to an ephemeral
-                clone, so `export` inside the command does not leak back
-                to the persistent session.
+                session's env. Like cwd, these run the command in a
+                subshell of its own, so `export` inside the command does
+                not leak back to the persistent session.
             cancel: Optional asyncio.Event used to abort execution
                 mid-flight. The whole line runs as one task, so setting
                 the event cancels it at whatever await it is in; the task
@@ -2971,30 +3044,40 @@ class Workspace:
                 else set_current_session(session, self._session_mgr)
             )
             try:
-                result = await self._serialize_line(
+                run = partial(
+                    execute_line,
+                    self._execute_env(),
+                    command,
                     session_id,
-                    partial(
-                        execute_line,
-                        self._execute_env(),
-                        command,
-                        session_id,
-                        stdin,
-                        cwd,
-                        env,
-                        cancel,
-                        record,
-                        runtime,
-                        routing_decision,
-                        handed,
-                        frame,
-                        sink=sink,
-                        call_stack=call_stack,
-                        execution_scope=execution_scope,
-                        job_table=job_table,
-                    ),
+                    stdin,
+                    cwd,
+                    env,
+                    cancel,
+                    record,
+                    runtime,
+                    routing_decision,
+                    handed,
+                    frame,
+                    sink=sink,
+                    call_stack=call_stack,
+                    execution_scope=execution_scope,
+                    job_table=job_table,
                 )
+                source = None
+                if (
+                    session is None
+                    and handed is None
+                    and (cwd is not None or env is not None)
+                ):
+                    result, source = await self._run_beside(
+                        session_id, cwd, env, run
+                    )
+                else:
+                    result = await self._serialize_line(session_id, run)
                 if sink is not None and isinstance(result, IOResult):
                     await drain_to_sink(sink, result)
+                if source is not None:
+                    record_status(source, result.exit_code)
                 return result
             finally:
                 if bound is not None:
