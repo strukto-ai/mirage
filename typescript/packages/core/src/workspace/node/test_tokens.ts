@@ -90,13 +90,14 @@ function condInto(node: TSNodeLike, out: ExprToken[]): void {
   for (const child of node.children) {
     const ctype = child.type
     if (ctype === '[[' || ctype === ']]') continue
-    if (child.isNamed !== true) {
+    if (child.isNamed !== true && ctype !== '$') {
       out.push({ op: ctype, operand: null, negative: false })
     } else if (ctype === NT.TEST_OPERATOR) {
       out.push({ op: child.text, operand: null, negative: false })
     } else if (CONTAINER_TYPES.has(ctype)) {
       condInto(child, out)
     } else {
+      // A lone `$` is the parser's anonymous token, and a word.
       out.push({ op: null, operand: child, negative: false })
     }
   }

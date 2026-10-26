@@ -14,11 +14,10 @@
 
 from functools import partial
 
-from mirage.rs.regex import posix_escape
 from mirage.shell.call_stack import CallStack
 from mirage.shell.types import TSNodeLike
 from mirage.types import PathSpec
-from mirage.utils.glob_walk import escape_glob, unmark_globs
+from mirage.utils.glob_walk import unmark_globs
 from mirage.view.types import SessionView
 from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.executor.builtins.condition.types import (
@@ -34,7 +33,7 @@ from mirage.workspace.executor.builtins.condition.types import (
 from mirage.workspace.expand import expand_node
 from mirage.workspace.expand.fields import split_fields
 from mirage.workspace.expand.node import expand_chunks
-from mirage.workspace.expand.pattern import expand_pattern
+from mirage.workspace.expand.pattern import expand_pattern, expand_regex
 from mirage.workspace.expand.types import ExecuteFn
 from mirage.workspace.expand.variable import ifs_value
 from mirage.workspace.node.test_tokens import (
@@ -185,10 +184,8 @@ async def _comparison(
         # segment (quoted literal, unquoted live), so the evaluator
         # matches unconditionally. A wholly-literal pattern matches
         # exactly itself.
-        escape = posix_escape if op == "=~" else escape_glob
-        pattern = await expand_pattern(
-            right_node, context, execute_fn, cs, view=view, escape=escape
-        )
+        expand = expand_regex if op == "=~" else expand_pattern
+        pattern = await expand(right_node, context, execute_fn, cs, view)
         return CondBinary(left=left_text, op=op, right=pattern)
     right_text = await expand_node(
         right_node, context, execute_fn, cs, view=view

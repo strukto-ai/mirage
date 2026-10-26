@@ -19,11 +19,10 @@ import type { CondNode } from '../executor/builtins/condition/index.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
 import type { ExecuteFn } from '../expand/types.ts'
 import { expandChunks, expandNode } from '../expand/node.ts'
-import { expandPattern } from '../expand/pattern.ts'
+import { expandPattern, expandRegex } from '../expand/pattern.ts'
 import { splitFields } from '../expand/fields.ts'
 import { ifsValue } from '../expand/variable.ts'
-import { escapeGlob, unmarkGlobs } from '../../utils/glob_walk.ts'
-import { posixEscape } from '../../rs/regex.ts'
+import { unmarkGlobs } from '../../utils/glob_walk.ts'
 import { CondParser, type CondTree, PATTERN_OPS, condTokens, flatTokens } from './test_tokens.ts'
 
 /**
@@ -131,8 +130,8 @@ async function comparison(
     // renders its quoting into the matcher's dialect per segment (quoted
     // literal, unquoted live), so the evaluator matches unconditionally. A
     // wholly-literal pattern matches exactly itself.
-    const escape = op === '=~' ? posixEscape : escapeGlob
-    const pattern = await expandPattern(right, context, executeFn, cs, view, escape)
+    const expand = op === '=~' ? expandRegex : expandPattern
+    const pattern = await expand(right, context, executeFn, cs, view)
     return { kind: 'binary', left: leftText, op, right: pattern }
   }
   const rightText = await expandNode(right, context, executeFn, cs, view)

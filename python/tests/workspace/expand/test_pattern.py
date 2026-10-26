@@ -21,7 +21,7 @@ from mirage.shell.parse import parse
 from mirage.utils.fnmatch import fnmatch
 from mirage.utils.glob_walk import escape_glob
 from mirage.workspace.evaluation import EvaluationContext
-from mirage.workspace.expand.pattern import _unquoted_pattern, expand_pattern
+from mirage.workspace.expand.pattern import expand_pattern
 from mirage.workspace.session import SessionState
 from mirage.workspace.session.session import vars_from_env
 
@@ -60,17 +60,9 @@ def test_escaped_text_matches_itself_and_nothing_else():
     assert not fnmatch("b", escape_glob("[^a]"))
 
 
-@pytest.mark.parametrize(
-    "text,expected",
-    [
-        ("a*", "a*"),
-        (r"a\*b", "a[*]b"),
-        (r"\?", "[?]"),
-        ("a\\", "a\\"),
-    ],
-)
-def test_unquoted_pattern_backslash_escapes(text, expected):
-    assert _unquoted_pattern(text, escape_glob) == expected
+def test_unquoted_pattern_backslash_escapes():
+    assert _expand(r"a\*b") == "a[*]b"
+    assert _expand(r"\?") == "[?]"
 
 
 def test_single_quoted_pattern_is_literal():

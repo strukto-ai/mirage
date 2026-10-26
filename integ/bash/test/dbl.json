@@ -944,6 +944,111 @@
         "stdout": "2\n2\n2\n2\n",
         "stderr": "mirage: syntax error in conditional expression\nmirage: syntax error near '-f'\nmirage: syntax error in conditional expression\nmirage: syntax error near '3'\nmirage: unexpected argument `]]' to conditional unary operator\nmirage: syntax error near ']]'\nmirage: unexpected EOF while looking for matching `)'\nmirage: unexpected argument to conditional binary operator\n"
       }
+    },
+    {
+      "id": "dbl_bare_dollar_is_a_word",
+      "seq": 18500009,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "[[ -n $ ]]; echo $?; [[ a != $ ]]; echo $?; [[ $ == $ ]]; echo $?; [[ $ = '$' ]]; echo $?; [[ -z $ ]]; echo $?",
+      "expect": {
+        "exit": 0,
+        "stdout": "0\n0\n0\n0\n1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "dbl_regex_quoted_bracket_members",
+      "seq": 18500010,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "[[ '\\' =~ [\".\"] ]]; echo $?; [[ . =~ [\".\"] ]]; echo $?; [[ b =~ ['^'a] ]]; echo $?; [[ a =~ ['^'a] ]]; echo $?; [[ - =~ [a'-'c] ]]; echo $?; [[ ']' =~ [']'] ]]; echo $?; [[ a =~ [\"[:alpha:]\"] ]]; echo $?; [[ '\\' =~ [\\.] ]]; echo $?; [[ 'a.' =~ [a]\".\" ]]; echo $?",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n0\n0\n1\n1\n0\n0\n1\n0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "dbl_pattern_tilde_leads_and_is_literal",
+      "seq": 18500011,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "( HOME=/h/a.b; [[ /h/axb =~ ~ ]]; echo $?; [[ /h/a.b/xzy =~ ~/x.y ]]; echo $?; [[ /h/a.b =~ ''~ ]]; echo $?; HOME='/h/a*'; [[ /h/aX == ~ ]]; echo $?; [[ '/h/a*' == ~ ]]; echo $?; case /h/aX in ~) echo y;; *) echo n;; esac; case /h/a* in ''~) echo y;; *) echo n;; esac )",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n0\n1\n1\n0\nn\nn\n",
+        "stderr": ""
+      }
     }
   ]
 }

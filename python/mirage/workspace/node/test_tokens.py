@@ -101,13 +101,14 @@ def _cond_into(node: TSNodeLike, out: list[ExprToken]) -> None:
         ctype = child.type
         if ctype in ("[[", "]]"):
             continue
-        if not child.is_named:
+        if not child.is_named and ctype != "$":
             out.append(ExprToken(op=ctype))
         elif ctype == NT.TEST_OPERATOR:
             out.append(ExprToken(op=get_text(child)))
         elif ctype in _CONTAINER_TYPES:
             _cond_into(child, out)
         else:
+            # A lone `$` is the parser's anonymous token, and a word.
             out.append(ExprToken(operand=child))
 
 
