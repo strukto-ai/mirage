@@ -49,7 +49,7 @@ import { PermissionsPolicy } from '../../policy/builtin/permissions.ts'
 import { PlacementPolicy } from '../../policy/builtin/placement.ts'
 import { PolicyError } from '../../policy/errors.ts'
 import { Decisions } from '../../policy/decisions.ts'
-import { JobOutput } from '../../shell/console/terminal.ts'
+import { Terminal } from '../../shell/console/terminal.ts'
 import { JobTable } from '../../shell/job_table/index.ts'
 import { buildFileCache } from './cache.ts'
 import { DriftQueue, installDriftState } from '../snapshot/drift.ts'
@@ -1940,11 +1940,15 @@ export class Workspace {
    *     nvidia-smi          [runs]
    *
    * As `( ... )` does, it runs on a fork of the session, so what it changes
-   * stays on the fork; its jobs are its own, which its `wait` waits on and
-   * whose output it reports; it has its own entry in the workspace's
+   * stays on the fork; its jobs are its own, which its `wait` waits on, a
+   * callback fired in it included; it has its own entry in the workspace's
    * process table (`ps`, `kill`); and its status is the session's `$?` once
-   * it ends. A line nested in one of the session's (a host callback fired
-   * mid-line) continues in that line instead, as `serializeLine` runs it.
+   * it ends. It writes to a terminal of its own, as a typed line does to its
+   * session's: it answers with what waited on the session's terminal first,
+   * then with what it and its jobs write, and once it ends, what its jobs
+   * still write goes on to the session's terminal for the next line. A line
+   * nested in one of the session's (a host callback fired mid-line)
+   * continues in that line instead, as `serializeLine` runs it.
    *
    * @param command the line.
    * @param options the caller's options, with the `cwd` or `env`.
@@ -1962,12 +1966,20 @@ export class Workspace {
     const source = this.sessionManager.get(options.sessionId ?? this.sessionManager.defaultId)
     const session = forkForCall(source, options.cwd, options.env)
     session.processId = null
-    session.jobOutput = new JobOutput(session.jobOutput ?? session.tty.jobs)
-    const result = await executeLine(this.executeEnv(), command, {
-      ...options,
-      session,
-      jobTable: this.jobTable.child(),
-    })
+    session.jobTable = this.jobTable.child()
+    session.tty = new Terminal()
+    session.tty.chunks = source.tty.chunks
+    source.tty.chunks = []
+    let result: ExecuteResult
+    try {
+      result = await executeLine(this.executeEnv(), command, {
+        ...options,
+        session,
+        tty: session.tty,
+      })
+    } finally {
+      await session.tty.attach(source.tty.jobs)
+    }
     recordStatus(source, result.exitCode)
     return result
   }

@@ -18,6 +18,7 @@ import errno
 import logging
 import shutil
 import tempfile
+from collections import deque
 from collections.abc import (
     AsyncIterator,
     Awaitable,
@@ -112,7 +113,7 @@ from mirage.secrets.types import ResolvedSource
 from mirage.shell import parse
 from mirage.shell.bytes import decode_text
 from mirage.shell.call_stack import CallStack
-from mirage.shell.console import Channel, JobConsole, JobOutput
+from mirage.shell.console import Channel, JobConsole, Terminal
 from mirage.shell.constants import BIN_PREFIX
 from mirage.shell.job_table import ConsoleFactory, JobTable
 from mirage.shell.literal import literal_tree
@@ -2710,7 +2711,7 @@ class Workspace:
         cwd: str | None,
         env: dict[str, str] | None,
         run: Callable[..., Awaitable[IOResult]],
-    ) -> IOResult:
+    ) -> tuple[IOResult, SessionState | None]:
         """Run a line given a cwd or env of its own as a subshell of the
         session, beside the session's other lines rather than after them.
 
@@ -2724,11 +2725,17 @@ class Workspace:
 
         As ``( ... )`` does, it runs on a fork of the session, so what it
         changes stays on the fork; its jobs are its own, which its
-        ``wait`` waits on and whose output it reports; it has its own
-        entry in the workspace's process table (``ps``, ``kill``); and
-        its status is the session's ``$?`` once it ends. A line nested
-        in one of the session's (a callback fired mid-line) continues in
-        that line instead, as ``_serialize_line`` runs it.
+        ``wait`` waits on, a callback fired in it included; it has its
+        own entry in the workspace's process table (``ps``, ``kill``);
+        and its status is the session's ``$?`` once it ends, which the
+        caller stamps after the last of its output is delivered. It
+        writes to a terminal of its own, as a typed line does to its
+        session's: it answers with what waited on the session's terminal
+        first, then with what it and its jobs write, and once it ends,
+        what its jobs still write goes on to the session's terminal for
+        the next line. A line nested in one of the session's (a callback
+        fired mid-line) continues in that line instead, as
+        ``_serialize_line`` runs it.
 
         Args:
             session_id (str | None): the session the caller named, or
@@ -2736,11 +2743,16 @@ class Workspace:
             cwd (str | None): the line's own working directory.
             env (dict[str, str] | None): the variables it sets for itself.
             run (Callable[..., Awaitable[IOResult]]): the line, which
-                takes the job table it starts its jobs in.
+                takes the terminal it writes to.
+
+        Returns:
+            tuple[IOResult, SessionState | None]: the line's result, and
+                the session whose ``$?`` its status becomes; None for a
+                nested line.
         """
         ambient = get_current_session_for(self._session_mgr)
         if ambient is not None and session_id in (None, ambient.session_id):
-            return await run()
+            return await run(), None
         await self.ensure_sessions_loaded()
         if self._shutting_down:
             raise RuntimeError("Workspace is closed")
@@ -2749,14 +2761,15 @@ class Workspace:
         )
         session = fork_for_call(source, cwd, env)
         session.process_id = None
-        session.job_output = JobOutput(session.job_output or session.tty.jobs)
+        session.job_table = self.job_table.child()
+        session.tty = Terminal()
+        session.tty.chunks, source.tty.chunks = source.tty.chunks, deque()
         token = set_current_session(session, self._session_mgr)
         try:
-            result = await run(job_table=self.job_table.child())
+            return await run(tty=session.tty), source
         finally:
             reset_current_session(token)
-        record_status(source, result.exit_code)
-        return result
+            await session.tty.attach(source.tty.jobs)
 
     @overload
     async def shell(
@@ -3050,16 +3063,21 @@ class Workspace:
                     execution_scope=execution_scope,
                     job_table=job_table,
                 )
+                source = None
                 if (
                     session is None
                     and handed is None
                     and (cwd is not None or env is not None)
                 ):
-                    result = await self._run_beside(session_id, cwd, env, run)
+                    result, source = await self._run_beside(
+                        session_id, cwd, env, run
+                    )
                 else:
                     result = await self._serialize_line(session_id, run)
                 if sink is not None and isinstance(result, IOResult):
                     await drain_to_sink(sink, result)
+                if source is not None:
+                    record_status(source, result.exit_code)
                 return result
             finally:
                 if bound is not None:

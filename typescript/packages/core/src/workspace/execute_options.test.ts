@@ -14,6 +14,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import * as abort from '../utils/abort.ts'
 import { Command } from '../commands/config.ts'
+import { CLI, CLIHandler } from '../commands/cli/types.ts'
 import { CommandSpec, Argument } from '../commands/spec/types.ts'
 import { IOResult } from '../io/types.ts'
 import { RAMObserverStore } from '../observe/store.ts'
@@ -53,6 +54,23 @@ function heldInput(): {
     yield ENC.encode('go\n')
   }
   return { stdin: chunks(), reading, release }
+}
+
+class StalledConsole extends JobConsole {
+  readonly reached: Promise<void>
+  private reach = (): void => undefined
+
+  constructor() {
+    super()
+    this.reached = new Promise<void>((resolve) => {
+      this.reach = resolve
+    })
+  }
+
+  override async emit(): Promise<void> {
+    this.reach()
+    await new Promise<void>(() => undefined)
+  }
 }
 
 function makeWs(): Workspace {
@@ -225,6 +243,52 @@ describe('execute({ cwd }): a process of its own', () => {
     input.release()
     expect(stdoutStr(outA)).toBe('from-a\n')
     expect(stdoutStr(await b)).toBe('got:go\n')
+    await ws.close()
+  })
+
+  it('lets a callback in it wait on its jobs', async () => {
+    const ws = makeWs()
+    ws.registerCli(
+      'again',
+      new CLI({
+        spec: new CommandSpec({ name: 'again' }),
+        handlers: {
+          '': new CLIHandler({
+            fn: async () => {
+              const inner = await ws.shell('wait %1; echo $?')
+              return [inner.stdout, new IOResult({ exitCode: inner.exitCode })]
+            },
+          }),
+        },
+      }),
+    )
+    const io = await ws.shell('sleep 0.1 & again', { cwd: '/ram' })
+    expect(stdoutStr(io)).toBe('0\n')
+    await ws.close()
+  })
+
+  it('hands what a job writes after its line ends to the next line', async () => {
+    const ws = makeWs()
+    await ws.shell(
+      '{ while [ ! -f /ram/go ]; do sleep 0.01; done; echo late; touch /ram/done; } &',
+      { cwd: '/ram' },
+    )
+    await ws.shell('touch /ram/go', { cwd: '/ram' })
+    while (!(await ws.vfs.exists('/ram/done'))) await new Promise((r) => setTimeout(r, 10))
+    const io = await ws.shell('echo next', { cwd: '/ram' })
+    expect(stdoutStr(io)).toBe('late\nnext\n')
+    await ws.close()
+  })
+
+  it('leaves the session status when the caller aborts it', async () => {
+    const ws = makeWs()
+    const sink = new StalledConsole()
+    const abort = new AbortController()
+    const call = ws.shell('echo $((', { cwd: '/ram', sink, signal: abort.signal })
+    await sink.reached
+    abort.abort()
+    await expect(call).rejects.toThrow()
+    expect(ws.sessionManager.get(ws.sessionManager.defaultId).lastExitCode).toBe(0)
     await ws.close()
   })
 })

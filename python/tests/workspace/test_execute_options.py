@@ -17,6 +17,10 @@ import asyncio
 import pytest
 
 from mirage import MountMode, Workspace
+from mirage.commands.cli.types import CLI, CLIHandler
+from mirage.commands.spec import CommandSpec
+from mirage.io.types import IOResult
+from mirage.shell.console import Channel, JobConsole
 from mirage.utils.abort import MirageAbortError, cancellable_sleep
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace.executor.builtins.sleep.sleep import handle_sleep
@@ -29,6 +33,16 @@ def _held(reading: asyncio.Event, release: asyncio.Event):
         yield b"go\n"
 
     return chunks()
+
+
+class _Stalled(JobConsole):
+    def __init__(self, reached: asyncio.Event) -> None:
+        super().__init__()
+        self.reached = reached
+
+    async def emit(self, channel: Channel, data: bytes) -> None:
+        self.reached.set()
+        await asyncio.Event().wait()
 
 
 def _make_ws():
@@ -222,6 +236,56 @@ async def test_a_job_writes_to_the_per_call_line_that_started_it():
     out_b = await b
     assert (await out_a.stdout_str()) == "from-a\n"
     assert (await out_b.stdout_str()) == "got:go\n"
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_callback_in_a_per_call_line_waits_on_its_jobs():
+    ws = _make_ws()
+
+    async def again(config, paths, texts, ctx):
+        inner = await ws.shell("wait %1; echo $?")
+        return inner.stdout, IOResult()
+
+    ws.register_cli(
+        "again",
+        CLI(
+            spec=CommandSpec(name="again"), handlers={"": CLIHandler(fn=again)}
+        ),
+    )
+    io = await ws.shell("sleep 0.1 & again", cwd="/ram")
+    assert (await io.stdout_str()) == "0\n"
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_job_that_outlives_its_line_writes_to_the_next():
+    ws = _make_ws()
+    await ws.shell(
+        "{ while [ ! -f /ram/go ]; do sleep 0.01; done; echo late;"
+        " touch /ram/done; } &",
+        cwd="/ram",
+    )
+    await ws.shell("touch /ram/go", cwd="/ram")
+    while not await ws.vfs.exists("/ram/done"):
+        await asyncio.sleep(0.01)
+    io = await ws.shell("echo next", cwd="/ram")
+    assert (await io.stdout_str()) == "late\nnext\n"
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_cancelled_per_call_line_leaves_the_status():
+    ws = _make_ws()
+    reached, cancel = asyncio.Event(), asyncio.Event()
+    call = asyncio.create_task(
+        ws.shell("echo $((", cwd="/ram", sink=_Stalled(reached), cancel=cancel)
+    )
+    await asyncio.wait_for(reached.wait(), 5)
+    cancel.set()
+    with pytest.raises(MirageAbortError):
+        await call
+    assert ws.get_session(ws.default_session_id).last_exit_code == 0
     await ws.close()
 
 

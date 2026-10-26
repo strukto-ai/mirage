@@ -50,7 +50,7 @@ import {
 } from './serialize.ts'
 import { DEFAULT_VISIBILITY, type ShowEntry, type Visibility } from '../../types.ts'
 import { type JobOutput, Terminal } from '../../shell/console/index.ts'
-import type { JobWaits } from '../../shell/job_table/index.ts'
+import type { JobTable, JobWaits } from '../../shell/job_table/index.ts'
 import type { MountMode } from '../../types.ts'
 import type { StatusWriter } from '../types.ts'
 import type { AliasExpansion } from '../../shell/types.ts'
@@ -429,6 +429,10 @@ export class SessionState {
   tty = new Terminal()
   jobOutput: JobOutput | null = null
   jobWaits: JobWaits | null = null
+  // The jobs this shell's lines start theirs in when no caller hands a
+  // table: a per-call line's own, so a callback fired in it reaches them;
+  // null for the workspace's.
+  jobTable: JobTable | null = null
   shellOptions: Record<string, boolean>
   // Transient `set -e` marker: true when the failure just returned
   // came from a short-circuited &&/|| branch or a `!`-negated command,
@@ -663,6 +667,7 @@ export class SessionState {
     forked.tty = this.tty
     forked.jobOutput = this.jobOutput
     forked.jobWaits = this.jobWaits
+    forked.jobTable = this.jobTable
     forked.getoptsPos = this.getoptsPos
     forked.errexitIgnored = this.errexitIgnored
     forked.getoptsOptind = this.getoptsOptind

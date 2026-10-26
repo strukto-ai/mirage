@@ -467,6 +467,7 @@ async def execute_line(
     call_stack: CallStack | None = None,
     execution_scope: ExecutionScope | None = None,
     job_table: JobTable | None = None,
+    tty: Terminal | None = None,
 ) -> IOResult:
     """The body of ``Workspace.shell``; see its docstring for the
     argument contract.
@@ -486,6 +487,10 @@ async def execute_line(
         frame (LineFrame | None): filled with the session and its
             status before the line, for ``Workspace.shell`` to restore
             ``$?`` from when the caller aborts.
+        tty (Terminal | None): the terminal a per-call line writes to,
+            its fork's own, as a typed line writes to its session's;
+            None for a typed line, which takes its session's, and for a
+            nested one, which has none.
     """
     if cancel is not None and cancel.is_set():
         raise MirageAbortError()
@@ -505,7 +510,6 @@ async def execute_line(
     # workspace's cwd, env and mount grants, so a callback reaching a
     # second workspace must resolve that workspace's session instead.
     ambient = get_current_session_for(ws.sessions)
-    tty = None
     if ambient is not None and session_id in (None, ambient.session_id):
         session = ambient
         session_id = ambient.session_id
@@ -675,6 +679,7 @@ async def run_prepared_line(
         session (SessionState): the session the line acquired.
     """
     session_id = session.session_id
+    job_table = job_table or session.job_table
     cache_facts = ws.dispatcher.capture_cache_facts()
     effective_session = fork_for_call(session, cwd, env)
     parent = get_current_evaluation()
