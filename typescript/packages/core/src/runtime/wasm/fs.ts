@@ -116,16 +116,17 @@ function stamp(
   return null
 }
 
-/** The open facts preview1 spells as oflags, rights and fdflags. */
+/** The open facts preview1 spells as oflags, rights and fdflags. Only the
+ * write right lets the descriptor write, as open(2)'s access mode does: a
+ * read-only open that creates hands out a file that only reads. */
 function openMode(oflags: number, rightsBase: bigint, fdflags: number): OpenMode {
   const create = (oflags & OFLAG_CREAT) !== 0
-  const truncate = (oflags & OFLAG_TRUNC) !== 0
-  const append = (fdflags & FDFLAG_APPEND) !== 0
+  const writable = (rightsBase & RIGHT_FD_WRITE) !== 0n
   return {
     readable: (rightsBase & RIGHT_FD_READ) !== 0n,
-    writable: create || truncate || append || (rightsBase & RIGHT_FD_WRITE) !== 0n,
-    truncate,
-    append,
+    writable,
+    truncate: writable && (oflags & OFLAG_TRUNC) !== 0,
+    append: (fdflags & FDFLAG_APPEND) !== 0,
     create,
     exclusive: create && (oflags & OFLAG_EXCL) !== 0,
     binary: true,

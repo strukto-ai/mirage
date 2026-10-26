@@ -97,6 +97,105 @@
           }
         }
       ]
+    },
+    {
+      "id": "a_read_only_descriptor_that_creates_refuses_writes",
+      "note": "O_CREAT makes the file; only the access mode lets the descriptor write. Monty has no os.open.",
+      "runtimes": [
+        "wasi",
+        "pyodide",
+        "host"
+      ],
+      "backends": [
+        "ram",
+        "disk",
+        "ssh",
+        "s3",
+        "redis",
+        "ram+cache",
+        "disk+cache",
+        "redis+cache"
+      ],
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "seed.txt": "s"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "program": {
+            "python": "import errno, os\nfd = os.open('/data/c.txt', os.O_RDONLY | os.O_CREAT, 0o644)\ntry:\n    os.write(fd, b'x')\nexcept OSError as e:\n    print(e.errno == errno.EBADF)\nos.close(fd)\nprint(os.path.getsize('/data/c.txt'))",
+            "node": "const fs = require('node:fs')\nconst f = await fs.promises.open('/data/c.txt', fs.constants.O_RDONLY | fs.constants.O_CREAT, 0o644)\nawait f.write('x').catch((e) => console.log(e.code))\nawait f.close()\nconsole.log((await fs.promises.stat('/data/c.txt')).size)"
+          },
+          "expect": {
+            "python": {
+              "exit": 0,
+              "stdout": "True\n0\n"
+            },
+            "node": {
+              "exit": 0,
+              "stdout": "EBADF\n0\n"
+            }
+          }
+        },
+        {
+          "command": "wc -c < /data/c.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "0\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "a_quickjs_read_only_descriptor_that_creates_refuses_writes",
+      "note": "Linux refuses the write (EBADF), and the corpus follows it as the Python cases do; wasmtime's own WASI writes through it, since it opens any O_CREAT for writing. qjs answers -errno in WASI's numbering, where EBADF is 8.",
+      "runtimes": [
+        "quickjs"
+      ],
+      "backends": [
+        "ram",
+        "disk",
+        "ssh",
+        "s3",
+        "redis",
+        "ram+cache",
+        "disk+cache",
+        "redis+cache"
+      ],
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "seed.txt": "s"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "program": {
+            "js": "const fd = os.open('/data/c.txt', os.O_RDONLY | os.O_CREAT, 0o644)\nconsole.log(os.write(fd, new Uint8Array([120]).buffer, 0, 1))\nos.close(fd)\nconsole.log(os.stat('/data/c.txt')[0].size)"
+          },
+          "expect": {
+            "exit": 0,
+            "stdout": "-8\n0\n"
+          }
+        },
+        {
+          "command": "wc -c < /data/c.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "0\n"
+          }
+        }
+      ]
     }
   ]
 }

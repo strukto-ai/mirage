@@ -147,22 +147,22 @@ def _call_guarded(
 def _open_mode(oflags: int, rights_base: int, fdflags: int) -> OpenMode:
     """The open facts preview1 spells as oflags, rights and fdflags.
 
+    Only the write right lets the descriptor write, as open(2)'s access
+    mode does: a read-only open that creates hands out a file that only
+    reads.
+
     Args:
         oflags (int): the open's oflags bag.
         rights_base (int): the rights the guest asked for.
         fdflags (int): the descriptor flags.
     """
     create = bool(oflags & OFLAG_CREAT)
-    truncate = bool(oflags & OFLAG_TRUNC)
-    append = bool(fdflags & FDFLAG_APPEND)
+    writable = bool(rights_base & RIGHT_FD_WRITE)
     return OpenMode(
         readable=bool(rights_base & RIGHT_FD_READ),
-        writable=create
-        or truncate
-        or append
-        or bool(rights_base & RIGHT_FD_WRITE),
-        truncate=truncate,
-        append=append,
+        writable=writable,
+        truncate=writable and bool(oflags & OFLAG_TRUNC),
+        append=bool(fdflags & FDFLAG_APPEND),
         create=create,
         exclusive=create and bool(oflags & OFLAG_EXCL),
         binary=True,
