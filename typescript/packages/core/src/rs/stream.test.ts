@@ -23,6 +23,11 @@ import type * as StreamModule from './stream.ts'
 
 const DECODE = { mode: 'decode', ignore_garbage: false }
 
+// The instance a stream runs on.
+function instance(stream: unknown): unknown {
+  return (stream as { exports: unknown }).exports
+}
+
 describe('openStream', () => {
   it('refuses a bad config with no output', async () => {
     const refused: unknown = await openStream('base64', { mode: 'nope' }).catch(
@@ -51,7 +56,6 @@ describe('openStream', () => {
   })
 
   it('moves matchers off an instance a large search grew', async () => {
-    const instance = (stream: unknown): unknown => (stream as { exports: unknown }).exports
     const small = new PosixRegex('b')
     const glob = new GlobMatcher('a*b')
     const large = new PosixRegex('x$')
@@ -70,7 +74,6 @@ describe('openStream', () => {
   })
 
   it('keeps an instance a paused search is on', async () => {
-    const instance = (stream: unknown): unknown => (stream as { exports: unknown }).exports
     const size = 34 * 1024 * 1024
     // `a*` keeps the automaton from skipping to the `x`, so the search pauses.
     const regex = new PosixRegex('a*x$')
