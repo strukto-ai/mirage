@@ -1020,8 +1020,8 @@ export class JobTable {
    * went with its workspace, deleted elsewhere: an ending written there
    * first would be deleted before this table's watch read it. The job is
    * stopped as a closed session's is. Each session's list is read once a
-   * round, however many of its jobs run here; a failed read is retried next
-   * round.
+   * round, however many of its jobs run here; a round that failed for a
+   * session, on its list or on a console, is tried again the next round.
    */
   private async checkLists(): Promise<void> {
     const sessions = new Map<string, Job[]>()
@@ -1032,18 +1032,16 @@ export class JobTable {
       sessions.set(job.sessionId, jobs)
     }
     for (const [sessionId, jobs] of sessions) {
-      let held: Set<string>
       try {
-        held = heldConsoles(await this.store.load(sessionId))
+        const held = heldConsoles(await this.store.load(sessionId))
+        for (const job of jobs) {
+          if (held.has(job.consoleName)) continue
+          await adoptEnding(job)
+          if (job.status === JobStatus.RUNNING && job.process !== null)
+            await this.stopRunner(job, job.process, 9)
+        }
       } catch (err) {
         console.debug('job list check failed:', err)
-        continue
-      }
-      for (const job of jobs) {
-        if (held.has(job.consoleName)) continue
-        await adoptEnding(job)
-        if (job.status === JobStatus.RUNNING && job.process !== null)
-          await this.stopRunner(job, job.process, 9)
       }
     }
   }

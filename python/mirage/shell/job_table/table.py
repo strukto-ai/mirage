@@ -1182,7 +1182,8 @@ class JobTable:
         elsewhere: an ending written there first would be deleted before
         this table's watch read it. The job is stopped as a closed
         session's is. Each session's list is read once a round, however
-        many of its jobs run here; a failed read is retried next round.
+        many of its jobs run here; a round that failed for a session, on
+        its list or on a console, is tried again the next round.
         """
         while True:
             await asyncio.sleep(LIST_CHECK_SECONDS)
@@ -1193,18 +1194,17 @@ class JobTable:
             for session_id, jobs in sessions.items():
                 try:
                     held = _held_consoles(await self.store.load(session_id))
+                    for job in jobs:
+                        if job.console_name in held:
+                            continue
+                        await _adopt_ending(job)
+                        if (
+                            job.status == JobStatus.RUNNING
+                            and job.process is not None
+                        ):
+                            await self._stop_runner(job, job.process, 9)
                 except Exception as exc:
                     logger.debug("job list check failed: %s", exc)
-                    continue
-                for job in jobs:
-                    if job.console_name in held:
-                        continue
-                    await _adopt_ending(job)
-                    if (
-                        job.status == JobStatus.RUNNING
-                        and job.process is not None
-                    ):
-                        await self._stop_runner(job, job.process, 9)
 
     async def _renew(self, interval: float) -> None:
         """Renew this table's lease every ``interval`` seconds, with the

@@ -909,6 +909,51 @@ class DroppedWatches extends RAMJobStore {
   }
 }
 
+/** A console whose reads fail while its store counts failures down. */
+class FailsReads implements ConsoleStore {
+  constructor(
+    private readonly inner: ConsoleStore,
+    private readonly store: FailingReads,
+  ) {}
+
+  append(channel: Channel, data: Uint8Array): Promise<ConsoleChunk> {
+    return this.inner.append(channel, data)
+  }
+
+  readFrom(seq: number, limit?: number): Promise<ReadResult> {
+    if (this.store.failures > 0) {
+      this.store.failures -= 1
+      return Promise.reject(new Error('connection dropped'))
+    }
+    return this.inner.readFrom(seq, limit)
+  }
+
+  get closed(): boolean {
+    return this.inner.closed
+  }
+
+  wait(seq: number): Promise<void> {
+    return this.inner.wait(seq)
+  }
+
+  waitEnded(signal?: AbortSignal): Promise<void> {
+    return this.inner.waitEnded(signal)
+  }
+
+  close(): Promise<void> {
+    return this.inner.close()
+  }
+}
+
+/** A job store whose consoles fail its next `failures` reads. */
+class FailingReads extends RAMJobStore {
+  failures = 0
+
+  override console(name: string): ConsoleStore {
+    return new FailsReads(super.console(name), this)
+  }
+}
+
 /** A job store on which another table starts a job just as a list is about
  * to go; with `replaces`, after another close deleted it. */
 class StartsOnDelete extends RAMJobStore {
@@ -1392,6 +1437,23 @@ describe('JobTable on a shared store, across retaken numbers and early kills', (
       await vi.advanceTimersByTimeAsync(LIST_CHECK_SECONDS * 1000 * 3)
       expect([listed.status, disowned.status]).toEqual([JobStatus.RUNNING, JobStatus.RUNNING])
       await jt.killAll()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('a list check that failed a read checks again', async () => {
+    vi.useFakeTimers()
+    try {
+      const store = new FailingReads()
+      const job = await sleeping(new JobTable(store))
+      await vi.advanceTimersByTimeAsync(0)
+      store.failures = 1
+      await store.clear()
+      await vi.advanceTimersByTimeAsync(LIST_CHECK_SECONDS * 1000 * 3)
+      await job.process?.join()
+      expect([job.status, job.exitCode]).toEqual([JobStatus.KILLED, 137])
+      expect(store.failures).toBe(0)
     } finally {
       vi.useRealTimers()
     }

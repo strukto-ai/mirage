@@ -1140,3 +1140,49 @@ async def test_a_dropped_job_deaf_to_its_stop_still_ends(monkeypatch):
     release.set()
     assert job.process is not None
     await job.process.join()
+
+
+class _FailsReads(_FailsFirstWatch):
+    """A console whose reads fail while its store counts failures down."""
+
+    def __init__(self, inner: ConsoleStore, store: "_FailingReads") -> None:
+        super().__init__(inner)
+        self._failed = True
+        self._store = store
+
+    async def read_from(
+        self, seq: int, limit: int | None = None
+    ) -> ReadResult:
+        if self._store.failures > 0:
+            self._store.failures -= 1
+            raise ConnectionError("connection dropped")
+        return await super().read_from(seq, limit)
+
+
+class _FailingReads(RAMJobStore):
+    """A job store whose consoles fail its next ``failures`` reads."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.failures = 0
+
+    def console(self, name: str) -> ConsoleStore:
+        return _FailsReads(super().console(name), self)
+
+
+@pytest.mark.asyncio
+async def test_a_list_check_that_failed_a_read_checks_again(monkeypatch):
+    monkeypatch.setattr(
+        "mirage.shell.job_table.table.LIST_CHECK_SECONDS", 0.02
+    )
+    store = _FailingReads()
+    table = JobTable(store)
+    job = await table.submit("sleep 30", _run_forever, "/", session_id="s")
+    await asyncio.sleep(0)
+    store.failures = 1
+    await store.clear()
+    assert job.process is not None
+    async with asyncio.timeout(2):
+        await job.process.join()
+    assert (job.status, job.exit_code) == (JobStatus.KILLED, 137)
+    assert store.failures == 0
