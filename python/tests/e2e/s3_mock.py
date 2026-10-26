@@ -58,10 +58,10 @@ def _bare(etag: str) -> str:
 
 
 def _sent(kwargs: dict[str, str]) -> dict[str, str]:
-    return {k: kwargs[k] for k in _CONDITION_KEYS if k in kwargs}
+    return {k: kwargs[k] for k in CONDITION_KEYS if k in kwargs}
 
 
-_CONDITION_KEYS = ("IfMatch", "IfNoneMatch", "CopySourceIfMatch")
+CONDITION_KEYS = ("IfMatch", "IfNoneMatch", "CopySourceIfMatch")
 
 MUTATIONS = ("put_object", "copy_object", "delete_object", "delete_objects")
 
@@ -177,6 +177,9 @@ class MultiBucketS3Client:
         self._hooks: dict[str, list[Callable[[], Awaitable[None] | None]]] = {}
         # Raise on a mutation sent without a condition, except a marker key.
         self.tripwire = False
+        # Per (bucket, key): how many mutations have taken effect, so two
+        # versions with equal bytes are still told apart.
+        self.commits: Counter[tuple[str, str]] = Counter()
 
     def before(
         self, op: str, hook: Callable[[], Awaitable[None] | None]
@@ -214,6 +217,14 @@ class MultiBucketS3Client:
         if if_match is not None and _bare(if_match) != _bare(
             self._etag(current)
         ):
+            raise _mock_s3_error("PreconditionFailed", 412)
+
+    def _refuse_existing(
+        self, current: bytes | None, if_none_match: str | None
+    ) -> None:
+        if if_none_match not in (None, "*"):
+            raise _mock_s3_error("NotImplemented", 501)
+        if if_none_match == "*" and current is not None:
             raise _mock_s3_error("PreconditionFailed", 412)
 
     def _etag(self, data: bytes) -> str:
@@ -299,8 +310,11 @@ class MultiBucketS3Client:
         self.calls["put_object"] += 1
         self.bucket_calls["put_object", Bucket] += 1
         await self._enter("put_object", Key, _sent(kwargs))
-        self._require(self._objects(Bucket).get(Key), kwargs.get("IfMatch"))
+        current = self._objects(Bucket).get(Key)
+        self._require(current, kwargs.get("IfMatch"))
+        self._refuse_existing(current, kwargs.get("IfNoneMatch"))
         self._objects(Bucket)[Key] = Body
+        self.commits[Bucket, Key] += 1
         # Real PutObject answers the stored object's ETag, so the token a
         # write stamps is the one head_object reports next -- suffix
         # included, which is what makes a multipart-shaped ETag testable.
@@ -319,6 +333,7 @@ class MultiBucketS3Client:
         current = self._objects(Bucket).get(Key)
         if current is not None:
             self._require(current, kwargs.get("IfMatch"))
+            self.commits[Bucket, Key] += 1
         self._objects(Bucket).pop(Key, None)
 
     async def copy_object(
@@ -340,9 +355,12 @@ class MultiBucketS3Client:
             self._etag(src_objects[src_key])
         ):
             raise _mock_s3_error("PreconditionFailed", 412)
-        self._require(self._objects(Bucket).get(Key), kwargs.get("IfMatch"))
+        current = self._objects(Bucket).get(Key)
+        self._require(current, kwargs.get("IfMatch"))
+        self._refuse_existing(current, kwargs.get("IfNoneMatch"))
         data = src_objects[src_key]
         self._objects(Bucket)[Key] = data
+        self.commits[Bucket, Key] += 1
         return {"CopyObjectResult": {"ETag": f'"{self._etag(data)}"'}}
 
     async def delete_objects(self, Bucket: str, Delete: dict) -> dict:
@@ -392,7 +410,8 @@ class MultiBucketS3Client:
                     }
                 )
                 continue
-            objects.pop(key, None)
+            if objects.pop(key, None) is not None:
+                self.commits[Bucket, key] += 1
             deleted.append({"Key": key})
         return {"Deleted": deleted, "Errors": errors}
 
