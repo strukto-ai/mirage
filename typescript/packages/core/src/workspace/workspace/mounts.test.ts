@@ -38,7 +38,7 @@ describe('normalizeMounts', () => {
   })
 
   it('carries commandLimits from a triple entry', () => {
-    const guard = new Limit({ timeoutSeconds: 1 })
+    const guard = new Limit({ maxLines: 1 })
     const normalized = normalizeMounts(
       {
         '/a': [new RAMVFS(), MountMode.READ, { curl: guard }],
@@ -46,6 +46,17 @@ describe('normalizeMounts', () => {
       DEFAULT_READ,
     )
     expect(normalized.commandLimits['/a']).toEqual({ curl: guard })
+  })
+
+  it('refuses a time limit in a mount table', () => {
+    for (const [name, limit] of [
+      ['curl', new Limit({ timeoutSeconds: 1 })],
+      ['line', new Limit({ timeoutSeconds: 1 })],
+    ] as const) {
+      expect(() =>
+        normalizeMounts({ '/a': [new RAMVFS(), MountMode.READ, { [name]: limit }] }, DEFAULT_READ),
+      ).toThrow(`mount /a: command_limits['${name}']`)
+    }
   })
 
   // The map is sparse by design -- it carries only what a Mount
@@ -115,7 +126,7 @@ describe('normalizeMounts', () => {
   // that filled it for one key and overwrote it for the other would drop
   // a mount's limits the moment it declared a policy.
   it("keeps a Mount's own read and commandLimits over the default", () => {
-    const guard = new Limit({ timeoutSeconds: 1 })
+    const guard = new Limit({ maxLines: 1 })
     const vfs = new RAMVFS()
     const normalized = normalizeMounts(
       {

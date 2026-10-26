@@ -34,7 +34,6 @@ from mirage.core.time_range import followed_day
 from mirage.errors import FsCondition, posix_errno
 from mirage.errors.fs import erofs
 from mirage.errors.types import (
-    CommandTimeoutError,
     ReadOnlyError,
     WalkDeclinedError,
 )
@@ -2347,10 +2346,9 @@ class Tape(BaseVFS):
     name = "tape"
     caches_reads = True
 
-    def __init__(self, delay: float = 0.0) -> None:
+    def __init__(self) -> None:
         super().__init__()
         self.files = {"a.txt": b"0123456789" * 5}
-        self.delay = delay
         self.pulled = 0
         self.reads = 0
         self.closed = False
@@ -2391,7 +2389,7 @@ class Tape(BaseVFS):
     async def _pulled(self, data: bytes) -> AsyncIterator[bytes]:
         try:
             for at in range(0, len(data), 10):
-                await asyncio.sleep(self.delay)
+                await asyncio.sleep(0)
                 self.pulled += 1
                 yield data[at : at + 10]
         finally:
@@ -2464,30 +2462,6 @@ async def test_a_window_or_a_post_vfs_policy_gets_whole_bytes(
         got, _ = await ws.dispatch("read", TAPE, stream=True, **kwargs)
         assert isinstance(got, bytes)
         assert tape.reads == 1
-
-
-@pytest.mark.asyncio
-async def test_each_pull_gets_the_whole_timeout():
-    tape = Tape(delay=0.05)
-    with Workspace({"/tape/": tape}, mode=MountMode.WRITE) as ws:
-        ws.namespace.mount_for("/tape/a.txt").command_limits["read"] = Limit(
-            timeout_seconds=0.2
-        )
-        stream, _ = await ws.dispatch("read", TAPE, stream=True)
-        got = []
-        async for chunk in stream:
-            got.append(chunk)
-            await asyncio.sleep(0.1)
-        assert len(got) == 5
-        tape.files["b.txt"] = tape.files["a.txt"]
-        tape.delay = 0.5
-        with pytest.raises(CommandTimeoutError):
-            await ws.dispatch(
-                "read",
-                PathSpec.from_str_path("/tape/b.txt"),
-                stream=True,
-                filetype=None,
-            )
 
 
 @pytest.mark.asyncio

@@ -15,7 +15,7 @@ import { type Context, command } from '../../../commands/config.ts'
 import { CommandSpec, Argument } from '../../../commands/spec/types.ts'
 import { IOResult, materialize } from '../../../io/types.ts'
 import { shellJoin } from '../../../shell/join.ts'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { Policy } from '../../../policy/base.ts'
 import type { ExecuteResultContext } from '../../../policy/types.ts'
 import { PermissionsPolicy } from '../../../policy/builtin/permissions.ts'
@@ -258,52 +258,25 @@ describe('external program capture', () => {
   })
 })
 
-describe('external program timeout', () => {
-  afterEach(() => {
-    delete DEFAULT_COMMAND_LIMITS['native-tool']
-    delete DEFAULT_COMMAND_LIMITS.python3
-  })
+describe('external program at the line deadline', () => {
+  function lineWs(probe: Runtime): Workspace {
+    return new Workspace(
+      { '/': new RAMVFS() },
+      {
+        mode: MountMode.EXEC,
+        runtimes: [probe],
+        commandLimits: { line: new Limit({ timeoutSeconds: 0.05 }) },
+      },
+    )
+  }
 
-  it.each([
-    ['native-tool', 1],
-    ['native-tool', 0],
-    ['native-tool', null],
-    ['python3', 1],
-    ['python3', 0],
-    ['python3', null],
-  ] as const)('honors %s mount timeout %s beyond the default', async (name, timeout) => {
-    DEFAULT_COMMAND_LIMITS[name] = new Limit({ timeoutSeconds: 0.05 })
-    const probe = new DelayedProcessProbe({ captures: ['python3', EXTERNAL_COMMANDS] })
-    const ws = workspace(probe)
-    for (const mount of ws.registry.allMounts()) {
-      mount.commandLimits.set(name, new Limit({ timeoutSeconds: timeout }))
-    }
-    try {
-      const result = await ws.shell(`PROGRAM=${name}; $PROGRAM`)
-      expect(result.exitCode).toBe(0)
-      expect(DEC.decode(result.stdout)).toBe('completed\n')
-      expect(probe.requests).toHaveLength(1)
-      expect(probe.aborted).toBe(false)
-    } finally {
-      await ws.close()
-    }
-  })
-
-  it.each(['default', 'mount'])('aborts the process when the %s timeout fires', async (source) => {
-    DEFAULT_COMMAND_LIMITS['native-tool'] = new Limit({
-      timeoutSeconds: source === 'default' ? 0.05 : 1,
-    })
+  it('aborts the process', async () => {
     const probe = new DelayedProcessProbe()
-    const ws = workspace(probe)
-    if (source === 'mount') {
-      for (const mount of ws.registry.allMounts()) {
-        mount.commandLimits.set('native-tool', new Limit({ timeoutSeconds: 0.05 }))
-      }
-    }
+    const ws = lineWs(probe)
     try {
       const result = await ws.shell('native-tool')
       expect(result.exitCode).toBe(124)
-      expect(DEC.decode(result.stderr)).toContain('native-tool: timed out after 0.05s')
+      expect(DEC.decode(result.stderr)).toContain('line: timed out after 0.05s')
       expect(probe.requests).toHaveLength(1)
       expect(probe.aborted).toBe(true)
     } finally {
@@ -311,10 +284,9 @@ describe('external program timeout', () => {
     }
   })
 
-  it('includes stdin materialization in the timeout', async () => {
-    DEFAULT_COMMAND_LIMITS['native-tool'] = new Limit({ timeoutSeconds: 0.05 })
+  it('never starts a program whose stdin arrives past it', async () => {
     const probe = new ProcessProbe()
-    const ws = workspace(probe)
+    const ws = lineWs(probe)
     async function* slowStdin(): AsyncGenerator<Uint8Array> {
       await sleep(150)
       yield ENC.encode('late\n')
@@ -322,7 +294,7 @@ describe('external program timeout', () => {
     try {
       const result = await ws.shell('native-tool', { stdin: slowStdin() })
       expect(result.exitCode).toBe(124)
-      expect(DEC.decode(result.stderr)).toContain('native-tool: timed out after 0.05s')
+      expect(DEC.decode(result.stderr)).toContain('line: timed out after 0.05s')
       expect(probe.requests).toHaveLength(0)
       await sleep(150)
       expect(probe.requests).toHaveLength(0)

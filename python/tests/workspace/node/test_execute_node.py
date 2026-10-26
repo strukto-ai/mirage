@@ -101,7 +101,6 @@ async def _sort_run_command(
     texts,
     flag_kwargs,
     context=Context(),
-    tables=None,
 ):
     """Mock run_command that sorts stdin for sort command."""
     if name == "sort" and context.stdin:

@@ -518,7 +518,7 @@ describe('SandboxMounts', () => {
     }))
     try {
       const ws = workspace(new FakeSandbox('ssh'), [], undefined, {
-        python3: new Limit({ timeoutSeconds: 0.05 }),
+        line: new Limit({ timeoutSeconds: 0.05 }),
       })
       const agent = await ws.session('agent', { profile: 'agent' })
       expect((await agent.shell('python3 slow.py')).exitCode).toBe(124)

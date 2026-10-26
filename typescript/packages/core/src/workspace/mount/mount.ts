@@ -57,7 +57,6 @@ import { isUnsatisfiableRange, sliceWindow } from '../../utils/ranges.ts'
 import type { Clock } from '../../utils/clock.ts'
 
 import { getExtension } from '../../utils/filetype.ts'
-import { resolveLimit } from '../../policy/index.ts'
 import { materialize, type ByteSource, IOResult } from '../../io/types.ts'
 import { closeQuietly } from '../../io/stream.ts'
 import { flagOccurrences } from '../../commands/spec/flag_view.ts'
@@ -395,12 +394,6 @@ function namedSpec(cmd: Command, cmdName: string): CommandSpec {
   if (cmd.spec.name === cmdName) return cmd.spec
   const spec: CommandSpecInit = cmd.spec
   return new CommandSpec({ ...spec, name: cmdName })
-}
-
-/** The workspace's and the session profile's command limits, which a mount resolves a command's limit through with its own. */
-export interface LimitTables {
-  readonly workspace?: Readonly<Record<string, Limit>>
-  readonly profile?: Readonly<Record<string, Limit>>
 }
 
 export class MountEntry {
@@ -1626,7 +1619,6 @@ export class MountEntry {
     texts: string[],
     flags: Record<string, FlagValue>,
     ctx: Partial<Context> = {},
-    tables: LimitTables = {},
   ): Promise<[ByteSource | null, IOResult]> {
     return this.use(async (): Promise<[ByteSource | null, IOResult]> => {
       const handlers = await this.pickHandlers(cmdName, paths, ctx)
@@ -1656,7 +1648,6 @@ export class MountEntry {
             operands,
             texts,
             { ...runCtx, spec: namedSpec(cmd, cmdName) },
-            tables,
             access,
             paths,
           )
@@ -1889,9 +1880,8 @@ export class MountEntry {
 
   /**
    * Run one handler through the runner a CLI leaf shares, in this mount's
-   * voice. `tables` are the workspace's and
-   * the profile's command limits, resolved with this mount's own. `typed` are
-   * the operands as the line typed them, which a file error names. A user
+   * voice. `typed` are the operands as the line typed them, which a file
+   * error names. A user
    * command that declares a write reaches its backend through its own
    * handle, past the dispatcher's per-path invalidation, so this mount drops
    * its caches once it has run; mirage's own commands write through the
@@ -1903,22 +1893,12 @@ export class MountEntry {
     paths: PathSpec[],
     texts: string[],
     ctx: Context,
-    tables: LimitTables,
     access: SessionAccess | undefined,
     typed: readonly PathSpec[],
   ): Promise<CommandFnResult> {
-    const limit = resolveLimit(
-      cmdName,
-      [this],
-      cmd.limit,
-      null,
-      tables.workspace ?? {},
-      tables.profile ?? {},
-    )
     const accessor = this.viewFor(access).accessor
     return this.runIn(
       cmdName,
-      limit,
       ctx,
       mountVoice(cmdName, typed),
       { command: cmdName, prefixes: [this.prefix], declared: cmd.limit ?? null },
@@ -1946,7 +1926,6 @@ export class MountEntry {
     paths: PathSpec[],
     texts: string[],
     ctx: Context,
-    limit: Limit | null,
   ): Promise<CommandFnResult> {
     const root = this.resolveCommand(cli.spec.name)
     const fn = handler.fn
@@ -1974,7 +1953,6 @@ export class MountEntry {
         const accessor = this.viewFor(access).accessor
         return this.runIn(
           prog,
-          limit,
           runCtx,
           cliVoice(prog),
           { command: prog, prefixes: [this.prefix], declared: handler.limit },
@@ -1994,7 +1972,6 @@ export class MountEntry {
    */
   private runIn(
     name: string,
-    limit: Limit | null,
     ctx: Context,
     voice: HandlerVoice,
     producer: Producer,
@@ -2004,7 +1981,7 @@ export class MountEntry {
     // No hold past an abort: an unmount waits on this mount's activity
     // with no grace, so a body, or a renderer of the rows it handed over,
     // that ignores the abort is let go rather than waited on.
-    return runHandler(call(ctx), name, limit, producer, voice, {
+    return runHandler(call(ctx), name, producer, voice, {
       scope: (result) => wrapMountStreams(result, this.activity),
       ...(writes ? { drop: () => this.dropCaches() } : {}),
       ...(ctx.signal !== undefined ? { signal: ctx.signal } : {}),
@@ -2151,10 +2128,7 @@ export class MountEntry {
    * and write contexts. Mirrors Python's `_framed`.
    */
   private framed<T>(work: () => Promise<T>): Promise<T> {
-    return runWithMountContext(
-      () => this.runWithWriteRevisions(work),
-      this.mountId,
-    )
+    return runWithMountContext(() => this.runWithWriteRevisions(work), this.mountId)
   }
 
   /**

@@ -34,8 +34,15 @@ export function runWithLineAbort<T>(
   sessions: readonly SessionState[],
   writer: StatusWriter,
   fn: () => Promise<T>,
+  stop?: AbortSignal,
 ): Promise<T> {
-  return runWithCaller({ ...currentCaller(), lineAbort: { signal, sessions, writer } }, fn)
+  return runWithCaller(
+    {
+      ...currentCaller(),
+      lineAbort: { signal, sessions, writer, ...(stop === undefined ? {} : { stop }) },
+    },
+    fn,
+  )
 }
 
 /**

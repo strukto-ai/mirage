@@ -70,7 +70,7 @@ async def test_line_deadline_cuts_a_loop_of_fast_commands():
 
 
 @pytest.mark.asyncio
-async def test_pipeline_without_budget_is_unbounded():
+async def test_pipeline_under_the_default_deadline_finishes():
     ws = _ws()
     r = await ws.shell("cat | cat", stdin=_quick_stdin())
     assert r.exit_code == 0

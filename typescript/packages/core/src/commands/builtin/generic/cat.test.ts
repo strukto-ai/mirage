@@ -181,28 +181,6 @@ describe('displayLines flags', () => {
     }
   })
 
-  // A lazy output's timeout leaves the signal alone, so a squeeze inside one
-  // whole read checks the invocation's deadline itself.
-  it('stops a squeeze at the command deadline', async () => {
-    const result = await catGeneric(
-      [],
-      [],
-      {
-        ...ctx(),
-        flags: { squeeze_blank: true },
-        stdin: ENC.encode('\n'.repeat(20_000_000)),
-        timeoutSeconds: 0.02,
-        command: 'cat',
-      } as Context,
-      statFn,
-      (p) => fileStream(p.virtual, []),
-    )
-    const [stdout] = result ?? [null]
-    const start = performance.now()
-    await expect(materialize(stdout)).rejects.toMatchObject({ name: 'CommandTimeoutError' })
-    expect(performance.now() - start).toBeLessThan(1000)
-  })
-
   // A backend cat calls the scan without the factory's guard, so a pull that
   // stalls must still lose to the abort, and its late line must not print.
   it('ends a stalled pull at the abort', async () => {

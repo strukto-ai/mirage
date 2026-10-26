@@ -197,23 +197,46 @@ async def test_profile_limits_are_session_owned_and_survive_storage():
 
 
 @pytest.mark.asyncio
-async def test_profile_can_raise_the_global_timeout():
+async def test_profile_can_raise_the_line_deadline():
     ws = Workspace(
         {"/data": RAMVFS()},
         mode=MountMode.EXEC,
-        command_limits={"sleep": Limit(timeout_seconds=0.005)},
+        command_limits={"line": Limit(timeout_seconds=0.05)},
         profiles={
-            "relaxed": {"command_limits": {"sleep": {"timeout_seconds": 1}}}
+            "relaxed": {"command_limits": {"line": {"timeout_seconds": 5}}}
         },
     )
     try:
         ws.create_session("relaxed", profile="relaxed")
-        assert (await ws.shell("sleep .02")).exit_code == 124
+        assert (await ws.shell("sleep .2")).exit_code == 124
         assert (
-            await ws.shell("sleep .02", session_id="relaxed")
+            await ws.shell("sleep .2", session_id="relaxed")
         ).exit_code == 0
     finally:
         await ws.close()
+
+
+@pytest.mark.parametrize(
+    "mount_limits,options",
+    [
+        ({}, {"command_limits": {"sleep": Limit(timeout_seconds=1)}}),
+        ({"line": Limit(timeout_seconds=1)}, {}),
+        (
+            {},
+            {
+                "profiles": {
+                    "p": {"command_limits": {"line": {"max_lines": 1}}}
+                }
+            },
+        ),
+    ],
+    ids=["workspace", "mount", "profile"],
+)
+def test_a_time_limit_where_none_applies_is_refused(mount_limits, options):
+    with pytest.raises(ValueError, match="command_limits"):
+        Workspace(
+            {"/data": (RAMVFS(), MountMode.READ, mount_limits)}, **options
+        )
 
 
 @pytest.mark.asyncio

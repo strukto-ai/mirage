@@ -503,7 +503,7 @@ describe('E2B cancellation and validation', () => {
         mode: MountMode.EXEC,
         runtimes: [runtime, 'workspace'],
         ...(kind === 'timeout'
-          ? { commandLimits: { 'native-sleep': new Limit({ timeoutSeconds: 0.05 }) } }
+          ? { commandLimits: { line: new Limit({ timeoutSeconds: 0.05 }) } }
           : {}),
       },
     )
@@ -519,7 +519,7 @@ describe('E2B cancellation and validation', () => {
       } else {
         const result = await run
         expect(result.exitCode).toBe(124)
-        expect(result.stderrText).toContain('timed out')
+        expect(result.stderrText).toContain('line: timed out after 0.05s')
       }
       await vi.waitFor(() => {
         expect(FakeSandbox.last.commands.handles[0]).toMatchObject({

@@ -241,41 +241,34 @@ export async function runOnMount(
   if (signal?.aborted === true) throw makeAbortError(signal)
   const access = sessionAccess(session)
   try {
-    return await mount.runCommand(
-      cmdName,
-      paths,
-      texts,
-      flags,
-      {
-        admission: ctx.admission,
-        ...(registry.diff === undefined ? {} : { diff: registry.diff }),
-        ids: registry.ids,
-        stdin: opts.stdin ?? null,
-        cwd: PathSpec.fromStrPath(session.cwd),
-        vfs: new Files(
-          dispatch,
-          namespace === undefined ? null : namespace.readers(() => session.visibility),
-          null,
-          { follow: ctx.follow ?? null, ledger: false },
-        ),
-        env: envSnapshot(session),
-        session: sessionView(session, registry.policies, context.frame.diagnostics),
-        ...(registry.processView === undefined ? {} : { processes: registry.processView(session) }),
-        runtime: {
-          execAllowed: registry.isExecAllowed(access),
-          execPathAllowed: (virtual: string) => registry.execAllowedAt(virtual, access),
-          ...(lineRuntime !== undefined
-            ? { bound: lineRuntime, settle: () => registry.settle(lineRuntime) }
-            : {}),
-        },
-        ...(signal !== undefined ? { signal } : {}),
-        ...(ctx.executeFn !== undefined
-          ? { shell: nestedShell(ctx.executeFn, session, signal) }
+    return await mount.runCommand(cmdName, paths, texts, flags, {
+      admission: ctx.admission,
+      ...(registry.diff === undefined ? {} : { diff: registry.diff }),
+      ids: registry.ids,
+      stdin: opts.stdin ?? null,
+      cwd: PathSpec.fromStrPath(session.cwd),
+      vfs: new Files(
+        dispatch,
+        namespace === undefined ? null : namespace.readers(() => session.visibility),
+        null,
+        { follow: ctx.follow ?? null, ledger: false },
+      ),
+      env: envSnapshot(session),
+      session: sessionView(session, registry.policies, context.frame.diagnostics),
+      ...(registry.processView === undefined ? {} : { processes: registry.processView(session) }),
+      runtime: {
+        execAllowed: registry.isExecAllowed(access),
+        execPathAllowed: (virtual: string) => registry.execAllowedAt(virtual, access),
+        ...(lineRuntime !== undefined
+          ? { bound: lineRuntime, settle: () => registry.settle(lineRuntime) }
           : {}),
-        ...(opts.argv !== undefined ? { argv: opts.argv } : {}),
       },
-      { workspace: registry.commandLimits, profile: session.commandLimits },
-    )
+      ...(signal !== undefined ? { signal } : {}),
+      ...(ctx.executeFn !== undefined
+        ? { shell: nestedShell(ctx.executeFn, session, signal) }
+        : {}),
+      ...(opts.argv !== undefined ? { argv: opts.argv } : {}),
+    })
   } catch (err) {
     // Command-owned usage errors (extra operands, missing patterns) become
     // this command's IOResult so the rest of the line keeps running, like a

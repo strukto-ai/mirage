@@ -21,7 +21,7 @@ import type { IOResult } from '../../io/types.ts'
 import { describe, expect, it, vi } from 'vitest'
 import { materialize, OpReport, type ByteSource } from '../../io/types.ts'
 import { runWithSession } from '../../context/session_context.ts'
-import { markLost, record, revisionFor, runWithRecording, startOp } from '../../observe/context.ts'
+import { record, revisionFor, runWithRecording, startOp } from '../../observe/context.ts'
 import { MountEntry } from '../mount/mount.ts'
 import { BatchedRAM, dispatched, render } from '../../test-utils.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
@@ -31,7 +31,6 @@ import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { BaseVFS } from '../../vfs/base.ts'
 import type { Handed } from '../../vfs/types.ts'
 import { eacces, enoent, erofs, exdev } from '../../errors/fs.ts'
-import { CommandTimeoutError } from '../../errors/types.ts'
 import type { Policy } from '../../policy/base.ts'
 import type { DispatchFn } from '../../runtime/types.ts'
 import type { Action, VfsContext, VfsResultContext } from '../../policy/types.ts'
@@ -1826,32 +1825,10 @@ class TreeCopyRAM extends RAMVFS {
  * give the loop a turn, and write the whole file back.
  */
 class SplicingRAMVFS extends RAMVFS {
-  constructor(private readonly pause = 0) {
-    super()
-  }
-
   override async pwrite(path: PathSpec, data: Uint8Array, offset: number): Promise<void> {
     const whole = await materialize(await this.read(path))
-    await new Promise((resolve) => setTimeout(resolve, this.pause))
+    await new Promise((resolve) => setTimeout(resolve, 0))
     await this.write(path, spliceWindow(whole, offset, data))
-  }
-}
-
-/** A RAM mount whose one op never answers until the test releases it. */
-class StalledRAMVFS extends RAMVFS {
-  calls = 0
-  release = (): void => undefined
-
-  constructor(stalled = 'pwrite') {
-    super()
-    Object.assign(this, {
-      [stalled]: () => {
-        this.calls += 1
-        return new Promise<void>((resolve) => {
-          this.release = resolve
-        })
-      },
-    })
   }
 }
 
@@ -1901,289 +1878,6 @@ describe('dispatch runs writers to one path one at a time', () => {
         ),
       )
       expect(DEC.decode((await ws.dispatch('read', '/b/f')) as Uint8Array)).toBe('A12B45C78D')
-    } finally {
-      await ws.close()
-    }
-  })
-
-  it('times out a writer queued behind a call that never answers', async () => {
-    // The stalled call keeps the path, since it may still write; a writer
-    // queued behind it times out on its own budget and then never runs.
-    const store = new StalledRAMVFS()
-    const ws = new Workspace(
-      {
-        '/data': [store, MountMode.WRITE, { pwrite: new Limit({ timeoutSeconds: 0.01 }) }],
-      },
-      { mode: MountMode.WRITE },
-    )
-    try {
-      await ws.dispatch('write', '/data/f', [ENC.encode('0123456789')])
-      await expect(ws.dispatch('pwrite', '/data/f', [ENC.encode('A'), 0])).rejects.toThrow()
-      await expect(ws.dispatch('pwrite', '/data/f', [ENC.encode('B'), 3])).rejects.toThrow()
-      store.release()
-      await new Promise((resolve) => setTimeout(resolve, 20))
-      expect(store.calls).toBe(1)
-    } finally {
-      store.release()
-      await ws.close()
-    }
-  })
-
-  it('lets an unmount go ahead once a stalled write has timed out', async () => {
-    // The hold outlives the timeout, the mount's activity does not: a store
-    // call that never answers must not keep the store from being removed.
-    const store = new StalledRAMVFS()
-    const ws = new Workspace(
-      {
-        '/data': [store, MountMode.WRITE, { pwrite: new Limit({ timeoutSeconds: 0.01 }) }],
-        '/other': new RAMVFS(),
-      },
-      { mode: MountMode.WRITE },
-    )
-    try {
-      await ws.dispatch('write', '/data/f', [ENC.encode('0123456789')])
-      await expect(ws.dispatch('pwrite', '/data/f', [ENC.encode('A'), 0])).rejects.toThrow()
-      await ws.unmount('/data')
-      expect(store.calls).toBe(1)
-    } finally {
-      store.release()
-      await ws.close()
-    }
-  })
-
-  it('keeps a late call off a mount that replaced its own', async () => {
-    // By the time a timed-out rename lands, its mount may be gone and
-    // another store mounted at the prefix: the late call must not touch
-    // the new mount's links.
-    const store = new StalledRAMVFS('rename')
-    const ws = new Workspace(
-      { '/data': [store, MountMode.WRITE, { rename: new Limit({ timeoutSeconds: 0.01 }) }] },
-      { mode: MountMode.WRITE },
-    )
-    try {
-      await ws.dispatch('write', '/data/a', [ENC.encode('a')])
-      await expect(
-        ws.dispatch('rename', '/data/a', [PathSpec.fromStrPath('/data/b')]),
-      ).rejects.toThrow()
-      await ws.unmount('/data')
-      ws.addMount('/data', new RAMVFS(), MountMode.WRITE)
-      await ws.dispatch('symlink', '/data/b', [], { target: 'x' })
-      store.release()
-      await new Promise((resolve) => setTimeout(resolve, 20))
-      expect(ws.namespace.isLink('/data/b')).toBe(true)
-    } finally {
-      store.release()
-      await ws.close()
-    }
-  })
-
-  it('keeps a late rename off a mount now over its destination', async () => {
-    // The source's mount stays, but a mount added under the destination
-    // after the timeout owns that name now: the late rename must not touch
-    // its links.
-    const store = new StalledRAMVFS('rename')
-    const ws = new Workspace(
-      { '/data': [store, MountMode.WRITE, { rename: new Limit({ timeoutSeconds: 0.01 }) }] },
-      { mode: MountMode.WRITE },
-    )
-    try {
-      await ws.dispatch('write', '/data/a', [ENC.encode('a')])
-      await ws.dispatch('mkdir', '/data/sub')
-      await expect(
-        ws.dispatch('rename', '/data/a', [PathSpec.fromStrPath('/data/sub/b')]),
-      ).rejects.toThrow()
-      ws.addMount('/data/sub', new RAMVFS(), MountMode.WRITE)
-      await ws.dispatch('symlink', '/data/sub/b', [], { target: 'x' })
-      store.release()
-      await new Promise((resolve) => setTimeout(resolve, 20))
-      expect(ws.namespace.isLink('/data/sub/b')).toBe(true)
-    } finally {
-      store.release()
-      await ws.close()
-    }
-  })
-
-  it('keeps the versions a mount now over a late rename destination holds', async () => {
-    // The source's mount stays, but a mount added at the destination after
-    // the timeout owns that name now: the late rename's cleanup must leave
-    // the versions kept for files read there.
-    class CachingRAMVFS extends RAMVFS {
-      override readonly cachesReads: boolean = true
-      override readonly local: boolean = false
-    }
-    const store = new StalledRAMVFS('rename')
-    const ws = new Workspace(
-      { '/data': [store, MountMode.WRITE, { rename: new Limit({ timeoutSeconds: 0.01 }) }] },
-      { mode: MountMode.WRITE },
-    )
-    try {
-      await ws.dispatch('mkdir', '/data/d')
-      await expect(
-        ws.dispatch('rename', '/data/d', [PathSpec.fromStrPath('/data/e')]),
-      ).rejects.toThrow()
-      ws.addMount('/data/e', new CachingRAMVFS(), MountMode.WRITE)
-      await ws.cache.keepFingerprints({ '/data/e/f': 'seen' })
-      store.release()
-      await new Promise((resolve) => setTimeout(resolve, 20))
-      expect((await ws.cache.fingerprints(['/data/e/f']))[0]).toBe('seen')
-    } finally {
-      store.release()
-      await ws.close()
-    }
-  })
-
-  it('keeps the version a late rename lost on', async () => {
-    // A timed-out rename whose store refuses a child's condition as it
-    // lands marks the child lost: the late cleanup keeps the version it
-    // lost on, so a retry without a read is refused again.
-    let release = (): void => undefined
-    const gate = new Promise<void>((resolve) => {
-      release = resolve
-    })
-    class LosingRAMVFS extends RAMVFS {
-      override readonly cachesReads: boolean = true
-      override readonly local: boolean = false
-      override async rename(): Promise<void> {
-        await gate
-        markLost(PathSpec.fromStrPath('/data/d/f'), 'refused')
-      }
-    }
-    const ws = new Workspace(
-      {
-        '/data': [
-          new LosingRAMVFS(),
-          MountMode.WRITE,
-          { rename: new Limit({ timeoutSeconds: 0.01 }) },
-        ],
-      },
-      { mode: MountMode.WRITE },
-    )
-    try {
-      await ws.dispatch('mkdir', '/data/d')
-      await ws.dispatch('write', '/data/d/f', [ENC.encode('f')])
-      await expect(
-        ws.dispatch('rename', '/data/d', [PathSpec.fromStrPath('/data/e')]),
-      ).rejects.toThrow()
-      release()
-      await new Promise((resolve) => setTimeout(resolve, 20))
-      expect((await ws.cache.fingerprints(['/data/d/f']))[0]).toBe('refused')
-    } finally {
-      release()
-      await ws.close()
-    }
-  })
-
-  it('lets go of a name when a rename gives up waiting for the other', async () => {
-    // The rename holds /data/f and waits for /data/g, which a stalled
-    // pwrite keeps; once the rename times out, /data/f is free again.
-    const store = new StalledRAMVFS()
-    const limit = new Limit({ timeoutSeconds: 0.01 })
-    const ws = new Workspace(
-      { '/data': [store, MountMode.WRITE, { pwrite: limit, rename: limit }] },
-      { mode: MountMode.WRITE },
-    )
-    try {
-      await ws.dispatch('write', '/data/f', [ENC.encode('f')])
-      await ws.dispatch('write', '/data/g', [ENC.encode('g')])
-      await expect(ws.dispatch('pwrite', '/data/g', [ENC.encode('G'), 0])).rejects.toThrow()
-      await expect(
-        ws.dispatch('rename', '/data/f', [PathSpec.fromStrPath('/data/g')]),
-      ).rejects.toThrow()
-      await ws.dispatch('write', '/data/f', [ENC.encode('after')])
-      expect(DEC.decode((await ws.dispatch('read', '/data/f')) as Uint8Array)).toBe('after')
-    } finally {
-      store.release()
-      await ws.close()
-    }
-  })
-
-  it('drops what a read cached once a timed-out write lands', async () => {
-    // The timeout evicts, but the store's call goes on: a read before it
-    // lands caches the old bytes, so the landing evicts again.
-    let release = (): void => undefined
-    const gate = new Promise<void>((resolve) => {
-      release = resolve
-    })
-    class LateRAMVFS extends RAMVFS {
-      override readonly cachesReads: boolean = true
-      override readonly local: boolean = false
-      held = false
-      override async write(path: PathSpec, data: Uint8Array): Promise<void> {
-        if (this.held) await gate
-        await super.write(path, data)
-      }
-    }
-    const store = new LateRAMVFS()
-    const ws = new Workspace(
-      { '/data': [store, MountMode.WRITE, { write: new Limit({ timeoutSeconds: 0.01 }) }] },
-      { mode: MountMode.WRITE },
-    )
-    try {
-      await ws.dispatch('write', '/data/f', [ENC.encode('old')])
-      store.held = true
-      await expect(ws.dispatch('write', '/data/f', [ENC.encode('new')])).rejects.toThrow()
-      expect(DEC.decode((await ws.dispatch('read', '/data/f')) as Uint8Array)).toBe('old')
-      release()
-      await new Promise((resolve) => setTimeout(resolve, 20))
-      expect(DEC.decode((await ws.dispatch('read', '/data/f')) as Uint8Array)).toBe('new')
-    } finally {
-      release()
-      await ws.close()
-    }
-  })
-
-  it('reports a call that fails after its timeout', async () => {
-    // The caller already has its timeout, so the store's own failure
-    // reaches no one else: it is reported, not dropped.
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
-    class LateFailingRAMVFS extends RAMVFS {
-      override async pwrite(): Promise<void> {
-        await new Promise((resolve) => setTimeout(resolve, 50))
-        throw new Error('store went away')
-      }
-    }
-    const ws = new Workspace(
-      {
-        '/data': [
-          new LateFailingRAMVFS(),
-          MountMode.WRITE,
-          { pwrite: new Limit({ timeoutSeconds: 0.01 }) },
-        ],
-      },
-      { mode: MountMode.WRITE },
-    )
-    try {
-      await ws.dispatch('write', '/data/f', [ENC.encode('0123456789')])
-      await expect(ws.dispatch('pwrite', '/data/f', [ENC.encode('A'), 0])).rejects.toThrow()
-      await new Promise((resolve) => setTimeout(resolve, 100))
-      expect(warn).toHaveBeenCalledTimes(1)
-      expect(String(warn.mock.calls[0]?.[0])).toContain('store went away')
-    } finally {
-      warn.mockRestore()
-      await ws.close()
-    }
-  })
-
-  it('holds the path past a timeout until the store has answered', async () => {
-    // A timeout rejects the caller but cannot stop the call: the timed-out
-    // pwrite still writes back what it read, so the next writer (a whole
-    // write, which has no timeout) must land after it, not under it.
-    const ws = new Workspace(
-      {
-        '/data': [
-          new SplicingRAMVFS(50),
-          MountMode.WRITE,
-          { pwrite: new Limit({ timeoutSeconds: 0.01 }) },
-        ],
-      },
-      { mode: MountMode.WRITE },
-    )
-    try {
-      await ws.dispatch('write', '/data/f', [ENC.encode('0123456789')])
-      await expect(ws.dispatch('pwrite', '/data/f', [ENC.encode('A'), 0])).rejects.toThrow()
-      await ws.dispatch('write', '/data/f', [ENC.encode('XXXXXXXXXX')])
-      await new Promise((resolve) => setTimeout(resolve, 100))
-      expect(DEC.decode((await ws.dispatch('read', '/data/f')) as Uint8Array)).toBe('XXXXXXXXXX')
     } finally {
       await ws.close()
     }
@@ -2295,31 +1989,6 @@ describe('a streamed read', () => {
       const got = await ws.dispatch('read', TAPE, [], { ...window, stream: true })
       expect(got).toBeInstanceOf(Uint8Array)
       expect(tape.reads).toBe(1)
-    } finally {
-      await ws.close()
-    }
-  })
-
-  it('gives each pull the whole timeout', async () => {
-    const tape = new Tape()
-    tape.delay = 50
-    const ws = new Workspace(
-      { '/tape': [tape, MountMode.WRITE, { read: new Limit({ timeoutSeconds: 0.2 }) }] },
-      { mode: MountMode.WRITE },
-    )
-    try {
-      const stream = await ws.dispatch('read', TAPE, [], { stream: true })
-      const got: Uint8Array[] = []
-      for await (const chunk of stream as AsyncIterable<Uint8Array>) {
-        got.push(chunk)
-        await sleep(100)
-      }
-      expect(got).toHaveLength(5)
-      tape.files.set('b.txt', tape.files.get('a.txt') ?? new Uint8Array())
-      tape.delay = 500
-      await expect(
-        ws.dispatch('read', '/tape/b.txt', [], { stream: true, filetype: null }),
-      ).rejects.toBeInstanceOf(CommandTimeoutError)
     } finally {
       await ws.close()
     }

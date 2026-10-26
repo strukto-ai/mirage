@@ -22,7 +22,6 @@ from collections.abc import (
     Awaitable,
     Iterable,
     Iterator,
-    Mapping,
 )
 from contextlib import (
     AbstractAsyncContextManager,
@@ -34,7 +33,6 @@ from typing import (
     Any,
     Callable,
     Literal,
-    NamedTuple,
     TypeVar,
     cast,
     overload,
@@ -106,7 +104,6 @@ from mirage.observe.context import (
     command_records,
     with_mount_context,
 )
-from mirage.policy import resolve_limit
 from mirage.runtime.python.host.host_io import host_io, with_host_io
 from mirage.shell.bytes import encode_text
 from mirage.types import (
@@ -510,19 +507,6 @@ async def _read_window(
     if whole:
         return data
     return slice_window(data, offset, size)
-
-
-class LimitTables(NamedTuple):
-    """The workspace's and the session profile's command limits, which a
-    mount resolves a command's limit through with its own.
-
-    Args:
-        workspace (Mapping[str, Limit] | None): the workspace's.
-        profile (Mapping[str, Limit] | None): the session profile's.
-    """
-
-    workspace: Mapping[str, Limit] | None = None
-    profile: Mapping[str, Limit] | None = None
 
 
 class MountEntry:
@@ -1084,7 +1068,6 @@ class MountEntry:
         texts: list[str],
         flag_kwargs: dict[str, FlagValue],
         ctx: Context = Context(),
-        tables: LimitTables | None = None,
     ) -> tuple[ByteSource | None, IOResult]:
         """Execute a command on this mount's VFS.
 
@@ -1103,9 +1086,6 @@ class MountEntry:
                 with the facts only this mount can supply added. A
                 handler reads the fields it wants, so no list of command
                 names is kept here.
-            tables (LimitTables | None): the workspace's and the session
-                profile's command limits, which the mount resolves the
-                command's bound through with its own.
         """
         async with self.use():
             handlers = await self._pick_handlers(
@@ -1140,7 +1120,6 @@ class MountEntry:
                         self._command_ctx(
                             flags, ctx, self.prefix if user else ""
                         ),
-                        tables or LimitTables(),
                         paths,
                     )
                     if result is not None:
@@ -1400,7 +1379,6 @@ class MountEntry:
         paths: list[PathSpec],
         texts: list[str],
         ctx: Context,
-        tables: LimitTables,
         typed: list[PathSpec],
     ) -> CommandFnResult:
         """Run one handler through the runner a CLI leaf shares, in this
@@ -1417,24 +1395,14 @@ class MountEntry:
             paths (list[PathSpec]): the keyed path operands.
             texts (list[str]): positional text args.
             ctx (Context): the handler's context.
-            tables (LimitTables): the workspace's and the profile's
-                command limits.
             typed (list[PathSpec]): the operands as the line typed them,
                 which a file error names.
         """
-        limit = resolve_limit(
-            cmd_name,
-            [self],
-            command_default=cmd.limit,
-            workspace_limits=tables.workspace,
-            profile_limits=tables.profile,
-        )
         ctx = dataclasses.replace(ctx, spec=_named_spec(cmd, cmd_name))
         with host_io():
             return await run_handler(
                 cmd.fn(self.vfs.accessor, paths, texts, ctx),
                 cmd_name,
-                limit,
                 Producer(
                     command=cmd_name,
                     prefixes=(self.prefix,),
@@ -1460,7 +1428,6 @@ class MountEntry:
         paths: list[PathSpec],
         texts: list[str],
         ctx: Context,
-        limit: Limit | None,
     ) -> CommandFnResult:
         """Run one leaf of a command tree this mount serves.
 
@@ -1478,7 +1445,6 @@ class MountEntry:
             paths (list[PathSpec]): the leaf's path operands.
             texts (list[str]): the leaf's text operands.
             ctx (Context): the leaf's context.
-            limit (Limit | None): the resolved limit.
         """
         root = self.resolve_command(cli.spec.name)
         fn = handler.fn
@@ -1511,7 +1477,6 @@ class MountEntry:
                             )
                         ),
                         prog,
-                        limit,
                         Producer(
                             command=prog,
                             prefixes=(self.prefix,),

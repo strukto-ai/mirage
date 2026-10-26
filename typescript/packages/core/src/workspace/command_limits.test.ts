@@ -261,49 +261,49 @@ it('keeps workspace limits on a copy', async () => {
   }
 })
 
-it('lets a profile raise the workspace timeout', async () => {
+it("lets a profile raise the workspace's line deadline", async () => {
   const ws = new Workspace(
     { '/data': new RAMVFS() },
     {
       mode: MountMode.EXEC,
-      commandLimits: { sleep: new Limit({ timeoutSeconds: 0.005 }) },
-      profiles: { relaxed: { commandLimits: { sleep: new Limit({ timeoutSeconds: 1 }) } } },
+      commandLimits: { line: new Limit({ timeoutSeconds: 0.005 }) },
+      profiles: { relaxed: { commandLimits: { line: new Limit({ timeoutSeconds: 1 }) } } },
     },
   )
   try {
     ws.createSession('relaxed', { profile: 'relaxed' })
-    expect((await ws.shell('sleep .02')).exitCode).toBe(124)
+    const cut = await ws.shell('sleep .02')
+    expect(cut.exitCode).toBe(124)
+    expect(DEC.decode(cut.stderr)).toBe('line: timed out after 0.005s\n')
     expect((await ws.shell('sleep .02', { sessionId: 'relaxed' })).exitCode).toBe(0)
   } finally {
     await ws.close()
   }
 })
 
-it('applies workspace and profile deadlines to registered CLIs', async () => {
+it('cuts a registered CLI that ignores its abort at the line deadline', async () => {
   const ws = new Workspace(
     { '/data': new RAMVFS() },
-    {
-      commandLimits: { prog: new Limit({ timeoutSeconds: 1 }) },
-      profiles: { short: { commandLimits: { prog: new Limit({ timeoutSeconds: 0.01 }) } } },
-    },
+    { commandLimits: { line: new Limit({ timeoutSeconds: 0.01 }) } },
   )
   const spec = new CLI({
     spec: new CommandSpec({ name: 'prog' }),
     handlers: {
       '': new CLIHandler({
         fn: async () => {
-          await new Promise((resolve) => setTimeout(resolve, 50))
+          await new Promise((resolve) => setTimeout(resolve, 2000))
           return [null, new IOResult()]
         },
-        limit: new Limit({ timeoutSeconds: 0.01 }),
       }),
     },
   })
   try {
     ws.registerCli('prog', spec)
-    ws.createSession('short', { profile: 'short' })
-    expect((await ws.shell('prog')).exitCode).toBe(0)
-    expect((await ws.shell('prog', { sessionId: 'short' })).exitCode).toBe(124)
+    const started = Date.now()
+    const r = await ws.shell('prog')
+    expect(r.exitCode).toBe(124)
+    expect(DEC.decode(r.stderr)).toBe('line: timed out after 0.01s\n')
+    expect(Date.now() - started).toBeLessThan(1500)
   } finally {
     await ws.close()
   }

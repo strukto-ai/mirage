@@ -25,7 +25,7 @@ import { OutputStream, closeQuietly } from '../../../io/stream.ts'
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import { encodeText } from '../../../shell/bytes.ts'
 import { STOP_WAIT_SECONDS } from '../../../shell/job_table/constants.ts'
-import type { Limit, PathSpec, Producer } from '../../../types.ts'
+import type { PathSpec, Producer } from '../../../types.ts'
 import { ABORT_JOIN_MS, joinOrAbort, stopSignal } from '../../../utils/abort.ts'
 import { concat } from '../../../utils/bytes.ts'
 import { readerOf, type Files } from '../../files.ts'
@@ -204,7 +204,6 @@ export async function answered(
 export async function runHandler(
   body: Promise<CommandFnResult>,
   name: string,
-  limit: Limit | null,
   producer: Producer,
   voice: HandlerVoice,
   opts: RunHandlerOpts = {},

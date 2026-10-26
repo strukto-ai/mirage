@@ -23,9 +23,9 @@ from mirage.workspace.workspace.failure import (
 
 
 def test_timeout_reports_124_with_the_timeout_message():
-    io = failure_result(CommandTimeoutError("sleep 99", 2.0), "sleep 99")
+    io = failure_result(CommandTimeoutError("line", 2.0), "sleep 99")
     assert io.exit_code == 124
-    assert io.stderr == b"sleep 99: timed out after 2s\n"
+    assert io.stderr == b"line: timed out after 2s\n"
 
 
 def test_a_placement_deny_reports_126_named_by_the_command():

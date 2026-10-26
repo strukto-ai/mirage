@@ -13,12 +13,12 @@
       "world": {
         "mounts": {
           "/ram": {
-            "vfs": "ram",
-            "limits": {
-              "sleep": {
-                "timeout_seconds": 1
-              }
-            }
+            "vfs": "ram"
+          }
+        },
+        "command_limits": {
+          "line": {
+            "timeout_seconds": 1
           }
         }
       },

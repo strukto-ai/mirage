@@ -61,7 +61,7 @@ describe('line deadline', () => {
     }
   })
 
-  it('is unbounded without a budget', async () => {
+  it('runs a line to its end under the default deadline', async () => {
     const ws = buildWs()
     try {
       const r = await ws.shell('cat | cat', { stdin: ENC.encode('hi\n') })

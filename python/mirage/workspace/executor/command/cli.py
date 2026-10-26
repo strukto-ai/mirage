@@ -662,7 +662,6 @@ async def handle_mount_cli(
             paths,
             walked.texts,
             ctx,
-            limit,
         )
 
     return await run_walked(walked, session, stdin, context, limit, run)
@@ -711,8 +710,8 @@ async def _run_cli(
             f"walk returned a leaf without a handler for {prog!r}"
         )
 
-    # asyncio's timeout cancels the runtime task as well as the caller;
-    # TypeScript forwards an explicit deadline and abort signal instead.
+    # The line's deadline cancels the runtime task as well as the caller;
+    # TypeScript forwards the line's abort signal instead.
     limit = resolve_limit(
         prog,
         command_default=binding.limit,
@@ -752,7 +751,6 @@ async def _run_cli(
         return await run_handler(
             body,
             prog,
-            limit,
             Producer(command=prog, declared=binding.limit),
             cli_voice(prog),
             drop=drop_caches if binding.write else None,

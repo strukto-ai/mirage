@@ -850,11 +850,6 @@
     "PARSES": "TypeScript keeps each spec's readings in a WeakMap keyed by the spec, as compileSpec keeps its tables; Python keeps them on the spec itself, since a frozen dataclass key would hash every field on every parse."
    }
   },
-  "commands/builtin/utils/limit": {
-   "typescript_only": {
-    "deadlineCheck": "A JavaScript generator cannot be cancelled from outside, so a TypeScript scan inside one pull checks the invocation's deadline itself; Python's with_timeout cancels the pull, and the scan stops at its next await."
-   }
-  },
   "commands/cli/builtin/git/dates": {
    "python_only": {
     "LATE_WALL": "A Python datetime holds no year past 9999, so from 9990 on a zone is read 400 years earlier for the standard-time search; a JavaScript Date holds those years.",

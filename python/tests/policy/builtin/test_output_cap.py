@@ -20,7 +20,9 @@ from pydantic import ValidationError
 from mirage.policy.builtin.output_cap import (
     ALL_COMMANDS,
     DEFAULT_COMMAND_LIMITS,
-    FALLBACK_LIMIT,
+    LINE_TIMEOUT_SECONDS,
+    check_command_limits,
+    line_timeout,
     resolve_limit,
     resolve_producer,
 )
@@ -80,26 +82,26 @@ def _mount(table=None, walk=1000):
 
 def test_a_layer_naming_one_bound_inherits_the_rest():
     resolved = resolve_limit(
-        "cat", workspace_limits={"cat": Limit(max_lines=5)}
+        "cat", workspace_limits={"cat": Limit(max_bytes=5)}
     )
     assert resolved is not None
-    assert (resolved.max_lines, resolved.timeout_seconds) == (
+    assert (resolved.max_bytes, resolved.max_lines) == (
         5,
-        DEFAULT_COMMAND_LIMITS["cat"].timeout_seconds,
+        DEFAULT_COMMAND_LIMITS["cat"].max_lines,
     )
 
 
 def test_every_command_entry_sits_below_each_layers_own():
     workspace = {
-        ALL_COMMANDS: Limit(timeout_seconds=9, walk_limit=7),
+        ALL_COMMANDS: Limit(max_lines=9, walk_limit=7),
         "find": Limit(walk_limit=50),
     }
-    mount = _mount({ALL_COMMANDS: Limit(timeout_seconds=5)})
+    mount = _mount({ALL_COMMANDS: Limit(max_lines=5)})
     find = resolve_limit("find", [mount], workspace_limits=workspace)
     ls = resolve_limit("ls", [mount], workspace_limits=workspace)
     assert find is not None and ls is not None
-    assert (find.timeout_seconds, find.walk_limit) == (5, 50)
-    assert (ls.timeout_seconds, ls.walk_limit) == (5, 7)
+    assert (find.max_lines, find.walk_limit) == (5, 50)
+    assert (ls.max_lines, ls.walk_limit) == (5, 7)
 
 
 def test_the_mount_walk_default_is_last_and_mounts_keep_the_tightest():
@@ -115,9 +117,69 @@ def test_rejects_negative_or_infinite_timeouts():
             Limit(timeout_seconds=seconds)
 
 
-def test_resolve_unknown_command_returns_fallback_limit():
-    assert resolve_limit("nl") == FALLBACK_LIMIT
-    assert FALLBACK_LIMIT.timeout_seconds is not None
+def test_resolve_unknown_command_has_no_bound():
+    assert resolve_limit("nl") is None
+
+
+def test_the_line_timeout_defaults_to_600_seconds():
+    assert LINE_TIMEOUT_SECONDS == 600
+    assert line_timeout() == LINE_TIMEOUT_SECONDS
+    assert line_timeout({"cat": Limit(max_lines=3)}, {"line": Limit()}) == 600
+
+
+def test_a_profile_line_entry_overrides_the_workspaces():
+    workspace = {"line": Limit(timeout_seconds=30)}
+    assert line_timeout(workspace) == 30
+    assert line_timeout(workspace, {"line": Limit(timeout_seconds=5)}) == 5
+    assert line_timeout(workspace, {"cat": Limit(max_lines=1)}) == 30
+
+
+@pytest.mark.parametrize("seconds", [None, 0])
+def test_a_line_entry_of_none_or_zero_lifts_the_deadline(seconds):
+    lifted = {"line": Limit(timeout_seconds=seconds)}
+    assert line_timeout(lifted) is None
+    assert line_timeout({"line": Limit(timeout_seconds=30)}, lifted) is None
+
+
+@pytest.mark.parametrize(
+    "limits,where,refusal",
+    [
+        (
+            {"sleep": Limit(timeout_seconds=1)},
+            "workspace",
+            "workspace: command_limits['sleep'].timeout_seconds: a line"
+            " has one time limit, set it on 'line'",
+        ),
+        (
+            {"line": Limit(timeout_seconds=1, max_lines=3)},
+            "profile",
+            "profile: command_limits['line'] takes only timeout_seconds,"
+            " not max_lines",
+        ),
+        (
+            {"line": Limit(timeout_seconds=1)},
+            "mount /data",
+            "mount /data: command_limits['line']: a line spans mounts,"
+            " set it on the workspace or a profile",
+        ),
+    ],
+)
+def test_check_command_limits_refuses_time_where_none_applies(
+    limits, where, refusal
+):
+    with pytest.raises(ValueError) as refused:
+        check_command_limits(
+            limits, where, takes_line=not where.startswith("mount")
+        )
+    assert str(refused.value) == refusal
+
+
+def test_check_command_limits_takes_a_line_entry_and_untimed_commands():
+    check_command_limits(
+        {"line": Limit(timeout_seconds=None), "cat": Limit(max_lines=3)},
+        "workspace",
+        takes_line=True,
+    )
 
 
 def _mounts(table):

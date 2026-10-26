@@ -440,13 +440,29 @@ async function runPreparedLine(
   // itself; the caller's route comes back when it ends.
   const outerRouting = context.frame.routing
   try {
+    // A top-level line runs under its `line` deadline, which a nested one
+    // shares: past it the tree is stopped like an abort and the line answers
+    // 124, as Python's asyncio.timeout does. The deadline is in the line's
+    // line's stop, the one object the tree runs on, so a nested line
+    // (`eval`) still finds the one signal its line answers to.
+    const lineSeconds =
+      options.record !== false
+        ? lineTimeout(env.registry.commandLimits, effectiveSession.commandLimits)
+        : null
+    const expiry = lineSeconds !== null && lineSeconds > 0 ? new AbortController() : null
+    const lineSignal = mergeSignals(options.signal, context.frame.abortSignal)
+    const stop = mergeSignals(lineSignal, expiry?.signal)
+    const deadline =
+      expiry === null || lineSeconds === null || stop === undefined
+        ? null
+        : { expiry, seconds: lineSeconds, signal: stop }
     // The line's signal, the caller's folded with the session's kill
     // channel, rides the async context so the status write can refuse an
     // orphan of this line and no other, and every status the line stamps,
     // a syntax error's or a deny's included, is the line's to put back.
     // Python sets the line writer at the same point.
     return await runWithLineAbort(
-      mergeSignals(options.signal, context.frame.abortSignal),
+      lineSignal,
       [targetSession, effectiveSession],
       frame.writer,
       async () => {
@@ -801,6 +817,7 @@ async function runPreparedLine(
                 nested,
                 handed,
                 judged,
+                deadline,
               ),
             env.sessions,
           )
@@ -809,6 +826,7 @@ async function runPreparedLine(
           parser.release()
         }
       },
+      deadline?.signal,
     )
   } finally {
     effectiveSession.aliasView = outerView
@@ -852,6 +870,10 @@ async function runParsedLine(
   nested: NestedRefusal,
   handed: HandOff,
   judged: () => Promise<[Walked, Judged[]][]>,
+  // The top-level line's deadline: the controller its timer aborts, its
+  // seconds, and the line's signal with it folded in; null for a nested
+  // line, or one whose deadline is lifted.
+  deadline: { expiry: AbortController; seconds: number; signal: AbortSignal } | null,
 ): Promise<ExecuteResult> {
   const effectiveSession = context.session
   const cacheFacts = env.dispatcher.captureCacheFacts()
@@ -1034,7 +1056,7 @@ async function runParsedLine(
           claimantFor(rootNode, handed),
           route,
           options.sink,
-          isLine ? lineTimeout(env.registry.commandLimits, effectiveSession.commandLimits) : null,
+          deadline?.seconds ?? null,
         )
       // The runtime's file calls are the line's, recorded as a tree's are,
       // and handed over however the run ends: a call it finished before it
@@ -1144,21 +1166,14 @@ async function runParsedLine(
       )
       if (filled !== null) return filled
     }
-    // A top-level line runs under its `line` deadline, which a nested one
-    // shares: past it the tree is stopped like an abort and the line answers
-    // 124, as Python's asyncio.timeout does.
-    const lineSeconds = isLine
-      ? lineTimeout(env.registry.commandLimits, effectiveSession.commandLimits)
-      : null
-    const deadline = lineSeconds !== null && lineSeconds > 0 ? new AbortController() : null
     const runBody = async (): Promise<[ByteSource | null, IOResult, ExecutionNode]> => {
       // atDeadline, not a bare timer: an engine that holds the event loop
       // (QuickJS) fires it from its interrupt hook.
       const disarm =
-        deadline === null || lineSeconds === null
+        deadline === null
           ? undefined
-          : atDeadline(lineSeconds, () => {
-              deadline.abort()
+          : atDeadline(deadline.seconds, () => {
+              deadline.expiry.abort()
             })
       try {
         // The one cancellation seam, the twin of Python's run_cancellable:
@@ -1168,9 +1183,7 @@ async function runParsedLine(
         // stop side effects and free producers, not to release the caller.
         const release = deps.parser instanceof ParseScope ? deps.parser.retain() : undefined
         const running = runCommandTree(
-          deadline === null
-            ? deps
-            : { ...deps, signal: mergeSignals(deps.signal, deadline.signal) ?? deadline.signal },
+          deadline === null ? deps : { ...deps, signal: deadline.signal },
           rootNode,
           context,
           stdin,
@@ -1183,10 +1196,13 @@ async function runParsedLine(
         // A `kill` names a signal, and what the line started gets the stop
         // bound to answer it, as Python joins the cancelled line whole.
         const runner = currentCaller().process
-        const result = await joinOrAbort(running, mergeSignals(killed, deadline?.signal), () =>
-          (runner?.signal ?? stopSignal(killed)) === null
-            ? ABORT_JOIN_MS
-            : STOP_WAIT_SECONDS * 1000,
+        const result = await joinOrAbort(
+          running,
+          mergeSignals(killed, deadline?.expiry.signal),
+          () =>
+            (runner?.signal ?? stopSignal(killed)) === null
+              ? ABORT_JOIN_MS
+              : STOP_WAIT_SECONDS * 1000,
         )
         if (killed?.aborted === true) throw makeAbortError(killed)
         return result
@@ -1197,12 +1213,12 @@ async function runParsedLine(
         // a throw. Once the caller aborted, the line's answer is the abort,
         // whatever a leaf threw while unwinding.
         const aborted = killed?.aborted === true
-        const expired = !aborted && deadline?.signal.aborted === true && lineSeconds !== null
+        const expired = !aborted && deadline?.expiry.signal.aborted === true
         executionFailure = {
           error: aborted
             ? makeAbortError(killed)
             : expired
-              ? new CommandTimeoutError(LINE, lineSeconds)
+              ? new CommandTimeoutError(LINE, deadline.seconds)
               : error,
         }
         const failed = failureResult(executionFailure.error)

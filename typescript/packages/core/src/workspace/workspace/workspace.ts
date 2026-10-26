@@ -1083,6 +1083,9 @@ export class Workspace {
     if (profile.policy != null) {
       parseProfilePolicy(profile.policy, `profile '${name}' policy`, true)
     }
+    if (profile.commandLimits != null) {
+      checkCommandLimits(profile.commandLimits, `profile '${name}'`, true)
+    }
     // Its env names pointers in the workspace env grammar, so the
     // sources it names are checked here too, before a session runs.
     for (const entry of Object.values(varsFromEntries(profile.env ?? {}))) {

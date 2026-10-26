@@ -15,48 +15,10 @@
 import { describe, expect, it } from 'vitest'
 import { materialize } from '../../../io/types.ts'
 import { Limit, OnExceed } from '../../../types.ts'
-import { guardOutput, maybeWithTimeout, runWithTimeout } from './limit.ts'
+import { guardOutput, runWithTimeout } from './limit.ts'
 import { CommandTimeoutError } from '../../../errors/types.ts'
 
 const ENC = new TextEncoder()
-
-/** Yields its bytes once, then waits until it is closed, once. */
-class HeldSource implements AsyncIterableIterator<Uint8Array> {
-  private sent = false
-  private closed = false
-  private release: (() => void) | null = null
-
-  constructor(
-    private readonly data: Uint8Array,
-    private readonly onClose: () => void,
-  ) {}
-
-  [Symbol.asyncIterator](): AsyncIterableIterator<Uint8Array> {
-    return this
-  }
-
-  async next(): Promise<IteratorResult<Uint8Array>> {
-    if (!this.sent) {
-      this.sent = true
-      return { done: false, value: this.data }
-    }
-    if (!this.closed) {
-      await new Promise<void>((resolve) => {
-        this.release = resolve
-      })
-    }
-    return { done: true, value: undefined }
-  }
-
-  return(): Promise<IteratorResult<Uint8Array>> {
-    if (!this.closed) {
-      this.closed = true
-      this.onClose()
-    }
-    this.release?.()
-    return Promise.resolve({ done: true, value: undefined })
-  }
-}
 const DEC = new TextDecoder()
 const TEN = ENC.encode(Array.from({ length: 10 }, (_, i) => `line${String(i)}\n`).join(''))
 
@@ -136,30 +98,6 @@ it.each([1, 2, 20])('intersects limits and detects exact fits with chunks of %i'
     expect(DEC.decode(await materialize(err)).includes('truncated')).toBe(truncated)
   }
 })
-
-it.each([false, true])(
-  'timeout wrapper retains owned producer close (pending=%s)',
-  async (pendingPull) => {
-    let closed = false
-    const source = new HeldSource(ENC.encode('prefix'), () => {
-      closed = true
-    })
-    const wrapped = maybeWithTimeout(
-      source,
-      new Limit({ timeoutSeconds: 30 }),
-      'writer',
-    ) as AsyncIterableIterator<Uint8Array>
-    let pending: Promise<IteratorResult<Uint8Array> | undefined> | undefined
-    if (pendingPull) {
-      expect((await wrapped.next()).value).toEqual(ENC.encode('prefix'))
-      pending = wrapped.next().catch(() => undefined)
-      await Promise.resolve()
-    }
-    await wrapped.return?.()
-    await pending
-    expect(closed).toBe(true)
-  },
-)
 
 describe('runWithTimeout', () => {
   it('closes a stream the call answers after its deadline', async () => {

@@ -72,6 +72,12 @@ export interface LineAbortFrame {
   signal: AbortSignal | undefined
   sessions: readonly SessionState[]
   writer: symbol
+  /**
+   * What the line's tree runs on, its deadline folded into `signal`, which
+   * a nested line inherits as its own; absent when it is `signal`. A
+   * deadline past stops the tree, not the line's own status write.
+   */
+  stop?: AbortSignal
 }
 
 /**
@@ -319,7 +325,7 @@ export function lineSignal(session: SessionState): AbortSignal | undefined {
   const signals = new Set(
     lineFrames()
       .filter((frame) => frame.sessions.includes(session))
-      .map((frame) => frame.signal),
+      .map((frame) => frame.stop ?? frame.signal),
   )
   return signals.size === 1 ? [...signals][0] : undefined
 }

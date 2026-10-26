@@ -68,29 +68,6 @@ describe('headGeneric line counts', () => {
     }
   })
 
-  // A lazy output's timeout leaves the signal alone, so a count inside one
-  // whole read checks the invocation's deadline itself.
-  it('-n -K stops at the command deadline', async () => {
-    const ctx = {
-      stdin: new TextEncoder().encode('\n'.repeat(20_000_000)),
-      flags: { lines: '-20000000' },
-      cwd: PathSpec.fromStrPath('/'),
-      timeoutSeconds: 0.02,
-      command: 'head',
-    }
-    const result = await headGeneric(
-      [],
-      [],
-      ctx as Context,
-      () => Promise.reject(new Error('stdin only')),
-      () => resolveSource(null),
-    )
-    const [stdout] = result ?? [null]
-    const start = performance.now()
-    await expect(materialize(stdout)).rejects.toMatchObject({ name: 'CommandTimeoutError' })
-    expect(performance.now() - start).toBeLessThan(1000)
-  })
-
   // A backend head calls the scan without the factory's guard, so a pull that
   // stalls must still lose to the abort, and its late line must not print.
   it.each([{ lines: '1' }, { bytes: '1' }])(

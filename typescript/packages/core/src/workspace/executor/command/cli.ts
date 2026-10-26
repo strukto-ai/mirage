@@ -541,7 +541,6 @@ export async function handleMountCli(
       paths,
       walked.texts,
       signal === undefined ? ctx : { ...ctx, signal },
-      limit,
     )
   return runWalked(walked, session, stdin, context, limit, run)
 }
@@ -617,12 +616,12 @@ async function runCli(
     return runHandler(
       body,
       prog,
-      limit,
       { command: prog, prefixes: [], declared: binding.limit ?? null },
       cliVoice(prog),
       {
         settle: settled,
         ...(binding.write && dropCaches !== null ? { drop: dropCaches } : {}),
+        ...(ctx.signal !== undefined ? { signal: ctx.signal } : {}),
         ...(ctx.vfs !== undefined ? { vfs: ctx.vfs } : {}),
       },
     )
@@ -668,6 +667,7 @@ export async function runWalked(
     env: envSnapshot(session),
     argv: walked.argv,
     spec: walked.path.length > 0 ? walked.leaf : new CommandSpec({ ...leaf, name: walked.prog }),
+    ...(context.signal !== undefined ? { signal: context.signal } : {}),
     ...(context.vfs !== undefined ? { vfs: context.vfs } : {}),
     ...(context.session !== undefined ? { session: context.session } : {}),
     ...(context.processes === undefined ? {} : { processes: context.processes }),
@@ -686,7 +686,7 @@ export async function runWalked(
   // back, so the shell stays live until that output settles.
   if (io.output !== null && !io.output.settled) io.output.callbacks.push(ended)
   else ended()
-  let stdout = answer
+  const stdout = answer
   if (io.producer === null) {
     const stderr = await io.materializeStderr()
     return [
