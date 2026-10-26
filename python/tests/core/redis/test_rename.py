@@ -205,10 +205,21 @@ async def test_rename_dir_keeps_the_source_when_the_write_is_refused(
 async def test_rename_dir_keeps_the_subtree_when_a_file_write_is_refused(
     accessor, monkeypatch
 ):
+    # The second write is refused, after the first landed: a walk that
+    # deleted each file once copied would already have lost the first.
     store = accessor.store
     await store.add_dir("/dir/sub")
     await store.set_file("/dir/sub/deep", b"z")
-    monkeypatch.setattr(store, "set_file", refuse)
+    real_set_file = store.set_file
+    written: list[str] = []
+
+    async def refuse_the_second(path: str, data: bytes) -> None:
+        written.append(path)
+        if len(written) == 2:
+            await refuse()
+        await real_set_file(path, data)
+
+    monkeypatch.setattr(store, "set_file", refuse_the_second)
     with pytest.raises(ResponseError):
         await rename(accessor, spec("/dir"), spec("/d/moved"))
     assert await store.has_dir("/dir")

@@ -90,8 +90,16 @@ describe.skipIf(skip)('RedisVFS rename when a write is refused', () => {
     expect(dec(await vfs.store.getFile('/dir/f'))).toBe('x')
   })
 
-  it('keeps the subtree when a file under it could not be written', async () => {
-    vi.spyOn(vfs.store, 'setFile').mockRejectedValue(OOM)
+  // The second write is refused, after the first landed: a walk that deleted
+  // each file once copied would already have lost the first.
+  it('keeps the subtree when a later file under it could not be written', async () => {
+    const realSetFile = vfs.store.setFile.bind(vfs.store)
+    let writes = 0
+    vi.spyOn(vfs.store, 'setFile').mockImplementation(async (path, data) => {
+      writes += 1
+      if (writes === 2) throw OOM
+      await realSetFile(path, data)
+    })
     await expect(vfs.rename(spec('/dir'), spec('/d/moved'))).rejects.toThrow('OOM')
     expect(await vfs.store.hasDir('/dir')).toBe(true)
     expect(await vfs.store.hasDir('/dir/sub')).toBe(true)
