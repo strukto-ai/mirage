@@ -153,6 +153,9 @@ export async function toStateDict(ws: WorkspaceLike): Promise<WorkspaceStateDict
       // trip, and stays the anchor: a load leaves it out of the mounts and
       // lets the new workspace add its own. Mirrors python.
       ...(ws.syntheticRoot && m.prefix === '/' ? { anchor: true as const } : {}),
+      ...(m.commandLimits.size > 0
+        ? { command_limits: commandLimitsToJSON(Object.fromEntries(m.commandLimits)) }
+        : {}),
     })
   }
   const ramCache = ws.cache instanceof RAMFileCacheStore ? ws.cache : null
@@ -426,12 +429,16 @@ export function buildMountArgs(
       )
     }
     const index = restoreIndexConfig(m.index_config, placed?.options.index, m.prefix)
+    // The mount's own limits, its "*" walk_limit among them, come back as
+    // saved unless the override names its own. Mirrors python.
+    const commandLimits = placed?.options.commandLimits ?? parseCommandLimits(m.command_limits)
     mountArgs[m.prefix] = new Mount(
       placed !== null ? placed.vfs : ((override as BaseVFS | undefined) ?? new RAMVFS()),
       {
         mode: m.mode as MountMode,
         read,
         write,
+        commandLimits,
         ...(index === undefined ? {} : { index }),
         vfsRef: placed !== null ? (placed.options.vfsRef ?? null) : savedRef(m),
       },

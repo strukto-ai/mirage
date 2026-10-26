@@ -15,14 +15,16 @@
 import pytest
 from pydantic import BaseModel, ConfigDict
 
-from mirage import MountMode, Workspace
+from mirage import Mount, MountMode, Workspace
 from mirage.secrets.errors import SecretsError
 from mirage.secrets.registry import register_secrets
 from mirage.secrets.types import ResolvedSecret
+from mirage.policy.builtin.output_cap import ALL_COMMANDS
 from mirage.server.clone import (
     build_override_mounts,
     clone_workspace_with_override,
 )
+from mirage.types import Limit
 from mirage.utils.clock import ManualClock
 from mirage.vfs.gdrive.config import GoogleDriveConfig
 from mirage.vfs.gdrive.gdrive import GoogleDriveVFS
@@ -264,6 +266,37 @@ async def test_an_override_mount_with_a_null_write_keeps_the_saved_policy():
         {"mounts": {"/r": {"vfs": "ram", "write": None}}}, None
     )
     assert built["/r/"].write is None
+
+
+@pytest.mark.asyncio
+async def test_a_clone_keeps_a_mount_limit_unless_the_override_names_one():
+    def capped() -> Mount:
+        return Mount(
+            vfs=RAMVFS(), command_limits={ALL_COMMANDS: Limit(walk_limit=3)}
+        )
+
+    src = Workspace({"/a": capped(), "/b": capped()})
+    try:
+        cloned = await clone_workspace_with_override(
+            src,
+            {
+                "mounts": {
+                    "/b": {
+                        "vfs": "ram",
+                        "command_limits": {ALL_COMMANDS: {"walk_limit": 5}},
+                    }
+                }
+            },
+        )
+        try:
+            assert [cloned.mount(p).vfs.walk_limit for p in ("/a", "/b")] == [
+                3,
+                5,
+            ]
+        finally:
+            await cloned.close()
+    finally:
+        await src.close()
 
 
 @pytest.mark.asyncio

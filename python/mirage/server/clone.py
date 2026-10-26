@@ -19,6 +19,7 @@ from mirage import Workspace
 from mirage.secrets.config import SecretSource
 from mirage.secrets.sources import resolve_config_secrets, resolve_sources_for
 from mirage.shell.constants import BIN_PREFIX
+from mirage.types import Limit
 from mirage.utils.path import norm_dir
 from mirage.vfs.history import HISTORY_PREFIX
 from mirage.vfs.registry import build_vfs
@@ -35,7 +36,7 @@ async def build_override_mounts(
     the new workspace will run with.
 
     Shared by the clone and load entry points, which both take the same
-    ``mounts: {<prefix>: {vfs, config, write}}`` shape. An override mount
+    ``mounts: {<prefix>: {vfs, config, write, command_limits}}`` shape. An override mount
     reads a pointer the way a yaml one does: `build_vfs` is sync,
     so the credential is fetched before it. The declared sources are
     built only when an override config names one, so an override that
@@ -54,15 +55,20 @@ async def build_override_mounts(
     if not override or "mounts" not in override:
         return {}
     blocks = {
-        prefix: (block["vfs"], block.get("config") or {}, block.get("write"))
+        prefix: (
+            block["vfs"],
+            block.get("config") or {},
+            block.get("write"),
+            block.get("command_limits") or {},
+        )
         for prefix, block in override["mounts"].items()
         if isinstance(block, dict) and block.get("vfs") is not None
     }
     sources = await resolve_sources_for(
-        declared, [config for _, config, _ in blocks.values()]
+        declared, [config for _, config, _, _ in blocks.values()]
     )
     out: dict[str, Any] = {}
-    for prefix, (vfs_name, config, write) in blocks.items():
+    for prefix, (vfs_name, config, write, limits) in blocks.items():
         built = build_vfs(
             vfs_name,
             await resolve_config_secrets(
@@ -73,6 +79,10 @@ async def build_override_mounts(
             vfs=built,
             vfs_ref=vfs_name,
             write=coerce_write_policy(write) if write is not None else None,
+            command_limits={
+                name: Limit.model_validate(limit)
+                for name, limit in limits.items()
+            },
         )
     return out
 
@@ -118,7 +128,7 @@ async def clone_workspace_with_override(
     Args:
         src_ws (Workspace): the source workspace.
         override (dict[str, Any] | None): partial workspace config
-            with ``mounts: {<prefix>: {vfs, config, write}}`` entries to
+            with ``mounts: {<prefix>: {vfs, config, write, command_limits}}`` entries to
             swap.
 
     Returns:

@@ -1196,14 +1196,18 @@ async def test_a_rebuilt_disk_mount_keeps_its_folder_versions(
 @pytest.mark.parametrize("route", ["copy", "load"])
 @pytest.mark.parametrize("kind", ["ram", "disk"])
 @pytest.mark.parametrize("limit", [2, -1])
+@pytest.mark.parametrize("scope", ["workspace", "mount"])
 async def test_a_rebuilt_local_mount_keeps_its_walk_limit(
-    tmp_path, route, kind, limit
+    tmp_path, route, kind, limit, scope
 ):
     root = tmp_path / "root"
     root.mkdir()
     vfs = RAMVFS() if kind == "ram" else DiskVFS(str(root))
-    ws = Workspace(
-        {"/d": vfs}, command_limits={ALL_COMMANDS: Limit(walk_limit=limit)}
+    table = {ALL_COMMANDS: Limit(walk_limit=limit)}
+    ws = (
+        Workspace({"/d": vfs}, command_limits=table)
+        if scope == "workspace"
+        else Workspace({"/d": Mount(vfs=vfs, command_limits=table)})
     )
     try:
         if route == "copy":
