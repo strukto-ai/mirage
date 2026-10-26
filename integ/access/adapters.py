@@ -155,7 +155,8 @@ async def beside_answer(
     the case's line writes, so the case's line ends only if it ran
     beside the held one rather than behind it. After ``BESIDE_WAIT`` the
     access writes ``go`` itself, so the held line ends, and the case
-    answers ``BEHIND``.
+    answers ``BEHIND``; a case line that fails releases and settles the
+    held one before its error is raised.
 
     Args:
         run (Callable[[str, str | None], Awaitable[Answer]]): runs a line,
@@ -184,6 +185,12 @@ async def beside_answer(
     except TimeoutError:
         await write(other["go"])
         answer = {"text": BEHIND, "is_error": True}
+    except Exception:
+        await write(other["go"])
+        await asyncio.wait_for(
+            asyncio.gather(held, return_exceptions=True), 60
+        )
+        raise
     return {**answer, "beside": await asyncio.wait_for(held, 60)}
 
 

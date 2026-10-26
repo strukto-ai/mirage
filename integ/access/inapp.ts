@@ -164,8 +164,16 @@ async function besideAnswer(session: Session, step: Json): Promise<Answer> {
   const late = new Promise<null>((resolve) => {
     timer = setTimeout(() => resolve(null), BESIDE_WAIT_MS)
   })
-  let answer = await Promise.race([ran, late])
-  clearTimeout(timer)
+  let answer: Json | null
+  try {
+    answer = await Promise.race([ran, late])
+  } catch (err) {
+    await session.vfs.write(other.go, 'ready')
+    await Promise.allSettled([held])
+    throw err
+  } finally {
+    clearTimeout(timer)
+  }
   if (answer === null) {
     await session.vfs.write(other.go, 'ready')
     await ran

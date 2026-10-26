@@ -1428,6 +1428,19 @@ async def main(args: argparse.Namespace) -> int:
     return 1 if report.failures else 0
 
 
+def at_least_one(value: str) -> int:
+    """An argument that counts workers, refused below one: a semaphore
+    with no permits would hold every suite forever.
+
+    Args:
+        value (str): the argument as typed.
+    """
+    jobs = int(value)
+    if jobs < 1:
+        raise argparse.ArgumentTypeError(f"must be at least 1, not {jobs}")
+    return jobs
+
+
 def parse() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=__doc__,
@@ -1435,7 +1448,7 @@ def parse() -> argparse.Namespace:
     )
     parser.add_argument("--host", action="append", choices=HOSTS)
     parser.add_argument("--host-jobs", type=int, choices=(1, 2), default=1)
-    parser.add_argument("--suite-jobs", type=int, default=1)
+    parser.add_argument("--suite-jobs", type=at_least_one, default=1)
     parser.add_argument("--deployment", action="append", choices=DEPLOYMENTS)
     parser.add_argument("--access", action="append", choices=ACCESSES)
     parser.add_argument(
