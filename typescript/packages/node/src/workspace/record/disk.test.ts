@@ -22,7 +22,136 @@ import { DiskRecordClient } from './disk.ts'
 
 vi.mock('node:fs/promises', async (original) => {
   const real = await original<typeof fs>()
-  return { ...real, open: vi.fn(real.open) }
+  return {
+    ...real,
+    open: vi.fn(real.open),
+    rename: vi.fn(real.rename),
+    stat: vi.fn(real.stat),
+    unlink: vi.fn(real.unlink),
+  }
+})
+
+const real = await vi.importActual<typeof fs>('node:fs/promises')
+
+afterEach(() => {
+  vi.mocked(fs.open).mockImplementation(real.open)
+  vi.mocked(fs.rename).mockImplementation(real.rename)
+  vi.mocked(fs.stat).mockImplementation(real.stat)
+  vi.mocked(fs.unlink).mockImplementation(real.unlink)
+})
+
+// Hold the first two stats of `lock` until both have run, and delay its
+// second unlink, so two waiters judge one stale lock together and the
+// later unlink lands after the earlier reclaimer's new lock.
+function raceTwoReclaimers(lock: string): void {
+  let stats = 0
+  let unlinks = 0
+  let bothSawIt: () => void = () => undefined
+  const together = new Promise<void>((resolve) => {
+    bothSawIt = resolve
+  })
+  vi.mocked(fs.stat).mockImplementation((async (p: string, opts?: { bigint?: boolean }) => {
+    const result = await real.stat(p, opts)
+    if (p === lock && stats < 2) {
+      stats += 1
+      if (stats === 2) bothSawIt()
+      await together
+    }
+    return result
+  }) as typeof fs.stat)
+  vi.mocked(fs.unlink).mockImplementation(async (p) => {
+    if (p === lock && unlinks++ === 1) await new Promise((r) => setTimeout(r, 200))
+    await real.unlink(p)
+  })
+}
+
+function staleLock(client: DiskRecordClient, name: string): string {
+  const lock = `${client.path(name)}.lock`
+  writeFileSync(lock, '424242')
+  utimesSync(lock, 0, 0)
+  return lock
+}
+
+describe('DiskRecordClient lock reclaim and release', () => {
+  let root: string
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), 'mirage-record-'))
+  })
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true })
+  })
+
+  it('never lets two reclaimers of one stale lock both hold it', async () => {
+    const client = new DiskRecordClient(root, '')
+    raceTwoReclaimers(staleLock(client, 'k'))
+    let inside = 0
+    let most = 0
+    const hold = async (): Promise<void> => {
+      const fh = await client.lock('k')
+      inside += 1
+      most = Math.max(most, inside)
+      await new Promise((r) => setTimeout(r, 300))
+      inside -= 1
+      await client.unlock('k', fh)
+    }
+    await Promise.all([hold(), hold()])
+    expect(most).toBe(1)
+    expect(readdirSync(root)).toEqual([])
+  })
+
+  it('gives two claims over one stale lock one winner', async () => {
+    const client = new DiskRecordClient(root, '')
+    await client.put('ws', { generation: 0, owner: null })
+    raceTwoReclaimers(staleLock(client, 'ws'))
+    const read = client.get.bind(client)
+    vi.spyOn(client, 'get').mockImplementation(async (name) => {
+      const found = await read(name)
+      await new Promise((r) => setTimeout(r, 300))
+      return found
+    })
+    const won = await Promise.all([
+      client.casPut('ws', { generation: 1, owner: 'alice' }, 0),
+      client.casPut('ws', { generation: 1, owner: 'bob' }, 0),
+    ])
+    expect(won.sort()).toEqual([false, true])
+    expect(readdirSync(root)).toEqual(['ws.json'])
+  })
+
+  it('leaves a lock another writer took on release', async () => {
+    const client = new DiskRecordClient(root, '')
+    const mine = await client.lock('k')
+    const lock = `${client.path('k')}.lock`
+    rmSync(lock)
+    const theirs = await client.lock('k')
+    await client.unlock('k', mine)
+    expect(readdirSync(root)).toEqual(['k.json.lock'])
+    await client.unlock('k', theirs)
+    expect(readdirSync(root)).toEqual([])
+  })
+
+  it('puts a record on disk before renaming it in', async () => {
+    const steps: [string, bigint][] = []
+    vi.mocked(fs.open).mockImplementation((async (...args: Parameters<typeof fs.open>) => {
+      const fh = await real.open(...args)
+      const sync = fh.sync.bind(fh)
+      fh.sync = async () => {
+        steps.push(['sync', (await fh.stat({ bigint: true })).ino])
+        await sync()
+      }
+      return fh
+    }) as typeof fs.open)
+    vi.mocked(fs.rename).mockImplementation(async (src, dst) => {
+      steps.push(['rename', (await real.stat(src, { bigint: true })).ino])
+      await real.rename(src, dst)
+    })
+    const client = new DiskRecordClient(root, '')
+    await client.put('k', { generation: 0 })
+    const record = (await real.stat(client.path('k'), { bigint: true })).ino
+    expect(steps).toEqual([
+      ['sync', record],
+      ['rename', record],
+    ])
+  })
 })
 
 it('releases the lock and handle when writing the owner fails', async () => {

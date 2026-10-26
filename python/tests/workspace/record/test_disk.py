@@ -15,8 +15,11 @@
 import asyncio
 import os
 import threading
+import time
+from itertools import count
 from pathlib import Path
 
+import aiofiles.os
 import pytest
 
 import mirage.workspace.record.disk as disk
@@ -121,3 +124,123 @@ async def test_cancel_during_acquisition_releases_lock(
         os.fstat(fds[0])
     monkeypatch.setattr(disk, "_acquire_lock", original)
     assert await client.cas_put("k", {"generation": 1}, 0)
+
+
+def _race_two_reclaimers(monkeypatch, lock_path: str) -> None:
+    """Hold the first two stats of ``lock_path`` until both have run, and
+    delay its second unlink, so two waiters judge one stale lock together
+    and the later unlink lands after the earlier reclaimer's new lock.
+
+    Args:
+        monkeypatch (pytest.MonkeyPatch): the test's patcher.
+        lock_path (str): the lockfile both waiters contend for.
+    """
+    both_saw_it = threading.Barrier(2)
+    stats = count()
+    unlinks = count()
+    real_stat = os.stat
+    real_unlink = os.unlink
+
+    def stat(path, *args, **kwargs):
+        result = real_stat(path, *args, **kwargs)
+        if path == lock_path and next(stats) < 2:
+            both_saw_it.wait(5)
+        return result
+
+    def unlink(path, *args, **kwargs):
+        if path == lock_path and next(unlinks) == 1:
+            time.sleep(0.2)
+        return real_unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(os, "stat", stat)
+    monkeypatch.setattr(os, "unlink", unlink)
+
+
+def _stale_lock(client: DiskRecordClient, name: str) -> str:
+    lock_path = client.path(name) + ".lock"
+    Path(lock_path).write_text("424242")
+    os.utime(lock_path, (0, 0))
+    return lock_path
+
+
+@pytest.mark.asyncio
+async def test_two_reclaimers_of_one_stale_lock_never_both_hold_it(
+    tmp_path, monkeypatch
+):
+    client = DiskRecordClient(str(tmp_path), "")
+    _race_two_reclaimers(monkeypatch, _stale_lock(client, "k"))
+    inside = 0
+    most = 0
+
+    async def hold() -> None:
+        nonlocal inside, most
+        fd = await client.lock("k")
+        inside += 1
+        most = max(most, inside)
+        await asyncio.sleep(0.3)
+        inside -= 1
+        await client.unlock("k", fd)
+
+    await asyncio.gather(hold(), hold())
+    assert most == 1
+    assert os.listdir(tmp_path) == []
+
+
+@pytest.mark.asyncio
+async def test_two_claims_over_one_stale_lock_have_one_winner(
+    tmp_path, monkeypatch
+):
+    client = DiskRecordClient(str(tmp_path), "")
+    await client.put("ws", {"generation": 0, "owner": None})
+    _race_two_reclaimers(monkeypatch, _stale_lock(client, "ws"))
+    read = client.get
+
+    async def slow_get(name: str):
+        found = await read(name)
+        await asyncio.sleep(0.3)
+        return found
+
+    monkeypatch.setattr(client, "get", slow_get)
+    won = await asyncio.gather(
+        client.cas_put("ws", {"generation": 1, "owner": "alice"}, 0),
+        client.cas_put("ws", {"generation": 1, "owner": "bob"}, 0),
+    )
+    assert sorted(won) == [False, True]
+    assert sorted(os.listdir(tmp_path)) == ["ws.json"]
+
+
+@pytest.mark.asyncio
+async def test_release_leaves_a_lock_another_writer_took(tmp_path):
+    client = DiskRecordClient(str(tmp_path), "")
+    mine = await client.lock("k")
+    lock_path = client.path("k") + ".lock"
+    os.unlink(lock_path)
+    theirs = await client.lock("k")
+    await client.unlock("k", mine)
+    assert os.path.exists(lock_path)
+    await client.unlock("k", theirs)
+    assert not os.path.exists(lock_path)
+
+
+@pytest.mark.asyncio
+async def test_a_record_reaches_the_disk_before_it_is_renamed_in(
+    tmp_path, monkeypatch
+):
+    steps: list[tuple[str, int]] = []
+    real_fsync = os.fsync
+    real_replace = aiofiles.os.replace
+
+    def fsync(fd: int) -> None:
+        steps.append(("fsync", os.fstat(fd).st_ino))
+        real_fsync(fd)
+
+    async def replace(src: str, dst: str) -> None:
+        steps.append(("replace", os.stat(src).st_ino))
+        await real_replace(src, dst)
+
+    monkeypatch.setattr(os, "fsync", fsync)
+    monkeypatch.setattr(aiofiles.os, "replace", replace)
+    client = DiskRecordClient(str(tmp_path), "")
+    await client.put("k", {"generation": 0})
+    record = os.stat(client.path("k")).st_ino
+    assert steps == [("fsync", record), ("replace", record)]
