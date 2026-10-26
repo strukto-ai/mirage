@@ -42,6 +42,11 @@ UNMIRRORED_DIRS = {
         "them"
     ),
     "fixtures": "shared test doubles imported by suites elsewhere",
+    "sim": (
+        "the deterministic workspace simulator and its scenarios; a scenario "
+        "spans workspace, session, cache and a backend, so no one source "
+        "package owns it"
+    ),
 }
 
 # A ratchet, not a target. It counts source modules with no `test_<name>.py`
