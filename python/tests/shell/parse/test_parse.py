@@ -422,6 +422,13 @@ def test_heredoc_body_keeps_a_line_that_only_opens_with_the_delimiter():
     }
 
 
+def test_heredoc_body_of_any_length_is_read():
+    body = "line\n" * 100_000
+    assert _heredoc_bodies_by_delimiter(f"cat <<'EOF' > f\n{body}EOF\n") == {
+        "EOF": body,
+    }
+
+
 def test_heredoc_lookalike_line_keeps_its_expansion():
     root = parse("cat <<EOF\nEOF$v\nEOF\n")
     redirect = root.named_children[0].named_children[-1]

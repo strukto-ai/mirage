@@ -256,6 +256,12 @@ describe('heredoc source reader: operator-line regressions', () => {
     })
   })
 
+  it('reads a body of any length', () => {
+    // The host reader this replaced overflowed the stack near 6,000 lines.
+    const body = 'line\n'.repeat(100_000)
+    expect(bodiesByDelimiter(`cat <<'EOF' > f\n${body}EOF\n`)).toEqual({ EOF: body })
+  })
+
   it('leaves an unterminated body as typed', () => {
     const root = parse('cat <<EOF; echo x\nhi\n')
     expect(root.error).toBeNull()
