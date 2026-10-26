@@ -177,6 +177,26 @@ pub extern "C" fn mirage_rs_begin(handle: u32, len: usize) -> i32 {
     call(handle, len, |stream, input, _| stream.begin(input))
 }
 
+/// Whether the input fed since the last answer, then the first `len` bytes
+/// of the input window, passes the stream's test: 1 yes, 0 no, -1 a refusal
+/// (or no such stream).
+#[unsafe(no_mangle)]
+pub extern "C" fn mirage_rs_test(handle: u32, len: usize) -> i32 {
+    STATE.with_borrow_mut(|state| {
+        let Some(slot) = state.slots.get_mut(&handle) else {
+            return -1;
+        };
+        slot.out.clear();
+        match slot.stream.test(&state.input[..len.min(state.input.len())]) {
+            Ok(answer) => i32::from(answer),
+            Err(err) => {
+                slot.error = err.message.into_bytes();
+                -1
+            }
+        }
+    })
+}
+
 /// 1 once the stream wants no more of the current input, else 0.
 #[unsafe(no_mangle)]
 pub extern "C" fn mirage_rs_done(handle: u32) -> i32 {

@@ -16,20 +16,16 @@ import type { util } from 'zod'
 import type { AdmissionRules, CommandRule } from '../policy/types.ts'
 import type { MountMode, ProcessScope, Visibility } from '../types.ts'
 import type { LinkStep } from '../utils/path.ts'
-import type { OpenStream } from './stream.ts'
-import { openStreamSync } from './stream.ts'
+import { MovableStream } from './stream.ts'
 
 export type Wire = Record<string, util.JSONType>
 
 const CACHE_SIZE = 1024
 const encoder = new TextEncoder()
 const decoder = new TextDecoder()
-const finalizer = new FinalizationRegistry<OpenStream>((stream) => {
-  stream.close()
-})
 
-function open(config: Readonly<Wire>): OpenStream {
-  return openStreamSync('policy', { ...config, dialect: 'ecmascript' }, true)
+function open(config: Readonly<Wire>): MovableStream {
+  return new MovableStream('policy', { ...config, dialect: 'ecmascript' })
 }
 
 /**
@@ -37,26 +33,15 @@ function open(config: Readonly<Wire>): OpenStream {
  * stream and asked one request at a time. Mirrors Python's PolicyMatcher.
  */
 export class PolicyMatcher {
-  private stream: OpenStream
+  private readonly stream: MovableStream
 
-  constructor(private readonly config: Readonly<Wire>) {
+  constructor(config: Readonly<Wire>) {
     this.stream = open(config)
-    finalizer.register(this, this.stream, this)
-  }
-
-  // The stream, opened again when the instance it was on retired.
-  private live(): OpenStream {
-    if (!this.stream.live) {
-      finalizer.unregister(this)
-      this.stream = open(this.config)
-      finalizer.register(this, this.stream, this)
-    }
-    return this.stream
   }
 
   /** The answer to one request, decoded from its JSON; text travels as code points. */
   ask(op: string, args: Readonly<Wire> = {}): unknown {
-    const stream = this.live()
+    const stream = this.stream.live
     stream.feed(encoder.encode(JSON.stringify({ op, ...args })))
     return JSON.parse(decoder.decode(stream.finish()))
   }

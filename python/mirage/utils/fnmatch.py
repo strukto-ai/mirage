@@ -14,7 +14,7 @@
 
 import re
 
-from mirage.rs.glob import Glob
+from mirage.rs.glob import Glob, glob_matcher
 
 QUOTED_CHARS = {chr(0xFDD0 + i): ch for i, ch in enumerate("*?[@+!()|")}
 EXTGLOB_RE = re.compile(r"[@?*+!]\(")
@@ -61,11 +61,7 @@ def fnmatch(
         extglob (bool): recognize extended pattern groups.
         period (bool): require an explicit initial pathname dot.
     """
-    glob = Glob(pattern, extglob, period)
-    try:
-        return glob.matches(name)
-    finally:
-        glob.close()
+    return glob_matcher(pattern, extglob, period).matches(name)
 
 
 def fnmatchcase(name: str, pattern: str) -> bool:
@@ -75,8 +71,4 @@ def fnmatchcase(name: str, pattern: str) -> bool:
         name (str): subject text.
         pattern (str): Python fnmatchcase pattern.
     """
-    glob = Glob(pattern, dialect="python")
-    try:
-        return glob.matches(name)
-    finally:
-        glob.close()
+    return glob_matcher(pattern, dialect="python").matches(name)

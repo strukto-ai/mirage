@@ -36,6 +36,7 @@ interface Exports {
   mirage_rs_feed_input(handle: number, index: number, len: number): number
   mirage_rs_end_input(handle: number, index: number): number
   mirage_rs_begin(handle: number, len: number): number
+  mirage_rs_test(handle: number, len: number): number
   mirage_rs_done(handle: number): number
   mirage_rs_status(handle: number): number
   mirage_rs_metadata(handle: number): number
@@ -189,6 +190,21 @@ export class OpenStream {
       const window = this.exports.mirage_rs_input(this.handle)
       new Uint8Array(this.exports.memory.buffer, window, bytes.byteLength).set(bytes)
       this.collect(this.exports.mirage_rs_begin(this.handle, bytes.byteLength), [])
+    })
+  }
+
+  /** Whether the input fed since the last answer, then `chunk`, passes the stream's test, in one call. */
+  test(chunk: Uint8Array): boolean {
+    return this.guard(() => {
+      const cut = Math.max(0, chunk.byteLength - this.capacity)
+      if (cut > 0)
+        this.push(chunk.subarray(0, cut), (len) => this.exports.mirage_rs_feed(this.handle, len))
+      const tail = chunk.subarray(cut)
+      const window = this.exports.mirage_rs_input(this.handle)
+      new Uint8Array(this.exports.memory.buffer, window, tail.byteLength).set(tail)
+      const answer = this.exports.mirage_rs_test(this.handle, tail.byteLength)
+      if (answer < 0) this.collect(1, [])
+      return answer === 1
     })
   }
 
@@ -376,6 +392,42 @@ export function openStreamSync(
 ): OpenStream {
   synchronous ??= new WebAssembly.Instance(moduleSync(), {}).exports as unknown as Exports
   return open(synchronous, kind, config, movable)
+}
+
+const movableFinalizer = new FinalizationRegistry<OpenStream>((stream) => {
+  stream.close()
+})
+
+/**
+ * A movable synchronous stream for an object a cache keeps, such as a compiled
+ * matcher: it opens again on the live instance once the one it was on retired,
+ * and closes when its owner is collected. A retired stream is unregistered, so
+ * it never holds its instance's memory.
+ */
+export class MovableStream {
+  private stream: OpenStream
+
+  constructor(
+    private readonly kind: string,
+    private readonly config: Readonly<Record<string, util.JSONType>>,
+  ) {
+    this.stream = this.open()
+  }
+
+  /** The stream, opened again first when its instance retired. */
+  get live(): OpenStream {
+    if (!this.stream.live) {
+      movableFinalizer.unregister(this)
+      this.stream = this.open()
+    }
+    return this.stream
+  }
+
+  private open(): OpenStream {
+    const stream = openStreamSync(this.kind, this.config, true)
+    movableFinalizer.register(this, stream, this)
+    return stream
+  }
 }
 
 function open(

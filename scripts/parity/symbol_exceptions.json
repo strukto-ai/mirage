@@ -103,13 +103,14 @@
    "typescript_only": {
     "units": "Validates character-value arrays returned by Rust; Python checks integer units while constructing a string.",
     "finalizer": "Closes Wasm slots for abandoned synchronous matcher objects; Python releases native streams by reference counting.",
+    "matchers": "The compiled-pattern map behind globMatcher; Python's functools.lru_cache holds the same entries.",
+    "scratch": "One reused buffer for the code units a synchronous call copies into Wasm; Python's str.encode builds them natively.",
     "spans": "Validates the Rust span result at the JavaScript boundary; Python validates pairs while reconstructing typed tuples."
    }
   },
   "rs/regex": {
    "typescript_only": {
     "cache": "The compiled-pattern map behind posixRegex; Python's functools.lru_cache holds the same entries.",
-    "finalizer": "Closes Wasm slots for abandoned synchronous matcher objects; Python releases native streams by reference counting.",
     "lineMeta": "Validates the line matcher's metadata at the JavaScript boundary; Python reads the same JSON record into typed fields.",
     "posixMeta": "Validates the POSIX matcher's metadata at the JavaScript boundary; Python reads the same JSON record into a typed field."
    }
@@ -136,6 +137,8 @@
   "rs/stream": {
    "typescript_only": {
     "Exports": "The raw ABI mirage-rs-wasm exports; the wasm instance loader; Python imports mirage-rs as a native PyO3 module, so it has no instance to compile, size or recycle.",
+    "MovableStream": "Reopens a cached matcher's stream on the live instance once a grown one retires; the wasm instance loader; Python imports mirage-rs as a native PyO3 module, so its streams never move.",
+    "movableFinalizer": "Closes the stream of a collected cached matcher; Python releases native streams by reference counting.",
     "RECYCLE_BYTES": "Linear memory never shrinks, so a grown instance is dropped past this size; the wasm instance loader; Python imports mirage-rs as a native PyO3 module, so it has no instance to compile, size or recycle.",
     "bytesAt": "Copies bytes out of linear memory; the wasm instance loader; Python imports mirage-rs as a native PyO3 module, so it has no instance to compile, size or recycle.",
     "compiled": "The compiled module, shared by every instance; the wasm instance loader; Python imports mirage-rs as a native PyO3 module, so it has no instance to compile, size or recycle.",
@@ -990,8 +993,7 @@
   "rs/policy": {
    "typescript_only": {
     "byValue": "The compiled-matcher map behind admissionMatcher and visibilityMatcher, keyed by configuration; Python's functools.lru_cache holds the same entries.",
-    "cached": "Looks a matcher up by its configuration, least recently asked dropped first; Python's functools.lru_cache does the same over the frozen value.",
-    "finalizer": "Closes Wasm slots for abandoned synchronous matcher objects; Python releases native streams by reference counting."
+    "cached": "Looks a matcher up by its configuration, least recently asked dropped first; Python's functools.lru_cache does the same over the frozen value."
    }
   },
   "workspace/session/resolve": {

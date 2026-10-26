@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { Glob } from '../rs/glob.ts'
+import { Glob, globMatcher } from '../rs/glob.ts'
 
 export const QUOTED_CHARS: Readonly<Record<string, string>> = Object.fromEntries(
   ['*', '?', '[', '@', '+', '!', '(', ')', '|'].map((ch, i) => [
@@ -46,20 +46,10 @@ export function patternParts(pattern: string): string[] {
 
 /** Match a case-sensitive shell pattern, preserving quoting sentinels. */
 export function fnmatch(name: string, pattern: string, extglob = false, period = false): boolean {
-  const glob = new Glob(pattern, extglob, period)
-  try {
-    return glob.matches(name)
-  } finally {
-    glob.close()
-  }
+  return globMatcher(pattern, extglob, period).matches(name)
 }
 
 /** Match Python's fnmatchcase dialect, including literal class carets. */
 export function fnmatchcase(name: string, pattern: string): boolean {
-  const glob = new Glob(pattern, false, false, 'python')
-  try {
-    return glob.matches(name)
-  } finally {
-    glob.close()
-  }
+  return globMatcher(pattern, false, false, 'python').matches(name)
 }

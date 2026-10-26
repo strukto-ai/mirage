@@ -100,6 +100,14 @@ impl Stream {
             .map_err(|err| StreamError::new_err((err.message, PyBytes::new(py, b"").unbind())))
     }
 
+    /// Whether the input fed since the last answer, then `data`, passes the
+    /// stream's test, in one call; the next input starts empty.
+    fn test(&mut self, py: Python<'_>, data: &[u8]) -> PyResult<bool> {
+        let inner = &mut self.inner;
+        py.detach(|| inner.test(data))
+            .map_err(|err| StreamError::new_err((err.message, PyBytes::new(py, b"").unbind())))
+    }
+
     /// Whether the stream wants no more of the current input.
     fn done(&self) -> bool {
         self.inner.done()
