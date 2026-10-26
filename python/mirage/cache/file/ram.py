@@ -155,6 +155,16 @@ class RAMFileCacheStore(RAMVFS, FileCacheMixin, KeyLockMixin):
             and not entry.is_expired(self._seconds())
         )
 
+    async def sizes(self, keys: list[str]) -> list[int | None]:
+        now = self._seconds()
+        entries = [self._entries.get(key) for key in keys]
+        return [
+            e.size
+            if e is not None and e.has_bytes and not e.is_expired(now)
+            else None
+            for e in entries
+        ]
+
     async def fingerprints(self, keys: list[str]) -> list[str | None]:
         entries = [self._entries.get(key) for key in keys]
         return [e.fingerprint if e is not None else None for e in entries]

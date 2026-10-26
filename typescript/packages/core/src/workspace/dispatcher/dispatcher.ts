@@ -476,31 +476,32 @@ async function sized(mount: MountEntry, path: PathSpec, row: unknown): Promise<u
     manager === null
   )
     return row
-  const size = await manager.cachedSize(path)
-  return size === null ? row : row.with({ size })
+  const [size] = await manager.cachedSizes([path])
+  return size == null ? row : row.with({ size })
 }
 
 /**
  * A subtree read with each row sized as `sized` sizes a stat, so a walk
- * answered from it reads the sizes its stats would. Mirrors Python's
- * `_sized_tree`.
+ * answered from it reads the sizes its stats would, in one ask of the file
+ * cache. Mirrors Python's `_sized_tree`.
  */
 async function sizedTree(
   mount: MountEntry,
   path: PathSpec,
   tree: Map<string, FileStat>,
 ): Promise<Map<string, FileStat>> {
-  if (mount.cacheManager === null) return tree
+  const manager = mount.cacheManager
+  const unsized = [...tree].filter(([, row]) => row.type === FileType.FILE && row.size === null)
+  if (manager === null || unsized.length === 0) return tree
   const base = rstripSlash(path.virtual)
-  const out = new Map<string, FileStat>()
-  for (const [rel, row] of tree) {
-    out.set(
-      rel,
-      row.type === FileType.FILE && row.size === null
-        ? ((await sized(mount, PathSpec.fromStrPath(`${base}/${rel}`), row)) as FileStat)
-        : row,
-    )
-  }
+  const sizes = await manager.cachedSizes(
+    unsized.map(([rel]) => PathSpec.fromStrPath(`${base}/${rel}`)),
+  )
+  const out = new Map(tree)
+  unsized.forEach(([rel, row], i) => {
+    const size = sizes[i]
+    if (size != null) out.set(rel, row.with({ size }))
+  })
   return out
 }
 

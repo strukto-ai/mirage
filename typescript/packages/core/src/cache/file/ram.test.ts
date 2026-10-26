@@ -289,6 +289,17 @@ describe('a version kept without bytes', () => {
     expect((await c.fingerprints(['/a']))[0]).toBeNull()
   })
 
+  it('answers sizes only for live bytes, in key order', async () => {
+    const clock = new ManualClock(1000)
+    const c = new RAMFileCacheStore({ clock })
+    await c.set('/a', encode('abc'))
+    await c.set('/empty', new Uint8Array(0))
+    await c.set('/old', encode('x'), { ttl: 1 })
+    await c.keepFingerprints({ '/v': 'v1' })
+    clock.advance(10)
+    expect(await c.sizes(['/a', '/empty', '/old', '/v', '/none'])).toEqual([3, 0, null, null, null])
+  })
+
   it('keeps a version an expiry leaves within the limit', async () => {
     const clock = new ManualClock(1000)
     const c = new RAMFileCacheStore({ limit: 20, clock })

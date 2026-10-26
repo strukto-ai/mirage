@@ -74,6 +74,15 @@ class FileCacheMixin:
     async def exists(self, key: str | PathSpec) -> bool:
         raise NotImplementedError
 
+    async def sizes(self, keys: list[str]) -> list[int | None]:
+        """The byte length of each key's live cached copy, in key order,
+        None where none is held, asked without fetching the bytes.
+
+        Args:
+            keys (list[str]): the cache keys.
+        """
+        raise NotImplementedError
+
     async def fingerprints(self, keys: list[str]) -> list[str | None]:
         """The backend token each key's cached copy was stored with, in key
         order.

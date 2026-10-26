@@ -16,7 +16,7 @@ import type { FileStat, PathSpec } from '../types.ts'
 
 /** The active cache operations a backend needs from its cache manager. */
 export interface CacheInvalidator {
-  cachedSize(path: PathSpec): Promise<number | null>
+  cachedSizes(paths: readonly PathSpec[]): Promise<(number | null)[]>
   isCached(path: PathSpec): Promise<boolean>
   probedStat(path: PathSpec): FileStat | null
 }

@@ -127,6 +127,20 @@
       }
     },
     {
+      "id": "g_native_tree_walk_sizes_from_the_read",
+      "seq": 500008,
+      "targets": [
+        "gdrive"
+      ],
+      "clear_cache": true,
+      "command": "du -a /data | grep Plan.gdoc.json; ls -lR /data | grep Plan.gdoc.json | awk '{print $5}'; cat /data/Plan.gdoc.json | wc -c; du -a /data | grep Plan.gdoc.json; ls -lR /data | grep Plan.gdoc.json | awk '{print $5}'",
+      "expect": {
+        "exit": 0,
+        "stdout": "0\t/data/Plan.gdoc.json\n-\n539\n539\t/data/Plan.gdoc.json\n539\n",
+        "stderr": ""
+      }
+    },
+    {
       "id": "g_sheet_create",
       "seq": 500009,
       "targets": [

@@ -787,8 +787,9 @@ class CacheManager:
                         "stale copy not dropped for %s", key, exc_info=True
                     )
 
-    async def cached_size(self, path: PathSpec) -> int | None:
-        """Return the cached render's byte length, without revalidating.
+    async def cached_sizes(self, paths: list[PathSpec]) -> list[int | None]:
+        """Return each cached render's byte length, in path order, without
+        revalidating or fetching the bytes.
 
         The size backfill a render-dependent backend cannot answer for
         itself (the dispatcher's stat) runs only where the backend
@@ -797,14 +798,14 @@ class CacheManager:
         than content, so nothing can serve unverified bytes through it.
 
         Args:
-            path (PathSpec): the path to look up.
+            paths (list[PathSpec]): the paths to look up.
         """
-        key = self._cache_key(path)
-        cache = self._readable_cache(key)
-        if cache is None:
-            return None
-        cached = await cache.get(key)
-        return None if cached is None else len(cached)
+        keys = [self._cache_key(path) for path in paths]
+        held = [key for key in keys if self._readable_cache(key) is not None]
+        if not held or self._file_cache is None:
+            return [None] * len(keys)
+        sizes = dict(zip(held, await self._file_cache.sizes(held)))
+        return [sizes.get(key) for key in keys]
 
     async def is_cached(self, path: PathSpec) -> bool:
         """Whether a read of ``path`` would be served from the cache,
