@@ -76,6 +76,10 @@ export {
   DatabricksVolumeVFS,
   type DatabricksVolumeVFSState,
 } from './vfs/databricks_volume/databricks_volume.ts'
+export {
+  TiDBFilesystemVFS,
+  type TiDBFilesystemVFSState,
+} from './vfs/tidb_filesystem/tidb_filesystem.ts'
 
 export {
   normalizeS3Config,

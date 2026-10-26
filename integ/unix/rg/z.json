@@ -21,6 +21,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "mkdir -p /data/rgfl/sub; printf 'alpha\\nfoo\\nbar\\nbaz\\nfoo\\nqux\\n' > /data/rgfl/a.txt; printf 'nothing\\n' > /data/rgfl/b.txt; printf 'x1\\nx2\\nx3\\nx4\\nx5\\nx6\\nx7\\nx8\\n' > /data/rgfl/c.txt; printf 'alpha\\nfoo here\\nbeta\\n' > /data/rgfl/g.txt; gzip -c /data/rgfl/g.txt > /data/rgfl/g.txt.gz; printf 'foo in tgz\\n' | gzip -c > /data/rgfl/t.tgz; rg foo /data/rgfl/g.txt.gz; echo rc=$?; rg -z foo /data/rgfl/g.txt.gz; rg -j1 -z -n foo /data/rgfl/g.txt.gz /data/rgfl/t.tgz; rg -j1 --search-zip -c foo /data/rgfl/g.txt.gz /data/rgfl/b.txt; rg -z --no-search-zip foo /data/rgfl/g.txt.gz; echo rc=$?; cat /data/rgfl/g.txt.gz | rg -z foo; echo rc=$?; rm -rf /data/rgfl",
@@ -59,6 +60,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "mkdir -p /data/rgfl/sub; printf 'alpha\\nfoo\\nbar\\nbaz\\nfoo\\nqux\\n' > /data/rgfl/a.txt; printf 'nothing\\n' > /data/rgfl/b.txt; printf 'x1\\nx2\\nx3\\nx4\\nx5\\nx6\\nx7\\nx8\\n' > /data/rgfl/c.txt; printf 'not gzip foo\\n' > /data/rgfl/fake.gz; rg -z foo /data/rgfl/fake.gz; echo rc=$?; rm -rf /data/rgfl",
@@ -92,6 +94,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "mkdir -p /data/rgfl/sub; printf 'alpha\\nfoo\\nbar\\nbaz\\nfoo\\nqux\\n' > /data/rgfl/a.txt; printf 'nothing\\n' > /data/rgfl/b.txt; printf 'x1\\nx2\\nx3\\nx4\\nx5\\nx6\\nx7\\nx8\\n' > /data/rgfl/c.txt; printf 'foo\\nbar\\nfoo\\n' | gzip -c > /data/rgfl/s.gz; n=$(wc -c < /data/rgfl/s.gz); head -c $((n-4)) /data/rgfl/s.gz > /data/rgfl/cut.gz; rg -z foo /data/rgfl/cut.gz; echo rc=$?; rg -z -c foo /data/rgfl/cut.gz; echo rc=$?; rg -z -v foo /data/rgfl/cut.gz; echo rc=$?; rm -rf /data/rgfl",

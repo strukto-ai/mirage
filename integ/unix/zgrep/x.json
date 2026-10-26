@@ -21,6 +21,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "printf 'ab\\nabc\\n@\\nx@\\n@x\\n' | gzip > /data/zx.gz; zgrep -xw @ /data/zx.gz; zgrep -wx @ /data/zx.gz; zgrep --line-regexp -Fic ab /data/zx.gz; zgrep -Pxo 'a\\Kb' /data/zx.gz; printf 'ab\\nabc\\n' | gzip | zgrep -x ab",

@@ -21,6 +21,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "printf 'abc\\ndefabc\\nabc abc\\n' > /data/rgb.txt; rg -b abc /data/rgb.txt",
@@ -54,6 +55,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "printf 'abc\\ndefabc\\nabc abc\\n' > /data/rgb.txt; rg -bn abc /data/rgb.txt",
@@ -88,6 +90,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "mkdir -p /data/rgb1 && printf 'abc\\ndefabc\\n' > /data/rgb1/x.txt && rg -bn abc /data/rgb1",
@@ -122,6 +125,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "printf 'caf\\303\\251 abc\\nx\\303\\251y abc\\n' > /data/rb5.txt; rg -b abc /data/rb5.txt",
@@ -155,6 +159,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "printf 'caf\\303\\251 abc\\nx\\303\\251y abc\\n' > /data/rb5.txt; rg -bo abc /data/rb5.txt",
@@ -189,6 +194,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "printf '\\377\\na\\n' > /data/rbinv.bin; rg -b a /data/rbinv.bin",
@@ -222,6 +228,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "printf '\\377\\na\\n' > /data/rbinv.bin; printf 'zzz\\n' > /data/rbz.txt; rg -b a /data/rbinv.bin /data/rbz.txt",
@@ -255,6 +262,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "printf '\\377a\\n' > /data/rbinv2.bin; rg -bo a /data/rbinv2.bin",
@@ -289,6 +297,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "printf 'a\\r\\nb\\r\\n' > /data/rbcrlf.txt; rg -b b /data/rbcrlf.txt",
@@ -322,6 +331,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "printf 'one\\n\\377\\ntwo abc\\nthree\\n' > /data/rcx.bin; rg -b -A1 abc /data/rcx.bin",
@@ -356,6 +366,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "printf 'one\\n\\377\\ntwo abc\\nthree\\n' > /data/cfrgb.bin; rg -bn -A1 -B1 abc /data/cfrgb.bin | od -An -tx1; echo rc=${PIPESTATUS[0]}; rm -f /data/cfrgb.bin",
@@ -392,6 +403,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "printf 'abc\\ndefabc\\n' > /data/fcB_b.txt; rg -b --no-byte-offset abc /data/fcB_b.txt; rg --no-byte-offset -b abc /data/fcB_b.txt; rg -bo --no-byte-offset abc /data/fcB_b.txt; rm -f /data/fcB_b.txt",

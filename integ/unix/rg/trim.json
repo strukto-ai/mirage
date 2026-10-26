@@ -21,6 +21,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "printf '  \\t lead\\n\\t\\ttab\\nnone\\n' > /data/fcB_t.txt; rg --trim -n 'lead|tab|none' /data/fcB_t.txt; rg --trim --no-trim tab /data/fcB_t.txt; rg --no-trim --trim -o 'l.ad' /data/fcB_t.txt; rg --trim -C1 tab /data/fcB_t.txt; rm -f /data/fcB_t.txt",
@@ -58,6 +59,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "printf '\\vbefore\\n\\t\\valpha\\n\\f\\vafter\\n' | rg --trim -n --column -b -C1 alpha; printf '\\valpha\\n' | rg --trim -o -n --column -b '(\\valpha)'; printf '\\valpha\\n' | rg --trim -o -n --column -b -r '$1' '(\\valpha)'; printf '\\valpha\\n' | rg alpha | od -An -tx1 | tr -d ' \\n'; echo; printf '\\valpha\\0' | rg --trim --null-data alpha | od -An -tx1 | tr -d ' \\n'; echo",

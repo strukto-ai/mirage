@@ -23,7 +23,8 @@
         "databricks",
         "databricks-prefix",
         "sharepoint-prefix",
-        "ssh"
+        "ssh",
+        "tidb-filesystem"
       ],
       "command": "mkdir -p /data/pcp3/at/sub && printf 'a' > /data/pcp3/at/f.txt && cp -a /data/pcp3/at /data/pcp3/atcopy && cat /data/pcp3/atcopy/f.txt",
       "expect": {

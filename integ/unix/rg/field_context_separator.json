@@ -21,6 +21,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "rg -n -A1 --field-context-separator '|' world /data/a.txt; rg -H -n -B1 --field-context-separator='\\x3d' --field-match-separator ': ' world /data/a.txt; rg --field-context-separator '\\t' -n -A1 world /data/a.txt | od -An -tx1",
@@ -59,6 +60,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "rg -n -b -C1 --field-context-separator '' bar /data/a.txt; rg -n --field-match-separator '' world /data/a.txt",

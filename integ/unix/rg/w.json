@@ -21,6 +21,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "rg -w alpha /data/r4/notes.txt; rg -x alpha /data/r4/notes.txt; rg -xi alpha /data/r4/notes.txt; rg -w -x alph /data/r4/notes.txt; echo rc=$?",
@@ -52,6 +53,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "rg -w alph /data/r4/notes.txt; echo rc=$?",
@@ -85,6 +87,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "seq 1 20000 > /data/prefilter.txt; printf 'NEEDLE\\nneedle\\nother\\nneedleX\\n' >> /data/prefilter.txt; rg -ciw needle /data/prefilter.txt",

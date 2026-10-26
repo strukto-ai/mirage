@@ -21,6 +21,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "mkdir -p /data/zb && printf 'hello\\nworld\\n' | gzip > /data/zb/m.gz && zgrep -b o /data/zb/m.gz",
@@ -54,6 +55,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "mkdir -p /data/zb2 && printf 'hello\\nworld\\n' | gzip > /data/zb2/m.gz && zgrep -bn world /data/zb2/m.gz",
@@ -88,6 +90,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "mkdir -p /data/zb3 && printf 'hello\\nworld\\n' | gzip > /data/zb3/m.gz && printf 'foo\\n' | gzip > /data/zb3/o.gz && zgrep -bo o /data/zb3/m.gz /data/zb3/o.gz",

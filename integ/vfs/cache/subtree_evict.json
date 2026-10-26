@@ -5,6 +5,7 @@
       "seq": 942000,
       "targets": [
         "s3",
+        "tidb-filesystem",
         "s3-prefix",
         "gridfs",
         "gridfs-prefix"
@@ -21,6 +22,7 @@
       "seq": 942001,
       "targets": [
         "s3",
+        "tidb-filesystem",
         "s3-prefix",
         "gridfs",
         "gridfs-prefix"
@@ -37,6 +39,7 @@
       "seq": 942002,
       "targets": [
         "s3",
+        "tidb-filesystem",
         "s3-prefix",
         "gridfs",
         "gridfs-prefix"
@@ -53,6 +56,7 @@
       "seq": 942003,
       "targets": [
         "s3",
+        "tidb-filesystem",
         "s3-prefix",
         "gridfs",
         "gridfs-prefix"
@@ -69,6 +73,7 @@
       "seq": 942004,
       "targets": [
         "s3",
+        "tidb-filesystem",
         "s3-prefix",
         "gridfs",
         "gridfs-prefix"
@@ -85,6 +90,7 @@
       "seq": 942005,
       "targets": [
         "s3",
+        "tidb-filesystem",
         "s3-prefix",
         "gridfs",
         "gridfs-prefix"
@@ -101,6 +107,7 @@
       "seq": 942006,
       "targets": [
         "s3",
+        "tidb-filesystem",
         "s3-prefix",
         "gridfs",
         "gridfs-prefix"
@@ -117,6 +124,7 @@
       "seq": 942007,
       "targets": [
         "s3",
+        "tidb-filesystem",
         "s3-prefix",
         "gridfs",
         "gridfs-prefix"
@@ -133,6 +141,7 @@
       "seq": 942008,
       "targets": [
         "s3",
+        "tidb-filesystem",
         "s3-prefix",
         "gridfs",
         "gridfs-prefix"
@@ -149,6 +158,7 @@
       "seq": 942009,
       "targets": [
         "s3",
+        "tidb-filesystem",
         "s3-prefix",
         "gridfs",
         "gridfs-prefix"
@@ -165,6 +175,7 @@
       "seq": 942010,
       "targets": [
         "s3",
+        "tidb-filesystem",
         "s3-prefix",
         "gridfs",
         "gridfs-prefix"
@@ -181,6 +192,7 @@
       "seq": 942011,
       "targets": [
         "s3",
+        "tidb-filesystem",
         "s3-prefix",
         "gridfs",
         "gridfs-prefix"
@@ -197,6 +209,7 @@
       "seq": 942012,
       "targets": [
         "s3",
+        "tidb-filesystem",
         "s3-prefix",
         "gridfs",
         "gridfs-prefix"
@@ -213,6 +226,7 @@
       "seq": 942013,
       "targets": [
         "s3",
+        "tidb-filesystem",
         "s3-prefix",
         "gridfs",
         "gridfs-prefix"
@@ -229,6 +243,7 @@
       "seq": 942014,
       "targets": [
         "s3",
+        "tidb-filesystem",
         "s3-prefix",
         "gridfs",
         "gridfs-prefix"
@@ -245,6 +260,7 @@
       "seq": 942015,
       "targets": [
         "s3",
+        "tidb-filesystem",
         "s3-prefix",
         "gridfs",
         "gridfs-prefix"

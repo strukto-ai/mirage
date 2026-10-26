@@ -21,6 +21,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "{ printf 'id=42 name=x\\n' | rg -o '(?<=id=)\\d+'; } 2>/dev/null",
@@ -54,6 +55,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "{ printf 'id=42 name=x\\n' | rg -o 'id=(?=4)'; } 2>/dev/null",
@@ -87,6 +89,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "{ printf 'aa ab\\n' | rg -o '(a)\\1'; } 2>/dev/null",
@@ -120,6 +123,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "{ printf 'aa\\n' | rg -e a -e '(?=a)'; } 2>/dev/null",
@@ -153,6 +157,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "{ printf 'aa\\n' | rg -w '(a)\\1'; } 2>/dev/null",
@@ -186,6 +191,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "printf 'word sword\\n' | rg -o '\\<w[a-z]*|[a-z]*d\\>'",
@@ -219,6 +225,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "printf 'word sword\\n' | rg -o '\\b{start}w[a-z]*|\\b{start-half}s'",
@@ -252,6 +259,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "printf 'a\\303\\251\\331\\241 x\\n' | rg -o '\\w+'",
@@ -285,6 +293,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "printf 'a\\331\\2435 \\302\\240b\\n' | rg -o '\\d+|\\s'",
@@ -318,6 +327,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "printf '\\303\\251 b\\n\\303\\251b\\n' | rg -o '\\bb'",
@@ -351,6 +361,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "printf 'a\\303\\2511\\n' | rg -o '[[:alpha:]]+|(?-u:\\w)+'",
@@ -384,6 +395,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "printf 'A\\302\\240B\\n' | rg -o '\\x41|\\u{42}|\\x{00a0}'",
@@ -417,6 +429,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "printf 'Aa\\naA\\n' | rg -o '(?i)a|a(?i)a'",
@@ -450,6 +463,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "printf 'aa\\n' | rg -r '[$x]' '(?P<x>a)'; printf 'aa\\n' | rg -r '<$y>' '(?<y>a)'",
@@ -483,6 +497,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "printf 'abc\\n' | rg -o '[a-z&&[^b]]|[a-c--b]|[a-c~~b-d]'",
@@ -516,6 +531,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "printf '\\303\\211\\303\\251 K\\342\\204\\252 \\305\\277\\n' | rg -io 'é|k|s'",
@@ -550,6 +566,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "printf 'a\\303\\2511\\303\\211\\n' | rg -o '\\pL+|\\p{Nd}|\\p{Lu}'",
@@ -583,6 +600,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "rg '('; rg 'a)'; rg '[a'; rg '*a'; rg 'a{2,1}'; rg 'a{,2}'; echo rc=$?",
@@ -613,6 +631,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "rg '\\d\\Z'; rg '(?z)a'; rg '\\x{110000}'; rg '[z-a]'; rg '[\\d-z]'; echo rc=$?",
@@ -643,6 +662,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "rg '(?P<x>a)(?P<x>b)'; rg '(?P<>a)'; rg '(?ii)a'; rg -e '(' -e b; echo rc=$?",
@@ -676,6 +696,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "printf 'xxxxxx\\nab\\n' | rg -o 'x{2}{3}|a++'",

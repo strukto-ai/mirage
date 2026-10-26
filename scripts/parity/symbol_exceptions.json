@@ -1,6 +1,21 @@
 {
   "baseline": 2984,
  "modules": {
+  "vfs/tidb_filesystem/config": {
+   "typescript_only": {
+    "TiDBFilesystemConfigRedacted": "The type of the redacted plain-object config that getState returns; Python's state is a dict built by config_state.",
+    "TiDBFilesystemConfigSchema": "Python checks the config through its pydantic model, which forbids extra fields; a TypeScript config is a plain object, so the code entry point parses it with this schema through parseConfigWithSchema.",
+    "normalizeRootPath": "Python normalizes root_path in a field validator on the pydantic model; the zod schema takes the same normalization as a transform function.",
+    "normalizeTiDBFilesystemConfig": "The TypeScript entry point that parses a plain-object config with the schema; Python constructs TiDBFilesystemConfig directly.",
+    "redactTiDBFilesystemConfig": "TypeScript redacts a plain-object config for getState through its schema; Python's config_state redacts the model's SecretStr fields."
+   }
+  },
+  "vfs/tidb_filesystem/tidb_filesystem": {
+   "typescript_only": {
+    "TiDBFilesystemVFSBase": "TypeScript core holds the VFS functions over the accessor and the node package builds the concrete VFS with its config and state; Python has one class.",
+    "TiDBFilesystemVFSState": "The typed shape getState returns in TypeScript; Python returns a dict."
+   }
+  },
   "vfs/ram/store": {
    "python_only": {
     "_FileStore": "Python RAM and device stores share a structural mapping contract because device listings return lists rather than dict views; TypeScript uses its native Map surface."

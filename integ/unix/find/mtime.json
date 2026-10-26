@@ -25,6 +25,7 @@
         "gdrive-folder",
         "box",
         "dropbox",
+        "tidb-filesystem",
         "dropbox-root"
       ],
       "command": "find /data -mtime +0 -o -mtime -1",
@@ -63,6 +64,7 @@
         "sharepoint",
         "sharepoint-prefix",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder"
       ],
@@ -98,6 +100,7 @@
         "gdrive-folder",
         "box",
         "dropbox",
+        "tidb-filesystem",
         "dropbox-root"
       ],
       "command": "find /data -name mtprobe.txt -mtime +5; echo code=$?",
@@ -131,6 +134,7 @@
         "sharepoint",
         "sharepoint-prefix",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder"
       ],
@@ -165,6 +169,7 @@
         "sharepoint",
         "sharepoint-prefix",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder"
       ],

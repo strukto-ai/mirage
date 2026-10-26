@@ -7,6 +7,7 @@
         "ram",
         "disk",
         "s3",
+        "tidb-filesystem",
         "s3-prefix",
         "redis",
         "opfs"
@@ -25,6 +26,7 @@
         "ram",
         "disk",
         "s3",
+        "tidb-filesystem",
         "s3-prefix",
         "redis",
         "opfs"
@@ -61,6 +63,7 @@
         "ram",
         "disk",
         "s3",
+        "tidb-filesystem",
         "s3-prefix",
         "redis",
         "opfs"
@@ -80,6 +83,7 @@
         "ram",
         "disk",
         "s3",
+        "tidb-filesystem",
         "s3-prefix",
         "redis",
         "opfs"
@@ -105,6 +109,7 @@
         "ram",
         "disk",
         "s3",
+        "tidb-filesystem",
         "s3-prefix",
         "redis",
         "opfs"
@@ -131,6 +136,7 @@
         "ram",
         "disk",
         "s3",
+        "tidb-filesystem",
         "s3-prefix",
         "redis",
         "opfs"
@@ -159,6 +165,7 @@
         "ram",
         "disk",
         "s3",
+        "tidb-filesystem",
         "s3-prefix",
         "redis",
         "opfs"
@@ -183,6 +190,7 @@
         "ram",
         "disk",
         "s3",
+        "tidb-filesystem",
         "s3-prefix",
         "redis",
         "opfs"

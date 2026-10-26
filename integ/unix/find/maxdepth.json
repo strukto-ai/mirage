@@ -23,6 +23,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder",
         "box"
@@ -63,6 +64,7 @@
         "gdrive-folder",
         "box",
         "dropbox",
+        "tidb-filesystem",
         "dropbox-root"
       ],
       "command": "find /data -maxdepth 0",
@@ -96,6 +98,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box",
         "hf",
         "hf-prefix",

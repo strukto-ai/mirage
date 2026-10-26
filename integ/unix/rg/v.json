@@ -21,6 +21,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "rg -v error /data/r4/app.log; rg -v --no-invert-match error /data/r4/app.log",
@@ -52,6 +53,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "printf 'a\\r\\nb\\r\\n' > /data/rvcrlf.txt; rg -n -v zzz /data/rvcrlf.txt",
@@ -86,6 +88,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "printf 'a\\r\\nb\\r\\n' > /data/rvcrlf.txt; rg -c -v zzz /data/rvcrlf.txt",

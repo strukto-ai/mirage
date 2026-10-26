@@ -25,7 +25,8 @@
         "s3-prefix",
         "sharepoint",
         "sharepoint-prefix",
-        "ssh"
+        "ssh",
+        "tidb-filesystem"
       ],
       "command": "i=orig; for i in a b c; do :; done; echo \"$i\"",
       "expect": {
@@ -59,7 +60,8 @@
         "s3-prefix",
         "sharepoint",
         "sharepoint-prefix",
-        "ssh"
+        "ssh",
+        "tidb-filesystem"
       ],
       "command": "for i in 1 2 3; do if [ $i = 2 ]; then break; fi; done; echo \"$i\"",
       "expect": {
@@ -93,7 +95,8 @@
         "s3-prefix",
         "sharepoint",
         "sharepoint-prefix",
-        "ssh"
+        "ssh",
+        "tidb-filesystem"
       ],
       "command": "i=orig; for i in; do :; done; echo \"$i\"; (set -- a 'b c'; for f do printf '[%s]' \"$f\"; done; for f; do printf '<%s>' \"$f\"; done; for f\ndo printf '{%s}' \"$f\"; done; g() { for y do printf '(%s)' \"$y\"; done; }; g 1 2; for f do for h do printf '%s%s ' \"$f\" \"$h\"; done; done; echo); sh -c 'for file do echo \"sh $file\"; done' sh x y; for 1x in a; do :; done; for x-y in a; do :; done; for \"x\" do :; done; select a.b in c; do :; done; echo rc=$?",
       "expect": {
@@ -127,7 +130,8 @@
         "s3-prefix",
         "sharepoint",
         "sharepoint-prefix",
-        "ssh"
+        "ssh",
+        "tidb-filesystem"
       ],
       "command": "for i in 1 2; do for j in a b; do :; done; done; echo \"$i$j\"",
       "expect": {
@@ -161,7 +165,8 @@
         "s3-prefix",
         "sharepoint",
         "sharepoint-prefix",
-        "ssh"
+        "ssh",
+        "tidb-filesystem"
       ],
       "command": "select sx in aa bb; do break; done <<< '1'; echo \"$sx\"; fna() { echo \"${FUNCNAME[*]} ${#FUNCNAME[@]} $FUNCNAME\"; fnb; }; fnb() { echo \"${FUNCNAME[@]}\"; fnx=$(echo \"$FUNCNAME\"); echo \"$fnx\"; echo \"${FUNCNAME[1]}\" | cat; }; fna; FUNCNAME=zz; echo \"top=[${FUNCNAME[*]}]\"; ( fnu() { unset FUNCNAME; echo \"[$FUNCNAME]\"; }; fnu; fnv() { echo \"[$FUNCNAME]\"; }; fnv; FUNCNAME=own; fnv )",
       "expect": {
@@ -195,7 +200,8 @@
         "s3-prefix",
         "sharepoint",
         "sharepoint-prefix",
-        "ssh"
+        "ssh",
+        "tidb-filesystem"
       ],
       "command": "(x=old; f() { echo \"in:$x\"; x=changed; }; x=new f; echo \"out:$x\"; u() { unset x; echo \"u:${x-unset}\"; }; x=pre u; echo \"u-out:$x\"; e() { export x; }; x=kept e; echo \"e-out:$x\"; env | grep '^x='; x=old; d() { declare -g x=glob; echo \"d:$x\"; }; x=pre d; echo \"d-out:$x\"; l() { local x; echo \"l:${x-unset}\"; }; x=pre l; nest() { x=n2 inner; echo \"nest:$x\"; }; inner() { echo \"inner:$x\"; x=ch; }; x=n1 nest; echo \"top:$x\"; x=1 x=2 true; echo \"dup:$x\"; g() { local x=g; h; echo \"g:$x\"; }; h() { unset x; echo \"h:$x\"; }; g; echo \"top:$x\")",
       "expect": {
@@ -242,7 +248,8 @@
         "s3-prefix",
         "sharepoint",
         "sharepoint-prefix",
-        "ssh"
+        "ssh",
+        "tidb-filesystem"
       ],
       "command": "( A=(old keep); declare -A M=([k]=v); S=str; f(){ local -I A=new; local -IA M; local -Ia S; declare -p A M S; }; f; declare -p A; g(){ local -a B=(1 2); local -a B; declare -p B; }; g; declare -i N; h(){ local N=(1+1); declare -p N; }; h; export E=(1); k(){ local E=(2); declare -p E; }; k )",
       "expect": {

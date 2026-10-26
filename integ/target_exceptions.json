@@ -51,7 +51,8 @@
       "s3-prefix": "The case needs a file whose name is not UTF-8, which only ram is known to hold: S3, Drive, Box, Dropbox, OneDrive, SharePoint, Nextcloud, Hugging Face, Databricks and GridFS name entries with UTF-8 strings, disk depends on the host filesystem (APFS refuses the name, ext4 keeps it), and no case yet pins such a name on redis, opfs or ssh. What it pins, bc printing a file's name as its bytes, happens after the read and does not vary by backend.",
       "sharepoint": "The case needs a file whose name is not UTF-8, which only ram is known to hold: S3, Drive, Box, Dropbox, OneDrive, SharePoint, Nextcloud, Hugging Face, Databricks and GridFS name entries with UTF-8 strings, disk depends on the host filesystem (APFS refuses the name, ext4 keeps it), and no case yet pins such a name on redis, opfs or ssh. What it pins, bc printing a file's name as its bytes, happens after the read and does not vary by backend.",
       "sharepoint-prefix": "The case needs a file whose name is not UTF-8, which only ram is known to hold: S3, Drive, Box, Dropbox, OneDrive, SharePoint, Nextcloud, Hugging Face, Databricks and GridFS name entries with UTF-8 strings, disk depends on the host filesystem (APFS refuses the name, ext4 keeps it), and no case yet pins such a name on redis, opfs or ssh. What it pins, bc printing a file's name as its bytes, happens after the read and does not vary by backend.",
-      "ssh": "The case needs a file whose name is not UTF-8, which only ram is known to hold: S3, Drive, Box, Dropbox, OneDrive, SharePoint, Nextcloud, Hugging Face, Databricks and GridFS name entries with UTF-8 strings, disk depends on the host filesystem (APFS refuses the name, ext4 keeps it), and no case yet pins such a name on redis, opfs or ssh. What it pins, bc printing a file's name as its bytes, happens after the read and does not vary by backend."
+      "ssh": "The case needs a file whose name is not UTF-8, which only ram is known to hold: S3, Drive, Box, Dropbox, OneDrive, SharePoint, Nextcloud, Hugging Face, Databricks and GridFS name entries with UTF-8 strings, disk depends on the host filesystem (APFS refuses the name, ext4 keeps it), and no case yet pins such a name on redis, opfs or ssh. What it pins, bc printing a file's name as its bytes, happens after the read and does not vary by backend.",
+      "tidb-filesystem": "The case needs a file whose name is not UTF-8, which only ram is known to hold: drive9 names entries with UTF-8 strings in its JSON listings and its percent-encoded paths, as S3, Drive, Box, Dropbox, OneDrive, SharePoint, Nextcloud, Hugging Face, Databricks and GridFS do. What it pins, bc printing a file's name as its bytes, happens after the read and does not vary by backend."
     },
     "integ/bash/control/scope.json :: ctl_for_long_word_list_leaves_last_value": {
       "box": "This 300,000-iteration regression exercises shell-local seq expansion and looping. The ram target covers both hosts without repeating the same backend-independent workload.",
@@ -74,7 +75,8 @@
       "s3-prefix": "This 300,000-iteration regression exercises shell-local seq expansion and looping. The ram target covers both hosts without repeating the same backend-independent workload.",
       "sharepoint": "This 300,000-iteration regression exercises shell-local seq expansion and looping. The ram target covers both hosts without repeating the same backend-independent workload.",
       "sharepoint-prefix": "This 300,000-iteration regression exercises shell-local seq expansion and looping. The ram target covers both hosts without repeating the same backend-independent workload.",
-      "ssh": "This 300,000-iteration regression exercises shell-local seq expansion and looping. The ram target covers both hosts without repeating the same backend-independent workload."
+      "ssh": "This 300,000-iteration regression exercises shell-local seq expansion and looping. The ram target covers both hosts without repeating the same backend-independent workload.",
+      "tidb-filesystem": "This 300,000-iteration regression exercises shell-local seq expansion and looping. The ram target covers both hosts without repeating the same backend-independent workload."
     },
     "integ/unix/ln/flags.json :: ln_backup_suffix_moves_a_file_aside": {
       "hf": "hf holds no empty directory: the service refuses a directory marker client-side (create_dir=false, probed on opendal 0.47.1), and it has no rename op, so a backup that has to move the occupied regular file aside fails with `Operation not supported`, the same limit mv/backup.json and cp/backup.json omit hf for. hf still runs every other ln case in this file, including the backup of a symlink occupant, which moves aside through the namespace table and never asks the backend to rename.",
@@ -152,7 +154,8 @@
       "s3-prefix": "-newer FILE reads the reference's mtime and the case sets that mtime with touch -d first, so the list is touch/d.json's, the backends that support setting one. find -newer itself runs wherever -newermt does; the sibling cases that pass a literal date carry the wider list.",
       "sharepoint": "-newer FILE reads the reference's mtime and the case sets that mtime with touch -d first, so the list is touch/d.json's, the backends that support setting one. find -newer itself runs wherever -newermt does; the sibling cases that pass a literal date carry the wider list.",
       "sharepoint-prefix": "-newer FILE reads the reference's mtime and the case sets that mtime with touch -d first, so the list is touch/d.json's, the backends that support setting one. find -newer itself runs wherever -newermt does; the sibling cases that pass a literal date carry the wider list.",
-      "ssh": "-newer FILE reads the reference's mtime and the case sets that mtime with touch -d first, so the list is touch/d.json's, the backends that support setting one. find -newer itself runs wherever -newermt does; the sibling cases that pass a literal date carry the wider list."
+      "ssh": "-newer FILE reads the reference's mtime and the case sets that mtime with touch -d first, so the list is touch/d.json's, the backends that support setting one. find -newer itself runs wherever -newermt does; the sibling cases that pass a literal date carry the wider list.",
+      "tidb-filesystem": "-newer FILE reads the reference's mtime and the case sets that mtime with touch -d first, so the list is touch/d.json's, the backends that support setting one. find -newer itself runs wherever -newermt does; the sibling cases that pass a literal date carry the wider list."
     },
     "integ/bash/command/findexec.json :: find_newermt_future_matches_nothing": {
       "gdrive": "This backend's find core accepts the mtime window for signature parity and applies nothing: core/object_store/find.py (s3, gridfs, hf) and core/gdrive/find.py (matching onedrive and sharepoint) both document -mtime as a deliberate no-op because their synthetic directories carry no mtime. -newermt folds into that same window, so a future date matches everything there where GNU matches nothing. The divergence predates -newermt and is a parked backend question, not a shell one; the parse-error and missing-reference siblings still run on every backend.",
@@ -192,7 +195,8 @@
       "nextcloud": "Nextcloud refuses a filename holding a newline at the WebDAV layer (HTTP 400, `Filename contains at least one invalid character`), for both hosts, so the case cannot seed the name it pins find's boundary handling on. The refusal is the server's, not the shell's; the boundary handling runs on every backend that takes the name."
     },
     "integ/bash/command/findexec.json :: find_ls_escapes_the_name": {
-      "nextcloud": "Nextcloud refuses a filename holding a backslash at the WebDAV layer (HTTP 400, `\"\\\" is not allowed inside a file or folder name`), for both hosts, so the case cannot seed the name whose escaping it pins in find -ls. The refusal is the server's, not the shell's; the escaping runs on every backend that takes the name."
+      "nextcloud": "Nextcloud refuses a filename holding a backslash at the WebDAV layer (HTTP 400, `\"\\\" is not allowed inside a file or folder name`), for both hosts, so the case cannot seed the name whose escaping it pins in find -ls. The refusal is the server's, not the shell's; the escaping runs on every backend that takes the name.",
+      "tidb-filesystem": "drive9 refuses a file name holding a backslash, so the case cannot seed the name whose escaping it pins in find -ls. The refusal is the server's, not the shell's; the escaping runs on every backend that takes the name."
     },
     "integ/bash/command/findexec.json :: find_print0_keeps_newline_boundaries": {
       "box": "A name holding a newline cannot be created there from python: the backend's write refuses the key and touch reports `cannot touch 'd/a\\nb': No such file or directory`, so the case never gets to the find action it pins (the TypeScript battery stores the name and passes). The boundary handling under test is find's, exercised on every backend that takes the name; the refusal is a parked python backend question, not a shell one.",
@@ -224,7 +228,8 @@
       "s3-prefix": "Requires the gapps target's rendered Google document fixtures; generic raw-file coverage is in the eight other binary cases.",
       "sharepoint": "Requires the gapps target's rendered Google document fixtures; generic raw-file coverage is in the eight other binary cases.",
       "sharepoint-prefix": "Requires the gapps target's rendered Google document fixtures; generic raw-file coverage is in the eight other binary cases.",
-      "ssh": "Requires the gapps target's rendered Google document fixtures; generic raw-file coverage is in the eight other binary cases."
+      "ssh": "Requires the gapps target's rendered Google document fixtures; generic raw-file coverage is in the eight other binary cases.",
+      "tidb-filesystem": "Requires the gapps target's rendered Google document fixtures; generic raw-file coverage is in the eight other binary cases."
     },
     "integ/unix/grep/binary.json :: grep_binary_integ_sheets_rendered": {
       "box": "Requires the gapps target's rendered Google document fixtures; generic raw-file coverage is in the eight other binary cases.",
@@ -248,7 +253,8 @@
       "s3-prefix": "Requires the gapps target's rendered Google document fixtures; generic raw-file coverage is in the eight other binary cases.",
       "sharepoint": "Requires the gapps target's rendered Google document fixtures; generic raw-file coverage is in the eight other binary cases.",
       "sharepoint-prefix": "Requires the gapps target's rendered Google document fixtures; generic raw-file coverage is in the eight other binary cases.",
-      "ssh": "Requires the gapps target's rendered Google document fixtures; generic raw-file coverage is in the eight other binary cases."
+      "ssh": "Requires the gapps target's rendered Google document fixtures; generic raw-file coverage is in the eight other binary cases.",
+      "tidb-filesystem": "Requires the gapps target's rendered Google document fixtures; generic raw-file coverage is in the eight other binary cases."
     },
     "integ/unix/grep/binary.json :: grep_binary_integ_slides_rendered": {
       "box": "Requires the gapps target's rendered Google document fixtures; generic raw-file coverage is in the eight other binary cases.",
@@ -272,7 +278,8 @@
       "s3-prefix": "Requires the gapps target's rendered Google document fixtures; generic raw-file coverage is in the eight other binary cases.",
       "sharepoint": "Requires the gapps target's rendered Google document fixtures; generic raw-file coverage is in the eight other binary cases.",
       "sharepoint-prefix": "Requires the gapps target's rendered Google document fixtures; generic raw-file coverage is in the eight other binary cases.",
-      "ssh": "Requires the gapps target's rendered Google document fixtures; generic raw-file coverage is in the eight other binary cases."
+      "ssh": "Requires the gapps target's rendered Google document fixtures; generic raw-file coverage is in the eight other binary cases.",
+      "tidb-filesystem": "Requires the gapps target's rendered Google document fixtures; generic raw-file coverage is in the eight other binary cases."
     },
     "integ/unix/grep/binary.json :: grep_binary_integ_gmail_0": {
       "box": "Requires the gmail target's seeded worker-3 message and service search; generic raw-file coverage is in the eight other binary cases.",
@@ -296,7 +303,8 @@
       "s3-prefix": "Requires the gmail target's seeded worker-3 message and service search; generic raw-file coverage is in the eight other binary cases.",
       "sharepoint": "Requires the gmail target's seeded worker-3 message and service search; generic raw-file coverage is in the eight other binary cases.",
       "sharepoint-prefix": "Requires the gmail target's seeded worker-3 message and service search; generic raw-file coverage is in the eight other binary cases.",
-      "ssh": "Requires the gmail target's seeded worker-3 message and service search; generic raw-file coverage is in the eight other binary cases."
+      "ssh": "Requires the gmail target's seeded worker-3 message and service search; generic raw-file coverage is in the eight other binary cases.",
+      "tidb-filesystem": "Requires the gmail target's seeded worker-3 message and service search; generic raw-file coverage is in the eight other binary cases."
     },
     "integ/unix/grep/binary.json :: grep_binary_integ_gmail_1": {
       "box": "Requires the gmail target's seeded worker-3 message and service search; generic raw-file coverage is in the eight other binary cases.",
@@ -320,7 +328,8 @@
       "s3-prefix": "Requires the gmail target's seeded worker-3 message and service search; generic raw-file coverage is in the eight other binary cases.",
       "sharepoint": "Requires the gmail target's seeded worker-3 message and service search; generic raw-file coverage is in the eight other binary cases.",
       "sharepoint-prefix": "Requires the gmail target's seeded worker-3 message and service search; generic raw-file coverage is in the eight other binary cases.",
-      "ssh": "Requires the gmail target's seeded worker-3 message and service search; generic raw-file coverage is in the eight other binary cases."
+      "ssh": "Requires the gmail target's seeded worker-3 message and service search; generic raw-file coverage is in the eight other binary cases.",
+      "tidb-filesystem": "Requires the gmail target's seeded worker-3 message and service search; generic raw-file coverage is in the eight other binary cases."
     },
     "integ/unix/grep/binary.json :: grep_binary_integ_gmail_2": {
       "box": "Requires the gmail target's seeded worker-3 message and service search; generic raw-file coverage is in the eight other binary cases.",
@@ -344,7 +353,8 @@
       "s3-prefix": "Requires the gmail target's seeded worker-3 message and service search; generic raw-file coverage is in the eight other binary cases.",
       "sharepoint": "Requires the gmail target's seeded worker-3 message and service search; generic raw-file coverage is in the eight other binary cases.",
       "sharepoint-prefix": "Requires the gmail target's seeded worker-3 message and service search; generic raw-file coverage is in the eight other binary cases.",
-      "ssh": "Requires the gmail target's seeded worker-3 message and service search; generic raw-file coverage is in the eight other binary cases."
+      "ssh": "Requires the gmail target's seeded worker-3 message and service search; generic raw-file coverage is in the eight other binary cases.",
+      "tidb-filesystem": "Requires the gmail target's seeded worker-3 message and service search; generic raw-file coverage is in the eight other binary cases."
     },
     "integ/unix/grep/binary.json :: grep_binary_integ_email_0": {
       "box": "Requires the email target's seeded worker-3 message and service search; generic raw-file coverage is in the eight other binary cases.",
@@ -368,7 +378,8 @@
       "s3-prefix": "Requires the email target's seeded worker-3 message and service search; generic raw-file coverage is in the eight other binary cases.",
       "sharepoint": "Requires the email target's seeded worker-3 message and service search; generic raw-file coverage is in the eight other binary cases.",
       "sharepoint-prefix": "Requires the email target's seeded worker-3 message and service search; generic raw-file coverage is in the eight other binary cases.",
-      "ssh": "Requires the email target's seeded worker-3 message and service search; generic raw-file coverage is in the eight other binary cases."
+      "ssh": "Requires the email target's seeded worker-3 message and service search; generic raw-file coverage is in the eight other binary cases.",
+      "tidb-filesystem": "Requires the email target's seeded worker-3 message and service search; generic raw-file coverage is in the eight other binary cases."
     },
     "integ/unix/grep/binary.json :: grep_binary_integ_email_1": {
       "box": "Requires the email target's seeded worker-3 message and service search; generic raw-file coverage is in the eight other binary cases.",
@@ -392,7 +403,8 @@
       "s3-prefix": "Requires the email target's seeded worker-3 message and service search; generic raw-file coverage is in the eight other binary cases.",
       "sharepoint": "Requires the email target's seeded worker-3 message and service search; generic raw-file coverage is in the eight other binary cases.",
       "sharepoint-prefix": "Requires the email target's seeded worker-3 message and service search; generic raw-file coverage is in the eight other binary cases.",
-      "ssh": "Requires the email target's seeded worker-3 message and service search; generic raw-file coverage is in the eight other binary cases."
+      "ssh": "Requires the email target's seeded worker-3 message and service search; generic raw-file coverage is in the eight other binary cases.",
+      "tidb-filesystem": "Requires the email target's seeded worker-3 message and service search; generic raw-file coverage is in the eight other binary cases."
     },
     "integ/unix/grep/binary.json :: grep_binary_integ_email_2": {
       "box": "Requires the email target's seeded worker-3 message and service search; generic raw-file coverage is in the eight other binary cases.",
@@ -416,7 +428,8 @@
       "s3-prefix": "Requires the email target's seeded worker-3 message and service search; generic raw-file coverage is in the eight other binary cases.",
       "sharepoint": "Requires the email target's seeded worker-3 message and service search; generic raw-file coverage is in the eight other binary cases.",
       "sharepoint-prefix": "Requires the email target's seeded worker-3 message and service search; generic raw-file coverage is in the eight other binary cases.",
-      "ssh": "Requires the email target's seeded worker-3 message and service search; generic raw-file coverage is in the eight other binary cases."
+      "ssh": "Requires the email target's seeded worker-3 message and service search; generic raw-file coverage is in the eight other binary cases.",
+      "tidb-filesystem": "Requires the email target's seeded worker-3 message and service search; generic raw-file coverage is in the eight other binary cases."
     },
     "integ/unix/ls/flags.json :: ls_time_style_pads_a_negative_epoch_after_the_sign": {
       "box": "The case pins how a negative epoch pads under --time-style=+%12s, so it has to set a 1969 mtime with touch -d first; the list is touch/d.json's, the backends that support setting one. The padding itself is strftime's and runs on every backend through the sibling time-style cases.",
@@ -436,7 +449,8 @@
       "s3-prefix": "The case pins how a negative epoch pads under --time-style=+%12s, so it has to set a 1969 mtime with touch -d first; the list is touch/d.json's, the backends that support setting one. The padding itself is strftime's and runs on every backend through the sibling time-style cases.",
       "sharepoint": "The case pins how a negative epoch pads under --time-style=+%12s, so it has to set a 1969 mtime with touch -d first; the list is touch/d.json's, the backends that support setting one. The padding itself is strftime's and runs on every backend through the sibling time-style cases.",
       "sharepoint-prefix": "The case pins how a negative epoch pads under --time-style=+%12s, so it has to set a 1969 mtime with touch -d first; the list is touch/d.json's, the backends that support setting one. The padding itself is strftime's and runs on every backend through the sibling time-style cases.",
-      "ssh": "The case pins how a negative epoch pads under --time-style=+%12s, so it has to set a 1969 mtime with touch -d first; the list is touch/d.json's, the backends that support setting one. The padding itself is strftime's and runs on every backend through the sibling time-style cases."
+      "ssh": "The case pins how a negative epoch pads under --time-style=+%12s, so it has to set a 1969 mtime with touch -d first; the list is touch/d.json's, the backends that support setting one. The padding itself is strftime's and runs on every backend through the sibling time-style cases.",
+      "tidb-filesystem": "The case pins how a negative epoch pads under --time-style=+%12s, so it has to set a 1969 mtime with touch -d first; the list is touch/d.json's, the backends that support setting one. The padding itself is strftime's and runs on every backend through the sibling time-style cases."
     },
     "integ/unix/tail/f.json :: tail_follow_name_gives_up_on_a_replacing_directory": {
       "hf": "hf holds no empty directory: the service refuses a directory marker client-side (create_dir=false, probed on opendal 0.47.1), so mkdir is a no-op and a directory exists exactly while it holds a key. This case replaces the followed file with an empty directory to pin GNU's `has been replaced with an untailable file` wording, so on hf the name is simply absent after the replacement and tail correctly reports it inaccessible instead. hf still runs every other follow case in this file, including the one that gives up on a directory named on the command line.",
@@ -460,7 +474,8 @@
       "s3-prefix": "The case pins how a width on a numeric directive replaces its default padding under --time-style=+%1d and friends, so it has to set a known mtime with touch -d first; the list is touch/d.json's, the backends that support setting one. The rendering itself is strftime's and runs on every backend through the sibling time-style cases.",
       "sharepoint": "The case pins how a width on a numeric directive replaces its default padding under --time-style=+%1d and friends, so it has to set a known mtime with touch -d first; the list is touch/d.json's, the backends that support setting one. The rendering itself is strftime's and runs on every backend through the sibling time-style cases.",
       "sharepoint-prefix": "The case pins how a width on a numeric directive replaces its default padding under --time-style=+%1d and friends, so it has to set a known mtime with touch -d first; the list is touch/d.json's, the backends that support setting one. The rendering itself is strftime's and runs on every backend through the sibling time-style cases.",
-      "ssh": "The case pins how a width on a numeric directive replaces its default padding under --time-style=+%1d and friends, so it has to set a known mtime with touch -d first; the list is touch/d.json's, the backends that support setting one. The rendering itself is strftime's and runs on every backend through the sibling time-style cases."
+      "ssh": "The case pins how a width on a numeric directive replaces its default padding under --time-style=+%1d and friends, so it has to set a known mtime with touch -d first; the list is touch/d.json's, the backends that support setting one. The rendering itself is strftime's and runs on every backend through the sibling time-style cases.",
+      "tidb-filesystem": "The case pins how a width on a numeric directive replaces its default padding under --time-style=+%1d and friends, so it has to set a known mtime with touch -d first; the list is touch/d.json's, the backends that support setting one. The rendering itself is strftime's and runs on every backend through the sibling time-style cases."
     },
     "integ/crossmount/version/basic.json :: xro_version_on_read_only_mount": {
       "box": "Only ram, disk and opfs declare a `/ro` mount in targets.json, so this case cannot run anywhere else: it exists to pin that --version and --help answer BEFORE the read-only refusal, which needs a read-only mount to refuse from. The directory's modal list is the two-mount cross-mount one (/data plus /data2), which every backend has; this case is the outlier because of the fixture it needs, not because of anything the backend cannot do.",
@@ -481,7 +496,8 @@
       "s3-prefix": "Only ram, disk and opfs declare a `/ro` mount in targets.json, so this case cannot run anywhere else: it exists to pin that --version and --help answer BEFORE the read-only refusal, which needs a read-only mount to refuse from. The directory's modal list is the two-mount cross-mount one (/data plus /data2), which every backend has; this case is the outlier because of the fixture it needs, not because of anything the backend cannot do.",
       "sharepoint": "Only ram, disk and opfs declare a `/ro` mount in targets.json, so this case cannot run anywhere else: it exists to pin that --version and --help answer BEFORE the read-only refusal, which needs a read-only mount to refuse from. The directory's modal list is the two-mount cross-mount one (/data plus /data2), which every backend has; this case is the outlier because of the fixture it needs, not because of anything the backend cannot do.",
       "sharepoint-prefix": "Only ram, disk and opfs declare a `/ro` mount in targets.json, so this case cannot run anywhere else: it exists to pin that --version and --help answer BEFORE the read-only refusal, which needs a read-only mount to refuse from. The directory's modal list is the two-mount cross-mount one (/data plus /data2), which every backend has; this case is the outlier because of the fixture it needs, not because of anything the backend cannot do.",
-      "ssh": "Only ram, disk and opfs declare a `/ro` mount in targets.json, so this case cannot run anywhere else: it exists to pin that --version and --help answer BEFORE the read-only refusal, which needs a read-only mount to refuse from. The directory's modal list is the two-mount cross-mount one (/data plus /data2), which every backend has; this case is the outlier because of the fixture it needs, not because of anything the backend cannot do."
+      "ssh": "Only ram, disk and opfs declare a `/ro` mount in targets.json, so this case cannot run anywhere else: it exists to pin that --version and --help answer BEFORE the read-only refusal, which needs a read-only mount to refuse from. The directory's modal list is the two-mount cross-mount one (/data plus /data2), which every backend has; this case is the outlier because of the fixture it needs, not because of anything the backend cannot do.",
+      "tidb-filesystem": "Only ram, disk and opfs declare a `/ro` mount in targets.json, so this case cannot run anywhere else: it exists to pin that --version and --help answer BEFORE the read-only refusal, which needs a read-only mount to refuse from. The directory's modal list is the two-mount cross-mount one (/data plus /data2), which every backend has; this case is the outlier because of the fixture it needs, not because of anything the backend cannot do."
     },
     "integ/crossmount/version/basic.json :: xro_help_on_read_only_mount": {
       "box": "Only ram, disk and opfs declare a `/ro` mount in targets.json, so this case cannot run anywhere else: it exists to pin that --version and --help answer BEFORE the read-only refusal, which needs a read-only mount to refuse from. The directory's modal list is the two-mount cross-mount one (/data plus /data2), which every backend has; this case is the outlier because of the fixture it needs, not because of anything the backend cannot do.",
@@ -502,7 +518,8 @@
       "s3-prefix": "Only ram, disk and opfs declare a `/ro` mount in targets.json, so this case cannot run anywhere else: it exists to pin that --version and --help answer BEFORE the read-only refusal, which needs a read-only mount to refuse from. The directory's modal list is the two-mount cross-mount one (/data plus /data2), which every backend has; this case is the outlier because of the fixture it needs, not because of anything the backend cannot do.",
       "sharepoint": "Only ram, disk and opfs declare a `/ro` mount in targets.json, so this case cannot run anywhere else: it exists to pin that --version and --help answer BEFORE the read-only refusal, which needs a read-only mount to refuse from. The directory's modal list is the two-mount cross-mount one (/data plus /data2), which every backend has; this case is the outlier because of the fixture it needs, not because of anything the backend cannot do.",
       "sharepoint-prefix": "Only ram, disk and opfs declare a `/ro` mount in targets.json, so this case cannot run anywhere else: it exists to pin that --version and --help answer BEFORE the read-only refusal, which needs a read-only mount to refuse from. The directory's modal list is the two-mount cross-mount one (/data plus /data2), which every backend has; this case is the outlier because of the fixture it needs, not because of anything the backend cannot do.",
-      "ssh": "Only ram, disk and opfs declare a `/ro` mount in targets.json, so this case cannot run anywhere else: it exists to pin that --version and --help answer BEFORE the read-only refusal, which needs a read-only mount to refuse from. The directory's modal list is the two-mount cross-mount one (/data plus /data2), which every backend has; this case is the outlier because of the fixture it needs, not because of anything the backend cannot do."
+      "ssh": "Only ram, disk and opfs declare a `/ro` mount in targets.json, so this case cannot run anywhere else: it exists to pin that --version and --help answer BEFORE the read-only refusal, which needs a read-only mount to refuse from. The directory's modal list is the two-mount cross-mount one (/data plus /data2), which every backend has; this case is the outlier because of the fixture it needs, not because of anything the backend cannot do.",
+      "tidb-filesystem": "Only ram, disk and opfs declare a `/ro` mount in targets.json, so this case cannot run anywhere else: it exists to pin that --version and --help answer BEFORE the read-only refusal, which needs a read-only mount to refuse from. The directory's modal list is the two-mount cross-mount one (/data plus /data2), which every backend has; this case is the outlier because of the fixture it needs, not because of anything the backend cannot do."
     },
     "integ/unix/slash/dest.json :: slashdest_cp_file_to_file": {
       "hf": "hf has no rename op and no copy op: mv and cp on it answer `Operation not supported` before any operand is looked at (the same limit mv/backup.json and cp/backup.json carry), so the GNU refusal this case pins cannot be reached there.",
@@ -743,7 +760,8 @@
       "redis": "A consistency scenario: a shadow workspace writes a key with no directory markers and the read workspace, under read: fresh, must synthesize the parent chain. Only the key-value stores (s3, gridfs) can hold a key without its parents. ram caches nothing, so read: fresh is refused at mount time, and the other backends, disk and opfs included, create real directories, leaving nothing implicit to find.",
       "sharepoint": "A consistency scenario: a shadow workspace writes a key with no directory markers and the read workspace, under read: fresh, must synthesize the parent chain. Only the key-value stores (s3, gridfs) can hold a key without its parents. ram caches nothing, so read: fresh is refused at mount time, and the other backends, disk and opfs included, create real directories, leaving nothing implicit to find.",
       "sharepoint-prefix": "A consistency scenario: a shadow workspace writes a key with no directory markers and the read workspace, under read: fresh, must synthesize the parent chain. Only the key-value stores (s3, gridfs) can hold a key without its parents. ram caches nothing, so read: fresh is refused at mount time, and the other backends, disk and opfs included, create real directories, leaving nothing implicit to find.",
-      "ssh": "A consistency scenario: a shadow workspace writes a key with no directory markers and the read workspace, under read: fresh, must synthesize the parent chain. Only the key-value stores (s3, gridfs) can hold a key without its parents. ram caches nothing, so read: fresh is refused at mount time, and the other backends, disk and opfs included, create real directories, leaving nothing implicit to find."
+      "ssh": "A consistency scenario: a shadow workspace writes a key with no directory markers and the read workspace, under read: fresh, must synthesize the parent chain. Only the key-value stores (s3, gridfs) can hold a key without its parents. ram caches nothing, so read: fresh is refused at mount time, and the other backends, disk and opfs included, create real directories, leaving nothing implicit to find.",
+      "tidb-filesystem": "A consistency scenario: a shadow workspace writes a key with no directory markers and the read workspace, under read: fresh, must synthesize the parent chain. Only the key-value stores (s3, gridfs) can hold a key without its parents. ram caches nothing, so read: fresh is refused at mount time, and the other backends, disk and opfs included, create real directories, leaving nothing implicit to find."
     },
     "integ/unix/find/implicit.json :: find_implicit_dir_name": {
       "box": "A consistency scenario: a shadow workspace writes a key with no directory markers and the read workspace, under read: fresh, must synthesize the parent chain. Only the key-value stores (s3, gridfs) can hold a key without its parents. ram caches nothing, so read: fresh is refused at mount time, and the other backends, disk and opfs included, create real directories, leaving nothing implicit to find.",
@@ -763,7 +781,8 @@
       "redis": "A consistency scenario: a shadow workspace writes a key with no directory markers and the read workspace, under read: fresh, must synthesize the parent chain. Only the key-value stores (s3, gridfs) can hold a key without its parents. ram caches nothing, so read: fresh is refused at mount time, and the other backends, disk and opfs included, create real directories, leaving nothing implicit to find.",
       "sharepoint": "A consistency scenario: a shadow workspace writes a key with no directory markers and the read workspace, under read: fresh, must synthesize the parent chain. Only the key-value stores (s3, gridfs) can hold a key without its parents. ram caches nothing, so read: fresh is refused at mount time, and the other backends, disk and opfs included, create real directories, leaving nothing implicit to find.",
       "sharepoint-prefix": "A consistency scenario: a shadow workspace writes a key with no directory markers and the read workspace, under read: fresh, must synthesize the parent chain. Only the key-value stores (s3, gridfs) can hold a key without its parents. ram caches nothing, so read: fresh is refused at mount time, and the other backends, disk and opfs included, create real directories, leaving nothing implicit to find.",
-      "ssh": "A consistency scenario: a shadow workspace writes a key with no directory markers and the read workspace, under read: fresh, must synthesize the parent chain. Only the key-value stores (s3, gridfs) can hold a key without its parents. ram caches nothing, so read: fresh is refused at mount time, and the other backends, disk and opfs included, create real directories, leaving nothing implicit to find."
+      "ssh": "A consistency scenario: a shadow workspace writes a key with no directory markers and the read workspace, under read: fresh, must synthesize the parent chain. Only the key-value stores (s3, gridfs) can hold a key without its parents. ram caches nothing, so read: fresh is refused at mount time, and the other backends, disk and opfs included, create real directories, leaving nothing implicit to find.",
+      "tidb-filesystem": "A consistency scenario: a shadow workspace writes a key with no directory markers and the read workspace, under read: fresh, must synthesize the parent chain. Only the key-value stores (s3, gridfs) can hold a key without its parents. ram caches nothing, so read: fresh is refused at mount time, and the other backends, disk and opfs included, create real directories, leaving nothing implicit to find."
     },
     "integ/unix/find/empty.json :: find_empty_dir_holding_only_a_link": {
       "hf": "hf holds no empty directory: the service refuses a directory marker client-side (create_dir=false, probed on opendal 0.47.1), so mkdir is a no-op and a directory exists exactly while it holds a key. This case, or the prep case it runs after, makes a directory and uses it before any key lands in it (cd, ls, tree, find, ln or a glob into it), so on hf that directory is absent. hf still runs the rest of the file.",
@@ -1011,7 +1030,8 @@
       "hf-prefix": "hf holds no empty directory: the service refuses a directory marker client-side (create_dir=false, probed on opendal 0.47.1), so mkdir is a no-op and a directory exists exactly while it holds a key. This case, or the prep case it runs after, makes a directory and uses it before any key lands in it (cd, ls, tree, find, ln or a glob into it), so on hf that directory is absent. hf still runs the rest of the file."
     },
     "integ/unix/ls/flags.json :: ls_sort_width_counts_columns": {
-      "nextcloud": "Nextcloud stores file names NFC-normalized, so the decomposed e + U+0301 name lists precomposed whenever the listing comes from the server. The row only held while mirage's index still had the name as typed, which depends on what earlier cases left cached."
+      "nextcloud": "Nextcloud stores file names NFC-normalized, so the decomposed e + U+0301 name lists precomposed whenever the listing comes from the server. The row only held while mirage's index still had the name as typed, which depends on what earlier cases left cached.",
+      "tidb-filesystem": "drive9 stores file names NFC-normalized, so the decomposed e + U+0301 name lists precomposed (measured against drive9-server 1f1ff16f: a PUT of `e%CC%81x` lists as `éx`). The width sort itself runs on every backend that keeps the name as typed."
     },
     "integ/unix/consistency/ancestors.json :: consistency_deep_write_refreshes_ancestor_listing": {
       "box": "The case writes /data2/anc/d1/leaf.txt without creating d1. box has real folders and refuses the write with ENOENT, which is GNU's answer for a redirect into a missing directory, so the case's expectation (that the write succeeds) is one only a flat keyed store can meet.",

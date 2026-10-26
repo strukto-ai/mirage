@@ -21,6 +21,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "mkdir -p /data/rgfl/sub; printf 'alpha\\nfoo\\nbar\\nbaz\\nfoo\\nqux\\n' > /data/rgfl/a.txt; printf 'nothing\\n' > /data/rgfl/b.txt; printf 'x1\\nx2\\nx3\\nx4\\nx5\\nx6\\nx7\\nx8\\n' > /data/rgfl/c.txt; rg -U 'foo\\nbar' /data/rgfl/a.txt; rg -U -n 'foo\\nbar' /data/rgfl/a.txt; rg -U -c 'foo\\nbar|baz' /data/rgfl/a.txt; rg -U --count-matches 'o\\n' /data/rgfl/a.txt; rg -U -n -o 'o\\nbar' /data/rgfl/a.txt; rg -U -n -C1 'foo\\nbar' /data/rgfl/a.txt; rg --multiline -b 'foo\\nbar' /data/rgfl/a.txt; rm -rf /data/rgfl",
@@ -61,6 +62,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "mkdir -p /data/rgfl/sub; printf 'alpha\\nfoo\\nbar\\nbaz\\nfoo\\nqux\\n' > /data/rgfl/a.txt; printf 'nothing\\n' > /data/rgfl/b.txt; printf 'x1\\nx2\\nx3\\nx4\\nx5\\nx6\\nx7\\nx8\\n' > /data/rgfl/c.txt; rg -U -n --vimgrep 'x2\\nx3|x5' /data/rgfl/c.txt; rg -U -n -r Y 'x2\\nx3' /data/rgfl/c.txt; rg -U -v 'x2\\nx3|x5' /data/rgfl/c.txt; rg -U -n -m1 'x2\\nx3|x5' /data/rgfl/c.txt; rg -j1 -U -l 'x2\\nx3' /data/rgfl/c.txt /data/rgfl/a.txt; rg -U -n -C1 'x2\\nx3|x6' /data/rgfl/c.txt; rg -U -c -v 'foo\\nbar' /data/rgfl/a.txt; echo rc=$?; rm -rf /data/rgfl",
@@ -103,6 +105,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "mkdir -p /data/rgfl/sub; printf 'alpha\\nfoo\\nbar\\nbaz\\nfoo\\nqux\\n' > /data/rgfl/a.txt; printf 'nothing\\n' > /data/rgfl/b.txt; printf 'x1\\nx2\\nx3\\nx4\\nx5\\nx6\\nx7\\nx8\\n' > /data/rgfl/c.txt; rg -U 'foo.bar' /data/rgfl/a.txt; echo rc=$?; rg -U --multiline-dotall 'foo.bar' /data/rgfl/a.txt; rg -U --multiline-dotall --no-multiline-dotall 'foo.bar' /data/rgfl/a.txt; echo rc=$?; rg --multiline-dotall 'x1.x2' /data/rgfl/c.txt; echo rc=$?; rm -rf /data/rgfl",
@@ -138,6 +141,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "{ mkdir -p /data/rgfl/sub; printf 'alpha\\nfoo\\nbar\\nbaz\\nfoo\\nqux\\n' > /data/rgfl/a.txt; printf 'nothing\\n' > /data/rgfl/b.txt; printf 'x1\\nx2\\nx3\\nx4\\nx5\\nx6\\nx7\\nx8\\n' > /data/rgfl/c.txt; rg 'foo\\nbar' /data/rgfl/a.txt; echo rc=$?; rg -U --no-multiline 'foo\\nbar' /data/rgfl/a.txt; echo rc=$?; rm -rf /data/rgfl; } 2>/dev/null",
@@ -172,6 +176,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "mkdir -p /data/rgfl/sub; printf 'alpha\\nfoo\\nbar\\nbaz\\nfoo\\nqux\\n' > /data/rgfl/a.txt; printf 'nothing\\n' > /data/rgfl/b.txt; printf 'x1\\nx2\\nx3\\nx4\\nx5\\nx6\\nx7\\nx8\\n' > /data/rgfl/c.txt; rg -U --passthru zzz /data/rgfl/b.txt; echo rc=$?; rg -j1 -U --passthru -n zzz /data/rgfl/b.txt /data/rgfl/c.txt; printf 'foo\\nbar\\0baz\\0' > /data/rgfl/n.bin; rg -U --null-data -r X foo /data/rgfl/n.bin | tr '\\0' '@'; echo; rm -rf /data/rgfl",
@@ -209,6 +214,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "mkdir -p /data/rgfl/sub; printf 'alpha\\nfoo\\nbar\\nbaz\\nfoo\\nqux\\n' > /data/rgfl/a.txt; printf 'nothing\\n' > /data/rgfl/b.txt; printf 'x1\\nx2\\nx3\\nx4\\nx5\\nx6\\nx7\\nx8\\n' > /data/rgfl/c.txt; printf 'a1\\na2\\nb\\na3\\n' > /data/rgfl/s.txt; rg -U --stop-on-nonmatch a /data/rgfl/s.txt; rg -U --stop-on-nonmatch -c a /data/rgfl/s.txt; rg -U --stop-on-nonmatch -n -A1 a /data/rgfl/s.txt; rg -U --stop-on-nonmatch -v b /data/rgfl/s.txt; rg -U --stop-on-nonmatch -B1 a3 /data/rgfl/s.txt; rm -rf /data/rgfl",

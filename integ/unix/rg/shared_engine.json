@@ -21,7 +21,8 @@
         "s3-prefix",
         "sharepoint",
         "sharepoint-prefix",
-        "ssh"
+        "ssh",
+        "tidb-filesystem"
       ],
       "command": "printf 'i I İ ı\\n' | rg -i -o i",
       "expect": {
@@ -51,7 +52,8 @@
         "s3-prefix",
         "sharepoint",
         "sharepoint-prefix",
-        "ssh"
+        "ssh",
+        "tidb-filesystem"
       ],
       "command": "printf 'ab aaaa\\n' | rg -o 'a|ab'",
       "expect": {
@@ -81,7 +83,8 @@
         "s3-prefix",
         "sharepoint",
         "sharepoint-prefix",
-        "ssh"
+        "ssh",
+        "tidb-filesystem"
       ],
       "command": "printf 'éx xx\\n' | rg -n -b --column -o '(?<letter>x)' -r '<${letter}>'",
       "expect": {
@@ -111,7 +114,8 @@
         "s3-prefix",
         "sharepoint",
         "sharepoint-prefix",
-        "ssh"
+        "ssh",
+        "tidb-filesystem"
       ],
       "command": "printf 'ébx\\n' | rg -o -b 'b*' | od -An -tx1 | tr -d ' \\n'; echo",
       "expect": {
@@ -141,7 +145,8 @@
         "s3-prefix",
         "sharepoint",
         "sharepoint-prefix",
-        "ssh"
+        "ssh",
+        "tidb-filesystem"
       ],
       "command": "printf '\\377aéx\\376\\n' | rg -a -o -b 'x|(?-u:\\xFF)' | od -An -tx1 | tr -d ' \\n'; echo",
       "expect": {
@@ -171,7 +176,8 @@
         "s3-prefix",
         "sharepoint",
         "sharepoint-prefix",
-        "ssh"
+        "ssh",
+        "tidb-filesystem"
       ],
       "command": "printf 'ax\\r\\nbx\\n' | rg --crlf -n -b --column 'x$' -r 'long' | od -An -tx1 | tr -d ' \\n'; echo",
       "expect": {
@@ -201,7 +207,8 @@
         "s3-prefix",
         "sharepoint",
         "sharepoint-prefix",
-        "ssh"
+        "ssh",
+        "tidb-filesystem"
       ],
       "command": "printf 'é x x\\n' | rg --vimgrep -b '(?<v>x)' -r '${v}${v}'",
       "expect": {
@@ -231,7 +238,8 @@
         "s3-prefix",
         "sharepoint",
         "sharepoint-prefix",
-        "ssh"
+        "ssh",
+        "tidb-filesystem"
       ],
       "command": "printf 'a ab\\n' | rg -o '(?<a>a)(?<b>b)?' -r '${a}:${b}:$1x:$$'",
       "expect": {
@@ -261,7 +269,8 @@
         "s3-prefix",
         "sharepoint",
         "sharepoint-prefix",
-        "ssh"
+        "ssh",
+        "tidb-filesystem"
       ],
       "command": "printf 'ab' | rg -o -b '$' | od -An -tx1 | tr -d ' \\n'; echo",
       "expect": {
@@ -291,7 +300,8 @@
         "s3-prefix",
         "sharepoint",
         "sharepoint-prefix",
-        "ssh"
+        "ssh",
+        "tidb-filesystem"
       ],
       "command": "printf '\\377x\\376\\n' | rg -a -o -b '.' | od -An -tx1 | tr -d ' \\n'; echo",
       "expect": {
@@ -321,7 +331,8 @@
         "s3-prefix",
         "sharepoint",
         "sharepoint-prefix",
-        "ssh"
+        "ssh",
+        "tidb-filesystem"
       ],
       "command": "{ printf 'a\\nb\\n' | rg -U --stop-on-nonmatch 'a\\nb'; } 2>/dev/null",
       "expect": {
@@ -351,7 +362,8 @@
         "s3-prefix",
         "sharepoint",
         "sharepoint-prefix",
-        "ssh"
+        "ssh",
+        "tidb-filesystem"
       ],
       "command": "printf 'a\\nb\\nx\\na\\nb\\n' | rg --stop-on-nonmatch -U 'a\\nb'",
       "expect": {
@@ -381,7 +393,8 @@
         "s3-prefix",
         "sharepoint",
         "sharepoint-prefix",
-        "ssh"
+        "ssh",
+        "tidb-filesystem"
       ],
       "command": "printf 'a\\n' | rg $'\\xff'",
       "expect": {
@@ -411,7 +424,8 @@
         "s3-prefix",
         "sharepoint",
         "sharepoint-prefix",
-        "ssh"
+        "ssh",
+        "tidb-filesystem"
       ],
       "command": "printf 'x\\na\\na\\n' | rg -n -C1 a",
       "expect": {
@@ -441,7 +455,8 @@
         "s3-prefix",
         "sharepoint",
         "sharepoint-prefix",
-        "ssh"
+        "ssh",
+        "tidb-filesystem"
       ],
       "command": "printf 'x\\na\\nb\\na\\nb\\n' | rg -U -n -C1 'a\\nb'",
       "expect": {
@@ -471,7 +486,8 @@
         "s3-prefix",
         "sharepoint",
         "sharepoint-prefix",
-        "ssh"
+        "ssh",
+        "tidb-filesystem"
       ],
       "command": "printf 'a\\nb\\nx\\ny\\n' | rg -U -n -m1 -A1 'a\\nb'",
       "expect": {
@@ -501,7 +517,8 @@
         "s3-prefix",
         "sharepoint",
         "sharepoint-prefix",
-        "ssh"
+        "ssh",
+        "tidb-filesystem"
       ],
       "command": "printf 'x\\na\\nb\\ny\\nz\\n' | rg -U -n -v -m1 --passthru 'a\\nb'",
       "expect": {
@@ -531,7 +548,8 @@
         "s3-prefix",
         "sharepoint",
         "sharepoint-prefix",
-        "ssh"
+        "ssh",
+        "tidb-filesystem"
       ],
       "command": "printf 'x\\na\\nb\\ny\\n' | rg -U -v -C1 -n -o 'a\\nb'",
       "expect": {
@@ -561,7 +579,8 @@
         "s3-prefix",
         "sharepoint",
         "sharepoint-prefix",
-        "ssh"
+        "ssh",
+        "tidb-filesystem"
       ],
       "command": "printf 'a\\r' | rg --crlf -o -b '$' | od -An -tx1 | tr -d ' \\n'; echo",
       "expect": {
@@ -591,7 +610,8 @@
         "s3-prefix",
         "sharepoint",
         "sharepoint-prefix",
-        "ssh"
+        "ssh",
+        "tidb-filesystem"
       ],
       "command": "printf 'ab\\ncd\\n' | rg -U -n -o 'a\\nb|$'",
       "expect": {
@@ -621,7 +641,8 @@
         "s3-prefix",
         "sharepoint",
         "sharepoint-prefix",
-        "ssh"
+        "ssh",
+        "tidb-filesystem"
       ],
       "command": "printf 'foo\\n' | rg --regex-size-limit 1 -c foo",
       "expect": {
@@ -651,7 +672,8 @@
         "s3-prefix",
         "sharepoint",
         "sharepoint-prefix",
-        "ssh"
+        "ssh",
+        "tidb-filesystem"
       ],
       "command": "printf 'é👩‍💻x\\n' | rg -M2 --max-columns-preview .",
       "expect": {
@@ -681,7 +703,8 @@
         "s3-prefix",
         "sharepoint",
         "sharepoint-prefix",
-        "ssh"
+        "ssh",
+        "tidb-filesystem"
       ],
       "command": "mkdir -p /data/rg-shared; printf 'αβγ\\nabc\\n' > /data/rg-shared/unicode; rg -n '\\p{Script_Extensions=Greek}+' /data/rg-shared",
       "expect": {
@@ -711,7 +734,8 @@
         "s3-prefix",
         "sharepoint",
         "sharepoint-prefix",
-        "ssh"
+        "ssh",
+        "tidb-filesystem"
       ],
       "command": "printf 'abc\\r' | rg --crlf -M3 a | od -An -tx1 | tr -d ' \\n'; echo",
       "expect": {
@@ -741,7 +765,8 @@
         "s3-prefix",
         "sharepoint",
         "sharepoint-prefix",
-        "ssh"
+        "ssh",
+        "tidb-filesystem"
       ],
       "command": "printf 'abc\\r' | rg --crlf -M3 --max-columns-preview a | od -An -tx1 | tr -d ' \\n'; echo",
       "expect": {
@@ -771,7 +796,8 @@
         "s3-prefix",
         "sharepoint",
         "sharepoint-prefix",
-        "ssh"
+        "ssh",
+        "tidb-filesystem"
       ],
       "command": "printf 'a\\0' | rg -a -U --null-data 'a$'",
       "expect": {
@@ -801,7 +827,8 @@
         "s3-prefix",
         "sharepoint",
         "sharepoint-prefix",
-        "ssh"
+        "ssh",
+        "tidb-filesystem"
       ],
       "command": "printf '\\0a\\0' | rg -a -U --null-data '^a'",
       "expect": {
@@ -831,7 +858,8 @@
         "s3-prefix",
         "sharepoint",
         "sharepoint-prefix",
-        "ssh"
+        "ssh",
+        "tidb-filesystem"
       ],
       "command": "printf 'a a\\0' | rg -a -U --null-data -c a | od -An -tx1 | tr -d ' \\n'; echo",
       "expect": {
@@ -861,7 +889,8 @@
         "s3-prefix",
         "sharepoint",
         "sharepoint-prefix",
-        "ssh"
+        "ssh",
+        "tidb-filesystem"
       ],
       "command": "printf 'a a\\0' | rg -a -U --null-data --count-matches a | od -An -tx1 | tr -d ' \\n'; echo",
       "expect": {
@@ -891,7 +920,8 @@
         "s3-prefix",
         "sharepoint",
         "sharepoint-prefix",
-        "ssh"
+        "ssh",
+        "tidb-filesystem"
       ],
       "command": "printf 'a\\na\\0' | rg -a -U --null-data -c '^a' | od -An -tx1 | tr -d ' \\n'; echo",
       "expect": {
@@ -921,7 +951,8 @@
         "s3-prefix",
         "sharepoint",
         "sharepoint-prefix",
-        "ssh"
+        "ssh",
+        "tidb-filesystem"
       ],
       "command": "printf 'a\\na\\0' | rg -a -U --null-data --count-matches '^a' | od -An -tx1 | tr -d ' \\n'; echo",
       "expect": {
@@ -951,7 +982,8 @@
         "s3-prefix",
         "sharepoint",
         "sharepoint-prefix",
-        "ssh"
+        "ssh",
+        "tidb-filesystem"
       ],
       "command": "printf 'b\\0x\\0' | rg -a -U --null-data -v -c 'a$' | od -An -tx1 | tr -d ' \\n'; echo",
       "expect": {
@@ -981,7 +1013,8 @@
         "s3-prefix",
         "sharepoint",
         "sharepoint-prefix",
-        "ssh"
+        "ssh",
+        "tidb-filesystem"
       ],
       "command": "printf 'a\\n\\0' | rg -a -U --null-data -n -b --column -o '^|$' | od -An -tx1 | tr -d ' \\n'; echo",
       "expect": {
@@ -1011,7 +1044,8 @@
         "s3-prefix",
         "sharepoint",
         "sharepoint-prefix",
-        "ssh"
+        "ssh",
+        "tidb-filesystem"
       ],
       "command": "printf 'a\\n' | rg -a -U --null-data --vimgrep -I '^|$' | od -An -tx1 | tr -d ' \\n'; echo",
       "expect": {
@@ -1041,7 +1075,8 @@
         "s3-prefix",
         "sharepoint",
         "sharepoint-prefix",
-        "ssh"
+        "ssh",
+        "tidb-filesystem"
       ],
       "command": "printf a | rg -a -U --null-data -c '$' | od -An -tx1 | tr -d ' \\n'; echo",
       "expect": {
@@ -1071,7 +1106,8 @@
         "s3-prefix",
         "sharepoint",
         "sharepoint-prefix",
-        "ssh"
+        "ssh",
+        "tidb-filesystem"
       ],
       "command": "printf 'a\\r\\n' | rg --crlf -M1 -r X a",
       "expect": {
@@ -1101,7 +1137,8 @@
         "s3-prefix",
         "sharepoint",
         "sharepoint-prefix",
-        "ssh"
+        "ssh",
+        "tidb-filesystem"
       ],
       "command": "printf 'a\\r\\n' | rg --crlf -M1 --max-columns-preview -r X a",
       "expect": {
@@ -1131,7 +1168,8 @@
         "s3-prefix",
         "sharepoint",
         "sharepoint-prefix",
-        "ssh"
+        "ssh",
+        "tidb-filesystem"
       ],
       "command": "printf 'a\\r' | rg --crlf -M2 -r X a",
       "expect": {
@@ -1161,7 +1199,8 @@
         "s3-prefix",
         "sharepoint",
         "sharepoint-prefix",
-        "ssh"
+        "ssh",
+        "tidb-filesystem"
       ],
       "command": "printf 'a\\r\\nb\\r\\n' | rg --crlf -U -r X 'a\\r?\\nb' | od -An -tx1 | tr -d ' \\n'; echo; printf 'a\\r\\nb\\r' | rg --crlf -U -r X 'a\\r?\\nb' | od -An -tx1 | tr -d ' \\n'; echo",
       "expect": {
@@ -1191,7 +1230,8 @@
         "s3-prefix",
         "sharepoint",
         "sharepoint-prefix",
-        "ssh"
+        "ssh",
+        "tidb-filesystem"
       ],
       "command": "printf 'a\\r\\nb\\r\\n' | rg --crlf -U -o -r '$0' 'a\\r?\\nb' | od -An -tx1 | tr -d ' \\n'; echo; printf 'a\\nb\\r' | rg --crlf -U --vimgrep --no-filename -r X 'a\\r?\\nb' | od -An -tx1 | tr -d ' \\n'; echo; printf 'a\\nb\\n' | rg --crlf -U -M2 -r X 'a\\r?\\nb' | od -An -tx1 | tr -d ' \\n'; echo",
       "expect": {
@@ -1221,7 +1261,8 @@
         "s3-prefix",
         "sharepoint",
         "sharepoint-prefix",
-        "ssh"
+        "ssh",
+        "tidb-filesystem"
       ],
       "command": "printf 'a\\r\\nb\\r\\0' | rg --crlf --null-data -U -r X 'a\\r?\\nb' | od -An -tx1 | tr -d ' \\n'; echo; printf 'a\\r\\nb\\r\\0' | rg --crlf --null-data -r X b | od -An -tx1 | tr -d ' \\n'; echo; printf 'a\\r\\nb\\r\\0' | rg --crlf --null-data -U 'a\\r?\\nb' | od -An -tx1 | tr -d ' \\n'; echo",
       "expect": {

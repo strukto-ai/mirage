@@ -21,6 +21,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "rg --passthrough -n world /data/a.txt; rg --passthru zzz /data/b.txt; echo rc=$?",
@@ -56,6 +57,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "rg -A2 -B1 -C4 -n bar /data/a.txt; rg -C2 -A0 -n world /data/a.txt; rg -C1 --passthru -n world /data/a.txt; rg --passthru -C1 -n bar /data/a.txt; rg -A1 --passthru -B1 -n bar /data/a.txt",

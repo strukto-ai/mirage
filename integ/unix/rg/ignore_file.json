@@ -21,6 +21,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "mkdir -p /data/rgfl/sub; printf 'alpha\\nfoo\\nbar\\nbaz\\nfoo\\nqux\\n' > /data/rgfl/a.txt; printf 'nothing\\n' > /data/rgfl/b.txt; printf 'x1\\nx2\\nx3\\nx4\\nx5\\nx6\\nx7\\nx8\\n' > /data/rgfl/c.txt; mkdir -p /data/rgfl/i/sub /data/rgfl/i/keep; printf 'foo a\\n' > /data/rgfl/i/a.txt; printf 'foo b\\n' > /data/rgfl/i/b.log; printf 'foo c\\n' > /data/rgfl/i/sub/c.txt; printf 'foo k\\n' > /data/rgfl/i/keep/k.log; printf 'foo h\\n' > /data/rgfl/i/.hidden.log; printf '*.log\\n!keep/*.log\\n' > /data/rgfl/rules; printf '/i/sub\\n' > /data/rgfl/anchored; printf 'sub/\\n' > /data/rgfl/dirs; printf '# comment\\n\\n*.txt\\n' > /data/rgfl/comments; printf '*.log\\n!.hidden.log\\n' > /data/rgfl/hid; (cd /data/rgfl && rg --ignore-file rules foo i | sort; rg --ignore-file rules foo i/b.log; rg --ignore-file anchored foo i | sort; rg --ignore-file dirs foo i | sort; rg --ignore-file comments foo i | sort; rg --ignore-file rules -g '*.log' foo i | sort; rg --ignore-file hid foo i | sort; rg --ignore-file rules --files i | sort); rm -rf /data/rgfl",
@@ -56,6 +57,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "mkdir -p /data/rgfl/sub; printf 'alpha\\nfoo\\nbar\\nbaz\\nfoo\\nqux\\n' > /data/rgfl/a.txt; printf 'nothing\\n' > /data/rgfl/b.txt; printf 'x1\\nx2\\nx3\\nx4\\nx5\\nx6\\nx7\\nx8\\n' > /data/rgfl/c.txt; mkdir -p /data/rgfl/i/sub /data/rgfl/i/keep; printf 'foo a\\n' > /data/rgfl/i/a.txt; printf 'foo b\\n' > /data/rgfl/i/b.log; printf 'foo c\\n' > /data/rgfl/i/sub/c.txt; printf 'foo k\\n' > /data/rgfl/i/keep/k.log; printf 'foo h\\n' > /data/rgfl/i/.hidden.log; printf '*.log\\n!keep/*.log\\n' > /data/rgfl/rules; printf '/i/sub\\n' > /data/rgfl/anchored; printf 'sub/\\n' > /data/rgfl/dirs; printf '# comment\\n\\n*.txt\\n' > /data/rgfl/comments; printf '*.log\\n!.hidden.log\\n' > /data/rgfl/hid; (cd /data/rgfl && rg --no-ignore-files --ignore-file rules foo i | sort; rg --ignore-file rules --no-ignore-files foo i | sort; rg --ignore-file rules --no-ignore foo i | sort; rg --ignore-file rules --ignore-file comments foo i | sort; rg --ignore-file missing foo i | sort; cd i && rg --ignore-file ../rules foo | sort); rm -rf /data/rgfl",
@@ -91,6 +93,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "mkdir -p /data/rgfl/sub; printf 'alpha\\nfoo\\nbar\\nbaz\\nfoo\\nqux\\n' > /data/rgfl/a.txt; printf 'nothing\\n' > /data/rgfl/b.txt; printf 'x1\\nx2\\nx3\\nx4\\nx5\\nx6\\nx7\\nx8\\n' > /data/rgfl/c.txt; rg --ignore-file /data/rgfl/missing foo /data/rgfl/a.txt; echo rc=$?; rm -rf /data/rgfl",
@@ -124,6 +127,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "mkdir -p /data/rgfl/sub; printf 'alpha\\nfoo\\nbar\\nbaz\\nfoo\\nqux\\n' > /data/rgfl/a.txt; printf 'nothing\\n' > /data/rgfl/b.txt; printf 'x1\\nx2\\nx3\\nx4\\nx5\\nx6\\nx7\\nx8\\n' > /data/rgfl/c.txt; mkdir -p /data/rgfl/w && printf 'foo w\\n' > /data/rgfl/w/x.txt && printf '*.TXT\\n' > /data/rgfl/rules && (cd /data/rgfl && rg --ignore-file rules --ignore-file-case-insensitive 'foo w' w; rg --ignore-file rules 'foo w' w); rm -rf /data/rgfl",

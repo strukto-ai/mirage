@@ -21,6 +21,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "zgrep -i ALPHA /data/z4/notes.txt.gz",
@@ -54,6 +55,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "printf '\\342\\204\\252\\n' | gzip > /data/zgi1.gz; zgrep -i k /data/zgi1.gz",
@@ -87,6 +89,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "printf '\\305\\277\\n' | gzip > /data/zgi2.gz; zgrep -i s /data/zgi2.gz",
@@ -120,6 +123,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "printf '\\342\\204\\252\\n\\305\\277\\nk\\n' | gzip > /data/zgi3.gz; zgrep -ci k /data/zgi3.gz",
@@ -154,6 +158,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "printf '\\342\\204\\252\\n\\305\\277\\nk\\n' | gzip > /data/zgi4.gz; zgrep -io k /data/zgi4.gz",
@@ -188,6 +193,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "printf '\\342\\204\\252\\n\\305\\277\\nk\\n' | gzip > /data/zgi5.gz; zgrep -il s /data/zgi5.gz",
@@ -222,6 +228,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "printf 'ÉLAN\\nélan\\n' | gzip > /data/casefold.gz; zgrep -i é /data/casefold.gz",
@@ -252,6 +259,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "printf 'ÉAb éAB\\n' | gzip > /data/casefold.gz; zgrep -oib 'éab' /data/casefold.gz",

@@ -18,6 +18,7 @@
         "sharepoint",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder",
         "box",
@@ -53,6 +54,7 @@
         "sharepoint",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder",
         "box",
@@ -90,7 +92,8 @@
         "databricks",
         "databricks-prefix",
         "sharepoint-prefix",
-        "ssh"
+        "ssh",
+        "tidb-filesystem"
       ],
       "command": "mkdir -p /data/fcF_n1/x /data/fcF_n1/y /data/fcF_n1/d && echo 1 > /data/fcF_n1/x/a && echo 2 > /data/fcF_n1/y/a && cp -n /data/fcF_n1/x/a /data/fcF_n1/y/a /data/fcF_n1/d; echo rc=$?; cat /data/fcF_n1/d/a; rm -r /data/fcF_n1",
       "expect": {
@@ -123,6 +126,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder",
         "box"

@@ -1,0 +1,160 @@
+---
+title: TiDB Cloud Filesystem
+icon: database
+description: Mount a TiDB Cloud Filesystem, or a self-hosted drive9 server, as a filesystem.
+---
+
+`TiDBFilesystemVFS` mounts a [TiDB Cloud Filesystem](https://www.pingcap.com/tidb/tidb-cloud-filesystem/)
+through its REST API. Agents list, read, write, move and remove files under
+the mount with ordinary shell commands, and no FUSE mount is needed.
+
+For tokens and regions, see [TiDB Cloud Filesystem Setup](/home/setup/tidb).
+
+## Config
+
+```python
+import os
+
+from mirage import MountMode, Workspace
+from mirage.vfs.tidb_filesystem import (
+	TiDBFilesystemConfig,
+	TiDBFilesystemVFS,
+)
+
+vfs = TiDBFilesystemVFS(TiDBFilesystemConfig(
+	host=os.environ["TIDB_FILESYSTEM_HOST"],
+	token=os.environ["TIDB_FILESYSTEM_TOKEN"],
+	root_path="/workspace",
+))
+ws = Workspace({"/fs": vfs}, mode=MountMode.WRITE)
+```
+
+{/* generated: config-table tidb_filesystem start */}
+| Field | Description |
+| --- | --- |
+| <code style={{ whiteSpace: 'nowrap' }}>host</code><br />required | The file system's endpoint, such as `https://aws-us-east-1.drive9.ai` for its region, or the origin of a self-hosted drive9 server. |
+| <code style={{ whiteSpace: 'nowrap' }}>token</code><br />required, secret | The file system token, sent as a bearer token. |
+| <code style={{ whiteSpace: 'nowrap' }}>root_path</code><br />default `'/'` | Directory inside the file system that becomes the mount root, such as `/projects/a` for a token scoped to it; `..` segments are refused. |
+| <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `30` | Seconds one request may take before it fails. |
+| <code style={{ whiteSpace: 'nowrap' }}>walk_limit</code><br />default `1000` | Most files one command walks under a folder: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit. |
+
+Fields marked secret are redacted in snapshots.
+{/* generated: config-table tidb_filesystem end */}
+
+## Mount mode
+
+`read` or `write`.
+
+## VFS.md
+
+The [VFS.md](/home/setup/vfs-md) an agent reads with TiDB Cloud Filesystem mounted at `/<path>`.
+
+{/* generated: vfs-md tidb_filesystem start */}
+<Tabs>
+  <Tab title="Rendered">
+    ### Virtual Filesystem
+
+    | Path | Description |
+    | --- | --- |
+    | `/<path>` | `tidb_filesystem`, write |
+
+    #### Supported Unix Commands for VFS
+
+    Unix commands work on each path as on a local filesystem, as far as the path supports them:
+
+    | Path | Supported |
+    | --- | --- |
+    | `/<path>` | Almost all Unix commands. |
+
+    #### Limitations of Unix Commands for VFS
+
+    Where a path differs from a local filesystem:
+
+    | Path | Limitations |
+    | --- | --- |
+    | `/<path>` | `grep -r`, `find` and `du` stop after 1000 files; a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. |
+
+    Run `man` to list every command, and `man <cmd>` or `<cmd> --help` for one command's usage.
+  </Tab>
+  <Tab title="Raw">
+    ```markdown
+    ---
+    name: workspace-filesystem
+    description: The virtual filesystem layout of this workspace.
+    ---
+
+    # Virtual Filesystem
+
+    | Path | Description |
+    | --- | --- |
+    | `/<path>` | `tidb_filesystem`, write |
+
+    ## Supported Unix Commands for VFS
+
+    Unix commands work on each path as on a local filesystem, as far as the path supports them:
+
+    | Path | Supported |
+    | --- | --- |
+    | `/<path>` | Almost all Unix commands. |
+
+    ## Limitations of Unix Commands for VFS
+
+    Where a path differs from a local filesystem:
+
+    | Path | Limitations |
+    | --- | --- |
+    | `/<path>` | `grep -r`, `find` and `du` stop after 1000 files; a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. |
+
+    Run `man` to list every command, and `man <cmd>` or `<cmd> --help` for one command's usage.
+    ```
+  </Tab>
+</Tabs>
+{/* generated: vfs-md tidb_filesystem end */}
+
+## Behavior
+
+- A file under 50,000 bytes is written with one request; a larger one goes up
+  in parts, a few at a time, and reads of it stream from object storage,
+  ranged when a command reads only part of it.
+- `>>` onto a file of 50,000 bytes or more sends only the new bytes and the
+  file's last part; a smaller file is read and written back.
+- `mv` is one server-side rename, for a file or a whole directory. `rm -r`
+  is one recursive delete.
+- `cp` reads the file and writes the copy, so the two never share content.
+- Before a write, `mkdir` or `mv`, Mirage asks the file system what the
+  destination and its parents are, so a missing parent, a file in the way or a
+  directory target fails as it does on a local disk.
+- A file in the extent layout, which only the file system's FUSE client
+  writes and reads, reads as `Operation not supported`.
+
+## Example
+
+```python
+import asyncio
+import os
+
+from mirage import MountMode, Workspace
+from mirage.vfs.tidb_filesystem import (
+	TiDBFilesystemConfig,
+	TiDBFilesystemVFS,
+)
+
+vfs = TiDBFilesystemVFS(TiDBFilesystemConfig(
+	host=os.environ["TIDB_FILESYSTEM_HOST"],
+	token=os.environ["TIDB_FILESYSTEM_TOKEN"],
+))
+
+
+async def main() -> None:
+	ws = Workspace({"/fs": vfs}, mode=MountMode.WRITE)
+	await ws.shell("mkdir -p /fs/notes && echo hello > /fs/notes/a.txt")
+	r = await ws.shell("ls -l /fs/notes && cat /fs/notes/a.txt")
+	print(await r.stdout_str())
+	await ws.close()
+
+
+if __name__ == "__main__":
+	asyncio.run(main())
+```
+
+See `examples/python/vfs/tidb_filesystem/tidb_filesystem.py`.

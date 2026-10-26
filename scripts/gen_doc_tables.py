@@ -87,6 +87,10 @@ SAMPLES: dict[str, dict[str, JsonValue]] = {
         "region": "us-east-1",
         "project_ref": "ref",
     },
+    "tidb_filesystem": {
+        "host": "https://aws-us-east-1.drive9.ai",
+        "token": "token",
+    },
 }
 
 

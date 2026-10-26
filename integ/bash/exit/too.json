@@ -21,6 +21,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "( exit -- 4 ); echo \"s=$?\"; ( exit 1 2; echo in ); echo \"t=$?\"; exit 1 2; echo after code=$?",

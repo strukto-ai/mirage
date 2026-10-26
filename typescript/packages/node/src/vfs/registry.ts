@@ -119,6 +119,12 @@ const REGISTRY: Record<string, VFSFactory> = {
       await import('@struktoai/mirage-core/vfs/databricks_volume/config')
     return DatabricksVolumeVFS.create(normalizeDatabricksVolumeConfig(config))
   },
+  tidb_filesystem: async (config) => {
+    const { TiDBFilesystemVFS } = await import('./tidb_filesystem/tidb_filesystem.ts')
+    const { normalizeTiDBFilesystemConfig } =
+      await import('@struktoai/mirage-core/vfs/tidb_filesystem/config')
+    return TiDBFilesystemVFS.create(normalizeTiDBFilesystemConfig(config))
+  },
   minio: async (config) => {
     const { MinIOVFS } = await import('./minio/minio.ts')
     const { normalizeMinIOConfig } = await import('./minio/config.ts')

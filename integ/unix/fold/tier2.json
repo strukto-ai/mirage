@@ -3,7 +3,7 @@
     {
       "id": "fold_tier2_bytes",
       "seq": 910011,
-      "targets": ["ram", "opfs", "disk", "redis", "s3", "databricks", "gridfs", "s3-prefix", "databricks-prefix", "gridfs-prefix", "hf", "hf-prefix", "dropbox", "dropbox-root", "onedrive", "sharepoint", "sharepoint-prefix", "ssh", "nextcloud", "gdrive", "gdrive-folder", "box"],
+      "targets": ["ram", "opfs", "disk", "redis", "s3", "databricks", "gridfs", "s3-prefix", "databricks-prefix", "gridfs-prefix", "hf", "hf-prefix", "dropbox", "dropbox-root", "onedrive", "sharepoint", "sharepoint-prefix", "ssh", "nextcloud", "tidb-filesystem", "gdrive", "gdrive-folder", "box"],
       "command": "printf 'abcdef' | fold --bytes --width 3",
       "expect": { "exit": 0, "stdout": "abc\ndef", "stderr": "" },
       "flags": ["bytes", "width"]
@@ -11,7 +11,7 @@
     {
       "id": "fold_tier2_characters_spaces",
       "seq": 910012,
-      "targets": ["ram", "opfs", "disk", "redis", "s3", "databricks", "gridfs", "s3-prefix", "databricks-prefix", "gridfs-prefix", "hf", "hf-prefix", "dropbox", "dropbox-root", "onedrive", "sharepoint", "sharepoint-prefix", "ssh", "nextcloud", "gdrive", "gdrive-folder", "box"],
+      "targets": ["ram", "opfs", "disk", "redis", "s3", "databricks", "gridfs", "s3-prefix", "databricks-prefix", "gridfs-prefix", "hf", "hf-prefix", "dropbox", "dropbox-root", "onedrive", "sharepoint", "sharepoint-prefix", "ssh", "nextcloud", "tidb-filesystem", "gdrive", "gdrive-folder", "box"],
       "command": "printf 'one two three\n' | fold --characters --spaces --width 7",
       "expect": { "exit": 0, "stdout": "one \ntwo \nthree\n", "stderr": "" },
       "flags": ["characters", "spaces", "width"]

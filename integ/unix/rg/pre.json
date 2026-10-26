@@ -21,6 +21,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "mkdir -p /data/rgfl/sub; printf 'alpha\\nfoo\\nbar\\nbaz\\nfoo\\nqux\\n' > /data/rgfl/a.txt; printf 'nothing\\n' > /data/rgfl/b.txt; printf 'x1\\nx2\\nx3\\nx4\\nx5\\nx6\\nx7\\nx8\\n' > /data/rgfl/c.txt; printf 'alpha\\nfoo here\\n' > /data/rgfl/p.txt; printf 'foo log\\n' > /data/rgfl/sub/p.log; rg --pre rev oof /data/rgfl/p.txt; rg -j1 --pre rev -n 'ereh oof' /data/rgfl/p.txt /data/rgfl/sub/p.log; rg -j1 --pre rev --pre-glob '*.log' 'oof|foo' /data/rgfl/p.txt /data/rgfl/sub/p.log; rg -j1 --pre rev --pre-glob '!*.log' 'oof|foo' /data/rgfl/p.txt /data/rgfl/sub/p.log; rg --pre cat foo /data/rgfl/p.txt; rg --pre '' foo /data/rgfl/p.txt; rg --pre rev --no-pre foo /data/rgfl/p.txt; printf 'foo\\n' | rg --pre rev oof; echo rc=$?; rm -rf /data/rgfl",
@@ -58,6 +59,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "mkdir -p /data/rgfl/sub; printf 'alpha\\nfoo\\nbar\\nbaz\\nfoo\\nqux\\n' > /data/rgfl/a.txt; printf 'nothing\\n' > /data/rgfl/b.txt; printf 'x1\\nx2\\nx3\\nx4\\nx5\\nx6\\nx7\\nx8\\n' > /data/rgfl/c.txt; rg --pre false foo /data/rgfl/a.txt; echo rc=$?; rg --pre nope foo /data/rgfl/a.txt; echo rc=$?; rm -rf /data/rgfl",
@@ -91,6 +93,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "mkdir -p /data/rgfl/sub; printf 'alpha\\nfoo\\nbar\\nbaz\\nfoo\\nqux\\n' > /data/rgfl/a.txt; printf 'nothing\\n' > /data/rgfl/b.txt; printf 'x1\\nx2\\nx3\\nx4\\nx5\\nx6\\nx7\\nx8\\n' > /data/rgfl/c.txt; printf 'alpha\\nfoo here\\n' > /data/rgfl/sub/q.txt; (cd /data/rgfl && rg --pre rev --pre-glob 'sub/*.txt' oof /data/rgfl/sub/q.txt; rg --pre rev --pre-glob 'sub/*.txt' oof sub/q.txt; rg --pre rev --pre-glob 'q.txt' oof /data/rgfl/sub/q.txt; rg --pre rev --pre-glob '/data/rgfl/sub/*.txt' oof sub/q.txt; echo rc=$?); rm -rf /data/rgfl",
