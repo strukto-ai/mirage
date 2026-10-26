@@ -2655,7 +2655,7 @@ async def build_databricks_volume(
 
 def build_tidb_filesystem(
     mount: dict, run_id: str, service: Service | None
-) -> tuple[object, Callable[[], Awaitable[None]]]:
+) -> tuple[TiDBFilesystemVFS, Callable[[], Awaitable[None]]]:
     assert isinstance(service, TiDBFilesystemService)
     return service.vfs(mount), _noop
 
