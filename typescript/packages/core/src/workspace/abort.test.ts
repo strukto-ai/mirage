@@ -12,15 +12,19 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { IOResult } from '../io/types.ts'
-import { YIELD_CALLS } from '../io/yield_budget.ts'
+import { YIELD_CALLS, YIELD_INTERVAL } from '../io/yield_budget.ts'
 import type { DispatchFn } from '../runtime/types.ts'
 import { PathSpec } from '../types.ts'
 import { guardDispatch } from './abort.ts'
 
 describe('guardDispatch', () => {
   const path = PathSpec.fromStrPath('/x')
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
 
   function recording(seen: string[]): DispatchFn {
     return (op) => {
@@ -46,6 +50,27 @@ describe('guardDispatch', () => {
       cause: { message: 'released' },
     })
     expect(seen).toEqual([])
+  })
+
+  it.each([
+    ['comes due between them', 1],
+    ['was due before them', YIELD_INTERVAL + 1],
+  ])('runs the ops issued at once in one turn when a yield %s', async (_, ahead) => {
+    let now = 0
+    vi.spyOn(performance, 'now').mockImplementation(() => now)
+    const seen: string[] = []
+    const guarded = guardDispatch((op) => {
+      seen.push(op)
+      now += YIELD_INTERVAL
+      return Promise.resolve([null, new IOResult()])
+    }, undefined)
+    await guarded('stat', path)
+    now -= YIELD_INTERVAL - ahead
+    const first = guarded('readdir', path)
+    const second = guarded('files_containing', path)
+    await first
+    expect(seen).toEqual(['stat', 'readdir', 'files_containing'])
+    await second
   })
 
   it.each([false, true])(

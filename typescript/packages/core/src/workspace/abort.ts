@@ -97,15 +97,27 @@ export function abortedLine(session: SessionState): AbortSignal | undefined {
  * so the budget hands the loop a task-queue turn every few milliseconds and
  * the abort or timeout that fired there refuses the next op. Python's
  * dispatcher spends the running task's budget, `task_turn`, the same way.
+ * The ops a command issues at once (the patterns of one grep) take the first
+ * one's answer, a turn or none, and go on together, as the tasks Python
+ * gathers start on budgets of their own: a turn each would let one op finish
+ * all it resolves without I/O before the next starts, and share nothing in
+ * flight with it.
  */
 export function guardDispatch(
   dispatch: CallerDispatchFn,
   signal: AbortSignal | undefined,
 ): CallerDispatchFn {
   const budget = new YieldBudget()
+  let together: Promise<void> | undefined | null = null
   return (op, path, args, kwargs, report, caller) => {
     if (signal?.aborted === true) return Promise.reject(makeAbortError(signal))
-    const pending = budget.run()
+    if (together === null) {
+      together = budget.run()
+      queueMicrotask(() => {
+        together = null
+      })
+    }
+    const pending = together
     if (pending === undefined) return dispatch(op, path, args, kwargs, report, caller)
     return pending.then(() => {
       if (signal?.aborted === true) throw makeAbortError(signal)
