@@ -20,6 +20,7 @@ from mirage._rs import ShellHeredoc
 from mirage.shell.bytes import decode_text
 from mirage.shell.escapes import decode_ansi_c
 from mirage.shell.helpers import (
+    ALIAS_WORD_TYPES,
     REDIRECT_NODE_TYPES,
     alias_rewrite,
     get_case_items,
@@ -316,7 +317,7 @@ class _Printer:
             return None
         name = node.child_by_field_name("name")
         head = name.named_children[0] if name is not None else None
-        if head is None or head.type != NT.WORD:
+        if head is None or head.type not in ALIAS_WORD_TYPES:
             return None
         values = self.aliases.values
         guards = (

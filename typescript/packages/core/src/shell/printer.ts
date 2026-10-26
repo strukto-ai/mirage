@@ -14,6 +14,7 @@
 
 import { decodeAnsiC } from './escapes.ts'
 import {
+  ALIAS_WORD_TYPES,
   REDIRECT_NODE_TYPES,
   aliasRewrite,
   getCaseItems,
@@ -124,7 +125,7 @@ class Printer {
   private expanded(node: TSNodeLike, indent: string): string | null {
     if (this.aliases === null) return null
     const head = node.childForFieldName?.('name')?.namedChildren[0]
-    if (head?.type !== NT.WORD) return null
+    if (head === undefined || !ALIAS_WORD_TYPES.has(head.type)) return null
     const { values, parse } = this.aliases
     const start = node.startIndex ?? 0
     const guards =

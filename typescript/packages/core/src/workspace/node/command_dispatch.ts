@@ -37,7 +37,14 @@ import { commandRecords } from '../../observe/context.ts'
 import type { OpRecord } from '../../observe/record.ts'
 import { decodeText, encodeText } from '../../shell/bytes.ts'
 import { CallStack } from '../../shell/call_stack.ts'
-import { getCommandName, getParts, getText, readRow, splitEnvPrefix } from '../../shell/helpers.ts'
+import {
+  ALIAS_WORD_TYPES,
+  getCommandName,
+  getParts,
+  getText,
+  readRow,
+  splitEnvPrefix,
+} from '../../shell/helpers.ts'
 import type { JobTable } from '../../shell/job_table/index.ts'
 import { ArithError, DiscardSignal, ExitSignal, TooManyMatches } from '../../shell/errors.ts'
 import { NodeType as NT } from '../../shell/types.ts'
@@ -196,7 +203,7 @@ export async function executeCommand(
     (Object.keys(session.aliasView ?? session.aliases).length > 0 || session.aliasMarks.size > 0) &&
     !isProgramInvocation(session) &&
     headNode?.type === NT.COMMAND_NAME &&
-    headNode.namedChildren[0]?.type === NT.WORD
+    ALIAS_WORD_TYPES.has(headNode.namedChildren[0]?.type ?? '')
   ) {
     const head = getText(headNode)
     const rewrite = aliasCommandText(session, node, headNode, aliasMark(session, readRow(node)))

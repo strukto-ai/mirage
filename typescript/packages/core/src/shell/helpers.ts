@@ -955,6 +955,12 @@ export function getFunctionBody(node: TSNodeLike): TSNodeLike[] | null {
 }
 
 /**
+ * What an unquoted plain word parses as: the only words bash checks for an
+ * alias, a name of digits included. Mirrors Python's ALIAS_WORD_TYPES.
+ */
+export const ALIAS_WORD_TYPES: ReadonlySet<string> = new Set([NT.WORD, NT.NUMBER])
+
+/**
  * A command with its alias words replaced as bash reads it, and the aliases
  * being expanded at each unit of the result. An insertion carries the
  * replaced word's guards and its own name, so no alias expands inside its own
@@ -984,19 +990,19 @@ export function aliasRewrite(
     if (text === null) break
     seen.add(name)
     parts.push(source.slice(cursor, at), text)
-    owners.push(...guards.slice(cursor, at))
+    for (let i = cursor; i < at; i++) owners.push(guards[i] ?? new Set())
     const guard = new Set([...blocked, name])
-    owners.push(...Array<ReadonlySet<string>>(text.length).fill(guard))
+    for (let units = text.length; units > 0; units--) owners.push(guard)
     cursor = end
     if (!text.endsWith(' ') && !text.endsWith('\t')) break
     const word = node.children.find((c) => (c.startIndex ?? 0) - base >= cursor)
-    if (word?.type !== NT.WORD) break
+    if (word === undefined || !ALIAS_WORD_TYPES.has(word.type)) break
     name = getText(word)
     at = (word.startIndex ?? 0) - base
     end = (word.endIndex ?? 0) - base
   }
   if (seen.size === 0) return null
   parts.push(source.slice(cursor))
-  owners.push(...guards.slice(cursor))
+  for (let i = cursor; i < guards.length; i++) owners.push(guards[i] ?? new Set())
   return [parts.join(''), owners]
 }
