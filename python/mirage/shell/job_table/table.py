@@ -14,6 +14,7 @@
 
 import asyncio
 import logging
+import secrets
 import uuid
 
 from mirage.process.handle import ProcessHandle
@@ -22,12 +23,12 @@ from mirage.shell.bytes import encode_text
 from mirage.shell.console import (
     KILLED_OUTCOME,
     Channel,
-    ConsoleStore,
     JobConsole,
     exit_outcome,
     killed_outcome,
 )
 from mirage.shell.job_table.constants import (
+    GENERATION_BITS,
     HANGUP_EXIT_CODE,
     KILLED_EXIT_CODE,
     LIST_CHECK_SECONDS,
@@ -228,71 +229,37 @@ async def _adopt_ending(job: Job) -> None:
     cancel_job(job, job.exit_code - 128 if job.exit_code > 128 else 9)
 
 
-async def _ended_within(console: ConsoleStore, seconds: float) -> bool:
-    """Whether a console ends, or closes, within ``seconds``.
+async def _watch(job: Job) -> None:
+    """Stop a job this table runs once another workspace ends it.
 
-    Args:
-        console (ConsoleStore): the console to wait on.
-        seconds (float): how long to wait.
-    """
-    try:
-        async with asyncio.timeout(seconds):
-            await console.wait_ended()
-    except TimeoutError:
-        return False
-    return True
-
-
-async def _held(jobs: JobStore, job: Job) -> bool:
-    """Whether a job's session list still holds it, listed or disowned.
-
-    Args:
-        jobs (JobStore): the job plane the list lives in.
-        job (Job): a job this table runs.
-    """
-    fields = await jobs.load(job.session_id)
-    if fields is None:
-        return False
-    listed = {entry["console"] for entry in fields.get("jobs", {}).values()}
-    held = fields.get("disowned", {})
-    return job.console_name in listed or job.console_name in held
-
-
-async def _watch(job: Job, jobs: JobStore) -> None:
-    """Stop a job this table runs once another workspace ends it, or once
-    its session's list no longer holds it.
-
-    A close, a reap and a disown of a running job each end its console
-    or keep its entry, so a list that dropped one whose console is still
-    open went with its workspace, deleted elsewhere: an ending written
-    there first would be deleted before this read it. So the list is
-    checked every ``LIST_CHECK_SECONDS`` the console stays open, and a
-    job it dropped stops as a closed session's does. A failed read is
-    retried until the runner settles, which cancels the watch: one that
-    gave up would leave a kill from elsewhere unheeded while the job ran
-    on.
+    A failed read is retried until the runner settles, which cancels
+    the watch: one that gave up would leave a kill from elsewhere
+    unheeded while the job ran on.
 
     Args:
         job (Job): a job this table runs.
-        jobs (JobStore): the job plane its session's list lives in.
     """
     store = job.console.store
     while not store.closed:
         try:
-            if await _ended_within(store, LIST_CHECK_SECONDS):
-                await _adopt_ending(job)
-                return
-            if job.status == JobStatus.RUNNING and not await _held(jobs, job):
-                await _adopt_ending(job)
-                if job.status == JobStatus.RUNNING:
-                    job.status = JobStatus.KILLED
-                    job.exit_code = KILLED_EXIT_CODE
-                    cancel_job(job)
-                return
-            continue
+            await store.wait_ended()
+            await _adopt_ending(job)
+            return
         except Exception as exc:
             logger.debug("job %d watch failed: %s", job.id, exc)
         await asyncio.sleep(WATCH_RETRY_SECONDS)
+
+
+def _held_consoles(fields: RecordFields | None) -> set[str]:
+    """The consoles a session's list holds, listed or disowned.
+
+    Args:
+        fields (RecordFields | None): the list, or None.
+    """
+    if fields is None:
+        return set()
+    listed = {entry["console"] for entry in fields.get("jobs", {}).values()}
+    return listed | set(fields.get("disowned", {}))
 
 
 class JobTable:
@@ -360,6 +327,7 @@ class JobTable:
         # tasks, so teardown can stop them; each leaves once it finishes.
         self._disowned: list[Job] = []
         self._lease: asyncio.Task[None] | None = None
+        self._checking: asyncio.Task[None] | None = None
         # The bounds on killed jobs' stops (``_end_killed``), each with
         # its job.
         self._stopping: dict[asyncio.Task[None], Job] = {}
@@ -435,7 +403,7 @@ class JobTable:
                 return KILLED_EXIT_CODE
             if job.status != JobStatus.RUNNING:
                 return job.exit_code
-            watcher = asyncio.ensure_future(_watch(job, self.store))
+            watcher = asyncio.ensure_future(_watch(job))
             try:
                 return await _settle(run, job)
             finally:
@@ -443,6 +411,7 @@ class JobTable:
                 await self._record_ending(job)
                 self._disowned = [j for j in self._disowned if j is not job]
                 self._drop_lease()
+                self._drop_checking()
 
         try:
             process = self.processes.start(
@@ -477,6 +446,7 @@ class JobTable:
         job.process = process
         self._jobs.setdefault(session_id, {})[job_id] = job
         self._keep_lease()
+        self._keep_checking()
         return job
 
     async def load(self, job: Job) -> None:
@@ -665,17 +635,7 @@ class JobTable:
         if job is None or job.status != JobStatus.RUNNING:
             return False
         if job.process is not None:
-            if not job.process.begun:
-                await _stop(job, signal)
-                await self._record_ending(job)
-                self._drop_lease()
-                return True
-            cancel_job(job, signal)
-            job.status = JobStatus.KILLED
-            job.exit_code = 128 + signal
-            task = asyncio.ensure_future(self._end_killed(job, job.process))
-            self._stopping[task] = job
-            task.add_done_callback(self._stopping.pop)
+            await self._stop_runner(job, job.process, signal)
             return True
         await _mark_killed(job.console, 128 + signal)
         await self._refresh(job)
@@ -764,9 +724,10 @@ class JobTable:
         now rather than at its bound. The store itself belongs to the
         workspace's state store.
         """
-        if self._lease is not None:
-            self._lease.cancel()
-            self._lease = None
+        for task in (self._lease, self._checking):
+            if task is not None:
+                task.cancel()
+        self._lease = self._checking = None
         stopping = dict(self._stopping)
         for task in stopping:
             task.cancel()
@@ -894,6 +855,33 @@ class JobTable:
             console_name=entry["console"],
         )
 
+    async def _stop_runner(
+        self, job: Job, process: ProcessHandle, signal: int
+    ) -> None:
+        """Stop a job this table runs and record it as killed by ``signal``.
+
+        One that has not begun has its console ended at once: no program
+        ran that could leave its own status. One that has has its console
+        ended once its runner stops, or ``STOP_WAIT_SECONDS`` later.
+
+        Args:
+            job (Job): the running job.
+            process (ProcessHandle): its runner.
+            signal (int): the signal it is stopped with.
+        """
+        if not process.begun:
+            await _stop(job, signal)
+            await self._record_ending(job)
+            self._drop_lease()
+            self._drop_checking()
+            return
+        cancel_job(job, signal)
+        job.status = JobStatus.KILLED
+        job.exit_code = 128 + signal
+        task = asyncio.ensure_future(self._end_killed(job, process))
+        self._stopping[task] = job
+        task.add_done_callback(self._stopping.pop)
+
     async def _end_killed(self, job: Job, process: ProcessHandle) -> None:
         """End a killed job's console once its runner has stopped, or
         ``STOP_WAIT_SECONDS`` after the kill, whichever comes first.
@@ -926,6 +914,7 @@ class JobTable:
         await _mark_killed(job.console, job.exit_code)
         await self._record_ending(job)
         self._drop_lease()
+        self._drop_checking()
 
     async def _record_ending(self, job: Job) -> None:
         """Keep how a job this table ran ended in its list entry, or drop
@@ -1115,6 +1104,11 @@ class JobTable:
     ) -> bool:
         """Write a session's list over the one read, iff still current.
 
+        A list written where none is starts at a random generation rather
+        than at 1, so a list deleted and written again never repeats the
+        generation a reader of the old one holds: a close that read the
+        old one deletes the new one only once it has stopped its jobs.
+
         Args:
             session_id (str): the session.
             fields (RecordFields | None): the list as read.
@@ -1132,7 +1126,11 @@ class JobTable:
         record: RecordFields = {
             "next": following,
             "jobs": jobs,
-            "generation": expected + 1,
+            "generation": (
+                expected + 1
+                if fields is not None
+                else 1 + secrets.randbits(GENERATION_BITS)
+            ),
         }
         if held:
             record["disowned"] = held
@@ -1157,6 +1155,56 @@ class JobTable:
             return
         self._lease.cancel()
         self._lease = None
+
+    def _keep_checking(self) -> None:
+        """Check the lists of the jobs this table runs every
+        ``LIST_CHECK_SECONDS`` while it runs any."""
+        if self._checking is None:
+            self._checking = asyncio.ensure_future(self._check_lists())
+
+    def _drop_checking(self) -> None:
+        """Stop checking once every job this table runs has ended its
+        console."""
+        if self._checking is None or any(
+            j.process is not None and not j.console.finished
+            for j in [*self.all_jobs(), *self._disowned]
+        ):
+            return
+        self._checking.cancel()
+        self._checking = None
+
+    async def _check_lists(self) -> None:
+        """Stop each job this table runs that its session's list dropped.
+
+        A close, a reap and a disown of a running job each end its
+        console or keep its entry, so a list that dropped one whose
+        console is still open went with its workspace, deleted
+        elsewhere: an ending written there first would be deleted before
+        this table's watch read it. The job is stopped as a closed
+        session's is. Each session's list is read once a round, however
+        many of its jobs run here; a failed read is retried next round.
+        """
+        while True:
+            await asyncio.sleep(LIST_CHECK_SECONDS)
+            sessions: dict[str, list[Job]] = {}
+            for job in [*self.all_jobs(), *self._disowned]:
+                if job.process is not None and job.status == JobStatus.RUNNING:
+                    sessions.setdefault(job.session_id, []).append(job)
+            for session_id, jobs in sessions.items():
+                try:
+                    held = _held_consoles(await self.store.load(session_id))
+                except Exception as exc:
+                    logger.debug("job list check failed: %s", exc)
+                    continue
+                for job in jobs:
+                    if job.console_name in held:
+                        continue
+                    await _adopt_ending(job)
+                    if (
+                        job.status == JobStatus.RUNNING
+                        and job.process is not None
+                    ):
+                        await self._stop_runner(job, job.process, 9)
 
     async def _renew(self, interval: float) -> None:
         """Renew this table's lease every ``interval`` seconds, with the

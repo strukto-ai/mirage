@@ -23,9 +23,9 @@ STOP_WAIT_SECONDS = 10.0
 # read of it failed.
 WATCH_RETRY_SECONDS = 1.0
 
-# How often a job's owner checks that its session's list still holds the
-# job while its console stays open: one deleted with its workspace ends
-# no console the owner could read.
+# How often a table that runs jobs checks that their sessions' lists still
+# hold them: a list deleted with its workspace ends no console the owner
+# could read.
 LIST_CHECK_SECONDS = 10.0
 
 # How long an owner's lease lasts on a store other processes share. The
@@ -42,6 +42,11 @@ HANGUP_EXIT_CODE = 129
 # jobs nobody reaps, or whose owner died, do not accumulate. How a job ended
 # outlives it in the job's list entry.
 CONSOLE_TTL_SECONDS = 86400
+
+# How many random bits a newly written job list's generation starts from:
+# few enough that every later generation stays an exact JSON number on
+# both hosts and in Redis's Lua.
+GENERATION_BITS = 52
 
 # How many times a job-list write retries against other writers before
 # it gives up: every workspace of a session writes the one record.

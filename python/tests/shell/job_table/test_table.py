@@ -30,7 +30,7 @@ from mirage.shell.job_table.ram import RAMJobStore
 from mirage.shell.job_table.table import JobTable
 from mirage.shell.job_table.types import Job, JobStatus
 from mirage.utils.clock import ManualClock
-from mirage.workspace.record.types import RecordFields
+from mirage.workspace.record.types import RecordFields, generation_of
 from mirage.workspace.types import ExecutionNode
 
 
@@ -1045,15 +1045,19 @@ async def test_a_kill_before_the_runner_begins_keeps_its_ending_and_lease():
 
 class _StartsOnDelete(RAMJobStore):
     """A job store on which another table starts a job just as a list is
-    about to go."""
+    about to go; with ``replaces``, after another close deleted it."""
 
-    def __init__(self) -> None:
+    def __init__(self, replaces: bool = False) -> None:
         super().__init__()
+        self.replaces = replaces
         self.peer: JobTable | None = None
         self.started: list[Job] = []
 
     async def delete(self, session_id: str, expected_generation: int) -> bool:
         if self.peer is not None and not self.started:
+            if self.replaces:
+                stored = generation_of(await self.load(session_id))
+                assert await super().delete(session_id, stored)
             self.started.append(
                 await self.peer.submit(
                     "late", _run_forever, "/", session_id=session_id
@@ -1063,8 +1067,9 @@ class _StartsOnDelete(RAMJobStore):
 
 
 @pytest.mark.asyncio
-async def test_a_close_stops_a_job_started_while_it_closed():
-    store = _StartsOnDelete()
+@pytest.mark.parametrize("replaces", [False, True])
+async def test_a_close_stops_a_job_started_while_it_closed(replaces):
+    store = _StartsOnDelete(replaces)
     a, b = JobTable(store), JobTable(store)
     store.peer = b
     await a.submit("sleep 30", _run_forever, "/", session_id="s")
@@ -1106,3 +1111,32 @@ async def test_a_listed_or_disowned_job_runs_on_past_its_checks(monkeypatch):
     await asyncio.sleep(0.1)
     assert [listed.status, disowned.status] == [JobStatus.RUNNING] * 2
     await table.kill_all()
+
+
+@pytest.mark.asyncio
+async def test_a_dropped_job_deaf_to_its_stop_still_ends(monkeypatch):
+    monkeypatch.setattr(
+        "mirage.shell.job_table.table.LIST_CHECK_SECONDS", 0.02
+    )
+    monkeypatch.setattr("mirage.shell.job_table.table.STOP_WAIT_SECONDS", 0.05)
+    store = RAMJobStore()
+    table = JobTable(store)
+    release = asyncio.Event()
+
+    async def deaf(job: Job) -> tuple[IOResult, ExecutionNode]:
+        while not release.is_set():
+            try:
+                await release.wait()
+            except asyncio.CancelledError:
+                continue
+        return IOResult(), ExecutionNode()
+
+    job = await table.submit("deaf", deaf, "/", session_id="s")
+    await asyncio.sleep(0)
+    await store.clear()
+    async with asyncio.timeout(2):
+        ended = await table.wait(job.id, "s")
+    assert (ended.status, ended.exit_code) == (JobStatus.KILLED, 137)
+    release.set()
+    assert job.process is not None
+    await job.process.join()

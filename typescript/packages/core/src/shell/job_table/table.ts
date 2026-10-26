@@ -17,13 +17,13 @@ import { ProcessTable } from '../../process/table.ts'
 import { PathSpec } from '../../types.ts'
 import {
   Channel,
-  type ConsoleStore,
   JobConsole,
   KILLED_OUTCOME,
   exitOutcome,
   killedOutcome,
 } from '../console/index.ts'
 import {
+  GENERATION_BITS,
   HANGUP_EXIT_CODE,
   KILLED_EXIT_CODE,
   LIST_CHECK_SECONDS,
@@ -163,87 +163,36 @@ async function adoptEnding(job: Job): Promise<void> {
 }
 
 /**
- * Whether a console ends, or closes, within `seconds`.
- *
- * @param store the console to wait on
- * @param seconds how long to wait
- * @param signal aborted once the job's runner settles
- */
-async function endedWithin(
-  store: ConsoleStore,
-  seconds: number,
-  signal: AbortSignal,
-): Promise<boolean> {
-  const round = new AbortController()
-  const timer = setTimeout(() => {
-    round.abort()
-  }, seconds * 1000)
-  try {
-    await store.waitEnded(AbortSignal.any([signal, round.signal]))
-  } catch (err) {
-    if (signal.aborted || !round.signal.aborted) throw err
-  } finally {
-    clearTimeout(timer)
-  }
-  return !round.signal.aborted
-}
-
-/**
- * Whether a job's session list still holds it, listed or disowned.
- *
- * @param jobs the job plane the list lives in
- * @param job a job this table runs
- */
-async function held(jobs: JobStore, job: Job): Promise<boolean> {
-  const fields = await jobs.load(job.sessionId)
-  if (fields === null) return false
-  const listed = Object.values((fields.jobs ?? {}) as Record<string, ListEntry>)
-  const disowned = (fields.disowned ?? {}) as Record<string, ListEntry>
-  return listed.some((entry) => entry.console === job.consoleName) || job.consoleName in disowned
-}
-
-/**
- * Stop a job this table runs once another workspace ends it, or once its
- * session's list no longer holds it.
- *
- * A close, a reap and a disown of a running job each end its console or
- * keep its entry, so a list that dropped one whose console is still open
- * went with its workspace, deleted elsewhere: an ending written there first
- * would be deleted before this read it. So the list is checked every
- * `LIST_CHECK_SECONDS` the console stays open, and a job it dropped stops
- * as a closed session's does. A failed read is retried until the runner
- * settles, which aborts the watch: one that gave up would leave a kill from
- * elsewhere unheeded while the job ran on.
+ * Stop a job this table runs once another workspace ends it. A failed read
+ * is retried until the runner settles, which aborts the watch: one that
+ * gave up would leave a kill from elsewhere unheeded while the job ran on.
  *
  * @param job the job, run by this table
- * @param jobs the job plane its session's list lives in
  * @param signal aborted once its runner settles, ending the watch
  */
-async function watch(job: Job, jobs: JobStore, signal: AbortSignal): Promise<void> {
+async function watch(job: Job, signal: AbortSignal): Promise<void> {
   const store = job.console.store
   while (!signal.aborted && !store.closed) {
     try {
-      if (await endedWithin(store, LIST_CHECK_SECONDS, signal)) {
-        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- the runner may settle across the await
-        if (!signal.aborted) await adoptEnding(job)
-        return
-      }
-      if (job.status === JobStatus.RUNNING && !(await held(jobs, job))) {
-        await adoptEnding(job)
-        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- an ending may have landed across the await
-        if (job.status === JobStatus.RUNNING) {
-          job.status = JobStatus.KILLED
-          job.exitCode = KILLED_EXIT_CODE
-          job.process?.terminate(9)
-        }
-        return
-      }
-      continue
+      await store.waitEnded(signal)
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- the runner may settle across the await
+      if (!signal.aborted) await adoptEnding(job)
+      return
     } catch (err) {
       console.debug('job watch failed:', err)
     }
     await sleep(WATCH_RETRY_SECONDS * 1000, signal)
   }
+}
+
+/** The consoles a session's list holds, listed or disowned. */
+function heldConsoles(fields: RecordFields | null): Set<string> {
+  if (fields === null) return new Set()
+  const listed = Object.values((fields.jobs ?? {}) as Record<string, ListEntry>)
+  return new Set([
+    ...listed.map((entry) => entry.console),
+    ...Object.keys((fields.disowned ?? {}) as Record<string, ListEntry>),
+  ])
 }
 
 /**
@@ -285,6 +234,7 @@ export class JobTable {
   // their tasks so teardown can stop them; each leaves once it finishes.
   private disowned: Job[] = []
   private lease: ReturnType<typeof setTimeout> | null = null
+  private checking: ReturnType<typeof setTimeout> | null = null
   // The bounds on killed jobs' stops (endKilled): each one's ending, and
   // the cut that ends its wait at once.
   private stopping = new Map<Job, { ending: Promise<void>; cut: () => void }>()
@@ -368,7 +318,7 @@ export class JobTable {
           if (job === null) return KILLED_EXIT_CODE
           if (job.status !== JobStatus.RUNNING) return job.exitCode
           const watching = new AbortController()
-          void watch(job, this.store, watching.signal).catch((err: unknown) => {
+          void watch(job, watching.signal).catch((err: unknown) => {
             console.debug('job watch failed:', err)
           })
           try {
@@ -378,6 +328,7 @@ export class JobTable {
             await this.recordEnding(job)
             this.disowned = this.disowned.filter((j) => j !== job)
             this.dropLease()
+            this.dropChecking()
           }
         },
         cancel: () => {
@@ -420,6 +371,7 @@ export class JobTable {
       init.abort.signal.removeEventListener('abort', onAbort)
     })
     this.keepLease()
+    this.keepChecking()
     return job
   }
 
@@ -571,16 +523,7 @@ export class JobTable {
     const job = this.get(jobId, sessionId)
     if (job?.status !== JobStatus.RUNNING) return false
     if (job.process !== null) {
-      if (!job.process.begun) {
-        await stop(job, signal)
-        await this.recordEnding(job)
-        this.dropLease()
-        return true
-      }
-      job.process.terminate(signal)
-      job.status = JobStatus.KILLED
-      job.exitCode = 128 + signal
-      this.endKilled(job, job.process)
+      await this.stopRunner(job, job.process, signal)
       return true
     }
     await markKilled(job.console, 128 + signal)
@@ -665,7 +608,9 @@ export class JobTable {
    */
   async close(): Promise<void> {
     if (this.lease !== null) clearTimeout(this.lease)
+    if (this.checking !== null) clearTimeout(this.checking)
     this.lease = null
+    this.checking = null
     const stopping = [...this.stopping.values()]
     for (const { cut } of stopping) cut()
     await Promise.all(stopping.map(({ ending }) => ending))
@@ -799,6 +744,26 @@ export class JobTable {
    * that far (aborted before it began) or is still stopping, or at once
    * when cut (close()). Mirrors Python's `_end_killed`.
    */
+  /**
+   * Stop a job this table runs and record it as killed by `signal`. One
+   * that has not begun has its console ended at once: no program ran that
+   * could leave its own status. One that has has its console ended once its
+   * runner stops, or `STOP_WAIT_SECONDS` later.
+   */
+  private async stopRunner(job: Job, process: ProcessHandle, signal: number): Promise<void> {
+    if (!process.begun) {
+      await stop(job, signal)
+      await this.recordEnding(job)
+      this.dropLease()
+      this.dropChecking()
+      return
+    }
+    process.terminate(signal)
+    job.status = JobStatus.KILLED
+    job.exitCode = 128 + signal
+    this.endKilled(job, process)
+  }
+
   private endKilled(job: Job, process: ProcessHandle): void {
     let cut = (): void => undefined
     const late = new Promise<void>((resolve) => {
@@ -829,6 +794,7 @@ export class JobTable {
     await markKilled(job.console, job.exitCode)
     await this.recordEnding(job)
     this.dropLease()
+    this.dropChecking()
   }
 
   /**
@@ -991,7 +957,10 @@ export class JobTable {
   /**
    * Write a session's list over the one read, iff still current.
    * `disowned` is the disowned jobs still running, by console; null keeps
-   * the ones read.
+   * the ones read. A list written where none is starts at a random
+   * generation rather than at 1, so a list deleted and written again never
+   * repeats the generation a reader of the old one holds: a close that read
+   * the old one deletes the new one only once it has stopped its jobs.
    */
   private write(
     sessionId: string,
@@ -1002,7 +971,9 @@ export class JobTable {
   ): Promise<boolean> {
     const expected = generationOf(fields)
     const held = disowned ?? ((fields?.disowned ?? {}) as Record<string, ListEntry>)
-    const record: RecordFields = { next: following, jobs, generation: expected + 1 }
+    const generation =
+      fields !== null ? expected + 1 : 1 + Math.floor(Math.random() * 2 ** GENERATION_BITS)
+    const record: RecordFields = { next: following, jobs, generation }
     if (Object.keys(held).length > 0) record.disowned = held
     return this.store.casSet(sessionId, record, expected)
   }
@@ -1012,6 +983,71 @@ export class JobTable {
    * owners, with the consoles of the jobs it still runs, so a quiet one
    * keeps its output while this table lives.
    */
+  /** Check the lists of the jobs this table runs every
+   * `LIST_CHECK_SECONDS` while it runs any. */
+  private keepChecking(): void {
+    if (this.checking !== null) return
+    const timer = setTimeout(() => {
+      void this.checkLists()
+        .catch((err: unknown) => {
+          console.debug('job list check failed:', err)
+        })
+        .finally(() => {
+          if (this.checking !== timer) return
+          this.checking = null
+          this.keepChecking()
+        })
+    }, LIST_CHECK_SECONDS * 1000)
+    this.checking = timer
+  }
+
+  /** Stop checking once every job this table runs has ended its console. */
+  private dropChecking(): void {
+    if (this.checking === null) return
+    if (
+      [...this.allJobs(), ...this.disowned].some((j) => j.process !== null && !j.console.finished)
+    )
+      return
+    clearTimeout(this.checking)
+    this.checking = null
+  }
+
+  /**
+   * Stop each job this table runs that its session's list dropped.
+   *
+   * A close, a reap and a disown of a running job each end its console or
+   * keep its entry, so a list that dropped one whose console is still open
+   * went with its workspace, deleted elsewhere: an ending written there
+   * first would be deleted before this table's watch read it. The job is
+   * stopped as a closed session's is. Each session's list is read once a
+   * round, however many of its jobs run here; a failed read is retried next
+   * round.
+   */
+  private async checkLists(): Promise<void> {
+    const sessions = new Map<string, Job[]>()
+    for (const job of [...this.allJobs(), ...this.disowned]) {
+      if (job.process === null || job.status !== JobStatus.RUNNING) continue
+      const jobs = sessions.get(job.sessionId) ?? []
+      jobs.push(job)
+      sessions.set(job.sessionId, jobs)
+    }
+    for (const [sessionId, jobs] of sessions) {
+      let held: Set<string>
+      try {
+        held = heldConsoles(await this.store.load(sessionId))
+      } catch (err) {
+        console.debug('job list check failed:', err)
+        continue
+      }
+      for (const job of jobs) {
+        if (held.has(job.consoleName)) continue
+        await adoptEnding(job)
+        if (job.status === JobStatus.RUNNING && job.process !== null)
+          await this.stopRunner(job, job.process, 9)
+      }
+    }
+  }
+
   private keepLease(): void {
     const lease = this.store.leaseSeconds
     if (lease === null || this.lease !== null) return

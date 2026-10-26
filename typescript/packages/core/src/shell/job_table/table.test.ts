@@ -28,7 +28,7 @@ import { RAMJobStore } from './ram.ts'
 import { JobTable } from './table.ts'
 import { Job, type JobResult, type JobRunner, JobStatus } from './types.ts'
 import { ManualClock } from '../../utils/clock.ts'
-import type { RecordFields } from '../../workspace/record/types.ts'
+import { generationOf, type RecordFields } from '../../workspace/record/types.ts'
 
 const dec = (b: Uint8Array | undefined): string =>
   b === undefined ? '' : new TextDecoder().decode(b)
@@ -910,14 +910,21 @@ class DroppedWatches extends RAMJobStore {
 }
 
 /** A job store on which another table starts a job just as a list is about
- * to go. */
+ * to go; with `replaces`, after another close deleted it. */
 class StartsOnDelete extends RAMJobStore {
   peer: JobTable | null = null
   readonly started: Job[] = []
 
+  constructor(private readonly replaces = false) {
+    super()
+  }
+
   override async delete(sessionId: string, expectedGeneration: number): Promise<boolean> {
-    if (this.peer !== null && this.started.length === 0)
+    if (this.peer !== null && this.started.length === 0) {
+      if (this.replaces)
+        expect(await super.delete(sessionId, generationOf(await this.load(sessionId)))).toBe(true)
       this.started.push(await sleeping(this.peer))
+    }
     return super.delete(sessionId, expectedGeneration)
   }
 }
@@ -1343,19 +1350,22 @@ describe('JobTable on a shared store, across retaken numbers and early kills', (
     expect((jt as unknown as { lease: unknown }).lease).toBeNull()
   })
 
-  it('a close stops a job started while it closed', async () => {
-    const store = new StartsOnDelete()
-    const a = new JobTable(store)
-    store.peer = new JobTable(store)
-    await sleeping(a)
-    const stopped = await a.closeSession('s')
-    const [late] = store.started
-    expect(stopped.map((j) => j.consoleName)).toEqual(expect.arrayContaining([late?.consoleName]))
-    expect(stopped).toHaveLength(2)
-    await late?.process?.join()
-    expect([late?.status, late?.exitCode]).toEqual([JobStatus.KILLED, 137])
-    expect(await store.load('s')).toBeNull()
-  })
+  it.each([false, true])(
+    'a close stops a job started while it closed (replaces: %s)',
+    async (replaces) => {
+      const store = new StartsOnDelete(replaces)
+      const a = new JobTable(store)
+      store.peer = new JobTable(store)
+      await sleeping(a)
+      const stopped = await a.closeSession('s')
+      const [late] = store.started
+      expect(stopped.map((j) => j.consoleName)).toEqual(expect.arrayContaining([late?.consoleName]))
+      expect(stopped).toHaveLength(2)
+      await late?.process?.join()
+      expect([late?.status, late?.exitCode]).toEqual([JobStatus.KILLED, 137])
+      expect(await store.load('s')).toBeNull()
+    },
+  )
 
   it('a job whose list was deleted elsewhere stops', async () => {
     vi.useFakeTimers()
@@ -1382,6 +1392,33 @@ describe('JobTable on a shared store, across retaken numbers and early kills', (
       await vi.advanceTimersByTimeAsync(LIST_CHECK_SECONDS * 1000 * 3)
       expect([listed.status, disowned.status]).toEqual([JobStatus.RUNNING, JobStatus.RUNNING])
       await jt.killAll()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('a dropped job deaf to its stop still ends', async () => {
+    vi.useFakeTimers()
+    try {
+      const store = new RAMJobStore()
+      const jt = new JobTable(store)
+      const release: { fire?: () => void } = {}
+      const abort = new AbortController()
+      const job = await jt.submit({
+        command: 'deaf',
+        run: deaf(release),
+        abort,
+        cwd: '/',
+        sessionId: 's',
+      })
+      await vi.advanceTimersByTimeAsync(0)
+      await store.clear()
+      const waited = jt.wait(job.id, 's')
+      await vi.advanceTimersByTimeAsync((LIST_CHECK_SECONDS + STOP_WAIT_SECONDS) * 1000 * 2)
+      const ended = await waited
+      expect([ended.status, ended.exitCode]).toEqual([JobStatus.KILLED, 137])
+      release.fire?.()
+      await job.process?.join()
     } finally {
       vi.useRealTimers()
     }

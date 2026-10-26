@@ -37,6 +37,13 @@ S3_BUCKET = os.environ.get("STORE_S3_BUCKET", "mirage-state")
 WORKSPACE_ID = "xstore"
 MARKER = "xstore-history-marker"
 JOBS_WORKSPACE_ID = "xjobs"
+# Enough sleeps that the peer's own PIDs share numbers with the owner's
+# jobs, which a bare PID must not reach.
+SLEEP_COUNT = 16
+SLEEPS = (
+    f"for i in {' '.join(str(n) for n in range(SLEEP_COUNT))}; "
+    "do sleep 30 & done"
+)
 JOBS_SESSION = "s"
 
 
@@ -334,6 +341,9 @@ async def jobs_own(prefix: str) -> None:
     result = await ws.shell("false &", session_id=JOBS_SESSION)
     check("py own: false started", result.exit_code == 0)
     check("py own: the peer's wait reaped false", await until(reaped))
+    result = await ws.shell(SLEEPS, session_id=JOBS_SESSION)
+    check("py own: the sleeps started", result.exit_code == 0)
+    check("py own: the peer's kill and wait reaped them", await until(reaped))
     await plane.clear()
     await ws.close()
     await store.close()
@@ -369,6 +379,40 @@ async def jobs_peer(prefix: str) -> None:
         "py peer: wait answers false's status",
         result.stdout == b"1\n",
         f"got {result.stdout!r}",
+    )
+
+    async def sleeping() -> bool:
+        found = await plane.load(JOBS_SESSION)
+        return found is not None and len(found["jobs"]) == SLEEP_COUNT
+
+    check("py peer: the owner's sleeps are listed", await until(sleeping))
+    result = await ws.shell('sleep 30 & kill "$!"', session_id=JOBS_SESSION)
+    check("py peer: kill $!", result.exit_code == 0, f"got {result.stderr!r}")
+    result = await ws.shell("jobs", session_id=JOBS_SESSION)
+    check(
+        "py peer: kill $! left every one of the owner's sleeps running",
+        result.stdout.count(b"running") == SLEEP_COUNT,
+        f"got {result.stdout!r}",
+    )
+    try:
+        result = await asyncio.wait_for(
+            ws.shell('false & wait "$!"; echo $?', session_id=JOBS_SESSION),
+            10,
+        )
+        waited = result.stdout
+    except TimeoutError:
+        waited = b"timed out"
+    check(
+        "py peer: wait $! waits for its own job",
+        waited == b"1\n",
+        f"got {waited!r}",
+    )
+    specs = " ".join(f"%{n}" for n in range(1, SLEEP_COUNT + 1))
+    result = await ws.shell(f"kill {specs}; wait", session_id=JOBS_SESSION)
+    check(
+        "py peer: kill and wait the owner's sleeps",
+        result.exit_code == 0,
+        f"got {result.stderr!r}",
     )
     await ws.close()
     await store.close()
