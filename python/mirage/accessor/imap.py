@@ -72,6 +72,19 @@ def _quoted(value: str) -> str:
     return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
+def check_line(value: str) -> None:
+    """Refuse text that would end an IMAP command line early.
+
+    Args:
+        value (str): a command's verb or argument, as sent.
+
+    Raises:
+        ValueError: the value holds a CR, LF or NUL.
+    """
+    if any(c in value for c in "\r\n\0"):
+        raise ValueError("an IMAP command cannot hold a line break or NUL")
+
+
 class _Protocol(asyncio.StreamReaderProtocol):
     """asyncio's stream protocol, noting when the server ends the
     connection: the stream reader reports its end only once every byte
@@ -272,7 +285,13 @@ class IMAPClient:
             verb (str): the command.
             *args (str): its arguments, already spelled.
             literal (bytes | None): octets sent as a final literal.
+
+        Raises:
+            ValueError: an argument holds a CR, LF or NUL, which would end
+                the command line early and start another.
         """
+        for arg in (verb, *args):
+            check_line(arg)
         async with self._lock:
             self._tag += 1
             tag = f"M{self._tag:04d}"
