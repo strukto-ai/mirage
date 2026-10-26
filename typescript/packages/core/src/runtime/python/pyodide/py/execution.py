@@ -567,8 +567,10 @@ class OutputCapture(io.RawIOBase):
 
     def write(self, data):
         self._checkClosed()
-        self._send(bytes(data))
-        return len(data)
+        # A count of bytes, whatever the buffer's item size.
+        payload = bytes(data)
+        self._send(payload)
+        return len(payload)
 
     def _send(self, data):
         if _exit_status is not None:

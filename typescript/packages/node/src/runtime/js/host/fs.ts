@@ -585,8 +585,23 @@ class HostFs implements Record<
     const opts = fieldsOf(options)
     const filter = opts.filter as ((from: string, to: string) => unknown) | undefined
     if (filter !== undefined && !(await filter(src, dst))) return
-    // node compares the two files, so a link that makes them one is
-    // caught as one spelling is.
+    const from = await this.checked(src, dst, opts)
+    // node makes the destination's missing parents first.
+    const parent = posix.dirname(posix.resolve(dst))
+    try {
+      await routed.stat(parent)
+    } catch (err) {
+      if (!isMissingPath(err)) throw err
+      await routed.mkdir(parent, { recursive: true })
+    }
+    await this.copied(src, dst, from, opts)
+  }
+
+  /** The source's entry once the pair passes the checks node's `cp`
+   * makes of every pair it copies: two names for one file (a link that
+   * makes them one is caught as one spelling is), a directory without
+   * `recursive`, and a directory into itself. */
+  private async checked(src: string, dst: string, opts: Record<string, unknown>): Promise<Stats> {
     const follow = opts.dereference === true
     const [source, target] = [await this.identity(src, follow), await this.identity(dst, follow)]
     if (source === target) {
@@ -619,15 +634,7 @@ class HostFs implements Record<
         )
       }
     }
-    // node makes the destination's missing parents first.
-    const parent = posix.dirname(posix.resolve(dst))
-    try {
-      await routed.stat(parent)
-    } catch (err) {
-      if (!isMissingPath(err)) throw err
-      await routed.mkdir(parent, { recursive: true })
-    }
-    await this.copied(src, dst, from, opts)
+    return from
   }
 
   /** The file `path` names once its links are followed, as node's `cp`
@@ -683,7 +690,7 @@ class HostFs implements Record<
       for (const name of await routed.readdir(src)) {
         const [child, target] = [posix.join(src, name), posix.join(dst, name)]
         if (filter !== undefined && !(await filter(child, target))) continue
-        await this.copied(child, target, await this.entryOf(child, opts.dereference === true), opts)
+        await this.copied(child, target, await this.checked(child, target, opts), opts)
       }
       // A directory it made takes the source's mode, once its entries are in.
       if (to === null) await routed.chmod(dst, from.mode & 0o7777)

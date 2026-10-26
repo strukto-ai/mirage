@@ -956,6 +956,20 @@ describe('patchNodeFs — calls node makes on its own', () => {
     ).rejects.toMatchObject({ code: 'ERR_FS_CP_DIR_TO_NON_DIR' })
     await fs.promises.cp('/data/src', '/data/lt', { recursive: true, dereference: true })
     expect(await fs.promises.readdir('/data/t')).toEqual(['f.txt'])
+    // Every pair is checked: a child that a link makes the source's own
+    // is refused there, the source kept.
+    await ws.vfs.mkdir('/data/src/sub')
+    await ws.vfs.write('/data/src/sub/g.txt', 'g')
+    await ws.vfs.mkdir('/data/out')
+    await ws.vfs.symlink('/data/out/sub', '/data/src/sub')
+    await expect(
+      fs.promises.cp('/data/src', '/data/out', { recursive: true, dereference: true }),
+    ).rejects.toMatchObject({
+      code: 'ERR_FS_CP_EINVAL',
+      message:
+        'Invalid src or dest: cp returned EINVAL (src and dest cannot be the same) /data/out/sub',
+    })
+    expect(await fs.promises.readFile('/data/src/sub/g.txt', 'utf-8')).toBe('g')
     await ws.close()
   })
 

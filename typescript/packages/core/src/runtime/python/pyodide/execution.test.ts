@@ -479,14 +479,20 @@ small = [str(i).encode() for i in range(100000)]
   })
 
   // Under -u each write goes out as it is made, as CPython's does, so a
-  // print os._exit follows is kept.
+  // print os._exit follows is kept; a write counts bytes, whatever the
+  // buffer's item size.
   it('writes through under -u, as CPython does', async () => {
     const guest = new PyodideExecution(await loadPyodideRuntime())
     const out: string[] = []
     try {
       const result = guest.run(
         {
-          code: "import os\nprint('kept')\nos._exit(0)",
+          code: [
+            'import array, os, sys',
+            'print(sys.stdout.buffer.write(array.array("I", [0x0a434241, 0x0a434241])))',
+            "print('kept')",
+            'os._exit(0)',
+          ].join('\n'),
           argv: ['-c'],
           cwd: '/',
           flags: { u: true },
@@ -507,7 +513,7 @@ small = [str(i).encode() for i in range(100000)]
         },
       )
       expect(result[2]).toBe(0)
-      expect(out.join('')).toBe('kept\n')
+      expect(out.join('')).toBe('ABC\nABC\n8\nkept\n')
     } finally {
       guest.close()
     }
