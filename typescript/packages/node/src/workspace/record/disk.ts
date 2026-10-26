@@ -230,22 +230,28 @@ export class DiskRecordClient {
     }
   }
 
+  // Unlink only after closing: Windows refuses to unlink an open file.
   private async releaseLock(fh: FileHandle, lockPath: string): Promise<void> {
     let owned = false
     try {
       const held = await fh.stat({ bigint: true })
       const current = await stat(lockPath, { bigint: true })
       owned = held.dev === current.dev && held.ino === current.ino
-      if (owned) await unlink(lockPath)
     } catch (e) {
       if (!isMissing(e)) throw e
-      owned = false
     } finally {
       await fh.close()
     }
-    // Only reachable when another writer reclaimed this lock as stale;
-    // the record write already landed, nothing to undo.
-    if (!owned) console.warn(`mirage: lock ${lockPath} was reclaimed before release`)
+    if (owned) {
+      try {
+        await unlink(lockPath)
+        return
+      } catch (e) {
+        if (!isMissing(e)) throw e
+      }
+    }
+    // Another writer reclaimed this lock as stale; leave it to its holder.
+    console.warn(`mirage: lock ${lockPath} was reclaimed before release`)
   }
 
   private async writeRecord(target: string, fields: Record<string, unknown>): Promise<void> {

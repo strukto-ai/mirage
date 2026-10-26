@@ -151,6 +151,32 @@ describe('DiskRecordClient lock reclaim and release', () => {
     expect(readdirSync(root)).toEqual([])
   })
 
+  it('closes the lock before unlinking it on release', async () => {
+    const client = new DiskRecordClient(root, '')
+    const fh = await client.lock('k')
+    const lock = `${client.path('k')}.lock`
+    const steps: string[] = []
+    const close = fh.close.bind(fh)
+    fh.close = async () => {
+      steps.push('close')
+      await close()
+    }
+    vi.mocked(fs.unlink).mockImplementation(async (p) => {
+      if (p === lock) steps.push('unlink')
+      await real.unlink(p)
+    })
+    await client.unlock('k', fh)
+    expect(steps).toEqual(['close', 'unlink'])
+  })
+
+  it('releases a lock that was deleted meanwhile', async () => {
+    const client = new DiskRecordClient(root, '')
+    const fh = await client.lock('k')
+    rmSync(`${client.path('k')}.lock`)
+    await client.unlock('k', fh)
+    expect(readdirSync(root)).toEqual([])
+  })
+
   it('puts a record on disk before renaming it in', async () => {
     const steps: [string, bigint][] = []
     vi.mocked(fs.open).mockImplementation((async (...args: Parameters<typeof fs.open>) => {

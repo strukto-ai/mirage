@@ -254,3 +254,39 @@ async def test_a_record_reaches_the_disk_before_it_is_renamed_in(
     await client.put("k", {"generation": 0})
     record = os.stat(client.path("k")).st_ino
     assert steps == [("fsync", record), ("replace", record)]
+
+
+@pytest.mark.asyncio
+async def test_release_closes_the_lock_before_unlinking_it(
+    tmp_path, monkeypatch
+):
+    client = DiskRecordClient(str(tmp_path), "")
+    fd = await client.lock("k")
+    lock_path = client.path("k") + ".lock"
+    steps: list[str] = []
+    real_close = os.close
+    real_unlink = os.unlink
+
+    def close(target: int) -> None:
+        if target == fd:
+            steps.append("close")
+        real_close(target)
+
+    def unlink(path, *args, **kwargs):
+        if path == lock_path:
+            steps.append("unlink")
+        return real_unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(os, "close", close)
+    monkeypatch.setattr(os, "unlink", unlink)
+    await client.unlock("k", fd)
+    assert steps == ["close", "unlink"]
+
+
+@pytest.mark.asyncio
+async def test_release_after_the_lock_was_deleted(tmp_path):
+    client = DiskRecordClient(str(tmp_path), "")
+    fd = await client.lock("k")
+    os.unlink(client.path("k") + ".lock")
+    await client.unlock("k", fd)
+    assert os.listdir(tmp_path) == []

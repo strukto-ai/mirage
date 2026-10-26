@@ -101,18 +101,21 @@ def _reclaim_stale_lock(lock_path: str) -> bool:
 
 
 def _release_lock(fd: int, lock_path: str) -> None:
+    # Unlink only after closing: Windows refuses to unlink an open file.
     try:
         owned = os.path.samestat(os.fstat(fd), os.stat(lock_path))
-        if owned:
-            os.unlink(lock_path)
     except FileNotFoundError:
         owned = False
     finally:
         os.close(fd)
-    if not owned:
-        # Only reachable when another writer reclaimed this lock as
-        # stale; the record write already landed, nothing to undo.
-        logger.warning("lock %s was reclaimed before release", lock_path)
+    if owned:
+        try:
+            os.unlink(lock_path)
+            return
+        except FileNotFoundError:
+            owned = False
+    # Another writer reclaimed this lock as stale; leave it to its holder.
+    logger.warning("lock %s was reclaimed before release", lock_path)
 
 
 async def _acquire_owned(lock_path: str) -> int | None:
