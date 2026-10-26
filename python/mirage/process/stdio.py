@@ -4,6 +4,7 @@ from mirage.io.errors import PipeClosed
 from mirage.io.pipe import CAPACITY, BytePipe
 from mirage.io.stream import OutputStream
 from mirage.shell.console import Channel, JobConsole
+from mirage.types import Refusal
 
 
 class ProcessInput:
@@ -47,6 +48,7 @@ class ProcessOutput(JobConsole):
         self.merge_stderr = merge_stderr
         self.stdout = ProcessInput(buffer_bytes)
         self.stderr = ProcessInput(buffer_bytes)
+        self.refusal: Refusal | None = None
 
     async def emit(self, channel: Channel, data: bytes) -> None:
         target = (

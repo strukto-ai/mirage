@@ -552,6 +552,27 @@ describe('codex-exec', () => {
     expect(unknown).toEqual({ status: 'unknownProcess' })
   })
 
+  it('runs processes side by side', async () => {
+    const client = await codex(await startHarness())
+    await client.start('slow', 'read x; echo got:$x', { pipeStdin: true })
+    const fast = await client.run('fast', 'echo fast')
+    const waiting = await client.result('process/read', { processId: 'slow', afterSeq: 0 })
+    await client.result('process/write', { processId: 'slow', writeId: 'w', chunk: b64('go\n') })
+    const out = await client.noteAny('slow', 'process/output')
+    const exited = await client.noteAny('slow', 'process/exited')
+    expect(fast).toEqual(['fast\n', '', 0])
+    expect(waiting.exited).toBe(false)
+    expect(unb64(out.chunk)).toBe('got:go\n')
+    expect(exited.exitCode).toBe(0)
+  })
+
+  it('keeps what a process sets to itself', async () => {
+    const client = await codex(await startHarness())
+    await client.run('p', 'export LEAK=1')
+    const [out] = await client.run('q', 'echo $USER ${LEAK:-unset}')
+    expect(out).toBe('demo unset\n')
+  })
+
   it('stops a process on interrupt and terminate', async () => {
     const client = await codex(await startHarness())
     await client.start('i', 'sleep 30')
@@ -667,7 +688,7 @@ describe('codex-exec', () => {
     expect(unb64(opened.dataBase64)).toBe('token\n')
     expect(refused.code).toBe(RPC_INTERNAL_ERROR)
     expect(code).not.toBe(0)
-    expect(err).not.toBe('')
+    expect(err.endsWith('policy denied: the vault is sealed\n')).toBe(true)
   })
 
   it('closes its session when the channel ends', async () => {

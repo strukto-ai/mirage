@@ -2,6 +2,7 @@ import { Channel, JobConsole } from '../shell/console/index.ts'
 import { BytePipe, CAPACITY } from '../io/pipe.ts'
 import { PipeClosed } from '../io/errors.ts'
 import { OutputStream } from '../io/stream.ts'
+import type { Refusal } from '../types.ts'
 
 export class ProcessInput {
   private readonly pipe: BytePipe
@@ -44,6 +45,7 @@ export class ProcessInput {
 export class ProcessOutput extends JobConsole {
   readonly stdout: ProcessInput
   readonly stderr: ProcessInput
+  refusal: Refusal | null = null
 
   constructor(
     private readonly mergeStderr = false,

@@ -1326,6 +1326,7 @@ class Workspace:
                 await output.emit(
                     Channel.STDERR, await materialize(result.stderr)
                 )
+                output.refusal = result.refusal
                 return result.exit_code
             finally:
                 reset_program_invocation(program_token)

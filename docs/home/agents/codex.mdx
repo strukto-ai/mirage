@@ -57,6 +57,7 @@ codex -C /
 
 - It works in the Codex TUI and in `codex exec`, not the Codex app.
 - Commands run under the SSH key's [profile](/home/profiles).
+- Commands run side by side, each in its own shell, so what one exports stays in it.
 - Codex checks `-C` on the local disk, so pass `-C /` and use absolute workspace paths.
 - The protocol is experimental and follows Codex 0.147.
 
