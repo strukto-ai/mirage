@@ -179,9 +179,7 @@ async function watch(job: Job, signal: AbortSignal): Promise<void> {
     } catch (err) {
       console.debug('job watch failed:', err)
     }
-    await sleep(WATCH_RETRY_SECONDS * 1000, signal).catch((err: unknown) => {
-      if (!isAbortError(err)) throw err
-    })
+    await sleep(WATCH_RETRY_SECONDS * 1000, signal)
   }
 }
 
