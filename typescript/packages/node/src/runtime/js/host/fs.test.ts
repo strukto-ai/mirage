@@ -945,6 +945,17 @@ describe('patchNodeFs — calls node makes on its own', () => {
     await ws.vfs.symlink('/data/lk2', 'd/sub/b.txt')
     await fs.promises.cp('/data/lk', '/data/lk2', { force: false })
     expect(await fs.promises.readlink('/data/lk2')).toBe('/data/d/a.txt')
+    // A directory onto a link to one: refused as a non-directory, unless
+    // `dereference` follows the link and copies into its target.
+    await ws.vfs.mkdir('/data/src')
+    await ws.vfs.write('/data/src/f.txt', 'f')
+    await ws.vfs.mkdir('/data/t')
+    await ws.vfs.symlink('/data/lt', 't')
+    await expect(
+      fs.promises.cp('/data/src', '/data/lt', { recursive: true }),
+    ).rejects.toMatchObject({ code: 'ERR_FS_CP_DIR_TO_NON_DIR' })
+    await fs.promises.cp('/data/src', '/data/lt', { recursive: true, dereference: true })
+    expect(await fs.promises.readdir('/data/t')).toEqual(['f.txt'])
     await ws.close()
   })
 
@@ -959,6 +970,12 @@ describe('patchNodeFs — calls node makes on its own', () => {
     ])
     // Within a name `**` is a `*`, so the walk stays one level down.
     expect(await names(fs.promises.glob('/data/d**/*.txt'))).toEqual(['/data/d/a.txt'])
+    // A trailing slash keeps the directories, named without it; an
+    // excluded base leaves out all under it.
+    expect(await names(fs.promises.glob('/data/d/*/'))).toEqual(['/data/d/sub'])
+    expect(await names(fs.promises.glob('/data/d/a.txt/'))).toEqual([])
+    expect(await names(fs.promises.glob('/data/d/a.txt', { exclude: () => true }))).toEqual([])
+    expect(await names(fs.promises.glob('/data/d/*', { exclude: ['/data/d'] }))).toEqual([])
     await ws.close()
   })
 

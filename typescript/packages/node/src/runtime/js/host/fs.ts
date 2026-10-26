@@ -663,7 +663,8 @@ class HostFs implements Record<
   ): Promise<void> {
     let to: Stats | null = null
     try {
-      to = await this.entryOf(dst, false)
+      // `dereference` follows a link on either side, as node's does.
+      to = await this.entryOf(dst, opts.dereference === true)
     } catch (err) {
       if (!isMissingPath(err)) throw err
     }
@@ -747,9 +748,12 @@ class HostFs implements Record<
     for (const raw of Array.isArray(pattern) ? pattern : [pattern]) {
       const spelling = spelled(raw)
       if (spelling === null) continue
-      const absolute = posix.isAbsolute(spelling)
+      const spelt = posix.isAbsolute(spelling)
         ? posix.normalize(spelling)
         : posix.join(cwd, spelling)
+      // A trailing slash asks for directories, named without it.
+      const directories = spelt.length > 1 && spelt.endsWith('/')
+      const absolute = directories ? spelt.slice(0, -1) : spelt
       const shown = (path: string): string =>
         posix.isAbsolute(spelling) ? path : posix.relative(cwd, path) || '.'
       const parts = absolute.split('/').slice(1)
@@ -786,15 +790,17 @@ class HostFs implements Record<
       for (let next = pending.shift(); next !== undefined; next = pending.shift()) {
         const [path, relative, level, entry] = next
         const named = shown(path)
-        if (relative !== '' && skipped(named, entry)) continue
+        // An excluded name is left out with all under it, the base too.
+        if (skipped(named, entry)) continue
+        const isDirectory = (entry as { isDirectory(): boolean }).isDirectory()
         if (
           (magic === -1 ? relative === '' : posix.matchesGlob(relative, rest)) &&
+          (!directories || isDirectory) &&
           !seen.has(named)
         ) {
           seen.add(named)
           yield typed ? entry : named
         }
-        const isDirectory = (entry as { isDirectory(): boolean }).isDirectory()
         if (magic === -1 || !isDirectory || level >= depth) continue
         const children = (await routed.readdir(path, { withFileTypes: true })) as unknown as {
           name: string
