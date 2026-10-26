@@ -18,6 +18,7 @@ import { operandExitCode } from '../commands/spec/usage.ts'
 import { asyncContextIsolatesTasks } from '../utils/async_context.ts'
 import {
   type Caller,
+  callerSignal,
   currentCaller,
   explaining,
   lineRunning,
@@ -57,7 +58,7 @@ import {
   type SessionResultContext,
   type VfsExplanation,
 } from './types.ts'
-import { makeAbortError } from '../utils/abort.ts'
+import { abortable, hasAborted, makeAbortError } from '../utils/abort.ts'
 import type { VfsCall } from '../vfs/types.ts'
 import type { RouteContext } from './types.ts'
 import type { SessionState } from '../workspace/session/session.ts'
@@ -121,10 +122,13 @@ export async function renderCommandDeny(
  * command touches a file, so each line is the one GNU prints when that
  * operand's step is refused: cp opens a source file for reading, reads a
  * source directory and creates each copy, and mv moves each source onto its
- * target. A target given by `-t`, after more than one source or that is a
- * directory takes each source by its base name, unless `-T`. A source named `.` or `..`, or a link cp copies as a link,
- * keeps `renderDeny`'s line: GNU's there depends on what the directory or
- * the link holds.
+ * target, or swaps the two under `--exchange`. A target given by `-t`, after
+ * more than one source or that is a directory takes each source by its base
+ * name, unless `-T`. A source named `.` or `..`, or a link cp copies as a
+ * link, keeps `renderDeny`'s line: GNU's there depends on what the directory
+ * or the link holds. A stat still waiting when the line stops ends the
+ * wording with the line's abort, so a cancel neither waits on it nor starts
+ * another stat.
  */
 async function transferLines(
   subject: string,
@@ -177,6 +181,7 @@ async function transferLines(
     subject === 'cp' ? flags.typedOrder('dereference', 'no_dereference', 'H', 'd', 'archive') : []
   const last = typed[typed.length - 1]
   const follows = last !== undefined ? last === 'dereference' || last === 'H' : !recursive
+  const exchange = subject === 'mv' && flags.asBool('exchange')
   const lines: string[] = []
   for (const src of refused) {
     const shown = src.rawPath || src.virtual
@@ -184,7 +189,9 @@ async function transferLines(
     const base = trimmed.slice(trimmed.lastIndexOf('/') + 1)
     if (base === '.' || base === '..') return null
     let line: string
-    if (subject === 'mv') {
+    if (exchange) {
+      line = `cannot exchange '${shown}' and '${landing(shown)}'`
+    } else if (subject === 'mv') {
       line = `cannot move '${shown}' to '${landing(shown)}'`
     } else if (!follows && (await fileType(ctx, src, true)) === FileType.SYMLINK) {
       return null
@@ -213,9 +220,11 @@ async function fileType(
   nofollow = false,
 ): Promise<FileType | null> {
   if (ctx.vfs === undefined) return null
+  const signal = callerSignal()
   try {
-    return (await ctx.vfs.stat(operand, undefined, { nofollow })).type
+    return (await abortable(ctx.vfs.stat(operand, undefined, { nofollow }), signal)).type
   } catch (err) {
+    if (hasAborted(signal)) throw err
     logger.debug?.(`no stat for refused operand ${operand.virtual}: ${String(err)}`)
     return null
   }

@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 import errno
 
 import pytest
@@ -43,7 +44,15 @@ from mirage.policy import (
 )
 from mirage.policy.mixin import SessionScopedMixin
 from mirage.policy.types import RouteContext, SessionContext
-from mirage.types import Limit, MountMode, PathSpec, Producer, Refusal
+from mirage.types import (
+    FileStat,
+    Limit,
+    MountMode,
+    PathSpec,
+    Producer,
+    Refusal,
+)
+from mirage.utils.abort import MirageAbortError
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace.dispatcher.constants import CALLS
 from mirage.workspace.mount import MountRegistry
@@ -223,6 +232,20 @@ SEALED_TRANSFERS = (
         "mv: cannot move '/data/sec/k' to '/data/out/k': Permission denied\n",
     ),
     (
+        "mv --exchange -T /data/sec/k /data/b",
+        "mv: cannot exchange '/data/sec/k' and '/data/b': Permission denied\n",
+    ),
+    (
+        "mv --exchange /data/open /data/sec/sub",
+        "mv: cannot exchange '/data/open' and '/data/sec/sub/open': "
+        "Permission denied\n",
+    ),
+    (
+        "mv --exchange -t /data/sec/sub /data/open",
+        "mv: cannot exchange '/data/open' and '/data/sec/sub/open': "
+        "Permission denied\n",
+    ),
+    (
         "cp /data/sec/lnk /data/out/l",
         "cp: cannot open '/data/sec/lnk' for reading: Permission denied\n",
     ),
@@ -283,6 +306,56 @@ async def test_a_refused_cp_or_mv_operand_reads_as_gnu_reports_it():
             assert (run.exit_code, await run.stderr_str()) == (1, stderr), line
             assert (judged.exit_code, judged.stderr) == (1, stderr), line
     finally:
+        await ws.close()
+
+
+class StallingStat(RAMVFS):
+    """A RAM mount whose stat of ``slow`` waits, once armed, until opened,
+    counting the stats that start once ``cancelled`` is set."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.armed = False
+        self.cancelled = False
+        self.late = 0
+        self.reached = asyncio.Event()
+        self.gate = asyncio.Event()
+
+    async def stat(self, path: PathSpec) -> FileStat:
+        if self.cancelled:
+            self.late += 1
+        if self.armed and path.virtual.endswith("/slow"):
+            self.reached.set()
+            await self.gate.wait()
+        return await super().stat(path)
+
+
+@pytest.mark.asyncio
+async def test_a_cancel_stops_a_refused_cp_whose_operand_stat_stalls():
+    # The wording's stats run while the line is judged; a cancel ends
+    # one still waiting there, and no other operand is read.
+    ram = StallingStat()
+    ws = Workspace({"/data/": ram}, mode=MountMode.WRITE)
+    rule = {"reason": "sealed", "paths": ["/data/sec/*"]}
+    ws.create_session("agent", profile={"commands": {"deny": [rule]}})
+    try:
+        await ws.shell(
+            "mkdir -p /data/sec/sub; echo s > /data/slow; echo b > /data/b"
+        )
+        ram.armed = True
+        line = asyncio.create_task(
+            ws.shell(
+                "cp -r /data/slow /data/b /data/sec/sub", session_id="agent"
+            )
+        )
+        await asyncio.wait_for(ram.reached.wait(), 5)
+        ram.cancelled = True
+        assert await asyncio.wait_for(ws.cancel("agent"), 2) == 1
+        with pytest.raises(MirageAbortError):
+            await line
+        assert ram.late == 0
+    finally:
+        ram.gate.set()
         await ws.close()
 
 
