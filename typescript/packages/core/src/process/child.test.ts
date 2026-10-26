@@ -3,7 +3,7 @@ import { Channel } from '../shell/console/index.ts'
 import { PathSpec } from '../types.ts'
 import { ChildProcess } from './child.ts'
 import { ProcessInput, ProcessOutput } from './stdio.ts'
-import { ProcessSupervisor } from './supervisor.ts'
+import { ProcessTable } from './table.ts'
 import type { ProcessRunner } from './types.ts'
 
 function spawnChild(
@@ -12,7 +12,7 @@ function spawnChild(
   run: (signal: AbortSignal) => ReturnType<ProcessRunner>,
 ): ChildProcess {
   const abort = new AbortController()
-  const process = new ProcessSupervisor().start({
+  const process = new ProcessTable().start({
     sessionId: 'a',
     command: 'child',
     cwd: PathSpec.fromStrPath('/'),

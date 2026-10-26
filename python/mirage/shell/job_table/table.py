@@ -15,7 +15,7 @@
 import asyncio
 import logging
 
-from mirage.process.supervisor import ProcessSupervisor
+from mirage.process.table import ProcessTable
 from mirage.shell.bytes import encode_text
 from mirage.shell.console import (
     KILLED_OUTCOME,
@@ -189,7 +189,7 @@ class JobTable:
     def __init__(
         self,
         console_factory: ConsoleFactory | None = None,
-        processes: ProcessSupervisor | None = None,
+        processes: ProcessTable | None = None,
         parent: "JobTable | None" = None,
         clock: Clock | None = None,
     ) -> None:
@@ -209,7 +209,7 @@ class JobTable:
                 client per job) is invisible to the embedder; a console
                 still outlives its table entry, so ``reap`` never closes
                 one.
-            processes (ProcessSupervisor | None): where the jobs run.
+            processes (ProcessTable | None): where the jobs run.
             parent (JobTable | None): the table of the shell a ``$( )``
                 is part of, whose jobs ``jobs`` still lists there, as
                 bash's does; its ``wait`` and ``kill`` reach none of them.
@@ -218,7 +218,7 @@ class JobTable:
         """
         self.parent = parent
         self.clock: Clock = clock if clock is not None else SystemClock()
-        self.processes = processes or ProcessSupervisor()
+        self.processes = processes or ProcessTable()
         self._jobs: dict[str, dict[int, Job]] = {}
         self._next_ids: dict[str, int] = {}
         self._console_factory = console_factory

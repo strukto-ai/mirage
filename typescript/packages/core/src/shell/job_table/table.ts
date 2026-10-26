@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { ProcessSupervisor } from '../../process/supervisor.ts'
+import { ProcessTable } from '../../process/table.ts'
 import { PathSpec } from '../../types.ts'
 import { Channel, JobConsole, KILLED_OUTCOME, exitOutcome } from '../console/index.ts'
 import { KILLED_EXIT_CODE, STOP_WAIT_SECONDS } from './constants.ts'
@@ -151,7 +151,7 @@ export class JobTable {
    */
   constructor(
     consoleFactory: ConsoleFactory | null = null,
-    readonly processes = new ProcessSupervisor(),
+    readonly processes = new ProcessTable(),
     // The table of the shell a `$( )` is part of, whose jobs `jobs` still
     // lists there, as bash's does; its `wait` and `kill` reach none of them.
     readonly parent: JobTable | null = null,
