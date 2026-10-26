@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import os
 import shutil
 
 import aiofiles.os
@@ -33,12 +34,12 @@ async def copy(
         await asyncio.to_thread(shutil.copyfile, s, d)
         await asyncio.to_thread(shutil.copystat, s, d)
     except OSError as exc:
-        # copyfile reports ENOENT both for a missing source and for a missing
-        # destination parent, so the operand to blame is only knowable
-        # after the failure: probe the source to tell them apart. Either
-        # way the host path never reaches the message.
+        # copyfile reports ENOENT and EACCES for either operand, so the
+        # operand to blame is only knowable after the failure: probe whether
+        # the source reads to tell them apart. Either way the host path
+        # never reaches the message.
         blame_src = isinstance(
-            exc, FileNotFoundError
-        ) and not await aiofiles.os.path.exists(s)
+            exc, (FileNotFoundError, PermissionError)
+        ) and not await aiofiles.os.access(s, os.R_OK)
         spec = src_spec if blame_src else dst_spec
         raise disk_error(exc, spec.virtual) from exc

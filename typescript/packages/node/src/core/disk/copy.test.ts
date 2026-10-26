@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { readFile, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { DiskAccessor } from '../../accessor/disk.ts'
@@ -52,6 +52,33 @@ describe('core/disk/copy', () => {
       code: 'ENOENT',
       virtualPath: '/nope',
     })
+  })
+
+  it.skipIf(process.getuid?.() === 0)('blames the source when it is unreadable', async () => {
+    await writeFile(join(root, 'src'), 'X')
+    await chmod(join(root, 'src'), 0)
+    try {
+      await expect(copy(accessor, spec('/src'), spec('/dst'))).rejects.toMatchObject({
+        code: 'EACCES',
+        virtualPath: '/src',
+      })
+    } finally {
+      await chmod(join(root, 'src'), 0o644)
+    }
+  })
+
+  it.skipIf(process.getuid?.() === 0)('blames the destination when it is unwritable', async () => {
+    await writeFile(join(root, 'src'), 'X')
+    await mkdir(join(root, 'ro'))
+    await chmod(join(root, 'ro'), 0o555)
+    try {
+      await expect(copy(accessor, spec('/src'), spec('/ro/dst'))).rejects.toMatchObject({
+        code: 'EACCES',
+        virtualPath: '/ro/dst',
+      })
+    } finally {
+      await chmod(join(root, 'ro'), 0o755)
+    }
   })
 
   it('never leaks the host path for either operand', async () => {
