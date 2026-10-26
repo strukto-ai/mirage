@@ -2696,9 +2696,24 @@ class Ssh:
             env={**(self.env() or os.environ), "TERM": "xterm"},
         )
         assert process.stdin is not None and process.stdout is not None
-        process.stdin.write(f"{command}\n".encode())
+        # The line prints a marker its echoed text does not contain, and
+        # the interrupt waits for it: sent on a timer, a Ctrl-C a slow
+        # login has not yet read lands before the line starts, and the
+        # line then runs to its end.
+        process.stdin.write(
+            f"printf '%s-%s\\n' line started; {command}\n".encode()
+        )
         await process.stdin.drain()
-        await asyncio.sleep(1)
+        seen = b""
+        try:
+            while b"line-started" not in seen:
+                chunk = await asyncio.wait_for(process.stdout.read(4096), 20)
+                if not chunk:
+                    break
+                seen += chunk
+        except TimeoutError:
+            process.kill()
+            return "the line never started"
         process.stdin.write(b"\x03")
         await process.stdin.drain()
         await asyncio.sleep(0.5)
@@ -2709,7 +2724,7 @@ class Ssh:
         except TimeoutError:
             process.kill()
             return "the shell never came back"
-        text = out.decode(errors="replace")
+        text = (seen + out).decode(errors="replace")
         return (
             "canceled"
             if "status=130" in text
