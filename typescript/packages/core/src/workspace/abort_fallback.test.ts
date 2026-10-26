@@ -129,3 +129,32 @@ describe('a nested line on the fallback storage', () => {
     },
   )
 })
+
+describe('a per-call line on the fallback storage', () => {
+  it('keeps its status when a line waiting on the session is aborted', async () => {
+    // The waiting line's frame is the only live one on the session when
+    // the per-call line stamps; borrowing its identity would let its
+    // abort put back the status it found over the per-call line's.
+    const ws = new Workspace({})
+    const abort = new AbortController()
+    const [reading, read] = gate()
+    const [held, release] = gate()
+    async function* stdin(): AsyncGenerator<Uint8Array> {
+      read()
+      await held
+      yield new TextEncoder().encode('go\n')
+    }
+    try {
+      const waiting = ws.shell('read x', { stdin: stdin(), signal: abort.signal })
+      const aborted = expect(waiting).rejects.toMatchObject({ name: 'AbortError' })
+      await reading
+      await ws.shell('false', { cwd: '/' })
+      abort.abort()
+      await aborted
+      expect(ws.sessionManager.get(ws.sessionManager.defaultId).lastExitCode).toBe(1)
+    } finally {
+      release()
+      await ws.close()
+    }
+  })
+})

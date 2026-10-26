@@ -151,6 +151,7 @@ import { resolveControlStores } from './build.ts'
 import { executeLine, type ExecuteEnv } from './execute.ts'
 import { forkForCall } from './utils.ts'
 import { recordStatus } from '../executor/statement.ts'
+import { newStatusWriter, runWithLineAbort } from '../abort.ts'
 import { fillEnv } from './fill.ts'
 import { closeWorkspace } from './lifecycle.ts'
 import { WorkspaceMeta } from './meta.ts'
@@ -1980,7 +1981,14 @@ export class Workspace {
     } finally {
       await session.tty.attach(source.tty.jobs)
     }
-    recordStatus(source, result.exitCode)
+    // Stamped in a frame of its own, so the status is never credited to a
+    // line still waiting on the session: where tasks share one frame stack
+    // (a browser) that line's frame is live here too, and its abort would
+    // put back what it found over this status.
+    await runWithLineAbort(options.signal, [source], newStatusWriter(), () => {
+      recordStatus(source, result.exitCode)
+      return Promise.resolve()
+    })
     return result
   }
 
