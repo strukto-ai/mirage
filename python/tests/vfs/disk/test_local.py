@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -56,6 +57,9 @@ async def test_rm(ws):
     assert result.exit_code != 0
 
 
+@pytest.mark.skipif(
+    os.geteuid() == 0, reason="root ignores the permission bits under test"
+)
 @pytest.mark.asyncio
 async def test_cp_names_the_operand_it_may_not_use(ws, tmp_path):
     # GNU (coreutils 9.7) opens the source for reading, then creates the

@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import os
+
 import pytest
 
 from mirage.accessor.disk import DiskAccessor
@@ -73,6 +75,9 @@ async def test_copy_blames_the_source_when_it_is_the_missing_operand(accessor):
     assert excinfo.value.filename == "/nope"
 
 
+@pytest.mark.skipif(
+    os.geteuid() == 0, reason="root ignores the permission bits under test"
+)
 @pytest.mark.asyncio
 async def test_copy_blames_the_source_when_it_is_unreadable(accessor):
     (accessor.root / "src").chmod(0)
@@ -88,6 +93,9 @@ async def test_copy_blames_the_source_when_it_is_unreadable(accessor):
     assert excinfo.value.filename == "/src"
 
 
+@pytest.mark.skipif(
+    os.geteuid() == 0, reason="root ignores the permission bits under test"
+)
 @pytest.mark.asyncio
 async def test_copy_blames_the_destination_when_it_is_unwritable(accessor):
     (accessor.root / "ro").mkdir()

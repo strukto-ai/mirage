@@ -54,7 +54,7 @@ describe('core/disk/copy', () => {
     })
   })
 
-  it('blames the source when it is unreadable', async () => {
+  it.skipIf(process.getuid?.() === 0)('blames the source when it is unreadable', async () => {
     await writeFile(join(root, 'src'), 'X')
     await chmod(join(root, 'src'), 0)
     try {
@@ -67,7 +67,7 @@ describe('core/disk/copy', () => {
     }
   })
 
-  it('blames the destination when it is unwritable', async () => {
+  it.skipIf(process.getuid?.() === 0)('blames the destination when it is unwritable', async () => {
     await writeFile(join(root, 'src'), 'X')
     await mkdir(join(root, 'ro'))
     await chmod(join(root, 'ro'), 0o555)
