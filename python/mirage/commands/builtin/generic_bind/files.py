@@ -320,7 +320,10 @@ def dispatched_read_tree(
     the subtree either: the serving backend's answer holds keys a mount
     there shadows, and lacks the mount's own. A subtree read stops at a
     link at the final name (ENOTDIR), so a walk that follows links
-    lists them directory by directory instead.
+    lists them directory by directory instead. One level (``level=True``)
+    is the listing a ``readdir`` answers with each child's stat, which
+    every mount that keeps listings answers, asked only where no mount
+    sits below, whose root the listing would name.
 
     Args:
         dispatch (DispatchFn): the walk's dispatcher.
@@ -335,7 +338,7 @@ def dispatched_read_tree(
     """
 
     async def read_tree(
-        path: PathSpec, limit: int | None = None
+        path: PathSpec, limit: int | None = None, level: bool = False
     ) -> dict[str, FileStat] | None:
         try:
             at = path.virtual if landing is None else landing(path.virtual)
@@ -347,10 +350,11 @@ def dispatched_read_tree(
         if (
             mounts is None
             or (
-                mounts.answers is not None
+                not level
+                and mounts.answers is not None
                 and not mounts.answers(at, "read_tree")
             )
-            or (crossing and bool(mounts.descendants(at)))
+            or ((crossing or level) and bool(mounts.descendants(at)))
         ):
             return None
         return cast(
@@ -361,6 +365,7 @@ def dispatched_read_tree(
                 path,
                 nofollow=True,
                 **({} if limit is None else {"limit": limit}),
+                **({"level": True} if level else {}),
             ),
         )
 

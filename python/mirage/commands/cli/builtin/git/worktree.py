@@ -153,13 +153,19 @@ class Scanner:
             raise WorkTreeLimitError(limit)
         self._counted[root] = self._counted.get(root, 0) + 1
 
-    async def _subtree(self, path: PathSpec) -> dict[str, FileStat] | None:
+    async def _subtree(
+        self, path: PathSpec, level: bool = False
+    ) -> dict[str, FileStat] | None:
         """A directory's whole subtree in one read, given up once it holds
-        more entries than files the walk may still count on its mount.
+        more entries than files the walk may still count on its mount;
+        with ``level``, its one level.
 
         Args:
             path (PathSpec): the directory.
+            level (bool): read the directory's children alone.
         """
+        if level:
+            return await self._read_tree(path, level=True)
         if self._mounts is None or self._mounts.walk_limit is None:
             return await self._read_tree(path)
         limit = self._mounts.walk_limit(path.virtual)

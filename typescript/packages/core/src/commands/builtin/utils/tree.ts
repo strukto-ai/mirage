@@ -24,7 +24,11 @@ import { WalkLimitError, UsageError } from '../../errors.ts'
 // The conditions under which a guard's path reaches no directory to walk.
 const NO_DIRECTORY: ReadonlySet<FsCondition> = new Set(['ENOENT', 'ENOTDIR', 'ELOOP'])
 
-export type ReadTree = (path: PathSpec, limit?: number) => Promise<Map<string, FileStat> | null>
+export type ReadTree = (
+  path: PathSpec,
+  limit?: number,
+  level?: boolean,
+) => Promise<Map<string, FileStat> | null>
 
 export type WalkCall<R> = (path: PathSpec, nofollow?: boolean, limit?: number) => Promise<R>
 
@@ -191,6 +195,28 @@ function answerable(path: PathSpec): boolean {
 }
 
 /**
+ * One level of `path`: each child's stat by its name, and the listing, in the
+ * order a whole read lists it; null where the read gives way to the walk's own
+ * listing. Mirrors Python's `_level`.
+ */
+async function level(
+  readTree: ReadTree,
+  path: PathSpec,
+  limit: number | undefined,
+): Promise<[Map<string, FileStat>, string[]] | null> {
+  let found: Map<string, FileStat> | null
+  try {
+    found = await readTree(path, limit, true)
+  } catch (err) {
+    if ((err as { code?: unknown }).code !== 'ENOTSUP' && !isEnotdir(err)) throw err
+    return null
+  }
+  if (found === null) return null
+  const copy = new Map(found)
+  return [copy, listings(copy).get('') ?? []]
+}
+
+/**
  * A walk's `readdir` and `stat`, answered from the mount's `readTree`.
  *
  * The first `readdir` of a directory no answer covers asks `readTree` for
@@ -204,15 +230,23 @@ function answerable(path: PathSpec): boolean {
  * `readdir`, which follows it as opendir(3) does and meets whatever refuses
  * the directory it leads to. Both take the path first and pass the rest
  * through; a listing's `limit` reaches `readTree` too, which may then answer
- * null for a subtree past it. Mirrors Python's `tree_walk`.
+ * null for a subtree past it.
+ *
+ * A directory no whole answer covers is read one level at a time
+ * (`readTree(path, limit, true)`): its listing and each child's stat in one
+ * call, so a walk the mount reads no subtree for, or one a depth bounds,
+ * stats no child on its own either. `whole` false reads levels only, for a
+ * walk a depth bounds or a single listing. Mirrors Python's `tree_walk`.
  */
 export function treeWalk<D, S>(
   readTree: ReadTree | undefined,
   readdir: WalkCall<D>,
   stat: WalkCall<S>,
+  whole = true,
 ): [WalkCall<D>, WalkCall<S>] {
   if (readTree === undefined) return [readdir, stat]
   const roots = new Map<string, [Map<string, FileStat>, Map<string, string[]>]>()
+  const levels = new Map<string, [Map<string, FileStat>, string[]] | null>()
   const asked = new Set<string>()
   const covering = (virtual: string): [string, string] | null => {
     for (const root of roots.keys()) {
@@ -225,7 +259,7 @@ export function treeWalk<D, S>(
   const treeReaddir: WalkCall<D> = async (path, nofollow, limit) => {
     const virtual = path.virtual.replace(/\/+$/, '') || '/'
     let hit = answerable(path) ? covering(virtual) : null
-    if (hit === null && !asked.has(virtual) && path.pattern === null) {
+    if (hit === null && whole && !asked.has(virtual) && path.pattern === null) {
       asked.add(virtual)
       let found: Map<string, FileStat> | null
       try {
@@ -247,6 +281,13 @@ export function treeWalk<D, S>(
         const base = root.replace(/\/+$/, '') + '/'
         return listing.map((name) => base + name) as D
       }
+    } else if (answerable(path) && path.pattern === null) {
+      if (!levels.has(virtual)) levels.set(virtual, await level(readTree, path, limit))
+      const answer = levels.get(virtual)
+      if (answer != null) {
+        const base = virtual.replace(/\/+$/, '') + '/'
+        return answer[1].map((name) => base + name) as D
+      }
     }
     return readdir(path, nofollow, limit)
   }
@@ -256,6 +297,11 @@ export function treeWalk<D, S>(
     if (hit !== null && hit[1] !== '') {
       const found = roots.get(hit[0])?.[0].get(hit[1])
       if (found !== undefined) return found as S
+    }
+    if (answerable(path)) {
+      const cut = virtual.lastIndexOf('/')
+      const row = levels.get(virtual.slice(0, cut) || '/')?.[0].get(virtual.slice(cut + 1))
+      if (row !== undefined) return row as S
     }
     return stat(path, nofollow)
   }

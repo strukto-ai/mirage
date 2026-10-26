@@ -103,9 +103,10 @@ interface Walk {
 
 function treeOf(files: CommandFiles, listing: (path: PathSpec) => Promise<string[]>): Walk {
   const [readdir, stat] = treeWalk<string[], FileStat>(
-    files.answers('read_tree') ? files.readTree : undefined,
+    files.readTree,
     listing,
     files.stat,
+    files.answers('read_tree'),
   )
   return { readdir, stat }
 }

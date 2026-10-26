@@ -94,7 +94,9 @@ function filesOver(vfs: RAMVFS, links: NamespaceLinks): Files {
       const data = await vfs.read(path, {})
       return [kwargs.stream === true ? [data] : data, new IOResult()]
     }
-    if (op === 'before_full_walk' || op === 'read_many') return [null, new IOResult()]
+    if (op === 'before_full_walk' || op === 'read_many' || op === 'read_tree') {
+      return [null, new IOResult()]
+    }
     if (op === 'write') {
       await vfs.write(path, await materialize(args[0] as ByteSource))
       return [null, new IOResult()]

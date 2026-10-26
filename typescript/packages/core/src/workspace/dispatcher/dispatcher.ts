@@ -480,6 +480,30 @@ async function sized(mount: MountEntry, path: PathSpec, row: unknown): Promise<u
   return size === null ? row : row.with({ size })
 }
 
+/**
+ * A subtree read with each row sized as `sized` sizes a stat, so a walk
+ * answered from it reads the sizes its stats would. Mirrors Python's
+ * `_sized_tree`.
+ */
+async function sizedTree(
+  mount: MountEntry,
+  path: PathSpec,
+  tree: Map<string, FileStat>,
+): Promise<Map<string, FileStat>> {
+  if (mount.cacheManager === null) return tree
+  const base = rstripSlash(path.virtual)
+  const out = new Map<string, FileStat>()
+  for (const [rel, row] of tree) {
+    out.set(
+      rel,
+      row.type === FileType.FILE && row.size === null
+        ? ((await sized(mount, PathSpec.fromStrPath(`${base}/${rel}`), row)) as FileStat)
+        : row,
+    )
+  }
+  return out
+}
+
 /** The dispatcher's link follow of one path, the final name too (`last`) or
  * only the names above it, with a loop thrown as ELOOP rather than the
  * namespace's CycleError. */
@@ -2338,6 +2362,9 @@ export class Dispatcher {
           )
         }
         if (name === 'stat') result = await sized(mount, p, result)
+        else if (name === 'read_tree' && result instanceof Map) {
+          result = await sizedTree(mount, p, result as Map<string, FileStat>)
+        }
       }
     } catch (err) {
       const code = (err as { code?: string }).code

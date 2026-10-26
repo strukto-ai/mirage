@@ -55,6 +55,7 @@ function makeDispatch(calls: Calls, roots: ReadonlySet<string>): DispatchFn {
   return (op: string, path: PathSpec) => {
     const k = rstripSlash(path.virtual) === '' ? '/' : rstripSlash(path.virtual)
     const isDir = k in TREE
+    if (op === 'read_tree') return Promise.resolve([null, new IOResult()])
     if (op === 'readdir') {
       calls.readdir.push(k)
       if (!isDir) return Promise.reject(enotdir(k))

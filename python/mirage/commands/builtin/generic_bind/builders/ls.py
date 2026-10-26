@@ -17,7 +17,7 @@ from mirage.accessor.base import Accessor
 from mirage.commands.builtin.generic.ls import ls_generic
 from mirage.commands.builtin.generic_bind.adapter import GenericCommand
 from mirage.commands.builtin.generic_bind.files import command_files
-from mirage.commands.builtin.utils.tree import WalkCall, tree_walk
+from mirage.commands.builtin.utils.tree import tree_walk
 from mirage.commands.config import Context
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
@@ -42,15 +42,14 @@ async def ls(
             )
         ]
     resolved = await files.resolve_glob(paths)
-    readdir: WalkCall = files.readdir
-    stat: WalkCall = files.stat
-    # Only -R walks; a plain listing reads one directory.
-    if FlagView(ctx.flags, spec=SPECS["ls"]).as_bool("recursive"):
-        readdir, stat = tree_walk(
-            (files.read_tree if files.answers("read_tree") else None),
-            readdir,
-            stat,
-        )
+    # Only -R reads whole subtrees; a plain listing reads one level.
+    readdir, stat = tree_walk(
+        files.read_tree,
+        files.readdir,
+        files.stat,
+        FlagView(ctx.flags, spec=SPECS["ls"]).as_bool("recursive")
+        and files.answers("read_tree"),
+    )
     return await ls_generic(resolved, list(texts), ctx, readdir, stat)
 
 

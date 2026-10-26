@@ -106,9 +106,10 @@ def walk_of(
         command (str): tar or zip.
     """
     readdir, stat = tree_walk(
-        files.read_tree if files.answers("read_tree") else None,
+        files.read_tree,
         files.readdir,
         files.stat,
+        files.answers("read_tree"),
     )
     return partial(_walk_with, readdir, stat, dispatch, command)
 

@@ -37,15 +37,21 @@ function found(): Map<string, FileStat> {
 // Mirrors test_tree.py.
 class Mount {
   readonly asked: string[] = []
+  readonly levels: string[] = []
   readonly calls: string[] = []
   constructor(
     readonly answer: Map<string, FileStat> | null = null,
     readonly refuse?: (vfs: string, op: string, path: PathSpec) => Error,
+    readonly level: Map<string, FileStat> | null = null,
   ) {}
-  readTree = (path: PathSpec): Promise<Map<string, FileStat> | null> => {
-    this.asked.push(path.virtual)
+  readTree = (
+    path: PathSpec,
+    _limit?: number,
+    level = false,
+  ): Promise<Map<string, FileStat> | null> => {
+    ;(level ? this.levels : this.asked).push(path.virtual)
     if (this.refuse !== undefined) return Promise.reject(this.refuse('ram', 'read_tree', path))
-    return Promise.resolve(this.answer)
+    return Promise.resolve(level ? this.level : this.answer)
   }
   readdir = (path: PathSpec): Promise<string[]> => {
     this.calls.push(`readdir ${path.virtual}`)
@@ -125,6 +131,40 @@ describe('treeWalk', () => {
     for (let i = 0; i < 2; i++) await readdir(at('/m'))
     expect(mount.calls).toEqual(['readdir /m', 'readdir /m'])
     expect(mount.asked).toEqual(['/m'])
+  })
+
+  it("lists a level's directory and answers its children's stats", async () => {
+    const mount = new Mount(
+      null,
+      undefined,
+      new Map([
+        ['b.txt', new FileStat({ name: 'b.txt', type: FILE, size: 2 })],
+        ['e', new FileStat({ name: 'e', type: DIR })],
+        ['l/x', new FileStat({ name: 'x', type: FileType.SYMLINK })],
+      ]),
+    )
+    const [readdir, stat] = treeWalk<string[], FileStat>(
+      mount.readTree,
+      mount.readdir,
+      mount.stat,
+      false,
+    )
+    expect(await readdir(at('/m'))).toEqual(['/m/b.txt', '/m/e', '/m/l'])
+    expect((await stat(at('/m/b.txt'))).size).toBe(2)
+    expect((await stat(at('/m/l'))).type).toBe(DIR)
+    await readdir(at('/m/e'))
+    await stat(at('/m/l/x'))
+    expect(mount.asked).toEqual([])
+    expect(mount.levels).toEqual(['/m', '/m/e'])
+    expect(mount.calls).toEqual(['stat /m/l/x'])
+  })
+
+  it('asks a level that gives way once', async () => {
+    const mount = new Mount()
+    const [readdir] = treeWalk<string[], FileStat>(mount.readTree, mount.readdir, mount.stat, false)
+    for (let i = 0; i < 2; i++) await readdir(at('/m'))
+    expect(mount.levels).toEqual(['/m'])
+    expect(mount.calls).toEqual(['readdir /m', 'readdir /m'])
   })
 
   it("propagates a backend's own refusal", async () => {

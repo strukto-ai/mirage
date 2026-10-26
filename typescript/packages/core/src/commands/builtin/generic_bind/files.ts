@@ -254,7 +254,10 @@ export async function dispatchedCall(
  * (`crossing`) asks only where no mount sits below the subtree either: the
  * serving backend's answer holds keys a mount there shadows, and lacks the
  * mount's own. A subtree read stops at a link at the final name (ENOTDIR), so
- * a walk that follows links lists them directory by directory instead.
+ * a walk that follows links lists them directory by directory instead. One
+ * level (`level`) is the listing a `readdir` answers with each child's stat,
+ * which every mount that keeps listings answers, asked only where no mount
+ * sits below, whose root the listing would name.
  * `mounts` is the boundary view a walk that does not cross them sees
  * (`mountView(files)`), undefined to take no shortcut; `landing` where a path lands, every link above its
  * final name followed (`linkLocation`, `NamespaceLinks.followParent`), null
@@ -267,7 +270,7 @@ export function dispatchedReadTree(
   landing: ((virtual: string) => string) | null,
   crossing: boolean,
 ): ReadTree {
-  return async (path, limit) => {
+  return async (path, limit, level = false) => {
     let at: string
     try {
       at = landing === null ? path.virtual : landing(path.virtual)
@@ -278,13 +281,14 @@ export function dispatchedReadTree(
     }
     if (
       mounts === undefined ||
-      !mounts.answers(at, 'read_tree') ||
-      (crossing && mounts.descendants(at).length > 0)
+      (!level && !mounts.answers(at, 'read_tree')) ||
+      ((crossing || level) && mounts.descendants(at).length > 0)
     )
       return null
     return (await dispatchedCall(dispatch, 'read_tree', path, [], {
       nofollow: true,
       ...(limit === undefined ? {} : { limit }),
+      ...(level ? { level: true } : {}),
     })) as Map<string, FileStat> | null
   }
 }

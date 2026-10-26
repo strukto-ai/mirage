@@ -1259,6 +1259,37 @@ export class MountEntry {
     return keepListing(index, key, listed)
   }
 
+  /**
+   * One level of a subtree read: the directory's listing, as `readdir`
+   * answers it, each child keyed by its name with the row its `stat` answers
+   * from that listing. Null where a stat does not come from the listing: a
+   * mount that keeps none, one under `read: fresh`, whose stats check the
+   * backend, and a child whose row a stat would finish (`whole`). Mirrors
+   * Python's `_level`.
+   */
+  private async level(
+    virtual: string,
+    limit: number | undefined,
+    access?: SessionAccess,
+  ): Promise<Map<string, FileStat> | null> {
+    if (!this.lists || this.read.policy === ReadPolicy.FRESH) return null
+    const names = (await this.call(
+      'readdir',
+      virtual,
+      [],
+      limit === undefined ? {} : { limit },
+      access,
+    )) as string[]
+    const rows = await this.index.getMany(names)
+    const found = new Map<string, FileStat>()
+    for (const child of names) {
+      const row = this.whole(rows.get(child) ?? null)
+      if (row === null) return null
+      found.set(child.slice(child.lastIndexOf('/') + 1), row)
+    }
+    return found
+  }
+
   /** A stat of `path` on this mount, as `callKeyed` answers one. Mirrors Python's `_stat`. */
   private async statAt(index: IndexCacheStore, path: PathSpec): Promise<FileStat> {
     const stored = (await this.stored('stat', path, index)) as FileStat | null
@@ -1413,7 +1444,9 @@ export class MountEntry {
    * null. A read resolves its renderer by `kwargs.filetype` when the caller
    * names one (null asks for the stored bytes) and by the path's extension
    * otherwise. A VFS with no `read` of its own (gdocs, gsheets, gslides)
-   * stores the rendering, so its stored bytes are the renderer's.
+   * stores the rendering, so its stored bytes are the renderer's. A
+   * `read_tree` of one level (`level: true`) is the mount's own listing with
+   * each child's row (`level`).
    */
   async callKeyed(
     name: string,
@@ -1422,6 +1455,9 @@ export class MountEntry {
     kwargs: OpKwargs = {},
     access?: SessionAccess,
   ): Promise<unknown> {
+    if (name === 'read_tree' && kwargs.level === true) {
+      return this.level(scope.virtual, kwargs.limit as number | undefined, access)
+    }
     const named = kwargs.filetype === undefined ? getExtension(scope.virtual) : kwargs.filetype
     const filetype =
       named === null && !this.vfs.supports('read') ? getExtension(scope.virtual) : named
