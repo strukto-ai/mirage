@@ -139,7 +139,7 @@ pub(super) fn lower(data: &[u8], bodies: &[Body]) -> Lowered {
     }
 }
 
-fn newlines(text: &[u8]) -> usize {
+pub(super) fn newlines(text: &[u8]) -> usize {
     memchr::memchr_iter(b'\n', text).count()
 }
 
@@ -329,10 +329,10 @@ impl Tree {
     /// A node's text in the line as typed: the heredoc bodies of the
     /// heredocs it holds included where they stand, not those it reads
     /// after it.
-    pub fn source_text(&self, index: usize) -> &[u8] {
+    pub fn source_text(&self, index: usize) -> std::borrow::Cow<'_, [u8]> {
         let node = &self.nodes[index];
         if node.parent == u32::MAX {
-            return &self.original;
+            return std::borrow::Cow::Borrowed(&self.original);
         }
         let (start, end) = (node.start as usize, node.end as usize);
         if !self
@@ -340,25 +340,77 @@ impl Tree {
             .iter()
             .any(|heredoc| start <= heredoc.at && heredoc.at < end)
         {
-            return &self.source[start..end];
+            return std::borrow::Cow::Borrowed(&self.source[start..end]);
         }
         if end <= start {
-            return &[];
+            return std::borrow::Cow::Borrowed(&[]);
         }
         let to = (self.offsets[end - 1] + 1).min(self.original.len());
-        &self.original[self.offsets[start].min(to)..to]
+        let from = self.offsets[start].min(to);
+        std::borrow::Cow::Owned(self.typed(start, end, from, to, Vec::new()))
+    }
+
+    /// The line as typed from `from` to `to` with `edits` (start, end,
+    /// replacement; `from`-based and sorted) made, less the line
+    /// continuations the parser dropped: those no byte of nodes `start` to
+    /// `end` came from, outside the heredocs it folded.
+    fn typed(
+        &self,
+        start: usize,
+        end: usize,
+        from: usize,
+        to: usize,
+        edits: Vec<(usize, usize, Vec<u8>)>,
+    ) -> Vec<u8> {
+        let mut kept = vec![false; to - from];
+        let mut keep = |a: usize, b: usize| {
+            for at in a.max(from)..b.min(to) {
+                kept[at - from] = true;
+            }
+        };
+        for &at in &self.offsets[start..end] {
+            keep(at, at + 1);
+        }
+        for heredoc in &self.heredocs {
+            keep(heredoc.operator, heredoc.word_end);
+            keep(heredoc.body_start, heredoc.end);
+        }
+        let typed = &self.original[from..to];
+        let mut out = Vec::with_capacity(typed.len());
+        let mut edits = edits.into_iter().peekable();
+        let mut at = 0;
+        while at <= typed.len() {
+            if let Some((_, edit_end, replacement)) = edits.next_if(|edit| edit.0 == at) {
+                out.extend(replacement);
+                at = at.max(edit_end);
+                continue;
+            }
+            if at == typed.len() {
+                break;
+            }
+            if typed[at] == b'\\' && typed.get(at + 1) == Some(&b'\n') && !kept[at] && !kept[at + 1]
+            {
+                at += 2;
+                continue;
+            }
+            out.push(typed[at]);
+            at += 1;
+        }
+        out
     }
 
     /// A node's text with each heredoc body the line reads after a
     /// substitution in it moved inside that substitution, just before its
     /// `)`, and out of where it stood: the same command to bash, and one
     /// that carries no heredoc out of itself. A body the input ended
-    /// inside gets its delimiter on a line of its own. Empty when no
-    /// substitution in the node carries one out.
+    /// inside gets its delimiter on a line of its own. Empty for a node
+    /// that is no substitution, or one that carries none out: only a
+    /// substitution's text is read as a line of its own.
     pub fn inlined(&self, index: usize) -> Vec<u8> {
         let node = &self.nodes[index];
         let (start, end) = (node.start as usize, node.end as usize);
-        if node.parent == u32::MAX || end <= start {
+        let kind = super::tree::KINDS[usize::from(node.kind)].0;
+        if !matches!(kind, "command_substitution" | "process_substitution") || end <= start {
             return Vec::new();
         }
         let (first, last) = (self.offsets[start], self.offsets[end - 1]);
@@ -399,12 +451,14 @@ impl Tree {
             }
             edits.push((close - first, close - first, bodies));
         }
-        let mut out = self.source_text(index).to_vec();
         edits.sort_by_key(|edit| (edit.0, edit.1));
-        for (start, end, replacement) in edits.into_iter().rev() {
-            out.splice(start..end, replacement);
-        }
-        out
+        self.typed(
+            start,
+            end,
+            first,
+            (last + 1).min(self.original.len()),
+            edits,
+        )
     }
 
     /// What bash warns of while it reads the line's heredocs, in the order

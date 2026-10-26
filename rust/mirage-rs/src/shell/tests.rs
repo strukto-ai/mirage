@@ -616,3 +616,28 @@ fn a_line_nested_past_the_reader_is_refused_at_the_next_opener() {
     let expansions = format!("echo {}", "${x:-".repeat(100_000));
     refused(&expansions);
 }
+
+#[test]
+fn substitutions_nested_in_expansions_are_scanned_once() {
+    // Each `${` scans the `$(` inside it; read again at every level, the
+    // work doubled per level and a short line ran out of budget.
+    for depth in [12, 24] {
+        let line = format!(
+            "echo {}ok{}",
+            "${x:-$(echo ".repeat(depth),
+            ")}".repeat(depth)
+        );
+        assert_eq!(parse(line.as_bytes()).error, None, "{depth}");
+    }
+}
+
+#[test]
+fn only_a_substitution_carries_its_heredoc_bodies_inlined() {
+    // Each list around the substitution would copy the whole body again.
+    let tree = parse(b"echo $(cat <<E) && true && true\nx\nE\n");
+    let carriers: Vec<&str> = (0..tree.nodes.len())
+        .filter(|index| !tree.inlined(*index).is_empty())
+        .map(|index| KINDS[usize::from(tree.nodes[index].kind)].0)
+        .collect();
+    assert_eq!(carriers, ["command_substitution"]);
+}

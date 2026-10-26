@@ -292,7 +292,7 @@ impl ShellNode {
     /// included.
     #[getter]
     fn source_text<'py>(&self, py: Python<'py>) -> Bound<'py, PyBytes> {
-        PyBytes::new(py, self.tree.source_text(self.index as usize))
+        PyBytes::new(py, &self.tree.source_text(self.index as usize))
     }
 
     /// The node's text with the heredoc bodies the line reads after a

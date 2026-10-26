@@ -80,6 +80,9 @@ struct Cond<'p, 'a> {
     ended: bool,
     /// How many `(` groups enclose the cursor.
     depth: usize,
+    /// The heredocs the substitutions in the words read so far left
+    /// pending: the next newline reads their bodies.
+    heredocs: Vec<super::heredoc::Pending>,
 }
 
 impl Cond<'_, '_> {
@@ -264,6 +267,23 @@ impl Cond<'_, '_> {
         self.pos = tok.end;
         if tok.kind == Kind::Newline && tok.start == tok.end {
             self.ended = true;
+        }
+        if tok.kind == Kind::Word {
+            // A substitution scanned inside another left its heredocs to
+            // the outer one, which carries them out.
+            let ends = self.parser.budget.ends.borrow();
+            let mut past = tok.start;
+            for (&at, (end, pending)) in ends.range(tok.start..tok.end) {
+                if at >= past {
+                    self.heredocs.extend(pending.iter().cloned());
+                    past = *end;
+                }
+            }
+        }
+        if tok.kind == Kind::Newline && tok.end > tok.start && !self.heredocs.is_empty() {
+            let s = self.parser.s;
+            self.pos = super::heredoc::bodies_end(s, tok.end, &mut self.heredocs);
+            self.heredocs.clear();
         }
     }
 
@@ -574,6 +594,7 @@ impl Parser<'_> {
             pos: start,
             ended: self.ended,
             depth: 0,
+            heredocs: Vec::new(),
         };
         let read = cond.test_or().and_then(|()| cond.test_close());
         match read {

@@ -91,11 +91,16 @@ pub(super) struct Mark {
 /// What a parse and its look aheads spend: the constructs they entered,
 /// which a parse that backtracks over nested input would otherwise let
 /// grow without bound, and how deep bash's reader's scan of quotes and
-/// expansions has nested.
+/// expansions has nested. `ends` holds where each substitution a scan
+/// read closes, by where it opens, and the heredocs still pending there,
+/// so a scan inside a scan reads each body once.
 #[derive(Default)]
 pub(super) struct Budget {
     pub work: std::cell::Cell<usize>,
     pub scans: std::cell::Cell<usize>,
+    pub ends: std::cell::RefCell<
+        std::collections::BTreeMap<usize, (usize, Vec<super::heredoc::Pending>)>,
+    >,
 }
 
 /// How deep the scan of quotes and expansions nests, or a `!` chain in a
@@ -181,6 +186,7 @@ pub(super) fn parse(source: &[u8], options: &super::Options) -> Tree {
             ended,
             offsets,
             Vec::new(),
+            Vec::new(),
             source,
         );
     }
@@ -199,22 +205,22 @@ pub(super) fn parse(source: &[u8], options: &super::Options) -> Tree {
         .collect();
     let lowered = lower(source, bodies);
     let pass = parse_pass(&lowered.source, options, ended);
-    let mut tree = joined(
+    joined(
         lowered.source,
         pass,
         options,
         ended,
         lowered.offsets,
         lowered.heredocs,
+        closes,
         source,
-    );
-    tree.closes = closes;
-    tree
+    )
 }
 
 /// Lay out a pass over `text`, its line continuations dropped first:
 /// `offsets` map `text` to `source`, and each heredoc's `at` is in `text`.
 /// The error is the last pass's, as bash reads the line joined.
+#[allow(clippy::too_many_arguments)]
 fn joined(
     text: Vec<u8>,
     mut pass: Pass,
@@ -222,6 +228,7 @@ fn joined(
     ended: bool,
     mut offsets: Vec<usize>,
     mut heredocs: Vec<super::lower::Heredoc>,
+    mut closes: Vec<(usize, Vec<usize>)>,
     source: &[u8],
 ) -> Tree {
     let dropped = continuations(&text, &pass);
@@ -245,7 +252,39 @@ fn joined(
             heredoc.at -= dropped.partition_point(|&at| at < heredoc.at);
         }
         pass = parse_pass(&logical, options, ended);
-        logical
+        let mut text = logical;
+        // A heredoc a continuation split (`$\⏎(cat <<E)`, `<\⏎<E`) comes to
+        // light only now: fold its body in as the first pass folds the
+        // others, its places in the line as typed.
+        while !pass.bodies.is_empty() {
+            let lowered = lower(&text, &pass.bodies);
+            let start = |at: usize| offsets[at.min(text.len())];
+            let end = |at: usize| at.checked_sub(1).map_or(offsets[0], |last| start(last) + 1);
+            let lines = super::lower::newlines(source) + usize::from(!source.ends_with(b"\n"));
+            for heredoc in &mut heredocs {
+                if let Some(at) = lowered.offsets.iter().position(|at| *at == heredoc.at) {
+                    heredoc.at = at;
+                }
+            }
+            for mut heredoc in lowered.heredocs {
+                heredoc.operator = start(heredoc.operator);
+                heredoc.word_end = end(heredoc.word_end);
+                heredoc.body_start = start(heredoc.body_start);
+                heredoc.end = end(heredoc.end);
+                heredoc.line =
+                    super::lower::newlines(&source[..heredoc.body_start.saturating_sub(1)]) + 1;
+                heredoc.eof_line = lines.max(heredoc.line);
+                heredocs.push(heredoc);
+            }
+            closes.extend(pass.closes.iter().map(|(close, opened)| {
+                (start(*close), opened.iter().map(|at| start(*at)).collect())
+            }));
+            heredocs.sort_by_key(|heredoc| heredoc.at);
+            offsets = lowered.offsets.iter().map(|at| offsets[*at]).collect();
+            text = lowered.source;
+            pass = parse_pass(&text, options, ended);
+        }
+        text
     };
     let Pass {
         mut root,
@@ -272,6 +311,7 @@ fn joined(
     tree.original = source.to_vec();
     tree.offsets = offsets;
     tree.heredocs = heredocs;
+    tree.closes = closes;
     tree
 }
 
@@ -758,7 +798,7 @@ impl Parser<'_> {
 
     /// `skip_space`, reading the body of each pending heredoc at the
     /// newline it starts after.
-    fn skip_space_bodies(&mut self) {
+    pub(super) fn skip_space_bodies(&mut self) {
         loop {
             self.skip_blank();
             if self.peek() != b'\n' {

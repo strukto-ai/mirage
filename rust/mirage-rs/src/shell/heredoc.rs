@@ -268,6 +268,15 @@ impl Parser<'_> {
     }
 }
 
+/// Past the bodies a newline ending at `start` reads for `heredocs`, the
+/// deepest first, as the parser reads them.
+pub(super) fn bodies_end(s: &[u8], start: usize, heredocs: &mut [Pending]) -> usize {
+    heredocs.sort_by_key(|heredoc| std::cmp::Reverse(heredoc.depth));
+    heredocs
+        .iter()
+        .fold(start, |at, heredoc| read_lines(s, at, heredoc, false).end)
+}
+
 /// What `read_lines` read.
 struct Lines {
     text: Vec<u8>,

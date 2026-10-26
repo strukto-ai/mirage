@@ -111,12 +111,19 @@ impl Parser<'_> {
 
     /// A substitution opening at `at`, its body parsed.
     pub(super) fn scan_substitution(&self, at: usize) -> R<usize> {
+        if let Some((end, _)) = self.budget.ends.borrow().get(&at) {
+            return Ok(*end);
+        }
         let mut probe = self.probe(at);
         if self.byte_at(at) == b'$' {
             probe.command_substitution()?;
         } else {
             probe.process_substitution()?;
         }
+        self.budget
+            .ends
+            .borrow_mut()
+            .insert(at, (probe.i, probe.pending));
         Ok(probe.i)
     }
 
