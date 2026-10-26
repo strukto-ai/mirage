@@ -55,6 +55,20 @@
       "note": "GNU 9.7: across devices mv copies the nested mount's files and removes them, but the mountpoint is busy, so it stays and mv exits 1."
     },
     {
+      "id": "boundary_mv_refuses_a_mount_root_reached_through_a_link",
+      "seq": 923204,
+      "targets": [
+        "ram-commands"
+      ],
+      "command": "echo p > /vault/p && ln -s /vault/d /vault/al && mkdir /scratch/dst; mv /vault/p /vault/al/inner /scratch/dst; echo rc=$?; ls /vault/d/inner; ls /scratch/dst; rm /vault/al && rm -r /scratch/dst",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\nsec.txt\np\n",
+        "stderr": "mv: cannot move '/vault/al/inner' to '/scratch/dst/inner': Device or resource busy\n"
+      },
+      "note": "The policy reads sources as typed; /vault/al/inner reaches the mount root /vault/d/inner only once mv follows the link, so mv refuses that source before copying (the mount keeps sec.txt) while the other source still moves, as GNU's per-source EBUSY does."
+    },
+    {
       "id": "boundary_hidden_mount_ls",
       "seq": 923210,
       "targets": [
