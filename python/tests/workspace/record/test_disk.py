@@ -21,6 +21,7 @@ import threading
 import time
 from itertools import count
 from pathlib import Path
+from typing import Literal
 
 import aiofiles.os
 import pytest
@@ -134,7 +135,9 @@ LATE_STEPS = pytest.mark.parametrize(
 )
 
 
-def _race_two_reclaimers(monkeypatch, lock_path: str, late_step: str) -> None:
+def _race_two_reclaimers(
+    monkeypatch, lock_path: str, late_step: Literal["unlink", "open"]
+) -> None:
     """Hold the first two stats of ``lock_path`` until both have run, then
     delay the later waiter's ``late_step``: its unlink of the lock (both
     reclaim at once) or its open of the reclaim guard (it reclaims after
@@ -143,7 +146,7 @@ def _race_two_reclaimers(monkeypatch, lock_path: str, late_step: str) -> None:
     Args:
         monkeypatch (pytest.MonkeyPatch): the test's patcher.
         lock_path (str): the lockfile both waiters contend for.
-        late_step (str): ``"unlink"`` or ``"open"``, the os call delayed.
+        late_step (Literal["unlink", "open"]): the os call delayed.
     """
     both_saw_it = threading.Barrier(2)
     stats = count()
@@ -261,9 +264,9 @@ async def test_release_leaves_a_lock_another_writer_took(tmp_path):
     os.unlink(lock_path)
     theirs = await client.lock("k")
     await client.unlock("k", mine)
-    assert os.path.exists(lock_path)
+    assert os.listdir(tmp_path) == ["k.json.lock"]
     await client.unlock("k", theirs)
-    assert not os.path.exists(lock_path)
+    assert os.listdir(tmp_path) == []
 
 
 @pytest.mark.asyncio

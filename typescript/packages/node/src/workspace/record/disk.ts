@@ -43,8 +43,8 @@ function isMissing(e: unknown): boolean {
  * One JSON-record-per-file client with lockfile CAS.
  *
  * The disk twin of `S3RecordClient`: a record is one file at
- * `{root}/{prefix}{name}.json`, written atomically (tmp then rename(2))
- * so readers never see a torn record. The conditional write serializes
+ * `{root}/{prefix}{name}.json`, written atomically (tmp, synced, then
+ * rename(2)) so readers never see a torn record. The conditional write serializes
  * on a `{record}.lock` created with O_CREAT|O_EXCL, so compare and
  * write hit the same stored version. Record names are percent-encoded
  * into filenames, so any id is safe. Mirrors the Python
