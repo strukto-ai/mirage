@@ -51,6 +51,9 @@ interface Suite {
 const STEP_OPS = new Set(['workspace', 'session_admin', 'snapshot', 'ask'])
 const WAITED = 'the line waited for all of its input'
 const STREAM_WAIT_MS = 10_000
+const BESIDE_WAIT_MS = 20_000
+const UNSTARTED = 'the line beside never started'
+const BEHIND = 'the line ran behind the held one'
 const encoder = new TextEncoder()
 
 function shellAnswer(stdout: string, stderr: string, code: number): Answer {
@@ -134,12 +137,52 @@ async function explain(session: Session, step: Json): Promise<Answer> {
   return await answered(session, call, await checked(call, callParams(step)), true)
 }
 
+/**
+ * A shell case run while a line with its own cwd still runs beside it, as
+ * beside_answer in adapters.py runs it: the line beside writes `up` and waits
+ * for `go`, which only the case's line writes, so the case's line ends only
+ * if it ran beside the held one rather than behind it.
+ */
+async function besideAnswer(session: Session, step: Json): Promise<Answer> {
+  const other = step.beside as { command: string; cwd: string; up: string; go: string }
+  const line = async (command: string, cwd?: string): Promise<Json> => {
+    const io = await session.shell(command, cwd === undefined ? {} : { cwd })
+    return shellAnswer(io.stdoutText, io.stderrText, io.exitCode) as Json
+  }
+  const held = line(other.command, other.cwd)
+  const deadline = Date.now() + BESIDE_WAIT_MS
+  while (!(await session.vfs.exists(other.up))) {
+    if (Date.now() > deadline) {
+      await session.vfs.write(other.go, 'ready')
+      await held
+      return { text: UNSTARTED, is_error: true }
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50))
+  }
+  const ran = line(step.command as string)
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const late = new Promise<null>((resolve) => {
+    timer = setTimeout(() => resolve(null), BESIDE_WAIT_MS)
+  })
+  let answer = await Promise.race([ran, late])
+  clearTimeout(timer)
+  if (answer === null) {
+    await session.vfs.write(other.go, 'ready')
+    await ran
+    answer = { text: BEHIND, is_error: true }
+  }
+  return { ...answer, beside: await held }
+}
+
 async function caseAnswer(
   op: string,
   session: Session,
   tools: Session['tools'],
   step: Json,
 ): Promise<Answer> {
+  if ((op === 'shell' || op === 'session') && step.beside !== undefined) {
+    return besideAnswer(session, step)
+  }
   if (op === 'shell' || op === 'session') {
     const io = await session.shell(step.command as string)
     return shellAnswer(io.stdoutText, io.stderrText, io.exitCode)

@@ -37,8 +37,9 @@ matches the adapters and the overview's matrix.
 
 ``--deployment`` picks deployments, one per CI leg. ``--access`` and
 ``--host`` narrow a run further and skip the route and command gates;
-``--host-jobs 2`` overlaps both hosts without narrowing coverage or skipping
-gates. ``--print`` prints the in-app answers for pinning.
+``--host-jobs 2`` overlaps both hosts and ``--suite-jobs N`` runs N suites
+of a deployment at once, neither narrowing coverage nor skipping gates.
+``--print`` prints the in-app answers for pinning.
 """
 
 import argparse
@@ -217,16 +218,29 @@ async def in_app(
 
 
 async def through_accesses(
-    server: Server, scratch: Path, wanted: set[str], report: Report
+    server: Server,
+    scratch: Path,
+    wanted: set[str],
+    report: Report,
+    jobs: int,
 ) -> None:
-    for access in server_accesses(server, scratch):
-        if access.name not in wanted:
-            continue
-        for suite in suites_for(access.name):
-            if server.d.name not in suite.get("deployments", DEPLOYMENTS):
-                continue
-            run_suite = runnable(suite, access.name)
-            prefix = f"{suite['id']}-{access.name}-"
+    """Run every suite through every access the server has, ``jobs`` at a
+    time: each suite gets its own workspace, sessions and snapshot names
+    under its access's prefix, so suites in flight never meet.
+
+    Args:
+        server (Server): the deployed server.
+        scratch (Path): a private directory.
+        wanted (set[str]): the accesses to run.
+        report (Report): the report.
+        jobs (int): how many suites run at once.
+    """
+    slots = asyncio.Semaphore(jobs)
+
+    async def through(access: Any, suite: dict[str, Any]) -> None:
+        run_suite = runnable(suite, access.name)
+        prefix = f"{suite['id']}-{access.name}-"
+        async with slots:
             started = time.monotonic()
             try:
                 answers = await access.suite(
@@ -238,15 +252,25 @@ async def through_accesses(
                     repr(exc),
                     "answers",
                 )
-                continue
+                return
             took = f"{time.monotonic() - started:.1f}s"
-            compare(
-                report,
-                f"{server.key} {access.name} [{took}]",
-                run_suite,
-                access.name,
-                answers,
-            )
+        compare(
+            report,
+            f"{server.key} {access.name} [{took}]",
+            run_suite,
+            access.name,
+            answers,
+        )
+
+    await asyncio.gather(
+        *(
+            through(access, suite)
+            for access in server_accesses(server, scratch)
+            if access.name in wanted
+            for suite in suites_for(access.name)
+            if server.d.name in suite.get("deployments", DEPLOYMENTS)
+        )
+    )
 
 
 def credentials(d: Deployment, issuer: Issuer) -> dict[str, str | None]:
@@ -1360,7 +1384,11 @@ async def main(args: argparse.Namespace) -> int:
                     server = Server(d, recorder)
                     keys.append(server.key)
                     await through_accesses(
-                        server, scratch / name / "scratch", wanted, report
+                        server,
+                        scratch / name / "scratch",
+                        wanted,
+                        report,
+                        args.suite_jobs,
                     )
                     await auth(server, issuer, wanted, report)
                     if "cli" in wanted:
@@ -1407,6 +1435,7 @@ def parse() -> argparse.Namespace:
     )
     parser.add_argument("--host", action="append", choices=HOSTS)
     parser.add_argument("--host-jobs", type=int, choices=(1, 2), default=1)
+    parser.add_argument("--suite-jobs", type=int, default=1)
     parser.add_argument("--deployment", action="append", choices=DEPLOYMENTS)
     parser.add_argument("--access", action="append", choices=ACCESSES)
     parser.add_argument(

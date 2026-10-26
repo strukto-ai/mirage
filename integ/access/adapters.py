@@ -62,6 +62,9 @@ CLI_GROUPS = (
 WAITED = "the line waited for all of its input"
 HELD = "the access held the output until the line ended"
 STREAM_WAIT = 10.0
+BESIDE_WAIT = 20.0
+UNSTARTED = "the line beside never started"
+BEHIND = "the line ran behind the held one"
 
 
 def shell_answer(stdout: str, stderr: str, code: int) -> Answer:
@@ -83,6 +86,14 @@ def io_answer(reply: dict[str, Any]) -> Answer:
     return shell_answer(
         reply["stdout"], reply["stderr"], int(reply["exit_code"])
     )
+
+
+def shell_params(command: str, cwd: str | None) -> dict[str, Any]:
+    return {"command": command, **({"cwd": cwd} if cwd else {})}
+
+
+async def rpc_answer(reply: Awaitable[dict[str, Any]]) -> Answer:
+    return io_answer(rpc_result(await reply))
 
 
 async def streamed_answer(
@@ -129,6 +140,51 @@ def stdin_bytes(spec: str | dict[str, Any]) -> bytes:
     if isinstance(spec, str):
         return spec.encode()
     return (spec["repeat"] * spec["times"]).encode()
+
+
+async def beside_answer(
+    run: Callable[[str, str | None], Awaitable[Answer]],
+    start: Callable[[str, str], Awaitable[Awaitable[Answer]]],
+    exists: Callable[[str], Awaitable[bool]],
+    write: Callable[[str], Awaitable[None]],
+    step: dict[str, Any],
+) -> Answer:
+    """A shell case run while a line with its own cwd still runs beside it.
+
+    The line beside writes ``up`` and then waits for ``go``, which only
+    the case's line writes, so the case's line ends only if it ran
+    beside the held one rather than behind it. After ``BESIDE_WAIT`` the
+    access writes ``go`` itself, so the held line ends, and the case
+    answers ``BEHIND``.
+
+    Args:
+        run (Callable[[str, str | None], Awaitable[Answer]]): runs a line,
+            with its own cwd or none, to its answer.
+        start (Callable[[str, str], Awaitable[Awaitable[Answer]]]): sends
+            a line with its own cwd, returning what its answer awaits on.
+        exists (Callable[[str], Awaitable[bool]]): whether a path exists,
+            asked from outside any line.
+        write (Callable[[str], Awaitable[None]]): writes a path from
+            outside any line.
+        step (dict[str, Any]): the case's input.
+    """
+    other = step["beside"]
+    held = await start(other["command"], other["cwd"])
+    deadline = time.monotonic() + BESIDE_WAIT
+    while not await exists(other["up"]):
+        if time.monotonic() > deadline:
+            await write(other["go"])
+            await asyncio.wait_for(held, 60)
+            return {"text": UNSTARTED, "is_error": True}
+        await asyncio.sleep(0.05)
+    try:
+        answer = await asyncio.wait_for(
+            run(step["command"], None), BESIDE_WAIT
+        )
+    except TimeoutError:
+        await write(other["go"])
+        answer = {"text": BEHIND, "is_error": True}
+    return {**answer, "beside": await asyncio.wait_for(held, 60)}
 
 
 class Recorder:
@@ -214,6 +270,7 @@ class RpcStream:
         self.env = env
         self.next_id = 0
         self.process: asyncio.subprocess.Process | None = None
+        self.early: dict[int, dict[str, Any]] = {}
 
     async def __aenter__(self) -> "RpcStream":
         self.process = await asyncio.create_subprocess_exec(
@@ -239,6 +296,8 @@ class RpcStream:
 
     async def receive(self, request_id: int) -> dict[str, Any]:
         assert self.process is not None and self.process.stdout is not None
+        if request_id in self.early:
+            return self.early.pop(request_id)
         while True:
             line = await asyncio.wait_for(self.process.stdout.readline(), 60)
             if not line:
@@ -248,6 +307,8 @@ class RpcStream:
             reply = json.loads(line)
             if reply.get("id") == request_id:
                 return reply
+            if isinstance(reply.get("id"), int):
+                self.early[reply["id"]] = reply
 
     async def call(
         self, method: str, params: dict[str, Any]
@@ -393,6 +454,36 @@ class Server:
                     )
                 ).raise_for_status()
 
+    async def exists(self, wid: str, path: str) -> bool:
+        """Whether a path exists, asked through the VFS route, outside any
+        line.
+
+        Args:
+            wid (str): the workspace.
+            path (str): the path.
+        """
+        async with self.client() as http:
+            reply = await http.post(
+                f"/v1/workspaces/{wid}/vfs/exists", json={"path": path}
+            )
+            reply.raise_for_status()
+            return reply.json() is True
+
+    async def write_file(self, wid: str, path: str) -> None:
+        """Write ``ready`` at a path through the VFS route, outside any
+        line.
+
+        Args:
+            wid (str): the workspace.
+            path (str): the path.
+        """
+        async with self.client() as http:
+            reply = await http.post(
+                f"/v1/workspaces/{wid}/vfs/write",
+                json={"path": path, "data": "cmVhZHk="},
+            )
+            reply.raise_for_status()
+
     async def job_seen(
         self, wid: str, command: str, statuses: tuple[str, ...], timeout: float
     ) -> str:
@@ -464,12 +555,7 @@ class Gate:
         if self._opened:
             return
         self._opened = True
-        async with self.server.client() as http:
-            reply = await http.post(
-                f"/v1/workspaces/{self.wid}/vfs/write",
-                json={"path": self.path, "data": "cmVhZHk="},
-            )
-            reply.raise_for_status()
+        await self.server.write_file(self.wid, self.path)
 
     async def run(
         self, argv: list[str], env: dict[str, str] | None, tty: bool = False
@@ -1422,6 +1508,23 @@ class InAppPython:
     async def case(
         self, op: str, session: Any, tools: Any, step: dict[str, Any]
     ) -> Answer:
+        if op in ("shell", "session") and "beside" in step:
+
+            async def line(command: str, cwd: str | None) -> Answer:
+                io = await session.shell(command, cwd=cwd)
+                return shell_answer(
+                    await io.stdout_str(), await io.stderr_str(), io.exit_code
+                )
+
+            async def held(command: str, cwd: str) -> Awaitable[Answer]:
+                return asyncio.ensure_future(line(command, cwd))
+
+            async def write(path: str) -> None:
+                await session.vfs.write(path, b"ready")
+
+            return await beside_answer(
+                line, held, session.vfs.exists, write, step
+            )
         if op in ("shell", "session"):
             io = await session.shell(step["command"])
             return shell_answer(
@@ -1620,6 +1723,27 @@ class Http:
         if step.get("output_stream"):
             params["stream"] = "true"
         if op in ("shell", "session"):
+            if "beside" in step:
+
+                async def line(command: str, cwd: str | None) -> Answer:
+                    reply = await http.post(
+                        f"{base}/shell",
+                        json=shell_params(command, cwd),
+                        params=params,
+                    )
+                    reply.raise_for_status()
+                    return io_answer(reply.json())
+
+                async def held(command: str, cwd: str) -> Awaitable[Answer]:
+                    return asyncio.ensure_future(line(command, cwd))
+
+                return await beside_answer(
+                    line,
+                    held,
+                    lambda path: self.server.exists(wid, path),
+                    lambda path: self.server.write_file(wid, path),
+                    step,
+                )
             if gated := step.get("output_gate"):
                 async with (
                     Gate(self.server, wid, gated) as gate,
@@ -1809,6 +1933,39 @@ class Cli:
         self, op: str, wid: str, session: str | None, step: dict[str, Any]
     ) -> Answer:
         env = self.server.env()
+        if op in ("shell", "session") and "beside" in step:
+
+            async def line(command: str, cwd: str | None) -> Answer:
+                code, out, err = await run(
+                    self.server.cli(
+                        "shell",
+                        "-w",
+                        wid,
+                        *self._session(session),
+                        *([f"--cwd={cwd}"] if cwd else []),
+                        "-c",
+                        command,
+                        "--json",
+                    ),
+                    env,
+                    tty=True,
+                )
+                return (
+                    io_answer(json.loads(out))
+                    if out.strip()
+                    else {"text": err, "is_error": True}
+                )
+
+            async def held(command: str, cwd: str) -> Awaitable[Answer]:
+                return asyncio.ensure_future(line(command, cwd))
+
+            return await beside_answer(
+                line,
+                held,
+                lambda path: self.server.exists(wid, path),
+                lambda path: self.server.write_file(wid, path),
+                step,
+            )
         if op in ("shell", "session"):
             argv = self.server.cli(
                 "shell",
@@ -2189,8 +2346,21 @@ class Rpc:
                     wid, command, ("canceled",), 15
                 )
 
+            async def held(command: str, cwd: str) -> Awaitable[Answer]:
+                return asyncio.ensure_future(
+                    rpc_answer(call("shell", shell_params(command, cwd)))
+                )
+
             return [
-                await rpc_case(call, cancel, suite["op"], c["input"])
+                await rpc_case(
+                    call,
+                    cancel,
+                    held,
+                    self.server,
+                    wid,
+                    suite["op"],
+                    c["input"],
+                )
                 for c in suite["cases"]
             ]
 
@@ -2228,8 +2398,24 @@ class RpcStdio(Rpc):
                     wid, command, ("canceled",), 15
                 )
 
+            async def held(command: str, cwd: str) -> Awaitable[Answer]:
+                stream.next_id += 1
+                sent = stream.next_id
+                await stream.send(
+                    rpc_request(sent, "shell", shell_params(command, cwd))
+                )
+                return rpc_answer(stream.receive(sent))
+
             return [
-                await rpc_case(stream.call, cancel, suite["op"], c["input"])
+                await rpc_case(
+                    stream.call,
+                    cancel,
+                    held,
+                    self.server,
+                    wid,
+                    suite["op"],
+                    c["input"],
+                )
                 for c in suite["cases"]
             ]
 
@@ -2237,9 +2423,22 @@ class RpcStdio(Rpc):
 async def rpc_case(
     call: Callable[[str, dict[str, Any]], Awaitable[dict[str, Any]]],
     cancel: Callable[[str], Awaitable[str]],
+    held: Callable[[str, str], Awaitable[Awaitable[Answer]]],
+    server: Server,
+    wid: str,
     op: str,
     step: dict[str, Any],
 ) -> Answer:
+    if op in ("shell", "session") and "beside" in step:
+        return await beside_answer(
+            lambda command, cwd: rpc_answer(
+                call("shell", shell_params(command, cwd))
+            ),
+            held,
+            lambda path: server.exists(wid, path),
+            lambda path: server.write_file(wid, path),
+            step,
+        )
     if op in ("shell", "session"):
         return io_answer(
             rpc_result(await call("shell", {"command": step["command"]}))
