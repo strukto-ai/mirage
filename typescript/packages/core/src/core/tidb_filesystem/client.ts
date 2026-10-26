@@ -18,6 +18,7 @@ import { boundedMap } from '../../concurrency/limiter.ts'
 import { ByteSpool } from '../../io/spool.ts'
 import { encodeBase64 } from '../../utils/base64.ts'
 import type { ByteWindow } from '../../utils/ranges.ts'
+import { rstripSlash } from '../../utils/slash.ts'
 import {
   apiRequest,
   apiStream,
@@ -87,7 +88,7 @@ function headers(accessor: TiDBFilesystemAccessor): Record<string, string> {
 }
 
 function nameOf(remotePath: string): string {
-  const stripped = remotePath.replace(/\/+$/, '')
+  const stripped = rstripSlash(remotePath)
   return stripped.slice(stripped.lastIndexOf('/') + 1) || '/'
 }
 
@@ -136,7 +137,7 @@ export async function statEntry(
   remotePath: string,
   directory = false,
 ): Promise<Entry> {
-  const target = directory ? `${remotePath.replace(/\/+$/, '')}/` : remotePath
+  const target = directory ? `${rstripSlash(remotePath)}/` : remotePath
   const response = (await request(accessor, 'HEAD', url(accessor, target), {
     read: 'response',
   })) as ApiResponse

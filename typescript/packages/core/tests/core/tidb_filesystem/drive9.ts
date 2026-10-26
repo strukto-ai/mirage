@@ -17,6 +17,7 @@ import type { AddressInfo } from 'node:net'
 import { TiDBFilesystemAccessor } from '../../../src/accessor/tidb_filesystem.ts'
 import { PathSpec } from '../../../src/types.ts'
 import { mountKey } from '../../../src/utils/key_prefix.ts'
+import { rstripSlash } from '../../../src/utils/slash.ts'
 import { normalizeTiDBFilesystemConfig } from '../../../src/vfs/tidb_filesystem/config.ts'
 
 export const TOKEN = 'fs-token'
@@ -111,7 +112,7 @@ export class FakeDrive9 {
   }
 
   private under(path: string): string[] {
-    const prefix = `${path.replace(/\/+$/, '')}/`
+    const prefix = `${rstripSlash(path)}/`
     return [...this.files.keys(), ...this.dirs].filter((p) => p.startsWith(prefix))
   }
 
@@ -164,7 +165,7 @@ export class FakeDrive9 {
       return
     }
     const raw = decodeURIComponent(target.pathname.slice('/v1/fs'.length)) || '/'
-    const path = raw.replace(/\/+$/, '') || '/'
+    const path = rstripSlash(raw) || '/'
     const action = [...target.searchParams.keys()][0] ?? ''
     this.requests.push([method, `${path}?${action}`])
     if (method === 'HEAD') {
@@ -182,7 +183,7 @@ export class FakeDrive9 {
       return
     }
     if (method === 'GET' && target.searchParams.has('list')) {
-      const prefix = `${path.replace(/\/+$/, '')}/`
+      const prefix = `${rstripSlash(path)}/`
       const files = [...this.files.keys()]
         .filter((p) => parentOf(p) === path && p.startsWith(prefix))
         .sort()
@@ -356,7 +357,7 @@ export class FakeDrive9 {
     if (req.headers['x-dat9-path-encoding'] === 'base64url') {
       header = Buffer.from(header, 'base64url').toString()
     }
-    const src = header.replace(/\/+$/, '') || '/'
+    const src = rstripSlash(header) || '/'
     const file = this.files.get(src)
     if (file !== undefined) {
       this.makeParents(dst)
