@@ -792,12 +792,31 @@ class HostFs:
             self._host.mkdir(path, mode, dir_fd=dir_fd)
             return
         self._adapter.mkdir(virtual)
-        # The new directory's own mode is what the umask left of 0o777, so
-        # the two together are what mkdir(2) leaves of mode (tempfile's
-        # private 0o700 among them).
-        own = self._adapter.stat(virtual).mode & 0o7777
-        if own & mode != own:
-            self._adapter.setattr(virtual, mode=own & mode)
+        if mode & 0o777 != 0o777:
+            self._narrow(virtual, mode)
+
+    def _narrow(self, virtual: str, mode: int) -> None:
+        """Narrow a directory just made to the permissions mode asks for.
+
+        Its own are what the umask left of 0o777, so the two together are
+        what mkdir(2) leaves of mode (tempfile's private 0o700 among
+        them), and a bit it inherited (a parent's set-group-ID) stays. A
+        lookup the workspace refuses leaves the directory as made.
+
+        Args:
+            virtual (str): the directory mkdir made.
+            mode (int): the mode mkdir was asked for.
+        """
+        try:
+            own = self._adapter.stat(virtual).mode & 0o7777
+        except PermissionError as exc:
+            logger.debug(
+                "mkdir: %s keeps the mode it was made with: %r", virtual, exc
+            )
+            return
+        narrow = own & ~0o777 | own & mode & 0o777
+        if narrow != own:
+            self._adapter.setattr(virtual, mode=narrow)
 
     def makedirs(
         self, name: Any, mode: int = 0o777, exist_ok: bool = False

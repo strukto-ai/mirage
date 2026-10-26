@@ -754,6 +754,13 @@ describe('patchNodeFs — calls node makes on its own', () => {
     expect((await fs.promises.stat(made)).mode & 0o777).toBe(0o700)
     await fs.promises.mkdir('/data/m', { mode: 0o750 })
     expect((await fs.promises.stat('/data/m')).mode & 0o777).toBe(0o750)
+    // A plain mkdir looks nothing up, and a refused lookup leaves a
+    // narrowed one as made: neither fails a create that happened.
+    ws.policies.add({
+      preVfs: (ctx) => (ctx.call.name === 'stat' ? { kind: 'deny', reason: 'no stat' } : null),
+    })
+    await fs.promises.mkdir('/data/plain')
+    await fs.promises.mkdir('/data/narrow', 0o700)
     expect(await fs.promises.mkdtemp('/data/tmp-')).not.toBe(made)
     await expect(fs.promises.mkdtemp('/data/nope/x-')).rejects.toMatchObject({
       code: 'ENOENT',
@@ -1017,8 +1024,9 @@ describe('patchNodeFs — calls node makes on its own', () => {
     expect(
       await names(fs.promises.glob('/data/d/**/*.txt', { cwd: '/data/d', exclude: ['sub/**'] })),
     ).toEqual(['/data/d/a.txt'])
-    // followSymlinks walks a link to a directory, short of one that leads
-    // back to its own ancestor (sub/up is '..').
+    // followSymlinks walks a link to a directory, short of one its branch
+    // already went through, as node 24 walks this tree (sub/up is '..');
+    // two directories linked to each other end.
     await ws.vfs.symlink('/data/alias', '/data/d/sub')
     expect(await names(fs.promises.glob('/data/*/*.txt'))).toEqual(['/data/d/a.txt'])
     expect(
@@ -1026,10 +1034,20 @@ describe('patchNodeFs — calls node makes on its own', () => {
     ).toEqual([
       '/data/alias/b.txt',
       '/data/alias/deep/c.txt',
+      '/data/alias/up/a.txt',
       '/data/d/a.txt',
       '/data/d/sub/b.txt',
       '/data/d/sub/deep/c.txt',
     ])
+    await ws.vfs.mkdir('/data/ma')
+    await ws.vfs.mkdir('/data/mb')
+    await ws.vfs.write('/data/ma/x.txt', 'x')
+    await ws.vfs.write('/data/mb/y.txt', 'y')
+    await ws.vfs.symlink('/data/ma/toB', '/data/mb')
+    await ws.vfs.symlink('/data/mb/toA', '/data/ma')
+    expect(
+      await names(fs.promises.glob('/data/m*/**/*.txt', { followSymlinks: true } as object)),
+    ).toEqual(['/data/ma/toB/y.txt', '/data/ma/x.txt', '/data/mb/toA/x.txt', '/data/mb/y.txt'])
     await ws.close()
   })
 

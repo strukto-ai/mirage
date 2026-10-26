@@ -360,6 +360,16 @@ class TestWrites:
         mode = patched.stat("/data/dir/private").st_mode
         assert mode & 0o777 == 0o700
 
+    def test_mkdir_does_not_fail_a_create_on_a_refused_lookup(self):
+        # A plain mkdir looks nothing up, and a refused lookup leaves a
+        # narrowed one as made: neither fails a create that happened.
+        ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
+        ws.policies.add(_NoStats())
+        patched = make_os_module(ws.vfs)
+        patched.mkdir("/data/plain")
+        patched.mkdir("/data/narrow", 0o700)
+        assert sorted(patched.listdir("/data")) == ["narrow", "plain"]
+
     def test_makedirs_creates_every_missing_ancestor(self):
         _, patched = seeded()
         patched.makedirs("/data/deep/x/y")

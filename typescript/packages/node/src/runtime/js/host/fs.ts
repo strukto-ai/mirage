@@ -606,28 +606,35 @@ class HostFs implements Record<
     await this.copied(src, dst, from, opts)
   }
 
-  /** Narrow a directory just made to `mode` as mkdir(2) does: its own
-   * mode is what the umask left of 0o777, so the two together are what
-   * mkdir(2) leaves of `mode`. */
+  /** Narrow a directory just made to the permissions `mode` asks for, as
+   * mkdir(2) does: its own are what the umask left of 0o777, so the two
+   * together are what mkdir(2) leaves of `mode`, and a bit it inherited
+   * (a parent's set-group-ID) stays. A mode asking all of 0o777 needs no
+   * lookup, and one the workspace refuses leaves the directory as made. */
   private async narrowed(path: string, mode: number | undefined): Promise<void> {
-    if (mode === undefined) return
-    const own = (await this.files.stat(path)).mode & 0o7777
-    if ((own & mode) !== own) await this.files.setattr(path, { mode: own & mode })
+    if (mode === undefined || (mode & 0o777) === 0o777) return
+    let own: number
+    try {
+      own = (await this.files.stat(path)).mode & 0o7777
+    } catch (err) {
+      const condition = classify(err)
+      if (condition !== 'EACCES' && condition !== 'EPERM') throw err
+      console.debug(`mkdir: ${path} keeps the mode it was made with: ${String(err)}`)
+      return
+    }
+    const narrow = (own & ~0o777) | (own & mode & 0o777)
+    if (narrow !== own) await this.files.setattr(path, { mode: narrow })
   }
 
-  /** Whether the link at `path` leads to a directory other than one of
-   * its own ancestors, which a walk that follows it would loop through. */
-  private async leadsDown(path: string): Promise<boolean> {
-    let target: string
+  /** Whether the link at `path` leads to a directory; a dangling one
+   * leads nowhere. */
+  private async linksToDirectory(path: string): Promise<boolean> {
     try {
-      if (!(await this.entryOf(path, true)).isDirectory()) return false
-      target = await routed.realpath(path)
+      return (await this.entryOf(path, true)).isDirectory()
     } catch (err) {
       if (!isMissingPath(err)) throw err
       return false
     }
-    const parent = await routed.realpath(posix.dirname(path))
-    return parent !== target && !parent.startsWith(`${target}/`)
   }
 
   /** The source's entry once the pair passes the checks node's `cp`
@@ -859,16 +866,20 @@ class HostFs implements Record<
         isFIFO: () => false,
         isSocket: () => false,
       }
-      const pending: [string, string, number, unknown][] = [[base, '', 0, baseEntry]]
+      // Each entry carries the directories its branch went through, by
+      // where their links lead, so a followed link never walks into one
+      // of them again, as node's walk does.
+      const pending: [string, string, number, unknown, string[]][] = [[base, '', 0, baseEntry, []]]
       for (let next = pending.shift(); next !== undefined; next = pending.shift()) {
-        const [path, relative, level, entry] = next
+        const [path, relative, level, entry, walked] = next
         const named = shown(path)
         // An excluded name is left out with all under it, the base too.
         if (skipped(path, named, entry)) continue
         const kind = entry as { isDirectory(): boolean; isSymbolicLink(): boolean }
         // `followSymlinks` takes a link to a directory as one.
         const isDirectory =
-          kind.isDirectory() || (follow && kind.isSymbolicLink() && (await this.leadsDown(path)))
+          kind.isDirectory() ||
+          (follow && kind.isSymbolicLink() && (await this.linksToDirectory(path)))
         if (
           (magic === -1 ? relative === '' : posix.matchesGlob(relative, rest)) &&
           (!directories || isDirectory) &&
@@ -878,6 +889,9 @@ class HostFs implements Record<
           yield typed ? entry : named
         }
         if (magic === -1 || !isDirectory || level >= depth) continue
+        const real = follow ? await routed.realpath(path) : path
+        if (follow && walked.includes(real)) continue
+        const branch = follow ? [...walked, real] : walked
         const children = (await routed.readdir(path, { withFileTypes: true })) as unknown as {
           name: string
           isSymbolicLink(): boolean
@@ -890,6 +904,7 @@ class HostFs implements Record<
             relative === '' ? child.name : `${relative}/${child.name}`,
             child.isSymbolicLink() && !follow ? depth : level + 1,
             child,
+            branch,
           ])
         }
       }
