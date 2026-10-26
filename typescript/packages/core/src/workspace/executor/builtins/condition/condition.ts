@@ -52,6 +52,7 @@ export async function handleTest(
   name = 'test',
   view?: SessionView,
   admit?: AdmitTest,
+  signal?: AbortSignal,
 ): Promise<Result> {
   const links = linkView(
     new Files(
@@ -71,6 +72,7 @@ export async function handleTest(
     ...(view !== undefined ? { view } : {}),
     ...(links !== undefined ? { links } : {}),
     ...(admit !== undefined ? { admit } : {}),
+    ...(signal !== undefined ? { signal } : {}),
   }
   let code: number
   try {

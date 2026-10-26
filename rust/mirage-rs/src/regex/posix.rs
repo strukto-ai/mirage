@@ -21,6 +21,43 @@ pub(crate) struct Options {
 /// for a group that took no part in it.
 pub(crate) type Spans = Vec<Option<(usize, usize)>>;
 
+/// A call that ran out of steps: the same call again goes on where it
+/// stopped, and any other starts over.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Pause {
+    /// The match at or after `at` in a subject of `len` bytes.
+    Extent { at: usize, len: usize },
+    /// The groups of the match `start..stop` a search from `at` found.
+    Groups {
+        at: usize,
+        len: usize,
+        start: usize,
+        stop: usize,
+    },
+    /// Whether a subject of `len` bytes matches.
+    Test { len: usize },
+    /// tac's backward search, at `place`.
+    Latest { place: usize },
+}
+
+/// Where a walk over a subject's matches stands: where the next search
+/// starts and where the last match ended.
+#[derive(Default)]
+pub(crate) struct Walk {
+    at: usize,
+    previous: Option<usize>,
+    ended: bool,
+}
+
+/// Where a pickaxe count stands: the matches so far, where the next
+/// search starts and the line it is in.
+#[derive(Default)]
+pub(crate) struct Tally {
+    count: usize,
+    start: usize,
+    begin: usize,
+}
+
 /// One POSIX expression over a whole subject, as regexec answers it: the
 /// leftmost match and the longest there, its groups placed by the first
 /// way of matching that text, trying a repetition's longer counts and an
@@ -28,6 +65,11 @@ pub(crate) type Spans = Vec<Option<(usize, usize)>>;
 /// `+` or `{m,}` that consumes nothing. An optional iteration of `{m,n}`
 /// may consume nothing, where regexec takes one through an empty branch
 /// but not one that ends on an anchor (`(a|b|$){1,3}` against `ab`).
+///
+/// Each search spends a `budget` of backtracking steps. Out of them it
+/// answers `Step::Paused`, and the same call with the same subject goes
+/// on where it stopped, so a host can yield between the calls of a search
+/// that back-references make run for long.
 pub(crate) struct Posix {
     /// The text a pattern of literal units alone spells, found by a
     /// substring search: a long fixed interval (`a\{32767\}`) makes an
@@ -47,8 +89,8 @@ pub(crate) struct Posix {
     /// The bytes a match can start with, which a backward search alone
     /// tries; found on its first call.
     starts: Option<[bool; 256]>,
-    /// The place whose backtracked attempt ran out of steps.
-    suspended: Option<usize>,
+    /// The call that ran out of steps.
+    paused: Option<Pause>,
 }
 
 impl Posix {
@@ -121,7 +163,7 @@ impl Posix {
             scratch: Scratch::default(),
             utf8: options.utf8,
             starts: None,
-            suspended: None,
+            paused: None,
         })
     }
 
@@ -129,53 +171,106 @@ impl Posix {
         self.groups
     }
 
-    /// Gives back what the last search grew past a small reserve.
+    /// Gives back what the last search grew past a small reserve, and
+    /// forgets a search left paused.
     pub(crate) fn release(&mut self) {
+        self.paused = None;
+        self.scratch.forget();
         self.scratch.trim();
     }
 
-    /// Where the leftmost-longest match at or after `at` lies.
-    fn extent(&mut self, hay: &[u8], at: usize) -> Option<(usize, usize)> {
-        let end = hay.len();
-        if let Some(literal) = &self.literal {
-            let found = memchr::memmem::find(hay.get(at..)?, literal)?;
-            return Some((at + found, at + found + literal.len()));
+    /// Whether `call` is the one that ran out of steps; any other starts
+    /// over, so the backtracker forgets where that one stopped.
+    fn resumes(&mut self, call: Pause) -> bool {
+        if self.paused.take() == Some(call) {
+            return true;
         }
-        if let Some(automata) = &mut self.automata {
-            let (start, first_end) = automata.first(hay, at, end, self.utf8)?;
-            if let Some(stop) = automata.longest_end(hay, start, end) {
-                return Some((start, stop.max(first_end)));
-            }
-            return self.longest_at(hay, start).or(Some((start, first_end)));
-        }
-        self.longest_at(hay, at)
+        self.scratch.forget();
+        false
     }
 
-    fn longest_at(&mut self, hay: &[u8], at: usize) -> Option<(usize, usize)> {
-        let mut budget = u64::MAX;
-        match self
-            .program
-            .find(hay, 0, hay.len(), at, true, &mut self.scratch, &mut budget)
-        {
-            Step::Done(found) => found,
-            Step::Paused => None,
+    /// Where the leftmost-longest match at or after `at` lies.
+    fn extent(&mut self, hay: &[u8], at: usize, budget: &mut u64) -> Step<Option<(usize, usize)>> {
+        let call = Pause::Extent { at, len: hay.len() };
+        self.resumes(call);
+        let end = hay.len();
+        if let Some(literal) = &self.literal {
+            let found = hay
+                .get(at..)
+                .and_then(|rest| memchr::memmem::find(rest, literal));
+            return Step::Done(found.map(|found| (at + found, at + found + literal.len())));
         }
+        let (from, fallback) = match &mut self.automata {
+            Some(automata) => {
+                let Some((start, first_end)) = automata.first(hay, at, end, self.utf8) else {
+                    return Step::Done(None);
+                };
+                if let Some(stop) = automata.longest_end(hay, start, end) {
+                    return Step::Done(Some((start, stop.max(first_end))));
+                }
+                (start, Some((start, first_end)))
+            }
+            None => (at, None),
+        };
+        let found = self
+            .program
+            .find(hay, 0, end, from, true, &mut self.scratch, budget);
+        if found == Step::Paused {
+            self.paused = Some(call);
+        }
+        found.map(|found| found.or(fallback))
     }
 
     /// The leftmost-longest match at or after `at`, a unit boundary.
-    pub(crate) fn search(&mut self, hay: &[u8], at: usize) -> Option<Spans> {
-        let (start, stop) = self.extent(hay, at)?;
-        let mut budget = u64::MAX;
-        let registers = self.program.captures(
+    pub(crate) fn search(
+        &mut self,
+        hay: &[u8],
+        at: usize,
+        budget: &mut u64,
+    ) -> Step<Option<Spans>> {
+        let len = hay.len();
+        let placing = match self.paused {
+            Some(Pause::Groups {
+                at: from,
+                len: size,
+                start,
+                stop,
+            }) if from == at && size == len => {
+                self.paused = None;
+                Some((start, stop))
+            }
+            _ => None,
+        };
+        let (start, stop) = match placing {
+            Some(found) => found,
+            None => match self.extent(hay, at, budget) {
+                Step::Done(Some(found)) => found,
+                Step::Done(None) => return Step::Done(None),
+                Step::Paused => return Step::Paused,
+            },
+        };
+        let registers = match self.program.captures(
             hay,
             0,
-            hay.len(),
+            len,
             start,
             stop,
             self.backrefs,
             &mut self.scratch,
-            &mut budget,
-        );
+            budget,
+            placing.is_some(),
+        ) {
+            Step::Done(registers) => registers,
+            Step::Paused => {
+                self.paused = Some(Pause::Groups {
+                    at,
+                    len,
+                    start,
+                    stop,
+                });
+                return Step::Paused;
+            }
+        };
         let mut spans: Spans = vec![None; self.groups + 1];
         spans[0] = Some((start, stop));
         if let Some(registers) = registers {
@@ -188,13 +283,18 @@ impl Posix {
                 }
             }
         }
-        Some(spans)
+        Step::Done(Some(spans))
     }
 
     /// Where the leftmost-longest match at or after `at` lies, its groups
     /// left unplaced.
-    pub(crate) fn find(&mut self, hay: &[u8], at: usize) -> Option<(usize, usize)> {
-        self.extent(hay, at)
+    pub(crate) fn find(
+        &mut self,
+        hay: &[u8],
+        at: usize,
+        budget: &mut u64,
+    ) -> Step<Option<(usize, usize)>> {
+        self.extent(hay, at, budget)
     }
 
     /// The latest place in `from..to` a match starts, tried from `to`
@@ -232,10 +332,10 @@ impl Posix {
                 below = place;
                 continue;
             }
-            let resume = self.suspended.take() == Some(place);
+            let resume = self.paused.take() == Some(Pause::Latest { place });
             match self.anchored(hay, place, resume, budget) {
                 Step::Paused => {
-                    self.suspended = Some(place);
+                    self.paused = Some(Pause::Latest { place });
                     return Err(place + 1);
                 }
                 Step::Done(Some(stop)) => return Ok(Some((place, stop))),
@@ -266,62 +366,63 @@ impl Posix {
 
     /// Whether the pattern matches anywhere in `hay`, as sed's addresses
     /// ask.
-    pub(crate) fn test(&mut self, hay: &[u8]) -> bool {
-        let Some(tester) = &self.tester else {
-            return self.extent(hay, 0).is_some();
+    pub(crate) fn test(&mut self, hay: &[u8], budget: &mut u64) -> Step<bool> {
+        if self.tester.is_none() {
+            return self.extent(hay, 0, budget).map(|found| found.is_some());
+        }
+        let call = Pause::Test { len: hay.len() };
+        self.resumes(call);
+        let found = match &self.tester {
+            Some(tester) => tester.find(hay, 0, hay.len(), 0, false, &mut self.scratch, budget),
+            None => Step::Done(None),
         };
-        let mut budget = u64::MAX;
-        let found = tester.find(hay, 0, hay.len(), 0, false, &mut self.scratch, &mut budget);
-        matches!(found, Step::Done(Some(_)))
+        if found == Step::Paused {
+            self.paused = Some(call);
+        }
+        found.map(|found| found.is_some())
     }
 
-    /// Every match a global substitution replaces, as sed walks them: each
-    /// search starts where the last match ended, an empty match right
+    /// The next match a global substitution replaces, as sed walks them:
+    /// each search starts where the last match ended, an empty match right
     /// where one ended is passed over, and past an empty match the next
-    /// search starts one unit on.
-    pub(crate) fn all(&mut self, hay: &[u8]) -> Vec<Spans> {
-        let mut out = Vec::new();
-        self.each(hay, |found| {
-            out.push(found);
-            true
-        });
-        out
-    }
-
-    /// The matches `all` finds, each handed to `visit` as it is found,
-    /// until `visit` answers false.
-    pub(crate) fn each(&mut self, hay: &[u8], mut visit: impl FnMut(Spans) -> bool) {
-        let mut at = 0;
-        let mut previous = None;
-        while at <= hay.len() {
-            let Some(found) = self.search(hay, at) else {
-                break;
+    /// search starts one unit on. None once the walk is over.
+    pub(crate) fn next(
+        &mut self,
+        hay: &[u8],
+        walk: &mut Walk,
+        budget: &mut u64,
+    ) -> Step<Option<Spans>> {
+        while !walk.ended && walk.at <= hay.len() {
+            let found = match self.search(hay, walk.at, budget) {
+                Step::Done(Some(found)) => found,
+                Step::Done(None) => break,
+                Step::Paused => return Step::Paused,
             };
             let Some((start, stop)) = found[0] else {
                 break;
             };
-            if start == stop && previous == Some(start) {
+            if start == stop && walk.previous == Some(start) {
                 match unit_at(hay, start, hay.len(), self.utf8) {
                     Some((_, len)) => {
-                        at = start + len;
+                        walk.at = start + len;
                         continue;
                     }
                     None => break,
                 }
             }
-            if !visit(found) {
-                break;
-            }
-            previous = Some(stop);
-            at = if stop > start {
-                stop
+            walk.previous = Some(stop);
+            if stop > start {
+                walk.at = stop;
             } else {
                 match unit_at(hay, stop, hay.len(), self.utf8) {
-                    Some((_, len)) => stop + len,
-                    None => break,
+                    Some((_, len)) => walk.at = stop + len,
+                    None => walk.ended = true,
                 }
-            };
+            }
+            return Step::Done(Some(found));
         }
+        walk.ended = true;
+        Step::Done(None)
     }
 
     /// How many times the pattern matches `hay` as git counts under
@@ -329,39 +430,48 @@ impl Posix {
     /// search resumes where the last match ended (a unit further after an
     /// empty one), and `^` never holds where it resumes. Each line is
     /// searched in place, so the count takes time in proportion to the
-    /// text however many matches it holds.
-    pub(crate) fn contains(&mut self, hay: &[u8]) -> usize {
+    /// text however many matches it holds. `tally` keeps where the count
+    /// stands when it pauses.
+    pub(crate) fn contains(
+        &mut self,
+        hay: &[u8],
+        tally: &mut Tally,
+        budget: &mut u64,
+    ) -> Step<usize> {
         let len = hay.len();
-        let (mut count, mut start, mut begin) = (0, 0, 0);
         // A line a search resumes at the start of, behind a NUL, where `^`
         // does not hold.
         let mut behind = Vec::new();
-        while start < len && begin <= len {
+        while tally.start < len && tally.begin <= len {
+            let begin = tally.begin;
             let end = memchr::memchr(b'\n', &hay[begin..]).map_or(len, |at| begin + at);
             let line = &hay[begin..end];
-            while start <= end && start < len {
-                let found = if count > 0 && start == begin {
+            while tally.start <= end && tally.start < len {
+                let found = if tally.count > 0 && tally.start == begin {
                     behind.clear();
                     behind.push(0);
                     behind.extend_from_slice(line);
-                    self.extent(&behind, 1)
-                        .map(|(first, last)| (first + begin - 1, last + begin - 1))
+                    self.extent(&behind, 1, budget).map(|found| {
+                        found.map(|(first, last)| (first + begin - 1, last + begin - 1))
+                    })
                 } else {
-                    self.extent(line, start.saturating_sub(begin))
-                        .map(|(first, last)| (first + begin, last + begin))
+                    self.extent(line, tally.start.saturating_sub(begin), budget)
+                        .map(|found| found.map(|(first, last)| (first + begin, last + begin)))
                 };
-                let Some((first, stop)) = found else {
-                    break;
+                let (first, stop) = match found {
+                    Step::Done(Some(found)) => found,
+                    Step::Done(None) => break,
+                    Step::Paused => return Step::Paused,
                 };
-                count += 1;
-                start = stop;
+                tally.count += 1;
+                tally.start = stop;
                 if first == stop && stop < len {
-                    start += unit_at(hay, stop, len, self.utf8).map_or(1, |(_, width)| width);
+                    tally.start += unit_at(hay, stop, len, self.utf8).map_or(1, |(_, width)| width);
                 }
             }
-            begin = end + 1;
+            tally.begin = end + 1;
         }
-        count
+        Step::Done(tally.count)
     }
 }
 
@@ -597,6 +707,7 @@ pub(crate) fn needles(asts: &[&Ast], fold: bool, utf8: bool) -> Option<Vec<Vec<u
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::regex::unbounded;
 
     fn compile(pattern: &str, extended: bool, flags: &str) -> Posix {
         let options = Options {
@@ -610,10 +721,27 @@ mod tests {
         Posix::compile(pattern.as_bytes(), &options).expect("compiles")
     }
 
+    fn search(regex: &mut Posix, hay: &[u8], at: usize) -> Option<Spans> {
+        unbounded(|budget| regex.search(hay, at, budget))
+    }
+
+    fn test(regex: &mut Posix, hay: &[u8]) -> bool {
+        unbounded(|budget| regex.test(hay, budget))
+    }
+
+    fn all(regex: &mut Posix, hay: &[u8]) -> Vec<Spans> {
+        let mut walk = Walk::default();
+        std::iter::from_fn(|| unbounded(|budget| regex.next(hay, &mut walk, budget))).collect()
+    }
+
+    fn contains(regex: &mut Posix, hay: &[u8]) -> usize {
+        unbounded(|budget| regex.contains(hay, &mut Tally::default(), budget))
+    }
+
     /// The match and its groups as text, `-` for a group with no part.
     fn groups(pattern: &str, subject: &str) -> Vec<String> {
         let mut regex = compile(pattern, true, "");
-        let spans = regex.search(subject.as_bytes(), 0).expect("matches");
+        let spans = search(&mut regex, subject.as_bytes(), 0).expect("matches");
         spans
             .iter()
             .map(|span| span.map_or("-".to_owned(), |(a, b)| subject[a..b].to_owned()))
@@ -627,21 +755,21 @@ mod tests {
         let mut regex = compile("\\b(a|aa)*", true, "u");
         assert!(regex.automata.is_none());
         let subject = format!("{}!", "a".repeat(5000));
-        let spans = regex.search(subject.as_bytes(), 0).expect("matches");
+        let spans = search(&mut regex, subject.as_bytes(), 0).expect("matches");
         assert_eq!(spans[0], Some((0, 5000)));
     }
 
     #[test]
     fn contains_counts_as_git_pickaxe_does() {
         let count =
-            |pattern: &str, text: &str| compile(pattern, true, "m").contains(text.as_bytes());
+            |pattern: &str, text: &str| contains(&mut compile(pattern, true, "m"), text.as_bytes());
         assert_eq!(count("^$", "a\n\nb\n"), 2);
         assert_eq!(count("^$", "a\n\n\n\nc\n"), 3);
         assert_eq!(count("b*", "a\n\n\nc\n"), 6);
         assert_eq!(count("^", "ab\nab\nab"), 3);
         assert_eq!(count("a", &"a".repeat(1 << 16)), 1 << 16);
         let mut regex = compile("x*", true, "um");
-        assert_eq!(regex.contains("😀😀".as_bytes()), 2);
+        assert_eq!(contains(&mut regex, "😀😀".as_bytes()), 2);
     }
 
     #[test]
@@ -666,81 +794,83 @@ mod tests {
     #[test]
     fn a_global_walk_passes_over_an_empty_match_where_one_ended() {
         let mut regex = compile("a*", true, "");
-        let starts: Vec<_> = regex
-            .all(b"baaac")
+        let starts: Vec<_> = all(&mut regex, b"baaac")
             .iter()
             .map(|spans| spans[0].unwrap())
             .collect();
         assert_eq!(starts, [(0, 0), (1, 4), (5, 5)]);
         let mut regex = compile("b*", true, "");
-        assert_eq!(regex.all(b"abc").len(), 3);
+        assert_eq!(all(&mut regex, b"abc").len(), 3);
     }
 
     #[test]
     fn a_dollar_reads_a_newline_unless_groups_are_placed() {
-        let found = |pattern: &str| compile(pattern, true, "").search(b"b\na", 0);
+        let found = |pattern: &str| search(&mut compile(pattern, true, ""), b"b\na", 0);
         assert_eq!(found("b$.").unwrap()[0], Some((0, 2)));
         for pattern in ["(b$.)", "b$.(a)", "(b)$.", "(b$|x)."] {
             assert_eq!(found(pattern), None, "{pattern}");
-            assert!(compile(pattern, true, "").test(b"b\na"), "{pattern}");
+            assert!(test(&mut compile(pattern, true, ""), b"b\na"), "{pattern}");
         }
-        assert!(!compile("(b$)a", true, "").test(b"b\na"));
-        assert!(!compile("(b)$.\\1", true, "").test(b"b\nb"));
-        assert!(!compile("(a|b)$.\\1", true, "").test(b"b\nb"));
+        assert!(!test(&mut compile("(b$)a", true, ""), b"b\na"));
+        assert!(!test(&mut compile("(b)$.\\1", true, ""), b"b\nb"));
+        assert!(!test(&mut compile("(a|b)$.\\1", true, ""), b"b\nb"));
     }
 
     #[test]
     fn a_class_that_takes_a_newline_finds_no_match_that_is_not_there() {
         let mut regex = compile("\\w[^x]*[ab][a-]", true, "");
-        assert_eq!(regex.search(b"aaxcx", 0), None);
+        assert_eq!(search(&mut regex, b"aaxcx", 0), None);
         assert_eq!(groups("\\w[^x]*[ab][a-]", "xaab-"), ["xaab-"]);
     }
 
     #[test]
     fn multiline_anchors_and_newlines() {
         let mut regex = compile("^b", false, "");
-        assert!(regex.search(b"a\nb", 0).is_none());
+        assert!(search(&mut regex, b"a\nb", 0).is_none());
         let mut regex = compile("^b", false, "m");
-        assert_eq!(regex.search(b"a\nb", 0).unwrap()[0], Some((2, 3)));
+        assert_eq!(search(&mut regex, b"a\nb", 0).unwrap()[0], Some((2, 3)));
         let mut regex = compile("a.b", false, "");
-        assert!(regex.search(b"a\nb", 0).is_some());
+        assert!(search(&mut regex, b"a\nb", 0).is_some());
         let mut regex = compile("a.b", false, "m");
-        assert!(regex.search(b"a\nb", 0).is_none());
+        assert!(search(&mut regex, b"a\nb", 0).is_none());
         let mut regex = compile("\\`b", false, "m");
-        assert!(regex.search(b"a\nb", 0).is_none());
+        assert!(search(&mut regex, b"a\nb", 0).is_none());
     }
 
     #[test]
     fn words_need_no_word_character_beside_the_match() {
         let mut regex = compile("ab|abc", true, "w");
-        assert_eq!(regex.search(b"abcd abc", 0).unwrap()[0], Some((5, 8)));
+        assert_eq!(search(&mut regex, b"abcd abc", 0).unwrap()[0], Some((5, 8)));
         let mut regex = compile("é", false, "uw");
-        assert_eq!(regex.search("aé é".as_bytes(), 0).unwrap()[0], Some((4, 6)));
+        assert_eq!(
+            search(&mut regex, "aé é".as_bytes(), 0).unwrap()[0],
+            Some((4, 6))
+        );
     }
 
     #[test]
     fn back_references_and_case() {
         let mut regex = compile("\\(a*\\)b\\1", false, "");
-        assert_eq!(regex.search(b"xaabaa", 0).unwrap()[0], Some((1, 6)));
+        assert_eq!(search(&mut regex, b"xaabaa", 0).unwrap()[0], Some((1, 6)));
         let mut regex = compile("é", false, "ui");
-        assert!(regex.search("É".as_bytes(), 0).is_some());
+        assert!(search(&mut regex, "É".as_bytes(), 0).is_some());
         let mut regex = compile("\\(é\\)\\1", false, "ui");
-        assert!(regex.search("éÉ".as_bytes(), 0).is_some());
+        assert!(search(&mut regex, "éÉ".as_bytes(), 0).is_some());
         let mut regex = compile("\\bé", false, "u");
-        assert!(regex.search("aé é".as_bytes(), 0).unwrap()[0] == Some((4, 6)));
+        assert!(search(&mut regex, "aé é".as_bytes(), 0).unwrap()[0] == Some((4, 6)));
     }
 
     #[test]
     fn a_fixed_text_is_found_by_its_bytes() {
         let mut regex = compile("a\\{3\\}\\(b\\)", false, "");
         assert_eq!(
-            regex.search(b"xaaab", 0),
+            search(&mut regex, b"xaaab", 0),
             Some(vec![Some((1, 5)), Some((4, 5))])
         );
         let long = "a".repeat(32767);
         let mut regex = compile("a\\{32767\\}", false, "");
         assert_eq!(
-            regex.search(long.as_bytes(), 0),
+            search(&mut regex, long.as_bytes(), 0),
             Some(vec![Some((0, 32767))])
         );
     }
@@ -764,5 +894,46 @@ mod tests {
         );
         assert_eq!(needles_of("ab+cd", false), Some(vec![b"bcd".to_vec()]));
         assert_eq!(needles_of("café", false), None);
+    }
+
+    /// What `call` answers given one step at a time, and how often it
+    /// paused on the way.
+    fn stepped<T>(mut call: impl FnMut(&mut u64) -> Step<T>) -> (T, usize) {
+        let mut pauses = 0;
+        loop {
+            match call(&mut 1) {
+                Step::Done(value) => return (value, pauses),
+                Step::Paused => pauses += 1,
+            }
+        }
+    }
+
+    #[test]
+    fn a_search_out_of_steps_goes_on_where_it_stopped() {
+        let subject = b"xaabaab aaabaaa";
+        let mut whole = compile("(a*)b\\1", true, "");
+        let mut regex = compile("(a*)b\\1", true, "");
+        let (found, pauses) = stepped(|budget| regex.search(subject, 0, budget));
+        assert!(pauses > 0);
+        assert_eq!(found, search(&mut whole, subject, 0));
+        assert!(stepped(|budget| regex.test(subject, budget)).0);
+        let mut walk = Walk::default();
+        let mut walked = Vec::new();
+        while let (Some(found), _) = stepped(|budget| regex.next(subject, &mut walk, budget)) {
+            walked.push(found);
+        }
+        assert_eq!(walked, all(&mut whole, subject));
+        let mut tally = Tally::default();
+        let (count, _) = stepped(|budget| regex.contains(subject, &mut tally, budget));
+        assert_eq!(count, contains(&mut whole, subject));
+    }
+
+    #[test]
+    fn another_call_after_a_pause_starts_over() {
+        let mut regex = compile("(a|aa)+\\1c", true, "");
+        let long = format!("{}b", "a".repeat(30));
+        assert_eq!(regex.search(long.as_bytes(), 0, &mut 1000), Step::Paused);
+        let found = search(&mut regex, b"aac", 0).map(|spans| spans[0]);
+        assert_eq!(found, Some(Some((0, 3))));
     }
 }

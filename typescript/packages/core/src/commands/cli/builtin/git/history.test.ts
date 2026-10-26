@@ -5,9 +5,9 @@ import { Decoration } from './types.ts'
 import { parseCommand, parseToKwargs } from '../../../spec/parser.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
 
-function hits(pattern: LinePattern | undefined, text: string): boolean {
+async function hits(pattern: LinePattern | undefined, text: string): Promise<boolean> {
   if (pattern === undefined) return false
-  return pattern instanceof RegExp ? pattern.test(text) : pattern.search(text) !== null
+  return pattern instanceof RegExp ? pattern.test(text) : (await pattern.search(text)) !== null
 }
 
 it.each([
@@ -48,19 +48,22 @@ it.each([
   expect(logFlags(argv).maxCount).toBe(expected)
 })
 
-it('keeps every --grep in both spellings', () => {
+it('keeps every --grep in both spellings', async () => {
   const flags = logFlags(['--grep=fix', '--grep', 'typo'])
-  expect(flags.greps.map((pattern) => hits(pattern, 'a typo'))).toEqual([false, true])
+  expect(await Promise.all(flags.greps.map((pattern) => hits(pattern, 'a typo')))).toEqual([
+    false,
+    true,
+  ])
   expect(flags.ignoreCase).toBe(false)
 })
 
 it.each([[['-i']], [['--regexp-ignore-case']]])(
   'folds case for --grep, --author and -S under %j',
-  (argv) => {
+  async (argv) => {
     const flags = logFlags(['--grep=FIX', '--author=BOB', ...argv])
     expect(flags.ignoreCase).toBe(true)
-    expect(hits(flags.greps[0], 'fix: flag')).toBe(true)
-    expect(hits(flags.authors[0], 'Bob <bob@example.com>')).toBe(true)
+    expect(await hits(flags.greps[0], 'fix: flag')).toBe(true)
+    expect(await hits(flags.authors[0], 'Bob <bob@example.com>')).toBe(true)
   },
 )
 
@@ -79,8 +82,8 @@ it.each([
   [['-P', '--grep=a\\-b\\_c\\ d'], 'a-b_c d', true],
   [['-P', '--grep=[]x]'], ']', true],
   [['-P', '--grep=a{x}'], 'a{x}', true],
-])('reads every pattern with the last syntax in %j', (argv, line, expected) => {
-  expect(hits(logFlags(argv).greps[0], line)).toBe(expected)
+])('reads every pattern with the last syntax in %j', async (argv, line, expected) => {
+  expect(await hits(logFlags(argv).greps[0], line)).toBe(expected)
 })
 
 it.each([

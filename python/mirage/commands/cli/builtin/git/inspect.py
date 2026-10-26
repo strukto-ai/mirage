@@ -370,7 +370,7 @@ async def config(
             for name, value in cfg.items(section):
                 full = b".".join((*section, name.lower())).decode()
                 if listing or (
-                    pattern.search(byte_view(full, utf8)) is not None
+                    await pattern.search(byte_view(full, utf8)) is not None
                     if pattern
                     else full == config_key(key)
                 ):

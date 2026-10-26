@@ -1,6 +1,7 @@
 import type { NOOPAccessor } from '../../../../accessor/base.ts'
 import { concat } from '../../../../utils/bytes.ts'
 import { IOResult } from '../../../../io/types.ts'
+import { YieldBudget } from '../../../../io/yield_budget.ts'
 import { byteView, encodeText, fromByteView, utf8Locale } from '../../../../shell/bytes.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 import { RegexSyntax } from '../../../builtin/types.ts'
@@ -33,9 +34,11 @@ import { placeNamed, shownEntries } from './seen.ts'
 import { resolveTree, treeEntries, type TreeEntry } from './tree.ts'
 import { checkSwitches, splitMarked, startPoint, verbUsage, requireVfs } from './util.ts'
 
+type LineMatcher = (line: string, signal?: AbortSignal) => Promise<boolean>
+
 /** A compiled search and presentation, independent of content source. */
 interface GrepFlags {
-  readonly patterns: readonly ((line: string) => boolean)[]
+  readonly patterns: readonly LineMatcher[]
   readonly invert: boolean
   readonly numbers: boolean
   readonly count: boolean
@@ -50,9 +53,10 @@ interface GrepFlags {
 // A line test for one pattern; under -w only a match that consumes something
 // counts, so an empty match does not select the line. Mirrors Python's
 // _line_matcher.
-function lineMatcher(pattern: PosixRegex, nonempty: boolean): (line: string) => boolean {
-  if (!nonempty) return (line) => pattern.search(line) !== null
-  return (line) => pattern.all(line).some((span) => span[0] != null && span[0][0] !== span[0][1])
+function lineMatcher(pattern: PosixRegex, nonempty: boolean): LineMatcher {
+  if (!nonempty) return async (line, signal) => (await pattern.search(line, 0, signal)) !== null
+  return async (line, signal) =>
+    (await pattern.all(line, signal)).some((span) => span[0] != null && span[0][0] !== span[0][1])
 }
 
 /** Compile patterns once, retaining Git's option precedence and errors. */
@@ -70,7 +74,7 @@ function parseFlags(
   }
   const ignoreCase = fl.asBool('ignore_case')
   const wholeWord = fl.asBool('word_regexp')
-  const compiled: ((line: string) => boolean)[] = []
+  const compiled: LineMatcher[] = []
   for (const value of patterns) {
     for (const part of value.split('\n')) {
       const view = byteView(part, utf8)
@@ -116,15 +120,28 @@ function parseFlags(
 }
 
 /** Select and render one file, preserving its content bytes. */
-function searched(data: Uint8Array, label: string, flags: GrepFlags): [Uint8Array, boolean] {
+async function searched(
+  data: Uint8Array,
+  label: string,
+  flags: GrepFlags,
+  signal?: AbortSignal,
+): Promise<[Uint8Array, boolean]> {
   const binary = data.subarray(0, BINARY_SNIFF).includes(0) && flags.binary !== 'text'
   if (binary && flags.binary === 'skip') return [new Uint8Array(), false]
   const lines = byteView(data, flags.utf8).split('\n')
   if (lines.at(-1) === '') lines.pop()
   const selected: [number, string][] = []
+  const budget = new YieldBudget(signal)
   for (const [index, line] of lines.entries()) {
-    if (flags.patterns.some((matches) => matches(line)) !== flags.invert)
-      selected.push([index + 1, line])
+    await budget.run()
+    let hit = false
+    for (const matches of flags.patterns) {
+      if (await matches(line, signal)) {
+        hit = true
+        break
+      }
+    }
+    if (hit !== flags.invert) selected.push([index + 1, line])
   }
   const matched = selected.length > 0
   const found = flags.listing === 'files_without_match' ? !matched : matched
@@ -285,7 +302,7 @@ export async function grep(
       let label = relativePath(path || revision, prefix)
       if (!flags.nul) label = quotePath(label, false, fully)
       if (revision && path) label = revision + ':' + label
-      const [rendered, hit] = searched(data, label, flags)
+      const [rendered, hit] = await searched(data, label, flags, ctx.signal)
       found ||= hit
       if (hit && flags.quiet) return [null, new IOResult()]
       out.push(rendered)

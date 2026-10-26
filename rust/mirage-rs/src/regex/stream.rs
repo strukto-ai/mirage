@@ -1,8 +1,8 @@
 use serde::{Deserialize, Serialize};
 
 use super::parse::{self, Ast, Dialect};
-use super::posix::{self, Posix, Spans};
-use super::{EXCEEDED, Options as GrepOptions, Regex, Step, Syntax};
+use super::posix::{self, Posix, Spans, Tally, Walk};
+use super::{EXCEEDED, Options as GrepOptions, Regex, STEPS, Step, Syntax};
 use crate::{Stream, StreamError, parse_config};
 
 /// An offset that stands for a group with no part in the match.
@@ -90,12 +90,19 @@ enum Matcher {
 /// writes the answer as little-endian u32 offsets, a start and an end per
 /// group with `u32::MAX` for none (posix), a pair per match (extents), or
 /// one byte (test). A -P line search that gives up at the match limit
-/// refuses in GNU grep's words instead of answering.
+/// refuses in GNU grep's words instead of answering. A search that takes
+/// more than `STEPS` leaves the stream `busy`, and the `drain` that
+/// finishes it writes the answer.
 struct RegexStream {
     matcher: Matcher,
     subject: Vec<u8>,
     operation: Operation,
     at: usize,
+    /// The answer so far, while `busy`.
+    reply: Vec<u8>,
+    walk: Walk,
+    tally: Tally,
+    busy: bool,
 }
 
 pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
@@ -155,6 +162,10 @@ pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
         subject: Vec::new(),
         operation: Operation::Search,
         at: 0,
+        reply: Vec::new(),
+        walk: Walk::default(),
+        tally: Tally::default(),
+        busy: false,
     }))
 }
 
@@ -192,52 +203,58 @@ fn put_spans(out: &mut Vec<u8>, spans: &Spans) {
     }
 }
 
-fn done<T>(step: Step<T>) -> T {
-    match step {
-        Step::Done(value) => value,
-        Step::Paused => unreachable!("an unlimited search paused"),
-    }
-}
-
 impl RegexStream {
-    fn answer(&mut self, out: &mut Vec<u8>) -> Result<(), StreamError> {
+    /// Go on with the answer `begin` asked for, `budget` steps at most;
+    /// `Step::Paused` leaves the rest to the next `drain`. A line search's
+    /// subject ends in the terminator `finish` added.
+    fn answer(&mut self, budget: &mut u64) -> Result<Step<()>, StreamError> {
         let hay = self.subject.as_slice();
+        let out = &mut self.reply;
         match (&mut self.matcher, self.operation) {
             (Matcher::Posix(regex), Operation::Search) => {
                 if self.at <= hay.len() {
-                    if let Some(spans) = regex.search(hay, self.at) {
-                        put_spans(out, &spans);
+                    match regex.search(hay, self.at, budget) {
+                        Step::Done(Some(spans)) => put_spans(out, &spans),
+                        Step::Done(None) => {}
+                        Step::Paused => return Ok(Step::Paused),
                     }
                 }
             }
-            (Matcher::Posix(regex), Operation::All) => {
-                for spans in regex.all(hay) {
-                    put_spans(out, &spans);
+            (Matcher::Posix(regex), Operation::All) => loop {
+                match regex.next(hay, &mut self.walk, budget) {
+                    Step::Done(Some(spans)) => put_spans(out, &spans),
+                    Step::Done(None) => break,
+                    Step::Paused => return Ok(Step::Paused),
+                }
+            },
+            (Matcher::Posix(regex), Operation::Contains) => {
+                match regex.contains(hay, &mut self.tally, budget) {
+                    Step::Done(count) => put(out, Some(count)),
+                    Step::Paused => return Ok(Step::Paused),
                 }
             }
-            (Matcher::Posix(regex), Operation::Contains) => {
-                put(out, Some(regex.contains(hay)));
-            }
-            (Matcher::Posix(regex), Operation::Test) => {
-                put(out, Some(usize::from(regex.test(hay))));
-            }
+            (Matcher::Posix(regex), Operation::Test) => match regex.test(hay, budget) {
+                Step::Done(hit) => put(out, Some(usize::from(hit))),
+                Step::Paused => return Ok(Step::Paused),
+            },
             (Matcher::Lines { regex, .. }, Operation::Test) => {
-                let mut line = hay.to_vec();
-                line.push(b'\n');
-                let to = hay.len();
-                let hit = done(regex.matches(&line, 0, to, &mut u64::MAX.clone()));
+                let to = hay.len() - 1;
+                let hit = match regex.matches(hay, 0, to, budget) {
+                    Step::Done(hit) => hit,
+                    Step::Paused => return Ok(Step::Paused),
+                };
                 if regex.exceeded() {
                     return Err(StreamError::new(EXCEEDED));
                 }
                 out.push(u8::from(hit));
             }
             (Matcher::Lines { regex, .. }, Operation::Extents) => {
-                let mut line = hay.to_vec();
-                line.push(b'\n');
-                let to = hay.len();
-                let mut at = 0;
-                while at <= to {
-                    let found = done(regex.extent(&line, 0, at, to, &mut u64::MAX.clone()));
+                let to = hay.len() - 1;
+                while self.at <= to {
+                    let found = match regex.extent(hay, 0, self.at, to, budget) {
+                        Step::Done(found) => found,
+                        Step::Paused => return Ok(Step::Paused),
+                    };
                     if regex.exceeded() {
                         return Err(StreamError::new(EXCEEDED));
                     }
@@ -247,15 +264,33 @@ impl RegexStream {
                     if end > start {
                         put(out, Some(start));
                         put(out, Some(end));
-                        at = end;
+                        self.at = end;
                     } else {
-                        at = start + regex.unit_len(&line, start, to);
+                        self.at = start + regex.unit_len(hay, start, to);
                     }
                 }
             }
             _ => return Err(StreamError::new("regex operation does not fit its mode")),
         }
-        Ok(())
+        Ok(Step::Done(()))
+    }
+
+    /// The answer is out or abandoned. A cached pattern keeps its stream:
+    /// the subject and the buffers a long one grew go back rather than
+    /// stay with it.
+    fn settle(&mut self) {
+        self.busy = false;
+        self.reply.clear();
+        self.walk = Walk::default();
+        self.tally = Tally::default();
+        self.subject.clear();
+        if self.subject.capacity() > KEPT_SUBJECT {
+            self.subject.shrink_to(KEPT_SUBJECT);
+        }
+        match &mut self.matcher {
+            Matcher::Posix(regex) => regex.release(),
+            Matcher::Lines { regex, .. } => regex.forget(),
+        }
     }
 }
 
@@ -266,22 +301,36 @@ impl Stream for RegexStream {
     }
 
     fn finish(&mut self, out: &mut Vec<u8>) -> Result<(), StreamError> {
-        let answered = self.answer(out);
-        // A cached pattern keeps its stream: the subject and the buffers a
-        // long one grew go back rather than stay with it.
-        self.subject.clear();
-        if self.subject.capacity() > KEPT_SUBJECT {
-            self.subject.shrink_to(KEPT_SUBJECT);
+        if let Matcher::Lines { .. } = self.matcher {
+            self.subject.push(b'\n');
         }
-        if let Matcher::Posix(regex) = &mut self.matcher {
-            regex.release();
+        self.busy = true;
+        self.drain(out)
+    }
+
+    fn busy(&self) -> bool {
+        self.busy
+    }
+
+    fn drain(&mut self, out: &mut Vec<u8>) -> Result<(), StreamError> {
+        if !self.busy {
+            return Ok(());
         }
+        let mut budget = STEPS;
+        let answered = match self.answer(&mut budget) {
+            Ok(Step::Paused) => return Ok(()),
+            Ok(Step::Done(())) => Ok(()),
+            Err(err) => Err(err),
+        };
+        // What a refused search found before it stays with the refusal.
+        out.append(&mut self.reply);
+        self.settle();
         answered
     }
 
     fn begin(&mut self, config: &[u8]) -> Result<(), StreamError> {
         let request: Request = parse_config(config)?;
-        self.subject.clear();
+        self.settle();
         self.operation = request.op;
         self.at = request.at;
         Ok(())
@@ -328,7 +377,37 @@ mod tests {
         let mut out = Vec::new();
         stream.feed(subject, &mut out).unwrap();
         stream.finish(&mut out).unwrap();
+        while stream.busy() {
+            stream.drain(&mut out).unwrap();
+        }
         out
+    }
+
+    #[test]
+    fn a_long_search_stays_busy_until_drained() {
+        let mut stream =
+            open(br#"{"mode":"posix","pattern":"\\(a\\|aa\\)*\\1c","dialect":"sed"}"#).unwrap();
+        let subject = [&[b'a'; 28][..], b"b"].concat();
+        let mut out = Vec::new();
+        stream.begin(br#"{"op":"search"}"#).unwrap();
+        stream.feed(&subject, &mut out).unwrap();
+        stream.finish(&mut out).unwrap();
+        assert!(stream.busy());
+        // A new request drops the one left paused.
+        assert_eq!(
+            words(&ask(stream.as_mut(), r#"{"op":"test"}"#, b"aac")),
+            [1]
+        );
+        stream.begin(br#"{"op":"test"}"#).unwrap();
+        stream.feed(&subject, &mut out).unwrap();
+        stream.finish(&mut out).unwrap();
+        let mut drains = 0;
+        while stream.busy() {
+            stream.drain(&mut out).unwrap();
+            drains += 1;
+        }
+        assert!(drains > 0);
+        assert_eq!(words(&out), [0]);
     }
 
     #[test]

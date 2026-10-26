@@ -527,7 +527,6 @@ export async function handleMountCli(
     context.commandLimits,
     session.commandLimits,
   )
-  const signal = context.signal
   const paths =
     follow === undefined
       ? walked.paths
@@ -546,15 +545,7 @@ export async function handleMountCli(
     ]
   }
   const run = (ctx: Context): Promise<CommandFnResult> =>
-    mount.runLeaf(
-      walked.prog,
-      cli,
-      walked.handler,
-      paths,
-      walked.texts,
-      signal === undefined ? ctx : { ...ctx, signal },
-      limit,
-    )
+    mount.runLeaf(walked.prog, cli, walked.handler, paths, walked.texts, ctx, limit)
   return runWalked(walked, session, stdin, context, limit, run)
 }
 
@@ -618,8 +609,16 @@ async function runCli(
     // Defer the call into the promise: a synchronously-thrown leaf error
     // must land in the runner's catch arms, exactly as when the call sat
     // inside its try.
-    start = (ctx) =>
-      answered(Promise.resolve().then(() => fn(install.accessor, walked.paths, walked.texts, ctx)))
+    // The leaf stops at the line's abort or its own timeout's.
+    start = (ctx, signal) =>
+      answered(
+        Promise.resolve().then(() =>
+          fn(install.accessor, walked.paths, walked.texts, {
+            ...ctx,
+            signal: mergeSignals(ctx.signal, signal) ?? signal,
+          }),
+        ),
+      )
   }
   const run = (ctx: Context): Promise<CommandFnResult> => {
     const abort = new AbortController()
@@ -696,6 +695,7 @@ export async function runWalked(
     ...(context.processes === undefined ? {} : { processes: context.processes }),
     ...(context.shell !== undefined ? { shell } : {}),
     ...(context.ids === undefined ? {} : { ids: context.ids }),
+    ...(context.signal === undefined ? {} : { signal: context.signal }),
   }
   let out: CommandFnResult
   try {

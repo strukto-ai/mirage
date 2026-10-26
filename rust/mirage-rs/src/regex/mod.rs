@@ -23,6 +23,30 @@ pub(crate) enum Step<T> {
     Paused,
 }
 
+impl<T> Step<T> {
+    pub(crate) fn map<U>(self, f: impl FnOnce(T) -> U) -> Step<U> {
+        match self {
+            Step::Done(value) => Step::Done(f(value)),
+            Step::Paused => Step::Paused,
+        }
+    }
+}
+
+/// The work one `feed`, `drain` or `finish` may do, under a millisecond of
+/// it: a step is a backtracking instruction or a byte searched. A search
+/// that needs more is `busy`, and the host yields between the `drain`
+/// calls that finish it.
+pub(crate) const STEPS: u64 = 1 << 16;
+
+/// What a search given every step it asks for finds: it never pauses.
+pub(crate) fn unbounded<T>(search: impl FnOnce(&mut u64) -> Step<T>) -> T {
+    let mut budget = u64::MAX;
+    match search(&mut budget) {
+        Step::Done(value) => value,
+        Step::Paused => unreachable!("an unlimited search paused"),
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub(crate) enum Syntax {
@@ -534,6 +558,17 @@ impl Regex {
     /// last call; the input ends there, as GNU grep's does.
     pub(crate) fn exceeded(&mut self) -> bool {
         std::mem::take(&mut self.exceeded)
+    }
+
+    /// Forgets a search left paused, so the next one starts over.
+    pub(crate) fn forget(&mut self) {
+        if let Matcher::Posix(posix) = &mut self.matcher {
+            posix.select.resume = None;
+            if let Some(extent) = &mut posix.extent {
+                extent.resume = None;
+            }
+            posix.scratch.forget();
+        }
     }
 
     /// A -P pattern's regular approximation, which its needles come from.

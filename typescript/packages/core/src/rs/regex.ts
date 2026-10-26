@@ -14,7 +14,9 @@
 
 import { z } from 'zod'
 import type { util } from 'zod'
+import { YieldBudget } from '../io/yield_budget.ts'
 import { fromByteView } from '../shell/bytes.ts'
+import { concat } from '../utils/bytes.ts'
 import { RegexError, SearchLimit, StreamRefusal } from './errors.ts'
 import { MovableStream } from './stream.ts'
 
@@ -127,18 +129,71 @@ function open(config: Readonly<Record<string, util.JSONType>>): MovableStream {
 }
 
 /**
+ * The regex streams one compiled expression searches with. A search out of
+ * steps stays in its stream, busy, until the caller's drains finish it, so
+ * each search takes a stream of its own: an idle one, or a new one while every
+ * stream is in another task's search. A stream an aborted search left busy
+ * still holds its subject, so it closes rather than going back. Mirrors
+ * Python's `_StreamPool`.
+ */
+class StreamPool {
+  readonly metadata: unknown
+  private readonly idle: MovableStream[]
+
+  constructor(private readonly config: Readonly<Record<string, util.JSONType>>) {
+    const first = open(config)
+    this.idle = [first]
+    this.metadata = JSON.parse(decoder.decode(first.live.metadata()))
+  }
+
+  /**
+   * The answer to `request` about `data`, yielding to the loop between the
+   * drains of a long search. A refusal throws StreamRefusal with what the
+   * search found.
+   */
+  async ask(
+    request: Readonly<Record<string, util.JSONType>>,
+    data: Uint8Array,
+    signal?: AbortSignal,
+  ): Promise<Uint8Array> {
+    const movable = this.idle.pop() ?? open(this.config)
+    let stream = movable.live
+    try {
+      const budget = new YieldBudget(signal)
+      for (;;) {
+        stream = movable.live
+        stream.begin(request)
+        const parts = [stream.feed(data), stream.finish()]
+        for (;;) {
+          if (!stream.busy()) return concat(parts)
+          await budget.run()
+          // A stream closes with its instance when another stream on it
+          // traps; the search starts over on the next one.
+          if (!stream.live) break
+          parts.push(stream.drain())
+        }
+      }
+    } finally {
+      if (stream.live && stream.busy()) movable.close()
+      else this.idle.push(movable)
+    }
+  }
+}
+
+/**
  * One POSIX expression, searched against whole subjects. A match is the
  * leftmost one and the longest there; its groups lie where the first way of
  * matching that text puts them, trying a repetition's longer counts and an
  * alternation's earlier branches first. Offsets count elements of the byte
  * view the subject arrives as. `dialect` `sed` reads the expression as GNU
  * sed does, `posix` as regcomp does for expr, nl, bash and git; `multiline`
- * is sed's `M`, and `word` git grep's -w. A refused expression throws
+ * is sed's `M`, and `word` git grep's -w. A long search yields to the loop
+ * between its bounded calls. A refused expression throws
  * RegexError in regerror's wording. Mirrors Python's PosixRegex.
  */
 export class PosixRegex {
   readonly groups: number
-  private readonly stream: MovableStream
+  private readonly streams: StreamPool
 
   constructor(
     pattern: string,
@@ -159,15 +214,8 @@ export class PosixRegex {
       multiline,
       word,
     }
-    this.stream = open(config)
-    this.groups = posixMeta.parse(JSON.parse(decoder.decode(this.stream.live.metadata()))).groups
-  }
-
-  private ask(subject: Subject, request: Readonly<Record<string, util.JSONType>>): number[] {
-    const stream = this.stream.live
-    stream.begin(request)
-    stream.feed(subject.data)
-    return words(stream.finish())
+    this.streams = new StreamPool(config)
+    this.groups = posixMeta.parse(this.streams.metadata).groups
   }
 
   private spans(subject: Subject, found: readonly number[]): Groups {
@@ -181,16 +229,17 @@ export class PosixRegex {
   }
 
   /** The leftmost-longest match at or after `at`, and its groups. */
-  search(text: string, at = 0): Groups | null {
+  async search(text: string, at = 0, signal?: AbortSignal): Promise<Groups | null> {
     const subject = new Subject(text, this.utf8)
-    const found = this.ask(subject, { op: 'search', at: subject.offset(at) })
+    const request = { op: 'search', at: subject.offset(at) }
+    const found = words(await this.streams.ask(request, subject.data, signal))
     return found.length === 0 ? null : this.spans(subject, found)
   }
 
   /** Every match a global substitution replaces, as sed walks them. */
-  all(text: string): Groups[] {
+  async all(text: string, signal?: AbortSignal): Promise<Groups[]> {
     const subject = new Subject(text, this.utf8)
-    const found = this.ask(subject, { op: 'all' })
+    const found = words(await this.streams.ask({ op: 'all' }, subject.data, signal))
     const width = 2 * (this.groups + 1)
     const out: Groups[] = []
     for (let at = 0; at < found.length; at += width)
@@ -204,8 +253,9 @@ export class PosixRegex {
    * character further after an empty one), and `^` never holds where it
    * resumes.
    */
-  contains(text: string): number {
-    return this.ask(new Subject(text, this.utf8), { op: 'contains' })[0] ?? 0
+  async contains(text: string, signal?: AbortSignal): Promise<number> {
+    const data = fromByteView(text, this.utf8)
+    return words(await this.streams.ask({ op: 'contains' }, data, signal))[0] ?? 0
   }
 
   /**
@@ -213,8 +263,9 @@ export class PosixRegex {
    * ask: with no groups to place, a `$` reads a newline the match goes on to
    * consume even in a pattern with groups.
    */
-  matches(text: string): boolean {
-    return this.ask(new Subject(text, this.utf8), { op: 'test' })[0] === 1
+  async matches(text: string, signal?: AbortSignal): Promise<boolean> {
+    const data = fromByteView(text, this.utf8)
+    return words(await this.streams.ask({ op: 'test' }, data, signal))[0] === 1
   }
 }
 
@@ -259,7 +310,7 @@ export class LineRegex {
   readonly needles: string[] | null
   /** Letters fold by Unicode, so `ſ` matches `s` and the Kelvin sign `k`. */
   readonly unicodeFolds: boolean
-  private readonly stream: MovableStream
+  private readonly streams: StreamPool
 
   constructor(
     patterns: readonly string[],
@@ -278,27 +329,21 @@ export class LineRegex {
       word,
       line,
     }
-    this.stream = open(config)
+    this.streams = new StreamPool(config)
     this.unicodeFolds = ignoreCase && utf8
-    const meta = lineMeta.parse(JSON.parse(decoder.decode(this.stream.live.metadata())))
+    const meta = lineMeta.parse(this.streams.metadata)
     this.warnings = meta.warnings
     this.needles = meta.needles
-  }
-
-  private ask(subject: Subject, op: string): Uint8Array {
-    const stream = this.stream.live
-    stream.begin({ op })
-    stream.feed(subject.data)
-    return stream.finish()
   }
 
   /**
    * Whether the line, without its terminator, matches. Throws SearchLimit when
    * a -P search gives up at PCRE2's match limit.
    */
-  matches(line: string): boolean {
+  async matches(line: string, signal?: AbortSignal): Promise<boolean> {
     try {
-      return this.ask(new Subject(line, this.utf8), 'test')[0] === 1
+      const found = await this.streams.ask({ op: 'test' }, fromByteView(line, this.utf8), signal)
+      return found[0] === 1
     } catch (err) {
       if (err instanceof StreamRefusal) throw new SearchLimit(err.message, [])
       throw err
@@ -309,10 +354,10 @@ export class LineRegex {
    * Each match grep -o prints from the line. Throws SearchLimit, carrying the
    * matches found before it, when a -P search gives up at PCRE2's match limit.
    */
-  extents(line: string): Span[] {
+  async extents(line: string, signal?: AbortSignal): Promise<Span[]> {
     const subject = new Subject(line, this.utf8)
     try {
-      return spans(subject, this.ask(subject, 'extents'))
+      return spans(subject, await this.streams.ask({ op: 'extents' }, subject.data, signal))
     } catch (err) {
       if (err instanceof StreamRefusal)
         throw new SearchLimit(err.message, spans(subject, err.output))

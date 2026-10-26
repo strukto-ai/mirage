@@ -23,6 +23,11 @@ import type * as StreamModule from './stream.ts'
 
 const DECODE = { mode: 'decode', ignore_garbage: false }
 
+// The instance a stream runs on.
+function instance(stream: unknown): unknown {
+  return (stream as { exports: unknown }).exports
+}
+
 describe('openStream', () => {
   it('refuses a bad config with no output', async () => {
     const refused: unknown = await openStream('base64', { mode: 'nope' }).catch(
@@ -51,12 +56,11 @@ describe('openStream', () => {
   })
 
   it('moves matchers off an instance a large search grew', async () => {
-    const instance = (stream: unknown): unknown => (stream as { exports: unknown }).exports
     const small = new PosixRegex('b')
     const glob = new GlobMatcher('a*b')
     const large = new PosixRegex('x$')
     const size = 34 * 1024 * 1024
-    expect(large.search('a'.repeat(size) + 'x')).toEqual([[size, size + 1]])
+    expect(await large.search('a'.repeat(size) + 'x')).toEqual([[size, size + 1]])
     const before = await openStream('base64', DECODE)
     const grown = instance(before)
     // Only the matchers are left on the grown instance, so it retires.
@@ -64,9 +68,25 @@ describe('openStream', () => {
     const after = await openStream('base64', DECODE)
     expect(instance(after)).not.toBe(grown)
     after.close()
-    expect(small.search('abc')).toEqual([[1, 2]])
+    expect(await small.search('abc')).toEqual([[1, 2]])
     expect(glob.matches('axb')).toBe(true)
-    expect(large.search('ax')).toEqual([[1, 2]])
+    expect(await large.search('ax')).toEqual([[1, 2]])
+  })
+
+  it('keeps an instance a paused search is on', async () => {
+    const size = 34 * 1024 * 1024
+    // `a*` keeps the automaton from skipping to the `x`, so the search pauses.
+    const regex = new PosixRegex('a*x$')
+    const abort = new AbortController()
+    const search = regex.search('a'.repeat(size) + 'x', 0, abort.signal)
+    const before = await openStream('base64', DECODE)
+    const grown = instance(before)
+    before.close()
+    const after = await openStream('base64', DECODE)
+    expect(instance(after)).toBe(grown)
+    after.close()
+    abort.abort()
+    await expect(search).rejects.toMatchObject({ name: 'AbortError' })
   })
 
   it('reads one input after another', async () => {

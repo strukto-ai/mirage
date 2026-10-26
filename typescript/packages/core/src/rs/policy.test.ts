@@ -112,7 +112,7 @@ describe('policy stream', () => {
     expect(matcher.ask('path_visible', { path: units('/secret/key') })).toBe(false)
     const regex = new PosixRegex('x$')
     const size = 34 * 1024 * 1024
-    expect(regex.search('a'.repeat(size) + 'x')).toEqual([[size, size + 1]])
+    expect(await regex.search('a'.repeat(size) + 'x')).toEqual([[size, size + 1]])
     const stream = await openStream('base64', { mode: 'decode', ignore_garbage: false })
     stream.close()
     expect(matcher.ask('path_visible', { path: units('/secret/key') })).toBe(false)

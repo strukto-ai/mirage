@@ -1,7 +1,7 @@
 import asyncio
 import logging
 import posixpath
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
 from dulwich.objects import Blob
@@ -52,6 +52,7 @@ from mirage.commands.cli.builtin.git.util import (
 from mirage.commands.config import Context
 from mirage.commands.spec.flag_view import FlagView
 from mirage.io.types import ByteSource, IOResult
+from mirage.io.yield_budget import YieldBudget
 from mirage.rs.errors import RegexError
 from mirage.rs.regex import PosixRegex, posix_escape, posix_regex
 from mirage.shell.bytes import (
@@ -70,7 +71,8 @@ class GrepFlags:
     """A compiled search and its presentation, independent of content source.
 
     Args:
-        patterns (tuple[Callable[[str], bool], ...]): alternative line matchers.
+        patterns (tuple[Callable[[str], Awaitable[bool]], ...]): alternative
+            line matchers.
         invert (bool): select nonmatching lines.
         numbers (bool): include line numbers.
         count (bool): print each matching file's line count.
@@ -82,7 +84,7 @@ class GrepFlags:
         utf8 (bool): match characters under a UTF-8 locale.
     """
 
-    patterns: tuple[Callable[[str], bool], ...]
+    patterns: tuple[Callable[[str], Awaitable[bool]], ...]
     invert: bool
     numbers: bool
     count: bool
@@ -96,7 +98,7 @@ class GrepFlags:
 
 def _line_matcher(
     pattern: PosixRegex, nonempty: bool
-) -> Callable[[str], bool]:
+) -> Callable[[str], Awaitable[bool]]:
     """A line test for one pattern; under -w only a match that consumes
     something counts, so an empty match does not select the line.
 
@@ -104,12 +106,16 @@ def _line_matcher(
         pattern (PosixRegex): the compiled expression.
         nonempty (bool): require a match that consumes input.
     """
-    if not nonempty:
-        return lambda line: pattern.search(line) is not None
-    return lambda line: any(
-        span[0] is not None and span[0][0] != span[0][1]
-        for span in pattern.all(line)
-    )
+
+    async def matches(line: str) -> bool:
+        if not nonempty:
+            return await pattern.search(line) is not None
+        return any(
+            span[0] is not None and span[0][0] != span[0][1]
+            for span in await pattern.all(line)
+        )
+
+    return matches
 
 
 def parse_flags(
@@ -178,7 +184,9 @@ def parse_flags(
     )
 
 
-def searched(data: bytes, label: str, flags: GrepFlags) -> tuple[bytes, bool]:
+async def searched(
+    data: bytes, label: str, flags: GrepFlags
+) -> tuple[bytes, bool]:
     """Select and render one file, preserving its content bytes.
 
     Args:
@@ -192,11 +200,17 @@ def searched(data: bytes, label: str, flags: GrepFlags) -> tuple[bytes, bool]:
     lines = byte_view(data, flags.utf8).split("\n")
     if lines[-1] == "":
         lines.pop()
-    selected = [
-        (number, line)
-        for number, line in enumerate(lines, 1)
-        if any(matches(line) for matches in flags.patterns) != flags.invert
-    ]
+    selected = []
+    budget = YieldBudget()
+    for number, line in enumerate(lines, 1):
+        await budget.run()
+        hit = False
+        for matches in flags.patterns:
+            if await matches(line):
+                hit = True
+                break
+        if hit != flags.invert:
+            selected.append((number, line))
     matched = bool(selected)
     found = not matched if flags.listing == "files_without_match" else matched
     if not found or flags.quiet:
@@ -372,7 +386,7 @@ async def grep(
                 label = quote_path(label, False, fully)
             if revision and relative:
                 label = revision + ":" + label
-            rendered, hit = searched(data, label, flags)
+            rendered, hit = await searched(data, label, flags)
             found = found or hit
             if hit and flags.quiet:
                 return None, IOResult()

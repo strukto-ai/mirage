@@ -110,12 +110,12 @@ async def _eval_leaf(
         return 0 if await apply_unary(ctx, node.op, node.operand) else 1
     if isinstance(node, CondBinary):
         if node.op == "=~":
-            return _regex_status(ctx, node)
+            return await _regex_status(ctx, node)
         return 0 if await _eval_cond_binary(ctx, node) else 1
     return 0 if node.value != "" else 1
 
 
-def _regex_status(ctx: CondContext, node: CondBinary) -> int:
+async def _regex_status(ctx: CondContext, node: CondBinary) -> int:
     """Match ``[[ left =~ right ]]``, filling BASH_REMATCH on a match.
 
     Args:
@@ -128,9 +128,8 @@ def _regex_status(ctx: CondContext, node: CondBinary) -> int:
     # bash hands the pattern to regcomp(REG_EXTENDED): glibc's
     # POSIX_EXTENDED syntax, where `\d` is a `d` and `(?` is refused.
     try:
-        found = posix_regex(
-            byte_view(node.right, utf8), True, utf8=utf8
-        ).search(left)
+        regex = posix_regex(byte_view(node.right, utf8), True, utf8=utf8)
+        found = await regex.search(left)
     except RegexError:
         return 2
     if found is None:
