@@ -222,6 +222,7 @@ def install_mounts(
     Returns:
         bool: whether the root mount was synthesized.
     """
+    placed: list[tuple[MountSpec, MountEntry]] = []
     for spec in specs:
         registry.check_vfs_available(spec.vfs)
         entry = registry.mount(
@@ -233,11 +234,16 @@ def install_mounts(
             index=spec.index if spec.index is not None else index,
             vfs_ref=spec.vfs_ref,
         )
+        placed.append((spec, entry))
+    # Every mount's limits before any settles: two mounts of one VFS
+    # settle against each other.
+    for spec, entry in placed:
         if spec.command_limits:
             check_command_limits(
                 spec.command_limits, f"mount {spec.prefix}", takes_line=False
             )
             entry.command_limits.update(spec.command_limits)
+    for _, entry in placed:
         registry.settle_walk_limit(entry)
     implicit_root = registry.root_mount is None
     if implicit_root:

@@ -58,6 +58,7 @@ import type { Decisions } from '../../policy/decisions.ts'
 import { Boundary } from '../../policy/boundary.ts'
 import { METADATA_OPS } from '../../policy/constants.ts'
 import { PolicyError } from '../../policy/errors.ts'
+import { walkBound } from '../../policy/builtin/output_cap.ts'
 import { mountKey, underPath } from '../../utils/key_prefix.ts'
 import { normDir, ownerPrefix, rstripSlash } from '../../utils/slash.ts'
 import { CycleError, endsAtDot, norm, parent, posixNormpath } from '../../utils/path.ts'
@@ -134,6 +135,8 @@ import {
 import {
   type Caller,
   type CallerDispatchFn,
+  callerSignal,
+  currentCaller,
   effectivePathMode,
   explaining,
   getCurrentSession,
@@ -143,6 +146,7 @@ import {
   sessionAccess,
 } from '../../context/session_context.ts'
 import { asyncContextIsolatesTasks } from '../../utils/async_context.ts'
+import { abortable } from '../../utils/abort.ts'
 import {
   hiddenUnder,
   leadsHidden,
@@ -221,12 +225,12 @@ function visibleAnswer(
 }
 
 /**
- * Whether a VFS may refuse a command that reads every file under a
- * directory: it defines `beforeFullWalk`, or sets a `walkLimit` the
- * default one holds it to. Mirrors Python's `_guards_walks`.
+ * Whether a mount may refuse a command that reads every file under a
+ * directory: its VFS defines `beforeFullWalk`, or the command walks it
+ * under a `walkLimit` (`limit`). Mirrors Python's `_guards_walks`.
  */
-function guardsWalks(vfs: BaseVFS): boolean {
-  return vfs.supports('before_full_walk') || vfs.walkLimit >= 0
+function guardsWalks(vfs: BaseVFS, limit: number): boolean {
+  return vfs.supports('before_full_walk') || limit >= 0
 }
 
 /**
@@ -879,7 +883,10 @@ export class Dispatcher {
     // With no walk guard on any mount, no path reaches one to ask.
     if (
       name === 'before_full_walk' &&
-      !this.namespace.mountPrefixes().some((p) => guardsWalks(this.namespace.mountFor(p).vfs))
+      !this.namespace.mountPrefixes().some((p) => {
+        const mount = this.namespace.mountFor(p)
+        return guardsWalks(mount.vfs, this.walkBoundOf(mount))
+      })
     ) {
       return [null, new IOResult()]
     }
@@ -954,7 +961,10 @@ export class Dispatcher {
     const owner = this.namespace.tryMountFor(call.path.virtual)
     // A mount with no walk guard has nothing to refuse, so a command asks
     // every mount it walks and only a guard costs a call.
-    if (name === 'before_full_walk' && (owner === null || !guardsWalks(owner.vfs))) {
+    if (
+      name === 'before_full_walk' &&
+      (owner === null || !guardsWalks(owner.vfs, this.walkBoundOf(owner)))
+    ) {
       return [null, new IOResult()]
     }
     // The cache stage answers first where the file cache decides: a call
@@ -2033,6 +2043,22 @@ export class Dispatcher {
   }
 
   /**
+   * The running command's `walkLimit` on `mount` (walkBound): its entry,
+   * its declared limit and the session's profile over the mount's and the
+   * workspace's. Mirrors Python's Dispatcher._walk_bound.
+   */
+  private walkBoundOf(mount: MountEntry): number {
+    const caller = this.caller ?? currentCaller()
+    return walkBound(
+      mount,
+      caller.command,
+      caller.declared,
+      this.namespace.commandLimits,
+      caller.session?.commandLimits ?? {},
+    )
+  }
+
+  /**
    * How many files the session sees under a walk guard's path, counted off
    * the mount's `readTree` with every hidden file dropped, and every file a
    * nested mount covers, so a guard's refusal never counts what the command
@@ -2043,7 +2069,12 @@ export class Dispatcher {
    * command reports it itself. null otherwise. Mirrors Python's
    * Dispatcher._visible_files.
    */
-  private async visibleFiles(mount: MountEntry, vfs: BaseVFS, call: Call): Promise<number | null> {
+  private async visibleFiles(
+    mount: MountEntry,
+    vfs: BaseVFS,
+    call: Call,
+    limit: number,
+  ): Promise<number | null> {
     const root = call.path.virtual
     const own = `${rstripSlash(mount.prefix)}/`
     const covered = this.namespace
@@ -2053,7 +2084,6 @@ export class Dispatcher {
     const counted = (virtual: string): boolean =>
       pathVisible(call.vis, virtual) &&
       !covered.some((p) => `${rstripSlash(virtual)}/`.startsWith(p))
-    const limit = vfs.walkLimit
     if (vfs.supports('read_tree')) {
       let found: Map<string, FileStat> | null
       try {
@@ -2310,11 +2340,16 @@ export class Dispatcher {
       } else if (name === 'before_full_walk' && !(await isDirectory(mount, p))) {
         result = null
       } else if (name === 'before_full_walk' && !vfs.supports(name)) {
-        await vfs.beforeFullWalk(p, await this.visibleFiles(mount, vfs, call))
+        // The command's own walkLimit, which the backend cannot know.
+        const limit = this.walkBoundOf(mount)
+        const files = await this.visibleFiles(mount, vfs, call, limit)
+        if (limit >= 0 && files !== null && files > limit) {
+          throw new Error(`more than ${String(limit)} files in scope (walk_limit); narrow the path`)
+        }
         result = null
       } else {
         if (name === 'before_full_walk')
-          fullKwargs.files = await this.visibleFiles(mount, vfs, call)
+          fullKwargs.files = await this.visibleFiles(mount, vfs, call, this.walkBoundOf(mount))
         if (names(call, this.caller)) await this.reconciler.reconcileRead(mount, p.virtual)
         const answered = probed(call, mount)
         result = answered ?? (await run(fullKwargs))
@@ -2596,18 +2631,18 @@ export class Dispatcher {
   /**
    * Run one write with its names held, one writer at a time per name.
    *
-   * The caller's timeout covers its wait for the hold and the store's
-   * call, not `after` (the bookkeeping), which it then waits for. A writer
-   * that gives up while queued lets go of any name it already holds and
-   * never runs. One that gives up after its call started keeps the hold
-   * until the store's own call settles, since a timeout cannot stop the
-   * call and a timed-out pwrite still writes back what it read; the
-   * mount's activity ends at the timeout as for any op, so an unmount
-   * does not wait on it. `after` runs only for a caller still waiting: a
-   * call that lands after its timeout runs `landed` instead, which drops what
-   * the landing made stale where its names still belong to the mount that
-   * ran it (a read between the timeout and the landing may have cached the
-   * old bytes); a failure nobody waits for any more is reported.
+   * The caller's abort covers its wait for the hold and the store's call,
+   * not `after` (the bookkeeping), which it then waits for. A writer that
+   * gives up while queued lets go of any name it already holds and never
+   * runs. One that gives up after its call started keeps the hold until the
+   * store's own call settles, since an abort cannot stop the call and an
+   * abandoned pwrite still writes back what it read; the mount's activity
+   * ends at the abort as for any op, so an unmount does not wait on it.
+   * `after` runs only for a caller still waiting: a call that lands after
+   * its caller left runs `landed` instead, which drops what the landing
+   * made stale where its names still belong to the mount that ran it (a
+   * read between the abort and the landing may have cached the old bytes);
+   * a failure nobody waits for any more is reported.
    *
    * Args:
    *   keys: the names to hold, in the one order every writer takes them.
@@ -2626,6 +2661,10 @@ export class Dispatcher {
     after: (value: unknown) => Promise<void>,
     landed: () => Promise<void>,
   ): Promise<unknown> {
+    // The caller's abort (the line's deadline among its reasons) stops the
+    // wait for the hold, so a write still queued never runs; one whose
+    // store call started keeps its hold until that call settles.
+    const signal = callerSignal()
     const turn = { entered: false, abandoned: false, late: false, started: false, settled: false }
     let giveUp = (): void => undefined
     const gaveUp = new Promise<void>((resolve) => {
@@ -2681,7 +2720,10 @@ export class Dispatcher {
     })
     let value: unknown
     try {
-      value = await entered.then(() => answer)
+      value = await abortable(
+        entered.then(() => answer),
+        signal,
+      )
     } catch (err) {
       if (turn.started && !turn.settled) turn.late = true
       if (!turn.entered) {

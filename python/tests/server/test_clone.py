@@ -268,14 +268,15 @@ async def test_an_override_mount_with_a_null_write_keeps_the_saved_policy():
     assert built["/r/"].write is None
 
 
+def _capped() -> Mount:
+    return Mount(
+        vfs=RAMVFS(), command_limits={ALL_COMMANDS: Limit(walk_limit=3)}
+    )
+
+
 @pytest.mark.asyncio
 async def test_a_clone_keeps_a_mount_limit_unless_the_override_names_one():
-    def capped() -> Mount:
-        return Mount(
-            vfs=RAMVFS(), command_limits={ALL_COMMANDS: Limit(walk_limit=3)}
-        )
-
-    src = Workspace({"/a": capped(), "/b": capped()})
+    src = Workspace({"/a": _capped(), "/b": _capped()})
     try:
         cloned = await clone_workspace_with_override(
             src,

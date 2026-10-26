@@ -431,7 +431,13 @@ export function buildMountArgs(
     const index = restoreIndexConfig(m.index_config, placed?.options.index, m.prefix)
     // The mount's own limits, its "*" walk_limit among them, come back as
     // saved unless the override names its own. Mirrors python.
-    const commandLimits = placed?.options.commandLimits ?? parseCommandLimits(m.command_limits)
+    // An override that names no limits keeps the saved ones, as Python's,
+    // whose Mount cannot tell an omitted table from an empty one.
+    const named = placed?.options.commandLimits
+    const commandLimits =
+      named !== undefined && Object.keys(named).length > 0
+        ? named
+        : parseCommandLimits(m.command_limits)
     mountArgs[m.prefix] = new Mount(
       placed !== null ? placed.vfs : ((override as BaseVFS | undefined) ?? new RAMVFS()),
       {

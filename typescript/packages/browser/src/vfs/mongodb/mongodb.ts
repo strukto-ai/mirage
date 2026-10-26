@@ -60,7 +60,9 @@ export class MongoDBVFS extends MongoDBVFSBase {
         ? options
         : { config: options, prefix: undefined, driver: undefined, endpoint: undefined }
     this.config = resolveMongoDBConfig(config)
-    this.driver = driver ?? new HttpMongoDriver({ endpoint: endpoint ?? this.config.uri })
+    this.driver =
+      driver ??
+      new HttpMongoDriver({ endpoint: endpoint ?? this.config.uri, timeout: this.config.timeout })
     this.accessor = new MongoDBAccessor(this.driver, this.config)
     this.vfsMd = prefix === undefined ? VFS_MD : VFS_MD.replace('{prefix}', prefix)
   }

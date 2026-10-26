@@ -503,6 +503,7 @@ class MountRegistry:
         )
         if alias is not None:
             m.activity = alias.activity
+            m.backend_walk_limit = alias.backend_walk_limit
         # The shared set first, so a command the VFS replaces keeps its own
         # spec, not the generic one of that name.
         for cmd in (*GENERIC_COMMANDS, *GENERAL_COMMANDS):
@@ -511,10 +512,10 @@ class MountRegistry:
         # handed, which are user commands and win.
         m._register_builtins(backend_commands(vfs))
         m.register_commands(vfs.commands())
+        self.settle_walk_limit(m)
         self._attach_manager(m)
         self._mounts.append(m)
         self._mounts.sort(key=lambda x: len(x.prefix), reverse=True)
-        self.settle_walk_limit(m)
         if norm_prefix == "/":
             self._root = m
         return m
@@ -624,23 +625,41 @@ class MountRegistry:
         """Set the mount's ``walk_limit``, which decides how its backend
         searches (its own search API under a cap, every file without):
         the mount's ``"*"`` entry, else the workspace's, else the
-        backend's default. A command's own ``walk_limit`` changes only
-        how far that command walks.
+        backend's default, a None one lifting the cap. A command's own
+        ``walk_limit`` changes only how far that command walks. The
+        mounts of one VFS share its search, so they settle on one limit.
 
         Args:
             entry (MountEntry): the mount, its own limits applied.
+
+        Raises:
+            ValueError: another mount of the VFS settles on another limit.
         """
+        settled = self._settled_walk_limit(entry)
+        for other in self._mounts:
+            if other is entry or other.vfs is not entry.vfs:
+                continue
+            theirs = self._settled_walk_limit(other)
+            if theirs != settled:
+                raise ValueError(
+                    f"mount {entry.prefix}: walk_limit {settled} differs "
+                    f"from {other.prefix}'s {theirs} on the same VFS"
+                )
+        entry.vfs.walk_limit = settled
+        entry.calls = entry.answered_calls()
+        self._rows = None
+
+    def _settled_walk_limit(self, entry: MountEntry) -> int:
         found = Limit.layered(
             (
                 entry.command_limits.get(ALL_COMMANDS),
                 self.command_limits.get(ALL_COMMANDS),
-                Limit(walk_limit=entry.vfs.walk_limit),
+                Limit(walk_limit=entry.backend_walk_limit),
             )
         )
-        if found is not None and found.walk_limit is not None:
-            entry.vfs.walk_limit = found.walk_limit
-            entry.calls = entry.answered_calls()
-        self._rows = None
+        if found is None:
+            return entry.backend_walk_limit
+        return -1 if found.walk_limit is None else found.walk_limit
 
     def limit_mount(self, prefix: str) -> MountEntry | None:
         """The mount a command's output guard resolves a stamped prefix

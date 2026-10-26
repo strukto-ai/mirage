@@ -16,7 +16,13 @@ import { Octokit } from '@octokit/core'
 import { RequestError } from '@octokit/request-error'
 import { retry } from '@octokit/plugin-retry'
 import { throttling } from '@octokit/plugin-throttling'
-import { MAX_BODY_BYTES, bodyChunks, loweredHeaders, readBytes } from '../api/client.ts'
+import {
+  MAX_BODY_BYTES,
+  bodyChunks,
+  loweredHeaders,
+  readBytes,
+  stallTimeout,
+} from '../api/client.ts'
 import { GRAPHQL_PATH, RAW_MEDIA_TYPE, SEARCH_PAGE_SIZE } from './constants.ts'
 
 export const GITHUB_API_BASE = 'https://api.github.com'
@@ -109,9 +115,11 @@ export function graphqlUrl(baseUrl: string): string {
 export class HttpGitHubTransport implements GitHubTransport {
   readonly baseUrl: string
   private readonly kit: InstanceType<typeof Kit>
+  private readonly fetcher: typeof fetch
 
-  constructor(opts: { token: string; baseUrl?: string }) {
+  constructor(opts: { token: string; baseUrl?: string; timeout?: number }) {
     this.baseUrl = opts.baseUrl ?? GITHUB_API_BASE
+    this.fetcher = stallTimeout(opts.timeout)
     this.kit = new Kit({
       auth: opts.token,
       baseUrl: this.baseUrl,
@@ -200,7 +208,7 @@ export class HttpGitHubTransport implements GitHubTransport {
         request: {
           fetch: async (input: RequestInfo | URL, init?: RequestInit) => {
             failed = undefined
-            const response = await globalThis.fetch(input, init)
+            const response = await this.fetcher(input, init)
             if (response.status >= 400) failed = response.clone()
             return response
           },

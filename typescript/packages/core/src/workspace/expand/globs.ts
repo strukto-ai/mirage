@@ -13,7 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { childMountNames, namespaceNames } from '../../view/namespace_view.ts'
-import { sessionAccess, sessionVisibility } from '../../context/session_context.ts'
+import { currentCaller, sessionAccess, sessionVisibility } from '../../context/session_context.ts'
+import { walkBound } from '../../policy/builtin/output_cap.ts'
 import type { NamespaceLinks, SessionAccess } from '../../view/types.ts'
 import type { DispatchFn } from '../../runtime/types.ts'
 import { mountKey } from '../../utils/key_prefix.ts'
@@ -596,14 +597,22 @@ export async function resolveGlobs(
           resolved = kept
         }
         // Each match counts against the mount serving it, as a word can
-        // reach into a mount below its own or follow a link into another.
+        // reach into a mount below its own or follow a link into another,
+        // and against the walkLimit every command shares there: a word
+        // expands before its command runs.
         const counts = new Map<string, number>()
+        const bounds = new Map<string, number>()
+        const profile = currentCaller().session?.commandLimits ?? {}
         for (const match of resolved) {
           const served = links !== null ? links.followParent(match.virtual) : match.virtual
           const owner = mountOf(registry, served, mount)
           const count = (counts.get(owner.prefix) ?? 0) + 1
           counts.set(owner.prefix, count)
-          const limit = owner.vfs.walkLimit
+          let limit = bounds.get(owner.prefix)
+          if (limit === undefined) {
+            limit = walkBound(owner, null, null, registry.commandLimits, profile)
+            bounds.set(owner.prefix, limit)
+          }
           if (limit >= 0 && count > limit) {
             throw new TooManyMatches(new GlobLimitError(unmarkGlobs(typed.rawPath), limit).message)
           }

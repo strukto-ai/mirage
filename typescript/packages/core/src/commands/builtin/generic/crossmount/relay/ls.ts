@@ -88,6 +88,8 @@ export async function runLs(
       : undefined,
     readdirOp(dispatch),
     relayedStat(dispatch),
+    true,
+    ctx.signal,
   )
   const result = await lsGeneric(flatten(scopes), ctx, readdir, stat, null)
   return result ?? [null, new IOResult()]

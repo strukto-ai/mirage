@@ -17,6 +17,7 @@ import {
   FileStat,
   FileType,
   LINK_TARGET_KEY,
+  type Limit,
   type MountMode,
   type PathSpec,
   type Visibility,
@@ -541,6 +542,11 @@ export class Namespace {
 
   mountPrefixes(): string[] {
     return this.registry.mountPrefixes()
+  }
+
+  /** The workspace's command limits, the layer under each mount's. */
+  get commandLimits(): Readonly<Record<string, Limit>> {
+    return this.registry.commandLimits
   }
 
   /**

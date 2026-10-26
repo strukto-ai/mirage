@@ -89,6 +89,7 @@ from mirage.observe.record import (
     OpRecord,
 )
 from mirage.policy.boundary import Boundary
+from mirage.policy.builtin.output_cap import walk_bound
 from mirage.policy.constants import METADATA_OPS
 from mirage.policy.errors import PolicyDenied, PolicyError
 from mirage.policy.types import EntryGate
@@ -400,15 +401,16 @@ def _visible_answer(
     return [hit for hit in result if path_visible(vis, hit[0])]
 
 
-def _guards_walks(vfs: BaseVFS) -> bool:
-    """Whether a VFS may refuse a command that reads every file under a
-    directory: it defines ``before_full_walk``, or sets a
-    ``walk_limit`` the default one holds it to.
+def _guards_walks(vfs: BaseVFS, limit: int) -> bool:
+    """Whether a mount may refuse a command that reads every file under a
+    directory: its VFS defines ``before_full_walk``, or the command walks
+    it under a ``walk_limit``.
 
     Args:
         vfs (BaseVFS): the mount's VFS.
+        limit (int): the command's ``walk_limit`` there, -1 for none.
     """
-    return vfs.supports("before_full_walk") or vfs.walk_limit >= 0
+    return vfs.supports("before_full_walk") or limit >= 0
 
 
 def _answer_paths(result: Any) -> list[str] | None:
@@ -1229,7 +1231,8 @@ class Dispatcher:
         await self._prepare(caller)
         # With no walk guard on any mount, no path reaches one to ask.
         if name == "before_full_walk" and not any(
-            _guards_walks(m.vfs) for m in self._namespace.registry.mounts()
+            _guards_walks(m.vfs, self._walk_bound(m, caller))
+            for m in self._namespace.registry.mounts()
         ):
             return None, IOResult()
         call = await self._walk(
@@ -1289,7 +1292,8 @@ class Dispatcher:
         # A mount with no walk guard has nothing to refuse, so a command
         # asks every mount it walks and only a guard costs a call.
         if name == "before_full_walk" and (
-            mount is None or not _guards_walks(mount.vfs)
+            mount is None
+            or not _guards_walks(mount.vfs, self._walk_bound(mount, caller))
         ):
             return None, IOResult()
         # The cache stage answers first where the file cache decides: a
@@ -2318,13 +2322,21 @@ class Dispatcher:
             elif call.name == "before_full_walk" and not mount.vfs.supports(
                 call.name
             ):
-                await mount.vfs.before_full_walk(
-                    call.path, files=await self._visible_files(mount, call)
-                )
+                # The command's own walk_limit, which the backend cannot
+                # know.
+                limit = self._walk_bound(mount, call.caller)
+                files = await self._visible_files(mount, call, limit)
+                if limit >= 0 and files is not None and files > limit:
+                    raise ValueError(
+                        f"more than {limit} files in scope (walk_limit); "
+                        "narrow the path"
+                    )
                 result = None
             else:
                 if call.name == "before_full_walk":
-                    kwargs["files"] = await self._visible_files(mount, call)
+                    kwargs["files"] = await self._visible_files(
+                        mount, call, self._walk_bound(mount, call.caller)
+                    )
                 if call.fresh:
                     kwargs["index"] = ListingCheckStore(hints=mount.index)
                 if _names(call):
@@ -2407,8 +2419,26 @@ class Dispatcher:
             await held.enter_async_context(self._writers.with_lock(key))
             return await self._call(call, mount, self._filler(call, mount))
 
+    def _walk_bound(self, mount: MountEntry, caller: Caller) -> int:
+        """The running command's ``walk_limit`` on ``mount``
+        (``walk_bound``): its entry, its declared limit and the session's
+        profile over the mount's and the workspace's.
+
+        Args:
+            mount (MountEntry): the mount walked.
+            caller (Caller): who makes the op.
+        """
+        session = caller.session
+        return walk_bound(
+            mount,
+            caller.command,
+            caller.declared,
+            self._namespace.registry.command_limits,
+            session.command_limits if session is not None else None,
+        )
+
     async def _visible_files(
-        self, mount: MountEntry, call: _Call
+        self, mount: MountEntry, call: _Call, limit: int
     ) -> int | None:
         """How many files the session sees under a walk guard's path.
 
@@ -2428,6 +2458,7 @@ class Dispatcher:
         Args:
             mount (MountEntry): the mount serving the path.
             call (_Call): the guard's call.
+            limit (int): the command's ``walk_limit`` there, -1 for none.
         """
         root = call.path.virtual
         own = mount.prefix.rstrip("/") + "/"
@@ -2445,7 +2476,6 @@ class Dispatcher:
                 virtual.rstrip("/") + "/"
             ).startswith(covered)
 
-        limit = mount.vfs.walk_limit
         if mount.vfs.supports("read_tree"):
             try:
                 found = await mount.call(

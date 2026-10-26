@@ -550,6 +550,9 @@ class MountEntry:
         self.mount_id = (ids if ids is not None else SystemIdSource()).uuid7()
         self.prefix = prefix
         self.vfs = vfs
+        # The backend's own walk_limit, kept from before any mount
+        # settles the VFS's; a later mount of the VFS takes the first's.
+        self.backend_walk_limit = vfs.walk_limit
         self.calls = self.answered_calls()
         self.mode = mode
         # How this mount's cached bytes are revalidated. Read by the
@@ -1399,26 +1402,31 @@ class MountEntry:
                 which a file error names.
         """
         ctx = dataclasses.replace(ctx, spec=_named_spec(cmd, cmd_name))
-        with host_io():
-            return await run_handler(
-                cmd.fn(self.vfs.accessor, paths, texts, ctx),
-                cmd_name,
-                Producer(
-                    command=cmd_name,
-                    prefixes=(self.prefix,),
-                    declared=cmd.limit,
-                ),
-                mount_voice(cmd_name, typed),
-                drop=(
-                    self.drop_caches
-                    if cmd.write and self._is_user_command(cmd)
-                    else None
-                ),
-                scope=lambda result: _wrap_mount_streams(
-                    result, self.activity
-                ),
-                vfs=ctx.vfs,
-            )
+        # The command's walks resolve their walk_limit with its own.
+        token = bind_caller(current_caller().changed({"declared": cmd.limit}))
+        try:
+            with host_io():
+                return await run_handler(
+                    cmd.fn(self.vfs.accessor, paths, texts, ctx),
+                    cmd_name,
+                    Producer(
+                        command=cmd_name,
+                        prefixes=(self.prefix,),
+                        declared=cmd.limit,
+                    ),
+                    mount_voice(cmd_name, typed),
+                    drop=(
+                        self.drop_caches
+                        if cmd.write and self._is_user_command(cmd)
+                        else None
+                    ),
+                    scope=lambda result: _wrap_mount_streams(
+                        result, self.activity
+                    ),
+                    vfs=ctx.vfs,
+                )
+        finally:
+            reset_caller(token)
 
     async def run_leaf(
         self,
@@ -1469,30 +1477,41 @@ class MountEntry:
                 refusal = self._command_refusal(prog, leaf, {}, root)
                 if refusal is not None:
                     return None, refusal
-                with host_io():
-                    return await run_handler(
-                        answered(
-                            call_leaf(
-                                fn, self.vfs.accessor, keyed, texts, run_ctx
-                            )
-                        ),
-                        prog,
-                        Producer(
-                            command=prog,
-                            prefixes=(self.prefix,),
-                            declared=handler.limit,
-                        ),
-                        cli_voice(prog),
-                        drop=(
-                            self.drop_caches
-                            if handler.write and self._is_user_command(root)
-                            else None
-                        ),
-                        scope=lambda result: _wrap_mount_streams(
-                            result, self.activity
-                        ),
-                        vfs=run_ctx.vfs,
-                    )
+                token = bind_caller(
+                    current_caller().changed({"declared": handler.limit})
+                )
+                try:
+                    with host_io():
+                        return await run_handler(
+                            answered(
+                                call_leaf(
+                                    fn,
+                                    self.vfs.accessor,
+                                    keyed,
+                                    texts,
+                                    run_ctx,
+                                )
+                            ),
+                            prog,
+                            Producer(
+                                command=prog,
+                                prefixes=(self.prefix,),
+                                declared=handler.limit,
+                            ),
+                            cli_voice(prog),
+                            drop=(
+                                self.drop_caches
+                                if handler.write
+                                and self._is_user_command(root)
+                                else None
+                            ),
+                            scope=lambda result: _wrap_mount_streams(
+                                result, self.activity
+                            ),
+                            vfs=run_ctx.vfs,
+                        )
+                finally:
+                    reset_caller(token)
 
     async def drop_caches(self, bodies: bool = True) -> None:
         """Drop what this mount keeps after a write that went past the

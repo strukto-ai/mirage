@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { Limit, type LimitInit, OnExceed, type Producer } from '../../types.ts'
+import { compareCodePoints } from '../../utils/sort.ts'
 
 const DEFAULT_MAX_LINES = 2000
 
@@ -92,6 +93,31 @@ export function resolveLimit(
       ]),
     ),
   )
+}
+
+/**
+ * How many files one walk lists on `mount`, -1 for no cap: the `walkLimit`
+ * of `command`, resolved as resolveLimit resolves every bound; without a
+ * command, the one every command shares (the `*` entries), which a glob
+ * counts against. A layer naming the bound as null lifts it. Mirrors
+ * Python's walk_bound.
+ */
+export function walkBound(
+  mount: LimitMount,
+  command: string | null = null,
+  commandDefault: Limit | null = null,
+  workspaceLimits: Readonly<Record<string, Limit>> = {},
+  profileLimits: Readonly<Record<string, Limit>> = {},
+): number {
+  const found = resolveLimit(
+    command ?? ALL_COMMANDS,
+    [mount],
+    commandDefault,
+    null,
+    workspaceLimits,
+    profileLimits,
+  )
+  return found?.walkLimit ?? -1
 }
 
 export type MountLookup = (prefix: string) => LimitMount | null
@@ -196,7 +222,7 @@ export function lineTimeout(
   profileLimits: Readonly<Record<string, Limit>> = {},
 ): number | null {
   const found = Limit.layered([ownLimit(profileLimits, LINE), ownLimit(workspaceLimits, LINE)])
-  if (found === null || !found.fieldsSet.has('timeoutSeconds')) return LINE_TIMEOUT_SECONDS
+  if (!found?.fieldsSet.has('timeoutSeconds')) return LINE_TIMEOUT_SECONDS
   return found.timeoutSeconds !== null && found.timeoutSeconds > 0 ? found.timeoutSeconds : null
 }
 
@@ -230,7 +256,7 @@ export function checkCommandLimits(
     if (extra.length > 0) {
       const named = extra.map((field) => field.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`))
       throw new Error(
-        `${where}: command_limits['${LINE}'] takes only timeout_seconds, not ${named.sort().join(', ')}`,
+        `${where}: command_limits['${LINE}'] takes only timeout_seconds, not ${named.sort(compareCodePoints).join(', ')}`,
       )
     }
   }

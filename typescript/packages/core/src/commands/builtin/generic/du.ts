@@ -584,7 +584,7 @@ export async function du(
     for (const item of block) lines.push(item)
     grand += total
     if (measured === null) records = null
-    else records?.push(...measured)
+    else if (records !== null) for (const record of measured) records.push(record)
   }
   // GNU still prints the grand total when every operand failed ("0 total"), so
   // this stays outside the loop guard.

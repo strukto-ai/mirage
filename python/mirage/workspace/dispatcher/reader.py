@@ -16,7 +16,7 @@ import posixpath
 from collections.abc import Callable, Mapping
 
 from mirage.context.session_context import current_caller
-from mirage.policy.builtin.output_cap import resolve_limit
+from mirage.policy.builtin.output_cap import walk_bound
 from mirage.types import FileStat, Limit, PathSpec, Visibility
 from mirage.utils.hidden import hidden_under, leads_hidden, path_visible
 from mirage.utils.path import norm, norm_dir, owner_prefix
@@ -339,10 +339,11 @@ class NamespaceReader:
         and it takes no mount's shortcut, so no mount answers a function
         for it or narrows its search.
 
-        A walk's ``walk_limit`` on each mount is ``command``'s, resolved
-        through the session's ``profile``, the mount's and the
-        workspace's command limits; without a command, the mount's own.
-        Both default to the running command's and its session's.
+        A walk's ``walk_limit`` on each mount is ``command``'s
+        (``walk_bound``), resolved through the session's ``profile``, the
+        mount's and the workspace's command limits and the running
+        command's declared one; without a command, the one every command
+        shares. Both default to the running command's and its session's.
 
         Args:
             crossing (bool): the walk goes through the dispatcher.
@@ -351,6 +352,9 @@ class NamespaceReader:
                 command limits.
         """
         caller = current_caller()
+        declared = (
+            caller.declared if command in (None, caller.command) else None
+        )
         if command is None:
             command = caller.command
         if profile is None and caller.session is not None:
@@ -396,17 +400,9 @@ class NamespaceReader:
             row = owner(virtual)
             if row is None:
                 return -1
-            if command is None:
-                return row.walk_limit
-            found = resolve_limit(
-                command,
-                [row],
-                workspace_limits=row.workspace_limits,
-                profile_limits=profile,
+            return walk_bound(
+                row, command, declared, row.workspace_limits, profile
             )
-            if found is None or found.walk_limit is None:
-                return row.walk_limit
-            return found.walk_limit
 
         return MountView(
             descendants=below,

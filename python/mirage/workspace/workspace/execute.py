@@ -57,7 +57,7 @@ from mirage.shell.types import NodeType as NT
 from mirage.shell.types import TSNodeLike
 from mirage.types import PathSpec, Refusal
 from mirage.utils.abort import MirageAbortError
-from mirage.workspace.abort import set_line_writer
+from mirage.workspace.abort import line_status_writer, set_line_writer
 from mirage.workspace.dispatcher.dispatcher import Dispatcher
 from mirage.workspace.evaluation import EvaluationContext, child_context
 from mirage.workspace.execution import ExecutionScope
@@ -697,6 +697,9 @@ async def run_prepared_line(
     # typed line is read, never inside the evaluator). Internal
     # evaluations get an inert scope.
     is_line = record
+    # The `line` deadline is the outermost line's, recorded or not; a
+    # nested one runs inside it.
+    top_level = is_line or line_status_writer() is None
     scope = RecordingScope(
         active=is_line, ledger=ws.records, clock=ws.registry.clock
     )
@@ -925,7 +928,7 @@ async def run_prepared_line(
                             ws.registry.command_limits,
                             effective_session.command_limits,
                         )
-                        if is_line
+                        if top_level
                         else None
                     ),
                 )
@@ -1065,7 +1068,7 @@ async def run_prepared_line(
                         ws.registry.command_limits,
                         effective_session.command_limits,
                     )
-                    if is_line
+                    if top_level
                     else None
                 ),
                 LINE,

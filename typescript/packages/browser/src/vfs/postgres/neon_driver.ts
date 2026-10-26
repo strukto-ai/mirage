@@ -15,6 +15,7 @@
 import { neon, types, type NeonQueryFunction } from '@neondatabase/serverless'
 import { readAsText } from '@struktoai/mirage-core/accessor/postgres'
 import type { PgDriver, PgQueryResult } from '@struktoai/mirage-core/core/postgres/_driver'
+import { DEFAULT_TIMEOUT } from '@struktoai/mirage-core/core/api/constants'
 
 interface FullResultsRow<R> {
   rows: R[]
@@ -24,7 +25,14 @@ interface FullResultsRow<R> {
 export class NeonPgDriver implements PgDriver {
   private readonly sql: NeonQueryFunction<false, true>
 
-  constructor(dsn: string) {
+  /**
+   * `timeout` bounds each query's HTTP round trip in seconds. A Neon query
+   * answers in one body, so a deadline on the request is its stall bound.
+   */
+  constructor(
+    dsn: string,
+    private readonly timeout: number = DEFAULT_TIMEOUT,
+  ) {
     this.sql = neon(dsn, { fullResults: true, types: readAsText(types) })
   }
 
@@ -32,10 +40,9 @@ export class NeonPgDriver implements PgDriver {
     text: string,
     params?: readonly unknown[],
   ): Promise<PgQueryResult<R>> {
-    const result = (await this.sql.query(
-      text,
-      params as unknown[] | undefined,
-    )) as unknown as FullResultsRow<R>
+    const result = (await this.sql.query(text, params as unknown[] | undefined, {
+      fetchOptions: { signal: AbortSignal.timeout(this.timeout * 1000) },
+    })) as unknown as FullResultsRow<R>
     return { rows: result.rows, rowCount: result.rowCount ?? result.rows.length }
   }
 

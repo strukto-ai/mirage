@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 import asyncio
 import sys
+from typing import Any
 from weakref import WeakKeyDictionary
 
 YIELD_SWITCHES = 2
@@ -62,7 +63,7 @@ class YieldBudget:
         self._next_yield = loop.time() + self._interval
 
 
-_TASK_BUDGETS: "WeakKeyDictionary[asyncio.Task[object], YieldBudget]" = (
+_TASK_BUDGETS: "WeakKeyDictionary[asyncio.Task[Any], YieldBudget]" = (
     WeakKeyDictionary()
 )
 

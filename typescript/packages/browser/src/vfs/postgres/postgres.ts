@@ -57,7 +57,7 @@ export class PostgresVFS extends PostgresVFSBase {
     const { config, prefix, driver } =
       'config' in options ? options : { config: options, prefix: undefined, driver: undefined }
     this.config = resolvePostgresConfig(config)
-    this.driver = driver ?? new NeonPgDriver(this.config.dsn)
+    this.driver = driver ?? new NeonPgDriver(this.config.dsn, this.config.timeout)
     this.accessor = new PostgresAccessor(this.driver, this.config)
     this.vfsMd = prefix === undefined ? VFS_MD : VFS_MD.replace('{prefix}', prefix)
   }

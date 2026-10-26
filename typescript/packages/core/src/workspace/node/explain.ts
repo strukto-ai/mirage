@@ -914,12 +914,14 @@ export async function lineJudgments(
   namespace: Namespace | null,
   handed: HandOff,
   reparse: (line: string) => TSNodeLike,
+  signal?: AbortSignal,
 ): Promise<[Walked, Judged[]][]> {
   const judged: [Walked, Judged[]][] = []
   const frame = rootFrame(root, handed.origin)
   // Each command's gates answer in microtasks: a long script would hold
-  // the loop, and its abort, until every command was judged.
-  const budget = new YieldBudget()
+  // the loop, and its abort, until every command was judged; the line's
+  // signal stops the pass.
+  const budget = new YieldBudget(signal)
   for (const item of walkedLine(root, session, reparse, frame)) {
     if (item.words[0]?.text === null) continue
     await budget.run()

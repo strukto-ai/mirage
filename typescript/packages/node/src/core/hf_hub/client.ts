@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { apiRequest, apiStream, stallTimeout } from '@struktoai/mirage-core/core/api/client'
+import { apiRequest, apiStream } from '@struktoai/mirage-core/core/api/client'
 import type { HfAccountAccessor } from '../../accessor/hf_hub.ts'
 import type { ApiResponse, RetryPolicy } from '@struktoai/mirage-core/core/api/client'
 import type { ByteWindow } from '@struktoai/mirage-core/utils/ranges'
@@ -193,7 +193,8 @@ export async function hubGet(
     headers: hubHeaders(account.token),
     params,
     retry: RETRY,
-    fetchFn: stallTimeout(account.config.timeout, hubFetch),
+    fetchFn: hubFetch,
+    timeout: account.config.timeout,
   })
 }
 
@@ -209,7 +210,8 @@ export async function hubGetResponse(
     params,
     retry: RETRY,
     read: 'response',
-    fetchFn: stallTimeout(account.config.timeout, hubFetch),
+    fetchFn: hubFetch,
+    timeout: account.config.timeout,
   })) as ApiResponse
 }
 
@@ -230,7 +232,8 @@ export async function hubPost(
     params,
     json: body,
     retry,
-    fetchFn: stallTimeout(account.config.timeout, hubFetch),
+    fetchFn: hubFetch,
+    timeout: account.config.timeout,
   })
 }
 
@@ -247,7 +250,8 @@ export async function hubRequest(
     headers: hubHeaders(account.token),
     params,
     retry: WRITE_RETRY,
-    fetchFn: stallTimeout(account.config.timeout, hubFetch),
+    fetchFn: hubFetch,
+    timeout: account.config.timeout,
   }
   if (body !== null && body !== undefined) options.json = body
   return apiRequest(method.toUpperCase(), url, options)
@@ -266,7 +270,8 @@ export async function hubPostNdjson(
     params,
     body: payload,
     retry: WRITE_RETRY,
-    fetchFn: stallTimeout(account.config.timeout, hubFetch),
+    fetchFn: hubFetch,
+    timeout: account.config.timeout,
   })
 }
 
@@ -287,7 +292,8 @@ export async function hubBytes(
     retry: RETRY,
     read: 'bytes',
     window,
-    fetchFn: stallTimeout(account.config.timeout, hubFetch),
+    fetchFn: hubFetch,
+    timeout: account.config.timeout,
   })) as Uint8Array
 }
 
@@ -309,7 +315,8 @@ export async function hubBytesTagged(
     retry: RETRY,
     read: 'bytes_response',
     window,
-    fetchFn: stallTimeout(account.config.timeout, hubFetch),
+    fetchFn: hubFetch,
+    timeout: account.config.timeout,
   })) as ApiResponse
   return [response.data as Uint8Array, response.headers.etag ?? '']
 }
@@ -337,7 +344,8 @@ export async function* hubStream(
   yield* apiStream(url, {
     errorOf,
     headers: hubHeaders(account.token),
-    fetchFn: stallTimeout(account.config.timeout, hubFetch),
+    fetchFn: hubFetch,
+    timeout: account.config.timeout,
     retry: RETRY,
     ...(onResponse === undefined ? {} : { onResponse }),
   })

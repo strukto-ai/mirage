@@ -791,9 +791,11 @@ class BaseVFS:
         whole, before the first file it touches there: tar -c, zip -r,
         cp -r, mv across mounts, diff -r, rm -r, chmod -R, chown -R and
         chgrp -R. Return to let the walk run; raise to refuse it, and the
-        error's message is what the command prints. The default refuses
-        more than ``walk_limit`` files. Searches and listings are
-        never refused: they stop after ``walk_limit`` files.
+        error's message is what the command prints. The default lets it
+        run: the dispatcher refuses more than the command's
+        ``walk_limit`` files before it asks a backend that defines none.
+        Searches and listings are never refused: they stop after
+        ``walk_limit`` files.
 
         Args:
             path (PathSpec): the directory about to be walked.
@@ -803,12 +805,6 @@ class BaseVFS:
                 its listings that stops one file past it; None when
                 neither counts, and the guard counts them itself.
         """
-        limit = self.walk_limit
-        if limit >= 0 and files is not None and files > limit:
-            raise ValueError(
-                f"more than {limit} files in scope (walk_limit); "
-                "narrow the path"
-            )
         return None
 
     def is_mounted(self) -> bool:

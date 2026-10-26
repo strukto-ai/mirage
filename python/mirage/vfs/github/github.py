@@ -139,7 +139,11 @@ class GitHubVFS(BaseVFS):
         self.config = config
         self.accessor = GitHubAccessor(
             GitHubAccount(
-                GhConfig(token=config.token, base_url=config.base_url)
+                GhConfig(
+                    token=config.token,
+                    base_url=config.base_url,
+                    timeout=config.timeout,
+                )
             ),
             owner,
             repo,

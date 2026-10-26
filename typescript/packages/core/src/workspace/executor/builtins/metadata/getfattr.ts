@@ -31,6 +31,7 @@ import type { Result } from '../types.ts'
 import { GETFATTR_USAGE, attrError, attrOperands, attrUsageRefusal } from './xattr.ts'
 import { rstripSlash } from '../../../../utils/slash.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
+import { callerSignal } from '../../../../context/session_context.ts'
 
 const ENCODINGS = new Set(['text', 'hex', 'base64'])
 const DEFAULT_MATCH = '^user\\.'
@@ -251,6 +252,8 @@ export async function handleGetfattr(
     ),
     readdirOp(dispatch),
     async (path) => (await dispatch('stat', path, [], { nofollow: true }))[0] as FileStat,
+    true,
+    callerSignal(),
   )
   for (const target of targets) {
     const typed = target.rawPath

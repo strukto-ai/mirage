@@ -39,6 +39,20 @@ function buildWs(line: number | null = null): Workspace {
 }
 
 describe('line deadline', () => {
+  it.each([true, false])(
+    'bounds the outermost line, recorded or not (record %s)',
+    async (record) => {
+      const ws = buildWs(0.1)
+      try {
+        const r = await ws.shell('sleep 2', { record })
+        expect(r.exitCode).toBe(124)
+        expect(DEC.decode(r.stderr)).toContain('line: timed out after 0.1s')
+      } finally {
+        await ws.close()
+      }
+    },
+  )
+
   it('bounds a slow final stage', async () => {
     const ws = buildWs(0.1)
     try {

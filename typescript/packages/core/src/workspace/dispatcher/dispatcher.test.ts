@@ -17,6 +17,7 @@ import { yieldBytes } from '../../io/stream.ts'
 import { type CallerDispatchFn, currentCaller } from '../../context/session_context.ts'
 import type { EntryGate } from '../../policy/types.ts'
 import { ALL_COMMANDS } from '../../policy/builtin/output_cap.ts'
+import { Command } from '../../commands/config.ts'
 import type { IOResult } from '../../io/types.ts'
 import { describe, expect, it, vi } from 'vitest'
 import { materialize, OpReport, type ByteSource } from '../../io/types.ts'
@@ -2687,7 +2688,7 @@ class LinedRAM extends LimitedRAM {
   }
 }
 
-function limited(cls: typeof LimitedRAM, files: number): LimitedRAM {
+function limited<T extends RAMVFS>(cls: new () => T, files: number): T {
   const vfs = new cls()
   vfs.store.dirs.add('/d')
   vfs.store.dirs.add('/d/secret')
@@ -3026,6 +3027,23 @@ describe('a hide filters a one-call read', () => {
     }
   })
 
+  // Twin of test_a_glob_counts_against_the_profiles_walk_limit.
+  it("counts a glob against the profile's walk limit", async () => {
+    const ws = new Workspace({ '/ram': limited(RAMVFS, 3) })
+    try {
+      ws.createSession('capped', {
+        profile: { commandLimits: { [ALL_COMMANDS]: new Limit({ walkLimit: 2 }) } },
+      })
+      const result = await ws.shell('echo /ram/d/*; echo $?', { sessionId: 'capped' })
+      expect([result.stdoutText, new TextDecoder().decode(result.stderr)]).toEqual([
+        '126\n',
+        `echo: Argument list too long\necho: ${refused}\n`,
+      ])
+    } finally {
+      await ws.close()
+    }
+  })
+
   // Twin of test_a_named_file_counts_nothing_against_a_walk.
   it('counts a named file nothing against a walk', async () => {
     const vfs = new LimitedRAM()
@@ -3200,6 +3218,102 @@ describe('a hide filters a one-call read', () => {
         'tar: more than 2 files in scope (walk_limit); narrow the path\n',
         1,
       ])
+    } finally {
+      await ws.close()
+    }
+  })
+
+  // Twin of test_a_full_walk_follows_the_commands_walk_limit.
+  it("follows the command's walk limit on a full walk", async () => {
+    const vfs = limited(RAMVFS, 3)
+    const ws = new Workspace(
+      { '/ram': [vfs, MountMode.WRITE, { rm: new Limit({ walkLimit: 2 }) }] },
+      { mode: MountMode.WRITE },
+    )
+    try {
+      const out = await ws.shell('rm -r /ram/d')
+      expect([new TextDecoder().decode(out.stderr), out.exitCode]).toEqual([
+        'rm: more than 2 files in scope (walk_limit); narrow the path\n',
+        1,
+      ])
+    } finally {
+      await ws.close()
+    }
+    expect(vfs.store.files.size).toBe(3)
+  })
+
+  // Twin of test_a_null_walk_limit_lifts_the_mounts.
+  it.each([
+    ['tar', 'cd /ram && tar -cf d.tar d; echo $?', '0\n'],
+    ['find', 'find /ram/d -type f | wc -l', '3\n'],
+  ])("lifts the mount's walk limit with a null one: %s", async (name, line, out) => {
+    const ws = new Workspace(
+      {
+        '/ram': [
+          limited(LimitedRAM, 3),
+          MountMode.WRITE,
+          { [name]: new Limit({ walkLimit: null }) },
+        ],
+      },
+      { mode: MountMode.WRITE },
+    )
+    try {
+      const result = await ws.shell(line)
+      expect([result.stdoutText, new TextDecoder().decode(result.stderr)]).toEqual([out, ''])
+    } finally {
+      await ws.close()
+    }
+  })
+
+  // Twin of test_a_registered_command_walks_under_its_declared_limit.
+  it('walks a registered command under its declared limit', async () => {
+    const ws = new Workspace({ '/ram': limited(RAMVFS, 3) })
+    try {
+      const mount = ws.mount('/ram')
+      const find = mount.resolveCommand('find')
+      if (find === null) throw new Error('no find')
+      mount.registerCommands([
+        new Command({
+          name: find.name,
+          spec: find.spec,
+          vfs: find.vfs,
+          filetype: find.filetype,
+          fn: find.fn,
+          aggregate: find.aggregate,
+          write: find.write,
+          limit: new Limit({ walkLimit: 2 }),
+        }),
+      ])
+      const result = await ws.shell('find /ram/d')
+      expect([result.stdoutText, new TextDecoder().decode(result.stderr), result.exitCode]).toEqual(
+        [
+          '/ram/d\n/ram/d/a0.txt\n/ram/d/a1.txt\n',
+          'find: /ram/d: stopped after 2 files (walk_limit); narrow the path\n',
+          1,
+        ],
+      )
+    } finally {
+      await ws.close()
+    }
+  })
+
+  // Twin of test_two_mounts_of_one_vfs_settle_on_one_walk_limit.
+  it('settles two mounts of one VFS on one walk limit', async () => {
+    const capped = { [ALL_COMMANDS]: new Limit({ walkLimit: 2 }) }
+    const lone = limited(RAMVFS, 3)
+    expect(() => new Workspace({ '/a': [lone, MountMode.READ, capped], '/b': lone })).toThrow(
+      "mount /a/: walk_limit 2 differs from /b/'s 10000 on the same VFS",
+    )
+    const vfs = limited(RAMVFS, 3)
+    const ws = new Workspace({
+      '/a': [vfs, MountMode.READ, capped],
+      '/b': [vfs, MountMode.READ, capped],
+    })
+    try {
+      const result = await ws.shell('ls -R /b/d')
+      expect(new TextDecoder().decode(result.stderr)).toBe(
+        'ls: /b/d: stopped after 2 files (walk_limit); narrow the path\n',
+      )
     } finally {
       await ws.close()
     }
@@ -3721,6 +3835,51 @@ it('keeps the bytes of a copy from a pipe under file hooks', async () => {
     expect(ran.exitCode).toBe(0)
     expect(DEC.decode(await ws.vfs.read('/ram/out'))).toBe('x')
   } finally {
+    await ws.close()
+  }
+})
+
+class StalledWriteRAM extends RAMVFS {
+  armed = false
+  calls = 0
+  release = (): void => undefined
+
+  override async write(path: PathSpec, data: ByteSource): Promise<void> {
+    if (this.armed) {
+      this.calls += 1
+      await new Promise<void>((resolve) => {
+        this.release = resolve
+      })
+    }
+    return super.write(path, data)
+  }
+}
+
+it('a write queued behind a stalled one never runs once its line is aborted', async () => {
+  // rm waits for the path's writer hold; its line's abort releases it from
+  // the queue, so the unlink never lands once the stalled write lets go.
+  const store = new StalledWriteRAM()
+  const ws = new Workspace({ '/data': [store, MountMode.WRITE] }, { mode: MountMode.WRITE })
+  ws.createSession('other')
+  try {
+    await ws.shell('echo keep > /data/f')
+    store.armed = true
+    const stalled = ws.shell('echo new > /data/f')
+    await vi.waitFor(() => {
+      expect(store.calls).toBe(1)
+    })
+    const controller = new AbortController()
+    const removing = ws.shell('rm /data/f', { sessionId: 'other', signal: controller.signal })
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    controller.abort()
+    await expect(removing).rejects.toMatchObject({ name: 'AbortError' })
+    store.armed = false
+    store.release()
+    await stalled
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(DEC.decode((await ws.shell('cat /data/f')).stdout)).toBe('new\n')
+  } finally {
+    store.release()
     await ws.close()
   }
 })

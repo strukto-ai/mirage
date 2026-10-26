@@ -3003,7 +3003,7 @@ class LinedRAM(LimitedRAM):
         )
 
 
-def _limited(cls: type[LimitedRAM], files: int) -> LimitedRAM:
+def _limited(cls: type[RAMVFS], files: int) -> RAMVFS:
     vfs = cls()
     vfs._store.dirs.update({"/d", "/d/secret"})
     vfs._store.files["/d/secret/b.txt"] = b"b\n"
@@ -3110,6 +3110,19 @@ async def test_a_glob_past_the_walk_limit_is_refused(line, out, err):
         assert (await result.stdout_str(), await result.stderr_str()) == (
             out,
             err,
+        )
+
+
+@pytest.mark.asyncio
+async def test_a_glob_counts_against_the_profiles_walk_limit():
+    with Workspace({"/ram/": _limited(RAMVFS, 3)}) as ws:
+        ws.create_session(
+            "capped", profile={"command_limits": {"*": {"walk_limit": 2}}}
+        )
+        result = await ws.shell("echo /ram/d/*; echo $?", session_id="capped")
+        assert (await result.stdout_str(), await result.stderr_str()) == (
+            "126\n",
+            f"echo: Argument list too long\necho: {GLOB_REFUSED}\n",
         )
 
 
@@ -3249,6 +3262,82 @@ async def test_a_copy_past_the_walk_limit_is_refused(cls):
             "",
             b"tar: more than 2 files in scope (walk_limit); narrow the path\n",
             1,
+        )
+
+
+@pytest.mark.asyncio
+async def test_a_full_walk_follows_the_commands_walk_limit():
+    vfs = _limited(RAMVFS, 3)
+    limits = {"rm": Limit(walk_limit=2)}
+    with Workspace(
+        {"/ram/": (vfs, MountMode.WRITE, limits)}, mode=MountMode.WRITE
+    ) as ws:
+        out = await ws.shell("rm -r /ram/d")
+        assert (out.stderr, out.exit_code) == (
+            b"rm: more than 2 files in scope (walk_limit); narrow the path\n",
+            1,
+        )
+    assert len(vfs._store.files) == 3
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "name, line, out",
+    [
+        ("tar", "cd /ram && tar -cf d.tar d; echo $?", "0\n"),
+        ("find", "find /ram/d -type f | wc -l", "3\n"),
+    ],
+)
+async def test_a_null_walk_limit_lifts_the_mounts(name, line, out):
+    limits = {name: Limit(walk_limit=None)}
+    with Workspace(
+        {"/ram/": (_limited(LimitedRAM, 3), MountMode.WRITE, limits)},
+        mode=MountMode.WRITE,
+    ) as ws:
+        result = await ws.shell(line)
+        assert (await result.stdout_str(), await result.stderr_str()) == (
+            out,
+            "",
+        )
+
+
+@pytest.mark.asyncio
+async def test_a_registered_command_walks_under_its_declared_limit():
+    with Workspace({"/ram/": _limited(RAMVFS, 3)}) as ws:
+        mount = ws.mount("/ram/")
+        find = mount.resolve_command("find")
+        mount.register_commands(
+            [dataclasses.replace(find, limit=Limit(walk_limit=2))]
+        )
+        result = await ws.shell("find /ram/d")
+        assert (
+            await result.stdout_str(),
+            result.stderr,
+            result.exit_code,
+        ) == (
+            "/ram/d\n/ram/d/a0.txt\n/ram/d/a1.txt\n",
+            b"find: /ram/d: stopped after 2 files (walk_limit); "
+            b"narrow the path\n",
+            1,
+        )
+
+
+@pytest.mark.asyncio
+async def test_two_mounts_of_one_vfs_settle_on_one_walk_limit():
+    capped = {ALL_COMMANDS: Limit(walk_limit=2)}
+    vfs = _limited(RAMVFS, 3)
+    with pytest.raises(ValueError, match="2 differs from /b/'s 10000"):
+        Workspace({"/a/": (vfs, MountMode.READ, capped), "/b/": vfs})
+    vfs = _limited(RAMVFS, 3)
+    with Workspace(
+        {
+            "/a/": (vfs, MountMode.READ, capped),
+            "/b/": (vfs, MountMode.READ, capped),
+        }
+    ) as ws:
+        result = await ws.shell("ls -R /b/d")
+        assert result.stderr == (
+            b"ls: /b/d: stopped after 2 files (walk_limit); narrow the path\n"
         )
 
 

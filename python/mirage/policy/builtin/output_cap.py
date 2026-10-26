@@ -98,6 +98,41 @@ def resolve_limit(
     )
 
 
+def walk_bound(
+    mount: LimitMount,
+    command: str | None = None,
+    command_default: Limit | None = None,
+    workspace_limits: Mapping[str, Limit] | None = None,
+    profile_limits: Mapping[str, Limit] | None = None,
+) -> int:
+    """How many files one walk lists on ``mount``, -1 for no cap.
+
+    The ``walk_limit`` of ``command``, resolved as ``resolve_limit``
+    resolves every bound; without a command, the one every command
+    shares (the ``"*"`` entries), which a glob counts against. A layer
+    naming the bound as None lifts it.
+
+    Args:
+        mount (LimitMount): the mount walked.
+        command (str | None): the command walking, None for none.
+        command_default (Limit | None): the command's declared limit.
+        workspace_limits (Mapping[str, Limit] | None): the workspace
+            defaults, keyed by command.
+        profile_limits (Mapping[str, Limit] | None): the session
+            profile's overrides, keyed by command.
+    """
+    found = resolve_limit(
+        ALL_COMMANDS if command is None else command,
+        [mount],
+        command_default,
+        workspace_limits=workspace_limits,
+        profile_limits=profile_limits,
+    )
+    if found is None or found.walk_limit is None:
+        return -1
+    return found.walk_limit
+
+
 MountLookup = Callable[[str], LimitMount | None]
 
 

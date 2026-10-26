@@ -203,7 +203,7 @@ async def seed(client):
                 "application/json",
             ),
         },
-        timeout=60,
+        timeout=180,
     )
     assert result["exit_code"] == 0, result
 

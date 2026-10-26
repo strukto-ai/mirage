@@ -68,6 +68,7 @@ The browser `WasabiVFS` is secret-free, your backend signs each operation using 
 | <code style={{ whiteSpace: 'nowrap' }}>endpoint</code> | Endpoint URL that replaces the one the provider derives. Requests go to the host each presigned URL names; the mount uses it to name its storage location. |
 | <code style={{ whiteSpace: 'nowrap' }}>defaultContentType</code><br />default `'application/octet-stream'` | `Content-Type` stored with every object the mount writes. |
 | <code style={{ whiteSpace: 'nowrap' }}>keyPrefix</code> | Key prefix the mount treats as its root. The browser can change it before a URL is signed, so enforce the prefix on the signing server. |
+| <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `DEFAULT_TIMEOUT` | Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off. |
 
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table browser/wasabi end */}

@@ -440,13 +440,13 @@ async function runPreparedLine(
   // itself; the caller's route comes back when it ends.
   const outerRouting = context.frame.routing
   try {
-    // A top-level line runs under its `line` deadline, which a nested one
-    // shares: past it the tree is stopped like an abort and the line answers
-    // 124, as Python's asyncio.timeout does. The deadline is in the line's
-    // line's stop, the one object the tree runs on, so a nested line
-    // (`eval`) still finds the one signal its line answers to.
+    // The outermost line, recorded or not, runs under its `line` deadline,
+    // which a nested one shares: past it the tree is stopped like an abort
+    // and the line answers 124, as Python's asyncio.timeout does. The
+    // deadline is in the line's stop, the one object the tree runs on, so a
+    // nested line (`eval`) still finds the one signal its line answers to.
     const lineSeconds =
-      options.record !== false
+      options.record !== false || currentCaller().lineAbort === null
         ? lineTimeout(env.registry.commandLimits, effectiveSession.commandLimits)
         : null
     const expiry = lineSeconds !== null && lineSeconds > 0 ? new AbortController() : null
@@ -523,6 +523,7 @@ async function runPreparedLine(
               env.namespace,
               handed,
               reparse,
+              stop,
             ))
           // Placement waits on admission, judged with the line's refusal sink
           // bound, so an op a policy script makes while the line is judged is

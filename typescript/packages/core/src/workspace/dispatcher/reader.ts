@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { currentCaller } from '../../context/session_context.ts'
-import { resolveLimit } from '../../policy/builtin/output_cap.ts'
+import { walkBound } from '../../policy/builtin/output_cap.ts'
 import { type FileStat, Limit, PathSpec, type Visibility } from '../../types.ts'
 import { hiddenUnder, leadsHidden, pathVisible } from '../../utils/hidden.ts'
 import { norm } from '../../utils/path.ts'
@@ -277,8 +277,9 @@ export class NamespaceReader implements NamespaceLinks {
    * so it has no boundary to stop at: no mount below a path, and no mount
    * root; and it takes no mount's shortcut, so no mount answers a function
    * for it or narrows its search. A walk's `walkLimit` on each mount is
-   * `command`'s, resolved through the session's `profile`, the mount's and
-   * the workspace's command limits; without a command, the mount's own. Both
+   * `command`'s (walkBound), resolved through the session's `profile`, the
+   * mount's and the workspace's command limits and the running command's
+   * declared one; without a command, the one every command shares. Both
    * default to the running command's and its session's.
    */
   mounts(
@@ -286,6 +287,8 @@ export class NamespaceReader implements NamespaceLinks {
     command: string | null = currentCaller().command,
     profile: Readonly<Record<string, Limit>> = currentCaller().session?.commandLimits ?? {},
   ): MountView {
+    const caller = currentCaller()
+    const declared = command === caller.command ? caller.declared : null
     const below = (path: string): string[] => {
       if (crossing) return []
       const base = normDir(path)
@@ -317,22 +320,16 @@ export class NamespaceReader implements NamespaceLinks {
       walkLimit: (path: string) => {
         const row = owner(path)
         if (row === null) return -1
-        const own = row.walkLimit ?? -1
-        if (command === null) return own
-        const found = resolveLimit(
+        return walkBound(
+          {
+            commandLimits: new Map(row.commandLimits ?? []),
+            defaultLimit: new Limit({ walkLimit: row.walkLimit ?? -1 }),
+          },
           command,
-          [
-            {
-              commandLimits: new Map(row.commandLimits ?? []),
-              defaultLimit: new Limit({ walkLimit: own }),
-            },
-          ],
-          null,
-          null,
+          declared,
           row.workspaceLimits ?? {},
           profile,
         )
-        return found?.walkLimit ?? own
       },
     }
   }

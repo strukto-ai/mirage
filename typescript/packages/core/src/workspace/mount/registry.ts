@@ -406,7 +406,10 @@ export class MountRegistry {
     const m = new MountEntry(
       alias === undefined ? init : { ...init, indexConfig: alias.indexConfig },
     )
-    if (alias !== undefined) m.activity = alias.activity
+    if (alias !== undefined) {
+      m.activity = alias.activity
+      m.backendWalkLimit = alias.backendWalkLimit
+    }
     for (const cmd of [...GENERIC_COMMANDS, ...GENERAL_COMMANDS]) {
       m.registerGeneral(cmd)
     }
@@ -504,10 +507,10 @@ export class MountRegistry {
         },
         this.mountList,
       )
+      this.settleWalkLimit(m)
       this.attachManager(m)
       this.mountList.push(m)
       this.mountList.sort((a, b) => b.prefix.length - a.prefix.length)
-      this.settleWalkLimit(m)
       if (norm === '/') this.rootRef = m
       return m
     } catch (err) {
@@ -605,23 +608,37 @@ export class MountRegistry {
   /**
    * Set the mount's `walkLimit`, which decides how its backend searches (its
    * own search API under a cap, every file without): the mount's `*` entry,
-   * else the workspace's, else the backend's default. A command's own
-   * `walkLimit` changes only how far that command walks. Mirrors Python's
+   * else the workspace's, else the backend's default, a null one lifting the
+   * cap. A command's own `walkLimit` changes only how far that command walks.
+   * The mounts of one VFS share its search, so they settle on one limit; one
+   * that would settle on another is refused. Mirrors Python's
    * `settle_walk_limit`.
    */
   settleWalkLimit(entry: MountEntry): void {
+    const settled = this.settledWalkLimit(entry)
+    for (const other of this.mountList) {
+      if (other === entry || other.vfs !== entry.vfs) continue
+      const theirs = this.settledWalkLimit(other)
+      if (theirs !== settled) {
+        throw new Error(
+          `mount ${entry.prefix}: walk_limit ${String(settled)} differs from ${other.prefix}'s ${String(theirs)} on the same VFS`,
+        )
+      }
+    }
+    entry.vfs.walkLimit = settled
+    entry.calls = entry.answeredCalls()
+    this.rowCache = null
+  }
+
+  private settledWalkLimit(entry: MountEntry): number {
     const found = Limit.layered([
       entry.commandLimits.get(ALL_COMMANDS) ?? null,
       Object.hasOwn(this.commandLimits, ALL_COMMANDS)
         ? (this.commandLimits[ALL_COMMANDS] ?? null)
         : null,
-      new Limit({ walkLimit: entry.vfs.walkLimit }),
+      new Limit({ walkLimit: entry.backendWalkLimit }),
     ])
-    if (found?.walkLimit != null) {
-      entry.vfs.walkLimit = found.walkLimit
-      entry.calls = entry.answeredCalls()
-    }
-    this.rowCache = null
+    return found === null ? entry.backendWalkLimit : (found.walkLimit ?? -1)
   }
 
   /**

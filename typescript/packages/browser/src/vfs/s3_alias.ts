@@ -20,6 +20,7 @@ import {
   z,
 } from '@struktoai/mirage-core/vfs/secrets'
 import { S3_BROWSER_RENAME } from './s3/config.ts'
+import { timeoutShape } from '@struktoai/mirage-core/core/api/config'
 import type { S3BrowserPresignedUrlProvider, S3Config, S3ConfigRedacted } from './s3/config.ts'
 
 /**
@@ -46,6 +47,7 @@ export interface S3BrowserAliasConfig {
   endpoint?: string
   defaultContentType?: string
   keyPrefix?: string
+  timeout?: number
 }
 
 export const BROWSER_ALIAS_FIELDS = {
@@ -77,6 +79,7 @@ export const BROWSER_ALIAS_FIELDS = {
     .describe(
       'Key prefix the mount treats as its root. The browser can change it before a URL is signed, so enforce the prefix on the signing server.',
     ),
+  ...timeoutShape,
 }
 
 /**
@@ -158,6 +161,7 @@ export function makeBrowserS3Alias<
           ? { defaultContentType: config.defaultContentType }
           : {}),
         ...(config.keyPrefix !== undefined ? { keyPrefix: config.keyPrefix } : {}),
+        ...(config.timeout !== undefined ? { timeout: config.timeout } : {}),
       }
     },
     redact: (config) => redactConfigWithSchema(schema, config) as unknown as R,

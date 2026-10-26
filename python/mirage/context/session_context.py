@@ -30,6 +30,7 @@ from typing import TYPE_CHECKING, Any, TypeVar
 from mirage.errors.fs import eacces, enoent, erofs
 from mirage.rs.policy import from_units, units, visibility_matcher
 from mirage.types import (
+    Limit,
     MountMode,
     PathSpec,
     Refusal,
@@ -156,6 +157,8 @@ class Caller:
         command_started (int | None): when the running command started.
         command (str | None): the running command's name, which its walks
             resolve their ``walk_limit`` by.
+        declared (Limit | None): the running registered command's own
+            limit, the layer under the workspace's its walks resolve by.
         enclosing (JobConsole | None): the recorder of the innermost
             level running a command, for a level whose output is a value
             (a substitution's) to send another level's stream bytes
@@ -199,6 +202,7 @@ class Caller:
     own_version: tuple[str, str | OwnRead | None] | None = None
     command_started: int | None = None
     command: str | None = None
+    declared: Limit | None = None
     enclosing: JobConsole | None = None
     execution: str | None = None
     process: ProcessHandle | None = None

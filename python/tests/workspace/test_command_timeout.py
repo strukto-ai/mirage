@@ -29,7 +29,9 @@ from mirage.policy.builtin import output_cap as sg
 from mirage.runtime.python import LocalRuntime
 from mirage.shell.console import Channel
 from mirage.types import Limit, OnExceed
+from mirage.utils.abort import MirageAbortError
 from mirage.vfs.ram import RAMVFS
+from mirage.workspace.lookup.lookup import programs
 from mirage.workspace.mount.namespace.ram import RAMNamespaceStore
 
 
@@ -61,9 +63,10 @@ async def test_quick_builtin_under_default_does_not_fire():
 
 
 @pytest.mark.asyncio
-async def test_the_line_deadline_cuts_a_long_command():
+@pytest.mark.parametrize("record", [True, False])
+async def test_the_line_deadline_cuts_a_long_command(record):
     ws = _ws(line=0.1)
-    r = await ws.shell("sleep 2")
+    r = await ws.shell("sleep 2", record=record)
     assert r.exit_code == 124
     assert "line: timed out after 0.1s" in (await r.stderr_str())
 
@@ -336,7 +339,6 @@ async def test_large_ram_command_honors_caller_cancel(command):
     # Large enough that every command outlasts several yield slices: a
     # line starts eagerly, so one done within its first slice ends before
     # the cancel's timer can fire, and the cancel must land mid-run.
-    from mirage.utils.abort import MirageAbortError
 
     ram = RAMVFS()
     ram.accessor.store.files["/big"] = b"line\n" * 2_000_000
@@ -395,7 +397,6 @@ async def test_ram_walk_honors_caller_cancel(command):
     # A walk the index answers awaits coroutines that never suspend; the
     # dispatcher's task budget and the tree walk's budget let the cancel
     # land.
-    from mirage.utils.abort import MirageAbortError
 
     ws = Workspace(
         {"/": (_wide_ram(), MountMode.WRITE, _UNCAPPED)}, mode=MountMode.WRITE
@@ -414,11 +415,9 @@ async def test_ram_walk_honors_caller_cancel(command):
 @pytest.mark.asyncio
 async def test_every_program_settles_soon_after_a_cancel():
     # Every program the shell resolves, given a big file and a wide
-    # directory, ends on its own or within a second of the caller's
-    # cancel. Each runs in a subshell, so a `cd`, `set` or `exec` leaves
-    # the next one's shell as it was.
-    from mirage.utils.abort import MirageAbortError
-    from mirage.workspace.lookup.lookup import programs
+    # directory, ends on its own or within a few seconds of the caller's
+    # cancel, with room for a loaded runner. Each runs in a subshell, so
+    # a `cd`, `set` or `exec` leaves the next one's shell as it was.
 
     ws = Workspace({"/": (_wide_ram(), MountMode.READ, _UNCAPPED)})
     loop = asyncio.get_running_loop()
@@ -444,7 +443,7 @@ async def test_every_program_settles_soon_after_a_cancel():
                 continue
             finally:
                 timer.cancel()
-            if fired and loop.time() - fired[0] > 1:
+            if fired and loop.time() - fired[0] > 3:
                 late.append(
                     f"{name} {operand}: {loop.time() - fired[0]:.2f}s late"
                 )

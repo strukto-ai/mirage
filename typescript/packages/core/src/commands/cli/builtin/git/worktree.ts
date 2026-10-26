@@ -28,6 +28,7 @@ import type { RepoLocation, WorkTree } from './types.ts'
 import type { MountView } from '../../../../view/types.ts'
 import type { Files } from '../../../../workspace/files.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
+import { callerSignal } from '../../../../context/session_context.ts'
 
 const GITIGNORE = '.gitignore'
 
@@ -93,6 +94,8 @@ class Scanner {
       (path, _limit, level) => this.subtree(path, level === true),
       (path) => vfs.readdir(path),
       (path) => vfs.stat(path, undefined, { nofollow: true }),
+      true,
+      callerSignal(),
     )
   }
 

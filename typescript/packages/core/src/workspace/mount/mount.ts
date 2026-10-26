@@ -401,6 +401,9 @@ export class MountEntry {
   readonly mountId: string
   readonly prefix: string
   readonly vfs: BaseVFS
+  // The backend's own walkLimit, kept from before any mount settles the
+  // VFS's; a later mount of the VFS takes the first's.
+  backendWalkLimit: number
   // The functions the VFS answers itself, read once when it is mounted: each
   // dispatcher call it defines, and `read_range` when a read fetches only the
   // range asked for. A command asks its mount's row (`MountView.answers`).
@@ -486,6 +489,7 @@ export class MountEntry {
     this.mountId = (init.ids ?? new SystemIdSource()).uuid7()
     this.prefix = prefix
     this.vfs = init.vfs
+    this.backendWalkLimit = init.vfs.walkLimit
     this.calls = this.answeredCalls()
     this.mode = init.mode ?? MountMode.READ
     // A frozen copy carrying the coerced policy, not the caller's object.
@@ -2023,13 +2027,16 @@ export class MountEntry {
   ): Promise<CommandFnResult> {
     // No hold past an abort: an unmount waits on this mount's activity
     // with no grace, so a body, or a renderer of the rows it handed over,
-    // that ignores the abort is let go rather than waited on.
-    return runHandler(call(ctx), name, producer, voice, {
-      scope: (result) => wrapMountStreams(result, this.activity),
-      ...(writes ? { drop: () => this.dropCaches() } : {}),
-      ...(ctx.signal !== undefined ? { signal: ctx.signal } : {}),
-      ...(ctx.vfs !== undefined ? { vfs: ctx.vfs } : {}),
-    })
+    // that ignores the abort is let go rather than waited on. The command's
+    // walks resolve their walkLimit with its own declared limit.
+    return runWithCaller({ ...currentCaller(), declared: producer.declared }, () =>
+      runHandler(call(ctx), name, producer, voice, {
+        scope: (result) => wrapMountStreams(result, this.activity),
+        ...(writes ? { drop: () => this.dropCaches() } : {}),
+        ...(ctx.signal !== undefined ? { signal: ctx.signal } : {}),
+        ...(ctx.vfs !== undefined ? { vfs: ctx.vfs } : {}),
+      }),
+    )
   }
 
   /**
