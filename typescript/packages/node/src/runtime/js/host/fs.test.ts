@@ -814,7 +814,13 @@ describe('patchNodeFs — calls node makes on its own', () => {
     for await (const entry of fs.promises.glob('*', { cwd: '/data/d', withFileTypes: true }))
       typed.push(`${entry.name}:${String(entry.isDirectory())}`)
     expect(typed.sort()).toEqual(['a.txt:false', 'sub:true'])
-    expect(await promisify(fs.glob)('*.txt', { cwd: '/data/d' })).toEqual(['a.txt'])
+    const called = await new Promise<string[]>((resolve, reject) => {
+      fs.glob('*.txt', { cwd: '/data/d' }, (err, matches) => {
+        if (err === null) resolve(matches)
+        else reject(err)
+      })
+    })
+    expect(called).toEqual(['a.txt'])
     await ws.close()
   })
 

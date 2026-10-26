@@ -45,6 +45,8 @@ import {
   type RoutedCall,
 } from './constants.ts'
 import { Descriptors, openFlags } from './descriptors.ts'
+import { dirent, openedDir } from './list.ts'
+import { stats } from './stat.ts'
 
 type FsObject = Record<string, unknown>
 type Fn = (...args: unknown[]) => unknown
@@ -56,7 +58,7 @@ const fs = createRequire(import.meta.url)('node:fs') as FsObject & { promises: F
 // made: a call on it reaches node for a host path and the workspace for
 // a mounted one, so a cp or glob across the two takes each end where it is.
 const routed = fs.promises as unknown as typeof fsPromises
-const { S_IFMT, S_IFREG, S_IFDIR, S_IFCHR, S_IFLNK, W_OK, X_OK, COPYFILE_EXCL } = constants
+const { W_OK, X_OK, COPYFILE_EXCL } = constants
 
 /** `path` as a string a mount could serve, or null: a descriptor and a
  * Buffer are host spellings no mount uses. */
@@ -64,11 +66,6 @@ function spelled(path: unknown): string | null {
   if (typeof path === 'string') return path
   if (path instanceof URL && path.protocol === 'file:') return fileURLToPath(path)
   return null
-}
-
-/** A stamp in nanoseconds, as node's BigIntStats spells one. */
-function ns(date: Date): bigint {
-  return BigInt(date.getTime()) * 1_000_000n
 }
 
 /** A refusal spelled the way node's own fs spells an error. */
@@ -453,65 +450,7 @@ class HostFs implements Record<
       gid: process.getgid?.() ?? 0,
       unknownMs: this.born,
     })
-    const kind = posix.mode & S_IFMT
-    const mtime = new Date(posix.mtimeMs)
-    const atime = new Date(posix.atimeMs)
-    const kinds = {
-      isFile: () => kind === S_IFREG,
-      isDirectory: () => kind === S_IFDIR,
-      isBlockDevice: () => false,
-      isCharacterDevice: () => kind === S_IFCHR,
-      isSymbolicLink: () => kind === S_IFLNK,
-      isFIFO: () => false,
-      isSocket: () => false,
-    }
-    const dates = { atime, mtime, ctime: mtime, birthtime: mtime }
-    const fields: Record<string, number> = {
-      dev: posix.dev,
-      ino: posix.ino,
-      mode: posix.mode,
-      nlink: unlinked ? 0 : posix.nlink,
-      uid: posix.uid,
-      gid: posix.gid,
-      rdev: posix.rdev,
-      size: posix.size,
-      blksize: posix.blksize,
-      blocks: posix.blocks,
-      atimeMs: posix.atimeMs,
-      mtimeMs: posix.mtimeMs,
-      ctimeMs: posix.ctimeMs,
-      birthtimeMs: posix.mtimeMs,
-    }
-    if (fieldsOf(options).bigint !== true) return { ...kinds, ...fields, ...dates }
-    // node's BigIntStats: every number a bigint, plus the stamps in ns.
-    const big = Object.fromEntries(
-      Object.entries(fields).map(([k, v]) => [k, BigInt(Math.trunc(v))]),
-    )
-    return {
-      ...kinds,
-      ...big,
-      atimeNs: ns(atime),
-      mtimeNs: ns(mtime),
-      ctimeNs: ns(mtime),
-      birthtimeNs: ns(mtime),
-      ...dates,
-    }
-  }
-
-  private direntOf(directory: string, row: VFSEntry): unknown {
-    const kind = row.isLink === true ? S_IFLNK : row.isDir ? S_IFDIR : (row.mode ?? 0) & S_IFMT
-    return {
-      name: entryName(row.path),
-      parentPath: directory,
-      path: directory,
-      isFile: () => kind === S_IFREG,
-      isDirectory: () => kind === S_IFDIR,
-      isBlockDevice: () => false,
-      isCharacterDevice: () => kind === S_IFCHR,
-      isSymbolicLink: () => kind === S_IFLNK,
-      isFIFO: () => false,
-      isSocket: () => false,
-    }
+    return stats(unlinked ? { ...posix, nlink: 0 } : posix, fieldsOf(options).bigint === true)
   }
 
   /**
@@ -849,59 +788,16 @@ class HostFs implements Record<
   }
 
   async opendir(path: string, options?: Options): Promise<unknown> {
-    let entries: unknown[]
     try {
-      entries = await this.readdir(path, {
-        withFileTypes: true,
-        recursive: fieldsOf(options).recursive === true,
-      })
+      return openedDir(
+        path,
+        await this.readdir(path, {
+          withFileTypes: true,
+          recursive: fieldsOf(options).recursive === true,
+        }),
+      )
     } catch (err) {
       throw fsError(err, 'opendir', path)
-    }
-    // The listing is read whole as the directory opens, where node reads
-    // a batch at a time: a caller cannot tell the two apart, and the
-    // sync reads then need no workspace call.
-    let closed = false
-    const refused = (): Error =>
-      Object.assign(new Error('Directory handle was closed'), { code: 'ERR_DIR_CLOSED' })
-    const readSync = (): unknown => {
-      if (closed) throw refused()
-      return entries.shift() ?? null
-    }
-    const closeSync = (): void => {
-      if (closed) throw refused()
-      closed = true
-    }
-    const read = (): Promise<unknown> => Promise.resolve().then(readSync)
-    const settle = (work: () => unknown, done: unknown): Promise<unknown> | undefined => {
-      const settled = Promise.resolve().then(work)
-      if (typeof done !== 'function') return settled
-      answer(
-        settled.then((value) => [value]),
-        done as Fn,
-      )
-      return undefined
-    }
-    return {
-      path,
-      read: (done?: unknown) => settle(readSync, done),
-      readSync,
-      close: (done?: unknown) => settle(closeSync, done),
-      closeSync,
-      async *[Symbol.asyncIterator]() {
-        try {
-          for (let entry = await read(); entry !== null; entry = await read()) yield entry
-        } finally {
-          if (!closed) closeSync()
-        }
-      },
-      [Symbol.asyncDispose]: () => {
-        if (!closed) closeSync()
-        return Promise.resolve()
-      },
-      [Symbol.dispose]: () => {
-        if (!closed) closeSync()
-      },
     }
   }
 
@@ -950,7 +846,7 @@ class HostFs implements Record<
     const walk = async (directory: string, prefix: string): Promise<void> => {
       for (const row of await this.files.readdir(directory, typed || recursive)) {
         const name = entryName(row.path)
-        out.push(typed ? this.direntOf(directory, row) : prefix + name)
+        out.push(typed ? dirent(directory, row) : prefix + name)
         if (recursive && row.isDir && row.isLink !== true) {
           await walk(posix.join(directory, name), `${prefix}${name}/`)
         }
