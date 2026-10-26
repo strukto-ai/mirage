@@ -34,6 +34,7 @@ function declarationParts(node: TSNodeLike): DeclarationParts {
   const flags: string[] = []
   const operands: TSNodeLike[] = []
   for (const child of node.children.slice(1)) {
+    if (child.type.endsWith('_redirect')) continue
     if (child.type === 'word') {
       if (child.text.startsWith('-')) flags.push(child.text)
       else operands.push(child)

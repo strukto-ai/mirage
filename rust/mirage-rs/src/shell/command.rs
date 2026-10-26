@@ -128,6 +128,10 @@ impl Parser<'_> {
                 children.push(self.herestring()?.with_field("redirect"));
                 continue;
             }
+            if self.at_redirect() && self.words_after_redirects()? {
+                children.extend(self.redirect_run()?);
+                continue;
+            }
             if self.at_command_end() {
                 break;
             }
@@ -430,6 +434,64 @@ impl Parser<'_> {
         rest.starts_with(b">") || rest.starts_with(b"<") || rest.starts_with(b"&>")
     }
 
+    /// Whether a word follows the redirects that start here. bash gives
+    /// each redirect one word and the command the words after it, so
+    /// such redirects stand among the command's words; a run that ends
+    /// the command is left to the statement around it. The scanner reads
+    /// past each target without building it, so nested targets are not
+    /// parsed once per level.
+    pub(super) fn words_after_redirects(&mut self) -> R<bool> {
+        let mark = self.mark();
+        let words = self.skip_redirects() && !self.at_command_end();
+        self.reset(mark);
+        Ok(words)
+    }
+
+    /// Past the redirects and herestrings from here, each with its word;
+    /// false at one the scanner cannot read, which the parse refuses.
+    fn skip_redirects(&mut self) -> bool {
+        let ops: &[&str] = &[
+            "&>>", "&>", ">>", ">&-", "<&-", ">&", "<&", ">|", "<>", "<<<", "<<-", "<<", ">", "<",
+        ];
+        while self.at_redirect() || self.at_herestring() {
+            self.i = digits_end(self.s, self.i);
+            let Some(op) = ops.iter().find(|op| self.starts(op.as_bytes())) else {
+                return false;
+            };
+            self.i += op.len();
+            let closes = *op == ">&-" || *op == "<&-";
+            if !(closes && (is_blank(self.peek()) || self.at_command_end())) {
+                self.skip_blank();
+                let end = if op.starts_with("<<") && *op != "<<<" {
+                    self.word_extent(self.i)
+                } else {
+                    self.scan_word(self.i)
+                };
+                match end {
+                    Ok(end) if end > self.i => self.i = end,
+                    _ => return false,
+                }
+            }
+            self.skip_blank();
+        }
+        true
+    }
+
+    /// The redirects and herestrings from here to the next word.
+    pub(super) fn redirect_run(&mut self) -> R<Vec<Syn>> {
+        let mut run = Vec::new();
+        while self.at_redirect() || self.at_herestring() {
+            let redirect = if self.at_herestring() {
+                self.herestring()?
+            } else {
+                self.redirect(false)?
+            };
+            run.push(redirect.with_field("redirect"));
+            self.skip_blank();
+        }
+        Ok(run)
+    }
+
     /// A file or heredoc redirect; a file redirect takes every word after
     /// its operator when `greedy`, one otherwise.
     pub(super) fn redirect(&mut self, greedy: bool) -> R<Syn> {
@@ -452,6 +514,9 @@ impl Parser<'_> {
         self.i += op.len();
         children.push(Syn::token(op, at, self.i));
         let closes = *op == ">&-" || *op == "<&-";
+        if closes && (is_blank(self.peek()) || self.at_command_end()) {
+            return Ok(Syn::node("file_redirect", children));
+        }
         loop {
             self.skip_blank();
             if self.at_command_end() || self.at_redirect() || self.starts(b"<<<") {
@@ -509,17 +574,33 @@ impl Parser<'_> {
     }
 
     /// `declare`, `local` and their kin, or `unset`: names, words, and for
-    /// a declaration assignments.
+    /// a declaration assignments. One with redirects among its words is
+    /// wrapped with the redirects after them, so its redirects apply in
+    /// the order written.
     pub(super) fn declaration(&mut self, word: &'static str, kind: &'static str) -> R<Syn> {
         let mut children = vec![self.keyword(word)?];
+        let mut redirected = false;
         loop {
             self.skip_blank();
+            if (self.at_redirect() || self.at_herestring()) && self.words_after_redirects()? {
+                children.extend(self.redirect_run()?);
+                redirected = true;
+                continue;
+            }
             if self.at_command_end() {
                 break;
             }
             if kind == "declaration_command" && self.at_declared_assignment() {
                 if self.subscripted_array() {
                     return self.fail(self.i);
+                }
+                // bash refuses an array value after a redirect.
+                if redirected && self.at_compound_assignment() {
+                    let open = self.s[self.i..]
+                        .iter()
+                        .position(|byte| *byte == b'(')
+                        .unwrap_or(0);
+                    return self.fail(self.i + open);
                 }
                 children.push(self.assignment(false)?);
                 continue;
@@ -533,7 +614,13 @@ impl Parser<'_> {
                 None => break,
             }
         }
-        Ok(Syn::node(kind, children))
+        let node = Syn::node(kind, children);
+        if !redirected {
+            return Ok(node);
+        }
+        let mut wrapped = vec![node.with_field("body")];
+        wrapped.extend(self.redirect_run()?);
+        Ok(Syn::node("redirected_statement", wrapped))
     }
 
     /// A word that is only a name, which the grammar reads as one.

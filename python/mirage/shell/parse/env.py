@@ -43,6 +43,8 @@ def _declaration_parts(
     flags: list[str] = []
     operands: list[TSNodeLike] = []
     for child in node.children[1:]:
+        if child.type.endswith("_redirect"):
+            continue
         if child.type == "word":
             text = child.text
             word = decode_text(text) if text else ""
