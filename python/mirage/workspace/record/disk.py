@@ -58,33 +58,61 @@ def _acquire_lock(lock_path: str) -> int | None:
 
 def _reclaim_stale_lock(lock_path: str) -> bool:
     """True when the lock is gone or was stale and removed; False when a
-    live writer still holds it."""
-    try:
-        age = time.time() - os.stat(lock_path).st_mtime
-    except FileNotFoundError:
+    live writer still holds it or another waiter is reclaiming it.
+
+    Reclaimers serialize on a ``.reclaim`` guard, itself reclaimed the
+    same way, and re-check the age under it: no waiter creates a lock
+    while the stale one exists, so the lock found stale is the one
+    removed, never a fresh lock another reclaimer just took."""
+
+    def age() -> float | None:
+        try:
+            return time.time() - os.stat(lock_path).st_mtime
+        except FileNotFoundError:
+            return None
+
+    seen = age()
+    if seen is None:
         return True
-    if age <= LOCK_STALE_SECONDS:
+    if seen <= LOCK_STALE_SECONDS:
         return False
-    logger.warning("reclaiming stale lock %s (age %.1fs)", lock_path, age)
+    guard = f"{lock_path}.reclaim"
     try:
-        os.unlink(lock_path)
-    except FileNotFoundError:
-        # The holder released it between the stat and the unlink; the
-        # lock is gone either way, which is all this function promises.
-        pass
-    return True
+        os.close(os.open(guard, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
+    except FileExistsError:
+        _reclaim_stale_lock(guard)
+        return False
+    try:
+        seen = age()
+        if seen is None:
+            return True
+        if seen <= LOCK_STALE_SECONDS:
+            return False
+        logger.warning("reclaiming stale lock %s (age %.1fs)", lock_path, seen)
+        try:
+            os.unlink(lock_path)
+        except FileNotFoundError:
+            # The holder released it between the stat and the unlink; the
+            # lock is gone either way, which is all this function promises.
+            pass
+        return True
+    finally:
+        os.unlink(guard)
 
 
 def _release_lock(fd: int, lock_path: str) -> None:
-    os.close(fd)
     try:
-        os.unlink(lock_path)
+        owned = os.path.samestat(os.fstat(fd), os.stat(lock_path))
+        if owned:
+            os.unlink(lock_path)
     except FileNotFoundError:
+        owned = False
+    finally:
+        os.close(fd)
+    if not owned:
         # Only reachable when another writer reclaimed this lock as
         # stale; the record write already landed, nothing to undo.
-        logger.warning(
-            "lock %s vanished before release (reclaimed?)", lock_path
-        )
+        logger.warning("lock %s was reclaimed before release", lock_path)
 
 
 async def _acquire_owned(lock_path: str) -> int | None:
@@ -195,6 +223,8 @@ class DiskRecordClient:
         tmp = f"{path}.{os.getpid()}.{next(_TMP_COUNTER)}.tmp"
         async with aiofiles.open(tmp, "wb") as f:
             await f.write(json.dumps(fields).encode())
+            await f.flush()
+            await asyncio.to_thread(os.fsync, f.fileno())
         await aiofiles.os.replace(tmp, path)
 
     async def list_names(self) -> list[str]:

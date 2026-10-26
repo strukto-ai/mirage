@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { mkdir, open, readFile, readdir, rename, stat, unlink, writeFile } from 'node:fs/promises'
+import { mkdir, open, readFile, readdir, rename, stat, unlink } from 'node:fs/promises'
 import type { FileHandle } from 'node:fs/promises'
 import path from 'node:path'
 import { generationOf } from '@struktoai/mirage-core/workspace/record/types'
@@ -187,43 +187,76 @@ export class DiskRecordClient {
   }
 
   // True when the lock is gone or was stale and removed; false when a
-  // live writer still holds it.
+  // live writer still holds it or another waiter is reclaiming it.
+  // Reclaimers serialize on a `.reclaim` guard, itself reclaimed the
+  // same way, and re-check the age under it: no waiter creates a lock
+  // while the stale one exists, so the lock found stale is the one
+  // removed, never a fresh lock another reclaimer just took.
   private async reclaimStaleLock(lockPath: string): Promise<boolean> {
-    let mtimeMs: number
-    try {
-      mtimeMs = (await stat(lockPath)).mtimeMs
-    } catch (e) {
-      if (isMissing(e)) return true
-      throw e
+    const age = async (): Promise<number | null> => {
+      try {
+        return (Date.now() - (await stat(lockPath)).mtimeMs) / 1000
+      } catch (e) {
+        if (isMissing(e)) return null
+        throw e
+      }
     }
-    const age = (Date.now() - mtimeMs) / 1000
-    if (age <= LOCK_STALE_SECONDS) return false
-    console.warn(`mirage: reclaiming stale lock ${lockPath} (age ${age.toFixed(1)}s)`)
+    let seen = await age()
+    if (seen === null) return true
+    if (seen <= LOCK_STALE_SECONDS) return false
+    const guard = `${lockPath}.reclaim`
     try {
-      await unlink(lockPath)
+      await (await open(guard, 'wx')).close()
     } catch (e) {
-      // The holder released it between the stat and the unlink; the
-      // lock is gone either way, which is all this method promises.
-      if (!isMissing(e)) throw e
+      if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e
+      await this.reclaimStaleLock(guard)
+      return false
     }
-    return true
+    try {
+      seen = await age()
+      if (seen === null) return true
+      if (seen <= LOCK_STALE_SECONDS) return false
+      console.warn(`mirage: reclaiming stale lock ${lockPath} (age ${seen.toFixed(1)}s)`)
+      try {
+        await unlink(lockPath)
+      } catch (e) {
+        // The holder released it between the stat and the unlink; the
+        // lock is gone either way, which is all this method promises.
+        if (!isMissing(e)) throw e
+      }
+      return true
+    } finally {
+      await unlink(guard)
+    }
   }
 
   private async releaseLock(fh: FileHandle, lockPath: string): Promise<void> {
-    await fh.close()
+    let owned = false
     try {
-      await unlink(lockPath)
+      const held = await fh.stat({ bigint: true })
+      const current = await stat(lockPath, { bigint: true })
+      owned = held.dev === current.dev && held.ino === current.ino
+      if (owned) await unlink(lockPath)
     } catch (e) {
-      // Only reachable when another writer reclaimed this lock as
-      // stale; the record write already landed, nothing to undo.
       if (!isMissing(e)) throw e
-      console.warn(`mirage: lock ${lockPath} vanished before release (reclaimed?)`)
+      owned = false
+    } finally {
+      await fh.close()
     }
+    // Only reachable when another writer reclaimed this lock as stale;
+    // the record write already landed, nothing to undo.
+    if (!owned) console.warn(`mirage: lock ${lockPath} was reclaimed before release`)
   }
 
   private async writeRecord(target: string, fields: Record<string, unknown>): Promise<void> {
     const tmp = `${target}.${String(process.pid)}.${String(tmpCounter++)}.tmp`
-    await writeFile(tmp, JSON.stringify(fields))
+    const fh = await open(tmp, 'w')
+    try {
+      await fh.writeFile(JSON.stringify(fields))
+      await fh.sync()
+    } finally {
+      await fh.close()
+    }
     await rename(tmp, target)
   }
 }
