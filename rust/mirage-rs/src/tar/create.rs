@@ -112,9 +112,20 @@ async fn file(out: &mut Output<'_>, entry: &Entry, fd: u32) -> Option<Trouble> {
         &entry.spelled
     };
     let cannot = |verb: &[u8], reply: &Reply| {
-        [b"tar: ", &shown[..], b": Cannot ", verb, b": ", &failure_text(reply)].concat()
+        [
+            b"tar: ",
+            &shown[..],
+            b": Cannot ",
+            verb,
+            b": ",
+            &failure_text(reply),
+        ]
+        .concat()
     };
-    let open = (entry.path.clone().unwrap_or_default(), Opening::Operand(entry.operand));
+    let open = (
+        entry.path.clone().unwrap_or_default(),
+        Opening::Operand(entry.operand),
+    );
     let (size, mut open, fd) = match entry.size {
         Some(size) => (size, Some(open), fd),
         None => {
@@ -132,7 +143,8 @@ async fn file(out: &mut Output<'_>, entry: &Entry, fd: u32) -> Option<Trouble> {
         Ok(data) => data,
         Err(reply) => return Some(Trouble::Left(cannot(b"open", &reply))),
     };
-    out.put(&header::encode(&entry.name, Kind::File, size, b"")).await;
+    out.put(&header::encode(&entry.name, Kind::File, size, b""))
+        .await;
     let mut seen = 0u64;
     let mut trouble = None;
     while let Some(data) = next {
@@ -202,7 +214,10 @@ pub(super) async fn run(host: &Host, config: &Config) -> i32 {
     let mut names = Vec::new();
     for (index, entry) in config.members.iter().enumerate() {
         match entry.kind {
-            Planned::Dir => out.put(&header::encode(&entry.name, Kind::Dir, 0, b"")).await,
+            Planned::Dir => {
+                out.put(&header::encode(&entry.name, Kind::Dir, 0, b""))
+                    .await
+            }
             Planned::Link => {
                 let head = header::encode(&entry.name, Kind::Link, 0, &entry.target);
                 out.put(&head).await;

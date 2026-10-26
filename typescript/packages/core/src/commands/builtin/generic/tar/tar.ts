@@ -32,13 +32,7 @@ import {
 import { C_SPACE, UINTMAX } from '../../constants.ts'
 import { UsageError } from '../../../errors.ts'
 import type { FlagValue } from '../../../spec/types.ts'
-import {
-  checkDirectories,
-  planCreate,
-  type DirProbe,
-  type StatFn,
-  type WalkFn,
-} from './create.ts'
+import { checkDirectories, planCreate, type DirProbe, type StatFn, type WalkFn } from './create.ts'
 import { fsStrerror, walkRefusal } from '../../../../errors/fs.ts'
 import { extractDest } from '../archive/extract.ts'
 import { linksOf, mountView, mountRoot } from '../../utils/links.ts'
@@ -189,7 +183,10 @@ export async function tarGeneric(
     })
     if (!plan.write) {
       const stderr = formatOptionalRecords(plan.notices)
-      return [null, new IOResult({ exitCode: plan.exitCode, ...(stderr !== null ? { stderr } : {}) })]
+      return [
+        null,
+        new IOResult({ exitCode: plan.exitCode, ...(stderr !== null ? { stderr } : {}) }),
+      ]
     }
     if (archive.walkError !== null) {
       config.unopened = byteView(fsStrerror(walkRefusal(archive)) ?? '')

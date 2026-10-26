@@ -229,10 +229,30 @@ fn open_failure(config: &Config, reply: &Reply, reading: bool) -> Vec<u8> {
     let (name, text) = (&config.archive, failure_text(reply));
     let mut out = Vec::new();
     if reading && reply.names(&["EISDIR"]) {
-        out.extend([who.as_bytes(), b": ", name, b": Cannot read: ", &text, b"\n"].concat());
+        out.extend(
+            [
+                who.as_bytes(),
+                b": ",
+                name,
+                b": Cannot read: ",
+                &text,
+                b"\n",
+            ]
+            .concat(),
+        );
         out.extend(format!("{who}: At beginning of tape, quitting now\n").bytes());
     } else {
-        out.extend([who.as_bytes(), b": ", name, b": Cannot open: ", &text, b"\n"].concat());
+        out.extend(
+            [
+                who.as_bytes(),
+                b": ",
+                name,
+                b": Cannot open: ",
+                &text,
+                b"\n",
+            ]
+            .concat(),
+        );
     }
     out.extend(format!("{who}{}\n", &FATAL[3..]).bytes());
     if let Some(codec) = config.codec {
@@ -254,7 +274,7 @@ async fn read(
     host: &Host,
     fd: u32,
     open: Option<(Vec<u8>, Opening)>,
-) -> Result<Option<Vec<u8>>, Reply> {
+) -> Result<Option<Vec<u8>>, Box<Reply>> {
     let (reply, data) = host
         .ask(Request::Read {
             fd,
@@ -263,7 +283,7 @@ async fn read(
         })
         .await;
     if failed(&reply) {
-        return Err(reply);
+        return Err(Box::new(reply));
     }
     Ok((!reply.end).then_some(data))
 }

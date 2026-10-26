@@ -51,7 +51,13 @@ export async function writeSnapshotTar(
     await Promise.all(
       files.map(async ([name, data]) => {
         const body = typeof data === 'string' ? await readRegular(data) : data
-        const header = { name, size: body.byteLength, type: 'file' as const, mode: 0o644, mtime: new Date(0) }
+        const header = {
+          name,
+          size: body.byteLength,
+          type: 'file' as const,
+          mode: 0o644,
+          mtime: new Date(0),
+        }
         return { header, body }
       }),
     ),

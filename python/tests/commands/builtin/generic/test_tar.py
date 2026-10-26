@@ -170,7 +170,9 @@ async def test_create_plans_a_symlink_as_a_symlink():
     """
     tree = _Tree({"/d/a.txt": b"a"}, dirs=("/d",))
     links = _links({"/d/link.txt": "a.txt", "/link": "/d/a.txt"})
-    plan = await _plan(tree, [_raw("/d", "d"), _raw("/link", "link")], links=links)
+    plan = await _plan(
+        tree, [_raw("/d", "d"), _raw("/link", "link")], links=links
+    )
     stored = {m.name: m.target for m in plan.members if m.kind == "link"}
     assert stored == {"d/link.txt": "a.txt", "link": "/d/a.txt"}
 

@@ -45,7 +45,7 @@ impl Kind {
 }
 
 /// One member as its headers describe it.
-#[derive(Clone, Default)]
+#[derive(Default)]
 pub(super) struct Member {
     pub(super) name: Vec<u8>,
     pub(super) target: Vec<u8>,
@@ -70,40 +70,6 @@ pub(super) enum Block {
     Head(Member, u8, Vec<Vec<u8>>),
 }
 
-/// A numeric field's C type, as GNU's diagnostics name it, and its range.
-#[derive(Clone, Copy)]
-enum Type {
-    Mode,
-    Uid,
-    Gid,
-    Size,
-    Time,
-    Major,
-    Minor,
-}
-
-impl Type {
-    fn name(self) -> &'static str {
-        match self {
-            Type::Mode => "mode_t",
-            Type::Uid => "uid_t",
-            Type::Gid => "gid_t",
-            Type::Size => "off_t",
-            Type::Time => "time_t",
-            Type::Major => "major_t",
-            Type::Minor => "minor_t",
-        }
-    }
-
-    fn range(self) -> (i128, i128) {
-        match self {
-            Type::Size => (0, i128::from(i64::MAX)),
-            Type::Time => (i128::from(i64::MIN), i128::from(i64::MAX)),
-            _ => (0, i128::from(u32::MAX)),
-        }
-    }
-}
-
 /// A numeric field as GNU reads one: base-256 two's complement when the
 /// first byte's high bit is set, else octal digits after any blanks, ended
 /// by a NUL, a blank or the field's end. None when it is neither; `Some(None)`
@@ -117,10 +83,7 @@ fn number(field: &[u8]) -> Option<Option<i128>> {
         return Some(Some(value));
     }
     let blank = |b: u8| matches!(b, b' ' | b'\t' | b'\n' | 0x0b | 0x0c | b'\r');
-    let start = field
-        .iter()
-        .position(|&b| !blank(b))
-        .unwrap_or(field.len());
+    let start = field.iter().position(|&b| !blank(b)).unwrap_or(field.len());
     let digits = field[start..]
         .iter()
         .take_while(|b| (b'0'..=b'7').contains(b))
@@ -139,32 +102,28 @@ fn number(field: &[u8]) -> Option<Option<i128>> {
     Some(Some(value))
 }
 
-/// A field's value, -1 when GNU refuses it, with what it says if so.
-fn read(field: &[u8], kind: Type, lines: &mut Vec<Vec<u8>>) -> i128 {
+/// A field's value, -1 when GNU refuses it, with what it says if so; `kind`
+/// is the field's C type, as GNU's diagnostics name it.
+fn read(field: &[u8], kind: &str, lines: &mut Vec<Vec<u8>>) -> i128 {
     let shown = &field[..field.iter().position(|&b| b == 0).unwrap_or(field.len())];
     let value = match number(field) {
         Some(value) => value.unwrap_or(0),
         None => {
-            lines.push(
-                format!(
-                    "tar: Archive contains '{}' where numeric {} value expected",
-                    crate::quoted(shown),
-                    kind.name()
-                )
-                .into_bytes(),
-            );
+            let shown = crate::quoted(shown);
+            let line =
+                format!("tar: Archive contains '{shown}' where numeric {kind} value expected");
+            lines.push(line.into_bytes());
             return -1;
         }
     };
-    let (low, high) = kind.range();
+    let (low, high) = match kind {
+        "off_t" => (0, i128::from(i64::MAX)),
+        "time_t" => (i128::from(i64::MIN), i128::from(i64::MAX)),
+        _ => (0, i128::from(u32::MAX)),
+    };
     if !(low..=high).contains(&value) {
-        lines.push(
-            format!(
-                "tar: Archive value {value} is out of {} range {low}..{high}",
-                kind.name()
-            )
-            .into_bytes(),
-        );
+        let line = format!("tar: Archive value {value} is out of {kind} range {low}..{high}");
+        lines.push(line.into_bytes());
         return -1;
     }
     value
@@ -207,7 +166,7 @@ pub(super) fn decode(block: &[u8]) -> Block {
         return Block::Bad(Vec::new());
     }
     let mut lines = Vec::new();
-    let size = read(&block[124..136], Type::Size, &mut lines);
+    let size = read(&block[124..136], "off_t", &mut lines);
     if size < 0 {
         return Block::Bad(lines);
     }
@@ -217,20 +176,20 @@ pub(super) fn decode(block: &[u8]) -> Block {
         name = [&prefix[..], b"/", &name].concat();
     }
     let flag = block[156];
-    let mode = read(&block[100..108], Type::Mode, &mut lines);
+    let mode = read(&block[100..108], "mode_t", &mut lines);
     let member = Member {
         name,
         target: text(&block[157..257]),
         kind: Kind::of(flag),
         mode: (mode & 0o7777) as u32,
-        uid: unsigned(read(&block[108..116], Type::Uid, &mut lines)),
-        gid: unsigned(read(&block[116..124], Type::Gid, &mut lines)),
+        uid: unsigned(read(&block[108..116], "uid_t", &mut lines)),
+        gid: unsigned(read(&block[116..124], "gid_t", &mut lines)),
         uname: text(&block[265..297]),
         gname: text(&block[297..329]),
         size: size as u64,
-        mtime: read(&block[136..148], Type::Time, &mut lines) as i64,
-        major: unsigned(read(&block[329..337], Type::Major, &mut lines)),
-        minor: unsigned(read(&block[337..345], Type::Minor, &mut lines)),
+        mtime: read(&block[136..148], "time_t", &mut lines) as i64,
+        major: unsigned(read(&block[329..337], "major_t", &mut lines)),
+        minor: unsigned(read(&block[337..345], "minor_t", &mut lines)),
     };
     Block::Head(member, flag, lines)
 }
@@ -443,7 +402,12 @@ impl Rows {
                 name.to_vec()
             }
         };
-        let owner = [&id(&member.uname, member.uid)[..], b"/", &id(&member.gname, member.gid)].concat();
+        let owner = [
+            &id(&member.uname, member.uid)[..],
+            b"/",
+            &id(&member.gname, member.gid),
+        ]
+        .concat();
         let size = match member.kind {
             Kind::Char | Kind::Block => format!("{},{}", member.major, member.minor),
             _ => member.size.to_string(),

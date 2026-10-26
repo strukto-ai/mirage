@@ -67,7 +67,7 @@ impl Raw<'_> {
                 Ok(Some(data)) => self.data.extend_from_slice(&data),
                 Ok(None) => self.ended = true,
                 Err(reply) => {
-                    self.error = Some(reply);
+                    self.error = Some(*reply);
                     self.ended = true;
                 }
             }
@@ -166,7 +166,7 @@ impl Input<'_> {
     /// false when the input ends first, after the whole blocks it held.
     async fn copy(&mut self, size: u64, sink: &mut Sink<'_>) -> bool {
         let host = self.raw.host;
-        let (mut left, mut blocks) = (size, size + padding(size) as u64);
+        let (mut left, mut blocks) = (size, size.saturating_add(padding(size) as u64));
         while blocks > 0 {
             if !self.fill(BLOCK).await {
                 return false;
@@ -341,7 +341,9 @@ impl Run<'_, '_> {
                 if let Kind::Other(flag) = member.kind {
                     let name = escaped(&member.name);
                     let tail = b"', extracted as normal file";
-                    self.say([b"tar: ", &name[..], b": Unknown file type '", &[flag], tail].concat());
+                    self.say(
+                        [b"tar: ", &name[..], b": Unknown file type '", &[flag], tail].concat(),
+                    );
                 }
                 if config.to_stdout {
                     if config.verbose {
@@ -362,7 +364,14 @@ impl Run<'_, '_> {
                     if let Err((_, text)) = host.ensure(&mut self.made, &dir).await {
                         let up = parent.join(&b'/');
                         self.say([b"tar: ", &up[..], b": Cannot mkdir: ", &text].concat());
-                        self.say([b"tar: ", &shown[..], b": Cannot open: No such file or directory"].concat());
+                        self.say(
+                            [
+                                b"tar: ",
+                                &shown[..],
+                                b": Cannot open: No such file or directory",
+                            ]
+                            .concat(),
+                        );
                         self.failed = true;
                         return input.skip(member.size).await;
                     }
@@ -557,7 +566,11 @@ pub(super) async fn run(host: &Host, config: &Config) -> i32 {
         host.warn(&open_failure(config, &reply, true));
         return FAILED;
     }
-    let lead = input.failure.as_ref().map(Failure::lines).unwrap_or_default();
+    let lead = input
+        .failure
+        .as_ref()
+        .map(Failure::lines)
+        .unwrap_or_default();
     if cut {
         host.warn(&[lead, lines(&run.notices), lines(&[UNEXPECTED_EOF, FATAL])].concat());
         return FAILED;

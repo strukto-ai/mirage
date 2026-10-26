@@ -282,7 +282,5 @@ export async function planCreate(
       })
     }
   }
-  // GNU closes a run that failed an operand with one trailer, after
-  // everything it did manage to name.
   return { members, notices, exitCode, write: true }
 }
