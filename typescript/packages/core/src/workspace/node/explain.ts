@@ -540,12 +540,15 @@ async function* judgeWords(
     ctx,
     session,
   }
-  // env's command runs in the environment env builds for it.
+  // env's command runs in the environment env builds for it, and a nested
+  // shell's line in a new shell started from this one.
   const child = name === 'env' && inners.length > 0 ? envChild(args, session) : null
   let innerSession = session
   if (child !== null && typeof child !== 'string') {
     innerSession = session.fork()
     innerSession.vars = envVars(session, child[1])
+  } else if ((name === 'sh' || name === 'bash') && inners.length > 0) {
+    innerSession = session.newShell()
   }
   for (const inner of inners) {
     if (!innerReadable(inner)) continue

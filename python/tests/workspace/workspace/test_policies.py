@@ -2187,6 +2187,26 @@ async def test_env_i_brings_no_startup_variable_back():
 
 
 @pytest.mark.asyncio
+async def test_a_nested_shell_s_line_is_read_in_a_new_shell():
+    pwd, gpu = SeePrefix("PWD"), SeePrefix()
+    ws = Workspace(
+        {"/data/": RAMVFS()}, mode=MountMode.WRITE, policies=[pwd, gpu]
+    )
+    try:
+        await ws.shell("env -i bash -c 'echo a'")
+        assert pwd.routed == [("env", "/"), ("bash", None), ("echo", "/")]
+        await ws.shell("GPU=1")
+        await ws.shell("bash -c 'echo b'")
+        assert gpu.routed[-2:] == [("bash", "1"), ("echo", None)]
+        for spy in (pwd, gpu):
+            assert sorted(spy.commanded, key=str) == sorted(
+                spy.routed, key=str
+            )
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
 async def test_a_prefix_leaves_a_readonly_name_and_the_next_command_alone():
     spy = SeePrefix()
     ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE, policies=[spy])

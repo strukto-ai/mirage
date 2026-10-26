@@ -1617,6 +1617,35 @@ describe('what a method sees', () => {
     }
   })
 
+  it("a nested shell's line is read in a new shell", async () => {
+    const pwd = new SeePrefix('PWD')
+    const gpu = new SeePrefix()
+    const ws = new Workspace(
+      { '/data/': new RAMVFS() },
+      { mode: MountMode.WRITE, policies: [pwd, gpu] },
+    )
+    try {
+      await ws.shell("env -i bash -c 'echo a'")
+      expect(pwd.routed).toEqual([
+        ['env', '/'],
+        ['bash', null],
+        ['echo', '/'],
+      ])
+      await ws.shell('GPU=1')
+      await ws.shell("bash -c 'echo b'")
+      expect(gpu.routed.slice(-2)).toEqual([
+        ['bash', '1'],
+        ['echo', null],
+      ])
+      const key = (pair: [string, string | null]): string => JSON.stringify(pair)
+      for (const spy of [pwd, gpu]) {
+        expect(spy.commanded.map(key).sort()).toEqual(spy.routed.map(key).sort())
+      }
+    } finally {
+      await ws.close()
+    }
+  })
+
   it('a prefix leaves a readonly name and the next command alone', async () => {
     const spy = new SeePrefix()
     const ws = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE, policies: [spy] })
