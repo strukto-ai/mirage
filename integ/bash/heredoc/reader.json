@@ -33,6 +33,38 @@
       ]
     },
     {
+      "id": "heredoc_reader_left_open_in_a_backtick_ends_with_it",
+      "command": "echo `cat <<true;`\necho body\ntrue",
+      "expect": {
+        "exit": 0,
+        "stdout": "\nbody\n",
+        "stderr": "mirage: line 1: warning: here-document at line 1 delimited by end-of-file (wanted `true')\n"
+      },
+      "seq": 509984,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder"
+      ]
+    },
+    {
       "id": "heredoc_reader_mixed_substitutions",
       "command": "cat <<EOF\n$(echo cs) `echo bq`\nEOF",
       "expect": {
