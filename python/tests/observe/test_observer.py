@@ -14,6 +14,7 @@
 
 import asyncio
 import json
+import logging
 
 from mirage.io import IOResult
 from mirage.observe import OpRecord
@@ -294,7 +295,9 @@ def test_an_empty_history_sets_no_floor():
     assert [e["timestamp"] for e in events] == [-1000]
 
 
-def test_a_torn_line_costs_only_itself_and_the_entry_appended_onto_it():
+def test_a_torn_line_costs_only_itself_and_the_entry_appended_onto_it(
+    caplog,
+):
     store = RAMObserverStore()
     obs = Observer(store=store, clock=ManualClock(start=NEW_YEAR))
     _log_command(obs, "first", "s1", NEW_YEAR)
@@ -305,8 +308,10 @@ def test_a_torn_line_costs_only_itself_and_the_entry_appended_onto_it():
     _log_command(obs, "third", "s1", NEW_YEAR + 2)
     shown = asyncio.run(obs.session_command_events("s1"))
     assert [e["command"] for e in shown] == ["first", "third"]
-    every = asyncio.run(obs.command_events())
+    with caplog.at_level(logging.DEBUG, logger="mirage.observe.observer"):
+        every = asyncio.run(obs.command_events())
     assert [e["command"] for e in every] == ["first", "third"]
+    assert f"skipping unparseable history line in {path}" in caplog.text
 
 
 def test_an_entry_whose_command_holds_a_line_separator_is_kept():

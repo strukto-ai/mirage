@@ -57,10 +57,12 @@ from mirage.shell.helpers import (
 )
 from mirage.shell.parse import opaque_reads, referenced_names
 from mirage.shell.types import NodeType
+from mirage.shell.variable import VarAttr
 from mirage.types import PathSpec, Refusal
 from mirage.utils.hidden import is_glob
 from mirage.utils.path import resolve_path
 from mirage.workspace.executor.builtins.alias.alias import expanding_aliases
+from mirage.workspace.executor.builtins.env.env import env_child, env_vars
 from mirage.workspace.executor.command.routing import command_words
 from mirage.workspace.expand.classify.path import classify_bare_path
 from mirage.workspace.lookup import line_flags, reads_subtrees
@@ -96,6 +98,7 @@ from mirage.workspace.node.occurrence import (
 )
 from mirage.workspace.session import SessionState, env_snapshot
 from mirage.workspace.session.shell_dirs import home_dir
+from mirage.workspace.session.state import env_is_readonly, seed_var, set_attr
 
 # How the explanation tree names a parse node that shapes a line; a node
 # not here (a redirected or negated statement) is read through.
@@ -604,13 +607,22 @@ async def _judge_words(
         ctx,
         session,
     )
+    # env's command runs in the environment env builds for it, and a
+    # nested shell's line in a new shell started from this one.
+    child = env_child(args, session) if name == "env" and inners else None
+    inner_session = session
+    if child is not None and not isinstance(child, str):
+        inner_session = session.fork()
+        inner_session.vars = env_vars(session, child[1])
+    elif name in ("sh", "bash") and inners:
+        inner_session = session.new_shell()
     for inner in inners:
         if not inner.readable:
             continue
         if inner.line is not None:
             async for one in _judge_line(
-                parse(inner.line, expanding_aliases(session)),
-                session,
+                parse(inner.line, expanding_aliases(inner_session)),
+                inner_session,
                 registry,
                 namespace,
                 line_frame(inner.line, occurrence),
@@ -630,7 +642,7 @@ async def _judge_words(
             async for one in _judge_words(
                 argv,
                 within,
-                session,
+                inner_session,
                 registry,
                 namespace,
                 stated=stated and not inner.open,
@@ -782,6 +794,38 @@ def _words_of(node: Any, home: str | None) -> list[Word]:
     return [read_word(part, home) for part in parts]
 
 
+def _seeded(
+    node: Any, session: SessionState, home: str | None
+) -> SessionState:
+    """The session a command runs in: ``session`` with the command's own
+    ``NAME=value`` prefix exported, as the executor seeds it before the
+    command's gate, so ``pre_execute`` reads the environment
+    ``pre_command`` will. A value only the run expands is read as typed,
+    as the command's words are, and a readonly name is left as it is.
+
+    Args:
+        node (Any): the command's tree-sitter node.
+        session (SessionState): the session the command stands in.
+        home (str | None): the home directory a leading ``~`` names.
+    """
+    assigned, _ = split_env_prefix(get_parts(node))
+    if not assigned:
+        return session
+    seeded = session.fork()
+    for part in assigned:
+        key, eq, raw = get_text(part).partition("=")
+        if not eq or env_is_readonly(seeded, key, False):
+            continue
+        values = [
+            c for c in part.named_children if c.type != NodeType.VARIABLE_NAME
+        ]
+        seed_var(
+            seeded, key, read_word(values[0], home).value if values else raw
+        )
+        set_attr(seeded, key, VarAttr.EXPORT)
+    return seeded
+
+
 def _walk_substitution(
     tree: Any,
     session: SessionState,
@@ -895,11 +939,11 @@ def _walk_node(
             yield Walked(
                 words,
                 statement_redirects(node, home),
-                session,
+                _seeded(node, session, home),
                 occurrence_in(node, frame),
                 lost=lost,
                 stdin=statement_stdin(node),
-                elsewhere=elsewhere,
+                elsewhere=tuple(_seeded(node, e, home) for e in elsewhere),
             )
             walked = _after_cd(words, session, lost, elsewhere)
         for child in node.children:

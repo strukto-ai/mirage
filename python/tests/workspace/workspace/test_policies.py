@@ -2103,3 +2103,117 @@ async def test_a_route_policy_reads_the_session_as_data():
         assert "/data" in seen[-1]["mounts"]
     finally:
         await ws.close()
+
+
+class SeePrefix(Policy):
+    def __init__(self, name: str = "GPU") -> None:
+        self.name = name
+        self.routed: list[tuple[str, str | None]] = []
+        self.commanded: list[tuple[str, str | None]] = []
+
+    async def pre_execute(self, ctx: RouteContext) -> Action | None:
+        self.routed.extend(
+            (c.command, c.session.get(self.name) if c.session else None)
+            for c in ctx.commands
+        )
+        return None
+
+    async def pre_command(self, ctx: CommandContext) -> Action | None:
+        assert ctx.session is not None
+        self.commanded.append((ctx.command, ctx.session.get(self.name)))
+        return None
+
+
+@pytest.mark.asyncio
+async def test_pre_execute_reads_a_commands_own_prefix_as_pre_command_will():
+    # GPU=1 is the environment of echo alone: cat beside it and the
+    # line's session never hold it.
+    spy = SeePrefix()
+    seen: list[dict] = []
+
+    def route(ctx: RouteContext) -> None:
+        seen.append(script_context(ctx))
+        return None
+
+    ws = Workspace(
+        {"/data/": RAMVFS()},
+        mode=MountMode.WRITE,
+        policies=[spy],
+        route_policy=route,
+    )
+    try:
+        await ws.shell("GPU=1 MODEL='a b' echo hi | cat")
+        assert spy.routed == [("echo", "1"), ("cat", None)]
+        assert sorted(spy.commanded) == sorted(spy.routed)
+        echo, cat = seen[-1]["commands"]
+        assert (echo["env"]["GPU"], echo["env"]["MODEL"]) == ("1", "a b")
+        assert "GPU" not in cat["env"]
+        assert "GPU" not in seen[-1]["env"]
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_env_s_command_is_read_in_the_environment_env_gives_it():
+    spy = SeePrefix()
+    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE, policies=[spy])
+    try:
+        await ws.shell(
+            "GPU=1 env -u GPU echo a; env GPU=2 echo b; GPU=3 env -i echo c"
+        )
+        assert spy.routed == [
+            ("env", "1"),
+            ("echo", None),
+            ("env", None),
+            ("echo", "2"),
+            ("env", "3"),
+            ("echo", None),
+        ]
+        assert sorted(spy.commanded, key=str) == sorted(spy.routed, key=str)
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_env_i_brings_no_startup_variable_back():
+    spy = SeePrefix("PWD")
+    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE, policies=[spy])
+    try:
+        await ws.shell("env -i echo c")
+        assert spy.routed == [("env", "/"), ("echo", None)]
+        assert sorted(spy.commanded, key=str) == sorted(spy.routed, key=str)
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_nested_shell_s_line_is_read_in_a_new_shell():
+    pwd, gpu = SeePrefix("PWD"), SeePrefix()
+    ws = Workspace(
+        {"/data/": RAMVFS()}, mode=MountMode.WRITE, policies=[pwd, gpu]
+    )
+    try:
+        await ws.shell("env -i bash -c 'echo a'")
+        assert pwd.routed == [("env", "/"), ("bash", None), ("echo", "/")]
+        await ws.shell("GPU=1")
+        await ws.shell("bash -c 'echo b'")
+        assert gpu.routed[-2:] == [("bash", "1"), ("echo", None)]
+        for spy in (pwd, gpu):
+            assert sorted(spy.commanded, key=str) == sorted(
+                spy.routed, key=str
+            )
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_prefix_leaves_a_readonly_name_and_the_next_command_alone():
+    spy = SeePrefix()
+    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE, policies=[spy])
+    try:
+        await ws.shell("readonly GPU=0")
+        await ws.shell("GPU=1 cd /data; echo $GPU")
+        assert spy.routed[-2:] == [("cd", "0"), ("echo", "0")]
+        assert spy.commanded[-2:] == spy.routed[-2:]
+    finally:
+        await ws.close()

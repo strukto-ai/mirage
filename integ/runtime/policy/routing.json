@@ -658,6 +658,49 @@
       ]
     },
     {
+      "id": "a_route_program_reads_a_commands_own_prefix",
+      "note": "Each command holds the env it runs with, its own NAME=value prefix included; the prefix is that command's alone.",
+      "world": {
+        "runtimes": [
+          "monty",
+          "local",
+          "workspace"
+        ],
+        "mounts": {
+          "/ram": {
+            "vfs": "ram"
+          }
+        },
+        "route_policy": {
+          "script": "import json\nimport os\n\nctx = json.loads(os.environ[\"MIRAGE_POLICY_CTX\"])\nif any(c['command'] == 'python3' and c['env'].get('PLACE') == 'local' for c in ctx['commands']):\n    print(json.dumps({\"kind\": \"route\", \"runtime\": \"local\"}))\n",
+          "runtime": "monty"
+        }
+      },
+      "steps": [
+        {
+          "command": "PLACE=local python3 -c \"import sys; print(sys.platform == 'monty')\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "False\n"
+          }
+        },
+        {
+          "command": "PLACE=local true; python3 -c \"import sys; print(sys.platform == 'monty')\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "True\n"
+          }
+        },
+        {
+          "command": "python3 -c \"import sys; print(sys.platform == 'monty')\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "True\n"
+          }
+        }
+      ]
+    },
+    {
       "id": "a_route_program_that_fails_is_a_routing_error",
       "world": {
         "runtimes": [

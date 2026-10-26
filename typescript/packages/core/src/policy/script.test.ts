@@ -361,6 +361,7 @@ describe('scriptContext', () => {
     const [first] = data.commands as Record<string, unknown>[]
     expect(first?.command).toBe('cat')
     expect(Object.keys(first ?? {})).not.toContain('session')
+    expect(first?.env).toEqual({ TEAM: 'core', HOME: '/home/agent' })
     expect(data.cwd).toBe('/data')
   })
 

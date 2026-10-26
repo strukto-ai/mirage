@@ -127,12 +127,21 @@ function plain(value: unknown, data = false): JsonValue {
  * reads, under the Python name, as plain data. The live handles become
  * data: the session its `cwd`, `env` and `profile`, the namespace the
  * `mounts` the session sees. The files are the program's own `open()`,
- * which reads as the session. Mirrors the Python `script_context`.
+ * which reads as the session. Each of a line's `commands` also holds the
+ * `env` it runs with, its own `NAME=value` prefix included. Mirrors the
+ * Python `script_context`.
  */
 export function scriptContext(
   ctx: CommandContext | RouteContext | VfsContext | SessionContext,
 ): Record<string, JsonValue> {
   const data = plain(ctx) as Record<string, JsonValue>
+  if ('commands' in ctx) {
+    const commands = data.commands as Record<string, JsonValue>[]
+    data.commands = ctx.commands.map((command, at) => ({
+      ...commands[at],
+      env: { ...(command.session?.snapshot() ?? {}) },
+    }))
+  }
   const session = ctx.session
   if (session !== undefined) {
     data.cwd = session.cwd()
