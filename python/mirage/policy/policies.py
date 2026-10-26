@@ -146,12 +146,12 @@ async def transfer_lines(
     The deny lands before the command touches a file, so each line is
     the one GNU prints when that operand's step is refused: cp opens a
     source file for reading, reads a source directory and creates each
-    copy, and mv moves each source onto its target. A target given by
-    ``-t``, after more than one source or that is a directory takes each
-    source by its base name, unless ``-T``. A
-    source named ``.`` or ``..``, or a link cp copies as a link, keeps
-    ``render_deny``'s line: GNU's there depends on what the directory
-    or the link holds.
+    copy, and mv moves each source onto its target, or swaps the two
+    under ``--exchange``. A target given by ``-t``, after more than one
+    source or that is a directory takes each source by its base name,
+    unless ``-T``. A source named ``.`` or ``..``, or a link cp copies
+    as a link, keeps ``render_deny``'s line: GNU's there depends on what
+    the directory or the link holds.
 
     Args:
         subject (str): the command name.
@@ -218,12 +218,15 @@ async def transfer_lines(
         else []
     )
     follows = typed[-1] in ("dereference", "H") if typed else not recursive
+    exchange = subject == "mv" and flags.as_bool("exchange")
     lines = []
     for src in refused:
         shown = src.raw_path or src.virtual
         if shown.rstrip("/").rsplit("/", 1)[-1] in (".", ".."):
             return None
-        if subject == "mv":
+        if exchange:
+            line = f"cannot exchange '{shown}' and '{landing(shown)}'"
+        elif subject == "mv":
             line = f"cannot move '{shown}' to '{landing(shown)}'"
         elif (
             not follows

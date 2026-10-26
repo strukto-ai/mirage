@@ -19,7 +19,7 @@ import { describe, expect, it } from 'vitest'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { record, startOp } from '../observe/context.ts'
 import { norm } from '../utils/path.ts'
-import { Limit, MountMode, OnExceed, PathSpec } from '../types.ts'
+import { type FileStat, Limit, MountMode, OnExceed, PathSpec } from '../types.ts'
 import { MountRegistry } from '../workspace/mount/registry.ts'
 import { Session, Workspace } from '../workspace/workspace/workspace.ts'
 import type { Policy } from './base.ts'
@@ -154,6 +154,33 @@ class NoInterpreters implements Policy {
       return { kind: 'deny', reason: 'interpreters are off' }
     }
     return null
+  }
+}
+
+/** A RAM mount whose stat of `sec/k` waits, once armed, until opened. */
+class StallingStat extends RAMVFS {
+  armed = false
+  open = (): void => undefined
+  reached: Promise<void>
+  private reach = (): void => undefined
+  private readonly gate: Promise<void>
+
+  constructor() {
+    super()
+    this.reached = new Promise((resolve) => {
+      this.reach = resolve
+    })
+    this.gate = new Promise((resolve) => {
+      this.open = resolve
+    })
+  }
+
+  override async stat(path: PathSpec): Promise<FileStat> {
+    if (this.armed && path.virtual.endsWith('/sec/k')) {
+      this.reach()
+      await this.gate
+    }
+    return super.stat(path)
   }
 }
 
@@ -308,6 +335,18 @@ describe('Policies', () => {
           "mv: cannot move '/data/sec/k' to '/data/out/k': Permission denied\n",
         ],
         [
+          'mv --exchange -T /data/sec/k /data/b',
+          "mv: cannot exchange '/data/sec/k' and '/data/b': Permission denied\n",
+        ],
+        [
+          'mv --exchange /data/open /data/sec/sub',
+          "mv: cannot exchange '/data/open' and '/data/sec/sub/open': Permission denied\n",
+        ],
+        [
+          'mv --exchange -t /data/sec/sub /data/open',
+          "mv: cannot exchange '/data/open' and '/data/sec/sub/open': Permission denied\n",
+        ],
+        [
           'cp /data/sec/lnk /data/out/l',
           "cp: cannot open '/data/sec/lnk' for reading: Permission denied\n",
         ],
@@ -334,6 +373,28 @@ describe('Policies', () => {
         expect([line, judged.exitCode, judged.stderr]).toEqual([line, 1, stderr])
       }
     } finally {
+      await ws.close()
+    }
+  })
+
+  it('cancels a refused cp whose operand stat stalls', async () => {
+    // The wording's stats run while the line is judged, before the tree's
+    // cancellation guard, so one still waiting gives up when the line stops.
+    const ram = new StallingStat()
+    const ws = new Workspace({ '/data/': ram }, { mode: MountMode.WRITE })
+    const rule = { reason: 'sealed', paths: ['/data/sec/*'] }
+    ws.createSession('agent', { profile: { commands: { deny: [rule] } } })
+    try {
+      await ws.shell('mkdir -p /data/sec /data/out; echo k > /data/sec/k')
+      ram.armed = true
+      const line = ws.shell('cp /data/sec/k /data/out/', { sessionId: 'agent' })
+      void line.catch(() => undefined)
+      await ram.reached
+      const late = new Promise((resolve) => setTimeout(resolve, 2000, 'still waiting'))
+      expect(await Promise.race([ws.cancel('agent'), late])).toBe(1)
+      await expect(line).rejects.toMatchObject({ name: 'AbortError' })
+    } finally {
+      ram.open()
       await ws.close()
     }
   })

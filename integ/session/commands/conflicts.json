@@ -262,6 +262,20 @@
       }
     },
     {
+      "id": "conflict_mv_exchange_names_the_swap_it_refuses",
+      "seq": 923272,
+      "targets": [
+        "ram-commands"
+      ],
+      "session": "courier",
+      "command": "mv --exchange -T /scratch/vaultc/secret /scratch/outbox/deep/moved",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "mv: cannot exchange '/scratch/vaultc/secret' and '/scratch/outbox/deep/moved': Permission denied\n"
+      }
+    },
+    {
       "id": "conflict_the_destination_still_asks_on_a_source_no_rule_holds",
       "seq": 923248,
       "targets": [
