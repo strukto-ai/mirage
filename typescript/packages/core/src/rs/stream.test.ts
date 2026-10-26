@@ -77,14 +77,16 @@ describe('openStream', () => {
     const size = 34 * 1024 * 1024
     // `a*` keeps the automaton from skipping to the `x`, so the search pauses.
     const regex = new PosixRegex('a*x$')
-    const search = regex.search('a'.repeat(size) + 'x')
+    const abort = new AbortController()
+    const search = regex.search('a'.repeat(size) + 'x', 0, abort.signal)
     const before = await openStream('base64', DECODE)
     const grown = instance(before)
     before.close()
     const after = await openStream('base64', DECODE)
     expect(instance(after)).toBe(grown)
     after.close()
-    expect(await search).toEqual([[0, size + 1]])
+    abort.abort()
+    await expect(search).rejects.toMatchObject({ name: 'AbortError' })
   })
 
   it('reads one input after another', async () => {
