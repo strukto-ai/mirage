@@ -54,6 +54,10 @@ async def _data_ttl(cache: RedisFileCacheStore, path: str) -> int:
     return await cache._cache_client.ttl(cache._data_key(path))
 
 
+async def _no_get(*args, **kwargs):
+    raise AssertionError("sizes fetched a body")
+
+
 @pytest.mark.asyncio
 async def test_set_and_get(cache):
     await cache.set("/file.txt", b"hello")
@@ -520,11 +524,7 @@ async def test_sizes_answer_each_key_in_order_without_its_bytes(
     await cache.set("/a", b"abc")
     await cache.set("/empty", b"")
     await cache.keep_fingerprints({"/v": "v1"})
-
-    async def no_get(*args, **kwargs):
-        raise AssertionError("sizes fetched a body")
-
-    monkeypatch.setattr(cache._cache_client, "get", no_get)
+    monkeypatch.setattr(cache._cache_client, "get", _no_get)
     keys = ["/a", "/empty", "/v", "/none"]
     assert await cache.sizes(keys) == [3, 0, None, None]
 
