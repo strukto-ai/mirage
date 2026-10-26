@@ -130,7 +130,11 @@ fn heredocs_after_a_line_are_read_in_order() {
     );
     // bash reads a backtick's text first: a heredoc left open in it ends
     // with it, and the lines after are commands.
-    for line in ["echo `cat <<A`\nA", "echo `cat <<A;`\nA"] {
+    for line in [
+        "echo `cat <<A`\nA",
+        "echo `cat <<A;`\nA",
+        "echo $`cat <<A`\nA",
+    ] {
         let tree = read(line);
         assert!(
             tree.ends_with("(command name: (command_name (word=A))))"),

@@ -364,7 +364,7 @@ impl Parser<'_> {
             b'(' if self.at(2) == b'(' => self.arithmetic_or_substitution().map(Some),
             b'(' => self.command_substitution().map(Some),
             b'[' => self.bracket_arithmetic().map(Some),
-            b'`' => self.dollar_backtick().map(Some),
+            b'`' => self.backtick().map(Some),
             byte if is_name(byte) || SPECIAL.contains(&byte) => Ok(self.simple_expansion()),
             _ => Ok(None),
         }
@@ -455,7 +455,7 @@ impl Parser<'_> {
         self.statements(close, None, false)
     }
 
-    /// `` `...` ``.
+    /// `` `...` `` or `` $`...` ``.
     /// bash reads a backtick substitution's text when it runs it: what
     /// the grammar cannot read here, or a body that leaves a heredoc
     /// open at its end, is one raw word.
@@ -464,13 +464,14 @@ impl Parser<'_> {
             return self.fail(self.i);
         }
         self.enter()?;
-        let at = self.i;
+        let open = if self.peek() == b'$' { "$`" } else { "`" };
+        let at = self.i + open.len() - 1;
         let Some(end) = super::lex::quote_end(self.s, at, b'`') else {
             return Err(Fail::eof(at, '`'));
         };
         let mark = self.mark();
         let pending = self.pending.len();
-        let open = self.expect("`")?;
+        let open = self.expect(open)?;
         let mut children = vec![open];
         self.in_backtick = true;
         let body = self.statements(Close::Backtick, None, false);
@@ -485,20 +486,6 @@ impl Parser<'_> {
                 self.i = end - 1;
             }
         }
-        children.push(self.expect("`")?);
-        self.leave();
-        Ok(Syn::node("command_substitution", children))
-    }
-
-    /// `` $`...` ``.
-    fn dollar_backtick(&mut self) -> R<Syn> {
-        self.enter()?;
-        let open = self.expect("$`")?;
-        let mut children = vec![open];
-        self.in_backtick = true;
-        let body = self.statements(Close::Backtick, None, false);
-        self.in_backtick = false;
-        children.extend(body?);
         children.push(self.expect("`")?);
         self.leave();
         Ok(Syn::node("command_substitution", children))
