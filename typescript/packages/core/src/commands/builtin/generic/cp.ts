@@ -618,6 +618,7 @@ export async function sourceKind(
     const code = (err as { code?: unknown }).code
     if (code === 'ENOTDIR') return { kind: null, condition: 'ENOTDIR' }
     if (code === 'ELOOP') return { kind: null, condition: 'ELOOP' }
+    if (code === 'EACCES') return { kind: null, condition: 'EACCES' }
     if (!isMissingPath(err)) throw err
   }
   if (info !== null) return { kind: info.type, condition: null }
@@ -1318,6 +1319,18 @@ export async function copyEntries(
 }
 
 /**
+ * GNU's line for a file copy that failed: the source's open when the error
+ * names the source, else the destination's create. Mirrors Python's
+ * copy_failed.
+ */
+function copyFailed(cmdName: string, src: PathSpec, dst: PathSpec, err: unknown): string {
+  if ((err as { virtualPath?: unknown }).virtualPath === src.virtual) {
+    return `${cmdName}: cannot open '${src.rawPath}' for reading: ${String(fsStrerror(err))}`
+  }
+  return `${cmdName}: cannot create regular file '${dst.rawPath}': ${String(fsStrerror(err))}`
+}
+
+/**
  * Copy one file between the strategy's mounts, reporting a failure in GNU's
  * words; false when it failed. A store-to-store copy goes first where the
  * strategy has one: the destination's store copies from the source's without
@@ -1342,11 +1355,7 @@ export async function transferFile(
       const cannot = classify(err) === 'EXDEV' || classify(err) === 'ENOTSUP'
       if ((err as Partial<WalkDeclinedError>).declined !== true && !cannot) {
         if (!isFsError(err)) throw err
-        errors.push(
-          (err as { virtualPath?: unknown }).virtualPath === src.virtual
-            ? `${cmdName}: cannot open '${src.rawPath}' for reading: ${String(fsStrerror(err))}`
-            : `${cmdName}: cannot create regular file '${dst.rawPath}': ${String(fsStrerror(err))}`,
-        )
+        errors.push(copyFailed(cmdName, src, dst, err))
         return false
       }
     }
@@ -1736,9 +1745,7 @@ export async function cpGeneric(
           await copyEntry(strategy, copies, entry, entryDst)
         } catch (err) {
           if (!isFsError(err)) throw err
-          errors.push(
-            `cp: cannot create regular file '${entryDst.rawPath}': ${String(fsStrerror(err))}`,
-          )
+          errors.push(copyFailed('cp', entry, entryDst, err))
           continue
         }
       }
@@ -1795,9 +1802,7 @@ export async function cpGeneric(
         await copyEntry(copier, copies, src, target)
       } catch (err) {
         if (!isFsError(err)) throw err
-        errors.push(
-          `cp: cannot create regular file '${target.rawPath}': ${String(fsStrerror(err))}`,
-        )
+        errors.push(copyFailed('cp', src, target, err))
         continue
       }
     }

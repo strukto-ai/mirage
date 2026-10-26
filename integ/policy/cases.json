@@ -247,6 +247,8 @@
     {"op": "exec", "command": "touch /data/t", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "touch: Permission denied\n", "refusal": "no touching"}}},
     {"op": "exec", "command": "cat /data/locked", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "cat: /data/locked: Permission denied\n", "refusal": "locked file"}}},
     {"op": "exec", "command": "cat /data/locked /data/open", "expect": {"value": {"exit_code": 1, "stdout": "open\n", "stderr": "cat: /data/locked: Permission denied\n", "refusal": "locked file"}}},
+    {"op": "exec", "command": "cp /data/locked /data/copy", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "cp: cannot stat '/data/locked': Permission denied\n", "refusal": "locked file"}}},
+    {"op": "exec", "command": "mv /data/locked /data/moved", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "mv: cannot stat '/data/locked': Permission denied\n", "refusal": "locked file"}}},
     {"op": "exec", "command": "export MODE=fast", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "MODE: permission denied\n", "refusal": "mode is fixed"}}},
     {"op": "exec", "command": "echo blocked", "expect": {"value": {"exit_code": 126, "stdout": "", "stderr": "echo: Permission denied\n", "refusal": "blocked line"}}},
     {"op": "explain", "command": "touch /data/t", "expect": {"value": {"outcome": "allow", "reason": "", "answers": [], "refusal": null, "exit_code": 0, "stderr": "", "commands": [{"command": "touch", "outcome": "deny", "answers": [{"kind": "deny", "policy": "RulePolicy", "reason": "no touching"}], "runtime": ""}]}}},
@@ -421,7 +423,8 @@
     {"op": "exec", "session": "agent", "command": "echo $TEAM", "expect": {"value": {"exit_code": 0, "stdout": "core\n", "stderr": "", "refusal": null}}},
     {"op": "exec", "session": "agent", "command": "echo ${MIRAGE_POLICY_CTX:-unset}", "expect": {"value": {"exit_code": 0, "stdout": "unset\n", "stderr": "", "refusal": null}}},
     {"op": "vfs", "session": "agent", "call": "read", "args": {"path": "/data/x"}, "expect": {"errno": "EACCES", "reason": "secret text"}},
-    {"op": "vfs", "session": "agent", "call": "read", "args": {"path": "/data/y"}, "expect": {"value": "cGxhaW4K"}}
+    {"op": "vfs", "session": "agent", "call": "read", "args": {"path": "/data/y"}, "expect": {"value": "cGxhaW4K"}},
+    {"op": "exec", "session": "agent", "command": "cp /data/x /data/z", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "cp: cannot open '/data/x' for reading: Permission denied\n", "refusal": "secret text"}}}
    ]
   },
   {
