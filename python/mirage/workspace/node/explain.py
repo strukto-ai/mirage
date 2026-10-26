@@ -787,7 +787,7 @@ def _words_of(node: Any, home: str | None) -> list[Word]:
     """One command node's words, name first, the env prefix dropped.
 
     Args:
-        node (Any): the command's tree-sitter node.
+        node (Any): the command's parsed node.
         home (str | None): the home directory a leading ``~`` names.
     """
     _, parts = split_env_prefix(get_parts(node))
@@ -903,7 +903,7 @@ def _walk_node(
     each parsed here as the evaluator parses it.
 
     Args:
-        node (Any): the tree-sitter node to walk.
+        node (Any): the parsed node to walk.
         session (SessionState): the session this node begins in.
         home (str | None): the home directory a leading ``~`` names.
         frame (Frame): the scope the node is read in.
@@ -953,10 +953,9 @@ def _walk_node(
     if node.type in FORK_SCOPES:
         segments = segment_frames(node, frame)
         if segments:
-            # A backtick region is read as the evaluator runs it: one
-            # line per pair, parsed on its own, because tree-sitter
-            # lexes touching pairs as one node whose subtree is not
-            # what runs.
+            # A backtick region is read as the evaluator runs it: its
+            # body parsed again once its backslashes are gone, because
+            # the node's subtree is not what runs.
             for segment in segments:
                 yield from _walk_substitution(
                     parse(segment.text, expanding_aliases(session)),
@@ -1006,7 +1005,7 @@ def _moves(node: Any, session: SessionState, home: str | None) -> bool:
     the tree, so a nested scope costs one more scan, not another walk.
 
     Args:
-        node (Any): the scope's tree-sitter node.
+        node (Any): the scope's parsed node.
         session (SessionState): the session the scope begins in.
         home (str | None): the home directory a leading ``~`` names.
     """
@@ -1042,7 +1041,7 @@ def _walk_children(
     returns where the scope ends.
 
     Args:
-        node (Any): the tree-sitter node whose children form the scope.
+        node (Any): the parsed node whose children form the scope.
         session (SessionState): the session the scope begins in.
         home (str | None): the home directory a leading ``~`` names.
         frame (Frame): the scope the children are read in.
@@ -1133,7 +1132,7 @@ def _walked_line(
     readers judge the file the shell opens, not just the operands.
 
     Args:
-        ast (Any): the parsed tree-sitter root node.
+        ast (Any): the parsed root node.
         session (SessionState): the session running the line.
         frame (Frame | None): the scope the line is read in; None
             reads ``ast`` as a line of its own.
@@ -1157,7 +1156,7 @@ async def line_judgments(
     :func:`prejudge_line` refuses from, made once for both.
 
     Args:
-        ast (Any): the parsed tree-sitter root node.
+        ast (Any): the parsed root node.
         session (SessionState): the session running the line.
         registry (MountRegistry): registry holding the policies, the
             decision ledger and the CLI installs.
@@ -1290,7 +1289,7 @@ async def prejudge_line(
     puts it on stdout.
 
     Args:
-        ast (Any): the parsed tree-sitter root node.
+        ast (Any): the parsed root node.
         session (SessionState): the session running the line.
         registry (MountRegistry): registry holding the policies, the
             decision ledger and the CLI installs.
@@ -1406,7 +1405,7 @@ async def admit_line(
     again for each on every retry.
 
     Args:
-        ast (Any): the parsed tree-sitter root node.
+        ast (Any): the parsed root node.
         session (SessionState): the session running the line.
         registry (MountRegistry): registry holding the policies, the
             decision ledger and the CLI installs.
@@ -1483,7 +1482,7 @@ def _defines_function(node: Any) -> bool:
     for it.
 
     Args:
-        node (Any): the tree-sitter node to scan.
+        node (Any): the parsed node to scan.
     """
     stack = [node]
     while stack:
@@ -1672,7 +1671,7 @@ async def _judge_line(
     ``_judge_words`` yields them.
 
     Args:
-        ast (Any): the parsed tree-sitter root node.
+        ast (Any): the parsed root node.
         session (SessionState): the session running the line.
         registry (MountRegistry): registry holding the policies, the
             decision ledger and the CLI installs.
@@ -1827,7 +1826,7 @@ async def explain_line(
     nothing is expanded and no ``$( )`` runs.
 
     Args:
-        ast (Any): the parsed tree-sitter root node.
+        ast (Any): the parsed root node.
         session (SessionState): the session running the line.
         registry (MountRegistry): registry holding the policies, the
             decision ledger and the CLI installs.

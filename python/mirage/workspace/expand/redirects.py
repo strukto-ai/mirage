@@ -98,9 +98,7 @@ async def _expand_target(
             kind=r.kind,
             append=r.append,
             clobber=r.clobber,
-            pipeline=r.pipeline,
             expand_vars=r.expand_vars,
-            continuation=r.continuation,
         )
     if isinstance(r.target, int):
         return r
@@ -125,7 +123,6 @@ async def _expand_target(
                 target=r.target,
                 target_node=r.target_node,
                 kind=RedirectKind.AMBIGUOUS,
-                pipeline=r.pipeline,
             )
         target_scope = targets[0]
     return Redirect(
@@ -135,5 +132,4 @@ async def _expand_target(
         kind=r.kind,
         append=r.append,
         clobber=r.clobber,
-        pipeline=r.pipeline,
     )

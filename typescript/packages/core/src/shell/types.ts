@@ -24,8 +24,6 @@
  * assignments included, so `i=2, a[i]` reads the new `i`; `read` answers
  * the element's stored text, null when unset.
  */
-import type { Heredoc } from './parse/heredoc/types.ts'
-
 export interface ElementOps {
   resolve(name: string, subscript: string, env: Readonly<Record<string, string>>): string
   read(name: string, key: string): string | null
@@ -222,7 +220,7 @@ export interface RedirectInit {
   fd: number
   // The target path, the dup'd fd number, or FD_CLOSE (-1) for `>&-`.
   target: unknown
-  // The tree-sitter node the target came from.
+  // The parsed node the target came from.
   targetNode?: unknown
   // Which stream the redirect moves.
   kind?: RedirectKind
@@ -231,14 +229,8 @@ export interface RedirectInit {
   // Whether the operator was `>|`, which overrides `set -C` for this one
   // redirect and nothing else.
   clobber?: boolean
-  // The process substitution feeding the target.
-  pipeline?: unknown
   // Whether the target undergoes expansion.
   expandVars?: boolean
-  // The `&&`/`||` steps a heredoc's operator line carries past the
-  // delimiter word (`false <<EOF || echo x`), each an operator and its
-  // right operand, in the order bash applies them to the statement.
-  continuation?: readonly (readonly [string, unknown])[]
 }
 
 export class Redirect {
@@ -248,16 +240,7 @@ export class Redirect {
   readonly kind: RedirectKind
   readonly append: boolean
   readonly clobber: boolean
-  // The node a heredoc's operator line pipes the command into
-  // (`cat <<EOF | tr`), run on the command's stdout.
-  pipeline: unknown
   readonly expandVars: boolean
-  // The `&&`/`||` steps a heredoc's operator line carries past the
-  // delimiter word (`false <<EOF || echo x`), in the order bash applies
-  // them. tree-sitter parses that tail inside the heredoc_redirect node,
-  // so it is detached here and applied by the executor around the whole
-  // statement.
-  continuation: readonly (readonly [string, unknown])[]
 
   constructor(init: RedirectInit) {
     this.fd = init.fd
@@ -266,9 +249,7 @@ export class Redirect {
     this.kind = init.kind ?? RedirectKind.STDOUT
     this.append = init.append ?? false
     this.clobber = init.clobber ?? false
-    this.pipeline = init.pipeline ?? null
     this.expandVars = init.expandVars ?? true
-    this.continuation = init.continuation ?? []
   }
 }
 
@@ -432,9 +413,34 @@ export const BuiltinGroup = Object.freeze({
 export type BuiltinGroup = (typeof BuiltinGroup)[keyof typeof BuiltinGroup]
 
 /**
- * The structural shape of a tree-sitter syntax node, so consumers can
- * walk a parsed line without depending on a concrete tree-sitter
- * binding (web-tree-sitter here, tree_sitter in Python). Mirrors the
+ * A heredoc the parser folded into its line as a `<` redirect from a
+ * double-quoted word. `at` is where its `<` stands in the text the tree
+ * reads; the other offsets are in the line as typed. Mirrors Python's
+ * ShellHeredoc.
+ */
+export interface Heredoc {
+  readonly at: number
+  readonly operatorStart: number
+  readonly wordEnd: number
+  readonly bodyStart: number
+  readonly end: number
+  /** The delimiter word as typed. */
+  readonly word: string
+  /** The delimiter as bash reads it, quotes removed. */
+  readonly delimiter: string
+  /** The body as bash reads it. */
+  readonly body: string
+  /** A quoted delimiter: the body is not expanded. */
+  readonly quoted: boolean
+  /** `<<-`: its lines lose their leading tabs. */
+  readonly dash: boolean
+  /** Whether the delimiter line ended it, not the end of the input. */
+  readonly terminated: boolean
+}
+
+/**
+ * The structural shape of a parsed syntax node, so consumers can walk a
+ * parsed line without depending on the parser's binding. Mirrors the
  * Python side reading nodes through shell.types.
  */
 export interface TSNodeLike {
@@ -442,29 +448,35 @@ export interface TSNodeLike {
   readonly warnings?: string
   readonly sourceText?: string
   readonly inlined?: string | undefined
-  readonly hasError?: boolean
+  /** Where each UTF-16 unit of the text the tree reads came from in the line as typed, then its end. */
+  readonly offsets?: ArrayLike<number>
+  /** bash's refusal of the tree's line: where, its diagnostic as mirage prints it, and its status. */
+  readonly error?: {
+    readonly index: number
+    readonly message: string
+    readonly status: number
+  } | null
   type: string
   text: string
   children: TSNodeLike[]
   namedChildren: TSNodeLike[]
   parent?: TSNodeLike | null
-  /** The token after this node in its parent, as web-tree-sitter spells it. */
+  /** The token after this node in its parent. */
   nextSibling?: TSNodeLike | null
-  /** The token before this node in its parent, as web-tree-sitter spells it. */
+  /** The token before this node in its parent. */
   previousSibling?: TSNodeLike | null
   isNamed?: boolean
-  isMissing?: boolean
   startIndex?: number
   endIndex?: number
   startPosition?: { row: number; column: number }
   endPosition?: { row: number; column: number }
   /**
-   * Tree-node identity. Web-tree-sitter hands out a fresh wrapper per
+   * Tree-node identity. The parser hands out a fresh wrapper per
    * lookup, so `===` cannot tell one node from a re-read of it; the
    * env-plane name walk uses this to skip an assignment's own target.
    */
   id?: number
-  /** Field lookup (`variable_assignment.name`), as web-tree-sitter spells it. */
+  /** Field lookup (`variable_assignment.name`). */
   childForFieldName?(fieldName: string): TSNodeLike | null
 }
 
@@ -485,9 +497,7 @@ export interface BacktickSegment {
 
 export interface ShellNode extends TSNodeLike {
   readonly id: number
-  readonly hasError: boolean
   readonly isNamed: boolean
-  readonly isMissing: boolean
   readonly startIndex: number
   readonly endIndex: number
   readonly startPosition: { row: number; column: number }

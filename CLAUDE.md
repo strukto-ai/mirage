@@ -196,10 +196,11 @@ under `rm`/`mv`/`mkdir`/... and refuses it as a source of `tar -c`, `zip`,
 
 ### Shell
 
-`shell/parse/` (tree-sitter-bash) builds the node tree `workspace/node/`
-runs; `workspace/expand/` expands and classifies words; `workspace/lookup/`
-holds the one precedence list (builtin, namespace command, function, CLI,
-mount); `workspace/executor/` runs pipes, redirects, jobs and control flow.
+`shell/parse/` reads a line with mirage-rs's bash parser
+(`rust/mirage-rs/src/shell/`) into the node tree `workspace/node/` runs;
+`workspace/expand/` expands and classifies words; `workspace/lookup/` holds
+the one precedence list (builtin, namespace command, function, CLI, mount);
+`workspace/executor/` runs pipes, redirects, jobs and control flow.
 Follow tables live in `workspace/lookup/constants.py`. Every session write goes through
 `SessionView.set`, so a `pre_session` rule is enforced; only shell
 bookkeeping and `seed_var` are exempt.
@@ -279,7 +280,7 @@ sync spawn.
 ```mermaid
 flowchart TD
     App["application · agent adapter · mirage CLI · server"] --> WS["Workspace.shell(line, session)"]
-    WS --> Parse["shell parser<br/>shell/parse (tree-sitter-bash)"]
+    WS --> Parse["shell parser<br/>shell/parse (mirage-rs)"]
     Parse --> Expand["expansion + classification<br/>workspace/expand"]
     Expand --> Lookup["lookup<br/>builtin › namespace command › function › CLI › mount"]
     Lookup --> Exec["executor<br/>workspace/executor"]

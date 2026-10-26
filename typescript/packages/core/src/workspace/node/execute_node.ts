@@ -52,7 +52,6 @@ import {
   withOwnRedirects,
   getRedirects,
   readRow,
-  takeContinuation,
   getText,
   getParts,
   getUnsetArgs,
@@ -467,12 +466,6 @@ async function runPipeline(
   return [stdout, flipped, execNode]
 }
 
-type RunLeft = (
-  context: EvaluationContext,
-  stdin: ByteSource | null,
-  callStack: CallStack | null,
-) => Promise<Result>
-
 /** What `!` makes of the statement it wraps once that has run. */
 async function negated(
   rawStdout: ByteSource | null,
@@ -500,8 +493,7 @@ async function negated(
 }
 
 /**
- * Run a redirected statement: the command under its redirects, then the
- * pipeline a heredoc's operator line fed it into.
+ * Run a redirected statement: the command under its redirects.
  *
  * The parse hoists a trailing redirect over whatever precedes it, so the
  * redirects are bound where bash binds them first: past a list to its
@@ -549,7 +541,7 @@ async function runRedirected(
     return recurse(command, context, stdin, callStack)
   }
   if (command !== null && command.type === NT.LIST) {
-    // tree-sitter hoists a trailing redirect over the whole &&/||
+    // the parser hoists a trailing redirect over the whole &&/||
     // list; bash binds it to the last command:
     //   redirected(list(L, op, R), r) == list(L, op, redirected(R, r))
     // Re-associate and defer target expansion until R runs, so
@@ -611,8 +603,6 @@ async function runRedirected(
     )
     return negated(stdout, io, execNode, context, inner ?? command)
   }
-  const pipeNode =
-    (redirects.find((r) => r.pipeline != null)?.pipeline as TSNodeLike | null) ?? null
   const forked = forks(command, context.session)
   const expandAs =
     (forkedNow: boolean) =>
@@ -677,7 +667,7 @@ async function runRedirected(
           stdin,
           callStack,
           false,
-          pipeNode === null ? sink : undefined,
+          sink,
           expandAs(ranForked),
           guard,
           name,
@@ -690,7 +680,7 @@ async function runRedirected(
         [],
         () =>
           recurse(command, context, stdin, callStack, {
-            ...(pipeNode === null && sink ? { sink } : {}),
+            ...(sink ? { sink } : {}),
             ownDiagnostics: false,
           }),
         underRedirects,
@@ -708,7 +698,7 @@ async function runRedirected(
         stdin,
         callStack,
         false,
-        pipeNode === null ? sink : undefined,
+        sink,
         expand,
         undefined,
         '',
@@ -729,64 +719,7 @@ async function runRedirected(
   } finally {
     context.frame.diagnostics = outer
   }
-  if (pipeNode !== null && stdout !== null) {
-    const [stdout2, io2, execNode2] = await recurse(pipeNode, context, stdout, callStack)
-    stdout = stdout2
-    io = await io.merge(io2)
-    execNode = execNode2
-  }
   return [stdout, io, execNode]
-}
-
-/**
- * Fold the `&&`/`||` steps a heredoc's operator line carried around the
- * statement, left to right.
- *
- * The last step's operator joins everything before it to its right
- * operand, so the fold is `handleConnection` with the statement's node
- * standing for that left side; `recurseContinuation` runs the remaining
- * steps when asked for it and recurses normally for the right operand.
- * The list semantics (short-circuit, `$?`, `PIPESTATUS`, `set -e`
- * immunity) are therefore the `list` node's own, not a second copy.
- */
-async function runContinuation(
-  recurse: Recurse,
-  runLeft: RunLeft,
-  left: TSNodeLike,
-  steps: readonly (readonly [string, TSNodeLike])[],
-  context: EvaluationContext,
-  stdin: ByteSource | null,
-  callStack: CallStack | null,
-  executeFn: ExecuteFn | null = null,
-): Promise<Result> {
-  const last = steps[steps.length - 1]
-  if (last === undefined) return runLeft(context, stdin, callStack)
-  const [op, right] = last
-  const wrapped = recurseContinuation.bind(
-    null,
-    recurse,
-    runLeft,
-    left,
-    steps.slice(0, -1),
-    executeFn,
-  )
-  return handleConnection(wrapped, left, op, right, context, stdin, callStack, executeFn)
-}
-
-async function recurseContinuation(
-  recurse: Recurse,
-  runLeft: RunLeft,
-  left: TSNodeLike,
-  steps: readonly (readonly [string, TSNodeLike])[],
-  executeFn: ExecuteFn | null,
-  node: TSNodeLike,
-  context: EvaluationContext,
-  stdin: ByteSource | null,
-  callStack: CallStack | null,
-): Promise<Result> {
-  if (node === left)
-    return runContinuation(recurse, runLeft, left, steps, context, stdin, callStack, executeFn)
-  return recurse(node, context, stdin, callStack)
 }
 
 async function recursePipeStderr(
@@ -1326,13 +1259,7 @@ async function executeNodeBody(
 
   if (kind === NodeKind.REDIRECT) {
     const [command, redirects] = getRedirects(node)
-    // The `&&`/`||` steps a heredoc's operator line carried
-    // (`false <<EOF || echo x`) wrap the whole statement, hoisted list
-    // and all, exactly as a `list` node would have wrapped it had the
-    // parser read the line the way bash does.
-    const continuation = takeContinuation(redirects)
-    const runLeft = runRedirected.bind(
-      null,
+    const ran = await runRedirected(
       recurse,
       dispatch,
       executeFn,
@@ -1343,20 +1270,10 @@ async function executeNodeBody(
       deps.signal,
       jobTable.processes,
       sink,
+      context,
+      stdin,
+      callStack,
     )
-    const ran =
-      continuation.length === 0
-        ? await runLeft(context, stdin, callStack)
-        : await runContinuation(
-            recurse,
-            runLeft,
-            node,
-            continuation,
-            context,
-            stdin,
-            callStack,
-            executeFn,
-          )
     return sink === undefined ? ran : drained(sink, ...ran)
   }
 
@@ -1646,6 +1563,6 @@ async function executeNodeBody(
   }
 
   // Constructs the parser accepts but the executor cannot honor
-  // (tree-sitter ERROR nodes, future grammar additions).
+  // (future grammar additions).
   return fail(node.text, `mirage: unsupported shell construct: ${node.type}\n`, 2)
 }

@@ -32,8 +32,10 @@ impl Parser<'_> {
             ("[", "]", Closer::Single)
         };
         let mut children = vec![self.expect(open)?];
-        let inside = self.i;
-        self.skip_space();
+        if double {
+            self.check_conditional(self.i)?;
+        }
+        self.test_space(closer);
         if !self.at_test_close(closer) {
             let expression = if double {
                 self.top_test_expression()?
@@ -41,13 +43,10 @@ impl Parser<'_> {
                 self.test_expression(closer, 0)?
             };
             children.push(expression);
-            self.skip_space();
+            self.test_space(closer);
         }
         if !self.at_test_close(closer) {
             return self.fail(self.i);
-        }
-        if double {
-            self.check_conditional(inside, self.i)?;
         }
         children.push(self.expect(close)?);
         self.leave();
@@ -72,17 +71,17 @@ impl Parser<'_> {
     fn top_test_expression(&mut self) -> R<Syn> {
         let mark = self.mark();
         let left = self.test_unary(Closer::Double)?;
-        self.skip_space();
+        self.test_space(Closer::Double);
         if self.peek() == b'=' && is_space(self.at(1)) {
             let at = self.i;
             self.i += 1;
             let op = Syn::token("=", at, at + 1).with_field("operator");
-            self.skip_space();
+            self.test_space(Closer::Double);
             if let Some(end) = self.regex_no_space_end() {
                 let regex_at = self.i;
                 self.i = end;
                 let right = Syn::leaf("regex", regex_at, end).with_field("right");
-                self.skip_space();
+                self.test_space(Closer::Double);
                 if self.at_test_close(Closer::Double) {
                     return Ok(Syn::node(
                         "binary_expression",
@@ -100,17 +99,17 @@ impl Parser<'_> {
         self.enter()?;
         let mut left = self.test_unary(closer)?;
         loop {
-            self.skip_space();
+            self.test_space(closer);
             if self.at_test_close(closer) || self.eof() {
                 break;
             }
             if self.peek() == b'?' && TERNARY >= min {
                 let question = self.expect("?")?;
-                self.skip_space();
+                self.test_space(closer);
                 let consequence = self.test_expression(closer, 0)?;
-                self.skip_space();
+                self.test_space(closer);
                 let colon = self.expect(":")?;
-                self.skip_space();
+                self.test_space(closer);
                 let alternative = self.test_expression(closer, TERNARY + 1)?;
                 left = Syn::node(
                     "ternary_expression",
@@ -143,7 +142,7 @@ impl Parser<'_> {
                 break;
             }
             let op = op.with_field("operator");
-            self.skip_space();
+            self.test_space(closer);
             let right = match op.kind {
                 "=~" => self.regex_operand(closer)?,
                 "==" | "!=" => self.pattern_operand(closer, prec)?,
@@ -195,7 +194,7 @@ impl Parser<'_> {
         if let Some(end) = self.test_operator_end() {
             self.i = end;
             let op = Syn::leaf("test_operator", at, end).with_field("operator");
-            self.skip_space();
+            self.test_space(closer);
             if self.at_test_close(closer) {
                 self.i = at;
                 return self.test_operand(closer);
@@ -224,7 +223,7 @@ impl Parser<'_> {
         if let Some((text, prec)) = prefix {
             self.i += text.len();
             let op = Syn::token(text, at, self.i).with_field("operator");
-            self.skip_space();
+            self.test_space(closer);
             let operand = if text == "!" {
                 self.test_expression(closer, UNARY)?
             } else {
@@ -260,6 +259,17 @@ impl Parser<'_> {
         match self.literal_opt(ctx)? {
             Some(node) => Ok(node),
             None => self.fail(self.i),
+        }
+    }
+
+    /// The blanks and newlines between a test's tokens. Inside `[[ ]]` a
+    /// newline reads the bodies of the heredocs pending there, as it does
+    /// between commands.
+    fn test_space(&mut self, closer: Closer) {
+        if closer == Closer::Double {
+            self.skip_space_bodies();
+        } else {
+            self.skip_space();
         }
     }
 

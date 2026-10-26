@@ -604,9 +604,6 @@ importers:
       sha.js:
         specifier: ^2.4.12
         version: 2.4.12
-      web-tree-sitter:
-        specifier: ^0.26.13
-        version: 0.26.13
       zod:
         specifier: ^4.6.6
         version: 4.6.7
@@ -638,9 +635,6 @@ importers:
       pyodide:
         specifier: ^314.0.5
         version: 314.0.5
-      tree-sitter-bash:
-        specifier: ^0.25.1
-        version: 0.25.1
       typescript:
         specifier: ^6.0.0
         version: 6.0.3
@@ -5616,10 +5610,6 @@ packages:
   nise@6.1.5:
     resolution: {integrity: sha512-SnRDPDBjxZZoU2n0+gzzLtSvo1OZo7j6jnbXsoh3AFxEGhaFU7ZF0TmefuKERq79wxR2U+MPn7ArW+Tl+clC3A==}
 
-  node-addon-api@8.7.0:
-    resolution: {integrity: sha512-9MdFxmkKaOYVTV+XVRG8ArDwwQ77XIgIPyKASB1k3JPq3M8fGQQQE3YpMOrKm6g//Ktx8ivZr8xo1Qmtqub+GA==}
-    engines: {node: ^18 || ^20 || >= 21}
-
   node-domexception@1.0.0:
     resolution: {integrity: sha512-/jKZoMpw0F8GRwl4/eLROPA3cfcXtLApP0QzLmUT/HuPCZWyB7IY9ZrMeKw2O/nFIqPQB3PVM9aYm0F312AXDQ==}
     engines: {node: '>=10.5.0'}
@@ -6559,14 +6549,6 @@ packages:
     resolution: {integrity: sha512-L0Orpi8qGpRG//Nd+H90vFB+3iHnue1zSSGmNOOCh1GLJ7rUKVwV2HvijphGQS2UmhUZewS9VgvxYIdgr+fG1A==}
     hasBin: true
 
-  tree-sitter-bash@0.25.1:
-    resolution: {integrity: sha512-7hMytuYIMoXOq24yRulgIxthE9YmggZIOHCyPTTuJcu6EU54tYD+4G39cUb28kxC6jMf/AbPfWGLQtgPTdh3xw==}
-    peerDependencies:
-      tree-sitter: ^0.25.0
-    peerDependenciesMeta:
-      tree-sitter:
-        optional: true
-
   trough@2.2.0:
     resolution: {integrity: sha512-tmMpK00BjZiUyVyvrBK7knerNgmgvcV/KLVyuma/SC+TQN167GrMRciANTz09+k3zW8L8t60jWO1GpfkZdjTaw==}
 
@@ -6839,9 +6821,6 @@ packages:
   web-streams-polyfill@3.3.3:
     resolution: {integrity: sha512-d2JWLCivmZYTSIoge9MsgFCZrt571BikcWGYkjC1khllbTeDlGqZ2D8vD8E/lJa8WGWbb7Plm8/XJYV7IJHZZw==}
     engines: {node: '>= 8'}
-
-  web-tree-sitter@0.26.13:
-    resolution: {integrity: sha512-5bUZ7vbQ1kcondet96wzP974+JfCZDeQ7bTpacICm2nnvHpa5cO0ByRsoMcAhUP+743vpkb4m0BFlVSm+Ye9VA==}
 
   webidl-conversions@7.0.0:
     resolution: {integrity: sha512-VwddBukDzu71offAQR975unBIGqfKZpM+8ZX6ySk8nYhVoo5CYaZyzt3YBvYtRtO+aoGlqxPg/B87NGVZ/fu6g==}
@@ -12251,8 +12230,6 @@ snapshots:
       just-extend: 6.2.0
       path-to-regexp: 8.4.2
 
-  node-addon-api@8.7.0: {}
-
   node-domexception@1.0.0: {}
 
   node-fetch-native@1.6.7: {}
@@ -13286,11 +13263,6 @@ snapshots:
 
   tree-kill@1.2.2: {}
 
-  tree-sitter-bash@0.25.1:
-    dependencies:
-      node-addon-api: 8.7.0
-      node-gyp-build: 4.8.4
-
   trough@2.2.0: {}
 
   ts-algebra@2.0.0: {}
@@ -13630,8 +13602,6 @@ snapshots:
   walk-up-path@4.0.0: {}
 
   web-streams-polyfill@3.3.3: {}
-
-  web-tree-sitter@0.26.13: {}
 
   webidl-conversions@7.0.0: {}
 

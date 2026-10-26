@@ -461,6 +461,20 @@
         "stdout": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nX\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "extglob_off_case_group_refuses_the_line",
+      "seq": 960833,
+      "targets": [
+        "ram",
+        "disk"
+      ],
+      "command": "echo before; case a in @(a)) echo yes;; *) echo no;; esac",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "mirage: syntax error near '('\n"
+      }
     }
   ]
 }

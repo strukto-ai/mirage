@@ -42,7 +42,7 @@ export const BRACE_LITERAL_TYPES: ReadonlySet<string> = new Set([
   NT.BRACE_EXPRESSION,
 ])
 
-// Arithmetic operator tokens from tree-sitter that pass through as-is
+// Arithmetic operator tokens from the parser that pass through as-is
 // when the expression text is reconstructed for the shared evaluator
 // (shell/arith.ts).
 export const ARITH_OPERATORS: ReadonlySet<string> = new Set([

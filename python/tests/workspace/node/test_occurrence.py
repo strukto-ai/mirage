@@ -54,7 +54,7 @@ def _first(node, kind: str):
 
     Args:
         node: the tree to scan.
-        kind (str): the tree-sitter node type.
+        kind (str): the node type.
     """
     stack = [node]
     while stack:
@@ -70,7 +70,7 @@ def _commands(node: Any) -> list[Any]:
     included.
 
     Args:
-        node (Any): the tree-sitter tree to scan.
+        node (Any): the parsed tree to scan.
     """
     out: list[Any] = []
     stack = [node]

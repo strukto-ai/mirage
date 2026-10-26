@@ -27,8 +27,6 @@ from mirage.shell.helpers import (
     get_function_body,
     get_function_name,
     get_function_source,
-    get_heredoc_meta,
-    get_heredoc_parts,
     get_if_branches,
     get_list_parts,
     get_negated_command,
@@ -41,16 +39,14 @@ from mirage.shell.helpers import (
     get_while_parts,
     is_backgrounded,
     literal_word,
-    normalize_heredoc_body,
     quoted_parts,
     source_parts,
     split_env_prefix,
-    take_continuation,
 )
 from mirage.shell.parse import parse
 from mirage.shell.parse.parse import parse_program
 from mirage.shell.types import NodeType as NT
-from mirage.shell.types import RedirectKind
+from mirage.shell.types import Redirect, RedirectKind
 
 
 def _parse(cmd: str):
@@ -133,7 +129,7 @@ def _stages_shape(cmd: str, redirected: bool = False):
     [
         ("a | b", False, (["a", "b"], [False], [[], []], False, None)),
         ("! a | b", False, (["a", "b"], [False], [[], []], True, None)),
-        # tree-sitter reads these as pipeline(redirected(<chain>, r), ...).
+        # The parser reads these as pipeline(redirected(<chain>, r), ...).
         (
             "a | b < f | c",
             False,
@@ -388,11 +384,53 @@ def test_process_substitution():
     assert len(ps_nodes) == 2
 
 
+def _heredoc(cmd: str) -> Redirect:
+    _, redirects = get_redirects(_first(cmd))
+    return next(r for r in redirects if r.kind == RedirectKind.HEREDOC)
+
+
 def test_heredoc():
-    node = _first("cat <<EOF\nhello\nEOF")
-    nc = node.named_children
-    has_heredoc = any(c.type == NT.HEREDOC_REDIRECT for c in nc)
-    assert has_heredoc
+    redirect = _heredoc("cat <<EOF\nhello\nworld\nEOF")
+    assert redirect.target == "hello\nworld\n"
+    assert redirect.expand_vars is True
+    # The body rides in a double-quoted word, under the redirect that
+    # carries the heredoc.
+    assert redirect.target_node.type == NT.STRING
+    assert redirect.target_node.parent.heredoc.delimiter == b"EOF"
+
+
+@pytest.mark.parametrize(
+    "cmd, body, expands",
+    [
+        ("python3 <<PYEOF\nprint('hello')\nPYEOF", "print('hello')\n", True),
+        ("python3 <<'SCRIPT'\nprint('hi')\nSCRIPT", "print('hi')\n", False),
+        ('python3 <<"EOF"\nimport sys\nEOF', "import sys\n", False),
+        ("cat <<EN'D'\nx=$v\nEND\n", "x=$v\n", False),
+        ("cat <<\\END\nx=$v\nEND\n", "x=$v\n", False),
+        # A backslash before a newline is the reader's line continuation,
+        # so `EO\<newline>F` names EOF and its body still expands.
+        ("cat <<EO\\\nF\nx=$v\nEOF\n", "x=$v\n", True),
+        ("cat <<EO\\\nF\\G\nx=$v\nEOFG\n", "x=$v\n", False),
+        ("cat <<EOF\n\nfoo\nEOF", "\nfoo\n", True),
+        ("cat <<-EOF\n\n\tfoo\nEOF", "\nfoo\n", True),
+    ],
+)
+def test_heredoc_body_and_quoting(cmd: str, body: str, expands: bool):
+    redirect = _heredoc(cmd)
+    assert redirect.target == body
+    assert redirect.expand_vars is expands
+
+
+def test_a_heredocs_line_goes_on_as_any_line_does():
+    left, op, right = get_list_parts(
+        _first("cat <<EOF | tr a-z A-Z && echo done\nabc\nEOF")
+    )
+    assert (op, get_text(right)) == ("&&", "echo done")
+    cmds, _ = get_pipeline_commands(left)
+    command, redirects = get_redirects(cmds[0])
+    assert get_command_name(command) == "cat"
+    assert redirects[0].target == "abc\n"
+    assert get_command_name(cmds[1]) == "tr"
 
 
 def test_get_pipeline_single():
@@ -420,18 +458,6 @@ def test_negated_command():
 
 
 # ── heredoc ──────────────────────────────────────
-
-
-def test_heredoc_parts():
-    node = _first("cat <<EOF\nhello\nworld\nEOF")
-    redirect = node.named_children[1]
-    delim, body = get_heredoc_parts(redirect)
-    assert delim == "EOF"
-    assert "hello" in body
-    assert "world" in body
-
-
-# ── process substitution ─────────────────────────
 
 
 def test_process_sub_command():
@@ -666,16 +692,6 @@ def test_redirect_target_cmd_sub():
     assert target_node.type == NT.COMMAND_SUBSTITUTION
 
 
-def test_redirect_target_heredoc_carries_node():
-    # The heredoc_redirect node rides along so the expansion layer can
-    # walk the body's expansion children structurally.
-    node = _first("cat <<EOF\nhello\nEOF")
-    _, redirects = get_redirects(node)
-    target_node = redirects[0].target_node
-    assert target_node is not None
-    assert target_node.type == "heredoc_redirect"
-
-
 def test_redirect_target_stderr():
     node = _first("cmd 2> /err.txt")
     _, redirects = get_redirects(node)
@@ -805,34 +821,6 @@ def test_python3_with_args():
     assert get_text(parts[3]) == "arg2"
 
 
-def test_python3_heredoc():
-    node = _first("python3 <<PYEOF\nprint('hello')\nPYEOF")
-    assert node.type == NT.REDIRECTED_STATEMENT
-    cmd, _ = get_redirects(node)
-    assert get_command_name(cmd) == "python3"
-    redirect = node.named_children[1]
-    assert redirect.type == NT.HEREDOC_REDIRECT
-    delim, body = get_heredoc_parts(redirect)
-    assert delim == "PYEOF"
-    assert "print" in body
-
-
-def test_python3_heredoc_quoted_delim():
-    node = _first("python3 <<'SCRIPT'\nprint('hi')\nSCRIPT")
-    redirect = node.named_children[1]
-    delim, body = get_heredoc_parts(redirect)
-    assert "SCRIPT" in delim
-    assert "print" in body
-
-
-def test_python3_heredoc_double_quoted():
-    node = _first('python3 <<"EOF"\nimport sys\nEOF')
-    redirect = node.named_children[1]
-    delim, body = get_heredoc_parts(redirect)
-    assert "EOF" in delim
-    assert "import sys" in body
-
-
 def test_python_command_name():
     cmd = _first("python script.py")
     assert get_command_name(cmd) == "python"
@@ -857,9 +845,7 @@ def test_get_redirects_bare_redirect_has_no_command():
     assert redirects[0].target == "empty.txt"
 
 
-def test_get_redirects_hoists_file_redirect_inside_heredoc():
-    # `cat <<END > out.txt` parses the file redirect INSIDE the
-    # heredoc_redirect node; it must surface as a sibling redirect.
+def test_get_redirects_reads_a_file_redirect_after_a_heredoc():
     node = _first("cat <<END > out.txt\nbody\nEND")
     command, redirects = get_redirects(node)
     assert command is not None
@@ -887,54 +873,6 @@ def test_get_redirects_recovers_herestring_after_file_redirect():
         RedirectKind.HERESTRING,
     ]
     assert redirects[1].target == "here"
-
-
-def test_get_heredoc_meta_partially_quoted_delimiter():
-    node = _first("cat <<EN'D'\nx=$v\nEND\n")
-    heredoc = None
-    for c in node.named_children:
-        if c.type == NT.HEREDOC_REDIRECT:
-            heredoc = c
-    assert heredoc is not None
-    body, dash, quoted = get_heredoc_meta(heredoc)
-    assert quoted is True
-    assert dash is False
-    assert body == "x=$v\n"
-
-
-def test_get_heredoc_meta_backslash_quoted_delimiter():
-    node = _first("cat <<\\END\nx=$v\nEND\n")
-    heredoc = node.named_children[1]
-    body, dash, quoted = get_heredoc_meta(heredoc)
-    assert quoted is True
-    assert dash is False
-    assert body == "x=$v\n"
-
-
-def test_get_heredoc_meta_continued_delimiter_is_not_quoted():
-    # A backslash before a newline is the reader's line continuation, so
-    # `EO\<newline>F` names EOF and its body still expands.
-    node = _first("cat <<EO\\\nF\nx=$v\nEOF\n")
-    heredoc = node.named_children[1]
-    body, dash, quoted = get_heredoc_meta(heredoc)
-    assert quoted is False
-    assert dash is False
-    assert body == "x=$v\n"
-
-
-def test_get_heredoc_meta_continuation_with_an_escape_is_quoted():
-    node = _first("cat <<EO\\\nF\\G\nx=$v\nEOFG\n")
-    heredoc = node.named_children[1]
-    _, _, quoted = get_heredoc_meta(heredoc)
-    assert quoted is True
-
-
-def test_get_heredoc_meta_body_gets_trailing_newline():
-    # tree-sitter drops the final newline for concatenated delimiters.
-    node = _first("cat <<EN'D'\nline\nEND\n")
-    heredoc = node.named_children[1]
-    body, _, _ = get_heredoc_meta(heredoc)
-    assert body == "line\n"
 
 
 def _literals(line: str, home: str | None = None) -> list[str | None]:
@@ -1032,113 +970,6 @@ def test_byte_offset_counts_a_surrogate_escape_as_one_byte():
     assert byte_offset("a\udcffb", 3) == 3
 
 
-def _heredoc_redirect(cmd: str):
-    return next(
-        c for c in _first(cmd).named_children if c.type == NT.HEREDOC_REDIRECT
-    )
-
-
-def test_get_heredoc_parts_keeps_leading_empty_lines():
-    _, body = get_heredoc_parts(_heredoc_redirect("cat <<EOF\n\nfoo\nEOF"))
-    assert body == "\nfoo\n"
-
-
-def test_get_heredoc_meta_keeps_leading_empty_lines_under_dash():
-    body, dash, _ = get_heredoc_meta(
-        _heredoc_redirect("cat <<-EOF\n\n\tfoo\nEOF")
-    )
-    assert dash is True
-    assert body == "\nfoo\n"
-
-
-def test_normalize_heredoc_body_strips_a_swallowed_escaped_delimiter_line():
-    assert normalize_heredoc_body("body\nEOF\n", "\\EOF") == "body\n"
-
-
-# ── heredoc operator-line tail ───────────────────
-
-
-def _heredoc_stmt(cmd: str):
-    stmt = _first(cmd)
-    assert stmt.type == NT.REDIRECTED_STATEMENT
-    return stmt
-
-
-def test_heredoc_tail_list_step_is_a_continuation_not_a_pipe():
-    # tree-sitter parses `|| echo recovered` inside the heredoc_redirect;
-    # a bare command there used to be taken for a pipeline stage.
-    _, redirects = get_redirects(
-        _heredoc_stmt("false <<'EOF' || echo recovered\nignored\nEOF")
-    )
-    assert len(redirects) == 1
-    assert redirects[0].pipeline is None
-    assert [
-        (op, get_text(right)) for op, right in redirects[0].continuation
-    ] == [("||", "echo recovered")]
-
-
-def test_heredoc_tail_unwinds_a_list_along_its_left_spine():
-    # `false <<EOF || echo a && echo b` is `(false || echo a) && echo b`.
-    _, redirects = get_redirects(
-        _heredoc_stmt("false <<EOF || echo a && echo b\nx\nEOF")
-    )
-    assert [
-        (op, get_text(right)) for op, right in redirects[0].continuation
-    ] == [("||", "echo a"), ("&&", "echo b")]
-
-
-def test_heredoc_tail_pipe_then_list():
-    # `cat <<EOF | tr a-z A-Z && echo done`: the pipe feeds `tr`, and
-    # `&& echo done` applies to the pipeline.
-    _, redirects = get_redirects(
-        _heredoc_stmt("cat <<EOF | tr a-z A-Z && echo done\nabc\nEOF")
-    )
-    assert get_text(redirects[0].pipeline) == "tr a-z A-Z"
-    assert [
-        (op, get_text(right)) for op, right in redirects[0].continuation
-    ] == [("&&", "echo done")]
-
-
-def test_heredoc_tail_plain_pipe_keeps_the_pipeline_node():
-    _, redirects = get_redirects(
-        _heredoc_stmt("cat <<EOF | tr a-z A-Z\nabc\nEOF")
-    )
-    assert redirects[0].pipeline.type == NT.PIPELINE
-    assert redirects[0].continuation == ()
-
-
-def test_heredoc_tail_after_a_hoisted_file_redirect():
-    _, redirects = get_redirects(
-        _heredoc_stmt("cat <<EOF > /o && cat /o\ninner\nEOF")
-    )
-    assert [r.kind for r in redirects] == [
-        RedirectKind.HEREDOC,
-        RedirectKind.STDOUT,
-    ]
-    assert [
-        (op, get_text(right)) for op, right in redirects[0].continuation
-    ] == [("&&", "cat /o")]
-
-
-def test_heredoc_tail_right_operand_may_be_compound():
-    _, redirects = get_redirects(
-        _heredoc_stmt("false <<EOF || { echo a; echo b; }\nx\nEOF")
-    )
-    ((op, right),) = redirects[0].continuation
-    assert op == "||"
-    assert right.type == NT.COMPOUND_STATEMENT
-
-
-def test_take_continuation_detaches_the_steps():
-    _, redirects = get_redirects(
-        _heredoc_stmt("false <<EOF || echo a && echo b\nx\nEOF")
-    )
-    steps = take_continuation(redirects)
-    assert [op for op, _ in steps] == ["||", "&&"]
-    assert redirects[0].continuation == ()
-    assert take_continuation(redirects) == ()
-
-
 def _spelled(parts):
     return [
         part if isinstance(part, str) else (part.type, get_text(part))
@@ -1160,9 +991,10 @@ def _spelled(parts):
                 " ",
             ],
         ),
+        # The parser has dropped the line continuation.
         (
             'echo "a\\\n $x"',
-            ["", ("string_content", "a\\\n "), ("simple_expansion", "$x"), ""],
+            ["", ("string_content", "a "), ("simple_expansion", "$x"), ""],
         ),
     ],
 )

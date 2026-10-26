@@ -32,7 +32,7 @@ export const PATTERN_OPS: ReadonlySet<string> = new Set(['=', '==', '!=', '=~'])
 
 /**
  * Detect a unary_expression that is really a negative number word.
- * tree-sitter parses `-1` inside a test as unary_expression with a bare
+ * The parser reads `-1` inside a test as a unary_expression with a bare
  * `-` token; the flat argv needs it back as one operand.
  */
 function negativeNumberChild(node: TSNodeLike): TSNodeLike | null {
@@ -56,7 +56,7 @@ function negativeNumberChild(node: TSNodeLike): TSNodeLike | null {
 
 /**
  * One token of a test expression: an operator's text, or an operand node
- * (`negative` for a `-N` tree-sitter split into `-` and N).
+ * (`negative` for a `-N` the parser split into `-` and N).
  */
 export type ExprToken =
   | { readonly op: string; readonly operand: null; readonly negative: false }
@@ -75,8 +75,7 @@ export class CondSyntax extends Error {}
 
 /**
  * The tokens of a `[[ ]]` node in source order, which its grammar
- * (`CondParser`) reads: every reader of the test reads these. Throws
- * `CondSyntax` where tree-sitter could not read it.
+ * (`CondParser`) reads: every reader of the test reads these.
  */
 export function condTokens(node: TSNodeLike): ExprToken[] {
   const out: ExprToken[] = []
@@ -89,7 +88,6 @@ function condInto(node: TSNodeLike, out: ExprToken[]): void {
   for (const child of node.children) {
     const ctype = child.type
     if (ctype === '[[' || ctype === ']]') continue
-    if (ctype === NT.ERROR) throw new CondSyntax()
     if (child.isNamed !== true) {
       out.push({ op: ctype, operand: null, negative: false })
     } else if (ctype === NT.TEST_OPERATOR) {
@@ -107,10 +105,8 @@ function condInto(node: TSNodeLike, out: ExprToken[]): void {
 /**
  * The tokens of a `[ ]` node in source order, the words `[` is given once
  * each operand is expanded: every reader of the test reads these.
- * tree-sitter nests `-a`/`-o` chains unpredictably, so the shape is
- * discarded and test's own arity rules read the words. A statement
- * separator inside an ERROR recovery node means tree-sitter swallowed the
- * rest of the line into the test, so the tokens end there.
+ * The parser nests `-a`/`-o` chains by its own precedence, so the shape is
+ * discarded and test's own arity rules read the words.
  */
 export function flatTokens(node: TSNodeLike): ExprToken[] {
   const out: ExprToken[] = []
@@ -118,19 +114,11 @@ export function flatTokens(node: TSNodeLike): ExprToken[] {
   return out
 }
 
-/**
- * Append the flat tokens of one test-expression node to `out`; false once
- * a statement separator ends them.
- */
-function flatInto(node: TSNodeLike, out: ExprToken[]): boolean {
+/** Append the flat tokens of one test-expression node to `out`. */
+function flatInto(node: TSNodeLike, out: ExprToken[]): void {
   for (const child of node.children) {
     const ctype = child.type
     if (BRACKETS.has(ctype)) continue
-    if (ctype === NT.ERROR) {
-      if (child.children.some((g) => g.isNamed !== true && g.type === ';')) return false
-      if (!flatInto(child, out)) return false
-      continue
-    }
     if (child.isNamed !== true) {
       if (!FLAT_SKIP_TOKENS.has(ctype)) out.push({ op: child.text, operand: null, negative: false })
       continue
@@ -141,7 +129,7 @@ function flatInto(node: TSNodeLike, out: ExprToken[]): boolean {
         out.push({ op: null, operand: negative, negative: true })
         continue
       }
-      if (!flatInto(child, out)) return false
+      flatInto(child, out)
       continue
     }
     if (ctype === NT.TEST_OPERATOR) {
@@ -150,7 +138,6 @@ function flatInto(node: TSNodeLike, out: ExprToken[]): boolean {
     }
     out.push({ op: null, operand: child, negative: false })
   }
-  return true
 }
 
 /**

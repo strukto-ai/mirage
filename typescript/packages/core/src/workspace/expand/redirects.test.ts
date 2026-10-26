@@ -265,10 +265,9 @@ describe('quoted redirect targets', () => {
   })
 })
 
-// tree-sitter-bash 0.25.1 splits a later unbraced `$var` out of a word
-// when a name-terminating character follows it, so `> /api/$c/$id.json`
-// used to write a file literally named `$` under /api/<c>. parse()
-// repairs the tree; these pin the end-to-end behavior.
+// A later unbraced `$var` followed by a name-terminating character stays
+// in its word: `> /api/$c/$id.json` once wrote a file literally named `$`
+// under /api/<c>. These pin the end-to-end behavior.
 describe('later unbraced var in a redirect target', () => {
   it('writes the fully expanded path', async () => {
     const { ws } = makeIntegrationWS()

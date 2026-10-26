@@ -1,38 +1,9 @@
 from typing import Any
 
 import pytest
-import tree_sitter
-import tree_sitter_bash
 
 from mirage.rs.shell import parse_shell
 
-GRAMMAR = tree_sitter.Parser(tree_sitter.Language(tree_sitter_bash.language()))
-
-# Lines both parsers read alike: tree-sitter-bash's shapes, spans and
-# points, the grammar's quirks included.
-SAME = [
-    "echo hi",
-    "echo a > f b 2>&1 | tr a b && x=1 y=2",
-    "a | b > f | c",
-    "! a && b || c &",
-    "echo \"a $b ${c} $(d) `e`\" 'f' $'g\\n'",
-    'printf "%s" "$x $y" "$x  y" "$x "',
-    "echo {1..3} {a,b} ] ]",
-    "x=(1 2) a[i+1]=v declare -r y=1 z",
-    "echo ${a:-two words} ${a#*/} ${a/x/ $f} ${#a[@]} ${!p*}",
-    "echo $(( a + b * -c )) $[1] && (( i++, j-- ))",
-    "[[ $x == a* && -f f ]] || [ ! -e g ]",
-    "case $x in a|b) echo ab;; *.txt) ;& (c) echo c;; esac",
-    "for i in 1 2; do echo $i; done; for ((i=0; i<3; i++)); do :; done",
-    "f() { local v=$1; } # trailing",
-    'while read -r l; do echo "$l"; done < f',
-    "cat <<EOF | wc -l\nline $x\nEOF",
-    "cat <<-'E'\n\tbody\n\tE",
-    "echo héllo wörld 💡 | tr é e",
-    'echo "日本 $x 😀"',
-]
-
-# Lines tree-sitter-bash misreads, as bash reads them.
 BASH = [
     (
         "exec 0>f",
@@ -58,23 +29,6 @@ BASH = [
 ]
 
 
-def _canon(node: Any, field: str | None = None) -> tuple[Any, ...]:
-    return (
-        node.type,
-        node.is_named,
-        field,
-        node.start_byte,
-        node.end_byte,
-        tuple(node.start_point),
-        tuple(node.end_point),
-        node.is_missing,
-        [
-            _canon(child, node.field_name_for_child(i))
-            for i, child in enumerate(node.children)
-        ],
-    )
-
-
 def _sexp(node: Any, field: str | None = None) -> str:
     head = f"{field}: " if field else ""
     named = [
@@ -86,19 +40,8 @@ def _sexp(node: Any, field: str | None = None) -> str:
     return f"{head}({inner})"
 
 
-@pytest.mark.parametrize("line", SAME)
-def test_tree_matches_tree_sitter_bash(line: str) -> None:
-    data = line.encode()
-    want = GRAMMAR.parse(data).root_node
-    got = parse_shell(line).root_node
-    assert not want.has_error
-    assert _canon(got) == _canon(want)
-
-
 @pytest.mark.parametrize("line,sexp", BASH)
-def test_tree_follows_bash_where_the_grammar_misreads(
-    line: str, sexp: str
-) -> None:
+def test_tree_reads_as_bash_reads(line: str, sexp: str) -> None:
     tree = parse_shell(line)
     assert tree.error is None
     assert _sexp(tree.root_node) == sexp
@@ -106,11 +49,22 @@ def test_tree_follows_bash_where_the_grammar_misreads(
 
 def test_a_refused_line_reports_bash_words() -> None:
     tree = parse_shell("if true; then")
-    assert tree.root_node.has_error
-    assert tree.error == (13, "syntax error: unexpected end of file")
+    assert tree.error == (
+        13,
+        b"mirage: syntax error: unexpected end of file\n",
+        2,
+    )
     assert parse_shell("echo a; fi").error == (
         8,
-        "syntax error near unexpected token `fi'",
+        b"mirage: syntax error near 'fi'\n",
+        2,
+    )
+    # With extglob off a pattern group is no word.
+    assert parse_shell("echo @(a)").error is None
+    assert parse_shell("echo @(a)", extglob=False).error == (
+        6,
+        b"mirage: syntax error near '('\n",
+        2,
     )
 
 
@@ -140,3 +94,65 @@ def test_ids_differ_across_trees() -> None:
     assert one.id != two.id
     assert one.children[0].id == one.children[0].id
     assert len({hash(node) for node in (one, two)}) == 2
+
+
+@pytest.mark.parametrize(
+    "command,expected",
+    [
+        # An odd-length trailing run ends in a live continuation.
+        ("echo a\\", "echo a"),
+        ("echo a\\\\\\", "echo a\\\\"),
+        ("echo \\", "echo "),
+        # An even-length run is all escaped backslashes, so nothing goes.
+        ("echo a\\\\", "echo a\\\\"),
+        ("echo a\\\\\\\\", "echo a\\\\\\\\"),
+        ("echo a", "echo a"),
+        ("echo a\\ b", "echo a\\ b"),
+        # Mid-line, the pair goes wherever the reader sees it.
+        ("echo a\\\nb", "echo ab"),
+        ('echo "a\\\nb"', 'echo "ab"'),
+        ("echo $\\\n{x} $((1\\\n+2))", "echo ${x} $((1+2))"),
+        ("ec\\\nho a", "echo a"),
+        ("echo a\\\\\nb", "echo a\\\\\nb"),
+        ("echo a\\\\\\\nb", "echo a\\\\b"),
+        # Single-quoted and ANSI-C text and comments keep theirs.
+        ("echo 'a\\\nb'", "echo 'a\\\nb'"),
+        ("echo $'a\\\nb'", "echo $'a\\\nb'"),
+        ("echo a # c \\\necho b", "echo a # c \\\necho b"),
+        ("echo \"$(echo 'u\\\nv')\"", "echo \"$(echo 'u\\\nv')\""),
+        ('echo "it\'s a\\\nb"', 'echo "it\'s ab"'),
+    ],
+)
+def test_the_tree_reads_the_line_with_its_continuations_dropped(
+    command: str, expected: str
+) -> None:
+    assert parse_shell(command).source == expected.encode()
+
+
+def test_a_quoted_heredoc_body_keeps_its_continuations() -> None:
+    tree = parse_shell("cat <<'E' | \\\ntr a b\na\\\nb\nE")
+    assert tree.source == b'cat <"a\\\\\nb\n" | tr a b\n'
+    assert tree.root_node.source_text == b"cat <<'E' | \\\ntr a b\na\\\nb\nE"
+
+
+def test_an_unquoted_heredoc_body_joins_its_lines() -> None:
+    tree = parse_shell("cat <<E | \\\ntr a b\na\\\nb $x\nE")
+    assert tree.source == b'cat <"ab $x\n" | tr a b\n'
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "echo A; \\\n fi",
+        "echo /api/$c/$id.json; fi",
+        "! echo A \\\n; fi",
+        "time echo A \\\n; fi",
+        "cat <<E; fi\nbody\nE",
+    ],
+    ids=["continuation", "expansion", "bang", "time", "heredoc"],
+)
+def test_offsets_point_back_into_the_line_as_typed(command: str) -> None:
+    # The stray `fi` is where the parser refuses each line.
+    root = parse_shell(command).root_node
+    (error,) = (node for node in root.children if node.type == "ERROR")
+    assert root.offsets[error.start_byte] == command.encode().rindex(b"fi")

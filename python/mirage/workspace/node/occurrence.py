@@ -19,14 +19,18 @@ from typing import Any
 
 from mirage.policy import Claimant, HandOff, Occurrence
 from mirage.shell.backticks import split_backtick_region
-from mirage.shell.helpers import byte_offset, get_function_name, get_text
-from mirage.shell.parse.heredoc.prefix import tree_root
+from mirage.shell.helpers import (
+    byte_offset,
+    get_function_name,
+    get_text,
+    tree_root,
+)
 from mirage.workspace.session import SessionState
 
 # What opens and closes a substitution's body, in the order the
 # openers are tried; the body between them is the text a nested line
-# is parsed from. A backtick region is not here: tree-sitter lexes
-# touching pairs as one node, so it is split into lines
+# is parsed from. A backtick region is not here: its body loses its
+# backslashes before it is parsed, so it is lexed into lines
 # (``segment_frames``) rather than framed as one body.
 SUBSTITUTION_DELIMITERS = (("$(", ")"), ("<(", ")"), (">(", ")"))
 
@@ -230,7 +234,7 @@ def occurrence_in(node: Any, frame: Frame) -> Occurrence:
     it.
 
     Args:
-        node (Any): the command's tree-sitter node.
+        node (Any): the command's parsed node.
         frame (Frame): the scope it was walked in.
     """
     return Occurrence(
@@ -261,7 +265,7 @@ def whole_occurrence(frame: Frame) -> Occurrence:
 def body_frame(node: Any, frame: Frame) -> Frame | None:
     """The frame of a substitution's body, as the nested line that
     evaluates it will parse it: ``$( )``, ``<( )`` or ``>( )``, with
-    the whitespace tree-sitter folds into the opening token set aside
+    the whitespace the parser folds into the opening token set aside
     as expansion sets it aside.
 
     Args:
@@ -284,11 +288,9 @@ def body_frame(node: Any, frame: Frame) -> Frame | None:
 
 
 def part_of(occurrence: Occurrence, start: int, end: int) -> Occurrence:
-    """The occurrence of one span of a node's text, for a node that
-    holds several lines: a backtick region, which tree-sitter lexes as
-    one node when the pairs touch and the evaluator splits again. Each
-    pair is its own place on the line, as it would be had the grammar
-    kept them apart.
+    """The occurrence of one span of a node's text, for a node whose
+    line is not its whole text: a backtick region, which the evaluator
+    lexes again. Each command is its own place on the line.
 
     Args:
         occurrence (Occurrence): the node's place.
@@ -309,11 +311,11 @@ def segment_frames(node: Any, frame: Frame) -> list[Frame]:
     each to be parsed on its own under the pair's own place on the
     line; empty for a node that is not a backtick region.
 
-    The region's subtree is not what runs: tree-sitter lexes touching
-    pairs as one node and merges their commands into one, so the pass
-    reads the region as the evaluator does, split by the one lexer
-    both share (``split_backtick_region``), with the folded whitespace
-    set aside first as expansion sets it aside.
+    The region's subtree is not what runs: bash removes a backtick
+    body's backslashes before it parses it, so the pass reads the
+    region as the evaluator does, split by the one lexer both share
+    (``split_backtick_region``), with the folded whitespace set aside
+    first as expansion sets it aside.
 
     Args:
         node (Any): the substitution node.
@@ -383,7 +385,7 @@ def claimant_for(node: Any, handed: HandOff | None) -> Claimant | None:
     outside a line.
 
     Args:
-        node (Any): the command's tree-sitter node.
+        node (Any): the command's parsed node.
         handed (HandOff | None): the line's hand-off.
     """
     if handed is None:

@@ -1301,10 +1301,9 @@ describe('prejudge scope', () => {
   })
 
   it('holds a line with touching backtick pairs as the lines they run', async () => {
-    // tree-sitter lexes the two pairs as one node whose subtree is one
-    // merged command that never runs. Judged on that spelling, the pass
-    // saw no readable cat and nothing held the line: the echo ran, and
-    // only then did the cat's gate, running its own pair as a line, ask.
+    // Judged on a spelling that is not what runs, the pass saw no readable
+    // cat and nothing held the line: the echo ran, and only then did the
+    // cat's gate, running its own pair as a line, ask.
     // Read as the lines the evaluator runs, the pass asks first and
     // holds the whole line.
     const w = await ws()

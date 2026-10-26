@@ -8,9 +8,9 @@ export class ParseScope {
   private readonly programs: ParsedProgram[] = []
   private released = false
 
-  parse(command: string, aliases: ReadonlySet<string> = new Set()): ShellNode {
+  parse(command: string, aliases: ReadonlySet<string> = new Set(), extglob = true): ShellNode {
     if (this.references === 0) throw new Error('parse scope is released')
-    const program = parseProgram(command, aliases)
+    const program = parseProgram(command, aliases, extglob)
     this.programs.push(program)
     return program.root
   }

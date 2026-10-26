@@ -427,9 +427,6 @@ async def test_arithmetic_random_assignment_seeds_within_the_expression(
     [
         # A substring offset or length is arithmetic: it draws, seeds,
         # and assigns, and the second operand sees the first's write.
-        # Parenthesized because tree-sitter-bash emits an ERROR node for
-        # a bare `=` inside `${v:...}`; the parenthesized form is the
-        # same expression to bash.
         (
             "RANDOM=42; v=abcdefghij; echo ${v:RANDOM%10:1} $RANDOM",
             "c 26794\n",

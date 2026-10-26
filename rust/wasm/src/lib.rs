@@ -467,13 +467,17 @@ pub extern "C" fn mirage_rs_nfs_close(handle: u32) {
     });
 }
 
-/// The last shell parse: its node table and its error.
+/// The last shell parse: its node table, its error, and what the tree
+/// says of the line beyond its nodes.
 #[derive(Default)]
 struct Parsed {
     table: Vec<u32>,
     error_at: i32,
+    status: u8,
     message: Vec<u8>,
     names: Vec<u8>,
+    extras: Vec<u32>,
+    text: Vec<u8>,
 }
 
 thread_local! {
@@ -484,49 +488,70 @@ thread_local! {
 const NODE_WORDS: usize = 10;
 
 /// The UTF-16 offset of each byte offset of `source`, which is how a
-/// host's strings count.
+/// host's strings count: a character takes one unit, or two past the
+/// BMP, and a byte that starts no UTF-8 character one, as the host's text
+/// carries it. A character's later bytes stand at its end.
 fn utf16_offsets(source: &[u8]) -> Vec<u32> {
     let mut offsets = Vec::with_capacity(source.len() + 1);
     let mut units = 0u32;
-    for &byte in source {
-        offsets.push(units);
-        // A lead byte starts a character: four-byte ones take two units,
-        // the rest one; continuation bytes take none.
-        units += match byte {
-            0x80..=0xbf => 0,
-            0xf0..=0xff => 2,
-            _ => 1,
+    let mut at = 0;
+    while at < source.len() {
+        let len = match source[at] {
+            0x00..=0x7f => 1,
+            0xc2..=0xdf => 2,
+            0xe0..=0xef => 3,
+            0xf0..=0xf4 => 4,
+            _ => 0,
         };
+        let valid = len > 0
+            && source
+                .get(at..at + len)
+                .is_some_and(|chunk| std::str::from_utf8(chunk).is_ok());
+        offsets.push(units);
+        if !valid {
+            units += 1;
+            at += 1;
+            continue;
+        }
+        units += if len == 4 { 2 } else { 1 };
+        offsets.extend(std::iter::repeat_n(units, len - 1));
+        at += len;
     }
     offsets.push(units);
     offsets
 }
 
 /// Parse the args buffer's first `len` bytes as a shell program, the
-/// `aliases_len` after them naming the shell's aliases, each ended by a NUL.
+/// `aliases_len` after them naming the shell's aliases, each ended by a NUL,
+/// extglob's pattern groups on when `extglob` is not 0.
 /// Its node table, `NODE_WORDS` words a node level by level, offsets and columns in
-/// UTF-16 units, is at `mirage_rs_shell_table` until the next parse:
-/// kind | field << 16 | flags << 24 (1 named, 2 has_error),
+/// UTF-16 units of the text the tree reads, is at `mirage_rs_shell_table` until
+/// the next parse: kind | field << 16 | flags << 24 (1 named),
 /// start, end, start row, start column, end row, end column, parent,
-/// first child, child count. Returns the node count.
+/// first child, child count. Returns the node count. The rest of the parse
+/// is at `mirage_rs_shell_extras` and `mirage_rs_shell_text`.
 #[unsafe(no_mangle)]
-pub extern "C" fn mirage_rs_shell_parse(len: usize, aliases_len: usize) -> usize {
+pub extern "C" fn mirage_rs_shell_parse(len: usize, aliases_len: usize, extglob: u32) -> usize {
     let args = STATE.with_borrow_mut(|state| std::mem::take(&mut state.args));
     let source = &args[..len.min(args.len())];
-    let aliases: Vec<Vec<u8>> = args[source.len()..(len + aliases_len).min(args.len())]
-        .split(|byte| *byte == 0)
-        .filter(|name| !name.is_empty())
-        .map(<[u8]>::to_vec)
-        .collect();
-    let tree = mirage_rs::shell::parse_with_aliases(source, &aliases);
-    let utf16 = utf16_offsets(source);
+    let options = mirage_rs::shell::Options {
+        aliases: args[source.len()..(len + aliases_len).min(args.len())]
+            .split(|byte| *byte == 0)
+            .filter(|name| !name.is_empty())
+            .map(<[u8]>::to_vec)
+            .collect(),
+        extglob: extglob != 0,
+    };
+    let tree = mirage_rs::shell::parse_with(source, &options);
+    let utf16 = utf16_offsets(&tree.source);
+    let typed = utf16_offsets(source);
     let column =
         |offset: u32, bytes: u32| utf16[offset as usize] - utf16[(offset - bytes) as usize];
     PARSED.with_borrow_mut(|parsed| {
         parsed.table.clear();
         parsed.table.reserve(tree.nodes.len() * NODE_WORDS);
         for node in &tree.nodes {
-            let flags = u32::from(node.named) | u32::from(node.has_error) << 1;
+            let flags = u32::from(node.named);
             parsed.table.extend_from_slice(&[
                 u32::from(node.kind) | u32::from(node.field) << 16 | flags << 24,
                 utf16[node.start as usize],
@@ -541,17 +566,102 @@ pub extern "C" fn mirage_rs_shell_parse(len: usize, aliases_len: usize) -> usize
             ]);
         }
         match &tree.error {
-            Some((at, message)) => {
-                parsed.error_at = i32::try_from(utf16[(*at).min(source.len())]).unwrap_or(i32::MAX);
-                parsed.message = message.clone().into_bytes();
+            Some(refusal) => {
+                parsed.error_at =
+                    i32::try_from(typed[refusal.at.min(source.len())]).unwrap_or(i32::MAX);
+                parsed.status = refusal.status;
+                parsed.message.clone_from(&refusal.message);
             }
             None => {
                 parsed.error_at = -1;
                 parsed.message.clear();
             }
         }
+        extras(&tree, &utf16, &typed, parsed);
     });
     tree.nodes.len()
+}
+
+/// Fill `extras` and `text`: a header of the source's byte length, the
+/// heredoc count, the count of nodes with an inlined text and the
+/// warnings' byte length; then where each UTF-16 unit of the source came
+/// from in the line as typed, and its end; then per heredoc its `<` in
+/// the source, its `<<`, word end, body start and end in the line as
+/// typed, flags (1 quoted, 2 terminated, 4 `<<-`) and the byte lengths of
+/// its word, delimiter and body; then per such node its index and the byte
+/// length of its text. `text` holds the source, each heredoc's word,
+/// delimiter and body, each inlined text and the warnings, in that order.
+fn extras(tree: &mirage_rs::shell::Tree, utf16: &[u32], typed: &[u32], parsed: &mut Parsed) {
+    let inlined: Vec<(usize, Vec<u8>)> = if tree.closes.is_empty() {
+        Vec::new()
+    } else {
+        (0..tree.nodes.len())
+            .map(|index| (index, tree.inlined(index)))
+            .filter(|(_, text)| !text.is_empty())
+            .collect()
+    };
+    let warnings = tree.warnings();
+    let extras = &mut parsed.extras;
+    let text = &mut parsed.text;
+    extras.clear();
+    text.clear();
+    let count = |value: usize| u32::try_from(value).unwrap_or(u32::MAX);
+    extras.extend_from_slice(&[
+        count(tree.source.len()),
+        count(tree.heredocs.len()),
+        count(inlined.len()),
+        count(warnings.len()),
+    ]);
+    // Each unit a byte starts maps to where that byte came from.
+    for at in 0..tree.source.len() {
+        let origin = typed[tree.offsets[at]];
+        extras.extend((0..utf16[at + 1] - utf16[at]).map(|unit| origin + unit));
+    }
+    extras.push(typed[tree.offsets[tree.source.len()]]);
+    text.extend_from_slice(&tree.source);
+    for heredoc in &tree.heredocs {
+        extras.extend_from_slice(&[
+            utf16[heredoc.at],
+            typed[heredoc.operator],
+            typed[heredoc.word_end],
+            typed[heredoc.body_start],
+            typed[heredoc.end],
+            u32::from(heredoc.quoted)
+                | u32::from(heredoc.terminated) << 1
+                | u32::from(heredoc.dash) << 2,
+            count(heredoc.word.len()),
+            count(heredoc.delimiter.len()),
+            count(heredoc.body.len()),
+        ]);
+        text.extend_from_slice(&heredoc.word);
+        text.extend_from_slice(&heredoc.delimiter);
+        text.extend_from_slice(&heredoc.body);
+    }
+    for (index, inlined) in &inlined {
+        extras.extend_from_slice(&[count(*index), count(inlined.len())]);
+        text.extend_from_slice(inlined);
+    }
+    text.extend_from_slice(&warnings);
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn mirage_rs_shell_extras() -> *const u32 {
+    PARSED.with_borrow(|parsed| parsed.extras.as_ptr())
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn mirage_rs_shell_extras_len() -> usize {
+    PARSED.with_borrow(|parsed| parsed.extras.len())
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn mirage_rs_shell_text() -> *const u8 {
+    PARSED.with_borrow(|parsed| parsed.text.as_ptr())
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn mirage_rs_shell_text_len() -> usize {
+    PARSED.with_borrow(|parsed| parsed.text.len())
 }
 
 #[unsafe(no_mangle)]
@@ -559,10 +669,17 @@ pub extern "C" fn mirage_rs_shell_table() -> *const u32 {
     PARSED.with_borrow(|parsed| parsed.table.as_ptr())
 }
 
-/// Where the last parse's syntax error is, in UTF-16 units; -1 for none.
+/// Where in the line as typed the last parse's refusal is, in UTF-16
+/// units; -1 for none.
 #[unsafe(no_mangle)]
 pub extern "C" fn mirage_rs_shell_error_at() -> i32 {
     PARSED.with_borrow(|parsed| parsed.error_at)
+}
+
+/// The status the last parse's line is refused with.
+#[unsafe(no_mangle)]
+pub extern "C" fn mirage_rs_shell_status() -> u32 {
+    PARSED.with_borrow(|parsed| u32::from(parsed.status))
 }
 
 #[unsafe(no_mangle)]

@@ -600,7 +600,7 @@ def _stdout_to_stderr(node: TSNodeLike) -> bool:
     its own status.
 
     Args:
-        node (TSNodeLike): the statement's tree-sitter node.
+        node (TSNodeLike): the statement's parsed node.
     """
     if node.type != NT.REDIRECTED_STATEMENT:
         return False

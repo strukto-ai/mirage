@@ -13,78 +13,63 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 
+from mirage.io.types import IOResult
 from mirage.rs.shell import parse_shell
-from mirage.shell.bytes import encode_text
-from mirage.shell.parse.heredoc import heredoc_operators
-from mirage.shell.parse.heredoc.lower import drop_source_bytes, lower_heredocs
-from mirage.shell.parse.heredoc.node import HeredocNode
-from mirage.shell.parse.heredoc.reader import (
-    discover_heredocs,
-    read_planned,
-)
 from mirage.shell.parse.program import ParsedProgram
-from mirage.shell.parse.source import (
-    continuation_bytes,
-    join_continuations,
-    source_offsets,
-)
-from mirage.shell.parse.syntax import heredoc_plan
 from mirage.shell.types import TSNodeLike
 
 
-def parse(command: str, aliases: frozenset[str] = frozenset()) -> TSNodeLike:
-    """Parse shell structure after the source reader gathers heredocs.
+def parse(
+    command: str, aliases: frozenset[str] = frozenset(), extglob: bool = True
+) -> TSNodeLike:
+    """Parse a line as bash reads it.
 
-    Bodies become inline expansion words with reader-owned input metadata.
-    The resulting nodes retain their original source for nested evaluation;
-    neither delimiter recognition nor expansion depends on heredoc tokens.
-    A line the reader refuses takes its heredocs from the parser's tree.
-    Line continuations are joined first, so a word's text is what bash
-    reads.
+    The parser folds each heredoc body into its line as a ``<`` redirect
+    from a double-quoted word, whose node carries the heredoc, and drops
+    the line continuations, so a word's text is what bash reads. Each
+    node's ``offsets`` map the text back to the line as typed.
 
     Args:
         command (str): shell source to parse.
         aliases (frozenset[str]): the names the shell expands as aliases;
             one is a command where a command starts.
+        extglob (bool): whether extglob's pattern groups are on.
 
     Returns:
         TSNodeLike: root node; a line the parser refuses ends in an
-        ``ERROR`` node.
+        ``ERROR`` node, and its ``error`` holds bash's refusal.
     """
-    original = encode_text(command)
-    source = None
-    if b"<<" in original:
-        plan = heredoc_plan(command)
-        documents = (
-            read_planned(original, plan)
-            if plan is not None
-            else discover_heredocs(
-                original,
-                heredoc_operators(parse_shell(original, aliases).root_node),
-            )
-        )
-        if documents:
-            source = lower_heredocs(
-                original, documents, () if plan is None else plan.closes
-            )
-    if source is None:
-        return parse_shell(
-            join_continuations(command, aliases), aliases
-        ).root_node
-    source = drop_source_bytes(
-        source, continuation_bytes(source.source, aliases)
-    )
-    return HeredocNode(parse_shell(source.source, aliases).root_node, source)
+    return parse_shell(command, aliases, extglob).root_node
 
 
 def parse_program(
-    command: str, aliases: frozenset[str] = frozenset()
+    command: str, aliases: frozenset[str] = frozenset(), extglob: bool = True
 ) -> ParsedProgram:
     """Parse a line into a program its holders release when done with it.
 
     Args:
         command (str): shell source to parse.
         aliases (frozenset[str]): the names the shell expands as aliases.
+        extglob (bool): whether extglob's pattern groups are on.
     """
-    root = parse(command, aliases)
-    return ParsedProgram(command, root, source_offsets(command, root, aliases))
+    return ParsedProgram(
+        command, parse_shell(command, aliases, extglob).root_node
+    )
+
+
+def syntax_refusal(root: TSNodeLike) -> IOResult | None:
+    """What a line bash refuses yields: its diagnostic and status. Status
+    2 is a syntax error, 1 an array bash cannot read, 127 a substitution
+    whose body bash cannot parse.
+
+    Args:
+        root (TSNodeLike): the line's root node.
+
+    Returns:
+        IOResult | None: None when bash reads the line.
+    """
+    error = getattr(root, "error", None)
+    if error is None:
+        return None
+    _, message, status = error
+    return IOResult(exit_code=status, stderr=message)
