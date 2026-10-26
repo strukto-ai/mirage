@@ -2711,18 +2711,24 @@ class Workspace:
         env: dict[str, str] | None,
         run: Callable[..., Awaitable[IOResult]],
     ) -> IOResult:
-        """Run a line given a cwd or env of its own as a process of its
-        own, as ``bash -c`` started from the session is.
+        """Run a line given a cwd or env of its own as a subshell of the
+        session, beside the session's other lines rather than after them.
 
-        It runs on a fork of the session, as a background job does, so
-        what it changes stays on the fork; it has jobs of its own, which
-        its ``wait`` waits on and whose output it reports; and it waits
-        on none of the session's other lines: an agent's ``nvidia-smi``
-        answers while its ``python3 train.py`` still runs. Its status is
-        the session's ``$?`` once it ends, as ``bash -c``'s is its
-        caller's. A line nested in one of the session's (a callback fired
-        mid-line) continues in that line instead, as ``_serialize_line``
-        runs it.
+        Beside them on the workspace's loop, not in another OS process:
+        each line is a task that hands the loop over whenever it waits,
+        so an agent's quick line runs while its long one waits on its
+        runtime::
+
+            python3 train.py  [running ==========================] done
+            nvidia-smi          [runs]
+
+        As ``( ... )`` does, it runs on a fork of the session, so what it
+        changes stays on the fork; its jobs are its own, which its
+        ``wait`` waits on and whose output it reports; it has its own
+        entry in the workspace's process table (``ps``, ``kill``); and
+        its status is the session's ``$?`` once it ends. A line nested
+        in one of the session's (a callback fired mid-line) continues in
+        that line instead, as ``_serialize_line`` runs it.
 
         Args:
             session_id (str | None): the session the caller named, or
@@ -2848,15 +2854,14 @@ class Workspace:
             session_id: Session whose persistent state hosts the command.
             stdin: Optional stdin payload (bytes or async byte iterator).
             cwd: Per-call working directory override. When provided, the
-                command runs as a process of its own, as ``bash -c``
-                started from the session does: on an ephemeral clone of
-                the session, so the persistent session's cwd is unchanged
-                and any `cd` inside the command does not leak, with jobs
-                of its own, and beside the session's other lines rather
-                than after them.
+                command runs in a subshell of its own (an ephemeral clone
+                of the session), beside the session's other lines rather
+                than after them: the persistent session's cwd is
+                unchanged, any `cd` inside the command does not leak, and
+                its jobs are its own.
             env: Per-call environment overrides layered on top of the
-                session's env. Like cwd, these run the command as a
-                process of its own, so `export` inside the command does
+                session's env. Like cwd, these run the command in a
+                subshell of its own, so `export` inside the command does
                 not leak back to the persistent session.
             cancel: Optional asyncio.Event used to abort execution
                 mid-flight. The whole line runs as one task, so setting
