@@ -17,6 +17,7 @@ from abc import ABC, abstractmethod
 from typing import Any
 
 from mirage.observe.store import ObserverStore
+from mirage.shell.job_table.store import JobStore
 from mirage.workspace.mount.namespace import NamespaceStore
 from mirage.workspace.record.types import CAS_MAX_RETRIES, generation_of
 
@@ -30,23 +31,25 @@ WorkspaceFields = dict[str, Any]
 class WorkspaceStateStore(ABC):
     """Provider for a workspace's whole control-plane state.
 
-    One store, four planes, each scoped by workspace id: namespace
+    One store, five planes, each scoped by workspace id: namespace
     nodes (symlinks, attribute overlays), observer events (command
-    history), the session table (mount grants, cwd, env), and the
+    history), the session table (mount grants, cwd, env), the
     workspace metadata record (discovery: which sessions exist, which
-    is the default). Handing two processes the same store config plus a
+    is the default), and the jobs (each session's job list and each
+    job's console). Handing two processes the same store config plus a
     workspace id gives them the same workspace state, which is the seam
     that lets a kernel tier bind a session-bound mountpoint created by
-    another daemon.
+    another daemon, and lets any of them list, wait on and kill a
+    session's jobs.
 
-    The node table and the session table are two NamespaceStores and
-    the observer keeps its ObserverStore; this provider only unifies
-    their construction, connection, and key scoping. Per-group overrides
-    redirect a plane group to a different provider (e.g. large observer
-    logs to disk while everything else stays on Redis). Sessions and
-    metadata form one inseparable group: the default-session pointer in
-    the metadata must never live on a different server than the session
-    table it points into.
+    The node table and the session table are two NamespaceStores, the
+    observer keeps its ObserverStore and the jobs their JobStore; this
+    provider only unifies their construction, connection, and key
+    scoping. Per-group overrides redirect a plane group to a different
+    provider (e.g. large observer logs to disk while everything else
+    stays on Redis). Sessions and metadata form one inseparable group:
+    the default-session pointer in the metadata must never live on a
+    different server than the session table it points into.
     """
 
     def __init__(
@@ -55,10 +58,12 @@ class WorkspaceStateStore(ABC):
         namespace: "WorkspaceStateStore | None" = None,
         observer: "WorkspaceStateStore | None" = None,
         workspace: "WorkspaceStateStore | None" = None,
+        jobs: "WorkspaceStateStore | None" = None,
     ) -> None:
         self._namespace_override = namespace
         self._observer_override = observer
         self._workspace_override = workspace
+        self._jobs_override = jobs
         self._closed = False
 
     def namespace(self, workspace_id: str) -> NamespaceStore:
@@ -87,6 +92,13 @@ class WorkspaceStateStore(ABC):
             else self
         )
         return target._make_sessions(workspace_id)
+
+    def jobs(self, workspace_id: str) -> JobStore:
+        """The job plane (job lists, consoles, leases) for one workspace."""
+        target = (
+            self._jobs_override if self._jobs_override is not None else self
+        )
+        return target._make_jobs(workspace_id)
 
     async def load_meta(self, workspace_id: str) -> WorkspaceFields | None:
         """Read one workspace's metadata record; None when never written."""
@@ -159,6 +171,7 @@ class WorkspaceStateStore(ABC):
         await self.namespace(workspace_id).clear()
         await self.observer(workspace_id).clear()
         await self.sessions(workspace_id).clear()
+        await self.jobs(workspace_id).clear()
         providers = {
             id(provider): provider
             for provider in (
@@ -166,6 +179,7 @@ class WorkspaceStateStore(ABC):
                 self._namespace_override,
                 self._observer_override,
                 self._workspace_override,
+                self._jobs_override,
             )
             if provider is not None
         }
@@ -181,6 +195,7 @@ class WorkspaceStateStore(ABC):
             self._namespace_override,
             self._observer_override,
             self._workspace_override,
+            self._jobs_override,
         ):
             if override is not None:
                 await override.close()
@@ -197,6 +212,10 @@ class WorkspaceStateStore(ABC):
     @abstractmethod
     def _make_sessions(self, workspace_id: str) -> NamespaceStore:
         """Construct (or return the cached) session store for a workspace."""
+
+    @abstractmethod
+    def _make_jobs(self, workspace_id: str) -> JobStore:
+        """Construct (or return the cached) job plane for a workspace."""
 
     @abstractmethod
     async def _load_meta(self, workspace_id: str) -> WorkspaceFields | None:

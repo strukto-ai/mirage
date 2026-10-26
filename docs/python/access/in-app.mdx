@@ -40,6 +40,15 @@ One virtual terminal over the backends mounted at each prefix.
 <ResponseField name="on_ask" type="AskHandler">
   Answers an ask while the line waits. Without one, asks wait in [`ws.decisions`](#ws-decisions).
 </ResponseField>
+<ResponseField name="workspace_id" type="str">
+  The workspace's id, generated when unset.
+</ResponseField>
+<ResponseField name="session_id" type="str">
+  The default session's id.
+</ResponseField>
+<ResponseField name="store" type="WorkspaceStateStore">
+  Where the workspace keeps its [state](/home/configuration#cache-index-and-store): symlinks and file attributes, command history, sessions and background jobs. In memory when unset. A store passed in is borrowed: close it after `ws.close()`, or pass `owns_store=True`.
+</ResponseField>
 
 See [Workspace configuration](/home/configuration) for YAML settings.
 Direct SDK construction defaults `mode` to `READ`; YAML defaults it to `write`.
@@ -58,6 +67,23 @@ from mirage import IOConfig, Workspace
 from mirage.vfs.ram import RAMVFS
 
 ws = Workspace({"/": RAMVFS()}, io=IOConfig(buffer_bytes=262144))
+```
+
+Every process that builds the workspace on one Redis store, under the same ids, shares its sessions, history and background jobs:
+
+```python
+from mirage import MountMode, Workspace
+from mirage.vfs.ram import RAMVFS
+from mirage.workspace.store.redis import RedisWorkspaceStateStore
+
+store = RedisWorkspaceStateStore(url="redis://localhost:6379/0")
+ws = Workspace(
+    {"/": RAMVFS()},
+    mode=MountMode.WRITE,
+    workspace_id="agent-ws",
+    session_id="s1",
+    store=store,
+)
 ```
 
 ### ws.session

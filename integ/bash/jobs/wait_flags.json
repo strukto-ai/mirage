@@ -384,6 +384,41 @@
         "stdout": "",
         "stderr": "bash: wait: %999: no such job\n"
       }
+    },
+    {
+      "id": "job_wait_takes_f_attached_p_and_double_dash",
+      "seq": 940139,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(sleep 0.1 & wait -f %1; echo \"rc=$?\"; sleep 0.1 & wait -n -pwfv; [ \"$wfv\" = \"$!\" ] && echo same; sleep 0.1 & wait -- %1; echo \"rc=$?\")",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=0\nsame\nrc=0\n",
+        "stderr": ""
+      }
     }
   ]
 }

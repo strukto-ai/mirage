@@ -59,9 +59,9 @@ import {
   Channel,
   type ConsoleChunk,
   JobConsole,
-  KILLED_OUTCOME,
   RAMConsoleStore,
   exitOutcome,
+  killedOutcome,
 } from '../../shell/console/index.ts'
 import {
   type ReadSpec,
@@ -176,6 +176,10 @@ export async function toStateDict(ws: WorkspaceLike): Promise<WorkspaceStateDict
   const sessions: SessionSnapshot[] = ws.sessionManager
     .list()
     .map((s) => s.toDict() as unknown as SessionSnapshot)
+  // The lists live in the job store, where other workspaces on it add jobs
+  // this one has not read yet. A killed job is finished only once its
+  // console ended: its runner may still leave output and a status.
+  for (const s of ws.sessionManager.list()) await ws.jobTable.sync(s.sessionId)
   // Output is stored per channel rather than chunk by chunk: the manifest
   // externalizes byte fields into tar entries, so keeping chunks would
   // write one entry per write a job ever made. The cost is that a restored
@@ -184,7 +188,7 @@ export async function toStateDict(ws: WorkspaceLike): Promise<WorkspaceStateDict
   const jobs: JobSnapshot[] = await Promise.all(
     ws.jobTable
       .allJobs()
-      .filter((j) => j.status !== JobStatus.RUNNING)
+      .filter((j) => j.status !== JobStatus.RUNNING && (j.process === null || j.console.finished))
       .map(async (j) => ({
         id: j.id,
         command: j.command,
@@ -666,7 +670,7 @@ export async function applyStateDict(
   if (seed !== null) ws.sessionManager.restoreSeed(seed)
   restoreCache(ws, state)
   await restoreHistory(ws, state)
-  restoreJobs(ws, state)
+  await restoreJobs(ws, state)
   await restoreNodes(ws, state)
 }
 
@@ -814,7 +818,9 @@ function restoredConsole(j: JobSnapshot): JobConsole {
     }
   }
   const outcome =
-    (j.status as JobStatus) === JobStatus.KILLED ? KILLED_OUTCOME : exitOutcome(j.exit_code)
+    (j.status as JobStatus) === JobStatus.KILLED
+      ? killedOutcome(j.exit_code)
+      : exitOutcome(j.exit_code)
   chunks.push({
     seq: chunks.length,
     ts: j.created_at,
@@ -826,9 +832,9 @@ function restoredConsole(j: JobSnapshot): JobConsole {
   return console
 }
 
-function restoreJobs(ws: WorkspaceLike, state: WorkspaceStateDict): void {
+async function restoreJobs(ws: WorkspaceLike, state: WorkspaceStateDict): Promise<void> {
   for (const j of state.jobs) {
-    ws.jobTable.load(
+    await ws.jobTable.load(
       new Job({
         id: j.id,
         command: j.command,

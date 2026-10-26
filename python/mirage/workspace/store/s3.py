@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.observe.store import ObserverStore
+from mirage.shell.job_table.store import JobStore
 from mirage.vfs.s3.config import S3Config
 from mirage.workspace.mount.namespace.store import (
     NamespaceStore,
@@ -60,6 +61,13 @@ class S3WorkspaceStateStore(WorkspaceStateStore):
             "The s3 store hosts only the sessions+meta group; keep the "
             "observer plane on ram or redis and pass the s3 store as "
             "the 'workspace' group override."
+        )
+
+    def _make_jobs(self, workspace_id: str) -> JobStore:
+        raise RuntimeError(
+            "The s3 store hosts only the sessions+meta group; keep the "
+            "jobs plane on ram or redis and pass the s3 store as the "
+            "'workspace' group override."
         )
 
     def _make_sessions(self, workspace_id: str) -> NamespaceStore:

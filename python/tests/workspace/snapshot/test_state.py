@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 import logging
 import os
 from collections.abc import AsyncIterator, Callable
@@ -35,12 +36,14 @@ from mirage import (
 )
 from mirage.cache.file.config import RedisCacheConfig
 from mirage.cache.index import IndexConfig, RedisIndexConfig
+from mirage.io import IOResult
 from mirage.policy import Action, Deny, Policy, PolicyDenied
 from mirage.policy.builtin.output_cap import ALL_COMMANDS
 from mirage.policy.types import SessionContext
 from mirage.secrets import registry
 from mirage.secrets.registry import register_secrets
 from mirage.secrets.types import ResolvedSecret
+from mirage.shell.job_table.types import Job
 from mirage.types import (
     ContentType,
     FileType,
@@ -63,6 +66,7 @@ from mirage.vfs.s3 import S3VFS, S3Config
 from mirage.vfs.secrets import REDACTED_SECRET
 from mirage.workspace.snapshot.keys import (
     CacheKey,
+    JobKey,
     MountKey,
     StateKey,
     VFSStateKey,
@@ -73,6 +77,8 @@ from mirage.workspace.snapshot.state import (
     requires_vfs_override,
     to_state_dict,
 )
+from mirage.workspace.store import RAMWorkspaceStateStore
+from mirage.workspace.types import ExecutionNode
 from mirage.workspace.workspace.types import VFSMount
 
 
@@ -1530,3 +1536,51 @@ async def test_copy_keeps_the_workspace_clock(track):
     assert await copied._cache.exists("/c.txt") is True
     clock.advance(1)
     assert await copied._cache.exists("/c.txt") is False
+
+
+@pytest.mark.asyncio
+async def test_a_snapshot_takes_the_finished_jobs_another_workspace_ran():
+    store = RAMWorkspaceStateStore()
+    a, b = (
+        Workspace(
+            {"/m": RAMVFS()},
+            workspace_id="shared",
+            session_id="s",
+            store=store,
+        )
+        for _ in range(2)
+    )
+    try:
+        await a.shell("true &", session_id="s")
+        await a.job_table.wait(1, "s")
+        state = await to_state_dict(b)
+        assert [j[JobKey.COMMAND] for j in state[StateKey.JOBS]] == ["true"]
+    finally:
+        await a.close()
+        await b.close()
+
+
+@pytest.mark.asyncio
+async def test_a_snapshot_leaves_out_a_killed_job_still_stopping():
+    ws = Workspace({"/m": RAMVFS()})
+    release = asyncio.Event()
+
+    async def run(job: Job) -> tuple[IOResult, ExecutionNode]:
+        try:
+            await asyncio.Event().wait()
+        finally:
+            await asyncio.shield(release.wait())
+        return IOResult(), ExecutionNode()
+
+    try:
+        job = await ws.job_table.submit("deaf", run, "/")
+        await asyncio.sleep(0)
+        assert await ws.job_table.kill(job.id)
+        assert (await to_state_dict(ws))[StateKey.JOBS] == []
+        release.set()
+        assert job.process is not None
+        await job.process.join()
+        assert len((await to_state_dict(ws))[StateKey.JOBS]) == 1
+    finally:
+        release.set()
+        await ws.close()

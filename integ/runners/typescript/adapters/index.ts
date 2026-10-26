@@ -69,7 +69,6 @@ import {
   HfModelsVFS,
   HfSpacesVFS,
   JaegerVFS,
-  JobConsole,
   LanceDBVFS,
   LangfuseVFS,
   LinearVFS,
@@ -87,8 +86,8 @@ import {
   QingStorVFS,
   R2VFS,
   RAMVFS,
-  RedisConsoleStore,
   RedisVFS,
+  RedisWorkspaceStateStore,
   type BaseVFS,
   type WritePolicy,
   S3VFS,
@@ -103,7 +102,6 @@ import {
   TrelloVFS,
   WasabiVFS,
   Workspace,
-  type ConsoleFactory,
 } from '@struktoai/mirage-node'
 import { parseSessionProfile, type SessionProfile } from '@struktoai/mirage-core/policy/profile'
 import { normalizePostgresConfig } from '@struktoai/mirage-core/vfs/postgres/config'
@@ -111,6 +109,7 @@ import { normalizeMongoDBConfig } from '@struktoai/mirage-core/vfs/mongodb/confi
 import { normalizeTiDBFilesystemConfig } from '@struktoai/mirage-core/vfs/tidb_filesystem/config'
 import { normalizeTrelloConfig } from '@struktoai/mirage-core/core/trello/config'
 import { ScriptSource } from '@struktoai/mirage-core/runtime/types'
+import { RAMWorkspaceStateStore } from '@struktoai/mirage-core/workspace/store/ram'
 import { ManualClock } from '@struktoai/mirage-core/utils/clock'
 import * as lancedb from '@lancedb/lancedb'
 import { QdrantClient } from '@qdrant/js-client-rest'
@@ -277,26 +276,18 @@ function installLocalClis(
   if (target.clis?.includes('scope-probe') === true) ws.registerCli('scope-probe', COMMAND_CLI)
 }
 
-// Where a target declares console: {type: 'redis'}, each job's console
-// rides its own Redis stream on REDIS_URL. The nonce beside the id
-// matters because battery cases reap jobs and ids restart at 1; a
-// reused stream would replay the previous case's chunks, ending chunk
-// included. Only the ram opener consults this (main.ts refuses a
-// console block on any other VFS), and ws.close() releases the
-// clients through JobTable.closeConsoles.
-function consoleFactoryFor(target: Target): ConsoleFactory | undefined {
-  if (target.console?.type !== 'redis') return undefined
-  const url = process.env.REDIS_URL ?? 'redis://localhost:6379/0'
-  const prefix = `mirage-integ-console-${randomBytes(4).toString('hex')}:`
-  return (jobId: number) =>
-    new JobConsole(
-      new RedisConsoleStore({
-        url,
-        keyPrefix: `${prefix}${randomBytes(4).toString('hex')}-${jobId.toString()}:`,
-        // Battery keys must not accumulate in the shared redis db.
-        ttlSeconds: 3600,
-      }),
-    )
+// Where a target declares jobs: {type: 'redis'}, its job lists and
+// consoles ride REDIS_URL under this open's own key prefix and every
+// other plane stays in memory. Only the ram opener consults this
+// (main.ts refuses a jobs block on any other VFS).
+function jobStoreFor(target: Target): RAMWorkspaceStateStore | undefined {
+  if (target.jobs?.type !== 'redis') return undefined
+  return new RAMWorkspaceStateStore({
+    jobs: new RedisWorkspaceStateStore({
+      url: process.env.REDIS_URL ?? 'redis://localhost:6379/0',
+      keyPrefix: `mirage-integ-jobs-${randomBytes(4).toString('hex')}:`,
+    }),
+  })
 }
 
 // Where a target declares cache: {type: 'redis'}, the file cache rides
@@ -317,7 +308,7 @@ function cacheFor(target: Target): RedisCacheConfig | undefined {
 // one the YAML loader uses, so a case runs under exactly what a
 // deployment would write. Only the openers that consult it may declare
 // one (main.ts refuses it on any other VFS), the same way the
-// console block rides ram alone: an unwired opener would run the target
+// jobs block rides ram alone: an unwired opener would run the target
 // unbound and it would read as covered.
 /**
  * Wrap a profile's inline policy source the way the config loader does.
@@ -381,11 +372,11 @@ async function openRam(target: Target): Promise<Open> {
       m.mode === 'read' ? [vfs, MountMode.READ] : m.mode === 'exec' ? [vfs, MountMode.EXEC] : vfs
   }
   const secretsEnv = target.secrets !== undefined ? buildSecretsEnv(target.secrets) : null
-  const consoleFactory = consoleFactoryFor(target)
+  const store = jobStoreFor(target)
   const cache = cacheFor(target)
   const ws = new Workspace(mounts, {
     mode: MountMode.WRITE,
-    ...(consoleFactory !== undefined ? { consoleFactory } : {}),
+    ...(store !== undefined ? { store } : {}),
     ...(cache !== undefined ? { cache } : {}),
     ...(secretsEnv !== null ? { env: secretsEnv.env } : {}),
     ...permissionOptions(target),
@@ -393,6 +384,9 @@ async function openRam(target: Target): Promise<Open> {
   installLocalClis(ws, target)
   const cleanup = async (): Promise<void> => {
     await ws.close()
+    // Battery keys must not accumulate in the shared redis db.
+    await store?.jobs(ws.workspaceId).clear()
+    await store?.close()
     await secretsEnv?.cleanup()
   }
   return { ws: ws as unknown as ExecWorkspace, cleanup }

@@ -422,7 +422,7 @@ async def handle_background(
     # Non-interactive bash announces nothing on launch ("[1] <pid>" is
     # interactive-only); the job stays discoverable via $! and `jobs`.
     try:
-        job = job_table.submit(
+        job = await job_table.submit(
             command=cmd_str,
             run=_run_bg,
             cwd=bg_session.cwd,
@@ -431,14 +431,15 @@ async def handle_background(
             limit=session.processes.max,
             simple=_one_program(left, session),
         )
-    except Exception as exc:
+    except BaseException as exc:
         release_job()
         for source in held_inputs:
             await source.lines.unhold()
         # A submission that fails (a console the table cannot build, a
-        # session at its process cap) starts no runner, so nothing would
-        # ever revoke the job's hand-off: its grants would stay reserved
-        # for good, neither spent nor on offer to any later line.
+        # session at its process cap) or is cancelled while the job store
+        # answers starts no runner, so nothing would ever revoke the
+        # job's hand-off: its grants would stay reserved for good,
+        # neither spent nor on offer to any later line.
         if job_handed is not None and decisions is not None:
             await decisions.revoke(session.session_id, job_handed)
         if isinstance(exc, BlockingIOError):
@@ -640,7 +641,7 @@ async def _wait_first(job_table: JobTable, jobs: list[Job]) -> Job:
     return tasks[first]
 
 
-def _reaped(
+async def _reaped(
     job_table: JobTable, job: Job, cmd_str: str
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Report one finished job's status, and reap it.
@@ -654,7 +655,7 @@ def _reaped(
     """
     # Reaped like GNU bash reaps a job waited on by id, so a later bare
     # `wait` does not answer for it again.
-    job_table.reap(job.id, job.session_id)
+    await job_table.reap(job.id, job.session_id)
     return (
         None,
         IOResult(exit_code=job.exit_code),
@@ -749,6 +750,7 @@ async def handle_wait(
             await view.unset(var)
     errors: list[str] = []
     picked: list[Job] = []
+    await job_table.sync(sid)
     visible = job_table.list_jobs(sid)
     for spec in specs:
         job, refusal = _resolve_spec(visible, spec)
@@ -771,13 +773,13 @@ async def handle_wait(
         job = await _wait_first(job_table, candidates)
         if var is not None and view is not None:
             await view.set(var, str(job.pid))
-        stdout, io, node = _reaped(job_table, job, cmd_str)
+        stdout, io, node = await _reaped(job_table, job, cmd_str)
         if err_text:
             io.stderr = encode_text(err_text)
         return stdout, io, node
     if not specs:
         await job_table.wait_all(sid)
-        job_table.pop_completed(sid)
+        await job_table.pop_completed(sid)
         return None, IOResult(), ExecutionNode(command=cmd_str, exit_code=0)
     if not picked:
         # Every spec was refused: bash answers 127 for a job it cannot
@@ -790,7 +792,7 @@ async def handle_wait(
     last_job: Job | None = None
     for job in picked:
         finished = await job_table.wait(job.id, sid)
-        _, io, _ = _reaped(job_table, finished, cmd_str)
+        _, io, _ = await _reaped(job_table, finished, cmd_str)
         last_code = io.exit_code
         last_job = finished
     # `wait id1 id2` answers with the last id's status, so `-p` names
@@ -841,6 +843,7 @@ async def handle_disown(
     specs = scan.operands
     targets: list[Job] = []
     errors: list[str] = []
+    await job_table.sync(sid)
     jobs = job_table.list_jobs(sid)
     if specs:
         for spec in specs:
@@ -863,7 +866,7 @@ async def handle_disown(
         targets = [jobs[-1]]
     if not keep:
         for job in targets:
-            job_table.disown(job.id, sid)
+            await job_table.disown(job.id, sid)
     err = encode_text("\n".join(errors) + "\n") if errors else None
     code = 1 if errors else 0
     return (
@@ -901,6 +904,7 @@ async def handle_fg(
     """
     cmd_str = " ".join(parts)
     sid = _session_of(session)
+    await job_table.sync(sid)
     jobs = job_table.list_jobs(sid)
     if len(parts) <= 1:
         if not jobs:
@@ -936,7 +940,7 @@ async def handle_fg(
     if sink is not None:
         await sink.emit(Channel.STDOUT, header)
     job = await job_table.wait(target.id, sid)
-    job_table.reap(target.id, sid)
+    await job_table.reap(target.id, sid)
     return (
         header if sink is None else None,
         IOResult(exit_code=job.exit_code),
@@ -1004,6 +1008,24 @@ def _kill_pid(jobs: list[Job], operand: str) -> tuple[int | None, str]:
     return int(operand), ""
 
 
+def _runnerless(jobs: list[Job], operand: str) -> Job | None:
+    """The job a ``%N`` operand names when it has no runner here.
+
+    Another workspace runs it, or it was restored from a snapshot. It is
+    killed through the job table, which ends another workspace's job by
+    ending its console for its owner to see, and never through this
+    workspace's process table, where its stand-in PID may name a runner
+    of this workspace's own.
+
+    Args:
+        jobs (list[Job]): the jobs the builtin can see.
+        operand (str): the operand as typed.
+    """
+    raw = operand[1:] if operand.startswith("%") else ""
+    job = _job_numbered(jobs, int(raw)) if raw.isdigit() else None
+    return job if job is not None and job.process is None else None
+
+
 async def handle_kill(
     job_table: JobTable,
     parts: list[str],
@@ -1065,11 +1087,23 @@ async def handle_kill(
     processes = _process_view(job_table, session)
     errors: list[str] = []
     signalled = False
+    await job_table.sync(sid)
     for operand in words:
         jobs = job_table.list_jobs(sid)
         pid, refusal = _kill_pid(jobs, operand)
         if pid is None:
             errors.append(f"{voice}kill: {refusal}")
+            continue
+        runnerless = _runnerless(jobs, operand)
+        if runnerless is not None:
+            if signal == 0:
+                found = runnerless.status == JobStatus.RUNNING
+            else:
+                found = await job_table.kill(runnerless.id, sid, signal)
+            if not found:
+                errors.append(f"{voice}kill: ({pid}) - No such process")
+                continue
+            signalled = True
             continue
         try:
             if signal == 0:
@@ -1151,6 +1185,10 @@ async def handle_jobs(
             flags.update(word[1:])
         else:
             specs.append(word)
+    table: JobTable | None = job_table
+    while table is not None:
+        await table.sync(sid)
+        table = table.parent
     jobs = job_table.listing(sid)
     if specs:
         picked: list[Job] = []
@@ -1176,7 +1214,7 @@ async def handle_jobs(
         lines = [str(j.pid) for j in jobs]
     else:
         lines = [_job_row(j, "l" in flags) for j in jobs]
-    job_table.pop_completed(sid)
+    await job_table.pop_completed(sid)
     out = encode_text("\n".join(lines) + "\n") if lines else b""
     return out, IOResult(), ExecutionNode(command=cmd_str, exit_code=0)
 

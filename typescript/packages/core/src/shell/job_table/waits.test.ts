@@ -30,13 +30,13 @@ describe('JobWaits', () => {
     })
     const finished: string[] = []
     waits.add(
-      table.submit({
+      await table.submit({
         command: 'first',
         abort: new AbortController(),
         cwd: '/',
-        run: () => {
+        run: async () => {
           waits.add(
-            table.submit({
+            await table.submit({
               command: 'late',
               abort: new AbortController(),
               cwd: '/',
@@ -48,10 +48,7 @@ describe('JobWaits', () => {
             }),
           )
           finished.push('first')
-          return Promise.resolve([
-            new IOResult(),
-            new ExecutionNode({ command: 'first' }),
-          ] as JobResult)
+          return [new IOResult(), new ExecutionNode({ command: 'first' })] as JobResult
         },
       }),
     )

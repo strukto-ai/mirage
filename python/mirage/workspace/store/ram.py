@@ -13,6 +13,8 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.observe.store import ObserverStore, RAMObserverStore
+from mirage.shell.job_table.ram import RAMJobStore
+from mirage.shell.job_table.store import JobStore
 from mirage.workspace.mount.namespace import NamespaceStore, RAMNamespaceStore
 from mirage.workspace.record.types import generation_of
 from mirage.workspace.store.base import WorkspaceFields, WorkspaceStateStore
@@ -32,13 +34,18 @@ class RAMWorkspaceStateStore(WorkspaceStateStore):
         namespace: WorkspaceStateStore | None = None,
         observer: WorkspaceStateStore | None = None,
         workspace: WorkspaceStateStore | None = None,
+        jobs: WorkspaceStateStore | None = None,
     ) -> None:
         super().__init__(
-            namespace=namespace, observer=observer, workspace=workspace
+            namespace=namespace,
+            observer=observer,
+            workspace=workspace,
+            jobs=jobs,
         )
         self._namespaces: dict[str, RAMNamespaceStore] = {}
         self._observers: dict[str, RAMObserverStore] = {}
         self._sessions: dict[str, RAMNamespaceStore] = {}
+        self._jobs: dict[str, RAMJobStore] = {}
         self._meta: dict[str, WorkspaceFields] = {}
 
     def _make_namespace(self, workspace_id: str) -> NamespaceStore:
@@ -55,6 +62,11 @@ class RAMWorkspaceStateStore(WorkspaceStateStore):
         if workspace_id not in self._sessions:
             self._sessions[workspace_id] = RAMNamespaceStore()
         return self._sessions[workspace_id]
+
+    def _make_jobs(self, workspace_id: str) -> JobStore:
+        if workspace_id not in self._jobs:
+            self._jobs[workspace_id] = RAMJobStore()
+        return self._jobs[workspace_id]
 
     async def _load_meta(self, workspace_id: str) -> WorkspaceFields | None:
         fields = self._meta.get(workspace_id)
@@ -76,6 +88,7 @@ class RAMWorkspaceStateStore(WorkspaceStateStore):
         self._namespaces.pop(workspace_id, None)
         self._observers.pop(workspace_id, None)
         self._sessions.pop(workspace_id, None)
+        self._jobs.pop(workspace_id, None)
         self._meta.pop(workspace_id, None)
 
     async def _close(self) -> None:

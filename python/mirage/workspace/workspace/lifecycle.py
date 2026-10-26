@@ -227,7 +227,7 @@ async def close_workspace(deps: CloseDeps) -> list[BaseException]:
     for close in deps.closers:
         await settle(close())
     await settle(deps.processes.drain(deps.blocked_loop))
-    await settle(deps.job_table.close_consoles())
+    await settle(deps.job_table.close())
     await settle(
         *(
             asyncio.shield(task)

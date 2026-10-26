@@ -18,6 +18,7 @@ import { ScriptSource } from '@struktoai/mirage-core/runtime/types'
 import { MountMode, ReadPolicy, WritePolicy } from '@struktoai/mirage-core/types'
 import { RAMNamespaceStore } from '@struktoai/mirage-core/workspace/mount/namespace/ram'
 import { RAMWorkspaceStateStore } from '@struktoai/mirage-core/workspace/store/ram'
+import { RAMJobStore } from '@struktoai/mirage-core/shell/job_table/ram'
 import { normalizeCacheConfig } from '@struktoai/mirage-core/cache/file/config'
 import {
   normalizeIndexConfig,
@@ -30,6 +31,7 @@ import { RedisNamespaceStore } from './workspace/mount/namespace/redis.ts'
 import { DiskWorkspaceStateStore } from './workspace/store/disk.ts'
 import { RedisWorkspaceStateStore } from './workspace/store/redis.ts'
 import { RedisConsoleStore } from './shell/console/redis/index.ts'
+import { RedisJobStore } from './shell/job_table/redis.ts'
 import { RedisFileCacheStore } from './cache/file/redis.ts'
 import { Workspace } from './workspace.ts'
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
@@ -839,37 +841,57 @@ describe('configToWorkspaceArgs', () => {
     ).toThrow(/unknown field `extends`/)
   })
 
-  it('console redis block builds a factory that mints fresh keys', async () => {
+  it('a jobs group puts job lists and consoles on redis', async () => {
     const cfg = loadWorkspaceConfig({
       mounts: { '/': { vfs: 'ram' } },
-      console: { type: 'redis', url: 'redis://localhost:6379/5', key_prefix: 'test_console:' },
+      store: {
+        type: 'ram',
+        jobs: { type: 'redis', url: 'redis://localhost:6379/5', key_prefix: 'test_jobs:' },
+      },
     })
     const args = await configToWorkspaceArgs(cfg)
-    const factory = args.options.consoleFactory
-    expect(factory).toBeDefined()
-    const prefixOf = (jobId: number): string => {
-      const store = factory?.(jobId).store
-      if (!(store instanceof RedisConsoleStore)) throw new Error('expected a RedisConsoleStore')
-      return store.keyPrefix
+    const store = args.options.store
+    expect(store).toBeInstanceOf(RAMWorkspaceStateStore)
+    expect(store?.namespace('ws1')).toBeInstanceOf(RAMNamespaceStore)
+    const jobs = store?.jobs('ws1')
+    expect(jobs).toBeInstanceOf(RedisJobStore)
+    const first = jobs?.console('a')
+    const second = jobs?.console('b')
+    if (!(first instanceof RedisConsoleStore) || !(second instanceof RedisConsoleStore)) {
+      throw new Error('expected a RedisConsoleStore')
     }
-    const first = prefixOf(1)
-    const second = prefixOf(1)
-    // Fresh keys per console: job ids restart at 1 when the table
-    // empties, so two consoles built for "job 1" must not share a
-    // stream (a shared one would replay the first job's chunks). The
-    // minted prefix is public: it is the address an embedder hands to
-    // a reader in another process.
-    expect(first).not.toBe(second)
-    expect(first.startsWith('test_console:')).toBe(true)
+    expect(first.keyPrefix).toBe('test_jobs:ws1:jobs:console:a:')
+    expect(first.keyPrefix).not.toBe(second.keyPrefix)
+    await store?.close()
   })
 
-  it('console ram block leaves consoles in memory', async () => {
+  it('a disk store keeps jobs in memory', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mirage-store-'))
     const cfg = loadWorkspaceConfig({
       mounts: { '/': { vfs: 'ram' } },
-      console: { type: 'ram' },
+      store: { type: 'disk', root: dir },
     })
     const args = await configToWorkspaceArgs(cfg)
-    expect(args.options.consoleFactory).toBeUndefined()
+    expect(args.options.store?.jobs('ws1')).toBeInstanceOf(RAMJobStore)
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it.each(['disk', 's3'])('a jobs group refuses %s, which cannot stream', (backend) => {
+    expect(() =>
+      loadWorkspaceConfig({
+        mounts: { '/': { vfs: 'ram' } },
+        store: { type: 'ram', jobs: { type: backend } },
+      }),
+    ).toThrow(/store\.jobs/)
+  })
+
+  it('the console block is gone', () => {
+    expect(() =>
+      loadWorkspaceConfig({
+        mounts: { '/': { vfs: 'ram' } },
+        console: { type: 'redis' },
+      }),
+    ).toThrow()
   })
 })
 

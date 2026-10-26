@@ -14,9 +14,10 @@
 
 import { concat } from '../../utils/bytes.ts'
 import { Channel, type ConsoleChunk, type OwnedStream, type ReadResult } from './types.ts'
+import { END_OF_CONSOLE } from './constants.ts'
 import { RAMConsoleStore } from './ram.ts'
 import type { ConsoleStore } from './store.ts'
-import { encodeText } from '../bytes.ts'
+import { decodeText, encodeText } from '../bytes.ts'
 
 function join(chunks: ConsoleChunk[]): Uint8Array {
   return concat(chunks.map((c) => c.data))
@@ -58,11 +59,8 @@ export class JobConsole {
   }
 
   /**
-   * Where this console's chunks live.
-   *
-   * Public because the store carries the console's address: a shared
-   * store (`RedisConsoleStore.keyPrefix`) is how an embedder points a
-   * reader in another process at a live console.
+   * Where this console's chunks live. A job's console is the one its job
+   * store names, which every workspace on that store reads and ends.
    */
   get store(): ConsoleStore {
     return this.backing
@@ -131,17 +129,37 @@ export class JobConsole {
    * Resolve once the job has ended.
    *
    * Resolves on a closed store too, so a console discarded while someone
-   * was joining on it does not strand them.
+   * was joining on it does not strand them, and once `signal` aborts, so
+   * an abandoned join stops reading.
+   *
+   * @param signal ends the wait early
    */
-  async waitFinished(): Promise<void> {
+  async waitFinished(signal?: AbortSignal): Promise<void> {
     let cursor = 0
-    for (;;) {
+    while (signal?.aborted !== true) {
       const [chunks, next] = await this.backing.readFrom(cursor)
       cursor = next
       if (chunks.some((c) => c.channel === Channel.CONTROL)) return
-      await this.backing.wait(cursor)
+      await this.backing.wait(cursor, signal)
       if (this.backing.closed) return
     }
+  }
+
+  /**
+   * How the job ended, or null while no ending is stored.
+   *
+   * Reads only the last chunk, wherever the store keeps it: a read past
+   * the end answers the console's length, and the ending is always the
+   * last chunk. This is how a workspace learns how another one's job
+   * ended.
+   */
+  async outcome(): Promise<string | null> {
+    const [, end] = await this.backing.readFrom(END_OF_CONSOLE)
+    if (end === 0) return null
+    const [chunks] = await this.backing.readFrom(end - 1, 1)
+    const last = chunks[chunks.length - 1]
+    if (last?.channel !== Channel.CONTROL) return null
+    return decodeText(last.data)
   }
 
   /**

@@ -12,6 +12,13 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-# The CONTROL payload for a killed job; a job that ran to completion
-# carries "exit:<code>" instead (utils.exit_outcome).
+# The two forms of the CONTROL payload, "<form>:<code>": a job that ran
+# to completion ends "exit:<code>" and one stopped by a signal
+# "killed:<code>", the code being the status `wait` answers for it
+# (utils.exit_outcome, utils.killed_outcome).
+EXIT_OUTCOME = "exit"
 KILLED_OUTCOME = "killed"
+
+# A cursor past any console's end: reading from it returns no chunks and
+# the console's length as the next cursor. Exact on both hosts.
+END_OF_CONSOLE = 2**53 - 1

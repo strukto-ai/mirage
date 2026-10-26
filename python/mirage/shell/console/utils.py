@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.shell.console.constants import EXIT_OUTCOME, KILLED_OUTCOME
+
 
 def exit_outcome(exit_code: int) -> str:
     """Outcome text for a job that ran to completion.
@@ -19,4 +21,13 @@ def exit_outcome(exit_code: int) -> str:
     Args:
         exit_code (int): the job's exit status.
     """
-    return f"exit:{exit_code}"
+    return f"{EXIT_OUTCOME}:{exit_code}"
+
+
+def killed_outcome(exit_code: int) -> str:
+    """Outcome text for a job stopped by a signal.
+
+    Args:
+        exit_code (int): the status it answers, 128 plus the signal.
+    """
+    return f"{KILLED_OUTCOME}:{exit_code}"

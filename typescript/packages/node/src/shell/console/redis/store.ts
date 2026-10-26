@@ -20,7 +20,7 @@ import type {
   ReadResult,
 } from '@struktoai/mirage-core/shell/console/index'
 import { RedisConnection } from '../../../optional_peer.ts'
-import { APPEND_LUA, POLL_MS } from './constants.ts'
+import { APPEND_LUA, ENDED_POLL_MS, POLL_MS } from './constants.ts'
 
 interface StreamEntry {
   id: { toString: () => string }
@@ -30,12 +30,26 @@ interface StreamEntry {
 export interface RedisConsoleStoreOptions {
   url?: string
   keyPrefix?: string
-  /** Expire the keys this long after the last append; absent keeps them. */
+  /** Expire the keys this long after the last append or expire(); absent keeps them. */
   ttlSeconds?: number
+  /**
+   * A connection the caller owns and shares between consoles (a job
+   * store's); absent connects to `url` and closes that connection on
+   * close().
+   */
+  connection?: RedisConnection
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise<void>((resolve) => setTimeout(resolve, ms))
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise<void>((resolve) => {
+    const done = (): void => {
+      clearTimeout(timer)
+      signal?.removeEventListener('abort', done)
+      resolve()
+    }
+    const timer = setTimeout(done, ms)
+    signal?.addEventListener('abort', done, { once: true })
+  })
 }
 
 /**
@@ -49,11 +63,9 @@ function sleep(ms: number): Promise<void> {
  * RedisConsoleStore byte for byte, so the reader does not have to be
  * the writer's language.
  *
- * The job owns its keys: a factory must hand every job a prefix nothing
+ * The job owns its keys: its job store hands every job a prefix nothing
  * else has written, because a reused stream replays the previous job's
- * chunks, ending chunk included. `keyPrefix` stays public because it is
- * the console's address: an embedder reads it off a job's store and
- * hands it to the process that should attach.
+ * chunks, ending chunk included.
  *
  * The ending chunk is terminal in the store itself, not only in this
  * process: the append script refuses any append once a CONTROL chunk
@@ -64,10 +76,14 @@ function sleep(ms: number): Promise<void> {
  * Python's XREAD BLOCK does: node-redis serializes commands on one
  * connection, so a blocking read would wedge the job's own appends
  * behind it, and a second connection costs more than a short poll.
+ * `waitEnded` polls the ending flag instead, so a watcher costs nothing
+ * per chunk.
  * There is no retention trim, so readFrom never reports a truncated
- * cursor; retention is bounded by `ttlSeconds` instead, refreshed on
- * every append, so a console expires that long after its job's last
- * write.
+ * cursor; retention is bounded by `ttlSeconds` instead, refreshed on every
+ * append and by `expire()`, which a job's owner calls while the job runs,
+ * so a console expires that long after its job ended or its owner went,
+ * and never under a quiet job still running: a reader parked on it would
+ * not see a restarted sequence.
  */
 export class RedisConsoleStore implements ConsoleStore {
   readonly url: string
@@ -77,6 +93,7 @@ export class RedisConsoleStore implements ConsoleStore {
   private readonly endedKey: string
   private readonly ttlSeconds: number
   private readonly redis: RedisConnection
+  private readonly ownsConnection: boolean
   private isClosed = false
 
   constructor(options: RedisConsoleStoreOptions = {}) {
@@ -86,7 +103,8 @@ export class RedisConsoleStore implements ConsoleStore {
     this.counterKey = `${this.keyPrefix}seq`
     this.endedKey = `${this.keyPrefix}ended`
     this.ttlSeconds = options.ttlSeconds ?? 0
-    this.redis = new RedisConnection(this.url, 'RedisConsoleStore')
+    this.ownsConnection = options.connection === undefined
+    this.redis = options.connection ?? new RedisConnection(this.url, 'RedisConsoleStore')
   }
 
   get closed(): boolean {
@@ -161,13 +179,13 @@ export class RedisConsoleStore implements ConsoleStore {
     return [[], Math.min(seq, total), false]
   }
 
-  async wait(seq: number): Promise<void> {
+  async wait(seq: number, signal?: AbortSignal): Promise<void> {
     // Checked before touching the client: close() nulls the promise,
     // and a wait arriving later must not reconnect a discarded store.
     if (this.isClosed) return
     const c = await this.client()
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- close() flips it across awaits
-    while (!this.isClosed) {
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- close() and the signal flip across awaits
+    while (!this.isClosed && signal?.aborted !== true) {
       let raw: string | null
       try {
         raw = await c.get(this.counterKey)
@@ -179,15 +197,35 @@ export class RedisConsoleStore implements ConsoleStore {
         throw err
       }
       if (raw !== null && Number(raw) > seq) return
-      await sleep(POLL_MS)
+      await sleep(POLL_MS, signal)
     }
+  }
+
+  async waitEnded(signal?: AbortSignal): Promise<void> {
+    while (!this.isClosed && signal?.aborted !== true) {
+      const c = await this.client()
+      if ((await c.exists(this.endedKey)) > 0) return
+      await sleep(ENDED_POLL_MS, signal)
+    }
+  }
+
+  /** The console's keys: its stream, its counter and its ending flag. */
+  get keys(): readonly string[] {
+    return [this.streamKey, this.counterKey, this.endedKey]
+  }
+
+  /** Push the keys' expiry out again, as an append does. */
+  async expire(): Promise<void> {
+    if (this.isClosed || this.ttlSeconds <= 0) return
+    const c = await this.client()
+    await Promise.all(this.keys.map((key) => c.expire(key, this.ttlSeconds)))
   }
 
   async close(): Promise<void> {
     // Idempotent, and the flag flips before the quit so a parked wait
     // that wakes mid-teardown returns instead of re-polling.
     this.isClosed = true
-    await this.redis.close()
+    if (this.ownsConnection) await this.redis.close()
   }
 
   /** Delete the console's keys (test and integ teardown only). */

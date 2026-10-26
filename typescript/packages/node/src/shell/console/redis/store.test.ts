@@ -15,6 +15,7 @@
 import { randomUUID } from 'node:crypto'
 import { Channel, JobConsole } from '@struktoai/mirage-core/shell/console/index'
 import { afterEach, describe, expect, it } from 'vitest'
+import { RedisConnection } from '../../../optional_peer.ts'
 import { RedisConsoleStore } from './store.ts'
 
 const REDIS_URL = process.env.REDIS_URL ?? ''
@@ -181,5 +182,45 @@ describe.skipIf(REDIS_URL === '')('RedisConsoleStore', () => {
     expect(ttls[1]).toBeGreaterThan(0)
     expect(ttls[2]).toBeGreaterThan(0)
     expect(ttls[3]).toBe(-1)
+  })
+
+  it('expire pushes the keys out again', async () => {
+    const prefix = `test:console:${randomUUID()}:`
+    const store = new RedisConsoleStore({ url: REDIS_URL, keyPrefix: prefix, ttlSeconds: 60 })
+    opened.push(store)
+    await store.append(Channel.STDOUT, ENC.encode('x'))
+    const { createClient } = await import('redis')
+    const client = createClient({ url: REDIS_URL })
+    await client.connect()
+    await client.expire(`${prefix}stream`, 5)
+    await store.expire()
+    const ttl = await client.ttl(`${prefix}stream`)
+    await client.quit()
+    expect(ttl).toBeGreaterThan(5)
+  })
+
+  it('waitEnded returns once the ending lands', async () => {
+    const store = makeStore(`test:console:${randomUUID()}:`)
+    let done = false
+    const waiter = store.waitEnded().then(() => {
+      done = true
+    })
+    await store.append(Channel.STDOUT, ENC.encode('out'))
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(done).toBe(false)
+    await store.append(Channel.CONTROL, ENC.encode('exit:0'))
+    await waiter
+  })
+
+  it('a shared connection outlives its console', async () => {
+    const prefix = `test:console:${randomUUID()}:`
+    const connection = new RedisConnection(REDIS_URL, 'test')
+    const store = new RedisConsoleStore({ keyPrefix: prefix, connection })
+    await store.append(Channel.STDOUT, ENC.encode('x'))
+    await store.close()
+    const c = await connection.client()
+    expect(await c.exists(`${prefix}stream`)).toBe(1)
+    await c.del([`${prefix}stream`, `${prefix}seq`, `${prefix}ended`])
+    await connection.close()
   })
 })

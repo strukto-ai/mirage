@@ -12,13 +12,41 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { ProcessHandle } from '../../process/handle.ts'
 import { ProcessTable } from '../../process/table.ts'
 import { PathSpec } from '../../types.ts'
-import { Channel, JobConsole, KILLED_OUTCOME, exitOutcome } from '../console/index.ts'
-import { KILLED_EXIT_CODE, STOP_WAIT_SECONDS } from './constants.ts'
-import { type ConsoleFactory, Job, type JobResult, type JobRunner, JobStatus } from './types.ts'
+import {
+  Channel,
+  JobConsole,
+  KILLED_OUTCOME,
+  exitOutcome,
+  killedOutcome,
+} from '../console/index.ts'
+import {
+  HANGUP_EXIT_CODE,
+  KILLED_EXIT_CODE,
+  LIST_MAX_RETRIES,
+  STOP_WAIT_SECONDS,
+  WATCH_RETRY_SECONDS,
+} from './constants.ts'
+import { RAMJobStore } from './ram.ts'
+import type { JobStore } from './store.ts'
+import { Job, type JobResult, type JobRunner, JobStatus } from './types.ts'
 import { encodeText } from '../bytes.ts'
+import { sleep } from '../../utils/abort.ts'
 import { SystemClock, type Clock } from '../../utils/clock.ts'
+import { generationOf, type RecordFields } from '../../workspace/record/types.ts'
+
+// One job's entry in its session's list.
+interface ListEntry {
+  command: string
+  cwd: string
+  created_at: number
+  owner: string
+  console: string
+  // How the job ended, once its owner recorded it.
+  ending?: string
+}
 
 function isAbortError(err: unknown): boolean {
   if (err instanceof Error && err.name === 'AbortError') return true
@@ -26,16 +54,12 @@ function isAbortError(err: unknown): boolean {
   return false
 }
 
-/**
- * Run a job to completion and record how it ended.
- *
- * Every write to a job's status, exit code, and console ending happens
- * here, so the table has exactly one writer. The runner only produces
- * output.
- *
- * Status is set before the console is finished, so a reader released by
- * the ending chunk always sees settled fields.
- */
+/** The status and exit code a console's ending records. */
+function ended(outcome: string): [JobStatus, number] {
+  const [form = '', code = '0'] = outcome.split(':')
+  return [form === KILLED_OUTCOME ? JobStatus.KILLED : JobStatus.COMPLETED, Number(code)]
+}
+
 /**
  * The status a stopped job answers: the one its program exited with after
  * handling the signal, when the job is that one program, else 128 plus
@@ -48,10 +72,33 @@ function stoppedStatus(job: Job): number {
   return signal === null ? KILLED_EXIT_CODE : 128 + signal
 }
 
+/** The ending text an ended job's status and exit code record. */
+function outcomeOf(job: Job): string {
+  return job.status === JobStatus.KILLED ? killedOutcome(job.exitCode) : exitOutcome(job.exitCode)
+}
+
 /** Write the kill marker and the ending chunk. Mirrors Python's `_mark_killed`. */
-async function markKilled(console: JobConsole): Promise<void> {
+async function markKilled(console: JobConsole, exitCode: number): Promise<void> {
   await console.emit(Channel.STDERR, encodeText('Killed'))
-  await console.finish(KILLED_OUTCOME)
+  await console.finish(killedOutcome(exitCode))
+}
+
+/**
+ * End a job's console with how it ended, then take the ending the console
+ * holds. Another workspace's `kill`, or the bound on a killed job's stop,
+ * may have ended the console first; the store keeps the first ending, and
+ * every workspace answers that one. Status is set before the console is
+ * finished, so a reader released by the ending chunk always sees settled
+ * fields. Mirrors Python's `_record`.
+ */
+async function record(job: Job, status: JobStatus, exitCode: number): Promise<void> {
+  job.status = status
+  job.exitCode = exitCode
+  if (status === JobStatus.KILLED) await markKilled(job.console, exitCode)
+  else await job.console.finish(exitOutcome(exitCode))
+  if (job.console.store.closed) return
+  const outcome = await job.console.outcome()
+  if (outcome !== null) [job.status, job.exitCode] = ended(outcome)
 }
 
 /**
@@ -62,47 +109,78 @@ async function stop(job: Job, signal = 9): Promise<void> {
   job.process?.terminate(signal)
   job.status = JobStatus.KILLED
   job.exitCode = 128 + signal
-  await markKilled(job.console)
+  await markKilled(job.console, job.exitCode)
 }
 
+/**
+ * Run a job to completion and record how it ended.
+ *
+ * A job's console ends here, in the job's own task, once its runner has:
+ * `kill` only stops the runner, so a program that handled the signal
+ * leaves its own status (`stoppedStatus`) in the ending every workspace
+ * reads. A job something stopped ends as killed however its runner
+ * finished.
+ */
 async function settle(run: JobRunner, job: Job): Promise<number> {
   let result: JobResult
   try {
     if (job.abort?.signal.aborted) throw new DOMException('aborted', 'AbortError')
     result = await run(job)
   } catch (err) {
-    // A job killed while it was still running is already settled; the
-    // runner unwinding afterwards must not reopen or relabel it.
-    if (job.status !== JobStatus.RUNNING) {
-      if (!isAbortError(err)) return 1
-      // Final only now the runner has ended: a program that handled the
-      // signal leaves its own status.
-      job.exitCode = stoppedStatus(job)
-      return job.exitCode
-    }
-    if (isAbortError(err)) {
-      const code = stoppedStatus(job)
-      job.status = JobStatus.KILLED
-      job.exitCode = code
-      await markKilled(job.console)
-      return code
+    if (isAbortError(err) || job.status !== JobStatus.RUNNING) {
+      await record(job, JobStatus.KILLED, stoppedStatus(job))
+      return isAbortError(err) ? job.exitCode : 1
     }
     // Recorded as the job's output and exit status rather than
     // rethrown: nobody awaits this task, so rethrowing would only
     // strand the error in an unhandled rejection.
-    job.status = JobStatus.COMPLETED
-    job.exitCode = 1
     const msg = err instanceof Error ? err.message : String(err)
     await job.console.emit(Channel.STDERR, encodeText(msg))
-    await job.console.finish(exitOutcome(1))
+    await record(job, JobStatus.COMPLETED, 1)
     return 1
   }
   const [ioResult] = result
-  if (job.status !== JobStatus.RUNNING) return ioResult.exitCode
-  job.exitCode = ioResult.exitCode
-  job.status = JobStatus.COMPLETED
-  await job.console.finish(exitOutcome(job.exitCode))
+  if (job.status !== JobStatus.RUNNING) await record(job, JobStatus.KILLED, stoppedStatus(job))
+  else await record(job, JobStatus.COMPLETED, ioResult.exitCode)
   return ioResult.exitCode
+}
+
+/**
+ * Stop a job this table runs if another workspace ended its console. A
+ * `kill` elsewhere ends the job's console, the one record of how the job
+ * ended, and this stops the runner the way a local kill does, with the
+ * signal the ending implies. Mirrors Python's `_adopt_ending`.
+ */
+async function adoptEnding(job: Job): Promise<void> {
+  if (job.status !== JobStatus.RUNNING) return
+  const outcome = await job.console.outcome()
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- the runner may settle it across the await
+  if (outcome === null || job.status !== JobStatus.RUNNING) return
+  ;[job.status, job.exitCode] = ended(outcome)
+  job.process?.terminate(job.exitCode > 128 ? job.exitCode - 128 : 9)
+}
+
+/**
+ * Stop a job this table runs once another workspace ends it. A failed read
+ * is retried until the runner settles, which aborts the watch: one that
+ * gave up would leave a kill from elsewhere unheeded while the job ran on.
+ *
+ * @param job the job, run by this table
+ * @param signal aborted once its runner settles, ending the watch
+ */
+async function watch(job: Job, signal: AbortSignal): Promise<void> {
+  const store = job.console.store
+  while (!signal.aborted && !store.closed) {
+    try {
+      await store.waitEnded(signal)
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- the runner may settle across the await
+      if (!signal.aborted) await adoptEnding(job)
+      return
+    } catch (err) {
+      console.debug('job watch failed:', err)
+    }
+    await sleep(WATCH_RETRY_SECONDS * 1000, signal)
+  }
 }
 
 /**
@@ -114,43 +192,46 @@ async function settle(run: JobRunner, job: Job): Promise<number> {
  * `disown` only ever see the calling session's list, exactly as one bash
  * never lists another bash's jobs. Runner PIDs are tracked separately:
  * `$!` and `jobs -l` report the managed PID, while `%N` names a
- * session-local job number. A KILLED job ends its console; its process
- * remains stopping until the runner actually finishes.
+ * session-local job number. A killed job's process remains stopping until
+ * the runner actually finishes, and its console ends then, or once the
+ * runner had `STOP_WAIT_SECONDS` to stop and did not.
+ *
+ * The lists live in the workspace's job store, so every workspace on a
+ * shared store sees a session's jobs with the same numbers. A job runs on
+ * the table that started it, its owner; another table lists it, reads and
+ * waits on its console, and kills it by ending that console, which its
+ * owner watches for. `sync` brings a session's list up to date before a
+ * builtin reads it. A job whose owner's lease lapsed with no ending was
+ * lost with its owner and is ended as hung up, as a bash's job is when its
+ * terminal goes.
  *
  * The table is still owned by the workspace rather than by a session,
- * because the workspace owns the tasks: teardown must stop every job in
- * every session (`killAll`), snapshot capture reads every finished one
- * (`allJobs`), and a disowned job keeps running after its shell forgot
+ * because the workspace owns the tasks: teardown must stop every job it
+ * runs in every session (`killAll`), snapshot capture reads every finished
+ * one (`allJobs`), and a disowned job keeps running after its shell forgot
  * it. Those are the only cross-session views; every other method takes
- * the session whose list it reads, and the empty session id is the list
- * a caller with no session (a bare table in a test) shares.
+ * the session whose list it reads, and the empty session id is the list a
+ * caller with no session (a bare table in a test) shares.
  */
 export class JobTable {
-  private readonly jobs = new Map<string, Map<number, Job>>()
-  private readonly nextIds = new Map<string, number>()
-  private readonly consoleFactory: ConsoleFactory | null
-  private factoryConsoles: JobConsole[] = []
-  // The table whose closeConsoles() releases what the factory builds for
-  // this one: itself, or the table a child came from.
-  private consoleOwner: JobTable = this
-  // Jobs `disown` removed while still running: the shell forgets them,
-  // the workspace still owns their tasks so teardown can stop them.
+  store: JobStore
+  readonly owner = crypto.randomUUID().replaceAll('-', '')
+  private jobs = new Map<string, Map<number, Job>>()
+  // Jobs `disown` removed while still running, and ones another job's
+  // number displaced: the shell forgets them, the workspace still owns
+  // their tasks so teardown can stop them; each leaves once it finishes.
   private disowned: Job[] = []
+  private lease: ReturnType<typeof setTimeout> | null = null
+  // The bounds on killed jobs' stops (endKilled): each one's ending, and
+  // the cut that ends its wait at once.
+  private stopping = new Map<Job, { ending: Promise<void>; cut: () => void }>()
 
   /**
-   * @param consoleFactory builds each new job's console from its job
-   *   id; null means an in-memory console per job. A factory must hand
-   *   every job a fresh backing: ids restart at 1 when a session's list
-   *   empties (GNU numbering) and two sessions can both hold a job 1,
-   *   so a store keyed on the id alone gets reused, and a reused stream
-   *   replays the previous job's chunks, ending chunk included. The
-   *   table tracks what the factory builds and closeConsoles() releases
-   *   it at workspace teardown, because a config-provisioned store (a
-   *   Redis client per job) is invisible to the embedder; a console
-   *   still outlives its table entry, so reap() never closes one.
+   * @param store the job plane holding each session's list and each job's
+   *   console; null keeps them in memory, private to this table.
    */
   constructor(
-    consoleFactory: ConsoleFactory | null = null,
+    store: JobStore | null = null,
     readonly processes = new ProcessTable(),
     // The table of the shell a `$( )` is part of, whose jobs `jobs` still
     // lists there, as bash's does; its `wait` and `kill` reach none of them.
@@ -158,19 +239,17 @@ export class JobTable {
     // The workspace clock a job's `createdAt` is read on.
     readonly clock: Clock = new SystemClock(),
   ) {
-    this.consoleFactory = consoleFactory
+    this.store = store ?? new RAMJobStore()
   }
 
   /**
    * A table for a child shell (`bash -c`, a script, `( )`, `$( )`): a job
-   * list of its own on the same processes, whose jobs get their consoles
-   * from this table's factory, released at teardown with this table's.
-   * `parent` is the table a `$( )` still lists in `jobs`.
+   * list of its own on the same processes, kept in memory, since a child
+   * shell's jobs end with it on this workspace and no other one lists
+   * them. `parent` is the table a `$( )` still lists in `jobs`.
    */
   child(parent: JobTable | null = null): JobTable {
-    const table = new JobTable(this.consoleFactory, this.processes, parent, this.clock)
-    table.consoleOwner = this.consoleOwner
-    return table
+    return new JobTable(null, this.processes, parent, this.clock)
   }
 
   private sessionJobs(sessionId: string): Map<number, Job> {
@@ -185,12 +264,14 @@ export class JobTable {
   /**
    * Register a job in its session's list and start it.
    *
-   * Reserve a process slot before allocating a console. The runner is
-   * deferred until the job and console are ready; failed setup cancels
-   * the reservation without entering the supplied runner. Only fully
+   * The job's number is taken from the store first, so two workspaces
+   * starting a job on one session never share one; a process slot is
+   * reserved next, and a refused one gives the number back. The runner is
+   * deferred until the job and console are ready; failed setup cancels the
+   * reservation without entering the supplied runner. Only fully
    * initialized jobs join the table.
    */
-  submit(init: {
+  async submit(init: {
     command: string
     run: JobRunner
     abort: AbortController
@@ -200,38 +281,53 @@ export class JobTable {
     limit?: number | null
     // The job is one simple command (`Job.simple`).
     simple?: boolean
-  }): Job {
+  }): Promise<Job> {
     const sessionId = init.sessionId ?? ''
-    const jobs = this.sessionJobs(sessionId)
-    // GNU bash restarts job numbering at 1 once the job list empties.
-    // Without this, reaping after a targeted `wait` would leave a
-    // later `wait %1` pointing at nothing.
-    if (jobs.size === 0) this.nextIds.set(sessionId, 1)
-    const jobId = this.nextIds.get(sessionId) ?? 1
-    let job: Job | null = null
-    const process = this.processes.start({
-      sessionId,
-      parentPid: init.parentPid ?? null,
+    const name = crypto.randomUUID().replaceAll('-', '')
+    const createdAt = this.clock.now()
+    await this.store.renew(this.owner)
+    const jobId = await this.allocate(sessionId, {
       command: init.command,
-      cwd: PathSpec.fromStrPath(init.cwd),
-      run: async () => {
-        if (job === null) return KILLED_EXIT_CODE
-        if (job.status === JobStatus.RUNNING) return settle(init.run, job)
-        return job.exitCode
-      },
-      cancel: () => {
-        init.abort.abort()
-      },
-      limit: init.limit ?? null,
+      cwd: init.cwd,
+      created_at: createdAt,
+      owner: this.owner,
+      console: name,
     })
+    let job: Job | null = null
+    let process: ProcessHandle
     try {
-      let jobConsole: JobConsole
-      if (this.consoleFactory === null) {
-        jobConsole = new JobConsole()
-      } else {
-        jobConsole = this.consoleFactory(jobId)
-        this.consoleOwner.factoryConsoles.push(jobConsole)
-      }
+      process = this.processes.start({
+        sessionId,
+        parentPid: init.parentPid ?? null,
+        command: init.command,
+        cwd: PathSpec.fromStrPath(init.cwd),
+        run: async () => {
+          if (job === null) return KILLED_EXIT_CODE
+          if (job.status !== JobStatus.RUNNING) return job.exitCode
+          const watching = new AbortController()
+          void watch(job, watching.signal).catch((err: unknown) => {
+            console.debug('job watch failed:', err)
+          })
+          try {
+            return await settle(init.run, job)
+          } finally {
+            watching.abort()
+            await this.recordEnding(job)
+            this.disowned = this.disowned.filter((j) => j !== job)
+            this.dropLease()
+          }
+        },
+        cancel: () => {
+          init.abort.abort()
+        },
+        limit: init.limit ?? null,
+      })
+    } catch (error) {
+      await this.remove(sessionId, new Set([name]), true)
+      throw error
+    }
+    try {
+      const jobConsole = new JobConsole(this.store.console(name))
       jobConsole.bindExecution(process.info.executionId)
       job = new Job({
         id: jobId,
@@ -241,15 +337,17 @@ export class JobTable {
         sessionId,
         console: jobConsole,
         simple: init.simple ?? false,
-        createdAt: this.clock.now(),
+        createdAt,
+        owner: this.owner,
+        consoleName: name,
       })
     } catch (error) {
       process.terminate()
+      await this.remove(sessionId, new Set([name]), true)
       throw error
     }
     job.process = process
-    jobs.set(job.id, job)
-    this.nextIds.set(sessionId, jobId + 1)
+    this.sessionJobs(sessionId).set(job.id, job)
     const onAbort = () => {
       process.terminate()
     }
@@ -258,14 +356,99 @@ export class JobTable {
     void process.join().then(() => {
       init.abort.signal.removeEventListener('abort', onAbort)
     })
+    this.keepLease()
     return job
   }
 
-  /** Insert a finished job restored from a snapshot into its session. */
-  load(job: Job): void {
+  /**
+   * Insert a finished job restored from a snapshot into its session. Its
+   * output moves onto a console in the store, so every workspace on it
+   * reads the job the way it reads one that ran there. It keeps its number
+   * unless another workspace's job holds it, and then takes the next free
+   * one rather than hide that job.
+   */
+  async load(job: Job): Promise<void> {
+    const name = crypto.randomUUID().replaceAll('-', '')
+    const store = this.store.console(name)
+    const [chunks] = await job.console.readFrom(0)
+    for (const chunk of chunks) await store.append(chunk.channel, chunk.data)
+    const restored = new JobConsole(store, true)
+    if (job.executionId !== null) restored.bindExecution(job.executionId)
+    job.console = restored
+    job.owner = this.owner
+    job.consoleName = name
+    job.id = await this.insert(job.sessionId, job.id, {
+      command: job.command,
+      cwd: job.cwd,
+      created_at: job.createdAt,
+      owner: job.owner,
+      console: name,
+      ending: outcomeOf(job),
+    })
     this.sessionJobs(job.sessionId).set(job.id, job)
-    if (job.id >= (this.nextIds.get(job.sessionId) ?? 1)) {
-      this.nextIds.set(job.sessionId, job.id + 1)
+  }
+
+  /**
+   * Bring a session's list up to date with the store.
+   *
+   * Adds the jobs other workspaces started, drops the ones they reaped or
+   * disowned (a job this table runs keeps running, on the side list
+   * `disown` uses), and settles a job whose console another workspace
+   * ended, or another workspace's job whose owner's lease lapsed with no
+   * ending. A job is the one listed under its number only while their
+   * consoles match: once the list empties, numbering restarts and a new
+   * job can take a reaped one's number.
+   *
+   * A console attached to a job first seen here is the job's only while
+   * the list has not changed since it was read: a store drops the console
+   * of a job reaped meanwhile, and attaching then would open an empty one
+   * that never ends. So the list is read again after such an attach, and
+   * the sync retried should it have moved. This table's own jobs are
+   * matched after the last read, with no wait between, so one it started
+   * meanwhile is never taken for another workspace's; a running one the
+   * list no longer names stays listed, unless the list holds it as
+   * disowned or another job took its number, and then it runs on unlisted,
+   * as a disowned job does.
+   */
+  async sync(sessionId = ''): Promise<void> {
+    let fields: RecordFields | null = null
+    let remotes = new Map<string, Job>()
+    for (let attempt = 0; attempt < LIST_MAX_RETRIES; attempt++) {
+      fields = await this.store.load(sessionId)
+      const listed = (fields?.jobs ?? {}) as Record<string, ListEntry>
+      const known = new Set(this.listJobs(sessionId).map((j) => j.consoleName))
+      remotes = new Map(
+        Object.entries(listed)
+          .filter(([, entry]) => !known.has(entry.console))
+          .map(([key, entry]) => [entry.console, this.remote(Number(key), sessionId, entry)]),
+      )
+      if (
+        remotes.size === 0 ||
+        generationOf(await this.store.load(sessionId)) === generationOf(fields)
+      )
+        break
+    }
+    const entries = (fields?.jobs ?? {}) as Record<string, ListEntry>
+    const held = (fields?.disowned ?? {}) as Record<string, ListEntry>
+    const mine = new Map(this.listJobs(sessionId).map((j) => [j.consoleName, j]))
+    const jobs = new Map<number, Job>()
+    for (const [key, entry] of Object.entries(entries)) {
+      const job = mine.get(entry.console) ?? remotes.get(entry.console)
+      mine.delete(entry.console)
+      if (job === undefined) continue
+      if (job.process === null && job.status === JobStatus.RUNNING && entry.ending !== undefined)
+        [job.status, job.exitCode] = ended(entry.ending)
+      jobs.set(Number(key), job)
+    }
+    for (const job of mine.values()) {
+      if (job.process === null || job.status !== JobStatus.RUNNING) continue
+      if (job.consoleName in held || jobs.has(job.id)) this.disowned.push(job)
+      else jobs.set(job.id, job)
+    }
+    this.jobs.set(sessionId, new Map([...jobs].sort(([a], [b]) => a - b)))
+    for (const job of jobs.values()) {
+      if (job.process !== null) await adoptEnding(job)
+      else if (job.status === JobStatus.RUNNING) await this.refresh(job)
     }
   }
 
@@ -302,26 +485,44 @@ export class JobTable {
   /**
    * Stop a job and record it as killed.
    *
-   * The job is settled here rather than by waiting for the aborted
-   * runner to unwind. The signal is only observed where someone checks
+   * The job answers as killed at once, but its console ends only once the
+   * runner has stopped, so a program that handled the signal leaves its
+   * own status in the ending every workspace reads. Nothing here waits for
+   * the aborted runner. The signal is only observed where someone checks
    * it, which today is the executor between nodes and the commands that
    * take it, so a job sitting inside one long command would not notice
-   * until it finished on its own. Joining would hang the shell on
-   * exactly the runaway job the caller is trying to stop.
+   * until it finished on its own; joining would hang the shell on exactly
+   * the runaway job the caller is trying to stop. A runner that has not
+   * stopped `STOP_WAIT_SECONDS` later has its console ended for it, with
+   * the status the kill recorded, and one that has not begun has it ended
+   * at once: no program ran that could leave its own.
    *
-   * The console's own guards make the early ending safe: emits after the
-   * ending chunk are dropped, so a runner still unwinding cannot append
-   * past its own death, and `settle` returns early once the job is no
-   * longer RUNNING so it cannot relabel it.
+   * Another workspace's job is killed by ending its console; its owner
+   * sees the ending and stops the runner. Should the job have ended
+   * first, the ending it wrote stands and the job was not killed.
    *
    * @param signal the signal the job is stopped with; its status is 128
    *   plus it, KILL's 137 by default.
    */
   async kill(jobId: number, sessionId = '', signal = 9): Promise<boolean> {
     const job = this.get(jobId, sessionId)
-    if (job?.status !== JobStatus.RUNNING || job.process === null) return false
-    await stop(job, signal)
-    return true
+    if (job?.status !== JobStatus.RUNNING) return false
+    if (job.process !== null) {
+      if (!job.process.begun) {
+        await stop(job, signal)
+        await this.recordEnding(job)
+        this.dropLease()
+        return true
+      }
+      job.process.terminate(signal)
+      job.status = JobStatus.KILLED
+      job.exitCode = 128 + signal
+      this.endKilled(job, job.process)
+      return true
+    }
+    await markKilled(job.console, 128 + signal)
+    await this.refresh(job)
+    return (job.status as JobStatus) === JobStatus.KILLED
   }
 
   /**
@@ -330,12 +531,14 @@ export class JobTable {
    * longer knows it. It stays on a side list so `killAll` at teardown
    * reaches its task.
    */
-  disown(jobId: number, sessionId = ''): boolean {
+  async disown(jobId: number, sessionId = ''): Promise<boolean> {
     const jobs = this.jobs.get(sessionId)
     const job = jobs?.get(jobId)
     if (jobs === undefined || job === undefined) return false
     jobs.delete(jobId)
-    if (job.status === JobStatus.RUNNING) this.disowned.push(job)
+    const running = job.status === JobStatus.RUNNING
+    if (job.process !== null && running) this.disowned.push(job)
+    await this.remove(sessionId, new Set([job.consoleName]), false, running)
     return true
   }
 
@@ -347,23 +550,34 @@ export class JobTable {
    * up, and a later shell that reuses the same id starts from an empty
    * list numbered from 1 rather than inheriting jobs it never launched,
    * under a profile it may not share. Session closure revokes process
-   * entry points and stops disowned runners too.
+   * entry points and stops disowned runners too. Closing a session closes
+   * it everywhere, so the jobs other workspaces run in it are stopped too,
+   * the disowned ones included: their consoles are ended, which their
+   * owners watch for.
    */
   async closeSession(sessionId: string): Promise<Job[]> {
+    await this.sync(sessionId)
     const running = this.runningJobs(sessionId)
     for (const job of running) await this.kill(job.id, sessionId)
-    this.processes.revokeSession(sessionId)
+    const fields = await this.store.load(sessionId)
+    for (const [name, entry] of Object.entries(
+      (fields?.disowned ?? {}) as Record<string, ListEntry>,
+    ))
+      if (entry.owner !== this.owner)
+        await markKilled(new JobConsole(this.store.console(name)), KILLED_EXIT_CODE)
     this.jobs.delete(sessionId)
-    this.nextIds.delete(sessionId)
+    await this.store.delete(sessionId)
+    this.processes.revokeSession(sessionId)
     return running
   }
 
-  /** Stop every running job in every session, returning the ones that
-   * were running. Disowned jobs are stopped too: the shell forgot them,
-   * the workspace did not, and a teardown that left them running would
-   * leak tasks. */
+  /** Stop every running job this table runs in every session, returning
+   * the ones that were running. Disowned jobs are stopped too: the shell
+   * forgot them, the workspace did not, and a teardown that left them
+   * running would leak tasks. Another workspace's jobs are its own to
+   * stop. */
   async killAll(): Promise<Job[]> {
-    const running = this.allRunningJobs()
+    const running = this.allRunningJobs().filter((j) => j.process !== null)
     for (const job of [...running, ...this.disowned])
       if (job.status === JobStatus.RUNNING && job.process !== null) await stop(job)
     this.disowned = []
@@ -371,20 +585,18 @@ export class JobTable {
   }
 
   /**
-   * Close every console the factory built, releasing its store.
-   *
-   * Called by workspace teardown after killAll(). Only tracked,
-   * factory-built consoles are closed: the default in-memory ones hold
-   * nothing, while a factory-provisioned store keeps a client open per
-   * job, and in Node an open client holds the process alive. Closing
-   * also releases any reader still parked on one.
+   * Stop renewing this table's lease, at workspace teardown. Called after
+   * killAll(), so every job this table ran has ended and other workspaces
+   * need no lease to settle them; a killed job whose runner is still
+   * stopping has its console ended now rather than at its bound. The
+   * store itself belongs to the workspace's state store.
    */
-  async closeConsoles(): Promise<void> {
-    const consoles = this.factoryConsoles
-    this.factoryConsoles = []
-    for (const jobConsole of consoles) {
-      await jobConsole.close()
-    }
+  async close(): Promise<void> {
+    if (this.lease !== null) clearTimeout(this.lease)
+    this.lease = null
+    const stopping = [...this.stopping.values()]
+    for (const { cut } of stopping) cut()
+    await Promise.all(stopping.map(({ ending }) => ending))
   }
 
   /**
@@ -398,29 +610,49 @@ export class JobTable {
    * task and its console already holds the ending chunk, so it
    * returns without waiting.
    *
-   * A killed job's console ends at the kill, so its runner is joined
-   * too, for at most `STOP_WAIT_SECONDS`: what it started stops in that
+   * A killed job's console ends once its runner has stopped, or
+   * `STOP_WAIT_SECONDS` after the kill: what it started stops in that
    * time (a handler finishes, a sandbox is reaped) and the status it
    * leaves is the one answered, as bash's `wait` answers once the child
-   * has gone.
+   * has gone. An ending another workspace wrote is taken at once, before
+   * this table's watcher stops the runner. The runner is joined too, for
+   * at most `STOP_WAIT_SECONDS`, so what its task holds is let go before
+   * this returns.
+   *
+   * Another workspace's job answers the status its ending records. While
+   * none is stored its owner's lease is checked every third of it, and a
+   * lapsed one ends the job as hung up.
+   *
+   * @param signal abandons the wait, so a caller that gave up stops its
+   *   reads: a promise cannot be cancelled, where Python cancels its task.
+   *   The job keeps running.
    */
-  async wait(jobId: number, sessionId = ''): Promise<Job> {
+  async wait(jobId: number, sessionId = '', signal?: AbortSignal): Promise<Job> {
     const job = this.get(jobId, sessionId)
     if (job === null) {
       throw new Error(`unknown job: ${jobId.toString()}`)
     }
-    if (job.process === null) return job
-    await job.console.waitFinished()
+    if (job.process === null) {
+      if (job.status === JobStatus.RUNNING) await this.joinRemote(job, signal)
+      return job
+    }
+    await job.console.waitFinished(signal)
+    if (signal?.aborted === true) return job
+    await adoptEnding(job)
     let timer: ReturnType<typeof setTimeout> | undefined
+    let stop = (): void => undefined
     const late = new Promise<null>((resolve) => {
-      timer = setTimeout(() => {
+      stop = () => {
         resolve(null)
-      }, STOP_WAIT_SECONDS * 1000)
+      }
+      timer = setTimeout(stop, STOP_WAIT_SECONDS * 1000)
+      signal?.addEventListener('abort', stop, { once: true })
     })
     try {
       await Promise.race([job.process.join(), late])
     } finally {
       clearTimeout(timer)
+      signal?.removeEventListener('abort', stop)
     }
     return job
   }
@@ -434,10 +666,10 @@ export class JobTable {
    * snapshots each console right after this returns. Joining a
    * finished job costs one read.
    */
-  async waitAll(sessionId = ''): Promise<Job[]> {
+  async waitAll(sessionId = '', signal?: AbortSignal): Promise<Job[]> {
     const running = this.runningJobs(sessionId)
     for (const job of this.listJobs(sessionId)) {
-      await this.wait(job.id, sessionId)
+      await this.wait(job.id, sessionId, signal)
     }
     return running
   }
@@ -449,8 +681,11 @@ export class JobTable {
    * GNU bash, where a job waited on by id is deleted from the job list,
    * so a later `jobs` or `wait %N` no longer finds it.
    */
-  reap(jobId: number, sessionId = ''): void {
+  async reap(jobId: number, sessionId = ''): Promise<void> {
+    const job = this.get(jobId, sessionId)
+    if (job === null) return
     this.jobs.get(sessionId)?.delete(jobId)
+    await this.remove(sessionId, new Set([job.consoleName]))
   }
 
   /**
@@ -460,11 +695,286 @@ export class JobTable {
    * A reader holding a job's console keeps reading it: the console
    * outlives its table entry and dies with its last reader.
    */
-  popCompleted(sessionId = ''): Job[] {
+  async popCompleted(sessionId = ''): Promise<Job[]> {
     const jobs = this.jobs.get(sessionId)
     if (jobs === undefined) return []
     const completed = [...jobs.values()].filter((j) => j.status !== JobStatus.RUNNING)
     for (const j of completed) jobs.delete(j.id)
+    if (completed.length > 0)
+      await this.remove(sessionId, new Set(completed.map((j) => j.consoleName)))
     return completed
+  }
+
+  /** Another workspace's job, as its list entry describes it. */
+  private remote(jobId: number, sessionId: string, entry: ListEntry): Job {
+    return new Job({
+      id: jobId,
+      command: entry.command,
+      cwd: entry.cwd,
+      createdAt: entry.created_at,
+      console: new JobConsole(this.store.console(entry.console)),
+      sessionId,
+      owner: entry.owner,
+      consoleName: entry.console,
+    })
+  }
+
+  /**
+   * End a killed job's console once its runner has stopped, or
+   * `STOP_WAIT_SECONDS` after the kill, whichever comes first. A runner
+   * that settles ends the console itself, with the status it left; this
+   * ends it with the status the kill recorded when the runner never got
+   * that far (aborted before it began) or is still stopping, or at once
+   * when cut (close()). Mirrors Python's `_end_killed`.
+   */
+  private endKilled(job: Job, process: ProcessHandle): void {
+    let cut = (): void => undefined
+    const late = new Promise<void>((resolve) => {
+      const timer = setTimeout(resolve, STOP_WAIT_SECONDS * 1000)
+      cut = () => {
+        clearTimeout(timer)
+        resolve()
+      }
+    })
+    const ending = (async () => {
+      await Promise.race([process.join(), late])
+      cut()
+      await this.endStopping(job)
+    })()
+      .catch((err: unknown) => {
+        console.debug('ending a killed job failed:', err)
+      })
+      .finally(() => this.stopping.delete(job))
+    this.stopping.set(job, { ending, cut })
+  }
+
+  /**
+   * End a killed job's console with the status its kill recorded, unless
+   * its runner already ended it.
+   */
+  private async endStopping(job: Job): Promise<void> {
+    if (job.console.finished) return
+    await markKilled(job.console, job.exitCode)
+    await this.recordEnding(job)
+    this.dropLease()
+  }
+
+  /**
+   * Keep how a job this table ran ended in its list entry, or drop its
+   * disowned record, which nothing else would. The entry outlives the
+   * console's output, which a shared store expires, so a workspace that
+   * attaches after the output went still reads how the job ended instead
+   * of taking it as hung up. A failed write is logged: the console still
+   * holds the ending.
+   */
+  private async recordEnding(job: Job): Promise<void> {
+    const ending = outcomeOf(job)
+    try {
+      for (let attempt = 0; attempt < LIST_MAX_RETRIES; attempt++) {
+        const fields = await this.store.load(job.sessionId)
+        if (fields === null) return
+        const jobs = { ...((fields.jobs ?? {}) as Record<string, ListEntry>) }
+        const held = { ...((fields.disowned ?? {}) as Record<string, ListEntry>) }
+        if (job.consoleName in held) {
+          // eslint-disable-next-line @typescript-eslint/no-dynamic-delete -- held is keyed by console name
+          delete held[job.consoleName]
+        } else {
+          const entry = jobs[job.id.toString()]
+          if (entry?.console !== job.consoleName || entry.ending === ending) return
+          jobs[job.id.toString()] = { ...entry, ending }
+        }
+        if (await this.write(job.sessionId, fields, jobs, Number(fields.next ?? 1), held)) return
+      }
+      console.debug('job ending kept conflicting:', job.id)
+    } catch (err) {
+      console.debug('job ending not kept:', err)
+    }
+  }
+
+  /**
+   * Settle another workspace's job from its console's ending, or end it as
+   * hung up when its owner's lease lapsed with none.
+   */
+  private async refresh(job: Job): Promise<void> {
+    let outcome = await job.console.outcome()
+    if (outcome === null) {
+      if (await this.store.alive(job.owner)) return
+      await markKilled(job.console, HANGUP_EXIT_CODE)
+      outcome = await job.console.outcome()
+      if (outcome === null) return
+    }
+    ;[job.status, job.exitCode] = ended(outcome)
+  }
+
+  /**
+   * Block until another workspace's job ends, or `signal` aborts. One read
+   * follows the console across every lease check, so a long wait never
+   * stacks readers, and an abandoned one stops reading.
+   */
+  private async joinRemote(job: Job, signal?: AbortSignal): Promise<void> {
+    const lease = this.store.leaseSeconds
+    const finished = job.console.waitFinished(signal)
+    finished.catch((err: unknown) => {
+      console.debug('job wait failed:', err)
+    })
+    while (job.status === JobStatus.RUNNING && signal?.aborted !== true) {
+      if (lease === null) {
+        await finished
+      } else {
+        let timer: ReturnType<typeof setTimeout> | undefined
+        const check = new Promise<null>((resolve) => {
+          timer = setTimeout(
+            () => {
+              resolve(null)
+            },
+            (lease * 1000) / 3,
+          )
+        })
+        try {
+          await Promise.race([finished, check])
+        } finally {
+          clearTimeout(timer)
+        }
+      }
+      if (job.console.store.closed) return
+      await this.refresh(job)
+    }
+  }
+
+  /**
+   * Add a job to a session's list under the next number. Numbering
+   * restarts at 1 once the list is empty, as GNU bash restarts it; without
+   * that, reaping after a targeted `wait` would leave a later `wait %1`
+   * pointing at nothing.
+   */
+  private async allocate(sessionId: string, entry: ListEntry): Promise<number> {
+    for (let attempt = 0; attempt < LIST_MAX_RETRIES; attempt++) {
+      const fields = await this.store.load(sessionId)
+      const jobs = { ...((fields?.jobs ?? {}) as Record<string, ListEntry>) }
+      const jobId = Object.keys(jobs).length > 0 ? Number(fields?.next ?? 1) : 1
+      jobs[jobId.toString()] = entry
+      if (await this.write(sessionId, fields, jobs, jobId + 1)) return jobId
+    }
+    throw new Error(`job list of session ${sessionId} kept conflicting with another writer`)
+  }
+
+  /**
+   * Add a job to a session's list under its own number, or under the next
+   * free one should another job hold it, and return the number it took.
+   */
+  private async insert(sessionId: string, jobId: number, entry: ListEntry): Promise<number> {
+    for (let attempt = 0; attempt < LIST_MAX_RETRIES; attempt++) {
+      const fields = await this.store.load(sessionId)
+      const jobs = { ...((fields?.jobs ?? {}) as Record<string, ListEntry>) }
+      const following = Number(fields?.next ?? 1)
+      let taken = jobId
+      if (taken.toString() in jobs) {
+        taken = following
+        while (taken.toString() in jobs) taken += 1
+      }
+      jobs[taken.toString()] = entry
+      if (await this.write(sessionId, fields, jobs, Math.max(following, taken + 1))) return taken
+    }
+    throw new Error(`job list of session ${sessionId} kept conflicting with another writer`)
+  }
+
+  /**
+   * Drop jobs from a session's list, named by their consoles, never by
+   * number: another workspace may have reaped one and a new job taken its
+   * number. With `giveBack` the jobs never started, so the last number
+   * handed out is free again, as no job took it. With `disowned` the jobs
+   * still run, disowned: their entries move to the list's disowned ones,
+   * by console, where the session's close still reaches them.
+   */
+  private async remove(
+    sessionId: string,
+    names: Set<string>,
+    giveBack = false,
+    disowned = false,
+  ): Promise<void> {
+    for (let attempt = 0; attempt < LIST_MAX_RETRIES; attempt++) {
+      const fields = await this.store.load(sessionId)
+      if (fields === null) return
+      const stored = (fields.jobs ?? {}) as Record<string, ListEntry>
+      const dropped = new Set(
+        Object.entries(stored)
+          .filter(([, entry]) => names.has(entry.console))
+          .map(([key]) => Number(key)),
+      )
+      if (dropped.size === 0) return
+      const jobs = Object.fromEntries(
+        Object.entries(stored).filter(([key]) => !dropped.has(Number(key))),
+      )
+      let following = Number(fields.next ?? 1)
+      if (giveBack && dropped.has(following - 1)) following -= 1
+      const held = { ...((fields.disowned ?? {}) as Record<string, ListEntry>) }
+      if (disowned)
+        for (const [key, entry] of Object.entries(stored))
+          if (dropped.has(Number(key)) && entry.ending === undefined) held[entry.console] = entry
+      if (await this.write(sessionId, fields, jobs, following, held)) return
+    }
+    throw new Error(`job list of session ${sessionId} kept conflicting with another writer`)
+  }
+
+  /**
+   * Write a session's list over the one read, iff still current.
+   * `disowned` is the disowned jobs still running, by console; null keeps
+   * the ones read.
+   */
+  private write(
+    sessionId: string,
+    fields: RecordFields | null,
+    jobs: Record<string, ListEntry>,
+    following: number,
+    disowned: Record<string, ListEntry> | null = null,
+  ): Promise<boolean> {
+    const expected = generationOf(fields)
+    const held = disowned ?? ((fields?.disowned ?? {}) as Record<string, ListEntry>)
+    const record: RecordFields = { next: following, jobs, generation: expected + 1 }
+    if (Object.keys(held).length > 0) record.disowned = held
+    return this.store.casSet(sessionId, record, expected)
+  }
+
+  /**
+   * Renew this table's lease while it runs jobs on a store that leases
+   * owners, with the consoles of the jobs it still runs, so a quiet one
+   * keeps its output while this table lives.
+   */
+  private keepLease(): void {
+    const lease = this.store.leaseSeconds
+    if (lease === null || this.lease !== null) return
+    const renew = () => {
+      this.lease = setTimeout(
+        () => {
+          // A failed renewal is logged and retried: should the lease lapse
+          // meanwhile, other workspaces end this table's jobs as hung up and
+          // the watchers here stop them, so the two never disagree.
+          const consoles = [...this.allJobs(), ...this.disowned]
+            .filter((j) => j.process !== null && !j.console.finished)
+            .map((j) => j.consoleName)
+          this.store.renew(this.owner, consoles).catch((err: unknown) => {
+            console.debug('job lease renewal failed:', err)
+          })
+          if (this.lease !== null) renew()
+        },
+        (lease * 1000) / 3,
+      )
+    }
+    renew()
+  }
+
+  /**
+   * Stop renewing once every job this table runs has ended its console: a
+   * killed one still stopping keeps the lease, or other workspaces would
+   * end it as hung up.
+   */
+  private dropLease(): void {
+    if (this.lease === null) return
+    if (
+      [...this.allJobs(), ...this.disowned].some((j) => j.process !== null && !j.console.finished)
+    )
+      return
+    clearTimeout(this.lease)
+    this.lease = null
   }
 }

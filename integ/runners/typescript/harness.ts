@@ -112,10 +112,10 @@ export interface Target {
   docs?: string
   dataset?: string
   facet?: string
-  // Where background-job consoles live: { type: 'redis' } puts each
-  // job's console on its own Redis stream (REDIS_URL). Only the ram
-  // opener consults it; main.ts refuses it on any other VFS.
-  console?: { type?: string }
+  // Where background jobs live: { type: 'redis' } puts each session's
+  // job list and each job's console on REDIS_URL. Only the ram opener
+  // consults it; main.ts refuses it on any other VFS.
+  jobs?: { type?: string }
   // Where the file cache lives: { type: 'redis' } puts it on REDIS_URL
   // under each open's own key prefix. Only the ram opener consults it;
   // main.ts refuses it on any other VFS.

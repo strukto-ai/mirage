@@ -36,7 +36,11 @@ class Job:
     Output lives in ``console`` rather than in byte fields, so a reader
     can watch a job while it runs instead of waiting for it to end. A
     ``simple`` job is one simple command, which the job is, so a program
-    it ran that handled a ``kill`` leaves the job its own status.
+    it ran that handled a ``kill`` leaves the job its own status. Its
+    ``owner`` is the job table that runs it; a job another workspace
+    runs has no ``process`` here. Its ``console_name`` is the name its
+    job store keeps the console under, which tells apart two jobs a
+    reused number gave the same id.
     """
 
     id: int
@@ -49,6 +53,8 @@ class Job:
     session_id: str = ""
     process: ProcessHandle | None = None
     simple: bool = False
+    owner: str = ""
+    console_name: str = ""
 
     @property
     def execution_id(self) -> str | None:
@@ -62,8 +68,8 @@ class Job:
     def pid(self) -> int:
         """The managed PID `$!`, `jobs -p` and `wait -p` report.
 
-        A job restored from a snapshot has no runner, so its job number
-        stands in.
+        A job restored from a snapshot or run by another workspace has
+        no runner here, so its job number stands in.
         """
         return self.process.info.pid if self.process is not None else self.id
 
@@ -71,5 +77,3 @@ class Job:
 JobRunner = Callable[
     [Job], Coroutine[Any, Any, tuple[IOResult, ExecutionNode]]
 ]
-
-ConsoleFactory = Callable[[int], JobConsole]

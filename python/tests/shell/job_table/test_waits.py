@@ -35,11 +35,11 @@ async def test_join_outlasts_every_job_including_ones_added_meanwhile():
         return IOResult(), ExecutionNode(command="late", exit_code=0)
 
     async def first(job):
-        waits.add(table.submit("late", late, cwd="/"))
+        waits.add(await table.submit("late", late, cwd="/"))
         finished.append("first")
         return IOResult(), ExecutionNode(command="first", exit_code=0)
 
-    waits.add(table.submit("first", first, cwd="/"))
+    waits.add(await table.submit("first", first, cwd="/"))
     joined = asyncio.create_task(waits.join(JobConsole()))
     await asyncio.sleep(0.01)
     assert not joined.done()

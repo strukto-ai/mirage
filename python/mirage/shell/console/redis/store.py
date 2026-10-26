@@ -12,13 +12,18 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 import time
 from typing import cast
 
 import redis.asyncio as aioredis
 from redis import exceptions as redis_exceptions
 
-from mirage.shell.console.redis.constants import APPEND_LUA, BLOCK_MS
+from mirage.shell.console.redis.constants import (
+    APPEND_LUA,
+    BLOCK_MS,
+    ENDED_POLL_MS,
+)
 from mirage.shell.console.types import Channel, ConsoleChunk, ReadResult
 
 
@@ -33,11 +38,9 @@ class RedisConsoleStore:
     Both languages write the same schema, so the reader does not have to
     be the writer's language.
 
-    The job owns its keys: a factory must hand every job a prefix
+    The job owns its keys: its job store hands every job a prefix
     nothing else has written, because a reused stream replays the
-    previous job's chunks, ending chunk included. ``key_prefix`` stays
-    public because it is the console's address: an embedder reads it off
-    a job's store and hands it to the process that should attach.
+    previous job's chunks, ending chunk included.
 
     The ending chunk is terminal in the store itself, not only in this
     process: the append script refuses any append once a CONTROL chunk
@@ -45,16 +48,24 @@ class RedisConsoleStore:
     guard is dropped server-side instead of landing after the ending.
 
     ``wait`` blocks server-side (XREAD BLOCK) in short rounds so a
-    local ``close`` is noticed within one round. There is no retention
+    local ``close`` is noticed within one round; ``wait_ended`` polls
+    the ending flag instead, so a watcher costs nothing per chunk. There is no retention
     trim, so ``read_from`` never reports a truncated cursor; retention
-    is bounded by ``ttl_seconds`` instead, refreshed on every append,
-    so a console expires that long after its job's last write.
+    is bounded by ``ttl_seconds`` instead, refreshed on every append
+    and by ``expire``, which a job's owner calls while the job runs, so
+    a console expires that long after its job ended or its owner went,
+    and never under a quiet job still running: a reader parked on it
+    would not see a restarted sequence.
 
     Args:
         url (str): Redis connection URL.
         key_prefix (str): namespace for this one console's keys.
         ttl_seconds (int | None): expire the keys this long after the
-            last append. None keeps them until deleted by hand.
+            last append or ``expire``. None keeps them until deleted by
+            hand.
+        client (aioredis.Redis | None): a client the caller owns and
+            shares between consoles (a job store's); None connects to
+            ``url`` and closes that connection on ``close``.
     """
 
     def __init__(
@@ -62,9 +73,11 @@ class RedisConsoleStore:
         url: str = "redis://localhost:6379/0",
         key_prefix: str = "mirage:console:",
         ttl_seconds: int | None = None,
+        client: aioredis.Redis | None = None,
     ) -> None:
         self.key_prefix = key_prefix
-        self._client = aioredis.from_url(url)
+        self._owns_client = client is None
+        self._client = client if client is not None else aioredis.from_url(url)
         self._stream = f"{key_prefix}stream"
         self._counter = f"{key_prefix}seq"
         self._ended = f"{key_prefix}ended"
@@ -75,6 +88,12 @@ class RedisConsoleStore:
     @property
     def closed(self) -> bool:
         return self._closed
+
+    @property
+    def keys(self) -> tuple[str, str, str]:
+        """The console's keys: its stream, its counter and its ending
+        flag."""
+        return (self._stream, self._counter, self._ended)
 
     async def append(self, channel: Channel, data: bytes) -> ConsoleChunk:
         """Append one chunk, atomically against the console's ending.
@@ -129,9 +148,25 @@ class RedisConsoleStore:
             if resp:
                 return
 
+    async def wait_ended(self) -> None:
+        while not self._closed:
+            if await self._client.exists(self._ended):
+                return
+            await asyncio.sleep(ENDED_POLL_MS / 1000)
+
+    async def expire(self) -> None:
+        """Push the keys' expiry out again, as an append does."""
+        self._check_open()
+        if self._ttl:
+            pipe = self._client.pipeline()
+            for key in self.keys:
+                pipe.expire(key, self._ttl)
+            await pipe.execute()
+
     async def close(self) -> None:
         self._closed = True
-        await self._client.aclose()
+        if self._owns_client:
+            await self._client.aclose()
 
     async def clear(self) -> None:
         """Delete the console's keys (test and integ teardown only)."""

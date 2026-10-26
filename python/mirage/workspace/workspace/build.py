@@ -18,6 +18,7 @@ from typing import Any
 from mirage.observe.store import ObserverStore
 from mirage.runtime.base import Runtime
 from mirage.runtime.binding import WorkspaceBinding
+from mirage.shell.job_table.store import JobStore
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.namespace.store import NamespaceStore
 from mirage.workspace.store import RAMWorkspaceStateStore, WorkspaceStateStore
@@ -38,6 +39,7 @@ class ControlStores:
     observe: ObserverStore
     namespace: NamespaceStore
     sessions: NamespaceStore
+    jobs: JobStore
 
 
 def resolve_control_stores(
@@ -48,7 +50,7 @@ def resolve_control_stores(
     namespace_store: NamespaceStore | None,
     session_store: NamespaceStore | None,
 ) -> ControlStores:
-    """Resolve the state-store provider and its three planes.
+    """Resolve the state-store provider and its planes.
 
     A caller-passed provider may be shared with sibling workspaces, so
     only a workspace that built its own provider (or was told it owns
@@ -77,6 +79,7 @@ def resolve_control_stores(
         observe=observe,
         namespace=namespace_store,
         sessions=session_store,
+        jobs=state_store.jobs(workspace_id),
     )
 
 

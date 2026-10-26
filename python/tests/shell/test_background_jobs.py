@@ -66,7 +66,7 @@ def test_kill_settles_a_runner_that_ignores_the_cancel():
     async def _run():
         _DEAF_RELEASE.clear()
         table = JobTable()
-        job = table.submit(command="deaf", run=_deaf_run, cwd="/")
+        job = await table.submit(command="deaf", run=_deaf_run, cwd="/")
         while not await job.console.snapshot(Channel.STDOUT):
             await asyncio.sleep(0)
 
@@ -75,17 +75,18 @@ def test_kill_settles_a_runner_that_ignores_the_cancel():
 
         assert job.status == JobStatus.KILLED
         assert job.exit_code == 137
-        assert job.console.finished
+        assert not job.console.finished
 
         # The runner finishes normally afterwards; it must not relabel
-        # the job it no longer owns.
+        # the job it was told to stop.
         while not _DEAF_RELEASE:
             await asyncio.sleep(0)
         _DEAF_RELEASE[0].set()
-        await asyncio.sleep(0)
-        await asyncio.sleep(0)
+        assert job.process is not None
+        await job.process.join()
         assert job.status == JobStatus.KILLED
         assert job.exit_code == 137
+        assert job.console.finished
 
     asyncio.run(_run())
 
@@ -93,7 +94,7 @@ def test_kill_settles_a_runner_that_ignores_the_cancel():
 def test_wait_handles_task_exception():
     async def _run():
         table = JobTable()
-        table.submit(command="bad_cmd", run=_failing_run, cwd="/")
+        await table.submit(command="bad_cmd", run=_failing_run, cwd="/")
         job = await table.wait(1)
         assert job.status == JobStatus.COMPLETED
         assert job.exit_code == 1
@@ -106,8 +107,8 @@ def test_wait_handles_task_exception():
 def test_wait_all_survives_failing_task():
     async def _run():
         table = JobTable()
-        table.submit(command="bad", run=_failing_run, cwd="/")
-        table.submit(command="good", run=_successful_run, cwd="/")
+        await table.submit(command="bad", run=_failing_run, cwd="/")
+        await table.submit(command="good", run=_successful_run, cwd="/")
         jobs = await table.wait_all()
         assert len(jobs) == 2
         bad = table.get(1)
@@ -122,7 +123,7 @@ def test_wait_all_survives_failing_task():
 def test_wait_successful_task():
     async def _run():
         table = JobTable()
-        table.submit(command="echo hello", run=_successful_run, cwd="/")
+        await table.submit(command="echo hello", run=_successful_run, cwd="/")
         job = await table.wait(1)
         assert job.status == JobStatus.COMPLETED
         assert job.exit_code == 0
@@ -134,11 +135,14 @@ def test_wait_successful_task():
 def test_kill_keeps_output_produced_before_the_kill():
     async def _run():
         table = JobTable()
-        job = table.submit(command="noisy", run=_never_ending_run, cwd="/")
+        job = await table.submit(
+            command="noisy", run=_never_ending_run, cwd="/"
+        )
         while not await job.console.snapshot(Channel.STDOUT):
             await asyncio.sleep(0)
 
         assert await table.kill(1)
+        await table.wait(1)
 
         assert job.status == JobStatus.KILLED
         assert job.exit_code == 137
@@ -148,17 +152,21 @@ def test_kill_keeps_output_produced_before_the_kill():
     asyncio.run(_run())
 
 
-def test_kill_returns_a_settled_job():
-    """kill joins, so a caller never sees a half-dead job."""
+def test_kill_answers_killed_at_once_and_ends_the_console_once_stopped():
+    """kill never joins; the console ends once the runner has stopped."""
 
     async def _run():
         table = JobTable()
-        job = table.submit(command="noisy", run=_never_ending_run, cwd="/")
+        job = await table.submit(
+            command="noisy", run=_never_ending_run, cwd="/"
+        )
 
         assert await table.kill(1)
 
-        assert job.console.finished
         assert job.status == JobStatus.KILLED
+        assert job.process is not None
+        await job.process.join()
+        assert job.console.finished
 
     asyncio.run(_run())
 
@@ -166,7 +174,7 @@ def test_kill_returns_a_settled_job():
 def test_kill_is_false_for_unknown_and_finished_jobs():
     async def _run():
         table = JobTable()
-        table.submit(command="echo hello", run=_successful_run, cwd="/")
+        await table.submit(command="echo hello", run=_successful_run, cwd="/")
         await table.wait(1)
 
         assert not await table.kill(1)
@@ -178,8 +186,8 @@ def test_kill_is_false_for_unknown_and_finished_jobs():
 def test_kill_all_stops_every_running_job():
     async def _run():
         table = JobTable()
-        table.submit(command="a", run=_never_ending_run, cwd="/")
-        table.submit(command="b", run=_never_ending_run, cwd="/")
+        await table.submit(command="a", run=_never_ending_run, cwd="/")
+        await table.submit(command="b", run=_never_ending_run, cwd="/")
 
         killed = await table.kill_all()
 

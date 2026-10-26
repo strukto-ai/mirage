@@ -18,35 +18,33 @@ from mirage.utils.loader import lazy_exports
 
 if TYPE_CHECKING:
     from mirage.shell.job_table.constants import KILLED_EXIT_CODE
+    from mirage.shell.job_table.ram import RAMJobStore
+    from mirage.shell.job_table.redis import RedisJobStore
+    from mirage.shell.job_table.store import JobStore
     from mirage.shell.job_table.table import JobTable, cancel_job
-    from mirage.shell.job_table.types import (
-        ConsoleFactory,
-        Job,
-        JobRunner,
-        JobStatus,
-    )
+    from mirage.shell.job_table.types import Job, JobRunner, JobStatus
     from mirage.shell.job_table.waits import JobWaits
 
 _EXPORTS: dict[str, tuple[str, ...]] = {
     "mirage.shell.job_table.constants": ("KILLED_EXIT_CODE",),
+    "mirage.shell.job_table.ram": ("RAMJobStore",),
+    "mirage.shell.job_table.redis": ("RedisJobStore",),
+    "mirage.shell.job_table.store": ("JobStore",),
     "mirage.shell.job_table.table": ("JobTable", "cancel_job"),
-    "mirage.shell.job_table.types": (
-        "ConsoleFactory",
-        "Job",
-        "JobRunner",
-        "JobStatus",
-    ),
+    "mirage.shell.job_table.types": ("Job", "JobRunner", "JobStatus"),
     "mirage.shell.job_table.waits": ("JobWaits",),
 }
 
 __all__ = [
     "KILLED_EXIT_CODE",
-    "ConsoleFactory",
     "Job",
     "JobRunner",
     "JobStatus",
+    "JobStore",
     "JobTable",
     "JobWaits",
+    "RAMJobStore",
+    "RedisJobStore",
     "cancel_job",
 ]
 

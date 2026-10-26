@@ -51,6 +51,15 @@ One virtual terminal over the backends mounted at each prefix.
 <ResponseField name="options.onAsk" type="AskHandler">
   Answers an ask while the line waits. Without one, asks wait in [`ws.decisions`](#ws-decisions).
 </ResponseField>
+<ResponseField name="options.workspaceId" type="string">
+  The workspace's id, generated when unset.
+</ResponseField>
+<ResponseField name="options.sessionId" type="string">
+  The default session's id.
+</ResponseField>
+<ResponseField name="options.store" type="WorkspaceStateStore">
+  Where the workspace keeps its [state](/home/configuration#cache-index-and-store): symlinks and file attributes, command history, sessions and background jobs. In memory when unset. A store passed in is borrowed: close it after `ws.close()`, or pass `ownsStore: true`.
+</ResponseField>
 
 See [Workspace configuration](/home/configuration) for `snake_case` YAML settings.
 Direct SDK construction defaults `mode` to `READ`; YAML defaults it to `write`.
@@ -72,6 +81,18 @@ import { IOConfig, RAMVFS, Workspace } from '@struktoai/mirage-node'
 const ws = new Workspace(
   { '/': new RAMVFS() },
   { io: new IOConfig({ bufferBytes: 262144 }) },
+)
+```
+
+Every process that builds the workspace on one Redis store, under the same ids, shares its sessions, history and background jobs:
+
+```ts
+import { MountMode, RAMVFS, RedisWorkspaceStateStore, Workspace } from '@struktoai/mirage-node'
+
+const store = new RedisWorkspaceStateStore({ url: 'redis://localhost:6379/0' })
+const ws = new Workspace(
+  { '/': new RAMVFS() },
+  { mode: MountMode.WRITE, workspaceId: 'agent-ws', sessionId: 's1', store },
 )
 ```
 

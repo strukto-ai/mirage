@@ -15,6 +15,7 @@
 from collections.abc import AsyncIterator
 
 from mirage.shell.bytes import encode_text
+from mirage.shell.console.constants import END_OF_CONSOLE
 from mirage.shell.console.ram import RAMConsoleStore
 from mirage.shell.console.store import ConsoleStore
 from mirage.shell.console.types import (
@@ -65,9 +66,8 @@ class JobConsole:
     def store(self) -> ConsoleStore:
         """Where this console's chunks live.
 
-        Public because the store carries the console's address: a
-        shared store (``RedisConsoleStore.key_prefix``) is how an
-        embedder points a reader in another process at a live console.
+        A job's console is the one its job store names, which every
+        workspace on that store reads and ends.
         """
         return self._store
 
@@ -172,6 +172,23 @@ class JobConsole:
             await self._store.wait(seq)
             if self._store.closed:
                 return
+
+    async def outcome(self) -> str | None:
+        """How the job ended, or None while no ending is stored.
+
+        Reads only the last chunk, wherever the store keeps it: a read
+        past the end answers the console's length, and the ending is
+        always the last chunk. This is how a workspace learns how
+        another one's job ended.
+        """
+        _, end, _ = await self._store.read_from(END_OF_CONSOLE)
+        if end == 0:
+            return None
+        chunks, _, _ = await self._store.read_from(end - 1, 1)
+        last = chunks[-1] if chunks else None
+        if last is None or last.channel != Channel.CONTROL:
+            return None
+        return last.data.decode()
 
     async def snapshot(self, channel: Channel | None = None) -> bytes:
         """Join everything the job has printed so far.

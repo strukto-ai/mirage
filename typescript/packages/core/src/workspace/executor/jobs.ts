@@ -367,7 +367,7 @@ export async function handleBackground(
   // interactive-only); the job stays discoverable via $! and `jobs`.
   let job: Job
   try {
-    job = jobTable.submit({
+    job = await jobTable.submit({
       command: cmdStr,
       run: runBg,
       abort,
@@ -513,23 +513,31 @@ function resolveSpec(jobs: readonly Job[], spec: string): [Job | null, string] {
   return [null, `\`${spec}': not a pid or valid job spec`]
 }
 
-/** Block until the first of several jobs ends, and return it. */
-async function waitFirst(jobTable: JobTable, jobs: Job[]): Promise<Job> {
+/**
+ * Block until the first of several jobs ends, and return it. Once one has,
+ * the other waits are abandoned, as `signal` abandons them all.
+ */
+async function waitFirst(jobTable: JobTable, jobs: Job[], signal?: AbortSignal): Promise<Job> {
   for (const job of jobs) {
-    if (job.status !== JobStatus.RUNNING) return await jobTable.wait(job.id, job.sessionId)
+    if (job.status !== JobStatus.RUNNING) return await jobTable.wait(job.id, job.sessionId, signal)
   }
-  const races = jobs.map(async (job) => await jobTable.wait(job.id, job.sessionId))
-  return await Promise.race(races)
+  const losers = new AbortController()
+  const done = signal === undefined ? losers.signal : AbortSignal.any([signal, losers.signal])
+  try {
+    return await Promise.race(jobs.map((job) => jobTable.wait(job.id, job.sessionId, done)))
+  } finally {
+    losers.abort()
+  }
 }
 
 /**
  * Report one finished job's status, and reap it. Its output already went
  * where its shell writes as it was written.
  */
-function reaped(jobTable: JobTable, job: Job, cmdStr: string): JobHandlerResult {
+async function reaped(jobTable: JobTable, job: Job, cmdStr: string): Promise<JobHandlerResult> {
   // Reaped like GNU bash reaps a job waited on by id, so a later bare
   // `wait` does not answer for it again.
-  jobTable.reap(job.id, job.sessionId)
+  await jobTable.reap(job.id, job.sessionId)
   return [
     null,
     new IOResult({ exitCode: job.exitCode }),
@@ -616,6 +624,7 @@ export async function handleWait(
   }
   const errors: string[] = []
   const picked: Job[] = []
+  await jobTable.sync(sid)
   const visible = jobTable.listJobs(sid)
   for (const spec of specs) {
     const [job, refusal] = resolveSpec(visible, spec)
@@ -636,15 +645,15 @@ export async function handleWait(
         new ExecutionNode({ command: cmdStr, exitCode: 127 }),
       ]
     }
-    const job = await abortable(waitFirst(jobTable, candidates), signal)
+    const job = await abortable(waitFirst(jobTable, candidates, signal), signal)
     if (varName !== null && view !== null) await view.set(varName, String(job.pid))
-    const [stdout, io, node] = reaped(jobTable, job, cmdStr)
+    const [stdout, io, node] = await reaped(jobTable, job, cmdStr)
     if (errBytes !== null) io.stderr = errBytes
     return [stdout, io, node]
   }
   if (specs.length === 0) {
-    await abortable(jobTable.waitAll(sid), signal)
-    jobTable.popCompleted(sid)
+    await abortable(jobTable.waitAll(sid, signal), signal)
+    await jobTable.popCompleted(sid)
     return [null, new IOResult(), new ExecutionNode({ command: cmdStr, exitCode: 0 })]
   }
   if (picked.length === 0) {
@@ -657,8 +666,8 @@ export async function handleWait(
   let lastCode = 0
   let lastJob: Job | null = null
   for (const job of picked) {
-    const finished = await abortable(jobTable.wait(job.id, sid), signal)
-    const [, io] = reaped(jobTable, finished, cmdStr)
+    const finished = await abortable(jobTable.wait(job.id, sid, signal), signal)
+    const [, io] = await reaped(jobTable, finished, cmdStr)
     lastCode = io.exitCode
     lastJob = finished
   }
@@ -682,12 +691,12 @@ export async function handleWait(
  * it in the table, a no-op here since no hangup is ever delivered. A spec
  * naming no job is `no such job`, exit 1, and the others still drop.
  */
-export function handleDisown(
+export async function handleDisown(
   jobTable: JobTable,
   parts: string[],
   session: SessionState | null = null,
   _view: SessionView | null = null,
-): JobHandlerResult {
+): Promise<JobHandlerResult> {
   const cmdStr = parts.join(' ')
   const sid = sessionOf(session)
   const scan = scanOptions(parts.slice(1), 'arh')
@@ -700,6 +709,7 @@ export function handleDisown(
   const specs = scan.operands
   let targets: Job[] = []
   const errors: string[] = []
+  await jobTable.sync(sid)
   const jobs = jobTable.listJobs(sid)
   if (specs.length > 0) {
     for (const spec of specs) {
@@ -720,7 +730,7 @@ export function handleDisown(
     targets = [current]
   }
   if (!keep) {
-    for (const job of targets) jobTable.disown(job.id, sid)
+    for (const job of targets) await jobTable.disown(job.id, sid)
   }
   const err = errors.length > 0 ? encodeText(errors.join('\n') + '\n') : null
   const code = errors.length > 0 ? 1 : 0
@@ -753,6 +763,7 @@ export async function handleFg(
 ): Promise<JobHandlerResult> {
   const cmdStr = parts.join(' ')
   const sid = sessionOf(session)
+  await jobTable.sync(sid)
   const jobs = jobTable.listJobs(sid)
   let target: Job
   if (parts.length <= 1) {
@@ -782,8 +793,8 @@ export async function handleFg(
   }
   const header = encodeText(target.command + '\n')
   if (sink !== undefined) await sink.emit(Channel.STDOUT, header)
-  const job = await abortable(jobTable.wait(target.id, sid), signal)
-  jobTable.reap(target.id, sid)
+  const job = await abortable(jobTable.wait(target.id, sid, signal), signal)
+  await jobTable.reap(target.id, sid)
   return [
     sink === undefined ? header : null,
     new IOResult({ exitCode: job.exitCode }),
@@ -840,6 +851,20 @@ function killPid(jobs: readonly Job[], operand: string): [number | null, string]
 }
 
 /**
+ * The job a `%N` operand names when it has no runner here: another
+ * workspace runs it, or it was restored from a snapshot. It is killed
+ * through the job table, which ends another workspace's job by ending its
+ * console for its owner to see, and never through this workspace's process
+ * table, where its stand-in PID may name a runner of this workspace's own.
+ * Mirrors Python's `_runnerless`.
+ */
+function runnerless(jobs: Job[], operand: string): Job | null {
+  const raw = operand.startsWith('%') ? operand.slice(1) : ''
+  const job = /^\d+$/.test(raw) ? jobNumbered(jobs, Number(raw)) : null
+  return job !== null && job.process === null ? job : null
+}
+
+/**
  * Signal managed runners with bash's kill surface. The signal comes from
  * `-s`/`-n`, or from the first `-sigspec`; `0` probes and every other
  * signal cancels the runner with it. Every operand is tried and each failure is
@@ -887,11 +912,25 @@ export async function handleKill(
   const processes = processView(jobTable, session)
   const errors: string[] = []
   let signalled = false
+  await jobTable.sync(sid)
   for (const operand of words) {
     const jobs = jobTable.listJobs(sid)
     const [pid, refusal] = killPid(jobs, operand)
     if (pid === null) {
       errors.push(`${voice}kill: ${refusal}`)
+      continue
+    }
+    const unrun = runnerless(jobs, operand)
+    if (unrun !== null) {
+      const found =
+        signal === 0
+          ? unrun.status === JobStatus.RUNNING
+          : await jobTable.kill(unrun.id, sid, signal)
+      if (!found) {
+        errors.push(`${voice}kill: (${String(pid)}) - No such process`)
+        continue
+      }
+      signalled = true
       continue
     }
     let found: boolean
@@ -944,12 +983,12 @@ function jobRow(job: Job, long: boolean): string {
  * one that names no job is `no such job`, exit 1. `-x` is not carried,
  * and an unknown letter is GNU's usage line, exit 2.
  */
-export function handleJobs(
+export async function handleJobs(
   jobTable: JobTable,
   parts: string[],
   session: SessionState | null = null,
   _view: SessionView | null = null,
-): JobHandlerResult {
+): Promise<JobHandlerResult> {
   const cmdStr = parts.join(' ')
   const sid = sessionOf(session)
   const flags = new Set<string>()
@@ -971,6 +1010,8 @@ export function handleJobs(
       specs.push(word)
     }
   }
+  for (let table: JobTable | null = jobTable; table !== null; table = table.parent)
+    await table.sync(sid)
   let jobs = jobTable.listing(sid)
   if (specs.length > 0) {
     const picked: Job[] = []
@@ -995,7 +1036,7 @@ export function handleJobs(
   const lines = flags.has('p')
     ? jobs.map((j) => String(j.pid))
     : jobs.map((j) => jobRow(j, flags.has('l')))
-  jobTable.popCompleted(sid)
+  await jobTable.popCompleted(sid)
   const out = lines.length > 0 ? encodeText(`${lines.join('\n')}\n`) : new Uint8Array()
   return [out, new IOResult(), new ExecutionNode({ command: cmdStr, exitCode: 0 })]
 }

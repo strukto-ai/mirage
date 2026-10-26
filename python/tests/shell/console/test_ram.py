@@ -182,3 +182,34 @@ async def test_append_survives_a_waiter_whose_loop_closed():
     chunk = await store.append(Channel.STDOUT, b"a")
 
     assert chunk.seq == 0
+
+
+@pytest.mark.asyncio
+async def test_an_append_after_the_ending_is_dropped():
+    store = RAMConsoleStore()
+    await store.append(Channel.STDOUT, b"out")
+    ending = await store.append(Channel.CONTROL, b"killed:143")
+    assert await store.append(Channel.STDOUT, b"late") == ending
+    chunks, _, _ = await store.read_from(0)
+    assert [c.data for c in chunks] == [b"out", b"killed:143"]
+
+
+@pytest.mark.asyncio
+async def test_wait_ended_wakes_on_the_ending_alone():
+    store = RAMConsoleStore()
+    waiter = asyncio.ensure_future(store.wait_ended())
+    await store.append(Channel.STDOUT, b"out")
+    await asyncio.sleep(0)
+    assert not waiter.done()
+    await store.append(Channel.CONTROL, b"exit:0")
+    await asyncio.wait_for(waiter, 2)
+    await asyncio.wait_for(store.wait_ended(), 2)
+
+
+@pytest.mark.asyncio
+async def test_wait_ended_returns_on_close():
+    store = RAMConsoleStore()
+    waiter = asyncio.ensure_future(store.wait_ended())
+    await asyncio.sleep(0)
+    await store.close()
+    await asyncio.wait_for(waiter, 2)

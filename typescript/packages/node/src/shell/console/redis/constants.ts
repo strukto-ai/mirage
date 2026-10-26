@@ -22,3 +22,7 @@ import { readFileSync } from 'node:fs'
 export const APPEND_LUA = readFileSync(new URL('./append.lua', import.meta.url), 'utf8')
 
 export const POLL_MS = 100
+
+// How often `waitEnded` checks for the ending: it is how a job's owner
+// notices a kill another process wrote, which needs no chunk's latency.
+export const ENDED_POLL_MS = 1000

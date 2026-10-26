@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+export { RAMJobStore } from './ram.ts'
+export { JobStore } from './store.ts'
 export { JobTable } from './table.ts'
 export { JobWaits } from './waits.ts'
-export { type ConsoleFactory, Job, type JobResult, type JobRunner, JobStatus } from './types.ts'
+export { Job, type JobResult, type JobRunner, JobStatus } from './types.ts'

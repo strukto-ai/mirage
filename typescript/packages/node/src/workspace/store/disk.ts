@@ -25,6 +25,8 @@ import type {
   WorkspaceFields,
   WorkspaceStateStoreOverrides,
 } from '@struktoai/mirage-core/workspace/store/base'
+import { RAMJobStore } from '@struktoai/mirage-core/shell/job_table/ram'
+import type { JobStore } from '@struktoai/mirage-core/shell/job_table/store'
 import { DiskObserverStore } from '../../observe/disk_store.ts'
 import { DiskNamespaceStore } from '../mount/namespace/disk.ts'
 import { DiskRecordClient, quoteName } from '../record/disk.ts'
@@ -63,6 +65,11 @@ export interface DiskWorkspaceStateStoreOptions extends WorkspaceStateStoreOverr
  * workspace survives restart like `git init`. Local filesystems only;
  * anything cross-machine belongs on redis or s3. Mirrors the Python
  * DiskWorkspaceStateStore byte-for-byte on disk.
+ *
+ * Jobs stay in this process's memory: a job never outlives the process
+ * that runs it, and a stream other processes could follow needs Redis, so
+ * the jobs plane of processes sharing a disk store is a redis `jobs`
+ * group.
  */
 export class DiskWorkspaceStateStore extends WorkspaceStateStore {
   private readonly root: string
@@ -70,6 +77,7 @@ export class DiskWorkspaceStateStore extends WorkspaceStateStore {
   private readonly namespaces = new Map<string, DiskNamespaceStore>()
   private readonly observers = new Map<string, DiskObserverStore>()
   private readonly sessionTables = new Map<string, RecordNamespaceStore>()
+  private readonly jobPlanes = new Map<string, RAMJobStore>()
 
   constructor(options: DiskWorkspaceStateStoreOptions = {}) {
     const { root, ...overrides } = options
@@ -121,6 +129,15 @@ export class DiskWorkspaceStateStore extends WorkspaceStateStore {
     return table
   }
 
+  protected makeJobs(workspaceId: string): JobStore {
+    let jobs = this.jobPlanes.get(workspaceId)
+    if (jobs === undefined) {
+      jobs = new RAMJobStore()
+      this.jobPlanes.set(workspaceId, jobs)
+    }
+    return jobs
+  }
+
   protected async readMeta(workspaceId: string): Promise<WorkspaceFields | null> {
     const [fields] = await this.metaClient(workspaceId).get('workspace')
     return fields
@@ -135,6 +152,7 @@ export class DiskWorkspaceStateStore extends WorkspaceStateStore {
   }
 
   protected async forgetSelf(workspaceId: string): Promise<void> {
+    this.jobPlanes.delete(workspaceId)
     for (const handles of [this.namespaces, this.observers, this.sessionTables, this.meta]) {
       await handles.get(workspaceId)?.close()
       handles.delete(workspaceId)
