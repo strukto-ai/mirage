@@ -23,6 +23,7 @@ import { BIN_PREFIX } from '../../../../shell/constants.ts'
 import { DESCRIPTIONS } from './constants.ts'
 import { NameKind } from './types.ts'
 import { sessionEntry } from '../../../session/session.ts'
+import { bodyAliases } from '../alias/alias.ts'
 
 // The kind one layer reports a name as. A function is a function and one
 // of bash's own builtins is a builtin; every other layer runs a program,
@@ -134,8 +135,8 @@ export function describe(
     return `${name} is aliased to \`${sessionEntry(session.aliases, name) ?? ''}'`
   }
   const body = session === undefined ? undefined : sessionEntry(session.functions, name)
-  if (kind === NameKind.FUNCTION && body !== undefined)
-    return `${name} is a function\n${storedFunctionText(name, body, parser)}`
+  if (kind === NameKind.FUNCTION && session !== undefined && body !== undefined)
+    return `${name} is a function\n${storedFunctionText(name, body, parser, bodyAliases(session, name))}`
   if (kind === NameKind.FILE) return `${name} is ${programFile(name)}`
   return `${name} is ${DESCRIPTIONS[kind] ?? ''}`
 }

@@ -1709,6 +1709,70 @@
         "stdout": "hi\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "redirect_inner_and_hoisted_both_open",
+      "seq": 501178,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "true && > /data/a echo hi > /data/b; cat /data/a /data/b; ! > /data/c echo x > /data/d; echo $?; cat /data/c /data/d; echo y | > /data/e cat > /data/g; cat /data/e /data/g; rm /data/a /data/b /data/c /data/d /data/e /data/g",
+      "expect": {
+        "exit": 0,
+        "stdout": "hi\n1\nx\ny\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "redirect_among_assignments_reads_in_order",
+      "seq": 501179,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "unset a b; a=one > /dev/null b=$a; echo \"b=$b\"; a=$(false) > /dev/null b=two; echo \"st=$?\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "b=one\nst=1\n",
+        "stderr": ""
+      }
     }
   ]
 }

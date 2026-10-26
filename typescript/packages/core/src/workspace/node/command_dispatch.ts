@@ -101,6 +101,7 @@ import { postSessionGate, preSessionGate } from '../../policy/index.ts'
 import { ExecutionNode } from '../types.ts'
 import { concat } from '../../utils/bytes.ts'
 import type { ExpandedWords } from './types.ts'
+import { WORD_BREAKS } from '../../shell/parse/constants.ts'
 
 type Result = [ByteSource | null, IOResult, ExecutionNode]
 
@@ -116,6 +117,35 @@ async function ownWords<T>(node: TSNodeLike, pending: Promise<T>): Promise<T> {
     if (err instanceof ExitSignal) err.expanding = node.id ?? null
     throw err
   }
+}
+
+/**
+ * The aliases the parser takes for a line an alias rewrote. An alias is no
+ * alias inside the text its own expansion produced, so a name spelling a
+ * reserved word is that word there (`alias fi='if :; then :; fi'` closes its
+ * own `if`). The parser takes one set for the line, so a name that stands in
+ * its own text leaves it. Mirrors Python's parser_aliases.
+ */
+export function parserAliases(
+  line: string,
+  aliases: ReadonlySet<string>,
+  owners: readonly ReadonlySet<string>[],
+): ReadonlySet<string> {
+  return new Set([...aliases].filter((name) => !ownedWord(line, name, owners)))
+}
+
+/** Whether `name` stands as a word of `line` inside text its own expansion produced. */
+function ownedWord(line: string, name: string, owners: readonly ReadonlySet<string>[]): boolean {
+  for (let at = line.indexOf(name); at >= 0; at = line.indexOf(name, at + 1)) {
+    const end = at + name.length
+    if (
+      (at === 0 || WORD_BREAKS.has(line[at - 1] ?? '')) &&
+      (end === line.length || WORD_BREAKS.has(line[end] ?? '')) &&
+      owners[at]?.has(name) === true
+    )
+      return true
+  }
+  return false
 }
 
 export async function executeCommand(
@@ -180,7 +210,7 @@ export async function executeCommand(
       const scope = parser.fork()
       try {
         const aliases = new Set([...expandingAliases(session), ...names])
-        const ast = scope.parse(line, aliases)
+        const ast = scope.parse(line, parserAliases(line, aliases, owners))
         const found =
           checkSyntax(
             line,

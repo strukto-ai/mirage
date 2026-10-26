@@ -1128,7 +1128,7 @@ async function runParsedLine(
       // The walked set carries stored function bodies and alias
       // expansions too, so a body invoked by bare name still fills what
       // it reads.
-      const nodes = lineNodes(rootNode, effectiveSession, reparse)
+      const nodes = lineNodes(rootNode, effectiveSession)
       const filled = await fillManaged(
         nodes,
         guestBound(nodes, decision),

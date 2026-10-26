@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import re
 import shlex
 from collections.abc import Callable, Iterator, Sequence
 from dataclasses import replace
@@ -367,7 +366,12 @@ def _bind_last(
     """
     if not redirects:
         return stages
-    last = stages.redirects[-1] + tuple(redirects)
+    carried = stages.redirects[-1]
+    last = (
+        carried + tuple(redirects)
+        if carried
+        else tuple(with_own_redirects(stages.commands[-1], redirects))
+    )
     return replace(stages, redirects=stages.redirects[:-1] + (last,))
 
 
@@ -394,10 +398,13 @@ def _pipeline_head(stage: TSNodeLike) -> PipelineStages:
             return single
         body, hoisted = found, tuple(parsed)
     if body.type == NT.NEGATED_COMMAND:
+        negated = get_negated_command(body)
         return PipelineStages(
-            commands=(get_negated_command(body),),
+            commands=(negated,),
             stderr_flags=(),
-            redirects=(hoisted,),
+            redirects=(
+                tuple(with_own_redirects(negated, hoisted)) if hoisted else (),
+            ),
             negated=True,
         )
     if not hoisted:
@@ -429,24 +436,20 @@ def get_while_parts(
 
 def get_for_parts(
     node: TSNodeLike,
-) -> tuple[str, list[TSNodeLike], list[TSNodeLike]]:
+) -> tuple[str, list[TSNodeLike] | None, list[TSNodeLike]]:
     """Get (variable, values, body_commands) from for/select.
 
     Returns the do_group's children list so multi-statement
-    bodies are preserved. The parser spells a name the grammar cannot
-    read as ``for 0 in NAME``, so that header names NAME.
+    bodies are preserved. ``values`` is None for a header with no
+    ``in`` (``for f do``), which loops over ``"$@"``.
     """
     nc = node.named_children
-    variable = get_text(nc[0])
-    values = [c for c in nc[1:] if c.type not in (NT.DO_GROUP, "ERROR")]
-    if (
-        variable == "0"
-        and values
-        and not re.fullmatch(r"\w+", get_text(values[0]), re.ASCII)
-    ):
-        variable, values = get_text(values[0]), values[1:]
-    body = list(nc[-1].named_children)
-    return variable, values, body
+    values = (
+        [c for c in nc[1:] if c.type not in (NT.DO_GROUP, NT.COMMENT)]
+        if any(c.type == NT.IN for c in node.children)
+        else None
+    )
+    return get_text(nc[0]), values, list(nc[-1].named_children)
 
 
 def get_cfor_parts(
@@ -543,7 +546,14 @@ _REDIRECT_OPERATORS = (
     | _CLOSE_OPERATORS
     | _DUP_OPERATORS
     | _BOTH_OPERATORS
-    | frozenset({NT.REDIRECT_OUT, NT.REDIRECT_CLOBBER, NT.REDIRECT_APPEND})
+    | frozenset(
+        {
+            NT.REDIRECT_OUT,
+            NT.REDIRECT_CLOBBER,
+            NT.REDIRECT_APPEND,
+            NT.REDIRECT_READWRITE,
+        }
+    )
 )
 
 
@@ -570,7 +580,7 @@ def _parse_file_redirect(child: TSNodeLike) -> Redirect:
         if c.type == NT.FILE_DESCRIPTOR:
             fd = int(get_text(c))
         elif c.type in _REDIRECT_OPERATORS:
-            op = "<>" if get_text(c) == "<>" else c.type
+            op = c.type
         elif c.type == NT.NUMBER:
             dup_fd = int(get_text(c))
 
@@ -616,13 +626,17 @@ def _parse_file_redirect(child: TSNodeLike) -> Redirect:
         )
 
     if fd is None:
-        fd = FD_STDIN if op in _INPUT_OPERATORS or op == "<>" else FD_STDOUT
+        fd = (
+            FD_STDIN
+            if op in _INPUT_OPERATORS or op == NT.REDIRECT_READWRITE
+            else FD_STDOUT
+        )
     if op in _CLOSE_OPERATORS:
         target = FD_CLOSE
     elif op in _DUP_OPERATORS and dup_fd is not None:
         target = dup_fd
 
-    if op == "<>":
+    if op == NT.REDIRECT_READWRITE:
         kind = RedirectKind.READWRITE
     elif op in _INPUT_OPERATORS:
         kind = RedirectKind.STDIN
@@ -836,6 +850,20 @@ def command_redirects(node: TSNodeLike) -> list[Redirect]:
         elif child.type == NT.HERESTRING_REDIRECT:
             redirects.append(_parse_herestring_redirect(child))
     return redirects
+
+
+def with_own_redirects(
+    command: TSNodeLike, redirects: Sequence[Redirect]
+) -> list[Redirect]:
+    """Redirects hoisted onto a command, after the ones written among its
+    words: bash applies them in source order (``true && > a echo > b``).
+
+    Args:
+        command (TSNodeLike): the node the redirects bind to.
+        redirects (Sequence[Redirect]): the redirects hoisted onto it.
+    """
+    own = command_redirects(command) if command.type == NT.COMMAND else []
+    return [*own, *redirects]
 
 
 def get_list_parts(

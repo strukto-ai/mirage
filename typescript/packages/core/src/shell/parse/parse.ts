@@ -37,10 +37,11 @@ export function parse(command: string, aliases: ReadonlySet<string> = new Set())
     ? []
     : plan !== null
       ? readPlanned(command, plan)
-      : discoverHeredocs(command, heredocOperators(parseShell(command).rootNode))
-  if (documents.length === 0) return parseShell(joinContinuations(command), aliases).rootNode
+      : discoverHeredocs(command, heredocOperators(parseShell(command, aliases).rootNode))
+  if (documents.length === 0)
+    return parseShell(joinContinuations(command, aliases), aliases).rootNode
   const lowered = lowerHeredocs(command, documents, plan?.closes)
-  const source = dropSourceChars(lowered, continuationIndices(lowered.source))
+  const source = dropSourceChars(lowered, continuationIndices(lowered.source, aliases))
   return new HeredocNode(parseShell(source.source, aliases).rootNode, source)
 }
 
@@ -50,5 +51,5 @@ export function parseProgram(
   aliases: ReadonlySet<string> = new Set(),
 ): ParsedProgram {
   const root = parse(command, aliases)
-  return new ParsedProgram(command, root, sourceOffsets(command, root))
+  return new ParsedProgram(command, root, sourceOffsets(command, root, aliases))
 }

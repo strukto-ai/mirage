@@ -363,10 +363,11 @@ impl Parser<'_> {
         if closer != Closer::Single {
             let mark = self.mark();
             if let Some((word, group)) = self.pattern_word()? {
-                if grammar == Some(self.i) {
+                let literal = word.is("extglob_pattern");
+                if grammar == Some(self.i) && literal {
                     return Ok(Syn::leaf("extglob_pattern", at, self.i));
                 }
-                if group || grammar.is_some() {
+                if group || grammar.is_some() || !literal {
                     return Ok(word);
                 }
             }

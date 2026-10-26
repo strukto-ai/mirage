@@ -1359,6 +1359,40 @@
         "stdout": "1\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "alias_reserved_name_closes_its_own_block",
+      "seq": 940136,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "shopt -s expand_aliases; alias fi='if true; then echo hi; fi'; eval fi; alias fi='echo works'; eval 'f() { fi; }'; f; unalias fi",
+      "expect": {
+        "exit": 0,
+        "stdout": "hi\nworks\n",
+        "stderr": ""
+      }
     }
   ]
 }

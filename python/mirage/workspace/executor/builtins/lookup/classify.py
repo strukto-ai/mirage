@@ -14,6 +14,7 @@
 
 from mirage.shell.constants import BIN_PREFIX
 from mirage.shell.printer import stored_function_text
+from mirage.workspace.executor.builtins.alias.alias import body_aliases
 from mirage.workspace.executor.builtins.lookup.constants import DESCRIPTIONS
 from mirage.workspace.executor.builtins.lookup.types import NameKind
 from mirage.workspace.lookup import Consumer, lookup, lookup_all, program
@@ -170,9 +171,8 @@ def describe(
         and session is not None
         and name in session.functions
     ):
-        return (
-            f"{name} is a function\n"
-            f"{stored_function_text(name, session.functions[name])}"
+        return f"{name} is a function\n" + stored_function_text(
+            name, session.functions[name], body_aliases(session, name)
         )
     if kind is NameKind.FILE:
         return f"{name} is {program_file(name)}"

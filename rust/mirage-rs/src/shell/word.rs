@@ -358,7 +358,7 @@ impl Parser<'_> {
     }
 
     /// A `$` construct inside double quotes, or None for a literal `$`.
-    fn dollar_in_string(&mut self) -> R<Option<Syn>> {
+    pub(super) fn dollar_in_string(&mut self) -> R<Option<Syn>> {
         match self.at(1) {
             b'{' => self.expansion().map(Some),
             b'(' if self.at(2) == b'(' => self.arithmetic_or_substitution().map(Some),

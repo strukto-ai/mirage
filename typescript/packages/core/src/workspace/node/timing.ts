@@ -44,12 +44,22 @@ export function timingReport(
  * times the pipeline. Mirrors Python's timed_by.
  */
 export function timedBy(node: TSNodeLike): boolean | null {
-  for (let parent = node.parent ?? null; parent !== null && PREFIXES.has(parent.type);) {
+  let current = node
+  for (
+    let parent = node.parent ?? null;
+    parent !== null &&
+    (PREFIXES.has(parent.type) ||
+      (parent.type === NT.PIPELINE && parent.startIndex === current.startIndex));
+  ) {
     if (parent.type === NT.TIMED_STATEMENT) return null
+    current = parent
     parent = parent.parent ?? null
   }
   let portable = false
-  for (let inner: TSNodeLike | undefined = node; inner !== undefined && PREFIXES.has(inner.type);) {
+  for (
+    let inner: TSNodeLike | undefined = node;
+    inner !== undefined && (PREFIXES.has(inner.type) || inner.type === NT.PIPELINE);
+  ) {
     if (inner.type === NT.TIMED_STATEMENT && inner.children.some((child) => child.type === '-p'))
       portable = true
     inner = inner.namedChildren[0]

@@ -280,8 +280,10 @@ impl Parser<'_> {
     /// reads it otherwise.
     fn case_pattern(&mut self) -> R<Vec<Syn>> {
         let mark = self.mark();
-        if let Some((word, true)) = self.pattern_word()? {
-            return Ok(vec![word]);
+        if let Some((word, group)) = self.pattern_word()? {
+            if group || !word.is("extglob_pattern") {
+                return Ok(vec![word]);
+            }
         }
         self.reset(mark);
         let nodes = self.grammar_case_pattern()?;

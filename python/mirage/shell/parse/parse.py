@@ -59,7 +59,8 @@ def parse(command: str, aliases: frozenset[str] = frozenset()) -> TSNodeLike:
             read_planned(original, plan)
             if plan is not None
             else discover_heredocs(
-                original, heredoc_operators(parse_shell(original).root_node)
+                original,
+                heredoc_operators(parse_shell(original, aliases).root_node),
             )
         )
         if documents:
@@ -67,8 +68,12 @@ def parse(command: str, aliases: frozenset[str] = frozenset()) -> TSNodeLike:
                 original, documents, () if plan is None else plan.closes
             )
     if source is None:
-        return parse_shell(join_continuations(command), aliases).root_node
-    source = drop_source_bytes(source, continuation_bytes(source.source))
+        return parse_shell(
+            join_continuations(command, aliases), aliases
+        ).root_node
+    source = drop_source_bytes(
+        source, continuation_bytes(source.source, aliases)
+    )
     return HeredocNode(parse_shell(source.source, aliases).root_node, source)
 
 
@@ -82,4 +87,4 @@ def parse_program(
         aliases (frozenset[str]): the names the shell expands as aliases.
     """
     root = parse(command, aliases)
-    return ParsedProgram(command, root, source_offsets(command, root))
+    return ParsedProgram(command, root, source_offsets(command, root, aliases))

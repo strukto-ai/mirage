@@ -75,6 +75,7 @@ from mirage.shell.helpers import (
 )
 from mirage.shell.job_table import JobTable
 from mirage.shell.parse import check_syntax, syntax_error_result
+from mirage.shell.parse.constants import WORD_BREAKS
 from mirage.shell.parse.scope import ParseScope
 from mirage.shell.parse.source import source_offsets
 from mirage.shell.parse.syntax import find_syntax_issue
@@ -168,6 +169,62 @@ async def _own_words(node: TSNodeLike, pending: Awaitable[T]) -> T:
         raise
 
 
+def parser_aliases(
+    line: str,
+    aliases: frozenset[str],
+    owners: tuple[frozenset[str], ...],
+    offsets: tuple[int, ...],
+) -> frozenset[str]:
+    """The aliases the parser takes for a line an alias rewrote.
+
+    An alias is no alias inside the text its own expansion produced, so
+    a name spelling a reserved word is that word there (``alias fi='if
+    :; then :; fi'`` closes its own ``if``). The parser takes one set for
+    the line, so a name that stands in its own text leaves it.
+
+    Args:
+        line (str): the rewritten line.
+        aliases (frozenset[str]): the names the line's reader expands.
+        owners (tuple[frozenset[str], ...]): per byte, the aliases whose
+            expansion wrote it.
+        offsets (tuple[int, ...]): each character's byte offset.
+    """
+    return frozenset(
+        name
+        for name in aliases
+        if not _owned_word(line, name, owners, offsets)
+    )
+
+
+def _owned_word(
+    line: str,
+    name: str,
+    owners: tuple[frozenset[str], ...],
+    offsets: tuple[int, ...],
+) -> bool:
+    """Whether ``name`` stands as a word of ``line`` inside text its own
+    expansion produced.
+
+    Args:
+        line (str): the rewritten line.
+        name (str): an alias name.
+        owners (tuple[frozenset[str], ...]): per byte, the aliases whose
+            expansion wrote it.
+        offsets (tuple[int, ...]): each character's byte offset.
+    """
+    at = line.find(name)
+    while at >= 0:
+        end = at + len(name)
+        if (
+            (at == 0 or line[at - 1] in WORD_BREAKS)
+            and (end == len(line) or line[end] in WORD_BREAKS)
+            and name in owners[offsets[at]]
+        ):
+            return True
+        at = line.find(name, at + 1)
+    return False
+
+
 async def execute_command(
     recurse: Callable[..., Awaitable[RedirectResult]],
     dispatch: DispatchFn,
@@ -229,7 +286,9 @@ async def execute_command(
             scope = ParseScope()
             try:
                 aliases = expanding_aliases(session) | names
-                ast = scope.parse(line, aliases)
+                ast = scope.parse(
+                    line, parser_aliases(line, aliases, owners, offsets)
+                )
                 found = check_syntax(
                     line,
                     aliases,

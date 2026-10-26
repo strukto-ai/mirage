@@ -47,9 +47,12 @@ function verbatimSpans(root: ShellNode): [number, number][] {
  * heredoc body is lowered into a quoted word before this runs, where
  * every backslash it holds is escaped, so no body loses a character here.
  */
-export function continuationIndices(text: string): number[] {
+export function continuationIndices(
+  text: string,
+  aliases: ReadonlySet<string> = new Set(),
+): number[] {
   if (!text.includes('\\\n') && !text.endsWith('\\')) return []
-  const spans = verbatimSpans(parseShell(text).rootNode)
+  const spans = verbatimSpans(parseShell(text, aliases).rootNode)
   const dropped: number[] = []
   let at = 0
   let index = text.indexOf('\\')
@@ -74,7 +77,11 @@ export function continuationIndices(text: string): number[] {
  * this gives the char of `command` it came from, and an inserted char gives
  * the char after it. Mirrors Python's source_offsets.
  */
-export function sourceOffsets(command: string, root: TSNodeLike): readonly number[] {
+export function sourceOffsets(
+  command: string,
+  root: TSNodeLike,
+  aliases: ReadonlySet<string> = new Set(),
+): readonly number[] {
   if (root instanceof ProgramNode && root.program.original === command) return root.program.offsets
   if (root instanceof HeredocNode) return root.offsets
   const source = dropSourceChars(
@@ -85,12 +92,15 @@ export function sourceOffsets(command: string, root: TSNodeLike): readonly numbe
       documents: [],
       closes: [],
     },
-    continuationIndices(command),
+    continuationIndices(command, aliases),
   )
   return rebaseSource(source, source.source.slice(0, root.startIndex ?? 0) + root.text).offsets
 }
 
 /** The line as bash's reader hands it on, continuations removed. */
-export function joinContinuations(command: string): string {
-  return dropChars(command, continuationIndices(command))
+export function joinContinuations(
+  command: string,
+  aliases: ReadonlySet<string> = new Set(),
+): string {
+  return dropChars(command, continuationIndices(command, aliases))
 }

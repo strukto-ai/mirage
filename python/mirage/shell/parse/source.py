@@ -46,7 +46,9 @@ def _verbatim_spans(root: TSNodeLike) -> list[tuple[int, int]]:
     return sorted(spans)
 
 
-def continuation_bytes(data: bytes) -> list[int]:
+def continuation_bytes(
+    data: bytes, aliases: frozenset[str] = frozenset()
+) -> list[int]:
     """Offsets of the bytes bash's reader deletes as line continuations.
 
     The reader removes ``\\<newline>`` before a token is read, so the
@@ -61,10 +63,12 @@ def continuation_bytes(data: bytes) -> list[int]:
 
     Args:
         data (bytes): shell source.
+        aliases (frozenset[str]): the names the shell expands as aliases,
+            so the parse that finds quoted text reads the line it runs.
     """
     if b"\\\n" not in data and not data.endswith(b"\\"):
         return []
-    spans = _verbatim_spans(parse_shell(data).root_node)
+    spans = _verbatim_spans(parse_shell(data, aliases).root_node)
     dropped: list[int] = []
     at = 0
     index = data.find(b"\\")
@@ -85,7 +89,9 @@ def continuation_bytes(data: bytes) -> list[int]:
     return dropped
 
 
-def source_offsets(command: str, root: TSNodeLike) -> tuple[int, ...]:
+def source_offsets(
+    command: str, root: TSNodeLike, aliases: frozenset[str] = frozenset()
+) -> tuple[int, ...]:
     """Where each byte of the source ``parse`` read sits in ``command``.
 
     ``parse`` deletes line continuations and lowers heredocs, so a node's
@@ -96,6 +102,7 @@ def source_offsets(command: str, root: TSNodeLike) -> tuple[int, ...]:
     Args:
         command (str): the line ``root`` was parsed from.
         root (TSNodeLike): what ``parse(command)`` returned.
+        aliases (frozenset[str]): the alias names ``parse`` read it with.
     """
     if isinstance(root, ProgramNode) and root.program.original == command:
         return root.program.offsets
@@ -104,17 +111,20 @@ def source_offsets(command: str, root: TSNodeLike) -> tuple[int, ...]:
     data = encode_text(command)
     source = drop_source_bytes(
         HeredocSource(data, data, tuple(range(len(data) + 1)), ()),
-        continuation_bytes(data),
+        continuation_bytes(data, aliases),
     )
     repaired = source.source[: root.start_byte] + (root.text or b"")
     return rebase_source(source, repaired).offsets
 
 
-def join_continuations(command: str) -> str:
+def join_continuations(
+    command: str, aliases: frozenset[str] = frozenset()
+) -> str:
     """The line as bash's reader hands it on, continuations removed.
 
     Args:
         command (str): the raw command line.
+        aliases (frozenset[str]): the names the shell expands as aliases.
     """
     data = encode_text(command)
-    return decode_text(drop_bytes(data, continuation_bytes(data)))
+    return decode_text(drop_bytes(data, continuation_bytes(data, aliases)))

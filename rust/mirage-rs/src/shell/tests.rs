@@ -406,3 +406,48 @@ fn words_the_executor_reads_as_words() {
          (extglob_pattern=]))"
     ));
 }
+
+#[test]
+fn a_raw_arithmetic_body_keeps_what_bash_expands_first() {
+    assert_eq!(
+        read("echo $(( $10 + ${x}0 ))"),
+        "(program (command name: (command_name (word=echo)) argument: (arithmetic_expansion (concatenation \
+         (simple_expansion (variable_name=1)) (word=0 + ) (expansion (variable_name=x)) (word=0)))))"
+    );
+    assert_eq!(
+        read("for (( i=$10; i<${n}0; )) do :; done"),
+        "(program (c_style_for_statement initializer: (concatenation (word=i=) (simple_expansion (variable_name=1)) \
+         (word=0)) condition: (concatenation (word=i<) (expansion (variable_name=n)) (word=0)) \
+         body: (do_group (command name: (command_name (word=:))))))"
+    );
+    assert_eq!(
+        read("echo $(( a # ))"),
+        "(program (command name: (command_name (word=echo)) argument: (arithmetic_expansion (word=a #))))"
+    );
+}
+
+#[test]
+fn a_pattern_keeps_the_expansions_in_it() {
+    assert_eq!(
+        read("[[ a == [b$x] ]]"),
+        "(program (test_command (binary_expression left: (word=a) right: (concatenation \
+         (extglob_pattern=[b) (simple_expansion (variable_name=x)) (extglob_pattern=])))))"
+    );
+    assert!(read("case a in *$x) :;; esac").contains(
+        "value: (concatenation (extglob_pattern=*) (simple_expansion (variable_name=x)))"
+    ));
+}
+
+#[test]
+fn tokens_the_executor_reads_by_kind() {
+    let kinds = |source: &str| {
+        let tree = parse(source.as_bytes());
+        tree.nodes
+            .iter()
+            .map(|node| KINDS[usize::from(node.kind)].0)
+            .collect::<Vec<_>>()
+    };
+    assert!(!kinds("for f do :; done").contains(&"in"));
+    assert!(kinds("for f in; do :; done").contains(&"in"));
+    assert!(kinds("cat <>f").contains(&"<>"));
+}

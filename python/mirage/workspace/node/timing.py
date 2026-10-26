@@ -54,7 +54,9 @@ def timing_report(
 def timed_by(node: TSNodeLike) -> bool | None:
     """How a ``time`` reports its pipeline. bash times a pipeline once,
     however many ``time`` words and ``!`` lead it: the outermost ``time``
-    reports, portable when any of them takes ``-p``.
+    reports, portable when any of them takes ``-p``. The parse keeps the
+    words after the first on the pipeline's first stage (``time ! time a
+    | b``), so the walk passes through a pipeline from its head.
 
     Args:
         node (TSNodeLike): a timed_statement.
@@ -63,14 +65,20 @@ def timed_by(node: TSNodeLike) -> bool | None:
         bool | None: whether the report is portable; None when an outer
         ``time`` already times the pipeline.
     """
-    parent = node.parent
-    while parent is not None and parent.type in PREFIXES:
+    current, parent = node, node.parent
+    while parent is not None and (
+        parent.type in PREFIXES
+        or parent.type == NT.PIPELINE
+        and parent.start_byte == current.start_byte
+    ):
         if parent.type == NT.TIMED_STATEMENT:
             return None
-        parent = parent.parent
+        current, parent = parent, parent.parent
     portable = False
     inner: TSNodeLike | None = node
-    while inner is not None and inner.type in PREFIXES:
+    while inner is not None and (
+        inner.type in PREFIXES or inner.type == NT.PIPELINE
+    ):
         if inner.type == NT.TIMED_STATEMENT and any(
             child.type == "-p" for child in inner.children
         ):
