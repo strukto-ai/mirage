@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it, vi } from 'vitest'
-import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { FileStat, FileType, Limit, MountMode, PathSpec } from '../../types.ts'
 import { LookupStatus } from '../../cache/index/config.ts'
@@ -71,13 +70,11 @@ class RecordingSandbox extends RemoteSandbox {
   }
 }
 
-async function sandboxWorkspace(box: RecordingSandbox): Promise<Workspace> {
-  const parser = await getTestParser()
+function sandboxWorkspace(box: RecordingSandbox): Workspace {
   return new Workspace(
     { '/data': new RAMVFS() },
     {
       mode: MountMode.EXEC,
-      shellParser: parser,
       runtimes: [box, 'workspace'],
     },
   )
@@ -88,7 +85,7 @@ describe('RemoteSandbox', () => {
     'passes %s and its output through the remote environment',
     async (line) => {
       const box = new RecordingSandbox({ captures: line.split(' ', 1) })
-      const ws = await sandboxWorkspace(box)
+      const ws = sandboxWorkspace(box)
       try {
         const io = await ws.shell(line)
         expect(io.exitCode).toBe(0)
@@ -102,7 +99,7 @@ describe('RemoteSandbox', () => {
 
   it('connects on the first line only', async () => {
     const box = new RecordingSandbox({ captures: ['python3'] })
-    const ws = await sandboxWorkspace(box)
+    const ws = sandboxWorkspace(box)
     try {
       const io = await ws.shell('python3 x')
       expect(DEC.decode(io.stdout)).toBe('ran:python3 x')
@@ -124,7 +121,7 @@ describe('RemoteSandbox', () => {
       }
     }
     const box = new FlakyBox({ captures: ['python3'] })
-    const ws = await sandboxWorkspace(box)
+    const ws = sandboxWorkspace(box)
     try {
       const first = await ws.shell('python3 x')
       expect(first.exitCode).not.toBe(0)
@@ -161,7 +158,7 @@ describe('RemoteSandbox', () => {
 
   it('passes stdin bytes through to execLine', async () => {
     const box = new RecordingSandbox({ captures: ['*'] })
-    const ws = await sandboxWorkspace(box)
+    const ws = sandboxWorkspace(box)
     try {
       await ws.shell('wc -l', { stdin: ENC.encode('a\nb\n') })
       const [, stdin] = box.execs[box.execs.length - 1] ?? ['', null, {}, '']
@@ -192,11 +189,10 @@ describe('RemoteSandbox', () => {
       }
     }
     const box = new SlowBox({ captures: ['python3'] })
-    const parser = await getTestParser()
     const guards = { python3: new Limit({ timeoutSeconds: 0.05 }) }
     const ws = new Workspace(
       { '/data': [new RAMVFS(), MountMode.EXEC, guards] },
-      { mode: MountMode.EXEC, shellParser: parser, runtimes: [box, 'workspace'] },
+      { mode: MountMode.EXEC, runtimes: [box, 'workspace'] },
     )
     try {
       // A captured line obeys the same command limits as any
@@ -367,11 +363,10 @@ describe('RemoteSandbox', () => {
       }
     }
     const box = new ChattyBox({ captures: ['python3'] })
-    const parser = await getTestParser()
     const guards = { python3: new Limit({ maxLines: 2 }) }
     const ws = new Workspace(
       { '/data': [new RAMVFS(), MountMode.EXEC, guards] },
-      { mode: MountMode.EXEC, shellParser: parser, runtimes: [box, 'workspace'] },
+      { mode: MountMode.EXEC, runtimes: [box, 'workspace'] },
     )
     try {
       const io = await ws.shell('python3 train.py')
@@ -388,7 +383,7 @@ describe('RemoteSandbox', () => {
     // next stat or listing asks the backend again. Mirrors Python's
     // `test_remote_line_invalidates_local_read_caches`.
     const box = new RecordingSandbox({ captures: ['python3'] })
-    const ws = await sandboxWorkspace(box)
+    const ws = sandboxWorkspace(box)
     try {
       const mount = ws.registry.allMounts().find((m) => m.prefix === '/data/')
       if (mount === undefined) throw new Error('no /data mount')

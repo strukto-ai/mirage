@@ -28,7 +28,7 @@ function native(cmd: string): string {
 }
 
 async function mirage(cmd: string): Promise<string> {
-  const { ws } = await makeWorkspace()
+  const { ws } = makeWorkspace()
   try {
     const io = await ws.shell(cmd)
     return stdoutStr(io)

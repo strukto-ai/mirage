@@ -16,7 +16,6 @@ import { describe, expect, it } from 'vitest'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { CycleError } from '../../../utils/path.ts'
 import { MountMode } from '../../../types.ts'
-import { getTestParser } from '../../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../workspace/workspace.ts'
 import { metaFromFields, metaToFields } from './namespace.ts'
 import { RAMNamespaceStore } from './ram.ts'
@@ -423,10 +422,7 @@ describe('Namespace extended attributes', () => {
 
 describe('Namespace session links', () => {
   it('answer as the session sees', async () => {
-    const ws = new Workspace(
-      { '/data': new RAMVFS() },
-      { mode: MountMode.WRITE, shellParser: await getTestParser() },
-    )
+    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
     await ws.shell(
       'mkdir /data/vault /data/pub; ln -s /data/vault/s.txt /data/lnk; ln -s /data/pub /data/pl',
     )

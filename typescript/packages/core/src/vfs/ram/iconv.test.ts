@@ -19,7 +19,6 @@ import { materialize } from '../../io/types.ts'
 import { RAMVFS } from './ram.ts'
 import { PathSpec } from '../../types.ts'
 import { MountMode } from '../../types.ts'
-import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
 const RAM_ICONV = GENERIC_COMMANDS.filter((c) => c.name === 'iconv' && c.filetype == null)
 
@@ -69,10 +68,7 @@ async function readOnlyShell(
   line: string,
 ): Promise<[number, string, string, string[]]> {
   const vfs = new RAMVFS()
-  const ws = new Workspace(
-    { '/ro/': [vfs, MountMode.WRITE] },
-    { mode: MountMode.WRITE, shellParser: await getTestParser() },
-  )
+  const ws = new Workspace({ '/ro/': [vfs, MountMode.WRITE] }, { mode: MountMode.WRITE })
   try {
     const seeded = await ws.shell(seed)
     if (seeded.exitCode !== 0) throw new Error(DEC.decode(seeded.stderr))

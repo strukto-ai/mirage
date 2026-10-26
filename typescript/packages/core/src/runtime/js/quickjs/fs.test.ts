@@ -14,7 +14,6 @@
 
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { FileStat, FileType, MountMode } from '../../../types.ts'
-import { getTestParser } from '../../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../../workspace/workspace/workspace.ts'
 import { describe, expect, it } from 'vitest'
 import { QuickJsRuntime } from './runtime.ts'
@@ -96,11 +95,7 @@ describe('quickjs gives the event loop a turn', () => {
     // A RAM mount answers every call in microtasks alone, so without a
     // turn a guest looping over files held the loop until it ended, and
     // another session's I/O and timers waited the whole run.
-    const parser = await getTestParser()
-    const ws = new Workspace(
-      { '/data': new RAMVFS() },
-      { mode: MountMode.EXEC, shellParserFactory: () => Promise.resolve(parser) },
-    )
+    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.EXEC })
     try {
       await ws.shell('echo hi > /data/f.txt')
       let last = performance.now()
@@ -141,11 +136,7 @@ describe('quickjs reads after a failed fetch', () => {
       }
     }
     const flaky = new Flaky()
-    const parser = await getTestParser()
-    const ws = new Workspace(
-      { '/data': flaky },
-      { mode: MountMode.EXEC, shellParserFactory: () => Promise.resolve(parser) },
-    )
+    const ws = new Workspace({ '/data': flaky }, { mode: MountMode.EXEC })
     try {
       await ws.shell('echo content > /data/f.txt')
       flaky.failures = 1

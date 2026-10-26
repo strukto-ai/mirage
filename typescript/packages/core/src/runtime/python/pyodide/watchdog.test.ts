@@ -1,7 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { MountMode } from '../../../types.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
-import { getTestParser } from '../../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { context } from '../../../../tests/workspace/fixtures/context.ts'
 import { Workspace } from '../../../workspace/workspace/workspace.ts'
 import { PyodideRuntime } from './runtime.ts'
@@ -43,7 +42,6 @@ describe('pyodide maxMemory', { timeout: 120_000 }, () => {
       { '/data': new RAMVFS() },
       {
         mode: MountMode.EXEC,
-        shellParser: await getTestParser(),
         runtimes: [new PyodideRuntime({ config: { maxMemory: '128M' } }), 'workspace'],
       },
     )
@@ -65,7 +63,6 @@ describe('pyodide maxMemory', { timeout: 120_000 }, () => {
       { '/data': new RAMVFS() },
       {
         mode: MountMode.EXEC,
-        shellParser: await getTestParser(),
         runtimes: [new PyodideRuntime({ config: { maxMemory: '128M' } }), 'workspace'],
       },
     )

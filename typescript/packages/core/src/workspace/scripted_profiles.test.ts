@@ -2,7 +2,6 @@ import { describe, expect, it, vi } from 'vitest'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { ScriptSource } from '../runtime/types.ts'
 import { MountMode } from '../types.ts'
-import { getTestParser } from '../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from './workspace/workspace.ts'
 
 // Mirrors the profile policy cases in
@@ -78,17 +77,15 @@ function scripted(
   }
 }
 
-async function build(
+function build(
   profiles: Record<string, unknown>,
   runtimes?: string[],
   profile?: string,
-): Promise<Workspace> {
-  const shellParser = await getTestParser()
+): Workspace {
   return new Workspace(
     { '/data/': new RAMVFS() },
     {
       mode: MountMode.WRITE,
-      shellParser,
       profiles: profiles as never,
       ...(runtimes !== undefined ? { runtimes } : {}),
       ...(profile !== undefined ? { profile } : {}),
@@ -98,7 +95,7 @@ async function build(
 
 describe('profile policies', () => {
   it('judges each command, with the facts as ctx', async () => {
-    const ws = await build(scripted())
+    const ws = build(scripted())
     try {
       await ws.shell('mkdir -p /data/sealed && echo k > /data/sealed/k')
       ws.createSession('s', { profile: 'release' })
@@ -113,7 +110,7 @@ describe('profile policies', () => {
   }, 120000)
 
   it('sees who makes the call as a coded policy does', async () => {
-    const ws = await build(scripted({ preCommand: CALLER }))
+    const ws = build(scripted({ preCommand: CALLER }))
     try {
       await ws.vfs.write('/data/owner.txt', 'core\n')
       ws.createSession('s', { profile: 'release' })
@@ -129,7 +126,7 @@ describe('profile policies', () => {
   it('reads resolved paths, not typed words', async () => {
     // `cd /data && cat sealed/k` names no /data/sealed word; the gate
     // hands the program the resolved operand, so the deny still lands.
-    const ws = await build(scripted())
+    const ws = build(scripted())
     try {
       ws.createSession('s', { profile: 'release' })
       const denied = await ws.shell('cd /data && cat sealed/k', { sessionId: 's' })
@@ -143,7 +140,7 @@ describe('profile policies', () => {
   it('a policy-only profile installs everything', async () => {
     // No allow list, so nothing is hidden: a command no document names
     // runs whenever the program stays silent on it.
-    const ws = await build(scripted())
+    const ws = build(scripted())
     try {
       await ws.shell('echo x > /data/x')
       ws.createSession('s', { profile: 'release' })
@@ -157,7 +154,7 @@ describe('profile policies', () => {
     // Optional, not required: a profile stating both keeps the allow
     // list, and the program adds its verdicts beside it.
     const profiles = scripted()
-    const ws = await build({
+    const ws = build({
       release: { ...profiles.release, commands: { allow: ['ls', 'cat', 'echo'] } },
     })
     try {
@@ -172,7 +169,7 @@ describe('profile policies', () => {
   }, 120000)
 
   it('takes an ask it computed to the approval ledger', async () => {
-    const ws = await build(scripted())
+    const ws = build(scripted())
     try {
       ws.createSession('s', { profile: 'release' })
       const held = await ws.shell('shred /data/x', { sessionId: 's' })
@@ -186,7 +183,7 @@ describe('profile policies', () => {
   }, 120000)
 
   it('leaves other sessions alone', async () => {
-    const ws = await build(scripted())
+    const ws = build(scripted())
     try {
       await ws.shell('mkdir -p /data/sealed && echo k > /data/sealed/k')
       ws.createSession('s', { profile: 'release' })
@@ -198,7 +195,7 @@ describe('profile policies', () => {
   }, 120000)
 
   it('a scripted default profile shapes the default session', async () => {
-    const ws = await build(scripted(), undefined, 'release')
+    const ws = build(scripted(), undefined, 'release')
     try {
       expect((await ws.shell('echo hi')).exitCode).toBe(0)
       const denied = await ws.shell('cat /data/sealed/k')
@@ -214,7 +211,7 @@ describe('profile policies', () => {
     // same entry point an agent's program would, so it can ask about what a
     // file holds. A directory operand is not its business, and a file
     // without the marker runs.
-    const ws = await build(scripted({ preCommand: READER }))
+    const ws = build(scripted({ preCommand: READER }))
     try {
       await ws.shell(
         "mkdir -p /data/in && printf 'subject: invoice\\n\\na payload\\n' > /data/in/mail.txt && echo plain > /data/in/note.txt",
@@ -234,7 +231,7 @@ describe('profile policies', () => {
     // A profile is operator configuration, so the runtime that judges
     // for it is a property of the profile, built fresh and never
     // resolved out of the runtime world.
-    const ws = await build(scripted(), ['workspace'])
+    const ws = build(scripted(), ['workspace'])
     try {
       ws.createSession('s', { profile: 'release' })
       const denied = await ws.shell('cat /data/sealed/k', { sessionId: 's' })
@@ -248,7 +245,7 @@ describe('profile policies', () => {
   it('a broken policy fails closed per command', async () => {
     // Silence on failure would run exactly the commands the policy
     // existed to judge.
-    const ws = await build(scripted({ preCommand: "raise ValueError('boom')" }))
+    const ws = build(scripted({ preCommand: "raise ValueError('boom')" }))
     try {
       ws.createSession('s', { profile: 'release' })
       const refused = await ws.shell('echo hi', { sessionId: 's' })
@@ -262,7 +259,7 @@ describe('profile policies', () => {
   }, 120000)
 
   it('a runtime policies do not run on fails closed', async () => {
-    const ws = await build(scripted({ preCommand: JUDGE }, 'workspace'))
+    const ws = build(scripted({ preCommand: JUDGE }, 'workspace'))
     try {
       ws.createSession('s', { profile: 'release' })
       const refused = await ws.shell('echo hi', { sessionId: 's' })
@@ -279,7 +276,7 @@ describe('profile policies', () => {
   it('a program printing something else fails closed', async () => {
     // stdout is the answer: anything but one JSON answer or nothing is
     // refused rather than guessed at.
-    const ws = await build(scripted({ preCommand: "print('looks fine to me')" }))
+    const ws = build(scripted({ preCommand: "print('looks fine to me')" }))
     try {
       ws.createSession('s', { profile: 'release' })
       const refused = await ws.shell('echo hi', { sessionId: 's' })
@@ -293,7 +290,7 @@ describe('profile policies', () => {
   }, 120000)
 
   it('a policy program that names no runtime runs on monty', async () => {
-    const ws = await build({
+    const ws = build({
       release: { policy: { preCommand: [{ script: new ScriptSource(JUDGE, 'python') }] } },
     })
     try {
@@ -312,7 +309,7 @@ describe('profile policies', () => {
     vi.doMock('@pydantic/monty', () => {
       throw new Error('not installed')
     })
-    const ws = await build({
+    const ws = build({
       release: { policy: { preCommand: [{ script: new ScriptSource(JUDGE, 'python') }] } },
     })
     try {
@@ -326,28 +323,26 @@ describe('profile policies', () => {
     }
   }, 120000)
 
-  it('the old script and runtime keys are told the new block', async () => {
+  it('the old script and runtime keys are told the new block', () => {
     // Shipped first as `script` with `runtime` beside it, a word for
     // what the file is rather than what it does and an engine that
     // read as the profile's own; the refusal says where they went.
-    await expect(
+    expect(() =>
       build({ release: { script: new ScriptSource(JUDGE, 'python'), runtime: 'monty' } }),
-    ).rejects.toThrow(/now a policy block/)
+    ).toThrow(/now a policy block/)
   })
 
   it('names its programs per method', async () => {
-    await expect(
+    expect(() =>
       build({
         release: { policy: { script: new ScriptSource(JUDGE, 'python'), runtime: 'monty' } },
       }),
-    ).rejects.toThrow(/per method/)
+    ).toThrow(/per method/)
     const program = { script: new ScriptSource(JUDGE, 'python'), runtime: 'monty' }
-    await expect(build({ release: { policy: { onRead: [program] } } })).rejects.toThrow(
-      /names onRead/,
-    )
-    const ws = await build({ release: { policy: { postVfs: [program], preVfs: [program] } } })
+    expect(() => build({ release: { policy: { onRead: [program] } } })).toThrow(/names onRead/)
+    const ws = build({ release: { policy: { postVfs: [program], preVfs: [program] } } })
     await ws.close()
-    await expect(
+    expect(() =>
       build({
         release: {
           policy: {
@@ -355,11 +350,11 @@ describe('profile policies', () => {
           },
         },
       }),
-    ).rejects.toThrow(/names constructor/)
+    ).toThrow(/names constructor/)
   })
 
   it('an inline document may not add a policy', async () => {
-    const ws = await build(scripted())
+    const ws = build(scripted())
     try {
       expect(() =>
         ws.createSession('s', {
@@ -391,7 +386,7 @@ const GATES = { preVfs: FROZEN, preSession: CREDENTIALS }
 
 describe('profile policies at the op and session views', () => {
   it("judges its session's file calls with the facts of the op", async () => {
-    const ws = await build(scripted(GATES))
+    const ws = build(scripted(GATES))
     try {
       await ws.shell('mkdir -p /data/frozen && echo keep > /data/frozen/k')
       ws.createSession('s', { profile: 'release' })
@@ -411,7 +406,7 @@ describe('profile policies at the op and session views', () => {
   }, 120000)
 
   it('judges the session view with the facts of the write', async () => {
-    const ws = await build(scripted(GATES))
+    const ws = build(scripted(GATES))
     try {
       ws.createSession('s', { profile: 'release' })
       const refused = await ws.shell('export AWS_SECRET=x', { sessionId: 's' })
@@ -432,7 +427,7 @@ describe('profile policies at the op and session views', () => {
     // policy's own and is let through rather than re-entering the run
     // waiting on it, so the content verdict lands and the op program
     // still refuses a write.
-    const ws = await build(scripted({ preCommand: READER, preVfs: FROZEN }))
+    const ws = build(scripted({ preCommand: READER, preVfs: FROZEN }))
     try {
       await ws.shell(
         "mkdir -p /data/in && printf 'subject: invoice\\n\\na payload\\n' > /data/in/mail.txt && echo plain > /data/in/note.txt",
@@ -468,7 +463,7 @@ describe('a profile policy reads as the session it judges for', () => {
     // refuse on. The same program under a profile without the hide reads
     // the file and refuses.
     const policy = { preCommand: [{ script: new ScriptSource(PEEK, 'python'), runtime: 'monty' }] }
-    const ws = await build({
+    const ws = build({
       blind: { policy, paths: { hide: ['/data/secret'] } },
       sighted: { policy },
     })

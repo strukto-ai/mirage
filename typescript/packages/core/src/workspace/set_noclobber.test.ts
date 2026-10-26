@@ -75,7 +75,7 @@ const CASES: [string, string, string][] = [
 
 describe('set -C noclobber', () => {
   it.each(CASES)('%s', async (cmd, out, err) => {
-    const { ws } = await makeWorkspace()
+    const { ws } = makeWorkspace()
     const io = await ws.shell(cmd)
     expect(stdoutStr(io)).toBe(out)
     expect(stderrStr(io)).toBe(err)
@@ -87,7 +87,7 @@ describe('set -C noclobber', () => {
     // the command never runs at all. Checking after the fact matched the
     // target's contents and nothing else: `touch marker > existing` still
     // created the marker.
-    const { ws } = await makeWorkspace()
+    const { ws } = makeWorkspace()
     const io = await ws.shell(
       'echo a > /ram/f; set -C; touch /ram/marker > /ram/f;' + ' echo rc=$?; ls /ram/marker',
     )
@@ -103,7 +103,7 @@ describe('set -C noclobber', () => {
     // The worst shape of the same bug: `rm f > f` ran first, so by the
     // time the probe looked there was nothing to refuse and the line
     // reported success while the file was gone.
-    const { ws } = await makeWorkspace()
+    const { ws } = makeWorkspace()
     const io = await ws.shell(
       'echo one > /ram/f; set -C; rm /ram/f > /ram/f; echo rc=$?; cat /ram/f',
     )
@@ -116,7 +116,7 @@ describe('set -C noclobber', () => {
     // first one created even though the target was absent when the
     // statement began. Probing every target against one pre-command
     // snapshot passed both and wrote the output.
-    const { ws } = await makeWorkspace()
+    const { ws } = makeWorkspace()
     const io = await ws.shell(
       'set -C; echo x > /ram/dup > /ram/dup; echo rc=$?; cat /ram/dup; echo end',
     )
@@ -130,7 +130,7 @@ describe('set -C noclobber', () => {
   it('counts append and override opens as creating', async () => {
     // `>>` and `>|` never refuse, but they do open, so a later `>` onto
     // the same absent target refuses against what they created.
-    const { ws } = await makeWorkspace()
+    const { ws } = makeWorkspace()
     const ap = await ws.shell(
       'set -C; echo x >> /ram/ap > /ram/ap; echo rc=$?; cat /ram/ap; echo end',
     )
@@ -145,7 +145,7 @@ describe('set -C noclobber', () => {
   })
 
   it('shows in the option listing', async () => {
-    const { ws } = await makeWorkspace()
+    const { ws } = makeWorkspace()
     // The session is reused across calls, so the default is asserted
     // before anything sets the option.
     expect(stdoutStr(await ws.shell('set -o'))).toContain('noclobber      \toff\n')

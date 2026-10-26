@@ -144,6 +144,7 @@ from mirage.workspace.cli import CLIInstall
 from mirage.workspace.dispatcher.dispatcher import Dispatcher
 from mirage.workspace.documentation.documents import Documents
 from mirage.workspace.execution import ExecutionScope
+from mirage.workspace.executor.builtins.alias.alias import expanding_aliases
 from mirage.workspace.executor.statement import restore_status
 from mirage.workspace.expand.classify.path import classify_bare_path
 from mirage.workspace.expand.globs import GlobOptions, resolve_globs
@@ -680,7 +681,8 @@ class Workspace:
                 default session when empty.
         """
         session = self.get_session(session_id or self.default_session_id)
-        ast = parse(line)
+        aliases = expanding_aliases(session)
+        ast = parse(line, aliases)
         verdicts = await explain_line(
             ast, session, self._registry, self._namespace, every=False
         )
@@ -704,6 +706,7 @@ class Workspace:
                 judged if whole_line else verdicts,
                 lambda command: "",
                 whole_line,
+                aliases,
             )
         answers, placed = await self._router.placement(
             line,
@@ -727,7 +730,9 @@ class Workspace:
         )
         if isinstance(placed, (Deny, Pending)):
             refused = placement_refused(placed, line)
-            said = explained_line(line, judged, verdicts, lambda command: "")
+            said = explained_line(
+                line, judged, verdicts, lambda command: "", aliases=aliases
+            )
             return dataclasses.replace(
                 said,
                 answers=answers,
@@ -748,6 +753,7 @@ class Workspace:
             judged if whole_line else verdicts,
             lambda command: self._router.runtime_for(command, placed),
             whole_line,
+            aliases,
         )
         return dataclasses.replace(said, answers=answers)
 

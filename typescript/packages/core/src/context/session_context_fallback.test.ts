@@ -58,7 +58,6 @@ import type { SessionManager } from '../workspace/session/manager.ts'
 import { SessionState } from '../workspace/session/session.ts'
 import { parseSessionProfile } from '../policy/profile.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
-import { getTestParser } from '../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Session, Workspace } from '../workspace/workspace/workspace.ts'
 import type * as asyncContextModule from '../utils/async_context.ts'
 import { pathVisible } from '../utils/hidden.ts'
@@ -399,12 +398,10 @@ describe('a named facade session on the fallback storage', () => {
     // live by a concurrent task would otherwise judge the named
     // session's ops. The unnamed entry point keeps the ambient frame, which
     // is what a command's runtime reaching `ws.vfs` relies on.
-    const parser = await getTestParser()
     const ws = new Workspace(
       { '/data': [new RAMVFS(), MountMode.WRITE] as const },
       {
         mode: MountMode.WRITE,
-        shellParser: parser,
         profiles: { agent: parseSessionProfile({ paths: { hide: ['/data/vault'] } }) },
         profile: 'agent',
       },
@@ -433,7 +430,7 @@ describe('dry runs on the fallback storage', () => {
     // another task makes meanwhile runs for real.
     const ws = new Workspace(
       { '/data': [new RAMVFS(), MountMode.WRITE] as const },
-      { mode: MountMode.WRITE, shellParser: await getTestParser() },
+      { mode: MountMode.WRITE },
     )
     try {
       const session = new Session(ws, ws.defaultSessionId)
@@ -464,7 +461,7 @@ describe('dry runs on the fallback storage', () => {
     // as explained, or refused as a deciding policy's write.
     const ws = new Workspace(
       { '/data': [new RAMVFS(), MountMode.WRITE] as const },
-      { mode: MountMode.WRITE, shellParser: await getTestParser() },
+      { mode: MountMode.WRITE },
     )
     try {
       const session = new Session(ws, ws.defaultSessionId)
@@ -605,8 +602,7 @@ describe('xargs session isolation on the fallback storage', () => {
   })
 
   it.each([0, 2])('-P%i keeps shell variables local to each invocation', async (procs) => {
-    const parser = await getTestParser()
-    const ws = new Workspace({}, { shellParser: parser })
+    const ws = new Workspace({})
     try {
       const io = await ws.shell(
         `X=outer; change() { echo "$X"; X=inner; }; printf 'a\\nb\\n' | xargs -P${String(procs)} -n1 change; echo "$X"`,
@@ -622,8 +618,7 @@ describe('xargs session isolation on the fallback storage', () => {
 
 describe('overlapping shell calls beside xargs', () => {
   it('keeps another foreground call queued and honors its abort', async () => {
-    const parser = await getTestParser()
-    const ws = new Workspace({}, { shellParser: parser })
+    const ws = new Workspace({})
     const child = ws.shell('printf a | xargs -P2 -I{} sleep 0.3')
     try {
       await new Promise((resolve) => setTimeout(resolve, 20))
@@ -643,8 +638,7 @@ describe('overlapping shell calls beside xargs', () => {
   it.each(['again', 'printf a | xargs -P2 -I{} again', 'again | cat'])(
     'lets a host callback re-enter its own session: %s',
     async (line) => {
-      const parser = await getTestParser()
-      const ws = new Workspace({}, { shellParser: parser })
+      const ws = new Workspace({})
       ws.registerCli(
         'again',
         new CLI({
@@ -676,8 +670,7 @@ describe('overlapping shell calls beside xargs', () => {
   it.each([false, true])(
     'queues unrelated calls while a callback re-enters (named=%s)',
     async (named) => {
-      const parser = await getTestParser()
-      const ws = new Workspace({}, { shellParser: parser })
+      const ws = new Workspace({})
       const [entered, enter] = gate()
       const [held, release] = gate()
       let expired: ((command: string) => Promise<IOResult>) | undefined
@@ -729,8 +722,7 @@ describe('overlapping shell calls beside xargs', () => {
   )
 
   it('admits nothing through a host callback of a line that has ended', async () => {
-    const parser = await getTestParser()
-    const ws = new Workspace({}, { shellParser: parser })
+    const ws = new Workspace({})
     const [entered, enter] = gate()
     const [held, release] = gate()
     ws.registerCli(
@@ -772,8 +764,7 @@ describe('overlapping shell calls beside xargs', () => {
       ),
     ),
   )('keeps sessions separate: %j', async ({ procs, named, childFirst }) => {
-    const parser = await getTestParser()
-    const ws = new Workspace({}, { shellParser: parser })
+    const ws = new Workspace({})
     const [childEntered, enterChild] = gate()
     const [childHeld, releaseChild] = gate()
     const [otherEntered, enterOther] = gate()
@@ -846,10 +837,7 @@ describe('overlapping shell calls beside xargs', () => {
 })
 
 it('keeps each browser session’s permissions, umask and glob settings across suspension', async () => {
-  const ws = new Workspace(
-    { '/data': new RAMVFS() },
-    { mode: MountMode.WRITE, shellParser: await getTestParser() },
-  )
+  const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
   const loose = ws.createSession('loose')
   const tight = ws.createSession('tight', {
     profile: parseSessionProfile({ mounts: { '/data': 'r' }, paths: { hide: ['/data/private'] } }),
@@ -908,10 +896,7 @@ it('keeps each browser session’s permissions, umask and glob settings across s
 })
 
 it('keeps unbound file calls restrictive when a wider browser session shadows their owner', async () => {
-  const ws = new Workspace(
-    { '/data': new RAMVFS() },
-    { mode: MountMode.WRITE, shellParser: await getTestParser() },
-  )
+  const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
   const narrow = ws.createSession('narrow', {
     profile: parseSessionProfile({ mounts: { '/data': 'r' }, paths: { hide: ['/data/secret'] } }),
   })
@@ -947,7 +932,7 @@ it('keeps unbound file calls restrictive when a wider browser session shadows th
 it('walks a nested mount under the command’s own gate while another session’s gate is live', async () => {
   const ws = new Workspace(
     { '/data': new RAMVFS(), '/data/sub': new RAMVFS() },
-    { mode: MountMode.WRITE, shellParser: await getTestParser() },
+    { mode: MountMode.WRITE },
   )
   const sealed = ws.createSession('sealed', {
     profile: parseSessionProfile({
@@ -999,10 +984,7 @@ it('walks a nested mount under the command’s own gate while another session’
 })
 
 it('walks dotted operands with the command’s own probe while another session runs on the mount', async () => {
-  const ws = new Workspace(
-    { '/data': new RAMVFS() },
-    { mode: MountMode.WRITE, shellParser: await getTestParser() },
-  )
+  const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
   const wide = ws.createSession('wide')
   const hider = ws.createSession('hider', {
     profile: parseSessionProfile({ paths: { hide: ['/data/h'] } }),
@@ -1038,10 +1020,7 @@ it('walks dotted operands with the command’s own probe while another session r
 })
 
 it('links under the command’s own hides while another session’s hides are live', async () => {
-  const ws = new Workspace(
-    { '/data': new RAMVFS() },
-    { mode: MountMode.WRITE, shellParser: await getTestParser() },
-  )
+  const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
   const hider = ws.createSession('hider', {
     profile: parseSessionProfile({ paths: { hide: ['/data/x'] } }),
   })
@@ -1116,10 +1095,7 @@ describe('a line beside another session’s paused line on the fallback storage'
   it('keeps a once-granted ask path for the command it was granted to', async () => {
     const allowOnce = (asked: Decision): Promise<Decision> =>
       Promise.resolve({ ...asked, outcome: Outcome.ALLOW, scope: Scope.ONCE })
-    const ws = new Workspace(
-      { '/data': new RAMVFS() },
-      { mode: MountMode.WRITE, shellParser: await getTestParser(), onAsk: allowOnce },
-    )
+    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE, onAsk: allowOnce })
     const asker = ws.createSession('asker', {
       profile: parseSessionProfile({
         commands: { ask: [{ reason: 'review', paths: ['/data/review/*'] }] },
@@ -1152,10 +1128,7 @@ describe('a line beside another session’s paused line on the fallback storage'
   })
 
   it('reports the session’s own mount mode', async () => {
-    const ws = new Workspace(
-      { '/data': new RAMVFS() },
-      { mode: MountMode.WRITE, shellParser: await getTestParser() },
-    )
+    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
     const narrow = ws.createSession('narrow', {
       profile: parseSessionProfile({ mounts: { '/data': 'r' } }),
     })
@@ -1177,10 +1150,7 @@ describe('a line beside another session’s paused line on the fallback storage'
   })
 
   it('runs find -exec as find’s own session', async () => {
-    const ws = new Workspace(
-      { '/data': new RAMVFS() },
-      { mode: MountMode.WRITE, shellParser: await getTestParser() },
-    )
+    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
     const a = ws.createSession('a')
     const b = ws.createSession('b')
     const holds = registerPauses(ws)
@@ -1209,10 +1179,7 @@ describe('a line beside another session’s paused line on the fallback storage'
 })
 
 it('judges a named facade’s op by its own rules when a wider session binds meanwhile', async () => {
-  const ws = new Workspace(
-    { '/data': new RAMVFS() },
-    { mode: MountMode.WRITE, shellParser: await getTestParser() },
-  )
+  const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
   ws.createSession('sealed', {
     profile: parseSessionProfile({
       commands: { deny: [{ reason: 'sealed', paths: ['/data/secret'] }] },
@@ -1259,10 +1226,7 @@ it('judges a named facade’s op by its own rules when a wider session binds mea
 })
 
 it('expands an ambient glob under every live session’s hides', async () => {
-  const ws = new Workspace(
-    { '/data': new RAMVFS() },
-    { mode: MountMode.WRITE, shellParser: await getTestParser() },
-  )
+  const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
   const hider = ws.createSession('hider', {
     profile: parseSessionProfile({ paths: { hide: ['/data/secret'] } }),
   })
@@ -1306,10 +1270,7 @@ it('expands an ambient glob under every live session’s hides', async () => {
 })
 
 it('checks a link target under the caller’s own view while a peer hides the link', async () => {
-  const ws = new Workspace(
-    { '/data': new RAMVFS() },
-    { mode: MountMode.WRITE, shellParser: await getTestParser() },
-  )
+  const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
   const peer = ws.createSession('peer', {
     profile: parseSessionProfile({ paths: { hide: ['/data/link'] } }),
   })

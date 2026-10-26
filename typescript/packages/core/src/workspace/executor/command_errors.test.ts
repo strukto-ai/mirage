@@ -8,7 +8,6 @@ import { type FileStat, PathSpec } from '../../types.ts'
 import { eacces } from '../../errors/fs.ts'
 import { MountEntry } from '../mount/mount.ts'
 import { Workspace } from '../workspace/workspace.ts'
-import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 
 const DEC = new TextDecoder()
 const ENC = new TextEncoder()
@@ -38,10 +37,7 @@ it.each([
 ])('keeps lazy failures on the producer: %s', async (tail, expected) => {
   for (const error of [eacces('/bad/closed'), new Error('remote failure')]) {
     const bad = new RAMVFS()
-    const ws = new Workspace(
-      { '/bad': bad, '/out': new RAMVFS() },
-      { mode: 'exec', shellParser: await getTestParser() },
-    )
+    const ws = new Workspace({ '/bad': bad, '/out': new RAMVFS() }, { mode: 'exec' })
     for (const cmd of failingCommand('cat', error)) ws.registry.mountFor('/bad/f').register(cmd)
     try {
       await ws.shell('echo data >/bad/f')
@@ -75,7 +71,7 @@ it.each(['find', 'du', 'ls -R'])('keeps nested %s failure inside the line', asyn
   const listing = name === 'ls -R'
   const ws = new Workspace(
     { '/bad': listing ? new FailingListing() : new RAMVFS(), '/good': new RAMVFS() },
-    { mode: 'exec', shellParser: await getTestParser() },
+    { mode: 'exec' },
   )
   if (!listing) {
     for (const cmd of failingCommand(name, new Error('remote failure'), false))

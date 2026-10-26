@@ -19,15 +19,14 @@ import { describe, expect, it } from 'vitest'
 import { IOResult } from '../../io/types.ts'
 import { getParts } from '../../shell/helpers.ts'
 import { globPattern, unmarkGlobs } from '../../utils/glob_walk.ts'
-import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { SessionState } from '../session/session.ts'
 import { expandWords } from './parts.ts'
+import { parse } from '../../shell/parse/parse.ts'
 
 const ENC = new TextEncoder()
 
 async function words(cmd: string, env: Record<string, string> = {}, stdout = '') {
-  const parser = await getTestParser()
-  const root = parser.parse(cmd)
+  const root = parse(cmd)
   const parts = getParts(root.namedChildren[0] as never)
   const session = new SessionState({ sessionId: 't', cwd: '/', vars: varsFromEnv(env) })
   const executeFn: ExecuteFn = () => Promise.resolve(new IOResult({ stdout: ENC.encode(stdout) }))

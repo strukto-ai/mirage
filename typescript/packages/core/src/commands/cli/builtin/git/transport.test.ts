@@ -13,15 +13,13 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { execFileSync, spawnSync } from 'node:child_process'
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { mkdtempSync, rmSync } from 'node:fs'
 import { createServer, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
-import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeAll, expect, it } from 'vitest'
 
-import { createShellParser } from '../../../../shell/parse/index.ts'
 import { MountMode } from '../../../../types.ts'
 import { RAMVFS } from '../../../../vfs/ram/ram.ts'
 import { Workspace } from '../../../../workspace/workspace/workspace.ts'
@@ -42,9 +40,6 @@ const ENV = {
   GIT_COMMITTER_EMAIL: 'a@example.com',
 }
 const INFO_REFS = '/repo.git/info/refs?service=git-upload-pack'
-const require = createRequire(import.meta.url)
-const engineWasm = readFileSync(require.resolve('web-tree-sitter/web-tree-sitter.wasm'))
-const grammarWasm = readFileSync(require.resolve('tree-sitter-bash/tree-sitter-bash.wasm'))
 
 let tmp: string
 let server: Server
@@ -138,10 +133,9 @@ function served(name: string, extra: string): void {
   )
 }
 
-async function workspace(): Promise<Workspace> {
+function workspace(): Workspace {
   const ram = new RAMVFS()
-  const parser = await createShellParser({ engineWasm, grammarWasm })
-  const ws = new Workspace({ '/w': ram }, { mode: MountMode.WRITE, shellParser: parser })
+  const ws = new Workspace({ '/w': ram }, { mode: MountMode.WRITE })
   ws.registerCli('git', GIT)
   return ws
 }
@@ -220,7 +214,7 @@ it('splits extra headers, later ones winning', () => {
 })
 
 it('clones and fetches over smart http', async () => {
-  const ws = await workspace()
+  const ws = workspace()
   let result = await ws.shell(`cd /w && git clone ${url} c`)
   expect([result.exitCode, DEC.decode(result.stderr)]).toEqual([0, "Cloning into 'c'...\n"])
   result = await ws.shell('cd /w/c && git log --format=%s')
@@ -246,7 +240,7 @@ it('clones and fetches over smart http', async () => {
 })
 
 it('says a missing http repository is not found and removes the clone', async () => {
-  const ws = await workspace()
+  const ws = workspace()
   const result = await ws.shell(`cd /w && git clone ${url}/nope.git m`)
   const left = await ws.shell('test -e /w/m || echo removed')
   expect([result.exitCode, DEC.decode(result.stderr)]).toEqual([
@@ -283,7 +277,7 @@ it('ignores a ref named outside the repository', async () => {
   ])
   const origin = await listen(funny)
   try {
-    const ws = await workspace()
+    const ws = workspace()
     const cloned = await ws.shell(`cd /w && git clone ${origin}/repo.git c`)
     const fetched = await ws.shell('cd /w/c && git fetch')
     const refs = await ws.shell("cd /w/c && git for-each-ref --format='%(refname)'")
@@ -317,7 +311,7 @@ it.each([
   const hop = redirector(await listen(target))
   const origin = await listen(hop)
   try {
-    const ws = await workspace()
+    const ws = workspace()
     ws.registerCli('gh', GH, { token: 't0k', base_url: origin })
     const result = await ws.shell(
       `cd /w && ${line.replace('{userinfo}', origin.replace('://', '://me:secret@'))}`,
@@ -339,7 +333,7 @@ it('sends the gh token only as authorization on gh repo clone', async () => {
   const listener = backend(tmp, [], seen)
   const base = await listen(listener)
   try {
-    const ws = await workspace()
+    const ws = workspace()
     ws.registerCli('gh', GH, { token: 't0k', base_url: base })
     const result = await ws.shell('cd /w && gh repo clone gh/repo c -- -q')
     expect([result.exitCode, DEC.decode(result.stderr)]).toEqual([0, ''])

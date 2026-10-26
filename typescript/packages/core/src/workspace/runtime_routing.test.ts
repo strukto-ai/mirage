@@ -26,7 +26,6 @@ import type { OutputFn, RunResult } from '../runtime/types.ts'
 import { MontyRuntime } from '../runtime/python/monty/index.ts'
 import { QuickJsRuntime } from '../runtime/js/quickjs/runtime.ts'
 import { ScriptSource } from '../runtime/types.ts'
-import { getTestParser } from '../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Channel, JobConsole } from '../shell/console/index.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { Limit, MountMode, VFSName, type PathSpec } from '../types.ts'
@@ -54,13 +53,11 @@ class NamedFakeRuntime extends LanguageRuntime {
   }
 }
 
-async function runtimeArgWorkspace(): Promise<Workspace> {
-  const parser = await getTestParser()
+function runtimeArgWorkspace(): Workspace {
   return new Workspace(
     { '/': new RAMVFS() },
     {
       mode: MountMode.EXEC,
-      shellParser: parser,
       runtimes: [new NamedFakeRuntime('alpha'), new NamedFakeRuntime('beta'), 'workspace'],
     },
   )
@@ -68,7 +65,7 @@ async function runtimeArgWorkspace(): Promise<Workspace> {
 
 describe('per-line runtime argument', () => {
   it('rebinds captured stages for the routed line only', async () => {
-    const ws = await runtimeArgWorkspace()
+    const ws = runtimeArgWorkspace()
     try {
       const routed = await ws.shell('python3 -c "x"', { runtime: 'beta' })
       expect(DEC.decode(routed.stdout)).toBe('ran-beta\n')
@@ -80,7 +77,7 @@ describe('per-line runtime argument', () => {
   })
 
   it('nested evals inherit the runtime argument', async () => {
-    const ws = await runtimeArgWorkspace()
+    const ws = runtimeArgWorkspace()
     try {
       const io = await ws.shell('echo $(python3 -c "x")', { runtime: 'beta' })
       expect(DEC.decode(io.stdout)).toBe('ran-beta\n')
@@ -90,7 +87,7 @@ describe('per-line runtime argument', () => {
   })
 
   it("leaves its caller's route to a nested line", async () => {
-    const ws = await runtimeArgWorkspace()
+    const ws = runtimeArgWorkspace()
     try {
       ws.registry.mountForPrefix('/').register(
         new Command({
@@ -111,7 +108,7 @@ describe('per-line runtime argument', () => {
   })
 
   it('never touches uncaptured stages', async () => {
-    const ws = await runtimeArgWorkspace()
+    const ws = runtimeArgWorkspace()
     try {
       const io = await ws.shell('echo plain-workspace', { runtime: 'beta' })
       expect(DEC.decode(io.stdout)).toBe('plain-workspace\n')
@@ -121,7 +118,7 @@ describe('per-line runtime argument', () => {
   })
 
   it('fails loud on unknown runtimes and the workspace name', async () => {
-    const ws = await runtimeArgWorkspace()
+    const ws = runtimeArgWorkspace()
     try {
       await expect(ws.shell('python3 -c "x"', { runtime: 'nope' })).rejects.toThrow(
         /unknown runtime:/,
@@ -135,13 +132,11 @@ describe('per-line runtime argument', () => {
   })
 })
 
-async function routedWorkspace(): Promise<Workspace> {
-  const parser = await getTestParser()
+function routedWorkspace(): Workspace {
   return new Workspace(
     { '/': new RAMVFS() },
     {
       mode: MountMode.EXEC,
-      shellParser: parser,
       runtimes: [new NamedFakeRuntime('alpha'), new NamedFakeRuntime('beta'), 'workspace'],
       routePolicy: (ctx) => (ctx.line.includes('big') ? 'beta' : null),
     },
@@ -161,7 +156,7 @@ const ROUTE_NODE = [
 
 describe('routing ladder', () => {
   it('a route moves a line between capturers', async () => {
-    const ws = await routedWorkspace()
+    const ws = routedWorkspace()
     try {
       const small = await ws.shell('python3 -c "small"')
       expect(DEC.decode(small.stdout)).toBe('ran-alpha\n')
@@ -173,7 +168,7 @@ describe('routing ladder', () => {
   })
 
   it('runtime argument beats the route', async () => {
-    const ws = await routedWorkspace()
+    const ws = routedWorkspace()
     try {
       const io = await ws.shell('python3 -c "big job"', { runtime: 'alpha' })
       expect(DEC.decode(io.stdout)).toBe('ran-alpha\n')
@@ -183,12 +178,10 @@ describe('routing ladder', () => {
   })
 
   it('the global policy names the runtime', async () => {
-    const parser = await getTestParser()
     const ws = new Workspace(
       { '/': new RAMVFS() },
       {
         mode: MountMode.EXEC,
-        shellParser: parser,
         runtimes: [new NamedFakeRuntime('alpha'), new NamedFakeRuntime('beta'), 'workspace'],
         routePolicy: (ctx) => (ctx.line.includes('heavy') ? 'beta' : null),
       },
@@ -204,14 +197,12 @@ describe('routing ladder', () => {
   })
 
   it('a hung route program times out with a routing error', async () => {
-    const parser = await getTestParser()
     const saved = SCRIPT_EVAL_TIMEOUT.seconds
     SCRIPT_EVAL_TIMEOUT.seconds = 0.5
     const ws = new Workspace(
       { '/': new RAMVFS() },
       {
         mode: MountMode.EXEC,
-        shellParser: parser,
         runtimes: [new NamedFakeRuntime('alpha'), 'workspace'],
         routePolicy: {
           script: new ScriptSource('while True:\n    pass\n', 'python'),
@@ -247,12 +238,10 @@ describe('routing ladder', () => {
   })
 
   it('a route program reads mounted content as the session', async () => {
-    const parser = await getTestParser()
     const ws = new Workspace(
       { '/': new RAMVFS() },
       {
         mode: MountMode.EXEC,
-        shellParser: parser,
         runtimes: [new MontyRuntime({ captures: [] }), new QuickJsRuntime(), 'workspace'],
         // The runtime name comes from a mounted file; a read that missed
         // would fail the program and the line.
@@ -273,12 +262,10 @@ describe('routing ladder', () => {
   })
 
   it("a policy's deny folds into the line result", async () => {
-    const parser = await getTestParser()
     const ws = new Workspace(
       { '/': new RAMVFS() },
       {
         mode: MountMode.EXEC,
-        shellParser: parser,
         runtimes: [new NamedFakeRuntime('alpha'), 'workspace'],
         policies: [
           {
@@ -309,12 +296,10 @@ describe('routing ladder', () => {
   })
 
   it('a runtime name places the line', async () => {
-    const parser = await getTestParser()
     const ws = new Workspace(
       { '/': new RAMVFS() },
       {
         mode: MountMode.EXEC,
-        shellParser: parser,
         runtimes: [new NamedFakeRuntime('alpha'), new NamedFakeRuntime('beta'), 'workspace'],
         routePolicy: () => 'beta',
       },
@@ -328,13 +313,11 @@ describe('routing ladder', () => {
   })
 
   it('a syntax error gates before the policy', async () => {
-    const parser = await getTestParser()
     const calls: string[] = []
     const ws = new Workspace(
       { '/': new RAMVFS() },
       {
         mode: MountMode.EXEC,
-        shellParser: parser,
         runtimes: [new NamedFakeRuntime('alpha'), 'workspace'],
         routePolicy: (ctx) => {
           calls.push(ctx.line)
@@ -353,12 +336,10 @@ describe('routing ladder', () => {
   })
 
   it("a coded route policy places beside a policy's deny", async () => {
-    const parser = await getTestParser()
     const ws = new Workspace(
       { '/': new RAMVFS() },
       {
         mode: MountMode.EXEC,
-        shellParser: parser,
         runtimes: [new NamedFakeRuntime('alpha'), new NamedFakeRuntime('beta'), 'workspace'],
         routePolicy: () => 'beta',
         policies: [
@@ -382,7 +363,7 @@ describe('routing ladder', () => {
   })
 
   it('nested evals inherit the typed line decision', async () => {
-    const ws = await routedWorkspace()
+    const ws = routedWorkspace()
     try {
       const io = await ws.shell('echo big $(python3 -c "x")')
       expect(DEC.decode(io.stdout)).toBe('big ran-beta\n')
@@ -392,12 +373,10 @@ describe('routing ladder', () => {
   })
 
   it('addRuntime appends, rebinds, and rejects duplicates', async () => {
-    const parser = await getTestParser()
     const ws = new Workspace(
       { '/': new RAMVFS() },
       {
         mode: MountMode.EXEC,
-        shellParser: parser,
         runtimes: [new NamedFakeRuntime('alpha'), 'workspace'],
       },
     )
@@ -431,12 +410,11 @@ function runtimes(said: ShellExplanation): string[] {
   return said.node.children.flatMap((node) => ('command' in node ? [node.runtime] : []))
 }
 
-async function placed(options: Partial<WorkspaceOptions>): Promise<Workspace> {
+function placed(options: Partial<WorkspaceOptions>): Workspace {
   return new Workspace(
     { '/': new RAMVFS() },
     {
       mode: MountMode.EXEC,
-      shellParser: await getTestParser(),
       runtimes: [new NamedFakeRuntime('alpha'), new NamedFakeRuntime('beta'), 'workspace'],
       ...options,
     },
@@ -445,7 +423,7 @@ async function placed(options: Partial<WorkspaceOptions>): Promise<Workspace> {
 
 describe('the placement stage', () => {
   it('a coded policy places the line', async () => {
-    const ws = await placed({ policies: [new HeavyOnBeta()] })
+    const ws = placed({ policies: [new HeavyOnBeta()] })
     try {
       expect(DEC.decode((await ws.shell('python3 -c "heavy"')).stdout)).toBe('ran-beta\n')
       expect(DEC.decode((await ws.shell('python3 -c "light"')).stdout)).toBe('ran-alpha\n')
@@ -458,7 +436,7 @@ describe('the placement stage', () => {
   })
 
   it('a deny outranks a route', async () => {
-    const ws = await placed({ routePolicy: () => 'beta', policies: [new NoSecrets()] })
+    const ws = placed({ routePolicy: () => 'beta', policies: [new NoSecrets()] })
     try {
       const denied = await ws.shell('python3 -c "secret"')
       expect([denied.exitCode, DEC.decode(denied.stderr)]).toEqual([
@@ -478,7 +456,7 @@ describe('the placement stage', () => {
   })
 
   it('two placements that disagree refuse the line', async () => {
-    const ws = await placed({ routePolicy: () => 'alpha', policies: [new HeavyOnBeta()] })
+    const ws = placed({ routePolicy: () => 'alpha', policies: [new HeavyOnBeta()] })
     try {
       const refused = await ws.shell('python3 -c "heavy"')
       expect(refused.exitCode).toBe(126)
@@ -493,7 +471,7 @@ describe('the placement stage', () => {
   })
 
   it('explain names the policy that placed the line', async () => {
-    const ws = await placed({
+    const ws = placed({
       routePolicy: (ctx) => (ctx.line.includes('heavy') ? 'beta' : null),
       policies: [new NoSecrets()],
     })
@@ -518,7 +496,7 @@ describe('the placement stage', () => {
 
   it('admission comes before placement', async () => {
     const seen: string[] = []
-    const ws = await placed({
+    const ws = placed({
       routePolicy: (ctx) => {
         seen.push(ctx.line)
         return null
@@ -543,12 +521,10 @@ describe('the placement stage', () => {
 
 describe('workspace runtime overrides', () => {
   it('explicit captures restrict the workspace', async () => {
-    const parser = await getTestParser()
     const ws = new Workspace(
       { '/': new RAMVFS() },
       {
         mode: MountMode.EXEC,
-        shellParser: parser,
         runtimes: [new NamedFakeRuntime('alpha'), new WorkspaceRuntime({ captures: ['echo'] })],
       },
     )
@@ -566,12 +542,10 @@ describe('workspace runtime overrides', () => {
   })
 
   it('explicit captures restrict under routing', async () => {
-    const parser = await getTestParser()
     const ws = new Workspace(
       { '/': new RAMVFS() },
       {
         mode: MountMode.EXEC,
-        shellParser: parser,
         runtimes: [new NamedFakeRuntime('alpha'), new WorkspaceRuntime({ captures: ['echo'] })],
         routePolicy: () => null,
       },
@@ -589,12 +563,10 @@ describe('workspace runtime overrides', () => {
 
 describe('script context', () => {
   it('empty declared captures serve nothing', async () => {
-    const parser = await getTestParser()
     const ws = new Workspace(
       { '/': new RAMVFS() },
       {
         mode: MountMode.EXEC,
-        shellParser: parser,
         runtimes: [new NamedFakeRuntime('alpha'), new WorkspaceRuntime({ captures: [] })],
       },
     )
@@ -641,12 +613,11 @@ describe('whole-line runtimes', () => {
         return { stdout: await ctx.vfs.read('/f.txt'), stderr: null, exitCode: 0 }
       }
     }
-    const parser = await getTestParser()
     const box = new ReadingBox()
     box.captures = ['*']
     const ws = new Workspace(
       { '/': new RAMVFS() },
-      { mode: MountMode.EXEC, shellParser: parser, runtimes: [box, 'workspace'] },
+      { mode: MountMode.EXEC, runtimes: [box, 'workspace'] },
     )
     try {
       await ws.vfs.write('/f.txt', 'hi\n')
@@ -680,14 +651,12 @@ describe('whole-line runtimes', () => {
       }
     }
     const seen: [number, string][] = []
-    const parser = await getTestParser()
     const box = new BrokenBox()
     box.captures = ['*']
     const ws = new Workspace(
       { '/': new RAMVFS() },
       {
         mode: MountMode.EXEC,
-        shellParser: parser,
         runtimes: [box, 'workspace'],
         policies: [
           {
@@ -734,12 +703,11 @@ describe('whole-line runtimes', () => {
       }
     }
     DEFAULT_COMMAND_LIMITS.anything = new Limit({ timeoutSeconds: 0.2 })
-    const parser = await getTestParser()
     const box = new SettlingBox()
     box.captures = ['*']
     const ws = new Workspace(
       { '/': new RAMVFS() },
-      { mode: MountMode.EXEC, shellParser: parser, runtimes: [box, 'workspace'] },
+      { mode: MountMode.EXEC, runtimes: [box, 'workspace'] },
     )
     try {
       const result = await ws.shell('anything')
@@ -768,10 +736,9 @@ describe('whole-line runtimes', () => {
       }
     }
     DEFAULT_COMMAND_LIMITS.python3 = new Limit({ timeoutSeconds: 0.2 })
-    const parser = await getTestParser()
     const ws = new Workspace(
       { '/': new RAMVFS() },
-      { mode: MountMode.EXEC, shellParser: parser, runtimes: [new Deaf(), 'workspace'] },
+      { mode: MountMode.EXEC, runtimes: [new Deaf(), 'workspace'] },
     )
     try {
       expect((await ws.shell('python3 -c x | cat')).exitCode).toBe(124)
@@ -801,12 +768,11 @@ describe('whole-line runtimes', () => {
         return new Promise<RunResult>(() => undefined)
       }
     }
-    const parser = await getTestParser()
     const box = new StallingBox()
     box.captures = ['*']
     const ws = new Workspace(
       { '/': new RAMVFS() },
-      { mode: MountMode.EXEC, shellParser: parser, runtimes: [box, 'workspace'] },
+      { mode: MountMode.EXEC, runtimes: [box, 'workspace'] },
     )
     try {
       await ws.vfs.write('/f.txt', 'hi\n')
@@ -828,11 +794,10 @@ describe('whole-line runtimes', () => {
   })
 
   it('a named capture keeps the pipeline and redirect in Mirage', async () => {
-    const parser = await getTestParser()
     const box = new LineBox()
     const ws = new Workspace(
       { '/': new RAMVFS() },
-      { mode: MountMode.EXEC, shellParser: parser, runtimes: [box, 'workspace'] },
+      { mode: MountMode.EXEC, runtimes: [box, 'workspace'] },
     )
     try {
       const result = await ws.shell('nvidia-smi -L | grep box > /out.txt')
@@ -847,12 +812,11 @@ describe('whole-line runtimes', () => {
   })
 
   it('a "*" capture claims any line and stdin arrives', async () => {
-    const parser = await getTestParser()
     const box = new LineBox()
     box.captures = ['*']
     const ws = new Workspace(
       { '/': new RAMVFS() },
-      { mode: MountMode.EXEC, shellParser: parser, runtimes: [box, 'workspace'] },
+      { mode: MountMode.EXEC, runtimes: [box, 'workspace'] },
     )
     try {
       const result = await ws.shell('ls / && echo done', { stdin: ENC.encode('fed') })
@@ -864,14 +828,12 @@ describe('whole-line runtimes', () => {
   })
 
   it('a route to the workspace keeps a line in Mirage', async () => {
-    const parser = await getTestParser()
     const box = new LineBox()
     box.captures = ['*']
     const ws = new Workspace(
       { '/': new RAMVFS() },
       {
         mode: MountMode.EXEC,
-        shellParser: parser,
         runtimes: [box, 'workspace'],
         routePolicy: (ctx) => (ctx.line.includes('keep-out') ? 'workspace' : null),
       },
@@ -888,14 +850,12 @@ describe('whole-line runtimes', () => {
   })
 
   it('the runtime argument places the whole line', async () => {
-    const parser = await getTestParser()
     const box = new LineBox()
     box.captures = ['*']
     const ws = new Workspace(
       { '/': new RAMVFS() },
       {
         mode: MountMode.EXEC,
-        shellParser: parser,
         runtimes: [box, 'workspace'],
         routePolicy: () => 'workspace',
       },
@@ -911,12 +871,11 @@ describe('whole-line runtimes', () => {
   })
 
   it('a sink receives the line the runtime served', async () => {
-    const parser = await getTestParser()
     const box = new LineBox()
     box.captures = ['*']
     const ws = new Workspace(
       { '/': new RAMVFS() },
-      { mode: MountMode.EXEC, shellParser: parser, runtimes: [box, 'workspace'] },
+      { mode: MountMode.EXEC, runtimes: [box, 'workspace'] },
     )
     const console_ = new JobConsole()
     try {
@@ -934,11 +893,10 @@ describe('whole-line runtimes', () => {
   it('the workspace entry is a pure routing marker', async () => {
     // A workspace-resolved line runs on the workspace executor inline; the
     // entry is a marker with no line entry point to call.
-    const parser = await getTestParser()
     const fallback = new WorkspaceRuntime()
     const ws = new Workspace(
       { '/': new RAMVFS() },
-      { mode: MountMode.EXEC, shellParser: parser, runtimes: ['pyodide', fallback] },
+      { mode: MountMode.EXEC, runtimes: ['pyodide', fallback] },
     )
     try {
       expect(isLineExecutor(fallback)).toBe(false)

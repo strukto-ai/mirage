@@ -18,21 +18,16 @@
 import { describe, expect, it } from 'vitest'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { MountMode } from '../../types.ts'
-import {
-  getTestParser,
-  stderrStr,
-  stdoutStr,
-} from '../../../tests/workspace/fixtures/workspace_fixture.ts'
+import { stderrStr, stdoutStr } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../workspace/workspace.ts'
 
-async function makeWs(): Promise<Workspace> {
-  const parser = await getTestParser()
-  return new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE, shellParser: parser })
+function makeWs(): Workspace {
+  return new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
 }
 
 describe('executeDeclaration', () => {
   it('refuses an unknown option letter before any operand', async () => {
-    const ws = await makeWs()
+    const ws = makeWs()
     const io = await ws.shell('declare -q NAME')
     expect(stdoutStr(io)).toBe('')
     expect(stderrStr(io)).toBe(
@@ -44,7 +39,7 @@ describe('executeDeclaration', () => {
   })
 
   it('applies a shaping letter to later writes, not the held value', async () => {
-    const ws = await makeWs()
+    const ws = makeWs()
     const io = await ws.shell('v=MiXeD; declare -l v; declare -p v; v=ABC; declare -p v')
     expect(stdoutStr(io)).toBe('declare -l v="MiXeD"\ndeclare -l v="abc"\n')
   })
@@ -52,7 +47,7 @@ describe('executeDeclaration', () => {
   it('drops an unquoted empty expansion by word splitting', async () => {
     // `export $UNSET` is a bare `export` and prints the listing; the
     // quoted form is a real, empty operand and refuses.
-    const ws = await makeWs()
+    const ws = makeWs()
     expect((await ws.shell('export $NOPE')).exitCode).toBe(0)
     const io = await ws.shell('export "$NOPE"')
     expect(stderrStr(io)).toBe("bash: export: `': not a valid identifier\n")
@@ -64,7 +59,7 @@ describe('executeDeclaration', () => {
     // an already-readonly name fails with the old value intact. GNU
     // treats it as a fatal variable-assignment error, so the rest of
     // that line never runs -- the value is read back on the next one.
-    const ws = await makeWs()
+    const ws = makeWs()
     const io = await ws.shell('readonly -a a=(x); readonly -a a=(y); echo REACHED')
     expect(stderrStr(io)).toBe('bash: a: readonly variable\n')
     expect(io.exitCode).toBe(1)

@@ -1,9 +1,6 @@
-import { readFileSync } from 'node:fs'
-import { createRequire } from 'node:module'
-import { afterEach, beforeAll, expect, it, vi } from 'vitest'
+import { afterEach, expect, it, vi } from 'vitest'
 import * as github from '../../../../core/github/repo.ts'
 import { IOResult } from '../../../../io/types.ts'
-import { createShellParser, type ShellParser } from '../../../../shell/parse/index.ts'
 import { MountMode, PathSpec } from '../../../../types.ts'
 import { RAMVFS } from '../../../../vfs/ram/ram.ts'
 import type { ExecuteResult } from '../../../../workspace/workspace/types.ts'
@@ -16,14 +13,6 @@ const WORK = PathSpec.fromStrPath('/w')
 const TOKEN = { Authorization: `Basic ${btoa('x-access-token:secret-never-print')}` }
 const ATTACKER = 'https://attacker.example/x.git'
 
-const require = createRequire(import.meta.url)
-let parser: ShellParser
-beforeAll(async () => {
-  parser = await createShellParser({
-    engineWasm: readFileSync(require.resolve('web-tree-sitter/web-tree-sitter.wasm')),
-    grammarWasm: readFileSync(require.resolve('tree-sitter-bash/tree-sitter-bash.wasm')),
-  })
-})
 afterEach(() => vi.restoreAllMocks())
 
 function clones(): [string[], Context, Readonly<Record<string, string>> | undefined][] {
@@ -37,7 +26,7 @@ function clones(): [string[], Context, Readonly<Record<string, string>> | undefi
 }
 
 async function run(line: string, base?: string): Promise<ExecuteResult> {
-  const ws = new Workspace({ '/w': new RAMVFS() }, { mode: MountMode.WRITE, shellParser: parser })
+  const ws = new Workspace({ '/w': new RAMVFS() }, { mode: MountMode.WRITE })
   ws.registerCli('gh', GH, {
     token: 'secret-never-print',
     ...(base === undefined ? {} : { base_url: base }),

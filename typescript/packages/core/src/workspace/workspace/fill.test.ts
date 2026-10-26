@@ -34,14 +34,11 @@ import type { TSNodeLike } from '../../shell/types.ts'
 import { MountMode, type PathSpec } from '../../types.ts'
 import type { Action, CommandContext, Policy } from '../../policy/index.ts'
 import { parseSessionProfile, type SessionProfile } from '../../policy/profile.ts'
+import { parse } from '../../shell/parse/parse.ts'
 import type { RouteContext } from '../../policy/types.ts'
 import type { AskHandler } from '../../policy/decisions.ts'
 import { Outcome, Scope, type Decision, type SessionContext } from '../../policy/types.ts'
-import {
-  getTestParser,
-  stderrStr,
-  stdoutStr,
-} from '../../../tests/workspace/fixtures/workspace_fixture.ts'
+import { stderrStr, stdoutStr } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { guestBound } from './fill.ts'
 import { Workspace } from './workspace.ts'
 import { toStateDict } from '../snapshot/state.ts'
@@ -96,18 +93,16 @@ function ruled(verb: 'deny' | 'ask', name: string, reason: string): SessionProfi
   return parseSessionProfile({ commands: { [verb]: [{ reason, commands: [name] }] } })
 }
 
-async function makeWs(
+function makeWs(
   env: EnvEntries | undefined,
   guard?: Policy[] | SessionProfile,
   onAsk?: AskHandler,
   secrets?: SecretEntries,
-): Promise<Workspace> {
-  const parser = await getTestParser()
+): Workspace {
   return new Workspace(
     { '/': new RAMVFS() },
     {
       mode: MountMode.WRITE,
-      shellParser: parser,
       ...(env !== undefined ? { env } : {}),
       ...(Array.isArray(guard) ? { policies: guard } : {}),
       ...(guard !== undefined && !Array.isArray(guard)
@@ -186,7 +181,7 @@ describe('fillEnv through execute', () => {
   it('lazy fetches only when referenced and only once', async () => {
     const { calls, fetch } = countingSource({ TOKEN: 't0' })
     registerSecrets('fake-lazy', FakeConfig, fetch)
-    const ws = await makeWs({ TOKEN: { from: 'fake-lazy', ref: 'r' } })
+    const ws = makeWs({ TOKEN: { from: 'fake-lazy', ref: 'r' } })
     try {
       expect((await ws.shell('echo hi')).exitCode).toBe(0)
       expect(calls).toEqual([])
@@ -202,7 +197,7 @@ describe('fillEnv through execute', () => {
   it('a whole-env command fetches an unspelled name', async () => {
     const { calls, fetch } = countingSource({ TOKEN: 't0' })
     registerSecrets('fake-whole', FakeConfig, fetch)
-    const ws = await makeWs({ TOKEN: { from: 'fake-whole', ref: 'r' } })
+    const ws = makeWs({ TOKEN: { from: 'fake-whole', ref: 'r' } })
     try {
       expect((await ws.shell('ls /')).exitCode).toBe(0)
       expect(calls).toEqual([])
@@ -216,7 +211,7 @@ describe('fillEnv through execute', () => {
   it('eager joins every line while a lazy sibling waits', async () => {
     const { calls, fetch } = countingSource({ E: 'ev', L: 'lv' })
     registerSecrets('fake-eager', FakeConfig, fetch)
-    const ws = await makeWs({
+    const ws = makeWs({
       E: { from: 'fake-eager', ref: 're', fetch: 'eager' },
       L: { from: 'fake-eager', ref: 'rl' },
     })
@@ -234,7 +229,7 @@ describe('fillEnv through execute', () => {
   it('two names off one secret is one fetch', async () => {
     const { calls, fetch } = countingSource({ user: 'u', pass: 'p' })
     registerSecrets('fake-group', FakeConfig, fetch)
-    const ws = await makeWs({
+    const ws = makeWs({
       DB_USER: { from: 'fake-group', ref: 'db', key: 'user' },
       DB_PASS: { from: 'fake-group', ref: 'db', key: 'pass' },
     })
@@ -249,7 +244,7 @@ describe('fillEnv through execute', () => {
   it('key defaults to the variable name', async () => {
     const { fetch } = countingSource({ API: 'v' })
     registerSecrets('fake-key', FakeConfig, fetch)
-    const ws = await makeWs({ API: { from: 'fake-key', ref: 'r' } })
+    const ws = makeWs({ API: { from: 'fake-key', ref: 'r' } })
     try {
       expect(stdoutStr(await ws.shell('echo $API'))).toBe('v\n')
     } finally {
@@ -260,7 +255,7 @@ describe('fillEnv through execute', () => {
   it('a missing key names both sides', async () => {
     const { fetch } = countingSource({ a: '1', b: '2' })
     registerSecrets('fake-miss', FakeConfig, fetch)
-    const ws = await makeWs({ T: { from: 'fake-miss', ref: 'r', key: 'c' } })
+    const ws = makeWs({ T: { from: 'fake-miss', ref: 'r', key: 'c' } })
     try {
       const io = await ws.shell('echo $T')
       expect(io.exitCode).toBe(1)
@@ -276,7 +271,7 @@ describe('fillEnv through execute', () => {
   it("a per-session env is that session's alone", async () => {
     const { calls, fetch } = countingSource({ S: 'sv' })
     registerSecrets('fake-session', FakeConfig, fetch)
-    const ws = await makeWs(undefined)
+    const ws = makeWs(undefined)
     try {
       ws.sessionManager.create('s2', { env: { S: { from: 'fake-session', ref: 'r' } } })
       const io = await ws.shell('echo $S', { sessionId: 's2' })
@@ -289,7 +284,7 @@ describe('fillEnv through execute', () => {
   })
 
   it('a readonly preset refuses with bash wording', async () => {
-    const ws = await makeWs({ EDITOR: { value: 'vi', readonly: true } })
+    const ws = makeWs({ EDITOR: { value: 'vi', readonly: true } })
     try {
       let io = await ws.shell('EDITOR=x')
       expect(io.exitCode).toBe(1)
@@ -306,7 +301,7 @@ describe('fillEnv through execute', () => {
   it('export -p renders an unfetched managed name unset', async () => {
     // Written straight into the session (no env block), so the fill
     // pass is off and the renderer meets the third state itself.
-    const ws = await makeWs(undefined)
+    const ws = makeWs(undefined)
     try {
       const session = ws.getSession(ws.defaultSessionId)
       session.vars.T = {
@@ -323,7 +318,7 @@ describe('fillEnv through execute', () => {
   it('a command substitution fetches through the inner fill', async () => {
     const { calls, fetch } = countingSource({ TOKEN: 't0' })
     registerSecrets('fake-cmdsub', FakeConfig, fetch)
-    const ws = await makeWs({ TOKEN: { from: 'fake-cmdsub', ref: 'r' } })
+    const ws = makeWs({ TOKEN: { from: 'fake-cmdsub', ref: 'r' } })
     try {
       expect(stdoutStr(await ws.shell('x=$(echo $TOKEN); echo $x'))).toBe('t0\n')
       expect(calls).toEqual(['r'])
@@ -335,7 +330,7 @@ describe('fillEnv through execute', () => {
   it('a subshell export detaches only the fork', async () => {
     const { fetch } = countingSource({ TOKEN: 't0' })
     registerSecrets('fake-fork', FakeConfig, fetch)
-    const ws = await makeWs({ TOKEN: { from: 'fake-fork', ref: 'r' } })
+    const ws = makeWs({ TOKEN: { from: 'fake-fork', ref: 'r' } })
     try {
       expect(stdoutStr(await ws.shell('(export TOKEN=y; echo $TOKEN)'))).toBe('y\n')
       expect(ws.getSession(ws.defaultSessionId).vars.TOKEN?.managed).not.toBeUndefined()
@@ -348,7 +343,7 @@ describe('fillEnv through execute', () => {
   it('a write detaches, the next read is session-served, the value serializes', async () => {
     const { calls, fetch } = countingSource({ TOKEN: 't0' })
     registerSecrets('fake-write', FakeConfig, fetch)
-    const ws = await makeWs({ TOKEN: { from: 'fake-write', ref: 'r' } })
+    const ws = makeWs({ TOKEN: { from: 'fake-write', ref: 'r' } })
     try {
       expect((await ws.shell('export TOKEN=mine')).exitCode).toBe(0)
       const afterWrite = calls.length
@@ -364,7 +359,7 @@ describe('fillEnv through execute', () => {
 
   it('a dead source fails only the command that needs it', async () => {
     registerSecrets('fake-dead', FakeConfig, () => Promise.reject(new Error('connection refused')))
-    const ws = await makeWs({ TOKEN: { from: 'fake-dead', ref: 'r' } })
+    const ws = makeWs({ TOKEN: { from: 'fake-dead', ref: 'r' } })
     try {
       const io = await ws.shell('echo $TOKEN')
       expect(io.exitCode).toBe(1)
@@ -379,7 +374,7 @@ describe('fillEnv through execute', () => {
 
   it('a failed fetch sets the exit status', async () => {
     registerSecrets('fake-exit', FakeConfig, () => Promise.reject(new Error('connection refused')))
-    const ws = await makeWs({ TOKEN: { from: 'fake-exit', ref: 'r' } })
+    const ws = makeWs({ TOKEN: { from: 'fake-exit', ref: 'r' } })
     try {
       expect((await ws.shell('true')).exitCode).toBe(0)
       expect((await ws.shell('echo $TOKEN')).exitCode).toBe(1)
@@ -389,12 +384,10 @@ describe('fillEnv through execute', () => {
     }
   })
 
-  it('an unknown source fails at construction', async () => {
-    await expect(makeWs({ T: { from: 'nope-never', ref: 'r' } })).rejects.toThrow(
-      /unknown secrets source/,
-    )
+  it('an unknown source fails at construction', () => {
+    expect(() => makeWs({ T: { from: 'nope-never', ref: 'r' } })).toThrow(/unknown secrets source/)
     const profile = parseSessionProfile({ env: { T: { from: 'nope-never', ref: 'r' } } })
-    await expect(makeWs(undefined, profile)).rejects.toThrow(/unknown secrets source/)
+    expect(() => makeWs(undefined, profile)).toThrow(/unknown secrets source/)
   })
 
   // A profile's env speaks the workspace env grammar, so a credential a
@@ -405,7 +398,7 @@ describe('fillEnv through execute', () => {
     const { fetch } = countingSource({ TOKEN: 't0' })
     registerSecrets('fake-profile', FakeConfig, fetch)
     const pointer = { from: 'fake-profile', ref: 'r' }
-    const ws = await makeWs(undefined, parseSessionProfile({ env: { TOKEN: pointer } }))
+    const ws = makeWs(undefined, parseSessionProfile({ env: { TOKEN: pointer } }))
     try {
       ws.createSession('agent')
       for (const sessionId of [ws.defaultSessionId, 'agent']) {
@@ -421,7 +414,7 @@ describe('fillEnv through execute', () => {
 
   it('a mutating export detaches without fetching', async () => {
     registerSecrets('fake-detach', FakeConfig, () => Promise.reject(new Error('sealed')))
-    const ws = await makeWs({ TOKEN: { from: 'fake-detach', ref: 'r' } })
+    const ws = makeWs({ TOKEN: { from: 'fake-detach', ref: 'r' } })
     try {
       expect((await ws.shell('export TOKEN=local')).exitCode).toBe(0)
       expect(stdoutStr(await ws.shell('echo $TOKEN'))).toBe('local\n')
@@ -433,7 +426,7 @@ describe('fillEnv through execute', () => {
   it('mutating forms do not render the environment', async () => {
     const { calls, fetch } = countingSource({ TOKEN: 't0' })
     registerSecrets('fake-mutate', FakeConfig, fetch)
-    const ws = await makeWs({ TOKEN: { from: 'fake-mutate', ref: 'r' } })
+    const ws = makeWs({ TOKEN: { from: 'fake-mutate', ref: 'r' } })
     try {
       for (const line of ['set -u', 'set +u', 'declare -x OTHER=1', 'export OTHER=2']) {
         await ws.shell(line)
@@ -449,7 +442,7 @@ describe('fillEnv through execute', () => {
   it('printenv of the name fetches it', async () => {
     const { calls, fetch } = countingSource({ TOKEN: 't0' })
     registerSecrets('fake-printenv', FakeConfig, fetch)
-    const ws = await makeWs({ TOKEN: { from: 'fake-printenv', ref: 'r' } })
+    const ws = makeWs({ TOKEN: { from: 'fake-printenv', ref: 'r' } })
     try {
       expect(stdoutStr(await ws.shell('printenv TOKEN'))).toBe('t0\n')
       expect(calls).toEqual(['r'])
@@ -461,7 +454,7 @@ describe('fillEnv through execute', () => {
   it('a hidden managed name never fetches', async () => {
     const { calls, fetch } = countingSource({ TOKEN: 't0' })
     registerSecrets('fake-hidden', FakeConfig, fetch)
-    const ws = await makeWs({ TOKEN: { from: 'fake-hidden', ref: 'r', fetch: 'eager' } })
+    const ws = makeWs({ TOKEN: { from: 'fake-hidden', ref: 'r', fetch: 'eager' } })
     try {
       const session = ws.getSession(ws.defaultSessionId)
       session.visibility = { ...session.visibility, vars: { names: ['TOKEN'] } }
@@ -478,7 +471,7 @@ describe('fillEnv through execute', () => {
   it('a stored function body fills across lines', async () => {
     const { calls, fetch } = countingSource({ TOKEN: 't0' })
     registerSecrets('fake-fn', FakeConfig, fetch)
-    const ws = await makeWs({ TOKEN: { from: 'fake-fn', ref: 'r' } })
+    const ws = makeWs({ TOKEN: { from: 'fake-fn', ref: 'r' } })
     try {
       expect((await ws.shell('f() { echo "t:$TOKEN"; }')).exitCode).toBe(0)
       expect(calls).toEqual([])
@@ -492,7 +485,7 @@ describe('fillEnv through execute', () => {
   it('a function calling a function fills transitively', async () => {
     const { calls, fetch } = countingSource({ TOKEN: 't0' })
     registerSecrets('fake-fn2', FakeConfig, fetch)
-    const ws = await makeWs({ TOKEN: { from: 'fake-fn2', ref: 'r' } })
+    const ws = makeWs({ TOKEN: { from: 'fake-fn2', ref: 'r' } })
     try {
       await ws.shell('inner() { echo "i:$TOKEN"; }')
       await ws.shell('outer() { inner; }')
@@ -507,7 +500,7 @@ describe('fillEnv through execute', () => {
   it('an indirect expansion fetches the target', async () => {
     const { calls, fetch } = countingSource({ TOKEN: 't0' })
     registerSecrets('fake-indirect', FakeConfig, fetch)
-    const ws = await makeWs({ TOKEN: { from: 'fake-indirect', ref: 'r' } })
+    const ws = makeWs({ TOKEN: { from: 'fake-indirect', ref: 'r' } })
     try {
       expect((await ws.shell('name=TOKEN')).exitCode).toBe(0)
       expect(calls).toEqual([])
@@ -521,7 +514,7 @@ describe('fillEnv through execute', () => {
   it('a prior-line nameref fetches its target', async () => {
     const { calls, fetch } = countingSource({ TOKEN: 't0' })
     registerSecrets('fake-nameref', FakeConfig, fetch)
-    const ws = await makeWs({ TOKEN: { from: 'fake-nameref', ref: 'r' } })
+    const ws = makeWs({ TOKEN: { from: 'fake-nameref', ref: 'r' } })
     try {
       const session = ws.getSession(ws.defaultSessionId)
       // Written straight into the session so the declaring line's own
@@ -537,7 +530,7 @@ describe('fillEnv through execute', () => {
   it('an alias body fills on invocation', async () => {
     const { calls, fetch } = countingSource({ TOKEN: 't0' })
     registerSecrets('fake-alias', FakeConfig, fetch)
-    const ws = await makeWs({ TOKEN: { from: 'fake-alias', ref: 'r' } })
+    const ws = makeWs({ TOKEN: { from: 'fake-alias', ref: 'r' } })
     try {
       expect((await ws.shell('shopt -s expand_aliases')).exitCode).toBe(0)
       expect((await ws.shell('alias show=\'echo "a:$TOKEN"\'')).exitCode).toBe(0)
@@ -562,7 +555,7 @@ describe('fillEnv through execute', () => {
   ])("a function's alias fills on invocation (%j)", async (lines, out) => {
     const { calls, fetch } = countingSource({ TOKEN: 't0' })
     registerSecrets('fake-alias-saved', FakeConfig, fetch)
-    const ws = await makeWs({ TOKEN: { from: 'fake-alias-saved', ref: 'r' } })
+    const ws = makeWs({ TOKEN: { from: 'fake-alias-saved', ref: 'r' } })
     try {
       for (const line of ['shopt -s expand_aliases', ...lines])
         expect((await ws.shell(line)).exitCode).toBe(0)
@@ -579,7 +572,7 @@ describe('fillEnv through execute', () => {
   ])('a saved alias fetches nothing where it is not read (%j)', async (lines, line) => {
     const { calls, fetch } = countingSource({ TOKEN: 't0' })
     registerSecrets('fake-alias-unread', FakeConfig, fetch)
-    const ws = await makeWs({ TOKEN: { from: 'fake-alias-unread', ref: 'r' } })
+    const ws = makeWs({ TOKEN: { from: 'fake-alias-unread', ref: 'r' } })
     try {
       for (const setup of ['shopt -s expand_aliases', ...lines])
         expect((await ws.shell(setup)).exitCode).toBe(0)
@@ -593,7 +586,7 @@ describe('fillEnv through execute', () => {
   it('the alias rest word is not a managed read', async () => {
     const { calls, fetch } = countingSource({ token: 'v' })
     registerSecrets('fake-alias-rest', FakeConfig, fetch)
-    const ws = await makeWs({
+    const ws = makeWs({
       __mirage_alias_rest__: { from: 'fake-alias-rest', ref: 'r', key: 'token' },
     })
     try {
@@ -609,7 +602,7 @@ describe('fillEnv through execute', () => {
   it('an alias never fetches while expansion is off', async () => {
     const { calls, fetch } = countingSource({ TOKEN: 't0' })
     registerSecrets('fake-alias-off', FakeConfig, fetch)
-    const ws = await makeWs({ TOKEN: { from: 'fake-alias-off', ref: 'r' } })
+    const ws = makeWs({ TOKEN: { from: 'fake-alias-off', ref: 'r' } })
     try {
       await ws.shell("alias show='echo $TOKEN'")
       expect((await ws.shell('show')).exitCode).not.toBe(0)
@@ -622,7 +615,7 @@ describe('fillEnv through execute', () => {
   it('an invocation before a redefinition fills the stored body', async () => {
     const { calls, fetch } = countingSource({ TOKEN: 't0' })
     registerSecrets('fake-order', FakeConfig, fetch)
-    const ws = await makeWs({ TOKEN: { from: 'fake-order', ref: 'r' } })
+    const ws = makeWs({ TOKEN: { from: 'fake-order', ref: 'r' } })
     try {
       expect((await ws.shell('f() { echo "t:$TOKEN"; }')).exitCode).toBe(0)
       expect(calls).toEqual([])
@@ -636,7 +629,7 @@ describe('fillEnv through execute', () => {
   it('every same-line redefinition body fills', async () => {
     const { calls, fetch } = countingSource({ TOKEN: 't0' })
     registerSecrets('fake-redef-multi', FakeConfig, fetch)
-    const ws = await makeWs({ TOKEN: { from: 'fake-redef-multi', ref: 'r' } })
+    const ws = makeWs({ TOKEN: { from: 'fake-redef-multi', ref: 'r' } })
     try {
       const io = await ws.shell('f() { :; }; f; f() { echo "e:$TOKEN"; }; f')
       expect(stdoutStr(io)).toBe('e:t0\n')
@@ -649,7 +642,7 @@ describe('fillEnv through execute', () => {
   it('a body local mask never fetches', async () => {
     const { calls, fetch } = countingSource({ TOKEN: 't0' })
     registerSecrets('fake-body-local', FakeConfig, fetch)
-    const ws = await makeWs({ TOKEN: { from: 'fake-body-local', ref: 'r' } })
+    const ws = makeWs({ TOKEN: { from: 'fake-body-local', ref: 'r' } })
     try {
       const io = await ws.shell('f() { local TOKEN=shadow; echo "in:$TOKEN"; }; f')
       expect(stdoutStr(io)).toBe('in:shadow\n')
@@ -662,7 +655,7 @@ describe('fillEnv through execute', () => {
   it('a body mask leaves the line read fetching', async () => {
     const { calls, fetch } = countingSource({ TOKEN: 't0' })
     registerSecrets('fake-body-line', FakeConfig, fetch)
-    const ws = await makeWs({ TOKEN: { from: 'fake-body-line', ref: 'r' } })
+    const ws = makeWs({ TOKEN: { from: 'fake-body-line', ref: 'r' } })
     try {
       const io = await ws.shell('f() { local TOKEN=shadow; }; f; echo "g:$TOKEN"')
       expect(stdoutStr(io)).toBe('g:t0\n')
@@ -675,7 +668,7 @@ describe('fillEnv through execute', () => {
   it('a body read before its mask fetches', async () => {
     const { calls, fetch } = countingSource({ TOKEN: 't0' })
     registerSecrets('fake-body-pre', FakeConfig, fetch)
-    const ws = await makeWs({ TOKEN: { from: 'fake-body-pre', ref: 'r' } })
+    const ws = makeWs({ TOKEN: { from: 'fake-body-pre', ref: 'r' } })
     try {
       const io = await ws.shell('f() { echo "pre:$TOKEN"; local TOKEN=shadow; }; f')
       expect(stdoutStr(io)).toBe('pre:t0\n')
@@ -688,7 +681,7 @@ describe('fillEnv through execute', () => {
   it('a body assignment masks its own read', async () => {
     const { calls, fetch } = countingSource({ TOKEN: 't0' })
     registerSecrets('fake-body-assign', FakeConfig, fetch)
-    const ws = await makeWs({ TOKEN: { from: 'fake-body-assign', ref: 'r' } })
+    const ws = makeWs({ TOKEN: { from: 'fake-body-assign', ref: 'r' } })
     try {
       const io = await ws.shell('f() { TOKEN=w; echo "in:$TOKEN"; }; f')
       expect(stdoutStr(io)).toBe('in:w\n')
@@ -701,7 +694,7 @@ describe('fillEnv through execute', () => {
   it('a body mask reading the standing value fetches', async () => {
     const { calls, fetch } = countingSource({ TOKEN: 't0' })
     registerSecrets('fake-body-pin', FakeConfig, fetch)
-    const ws = await makeWs({ TOKEN: { from: 'fake-body-pin', ref: 'r' } })
+    const ws = makeWs({ TOKEN: { from: 'fake-body-pin', ref: 'r' } })
     try {
       const io = await ws.shell('f() { local TOKEN=$TOKEN; echo "in:$TOKEN"; }; f')
       expect(stdoutStr(io)).toBe('in:t0\n')
@@ -714,7 +707,7 @@ describe('fillEnv through execute', () => {
   it('a stored body mask holds across lines', async () => {
     const { calls, fetch } = countingSource({ TOKEN: 't0' })
     registerSecrets('fake-stored-mask', FakeConfig, fetch)
-    const ws = await makeWs({ TOKEN: { from: 'fake-stored-mask', ref: 'r' } })
+    const ws = makeWs({ TOKEN: { from: 'fake-stored-mask', ref: 'r' } })
     try {
       // The stored statements keep their container, so the body's
       // leading local masks its later reads on a later line exactly
@@ -731,7 +724,7 @@ describe('fillEnv through execute', () => {
   it('a stored body read before its mask fetches', async () => {
     const { calls, fetch } = countingSource({ TOKEN: 't0' })
     registerSecrets('fake-stored-read', FakeConfig, fetch)
-    const ws = await makeWs({ TOKEN: { from: 'fake-stored-read', ref: 'r' } })
+    const ws = makeWs({ TOKEN: { from: 'fake-stored-read', ref: 'r' } })
     try {
       const line = 'fread() { echo "r:$TOKEN"; local TOKEN=shadow; }'
       expect((await ws.shell(line)).exitCode).toBe(0)
@@ -745,7 +738,7 @@ describe('fillEnv through execute', () => {
   it('a top-level declaration masks', async () => {
     const { calls, fetch } = countingSource({ TOKEN: 't0' })
     registerSecrets('fake-top-decl', FakeConfig, fetch)
-    const ws = await makeWs({ TOKEN: { from: 'fake-top-decl', ref: 'r' } })
+    const ws = makeWs({ TOKEN: { from: 'fake-top-decl', ref: 'r' } })
     try {
       const io = await ws.shell('export TOKEN=local; printenv TOKEN')
       expect(stdoutStr(io)).toBe('local\n')
@@ -758,7 +751,7 @@ describe('fillEnv through execute', () => {
   it('a top-level local is not a mask', async () => {
     const { calls, fetch } = countingSource({ TOKEN: 't0' })
     registerSecrets('fake-top-local', FakeConfig, fetch)
-    const ws = await makeWs({ TOKEN: { from: 'fake-top-local', ref: 'r' } })
+    const ws = makeWs({ TOKEN: { from: 'fake-top-local', ref: 'r' } })
     try {
       const io = await ws.shell('local TOKEN=x; echo "t:$TOKEN"')
       expect(stdoutStr(io)).toBe('t:t0\n')
@@ -771,7 +764,7 @@ describe('fillEnv through execute', () => {
   it('a tilde expansion fetches HOME', async () => {
     const { calls, fetch } = countingSource({ HOME: '/hh' })
     registerSecrets('fake-tilde', FakeConfig, fetch)
-    const ws = await makeWs({ HOME: { from: 'fake-tilde', ref: 'h' } })
+    const ws = makeWs({ HOME: { from: 'fake-tilde', ref: 'h' } })
     try {
       const io = await ws.shell('echo ~/logs')
       expect(stdoutStr(io)).toBe('/hh/logs\n')
@@ -784,7 +777,7 @@ describe('fillEnv through execute', () => {
   it('a bare cd fetches HOME', async () => {
     const { calls, fetch } = countingSource({ HOME: '/d' })
     registerSecrets('fake-cd-home', FakeConfig, fetch)
-    const ws = await makeWs({ HOME: { from: 'fake-cd-home', ref: 'h' } })
+    const ws = makeWs({ HOME: { from: 'fake-cd-home', ref: 'h' } })
     try {
       expect((await ws.shell('mkdir /d')).exitCode).toBe(0)
       const io = await ws.shell('cd; pwd')
@@ -798,7 +791,7 @@ describe('fillEnv through execute', () => {
   it('cd dash fetches OLDPWD', async () => {
     const { calls, fetch } = countingSource({ OLDPWD: '/d' })
     registerSecrets('fake-cd-old', FakeConfig, fetch)
-    const ws = await makeWs({ OLDPWD: { from: 'fake-cd-old', ref: 'o' } })
+    const ws = makeWs({ OLDPWD: { from: 'fake-cd-old', ref: 'o' } })
     try {
       expect((await ws.shell('mkdir /d')).exitCode).toBe(0)
       const io = await ws.shell('cd -')
@@ -812,7 +805,7 @@ describe('fillEnv through execute', () => {
   it('a relative cd fetches CDPATH', async () => {
     const { calls, fetch } = countingSource({ CDPATH: '/pp' })
     registerSecrets('fake-cd-path', FakeConfig, fetch)
-    const ws = await makeWs({ CDPATH: { from: 'fake-cd-path', ref: 'c' } })
+    const ws = makeWs({ CDPATH: { from: 'fake-cd-path', ref: 'c' } })
     try {
       expect((await ws.shell('mkdir -p /pp/sub')).exitCode).toBe(0)
       const io = await ws.shell('cd sub')
@@ -826,7 +819,7 @@ describe('fillEnv through execute', () => {
   it('read fetches IFS', async () => {
     const { calls, fetch } = countingSource({ IFS: ' ' })
     registerSecrets('fake-read-ifs', FakeConfig, fetch)
-    const ws = await makeWs({ IFS: { from: 'fake-read-ifs', ref: 'i' } })
+    const ws = makeWs({ IFS: { from: 'fake-read-ifs', ref: 'i' } })
     try {
       const io = await ws.shell("echo 'a b' | read v")
       expect(io.exitCode).toBe(0)
@@ -839,7 +832,7 @@ describe('fillEnv through execute', () => {
   it('getopts fetches OPTIND', async () => {
     const { calls, fetch } = countingSource({ OPTIND: '1' })
     registerSecrets('fake-getopts', FakeConfig, fetch)
-    const ws = await makeWs({ OPTIND: { from: 'fake-getopts', ref: 'g' } })
+    const ws = makeWs({ OPTIND: { from: 'fake-getopts', ref: 'g' } })
     try {
       const io = await ws.shell('getopts ab o')
       expect(io.exitCode).toBe(1)
@@ -852,7 +845,7 @@ describe('fillEnv through execute', () => {
   it('a line mask beats an implicit read', async () => {
     const { calls, fetch } = countingSource({ HOME: '/hh' })
     registerSecrets('fake-mask-tilde', FakeConfig, fetch)
-    const ws = await makeWs({ HOME: { from: 'fake-mask-tilde', ref: 'h' } })
+    const ws = makeWs({ HOME: { from: 'fake-mask-tilde', ref: 'h' } })
     try {
       const io = await ws.shell('HOME=/d; echo ~')
       expect(stdoutStr(io)).toBe('/d\n')
@@ -865,7 +858,7 @@ describe('fillEnv through execute', () => {
   it('an arithmetic read chases an earlier value', async () => {
     const { calls, fetch } = countingSource({ TOKEN: '7' })
     registerSecrets('fake-arith-chase', FakeConfig, fetch)
-    const ws = await makeWs({ TOKEN: { from: 'fake-arith-chase', ref: 'r' } })
+    const ws = makeWs({ TOKEN: { from: 'fake-arith-chase', ref: 'r' } })
     try {
       expect((await ws.shell('name=TOKEN')).exitCode).toBe(0)
       expect(calls).toEqual([])
@@ -880,7 +873,7 @@ describe('fillEnv through execute', () => {
   it('an arithmetic read chases a same-line assignment', async () => {
     const { calls, fetch } = countingSource({ TOKEN: '7' })
     registerSecrets('fake-arith-line', FakeConfig, fetch)
-    const ws = await makeWs({ TOKEN: { from: 'fake-arith-line', ref: 'r' } })
+    const ws = makeWs({ TOKEN: { from: 'fake-arith-line', ref: 'r' } })
     try {
       const io = await ws.shell('name=TOKEN; echo $((name))')
       expect(stdoutStr(io)).toBe('7\n')
@@ -893,7 +886,7 @@ describe('fillEnv through execute', () => {
   it('the arithmetic chase respects a body mask', async () => {
     const { calls, fetch } = countingSource({ TOKEN: '7' })
     registerSecrets('fake-arith-mask', FakeConfig, fetch)
-    const ws = await makeWs({ TOKEN: { from: 'fake-arith-mask', ref: 'r' } })
+    const ws = makeWs({ TOKEN: { from: 'fake-arith-mask', ref: 'r' } })
     try {
       const io = await ws.shell('f() { local TOKEN=5; echo $((TOKEN)); }; f')
       expect(stdoutStr(io)).toBe('5\n')
@@ -906,7 +899,7 @@ describe('fillEnv through execute', () => {
   it("the arithmetic chase follows a body mask's value", async () => {
     const { calls, fetch } = countingSource({ TOKEN: '7' })
     registerSecrets('fake-arith-bodyval', FakeConfig, fetch)
-    const ws = await makeWs({ TOKEN: { from: 'fake-arith-bodyval', ref: 'r' } })
+    const ws = makeWs({ TOKEN: { from: 'fake-arith-bodyval', ref: 'r' } })
     try {
       const io = await ws.shell('f() { local n=TOKEN; echo $((n)); }; f')
       expect(stdoutStr(io)).toBe('7\n')
@@ -919,7 +912,7 @@ describe('fillEnv through execute', () => {
   it('a [[ numeric comparison chases', async () => {
     const { calls, fetch } = countingSource({ TOKEN: '7' })
     registerSecrets('fake-arith-test', FakeConfig, fetch)
-    const ws = await makeWs({ TOKEN: { from: 'fake-arith-test', ref: 'r' } })
+    const ws = makeWs({ TOKEN: { from: 'fake-arith-test', ref: 'r' } })
     try {
       expect((await ws.shell('name=TOKEN')).exitCode).toBe(0)
       const io = await ws.shell('[[ name -gt 5 ]]; echo $?')
@@ -933,7 +926,7 @@ describe('fillEnv through execute', () => {
   it('a let operand chases', async () => {
     const { calls, fetch } = countingSource({ TOKEN: '7' })
     registerSecrets('fake-arith-let', FakeConfig, fetch)
-    const ws = await makeWs({ TOKEN: { from: 'fake-arith-let', ref: 'r' } })
+    const ws = makeWs({ TOKEN: { from: 'fake-arith-let', ref: 'r' } })
     try {
       expect((await ws.shell('name=TOKEN')).exitCode).toBe(0)
       const io = await ws.shell('let y=name+1; echo $y')
@@ -947,7 +940,7 @@ describe('fillEnv through execute', () => {
   it('the arithmetic chase follows a dynamic assignment', async () => {
     const { calls, fetch } = countingSource({ TOKEN: '7' })
     registerSecrets('fake-arith-dyn', FakeConfig, fetch)
-    const ws = await makeWs({ TOKEN: { from: 'fake-arith-dyn', ref: 'r' } })
+    const ws = makeWs({ TOKEN: { from: 'fake-arith-dyn', ref: 'r' } })
     try {
       expect((await ws.shell('other=TOKEN')).exitCode).toBe(0)
       const io = await ws.shell('n=$other; echo $((n))')
@@ -961,7 +954,7 @@ describe('fillEnv through execute', () => {
   it('the arithmetic chase replans after a fetch', async () => {
     const { calls, fetch } = countingSource({ A: 'B', B: '7' })
     registerSecrets('fake-arith-replan', FakeConfig, fetch)
-    const ws = await makeWs({
+    const ws = makeWs({
       A: { from: 'fake-arith-replan', ref: 'ra', key: 'A' },
       B: { from: 'fake-arith-replan', ref: 'rb', key: 'B' },
     })
@@ -979,7 +972,7 @@ describe('fillEnv through execute', () => {
   it('numeric arithmetic never fetches', async () => {
     const { calls, fetch } = countingSource({ TOKEN: '7' })
     registerSecrets('fake-arith-num', FakeConfig, fetch)
-    const ws = await makeWs({ TOKEN: { from: 'fake-arith-num', ref: 'r' } })
+    const ws = makeWs({ TOKEN: { from: 'fake-arith-num', ref: 'r' } })
     try {
       const io = await ws.shell('echo $((2 + 2))')
       expect(stdoutStr(io)).toBe('4\n')
@@ -992,7 +985,7 @@ describe('fillEnv through execute', () => {
   it('a dynamic head fetches everything pending', async () => {
     const { calls, fetch } = countingSource({ TOKEN: 't0' })
     registerSecrets('fake-dyn', FakeConfig, fetch)
-    const ws = await makeWs({ TOKEN: { from: 'fake-dyn', ref: 'r' } })
+    const ws = makeWs({ TOKEN: { from: 'fake-dyn', ref: 'r' } })
     try {
       expect((await ws.shell('h=echo')).exitCode).toBe(0)
       expect(calls).toEqual([])
@@ -1006,7 +999,7 @@ describe('fillEnv through execute', () => {
   it('a copy carries the env template to new sessions', async () => {
     const { calls, fetch } = countingSource({ TOKEN: 't0' })
     registerSecrets('fake-copy', FakeConfig, fetch)
-    const ws = await makeWs({ TOKEN: { from: 'fake-copy', ref: 'r' }, MODE: 'prod' })
+    const ws = makeWs({ TOKEN: { from: 'fake-copy', ref: 'r' }, MODE: 'prod' })
     try {
       const twin = await ws.copy()
       try {
@@ -1025,7 +1018,7 @@ describe('fillEnv through execute', () => {
   it('a denied literal line never fetches', async () => {
     const { calls, fetch } = countingSource({ TOKEN: 't0' })
     registerSecrets('fake-denied', FakeConfig, fetch)
-    const ws = await makeWs(
+    const ws = makeWs(
       { TOKEN: { from: 'fake-denied', ref: 'r' } },
       ruled('deny', 'printenv', 'printenv is off'),
     )
@@ -1047,9 +1040,7 @@ describe('fillEnv through execute', () => {
     // preExecute's, which answers before anything is fetched.
     const { calls, fetch } = countingSource({ TOKEN: 't0' })
     registerSecrets('fake-line-deny', FakeConfig, fetch)
-    const ws = await makeWs({ TOKEN: { from: 'fake-line-deny', ref: 'r' } }, [
-      new DenyLine('printenv'),
-    ])
+    const ws = makeWs({ TOKEN: { from: 'fake-line-deny', ref: 'r' } }, [new DenyLine('printenv')])
     try {
       const io = await ws.shell('printenv TOKEN')
       expect(io.exitCode).toBe(126)
@@ -1063,7 +1054,7 @@ describe('fillEnv through execute', () => {
   it('a coded command deny answers after the fetch', async () => {
     const { calls, fetch } = countingSource({ TOKEN: 't0' })
     registerSecrets('fake-command-deny', FakeConfig, fetch)
-    const ws = await makeWs({ TOKEN: { from: 'fake-command-deny', ref: 'r' } }, [
+    const ws = makeWs({ TOKEN: { from: 'fake-command-deny', ref: 'r' } }, [
       new DenyNamed('printenv'),
     ])
     try {
@@ -1084,7 +1075,7 @@ describe('fillEnv through execute', () => {
     // line's earlier commands would already have run.
     const { calls, fetch } = countingSource({ TOKEN: 't0' })
     registerSecrets('fake-dynamic', FakeConfig, fetch)
-    const ws = await makeWs(
+    const ws = makeWs(
       { TOKEN: { from: 'fake-dynamic', ref: 'r' } },
       ruled('deny', 'echo', 'echo is off'),
     )
@@ -1108,7 +1099,7 @@ describe('fillEnv through execute', () => {
       calls.push('ask')
       return Promise.resolve({ ...record, outcome: Outcome.ALLOW })
     }
-    const ws = await makeWs(
+    const ws = makeWs(
       { TOKEN: { from: 'fake-ask-allow', ref: 'r' } },
       ruled('ask', 'printenv', 'printenv needs sign-off'),
       approve,
@@ -1132,7 +1123,7 @@ describe('fillEnv through execute', () => {
       calls.push('ask')
       return Promise.resolve({ ...record, outcome: Outcome.DENY })
     }
-    const ws = await makeWs(
+    const ws = makeWs(
       { TOKEN: { from: 'fake-ask-deny', ref: 'r' } },
       ruled('ask', 'printenv', 'printenv needs sign-off'),
       refuse,
@@ -1152,7 +1143,7 @@ describe('fillEnv through execute', () => {
     // is skipped; the answered replay fetches and runs.
     const { calls, fetch } = countingSource({ TOKEN: 't0' })
     registerSecrets('fake-ask-pending', FakeConfig, fetch)
-    const ws = await makeWs(
+    const ws = makeWs(
       { TOKEN: { from: 'fake-ask-pending', ref: 'r' } },
       ruled('ask', 'printenv', 'printenv needs sign-off'),
     )
@@ -1180,7 +1171,7 @@ describe('fillEnv through execute', () => {
     // stays live for an allowed line.
     const { calls, fetch } = countingSource({ TOKEN: 't0' })
     registerSecrets('fake-body-deny', FakeConfig, fetch)
-    const ws = await makeWs(
+    const ws = makeWs(
       { TOKEN: { from: 'fake-body-deny', ref: 'r' } },
       ruled('deny', 'printenv', 'printenv is off'),
     )
@@ -1200,7 +1191,7 @@ describe('fillEnv through execute', () => {
   it('a denied transitive body never fetches', async () => {
     const { calls, fetch } = countingSource({ TOKEN: 't0' })
     registerSecrets('fake-body-trans', FakeConfig, fetch)
-    const ws = await makeWs(
+    const ws = makeWs(
       { TOKEN: { from: 'fake-body-trans', ref: 'r' } },
       ruled('deny', 'printenv', 'printenv is off'),
     )
@@ -1223,7 +1214,7 @@ describe('fillEnv through execute', () => {
     // function can predate it (per-session profiles).
     const { calls, fetch } = countingSource({ TOKEN: 't0' })
     registerSecrets('fake-body-mixed', FakeConfig, fetch)
-    const ws = await makeWs(
+    const ws = makeWs(
       { TOKEN: { from: 'fake-body-mixed', ref: 'r' } },
       ruled('deny', 'printenv', 'printenv is off'),
     )
@@ -1244,7 +1235,7 @@ describe('fillEnv through execute', () => {
     // runs when its invocation is refused, so nothing fetches.
     const { calls, fetch } = countingSource({ TOKEN: 't0' })
     registerSecrets('fake-inv-deny', FakeConfig, fetch)
-    const ws = await makeWs(
+    const ws = makeWs(
       { TOKEN: { from: 'fake-inv-deny', ref: 'r' } },
       ruled('deny', 'f', 'f is off'),
     )
@@ -1264,7 +1255,7 @@ describe('fillEnv through execute', () => {
     // question fires for a command that only got stored.
     const { calls, fetch } = countingSource({ TOKEN: 't0', E: 'ev' })
     registerSecrets('fake-def-eager', FakeConfig, fetch)
-    const ws = await makeWs(
+    const ws = makeWs(
       {
         TOKEN: { from: 'fake-def-eager', ref: 'r' },
         EAGER: { from: 'fake-def-eager', ref: 're', key: 'E', fetch: 'eager' },
@@ -1287,7 +1278,7 @@ describe('fillEnv through execute', () => {
       calls.push('ask')
       return Promise.resolve({ ...record, outcome: Outcome.ALLOW })
     }
-    const ws = await makeWs(
+    const ws = makeWs(
       { TOKEN: { from: 'fake-body-ask', ref: 'r' } },
       ruled('ask', 'printenv', 'printenv needs sign-off'),
       approve,
@@ -1313,7 +1304,7 @@ describe('fillEnv through execute', () => {
       calls.push('ask')
       return Promise.resolve({ ...record, outcome: Outcome.ALLOW })
     }
-    const ws = await makeWs(
+    const ws = makeWs(
       { TOKEN: { from: 'fake-two-defs', ref: 'r' } },
       ruled('ask', 'printenv', 'printenv needs sign-off'),
       approve,
@@ -1334,7 +1325,7 @@ describe('fillEnv through execute', () => {
       calls.push('ask')
       return Promise.resolve({ ...record, outcome: Outcome.DENY })
     }
-    const ws = await makeWs(
+    const ws = makeWs(
       { TOKEN: { from: 'fake-body-ask-deny', ref: 'r' } },
       ruled('ask', 'printenv', 'printenv needs sign-off'),
       refuse,
@@ -1357,7 +1348,7 @@ describe('fillEnv through execute', () => {
     // invocation keeps the whole-environment read.
     const { calls, fetch } = countingSource({ TOKEN: 't0' })
     registerSecrets('fake-env-i', FakeConfig, fetch)
-    const ws = await makeWs({ TOKEN: { from: 'fake-env-i', ref: 'r' } })
+    const ws = makeWs({ TOKEN: { from: 'fake-env-i', ref: 'r' } })
     try {
       const io = await ws.shell('env -i')
       expect(io.exitCode).toBe(0)
@@ -1378,7 +1369,7 @@ describe('fillEnv through execute', () => {
     // source is contacted, and the replacement persists.
     const { calls, fetch } = countingSource({ TOKEN: 't0' })
     registerSecrets('fake-mask-assign', FakeConfig, fetch)
-    const ws = await makeWs({ TOKEN: { from: 'fake-mask-assign', ref: 'r' } })
+    const ws = makeWs({ TOKEN: { from: 'fake-mask-assign', ref: 'r' } })
     try {
       const io = await ws.shell('TOKEN=local; printenv TOKEN')
       expect(stdoutStr(io)).toBe('local\n')
@@ -1394,7 +1385,7 @@ describe('fillEnv through execute', () => {
   it('a masked unset never fetches', async () => {
     const { calls, fetch } = countingSource({ TOKEN: 't0' })
     registerSecrets('fake-mask-unset', FakeConfig, fetch)
-    const ws = await makeWs({ TOKEN: { from: 'fake-mask-unset', ref: 'r' } })
+    const ws = makeWs({ TOKEN: { from: 'fake-mask-unset', ref: 'r' } })
     try {
       const io = await ws.shell('unset TOKEN; printenv TOKEN')
       expect(io.exitCode).toBe(1)
@@ -1412,7 +1403,7 @@ describe('fillEnv through execute', () => {
     // later line that really reads it.
     const { calls, fetch } = countingSource({ TOKEN: 't0' })
     registerSecrets('fake-env-excl', FakeConfig, fetch)
-    const ws = await makeWs({ TOKEN: { from: 'fake-env-excl', ref: 'r' } })
+    const ws = makeWs({ TOKEN: { from: 'fake-env-excl', ref: 'r' } })
     try {
       const removed = await ws.shell('env -u TOKEN printenv TOKEN')
       expect(removed.exitCode).toBe(1)
@@ -1434,7 +1425,7 @@ describe('fillEnv through execute', () => {
     // next real read.
     const { calls, fetch } = countingSource({ TOKEN: 't0' })
     registerSecrets('fake-prefix', FakeConfig, fetch)
-    const ws = await makeWs({ TOKEN: { from: 'fake-prefix', ref: 'r' } })
+    const ws = makeWs({ TOKEN: { from: 'fake-prefix', ref: 'r' } })
     try {
       const io = await ws.shell('TOKEN=local printenv TOKEN')
       expect(stdoutStr(io)).toBe('local\n')
@@ -1453,7 +1444,7 @@ describe('fillEnv through execute', () => {
     // proves a replacement, so the fetch stands.
     const first = countingSource({ TOKEN: 't0', A: 'a0' })
     registerSecrets('fake-cond', FakeConfig, first.fetch)
-    const ws = await makeWs({ TOKEN: { from: 'fake-cond', ref: 'r' } })
+    const ws = makeWs({ TOKEN: { from: 'fake-cond', ref: 'r' } })
     try {
       const io = await ws.shell('A=1 && printenv TOKEN')
       expect(stdoutStr(io)).toBe('t0\n')
@@ -1463,7 +1454,7 @@ describe('fillEnv through execute', () => {
     }
     const second = countingSource({ TOKEN: 't0' })
     registerSecrets('fake-bg', FakeConfig, second.fetch)
-    const ws2 = await makeWs({ TOKEN: { from: 'fake-bg', ref: 'r' } })
+    const ws2 = makeWs({ TOKEN: { from: 'fake-bg', ref: 'r' } })
     try {
       await ws2.shell('TOKEN=local & printenv TOKEN')
       expect(second.calls).toEqual(['r'])
@@ -1477,7 +1468,7 @@ describe('fillEnv through execute', () => {
     // the name.
     const { calls, fetch } = countingSource({ TOKEN: 't0' })
     registerSecrets('fake-selfread', FakeConfig, fetch)
-    const ws = await makeWs({ TOKEN: { from: 'fake-selfread', ref: 'r' } })
+    const ws = makeWs({ TOKEN: { from: 'fake-selfread', ref: 'r' } })
     try {
       const io = await ws.shell('TOKEN=$TOKEN; printenv TOKEN')
       expect(stdoutStr(io)).toBe('t0\n')
@@ -1502,7 +1493,7 @@ describe('fillEnv through execute', () => {
         return null
       },
     }
-    const ws = await makeWs({ TOKEN: { from: 'fake-gated', ref: 'r' } }, [gate])
+    const ws = makeWs({ TOKEN: { from: 'fake-gated', ref: 'r' } }, [gate])
     try {
       const io = await ws.shell('TOKEN=local; printenv TOKEN')
       expect(stdoutStr(io)).toBe('local\n')
@@ -1517,7 +1508,7 @@ describe('fillEnv through execute', () => {
     async (mounted) => {
       const { calls, fetch } = countingSource({ CLI_ROOT: 'r0', CLI_ALPHA: 'a0', CLI_BETA: 'b0' })
       registerSecrets('fake-cli-path', FakeConfig, fetch)
-      const ws = await makeWs({
+      const ws = makeWs({
         CLI_ROOT: { from: 'fake-cli-path', ref: 'root' },
         CLI_ALPHA: { from: 'fake-cli-path', ref: 'alpha' },
         CLI_BETA: { from: 'fake-cli-path', ref: 'beta' },
@@ -1547,7 +1538,6 @@ describe('fillEnv through execute', () => {
       { '/a/': new RAMVFS(), '/b/': new RAMVFS() },
       {
         mode: MountMode.WRITE,
-        shellParser: await getTestParser(),
         env: {
           CLI_ROOT: { from: 'fake-cli-cd', ref: 'root' },
           CLI_ALPHA: { from: 'fake-cli-cd', ref: 'alpha' },
@@ -1575,7 +1565,6 @@ describe('fillEnv through execute', () => {
       { '/reader': new RAMVFS(), '/write': new RAMVFS() },
       {
         mode: MountMode.WRITE,
-        shellParser: await getTestParser(),
         env: {
           TOKEN: { from: 'fake-tree-fallback', ref: 'selected' },
           UNUSED: { from: 'fake-tree-fallback', ref: 'must-not-fetch' },
@@ -1649,7 +1638,7 @@ describe('fillEnv through execute', () => {
         show: new CLIHandler({ fn: () => null }),
       },
     })
-    const ws = await makeWs({ TOKEN: { from: 'fake-tree-gate', ref: 'r' } }, [policy])
+    const ws = makeWs({ TOKEN: { from: 'fake-tree-gate', ref: 'r' } }, [policy])
     try {
       ws.mount('/').registerCommands([tok])
       await ws.shell(line)
@@ -1665,7 +1654,7 @@ describe('fillEnv through execute', () => {
     // service, under hides, with no pattern naming it.
     const { calls, fetch } = countingSource({ CLI_ROOT: 'r0', CLI_ALPHA: 'a0' })
     registerSecrets('fake-cli-refused', FakeConfig, fetch)
-    const ws = await makeWs(
+    const ws = makeWs(
       {
         CLI_ROOT: { from: 'fake-cli-refused', ref: 'root' },
         CLI_ALPHA: { from: 'fake-cli-refused', ref: 'alpha' },
@@ -1692,7 +1681,7 @@ describe('fillEnv through execute', () => {
     // the word a pattern names, so the command keeps its fetch.
     const { calls, fetch } = countingSource({ CLI_ROOT: 'r0' })
     registerSecrets('fake-cli-glob', FakeConfig, fetch)
-    const ws = await makeWs(
+    const ws = makeWs(
       { CLI_ROOT: { from: 'fake-cli-glob', ref: 'root' } },
       parseSessionProfile({ commands: { allow: ['probe /open.txt'] } }),
     )
@@ -1716,7 +1705,6 @@ describe('fillEnv through execute', () => {
       { '/': new RAMVFS() },
       {
         mode: MountMode.EXEC,
-        shellParser: await getTestParser(),
         runtimes: [new NiceBox(), 'workspace'],
         env: { TOKEN: { from: 'fake-nice-box', ref: 'r' } },
         profiles: { p: parseSessionProfile({ commands: { allow: ['nice'] } }) },
@@ -1735,7 +1723,7 @@ describe('fillEnv through execute', () => {
   it('a supplied cli option skips its env', async () => {
     const { calls, fetch } = countingSource({ CLI_ROOT: 'r0', CLI_ALPHA: 'a0' })
     registerSecrets('fake-cli-supplied', FakeConfig, fetch)
-    const ws = await makeWs({
+    const ws = makeWs({
       CLI_ROOT: { from: 'fake-cli-supplied', ref: 'root' },
       CLI_ALPHA: { from: 'fake-cli-supplied', ref: 'alpha' },
     })
@@ -1755,7 +1743,7 @@ describe('fillEnv through execute', () => {
   it('an abbreviated option still fetches', async () => {
     const { calls, fetch } = countingSource({ CLI_ROOT: 'r0', CLI_ALPHA: 'a0' })
     registerSecrets('fake-cli-abbrev', FakeConfig, fetch)
-    const ws = await makeWs({
+    const ws = makeWs({
       CLI_ROOT: { from: 'fake-cli-abbrev', ref: 'root' },
       CLI_ALPHA: { from: 'fake-cli-abbrev', ref: 'alpha' },
     })
@@ -1778,7 +1766,7 @@ describe('fillEnv through execute', () => {
     }
     const { calls, fetch } = countingSource({ CLI_ROOT: 'r0' })
     registerSecrets('fake-cli-group-env', FakeConfig, fetch)
-    const ws = await makeWs({ CLI_ROOT: { from: 'fake-cli-group-env', ref: 'root' } })
+    const ws = makeWs({ CLI_ROOT: { from: 'fake-cli-group-env', ref: 'root' } })
     try {
       ws.registerCli(
         'mycli',
@@ -1810,7 +1798,7 @@ describe('fillEnv through execute', () => {
     }
     const { calls, fetch } = countingSource({ CLI_SHARED: 's0' })
     registerSecrets('fake-cli-shared-one', FakeConfig, fetch)
-    const ws = await makeWs({ CLI_SHARED: { from: 'fake-cli-shared-one', ref: 'shared' } })
+    const ws = makeWs({ CLI_SHARED: { from: 'fake-cli-shared-one', ref: 'shared' } })
     try {
       ws.registerCli('mycli', sharedCliSpec(probe))
       // --token is typed, but --a still falls back to the variable the
@@ -1832,7 +1820,7 @@ describe('fillEnv through execute', () => {
     }
     const { calls, fetch } = countingSource({ CLI_SHARED: 's0' })
     registerSecrets('fake-cli-shared-all', FakeConfig, fetch)
-    const ws = await makeWs({ CLI_SHARED: { from: 'fake-cli-shared-all', ref: 'shared' } })
+    const ws = makeWs({ CLI_SHARED: { from: 'fake-cli-shared-all', ref: 'shared' } })
     try {
       ws.registerCli('mycli', sharedCliSpec(probe))
       const io = await ws.shell('mycli --token typed alpha --a typed2')
@@ -1847,7 +1835,7 @@ describe('fillEnv through execute', () => {
   it('an append assignment fetches before extending', async () => {
     const { calls, fetch } = countingSource({ TOKEN: 't0' })
     registerSecrets('fake-append', FakeConfig, fetch)
-    const ws = await makeWs({ TOKEN: { from: 'fake-append', ref: 'r' } })
+    const ws = makeWs({ TOKEN: { from: 'fake-append', ref: 'r' } })
     try {
       // The append alone on its line is a read: it starts from the
       // value it extends, then the write detaches the name.
@@ -1863,7 +1851,7 @@ describe('fillEnv through execute', () => {
   it('getopts consults a managed OPTERR', async () => {
     const { calls, fetch } = countingSource({ OPTERR: '0' })
     registerSecrets('fake-opterr', FakeConfig, fetch)
-    const ws = await makeWs({ OPTERR: { from: 'fake-opterr', ref: 'oe' } })
+    const ws = makeWs({ OPTERR: { from: 'fake-opterr', ref: 'oe' } })
     try {
       const io = await ws.shell('getopts a opt -z')
       expect(calls).toEqual(['oe'])
@@ -1880,7 +1868,7 @@ describe('fillEnv through execute', () => {
     // whole spec tree rather than reading "no verb selected".
     const { calls, fetch } = countingSource({ CLI_ROOT: 'r0', CLI_ALPHA: 'a0' })
     registerSecrets('fake-cli-alias', FakeConfig, fetch)
-    const ws = await makeWs({
+    const ws = makeWs({
       CLI_ROOT: { from: 'fake-cli-alias', ref: 'root' },
       CLI_ALPHA: { from: 'fake-cli-alias', ref: 'alpha' },
     })
@@ -1900,7 +1888,7 @@ describe('fillEnv through execute', () => {
   it('a shadowed cli head does not fetch', async () => {
     const { calls, fetch } = countingSource({ CLI_ROOT: 'r0' })
     registerSecrets('fake-cli-shadow', FakeConfig, fetch)
-    const ws = await makeWs({ CLI_ROOT: { from: 'fake-cli-shadow', ref: 'root' } })
+    const ws = makeWs({ CLI_ROOT: { from: 'fake-cli-shadow', ref: 'root' } })
     try {
       ws.registerCli('mycli', envCliSpec())
       await ws.shell('mycli() { echo shadowed; }')
@@ -1916,9 +1904,8 @@ describe('fillEnv through execute', () => {
 })
 
 describe('guestBound', () => {
-  it('a non-workspace binding on a line word counts; the workspace does not', async () => {
-    const parser = await getTestParser()
-    const node = parser.parse('python3 -c "print()"') as unknown as TSNodeLike
+  it('a non-workspace binding on a line word counts; the workspace does not', () => {
+    const node = parse('python3 -c "print()"') as unknown as TSNodeLike
     const guest = { name: 'monty' } as unknown as Runtime
     const decided = (bindings: Record<string, Runtime | null>): RouteDecision<Runtime> => ({
       bindings,
@@ -1948,7 +1935,7 @@ function accountSource(): (config: AccountConfig, ref: string) => Promise<Resolv
 describe('declared source instances', () => {
   it('carries an instance config to the fetch', async () => {
     registerSecrets('acct-one', AccountConfig, accountSource())
-    const ws = await makeWs(
+    const ws = makeWs(
       { TOKEN: { from: 'prod', ref: 'r', key: 'credential' } },
       undefined,
       undefined,
@@ -1963,7 +1950,7 @@ describe('declared source instances', () => {
 
   it('keeps two instances of one source apart', async () => {
     registerSecrets('acct-two', AccountConfig, accountSource())
-    const ws = await makeWs(
+    const ws = makeWs(
       {
         A: { from: 'prod', ref: 'r', key: 'credential' },
         B: { from: 'test', ref: 'r', key: 'credential' },
@@ -1987,7 +1974,7 @@ describe('declared source instances', () => {
     registerSecrets('env', z.strictObject({}), () =>
       Promise.resolve({ fields: { FILL_PROBE_TOKEN: 's3cr3t' } }),
     )
-    const ws = await makeWs(
+    const ws = makeWs(
       { TOKEN: { from: 'prod', ref: 'r', key: 'credential' } },
       undefined,
       undefined,
@@ -2007,7 +1994,7 @@ describe('declared source instances', () => {
 
   it('leaves a bare source name on ambient defaults', async () => {
     registerSecrets('acct-bare', AccountConfig, accountSource())
-    const ws = await makeWs(
+    const ws = makeWs(
       { TOKEN: { from: 'acct-bare', ref: 'r', key: 'credential' } },
       undefined,
       undefined,
@@ -2020,16 +2007,16 @@ describe('declared source instances', () => {
     }
   })
 
-  it('refuses a non-mapping secrets block', async () => {
+  it('refuses a non-mapping secrets block', () => {
     // An untyped REST override can hand over an array, and
     // Object.entries on one yields nothing -- the declarations would
     // vanish silently and every restored pointer would read as an
     // unknown source.
-    await expect(makeWs({}, undefined, undefined, [] as never)).rejects.toThrow(/must be a mapping/)
+    expect(() => makeWs({}, undefined, undefined, [] as never)).toThrow(/must be a mapping/)
   })
 
-  it('fails at construction for an instance naming an unknown source', async () => {
-    await expect(makeWs({}, undefined, undefined, { prod: { source: 'nope' } })).rejects.toThrow(
+  it('fails at construction for an instance naming an unknown source', () => {
+    expect(() => makeWs({}, undefined, undefined, { prod: { source: 'nope' } })).toThrow(
       /unknown secrets source/,
     )
   })
@@ -2043,7 +2030,7 @@ describe('declared source instances', () => {
       return Promise.resolve({ fields: { TOKEN: 't' } })
     })
     registerSecrets('acct-denied', AccountConfig, accountSource())
-    const ws = await makeWs(
+    const ws = makeWs(
       { TOKEN: { from: 'prod', ref: 'r', key: 'credential' } },
       ruled('deny', 'printenv', 'printenv is off'),
       undefined,
@@ -2065,14 +2052,9 @@ describe('declared source instances', () => {
     // name is the deployment's word, and `{prod: {source: env}}` must
     // hide the host's variable names however few of them there are.
     registerSecrets('env', FakeConfig, () => Promise.resolve({ fields: { HOME: '/root' } }))
-    const ws = await makeWs(
-      { TOKEN: { from: 'prod', ref: '', key: 'NOPE' } },
-      undefined,
-      undefined,
-      {
-        prod: { source: 'env' },
-      },
-    )
+    const ws = makeWs({ TOKEN: { from: 'prod', ref: '', key: 'NOPE' } }, undefined, undefined, {
+      prod: { source: 'env' },
+    })
     try {
       const io = await ws.shell('echo "$TOKEN"')
       expect(io.exitCode).toBe(1)
@@ -2095,7 +2077,7 @@ describe('declared source instances', () => {
       return { fields: { TOKEN: 't' } }
     })
     registerSecrets('acct-race', AccountConfig, accountSource())
-    const ws = await makeWs(
+    const ws = makeWs(
       { TOKEN: { from: 'prod', ref: 'r', key: 'credential' } },
       undefined,
       undefined,
@@ -2120,7 +2102,7 @@ describe('declared source instances', () => {
 
   it('a copy keeps the declared instances', async () => {
     registerSecrets('acct-copy', AccountConfig, accountSource())
-    const ws = await makeWs(
+    const ws = makeWs(
       { TOKEN: { from: 'prod', ref: 'r', key: 'credential' } },
       undefined,
       undefined,
@@ -2140,15 +2122,15 @@ describe('declared source instances', () => {
     }
   })
 
-  it('validates a pointer named after a prototype member', async () => {
-    await expect(
-      makeWs({ TOKEN: { from: 'constructor', ref: '', key: 'credential' } }),
-    ).rejects.toThrow(/unknown secrets source/)
+  it('validates a pointer named after a prototype member', () => {
+    expect(() => makeWs({ TOKEN: { from: 'constructor', ref: '', key: 'credential' } })).toThrow(
+      /unknown secrets source/,
+    )
   })
 
   it('needs no source of the instance name', async () => {
     registerSecrets('acct-named', AccountConfig, accountSource())
-    const ws = await makeWs(
+    const ws = makeWs(
       { TOKEN: { from: 'prod', ref: 'r', key: 'credential' } },
       undefined,
       undefined,
@@ -2164,7 +2146,7 @@ describe('declared source instances', () => {
     // unknown source name still fails at construction; what is left
     // for resolution to find is a config the source refuses.
     registerSecrets('acct-bad', AccountConfig, accountSource())
-    const ws = await makeWs(
+    const ws = makeWs(
       { TOKEN: { from: 'prod', ref: 'r', key: 'credential' } },
       undefined,
       undefined,
@@ -2193,17 +2175,15 @@ if ctx['key'].startswith('AWS_'):
     print(json.dumps({'kind': 'deny'}))
 `
 
-async function scriptedWs(
+function scriptedWs(
   env: EnvEntries,
   method: 'preCommand' | 'preSession',
   source: string,
-): Promise<Workspace> {
-  const parser = await getTestParser()
+): Workspace {
   return new Workspace(
     { '/': new RAMVFS() },
     {
       mode: MountMode.WRITE,
-      shellParser: parser,
       env,
       profiles: {
         release: {
@@ -2221,7 +2201,7 @@ describe('fillEnv under a profile policy', () => {
     // value is fetched, as under a coded preSession policy.
     const { calls, fetch } = countingSource({ TOKEN: 't0' })
     registerSecrets('fake-scripted-gate', FakeConfig, fetch)
-    const ws = await scriptedWs(
+    const ws = scriptedWs(
       { TOKEN: { from: 'fake-scripted-gate', ref: 'r' } },
       'preSession',
       SESSION_GATE,
@@ -2241,7 +2221,7 @@ describe('fillEnv under a profile policy', () => {
     // hold and no source is contacted.
     const { calls, fetch } = countingSource({ TOKEN: 't0' })
     registerSecrets('fake-scripted-judge', FakeConfig, fetch)
-    const ws = await scriptedWs(
+    const ws = scriptedWs(
       { TOKEN: { from: 'fake-scripted-judge', ref: 'r' } },
       'preCommand',
       'pass\n',
@@ -2269,7 +2249,7 @@ describe('a managed fetch under the invocation signal', () => {
           }
         }),
     )
-    const ws = await makeWs({ TOKEN: { from: 'fake-stalled', ref: 'r' } })
+    const ws = makeWs({ TOKEN: { from: 'fake-stalled', ref: 'r' } })
     try {
       await expect(
         ws.shell('echo $TOKEN', { signal: AbortSignal.timeout(50) }),

@@ -18,18 +18,12 @@
 // invalidation hooks (a mutation invalidates the file cache and the parent
 // listing before the next command in the pipeline runs).
 
-import { readFileSync } from 'node:fs'
-import { createRequire } from 'node:module'
 import { describe, expect, it } from 'vitest'
 import { RAMVFS } from '../vfs/ram/ram.ts'
-import { createShellParser } from '../shell/parse/index.ts'
 import { MountMode } from '../types.ts'
 import { Workspace } from './workspace/workspace.ts'
 
 const DEC = new TextDecoder()
-const require = createRequire(import.meta.url)
-const engineWasm = readFileSync(require.resolve('web-tree-sitter/web-tree-sitter.wasm'))
-const grammarWasm = readFileSync(require.resolve('tree-sitter-bash/tree-sitter-bash.wasm'))
 
 function cachingWorkspace(): Workspace {
   const ram = new RAMVFS()
@@ -40,7 +34,6 @@ function cachingWorkspace(): Workspace {
     { '/data': ram },
     {
       mode: MountMode.WRITE,
-      shellParserFactory: async () => createShellParser({ engineWasm, grammarWasm }),
     },
   )
 }

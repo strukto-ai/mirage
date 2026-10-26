@@ -20,7 +20,6 @@ import { DeviceInput } from '../../../io/types.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { MountMode, PathSpec } from '../../../types.ts'
 import { Workspace } from '../../workspace/workspace.ts'
-import { getTestParser } from '../../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { runResult } from '../../../../tests/workspace/fixtures/integration_fixture.ts'
 import {
   commandWords,
@@ -71,10 +70,7 @@ describe('routableScopes', () => {
   })
 
   it('keeps an awk line with an assignment operand on one mount', async () => {
-    const ws = new Workspace(
-      { '/data': new RAMVFS() },
-      { mode: MountMode.WRITE, shellParser: await getTestParser() },
-    )
+    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
     try {
       await runResult(ws, "printf '1\\n' > /data/a; printf '2\\n' > /data/b")
       expect(await runResult(ws, "awk '{print x, $0}' /data/a x=5 /data/b")).toEqual([

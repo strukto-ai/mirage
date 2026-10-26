@@ -14,8 +14,7 @@
 
 import type { ByteSource } from '../io/types.ts'
 import { ListingCheckStore } from '../cache/index/ram.ts'
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
-import { createRequire } from 'node:module'
+import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
@@ -23,7 +22,6 @@ import { Accessor } from '../accessor/base.ts'
 import { record, revisionFor, runWithRecording, startOp } from '../observe/context.ts'
 import type { Handed } from '../vfs/types.ts'
 import { BaseVFS } from '../vfs/base.ts'
-import { createShellParser, type ShellParser } from '../shell/parse/index.ts'
 import { splitManifestAndBlobs } from './snapshot/manifest.ts'
 import { writeSnapshotTar } from './snapshot/tar_io.ts'
 import { ContentType, DriftPolicy, FileStat, FileType, MountMode, type PathSpec } from '../types.ts'
@@ -31,15 +29,9 @@ import { ContentDriftError } from './snapshot/drift.ts'
 import { toStateDict } from './snapshot/state.ts'
 import { Workspace } from './workspace/workspace.ts'
 
-const require = createRequire(import.meta.url)
-const engineWasm = readFileSync(require.resolve('web-tree-sitter/web-tree-sitter.wasm'))
-const grammarWasm = readFileSync(require.resolve('tree-sitter-bash/tree-sitter-bash.wasm'))
-
-let parser: ShellParser
 let tempDir: string
 
-beforeAll(async () => {
-  parser = await createShellParser({ engineWasm, grammarWasm })
+beforeAll(() => {
   tempDir = mkdtempSync(join(tmpdir(), 'mirage-drift-'))
 })
 
@@ -145,7 +137,7 @@ class FakeRemoteVFS extends BaseVFS {
 
 function build(accessor: FakeRemoteAccessor): Workspace {
   const res = new FakeRemoteVFS(accessor)
-  return new Workspace({ '/remote': res }, { mode: MountMode.WRITE, shellParser: parser })
+  return new Workspace({ '/remote': res }, { mode: MountMode.WRITE })
 }
 
 // Wrap a dispatch call in runWithRecording so the captured OpRecord
@@ -183,7 +175,7 @@ describe('Workspace snapshot: capture and replay drift detection', () => {
 
     const loaded = await Workspace.load(
       snap,
-      { mode: MountMode.WRITE, shellParser: parser },
+      { mode: MountMode.WRITE },
       { '/remote/': new FakeRemoteVFS(accessor) },
     )
     expect(Object.keys(loaded.revisions).length).toBe(1)
@@ -208,7 +200,7 @@ describe('Workspace snapshot: capture and replay drift detection', () => {
 
     const loaded = await Workspace.load(
       snap,
-      { mode: MountMode.WRITE, shellParser: parser },
+      { mode: MountMode.WRITE },
       { '/remote/': new FakeRemoteVFS(accessor) },
     )
     expect(Object.keys(loaded.revisions)).toEqual(['/remote/a.txt'])
@@ -240,7 +232,7 @@ describe('Workspace snapshot: capture and replay drift detection', () => {
 
       const loaded = await Workspace.load(
         snap,
-        { mode: MountMode.WRITE, shellParser: parser, driftPolicy: DriftPolicy.STRICT },
+        { mode: MountMode.WRITE, driftPolicy: DriftPolicy.STRICT },
         { '/remote/': new FakeRemoteVFS(accessor) },
       )
       const index = loaded.namespace.mountFor('/remote/a.txt').index
@@ -287,7 +279,7 @@ describe('Workspace snapshot: capture and replay drift detection', () => {
     }
     const loaded = await Workspace.load(
       snap,
-      { mode: MountMode.WRITE, shellParser: parser, driftPolicy: DriftPolicy.STRICT },
+      { mode: MountMode.WRITE, driftPolicy: DriftPolicy.STRICT },
       { '/remote/': hinting },
     )
     try {
@@ -330,7 +322,7 @@ describe('Workspace snapshot: capture and replay drift detection', () => {
 
     const loaded = await Workspace.load(
       snap,
-      { mode: MountMode.WRITE, shellParser: parser, driftPolicy: DriftPolicy.STRICT },
+      { mode: MountMode.WRITE, driftPolicy: DriftPolicy.STRICT },
       { '/remote/': new FakeRemoteVFS(accessor) },
     )
     await expect(loaded.vfs.read('/remote/a.txt')).rejects.toBeInstanceOf(ContentDriftError)
@@ -349,7 +341,7 @@ describe('Workspace snapshot: capture and replay drift detection', () => {
 
     const loaded = await Workspace.load(
       snap,
-      { mode: MountMode.WRITE, shellParser: parser, driftPolicy: DriftPolicy.OFF },
+      { mode: MountMode.WRITE, driftPolicy: DriftPolicy.OFF },
       { '/remote/': new FakeRemoteVFS(accessor) },
     )
     expect(Object.keys(loaded.revisions).length).toBe(0)
@@ -387,7 +379,7 @@ it.each(['state', 'copy'])(
         expect(state.cache.entries.map((e) => e.key)).not.toContain('/remote/data/file')
         clone = await Workspace.fromState(
           state,
-          { shellParser: parser },
+          {},
           {
             '/remote': ws.mount('/remote').vfs,
             '/remote/data': replacement,
@@ -423,13 +415,10 @@ it.each([
     fresh.put('/remote/data/file', new TextEncoder().encode('newer'))
     const keep = new FakeRemoteAccessor()
     keep.put('/remote/data/nested/file', new TextEncoder().encode('keep'))
-    const ws = new Workspace(
-      {
-        [shadow ? '/remote' : '/remote/data']: new FakeRemoteVFS(old),
-        '/remote/data/nested': new FakeRemoteVFS(keep),
-      },
-      { shellParser: parser },
-    )
+    const ws = new Workspace({
+      [shadow ? '/remote' : '/remote/data']: new FakeRemoteVFS(old),
+      '/remote/data/nested': new FakeRemoteVFS(keep),
+    })
     let enter = (): void => undefined
     let resume = (): void => undefined
     const entered = new Promise<void>((resolve) => {
@@ -497,7 +486,7 @@ it('snapshot rejects fingerprints from a retired lazy op', async () => {
       return Promise.resolve(lazy())
     }
   }
-  const ws = new Workspace({ '/remote': new LazyRemoteVFS(old) }, { shellParser: parser })
+  const ws = new Workspace({ '/remote': new LazyRemoteVFS(old) })
   try {
     const id = ws.mount('/remote').mountId
     const [, records] = await runWithRecording(async () => {
@@ -527,14 +516,14 @@ it.each([false, true])(
     const ancestor = new FakeRemoteVFS(new FakeRemoteAccessor())
     const fresh = new FakeRemoteAccessor()
     fresh.put('/remote/data/file', new TextEncoder().encode('new'))
-    const source = new Workspace({ [prefix]: ancestor }, { shellParser: parser })
+    const source = new Workspace({ [prefix]: ancestor })
     let loaded: Workspace | undefined
     try {
       const state = await toStateDict(source)
       state.fingerprints = [
         { path: '/remote/data/file', mount_prefix: prefix, fingerprint: 'old-account' },
       ]
-      loaded = await Workspace.fromState(state, { shellParser: parser }, { [prefix]: ancestor })
+      loaded = await Workspace.fromState(state, {}, { [prefix]: ancestor })
       if (!shadow) await loaded.unmount('/remote/data')
       loaded.addMount('/remote/data', new FakeRemoteVFS(fresh))
       expect(await loaded.dispatch('read', '/remote/data/file')).toEqual(
@@ -575,7 +564,7 @@ it.each(
       }
     }
     const vfs = new AsyncStateVFS()
-    const ws = new Workspace({ '/data': vfs }, { shellParser: parser })
+    const ws = new Workspace({ '/data': vfs })
     if (opened) await ws.resolve('/data')
     const capture = (
       surface === 'copy' ? ws.copy() : ws.snapshot(join(tempDir, 'retired.tar'))

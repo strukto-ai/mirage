@@ -12,12 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { readFileSync } from 'node:fs'
-import { createRequire } from 'node:module'
-import { beforeAll, describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vitest'
 
 import { runWithAdmission } from '../../../../context/session_context.ts'
-import { createShellParser, type ShellParser } from '../../../../shell/parse/index.ts'
 import type { SessionProfile } from '../../../../policy/profile.ts'
 import type { CommandRule, EntryGate } from '../../../../policy/types.ts'
 import { MountMode, PathSpec } from '../../../../types.ts'
@@ -33,10 +30,6 @@ import { located, placeOf, readable, shownEntries } from './seen.ts'
 const DEC = new TextDecoder()
 const ENC = new TextEncoder()
 
-const require = createRequire(import.meta.url)
-const engineWasm = readFileSync(require.resolve('web-tree-sitter/web-tree-sitter.wasm'))
-const grammarWasm = readFileSync(require.resolve('tree-sitter-bash/tree-sitter-bash.wasm'))
-
 const PROFILES: Record<string, SessionProfile> = {
   veiled: { paths: { hide: ['/repo/secret.txt', '/repo/box/secret.txt'] } },
   boxed: { paths: { hide: ['/repo/box/secret.txt'] } },
@@ -45,12 +38,6 @@ const PROFILES: Record<string, SessionProfile> = {
   fresh: { commands: { deny: [{ reason: 'fresh', paths: ['/repo/new.txt'] }] } },
   walled: { commands: { deny: [{ reason: 'walled', paths: ['/repo/boxf/secret.txt'] }] } },
 }
-
-let parser: ShellParser
-
-beforeAll(async () => {
-  parser = await createShellParser({ engineWasm, grammarWasm })
-})
 
 /** Write one file and commit it. */
 async function commit(ws: Workspace, name: string, text: string, message: string): Promise<void> {
@@ -64,10 +51,7 @@ async function commit(ws: Workspace, name: string, text: string, message: string
 async function repository(
   commits: readonly (readonly [string, string, string])[],
 ): Promise<Workspace> {
-  const ws = new Workspace(
-    { '/repo': new RAMVFS() },
-    { mode: MountMode.WRITE, shellParser: parser, profiles: PROFILES },
-  )
+  const ws = new Workspace({ '/repo': new RAMVFS() }, { mode: MountMode.WRITE, profiles: PROFILES })
   ws.registerCli('git', GIT)
   await ws.shell('cd /repo && git init -q')
   for (const [name, text, message] of commits) await commit(ws, name, text, message)

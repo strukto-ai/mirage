@@ -16,24 +16,18 @@ import { describe, expect, it } from 'vitest'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { MountMode } from '../types.ts'
 import { compareDepthFirst } from './executor/find_action_dispatch.ts'
-import { getTestParser } from '../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from './workspace/workspace.ts'
 
-async function singleMountWs(): Promise<Workspace> {
-  const parser = await getTestParser()
+function singleMountWs(): Workspace {
   const root = new RAMVFS()
-  return new Workspace({ '/': root }, { mode: MountMode.WRITE, shellParser: parser })
+  return new Workspace({ '/': root }, { mode: MountMode.WRITE })
 }
 
-async function twoMountWs(): Promise<Workspace> {
-  const parser = await getTestParser()
+function twoMountWs(): Workspace {
   const root = new RAMVFS()
   const a = new RAMVFS()
   const b = new RAMVFS()
-  return new Workspace(
-    { '/': root, '/a': a, '/b': b },
-    { mode: MountMode.WRITE, shellParser: parser },
-  )
+  return new Workspace({ '/': root, '/a': a, '/b': b }, { mode: MountMode.WRITE })
 }
 
 async function setupHtmlFiles(ws: Workspace): Promise<void> {
@@ -49,7 +43,7 @@ const BATCH = "sh -c 'KEEP=child; cd /; set -- child; set -u'"
 describe('find action layer', () => {
   describe('-delete', () => {
     it('removes matched files', async () => {
-      const ws = await singleMountWs()
+      const ws = singleMountWs()
       await setupHtmlFiles(ws)
       const r = await ws.shell("find / -name '*.html' -delete", { sessionId: 's' })
       expect(r.exitCode).toBe(0)
@@ -61,14 +55,14 @@ describe('find action layer', () => {
     })
 
     it('is silent unless -print is also given', async () => {
-      const ws = await singleMountWs()
+      const ws = singleMountWs()
       await setupHtmlFiles(ws)
       const r = await ws.shell("find / -name '*.html' -delete", { sessionId: 's' })
       expect(r.stdoutText).toBe('')
     })
 
     it('emits matches when -print -delete is combined', async () => {
-      const ws = await singleMountWs()
+      const ws = singleMountWs()
       await setupHtmlFiles(ws)
       const r = await ws.shell("find / -name '*.html' -print -delete", {
         sessionId: 's',
@@ -79,7 +73,7 @@ describe('find action layer', () => {
     })
 
     it('skips mount roots', async () => {
-      const ws = await twoMountWs()
+      const ws = twoMountWs()
       ws.createSession('s')
       await ws.shell('touch /a/x.html /b/y.html', { sessionId: 's' })
       // Without -name, /a and /b appear as synthetic dir entries.
@@ -92,7 +86,7 @@ describe('find action layer', () => {
     })
 
     it('orders deepest-first so children clear before parents', async () => {
-      const ws = await singleMountWs()
+      const ws = singleMountWs()
       ws.createSession('s')
       await ws.shell('mkdir -p /tmp/a/b', { sessionId: 's' })
       await ws.shell('touch /tmp/a/b/file.txt', { sessionId: 's' })
@@ -103,7 +97,7 @@ describe('find action layer', () => {
     })
 
     it('removes directories emptied by the deepest-first pass', async () => {
-      const ws = await singleMountWs()
+      const ws = singleMountWs()
       ws.createSession('s')
       await ws.shell('mkdir -p /tree/deep', { sessionId: 's' })
       await ws.shell('touch /tree/deep/f.txt', { sessionId: 's' })
@@ -117,7 +111,7 @@ describe('find action layer', () => {
 
   describe('-print0', () => {
     it('separates matches with NUL bytes', async () => {
-      const ws = await singleMountWs()
+      const ws = singleMountWs()
       await setupHtmlFiles(ws)
       const r = await ws.shell("find / -name '*.html' -print0", { sessionId: 's' })
       const out = r.stdoutText
@@ -135,7 +129,7 @@ describe('find action layer', () => {
       // links 3, owner and group 8 left-aligned, size 8). A VFS has
       // neither an inode nor a block allocation, so those two columns
       // carry `?`, the answer `stat %i` and `%b` already give.
-      const ws = await singleMountWs()
+      const ws = singleMountWs()
       await setupHtmlFiles(ws)
       const r = await ws.shell("find / -name '*.html' -ls", { sessionId: 's' })
       const lines = r.stdoutText.split('\n').filter((l) => l !== '')
@@ -154,7 +148,7 @@ describe('find action layer', () => {
       // `find b a -depth` is b's tree post-order, then a's: one sort
       // over every row put a's tree first, and -delete removed in that
       // order.
-      const ws = await singleMountWs()
+      const ws = singleMountWs()
       try {
         await ws.shell('mkdir -p /w/b /w/a; printf x > /w/b/x; printf y > /w/a/y; cd /w')
         const out = async (line: string) => {
@@ -173,7 +167,7 @@ describe('find action layer', () => {
       // `find d/` prints its root as `d/` and the rest as `d/a`; the
       // slash left an empty final component that sorted the directory
       // first, so `find d/ -delete` refused the non-empty directory.
-      const ws = await singleMountWs()
+      const ws = singleMountWs()
       try {
         await ws.shell('mkdir -p /w/d/sub; printf a > /w/d/a.txt; printf x > /w/d/sub/c.txt; cd /w')
         const out = async (line: string) => {
@@ -198,7 +192,7 @@ describe('find action layer', () => {
       // GNU findutils 4.10 finishes `d` before it begins `d/sub` again,
       // and walks a repeated start point twice; the rows arrive as one
       // run per start point, so no sort can fold the two together.
-      const ws = await singleMountWs()
+      const ws = singleMountWs()
       try {
         await ws.shell('mkdir -p /w/d/sub; printf a > /w/d/a.txt; printf x > /w/d/sub/c.txt; cd /w')
         const out = async (line: string) => {
@@ -231,7 +225,7 @@ describe('find action layer', () => {
       // like through execvp, since coreutils ships them, and nothing the
       // shell alone defines: `cd`, `export`, `read` are `No such file or
       // directory` per match, exit 0.
-      const ws = await singleMountWs()
+      const ws = singleMountWs()
       try {
         await ws.shell('mkdir -p /w/d; cd /w')
         const io = await ws.shell('find d -maxdepth 0 -exec cd {} \\;; echo rc=$?')
@@ -256,7 +250,7 @@ describe('find action layer', () => {
       // GNU findutils 4.10 execs the head through execvp, which sees no
       // shell function: `find: 'f': No such file or directory` per match,
       // exit 0, and the function never runs.
-      const ws = await singleMountWs()
+      const ws = singleMountWs()
       try {
         await ws.shell('mkdir -p /w/d; cd /w')
         const io = await ws.shell(
@@ -276,7 +270,7 @@ describe('find action layer', () => {
       // GNU findutils 4.10 `-ls` keeps one row on one line: a space, a
       // backslash and a double quote take a backslash, a newline is
       // `\n`, and a byte outside ASCII is octal; `-print` stays raw.
-      const ws = await singleMountWs()
+      const ws = singleMountWs()
       try {
         await ws.shell(
           "mkdir -p /w/d; touch 'd/a b' 'd/c\\d' 'd/e\"f' \"d/n\nl\" 'd/ü' 2>/dev/null; cd /w; touch 'd/a b' 'd/c\\d' 'd/e\"f' \"d/n\nl\" 'd/ü'; ln -s 'a b' 'd/li nk'",
@@ -307,7 +301,7 @@ describe('find action layer', () => {
 
   describe('default behavior', () => {
     it('find without action flags is unchanged', async () => {
-      const ws = await singleMountWs()
+      const ws = singleMountWs()
       await setupHtmlFiles(ws)
       const r = await ws.shell("find / -name '*.html'", { sessionId: 's' })
       const out = r.stdoutText
@@ -319,7 +313,7 @@ describe('find action layer', () => {
 
   describe('synthetic mount entries', () => {
     it('honors -name on mount roots', async () => {
-      const ws = await twoMountWs()
+      const ws = twoMountWs()
       ws.createSession('s')
       const r = await ws.shell("find / -name 'a' -type d", { sessionId: 's' })
       const lines = r.stdoutText
@@ -334,7 +328,7 @@ describe('find action layer', () => {
 
 describe('a time test gates the -prune after it', () => {
   it('prunes only the directories the test holds for', async () => {
-    const ws = await singleMountWs()
+    const ws = singleMountWs()
     ws.createSession('s')
     await ws.shell(
       'mkdir -p /d/old/x /d/new/y && touch /d/old/x/f /d/new/y/g /d/old/o.txt && touch -d 2000-01-01 /d/old',
@@ -373,7 +367,7 @@ describe('find -exec isolation', () => {
             MUTATE_EXIT,
           ]
     it.each(actions)(`isolates %s ${terminator}`, async (action) => {
-      const ws = await singleMountWs()
+      const ws = singleMountWs()
       try {
         // The mutating programs are `sh -c` lines: GNU's -exec sees no
         // shell function, so a function head would not run at all.
@@ -397,7 +391,7 @@ describe('find -exec isolation', () => {
   }
 
   it('keeps the stderr of a program that exits 127, and names only a missing one', async () => {
-    const ws = await singleMountWs()
+    const ws = singleMountWs()
     try {
       await ws.shell('mkdir -p /w/d; cd /w')
       const own = await ws.shell(
@@ -416,7 +410,7 @@ describe('find -exec isolation', () => {
   })
 
   it('runs -delete at its position, in -depth order, and ends the chain on a failure', async () => {
-    const ws = await singleMountWs()
+    const ws = singleMountWs()
     const seed =
       "mkdir -p /w/d/sub; printf 'a\\n' > /w/d/a.txt; printf 'bb\\n' > /w/d/b.txt; " +
       'printf x > /w/d/sub/c.txt; cd /w'
@@ -470,7 +464,7 @@ describe('find -exec isolation', () => {
     // GNU: `-exec ... {} +` collects every start point's matches into one
     // batch; the actions run once at the command boundary, not once per
     // operand's native run.
-    const ws = await twoMountWs()
+    const ws = twoMountWs()
     const out = async (line: string): Promise<[string, string, number]> => {
       const r = await ws.shell(line, { sessionId: 's' })
       return [r.stdoutText, r.stderrText, r.exitCode]
@@ -501,7 +495,7 @@ describe('find -exec isolation', () => {
   it('ends the chain of a row -ls cannot list', async () => {
     // GNU find 4.9: a row -delete removed is `find: 'd/a.txt': No such
     // file or directory` at -ls, exit 1, and -print never runs for it.
-    const ws = await singleMountWs()
+    const ws = singleMountWs()
     try {
       await ws.shell('mkdir -p /w/d/sub; printf a > /w/d/a.txt; printf x > /w/d/sub/c.txt; cd /w')
       const io = await ws.shell('find d -type f -delete -ls -print')
@@ -518,7 +512,7 @@ describe('find -exec isolation', () => {
 
   it('prints every row twice for a repeated -print', async () => {
     // GNU runs both actions; one explicit -print is the implicit one.
-    const ws = await singleMountWs()
+    const ws = singleMountWs()
     try {
       await ws.shell('mkdir -p /w/d; touch /w/d/a.txt; cd /w')
       const twice = await ws.shell('find d -name a.txt -print -print')
@@ -538,7 +532,7 @@ describe('find -exec isolation', () => {
     // bash hands a slash-carrying head to the loader, so a workspace
     // script runs; one that is not there is GNU's execvp line, per match,
     // with find's exit status untouched.
-    const ws = await singleMountWs()
+    const ws = singleMountWs()
     const out = async (line: string): Promise<[string, string, number]> => {
       const r = await ws.shell(line)
       return [r.stdoutText, r.stderrText, r.exitCode]
@@ -572,7 +566,7 @@ describe('find -exec isolation', () => {
     // so the removal goes through the op dispatcher the way `rm link`
     // does; the mount's rm would only report the row absent and leave
     // the link in place.
-    const ws = await singleMountWs()
+    const ws = singleMountWs()
     try {
       await ws.shell(
         'mkdir -p /w/d/sub; printf a > /w/d/a.txt; ln -s a.txt /w/d/link; ln -s nowhere /w/d/dangling; cd /w',
@@ -598,7 +592,7 @@ describe('find -exec isolation', () => {
   it('renders a symlink row under -ls', async () => {
     // A symlink is namespace state no backend stat can see, so the
     // delegated ls needs the link view to render the row at all.
-    const ws = await singleMountWs()
+    const ws = singleMountWs()
     try {
       await ws.shell(
         'mkdir -p /w/d; touch /w/d/a.txt; ln -s a.txt /w/d/link; ln -s nowhere /w/d/dangling; cd /w',
@@ -619,7 +613,7 @@ describe('find -exec isolation', () => {
   it.each(['-exec touch marker \\;', '-print', '-delete'])(
     'refuses a later test before %s has side effects',
     async (action) => {
-      const ws = await singleMountWs()
+      const ws = singleMountWs()
       try {
         await ws.shell('mkdir -p /w/d; touch /w/d/a.txt; cd /w')
         const io = await ws.shell(`find d ${action} -name '*.txt' -print`)
@@ -640,7 +634,7 @@ for (const nested of [false, true]) {
   it.each(['-exec rm {} \\;', '-exec rm {} +', '-delete'])(
     `preserves newline paths (nested: ${String(nested)}) with %s`,
     async (action) => {
-      const ws = nested ? await twoMountWs() : await singleMountWs()
+      const ws = nested ? twoMountWs() : singleMountWs()
       try {
         const root = nested ? '/a/d' : '/d'
         await ws.shell(`mkdir -p ${root}; touch "${root}/a\nb" /bystander`)
@@ -662,7 +656,7 @@ for (const nested of [false, true]) {
 // GNU findutils 4.10.0: `keep` short-circuits the -o, everything else
 // reaches -delete, and the directory holding `keep` cannot go.
 it('deletes only the other arm under OR', async () => {
-  const ws = await singleMountWs()
+  const ws = singleMountWs()
   try {
     await ws.shell('mkdir d; touch d/keep d/remove')
     const io = await ws.shell('find d -name keep -o -delete')
@@ -675,14 +669,12 @@ it('deletes only the other arm under OR', async () => {
 })
 
 it('preserves newline mount names and filenames through print0 and ls', async () => {
-  const parser = await getTestParser()
   const root = new RAMVFS()
   const nested = new RAMVFS()
   const ws = new Workspace(
     { '/': root, '/d/nested\nmount': nested },
     {
       mode: MountMode.WRITE,
-      shellParser: parser,
     },
   )
   try {
@@ -702,7 +694,7 @@ it('preserves newline mount names and filenames through print0 and ls', async ()
 
 describe('find actions under an aborted invocation', () => {
   it('stops running -exec at the next match', async () => {
-    const ws = await singleMountWs()
+    const ws = singleMountWs()
     try {
       await ws.shell('mkdir -p /d; touch /d/a.html /d/b.html /d/c.html')
       const controller = new AbortController()

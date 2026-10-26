@@ -12,18 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { readFileSync } from 'node:fs'
-import { createRequire } from 'node:module'
 import { describe, expect, it } from 'vitest'
-import { createShellParser } from '../../shell/parse/index.ts'
 import { MountMode, type PathSpec } from '../../types.ts'
 import type { Handed } from '../../vfs/types.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
-
-const require = createRequire(import.meta.url)
-const engineWasm = readFileSync(require.resolve('web-tree-sitter/web-tree-sitter.wasm'))
-const grammarWasm = readFileSync(require.resolve('tree-sitter-bash/tree-sitter-bash.wasm'))
 
 describe('a warm read command reads nothing from the backend', () => {
   // Every read command reads at the dispatcher, which serves the warm entry
@@ -42,7 +35,6 @@ describe('a warm read command reads nothing from the backend', () => {
       { '/c': ram },
       {
         mode: MountMode.WRITE,
-        shellParserFactory: async () => createShellParser({ engineWasm, grammarWasm }),
       },
     )
     try {

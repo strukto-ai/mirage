@@ -30,18 +30,15 @@ import {
 } from '../workspace/workspace/workspace.ts'
 import { describe, expect, it, vi } from 'vitest'
 import { render } from '../test-utils.ts'
-import { getTestParser } from '../../tests/workspace/fixtures/workspace_fixture.ts'
 import { LISTING_CONCURRENCY } from './constants.ts'
 import { MountCore } from './core.ts'
 import type { MountAttrs } from './types.ts'
 import type { Files } from '../workspace/files.ts'
 
-const shellParser = await getTestParser()
-
 /** The core's workspace with the test shell parser, as node's carries its own. */
 class Workspace extends CoreWorkspace {
   constructor(mounts: Record<string, MountSpec>, options: WorkspaceOptions = {}) {
-    super(mounts, { shellParser, ...options })
+    super(mounts, { ...options })
   }
 }
 

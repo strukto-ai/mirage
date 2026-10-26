@@ -14,7 +14,6 @@
 
 import { describe, expect, it } from 'vitest'
 import { eacces } from '../../../../errors/fs.ts'
-import { getTestParser } from '../../../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { type FileStat, FileType, MountMode, type PathSpec } from '../../../../types.ts'
 import { BaseVFS } from '../../../../vfs/base.ts'
 import { RAMVFS } from '../../../../vfs/ram/ram.ts'
@@ -74,10 +73,7 @@ class Unanswering extends Halting {
 }
 
 async function run(line: string, vfs: RAMVFS = new Unattributed()): Promise<[number, string]> {
-  const ws = new Workspace(
-    { '/d': vfs },
-    { mode: MountMode.WRITE, shellParser: await getTestParser() },
-  )
+  const ws = new Workspace({ '/d': vfs }, { mode: MountMode.WRITE })
   try {
     const result = await ws.shell(line)
     return [result.exitCode, result.stdoutText]
@@ -133,10 +129,7 @@ describe('mkdir on a store without attributes', () => {
   it.each(['mkdir -p -m 700 {}', '(umask 077; mkdir -p {})'])(
     'makes the next operand after a bad one (%s)',
     async (line) => {
-      const ws = new Workspace(
-        { '/d': new Unattributed() },
-        { mode: MountMode.WRITE, shellParser: await getTestParser() },
-      )
+      const ws = new Workspace({ '/d': new Unattributed() }, { mode: MountMode.WRITE })
       try {
         await ws.shell('touch /d/file')
         const result = await ws.shell(line.replace('{}', '/d/file/sub /d/good'))
@@ -152,10 +145,7 @@ describe('mkdir on a store without attributes', () => {
   )
 
   it('keeps the create error when timing cleanup fails', async () => {
-    const ws = new Workspace(
-      { '/d': new Unanswering() },
-      { mode: MountMode.WRITE, shellParser: await getTestParser() },
-    )
+    const ws = new Workspace({ '/d': new Unanswering() }, { mode: MountMode.WRITE })
     try {
       const result = await ws.shell('mkdir -p /d/p/a/b')
       expect([result.exitCode, result.stderrText]).toEqual([

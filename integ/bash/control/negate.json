@@ -104,6 +104,40 @@
         "stdout": "0\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "negate_bare_bang_negates_the_empty_command",
+      "seq": 502139,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "! ; echo \"after $?\"; ! > /data/negf; echo \"r=$?\"; ls /data/negf; rm /data/negf",
+      "expect": {
+        "exit": 0,
+        "stdout": "after 1\nr=1\n/data/negf\n",
+        "stderr": ""
+      }
     }
   ]
 }

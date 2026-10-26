@@ -2,7 +2,6 @@ import { expect, it, vi } from 'vitest'
 import { WandbVFS } from './wandb.ts'
 import { normalizeWandbConfig } from '../../core/wandb/config.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
-import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { MountMode } from '../../types.ts'
 
 it('isolates mount scopes and directory indexes', async () => {
@@ -11,8 +10,7 @@ it('isolates mount scopes and directory indexes', async () => {
     new WandbVFS(normalizeWandbConfig({ entities: ['other'] })),
   ]
   const requests = mounts.map((vfs) => vi.spyOn(vfs.accessor.client, 'request'))
-  const shellParser = await getTestParser()
-  const workspaces = mounts.map((vfs) => new Workspace({ '/wandb': vfs }, { shellParser }))
+  const workspaces = mounts.map((vfs) => new Workspace({ '/wandb': vfs }))
   try {
     for (const [i, ws] of workspaces.entries()) {
       const result = await ws.shell('ls /wandb')
@@ -33,7 +31,6 @@ it('refuses W&B mutations and CLI dispatch even in a write workspace', async () 
     { '/wandb': vfs },
     {
       mode: MountMode.WRITE,
-      shellParser: await getTestParser(),
     },
   )
   try {
@@ -63,7 +60,7 @@ it('lets find page projects no further than its walk limit', async () => {
         },
       } as never)
     })
-  const ws = new Workspace({ '/wandb': vfs }, { shellParser: await getTestParser() })
+  const ws = new Workspace({ '/wandb': vfs })
   try {
     await ws.shell('find /wandb/lab -maxdepth 1')
     expect(request).toHaveBeenCalledTimes(3)

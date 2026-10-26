@@ -18,25 +18,18 @@
 // so no S3/MinIO is needed. Guards cross-mount transfer against regression
 // while it is collapsed onto the shared cp/mv generics.
 
-import { readFileSync } from 'node:fs'
-import { createRequire } from 'node:module'
 import { describe, expect, it } from 'vitest'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
-import { createShellParser } from '../../shell/parse/index.ts'
 import { MountMode } from '../../types.ts'
 import { Workspace } from '../workspace/workspace.ts'
 
 const DEC = new TextDecoder()
-const require = createRequire(import.meta.url)
-const engineWasm = readFileSync(require.resolve('web-tree-sitter/web-tree-sitter.wasm'))
-const grammarWasm = readFileSync(require.resolve('tree-sitter-bash/tree-sitter-bash.wasm'))
 
 function makeWs(): Workspace {
   return new Workspace(
     { '/a': new RAMVFS(), '/b': new RAMVFS() },
     {
       mode: MountMode.WRITE,
-      shellParserFactory: async () => createShellParser({ engineWasm, grammarWasm }),
     },
   )
 }

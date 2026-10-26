@@ -20,11 +20,7 @@
 import { describe, expect, it } from 'vitest'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { MountMode } from '../../types.ts'
-import {
-  getTestParser,
-  stderrStr,
-  stdoutStr,
-} from '../../../tests/workspace/fixtures/workspace_fixture.ts'
+import { stderrStr, stdoutStr } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../workspace/workspace.ts'
 
 describe('expandTestExpr', () => {
@@ -36,10 +32,7 @@ describe('expandTestExpr', () => {
     ['[ a += b ]; echo $?', '2\n', 'bash: [: +=: binary operator expected\n'],
     ['[ a -= b ]; echo $?', '2\n', 'bash: [: -=: binary operator expected\n'],
   ])('hands every operator in %j to test as a word', async (line, out, err) => {
-    const ws = new Workspace(
-      { '/data': new RAMVFS() },
-      { mode: MountMode.WRITE, shellParser: await getTestParser() },
-    )
+    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
     const io = await ws.shell(line)
     expect([stdoutStr(io), stderrStr(io)]).toEqual([out, err])
   })
@@ -55,10 +48,7 @@ it.each([
   ['x=0; [[ x=5 -eq 5 && $x == 5 ]]; echo "$? $x"', '0 5\n', ''],
   ['[[ x == x && -n >(true) ]]; echo after=$?', 'after=0\n', ''],
 ])('test_double_bracket_expands_only_reached_operands: %s', async (line, out, err) => {
-  const ws = new Workspace(
-    { '/data': new RAMVFS() },
-    { mode: MountMode.WRITE, shellParser: await getTestParser() },
-  )
+  const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
   try {
     const io = await ws.shell(line)
     expect([io.exitCode, stdoutStr(io), stderrStr(io)]).toEqual([0, out, err])
@@ -87,10 +77,7 @@ it.each([
     'bodypattern',
   ],
 ])('test_case_expands_only_tested_patterns: %s', async (line, out, err) => {
-  const ws = new Workspace(
-    { '/data': new RAMVFS() },
-    { mode: MountMode.WRITE, shellParser: await getTestParser() },
-  )
+  const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
   try {
     await ws.shell('shopt -s extglob')
     const io = await ws.shell(line)

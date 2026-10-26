@@ -24,7 +24,7 @@ import { makeWorkspace, stdoutStr } from '../../tests/workspace/fixtures/workspa
 // short-circuit in context/session_context.ts.
 describe('per-call cwd/env override preserves hiddenPaths', () => {
   it('execute({cwd}) on a restricted session still hides a hidden mount', async () => {
-    const { ws } = await makeWorkspace()
+    const { ws } = makeWorkspace()
     ws.createSession('restricted', { profile: { paths: { hide: ['/ram'] } } })
     const io = await ws.shell('cat /ram/notes.txt', {
       sessionId: 'restricted',
@@ -36,7 +36,7 @@ describe('per-call cwd/env override preserves hiddenPaths', () => {
   })
 
   it('execute({env}) on a restricted session still hides a hidden mount', async () => {
-    const { ws } = await makeWorkspace()
+    const { ws } = makeWorkspace()
     ws.createSession('restricted', { profile: { paths: { hide: ['/ram'] } } })
     const io = await ws.shell('cat /ram/notes.txt', {
       sessionId: 'restricted',
@@ -48,7 +48,7 @@ describe('per-call cwd/env override preserves hiddenPaths', () => {
   })
 
   it('execute({cwd}) on a restricted session can still reach visible mounts', async () => {
-    const { ws } = await makeWorkspace()
+    const { ws } = makeWorkspace()
     ws.createSession('restricted', { profile: { paths: { hide: ['/ram'] } } })
     const io = await ws.shell('cat /disk/readme.txt', {
       sessionId: 'restricted',

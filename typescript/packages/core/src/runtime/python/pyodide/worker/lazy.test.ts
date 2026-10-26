@@ -26,7 +26,6 @@ import { CommandTimeoutError } from '../../../../errors/types.ts'
 import { CLI } from '../../../../commands/cli/types.ts'
 import { ScriptSource } from '../../../types.ts'
 import { Workspace } from '../../../../workspace/workspace/workspace.ts'
-import { getTestParser } from '../../../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { RAMVFS } from '../../../../vfs/ram/ram.ts'
 
 import { getCurrentSession, runWithSession } from '../../../../context/session_context.ts'
@@ -222,7 +221,7 @@ describe('Pyodide lazy VFS', { timeout: 60_000 }, () => {
       const rt = new PyodideRuntime()
       const ws = new Workspace(
         { '/data': new RAMVFS() },
-        { mode: MountMode.EXEC, runtimes: [rt, 'workspace'], shellParser: await getTestParser() },
+        { mode: MountMode.EXEC, runtimes: [rt, 'workspace'] },
       )
       ws.registerCli(
         'spin',

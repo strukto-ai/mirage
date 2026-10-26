@@ -26,7 +26,6 @@ import { BaseVFS } from '../../../../vfs/base.ts'
 import type { Handed } from '../../../../vfs/types.ts'
 import { RAMVFS } from '../../../../vfs/ram/ram.ts'
 import { Workspace } from '../../../../workspace/workspace/workspace.ts'
-import { getTestParser } from '../../../../../tests/workspace/fixtures/workspace_fixture.ts'
 
 const DEC = new TextDecoder()
 
@@ -416,15 +415,12 @@ it('du -x counts a file listed past the mounts below', async () => {
   const vfs = new CutRAM()
   for (const dir of ['/d', '/d/m1', '/d/m2', '/d/m3']) vfs.store.dirs.add(dir)
   vfs.store.files.set('/d/z', new TextEncoder().encode('zz'))
-  const ws = new Workspace(
-    {
-      '/ram': vfs,
-      '/ram/d/m1': new RAMVFS(),
-      '/ram/d/m2': new RAMVFS(),
-      '/ram/d/m3': new RAMVFS(),
-    },
-    { shellParser: await getTestParser() },
-  )
+  const ws = new Workspace({
+    '/ram': vfs,
+    '/ram/d/m1': new RAMVFS(),
+    '/ram/d/m2': new RAMVFS(),
+    '/ram/d/m3': new RAMVFS(),
+  })
   try {
     const out = await ws.shell('du -x -a /ram/d')
     expect(DEC.decode(out.stdout)).toBe('2\t/ram/d/z\n2\t/ram/d\n')

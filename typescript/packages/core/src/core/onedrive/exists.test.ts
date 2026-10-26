@@ -18,7 +18,6 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { OneDriveAccessor } from '../../accessor/onedrive.ts'
 import { type FileStat, MountMode, PathSpec } from '../../types.ts'
 import { OneDriveVFS } from '../../vfs/onedrive/onedrive.ts'
-import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
 import { exists } from './exists.ts'
 
@@ -35,10 +34,7 @@ describe('OneDrive exists', () => {
       )
     vi.stubGlobal('fetch', fetchMock)
     const vfs = new OneDriveVFS({ accessToken: 'token' })
-    const ws = new Workspace(
-      { '/od/': vfs },
-      { mode: MountMode.READ, shellParser: await getTestParser() },
-    )
+    const ws = new Workspace({ '/od/': vfs }, { mode: MountMode.READ })
     try {
       // One command lists and stats, so its own listing proves b.txt absent.
       await runInCommandScope(async () => {

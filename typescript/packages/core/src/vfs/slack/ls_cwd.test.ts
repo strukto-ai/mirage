@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
 import { FakeSlackTransport, makeFakeVfs } from '../../../tests/vfs/slack/_test_util.ts'
 
@@ -37,10 +36,7 @@ describe('slack ls (no args) after cd preserves mount prefix', () => {
       if (endpoint === 'conversations.history') return historyPage
       throw new Error(`unexpected ${endpoint}`)
     })
-    const ws = new Workspace(
-      { '/slack/': makeFakeVfs(transport) },
-      { shellParser: await getTestParser() },
-    )
+    const ws = new Workspace({ '/slack/': makeFakeVfs(transport) })
     try {
       const io = await ws.shell('cd /slack/channels/general__C1 && ls')
       const stdout = new TextDecoder().decode(io.stdout)

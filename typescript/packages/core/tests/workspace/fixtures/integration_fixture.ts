@@ -17,7 +17,6 @@ import { RAMVFS } from '../../../src/vfs/ram/ram.ts'
 import { MountMode } from '../../../src/types.ts'
 import { ancestors } from '../../../src/utils/path.ts'
 import { Workspace } from '../../../src/workspace/workspace/workspace.ts'
-import { getTestParser } from './workspace_fixture.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
@@ -41,15 +40,12 @@ function put(res: RAMVFS, path: string, data: string | Uint8Array): void {
  * Mirrors the `FILES` + `ws` fixture in tests/integration/test_shell_patterns.py.
  * All test data lives under /data/... in a single RAMVFS.
  */
-export async function makeIntegrationWS(
-  files: Record<string, string | Uint8Array> = {},
-): Promise<IntegrationWS> {
-  const parser = await getTestParser()
+export function makeIntegrationWS(files: Record<string, string | Uint8Array> = {}): IntegrationWS {
   const data = new RAMVFS()
   for (const [relPath, body] of Object.entries(files)) {
     put(data, `/${relPath}`, body)
   }
-  const ws = new Workspace({ '/data': data }, { mode: MountMode.WRITE, shellParser: parser })
+  const ws = new Workspace({ '/data': data }, { mode: MountMode.WRITE })
   return { ws, data }
 }
 

@@ -34,7 +34,6 @@ import { PyodideRuntime } from './python/pyodide/runtime.ts'
 import { QuickJsRuntime } from './js/quickjs/runtime.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { MountMode, PathSpec } from '../types.ts'
-import { getTestParser } from '../../tests/workspace/fixtures/workspace_fixture.ts'
 import { context } from '../../tests/workspace/fixtures/context.ts'
 import { Workspace } from '../workspace/workspace/workspace.ts'
 import type { Policy } from '../policy/base.ts'
@@ -86,14 +85,12 @@ class DenySecret implements Policy {
   }
 }
 
-async function world(runtimes?: Runtime[]): Promise<Workspace> {
-  const parser = await getTestParser()
+function world(runtimes?: Runtime[]): Workspace {
   return new Workspace(
     { '/data': new RAMVFS(), '/secret': new RAMVFS() },
     {
       mode: MountMode.EXEC,
       policies: [new DenySecret()],
-      shellParserFactory: () => Promise.resolve(parser),
       ...(runtimes === undefined ? {} : { runtimes }),
     },
   )
@@ -160,7 +157,7 @@ describe('execution bindings', () => {
   })
 
   it('retains session permissions and gated writes after capture', async () => {
-    const ws = await world()
+    const ws = world()
     try {
       await ws.shell('echo private > /secret/a')
       ws.createSession('agent', { profile: { paths: { hide: ['/secret'] } } })
@@ -196,7 +193,7 @@ describe('execution bindings', () => {
 
   it('projects live mounts, namespace links, and attributes through the binding', async () => {
     const probe = new Probe()
-    const ws = await world([probe])
+    const ws = world([probe])
     try {
       await ws.shell('echo shared > /data/a; chmod 600 /data/a')
       const context = ws.runtimeContext()
@@ -217,8 +214,8 @@ describe('execution bindings', () => {
 
   it('refuses sharing an instance across workspaces', async () => {
     const runtime = new Probe()
-    const first = await world([runtime]),
-      second = await world()
+    const first = world([runtime]),
+      second = world()
     try {
       const ok = await runtime.execute([], [], context({ flags: { c: 'ok' } }))
       expect(dec.decode(ok.stdout)).toBe('ok')
@@ -240,7 +237,7 @@ it.each([
     const runtime = create()
     const expected = ['read', 'write', 'list', 'stat']
     expect(runtime.filesystem).toEqual(_name === 'pyodide' ? [...expected, 'glob'] : expected)
-    const ws = await world([runtime])
+    const ws = world([runtime])
     try {
       await ws.shell('echo shared > /data/file; ln -s /data/file /data/link')
       ws.createSession('one')
@@ -283,7 +280,7 @@ it.each([
 
 it('command execution supplies its active workspace context', async () => {
   const runtime = new Probe({ captures: ['python3'] })
-  const ws = await world([runtime])
+  const ws = world([runtime])
   try {
     ws.createSession('agent')
     await ws.shell('export PUBLIC=agent; cd /data', { sessionId: 'agent' })
@@ -337,7 +334,7 @@ it('does not share process views by profile or follow reused session IDs', async
 
 it('refuses a native runtime before running with hidden files', async () => {
   const runtime = new ShellProbe({ captures: ['*'] })
-  const ws = await world([runtime])
+  const ws = world([runtime])
   try {
     ws.createSession('restricted', { profile: { paths: { hide: ['/data/secret'] } } })
     const result = await ws.shell('echo should-not-run', { sessionId: 'restricted' })

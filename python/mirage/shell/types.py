@@ -236,6 +236,7 @@ class NodeType(StrEnum):
     REDIRECT_DUP_IN = "<&"
     REDIRECT_CLOSE_OUT = ">&-"
     REDIRECT_CLOSE_IN = "<&-"
+    REDIRECT_READWRITE = "<>"
     REDIRECT_BOTH = "&>"
     REDIRECT_BOTH_APPEND = "&>>"
     HEREDOC_START_TOKEN = "<<"

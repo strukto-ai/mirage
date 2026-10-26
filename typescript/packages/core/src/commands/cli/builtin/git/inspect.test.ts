@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { spawnSync, execFileSync } from 'node:child_process'
-import { createRequire } from 'node:module'
 import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, relative, sep } from 'node:path'
@@ -21,7 +20,6 @@ import { fileURLToPath } from 'node:url'
 import { afterAll, beforeAll, expect, it } from 'vitest'
 
 import { RAMVFS } from '../../../../vfs/ram/ram.ts'
-import { createShellParser, type ShellParser } from '../../../../shell/parse/index.ts'
 import { MountMode, PathSpec } from '../../../../types.ts'
 import { Workspace } from '../../../../workspace/workspace/workspace.ts'
 import { GIT } from './index.ts'
@@ -32,14 +30,9 @@ const BUILDER = fileURLToPath(
 )
 const DEC = new TextDecoder()
 
-const require = createRequire(import.meta.url)
-const engineWasm = readFileSync(require.resolve('web-tree-sitter/web-tree-sitter.wasm'))
-const grammarWasm = readFileSync(require.resolve('tree-sitter-bash/tree-sitter-bash.wasm'))
-
 let tmp: string
 let repoPath: string
 let ws: Workspace
-let parser: ShellParser
 
 function walk(root: string, base = root): string[] {
   const out: string[] = []
@@ -57,10 +50,7 @@ async function run(line: string): Promise<[number, string, string]> {
 }
 
 async function mountRepo(path: string): Promise<Workspace> {
-  const mounted = new Workspace(
-    { '/repo': new RAMVFS() },
-    { mode: MountMode.WRITE, shellParser: parser },
-  )
+  const mounted = new Workspace({ '/repo': new RAMVFS() }, { mode: MountMode.WRITE })
   const dispatch = mounted.vfs
   for (const rel of walk(path)) {
     const target = `/repo/${rel}`
@@ -76,7 +66,6 @@ beforeAll(async () => {
   repoPath = join(tmp, 'repo')
   execFileSync('bash', [BUILDER, repoPath], { stdio: 'ignore' })
 
-  parser = await createShellParser({ engineWasm, grammarWasm })
   ws = await mountRepo(repoPath)
 })
 

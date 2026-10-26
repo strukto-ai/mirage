@@ -29,11 +29,7 @@ import { BaseVFS, type VFSOptions } from '../vfs/base.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { Dispatcher } from './dispatcher/dispatcher.ts'
 import { Files } from './files.ts'
-import {
-  getTestParser,
-  stderrStr,
-  stdoutStr,
-} from '../../tests/workspace/fixtures/workspace_fixture.ts'
+import { stderrStr, stdoutStr } from '../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from './workspace/workspace.ts'
 
 const ENC = new TextEncoder()
@@ -78,10 +74,10 @@ function marked(dispatcher: Dispatcher): Dispatcher {
 }
 
 /** A workspace whose dispatcher, and each view it binds, marks every call it hands over. */
-async function markedWorkspace(
+function markedWorkspace(
   mounts: Record<string, BaseVFS>,
   mode: MountMode = MountMode.WRITE,
-): Promise<Workspace> {
+): Workspace {
   type Bind = (this: Dispatcher, arg: never) => Dispatcher
   const views = Dispatcher.prototype as unknown as Record<'forSession' | 'forCaller', Bind>
   for (const view of ['forSession', 'forCaller'] as const) {
@@ -90,7 +86,7 @@ async function markedWorkspace(
       return marked(bind.call(this, arg))
     })
   }
-  const ws = new Workspace(mounts, { mode, shellParser: await getTestParser() })
+  const ws = new Workspace(mounts, { mode })
   marked((ws as unknown as { dispatcher: Dispatcher }).dispatcher)
   return ws
 }
@@ -233,7 +229,7 @@ describe('every builtin goes through the dispatcher', () => {
     async (name, [line, prefixes]) => {
       const mounts = Object.fromEntries(prefixes.map((prefix) => [prefix, new Toy()]))
       const toys = Object.values(mounts)
-      const ws = await markedWorkspace(mounts, MountMode.EXEC)
+      const ws = markedWorkspace(mounts, MountMode.EXEC)
       try {
         for (const prefix of prefixes) {
           const seeded = await ws.shell(SEED.replaceAll('/t/', prefix))
@@ -259,7 +255,7 @@ describe('every builtin goes through the dispatcher', () => {
       spec: new CommandSpec(),
       fn: async () => [await toy.read(PathSpec.fromStrPath('/a.txt')), new IOResult()],
     })
-    const ws = await markedWorkspace({ '/t/': toy })
+    const ws = markedWorkspace({ '/t/': toy })
     try {
       await ws.shell(SEED)
       ws.mount('/t/').registerCommands(peek)
@@ -298,7 +294,7 @@ const TOY_GREP = command({
 
 describe('a replacement hands the rest to the default', () => {
   it('answers what it hands back as the builtin does', async () => {
-    const ws = await markedWorkspace({ '/t/': new Toy({ commands: TOY_GREP }) })
+    const ws = markedWorkspace({ '/t/': new Toy({ commands: TOY_GREP }) })
     try {
       expect((await ws.shell(SEED)).exitCode).toBe(0)
       expect(await run(ws, 'cd /t && grep -c beta a.txt b.txt dir/c.txt')).toEqual([
@@ -333,10 +329,7 @@ async function outcome(
   vfs: BaseVFS,
   line: string,
 ): Promise<[[number, string, string], [number, string, string]]> {
-  const ws = new Workspace(
-    { '/t/': vfs },
-    { mode: MountMode.WRITE, shellParser: await getTestParser() },
-  )
+  const ws = new Workspace({ '/t/': vfs }, { mode: MountMode.WRITE })
   try {
     expect((await ws.shell(SEED)).exitCode).toBe(0)
     return [await run(ws, line), await run(ws, STATE)]
@@ -392,10 +385,7 @@ const KINDS: Record<string, string> = {
 describe('one handler shape for a command and a CLI', () => {
   it('gives a command, a tree and a CLI one context', async () => {
     SEEN.length = 0
-    const ws = new Workspace(
-      { '/n/': new RAMVFS() },
-      { mode: MountMode.WRITE, shellParser: await getTestParser() },
-    )
+    const ws = new Workspace({ '/n/': new RAMVFS() }, { mode: MountMode.WRITE })
     try {
       expect((await ws.shell("printf 'first\\n' > /n/a.txt")).exitCode).toBe(0)
       ws.mount('/n/').registerCommands([...PEEK, NOTES])

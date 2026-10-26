@@ -15,7 +15,6 @@
 import { describe, expect, it } from 'vitest'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { MountMode } from '../../types.ts'
-import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
 
 // The twin of python's tests/commands/builtin/test_read_failure_exit.py.
@@ -76,9 +75,8 @@ const BARE_HERE: ReadonlyMap<string, string> = new Map([
 ])
 
 async function makeWs(): Promise<Workspace> {
-  const parser = await getTestParser()
   const ram = new RAMVFS()
-  const ws = new Workspace({ '/ram': ram }, { mode: MountMode.WRITE, shellParser: parser })
+  const ws = new Workspace({ '/ram': ram }, { mode: MountMode.WRITE })
   await ws.shell('mkdir -p /ram/dir')
   await ws.shell('echo inner > /ram/dir/inner.txt')
   return ws

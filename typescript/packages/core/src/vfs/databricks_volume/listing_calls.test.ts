@@ -22,7 +22,6 @@ import {
   type FetchCall,
 } from '../../../tests/core/databricks_volume/_test_util.ts'
 import { MountMode } from '../../types.ts'
-import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
 import { DatabricksVolumeVFSBase } from './databricks_volume.ts'
 
@@ -92,7 +91,7 @@ function agedRoute(call: FetchCall): Response {
 async function run(line: string): Promise<string[]> {
   const ws = new Workspace(
     { '/volume': new DatabricksVolumeVFSBase({ accessor: makeAccessor() }) },
-    { mode: MountMode.READ, shellParser: await getTestParser() },
+    { mode: MountMode.READ },
   )
   try {
     const result = await ws.shell(line)

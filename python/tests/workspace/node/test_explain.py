@@ -235,6 +235,15 @@ async def test_explain_reads_every_command_of_a_line(ws):
 
 
 @pytest.mark.asyncio
+async def test_explain_reads_a_reserved_word_alias_as_a_command(ws):
+    await ws.shell(
+        "shopt -s expand_aliases; alias fi='echo works'", session_id="s"
+    )
+    said = await ws.explain("fi", "s")
+    assert [child.command for child in said.node.children] == ["fi"]
+
+
+@pytest.mark.asyncio
 async def test_explain_says_exactly_what_the_run_would_say(ws):
     for line in ("rm /data/prod/x.txt", "git push origin main", "gerp x"):
         ran = await ws.shell(line, session_id="s")

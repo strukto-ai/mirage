@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import pytest
-import tree_sitter
 
 from mirage.shell import parse
 from mirage.shell.helpers import (
@@ -27,13 +26,15 @@ from mirage.shell.helpers import (
     get_text,
     get_while_parts,
 )
+from mirage.shell.parse import check_syntax
+from mirage.shell.parse.syntax import find_syntax_issue
 from mirage.shell.types import NodeType as NT
 
 
 def test_parse_returns_node():
     root = parse("echo hello")
-    assert isinstance(root, tree_sitter.Node)
     assert root.type == "program"
+    assert not root.has_error
 
 
 def test_simple_command():
@@ -438,7 +439,10 @@ def test_a_redirect_after_an_operator_word_stays_a_redirect():
 
 def test_the_translation_marker_stays_with_its_string():
     command = parse('echo $"hello"').named_children[0]
-    assert [get_text(p) for p in get_parts(command)] == ["echo", '"hello"']
+    assert [p.type for p in get_parts(command)] == [
+        NT.COMMAND_NAME,
+        NT.TRANSLATED_STRING,
+    ]
 
 
 @pytest.mark.parametrize(
@@ -499,3 +503,50 @@ def test_a_well_formed_bracket_test_stays_a_test(line):
     assert not any(
         get_command_name(c) == "[" for c in _nodes(root, NT.COMMAND)
     )
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "echo hi > /api/$c/$id.json",
+        "echo hi > /w/$c/$12.json",
+        "echo hi > /é💡/$c/$123abc.json",
+    ],
+)
+def test_a_redirect_target_is_one_word(command):
+    node = parse(command).named_children[0]
+    assert node.type == NT.REDIRECTED_STATEMENT
+    _, redirects = get_redirects(node)
+    assert [r.target for r in redirects] == [command.split("> ")[1]]
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "value=x 2>/dev/null; echo done",
+        "  value=é💡 2>/dev/null; echo done",
+        "value=$(echo x) 2>/dev/null && echo done",
+    ],
+)
+def test_assignments_with_a_redirect_keep_their_source(line):
+    raw = line.encode()
+    pending = [parse(line)]
+    while pending:
+        node = pending.pop()
+        assert node.text == raw[node.start_byte : node.end_byte]
+        pending.extend(node.children)
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "echo ${x:$offset:2}",
+        "if false; then echo ${x:.2f}; fi",
+        "echo ${x:$(echo 1):${n:-2}}",
+    ],
+)
+def test_a_substring_leaves_its_arithmetic_to_execution(source):
+    root = parse(source)
+    assert check_syntax(source) is None
+    assert find_syntax_issue(root) is None
+    assert root.text.decode() == source

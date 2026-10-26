@@ -1,6 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Mem0Accessor } from '../../accessor/mem0.ts'
 import { SEARCH } from '../../commands/cli/builtin/search/index.ts'
 import { PathSpec, type FileStat } from '../../types.ts'
@@ -169,10 +168,7 @@ it.each([
 ])('%s is refused before mem0 is asked', async (line, exitCode, stderr) => {
   const fetchMock = vi.fn()
   vi.stubGlobal('fetch', fetchMock)
-  const ws = new Workspace(
-    { '/m': new Mem0VFS({ apiKey: 'key', userId: 'alex' }) },
-    { shellParser: await getTestParser() },
-  )
+  const ws = new Workspace({ '/m': new Mem0VFS({ apiKey: 'key', userId: 'alex' }) })
   ws.registerCli('search', SEARCH)
   try {
     const result = await ws.shell(line)
@@ -209,10 +205,7 @@ it.each([
 // Twin of the parse refusals in test_search_refusals: search's usage errors
 // exit 2 like the ones it raises itself.
 it('refuses a value its spec types as a usage error', async () => {
-  const ws = new Workspace(
-    { '/m': new Mem0VFS({ apiKey: 'key', userId: 'alex' }) },
-    { shellParser: await getTestParser() },
-  )
+  const ws = new Workspace({ '/m': new Mem0VFS({ apiKey: 'key', userId: 'alex' }) })
   ws.registerCli('search', SEARCH)
   try {
     const result = await ws.shell('search --top-k many plans /m')
@@ -240,10 +233,9 @@ it('lets find page memories no further than its walk limit', async () => {
     ),
   )
   vi.stubGlobal('fetch', fetchMock)
-  const ws = new Workspace(
-    { '/m': new Mem0VFS({ apiKey: 'key', userId: 'alex', defaultPageSize: 1, walkLimit: 2 }) },
-    { shellParser: await getTestParser() },
-  )
+  const ws = new Workspace({
+    '/m': new Mem0VFS({ apiKey: 'key', userId: 'alex', defaultPageSize: 1, walkLimit: 2 }),
+  })
   try {
     await ws.shell('find /m')
     expect(fetchMock).toHaveBeenCalledTimes(3)

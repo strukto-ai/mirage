@@ -12,18 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { readFileSync } from 'node:fs'
-import { createRequire } from 'node:module'
 import { describe, expect, it } from 'vitest'
-import { createShellParser } from '../../../shell/parse/index.ts'
 import { MountMode } from '../../../types.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { Workspace } from '../../../workspace/workspace/workspace.ts'
 import { dispatched } from '../../../test-utils.ts'
-
-const require = createRequire(import.meta.url)
-const engineWasm = readFileSync(require.resolve('web-tree-sitter/web-tree-sitter.wasm'))
-const grammarWasm = readFileSync(require.resolve('tree-sitter-bash/tree-sitter-bash.wasm'))
 
 describe('a file in /dev is read at the dispatcher', () => {
   // cat and head read /dev in ranges, which /dev/zero answers without end;
@@ -34,7 +27,6 @@ describe('a file in /dev is read at the dispatcher', () => {
       { '/data': new RAMVFS() },
       {
         mode: MountMode.WRITE,
-        shellParserFactory: async () => createShellParser({ engineWasm, grammarWasm }),
       },
     )
     try {

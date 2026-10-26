@@ -38,8 +38,8 @@ async def owned_workspace(monkeypatch):
     programs = []
     original = scope.parse_program
 
-    def parse(source):
-        program = original(source)
+    def parse(source, aliases=frozenset()):
+        program = original(source, aliases)
         programs.append(program)
         return program
 

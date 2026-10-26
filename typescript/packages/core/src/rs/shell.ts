@@ -18,7 +18,7 @@ import { moduleSync } from './stream.ts'
 interface Exports {
   readonly memory: WebAssembly.Memory
   mirage_rs_args(len: number): number
-  mirage_rs_shell_parse(len: number): number
+  mirage_rs_shell_parse(len: number, aliasesLen: number): number
   mirage_rs_shell_table(): number
   mirage_rs_shell_error_at(): number
   mirage_rs_shell_message(): number
@@ -191,14 +191,18 @@ export class ShellTreeNode implements ShellNode {
 /**
  * Parse a shell program with mirage's own bash parser: tree-sitter-bash's
  * node kinds, fields and spans, bash's reading where that grammar misreads
- * bash. Mirrors Python's parse_shell.
+ * bash. `aliases` are the names the shell expands as aliases: one is a
+ * command where a command starts, never a reserved word. Mirrors Python's
+ * parse_shell.
  */
-export function parseShell(source: string): ShellTree {
+export function parseShell(source: string, aliases: Iterable<string> = []): ShellTree {
   const wasm = instance()
   const bytes = encoder.encode(source)
-  const args = wasm.mirage_rs_args(bytes.byteLength)
+  const names = encoder.encode([...aliases].map((name) => `${name}\0`).join(''))
+  const args = wasm.mirage_rs_args(bytes.byteLength + names.byteLength)
   bytesAt(wasm, args, bytes.byteLength).set(bytes)
-  const count = wasm.mirage_rs_shell_parse(bytes.byteLength)
+  bytesAt(wasm, args + bytes.byteLength, names.byteLength).set(names)
+  const count = wasm.mirage_rs_shell_parse(bytes.byteLength, names.byteLength)
   const ptr = wasm.mirage_rs_shell_table()
   const table = new Uint32Array(wasm.memory.buffer, ptr, count * WORDS).slice()
   const at = wasm.mirage_rs_shell_error_at()

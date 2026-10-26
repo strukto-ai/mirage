@@ -23,7 +23,6 @@ import type { FindOptions } from '../../../core/generic/find.ts'
 import { ContentType, FileStat, FileType, MountMode, PathSpec } from '../../../types.ts'
 import { parseSessionProfile } from '../../../policy/profile.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
-import { getTestParser } from '../../../../tests/workspace/fixtures/workspace_fixture.ts'
 import type { Context } from '../../config.ts'
 import { findGeneric as streamFind } from './find.ts'
 import { modifiedTs } from '../../../core/generic/find.ts'
@@ -319,7 +318,6 @@ describe('a link onto a directory a rule refuses to list', () => {
       { '/s': new RAMVFS(), '/v': new RAMVFS() },
       {
         mode: MountMode.WRITE,
-        shellParser: await getTestParser(),
         profiles: { sealed: SEALED_DOC },
       },
     )

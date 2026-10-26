@@ -48,11 +48,10 @@
     "./package.json": "./package.json"
   },
   "files": [
-    "dist",
-    "THIRD_PARTY_NOTICES"
+    "dist"
   ],
   "scripts": {
-    "build": "node scripts/embed-wasm.mjs && node scripts/clean.mjs && tsc -p tsconfig.build.json && node scripts/service-worker.mjs",
+    "build": "node scripts/clean.mjs && tsc -p tsconfig.build.json && node scripts/service-worker.mjs",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
@@ -62,11 +61,9 @@
   },
   "devDependencies": {
     "@modelcontextprotocol/client": "^2.3.0",
-    "tree-sitter-bash": "^0.25.1",
     "typescript": "^6.0.0",
     "@types/node": "^22.0.0",
     "vitest": "^4.1.12",
-    "web-tree-sitter": "^0.26.13",
     "e2b": "^2.45.0"
   },
   "peerDependencies": {

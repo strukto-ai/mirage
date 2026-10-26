@@ -18,7 +18,6 @@ import type { RunResult } from '../types.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { MountMode } from '../../types.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
-import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 
 class ProcessRuntime extends PythonRuntime {
   readonly name = 'custom-process'
@@ -40,10 +39,7 @@ describe('PythonRuntime version defaults', () => {
     async (mode) => {
       const runtime = new ProcessRuntime()
       expect(runtime.reach).toBe('process')
-      const ws = new Workspace(
-        { '/': new RAMVFS() },
-        { mode, runtimes: [runtime, 'workspace'], shellParser: await getTestParser() },
-      )
+      const ws = new Workspace({ '/': new RAMVFS() }, { mode, runtimes: [runtime, 'workspace'] })
       try {
         for (const line of ['python --version', 'python3 -V', 'python -VV']) {
           const io = await ws.shell(line, { env: { PYTHONPATH: '/startup' } })

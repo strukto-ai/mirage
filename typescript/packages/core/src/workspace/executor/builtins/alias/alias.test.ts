@@ -18,10 +18,7 @@
 import { describe, expect, it } from 'vitest'
 import { RAMVFS } from '../../../../vfs/ram/ram.ts'
 import { MountMode } from '../../../../types.ts'
-import {
-  getTestParser,
-  stdoutStr,
-} from '../../../../../tests/workspace/fixtures/workspace_fixture.ts'
+import { stdoutStr } from '../../../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../../workspace/workspace.ts'
 import { applyStateDict, toStateDict } from '../../../snapshot/state.ts'
 
@@ -38,20 +35,14 @@ describe('alias', () => {
     ["c='echo A; \\\n ' fi='fi; echo F'", 'c fi', '', 2],
     ["fi='echo SAFE; : <<EOF; fi ' x=$':\\nbody\\nEOF\\n'", 'fi x', '', 2],
   ])('runs alias %s as %j spelled as a reserved word', async (aliases, line, out, code) => {
-    const ws = new Workspace(
-      { '/data': new RAMVFS() },
-      { mode: MountMode.WRITE, shellParser: await getTestParser() },
-    )
+    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
     await ws.shell(`shopt -s expand_aliases; alias ${aliases}`)
     const io = await ws.shell(line)
     expect([stdoutStr(io), io.exitCode]).toEqual([out, code])
   })
 
   it('keeps the arguments of an alias after a non-ASCII assignment', async () => {
-    const ws = new Workspace(
-      { '/data': new RAMVFS() },
-      { mode: MountMode.WRITE, shellParser: await getTestParser() },
-    )
+    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
     await ws.shell("shopt -s expand_aliases; alias e='echo E'")
     const io = await ws.shell('X=☕ e arg')
     expect([stdoutStr(io), io.exitCode]).toEqual(['E arg\n', 0])
@@ -65,10 +56,7 @@ describe('alias', () => {
     [["alias a='echo x'; f() { a; }", 'f'], '', 127],
     [["alias a='echo nested'\ng() { a; }\nf() { g; }\nf"], 'nested\n', 0],
   ])('reads aliases where a function was defined: %j', async (lines, out, code) => {
-    const ws = new Workspace(
-      { '/data': new RAMVFS() },
-      { mode: MountMode.WRITE, shellParser: await getTestParser() },
-    )
+    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
     await ws.shell('shopt -s expand_aliases')
     let io = await ws.shell(':')
     for (const line of lines) io = await ws.shell(line)
@@ -82,10 +70,7 @@ describe('alias', () => {
     [["alias a='echo works'", 'f() { a; }'], 'works\n', 0],
     [["alias a='echo x'; f() { a; }"], '', 127],
   ])('reads the same aliases in a call with its own env or cwd: %j', async (lines, out, code) => {
-    const ws = new Workspace(
-      { '/data': new RAMVFS() },
-      { mode: MountMode.WRITE, shellParser: await getTestParser() },
-    )
+    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
     await ws.shell('shopt -s expand_aliases')
     for (const line of lines) await ws.shell(line)
     for (const opts of [{}, { env: {} }, { cwd: '/data' }]) {
@@ -97,10 +82,7 @@ describe('alias', () => {
   // A function expands the aliases its definition saw; `$( )` reads them as
   // they are when it runs.
   it('keeps the aliases a function definition saw', async () => {
-    const ws = new Workspace(
-      { '/data': new RAMVFS() },
-      { mode: MountMode.WRITE, shellParser: await getTestParser() },
-    )
+    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
     await ws.shell("shopt -s expand_aliases; alias a='echo 1'")
     await ws.shell('f() { a; }; g() { x=$(a); echo "[$x]"; }')
     await ws.shell("alias a='echo 2'")
@@ -116,10 +98,7 @@ describe('alias', () => {
   // made, so a restored body runs as a parse of its own and reads the
   // aliases as they are, even after the same text was defined again.
   it('does not read the replaced site after a checkout', async () => {
-    const ws = new Workspace(
-      { '/data': new RAMVFS() },
-      { mode: MountMode.WRITE, shellParser: await getTestParser() },
-    )
+    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
     for (const line of ['shopt -s expand_aliases', "alias a='echo 1'", 'f() { a; }'])
       await ws.shell(line)
     const state = await toStateDict(ws)
@@ -131,10 +110,7 @@ describe('alias', () => {
 })
 
 it('ends alias guards after a failed invocation', async () => {
-  const ws = new Workspace(
-    { '/data': new RAMVFS() },
-    { mode: MountMode.WRITE, shellParser: await getTestParser() },
-  )
+  const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
   try {
     await ws.shell("shopt -s expand_aliases; alias e='echo A; e' fi='fi'")
     expect((await ws.shell('e')).exitCode).toBe(127)

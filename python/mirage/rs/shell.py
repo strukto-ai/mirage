@@ -12,10 +12,12 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import Iterable
+
 from mirage._rs import ShellTree
 
 
-def parse_shell(source: str) -> ShellTree:
+def parse_shell(source: str | bytes, aliases: Iterable[str] = ()) -> ShellTree:
     """Parse a shell program with mirage's own bash parser.
 
     The tree has tree-sitter-bash's node kinds, field names and byte and
@@ -23,7 +25,11 @@ def parse_shell(source: str) -> ShellTree:
     its root node walks as a ``TSNodeLike``.
 
     Args:
-        source (str): the program; a lone surrogate stands for the byte
-            it escapes.
+        source (str | bytes): the program; in text, a lone surrogate
+            stands for the byte it escapes.
+        aliases (Iterable[str]): the names the shell expands as aliases;
+            one is a command where a command starts, never a reserved word.
     """
-    return ShellTree(source.encode("utf-8", "surrogateescape"))
+    if isinstance(source, str):
+        source = source.encode("utf-8", "surrogateescape")
+    return ShellTree(source, list(aliases))

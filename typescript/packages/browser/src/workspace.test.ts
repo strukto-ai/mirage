@@ -28,20 +28,11 @@ afterEach(() => {
 })
 
 describe('@struktoai/mirage-browser Workspace', () => {
-  it('lazy-decodes inlined WASM and runs `echo hi` end-to-end', async () => {
+  it('runs `echo hi` end-to-end', async () => {
     const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
     const res = await ws.shell('echo hi')
     expect(res.exitCode).toBe(0)
     expect(new TextDecoder().decode(res.stdout)).toBe('hi\n')
-    await ws.close()
-  })
-
-  it('reuses the cached parser across executes', async () => {
-    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
-    const r1 = await ws.shell('echo one')
-    const r2 = await ws.shell('echo two')
-    expect(new TextDecoder().decode(r1.stdout)).toBe('one\n')
-    expect(new TextDecoder().decode(r2.stdout)).toBe('two\n')
     await ws.close()
   })
 
@@ -61,39 +52,6 @@ describe('@struktoai/mirage-browser Workspace', () => {
       { mode: MountMode.WRITE, sessionId: 'pinned' },
     )
     expect(ws.sessionManager.defaultId).toBe('pinned')
-    await ws.close()
-  })
-
-  it('respects explicitly provided shellParserFactory (overrides inlined WASM)', async () => {
-    let calls = 0
-    const ws = new Workspace(
-      { '/data': new RAMVFS() },
-      {
-        mode: MountMode.WRITE,
-        shellParserFactory: async () => {
-          calls += 1
-          const { Workspace: NodeWorkspace } = await import('./workspace.ts')
-          // borrow the default factory: call execute() on a sibling Workspace
-          // to fetch its parser indirectly. Instead, simpler: lazy-import core.
-          const { createShellParser } = await import('@struktoai/mirage-core/shell/parse')
-          const { ENGINE_WASM_BASE64, GRAMMAR_WASM_BASE64 } = await import('./generated/wasm.ts')
-          void NodeWorkspace
-          const decode = (b64: string): Uint8Array => {
-            const bin = atob(b64)
-            const out = new Uint8Array(bin.length)
-            for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i)
-            return out
-          }
-          return createShellParser({
-            engineWasm: decode(ENGINE_WASM_BASE64),
-            grammarWasm: decode(GRAMMAR_WASM_BASE64),
-          })
-        },
-      },
-    )
-    await ws.shell('echo a')
-    await ws.shell('echo b')
-    expect(calls).toBe(1)
     await ws.close()
   })
 })

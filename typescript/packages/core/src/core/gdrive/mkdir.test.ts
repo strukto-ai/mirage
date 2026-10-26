@@ -16,7 +16,6 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import type { GDriveAccessor } from '../../accessor/gdrive.ts'
 import { MountMode, PathSpec } from '../../types.ts'
 import { GoogleDriveVFS } from '../../vfs/gdrive/gdrive.ts'
-import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
 import { handedAt } from '../../../tests/workspace/fixtures/handed.ts'
 import { readdir } from './readdir.ts'
@@ -33,13 +32,10 @@ beforeEach(() => {
   accessor = makeGDriveAccessor(fake)
 })
 
-async function workspace(): Promise<Workspace> {
+function workspace(): Workspace {
   const vfs = new GoogleDriveVFS({ clientId: 'x', refreshToken: 'y' })
   Object.assign(vfs, { accessor })
-  return new Workspace(
-    { '/d/': vfs },
-    { mode: MountMode.WRITE, shellParser: await getTestParser() },
-  )
+  return new Workspace({ '/d/': vfs }, { mode: MountMode.WRITE })
 }
 
 function spec(virtual: string): PathSpec {
@@ -61,7 +57,7 @@ describe('gdrive mkdir', () => {
   it('-p builds the chain one level at a time and is idempotent', async () => {
     // -p is the mount's: it makes one level at a time, each handed the folder
     // the level above answered.
-    const ws = await workspace()
+    const ws = workspace()
     try {
       await ws.dispatch('mkdir', '/d/a/b/c', [], { parents: true })
       const a = fake.find('a')
@@ -79,7 +75,7 @@ describe('gdrive mkdir', () => {
 
   it('-p over a file raises EEXIST at the leaf and ENOTDIR mid-path', async () => {
     fake.add('f.txt', 'root', undefined, ENC.encode('x'))
-    const ws = await workspace()
+    const ws = workspace()
     try {
       await expect(ws.dispatch('mkdir', '/d/f.txt', [], { parents: true })).rejects.toMatchObject({
         code: 'EEXIST',

@@ -16,7 +16,6 @@ import { describe, expect, it } from 'vitest'
 import { RAMVFS } from '../../../../vfs/ram/ram.ts'
 import { CapacityState, MountMode } from '../../../../types.ts'
 import type { CapacityResult } from '../../../../types.ts'
-import { getTestParser } from '../../../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../../workspace/workspace.ts'
 
 // RAM backend that reports a fixed quota, standing in for a real filesystem
@@ -36,12 +35,8 @@ class QuotaVFS extends RAMVFS {
   }
 }
 
-async function makeWs(): Promise<Workspace> {
-  const parser = await getTestParser()
-  return new Workspace(
-    { '/mem': new RAMVFS(), '/q': new QuotaVFS() },
-    { mode: MountMode.WRITE, shellParser: parser },
-  )
+function makeWs(): Workspace {
+  return new Workspace({ '/mem': new RAMVFS(), '/q': new QuotaVFS() }, { mode: MountMode.WRITE })
 }
 
 async function run(ws: Workspace, cmd: string): Promise<[number, string]> {
@@ -62,7 +57,7 @@ describe('df', () => {
   })
 
   it('unknown backend renders dashes', async () => {
-    const ws = await makeWs()
+    const ws = makeWs()
     const [code, out] = await run(ws, 'df /mem')
     expect(code).toBe(0)
     expect(out).toBe(
@@ -73,7 +68,7 @@ describe('df', () => {
   })
 
   it('quota backend reports real numbers', async () => {
-    const ws = await makeWs()
+    const ws = makeWs()
     const [code, out] = await run(ws, 'df /q')
     expect(code).toBe(0)
     expect(cols(out, 0)).toEqual([
@@ -93,7 +88,7 @@ describe('df', () => {
   // 1024000 is exactly 1000 KiB and GNU keeps `1000K` rather than rolling
   // to `1.0M`, because the roll happens at 1024, not 1000.
   it('human sizes match GNU', async () => {
-    const ws = await makeWs()
+    const ws = makeWs()
     const [code, out] = await run(ws, 'df -h /q')
     expect(code).toBe(0)
     expect(cols(out, 1).slice(0, 4)).toEqual(['ram', '1000K', '400K', '600K'])
@@ -105,7 +100,7 @@ describe('df', () => {
   // tmpfs (which prints `103k`) and confirmed with `numfmt --to=si`. Only
   // kilo differs in case; M and up are capitals in both tables.
   it('SI sizes match GNU', async () => {
-    const ws = await makeWs()
+    const ws = makeWs()
     const [code, out] = await run(ws, 'df -H /q')
     expect(code).toBe(0)
     expect(cols(out, 1).slice(0, 4)).toEqual(['ram', '1.1M', '410k', '615k'])
@@ -113,7 +108,7 @@ describe('df', () => {
   })
 
   it('type column', async () => {
-    const ws = await makeWs()
+    const ws = makeWs()
     const [, out] = await run(ws, 'df -T /q')
     expect(cols(out, 0).slice(0, 2)).toEqual(['Filesystem', 'Type'])
     expect(cols(out, 1).slice(0, 2)).toEqual(['ram', 'ram'])
@@ -121,7 +116,7 @@ describe('df', () => {
   })
 
   it('inode columns; unknown -> dashes', async () => {
-    const ws = await makeWs()
+    const ws = makeWs()
     const [, q] = await run(ws, 'df -i /q')
     expect(cols(q, 0)).toEqual(['Filesystem', 'Inodes', 'IUsed', 'IFree', 'IUse%', 'Mounted', 'on'])
     expect(cols(q, 1)).toEqual(['ram', '1000', '100', '900', '10%', '/q'])
@@ -131,7 +126,7 @@ describe('df', () => {
   })
 
   it('posix and block-size headers', async () => {
-    const ws = await makeWs()
+    const ws = makeWs()
     const [, posix] = await run(ws, 'df -P /q')
     expect(cols(posix, 0).slice(1)).toEqual([
       '1024-blocks',
@@ -148,7 +143,7 @@ describe('df', () => {
   })
 
   it('human-readable', async () => {
-    const ws = await makeWs()
+    const ws = makeWs()
     const [, out] = await run(ws, 'df -h /q')
     expect(cols(out, 0).slice(1, 4)).toEqual(['Size', 'Used', 'Avail'])
     expect((cols(out, 1)[1] ?? '').endsWith('K')).toBe(true)
@@ -156,7 +151,7 @@ describe('df', () => {
   })
 
   it('no args lists all mounts', async () => {
-    const ws = await makeWs()
+    const ws = makeWs()
     const [code, out] = await run(ws, 'df')
     expect(code).toBe(0)
     const mountedOn = out
@@ -170,14 +165,14 @@ describe('df', () => {
   })
 
   it('invalid option', async () => {
-    const ws = await makeWs()
+    const ws = makeWs()
     const [code] = await run(ws, 'df -z /mem')
     expect(code).toBe(2)
     await ws.close()
   })
 
   it('rejects a zero block size', async () => {
-    const ws = await makeWs()
+    const ws = makeWs()
     const r = await ws.shell('df -B0 /q')
     expect(r.exitCode).toBe(1)
     expect(r.stderrText).toBe("df: invalid -B argument '0'\n")
@@ -185,7 +180,7 @@ describe('df', () => {
   })
 
   it('last size-format flag wins', async () => {
-    const ws = await makeWs()
+    const ws = makeWs()
     const [, hb] = await run(ws, 'df -h -B1M /q')
     expect(cols(hb, 0)[1]).toBe('1M-blocks')
     const [, bh] = await run(ws, 'df -B1M -h /q')
@@ -198,7 +193,7 @@ describe('df', () => {
   })
 
   it('errors on a missing FILE operand', async () => {
-    const ws = await makeWs()
+    const ws = makeWs()
     await ws.shell('mkdir -p /mem/sub')
     await ws.shell("sh -c 'echo hi > /mem/sub/f.txt'")
     expect((await run(ws, 'df /mem/sub/f.txt'))[0]).toBe(0)
@@ -210,7 +205,7 @@ describe('df', () => {
   })
 
   it('follows a symlink to the target mount', async () => {
-    const ws = await makeWs()
+    const ws = makeWs()
     await ws.shell('ln -s /q /mem/link')
     const [code, out] = await run(ws, 'df /mem/link')
     expect(code).toBe(0)

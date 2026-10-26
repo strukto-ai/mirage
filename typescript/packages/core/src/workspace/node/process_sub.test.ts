@@ -3,7 +3,6 @@ import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { MountMode, type PathSpec } from '../../types.ts'
 import { Channel, JobConsole } from '../../shell/console/index.ts'
 import { Workspace } from '../workspace/workspace.ts'
-import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 
 function barrier(): { promise: Promise<void>; resolve: () => void } {
   let resolve!: () => void
@@ -47,18 +46,15 @@ class FirstByte extends JobConsole {
 async function assertReleased(ws: Workspace): Promise<void> {
   expect((await ws.shell('echo /dev/fd/*')).stdoutText).toBe('/dev/fd/*\n')
 }
-async function workspace(data = new RAMVFS()): Promise<Workspace> {
-  return new Workspace(
-    { '/data': data },
-    { mode: MountMode.WRITE, shellParser: await getTestParser() },
-  )
+function workspace(data = new RAMVFS()): Workspace {
+  return new Workspace({ '/data': data }, { mode: MountMode.WRITE })
 }
 it.each(['cat <(cat /data/source)', 'cat < <(cat /data/source)', 'cat /data/source > >(cat)'])(
   'delivers the first byte before producer completion: %s',
   async (command) => {
     const data = new BarrierVFS()
     const sink = new FirstByte()
-    const ws = await workspace(data)
+    const ws = workspace(data)
     let settled = false
     const running = ws.shell(command, { sink }).finally(() => {
       settled = true
@@ -83,7 +79,7 @@ it.each(['head -c 1 <(cat /data/source)', 'head -c 1 < <(cat /data/source)'])(
   'releases an early reader even while the producer ignores cancellation: %s',
   async (command) => {
     const data = new BarrierVFS()
-    const ws = await workspace(data)
+    const ws = workspace(data)
     try {
       const io = await ws.shell(command)
       expect([io.exitCode, io.stdoutText, io.stderrText]).toEqual([0, 'f', ''])
@@ -100,7 +96,7 @@ it.each(['cat <(cat /data/source)', 'cat /data/source > >(cat)'])(
   'cancels children and releases descriptors: %s',
   async (command) => {
     const data = new BarrierVFS()
-    const ws = await workspace(data)
+    const ws = workspace(data)
     const abort = new AbortController()
     const running = ws.shell(command, { signal: abort.signal })
     const rejection = expect(running).rejects.toMatchObject({ name: 'AbortError' })
@@ -134,7 +130,7 @@ it.each([
     [0, 'st:2\n', 'mirage: unsupported: exec onto a process substitution\n'],
   ],
 ])('releases its descriptors: %s', async (command, expected) => {
-  const ws = await workspace()
+  const ws = workspace()
   try {
     const io = await ws.shell(command)
     expect([io.exitCode, io.stdoutText, io.stderrText]).toEqual(expected)

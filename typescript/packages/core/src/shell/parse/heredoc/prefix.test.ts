@@ -12,41 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { readFileSync } from 'node:fs'
-import { createRequire } from 'node:module'
-import { beforeAll, describe, expect, it } from 'vitest'
-import { Language, Parser } from 'web-tree-sitter'
+import { describe, expect, it } from 'vitest'
+import { parseShell } from '../../../rs/shell.ts'
 import type { TSNodeLike } from '../../types.ts'
-import { protectedSource } from './shield.ts'
-import type { Node } from 'web-tree-sitter'
 import { bodyPrefix, treeRoot } from './prefix.ts'
 
-const require = createRequire(import.meta.url)
-const engineWasm = readFileSync(require.resolve('web-tree-sitter/web-tree-sitter.wasm'))
-const grammarWasm = readFileSync(require.resolve('tree-sitter-bash/tree-sitter-bash.wasm'))
-
 const HEREDOC_REDIRECT = 'heredoc_redirect'
-
-let shielding: { parse(command: string): Node }
-let plain: Parser
-
-beforeAll(async () => {
-  await Parser.init({ wasmBinary: engineWasm })
-  const language = await Language.load(new Uint8Array(grammarWasm))
-  plain = new Parser()
-  plain.setLanguage(language)
-  shielding = {
-    parse(command) {
-      const raw = plain.parse(command)
-      if (raw === null) throw new Error('no tree')
-      const source = protectedSource(command, raw.rootNode)
-      if (source === null) return raw.rootNode
-      const shielded = plain.parse(source)
-      if (shielded === null || shielded.rootNode.hasError) return raw.rootNode
-      return plain.parse(command, shielded)?.rootNode ?? raw.rootNode
-    },
-  }
-})
 
 function redirects(root: TSNodeLike): TSNodeLike[] {
   const found: TSNodeLike[] = []
@@ -62,7 +33,7 @@ function redirects(root: TSNodeLike): TSNodeLike[] {
 }
 
 function prefix(command: string): string {
-  const [first] = redirects(shielding.parse(command) as TSNodeLike)
+  const [first] = redirects(parseShell(command).rootNode)
   if (first === undefined) throw new Error('no heredoc_redirect in the tree')
   return bodyPrefix(first)
 }
@@ -137,18 +108,16 @@ describe('bodyPrefix', () => {
   })
 
   it('works under <<-', () => {
-    expect(prefix('cat <<-EOF\n\n\tfoo\nEOF\n')).toBe('\n')
+    expect(prefix('cat <<-EOF\n\n\tfoo\nEOF\n')).toBe('\n\t')
   })
 
-  it('leaves a blank first line to the body', () => {
-    expect(prefix('cat <<EOF\n  \nfoo\nEOF\n')).toBe('')
+  it('holds a blank first line', () => {
+    expect(prefix('cat <<EOF\n  \nfoo\nEOF\n')).toBe('  \n')
   })
 
   it('is the indentation an unshielded tree skipped', () => {
     const cmd = 'cat <<EOF\n  foo\nEOF\n'
-    const tree = plain.parse(cmd)
-    if (tree === null) throw new Error('parse returned null')
-    const [first] = redirects(tree.rootNode as TSNodeLike)
+    const [first] = redirects(parseShell(cmd).rootNode)
     if (first === undefined) throw new Error('no heredoc_redirect in the tree')
     expect(bodyPrefix(first)).toBe('  ')
   })
@@ -164,9 +133,7 @@ describe('bodyPrefix', () => {
   })
 
   it('reads a heredoc inside a command substitution on its own line', () => {
-    const [outer, inner] = redirects(
-      shielding.parse('cat <<A $(cat <<B\n\nb\nB\n)\na\nA\n') as TSNodeLike,
-    )
+    const [outer, inner] = redirects(parseShell('cat <<A $(cat <<B\n\nb\nB\n)\na\nA\n').rootNode)
     if (outer === undefined || inner === undefined) throw new Error('expected two redirects')
     expect(bodyPrefix(outer)).toBe('')
     expect(bodyPrefix(inner)).toBe('\n')

@@ -2,7 +2,7 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { Worker } from '../../concurrency/worker.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { MountMode } from '../../types.ts'
-import { getTestParser, stdoutStr } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
+import { stdoutStr } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { DiffRequest } from '../../rs/diff_worker.ts'
 import { Workspace } from './workspace.ts'
 
@@ -18,7 +18,7 @@ it('owns warm diff workers across single-mount and cross-mount commands', async 
       '/a': [new RAMVFS(), MountMode.WRITE],
       '/b': [new RAMVFS(), MountMode.WRITE],
     },
-    { mode: MountMode.WRITE, shellParser: await getTestParser() },
+    { mode: MountMode.WRITE },
   )
   workspaces.push(workspace)
   await workspace.shell('echo old > /a/old; echo new > /a/new; echo new > /b/new')
@@ -46,7 +46,6 @@ it('closes the diff pool and VFS even when execution settlement fails', async ()
     { '/a': [backend, MountMode.WRITE] },
     {
       mode: MountMode.WRITE,
-      shellParser: await getTestParser(),
     },
   )
   workspaces.push(workspace)

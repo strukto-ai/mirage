@@ -1,17 +1,10 @@
-import { readFileSync } from 'node:fs'
-import { createRequire } from 'node:module'
 import { describe, expect, it, vi } from 'vitest'
 import { IOResult, materialize } from '../../../io/types.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
-import { createShellParser } from '../../../shell/parse/index.ts'
 import { Workspace } from '../../../workspace/workspace/workspace.ts'
 import { FileStat, FileType, MountMode, PathSpec } from '../../../types.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
 import { prepareProgram, readProgramFile } from './program.ts'
-
-const require = createRequire(import.meta.url)
-const engineWasm = readFileSync(require.resolve('web-tree-sitter/web-tree-sitter.wasm'))
-const grammarWasm = readFileSync(require.resolve('tree-sitter-bash/tree-sitter-bash.wasm'))
 
 describe('program file routing', () => {
   it.each([
@@ -24,7 +17,6 @@ describe('program file routing', () => {
       { '/data': new RAMVFS() },
       {
         mode: MountMode.EXEC,
-        shellParserFactory: async () => createShellParser({ engineWasm, grammarWasm }),
       },
     )
     try {

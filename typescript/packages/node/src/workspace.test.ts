@@ -29,45 +29,11 @@ import { conditionalS3, s3Vfs, tmpRoot } from '../tests/test-utils.ts'
 import { Workspace } from './workspace.ts'
 
 describe('@struktoai/mirage-node Workspace', () => {
-  it('lazy-loads the shell parser via readFileSync(require.resolve(...)) on first execute()', async () => {
+  it('runs `echo hi` end-to-end', async () => {
     const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
     const res = await ws.shell('echo hi')
     expect(res.exitCode).toBe(0)
     expect(new TextDecoder().decode(res.stdout)).toBe('hi\n')
-    await ws.close()
-  })
-
-  it('reuses the cached parser across multiple execute() calls', async () => {
-    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
-    const r1 = await ws.shell('echo one')
-    const r2 = await ws.shell('echo two')
-    expect(new TextDecoder().decode(r1.stdout)).toBe('one\n')
-    expect(new TextDecoder().decode(r2.stdout)).toBe('two\n')
-    await ws.close()
-  })
-
-  it('respects an explicitly provided shellParserFactory', async () => {
-    let calls = 0
-    const ws = new Workspace(
-      { '/data': new RAMVFS() },
-      {
-        mode: MountMode.WRITE,
-        shellParserFactory: async () => {
-          calls += 1
-          const { createShellParser } = await import('@struktoai/mirage-core/shell/parse')
-          const { readFileSync } = await import('node:fs')
-          const { createRequire } = await import('node:module')
-          const requireCjs = createRequire(import.meta.url)
-          return createShellParser({
-            engineWasm: readFileSync(requireCjs.resolve('web-tree-sitter/web-tree-sitter.wasm')),
-            grammarWasm: readFileSync(requireCjs.resolve('tree-sitter-bash/tree-sitter-bash.wasm')),
-          })
-        },
-      },
-    )
-    await ws.shell('echo a')
-    await ws.shell('echo b')
-    expect(calls).toBe(1)
     await ws.close()
   })
 

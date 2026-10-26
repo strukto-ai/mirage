@@ -1,6 +1,7 @@
 use super::lex::{is_name, is_name_start, is_space, name_end};
 use super::parser::{Parser, R};
 use super::tree::Syn;
+use super::word::push_run;
 
 /// Binary operators of arithmetic and test expressions by precedence, as
 /// tree-sitter-bash ranks them; the longest spelling of each first, so
@@ -134,13 +135,58 @@ impl Parser<'_> {
                 last -= 1;
             }
             self.check_raw(self.i, last, false)?;
-            if last > self.i {
-                children.push(Syn::leaf("word", self.i, last));
-            }
+            children.extend(self.raw_body(self.i, last));
             self.i = end - 2;
         }
         children.push(self.expect("))")?);
         Ok(Syn::node(kind, children))
+    }
+
+    /// A body bash reads only when it runs it, from `start` to `end`: runs
+    /// of text as words between the pieces bash expands first, as in a
+    /// double-quoted word (`$x`, `${x}`, `$(…)`, `$((…))`, `` `…` ``,
+    /// `"…"`), or None for an empty body. A body holding a piece is a
+    /// concatenation, so each one evaluates as one expression.
+    fn raw_body(&mut self, start: usize, end: usize) -> Option<Syn> {
+        let mut pieces = Vec::new();
+        let mut run = start;
+        let mut at = start;
+        while at < end {
+            let byte = self.s[at];
+            if byte == b'\\' {
+                at += 2;
+                continue;
+            }
+            if !matches!(byte, b'$' | b'`' | b'"') {
+                at += 1;
+                continue;
+            }
+            self.i = at;
+            let mark = self.mark();
+            let read = match byte {
+                b'$' => self.dollar_in_string(),
+                b'`' => self.backtick().map(Some),
+                _ => self.string().map(Some),
+            };
+            match read {
+                Ok(Some(piece)) if self.i <= end => {
+                    push_run(&mut pieces, "word", run, at);
+                    pieces.push(piece);
+                    at = self.i;
+                    run = at;
+                }
+                _ => {
+                    self.reset(mark);
+                    at += 1;
+                }
+            }
+        }
+        push_run(&mut pieces, "word", run, end);
+        if pieces.len() > 1 || pieces.first().is_some_and(|piece| !piece.is("word")) {
+            Some(Syn::node("concatenation", pieces))
+        } else {
+            pieces.pop()
+        }
     }
 
     /// `$[a]`.
@@ -161,9 +207,7 @@ impl Parser<'_> {
             _ => {
                 self.forget(mark);
                 self.check_raw(at + 2, end - 1, false)?;
-                if end - 1 > at + 2 {
-                    children.push(Syn::leaf("word", at + 2, end - 1));
-                }
+                children.extend(self.raw_body(at + 2, end - 1));
                 self.i = end - 1;
             }
         }
@@ -202,8 +246,8 @@ impl Parser<'_> {
         let kept = children.len();
         if self.c_style_header(&mut children).is_err() {
             // bash splits the header at its `;`s and evaluates each part
-            // when the loop runs: a part the grammar cannot read is one
-            // raw word.
+            // when the loop runs: a part the grammar cannot read is a raw
+            // body.
             let Some(end) = self.double_paren_end(open_at) else {
                 return self.fail(self.i);
             };
@@ -237,47 +281,75 @@ impl Parser<'_> {
         Ok(Syn::node("c_style_for_statement", children))
     }
 
-    /// The three parts of a C-style for header as raw words; false when
+    /// The three parts of a C-style for header as raw bodies; false when
     /// the header does not hold three.
-    fn c_style_raw(&self, start: usize, end: usize, children: &mut Vec<Syn>) -> bool {
-        let mut part = start;
-        let mut depth = 0usize;
-        let mut index = 0;
+    fn c_style_raw(&mut self, start: usize, end: usize, children: &mut Vec<Syn>) -> bool {
+        let separators = self.header_separators(start, end);
+        if separators.len() != 2 {
+            return false;
+        }
         let fields = ["initializer", "condition", "update"];
-        let push = |from: usize, to: usize, children: &mut Vec<Syn>, index: usize| {
-            let mut from = from;
-            let mut to = to;
-            while from < to && is_space(self.s[from]) {
-                from += 1;
+        let mut from = start;
+        for (index, to) in separators.iter().copied().chain([end]).enumerate() {
+            let (mut first, mut last) = (from, to);
+            while first < last && is_space(self.s[first]) {
+                first += 1;
             }
-            while to > from && is_space(self.s[to - 1]) {
-                to -= 1;
+            while last > first && is_space(self.s[last - 1]) {
+                last -= 1;
             }
-            if to > from {
-                children.push(Syn::leaf("word", from, to).with_field(fields[index.min(2)]));
+            if let Some(body) = self.raw_body(first, last) {
+                children.push(body.with_field(fields[index]));
             }
-        };
+            if to < end {
+                children.push(Syn::token(";", to, to + 1));
+            }
+            from = to + 1;
+        }
+        true
+    }
+
+    /// The `;`s that split a C-style for header: outside its quotes,
+    /// substitutions and parentheses, where bash splits it.
+    fn header_separators(&self, start: usize, end: usize) -> Vec<usize> {
+        let mut found = Vec::new();
+        let mut depth = 0usize;
         let mut at = start;
         while at < end {
-            match self.s[at] {
-                b'(' => depth += 1,
-                b')' => depth = depth.saturating_sub(1),
-                b';' if depth == 0 && index < 2 => {
-                    push(part, at, children, index);
-                    children.push(Syn::token(";", at, at + 1));
-                    index += 1;
-                    part = at + 1;
+            at = match self.s[at] {
+                b'\\' => at + 2,
+                b'\'' => super::lex::quote_end(self.s, at, b'\'').unwrap_or(end),
+                b'"' | b'`' | b'$' => self.piece_end(at).unwrap_or(at + 1),
+                b'(' => {
+                    depth += 1;
+                    at + 1
                 }
-                _ => {}
-            }
-            at += 1;
+                b')' => {
+                    depth = depth.saturating_sub(1);
+                    at + 1
+                }
+                b';' => {
+                    if depth == 0 {
+                        found.push(at);
+                    }
+                    at + 1
+                }
+                _ => at + 1,
+            };
         }
-        push(part, end, children, index);
-        let separators = self.s[start..end]
-            .iter()
-            .filter(|byte| **byte == b';')
-            .count();
-        index == 2 && separators == 2
+        found
+    }
+
+    /// Where the quoted string, substitution or expansion at `at` ends, as
+    /// a double-quoted word reads it; None when none starts there.
+    fn piece_end(&self, at: usize) -> Option<usize> {
+        let mut probe = self.probe(at);
+        let read = match self.s[at] {
+            b'"' => probe.string().map(Some),
+            b'`' => probe.backtick().map(Some),
+            _ => probe.dollar_in_string(),
+        };
+        matches!(read, Ok(Some(_))).then_some(probe.i)
     }
 
     fn c_style_header(&mut self, children: &mut Vec<Syn>) -> R<()> {

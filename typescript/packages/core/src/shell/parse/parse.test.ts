@@ -11,26 +11,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
-import { readFileSync } from 'node:fs'
-import { createRequire } from 'node:module'
-import { beforeAll, describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { getParts, getRedirects, getText } from '../helpers.ts'
-import { createShellParser, type ShellParser } from './index.ts'
 import { NodeType as NT, type TSNodeLike } from '../types.ts'
+import { parse } from './parse.ts'
 
-const require = createRequire(import.meta.url)
-const engineWasm = readFileSync(require.resolve('web-tree-sitter/web-tree-sitter.wasm'))
-const grammarWasm = readFileSync(require.resolve('tree-sitter-bash/tree-sitter-bash.wasm'))
-
-let parser: ShellParser
-
-beforeAll(async () => {
-  parser = await createShellParser({ engineWasm, grammarWasm })
-})
-
-describe('createShellParser', () => {
+describe('parse', () => {
   it('parses a simple command to a program root with a command child', () => {
-    const root = parser.parse('echo hello')
+    const root = parse('echo hello')
     expect(root.type).toBe('program')
     expect(root.childCount).toBeGreaterThan(0)
     const command = root.child(0)
@@ -38,28 +26,28 @@ describe('createShellParser', () => {
   })
 
   it('parses a pipeline to a program with a pipeline child', () => {
-    const root = parser.parse('echo hello | grep world')
+    const root = parse('echo hello | grep world')
     expect(root.type).toBe('program')
     const pipeline = root.child(0)
     expect(pipeline?.type).toBe('pipeline')
   })
 
   it('parses a redirection', () => {
-    const root = parser.parse('echo hi > /tmp/x.txt')
+    const root = parse('echo hi > /tmp/x.txt')
     expect(root.type).toBe('program')
     const stmt = root.child(0)
     expect(stmt?.type).toBe('redirected_statement')
   })
 
   it('exposes node text matching the source', () => {
-    const root = parser.parse('cat /data/foo.txt')
+    const root = parse('cat /data/foo.txt')
     const command = root.child(0)
     expect(command?.text).toBe('cat /data/foo.txt')
   })
 
   it('returns the same parser interface across multiple parse() calls', () => {
-    const a = parser.parse('ls')
-    const b = parser.parse('pwd')
+    const a = parse('ls')
+    const b = parse('pwd')
     expect(a.type).toBe('program')
     expect(b.type).toBe('program')
     expect(a.child(0)?.text).toBe('ls')
@@ -67,7 +55,7 @@ describe('createShellParser', () => {
   })
 })
 
-describe('createShellParser — realistic multi-statement command', () => {
+describe('parse — realistic multi-statement command', () => {
   // Mirrors a command run by a user against an R2 mount that surfaced an
   // OPFS getFileHandle error. We don't dispatch here — we just verify the
   // parser tokenizes the command into exactly the structure we expect, so a
@@ -76,13 +64,13 @@ describe('createShellParser — realistic multi-statement command', () => {
     "find /r2/Review -maxdepth 3 -type f | sed 's#^#FILE #'; echo '---'; grep -RIl \"Base3\\|base3\" /r2/Review || true"
 
   it('produces a program with three top-level statements', () => {
-    const root = parser.parse(SRC)
+    const root = parse(SRC)
     expect(root.type).toBe('program')
     expect(root.namedChildren).toHaveLength(3)
   })
 
   it('first statement is a pipeline of find | sed', () => {
-    const root = parser.parse(SRC)
+    const root = parse(SRC)
     const first = root.namedChildren[0]
     expect(first?.type).toBe('pipeline')
     const cmds = first?.namedChildren.filter((n) => n.type === 'command') ?? []
@@ -92,14 +80,14 @@ describe('createShellParser — realistic multi-statement command', () => {
   })
 
   it('second statement is echo with a single-quoted arg', () => {
-    const root = parser.parse(SRC)
+    const root = parse(SRC)
     const second = root.namedChildren[1]
     expect(second?.type).toBe('command')
     expect(second?.text).toBe("echo '---'")
   })
 
   it('third statement is grep || true', () => {
-    const root = parser.parse(SRC)
+    const root = parse(SRC)
     const third = root.namedChildren[2]
     expect(third?.type).toBe('list')
     const left = third?.namedChildren[0]
@@ -109,7 +97,7 @@ describe('createShellParser — realistic multi-statement command', () => {
   })
 
   it('quoted regex "Base3\\|base3" stays a single argument', () => {
-    const root = parser.parse(SRC)
+    const root = parse(SRC)
     const third = root.namedChildren[2]
     const grepCmd = third?.namedChildren[0]
     expect(grepCmd?.type).toBe('command')
@@ -122,7 +110,7 @@ describe('createShellParser — realistic multi-statement command', () => {
   })
 
   it('grep target path /r2/Review parses as a single argument, no glob expansion at parse time', () => {
-    const root = parser.parse(SRC)
+    const root = parse(SRC)
     const third = root.namedChildren[2]
     const grepCmd = third?.namedChildren[0]
     const args = grepCmd?.namedChildren ?? []
@@ -141,27 +129,27 @@ describe('heredoc source reader', () => {
     ["cat <<'EOF'\n\\item Don't\nsecond\nEOF", "\\item Don't\nsecond\n"],
     ['cat <<"E\\$F"\n\\first\nE$F', '\\first\n'],
   ])('preserves body and source: %s', (command, body) => {
-    const root = parser.parse(command)
+    const root = parse(command)
     expect(root.hasError).toBe(false)
     expect(root.sourceText).toBe(command)
     expect(root.namedChildren[0]?.namedChildren.at(-1)?.heredoc?.body).toBe(body)
   })
 
   it('exposes expansions as ordinary string children', () => {
-    const root = parser.parse('cat <<EOF\n\\a $v `echo body`\nEOF')
+    const root = parse('cat <<EOF\n\\a $v `echo body`\nEOF')
     const word = root.namedChildren[0]?.namedChildren.at(-1)?.namedChildren.at(-1)
     expect(word?.namedChildren.map((child) => child.type)).toContain(NT.SIMPLE_EXPANSION)
     expect(word?.namedChildren.map((child) => child.type)).toContain(NT.COMMAND_SUBSTITUTION)
   })
 
   it('keeps escaped dollars literal', () => {
-    const root = parser.parse('cat <<EOF\n\\$v\nEOF')
+    const root = parse('cat <<EOF\n\\$v\nEOF')
     const word = root.namedChildren[0]?.namedChildren.at(-1)?.namedChildren.at(-1)
     expect(word?.namedChildren.map((child) => child.type)).not.toContain(NT.SIMPLE_EXPANSION)
   })
 
   it('keeps the pipeline outside the body', () => {
-    const root = parser.parse("cat <<'EOF' | tr a-z A-Z\n\\first\nEOF")
+    const root = parse("cat <<'EOF' | tr a-z A-Z\n\\first\nEOF")
     expect(root.namedChildren[0]?.type).toBe(NT.PIPELINE)
     expect(root.namedChildren[0]?.namedChildren.at(-1)?.text).toBe('tr a-z A-Z')
   })
@@ -169,7 +157,7 @@ describe('heredoc source reader', () => {
 
 describe('heredoc source reader: operator-line regressions', () => {
   function bodiesByDelimiter(command: string): Record<string, string> {
-    const root = parser.parse(command)
+    const root = parse(command)
     expect(root.hasError).toBe(false)
     const found: Record<string, string> = {}
     const stack: TSNodeLike[] = [root]
@@ -197,7 +185,7 @@ describe('heredoc source reader: operator-line regressions', () => {
     'case x in x) cat <<EOF;; esac\nhi\nEOF\n',
     '{ cat <<EOF; }\nhi\nEOF\n',
   ])('preserves operator-line source: %j', (command) => {
-    const root = parser.parse(command)
+    const root = parse(command)
     expect(root.hasError).toBe(false)
     expect(root.sourceText).toBe(command)
   })
@@ -240,7 +228,7 @@ describe('heredoc source reader: operator-line regressions', () => {
   })
 
   it('leaves an unterminated body as typed', () => {
-    const root = parser.parse('cat <<EOF; echo x\nhi\n')
+    const root = parse('cat <<EOF; echo x\nhi\n')
     expect(root.hasError).toBe(false)
     expect(root.sourceText).toBe('cat <<EOF; echo x\nhi\n')
     expect(root.warnings).not.toBe('')
@@ -258,7 +246,7 @@ describe('an operator token where bash reads a word', () => {
     ['test a == a', ['test', 'a', '==', 'a']],
     ['echo =="x"', ['echo', '=="x"']],
   ])('reads %j as words', (line, words) => {
-    const root = parser.parse(line)
+    const root = parse(line)
     expect(root.hasError).toBe(false)
     expect(getParts(root.namedChildren[0] as TSNodeLike).map((p) => getText(p))).toEqual(words)
   })
@@ -271,13 +259,13 @@ describe('an operator token where bash reads a word', () => {
     'case x in x) echo ==;; esac',
     'echo $; echo hi',
   ])('parses %j without a syntax error', (line) => {
-    expect(parser.parse(line).hasError).toBe(false)
+    expect(parse(line).hasError).toBe(false)
   })
 
   it('keeps a redirect after an operator word a redirect', () => {
     // The operand the grammar wanted after `==` swallowed `>/dev/null`.
     const [command, redirects] = getRedirects(
-      parser.parse('echo == >/dev/null').namedChildren[0] as TSNodeLike,
+      parse('echo == >/dev/null').namedChildren[0] as TSNodeLike,
     )
     if (command === null) throw new Error('expected the redirected command')
     expect(getParts(command).map((p) => getText(p))).toEqual(['echo', '=='])
@@ -285,8 +273,8 @@ describe('an operator token where bash reads a word', () => {
   })
 
   it('keeps the translation marker with its string', () => {
-    const command = parser.parse('echo $"hello"').namedChildren[0] as TSNodeLike
-    expect(getParts(command).map((p) => getText(p))).toEqual(['echo', '"hello"'])
+    const command = parse('echo $"hello"').namedChildren[0] as TSNodeLike
+    expect(getParts(command).map((p) => p.type)).toEqual([NT.COMMAND_NAME, NT.TRANSLATED_STRING])
   })
 
   it.each([
@@ -294,7 +282,7 @@ describe('an operator token where bash reads a word', () => {
     ['[ a =~ b ]', '=~'],
     ['(( 1 == 1 ))', '=='],
   ])('keeps the operator inside %j an operator', (line, operator) => {
-    const expression = parser.parse(line).namedChildren[0]?.namedChildren[0]
+    const expression = parse(line).namedChildren[0]?.namedChildren[0]
     expect(expression?.type).toBe(NT.BINARY_EXPRESSION)
     expect(expression?.children.filter((c) => !c.isNamed).map((c) => c.type)).toEqual([operator])
   })
@@ -336,7 +324,7 @@ describe('a [ that bash reads as a command', () => {
     ['[ c', [['[', 'c']]],
     ['[ \\( a \\) ]', [['[', '\\(', 'a', '\\)', ']']]],
   ])('parses %j as plain commands', (line, commands) => {
-    const root = parser.parse(line)
+    const root = parse(line)
     expect(root.hasError).toBe(false)
     expect(nodesOf(root, NT.COMMAND).map((c) => getParts(c).map((p) => getText(p)))).toEqual(
       commands,
@@ -351,7 +339,7 @@ describe('a [ that bash reads as a command', () => {
     '( [ a ])',
     '[ ! a ]',
   ])('keeps %j a test', (line) => {
-    const root = parser.parse(line)
+    const root = parse(line)
     expect(nodesOf(root, NT.TEST_COMMAND).length).toBeGreaterThan(0)
     const heads = nodesOf(root, NT.COMMAND).map((c) => getParts(c).map((p) => getText(p))[0])
     expect(heads).not.toContain('[')

@@ -16,7 +16,6 @@ import { describe, expect, it } from 'vitest'
 import { IOResult } from '../../../io/types.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { MountMode, PathSpec } from '../../../types.ts'
-import { getTestParser } from '../../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../workspace/workspace.ts'
 import { PolicyDenied } from '../../../policy/errors.ts'
 import { SessionState } from '../../session/session.ts'
@@ -115,11 +114,7 @@ describe('builtins/shared: operands and flags', () => {
 
 describe('builtins/shared: expandOperands', () => {
   it('expands a pattern per mount and passes a plain path through', async () => {
-    const parser = await getTestParser()
-    const ws = new Workspace(
-      { '/data': new RAMVFS() },
-      { mode: MountMode.WRITE, shellParser: parser },
-    )
+    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
     await ws.shell('echo a > /data/a.txt && echo b > /data/b.txt')
     const globSpec = new PathSpec({
       virtual: '/data/*.txt',

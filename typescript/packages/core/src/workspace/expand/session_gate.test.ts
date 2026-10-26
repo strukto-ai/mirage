@@ -18,7 +18,6 @@ import type { Policy } from '../../policy/base.ts'
 import type { Action, SessionContext } from '../../policy/types.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { MountMode } from '../../types.ts'
-import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../workspace/workspace.ts'
 
 const DEC = new TextDecoder()
@@ -36,13 +35,11 @@ class DenyUnset implements Policy {
   }
 }
 
-async function guarded(): Promise<Workspace> {
-  const parser = await getTestParser()
+function guarded(): Workspace {
   return new Workspace(
     { '/ram': new RAMVFS() },
     {
       mode: MountMode.WRITE,
-      shellParserFactory: () => Promise.resolve(parser),
       policies: [new DenyAws()],
     },
   )
@@ -78,7 +75,7 @@ const ALLOWED: [string, string, string][] = [
 describe('every session writer clears the pre_session gate', () => {
   for (const [line, name] of REFUSED) {
     it(`refuses ${line}`, async () => {
-      const ws = await guarded()
+      const ws = guarded()
       try {
         const result = await ws.shell(line)
         expect(result.exitCode, `${line} was not refused`).not.toBe(0)
@@ -93,7 +90,7 @@ describe('every session writer clears the pre_session gate', () => {
 
   for (const [line, name, expected] of ALLOWED) {
     it(`still writes ${line}`, async () => {
-      const ws = await guarded()
+      const ws = guarded()
       try {
         await ws.shell(line)
         const after = await ws.shell(`echo [$${name}]`)
@@ -111,7 +108,7 @@ describe('a session write states itself as a whole variable', () => {
     // session write like any other. Taking the direct path for it left
     // `printf -v 'AWS_KEY[0]'` as the one spelling a pre_session rule
     // could not refuse.
-    const ws = await guarded()
+    const ws = guarded()
     try {
       const result = await ws.shell("printf -v 'AWS_KEY[0]' %s x")
       expect(result.exitCode).not.toBe(0)
@@ -135,7 +132,7 @@ describe('a session write states itself as a whole variable', () => {
   ]
   for (const [line, expected] of KEPT) {
     it(`keeps the other elements: ${line}`, async () => {
-      const ws = await guarded()
+      const ws = guarded()
       try {
         const result = await ws.shell(line)
         expect(DEC.decode(result.stdout).trim()).toBe(expected)
@@ -147,7 +144,7 @@ describe('a session write states itself as a whole variable', () => {
 })
 
 it('does not expand length after a refused offset', async () => {
-  const ws = await guarded()
+  const ws = guarded()
   try {
     const result = await ws.shell('v=abcdef; echo "${v:(AWS_LIMIT=1):${OTHER:=2}}"')
     expect(result.exitCode).toBe(1)
@@ -173,7 +170,7 @@ const LITERALS: [string, string][] = [
 describe('a refused literal leaves the stored ones marked', () => {
   for (const [line, expected] of LITERALS) {
     it(line, async () => {
-      const ws = await guarded()
+      const ws = guarded()
       try {
         const result = await ws.shell(line)
         expect(result.refusal?.reason).toContain('not yours to set')
@@ -190,7 +187,7 @@ it("keeps a literal's mark on the target its write cleared", async () => {
   // The literal writes through `ref` to `T`; the plain operand then re-aims
   // `ref` at `AWS_KEY`, and the literal's `-x` must not follow it there past
   // the gate. Under `-n` it marks the reference itself.
-  const ws = await guarded()
+  const ws = guarded()
   try {
     const result = await ws.shell('T=old; declare -n ref=T; declare -nx ref=AWS_KEY ref=(one)')
     expect(result.exitCode).toBe(0)
@@ -205,12 +202,10 @@ it("keeps a literal's mark on the target its write cleared", async () => {
 it('asks for no unset when a fresh local is assigned', async () => {
   // The new local's reset is the scope's bookkeeping, not a deletion the
   // line asked for; only the assignment is the gated write.
-  const parser = await getTestParser()
   const ws = new Workspace(
     { '/ram': new RAMVFS() },
     {
       mode: MountMode.WRITE,
-      shellParserFactory: () => Promise.resolve(parser),
       policies: [new DenyUnset()],
     },
   )

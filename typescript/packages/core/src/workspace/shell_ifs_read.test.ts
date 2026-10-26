@@ -17,7 +17,7 @@ import { makeIntegrationWS, run } from '../../tests/workspace/fixtures/integrati
 
 describe('IFS / read interaction and inline VAR=val cmd prefix', () => {
   it('IFS=, splits read', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       expect(await run(ws, 'IFS=, read a b c <<< "1,2,3"; echo "$a:$b:$c"')).toBe('1:2:3\n')
     } finally {
@@ -26,7 +26,7 @@ describe('IFS / read interaction and inline VAR=val cmd prefix', () => {
   })
 
   it('IFS default whitespace', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       expect(await run(ws, 'echo "1 2 3" | { read a b c; echo "$a:$b:$c"; }')).toBe('1:2:3\n')
     } finally {
@@ -35,7 +35,7 @@ describe('IFS / read interaction and inline VAR=val cmd prefix', () => {
   })
 
   it('IFS prefix does not persist', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       const out = await run(ws, 'IFS=, read a b c <<< "1,2,3"; echo "${IFS-default}"')
       expect(out).not.toContain(',')
@@ -45,7 +45,7 @@ describe('IFS / read interaction and inline VAR=val cmd prefix', () => {
   })
 
   it('env prefix to command', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       const out = await run(ws, "FOO=bar bash -c 'echo $FOO'")
       expect(out).toContain('bar')
@@ -55,7 +55,7 @@ describe('IFS / read interaction and inline VAR=val cmd prefix', () => {
   })
 
   it('env prefix after word expansion', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       const out = await run(ws, 'FOO=bar bash -c "echo [$FOO]"')
       expect(out).toBe('[]\n')
@@ -65,7 +65,7 @@ describe('IFS / read interaction and inline VAR=val cmd prefix', () => {
   })
 
   it('IFS=: splits read', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       expect(await run(ws, 'IFS=: read a b c <<< "x:y:z"; echo "$a-$b-$c"')).toBe('x-y-z\n')
     } finally {
@@ -74,7 +74,7 @@ describe('IFS / read interaction and inline VAR=val cmd prefix', () => {
   })
 
   it('read trims trailing default-IFS whitespace', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       expect(await run(ws, 'read a b <<< "  x  y  "; echo "[$b]"')).toBe('[y]\n')
     } finally {
@@ -83,7 +83,7 @@ describe('IFS / read interaction and inline VAR=val cmd prefix', () => {
   })
 
   it('read single var keeps inner whitespace', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       expect(await run(ws, 'read a <<< "  x  y  "; echo "[$a]"')).toBe('[x  y]\n')
     } finally {
@@ -92,7 +92,7 @@ describe('IFS / read interaction and inline VAR=val cmd prefix', () => {
   })
 
   it('read keeps trailing non-whitespace IFS chars', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       expect(await run(ws, 'IFS=: read a b <<< "x:y:z:"; echo "[$b]"')).toBe('[y:z:]\n')
     } finally {
@@ -101,7 +101,7 @@ describe('IFS / read interaction and inline VAR=val cmd prefix', () => {
   })
 
   it('read single var with non-whitespace IFS stays intact', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       expect(await run(ws, 'IFS=: read a <<< ":x:"; echo "[$a]"')).toBe('[:x:]\n')
     } finally {
@@ -110,7 +110,7 @@ describe('IFS / read interaction and inline VAR=val cmd prefix', () => {
   })
 
   it('read rebinds stdin on the next line', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       await run(ws, 'read za <<< "first"')
       expect(await run(ws, 'read zb <<< "second"; echo "$zb"')).toBe('second\n')
@@ -120,7 +120,7 @@ describe('IFS / read interaction and inline VAR=val cmd prefix', () => {
   })
 
   it('read from a pipe works after a previous line', async () => {
-    const { ws } = await makeIntegrationWS()
+    const { ws } = makeIntegrationWS()
     try {
       await run(ws, "printf 'a\\n' | { read z1; echo $z1; }")
       expect(await run(ws, "printf 'b\\n' | { read z2; echo $z2; }")).toBe('b\n')

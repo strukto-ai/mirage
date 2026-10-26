@@ -16,9 +16,7 @@ import { CLIHandler } from '../commands/cli/types.ts'
 
 import { Outcome } from '../policy/index.ts'
 import { parseSessionProfile } from '../policy/profile.ts'
-import { readFileSync } from 'node:fs'
-import { createRequire } from 'node:module'
-import { beforeAll, describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vitest'
 
 import { CLI } from '../commands/cli/types.ts'
 import type { Context } from '../commands/config.ts'
@@ -29,7 +27,6 @@ import type { Action, SessionContext } from '../policy/types.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { vfsCall } from '../vfs/call.ts'
 import { Effect } from '../vfs/types.ts'
-import { createShellParser, type ShellParser } from '../shell/parse/index.ts'
 import { MountMode, PathSpec } from '../types.ts'
 import { ScriptSource } from '../runtime/types.ts'
 import type { Language } from '../runtime/types.ts'
@@ -37,16 +34,6 @@ import { Workspace } from './workspace/workspace.ts'
 import type { NOOPAccessor } from '../accessor/base.ts'
 
 // Mirrors python/tests/e2e/test_cli_dispatch.py.
-
-const require = createRequire(import.meta.url)
-const engineWasm = readFileSync(require.resolve('web-tree-sitter/web-tree-sitter.wasm'))
-const grammarWasm = readFileSync(require.resolve('tree-sitter-bash/tree-sitter-bash.wasm'))
-
-let parser: ShellParser
-
-beforeAll(async () => {
-  parser = await createShellParser({ engineWasm, grammarWasm })
-})
 
 const dec = new TextDecoder()
 
@@ -93,7 +80,7 @@ function makeTree(): CLI {
 
 function buildWorkspace(): Workspace {
   const ram = new RAMVFS()
-  return new Workspace({ '/data': ram }, { mode: MountMode.WRITE, shellParser: parser })
+  return new Workspace({ '/data': ram }, { mode: MountMode.WRITE })
 }
 
 describe('CLI dispatch e2e', () => {
@@ -129,7 +116,6 @@ describe('CLI dispatch e2e', () => {
       { '/data': ram },
       {
         mode: MountMode.WRITE,
-        shellParser: parser,
         profiles: {
           crew: {
             commands: {
@@ -201,7 +187,6 @@ describe('CLI dispatch e2e', () => {
       { '/data': ram },
       {
         mode: MountMode.WRITE,
-        shellParser: parser,
         clis: { sl: [makeTree(), { token: 'opt' }] },
       },
     )
@@ -216,7 +201,6 @@ function buildScriptWorkspace(): Workspace {
     { '/data': ram },
     {
       mode: MountMode.WRITE,
-      shellParser: parser,
       runtimes: ['monty', 'quickjs', 'workspace'],
     },
   )
@@ -374,7 +358,6 @@ describe('policy cli fact', () => {
       { '/data': ram },
       {
         mode: MountMode.WRITE,
-        shellParser: parser,
         policies: [
           {
             preExecute: (ctx) => {
@@ -406,7 +389,7 @@ describe('policy cli fact', () => {
   it('a CLI write into a read-only mount is refused', async () => {
     const ws = new Workspace(
       { '/abc': [new RAMVFS(), MountMode.READ], '/data': [new RAMVFS(), MountMode.WRITE] },
-      { mode: MountMode.WRITE, shellParser: parser },
+      { mode: MountMode.WRITE },
     )
     ws.registerCli('abc', ABC)
     try {
@@ -429,7 +412,6 @@ describe('policy cli fact', () => {
       { '/data': new RAMVFS() },
       {
         mode: MountMode.WRITE,
-        shellParser: parser,
         profiles: {
           hides: { paths: hidden },
           wildcard: { paths: hidden, commands: { allow: ['*'] } },
@@ -471,7 +453,6 @@ describe('policy cli fact', () => {
       { '/data': new RAMVFS() },
       {
         mode: MountMode.WRITE,
-        shellParser: parser,
         profiles: {
           sealed: parseSessionProfile({
             commands: {
@@ -621,7 +602,6 @@ describe('the session plane reaches a CLI leaf', () => {
       { '/data': ram },
       {
         mode: MountMode.WRITE,
-        shellParser: parser,
         policies: [new DenyAwsWrites()],
       },
     )
@@ -737,7 +717,6 @@ describe('a session hides reach what a CLI prints', () => {
       { '/data': new RAMVFS() },
       {
         mode: MountMode.WRITE,
-        shellParser: parser,
         profiles: {
           hides: {
             paths: { hide: ['/data/secret.txt'] },
@@ -769,7 +748,6 @@ describe('a session hides reach what a CLI prints', () => {
       { '/data': new Shelf() },
       {
         mode: MountMode.WRITE,
-        shellParser: parser,
         profiles: {
           hides: {
             paths: { hide: ['/data/secret.txt'] },

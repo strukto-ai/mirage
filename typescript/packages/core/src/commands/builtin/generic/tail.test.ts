@@ -33,7 +33,6 @@ import { record, startOp } from '../../../observe/context.ts'
 import { Channel } from '../../../shell/console/index.ts'
 import type { Job } from '../../../shell/job_table/types.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
-import { getTestParser } from '../../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../../workspace/workspace/workspace.ts'
 
 const ENC = new TextEncoder()
@@ -760,7 +759,6 @@ describe('a follow prints each append past the file cache', () => {
       {
         mode: MountMode.WRITE,
         read: { policy, ttl: DEFAULT_READ_TTL },
-        shellParserFactory: getTestParser,
       },
     )
     try {

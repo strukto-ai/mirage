@@ -20,7 +20,6 @@ import { SessionState } from './session/session.ts'
 import { newStatusWriter } from './abort.ts'
 import { currentCaller, lineSignal, runWithCaller } from '../context/session_context.ts'
 import { Glob } from '../rs/glob.ts'
-import { getTestParser } from '../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from './workspace/workspace.ts'
 
 // The browser-runtime branch under node's test runner: the mock forces
@@ -99,7 +98,7 @@ describe('a nested line on the fallback storage', () => {
   it.each(["eval 'x=${X//+(?)/x}; touched=yes'", 'f() { x=${X//+(?)/x}; touched=yes; }; f'])(
     "answers to the typed line's signal: %s",
     async (line) => {
-      const ws = new Workspace({}, { shellParser: await getTestParser() })
+      const ws = new Workspace({})
       const controller = new AbortController()
       const spansSpy = vi.spyOn(Glob.prototype, 'spans')
       let work: ReturnType<typeof ws.shell> | undefined

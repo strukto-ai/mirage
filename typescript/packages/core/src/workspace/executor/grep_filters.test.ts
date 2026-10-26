@@ -15,11 +15,7 @@
 import { describe, expect, it } from 'vitest'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { MountMode } from '../../types.ts'
-import {
-  getTestParser,
-  stderrStr,
-  stdoutStr,
-} from '../../../tests/workspace/fixtures/workspace_fixture.ts'
+import { stderrStr, stdoutStr } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../workspace/workspace.ts'
 
 // Direct port of tests/commands/native/test_grep_filters.py, pinned
@@ -27,27 +23,26 @@ import { Workspace } from '../workspace/workspace.ts'
 
 const ENC = new TextEncoder()
 
-async function makeWs(): Promise<Workspace> {
-  const parser = await getTestParser()
+function makeWs(): Workspace {
   const r = new RAMVFS()
   r.store.files.set('/notes.tex', ENC.encode('score 9\n'))
   r.store.files.set('/notes.txt', ENC.encode('score 8\n'))
   r.store.dirs.add('/sub')
   r.store.files.set('/sub/inner.tex', ENC.encode('score 7\n'))
   r.store.files.set('/data.parquet', ENC.encode('score binary\n'))
-  return new Workspace({ '/': r }, { mode: MountMode.WRITE, shellParser: parser })
+  return new Workspace({ '/': r }, { mode: MountMode.WRITE })
 }
 
 describe('grep --include/--exclude/--exclude-dir and -a', () => {
   it('--include filters the recursive walk', async () => {
-    const ws = await makeWs()
+    const ws = makeWs()
     const io = await ws.shell("grep -RInE --include='*.tex' score /")
     expect(io.exitCode).toBe(0)
     expect(stdoutStr(io)).toBe('/notes.tex:1:score 9\n/sub/inner.tex:1:score 7\n')
   })
 
   it('a later exclude overrides an earlier include', async () => {
-    const ws = await makeWs()
+    const ws = makeWs()
     const io = await ws.shell("grep -r --include='*.tex' --exclude='notes.*' score /")
     expect(stdoutStr(io)).toBe('/sub/inner.tex:score 7\n')
   })
@@ -55,7 +50,7 @@ describe('grep --include/--exclude/--exclude-dir and -a', () => {
   it('a later include overrides an earlier exclude', async () => {
     // GNU 3.11 resolves the two kinds by line order, so the reversed
     // spelling searches what the previous test skipped.
-    const ws = await makeWs()
+    const ws = makeWs()
     const io = await ws.shell("grep -r --exclude='notes.*' --include='*.tex' score /")
     expect(io.exitCode).toBe(0)
     expect(stdoutStr(io)).toBe('/notes.tex:score 9\n/sub/inner.tex:score 7\n')
@@ -65,7 +60,7 @@ describe('grep --include/--exclude/--exclude-dir and -a', () => {
     // Pinned GNU 3.11: include-then-exclude of one pattern skips the
     // file, exclude-then-include searches it. The reversed order also
     // flips the no-match default, which is what admits notes.txt.
-    const ws = await makeWs()
+    const ws = makeWs()
     const skipped = await ws.shell("grep -r --include='*.tex' --exclude='*.tex' score /")
     expect(skipped.exitCode).toBe(1)
     // The reversed order admits every no-match file, /.bash_history
@@ -81,7 +76,7 @@ describe('grep --include/--exclude/--exclude-dir and -a', () => {
   it('the no-match default follows the first kind', async () => {
     // GNU 3.11: a file matching no rule is searched when the first
     // filter option is an exclude, skipped when it is an include.
-    const ws = await makeWs()
+    const ws = makeWs()
     const excludeFirst = await ws.shell("grep -r --exclude='*.log' --include='*.zzz' score /")
     expect(excludeFirst.exitCode).toBe(0)
     const includeFirst = await ws.shell("grep -r --include='*.zzz' --exclude='*.log' score /")
@@ -89,7 +84,7 @@ describe('grep --include/--exclude/--exclude-dir and -a', () => {
   })
 
   it('an explicit operand follows the order rule', async () => {
-    const ws = await makeWs()
+    const ws = makeWs()
     const admitted = await ws.shell("grep --exclude='*.txt' --include='*.txt' score /notes.txt")
     expect(admitted.exitCode).toBe(0)
     const skipped = await ws.shell("grep --include='*.txt' --exclude='*.txt' score /notes.txt")
@@ -97,20 +92,20 @@ describe('grep --include/--exclude/--exclude-dir and -a', () => {
   })
 
   it('--exclude-dir prunes the walk', async () => {
-    const ws = await makeWs()
+    const ws = makeWs()
     const io = await ws.shell("grep -r --include='*.tex' --exclude-dir=sub score /")
     expect(stdoutStr(io)).toBe('/notes.tex:score 9\n')
   })
 
   it('a glob carrying a slash matches nothing', async () => {
-    const ws = await makeWs()
+    const ws = makeWs()
     const io = await ws.shell("grep -r --include='sub/*.tex' score /")
     expect(io.exitCode).toBe(1)
     expect(stdoutStr(io)).toBe('')
   })
 
   it('--include filters an explicit operand in silence', async () => {
-    const ws = await makeWs()
+    const ws = makeWs()
     const io = await ws.shell("grep --include='*.tex' -n score /notes.txt")
     expect(io.exitCode).toBe(1)
     expect(stdoutStr(io)).toBe('')
@@ -118,7 +113,7 @@ describe('grep --include/--exclude/--exclude-dir and -a', () => {
   })
 
   it('-a reads binary extensions in the walk', async () => {
-    const ws = await makeWs()
+    const ws = makeWs()
     const without = await ws.shell('grep -r score /')
     expect(stdoutStr(without)).not.toContain('data.parquet')
     const withA = await ws.shell('grep -ra score /')
@@ -126,7 +121,7 @@ describe('grep --include/--exclude/--exclude-dir and -a', () => {
   })
 
   it('-a is accepted on an explicit operand', async () => {
-    const ws = await makeWs()
+    const ws = makeWs()
     const io = await ws.shell("grep -aoiE 'SCORE' /notes.tex")
     expect(stdoutStr(io)).toBe('score\n')
   })

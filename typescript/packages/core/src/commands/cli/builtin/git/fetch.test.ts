@@ -22,13 +22,11 @@ import {
   rmSync,
   statSync,
 } from 'node:fs'
-import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join, relative, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterAll, beforeAll, expect, it } from 'vitest'
 
-import { createShellParser, type ShellParser } from '../../../../shell/parse/index.ts'
 import { MountMode, PathSpec } from '../../../../types.ts'
 import { RAMVFS } from '../../../../vfs/ram/ram.ts'
 import { Workspace } from '../../../../workspace/workspace/workspace.ts'
@@ -56,15 +54,10 @@ const ENV = {
 // macOS git writes these two into every new repository's config.
 const HOST_ONLY = '\tignorecase = true\n\tprecomposeunicode = true\n'
 
-const require = createRequire(import.meta.url)
-const engineWasm = readFileSync(require.resolve('web-tree-sitter/web-tree-sitter.wasm'))
-const grammarWasm = readFileSync(require.resolve('tree-sitter-bash/tree-sitter-bash.wasm'))
-
 let tmp: string
 let native: string
 let seed: string
 let ws: Workspace
-let parser: ShellParser
 
 /** Every file and directory under a root, directories with a trailing slash. */
 function walk(root: string, base = root): string[] {
@@ -103,8 +96,7 @@ beforeAll(async () => {
   execFileSync('bash', [SCENARIO, native], { stdio: 'ignore', env: ENV })
   cpSync(native, seed, { recursive: true })
   const ram = new RAMVFS()
-  parser = await createShellParser({ engineWasm, grammarWasm })
-  ws = new Workspace({ '/w': ram }, { mode: MountMode.WRITE, shellParser: parser })
+  ws = new Workspace({ '/w': ram }, { mode: MountMode.WRITE })
   ws.registerCli('git', GIT)
   for (const name of readdirSync(seed)) await load(name)
 })

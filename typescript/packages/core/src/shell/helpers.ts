@@ -126,7 +126,7 @@ export function getParts(node: TSNodeLike): TSNodeLike[] {
   for (let position = 0; position < children.length; position += 1) {
     const c = children[position]
     if (c === undefined) continue
-    if (c.isNamed === true && c.type !== NT.FILE_REDIRECT) {
+    if (c.isNamed === true && !REDIRECT_NODE_TYPES.has(c.type)) {
       parts.push(c)
     } else if (c.type === '$') {
       const nxt = children[position + 1]
@@ -292,10 +292,15 @@ export function getPipelineStages(
 // carries (the inner ones come first in the source).
 function bindLast(stages: PipelineStages, redirects: readonly Redirect[]): PipelineStages {
   if (redirects.length === 0) return stages
-  const last = stages.redirects[stages.redirects.length - 1] ?? []
+  const carried = stages.redirects[stages.redirects.length - 1] ?? []
+  const command = stages.commands[stages.commands.length - 1]
+  const last =
+    carried.length > 0 || command === undefined
+      ? [...carried, ...redirects]
+      : withOwnRedirects(command, redirects)
   return {
     ...stages,
-    redirects: [...stages.redirects.slice(0, -1), [...last, ...redirects]],
+    redirects: [...stages.redirects.slice(0, -1), last],
   }
 }
 
@@ -322,10 +327,12 @@ function pipelineHead(stage: TSNodeLike): PipelineStages {
     hoisted = parsed
   }
   if (body.type === NT.NEGATED_COMMAND) {
+    const inner = getNegatedCommand(body)
+    if (inner === null) return single
     return {
-      commands: [getNegatedCommand(body)],
+      commands: [inner],
       stderrFlags: [],
-      redirects: [hoisted],
+      redirects: [hoisted.length > 0 ? withOwnRedirects(inner, hoisted) : []],
       negated: true,
       lead: null,
     }
@@ -350,21 +357,18 @@ export function getWhileParts(node: TSNodeLike): [TSNodeLike[], TSNodeLike[]] {
 }
 
 /**
- * Get (variable, values, bodyCommands) from for/select. The parser spells a
- * name the grammar cannot read as `for 0 in NAME`, so that header names NAME.
+ * Get (variable, values, bodyCommands) from for/select. `values` is null for
+ * a header with no `in` (`for f do`), which loops over `"$@"`.
  */
-export function getForParts(node: TSNodeLike): [string, TSNodeLike[], TSNodeLike[]] {
+export function getForParts(node: TSNodeLike): [string, TSNodeLike[] | null, TSNodeLike[]] {
   const nc = node.namedChildren
   const first = nc[0]
   const last = nc[nc.length - 1]
   if (first === undefined || last === undefined) throw new Error('for: missing parts')
-  const values = nc.slice(1).filter((c) => c.type !== NT.DO_GROUP && c.type !== NT.ERROR)
-  const body = [...last.namedChildren]
-  const spelled = values[0]
-  if (getText(first) === '0' && spelled !== undefined && !/^\w+$/.test(getText(spelled))) {
-    return [getText(spelled), values.slice(1), body]
-  }
-  return [getText(first), values, body]
+  const values = node.children.some((c) => c.type === NT.IN)
+    ? nc.slice(1).filter((c) => c.type !== NT.DO_GROUP && c.type !== NT.COMMENT)
+    : null
+  return [getText(first), values, [...last.namedChildren]]
 }
 
 /**
@@ -417,6 +421,7 @@ export function isBackgrounded(node: TSNodeLike): boolean {
 export const REDIRECT_NODE_TYPES: ReadonlySet<string> = new Set([
   NT.FILE_REDIRECT,
   NT.HEREDOC_REDIRECT,
+  NT.HERESTRING_REDIRECT,
 ])
 
 // RAW_STRING (single quotes) belongs here alongside STRING (double
@@ -454,6 +459,7 @@ const REDIRECT_OPERATORS: ReadonlySet<string> = new Set([
   NT.REDIRECT_OUT,
   NT.REDIRECT_CLOBBER,
   NT.REDIRECT_APPEND,
+  NT.REDIRECT_READWRITE,
 ])
 
 /**
@@ -469,9 +475,6 @@ const REDIRECT_OPERATORS: ReadonlySet<string> = new Set([
  * is STDOUT or STDERR by the descriptor it claims.
  */
 function parseFileRedirect(child: TSNodeLike): Redirect {
-  // The parser's redirect shield lets the grammar see `0<f` and `3<<< w`
-  // with their descriptor (`operatorSource`); a redirect whose text opens
-  // with `<<<` is a herestring.
   let fd: number | null = null
   let target: string | number = ''
   let targetNode: TSNodeLike | null = null
@@ -482,7 +485,7 @@ function parseFileRedirect(child: TSNodeLike): Redirect {
     if (c.type === NT.FILE_DESCRIPTOR) {
       fd = parseInt(getText(c), 10)
     } else if (REDIRECT_OPERATORS.has(c.type)) {
-      op = getText(c) === '<>' ? '<>' : c.type
+      op = c.type
     } else if (c.type === NT.NUMBER) {
       dupFd = parseInt(getText(c), 10)
     }
@@ -496,7 +499,6 @@ function parseFileRedirect(child: TSNodeLike): Redirect {
     }
   }
 
-  if (/^\d*<<</.test(getText(child))) return parseHerestringRedirect(child, fd ?? 0)
   if (child.heredoc !== undefined) {
     return new Redirect({
       fd: fd ?? 0,
@@ -526,13 +528,13 @@ function parseFileRedirect(child: TSNodeLike): Redirect {
     })
   }
 
-  const input = op === '<>' || (op !== null && INPUT_OPERATORS.has(op))
+  const input = op === NT.REDIRECT_READWRITE || (op !== null && INPUT_OPERATORS.has(op))
   fd ??= input ? FD_STDIN : FD_STDOUT
   if (op !== null && CLOSE_OPERATORS.has(op)) target = FD_CLOSE
   else if (op !== null && DUP_OPERATORS.has(op) && dupFd !== null) target = dupFd
 
   let kind: RedirectKind
-  if (op === '<>') kind = RedirectKind.READWRITE
+  if (op === NT.REDIRECT_READWRITE) kind = RedirectKind.READWRITE
   else if (input) kind = RedirectKind.STDIN
   else if (fd === FD_STDERR && target === FD_STDOUT && op === NT.REDIRECT_STDERR) {
     kind = RedirectKind.STDERR_TO_STDOUT
@@ -549,10 +551,11 @@ function parseFileRedirect(child: TSNodeLike): Redirect {
   })
 }
 
-function parseHerestringRedirect(child: TSNodeLike, fd: number): Redirect {
+function parseHerestringRedirect(child: TSNodeLike): Redirect {
+  const descriptor = child.namedChildren.find((candidate) => candidate.type === NT.FILE_DESCRIPTOR)
   const word = child.namedChildren.find((candidate) => candidate.type !== NT.FILE_DESCRIPTOR)
   return new Redirect({
-    fd,
+    fd: descriptor === undefined ? 0 : parseInt(getText(descriptor), 10),
     target: word === undefined ? '' : getText(word),
     targetNode: word ?? null,
     kind: RedirectKind.HERESTRING,
@@ -599,13 +602,39 @@ export function getRedirects(node: TSNodeLike): [TSNodeLike | null, Redirect[]] 
       }
     } else if (child?.type === NT.FILE_REDIRECT) {
       redirects.push(parseFileRedirect(child))
+    } else if (child?.type === NT.HERESTRING_REDIRECT) {
+      redirects.push(parseHerestringRedirect(child))
     }
   }
 
+  if (command?.type !== NT.COMMAND) return [command, redirects]
   return [
-    command?.type === NT.COMMAND && getParts(command).length === 0 ? null : command,
-    redirects,
+    getParts(command).length === 0 ? null : command,
+    [...commandRedirects(command), ...redirects],
   ]
+}
+
+/**
+ * The redirects written among a simple command's words, in order: bash
+ * applies them wherever they stand (`> f echo hi`, `cat <<< x`).
+ */
+export function commandRedirects(node: TSNodeLike): Redirect[] {
+  const redirects: Redirect[] = []
+  for (const child of node.namedChildren) {
+    if (child.type === NT.FILE_REDIRECT) redirects.push(parseFileRedirect(child))
+    else if (child.type === NT.HERESTRING_REDIRECT) redirects.push(parseHerestringRedirect(child))
+  }
+  return redirects
+}
+
+/**
+ * Redirects hoisted onto a command, after the ones written among its words:
+ * bash applies them in source order (`true && > a echo > b`). Mirrors
+ * Python's with_own_redirects.
+ */
+export function withOwnRedirects(command: TSNodeLike, redirects: readonly Redirect[]): Redirect[] {
+  const own = command.type === NT.COMMAND ? commandRedirects(command) : []
+  return [...own, ...redirects]
 }
 
 /**
@@ -848,10 +877,9 @@ export function getUnsetArgs(node: TSNodeLike): string[] {
   return node.namedChildren.map((c) => getText(c))
 }
 
-export function getNegatedCommand(node: TSNodeLike): TSNodeLike {
-  const first = node.namedChildren[0]
-  if (first === undefined) throw new Error('negated_command: missing inner')
-  return first
+/** The command a `!` negates; null for a bare `!`, which negates the empty command. */
+export function getNegatedCommand(node: TSNodeLike): TSNodeLike | null {
+  return node.namedChildren[0] ?? null
 }
 
 // The body opens with the empty lines tree-sitter dropped before its

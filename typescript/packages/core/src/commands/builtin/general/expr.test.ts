@@ -17,7 +17,6 @@ import { describe, expect, it } from 'vitest'
 import { materialize } from '../../../io/types.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { MountMode } from '../../../types.ts'
-import { getTestParser } from '../../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../../../workspace/workspace/workspace.ts'
 import { GENERAL_EXPR, isNull } from './expr.ts'
 
@@ -714,10 +713,9 @@ describe('expr string operators count bytes, not characters', () => {
 describe('expr through the shell', () => {
   // The same lines the integ battery types, so the quoting an operator
   // needs to reach expr intact is pinned here too.
-  async function makeWs(): Promise<Workspace> {
-    const parser = await getTestParser()
+  function makeWs(): Workspace {
     const ram = new RAMVFS()
-    return new Workspace({ '/ram': ram }, { mode: MountMode.WRITE, shellParser: parser })
+    return new Workspace({ '/ram': ram }, { mode: MountMode.WRITE })
   }
 
   it.each([
@@ -792,7 +790,7 @@ describe('expr through the shell', () => {
     ["expr '(' 1", '', "expr: syntax error: expecting ')' after '1'\n", 2],
     ["expr '(' 1 +", '', "expr: syntax error: missing argument after '+'\n", 2],
   ])('%s', async (line, out, err, exitCode) => {
-    const ws = await makeWs()
+    const ws = makeWs()
     const io = await ws.shell(line)
     expect([io.stdoutText, io.stderrText, io.exitCode]).toEqual([out, err, exitCode])
     await ws.close()
@@ -802,7 +800,7 @@ describe('expr through the shell', () => {
     // The whole way through the shell: `substr` cut the first character
     // in half, so stdout is one invalid byte and not a replacement
     // character. GNU writes `a9 c3` here.
-    const ws = await makeWs()
+    const ws = makeWs()
     const io = await ws.shell('expr substr \u00e9\u00e9 2 2')
     expect([...io.stdout]).toEqual([0xa9, 0xc3, 0x0a])
     expect(io.exitCode).toBe(0)

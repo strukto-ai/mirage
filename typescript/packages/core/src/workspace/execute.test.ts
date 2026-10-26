@@ -12,32 +12,19 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { readFileSync } from 'node:fs'
-import { createRequire } from 'node:module'
-import { beforeAll, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { CLI, CLIHandler } from '../commands/cli/types.ts'
 import { command } from '../commands/config.ts'
 import { CommandSpec } from '../commands/spec/types.ts'
 import { IOResult, type ByteSource } from '../io/types.ts'
 import type { VfsContext } from '../policy/types.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
-import { createShellParser, type ShellParser } from '../shell/parse/index.ts'
 import { MountMode } from '../types.ts'
 import { Workspace } from './workspace/workspace.ts'
 
-const require = createRequire(import.meta.url)
-const engineWasm = readFileSync(require.resolve('web-tree-sitter/web-tree-sitter.wasm'))
-const grammarWasm = readFileSync(require.resolve('tree-sitter-bash/tree-sitter-bash.wasm'))
-
-let parser: ShellParser
-
-beforeAll(async () => {
-  parser = await createShellParser({ engineWasm, grammarWasm })
-})
-
 function buildWorkspace(): { ws: Workspace; ram: RAMVFS } {
   const ram = new RAMVFS()
-  const ws = new Workspace({ '/ram': ram }, { mode: MountMode.WRITE, shellParser: parser })
+  const ws = new Workspace({ '/ram': ram }, { mode: MountMode.WRITE })
   return { ws, ram }
 }
 
@@ -187,13 +174,6 @@ describe('Workspace.shell', () => {
     const res = await ws.shell('cat /ram/x.txt | wc -l')
     expect(res.exitCode).toBe(0)
     expect(new TextDecoder().decode(res.stdout)).toMatch(/^2/)
-    await ws.close()
-  })
-
-  it('throws when shellParser is missing', async () => {
-    const ram = new RAMVFS()
-    const ws = new Workspace({ '/ram': ram }, { mode: MountMode.READ })
-    await expect(ws.shell('true')).rejects.toThrow(/shellParser/)
     await ws.close()
   })
 })
@@ -520,10 +500,7 @@ describe('the ledger a file call lands in', () => {
   // makes a read that is the other workspace's, in its ledger, not the
   // line's.
   it("is the called workspace's, from another workspace's line", async () => {
-    const other = new Workspace(
-      { '/o': new RAMVFS() },
-      { mode: MountMode.WRITE, shellParser: parser },
-    )
+    const other = new Workspace({ '/o': new RAMVFS() }, { mode: MountMode.WRITE })
     const { ws } = buildWorkspace()
     try {
       await other.vfs.write('/o/f.txt', 'theirs\n')
@@ -552,7 +529,7 @@ describe('the ledger a file call lands in', () => {
   // read does: what it reads is no record of the unlink it judges, which
   // RAM does not record itself.
   it('keeps the op a policy judges, past what the policy read', async () => {
-    const ws = new Workspace({ '/d': new RAMVFS() }, { mode: MountMode.WRITE, shellParser: parser })
+    const ws = new Workspace({ '/d': new RAMVFS() }, { mode: MountMode.WRITE })
     try {
       await ws.vfs.write('/d/rules', 'keep\n')
       await ws.vfs.write('/d/f', 'gone\n')
@@ -577,7 +554,7 @@ describe('the ledger a file call lands in', () => {
   // nothing, so a record of it would read as a write and drop the path's
   // snapshot pin.
   it('takes no record of a write admission check', async () => {
-    const ws = new Workspace({ '/o': new RAMVFS() }, { mode: MountMode.WRITE, shellParser: parser })
+    const ws = new Workspace({ '/o': new RAMVFS() }, { mode: MountMode.WRITE })
     try {
       await ws.vfs.write('/o/f.txt', 'mine\n')
       ws.vfs.records.splice(0)

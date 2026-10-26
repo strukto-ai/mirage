@@ -279,6 +279,40 @@
         "stdout": "rc=127\n",
         "stderr": "fb: command not found\n"
       }
+    },
+    {
+      "id": "function_prints_a_bare_time_and_bang",
+      "seq": 940137,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "f() { time; ! ; ! time true; ! ! true; }; declare -f f",
+      "expect": {
+        "exit": 0,
+        "stdout": "f () \n{ \n    time ;\n    ! ;\n    time ! true;\n    true\n}\n",
+        "stderr": ""
+      }
     }
   ]
 }

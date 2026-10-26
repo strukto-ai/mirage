@@ -3,7 +3,6 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { Kind, parse, visit } from 'graphql'
 import { Workspace } from '../../typescript/packages/core/src/workspace/workspace/workspace.ts'
-import { getTestParser } from '../../typescript/packages/core/tests/workspace/fixtures/workspace_fixture.ts'
 import { WandbVFS } from '../../typescript/packages/core/src/vfs/wandb/wandb.ts'
 import { normalizeWandbConfig } from '../../typescript/packages/core/src/core/wandb/config.ts'
 import { MountMode } from '../../typescript/packages/core/src/types.ts'
@@ -102,7 +101,6 @@ export async function requestChecks(server: Awaited<ReturnType<typeof startWandb
       { '/wandb': vfs },
       {
         mode: MountMode.READ,
-        shellParser: await getTestParser(),
       },
     )
     try {

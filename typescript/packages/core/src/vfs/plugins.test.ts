@@ -24,11 +24,7 @@ import { write } from '../core/ram/write.ts'
 import { eacces } from '../errors/fs.ts'
 import { type FileStat, MountMode, PathSpec, type SearchQuery } from '../types.ts'
 import { sliceWindow } from '../utils/ranges.ts'
-import {
-  getTestParser,
-  stderrStr,
-  stdoutStr,
-} from '../../tests/workspace/fixtures/workspace_fixture.ts'
+import { stderrStr, stdoutStr } from '../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../workspace/workspace/workspace.ts'
 import { BaseVFS } from './base.ts'
 import { RAMVFS } from './ram/ram.ts'
@@ -119,10 +115,7 @@ describe('a plug-in VFS', () => {
   it('serves shell, streams and dispatcher from only three reads', async () => {
     const accessor = await makeAccessor()
     const vfs = new Minimal({ name: 'custom', accessor })
-    const ws = new Workspace(
-      { '/nested/data': vfs },
-      { mode: MountMode.READ, shellParser: await getTestParser() },
-    )
+    const ws = new Workspace({ '/nested/data': vfs }, { mode: MountMode.READ })
     try {
       for (const line of [
         'cat /nested/data/*.txt',
@@ -181,7 +174,7 @@ describe('a plug-in VFS', () => {
   it('reads a native window and stream without enabling writes', async () => {
     const accessor = await makeAccessor()
     const vfs = new Streaming({ name: 'custom', accessor })
-    const ws = new Workspace({ '/nested/data': vfs }, { shellParser: await getTestParser() })
+    const ws = new Workspace({ '/nested/data': vfs })
     try {
       expect(await ws.dispatch('read', PATH.virtual, [], { offset: 1, size: 3 })).toEqual(
         ENC.encode('ell'),
@@ -207,7 +200,7 @@ describe('a plug-in VFS', () => {
     const accessor = await makeAccessor()
     const ws = new Workspace(
       { '/nested/data': new Yielding({ name: 'custom', accessor }) },
-      { mode: MountMode.READ, shellParser: await getTestParser() },
+      { mode: MountMode.READ },
     )
     try {
       expect((await ws.shell('cat /nested/data/a.txt')).stdoutText).toBe('hello\n')
@@ -228,10 +221,7 @@ describe('a plug-in VFS', () => {
       const accessor = await makeAccessor()
       const vfs = new Writable({ name: 'custom', accessor })
       const spy = vi.spyOn(vfs, 'write')
-      const ws = new Workspace(
-        { '/nested/data': vfs },
-        { mode, shellParser: await getTestParser() },
-      )
+      const ws = new Workspace({ '/nested/data': vfs }, { mode })
       try {
         const result = await ws.shell('echo changed > /nested/data/a.txt')
         expect(result.exitCode === 0).toBe(mode === MountMode.WRITE)
@@ -253,7 +243,7 @@ it('propagates a search failure without falling back to reads', async () => {
   const vfs = new Searchable({ name: 'custom', accessor })
   const files = vi.spyOn(vfs, 'filesContaining').mockRejectedValue(eacces(PATH.virtual))
   const read = vi.spyOn(vfs, 'read')
-  const ws = new Workspace({ '/nested/data': vfs }, { shellParser: await getTestParser() })
+  const ws = new Workspace({ '/nested/data': vfs })
   try {
     const result = await ws.shell('grep -r hello /nested/data')
     expect(result.exitCode).not.toBe(0)
@@ -274,7 +264,7 @@ it('passes resource options through, and grep and rg never ask the search', asyn
     query: 'recent deployments',
     options: { limit: 20, filters: { project: 'backend' } },
   }
-  const ws = new Workspace({ '/nested/data': vfs }, { shellParser: await getTestParser() })
+  const ws = new Workspace({ '/nested/data': vfs })
   try {
     expect(await ws.dispatch('search', PATH.virtual, [query])).toEqual([
       [`${PATH.virtual}/42`, 'deployment 42'],
@@ -302,7 +292,7 @@ it('routes a write off a mount without one when an option names another', async 
       '/nested/data': new Minimal({ name: 'custom', accessor: await makeAccessor() }),
       '/ram': new RAMVFS(),
     },
-    { mode: MountMode.WRITE, shellParser: await getTestParser() },
+    { mode: MountMode.WRITE },
   )
   try {
     await ws.shell('cd /nested/data')

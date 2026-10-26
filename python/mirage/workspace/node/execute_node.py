@@ -18,12 +18,13 @@ from collections.abc import Awaitable, Callable
 from contextlib import nullcontext
 from dataclasses import replace
 from functools import partial
-from typing import Any, cast
+from typing import Any
 
 from mirage.cache.index.scope import command_scope
 from mirage.context import (
     program_invocation,
     redirect_paths_for,
+    redirect_runner_for,
     reset_current_session,
     reset_program_invocation,
     reset_redirect_paths,
@@ -56,6 +57,7 @@ from mirage.shell.constants import (
 )
 from mirage.shell.errors import ArithError, ExitSignal, ReadonlyError
 from mirage.shell.helpers import (
+    command_redirects,
     get_case_items,
     get_case_word,
     get_cfor_parts,
@@ -73,10 +75,10 @@ from mirage.shell.helpers import (
     get_while_parts,
     read_row,
     take_continuation,
+    with_own_redirects,
 )
 from mirage.shell.job_table import JobTable
 from mirage.shell.node_kind import NodeKind, node_kind, pipeline_transparent
-from mirage.shell.parse.timing import PrefixNode
 from mirage.shell.types import NodeType as NT
 from mirage.shell.types import (
     PipelineStages,
@@ -144,11 +146,11 @@ from mirage.workspace.node.test_expr import (
     expand_double_bracket,
     expand_test_expr,
 )
-from mirage.workspace.node.timing import timing_report
+from mirage.workspace.node.timing import timed_by, timing_report
 from mirage.workspace.node.types import ExpandedWords
 from mirage.workspace.session.elements import landed_arith
 from mirage.workspace.session.functions import FunctionSite
-from mirage.workspace.session.state import session_view
+from mirage.workspace.session.state import positional_params, session_view
 from mirage.workspace.types import ExecutionNode
 
 
@@ -308,13 +310,28 @@ async def _recurse_reassociated(
         namespace,
         view,
         right,
-        redirects,
+        with_own_redirects(right, redirects),
         processes,
         context,
         stdin,
         call_stack,
         sink=sink,
     )
+
+
+async def _no_command(
+    given: ByteSource | None,
+    sink: JobConsole | None,
+    paths: tuple[PathSpec, ...],
+) -> RedirectResult:
+    """The empty command a redirect with no command name runs under.
+
+    Args:
+        given (ByteSource | None): its stdin.
+        sink (JobConsole | None): where it would write.
+        paths (tuple[PathSpec, ...]): the redirects' resolved paths.
+    """
+    return None, IOResult(), ExecutionNode(command="", exit_code=0)
 
 
 async def _recurse_lifted(
@@ -748,14 +765,18 @@ async def _run_redirected(
                 namespace,
                 view,
                 inner,
-                redirects,
+                redirects
+                if inner is None
+                else with_own_redirects(inner, redirects),
                 processes,
                 context,
                 stdin,
                 call_stack,
                 sink=sink,
             )
-        return await _negated(stdout, io, exec_node, context, inner)
+        return await _negated(
+            stdout, io, exec_node, context, command if inner is None else inner
+        )
     pipe_node = next(
         (r.pipeline for r in redirects if r.pipeline is not None), None
     )
@@ -1241,15 +1262,21 @@ async def _execute_node(
 
     if kind == NodeKind.TIMED:
         started = time.monotonic()
-        inner = node.named_children[0]
-        stdout, io, exec_node = await stream(inner, context, stdin, cs)
-        stdout = await apply_barrier(stdout, io, BarrierPolicy.VALUE)
-        elapsed = time.monotonic() - started
-        report = b"".join(
-            timing_report(elapsed, portable, session.env.get("TIMEFORMAT"))
-            for portable in reversed(cast(PrefixNode, node).timing)
-        )
-        io.stderr = (await io.materialize_stderr()) + report
+        body = node.named_children
+        if body:
+            stdout, io, exec_node = await stream(body[0], context, stdin, cs)
+            stdout = await apply_barrier(stdout, io, BarrierPolicy.VALUE)
+        else:
+            stdout, io = None, IOResult()
+            exec_node = ExecutionNode(command="", exit_code=0)
+        portable = timed_by(node)
+        if portable is not None:
+            report = timing_report(
+                time.monotonic() - started,
+                portable,
+                session.env.get("TIMEFORMAT"),
+            )
+            io.stderr = (await io.materialize_stderr()) + report
         return stdout, io, exec_node
 
     if kind == NodeKind.COMMENT:
@@ -1307,6 +1334,76 @@ async def _execute_node(
             inline=call_stack is not None,
             execute_fn=execute_fn,
         )
+
+    if kind == NodeKind.COMMAND and not any(
+        child.type == NT.COMMAND_NAME for child in node.children
+    ):
+        # Assignments with redirects among them and no command name
+        # (`a=1 > f b=$a`): bash assigns in order, as an assignment
+        # statement does, then opens the redirects with no command; one
+        # that fails fails the line, the assignments standing, and else the
+        # status is the last substitution's, a redirect's included.
+        sub_seq = context.frame.cmdsub_seq
+        merged_io = IOResult()
+        for assignment in node.named_children:
+            if assignment.type == NT.VARIABLE_ASSIGNMENT:
+                _, io, _ = await recurse(
+                    assignment, context, stdin, cs, own_diagnostics=False
+                )
+                merged_io = await merged_io.merge(io)
+        runner = redirect_runner_for(node.id)
+        if runner is None:
+            _, opened, _ = await _run_redirected(
+                recurse,
+                dispatch,
+                execute_fn,
+                registry,
+                namespace,
+                view,
+                None,
+                command_redirects(node),
+                job_table.processes if job_table is not None else None,
+                context,
+                stdin,
+                cs,
+            )
+        else:
+            _, opened, _ = await runner(_no_command, None, "", ())
+        merged_io = await merged_io.merge(opened)
+        merged_io.exit_code = opened.exit_code or assignment_status(
+            context.frame, sub_seq
+        )
+        ran: RedirectResult = (
+            None,
+            merged_io,
+            ExecutionNode(
+                command=get_text(node), exit_code=merged_io.exit_code
+            ),
+        )
+        return ran if sink is None else await drained(sink, *ran)
+
+    own = (
+        command_redirects(node)
+        if kind == NodeKind.COMMAND and redirect_runner_for(node.id) is None
+        else []
+    )
+    if own:
+        ran = await _run_redirected(
+            recurse,
+            dispatch,
+            execute_fn,
+            registry,
+            namespace,
+            view,
+            node,
+            own,
+            job_table.processes if job_table is not None else None,
+            context,
+            stdin,
+            cs,
+            sink=sink,
+        )
+        return ran if sink is None else await drained(sink, *ran)
 
     if kind == NodeKind.COMMAND:
         expanded = ExpandedWords()
@@ -1520,25 +1617,31 @@ async def _execute_node(
         var, values, body = get_for_parts(node)
         if not is_valid_name(var):
             return fail(kind.value, f"bash: `{var}': not a valid identifier\n")
-        async with command_scope():
-            classified = await expand_and_classify(
-                values,
-                context,
-                execute_fn,
-                registry,
-                session.cwd,
-                cs,
-                view=view,
+        if values is None:
+            classified: list[str | PathSpec] = list(
+                positional_params(session, cs)
             )
-            # The loop word list is consumed by the shell (WordPolicy.SHELL):
-            # globs resolve to matches before iteration starts.
-            classified = await resolve_globs(
-                classified,
-                registry,
-                noglob=bool(session.shell_options.get("noglob")),
-                links=namespace.session_links(session),
-                options=glob_options(session),
-            )
+        else:
+            async with command_scope():
+                classified = await expand_and_classify(
+                    values,
+                    context,
+                    execute_fn,
+                    registry,
+                    session.cwd,
+                    cs,
+                    view=view,
+                )
+                # The loop word list is consumed by the shell
+                # (WordPolicy.SHELL): globs resolve to matches before
+                # iteration starts.
+                classified = await resolve_globs(
+                    classified,
+                    registry,
+                    noglob=bool(session.shell_options.get("noglob")),
+                    links=namespace.session_links(session),
+                    options=glob_options(session),
+                )
         policies = namespace.registry.policies
         with cs.loop():
             if kind == NodeKind.SELECT:
@@ -1658,6 +1761,15 @@ async def _execute_node(
 
     if kind == NodeKind.NEGATED:
         inner = get_negated_command(node)
+        if inner is None:
+            # A bare `!` negates the empty command, which succeeds.
+            return await _negated(
+                None,
+                IOResult(),
+                ExecutionNode(command="", exit_code=0),
+                context,
+                node,
+            )
         with ignoring_errexit(session):
             stdout, io, exec_node = await stream(inner, context, stdin, cs)
         return await _negated(stdout, io, exec_node, context, inner)

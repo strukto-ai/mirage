@@ -15,7 +15,6 @@
 import { describe, expect, it } from 'vitest'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { MountMode, PathSpec } from '../types.ts'
-import { getTestParser } from '../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from './workspace/workspace.ts'
 
 const ENC = new TextEncoder()
@@ -25,8 +24,7 @@ const DEC = new TextDecoder()
 // Dispatcher, so sandbox I/O shares the shell path's file cache:
 // warm reads serve cached bytes and writes invalidate, exactly as in
 // Python where Workspace.dispatch delegates to the Dispatcher.
-async function makeCachingWorkspace(): Promise<{ ws: Workspace; ram: RAMVFS }> {
-  const parser = await getTestParser()
+function makeCachingWorkspace(): { ws: Workspace; ram: RAMVFS } {
   const ram = new RAMVFS()
   // Force the cache on a local backend so reads are cached and, under
   // LAZY, never revalidated (the cache_mount.test.ts pattern).
@@ -35,7 +33,6 @@ async function makeCachingWorkspace(): Promise<{ ws: Workspace; ram: RAMVFS }> {
     { '/r': ram },
     {
       mode: MountMode.EXEC,
-      shellParserFactory: () => Promise.resolve(parser),
     },
   )
   return { ws, ram }
@@ -43,7 +40,7 @@ async function makeCachingWorkspace(): Promise<{ ws: Workspace; ram: RAMVFS }> {
 
 describe('sandbox bridge shares the shell file cache', () => {
   it('js read is served from the warm cache, not the backend', async () => {
-    const { ws, ram } = await makeCachingWorkspace()
+    const { ws, ram } = makeCachingWorkspace()
     try {
       await ws.shell('echo v1 > /r/f.txt')
       const first = DEC.decode((await ws.shell('cat /r/f.txt')).stdout)
@@ -62,7 +59,7 @@ describe('sandbox bridge shares the shell file cache', () => {
   }, 60_000)
 
   it('js write invalidates the cache so cat sees the new bytes', async () => {
-    const { ws } = await makeCachingWorkspace()
+    const { ws } = makeCachingWorkspace()
     try {
       await ws.shell('echo v1 > /r/f.txt')
       const warm = DEC.decode((await ws.shell('cat /r/f.txt')).stdout)
@@ -79,7 +76,7 @@ describe('sandbox bridge shares the shell file cache', () => {
   }, 60_000)
 
   it('Workspace.dispatch write invalidates the cache', async () => {
-    const { ws } = await makeCachingWorkspace()
+    const { ws } = makeCachingWorkspace()
     try {
       await ws.shell('echo v1 > /r/f.txt')
       expect(DEC.decode((await ws.shell('cat /r/f.txt')).stdout)).toContain('v1')
@@ -92,7 +89,7 @@ describe('sandbox bridge shares the shell file cache', () => {
   }, 60_000)
 
   it('Workspace.dispatch rename drops the stale source cache entry', async () => {
-    const { ws } = await makeCachingWorkspace()
+    const { ws } = makeCachingWorkspace()
     try {
       await ws.shell('echo v1 > /r/f.txt')
       expect(DEC.decode((await ws.shell('cat /r/f.txt')).stdout)).toContain('v1')

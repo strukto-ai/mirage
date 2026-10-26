@@ -16,8 +16,6 @@ import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { Language, Parser } from 'web-tree-sitter'
 import { assert, beforeAll, describe, expect, it } from 'vitest'
-import { getTestParser } from '../../tests/workspace/fixtures/workspace_fixture.ts'
-import type { ShellParser } from './parse/index.ts'
 import type { TSNodeLike } from './types.ts'
 import {
   braceExpands,
@@ -48,6 +46,8 @@ import {
   splitEnvPrefix,
 } from './helpers.ts'
 import { NodeType as NT, type Redirect, RedirectKind } from './types.ts'
+import { parse } from './parse/parse.ts'
+import { parseProgram } from './parse/parse.ts'
 
 function node(
   type: string,
@@ -162,26 +162,25 @@ describe('getProcessSubBody', () => {
 describe('getRedirects herestring ordering', () => {
   // The parser's redirect shield reads every `<<<` the way bash does, so a
   // herestring keeps its place among the statement's redirects.
-  async function redirectsOf(line: string): Promise<Redirect[]> {
-    const parser = await getTestParser()
-    return getRedirects(parser.parse(line).children[0] as TSNodeLike)[1]
+  function redirectsOf(line: string): Redirect[] {
+    return getRedirects(parse(line).children[0] as TSNodeLike)[1]
   }
 
-  it('keeps a herestring before an outer file redirect', async () => {
-    expect((await redirectsOf('cat <<< here < input.txt')).map((r) => r.kind)).toEqual([
+  it('keeps a herestring before an outer file redirect', () => {
+    expect(redirectsOf('cat <<< here < input.txt').map((r) => r.kind)).toEqual([
       RedirectKind.HERESTRING,
       RedirectKind.STDIN,
     ])
   })
 
-  it('keeps a herestring after a file redirect', async () => {
-    const redirects = await redirectsOf('cat < input.txt <<< here')
+  it('keeps a herestring after a file redirect', () => {
+    const redirects = redirectsOf('cat < input.txt <<< here')
     expect(redirects.map((r) => r.kind)).toEqual([RedirectKind.STDIN, RedirectKind.HERESTRING])
     expect(redirects[1]?.target).toBe('here')
   })
 
-  it('carries a raw_string herestring body', async () => {
-    const here = (await redirectsOf("cat <<< 'hi' > out.txt")).filter(
+  it('carries a raw_string herestring body', () => {
+    const here = redirectsOf("cat <<< 'hi' > out.txt").filter(
       (r) => r.kind === RedirectKind.HERESTRING,
     )
     expect(here).toHaveLength(1)
@@ -244,9 +243,8 @@ type StagesShape = [
 ]
 
 describe('getPipelineStages', () => {
-  async function shape(line: string, redirected: boolean): Promise<StagesShape> {
-    const parser = await getTestParser()
-    const first = parser.parse(line).children[0] as TSNodeLike
+  function shape(line: string, redirected: boolean): StagesShape {
+    const first = parse(line).children[0] as TSNodeLike
     const [body, redirects] = redirected ? getRedirects(first) : [first, []]
     if (body === null) throw new Error('no body')
     const stages = getPipelineStages(body, redirects)
@@ -291,8 +289,8 @@ describe('getPipelineStages', () => {
     // Redirects hoisted over the whole pipeline bind to its last stage.
     ['a | b > g', true, [['a', 'b'], [false], [[], ['g']], false, null]],
     ['! a | b < f > g', true, [['a', 'b'], [false], [[], ['f', 'g']], true, null]],
-  ])('%s', async (line, redirected, expected) => {
-    expect(await shape(line, redirected)).toEqual(expected)
+  ])('%s', (line, redirected, expected) => {
+    expect(shape(line, redirected)).toEqual(expected)
   })
 })
 
@@ -312,21 +310,20 @@ describe('getListParts', () => {
 })
 
 describe('getWhileParts / getIfBranches', () => {
-  async function firstOf(line: string): Promise<TSNodeLike> {
-    const parser = await getTestParser()
-    return parser.parse(line).children[0] as TSNodeLike
+  function firstOf(line: string): TSNodeLike {
+    return parse(line).children[0] as TSNodeLike
   }
   const texts = (nodes: readonly TSNodeLike[]): string[] => nodes.map(getText)
 
-  it('reads every statement before the do_group as the test', async () => {
-    const [test, body] = getWhileParts(await firstOf('while a; b; do echo loop; done'))
+  it('reads every statement before the do_group as the test', () => {
+    const [test, body] = getWhileParts(firstOf('while a; b; do echo loop; done'))
     expect(texts(test)).toEqual(['a', 'b'])
     expect(texts(body)).toEqual(['echo loop'])
   })
 
-  it('splits each branch at its then', async () => {
+  it('splits each branch at its then', () => {
     const [branches, elseBody] = getIfBranches(
-      await firstOf('if a; b; then c; d; elif e\nf\nthen g; else h; fi'),
+      firstOf('if a; b; then c; d; elif e\nf\nthen g; else h; fi'),
     )
     expect(branches.map(([test, body]) => [texts(test), texts(body)])).toEqual([
       [
@@ -377,9 +374,8 @@ describe('getTestArgv / getNegatedCommand / getFunction*', () => {
 })
 
 describe('literalWord', () => {
-  async function literals(line: string, home: string | null = null): Promise<(string | null)[]> {
-    const parser = await getTestParser()
-    const first = parser.parse(line).children[0] as TSNodeLike
+  function literals(line: string, home: string | null = null): (string | null)[] {
+    const first = parse(line).children[0] as TSNodeLike
     const [, parts] = splitEnvPrefix(getParts(first))
     return parts.map((p) => literalWord(p, home))
   }
@@ -402,12 +398,12 @@ describe('literalWord', () => {
     // Brace expansion multiplies words, so it is not literal either; a
     // lone {} and a quoted brace are.
     ["rm /r/{a,b} x{1..3} {} '{a,b}'", ['rm', null, null, '{}', '{a,b}']],
-  ])('reads %s before expansion', async (line, expected) => {
-    expect(await literals(line)).toEqual(expected)
+  ])('reads %s before expansion', (line, expected) => {
+    expect(literals(line)).toEqual(expected)
   })
 
-  it('expands a leading unquoted tilde only', async () => {
-    expect(await literals('ls ~ ~/x "~/y" ~u a~ ~/x"y"', '/home/me')).toEqual([
+  it('expands a leading unquoted tilde only', () => {
+    expect(literals('ls ~ ~/x "~/y" ~u a~ ~/x"y"', '/home/me')).toEqual([
       'ls',
       '/home/me',
       '/home/me/x',
@@ -417,7 +413,7 @@ describe('literalWord', () => {
       '/home/me/xy',
     ])
     // No $HOME: the tilde stays, as in bash.
-    expect(await literals('ls ~/x')).toEqual(['ls', '~/x'])
+    expect(literals('ls ~/x')).toEqual(['ls', '~/x'])
   })
 
   it('braceExpands', () => {
@@ -432,13 +428,12 @@ describe('literalWord', () => {
 })
 
 describe('isBackgrounded', () => {
-  async function firstOf(line: string): Promise<TSNodeLike> {
-    const parser = await getTestParser()
-    return parser.parse(line).children[0] as TSNodeLike
+  function firstOf(line: string): TSNodeLike {
+    return parse(line).children[0] as TSNodeLike
   }
 
-  it("reads the statement's own terminator", async () => {
-    const [, , body] = getForParts(await firstOf('for i in 1; do a & b; c && d; done'))
+  it("reads the statement's own terminator", () => {
+    const [, , body] = getForParts(firstOf('for i in 1; do a & b; c && d; done'))
     expect(body.map(getText)).toEqual(['a', 'b', 'c && d'])
     expect(body.map(isBackgrounded)).toEqual([true, false, false])
   })
@@ -453,30 +448,29 @@ describe('isBackgrounded', () => {
     ['case x in x) a & ;; esac', (n) => getCaseItems(n)[0]?.[1] ?? []],
     ['f() { a & }', (n) => getFunctionBody(n) ?? []],
     ['{ a & }', (n) => [...n.namedChildren]],
-  ])('sees the ampersand in %s', async (line, extract) => {
-    const body = extract(await firstOf(line))
+  ])('sees the ampersand in %s', (line, extract) => {
+    const body = extract(firstOf(line))
     expect(body.map(getText)).toEqual(['a'])
     expect(body.map(isBackgrounded)).toEqual([true])
   })
 })
 
 describe('a descriptor touching its operator', () => {
-  function statement(parser: ShellParser, line: string): [TSNodeLike, TSNodeLike] {
-    const stmt = parser.parse(line).children[0]
+  function statement(line: string): [TSNodeLike, TSNodeLike] {
+    const stmt = parse(line).children[0]
     const command = stmt?.namedChildren[0]
     if (stmt === undefined || command === undefined) throw new Error(`no statement in ${line}`)
     return [stmt, command]
   }
 
-  it('reads a bare 0 touching the operator as the descriptor', async () => {
-    const parser = await getTestParser()
-    const [stmt, command] = statement(parser, 'cat a 0>&-')
+  it('reads a bare 0 touching the operator as the descriptor', () => {
+    const [stmt, command] = statement('cat a 0>&-')
     expect(getParts(command).map((c) => c.text)).toEqual(['cat', 'a'])
     expect(getRedirects(stmt)[1].map((r) => [r.fd, r.target])).toEqual([[0, -1]])
-    const [spaced, spacedCommand] = statement(parser, 'cat a 0 >&-')
+    const [spaced, spacedCommand] = statement('cat a 0 >&-')
     expect(getParts(spacedCommand).map((c) => c.text)).toEqual(['cat', 'a', '0'])
     expect(getRedirects(spaced)[1].map((r) => r.fd)).toEqual([1])
-    const [chained] = statement(parser, 'cat 0<a >b')
+    const [chained] = statement('cat 0<a >b')
     expect(getRedirects(chained)[1].map((r) => [r.fd, r.target])).toEqual([
       [0, 'a'],
       [1, 'b'],
@@ -585,8 +579,8 @@ describe('sourceParts', () => {
     return [...parts].map((part) => (typeof part === 'string' ? part : [part.type, part.text]))
   }
 
-  function argument(parser: ShellParser, line: string): TSNodeLike {
-    const node = parser.parse(line).children[0]?.children[1]
+  function argument(line: string): TSNodeLike {
+    const node = parse(line).children[0]?.children[1]
     if (node === undefined) throw new Error('no argument')
     return node
   }
@@ -597,11 +591,11 @@ describe('sourceParts', () => {
       ['', ['string_content', '😀界'], '\n', ['simple_expansion', ' $x'], ' \t\n', ' '],
     ],
     ['echo "a\\\n $x"', ['', ['string_content', 'a '], ['simple_expansion', '$x'], '']],
-  ])('keeps the text between the children of %j', async (line, parts) => {
+  ])('keeps the text between the children of %j', (line, parts) => {
     // web-tree-sitter counts offsets in UTF-16 code units, so a surrogate
     // pair before a gap must not shift the slice. The reader joins a line
     // continuation before the grammar sees it.
-    expect(spelled(quotedParts(argument(await getTestParser(), line)))).toEqual(parts)
+    expect(spelled(quotedParts(argument(line)))).toEqual(parts)
   })
 
   it.each<[string, (string | [string, string])[]]>([
@@ -624,13 +618,12 @@ describe('sourceParts', () => {
         ['/', '/'],
         ['regex', 'x'],
         ['/', '/'],
-        '\\ ',
-        ['simple_expansion', '$f'],
+        ['concatenation', '\\ $f'],
         ['}', '}'],
       ],
     ],
-  ])('yields the text no child of %j owns', async (line, parts) => {
-    const expansion = argument(await getTestParser(), line).children[1]
+  ])('yields the text no child of %j owns', (line, parts) => {
+    const expansion = argument(line).children[1]
     if (expansion === undefined) throw new Error('no expansion')
     expect(spelled(sourceParts(expansion))).toEqual(parts)
   })
@@ -656,8 +649,8 @@ it.each([
     'f() { cat; } <<A >/dev/null <<B; echo u\na\nA\nb\nB',
     'f() { cat; } <<A >/dev/null <<B\na\nA\nb\nB',
   ],
-])('copies only the function source: %s', async (line, expected) => {
-  const program = (await getTestParser()).parseProgram(line)
+])('copies only the function source: %s', (line, expected) => {
+  const program = parseProgram(line)
   try {
     const node = program.root.namedChildren.find(
       (n) => n.type === 'function_definition' || n.type === 'redirected_statement',

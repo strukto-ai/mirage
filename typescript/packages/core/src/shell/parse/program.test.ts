@@ -1,12 +1,11 @@
 import { assert, describe, expect, it } from 'vitest'
-import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { getFunctionBody } from '../helpers.ts'
 import { retainPrograms } from './program.ts'
+import { parseProgram } from './parse.ts'
 
 describe('owned programs', () => {
-  it('retains invocation nodes independently of the parsing scope', async () => {
-    const parser = await getTestParser()
-    const program = parser.parseProgram('f() { echo hello; } 2>/dev/null')
+  it('retains invocation nodes independently of the parsing scope', () => {
+    const program = parseProgram('f() { echo hello; } 2>/dev/null')
     const definition = program.root.namedChildren[0]
     assert(definition)
     const body = getFunctionBody(definition)

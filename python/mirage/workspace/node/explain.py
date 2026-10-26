@@ -60,6 +60,7 @@ from mirage.shell.types import NodeType
 from mirage.types import PathSpec, Refusal
 from mirage.utils.hidden import is_glob
 from mirage.utils.path import resolve_path
+from mirage.workspace.executor.builtins.alias.alias import expanding_aliases
 from mirage.workspace.executor.command.routing import command_words
 from mirage.workspace.expand.classify.path import classify_bare_path
 from mirage.workspace.lookup import line_flags, reads_subtrees
@@ -608,7 +609,7 @@ async def _judge_words(
             continue
         if inner.line is not None:
             async for one in _judge_line(
-                parse(inner.line),
+                parse(inner.line, expanding_aliases(session)),
                 session,
                 registry,
                 namespace,
@@ -914,7 +915,7 @@ def _walk_node(
             # what runs.
             for segment in segments:
                 yield from _walk_substitution(
-                    parse(segment.text),
+                    parse(segment.text, expanding_aliases(session)),
                     session,
                     home,
                     segment,
@@ -925,7 +926,7 @@ def _walk_node(
         inner = body_frame(node, frame)
         if node.type == NodeType.COMMAND_SUBSTITUTION and inner is not None:
             yield from _walk_substitution(
-                parse(inner.text),
+                parse(inner.text, expanding_aliases(session)),
                 session,
                 home,
                 Frame(inner.text, 0, inner.parent),
@@ -1815,6 +1816,7 @@ def explained_line(
     verdicts: Sequence[Judged],
     runtime_of: Callable[[str], str],
     whole_line: bool = False,
+    aliases: frozenset[str] = frozenset(),
 ) -> ShellExplanation:
     """A line's public explanation: its verdict and its parse tree, with
     every command's explanation where the command stands.
@@ -1844,13 +1846,15 @@ def explained_line(
         runtime_of (Callable[[str], str]): the runtime that would run a
             command, empty for the workspace.
         whole_line (bool): whether a runtime takes the line whole.
+        aliases (frozenset[str]): the alias names the session expands,
+            which each scope is parsed with.
     """
     scopes: dict[tuple[Occurrence | None, str], list[Judged]] = {}
     for one in judged:
         at = one.occurrence
         scopes.setdefault((at.parent, at.source), []).append(one)
     root = next((key for key in scopes if key[0] is None), (None, line))
-    node = _scope_node("line", root, scopes, runtime_of)
+    node = _scope_node("line", root, scopes, runtime_of, aliases)
     # The run holds a line only on a verdict the pass may give on the
     # gate's behalf (``prejudge_line``): a question about words the
     # runtime completes (``find -exec``, ``xargs``) is the gate's, asked
@@ -1928,6 +1932,7 @@ def _scope_node(
     key: tuple[Occurrence | None, str],
     scopes: dict[tuple[Occurrence | None, str], list[Judged]],
     runtime_of: Callable[[str], str],
+    aliases: frozenset[str],
 ) -> ShellNode:
     """One scope of a line as a node: its text parsed, the commands
     judged in it placed by span, and the scopes evaluated from it placed
@@ -1941,6 +1946,8 @@ def _scope_node(
             scope's judgments.
         runtime_of (Callable[[str], str]): the runtime that would run a
             command.
+        aliases (frozenset[str]): the alias names each scope is parsed
+            with.
     """
     parent, text = key
     mine: dict[tuple[int, int], list[Judged]] = {}
@@ -1971,6 +1978,7 @@ def _scope_node(
                 other,
                 scopes,
                 runtime_of,
+                aliases,
             )
             for at, other in inside
         ]
@@ -1998,7 +2006,9 @@ def _scope_node(
             return inner
         return [ShellNode(shape, get_text(node), tuple(inner))]
 
-    children: list[ShellNode | CommandExplanation] = convert(parse(text))
+    children: list[ShellNode | CommandExplanation] = convert(
+        parse(text, aliases)
+    )
     # The shell's own spelling: a scope's text can carry a byte no UTF-8
     # encodes (`env` running `$'\xff'`), and the offsets are the
     # parser's, counted on these bytes.
