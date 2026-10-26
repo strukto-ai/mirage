@@ -1,0 +1,32 @@
+{
+  "cases": [
+    {
+      "id": "exec_mode_runs_python3_scripts_on_a_storage_mount",
+      "seq": 962398,
+      "targets": [
+        "s3-exec",
+        "gdrive-exec"
+      ],
+      "command": "printf 'hi\\n' > /data/xin.txt && printf '#!/usr/bin/env python3\\nprint(open(\"/data/xin.txt\").read().strip())\\n' > /data/xrun.py && python3 /data/xrun.py; echo py=$?; /data/xrun.py; echo direct=$?; rm /data/xrun.py /data/xin.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "hi\npy=0\nhi\ndirect=0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "exec_mode_runs_a_relative_python3_script_on_a_storage_mount",
+      "seq": 962399,
+      "targets": [
+        "s3-exec",
+        "gdrive-exec"
+      ],
+      "command": "(cd /data && printf 'print(2)\\n' > xrel.py && python3 xrel.py; echo py=$?; rm xrel.py)",
+      "expect": {
+        "exit": 0,
+        "stdout": "2\npy=0\n",
+        "stderr": ""
+      }
+    }
+  ]
+}
