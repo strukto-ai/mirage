@@ -307,3 +307,17 @@ def test_a_torn_line_costs_only_itself_and_the_line_appended_onto_it():
     assert [e["command"] for e in shown] == ["first", "third"]
     every = asyncio.run(obs.command_events())
     assert [e["command"] for e in every] == ["first", "third"]
+
+
+def test_an_entry_whose_command_holds_a_line_separator_is_kept():
+    store = RAMObserverStore()
+    obs = Observer(store=store, clock=ManualClock(start=NEW_YEAR))
+    _log_command(obs, "first", "s1", NEW_YEAR)
+    [path] = store.files
+    raw = (
+        '{"type": "command", "session": "s1", "timestamp": 1609459201000, '
+        '"command": "a\u2028b\u0085c"}\n'
+    )
+    asyncio.run(store.append(path, raw.encode()))
+    shown = asyncio.run(obs.session_command_events("s1"))
+    assert [e["command"] for e in shown] == ["first", "a\u2028b\u0085c"]

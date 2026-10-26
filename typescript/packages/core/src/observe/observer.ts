@@ -44,10 +44,9 @@ function parseFiles(files: Map<string, Uint8Array>): EventDict[] {
       try {
         out.push(JSON.parse(line) as EventDict)
       } catch (err) {
-        // A crash mid-append leaves half a line; drop it, not every
-        // later read of the session's history.
+        // A crash mid-append tears a line and the entry appended onto it.
         if (!(err instanceof SyntaxError)) throw err
-        console.debug(`skipping torn history line in ${key}`)
+        console.debug(`skipping unparseable history line in ${key}: ${String(err)}`)
       }
     }
   }

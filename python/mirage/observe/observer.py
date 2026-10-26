@@ -40,15 +40,16 @@ def _parse_files(files: dict[str, bytes]) -> list[dict[str, Any]]:
     for key in sorted(files.keys()):
         if not key.endswith(".jsonl"):
             continue
-        for line in files[key].decode(errors="replace").splitlines():
+        for line in files[key].decode(errors="replace").split("\n"):
             if not line:
                 continue
             try:
                 out.append(json.loads(line))
-            except json.JSONDecodeError:
-                # A crash mid-append leaves half a line; drop it, not
-                # every later read of the session's history.
-                logger.debug("skipping torn history line in %s", key)
+            except json.JSONDecodeError as e:
+                # A crash mid-append tears a line and the entry appended onto it.
+                logger.debug(
+                    "skipping unparseable history line in %s: %s", key, e
+                )
     return out
 
 
