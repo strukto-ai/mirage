@@ -20,6 +20,7 @@ import {
   dropPruned,
   optionsTree,
   settlePrunes,
+  treeHasAction,
   treeHasEmpty,
   treeHasPrune,
   prunedKeys,
@@ -226,14 +227,17 @@ export async function walkFind(
   // the root's own basename.
   const rootPath = path.virtual !== '/' ? rstripSlash(path.virtual) : '/'
   const pruneTree = bindTree(optionsTree(options), '', path.virtual, path.rawPath)
+  const prunes = treeHasPrune(pruneTree)
+  const needEmpty = treeHasEmpty(pruneTree)
+  const acts = treeHasAction(pruneTree)
   const readDirectory = async (spec: PathSpec): Promise<string[]> => {
     if (deps.enters !== undefined && !deps.enters(spec.virtual)) return []
-    if (treeHasPrune(pruneTree)) {
+    if (prunes) {
       const key = rstripSlash(spec.virtual) || '/'
       const depth =
         rstripSlash(spec.virtual).split('/').length - rstripSlash(rootPath).split('/').length
       const info = await statEntry(deps, spec.virtual)
-      const isEmpty = treeHasEmpty(pruneTree) ? await isEmptyEntry(deps, spec.virtual, true) : null
+      const isEmpty = needEmpty ? await isEmptyEntry(deps, spec.virtual, true) : null
       keep(
         {
           key,
@@ -245,6 +249,7 @@ export async function walkFind(
         },
         pruneTree,
         options.minDepth,
+        acts,
       )
       if (prunedKeys(pruneTree).includes(key)) return []
     }
@@ -281,7 +286,6 @@ export async function walkFind(
   }
   const results: string[] = []
   const tree = bindTree(optionsTree(options), '', path.virtual, path.rawPath)
-  const needEmpty = treeHasEmpty(tree)
   const needSize = options.minSize != null || options.maxSize != null
   const needMtime = options.mtimeMin != null || options.mtimeMax != null
   const learned = new Map<string, number | null>()
@@ -311,7 +315,7 @@ export async function walkFind(
       isEmpty,
       mtime: learned.get(key) ?? null,
     }
-    if (!keep(findEntry, tree, options.minDepth)) continue
+    if (!keep(findEntry, tree, options.minDepth, acts)) continue
     if (needSize && entry.file && st === null) {
       st = await statEntry(deps, entry.path)
       if (st === null) continue

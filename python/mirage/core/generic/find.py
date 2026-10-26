@@ -232,11 +232,14 @@ async def walk_find(
         search_path.virtual,
         search_path.raw_path,
     )
+    prunes = find_eval.tree_has_prune(prune_tree)
+    need_empty = find_eval.tree_has_empty(prune_tree)
+    acts = find_eval.tree_has_action(prune_tree)
 
     async def read_directory(spec: PathSpec) -> list[str]:
         if enters is not None and not enters(spec.virtual):
             return []
-        if find_eval.tree_has_prune(prune_tree):
+        if prunes:
             key = spec.virtual.rstrip("/") or "/"
             depth = len(spec.virtual.rstrip("/").split("/")) - len(
                 root_path.rstrip("/").split("/")
@@ -251,7 +254,7 @@ async def walk_find(
                     unstatted,
                     unreadable,
                 )
-                if find_eval.tree_has_empty(prune_tree)
+                if need_empty
                 else None
             )
             find_eval.keep(
@@ -265,6 +268,7 @@ async def walk_find(
                 ),
                 prune_tree,
                 args.mindepth,
+                acts,
             )
             if key in find_eval.pruned_keys(prune_tree):
                 return []
@@ -300,7 +304,6 @@ async def walk_find(
         search_path.virtual,
         search_path.raw_path,
     )
-    need_empty = find_eval.tree_has_empty(tree)
     need_size = args.min_size is not None or args.max_size is not None
     need_mtime = args.mtime_min is not None or args.mtime_max is not None
     learned: dict[str, float | None] = {}
@@ -349,7 +352,7 @@ async def walk_find(
             is_empty=is_empty,
             mtime=learned.get(key),
         )
-        if not find_eval.keep(entry, tree, args.mindepth):
+        if not find_eval.keep(entry, tree, args.mindepth, acts):
             continue
         if need_size and not is_dir and st is None:
             st = await _stat_entry(stat, p, unstatted)

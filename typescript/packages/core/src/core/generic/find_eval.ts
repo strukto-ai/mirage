@@ -118,36 +118,10 @@ function freshEffects(): Effects {
 // Whether the expression holds for one entry, recording what it did.
 // Evaluation short-circuits the way GNU's does (`-a` stops at the first
 // false, `-o` at the first true), so an action or a prune is reached
-// exactly when GNU would reach it.
+// exactly when GNU would reach it. The tests and connectives every entry
+// meets are told apart first.
 export function evaluate(node: PredNode, entry: FindEntry, effects: Effects): boolean {
   switch (node.op) {
-    case 'true':
-      return true
-    case 'action':
-      effects.acted = true
-      return true
-    case 'prune':
-      // Only a directory has contents to skip; a file key that is also a
-      // directory prefix (an object store allows both) must not drop what
-      // sits under the directory.
-      if (entry.kind === 'd' && effects.deferred.length > 0) {
-        node.pending.push({ entry })
-      } else if (entry.kind === 'd') {
-        node.pruned.push(entry.key)
-      }
-      effects.pruned = effects.pruned || entry.kind === 'd'
-      return true
-    case 'mtime':
-      // An entry the walk fetched no time for passes here and meets the
-      // expression's flat window afterwards; the test is recorded so a
-      // `-prune` reached past it is only pending.
-      if (entry.mtime === null || entry.mtime === undefined) {
-        effects.deferred.push(node)
-        return true
-      }
-      return inMtimeWindow(entry.mtime, node.lo, node.hi)
-    case 'empty':
-      return entry.isEmpty === true
     case 'name':
       return node.icase
         ? fnmatch(entry.name.toLowerCase(), node.pattern.toLowerCase())
@@ -186,6 +160,33 @@ export function evaluate(node: PredNode, entry: FindEntry, effects: Effects): bo
       }
       return false
     }
+    case 'true':
+      return true
+    case 'action':
+      effects.acted = true
+      return true
+    case 'prune':
+      // Only a directory has contents to skip; a file key that is also a
+      // directory prefix (an object store allows both) must not drop what
+      // sits under the directory.
+      if (entry.kind === 'd' && effects.deferred.length > 0) {
+        node.pending.push({ entry })
+      } else if (entry.kind === 'd') {
+        node.pruned.push(entry.key)
+      }
+      effects.pruned = effects.pruned || entry.kind === 'd'
+      return true
+    case 'mtime':
+      // An entry the walk fetched no time for passes here and meets the
+      // expression's flat window afterwards; the test is recorded so a
+      // `-prune` reached past it is only pending.
+      if (entry.mtime === null || entry.mtime === undefined) {
+        effects.deferred.push(node)
+        return true
+      }
+      return inMtimeWindow(entry.mtime, node.lo, node.hi)
+    case 'empty':
+      return entry.isEmpty === true
   }
 }
 
@@ -360,11 +361,13 @@ export function treeHasEmpty(node: PredNode): boolean {
 // one, they are the entries an action reached: `-path ./skip -prune -o -type
 // f -print` holds for `./skip` but never prints it. `-mindepth` applies
 // neither tests nor actions above its level, so a shallow directory is not
-// pruned either.
+// pruned either. `acts` is whether the tree holds an action, for a walk that
+// works it out once for every entry.
 export function keep(
   entry: FindEntry,
   tree: PredNode,
   minDepth: number | null | undefined,
+  acts = treeHasAction(tree),
 ): boolean {
   if (minDepth !== null && minDepth !== undefined && entry.depth < minDepth) return false
   const effects = freshEffects()
@@ -377,7 +380,7 @@ export function keep(
     const [first] = pruneNodes(tree)
     if (first !== undefined) first.pending.push({ entry })
   }
-  return treeHasAction(tree) ? effects.acted : matched
+  return acts ? effects.acted : matched
 }
 
 // Basename of a find start path, as GNU prints and matches it. Single source
