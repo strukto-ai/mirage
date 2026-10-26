@@ -21,6 +21,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "rg --hidden alpha /data/r4 | sort; rg -. alpha /data/r4 | sort; rg -.l alpha /data/r4 | sort; rg -i. ALPHA /data/r4 | sort; rg -. --no-hidden alpha /data/r4 | sort; rg -uu -l alpha /data/r4 | sort; rg -- -. /data/a.txt; echo rc=$?",
@@ -52,6 +53,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder",
         "box"

@@ -21,6 +21,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder",
         "box"
@@ -53,6 +54,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder",
         "box"
@@ -85,6 +87,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder",
         "box"
@@ -118,6 +121,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder",
         "box"
@@ -150,6 +154,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder",
         "box"
@@ -182,6 +187,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder",
         "box"
@@ -214,6 +220,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder",
         "box"
@@ -246,6 +253,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder",
         "box"
@@ -278,6 +286,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder",
         "box"
@@ -310,6 +319,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "mkdir -p /data/fcB_L/s /data/fcB_L/t && printf 'hello\\nworld\\n' > /data/fcB_L/a.txt && printf o > /data/fcB_L/s/f && printf o > /data/fcB_L/t/g && (cd /data/fcB_L && ln -s ../a.txt s/al && rg --no-follow -L --sort path o s; rg -L --files --sort path s; rm s/al && ln -s ../t s/tl && rg --sort path o s; rg -L --sort path o s); rm -rf /data/fcB_L",
@@ -346,6 +356,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "mkdir -p /data/fcB_L2/s /data/fcB_L2/t && printf o > /data/fcB_L2/s/f && printf o > /data/fcB_L2/t/g && (cd /data/fcB_L2 && ln -s nowhere s/.dang && rg -L --sort path -g '*.txt' o s; echo rc=$?; rm s/.dang && ln -s . s/.self && rg -L --sort path o s; echo rc=$?; rm s/.self && ln -s ../t s/tl && ln -s ../s t/sl && rg -L --sort path o s; echo rc=$?; rm s/tl t/sl && mkdir s/sub && printf o > s/sub/h && ln -s .. s/sub/up && (cd s && rg -L --files --sort path); echo rc=$?); rm -rf /data/fcB_L2",
@@ -382,6 +393,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "mkdir -p /data/fcB_L3 && printf o > /data/fcB_L3/f && ln -s nowhere /data/fcB_L3/dang && rg -L -q --sort path o /data/fcB_L3; echo rc=$?; rg -L -q --sort path zzz /data/fcB_L3; echo rc=$?; rm -rf /data/fcB_L3",
@@ -417,6 +429,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder",
         "box"

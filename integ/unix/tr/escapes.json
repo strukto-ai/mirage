@@ -4,7 +4,7 @@
       "id": "tr_escape_octal_no_leading_zero",
       "seq": 960040,
       "note": "GNU 9.7 tr reads octal as \\NNN with no leading zero required, so \\141 is 'a'. Escape parsing is backend-independent, so this runs on ram and disk only.",
-      "targets": ["ram", "opfs", "disk", "redis", "s3", "databricks", "gridfs", "s3-prefix", "databricks-prefix", "gridfs-prefix", "hf", "hf-prefix", "dropbox", "dropbox-root", "onedrive", "sharepoint", "sharepoint-prefix", "ssh", "nextcloud", "gdrive", "gdrive-folder", "box"],
+      "targets": ["ram", "opfs", "disk", "redis", "s3", "databricks", "gridfs", "s3-prefix", "databricks-prefix", "gridfs-prefix", "hf", "hf-prefix", "dropbox", "dropbox-root", "onedrive", "sharepoint", "sharepoint-prefix", "ssh", "nextcloud", "tidb-filesystem", "gdrive", "gdrive-folder", "box"],
       "command": "printf 'abc' | tr '\\141' X",
       "expect": {
         "exit": 0,
@@ -17,7 +17,7 @@
       "id": "tr_escape_unknown_drops_backslash",
       "seq": 960041,
       "note": "tr has no \\xHH — that is echo's grammar. GNU 9.7 drops the backslash and keeps the letter, so the set is {x, 4, 1} and 'axb41' loses all three.",
-      "targets": ["ram", "opfs", "disk", "redis", "s3", "databricks", "gridfs", "s3-prefix", "databricks-prefix", "gridfs-prefix", "hf", "hf-prefix", "dropbox", "dropbox-root", "onedrive", "sharepoint", "sharepoint-prefix", "ssh", "nextcloud", "gdrive", "gdrive-folder", "box"],
+      "targets": ["ram", "opfs", "disk", "redis", "s3", "databricks", "gridfs", "s3-prefix", "databricks-prefix", "gridfs-prefix", "hf", "hf-prefix", "dropbox", "dropbox-root", "onedrive", "sharepoint", "sharepoint-prefix", "ssh", "nextcloud", "tidb-filesystem", "gdrive", "gdrive-folder", "box"],
       "command": "printf 'axb41' | tr -d '\\x41'",
       "expect": {
         "exit": 0,
@@ -30,7 +30,7 @@
       "id": "tr_escape_nul",
       "seq": 960042,
       "note": "\\0 names NUL. Python's reader used to be a regex over eight named escapes, so this silently deleted nothing.",
-      "targets": ["ram", "opfs", "disk", "redis", "s3", "databricks", "gridfs", "s3-prefix", "databricks-prefix", "gridfs-prefix", "hf", "hf-prefix", "dropbox", "dropbox-root", "onedrive", "sharepoint", "sharepoint-prefix", "ssh", "nextcloud", "gdrive", "gdrive-folder", "box"],
+      "targets": ["ram", "opfs", "disk", "redis", "s3", "databricks", "gridfs", "s3-prefix", "databricks-prefix", "gridfs-prefix", "hf", "hf-prefix", "dropbox", "dropbox-root", "onedrive", "sharepoint", "sharepoint-prefix", "ssh", "nextcloud", "tidb-filesystem", "gdrive", "gdrive-folder", "box"],
       "command": "printf 'a\\0b\\0c' | tr -d '\\0'",
       "expect": {
         "exit": 0,
@@ -43,7 +43,7 @@
       "id": "tr_escape_c_is_not_stop_output",
       "seq": 960043,
       "note": "\\c stops output in echo -e but is an ordinary unknown escape in tr, so the set is {c}. TypeScript's reader used to break out of the scan here and delete nothing.",
-      "targets": ["ram", "opfs", "disk", "redis", "s3", "databricks", "gridfs", "s3-prefix", "databricks-prefix", "gridfs-prefix", "hf", "hf-prefix", "dropbox", "dropbox-root", "onedrive", "sharepoint", "sharepoint-prefix", "ssh", "nextcloud", "gdrive", "gdrive-folder", "box"],
+      "targets": ["ram", "opfs", "disk", "redis", "s3", "databricks", "gridfs", "s3-prefix", "databricks-prefix", "gridfs-prefix", "hf", "hf-prefix", "dropbox", "dropbox-root", "onedrive", "sharepoint", "sharepoint-prefix", "ssh", "nextcloud", "tidb-filesystem", "gdrive", "gdrive-folder", "box"],
       "command": "printf 'abcd' | tr -d '\\c'",
       "expect": {
         "exit": 0,

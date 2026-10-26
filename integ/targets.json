@@ -217,6 +217,16 @@
         "SSH_HOST"
       ]
     },
+    "tidb_filesystem": {
+      "python": [
+        "TIDB_FILESYSTEM_HOST",
+        "TIDB_FILESYSTEM_TOKEN"
+      ],
+      "typescript": [
+        "TIDB_FILESYSTEM_HOST",
+        "TIDB_FILESYSTEM_TOKEN"
+      ]
+    },
     "trello": {
       "python": [
         "TRELLO_URL"
@@ -1337,6 +1347,60 @@
           "fixture": "columnar/v1"
         }
       ]
+    },
+    {
+      "id": "tidb-filesystem",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "service": "tidb_filesystem",
+      "mounts": [
+        {
+          "path": "/data",
+          "vfs": "tidb_filesystem",
+          "backend": "tidb_filesystem",
+          "root": "data",
+          "fixture": "files/v1"
+        },
+        {
+          "path": "/data2",
+          "vfs": "tidb_filesystem",
+          "backend": "tidb_filesystem",
+          "root": "data2"
+        },
+        {
+          "path": "/res",
+          "vfs": "tidb_filesystem",
+          "backend": "tidb_filesystem",
+          "root": "res",
+          "fixture": "columnar/v1"
+        }
+      ],
+        "sessions": {
+          "narrowed": {
+            "mounts": {
+              "/data": "write",
+              "/data2": "write",
+              "/res": "read"
+            },
+            "paths": {
+              "hide": [
+                "/data/sessvis/vault",
+                "*.key"
+              ]
+            },
+            "vars": {
+              "hide": [
+                "SLACK_TOKEN"
+              ]
+            },
+            "env": {
+              "SLACK_TOKEN": "xoxb-integ",
+              "ROLE": "analyst"
+            }
+          }
+        }
     },
     {
       "id": "sharepoint",

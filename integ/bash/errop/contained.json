@@ -21,6 +21,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "(echo ${ERRQ5:?}); echo after code=$?",
@@ -51,6 +52,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "echo ${ERRQ6:?} | cat; echo after code=$?",

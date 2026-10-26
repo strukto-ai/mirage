@@ -21,6 +21,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "zgrep -m2 o /data/z4/app.log.gz",
@@ -54,6 +55,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "mkdir -p /data/gfl; printf 'alpha\\nbeta\\nfoo one\\ngamma\\ndelta\\nfoo two\\nepsilon\\n' > /data/gfl/a.txt; printf 'foo\\tbar\\nnone\\n' > /data/gfl/b.txt; printf 'foo\\nfoo\\n' | gzip -c > /data/gfl/z.gz; zgrep -m 1 foo /data/gfl/z.gz; zgrep -m -1 -c foo /data/gfl/z.gz; zgrep -m nope foo /data/gfl/z.gz; echo rc=$?; rm -rf /data/gfl",
@@ -87,6 +89,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "mkdir -p /data/zgm; printf 'aa\\nxa a\\nb\\n' | gzip -c > /data/zgm/f.gz; zgrep -o -m1 a /data/zgm/f.gz; zgrep -o -m2 a /data/zgm/f.gz; zgrep -o -c a /data/zgm/f.gz; zgrep -o -n -b -m1 a /data/zgm/f.gz; rc=$?; rm -r /data/zgm; exit $rc",

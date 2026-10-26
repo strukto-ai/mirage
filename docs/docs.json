@@ -151,7 +151,8 @@
                   "home/setup/dropbox",
                   "home/setup/box",
                   "home/setup/nextcloud",
-                  "home/setup/databricks"
+                  "home/setup/databricks",
+                  "home/setup/tidb"
                 ]
               },
               {
@@ -423,7 +424,8 @@
                       "python/vfs/box",
                       "python/vfs/dropbox",
                       "python/vfs/nextcloud",
-                      "python/vfs/databricks_volume"
+                      "python/vfs/databricks_volume",
+                      "python/vfs/tidb_filesystem"
                     ]
                   },
                   {
@@ -617,7 +619,8 @@
                       "typescript/setup/sharepoint",
                       "typescript/dropbox",
                       "typescript/box",
-                      "typescript/setup/databricks_volume"
+                      "typescript/setup/databricks_volume",
+                      "typescript/setup/tidb_filesystem"
                     ]
                   },
                   {

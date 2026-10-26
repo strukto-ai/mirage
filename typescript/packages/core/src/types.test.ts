@@ -154,6 +154,7 @@ describe('VFSName', () => {
       'ssh',
       'supabase',
       'tencent',
+      'tidb_filesystem',
       'trello',
       'wandb',
       'wasabi',

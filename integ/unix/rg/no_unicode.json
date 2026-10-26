@@ -21,6 +21,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "printf 'É\\néfoo\\ne\\nE\\n' > /data/fcR_nu; rg --no-unicode -i é /data/fcR_nu; echo rc=$?; rg -i é /data/fcR_nu; echo rc=$?; rg --no-unicode -w foo /data/fcR_nu; echo rc=$?; rg -w foo /data/fcR_nu; echo rc=$?; rg --no-unicode -i e /data/fcR_nu; echo rc=$?; rm /data/fcR_nu",

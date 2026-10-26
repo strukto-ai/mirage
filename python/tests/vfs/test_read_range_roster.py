@@ -51,6 +51,7 @@ NATIVE_RANGE = {
     "sharepoint",
     "slack",
     "ssh",
+    "tidb_filesystem",
 }
 
 WINDOW = ("offset", "size")

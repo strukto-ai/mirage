@@ -26,6 +26,7 @@ import { NotionVFS } from './notion/notion.ts'
 import { PostgresVFS } from './postgres/postgres.ts'
 import { SlackVFS } from './slack/slack.ts'
 import { SSHVFS } from './ssh/ssh.ts'
+import { TiDBFilesystemVFS } from './tidb_filesystem/tidb_filesystem.ts'
 
 // Every backend's op surface as the dispatcher sees it, pinned when the op tables
 // became VFS methods. A diff here is a lost or gained op unless the change is
@@ -127,6 +128,24 @@ const SERVED: [string, { prototype: BaseVFS }, string[]][] = [
       'rename',
       'rmdir',
       'setattr',
+      'stat',
+      'truncate',
+      'unlink',
+      'write',
+    ],
+  ],
+  [
+    'tidb_filesystem',
+    TiDBFilesystemVFS,
+    [
+      'append',
+      'create',
+      'mkdir',
+      'pwrite',
+      'read',
+      'readdir',
+      'rename',
+      'rmdir',
       'stat',
       'truncate',
       'unlink',

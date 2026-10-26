@@ -23,7 +23,8 @@
         "databricks",
         "databricks-prefix",
         "sharepoint-prefix",
-        "ssh"
+        "ssh",
+        "tidb-filesystem"
       ],
       "command": "mkdir -p /data/pcp2/tree/sub && printf 'a' > /data/pcp2/tree/f.txt && printf 'b' > /data/pcp2/tree/sub/g.txt && cp -R /data/pcp2/tree /data/pcp2/tcopy && cat /data/pcp2/tcopy/f.txt /data/pcp2/tcopy/sub/g.txt",
       "expect": {
@@ -56,6 +57,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder",
         "box"
@@ -93,7 +95,8 @@
         "databricks",
         "databricks-prefix",
         "sharepoint-prefix",
-        "ssh"
+        "ssh",
+        "tidb-filesystem"
       ],
       "command": "(cd /data && mkdir -p r10rm/s/n r10rm/d/s && echo a > r10rm/s/n/f && stat -c %n r10rm/d/s/n; cp -r r10rm/s r10rm/d; echo rc=$?; find r10rm/d | sort; rm -r r10rm)",
       "expect": {
@@ -125,7 +128,8 @@
         "databricks",
         "databricks-prefix",
         "sharepoint-prefix",
-        "ssh"
+        "ssh",
+        "tidb-filesystem"
       ],
       "command": "cp -r /dev/null /data/cpdev; echo \"st=$?\"; ls /data/cpdev; cp /dev/null /data/cpdev; echo \"st=$?\"; wc -c < /data/cpdev; rm /data/cpdev",
       "expect": {
@@ -158,7 +162,8 @@
         "databricks",
         "databricks-prefix",
         "sharepoint-prefix",
-        "ssh"
+        "ssh",
+        "tidb-filesystem"
       ],
       "command": "(cd /data && mkdir -p r16dot/s/sub r16dot/t r16dot/v && printf a > r16dot/s/a && printf b > r16dot/s/sub/b && cp -r r16dot/s/. r16dot/t && cp -r r16dot/s/sub/.. r16dot/u && cp -r r16dot/s/sub/../ r16dot/v; echo rc=$?; find r16dot/t r16dot/u r16dot/v | sort; rm -r r16dot)",
       "expect": {
@@ -190,7 +195,8 @@
         "databricks",
         "databricks-prefix",
         "sharepoint-prefix",
-        "ssh"
+        "ssh",
+        "tidb-filesystem"
       ],
       "command": "(cd /data && mkdir -p r16dotx/s/sub && printf a > r16dotx/s/a && cd r16dotx && (cd s && cp -r . ../t) && find t | sort && cp -rv s/sub/.. t && cp -r s/. s; echo rc=$?; cp -r s/sub/.. s/sub; echo rc=$?; cd /data && rm -r r16dotx)",
       "expect": {
@@ -223,7 +229,8 @@
         "databricks",
         "databricks-prefix",
         "sharepoint-prefix",
-        "ssh"
+        "ssh",
+        "tidb-filesystem"
       ],
       "command": "(cd /data && mkdir -p r16rep/s/sub r16rep/t r16rep/u && printf a > r16rep/s/a && cd r16rep && cp -r s s u; echo rc=$?; cp -r s/. s t; echo rc=$?; ln -s s/a la && cp s/a la u; echo rc=$?; find t u | sort; cd /data && rm -r r16rep)",
       "expect": {
@@ -255,7 +262,8 @@
         "databricks",
         "databricks-prefix",
         "sharepoint-prefix",
-        "ssh"
+        "ssh",
+        "tidb-filesystem"
       ],
       "command": "(cd /data && mkdir -p r16ord/s r16ord/t/a && printf a > r16ord/s/a && cd r16ord && cp -rn s/. t; echo rc=$?; cp -n s/a t; echo rc=$?; cp -r --update=none-fail s/. t; echo rc=$?; cp -rb s/. t; echo rc=$?; cp -r s/. t; echo rc=$?; find t | sort; cd /data && rm -r r16ord)",
       "expect": {
@@ -287,7 +295,8 @@
         "databricks",
         "databricks-prefix",
         "sharepoint-prefix",
-        "ssh"
+        "ssh",
+        "tidb-filesystem"
       ],
       "command": "(cd /data && mkdir -p r16lnk/s/sub r16lnk/t && printf a > r16lnk/s/a && ln -s ../a r16lnk/s/sub/link && printf x > r16lnk/t/sub && cd r16lnk && cp -r s/. t; echo rc=$?; cp -rn s/. t; echo rc=$?; find t | sort; cd /data && rm -r r16lnk)",
       "expect": {

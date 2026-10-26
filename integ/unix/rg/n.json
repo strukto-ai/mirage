@@ -21,6 +21,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "rg -n alpha /data/r4/notes.txt; rg -nN alpha /data/r4/notes.txt; rg --column alpha /data/r4/notes.txt; rg --vimgrep alpha /data/r4/notes.txt; rg --vimgrep --no-column alpha /data/r4/notes.txt",
@@ -52,6 +53,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "rg -nA1 warning /data/r4/app.log",
@@ -86,6 +88,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "seq 1 20000 > /data/prefilter.txt; printf 'NEEDLE\\nneedle\\nother\\nneedleX\\n' >> /data/prefilter.txt; rg -nb 'needle|other' /data/prefilter.txt",
@@ -120,6 +123,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "seq 1 20000 | tr '\\n' '\\000' > /data/prefilter.z; printf 'NEEDLE\\000needle\\000other\\000needleX\\000' >> /data/prefilter.z; rg --null-data -nb 'needle|other' /data/prefilter.z",

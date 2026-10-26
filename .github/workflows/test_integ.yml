@@ -263,7 +263,7 @@ jobs:
               - '!python/mirage/{accessor,core,ops,vfs,commands/builtin,commands/cli/builtin}/{airtable,aliyun,backblaze,box,ceph,chroma,databricks_volume,dify,digitalocean,discord,dropbox,email,gcal,gcs}{.py,/**}'
               - '!python/mirage/{accessor,core,ops,vfs,commands/builtin,commands/cli/builtin}/{gdocs,gdrive,gh,github,gmail,google,google_api,gridfs,gsheets,gslides,gws,hf,hf_buckets,hf_datasets}{.py,/**}'
               - '!python/mirage/{accessor,core,ops,vfs,commands/builtin,commands/cli/builtin}/{hf_hub,hf_models,hf_spaces,himalaya,jaeger,lancedb,langfuse,linear,mem0,minio,msgraph,nextcloud,notion,ntn}{.py,/**}'
-              - '!python/mirage/{accessor,core,ops,vfs,commands/builtin,commands/cli/builtin}/{oci,onedrive,postgres,qdrant,qingstor,r2,scaleway,seaweedfs,sharepoint,slack,supabase,tencent,trello,wandb,wasabi}{.py,/**}'
+              - '!python/mirage/{accessor,core,ops,vfs,commands/builtin,commands/cli/builtin}/{oci,onedrive,postgres,qdrant,qingstor,r2,scaleway,seaweedfs,sharepoint,slack,supabase,tencent,tidb_filesystem,trello,wandb,wasabi}{.py,/**}'
 
   typescript-build:
     needs: changes
@@ -720,7 +720,7 @@ jobs:
           ./python/.venv/bin/python integ/runners/tools/shard.py
           --shard "$SHARD_INDEX" --shards "$SHARD_COUNT" --procs 4
           --host python --facet core --facet http
-          --allow-skip chroma,lancedb,nextcloud,notion,postgres,qdrant
+          --allow-skip chroma,lancedb,nextcloud,notion,postgres,qdrant,tidb_filesystem
           --emit-dir "$GITHUB_WORKSPACE/emit/python"
           -- ./python/.venv/bin/python integ/runners/python/main.py --strict
       # The battery cannot snapshot a workspace, so the GridFS trash under a
@@ -944,7 +944,7 @@ jobs:
           ../python/.venv/bin/python runners/tools/shard.py
           --shard "$SHARD_INDEX" --shards "$SHARD_COUNT" --procs 4
           --host typescript --facet core --facet http
-          --allow-skip chroma,lancedb,nextcloud,notion,postgres,qdrant
+          --allow-skip chroma,lancedb,nextcloud,notion,postgres,qdrant,tidb_filesystem
           --emit-dir "$GITHUB_WORKSPACE/emit/typescript"
           -- pnpm exec tsx runners/typescript/main.ts --strict
       - name: Probe the GridFS trash under a snapshot restore (typescript)
@@ -1175,6 +1175,113 @@ jobs:
 
       - name: Run declarative battery on nextcloud
         run: ./python/.venv/bin/python integ/runners/python/main.py --target nextcloud --strict
+
+  # TiDB Cloud Filesystem runs on the open-source drive9 server, so both
+  # hosts' batteries reach the same REST API on a server built here at a
+  # pinned commit over a local TiDB, with large files on its local object
+  # store.
+  integ-tidb-filesystem:
+    needs: changes
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.data == 'true') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      tidb:
+        image: pingcap/tidb:v8.5.6
+        ports:
+          - 4000:4000
+    env:
+      DRIVE9_REF: 1f1ff16fcd4a66142b9d315575650cc4e52978c7
+      TIDB_FILESYSTEM_HOST: http://127.0.0.1:9009
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Check out drive9
+        uses: actions/checkout@v7
+        with:
+          repository: mem9-ai/drive9
+          ref: ${{ env.DRIVE9_REF }}
+          path: drive9
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: drive9/go.mod
+          cache-dependency-path: drive9/go.sum
+
+      - name: Build drive9-server
+        working-directory: drive9
+        run: make build-server
+
+      - name: Start drive9-server and provision a file system
+        run: |
+          for _ in $(seq 60); do
+            (echo > /dev/tcp/127.0.0.1/4000) 2> /dev/null && break
+            sleep 1
+          done
+          dsn='root@tcp(127.0.0.1:4000)/test?parseTime=true'
+          DRIVE9_LISTEN_ADDR=127.0.0.1:9009 \
+          DRIVE9_PUBLIC_URL="$TIDB_FILESYSTEM_HOST" \
+          DRIVE9_TENANT_PROVIDER=local \
+          DRIVE9_LOCAL_DSN="$dsn" DRIVE9_META_DSN="$dsn" DRIVE9_LOCAL_MYSQL_DSN="$dsn" \
+          DRIVE9_LOCAL_EMBEDDING_MODE=app \
+          DRIVE9_S3_DIR="$RUNNER_TEMP/drive9-s3" \
+            nohup drive9/bin/drive9-server > "$RUNNER_TEMP/drive9.log" 2>&1 &
+          for _ in $(seq 60); do
+            curl -sf "$TIDB_FILESYSTEM_HOST/healthz" > /dev/null && break
+            sleep 1
+          done
+          token=$(curl -sf -X POST "$TIDB_FILESYSTEM_HOST/v1/provision" | jq -r .api_key)
+          echo "::add-mask::$token"
+          echo "TIDB_FILESYSTEM_TOKEN=$token" >> "$GITHUB_ENV"
+          for _ in $(seq 60); do
+            curl -sf -H "Authorization: Bearer $token" "$TIDB_FILESYSTEM_HOST/v1/status" \
+              | jq -e '.status == "active"' > /dev/null && exit 0
+            sleep 1
+          done
+          tail -50 "$RUNNER_TEMP/drive9.log"
+          exit 1
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: ./.github/actions/setup-uv
+
+      - name: Install Python dependencies
+        working-directory: python
+        run: uv sync --all-extras
+
+      - name: Set up Node and pnpm
+        uses: ./.github/actions/setup-node-pnpm
+        with:
+          node-version: '24'
+
+      - name: Install TypeScript dependencies
+        working-directory: typescript
+        run: pnpm install --frozen-lockfile=false
+
+      - name: Build mirage-core, mirage-node and mirage-browser
+        working-directory: typescript
+        run: pnpm --filter @struktoai/mirage-core --filter @struktoai/mirage-node --filter @struktoai/mirage-browser build
+
+      - name: Run declarative battery on tidb-filesystem (typescript, background)
+        run: |
+          integ/scripts/background.sh start tidb-filesystem-ts \
+            'cd integ && pnpm exec tsx runners/typescript/main.ts --target tidb-filesystem --strict'
+
+      - name: Run declarative battery on tidb-filesystem (python)
+        run: ./python/.venv/bin/python integ/runners/python/main.py --target tidb-filesystem --strict
+
+      - name: Wait for the typescript battery
+        if: ${{ !cancelled() }}
+        run: integ/scripts/background.sh wait tidb-filesystem-ts
+
+      - name: Show the drive9 log
+        if: failure()
+        run: tail -200 "$RUNNER_TEMP/drive9.log"
 
   # The event batteries poll and wait on deliveries, so they get a runner of
   # their own rather than queueing behind the nextcloud corpus battery in
@@ -2465,7 +2572,7 @@ jobs:
     name: integ-gate
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    needs: [changes, typescript-build, integ, integ-ts, integ-shared-py, integ-shared-ts, integ-selftests, integ-shared-parity, integ-database, integ-data, integ-events, integ-fuse, integ-observability, integ-facets, integ-runtime, integ-e2b, integ-wandb, integ-shell-coverage]
+    needs: [changes, typescript-build, integ, integ-ts, integ-shared-py, integ-shared-ts, integ-selftests, integ-shared-parity, integ-database, integ-data, integ-tidb-filesystem, integ-events, integ-fuse, integ-observability, integ-facets, integ-runtime, integ-e2b, integ-wandb, integ-shell-coverage]
     if: always()
     steps:
       - name: Check required jobs

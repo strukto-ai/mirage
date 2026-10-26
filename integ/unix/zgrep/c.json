@@ -23,6 +23,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder",
         "box"
@@ -60,6 +61,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder",
         "box"
@@ -95,6 +97,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "zgrep -c error /data/z4/app.log.gz /data/z4/notes.txt.gz",
@@ -128,6 +131,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "printf 'ab\\n' | gzip > /data/zo.gz; zgrep -o '^' /data/zo.gz; echo rc=$?; zgrep -oc '[0-9]*' /data/zo.gz; echo rc=$?; rm /data/zo.gz",

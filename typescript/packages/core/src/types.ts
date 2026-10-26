@@ -519,6 +519,7 @@ export const VFSName = Object.freeze({
   HF_SPACES: 'hf_spaces',
   NEXTCLOUD: 'nextcloud',
   DATABRICKS_VOLUME: 'databricks_volume',
+  TIDB_FILESYSTEM: 'tidb_filesystem',
   MINIO: 'minio',
   CEPH: 'ceph',
   SEAWEEDFS: 'seaweedfs',
@@ -946,7 +947,7 @@ export interface PrimitiveCopy {
   mkdir: CopyFn<[path: PathSpec]>
   readdir: ReaddirFn
   /** A store-to-store copy between two mounts, tried before the bytes move;
-   * EXDEV from it says the stores cannot. */
+   * EXDEV or ENOTSUP from it says the stores cannot. */
   copy?: CopyFn
 }
 

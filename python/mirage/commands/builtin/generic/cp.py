@@ -1441,8 +1441,9 @@ async def transfer_file(
 
     A store-to-store copy goes first where the strategy has one: the
     destination's store copies from the source's without the bytes
-    passing through mirage. EXDEV from it says the stores cannot, and a
-    declined walk says a hide or rule wants the copy made by parts;
+    passing through mirage. EXDEV from it says the stores cannot, as
+    ENOTSUP does from a store with no copy of its own, and a declined
+    walk says a hide or rule wants the copy made by parts;
     either way the bytes move through a read and a write, the file
     materialized in between.
 
@@ -1461,7 +1462,7 @@ async def transfer_file(
         except OSError as exc:
             if isinstance(exc, WalkDeclinedError):
                 _logger.debug("copy %s declined: %s", src.virtual, exc)
-            elif classify(exc) is not FsCondition.EXDEV:
+            elif classify(exc) not in (FsCondition.EXDEV, FsCondition.ENOTSUP):
                 if not isinstance(exc, FS_ERRORS):
                     raise
                 errors.append(

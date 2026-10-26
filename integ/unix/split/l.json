@@ -12,7 +12,8 @@
         "gridfs",
         "s3-prefix",
         "gridfs-prefix",
-        "ssh"
+        "ssh",
+        "tidb-filesystem"
       ],
       "command": "(cd /data && printf 'old\\n' > xaa && cat xaa && printf 'new\\n' | split -l 1 && cat xaa && rm xaa)",
       "expect": {
@@ -66,6 +67,7 @@
         "sharepoint",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "gdrive",
         "gdrive-folder",
         "box"

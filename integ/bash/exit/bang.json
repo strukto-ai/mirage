@@ -21,6 +21,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "echo [$!]",
@@ -51,6 +52,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "(sleep 0.05 & wait $!) 2>/dev/null; echo waited=$?",
@@ -81,6 +83,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "echo [$!]",
@@ -111,6 +114,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "sleep 0.05 & p=$!; test \"$p\" -gt 0 && echo bg=pid; wait \"$p\"",

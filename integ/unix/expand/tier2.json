@@ -3,7 +3,7 @@
     {
       "id": "expand_tier2_long_aliases",
       "seq": 910017,
-      "targets": ["ram", "opfs", "disk", "redis", "s3", "databricks", "gridfs", "s3-prefix", "databricks-prefix", "gridfs-prefix", "hf", "hf-prefix", "dropbox", "dropbox-root", "onedrive", "sharepoint", "sharepoint-prefix", "ssh", "nextcloud", "gdrive", "gdrive-folder", "box"],
+      "targets": ["ram", "opfs", "disk", "redis", "s3", "databricks", "gridfs", "s3-prefix", "databricks-prefix", "gridfs-prefix", "hf", "hf-prefix", "dropbox", "dropbox-root", "onedrive", "sharepoint", "sharepoint-prefix", "ssh", "nextcloud", "tidb-filesystem", "gdrive", "gdrive-folder", "box"],
       "command": "printf '\ta\tb\n' | expand --initial --tabs 4 | cat -A",
       "expect": { "exit": 0, "stdout": "    a^Ib$\n", "stderr": "" },
       "flags": ["initial", "tabs"]

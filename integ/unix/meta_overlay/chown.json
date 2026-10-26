@@ -16,6 +16,7 @@
         "dropbox",
         "dropbox-root",
         "onedrive",
+        "tidb-filesystem",
         "sharepoint",
         "sharepoint-prefix",
         "box"
@@ -51,6 +52,7 @@
         "dropbox",
         "dropbox-root",
         "onedrive",
+        "tidb-filesystem",
         "sharepoint",
         "sharepoint-prefix",
         "box"

@@ -21,6 +21,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "rg -A1 warning /data/r4/app.log; rg -A1 --context-separator=@@ -e warning -e note /data/r4/app.log; rg --passthru warning /data/r4/app.log; rg -C1 -A0 warning /data/r4/app.log; rg --passthru -A0 warning /data/r4/app.log",

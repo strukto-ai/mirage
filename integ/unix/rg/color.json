@@ -21,6 +21,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "rg --color=never alpha /data/r4/notes.txt; rg --color never alpha /data/r4/notes.txt; rg -j1 --no-config --no-ignore --no-mmap --line-buffered alpha /data/r4/notes.txt; rg --color hello alpha /data/r4/notes.txt; echo rc=$?",

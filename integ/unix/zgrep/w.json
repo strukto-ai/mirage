@@ -21,6 +21,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "zgrep -w alpha /data/z4/notes.txt.gz",
@@ -54,6 +55,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "zgrep -w alph /data/z4/notes.txt.gz; echo rc=$?",
@@ -87,6 +89,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "printf '\\303\\251ab\\n' | gzip > /data/zgw1.gz; zgrep -w ab /data/zgw1.gz",
@@ -120,6 +123,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "printf 'a\\303\\251\\n' | gzip > /data/zgw2.gz; zgrep -w a /data/zgw2.gz",

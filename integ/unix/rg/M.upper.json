@@ -21,6 +21,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "printf 'short\\na much longer line\\n' > /data/fcB_m.txt; rg -M 5 o /data/fcB_m.txt; rg -M 5 --max-columns-preview o /data/fcB_m.txt; rg -M5 --max-columns-preview --no-max-columns-preview o /data/fcB_m.txt; rg --max-columns=6 -n -H line /data/fcB_m.txt; rg -M 0 line /data/fcB_m.txt; rg -M 5 -o much /data/fcB_m.txt; rg -M 5 -c o /data/fcB_m.txt; rm -f /data/fcB_m.txt",

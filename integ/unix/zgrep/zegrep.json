@@ -21,6 +21,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "mkdir -p /data/egr/sub; printf 'a|b\\nx\\none two\\n' > /data/egr/e.txt; printf 'a|b\\n' > /data/egr/sub/f.txt; cd /data/egr; gzip -c e.txt > e.txt.gz; zegrep 'a|x' e.txt.gz; zfgrep 'a|b' e.txt.gz; zegrep -c 'o|x' e.txt.gz; zfgrep -c 'a|b' e.txt.gz e.txt; zegrep -F 'a|b' e.txt.gz; echo rc=$?; cd /; rm -rf /data/egr",
@@ -56,6 +57,7 @@
         "sharepoint-prefix",
         "ssh",
         "nextcloud",
+        "tidb-filesystem",
         "box"
       ],
       "command": "[ \"$(man zegrep | sed 1d)\" = \"$(man zgrep | sed 1d)\" ] && echo same; man zfgrep | head -1; man | grep -cE '^- (zegrep|zfgrep) '",

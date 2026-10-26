@@ -35,6 +35,7 @@ import {
   overwriteGate,
   parseFlags,
   targetDirError,
+  transferFile,
   updateMode,
   type CpFlags,
   type TransferLinks,
@@ -287,6 +288,28 @@ async function runPrimitive(
   const { stat, strategy } = makePrimitive(files, dirs, fails)
   return cpGeneric(paths.map(spec), stat, strategy, flags)
 }
+
+describe('transferFile', () => {
+  it('moves the bytes when the store has no copy of its own', async () => {
+    // Mirrors test_a_store_with_no_copy_moves_the_bytes.
+    const files = new Map([['/src/a.txt', new Uint8Array([65, 65, 65])]])
+    const { strategy } = makePrimitive(files, new Set(['/src', '/d']), {})
+    const errors: string[] = []
+    const copied = await transferFile(
+      {
+        ...strategy,
+        copy: (_src, dst) => Promise.reject(enotsup('tidb_filesystem', 'copy', dst)),
+      },
+      spec('/src/a.txt'),
+      spec('/d/a.txt'),
+      'cp',
+      errors,
+    )
+    expect(copied).toBe(true)
+    expect(errors).toEqual([])
+    expect(files.get('/d/a.txt')).toEqual(new Uint8Array([65, 65, 65]))
+  })
+})
 
 describe('cpGeneric primitive transfer errors', () => {
   it('a refused destination probe skips only its own tree', async () => {
