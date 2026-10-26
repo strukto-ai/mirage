@@ -15,6 +15,7 @@
 import { decodeAnsiC } from './escapes.ts'
 import {
   REDIRECT_NODE_TYPES,
+  aliasRewrite,
   getCaseItems,
   getForParts,
   getFunctionRedirects,
@@ -28,7 +29,6 @@ import { singleQuote } from '../utils/quote.ts'
 
 const INDENT = '    '
 const CONTINUATION = /\\\n[ \t]*/g
-const FIRST_WORD = /\S+/
 // A name bash would read as a reserved word is printed after `function`.
 const RESERVED: ReadonlySet<string> = new Set([
   ...BASH_KEYWORDS,
@@ -84,42 +84,6 @@ class Aliases {
   ) {}
 }
 
-/**
- * A command with its alias words replaced, as bash reads it, and the aliases
- * it expanded: a value ending in a blank checks the next word too, and no
- * alias expands inside its own text. Mirrors Python's _alias_rewrite.
- */
-function aliasRewrite(
-  node: TSNodeLike,
-  head: TSNodeLike,
-  values: ReadonlyMap<string, string>,
-  blocked: ReadonlySet<string>,
-): [string, ReadonlySet<string>] | null {
-  if (node.startIndex === undefined || head.startIndex === undefined || head.endIndex === undefined)
-    return null
-  const source = node.text
-  let at = head.startIndex - node.startIndex
-  let end = head.endIndex - node.startIndex
-  let name = head.text
-  const used = new Set<string>()
-  let out = ''
-  let cursor = 0
-  for (let value = values.get(name); value !== undefined; value = values.get(name)) {
-    if (used.has(name) || blocked.has(name)) break
-    used.add(name)
-    out += source.slice(cursor, at) + value
-    cursor = end
-    if (!value.endsWith(' ') && !value.endsWith('\t')) break
-    const match = FIRST_WORD.exec(source.slice(cursor))
-    if (match === null) break
-    name = match[0]
-    at = cursor + match.index
-    end = at + name.length
-  }
-  if (used.size === 0) return null
-  return [out + source.slice(cursor), used]
-}
-
 function definitionOf(body: readonly TSNodeLike[]): TSNodeLike {
   let node = body[0]
   if (node === undefined) throw new Error('function: empty body')
@@ -151,7 +115,9 @@ class Printer {
   constructor(
     readonly inFunction: boolean,
     readonly aliases: Aliases | null = null,
-    readonly blocked: ReadonlySet<string> = new Set(),
+    // The aliases being expanded at each unit of the tree printed, for one
+    // an alias rewrote.
+    readonly owners: readonly ReadonlySet<string>[] | null = null,
   ) {}
 
   /** A command named by an alias, printed as what bash read it as. Mirrors Python's _expanded. */
@@ -159,11 +125,27 @@ class Printer {
     if (this.aliases === null) return null
     const head = node.childForFieldName?.('name')?.namedChildren[0]
     if (head?.type !== NT.WORD) return null
-    const rewrite = aliasRewrite(node, head, this.aliases.values, this.blocked)
+    const { values, parse } = this.aliases
+    const start = node.startIndex ?? 0
+    const guards =
+      this.owners?.slice(start, node.endIndex ?? start) ??
+      Array<ReadonlySet<string>>(node.text.length).fill(new Set())
+    const rewrite = aliasRewrite(
+      node,
+      head,
+      (name, blocked) => (blocked.has(name) ? null : (values.get(name) ?? null)),
+      guards,
+    )
     if (rewrite === null) return null
-    const [text, used] = rewrite
-    const printer = new Printer(this.inFunction, this.aliases, new Set([...this.blocked, ...used]))
-    const out = printer.statements(this.aliases.parse(text).children, indent, false)
+    const [text, owners] = rewrite
+    const root = parse(text)
+    const mapped = [...owners, new Set<string>()]
+    const printer = new Printer(
+      this.inFunction,
+      this.aliases,
+      Array.from(root.offsets ?? [], (i) => mapped[i] ?? new Set<string>()),
+    )
+    const out = printer.statements(root.children, indent, false)
     this.deferred.push(...printer.deferred)
     return out
   }

@@ -30,6 +30,7 @@ import { toScope, scopePath } from '../scope.ts'
 import { elementIsSet } from '../../../session/elements.ts'
 import { FILE_PAIR_BINARY, FILE_UNARY, INT_COMPARATORS, UNSUPPORTED_UNARY } from './constants.ts'
 import { CondError, type CondContext } from './types.ts'
+import { compareCodePoints } from '../../../../utils/sort.ts'
 import { rstripSlash } from '../../../../utils/slash.ts'
 
 /**
@@ -198,8 +199,8 @@ export async function applyBinary(
   const rt = scopePath(right)
   if (op === '=' || op === '==') return lt === rt
   if (op === '!=') return lt !== rt
-  if (op === '<') return lt < rt
-  if (op === '>') return lt > rt
+  if (op === '<') return compareCodePoints(lt, rt) < 0
+  if (op === '>') return compareCodePoints(lt, rt) > 0
   const compare = INT_COMPARATORS.get(op)
   if (compare !== undefined) {
     return compare(toInt(ctx, lt), toInt(ctx, rt))

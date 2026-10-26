@@ -12,8 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import re
-
 ALIAS_USAGE = "alias: usage: alias [-p] [name[=value] ... ]"
 UNALIAS_USAGE = "unalias: usage: unalias [-a] name [name ...]"
 
@@ -21,5 +19,3 @@ UNALIAS_USAGE = "unalias: usage: unalias [-a] name [name ...]"
 # `$` or a backtick anywhere in the name makes it unusable, since the parser
 # would never read such a word as one command name.
 BAD_NAME_CHARS = frozenset(" \t\n/=$`'\"|&;()<>")
-
-FIRST_WORD = re.compile(r"\S+")

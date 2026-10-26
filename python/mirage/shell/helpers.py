@@ -1103,3 +1103,66 @@ def get_function_body(node: TSNodeLike) -> FunctionBody:
             ),
         )
     ]
+
+
+def alias_rewrite(
+    node: TSNodeLike,
+    head: TSNodeLike,
+    value: Callable[[str, frozenset[str]], str | None],
+    guards: Sequence[frozenset[str]],
+) -> tuple[str, tuple[frozenset[str], ...]] | None:
+    """A command with its alias words replaced as bash reads it, and the
+    aliases being expanded at each byte of the result.
+
+    An insertion carries the replaced word's guards and its own name, so
+    no alias expands inside its own text, while the words around it keep
+    theirs. A value ending in a blank checks the command's next word,
+    the next child of the command, which an unquoted word must be.
+
+    Args:
+        node (TSNodeLike): the full command, including assignments.
+        head (TSNodeLike): its unquoted command word.
+        value (Callable[[str, frozenset[str]], str | None]): an alias's
+            text by name, given the guards at its word; None for none.
+        guards (Sequence[frozenset[str]]): the aliases being expanded at
+            each byte of the command.
+    """
+    source = node.text or b""
+    at = head.start_byte - node.start_byte
+    end = head.end_byte - node.start_byte
+    name = get_text(head)
+    seen: set[str] = set()
+    parts: list[bytes] = []
+    owners: list[frozenset[str]] = []
+    cursor = 0
+    while name not in seen:
+        blocked = guards[at]
+        text = value(name, blocked)
+        if text is None:
+            break
+        seen.add(name)
+        inserted = encode_text(text)
+        parts.extend((source[cursor:at], inserted))
+        owners.extend(guards[cursor:at])
+        owners.extend((blocked | {name},) * len(inserted))
+        cursor = end
+        if not text.endswith((" ", "\t")):
+            break
+        word = next(
+            (
+                c
+                for c in node.children
+                if c.start_byte - node.start_byte >= cursor
+            ),
+            None,
+        )
+        if word is None or word.type != NT.WORD:
+            break
+        name = get_text(word)
+        at = word.start_byte - node.start_byte
+        end = word.end_byte - node.start_byte
+    if not seen:
+        return None
+    parts.append(source[cursor:])
+    owners.extend(guards[cursor:])
+    return decode_text(b"".join(parts)), tuple(owners)

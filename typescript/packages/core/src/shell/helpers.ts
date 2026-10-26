@@ -953,3 +953,50 @@ export function getFunctionBody(node: TSNodeLike): TSNodeLike[] | null {
     },
   ]
 }
+
+/**
+ * A command with its alias words replaced as bash reads it, and the aliases
+ * being expanded at each unit of the result. An insertion carries the
+ * replaced word's guards and its own name, so no alias expands inside its own
+ * text, while the words around it keep theirs. A value ending in a blank
+ * checks the command's next word, the next child of the command, which an
+ * unquoted word must be. Mirrors Python's alias_rewrite.
+ */
+export function aliasRewrite(
+  node: TSNodeLike,
+  head: TSNodeLike,
+  value: (name: string, blocked: ReadonlySet<string>) => string | null,
+  guards: readonly ReadonlySet<string>[],
+): [string, ReadonlySet<string>[]] | null {
+  const source = getText(node)
+  const base = node.startIndex ?? 0
+  let at = (head.startIndex ?? 0) - base
+  let end = (head.endIndex ?? 0) - base
+  let name = getText(head)
+  const seen = new Set<string>()
+  const parts: string[] = []
+  const owners: ReadonlySet<string>[] = []
+  let cursor = 0
+  while (!seen.has(name)) {
+    const blocked = guards[at]
+    if (blocked === undefined) throw new Error('alias word has no source')
+    const text = value(name, blocked)
+    if (text === null) break
+    seen.add(name)
+    parts.push(source.slice(cursor, at), text)
+    owners.push(...guards.slice(cursor, at))
+    const guard = new Set([...blocked, name])
+    owners.push(...Array<ReadonlySet<string>>(text.length).fill(guard))
+    cursor = end
+    if (!text.endsWith(' ') && !text.endsWith('\t')) break
+    const word = node.children.find((c) => (c.startIndex ?? 0) - base >= cursor)
+    if (word?.type !== NT.WORD) break
+    name = getText(word)
+    at = (word.startIndex ?? 0) - base
+    end = (word.endIndex ?? 0) - base
+  }
+  if (seen.size === 0) return null
+  parts.push(source.slice(cursor))
+  owners.push(...guards.slice(cursor))
+  return [parts.join(''), owners]
+}

@@ -2124,10 +2124,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "[ -n a > /data/t-redir ]; echo \"st=$?\"; cat /data/t-redir; [ b \\> a ]; echo \"gt=$?\"; [ a \\< b ]; echo \"lt=$?\"; test b '>' c; echo \"test=$?\"; rm /data/t-redir",
+      "command": "[ -n a > /data/t-redir ]; echo \"st=$?\"; cat /data/t-redir; [ b \\> a ]; echo \"gt=$?\"; [ a \\< b ]; echo \"lt=$?\"; test b '>' c; echo \"test=$?\"; [ 😀 \\> $'\\uE000' ]; echo \"cp=$?\"; [[ 😀 > $'\\uE000' ]]; echo \"dbl=$?\"; rm /data/t-redir",
       "expect": {
         "exit": 0,
-        "stdout": "st=0\ngt=0\nlt=0\ntest=1\n",
+        "stdout": "st=0\ngt=0\nlt=0\ntest=1\ncp=0\ndbl=0\n",
         "stderr": ""
       }
     }

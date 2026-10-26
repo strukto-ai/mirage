@@ -19,5 +19,3 @@ export const UNALIAS_USAGE = 'unalias: usage: unalias [-a] name [name ...]'
 // `$` or a backtick anywhere in the name makes it unusable, since the parser
 // would never read such a word as one command name.
 export const BAD_NAME_CHARS = ' \t\n/=$`\'"|&;()<>'
-
-export const FIRST_WORD = /\S+/

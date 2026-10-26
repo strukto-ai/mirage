@@ -17,10 +17,11 @@ from collections.abc import Callable, Mapping, Sequence
 from functools import partial
 
 from mirage._rs import ShellHeredoc
-from mirage.shell.bytes import decode_text, encode_text
+from mirage.shell.bytes import decode_text
 from mirage.shell.escapes import decode_ansi_c
 from mirage.shell.helpers import (
     REDIRECT_NODE_TYPES,
+    alias_rewrite,
     get_case_items,
     get_for_parts,
     get_function_redirects,
@@ -35,7 +36,6 @@ from mirage.utils.quote import single_quote
 
 _INDENT = "    "
 _CONTINUATION = re.compile(r"\\\n[ \t]*")
-_FIRST_WORD = re.compile(r"\S+")
 # A name bash would read as a reserved word is printed after `function`.
 _RESERVED = BASH_KEYWORDS | {"!", "{", "}", "[[", "]]", "time", "coproc"}
 
@@ -94,49 +94,6 @@ class _Aliases:
         self.parse = parse
 
 
-def _alias_rewrite(
-    node: TSNodeLike,
-    head: TSNodeLike,
-    values: Mapping[str, str],
-    blocked: frozenset[str],
-) -> tuple[str, frozenset[str]] | None:
-    """A command with its alias words replaced, as bash reads it, and the
-    aliases it expanded: a value ending in a blank checks the next word
-    too, and no alias expands inside its own text.
-
-    Args:
-        node (TSNodeLike): the command.
-        head (TSNodeLike): its unquoted command word.
-        values (Mapping[str, str]): the aliases, by name.
-        blocked (frozenset[str]): the aliases being expanded around it.
-    """
-    source = node.text or b""
-    at = head.start_byte - node.start_byte
-    end = head.end_byte - node.start_byte
-    name = get_text(head)
-    used: set[str] = set()
-    parts: list[bytes] = []
-    cursor = 0
-    while name not in used and name not in blocked and name in values:
-        used.add(name)
-        value = values[name]
-        parts.extend((source[cursor:at], encode_text(value)))
-        cursor = end
-        if not value.endswith((" ", "\t")):
-            break
-        rest = decode_text(source[cursor:])
-        match = _FIRST_WORD.search(rest)
-        if match is None:
-            break
-        name = match.group(0)
-        at = cursor + len(encode_text(rest[: match.start()]))
-        end = at + len(encode_text(name))
-    if not used:
-        return None
-    parts.append(source[cursor:])
-    return decode_text(b"".join(parts)), frozenset(used)
-
-
 def _definition_of(body: FunctionBody) -> TSNodeLike:
     node = body[0]
     if node.parent is None and node.type == NT.REDIRECTED_STATEMENT:
@@ -158,11 +115,13 @@ class _Printer:
         self,
         in_function: bool,
         aliases: _Aliases | None = None,
-        blocked: frozenset[str] = frozenset(),
+        owners: Sequence[frozenset[str]] | None = None,
     ) -> None:
         self.in_function = in_function
         self.aliases = aliases
-        self.blocked = blocked
+        # The aliases being expanded at each byte of the tree printed, for
+        # one an alias rewrote.
+        self.owners = owners
         self.deferred: list[str] = []
 
     def definition(self, name: str, node: TSNodeLike, indent: str) -> str:
@@ -359,14 +318,31 @@ class _Printer:
         head = name.named_children[0] if name is not None else None
         if head is None or head.type != NT.WORD:
             return None
-        rewrite = _alias_rewrite(node, head, self.aliases.values, self.blocked)
+        values = self.aliases.values
+        guards = (
+            self.owners[node.start_byte : node.end_byte]
+            if self.owners is not None
+            else (frozenset(),) * len(node.text or b"")
+        )
+        rewrite = alias_rewrite(
+            node,
+            head,
+            lambda name, blocked: (
+                None if name in blocked else values.get(name)
+            ),
+            guards,
+        )
         if rewrite is None:
             return None
-        text, used = rewrite
-        printer = _Printer(self.in_function, self.aliases, self.blocked | used)
-        out = printer.statements(
-            self.aliases.parse(text).children, indent, False
+        text, owners = rewrite
+        root = self.aliases.parse(text)
+        mapped = (*owners, frozenset())
+        printer = _Printer(
+            self.in_function,
+            self.aliases,
+            tuple(mapped[i] for i in getattr(root, "offsets", ())),
         )
+        out = printer.statements(root.children, indent, False)
         self.deferred.extend(printer.deferred)
         return out
 

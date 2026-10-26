@@ -32,6 +32,26 @@ export const BASH_KEYWORDS: ReadonlySet<string> = new Set([
   'select',
 ])
 
+// The words the parser reads as syntax or as a declaration unless an alias
+// of the name expands: an alias of one changes how a later line parses.
+export const PARSED_WORDS: ReadonlySet<string> = new Set([
+  ...BASH_KEYWORDS,
+  'time',
+  'coproc',
+  '[[',
+  ']]',
+  ']',
+  '{',
+  '}',
+  'declare',
+  'typeset',
+  'export',
+  'readonly',
+  'local',
+  'unset',
+  'unsetenv',
+])
+
 // The characters that end an unquoted word.
 export const WORD_BREAKS: ReadonlySet<string> = new Set(' \t\n;&|()<>')
 

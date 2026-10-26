@@ -24,6 +24,9 @@ import type { JobTable } from '../../shell/job_table/index.ts'
 import { getText, sameLine } from '../../shell/helpers.ts'
 import { pipelineTransparent } from '../../shell/node_kind.ts'
 import { NodeType as NT } from '../../shell/types.ts'
+import { PARSED_WORDS } from '../../shell/parse/constants.ts'
+import { expandingAliases } from '../executor/builtins/alias/alias.ts'
+import { compareCodePoints } from '../../utils/sort.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
 import { isFsError } from '../../errors/fs.ts'
 import { carried, isUnwinding, LoopSignal, type Unwinding } from '../executor/control.ts'
@@ -179,10 +182,11 @@ async function runProgram(
   let echoedRow = firstRow - 1
   const bound = fd0Binding(session)
   // bash reads its input a line at a time: lines before one it refuses
-  // run first, and a line after the aliases change is read with them.
+  // run first, and a line after a change to what it parses with (an alias
+  // of a reserved word, `extglob`) is read with it.
   const reader = (node.parent ?? null) === null ? executeFn : null
   const refused = reader !== null ? refusedRow(node) : null
-  const aliases = reader !== null ? aliasState(session) : null
+  const parsed = reader !== null ? parseState(session) : null
   let lastRow = -1
 
   let i = 0
@@ -196,7 +200,7 @@ async function runProgram(
       child.isNamed === true &&
       child.type !== NT.COMMENT &&
       ((refused !== null && endRow >= refused) ||
-        (aliases !== null && lastRow >= 0 && startRow > lastRow && aliasState(session) !== aliases))
+        (parsed !== null && lastRow >= 0 && startRow > lastRow && parseState(session) !== parsed))
     if (
       !reread &&
       (child.isNamed !== true || child.type === NT.COMMENT || child.type === NT.ERROR)
@@ -518,12 +522,14 @@ export function refusedRow(node: TSNodeLike): number | null {
   return row
 }
 
-/** The aliases a command word expands as, and whether it expands them. Mirrors Python's _alias_state. */
-function aliasState(session: SessionState): string {
-  return JSON.stringify([
-    Object.entries(session.aliases).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)),
-    session.shopts.expand_aliases ?? null,
-  ])
+/**
+ * What a later line's parse depends on: the aliases expanding now of the
+ * words the parser reads as syntax, and `extglob`. Any other alias expands
+ * as its command runs. Mirrors Python's _parse_state.
+ */
+function parseState(session: SessionState): string {
+  const names = [...expandingAliases(session)].filter((name) => PARSED_WORDS.has(name))
+  return JSON.stringify([names.sort(compareCodePoints), session.shopts.extglob ?? false])
 }
 
 /**

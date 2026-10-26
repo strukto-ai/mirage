@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { getText } from '../../../../shell/helpers.ts'
+import { aliasRewrite, getText } from '../../../../shell/helpers.ts'
 import type { TSNodeLike } from '../../../../shell/types.ts'
 import { SHOPT_DEFAULTS } from '../../../../shell/constants.ts'
 import {
@@ -25,7 +25,7 @@ import { singleQuote } from '../../../../utils/quote.ts'
 import { scanOptions } from '../getopt.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 import { fail, finish, ok, result } from '../shared.ts'
-import { ALIAS_USAGE, BAD_NAME_CHARS, FIRST_WORD, UNALIAS_USAGE } from './constants.ts'
+import { ALIAS_USAGE, BAD_NAME_CHARS, UNALIAS_USAGE } from './constants.ts'
 import type { AliasMark } from './types.ts'
 import type { BuiltinCall, Result } from '../types.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
@@ -246,38 +246,12 @@ export function aliasCommandText(
   head: TSNodeLike,
   mark: AliasMark,
 ): [string, readonly ReadonlySet<string>[]] | null {
-  const source = getText(node)
-  const base = node.startIndex ?? 0
-  const inherited = guards(session, node)
-  let at = (head.startIndex ?? 0) - base
-  let end = (head.endIndex ?? 0) - base
-  let name = getText(head)
-  const seen = new Set<string>()
-  const parts: string[] = []
-  const owners: ReadonlySet<string>[] = []
-  let cursor = 0
-  while (!seen.has(name)) {
-    const blocked = inherited[at]
-    if (blocked === undefined) throw new Error('alias word has no source')
-    const value = aliasValue(session, name, mark, blocked)
-    if (value === null) break
-    seen.add(name)
-    parts.push(source.slice(cursor, at), value)
-    for (const owner of inherited.slice(cursor, at)) owners.push(owner)
-    const guard = new Set([...blocked, name])
-    for (const owner of Array<ReadonlySet<string>>(value.length).fill(guard)) owners.push(owner)
-    cursor = end
-    if (!value.endsWith(' ') && !value.endsWith('\t')) break
-    const match = FIRST_WORD.exec(source.slice(cursor))
-    if (match === null) break
-    name = match[0]
-    at = cursor + match.index
-    end = at + name.length
-  }
-  if (seen.size === 0) return null
-  parts.push(source.slice(cursor))
-  for (const owner of inherited.slice(cursor)) owners.push(owner)
-  return [parts.join(''), owners]
+  return aliasRewrite(
+    node,
+    head,
+    (name, blocked) => aliasValue(session, name, mark, blocked),
+    guards(session, node),
+  )
 }
 
 /** The read a command at `row` of the running parse belongs to (`readRow`).

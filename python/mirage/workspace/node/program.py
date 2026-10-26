@@ -29,9 +29,11 @@ from mirage.shell.errors import DiscardSignal, ExitSignal, ReturnSignal
 from mirage.shell.helpers import get_text, same_line
 from mirage.shell.job_table import JobTable
 from mirage.shell.node_kind import pipeline_transparent
+from mirage.shell.parse.constants import PARSED_WORDS
 from mirage.shell.types import NodeType as NT
 from mirage.shell.types import TSNodeLike
 from mirage.workspace.evaluation import EvaluationContext
+from mirage.workspace.executor.builtins.alias.alias import expanding_aliases
 from mirage.workspace.executor.builtins.exec import divert_statement
 from mirage.workspace.executor.control import (
     UNWINDING,
@@ -184,10 +186,11 @@ async def _run_program(
     echoed_row = first_row - 1
     bound = fd0_binding(session)
     # bash reads its input a line at a time: lines before one it refuses
-    # run first, and a line after the aliases change is read with them.
+    # run first, and a line after a change to what it parses with (an
+    # alias of a reserved word, ``extglob``) is read with it.
     reader = execute_fn if node.parent is None else None
     refused = refused_row(node) if reader is not None else None
-    aliases = _alias_state(session) if reader is not None else None
+    parsed = _parse_state(session) if reader is not None else None
     last_row = -1
 
     i = 0
@@ -200,9 +203,9 @@ async def _run_program(
             and (
                 refused is not None
                 and child.end_point[0] >= refused
-                or aliases is not None
+                or parsed is not None
                 and child.start_point[0] > last_row >= 0
-                and _alias_state(session) != aliases
+                and _parse_state(session) != parsed
             )
         )
         if not reread and (
@@ -586,17 +589,17 @@ def refused_row(node: TSNodeLike) -> int | None:
     return row
 
 
-def _alias_state(
-    session: SessionState,
-) -> tuple[tuple[tuple[str, str], ...], bool | None]:
-    """The aliases a command word expands as, and whether it expands them.
+def _parse_state(session: SessionState) -> tuple[frozenset[str], bool]:
+    """What a later line's parse depends on: the aliases expanding now of
+    the words the parser reads as syntax, and ``extglob``. Any other
+    alias expands as its command runs.
 
     Args:
         session (SessionState): shell session state.
     """
     return (
-        tuple(sorted(session.aliases.items())),
-        session.shopts.get("expand_aliases"),
+        expanding_aliases(session) & PARSED_WORDS,
+        bool(session.shopts.get("extglob", False)),
     )
 
 
