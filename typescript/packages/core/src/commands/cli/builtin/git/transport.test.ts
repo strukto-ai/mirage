@@ -256,6 +256,25 @@ it('says a missing http repository is not found and removes the clone', async ()
   expect(DEC.decode(left.stdout)).toBe('removed\n')
 })
 
+it('withholds the gh token from another origin on gh repo clone', async () => {
+  served('elsewhere', 'true')
+  const seen: [string, string | null][] = []
+  const listener = backend(join(tmp, 'elsewhere'), [], seen)
+  const other = `${await listen(listener)}/repo.git`
+  try {
+    const ws = await workspace()
+    ws.registerCli('gh', GH, { token: 't0k', base_url: 'https://ghe.test/api/v3' })
+    const result = await ws.shell(`cd /w && gh repo clone o/r ${other} -- -b`)
+    expect([result.exitCode, DEC.decode(result.stderr)]).toEqual([
+      128,
+      "Cloning into 'repo'...\nfatal: Remote branch https://ghe.test/o/r.git not found in upstream origin\n",
+    ])
+    expect(seen).toEqual([['GET', null]])
+  } finally {
+    listener.close()
+  }
+})
+
 it('ignores a ref named outside the repository', async () => {
   served('funny', 'git tag abcdefghijklmnop main && git branch wxyz main')
   const funny = backend(join(tmp, 'funny'), [
