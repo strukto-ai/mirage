@@ -2103,3 +2103,63 @@ async def test_a_route_policy_reads_the_session_as_data():
         assert "/data" in seen[-1]["mounts"]
     finally:
         await ws.close()
+
+
+class SeePrefix(Policy):
+    def __init__(self) -> None:
+        self.routed: list[tuple[str, str | None]] = []
+        self.commanded: list[tuple[str, str | None]] = []
+
+    async def pre_execute(self, ctx: RouteContext) -> Action | None:
+        self.routed.extend(
+            (c.command, c.session.get("GPU") if c.session else None)
+            for c in ctx.commands
+        )
+        return None
+
+    async def pre_command(self, ctx: CommandContext) -> Action | None:
+        assert ctx.session is not None
+        self.commanded.append((ctx.command, ctx.session.get("GPU")))
+        return None
+
+
+@pytest.mark.asyncio
+async def test_pre_execute_reads_a_commands_own_prefix_as_pre_command_will():
+    # GPU=1 is the environment of echo alone: cat beside it and the
+    # line's session never hold it.
+    spy = SeePrefix()
+    seen: list[dict] = []
+
+    def route(ctx: RouteContext) -> None:
+        seen.append(script_context(ctx))
+        return None
+
+    ws = Workspace(
+        {"/data/": RAMVFS()},
+        mode=MountMode.WRITE,
+        policies=[spy],
+        route_policy=route,
+    )
+    try:
+        await ws.shell("GPU=1 MODEL='a b' echo hi | cat")
+        assert spy.routed == [("echo", "1"), ("cat", None)]
+        assert sorted(spy.commanded) == sorted(spy.routed)
+        echo, cat = seen[-1]["commands"]
+        assert (echo["env"]["GPU"], echo["env"]["MODEL"]) == ("1", "a b")
+        assert "GPU" not in cat["env"]
+        assert "GPU" not in seen[-1]["env"]
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_prefix_leaves_a_readonly_name_and_the_next_command_alone():
+    spy = SeePrefix()
+    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE, policies=[spy])
+    try:
+        await ws.shell("readonly GPU=0")
+        await ws.shell("GPU=1 cd /data; echo $GPU")
+        assert spy.routed[-2:] == [("cd", "0"), ("echo", "0")]
+        assert spy.commanded[-2:] == spy.routed[-2:]
+    finally:
+        await ws.close()

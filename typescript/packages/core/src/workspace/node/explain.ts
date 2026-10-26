@@ -42,6 +42,7 @@ import {
 } from '../../shell/helpers.ts'
 import { opaqueReads, referencedNames } from '../../shell/parse/index.ts'
 import { NodeType, type TSNodeLike } from '../../shell/types.ts'
+import { VarAttr } from '../../shell/variable.ts'
 import { PathSpec, type Refusal } from '../../types.ts'
 import { isGlob } from '../../utils/hidden.ts'
 import { resolvePath } from '../../utils/path.ts'
@@ -52,7 +53,7 @@ import type { MountRegistry } from '../mount/registry.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
 import type { SessionState } from '../session/session.ts'
 import { homeDir } from '../session/shell_dirs.ts'
-import { envSnapshot } from '../session/state.ts'
+import { envIsReadonly, envSnapshot, seedVar, setAttr } from '../session/state.ts'
 import { sessionAccess } from '../../context/session_context.ts'
 import {
   classifiedWords,
@@ -585,6 +586,34 @@ function wordsOf(node: TSNodeLike, home: string | null): Word[] {
 }
 
 /**
+ * The session a command runs in: `session` with the command's own
+ * `NAME=value` prefix exported, as the executor seeds it before the
+ * command's gate, so `preExecute` reads the environment `preCommand`
+ * will. A value only the run expands is read as typed, as the command's
+ * words are, and a readonly name is left as it is.
+ */
+function seeded(node: TSNodeLike, session: SessionState, home: string | null): SessionState {
+  const [assigned] = splitEnvPrefix(getParts(node))
+  if (assigned.length === 0) return session
+  const forked = session.fork()
+  for (const part of assigned) {
+    const text = getText(part)
+    const eq = text.indexOf('=')
+    if (eq < 0) continue
+    const key = text.slice(0, eq)
+    if (envIsReadonly(forked, key, false)) continue
+    const value = part.namedChildren.find((c) => c.type !== NodeType.VARIABLE_NAME)
+    seedVar(
+      forked,
+      key,
+      value !== undefined ? wordValue(readWord(value, home)) : text.slice(eq + 1),
+    )
+    setAttr(forked, key, VarAttr.Export)
+  }
+  return forked
+}
+
+/**
  * Every command under one node, in source order, each with the session
  * it is judged in; returns the session the node leaves behind.
  *
@@ -669,10 +698,10 @@ function* walkNode(
         words,
         redirects: statementRedirects(node, home),
         stdin: statementStdin(node),
-        session,
+        session: seeded(node, session, home),
         occurrence: occurrenceIn(node, frame),
         lost,
-        elsewhere,
+        elsewhere: elsewhere.map((e) => seeded(node, e, home)),
       }
       walked = afterCd(words, session, lost, elsewhere)
     }

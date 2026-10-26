@@ -128,6 +128,7 @@ For `cat notes.txt | wc -l` in `/data`, `pre_execute` gets:
       "paths": ["/data/notes.txt"],
       "walks": false,
       "argv": ["notes.txt"],
+      "env": {"PWD": "/data", "TEAM": "core", "OLDPWD": "/"},
       ...
     },
     {"command": "wc", "words": [...], "paths": [], ...}
@@ -141,8 +142,10 @@ For `cat notes.txt | wc -l` in `/data`, `pre_execute` gets:
 }
 ```
 
-`pre_command` gets one entry of `commands`, with the session fields beside
-it:
+Each entry of `commands` has the `env` that command runs with, its own
+`NAME=value` prefix included: for `GPU=1 python3 train.py`, only the
+`python3` entry has `GPU`. `pre_command` gets one entry of `commands`, with
+the session fields beside it:
 
 | Method | `ctx` holds |
 | --- | --- |

@@ -61,6 +61,21 @@ function callOf(name: string): VfsCall {
   return call
 }
 
+class SeePrefix implements Policy {
+  routed: [string, string | null][] = []
+  commanded: [string, string | null][] = []
+
+  preExecute(ctx: RouteContext): Action | null {
+    for (const c of ctx.commands) this.routed.push([c.command, c.session?.get('GPU') ?? null])
+    return null
+  }
+
+  preCommand(ctx: CommandContext): Action | null {
+    this.commanded.push([ctx.command, ctx.session?.get('GPU') ?? null])
+    return null
+  }
+}
+
 class DenyWeird implements Policy {
   preCommand(ctx: CommandContext): Action | null {
     if (ctx.command === 'weird') return { kind: 'deny', reason: 'nope' }
@@ -1523,6 +1538,58 @@ describe('what a method sees', () => {
       expect(payload.cwd).toBe('/data')
       expect(payload.env.TEAM).toBe('core')
       expect(seen.at(-1)?.mounts).toContain('/data')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it("preExecute reads a command's own prefix as preCommand will", async () => {
+    // GPU=1 is the environment of echo alone: cat beside it and the
+    // line's session never hold it.
+    const spy = new SeePrefix()
+    const seen: Record<string, unknown>[] = []
+    const ws = new Workspace(
+      { '/data/': new RAMVFS() },
+      {
+        mode: MountMode.WRITE,
+        policies: [spy],
+        routePolicy: (ctx: RouteContext) => {
+          seen.push(scriptContext(ctx))
+          return null
+        },
+      },
+    )
+    try {
+      await ws.shell("GPU=1 MODEL='a b' echo hi | cat")
+      expect(spy.routed).toEqual([
+        ['echo', '1'],
+        ['cat', null],
+      ])
+      expect([...spy.commanded].sort()).toEqual([...spy.routed].sort())
+      const payload = seen.at(-1) as {
+        commands: { env: Record<string, string> }[]
+        env: Record<string, string>
+      }
+      const [echo, cat] = payload.commands
+      expect([echo?.env.GPU, echo?.env.MODEL]).toEqual(['1', 'a b'])
+      expect(cat?.env).not.toHaveProperty('GPU')
+      expect(payload.env).not.toHaveProperty('GPU')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('a prefix leaves a readonly name and the next command alone', async () => {
+    const spy = new SeePrefix()
+    const ws = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE, policies: [spy] })
+    try {
+      await ws.shell('readonly GPU=0')
+      await ws.shell('GPU=1 cd /data; echo $GPU')
+      expect(spy.routed.slice(-2)).toEqual([
+        ['cd', '0'],
+        ['echo', '0'],
+      ])
+      expect(spy.commanded.slice(-2)).toEqual(spy.routed.slice(-2))
     } finally {
       await ws.close()
     }

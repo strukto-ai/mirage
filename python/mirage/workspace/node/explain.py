@@ -57,6 +57,7 @@ from mirage.shell.helpers import (
 )
 from mirage.shell.parse import opaque_reads, referenced_names
 from mirage.shell.types import NodeType
+from mirage.shell.variable import VarAttr
 from mirage.types import PathSpec, Refusal
 from mirage.utils.hidden import is_glob
 from mirage.utils.path import resolve_path
@@ -96,6 +97,7 @@ from mirage.workspace.node.occurrence import (
 )
 from mirage.workspace.session import SessionState, env_snapshot
 from mirage.workspace.session.shell_dirs import home_dir
+from mirage.workspace.session.state import env_is_readonly, seed_var, set_attr
 
 # How the explanation tree names a parse node that shapes a line; a node
 # not here (a redirected or negated statement) is read through.
@@ -782,6 +784,38 @@ def _words_of(node: Any, home: str | None) -> list[Word]:
     return [read_word(part, home) for part in parts]
 
 
+def _seeded(
+    node: Any, session: SessionState, home: str | None
+) -> SessionState:
+    """The session a command runs in: ``session`` with the command's own
+    ``NAME=value`` prefix exported, as the executor seeds it before the
+    command's gate, so ``pre_execute`` reads the environment
+    ``pre_command`` will. A value only the run expands is read as typed,
+    as the command's words are, and a readonly name is left as it is.
+
+    Args:
+        node (Any): the command's tree-sitter node.
+        session (SessionState): the session the command stands in.
+        home (str | None): the home directory a leading ``~`` names.
+    """
+    assigned, _ = split_env_prefix(get_parts(node))
+    if not assigned:
+        return session
+    seeded = session.fork()
+    for part in assigned:
+        key, eq, raw = get_text(part).partition("=")
+        if not eq or env_is_readonly(seeded, key, False):
+            continue
+        values = [
+            c for c in part.named_children if c.type != NodeType.VARIABLE_NAME
+        ]
+        seed_var(
+            seeded, key, read_word(values[0], home).value if values else raw
+        )
+        set_attr(seeded, key, VarAttr.EXPORT)
+    return seeded
+
+
 def _walk_substitution(
     tree: Any,
     session: SessionState,
@@ -895,11 +929,11 @@ def _walk_node(
             yield Walked(
                 words,
                 statement_redirects(node, home),
-                session,
+                _seeded(node, session, home),
                 occurrence_in(node, frame),
                 lost=lost,
                 stdin=statement_stdin(node),
-                elsewhere=elsewhere,
+                elsewhere=tuple(_seeded(node, e, home) for e in elsewhere),
             )
             walked = _after_cd(words, session, lost, elsewhere)
         for child in node.children:
