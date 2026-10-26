@@ -45,7 +45,6 @@ class LanceDBVFS(BaseVFS):
     def __init__(self, config: LanceDBConfig) -> None:
         super().__init__()
         self.config = config
-        self.walk_limit = config.walk_limit
         self.caches_reads = config.uri.startswith(_REMOTE_SCHEMES)
         self.accessor = LanceDBAccessor(self.config)
         # Only cards are searched: a blob file is the blob column's bytes.

@@ -12,9 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from pydantic import BaseModel, ConfigDict, Field
-
-from mirage.vfs.constants import WALK_LIMIT
+from pydantic import BaseModel, ConfigDict
 
 
 class JaegerConfig(BaseModel):
@@ -37,7 +35,3 @@ class JaegerConfig(BaseModel):
     now."""
     request_timeout: int = 30
     """Seconds to wait for one HTTP request to Jaeger."""
-    walk_limit: int = Field(default=WALK_LIMIT, ge=-1)
-    """Most files one command walks under a folder: `grep -r`, `find` and other
-    walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is
-    refused. `-1` lifts the limit."""

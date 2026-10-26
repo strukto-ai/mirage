@@ -17,7 +17,8 @@ from pathlib import Path
 import pytest
 
 from mirage.commands.cli.builtin.git import GIT
-from mirage.types import MountMode
+from mirage.policy.builtin.output_cap import ALL_COMMANDS
+from mirage.types import Limit, MountMode
 from mirage.vfs.disk import DiskVFS
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
@@ -40,8 +41,9 @@ async def test_a_search_past_the_walk_limit_stops_with_a_fatal(
     repo_path: Path, line: str, answer: tuple[int, bytes, bytes]
 ):
     commit_file(repo_path, "c.txt", "three\n", "fourth")
-    vfs = DiskVFS(root=str(repo_path), walk_limit=2)
-    with Workspace({MOUNT: vfs}) as ws:
+    vfs = DiskVFS(root=str(repo_path))
+    limits = {ALL_COMMANDS: Limit(walk_limit=2)}
+    with Workspace({MOUNT: (vfs, MountMode.READ, limits)}) as ws:
         ws.register_cli("git", GIT)
         assert await run(ws, line) == answer
 
@@ -59,8 +61,16 @@ async def test_a_work_tree_counts_against_the_mount_serving_it(
 ):
     with Workspace(
         {
-            "/meta/": RAMVFS(walk_limit=-1),
-            "/data/": RAMVFS(walk_limit=2),
+            "/meta/": (
+                RAMVFS(),
+                MountMode.WRITE,
+                {ALL_COMMANDS: Limit(walk_limit=-1)},
+            ),
+            "/data/": (
+                RAMVFS(),
+                MountMode.WRITE,
+                {ALL_COMMANDS: Limit(walk_limit=2)},
+            ),
         },
         mode=MountMode.WRITE,
     ) as ws:

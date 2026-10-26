@@ -31,7 +31,6 @@ ws = Workspace({"/github": vfs}, mode=MountMode.READ)
 | <code style={{ whiteSpace: 'nowrap' }}>repo</code> | Repository name. Required unless the `GitHubVFS` constructor is given `repo`. |
 | <code style={{ whiteSpace: 'nowrap' }}>ref</code> | Branch, tag or commit SHA the mount reads. Unset follows the repository's default branch, resolved on the first read. |
 | <code style={{ whiteSpace: 'nowrap' }}>base_url</code> | GitHub API root. Unset uses `https://api.github.com`; set it for GitHub Enterprise. |
-| <code style={{ whiteSpace: 'nowrap' }}>walk_limit</code><br />default `5000` | Most files one command walks under a folder, each file read one blob request: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit and reads every file without asking code search. |
 
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table github end */}

@@ -268,6 +268,8 @@ export class BaseVFS<A extends Accessor = Accessor> {
    * work tree fail, a glob matching more is refused, and so are tar -c, zip
    * -r, cp -r, rm -r, chmod -R, chown -R, chgrp -R, mv to another mount and
    * diff -r of a directory holding more (`beforeFullWalk`); -1 for no cap.
+   * This is the backend's own value: the mount's `'*'` command limit, else
+   * the workspace's, replaces it when the VFS is mounted.
    */
   walkLimit: number = WALK_LIMIT
   /**

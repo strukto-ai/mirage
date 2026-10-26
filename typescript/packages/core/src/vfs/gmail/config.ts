@@ -18,16 +18,9 @@ import {
   redactConfigWithSchema,
   type ConfigOf,
   type RedactedConfig,
-  z,
 } from '../secrets.ts'
 
-const GmailConfigSchema = GoogleConfigSchema.extend({
-  walkLimit: z.number().int().min(-1).optional().meta({
-    description:
-      'Most files one command walks under a folder: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit, and the listing then keeps no message text.',
-    default: 1000,
-  }),
-})
+const GmailConfigSchema = GoogleConfigSchema
 
 export type GmailConfig = ConfigOf<typeof GmailConfigSchema>
 

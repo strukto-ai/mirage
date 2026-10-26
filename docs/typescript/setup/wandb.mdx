@@ -29,7 +29,6 @@ standard `fetch`. Browser access depends on the service's CORS configuration.
 | <code style={{ whiteSpace: 'nowrap' }}>baseUrl</code><br />default `'https://api.wandb.ai'` | W&B API root. Queries go to its `/graphql`, and only downloads from the same origin carry the key. |
 | <code style={{ whiteSpace: 'nowrap' }}>pageSize</code><br />default `100` | Items per GraphQL page, and steps per window when reading `history.jsonl`. |
 | <code style={{ whiteSpace: 'nowrap' }}>maxPages</code><br />default `10000` | The most pages one listing or history read fetches. Past it the read fails rather than return a partial result. |
-| <code style={{ whiteSpace: 'nowrap' }}>walkLimit</code><br />default `1000` | Most files one command walks under a folder: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit. |
 
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table wandb end */}

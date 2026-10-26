@@ -33,6 +33,7 @@ import { registerCliSpec, unregisterCliSpec } from '../commands/cli/specs.ts'
 import { GWS } from '../commands/cli/builtin/gws/index.ts'
 import { CLI } from '../commands/cli/types.ts'
 import { IOResult } from '../io/types.ts'
+import { ALL_COMMANDS } from '../policy/builtin/output_cap.ts'
 import { PolicyDenied } from '../policy/errors.ts'
 import type { Policy } from '../policy/index.ts'
 import type { Action, SessionContext } from '../policy/types.ts'
@@ -316,8 +317,12 @@ describe('Workspace.snapshot / Workspace.load', () => {
 describe('a rebuilt RAM mount', () => {
   it.each([2, -1])('keeps its walk limit (%d)', async (limit) => {
     const ws = new Workspace(
-      { '/d': new RAMVFS({ walkLimit: limit }) },
-      { mode: MountMode.WRITE, shellParser: parser },
+      { '/d': new RAMVFS() },
+      {
+        mode: MountMode.WRITE,
+        shellParser: parser,
+        commandLimits: { [ALL_COMMANDS]: new Limit({ walkLimit: limit }) },
+      },
     )
     const copied = await ws.copy()
     const restored = await Workspace.fromState(await toStateDict(ws), { shellParser: parser })

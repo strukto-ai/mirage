@@ -27,7 +27,8 @@ from mirage.core.github.search import (
     search_code,
 )
 from mirage.core.github.tree_entry import TreeEntry
-from mirage.types import MountMode, PathSpec, ReadSpec
+from mirage.policy.builtin.output_cap import ALL_COMMANDS
+from mirage.types import Limit, MountMode, PathSpec, ReadSpec
 from mirage.utils.key_prefix import mount_key
 from mirage.vfs.ram import RAMVFS
 from mirage.vfs.registry import build_vfs
@@ -459,8 +460,13 @@ REPO = {
 }
 
 
-async def _run(vfs, line: str) -> tuple[bytes, bytes, int]:
-    ws = Workspace({"/gh": Mount(vfs=vfs, mode=MountMode.READ)})
+async def _run(
+    vfs, line: str, limit: int | None = None
+) -> tuple[bytes, bytes, int]:
+    limits = {} if limit is None else {ALL_COMMANDS: Limit(walk_limit=limit)}
+    ws = Workspace(
+        {"/gh": Mount(vfs=vfs, mode=MountMode.READ, command_limits=limits)}
+    )
     try:
         result = await ws.shell(line)
         out = await result.materialize_stdout()
@@ -469,8 +475,8 @@ async def _run(vfs, line: str) -> tuple[bytes, bytes, int]:
         await ws.close()
 
 
-def _ram(limit: int = 10000) -> RAMVFS:
-    vfs = RAMVFS(walk_limit=limit)
+def _ram() -> RAMVFS:
+    vfs = RAMVFS()
     for key, data in REPO.items():
         parts = key.split("/")
         for depth in range(1, len(parts)):
@@ -493,13 +499,12 @@ async def _on_github(
             "owner": "o",
             "repo": "r",
             "base_url": hub.url,
-            "walk_limit": limit,
         }
         if pinned:
             config["ref"] = hub.head()
         vfs = build_vfs("github", config)
         hub.log.clear()
-        return await _run(vfs, line), hub
+        return await _run(vfs, line, limit), hub
 
 
 def _read(hub: FakeGitHub) -> list[str]:
@@ -582,7 +587,7 @@ async def test_a_ref_off_the_default_branch_reads_every_file(monkeypatch):
 async def test_a_ref_off_the_default_branch_stops_at_the_cap(monkeypatch):
     line = "grep -rw import /gh"
     got, hub = await _on_github(line, monkeypatch, pinned=True, limit=4)
-    assert got == await _run(_ram(4), line)
+    assert got == await _run(_ram(), line, 4)
     assert got[1:] == (b"grep: /gh: " + STOPPED_AT_4, 2)
     assert len(_read(hub)) == 4
 
@@ -612,7 +617,7 @@ async def test_a_search_past_the_scope_cap_stops_there(
     line, name, monkeypatch
 ):
     got, hub = await _on_github(line, monkeypatch, limit=4)
-    assert got == await _run(_ram(4), line)
+    assert got == await _run(_ram(), line, 4)
     assert got[1:] == (f"{name}: /gh: ".encode() + STOPPED_AT_4, 2)
     assert hub.count("blob") == 4
 
@@ -683,10 +688,9 @@ async def test_a_binary_the_walk_skips_does_not_count_to_the_cap(monkeypatch):
                 "owner": "o",
                 "repo": "r",
                 "base_url": hub.url,
-                "walk_limit": 3,
             },
         )
-        assert await _run(vfs, line) == await _run(_ram(), line)
+        assert await _run(vfs, line, 3) == await _run(_ram(), line)
         assert hub.count("search") == 1
 
 
@@ -734,13 +738,15 @@ async def test_the_scope_count_after_an_expiry_counts_the_refetched_tree(
                 "repo": "r",
                 "ref": "main",
                 "base_url": hub.url,
-                "walk_limit": count - 1,
             },
         )
         ws = Workspace(
             {
                 prefix: Mount(
-                    vfs=vfs, mode=MountMode.READ, read=ReadSpec(ttl=600)
+                    vfs=vfs,
+                    mode=MountMode.READ,
+                    read=ReadSpec(ttl=600),
+                    command_limits={ALL_COMMANDS: Limit(walk_limit=count - 1)},
                 )
             }
         )

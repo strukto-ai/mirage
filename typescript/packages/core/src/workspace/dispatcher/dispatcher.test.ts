@@ -16,6 +16,7 @@ import { yieldBytes } from '../../io/stream.ts'
 
 import { type CallerDispatchFn, currentCaller } from '../../context/session_context.ts'
 import type { EntryGate } from '../../policy/types.ts'
+import { ALL_COMMANDS } from '../../policy/builtin/output_cap.ts'
 import type { IOResult } from '../../io/types.ts'
 import { describe, expect, it, vi } from 'vitest'
 import { materialize, OpReport, type ByteSource } from '../../io/types.ts'
@@ -3093,10 +3094,7 @@ class SearchedRAM extends RAMVFS {
 // Python's TreeCountingRAM.
 class TreeCountingRAM extends RAMVFS {
   trees = 0
-
-  constructor() {
-    super({ walkLimit: -1 })
-  }
+  override walkLimit = -1
 
   override readTree(path: PathSpec): Promise<Map<string, FileStat> | null> {
     this.trees += 1
@@ -3107,9 +3105,7 @@ class TreeCountingRAM extends RAMVFS {
 // A RAM mount held to a `walkLimit` with no guard of its own. Twin of
 // Python's LimitedRAM.
 class LimitedRAM extends RAMVFS {
-  constructor() {
-    super({ walkLimit: 2 })
-  }
+  override walkLimit = 2
 }
 
 // The same mount with no tree read, so a walk is counted by listing each
@@ -3551,14 +3547,17 @@ describe('a hide filters a one-call read', () => {
   it.each(['path', 'modified'])(
     'counts each file of a planned rg against its own mount (--sort %s)',
     async (sort) => {
-      const top = new RAMVFS({ walkLimit: -1 })
+      const top = new RAMVFS()
       top.store.files.set('/t.txt', new TextEncoder().encode('hello\n'))
-      const remote = new RAMVFS({ walkLimit: 2 })
+      const remote = new RAMVFS()
       for (let i = 0; i < 4; i++) {
         remote.store.files.set(`/r${String(i)}.txt`, new TextEncoder().encode('hello\n'))
       }
       const ws = new Workspace(
-        { '/a': top, '/a/remote': remote },
+        {
+          '/a': [top, MountMode.READ, { [ALL_COMMANDS]: new Limit({ walkLimit: -1 }) }],
+          '/a/remote': [remote, MountMode.READ, { [ALL_COMMANDS]: new Limit({ walkLimit: 2 }) }],
+        },
         { shellParser: await getTestParser() },
       )
       try {
@@ -3580,15 +3579,18 @@ describe('a hide filters a one-call read', () => {
 
   // Twin of test_a_glob_counts_each_match_against_its_own_mount.
   it.each(['cat', 'echo'])('counts each glob match against its own mount (%s)', async (command) => {
-    const top = new RAMVFS({ walkLimit: -1 })
+    const top = new RAMVFS()
     top.store.dirs.add('/b')
     top.store.files.set('/b/t.txt', new TextEncoder().encode('t\n'))
-    const remote = new RAMVFS({ walkLimit: 2 })
+    const remote = new RAMVFS()
     for (let i = 0; i < 3; i++) {
       remote.store.files.set(`/r${String(i)}.txt`, new TextEncoder().encode('r\n'))
     }
     const ws = new Workspace(
-      { '/a': top, '/a/remote': remote },
+      {
+        '/a': [top, MountMode.READ, { [ALL_COMMANDS]: new Limit({ walkLimit: -1 }) }],
+        '/a/remote': [remote, MountMode.READ, { [ALL_COMMANDS]: new Limit({ walkLimit: 2 }) }],
+      },
       { shellParser: await getTestParser() },
     )
     const refused = '/a/*/*.txt: matches more than 2 files (walk_limit); narrow the path'
@@ -3604,13 +3606,20 @@ describe('a hide filters a one-call read', () => {
   })
 
   it('counts a glob through a link against the target mount', async () => {
-    const top = new RAMVFS({ walkLimit: -1 })
+    const top = new RAMVFS()
     top.store.dirs.add('/data')
     for (let i = 0; i < 3; i++) {
       top.store.files.set(`/data/t${String(i)}.txt`, new TextEncoder().encode('t\n'))
     }
     const ws = new Workspace(
-      { '/a': top, '/a/remote': new RAMVFS({ walkLimit: 2 }) },
+      {
+        '/a': [top, MountMode.WRITE, { [ALL_COMMANDS]: new Limit({ walkLimit: -1 }) }],
+        '/a/remote': [
+          new RAMVFS(),
+          MountMode.WRITE,
+          { [ALL_COMMANDS]: new Limit({ walkLimit: 2 }) },
+        ],
+      },
       { mode: MountMode.WRITE, shellParser: await getTestParser() },
     )
     try {

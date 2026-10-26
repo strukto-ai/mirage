@@ -15,7 +15,6 @@
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
 
 from mirage.utils import key_prefix as kp
-from mirage.vfs.constants import WALK_LIMIT
 
 
 class GridFSConfig(BaseModel):
@@ -39,10 +38,6 @@ class GridFSConfig(BaseModel):
     the rest, under the file's name and in the trash `rm` moves revisions
     to (`/trash/<filename>`, which no mount path reaches). Unset keeps
     every revision, so a snapshot pinned to any of them still reads."""
-    walk_limit: int = Field(default=WALK_LIMIT, ge=-1)
-    """Most files one command walks under a folder: `grep -r`, `find` and other
-    walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is
-    refused. `-1` lifts the limit."""
 
     @field_validator("key_prefix")
     @classmethod

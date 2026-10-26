@@ -159,8 +159,9 @@ class LinearVFS(BaseVFS):
     def __init__(self, config: LinearConfig) -> None:
         super().__init__()
         self.config = config
-        self.walk_limit = config.walk_limit
-        self.accessor = LinearAccessor(self.config)
+        self.accessor = LinearAccessor(
+            self.config, lambda: self.walk_limit >= 0
+        )
 
     async def files_containing(
         self,

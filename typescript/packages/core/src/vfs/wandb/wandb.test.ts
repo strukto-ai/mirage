@@ -3,7 +3,8 @@ import { WandbVFS } from './wandb.ts'
 import { normalizeWandbConfig } from '../../core/wandb/config.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
 import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
-import { MountMode } from '../../types.ts'
+import { ALL_COMMANDS } from '../../policy/builtin/output_cap.ts'
+import { Limit, MountMode } from '../../types.ts'
 
 it('isolates mount scopes and directory indexes', async () => {
   const mounts = [
@@ -51,7 +52,7 @@ it('refuses W&B mutations and CLI dispatch even in a write workspace', async () 
 
 // Twin of test_find_pages_projects_no_further_than_its_walk_limit.
 it('lets find page projects no further than its walk limit', async () => {
-  const vfs = new WandbVFS(normalizeWandbConfig({ entities: ['lab'], page_size: 1, walk_limit: 2 }))
+  const vfs = new WandbVFS(normalizeWandbConfig({ entities: ['lab'], page_size: 1 }))
   const request = vi
     .spyOn(vfs.accessor.client, 'request')
     .mockImplementation((_query, variables) => {
@@ -63,7 +64,10 @@ it('lets find page projects no further than its walk limit', async () => {
         },
       } as never)
     })
-  const ws = new Workspace({ '/wandb': vfs }, { shellParser: await getTestParser() })
+  const ws = new Workspace(
+    { '/wandb': [vfs, MountMode.READ, { [ALL_COMMANDS]: new Limit({ walkLimit: 2 }) }] },
+    { shellParser: await getTestParser() },
+  )
   try {
     await ws.shell('find /wandb/lab -maxdepth 1')
     expect(request).toHaveBeenCalledTimes(3)

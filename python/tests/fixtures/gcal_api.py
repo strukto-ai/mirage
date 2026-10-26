@@ -227,14 +227,18 @@ def gcal_config(**overrides: str | int) -> GCalConfig:
     )
 
 
-def make_accessor(**overrides: str | int) -> GCalAccessor:
+def make_accessor(
+    capped: Callable[[], bool] = lambda: True, **overrides: str | int
+) -> GCalAccessor:
     """An accessor for ``gcal_config(**overrides)``.
 
     Args:
+        capped (Callable[[], bool]): whether its mount walks under a
+            ``walk_limit``.
         **overrides (str | int): GCalConfig fields to set.
     """
     config = gcal_config(**overrides)
-    return GCalAccessor(config, TokenManager(config))
+    return GCalAccessor(config, TokenManager(config), capped)
 
 
 def spec(virtual: str, pattern: str | None = None) -> PathSpec:

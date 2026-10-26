@@ -12,9 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from pydantic import BaseModel, ConfigDict, Field, SecretStr
-
-from mirage.vfs.constants import WALK_LIMIT
+from pydantic import BaseModel, ConfigDict, SecretStr
 
 
 class LangfuseConfig(BaseModel):
@@ -33,7 +31,3 @@ class LangfuseConfig(BaseModel):
     default_from_timestamp: str | None = None
     """List only traces from this ISO 8601 timestamp on. Unset lists
     whatever the project holds, up to `default_trace_limit`."""
-    walk_limit: int = Field(default=WALK_LIMIT, ge=-1)
-    """Most files one command walks under a folder: `grep -r`, `find` and other
-    walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is
-    refused. `-1` lifts the limit."""

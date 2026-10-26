@@ -195,7 +195,7 @@ async def _list_label(
             )
         )
         children, att_seeds = _date_children(
-            groups[date_str], accessor.config.walk_limit >= 0
+            groups[date_str], accessor.capped()
         )
         seeds[date_str] = children
         for att_dir, att_entries in att_seeds.items():
@@ -222,7 +222,7 @@ async def _list_day(
     groups = await _group_by_date(accessor, msg_ids)
     children, att_seeds = _date_children(
         groups.get(match.slots["day"], []),
-        accessor.config.walk_limit >= 0,
+        accessor.capped(),
     )
     return DirListing(entries=children, seeds=att_seeds, window=True)
 

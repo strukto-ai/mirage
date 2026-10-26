@@ -43,7 +43,6 @@ console.log(res.stdoutText)
 | <code style={{ whiteSpace: 'nowrap' }}>keyPrefix</code> | Key prefix inside the bucket that the mount treats as its root; keys outside it are not visible. Leading slashes are dropped and a trailing `/` is added. |
 | <code style={{ whiteSpace: 'nowrap' }}>timeoutMs</code> | Milliseconds to wait to connect, and for each read of a response, before the request fails. Unset leaves the AWS SDK's own timeouts. |
 | <code style={{ whiteSpace: 'nowrap' }}>proxy</code><br />secret | Proxy URL for every HTTP and HTTPS request to the endpoint. |
-| <code style={{ whiteSpace: 'nowrap' }}>walkLimit</code><br />default `1000` | Most files one command walks under a folder: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit. |
 | <code style={{ whiteSpace: 'nowrap' }}>region</code><br />default `'us-east-1'` | Region requests are signed for; the gateway's endpoint does not depend on it. |
 | <code style={{ whiteSpace: 'nowrap' }}>endpoint</code><br />required | URL of the self-hosted S3 gateway, such as `http://localhost:9000`. |
 
@@ -69,7 +68,6 @@ The browser `CephVFS` is secret-free, your backend signs each operation using yo
 | <code style={{ whiteSpace: 'nowrap' }}>endpoint</code> | Endpoint URL that replaces the one the provider derives. Requests go to the host each presigned URL names; the mount uses it to name its storage location. |
 | <code style={{ whiteSpace: 'nowrap' }}>defaultContentType</code><br />default `'application/octet-stream'` | `Content-Type` stored with every object the mount writes. |
 | <code style={{ whiteSpace: 'nowrap' }}>keyPrefix</code> | Key prefix the mount treats as its root. The browser can change it before a URL is signed, so enforce the prefix on the signing server. |
-| <code style={{ whiteSpace: 'nowrap' }}>walkLimit</code><br />default `1000` | Most files one command walks under a folder: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit. |
 
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table browser/ceph end */}

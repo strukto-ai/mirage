@@ -64,7 +64,6 @@ The token reaches the browser, so use a fine-grained PAT scoped to read-only acc
 | <code style={{ whiteSpace: 'nowrap' }}>repo</code><br />required | Repository name. |
 | <code style={{ whiteSpace: 'nowrap' }}>ref</code> | Branch, tag or commit SHA the mount reads. Unset uses the repository's default branch, resolved when the mount is created. |
 | <code style={{ whiteSpace: 'nowrap' }}>baseUrl</code><br />default `'https://api.github.com'` | GitHub API root; set it for GitHub Enterprise. |
-| <code style={{ whiteSpace: 'nowrap' }}>walkLimit</code><br />default `5000` | Most files one command walks under a folder, each file read one blob request: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit and reads every file without asking code search. |
 
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table github end */}

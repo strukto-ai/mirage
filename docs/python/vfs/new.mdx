@@ -355,8 +355,10 @@ lines. A file named on the line and a binary-extension file read under `-a`
 are always read.
 
 `walk_limit` is the most files one command walks under a directory, 1000
-unless your VFS sets it, as `WikiVFS` sets it to 5000; `-1` for no limit.
-Searches and listings stop past it, keeping what they printed, and a search
+unless your VFS starts at another value, as `WikiVFS` starts at 5000; `-1` for
+no limit. A mount's `"*"` [command limit](/home/core/output-limits), else the
+workspace's, replaces it when the VFS is mounted, so read `self.walk_limit`
+when a call runs, not in `__init__`. Searches and listings stop past it, keeping what they printed, and a search
 counts only the files it reads, so a file your search rules out costs nothing.
 A glob matching more is refused.
 

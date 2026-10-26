@@ -120,14 +120,15 @@ export class GCalVFS extends BaseVFS {
   readonly config: GCalConfig
   override readonly accessor: GCalAccessor
 
-  override readonly walkLimit: number
-
   constructor(config: GCalConfig) {
     super()
     this.config = config
-    this.walkLimit = config.walkLimit
     const tm = new TokenManager(config)
-    this.accessor = new GCalAccessor({ tokenManager: tm, config })
+    this.accessor = new GCalAccessor({
+      tokenManager: tm,
+      config,
+      capped: () => this.walkLimit >= 0,
+    })
     this.vfsMd = treeVfsMd(config.bucketDays) + this.accessor.timeRange.vfsMd()
   }
 

@@ -294,9 +294,7 @@ class CutRAM(RAMVFS):
     stops at a walk's ``limit``."""
 
     read_tree = BaseVFS.read_tree
-
-    def __init__(self) -> None:
-        super().__init__(walk_limit=2)
+    walk_limit = 2
 
     async def readdir(self, path, limit=None):
         rows = list(await super().readdir(path))

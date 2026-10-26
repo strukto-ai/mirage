@@ -53,7 +53,6 @@ console.log(res.stdoutText)
 | <code style={{ whiteSpace: 'nowrap' }}>host</code><br />required | Workspace origin, `http://` or `https://`, with no path, query, fragment or credentials. |
 | <code style={{ whiteSpace: 'nowrap' }}>token</code><br />required, secret | Bearer token as a string, or a function, synchronous or asynchronous, that returns one for each request. |
 | <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `30` | Seconds one request may take before it fails. |
-| <code style={{ whiteSpace: 'nowrap' }}>walkLimit</code><br />default `1000` | Most files one command walks under a folder: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit. |
 
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table databricks_volume end */}

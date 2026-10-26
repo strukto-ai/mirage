@@ -159,7 +159,7 @@ async def _list_issues(
             "issue_key": issue.get("identifier"),
             "json_size": len(to_json_bytes(normalize_issue(issue))),
         }
-        if accessor.config.walk_limit >= 0:
+        if accessor.capped():
             extra["unsearched"] = unsearched_text(issue)
         rows.append(
             ISSUE(

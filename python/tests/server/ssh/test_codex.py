@@ -24,6 +24,7 @@ import asyncssh
 import pytest
 
 from mirage import RAMVFS, MountMode, Workspace
+from mirage.policy.builtin.output_cap import ALL_COMMANDS
 from mirage.server.rpc.constants import (
     RPC_INTERNAL_ERROR,
     RPC_INVALID_PARAMS,
@@ -34,6 +35,7 @@ from mirage.server.rpc.constants import (
 from mirage.server.ssh.codex import argv_line, process_env, to_path, to_uri
 from mirage.server.ssh.constants import CODEX_RETAINED_OUTPUT, CODEX_SUBSYSTEM
 from mirage.server.ssh.errors import CodexRPCError
+from mirage.types import Limit
 from tests.server.ssh.conftest import (
     SSHHarness,
     bind_key,
@@ -431,8 +433,16 @@ async def test_walk_stops_at_the_limit_of_the_mount_it_lists(tmp_path):
         tmp_path,
         Workspace(
             {
-                "/": (RAMVFS(walk_limit=-1), MountMode.WRITE),
-                "/w/": (RAMVFS(walk_limit=2), MountMode.WRITE),
+                "/": (
+                    RAMVFS(),
+                    MountMode.WRITE,
+                    {ALL_COMMANDS: Limit(walk_limit=-1)},
+                ),
+                "/w/": (
+                    RAMVFS(),
+                    MountMode.WRITE,
+                    {ALL_COMMANDS: Limit(walk_limit=2)},
+                ),
             }
         ),
     )

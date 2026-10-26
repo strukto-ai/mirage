@@ -38,7 +38,6 @@ import { unlink as hfUnlink } from '../../core/hf_buckets/unlink.ts'
 import { rmR as hfRmR } from '../../core/hf_buckets/rm.ts'
 import { tree as hfTree } from '../../core/hf_buckets/readdir.ts'
 import { rstripSlash, stripSlash } from '@struktoai/mirage-core/utils/slash'
-import { WALK_LIMIT } from '@struktoai/mirage-core/vfs/constants'
 
 export interface HfBucketsVFSState {
   type: string
@@ -60,10 +59,8 @@ export class HfBucketsVFS extends BaseVFS {
   readonly config: HfBucketsConfig
   override readonly accessor: HfBucketsAccessor
 
-  override readonly walkLimit: number
   constructor(config: HfBucketsConfig) {
     super()
-    this.walkLimit = config.walkLimit ?? WALK_LIMIT
     assertHfRepoId(config.bucket, 'bucket')
     const normalized = normalizeKeyPrefix(config.keyPrefix)
     const cfg: HfBucketsConfig = { ...config }

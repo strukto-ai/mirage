@@ -70,7 +70,6 @@ before running `search`.
 | <code style={{ whiteSpace: 'nowrap' }}>embeddingModel</code><br />default `'sentence-transformers/all-MiniLM-L6-v2'` | Model the server embeds a `search` query with under `cloudInference`; it must match the model the stored vectors came from. |
 | <code style={{ whiteSpace: 'nowrap' }}>cloudInference</code><br />default `false` | Send the `search` query text to the server to embed, which needs a cluster with inference enabled (Qdrant Cloud). `embed` takes precedence; with neither, `search` refuses the query. |
 | <code style={{ whiteSpace: 'nowrap' }}>embed</code><br />secret | Async function that turns a `search` query into a vector in-process, `(text: string) => Promise<number[]>`. |
-| <code style={{ whiteSpace: 'nowrap' }}>walkLimit</code><br />default `1000` | Most files one command walks under a folder: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit. |
 
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table qdrant end */}

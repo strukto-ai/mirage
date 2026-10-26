@@ -43,7 +43,6 @@ ws = Workspace({"/email": vfs}, mode=MountMode.READ)
 | <code style={{ whiteSpace: 'nowrap' }}>password</code><br />required, secret | Password or app password for `username`. |
 | <code style={{ whiteSpace: 'nowrap' }}>use_ssl</code><br />default `True` | Speak TLS from the first byte of the IMAP connection (IMAPS); off connects in plaintext. SMTP follows `smtp_port` instead. |
 | <code style={{ whiteSpace: 'nowrap' }}>max_messages</code><br />default `200` | How many of a folder's newest messages the mount lists and `grep` searches, and the window `himalaya envelope list` and `search` page through. |
-| <code style={{ whiteSpace: 'nowrap' }}>walk_limit</code><br />default `1000` | Most files one command walks under a folder: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit and reads every message without asking the server (IMAP `SEARCH TEXT`), which searches headers and body, not the mounted JSON. |
 | <code style={{ whiteSpace: 'nowrap' }}>save_copy</code><br />default `True` | After `himalaya` sends a message, append a copy to `sent_folder`, as upstream himalaya's `message.send.save-copy`. Off saves a copy only when `--save` names a mailbox. |
 | <code style={{ whiteSpace: 'nowrap' }}>sent_folder</code> | Mailbox a sent copy goes to. Unset asks the server for the mailbox tagged `\Sent` and falls back to `Sent`. |
 
@@ -362,6 +361,6 @@ read.
 
 Every message is read when the text is a key of the message JSON or a flag
 name, holds anything but ASCII letters and spaces, matches more than
-`max_messages` messages in a folder, or the search fails. `walk_limit: -1` reads every file instead, since a server that answers `SEARCH` from a full-text index (Dovecot
+`max_messages` messages in a folder, or the search fails. `walk_limit: -1` in the mount's `"*"` [command limit](/home/core/output-limits) reads every file instead, since a server that answers `SEARCH` from a full-text index (Dovecot
 with an FTS plugin, for one) matches words rather than substrings, so a
 narrowed scan could miss a message there.

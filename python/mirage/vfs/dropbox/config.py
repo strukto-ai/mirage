@@ -12,9 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from pydantic import BaseModel, ConfigDict, Field, SecretStr
-
-from mirage.vfs.constants import WALK_LIMIT
+from pydantic import BaseModel, ConfigDict, SecretStr
 
 
 class DropboxConfig(BaseModel):
@@ -30,11 +28,6 @@ class DropboxConfig(BaseModel):
     root_path: str = "/"
     """Dropbox folder the mount uses as its root, such as `/Projects`; `/`
     is the account root. `..` segments are rejected."""
-    walk_limit: int = Field(default=WALK_LIMIT, ge=-1)
-    """Most files one command walks under a folder: `grep -r`, `find` and other
-    walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is
-    refused. `-1` lifts the limit and reads every file without asking Dropbox
-    search, which needs a plan with full-text search and lags writes."""
     endpoint: str | None = None
     """Base URL that replaces Dropbox's OAuth, API and content hosts, such
     as a test server. Unset uses Dropbox's hosts."""

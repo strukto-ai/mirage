@@ -29,7 +29,6 @@ import { readdir as trelloReaddir } from '../../core/trello/readdir.ts'
 import { read as trelloRead } from '../../core/trello/read.ts'
 import { stat as trelloStat } from '../../core/trello/stat.ts'
 import { filesContaining as trelloFilesContaining } from '../../core/trello/search.ts'
-import { WALK_LIMIT } from '../constants.ts'
 
 export const VFS_MD = `{prefix}
   workspaces/
@@ -79,12 +78,9 @@ export class TrelloVFS extends BaseVFS {
     'workspaces/*/boards/*/lists/*/cards/*/card.json',
   ]
 
-  override readonly walkLimit: number
-
   constructor(config: TrelloConfig) {
     super()
     this.config = config
-    this.walkLimit = config.walkLimit ?? WALK_LIMIT
     const transportOpts: { apiKey: string; apiToken: string; baseUrl?: string } = {
       apiKey: config.apiKey,
       apiToken: config.apiToken,
@@ -93,11 +89,10 @@ export class TrelloVFS extends BaseVFS {
     const accessorOpts: {
       workspaceId?: string
       boardIds?: readonly string[]
-      walkLimit?: number
-    } = {}
+      capped: () => boolean
+    } = { capped: () => this.walkLimit >= 0 }
     if (config.workspaceId !== undefined) accessorOpts.workspaceId = config.workspaceId
     if (config.boardIds !== undefined) accessorOpts.boardIds = config.boardIds
-    accessorOpts.walkLimit = this.walkLimit
     this.accessor = new TrelloAccessor(new HttpTrelloTransport(transportOpts), accessorOpts)
   }
 

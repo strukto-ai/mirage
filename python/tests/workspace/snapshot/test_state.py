@@ -36,6 +36,7 @@ from mirage import (
 from mirage.cache.file.config import RedisCacheConfig
 from mirage.cache.index import IndexConfig, RedisIndexConfig
 from mirage.policy import Action, Deny, Policy, PolicyDenied
+from mirage.policy.builtin.output_cap import ALL_COMMANDS
 from mirage.policy.types import SessionContext
 from mirage.secrets import registry
 from mirage.secrets.registry import register_secrets
@@ -43,6 +44,7 @@ from mirage.secrets.types import ResolvedSecret
 from mirage.types import (
     ContentType,
     FileType,
+    Limit,
     ListingVersion,
     ReadPolicy,
     ReadSpec,
@@ -1199,12 +1201,10 @@ async def test_a_rebuilt_local_mount_keeps_its_walk_limit(
 ):
     root = tmp_path / "root"
     root.mkdir()
-    vfs = (
-        RAMVFS(walk_limit=limit)
-        if kind == "ram"
-        else DiskVFS(str(root), walk_limit=limit)
+    vfs = RAMVFS() if kind == "ram" else DiskVFS(str(root))
+    ws = Workspace(
+        {"/d": vfs}, command_limits={ALL_COMMANDS: Limit(walk_limit=limit)}
     )
-    ws = Workspace({"/d": vfs})
     try:
         if route == "copy":
             rebuilt = await ws.copy()

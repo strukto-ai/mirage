@@ -35,7 +35,6 @@ export interface OCIConfig {
   keyPrefix?: string
   timeoutMs?: number
   proxy?: string
-  walkLimit?: number
 }
 
 const OCIConfigSchema = z.object({
@@ -82,7 +81,6 @@ export function ociToS3Config(config: OCIConfig): S3Config {
     ...(config.keyPrefix !== undefined ? { keyPrefix: config.keyPrefix } : {}),
     ...(config.timeoutMs !== undefined ? { timeoutMs: config.timeoutMs } : {}),
     ...(config.proxy !== undefined ? { proxy: config.proxy } : {}),
-    ...(config.walkLimit !== undefined ? { walkLimit: config.walkLimit } : {}),
   }
 }
 

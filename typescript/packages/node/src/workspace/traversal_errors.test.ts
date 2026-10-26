@@ -14,11 +14,8 @@ const DEC = new TextDecoder()
 async function setup(kind: string, count = 0, walkLimit?: number) {
   const root = await mkdtemp(join(tmpdir(), 'mirage-walk-'))
   const opened: string[] = []
-  const limit = walkLimit === undefined ? {} : { walkLimit }
-  const vfs =
-    kind === 'disk'
-      ? new DiskVFS({ root, ...limit })
-      : new SSHVFS({ host: 'fake', root: '/srv', ...limit })
+  const vfs = kind === 'disk' ? new DiskVFS({ root }) : new SSHVFS({ host: 'fake', root: '/srv' })
+  if (walkLimit !== undefined) vfs.walkLimit = walkLimit
   if (kind === 'disk') {
     for (const name of ['a', 'b', 'c']) {
       await mkdir(join(root, name))

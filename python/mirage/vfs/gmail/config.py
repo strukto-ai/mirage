@@ -12,15 +12,9 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from pydantic import Field
 
 from mirage.core.google.config import GoogleConfig
-from mirage.vfs.constants import WALK_LIMIT
 
 
 class GmailConfig(GoogleConfig):
-    walk_limit: int = Field(default=WALK_LIMIT, ge=-1)
-    """Most files one command walks under a folder: `grep -r`, `find` and other
-    walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is
-    refused. `-1` lifts the limit, and the listing then keeps no message
-    text."""
+    pass

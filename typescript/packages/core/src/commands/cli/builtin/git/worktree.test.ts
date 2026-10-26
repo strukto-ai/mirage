@@ -14,7 +14,8 @@
 
 import { describe, expect, it } from 'vitest'
 import { getTestParser } from '../../../../../tests/workspace/fixtures/workspace_fixture.ts'
-import { type FileStat, MountMode, type PathSpec } from '../../../../types.ts'
+import { ALL_COMMANDS } from '../../../../policy/builtin/output_cap.ts'
+import { type FileStat, Limit, MountMode, type PathSpec } from '../../../../types.ts'
 import type { Handed } from '../../../../vfs/types.ts'
 import { RAMVFS } from '../../../../vfs/ram/ram.ts'
 import { Workspace } from '../../../../workspace/workspace/workspace.ts'
@@ -36,7 +37,13 @@ describe('a work tree past the walk_limit', () => {
     ['rm -q --cached b.txt', 1, false],
   ] as [string, number, boolean][])('git %s at %i refused: %s', async (line, limit, refused) => {
     const ws = new Workspace(
-      { '/repo': new RAMVFS({ walkLimit: limit }) },
+      {
+        '/repo': [
+          new RAMVFS(),
+          MountMode.WRITE,
+          { [ALL_COMMANDS]: new Limit({ walkLimit: limit }) },
+        ],
+      },
       { mode: MountMode.WRITE, shellParser: await getTestParser() },
     )
     ws.registerCli('git', GIT)
@@ -66,10 +73,7 @@ describe('a work tree past the walk_limit', () => {
 // it was handed. Twin of Python's TreeRAM.
 class TreeRAM extends RAMVFS {
   readonly trees: [string, number | undefined][] = []
-
-  constructor() {
-    super({ walkLimit: 10 })
-  }
+  override walkLimit = 10
 
   override readTree(path: PathSpec, handed?: Handed): Promise<Map<string, FileStat> | null> {
     this.trees.push([path.virtual, handed?.limit])

@@ -49,7 +49,6 @@ The VFS is read-only. A snapshot keeps its config, and a load needs the mount ha
 | <code style={{ whiteSpace: 'nowrap' }}>collection_name</code><br />required | Name of the existing Chroma collection to mount. |
 | <code style={{ whiteSpace: 'nowrap' }}>slug_field</code><br />default `'page_slug'` | Chunk metadata key that holds the path of the file a chunk belongs to, relative to the mount root (`guides/quickstart.md`). |
 | <code style={{ whiteSpace: 'nowrap' }}>chunk_index_field</code><br />default `'chunk_index'` | Chunk metadata key whose integer orders a file's chunks; a chunk without one sorts as `0`. |
-| <code style={{ whiteSpace: 'nowrap' }}>walk_limit</code><br />default `1000` | Most files one command walks under a folder: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit. |
 {/* generated: config-table chroma end */}
 
 ## VFS.md

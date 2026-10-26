@@ -2,7 +2,8 @@ import pytest
 from pydantic import SecretStr
 
 from mirage.commands.cli.builtin.search import SEARCH
-from mirage.types import VFSName
+from mirage.policy.builtin.output_cap import ALL_COMMANDS
+from mirage.types import Limit, MountMode, VFSName
 from mirage.vfs.mem0 import Mem0Config
 from mirage.vfs.mem0.mem0 import Mem0VFS
 from mirage.workspace import Workspace
@@ -103,11 +104,11 @@ async def test_find_pages_the_memories_no_further_than_its_walk_limit():
         api_key=SecretStr("secret"),
         user_id="alex",
         default_page_size=1,
-        walk_limit=2,
     )
     vfs = Mem0VFS(cfg)
     vfs.accessor._client = _PagedClient()
-    ws = Workspace({"/m": vfs})
+    limits = {ALL_COMMANDS: Limit(walk_limit=2)}
+    ws = Workspace({"/m": (vfs, MountMode.READ, limits)})
     try:
         await ws.shell("find /m")
         assert vfs.accessor._client.pages == [1, 2, 3]

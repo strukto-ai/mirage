@@ -20,10 +20,6 @@ ws = Workspace({"/data": vfs}, mode=MountMode.WRITE)
 
 `RAMVFS()` needs no configuration object.
 
-| Field | Default | Notes |
-| --- | --- | --- |
-| `walk_limit` | `10000` | Most files one command walks under a folder: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit. |
-
 ## VFS.md
 
 The [VFS.md](/home/setup/vfs-md) an agent reads with RAM mounted at `/<path>`.

@@ -40,7 +40,6 @@ ws = Workspace({"/langfuse": vfs}, mode=MountMode.READ)
 | <code style={{ whiteSpace: 'nowrap' }}>host</code><br />default `'https://cloud.langfuse.com'` | Langfuse API host; override for a self-hosted or regional instance. |
 | <code style={{ whiteSpace: 'nowrap' }}>default_trace_limit</code><br />default `100` | The most traces one trace listing (`traces/` or a session's traces) shows. An older trace is still readable by its id. |
 | <code style={{ whiteSpace: 'nowrap' }}>default_from_timestamp</code> | List only traces from this ISO 8601 timestamp on. Unset lists whatever the project holds, up to `default_trace_limit`. |
-| <code style={{ whiteSpace: 'nowrap' }}>walk_limit</code><br />default `1000` | Most files one command walks under a folder: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit. |
 
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table langfuse end */}

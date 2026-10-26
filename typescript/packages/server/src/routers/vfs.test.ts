@@ -57,7 +57,7 @@ describe('glob past the walk_limit', () => {
         payload: {
           config: {
             mode: 'write',
-            mounts: { '/': { vfs: 'ram', config: { walk_limit: 2 } } },
+            mounts: { '/': { vfs: 'ram', command_limits: { '*': { walk_limit: 2 } } } },
           },
         },
       })

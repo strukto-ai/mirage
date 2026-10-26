@@ -33,7 +33,6 @@ import { makeFilename } from './doc_entry.ts'
 import type { DeltaHook } from '../../events/base.ts'
 import { unlink as gdocsUnlink } from '../../core/gdocs/unlink.ts'
 import { rename as gdocsRename } from '../../core/gdocs/rename.ts'
-import { WALK_LIMIT } from '../constants.ts'
 
 export const VFS_MD = `{prefix}
   owned/
@@ -139,12 +138,9 @@ export class GDocsVFS extends BaseVFS {
   readonly config: GDocsConfig
   override readonly accessor: GDocsAccessor
 
-  override readonly walkLimit: number
-
   constructor(config: GDocsConfig) {
     super()
     this.config = config
-    this.walkLimit = config.walkLimit ?? WALK_LIMIT
     const tm = new TokenManager(config)
     this.accessor = new GDocsAccessor({ tokenManager: tm })
   }

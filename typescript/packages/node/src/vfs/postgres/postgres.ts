@@ -28,7 +28,6 @@ import { VFS_MD } from '@struktoai/mirage-core/vfs/postgres/postgres'
 import { VFSName } from '@struktoai/mirage-core/types'
 
 import { PostgresStore } from './store.ts'
-import { WALK_LIMIT } from '@struktoai/mirage-core/vfs/constants'
 
 export interface PostgresVFSOptions {
   config: PostgresConfig
@@ -50,13 +49,11 @@ export class PostgresVFS extends PostgresVFSBase {
   readonly store: PostgresStore
   override readonly accessor: PostgresAccessor
 
-  override readonly walkLimit: number
   constructor(options: PostgresVFSOptions | PostgresConfig) {
     super()
     const { config, prefix } =
       'config' in options ? options : { config: options, prefix: undefined }
     this.config = resolvePostgresConfig(config)
-    this.walkLimit = config.walkLimit ?? WALK_LIMIT
     this.store = new PostgresStore(this.config)
     this.accessor = new PostgresAccessor(this.store, this.config)
     this.vfsMd = prefix === undefined ? VFS_MD : VFS_MD.replace('{prefix}', prefix)

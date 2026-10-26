@@ -12,9 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from pydantic import BaseModel, ConfigDict, Field, SecretStr
-
-from mirage.vfs.constants import WALK_LIMIT
+from pydantic import BaseModel, ConfigDict, SecretStr
 
 
 class PostgresConfig(BaseModel):
@@ -35,7 +33,3 @@ class PostgresConfig(BaseModel):
     max_read_bytes: int = 10 * 1024 * 1024
     """Most bytes of `rows.jsonl` one read returns; a whole read past it is
     refused (`File too large`)."""
-    walk_limit: int = Field(default=WALK_LIMIT, ge=-1)
-    """Most files one command walks under a folder: `grep -r`, `find` and other
-    walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is
-    refused. `-1` lifts the limit."""

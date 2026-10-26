@@ -196,10 +196,13 @@ export function gcalConfig(overrides: Record<string, unknown> = {}): GCalConfig 
   })
 }
 
-/** An accessor for `gcalConfig(overrides)`. */
-export function makeAccessor(overrides: Record<string, unknown> = {}): GCalAccessor {
+/** An accessor for `gcalConfig(overrides)`, walking under a cap unless `capped` says not. */
+export function makeAccessor(
+  overrides: Record<string, unknown> = {},
+  capped = (): boolean => true,
+): GCalAccessor {
   const config = gcalConfig(overrides)
-  return new GCalAccessor({ tokenManager: new TokenManager(config), config })
+  return new GCalAccessor({ tokenManager: new TokenManager(config), config, capped })
 }
 
 /** A mount-relative PathSpec, globbed when a pattern is given. */

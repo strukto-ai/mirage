@@ -24,9 +24,10 @@ import { Workspace } from '../../../../workspace/workspace/workspace.ts'
 // listing is handed. Twin of Python's AskedRAM.
 class AskedRAM extends RAMVFS {
   readonly asked: (number | undefined)[] = []
+  override walkLimit = 2
 
   constructor() {
-    super({ walkLimit: 2 })
+    super()
     this.store.dirs.add('/d')
     for (const name of ['a', 'b', 'c']) this.store.files.set(`/d/${name}`, new Uint8Array())
   }

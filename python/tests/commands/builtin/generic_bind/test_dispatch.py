@@ -22,7 +22,8 @@ from mirage.commands.config import command
 from mirage.commands.spec import SPECS
 from mirage.errors.fs import eacces
 from mirage.io import IOResult
-from mirage.types import MountMode, PathSpec
+from mirage.policy.builtin.output_cap import ALL_COMMANDS
+from mirage.types import Limit, MountMode, PathSpec
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
@@ -89,10 +90,24 @@ async def _unmeasured_du(accessor, paths, texts, opts):
 @pytest.mark.asyncio
 async def test_du_walk_charges_each_mount_its_own_limit():
     # A du that reports no measurement leaves the line to this walk.
-    outer, inner = RAMVFS(walk_limit=-1), RAMVFS(walk_limit=2)
+    outer, inner = RAMVFS(), RAMVFS()
     outer.load_state({"files": {f"/f{i}": b"x" for i in range(4)}})
     inner.load_state({"files": {f"/g{i}": b"y" for i in range(3)}})
-    ws = Workspace({"/a": outer, "/a/b": inner}, mode=MountMode.WRITE)
+    ws = Workspace(
+        {
+            "/a": (
+                outer,
+                MountMode.WRITE,
+                {ALL_COMMANDS: Limit(walk_limit=-1)},
+            ),
+            "/a/b": (
+                inner,
+                MountMode.WRITE,
+                {ALL_COMMANDS: Limit(walk_limit=2)},
+            ),
+        },
+        mode=MountMode.WRITE,
+    )
     install(ws.mount("/a/b"), [_unmeasured_du])
     try:
         result = await ws.shell("du -a /a")

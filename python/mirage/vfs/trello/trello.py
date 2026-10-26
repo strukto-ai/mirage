@@ -62,8 +62,9 @@ class TrelloVFS(BaseVFS):
     def __init__(self, config: TrelloConfig) -> None:
         super().__init__()
         self.config = config
-        self.walk_limit = config.walk_limit
-        self.accessor = TrelloAccessor(self.config)
+        self.accessor = TrelloAccessor(
+            self.config, lambda: self.walk_limit >= 0
+        )
 
     def supports(self, name: str) -> bool:
         """Whether this VFS answers ``name``; with no walk limit it reads

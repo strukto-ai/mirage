@@ -30,7 +30,6 @@ import { DIFY_TREE } from '../../core/dify/tree.ts'
 import { read, readStream } from '../../core/dify/read.ts'
 import { stat } from '../../core/dify/stat.ts'
 import { searchMany } from '../../core/dify/search.ts'
-import { WALK_LIMIT } from '../constants.ts'
 
 export const VFS_MD = `This is a Dify Knowledge Base mounted as a read-only filesystem.
 
@@ -61,11 +60,9 @@ export class DifyVFS extends BaseVFS {
   readonly config: DifyConfigResolved
   override readonly accessor: DifyAccessor
 
-  override readonly walkLimit: number
   constructor(options: DifyVFSOptions | DifyConfig) {
     super()
     const config = 'config' in options ? options.config : options
-    this.walkLimit = config.walkLimit ?? WALK_LIMIT
     this.config = resolveDifyConfig(config)
     this.accessor = new DifyAccessor(this.config)
   }

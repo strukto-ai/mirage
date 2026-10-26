@@ -53,7 +53,6 @@ class GridFSVFS(BaseVFS):
     def __init__(self, config: GridFSConfig) -> None:
         super().__init__()
         self.config = config
-        self.walk_limit = config.walk_limit
         self.accessor = GridFSAccessor(self.config)
 
     async def readdir(

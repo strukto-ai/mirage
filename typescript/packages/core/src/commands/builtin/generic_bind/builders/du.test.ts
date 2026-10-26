@@ -393,9 +393,7 @@ describe('du -L through a directory it may not list', () => {
 // A RAM mount held to two files, with no tree read, whose listing stops at
 // a walk's limit. Twin of Python's CutRAM.
 class CutRAM extends RAMVFS {
-  constructor() {
-    super({ walkLimit: 2 })
-  }
+  override walkLimit = 2
 }
 // RAMVFS narrows readdir to a plain array, so the cut listing goes on the
 // prototype.

@@ -52,6 +52,7 @@ from mirage.policy import (
     VfsContext,
     VfsResultContext,
 )
+from mirage.policy.builtin.output_cap import ALL_COMMANDS
 from mirage.policy.builtin.permissions import PermissionsPolicy
 from mirage.policy.types import EntryGate
 from mirage.types import (
@@ -2970,8 +2971,10 @@ async def test_a_scan_guard_counts_only_the_files_the_session_sees(
 class TreeCountingRAM(RAMVFS):
     """A RAM mount with no walk guard that counts its tree reads."""
 
+    walk_limit = -1
+
     def __init__(self) -> None:
-        super().__init__(walk_limit=-1)
+        super().__init__()
         self.trees = 0
 
     async def read_tree(self, path):
@@ -2991,8 +2994,7 @@ async def test_a_mount_with_no_scan_guard_is_not_counted():
 class LimitedRAM(RAMVFS):
     """A RAM mount held to a ``walk_limit`` with no guard of its own."""
 
-    def __init__(self) -> None:
-        super().__init__(walk_limit=2)
+    walk_limit = 2
 
 
 class ListedRAM(LimitedRAM):
@@ -3169,15 +3171,25 @@ async def test_lines_a_search_hands_over_count_against_the_limit():
     assert vfs.asked == ["/ram/d/f0.txt", "/ram/d/f1.txt"]
 
 
+def _capped(
+    top: RAMVFS, remote: RAMVFS, mode: MountMode = MountMode.READ
+) -> dict[str, tuple[RAMVFS, MountMode, dict[str, Limit]]]:
+    """``top`` at ``/a`` with no walk cap and ``remote`` under it at
+    ``/a/remote`` held to two files."""
+    return {
+        "/a/": (top, mode, {ALL_COMMANDS: Limit(walk_limit=-1)}),
+        "/a/remote/": (remote, mode, {ALL_COMMANDS: Limit(walk_limit=2)}),
+    }
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("sort", ["path", "modified"])
 async def test_a_planned_rg_counts_each_file_against_its_own_mount(sort):
-    top = RAMVFS(walk_limit=-1)
+    top, remote = RAMVFS(), RAMVFS()
     top._store.files["/t.txt"] = b"hello\n"
-    remote = RAMVFS(walk_limit=2)
     for i in range(4):
         remote._store.files[f"/r{i}.txt"] = b"hello\n"
-    with Workspace({"/a/": top, "/a/remote/": remote}) as ws:
+    with Workspace(_capped(top, remote)) as ws:
         out = await ws.shell(f"rg --sort {sort} -l hello /a")
         assert (
             sorted((await out.stdout_str()).splitlines()),
@@ -3199,13 +3211,12 @@ NESTED_REFUSED = (
 @pytest.mark.asyncio
 @pytest.mark.parametrize("command", ["cat", "echo"])
 async def test_a_glob_counts_each_match_against_its_own_mount(command):
-    top = RAMVFS(walk_limit=-1)
+    top, remote = RAMVFS(), RAMVFS()
     top._store.dirs.add("/b")
     top._store.files["/b/t.txt"] = b"t\n"
-    remote = RAMVFS(walk_limit=2)
     for i in range(3):
         remote._store.files[f"/r{i}.txt"] = b"r\n"
-    with Workspace({"/a/": top, "/a/remote/": remote}) as ws:
+    with Workspace(_capped(top, remote)) as ws:
         out = await ws.shell(f"{command} /a/*/*.txt; echo $?")
         assert (await out.stdout_str(), await out.stderr_str()) == (
             "126\n",
@@ -3216,13 +3227,12 @@ async def test_a_glob_counts_each_match_against_its_own_mount(command):
 
 @pytest.mark.asyncio
 async def test_a_glob_through_a_link_counts_against_the_target_mount():
-    top = RAMVFS(walk_limit=-1)
+    top, remote = RAMVFS(), RAMVFS()
     top._store.dirs.add("/data")
     for i in range(3):
         top._store.files[f"/data/t{i}.txt"] = b"t\n"
-    remote = RAMVFS(walk_limit=2)
     with Workspace(
-        {"/a/": top, "/a/remote/": remote}, mode=MountMode.WRITE
+        _capped(top, remote, MountMode.WRITE), mode=MountMode.WRITE
     ) as ws:
         await ws.shell("ln -s /a/data /a/remote/link")
         out = await ws.shell("echo /a/*/*/*.txt; echo $?")

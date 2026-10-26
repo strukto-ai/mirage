@@ -21,7 +21,6 @@ import type { SlackConfig, SlackConfigRedacted } from '@struktoai/mirage-core/vf
 
 import { VFS_MD } from '@struktoai/mirage-core/vfs/slack/slack'
 import { VFSName } from '@struktoai/mirage-core/types'
-import { WALK_LIMIT } from '@struktoai/mirage-core/vfs/constants'
 
 export interface SlackVFSState {
   type: string
@@ -40,12 +39,9 @@ export class SlackVFS extends SlackVFSBase {
   readonly config: SlackConfig
   override readonly accessor: SlackAccessor
 
-  override readonly walkLimit: number
-
   constructor(config: SlackConfig) {
     super()
     this.config = config
-    this.walkLimit = config.walkLimit ?? WALK_LIMIT
     this.accessor = new SlackAccessor(
       new NodeSlackTransport(config.token, config.searchToken, config.baseUrl),
       config,

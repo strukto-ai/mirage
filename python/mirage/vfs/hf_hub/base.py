@@ -73,7 +73,6 @@ class HfHubVFS(BaseVFS, Generic[A]):
     def __init__(self, config: Any) -> None:
         super().__init__()
         self.config = config
-        self.walk_limit = config.walk_limit
         self.accessor = self.ACCESSOR(account_of(config), config)
 
     async def readdir(self, path: PathSpec) -> DirListing:

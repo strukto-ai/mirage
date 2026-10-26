@@ -14,7 +14,6 @@
 
 import { Accessor } from './base.ts'
 import type { TrelloTransport } from '../core/trello/client.ts'
-import { WALK_LIMIT } from '../vfs/constants.ts'
 
 /**
  * The mount's handle: the transport plus the configured visibility filter.
@@ -27,16 +26,21 @@ export class TrelloAccessor extends Accessor {
   readonly transport: TrelloTransport
   readonly workspaceId: string | null
   readonly boardIds: readonly string[] | null
-  readonly walkLimit: number
+  /**
+   * Whether the mount walks under a `walkLimit`, asked when a listing runs,
+   * since the mount settles its own once mounted; a listing then keeps each
+   * card's unsearched text for the search.
+   */
+  readonly capped: () => boolean
 
   constructor(
     transport: TrelloTransport,
-    options: { workspaceId?: string; boardIds?: readonly string[]; walkLimit?: number } = {},
+    options: { workspaceId?: string; boardIds?: readonly string[]; capped?: () => boolean } = {},
   ) {
     super()
     this.transport = transport
     this.workspaceId = options.workspaceId ?? null
     this.boardIds = options.boardIds ?? null
-    this.walkLimit = options.walkLimit ?? WALK_LIMIT
+    this.capped = options.capped ?? (() => true)
   }
 }

@@ -85,7 +85,6 @@ class GoogleDriveVFS(BaseVFS):
     def __init__(self, config: GoogleDriveConfig) -> None:
         super().__init__()
         self.config = config
-        self.walk_limit = config.walk_limit
         self.accessor = GDriveAccessor(self.config, TokenManager(config))
 
     async def readdir(

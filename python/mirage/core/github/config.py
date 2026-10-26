@@ -12,9 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from pydantic import BaseModel, ConfigDict, Field, SecretStr
-
-from mirage.core.github.constants import WALK_LIMIT
+from pydantic import BaseModel, ConfigDict, SecretStr
 
 
 class GitHubConfig(BaseModel):
@@ -38,11 +36,6 @@ class GitHubConfig(BaseModel):
     base_url: str | None = None
     """GitHub API root. Unset uses `https://api.github.com`; set it for
     GitHub Enterprise."""
-    walk_limit: int = Field(default=WALK_LIMIT, ge=-1)
-    """Most files one command walks under a folder, each file read one blob
-    request: `grep -r`, `find` and other walks stop there, and a larger glob,
-    `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit and reads
-    every file without asking code search."""
 
 
 class GhConfig(BaseModel):

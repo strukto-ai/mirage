@@ -12,11 +12,25 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import Callable
+
 from mirage.accessor.base import SessionAccessor
 from mirage.core.linear.config import LinearConfig
 
 
 class LinearAccessor(SessionAccessor):
-    def __init__(self, config: LinearConfig) -> None:
+    def __init__(
+        self,
+        config: LinearConfig,
+        capped: Callable[[], bool] = lambda: True,
+    ) -> None:
+        """Args:
+        config (LinearConfig): the account and its team filter.
+        capped (Callable[[], bool]): whether the mount walks under a
+            ``walk_limit``, asked when a listing runs, since the mount
+            settles its own once mounted; a listing then keeps each
+            issue's unsearched text for the search.
+        """
         super().__init__()
         self.config = config
+        self.capped = capped

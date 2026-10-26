@@ -10,7 +10,6 @@ import { readdir } from '../../core/mem0/readdir.ts'
 import { readStream } from '../../core/mem0/read.ts'
 import { stat } from '../../core/mem0/stat.ts'
 import { searchMany } from '../../core/mem0/search.ts'
-import { WALK_LIMIT } from '../constants.ts'
 
 export const VFS_MD = `{prefix}
   <memory-id>.json`
@@ -37,11 +36,9 @@ export class Mem0VFS extends BaseVFS {
 
   private readonly config: Mem0Config
 
-  override readonly walkLimit: number
   constructor(config: Mem0Config) {
     super()
     this.config = config
-    this.walkLimit = config.walkLimit ?? WALK_LIMIT
     this.accessor = new Mem0Accessor(config)
   }
 

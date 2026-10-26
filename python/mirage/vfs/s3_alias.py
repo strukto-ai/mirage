@@ -14,9 +14,8 @@
 
 from typing import Any, ClassVar
 
-from pydantic import BaseModel, ConfigDict, Field, SecretStr
+from pydantic import BaseModel, ConfigDict, SecretStr
 
-from mirage.vfs.constants import WALK_LIMIT
 from mirage.vfs.s3 import S3VFS, S3Config
 
 
@@ -70,10 +69,6 @@ class S3AliasConfig(BaseModel):
     the request fails."""
     proxy: SecretStr | None = None
     """Proxy URL for every HTTP and HTTPS request to the endpoint."""
-    walk_limit: int = Field(default=WALK_LIMIT, ge=-1)
-    """Most files one command walks under a folder: `grep -r`, `find` and other
-    walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is
-    refused. `-1` lifts the limit."""
 
     def resolved_endpoint_url(self) -> str:
         raise NotImplementedError
@@ -91,7 +86,6 @@ class S3AliasConfig(BaseModel):
             key_prefix=self.key_prefix,
             timeout=self.timeout,
             proxy=self.proxy,
-            walk_limit=self.walk_limit,
         )
 
 

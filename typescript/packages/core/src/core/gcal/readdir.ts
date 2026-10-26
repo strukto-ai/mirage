@@ -331,5 +331,5 @@ export async function readdir(
   const days = scopedBucket(accessor, match.slots.bucket ?? '', tz, path.virtual)
   const [timeMin, timeMax] = dayBounds(days[0] ?? '', tz, days.length)
   const events = await accessor.calendar.listEvents(calId, timeMin, timeMax, tz, accessor.timeRange)
-  return eventEntries(events, days, tz, freeBusy, size > 1, accessor.config.walkLimit >= 0)
+  return eventEntries(events, days, tz, freeBusy, size > 1, accessor.capped())
 }

@@ -3,7 +3,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { getTestParser } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Mem0Accessor } from '../../accessor/mem0.ts'
 import { SEARCH } from '../../commands/cli/builtin/search/index.ts'
-import { PathSpec, type FileStat } from '../../types.ts'
+import { ALL_COMMANDS } from '../../policy/builtin/output_cap.ts'
+import { Limit, MountMode, PathSpec, type FileStat } from '../../types.ts'
 import { Mem0VFS } from '../../vfs/mem0/mem0.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
 import { readdir } from './readdir.ts'
@@ -240,8 +241,9 @@ it('lets find page memories no further than its walk limit', async () => {
     ),
   )
   vi.stubGlobal('fetch', fetchMock)
+  const vfs = new Mem0VFS({ apiKey: 'key', userId: 'alex', defaultPageSize: 1 })
   const ws = new Workspace(
-    { '/m': new Mem0VFS({ apiKey: 'key', userId: 'alex', defaultPageSize: 1, walkLimit: 2 }) },
+    { '/m': [vfs, MountMode.READ, { [ALL_COMMANDS]: new Limit({ walkLimit: 2 }) }] },
     { shellParser: await getTestParser() },
   )
   try {

@@ -40,7 +40,6 @@ path.
 | <code style={{ whiteSpace: 'nowrap' }}>default_row_limit</code><br />default `1000` | Rows a windowed read returns when it passes an offset but no limit, and the rows one page of a streamed `rows.jsonl` fetches. |
 | <code style={{ whiteSpace: 'nowrap' }}>max_read_rows</code><br />default `10000` | Most rows one read returns. A whole read past it is refused, and so is a `head -n` / `tail -n` count past it on a table that long (`File too large`); `wc -l` counts past it. |
 | <code style={{ whiteSpace: 'nowrap' }}>max_read_bytes</code><br />default `10485760` (10 MiB) | Most bytes of `rows.jsonl` one read returns; a whole read past it is refused (`File too large`). |
-| <code style={{ whiteSpace: 'nowrap' }}>walk_limit</code><br />default `1000` | Most files one command walks under a folder: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit. |
 
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table postgres end */}

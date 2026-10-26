@@ -12,11 +12,25 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import Callable
+
 from mirage.accessor.base import SessionAccessor
 from mirage.core.trello.config import TrelloConfig
 
 
 class TrelloAccessor(SessionAccessor):
-    def __init__(self, config: TrelloConfig) -> None:
+    def __init__(
+        self,
+        config: TrelloConfig,
+        capped: Callable[[], bool] = lambda: True,
+    ) -> None:
+        """Args:
+        config (TrelloConfig): the account and its visibility filter.
+        capped (Callable[[], bool]): whether the mount walks under a
+            ``walk_limit``, asked when a listing runs, since the mount
+            settles its own once mounted; a listing then keeps each
+            card's unsearched text for the search.
+        """
         super().__init__()
         self.config = config
+        self.capped = capped

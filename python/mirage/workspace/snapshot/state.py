@@ -31,6 +31,7 @@ from mirage.core.disk.utils import open_regular
 from mirage.io.config import IOConfig
 from mirage.observe.log_entry import EVENT_CLEAR, EVENT_COMMAND, EVENT_DELETE
 from mirage.observe.observer import Observer
+from mirage.policy.builtin.output_cap import command_limits_to_json
 from mirage.policy.policies import Policies
 from mirage.policy.profile import (
     SessionProfile,
@@ -49,7 +50,6 @@ from mirage.shell.console import (
 from mirage.shell.constants import BIN_PREFIX
 from mirage.shell.job_table import Job, JobStatus, JobTable
 from mirage.shell.variable import ShellVar
-from mirage.policy.builtin.output_cap import command_limits_to_json
 from mirage.types import (
     JsonValue,
     Limit,
@@ -980,9 +980,7 @@ def _construct_vfs(mount_state: dict[str, Any]) -> BaseVFS:
     if ptype in (VFSName.RAM, VFSName.DISK):
         saved = vfs_state.get(VFSStateKey.CONFIG) or {}
         knobs = {
-            key: saved[key]
-            for key in ("folder_versions", "walk_limit")
-            if key in saved
+            key: saved[key] for key in ("folder_versions",) if key in saved
         }
         for key in unknown_kwargs(cls, knobs):
             del knobs[key]

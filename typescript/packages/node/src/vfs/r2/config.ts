@@ -35,7 +35,6 @@ export interface R2Config {
   keyPrefix?: string
   timeoutMs?: number
   proxy?: string
-  walkLimit?: number
 }
 
 const R2ConfigSchema = z.object({
@@ -84,7 +83,6 @@ export function r2ToS3Config(config: R2Config): S3Config {
     ...(config.keyPrefix !== undefined ? { keyPrefix: config.keyPrefix } : {}),
     ...(config.timeoutMs !== undefined ? { timeoutMs: config.timeoutMs } : {}),
     ...(config.proxy !== undefined ? { proxy: config.proxy } : {}),
-    ...(config.walkLimit !== undefined ? { walkLimit: config.walkLimit } : {}),
   }
 }
 

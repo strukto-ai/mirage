@@ -32,7 +32,6 @@ import { buildDeltaHook } from '../../core/airtable/events.ts'
 import type { DeltaHook } from '../../events/index.ts'
 import { linesContaining as airtableLinesContaining } from '../../core/airtable/search.ts'
 import type { ByteSource } from '../../io/types.ts'
-import { WALK_LIMIT } from '../constants.ts'
 
 export const VFS_MD = `{prefix}
   bases/
@@ -91,11 +90,9 @@ export class AirtableVFS extends BaseVFS {
 
   private readonly config: AirtableConfig
 
-  override readonly walkLimit: number
   constructor(config: AirtableConfig, options: { fetchFn?: typeof fetch } = {}) {
     super()
     this.config = config
-    this.walkLimit = config.walkLimit ?? WALK_LIMIT
     this.accessor = new AirtableAccessor(config, options)
   }
 

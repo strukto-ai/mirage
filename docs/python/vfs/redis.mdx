@@ -29,7 +29,6 @@ ws = Workspace({"/redis": vfs}, mode=MountMode.WRITE)
 | ------------ | -------- | ------------------------ | ----------------------- |
 | `url`        | no       | `redis://localhost:6379/0` | Redis connection URL  |
 | `key_prefix` | no       | `mirage:fs:`             | Key namespace prefix    |
-| `walk_limit` | no | `1000` | Most files one command walks under a folder: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit. |
 
 Keys are stored as:
 - `{prefix}file:{path}` - file content (raw bytes)
