@@ -2626,9 +2626,19 @@ def seed_host_fixture(root: Path, fixture_name: str) -> None:
 def build_redis(
     mount: dict, run_id: str, service: Service | None
 ) -> tuple[object, Callable[[], Awaitable[None]]]:
-    safe_path = mount["path"].strip("/").replace("/", "-") or "root"
+    # keyspace_of reopens another mount's keys through the other loopback
+    # spelling of REDIS_URL: one keyspace that must still read as one store.
+    owner = mount.get("keyspace_of", mount["path"])
+    safe_path = owner.strip("/").replace("/", "-") or "root"
     prefix = f"mirage-integ-{run_id}-{safe_path}/"
-    return RedisVFS(url=REDIS_URL, key_prefix=prefix), _noop
+    url = REDIS_URL
+    if "keyspace_of" in mount:
+        url = (
+            url.replace("localhost", "127.0.0.1")
+            if "localhost" in url
+            else url.replace("127.0.0.1", "localhost")
+        )
+    return RedisVFS(url=url, key_prefix=prefix), _noop
 
 
 def build_s3(

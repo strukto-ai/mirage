@@ -384,6 +384,27 @@
       ]
     },
     {
+      "id": "redis-alias",
+      "hosts": [
+        "python",
+        "typescript-node"
+      ],
+      "service": "redis",
+      "mounts": [
+        {
+          "path": "/data",
+          "vfs": "redis",
+          "backend": "redis"
+        },
+        {
+          "path": "/alias",
+          "vfs": "redis",
+          "backend": "redis",
+          "keyspace_of": "/data"
+        }
+      ]
+    },
+    {
       "id": "ram-nested",
       "hosts": [
         "python",

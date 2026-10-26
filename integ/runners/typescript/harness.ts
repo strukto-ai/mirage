@@ -40,6 +40,9 @@ export interface Mount {
   // allocating fresh storage, so cp/mv can be exercised against two
   // prefixes that address the same bytes.
   alias_of?: string
+  // A redis mount opened on another mount's keyspace through a second
+  // spelling of its url, so the two must still compare as one store.
+  keyspace_of?: string
   // A ram mount caches its reads, so a target's file cache sees them.
   caches_reads?: boolean
   // Fixture seeded by the adapter (over the backend API) instead of the

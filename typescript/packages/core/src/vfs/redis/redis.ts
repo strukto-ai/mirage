@@ -15,7 +15,6 @@
 import { RedisAccessor } from '../../accessor/redis.ts'
 import type { ByteSource } from '../../io/types.ts'
 import { VFSName } from '../../types.ts'
-import { stripSlash } from '../../utils/slash.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 import { BaseVFS, type VFSStateBase } from '../base.ts'
 import { REDACTED_SECRET } from '../secrets.ts'
@@ -35,6 +34,7 @@ import { rmdir as redisRmdir } from '../../core/redis/rmdir.ts'
 import { rmR as redisRmR } from '../../core/redis/rm.ts'
 import { rename as redisRename } from '../../core/redis/rename.ts'
 import { copy as redisCopy } from '../../core/redis/copy.ts'
+import { serverLocation } from '../../core/redis/location.ts'
 import { truncate as redisTruncate } from '../../core/redis/truncate.ts'
 import { setAttrs as redisSetAttrs } from '../../core/redis/set_attrs.ts'
 import { tree as redisTree } from '../../core/redis/readdir.ts'
@@ -84,13 +84,10 @@ export class RedisVFS extends BaseVFS {
     return this.store.keyPrefix
   }
 
-  // The server URL (host, port and db) plus the key prefix pin the keyspace
-  // two mounts would share. The prefix is joined path-like so nested
-  // prefixes collapse onto one key.
+  // Keys are {prefix}file:{path}, so only an identical prefix shares them:
+  // it is escaped whole so a "/" in it never meets the path.
   override storageLocation(): string {
-    const prefix = stripSlash(this.keyPrefix)
-    const base = `${this.name}:${this.url}`
-    return prefix === '' ? base : `${base}/${prefix}`
+    return `${this.name}:${serverLocation(this.url)}:${encodeURIComponent(this.keyPrefix)}`
   }
   override async close(): Promise<void> {
     await this.store.close()

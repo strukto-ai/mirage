@@ -451,8 +451,17 @@ async function openRedis(target: Target): Promise<Open> {
   const id = runId()
   const mounts: Record<string, RedisVFS> = {}
   for (const m of target.mounts) {
-    const safe = m.path.replace(/\/+/g, '-').replace(/^-|-$/g, '') || 'root'
-    mounts[m.path] = new RedisVFS({ url: REDIS_URL, keyPrefix: `mirage-integ-${id}-${safe}` })
+    // keyspace_of reopens another mount's keys through the other loopback
+    // spelling of REDIS_URL: one keyspace that must still read as one store.
+    const owner = m.keyspace_of ?? m.path
+    const safe = owner.replace(/\/+/g, '-').replace(/^-|-$/g, '') || 'root'
+    const url =
+      m.keyspace_of === undefined
+        ? REDIS_URL
+        : REDIS_URL.includes('localhost')
+          ? REDIS_URL.replace('localhost', '127.0.0.1')
+          : REDIS_URL.replace('127.0.0.1', 'localhost')
+    mounts[m.path] = new RedisVFS({ url, keyPrefix: `mirage-integ-${id}-${safe}` })
   }
   const ws = new Workspace(mounts, { mode: MountMode.WRITE })
   return { ws: ws as unknown as ExecWorkspace, cleanup: () => ws.close() }
