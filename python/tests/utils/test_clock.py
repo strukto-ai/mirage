@@ -90,6 +90,16 @@ KEPT_ON_SYSTEM_CLOCK = {
         "simulated loop already keeps on virtual time; on a manual clock "
         "a clock sleep would end the bound before the job stops"
     ),
+    ("shell/job_table/table.py", "asyncio.sleep"): (
+        "paces the renewal of the owner's lease, which expires on real "
+        "time in the store; a manual clock's sleep returns at once and "
+        "would spin the renewal"
+    ),
+    ("shell/job_table/ram.py", "time.monotonic"): (
+        "an owner's lease is compared by every table sharing the store, "
+        "and those tables may hold different clocks, so it stays on the "
+        "process monotonic clock, as a Redis lease expires on the server's"
+    ),
 }
 
 
