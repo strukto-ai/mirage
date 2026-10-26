@@ -34,7 +34,6 @@ from mirage.workspace.files import WorkspaceFiles
 from mirage.workspace.mount.namespace.store import NamespaceStore
 from mirage.workspace.mount.registry import MountRegistry
 from mirage.workspace.session.manager import SessionManager
-from mirage.workspace.session.store import SessionStore
 from mirage.workspace.store import WorkspaceStateStore
 from mirage.workspace.workspace.events import EventManager
 from mirage.workspace.workspace.kernel_mounts import KernelMounts
@@ -66,7 +65,7 @@ class CloseDeps:
         drop_state (bool): delete the workspace's state from its store
             once nothing writes it any more, before the store closes.
         workspace_id (str): the workspace whose state is dropped.
-        planes (Sequence[NamespaceStore | ObserverStore | SessionStore]):
+        planes (Sequence[NamespaceStore | ObserverStore]):
             the stores the state lives in, however they were wired.
         blocked_loop (asyncio.AbstractEventLoop | None): the loop a sync
             ``with`` block is exiting inside, which runs nothing until
@@ -86,7 +85,7 @@ class CloseDeps:
     kernel_mounts: KernelMounts
     drop_state: bool
     workspace_id: str
-    planes: Sequence[NamespaceStore | ObserverStore | SessionStore]
+    planes: Sequence[NamespaceStore | ObserverStore]
     blocked_loop: asyncio.AbstractEventLoop | None = None
 
 

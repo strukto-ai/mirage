@@ -21,10 +21,12 @@ of them; before this it lived in the session package and the other two
 imported upward into it, which made sessions read as foundational to
 namespaces and workspace state when the three are peers.
 
-What did NOT merge is the stores themselves. They differ where it
-matters: CAS against last-writer-wins, blob layout, whether the backend
-accepts a namespace at all, and the shape of a key. One persistence
-client, three stores.
+The node table and the session table share one store type,
+``NamespaceStore``; workspace metadata keeps its own record. The tables
+stay apart where it matters: nodes write through per op and last writer
+wins, a session flushes once per line under a generation CAS, the disk
+layout is one file for the nodes and one file per session, and only
+the session table may live on S3.
 """
 
 from mirage.workspace.record.types import (

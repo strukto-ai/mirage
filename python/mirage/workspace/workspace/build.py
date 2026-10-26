@@ -20,7 +20,6 @@ from mirage.runtime.base import Runtime
 from mirage.runtime.binding import WorkspaceBinding
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.namespace.store import NamespaceStore
-from mirage.workspace.session import SessionStore
 from mirage.workspace.store import RAMWorkspaceStateStore, WorkspaceStateStore
 from mirage.workspace.workspace.routing import Router
 from mirage.workspace.workspace.runtimes import Runtimes
@@ -38,7 +37,7 @@ class ControlStores:
     owned: bool
     observe: ObserverStore
     namespace: NamespaceStore
-    sessions: SessionStore
+    sessions: NamespaceStore
 
 
 def resolve_control_stores(
@@ -47,7 +46,7 @@ def resolve_control_stores(
     owns_store: bool,
     observe: ObserverStore | None,
     namespace_store: NamespaceStore | None,
-    session_store: SessionStore | None,
+    session_store: NamespaceStore | None,
 ) -> ControlStores:
     """Resolve the state-store provider and its three planes.
 
@@ -62,7 +61,7 @@ def resolve_control_stores(
         owns_store (bool): whether a passed provider is owned anyway.
         observe (ObserverStore | None): history-plane override.
         namespace_store (NamespaceStore | None): namespace override.
-        session_store (SessionStore | None): session-plane override.
+        session_store (NamespaceStore | None): session-table override.
     """
     owned = store is None or owns_store
     state_store = store if store is not None else RAMWorkspaceStateStore()

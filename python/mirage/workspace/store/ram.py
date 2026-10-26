@@ -15,8 +15,6 @@
 from mirage.observe.store import ObserverStore, RAMObserverStore
 from mirage.workspace.mount.namespace import NamespaceStore, RAMNamespaceStore
 from mirage.workspace.record.types import generation_of
-from mirage.workspace.session.ram import RAMSessionStore
-from mirage.workspace.session.store import SessionStore
 from mirage.workspace.store.base import WorkspaceFields, WorkspaceStateStore
 
 
@@ -40,7 +38,7 @@ class RAMWorkspaceStateStore(WorkspaceStateStore):
         )
         self._namespaces: dict[str, RAMNamespaceStore] = {}
         self._observers: dict[str, RAMObserverStore] = {}
-        self._sessions: dict[str, RAMSessionStore] = {}
+        self._sessions: dict[str, RAMNamespaceStore] = {}
         self._meta: dict[str, WorkspaceFields] = {}
 
     def _make_namespace(self, workspace_id: str) -> NamespaceStore:
@@ -53,9 +51,9 @@ class RAMWorkspaceStateStore(WorkspaceStateStore):
             self._observers[workspace_id] = RAMObserverStore()
         return self._observers[workspace_id]
 
-    def _make_sessions(self, workspace_id: str) -> SessionStore:
+    def _make_sessions(self, workspace_id: str) -> NamespaceStore:
         if workspace_id not in self._sessions:
-            self._sessions[workspace_id] = RAMSessionStore()
+            self._sessions[workspace_id] = RAMNamespaceStore()
         return self._sessions[workspace_id]
 
     async def _load_meta(self, workspace_id: str) -> WorkspaceFields | None:

@@ -48,3 +48,15 @@ async def test_clear_empties_the_table(tmp_path):
     await store.clear()
     assert await store.load() == {}
     await store.close()
+
+
+@pytest.mark.asyncio
+async def test_cas_set_checks_the_record_generation(tmp_path):
+    store = DiskNamespaceStore(str(tmp_path))
+    await store.set("/legacy", {"mode": 1})
+    assert await store.cas_set("/legacy", {"mode": 2, "generation": 1}, 0)
+    assert not await store.cas_set("/legacy", {"mode": 3, "generation": 1}, 0)
+    assert await store.cas_set("/legacy", {"mode": 3, "generation": 2}, 1)
+    assert (await store.load())["/legacy"] == {"mode": 3, "generation": 2}
+    assert not list(tmp_path.glob("*.lock"))
+    await store.close()

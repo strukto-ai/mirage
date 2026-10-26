@@ -39,7 +39,6 @@ import type { RuntimeEntry } from '../../runtime/base.ts'
 import type { NamespaceStore } from '../mount/namespace/store.ts'
 import type { SessionProfile } from '../../policy/profile.ts'
 import type { SessionState } from '../session/session.ts'
-import type { SessionStore } from '../session/store.ts'
 import type { WorkspaceStateStore } from '../store/base.ts'
 
 /**
@@ -118,7 +117,7 @@ export interface WorkspaceOptions {
   consoleFactory?: ConsoleFactory
   observe?: ObserverStore
   namespaceStore?: NamespaceStore
-  sessionStore?: SessionStore
+  sessionStore?: NamespaceStore
   workspaceId?: string
   store?: WorkspaceStateStore
   /**

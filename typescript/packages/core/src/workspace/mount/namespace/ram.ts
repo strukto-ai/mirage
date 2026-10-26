@@ -12,33 +12,40 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { NamespaceStore, type NodeFields } from './store.ts'
+import { generationOf, type RecordFields } from '../../record/types.ts'
+import { NamespaceStore } from './store.ts'
 
 // NamespaceStore held in process memory (the default). Durability equals
 // the process lifetime; snapshots remain the only persistence. Redis-backed
 // workspaces pass a RedisNamespaceStore instead and survive restarts.
 export class RAMNamespaceStore extends NamespaceStore {
-  private readonly entries = new Map<string, NodeFields>()
+  private readonly entries = new Map<string, RecordFields>()
 
-  load(): Promise<Map<string, NodeFields>> {
-    const out = new Map<string, NodeFields>()
-    for (const [path, fields] of this.entries) out.set(path, { ...fields })
+  load(): Promise<Map<string, RecordFields>> {
+    const out = new Map<string, RecordFields>()
+    for (const [key, fields] of this.entries) out.set(key, { ...fields })
     return Promise.resolve(out)
   }
 
-  set(path: string, fields: NodeFields): Promise<void> {
-    this.entries.set(path, { ...fields })
+  set(key: string, fields: RecordFields): Promise<void> {
+    this.entries.set(key, { ...fields })
     return Promise.resolve()
   }
 
-  delete(paths: readonly string[]): Promise<void> {
-    for (const path of paths) this.entries.delete(path)
+  casSet(key: string, fields: RecordFields, expectedGeneration: number): Promise<boolean> {
+    if (generationOf(this.entries.get(key)) !== expectedGeneration) return Promise.resolve(false)
+    this.entries.set(key, { ...fields })
+    return Promise.resolve(true)
+  }
+
+  delete(keys: readonly string[]): Promise<void> {
+    for (const key of keys) this.entries.delete(key)
     return Promise.resolve()
   }
 
-  replaceAll(entries: Map<string, NodeFields>): Promise<void> {
+  replaceAll(entries: Map<string, RecordFields>): Promise<void> {
     this.entries.clear()
-    for (const [path, fields] of entries) this.entries.set(path, { ...fields })
+    for (const [key, fields] of entries) this.entries.set(key, { ...fields })
     return Promise.resolve()
   }
 

@@ -53,4 +53,30 @@ describe('DiskNamespaceStore', () => {
     await store.clear()
     expect((await store.load()).size).toBe(0)
   })
+
+  it('casSet checks the record generation', async () => {
+    await store.set('/legacy', { mode: 1 })
+    expect(await store.casSet('/legacy', { mode: 2, generation: 1 }, 0)).toBe(true)
+    expect(await store.casSet('/legacy', { mode: 3, generation: 1 }, 0)).toBe(false)
+    expect(await store.casSet('/legacy', { mode: 3, generation: 2 }, 1)).toBe(true)
+    expect((await store.load()).get('/legacy')).toEqual({ mode: 3, generation: 2 })
+    expect(readdirSync(root)).toEqual(['namespace.json'])
+  })
+
+  it('stores a __proto__ key like any other, across a restart', async () => {
+    expect(await store.casSet('__proto__', { session_id: '__proto__', generation: 1 }, 0)).toBe(
+      true,
+    )
+    await store.set('constructor', { session_id: 'constructor' })
+    const reborn = new DiskNamespaceStore(root)
+    const entries = await reborn.load()
+    expect(entries.get('__proto__')).toEqual({ session_id: '__proto__', generation: 1 })
+    expect(entries.get('constructor')).toEqual({ session_id: 'constructor' })
+    expect(await reborn.casSet('__proto__', { session_id: '__proto__', generation: 2 }, 1)).toBe(
+      true,
+    )
+    await reborn.delete(['__proto__'])
+    expect([...(await reborn.load()).keys()]).toEqual(['constructor'])
+    await reborn.close()
+  })
 })

@@ -12,8 +12,6 @@ from mirage.vfs.ram.store import RAMStore
 from mirage.workspace import Workspace
 from mirage.workspace.mount.namespace.ram import RAMNamespaceStore
 from mirage.workspace.mount.namespace.store import NamespaceStore
-from mirage.workspace.session.ram import RAMSessionStore
-from mirage.workspace.session.store import SessionStore
 from mirage.workspace.snapshot import to_state_dict
 from mirage.workspace.store.ram import RAMWorkspaceStateStore
 
@@ -36,21 +34,12 @@ class ProbeObserverStore(RAMObserverStore):
         self.close_calls += 1
 
 
-class ProbeSessionStore(RAMSessionStore):
-    def __init__(self) -> None:
-        super().__init__()
-        self.close_calls = 0
-
-    async def close(self) -> None:
-        self.close_calls += 1
-
-
 class ProbeWorkspaceStateStore(RAMWorkspaceStateStore):
     def __init__(self) -> None:
         super().__init__()
         self.namespace_probe = ProbeNamespaceStore()
         self.observer_probe = ProbeObserverStore()
-        self.session_probe = ProbeSessionStore()
+        self.session_probe = ProbeNamespaceStore()
         self.close_calls = 0
 
     def _make_namespace(self, workspace_id: str) -> NamespaceStore:
@@ -59,7 +48,7 @@ class ProbeWorkspaceStateStore(RAMWorkspaceStateStore):
     def _make_observer(self, workspace_id: str) -> ProbeObserverStore:
         return self.observer_probe
 
-    def _make_sessions(self, workspace_id: str) -> SessionStore:
+    def _make_sessions(self, workspace_id: str) -> NamespaceStore:
         return self.session_probe
 
     async def _close(self) -> None:

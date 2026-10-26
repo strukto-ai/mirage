@@ -28,6 +28,7 @@ import { rstripSlash } from '../../../utils/slash.ts'
 import type { MountEntry } from '../mount.ts'
 import { RAMNamespaceStore } from './ram.ts'
 import type { NamespaceStore, NodeFields } from './store.ts'
+import type { RecordFields } from '../../record/types.ts'
 import type { MountRegistry } from '../registry.ts'
 import type { Clock } from '../../../utils/clock.ts'
 import { NamespaceReader } from '../../dispatcher/reader.ts'
@@ -114,7 +115,7 @@ export function metaToFields(meta: NodeMeta): NodeFields {
   return out
 }
 
-export function metaFromFields(fields: NodeFields): NodeMeta {
+export function metaFromFields(fields: RecordFields): NodeMeta {
   const meta: NodeMeta = {}
   if (typeof fields.target === 'string') meta.target = fields.target
   if (typeof fields.mtime === 'number') meta.mtime = fields.mtime

@@ -20,10 +20,11 @@ from urllib.parse import quote
 from mirage.observe.disk_store import DiskObserverStore
 from mirage.observe.store import ObserverStore
 from mirage.workspace.mount.namespace.disk import DiskNamespaceStore
-from mirage.workspace.mount.namespace.store import NamespaceStore
+from mirage.workspace.mount.namespace.store import (
+    NamespaceStore,
+    RecordNamespaceStore,
+)
 from mirage.workspace.record.disk import DiskRecordClient
-from mirage.workspace.session.disk import DiskSessionStore
-from mirage.workspace.session.store import SessionStore
 from mirage.workspace.store.base import WorkspaceFields, WorkspaceStateStore
 
 DEFAULT_STATE_ROOT = "~/.mirage/state"
@@ -42,7 +43,7 @@ class DiskWorkspaceStateStore(WorkspaceStateStore):
 
     - ``{root}/workspaces/{ws}/workspace.json`` — metadata record
     - ``{root}/workspaces/{ws}/sessions/{sid}.json`` — session table
-    - ``{root}/workspaces/{ws}/namespace.json`` — nodes + user, one JSON
+    - ``{root}/workspaces/{ws}/namespace.json`` — node table, one JSON
     - ``{root}/workspaces/{ws}/history/<day>/<sid>.jsonl`` — history
 
     The layout mirrors the S3 store file-for-object; mutable records
@@ -68,7 +69,7 @@ class DiskWorkspaceStateStore(WorkspaceStateStore):
         self._meta: dict[str, DiskRecordClient] = {}
         self._namespaces: dict[str, DiskNamespaceStore] = {}
         self._observers: dict[str, DiskObserverStore] = {}
-        self._sessions: dict[str, DiskSessionStore] = {}
+        self._sessions: dict[str, RecordNamespaceStore] = {}
 
     def _ws_root(self, workspace_id: str) -> str:
         # The id is one path segment, quoted so a separator cannot leave
@@ -101,10 +102,10 @@ class DiskWorkspaceStateStore(WorkspaceStateStore):
             )
         return self._observers[workspace_id]
 
-    def _make_sessions(self, workspace_id: str) -> SessionStore:
+    def _make_sessions(self, workspace_id: str) -> NamespaceStore:
         if workspace_id not in self._sessions:
-            self._sessions[workspace_id] = DiskSessionStore(
-                self._ws_root(workspace_id)
+            self._sessions[workspace_id] = RecordNamespaceStore(
+                DiskRecordClient(self._ws_root(workspace_id), "sessions/")
             )
         return self._sessions[workspace_id]
 
