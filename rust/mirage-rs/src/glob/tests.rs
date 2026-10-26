@@ -44,6 +44,21 @@ fn request(
             answer,
             "retest {pattern:?}"
         );
+        let literal = request(
+            pattern,
+            &[],
+            json!({"kind":"literal"}),
+            python,
+            extglob,
+            period,
+        );
+        if !literal.is_null() {
+            assert_eq!(
+                answer,
+                json!(json!(subject) == literal),
+                "literal {pattern:?} {subject:?}"
+            );
+        }
     }
     answer
 }
@@ -556,6 +571,32 @@ fn classification_keeps_groups_and_literal_slashes() {
         ),
         json!([units(""), units("a"), units(""), units("")])
     );
+}
+#[test]
+fn literal_names_the_one_subject_a_plain_pattern_matches() {
+    let literal = |pattern: &[u32], python: bool, extglob: bool| {
+        request(
+            pattern,
+            &[],
+            json!({"kind":"literal"}),
+            python,
+            extglob,
+            false,
+        )
+    };
+    assert_eq!(
+        literal(&units("a.com"), false, false),
+        json!(units("a.com"))
+    );
+    assert_eq!(literal(&units(""), false, false), json!([]));
+    assert_eq!(literal(&units("[a"), false, false), json!(units("[a")));
+    assert_eq!(literal(&units("+(a)"), false, false), json!(units("+(a)")));
+    assert_eq!(literal(&[0xfdd0], false, false), json!([42]));
+    assert_eq!(literal(&[0xfdd0], true, false), json!([0xfdd0]));
+    for pattern in ["a*", "?", "[ab]", "[!a]"] {
+        assert_eq!(literal(&units(pattern), false, false), json!(null));
+    }
+    assert_eq!(literal(&units("+(a)"), false, true), json!(null));
 }
 #[test]
 fn dialects_and_quoted_units_remain_distinct() {

@@ -34,6 +34,15 @@ describe('GlobMatcher', () => {
     expect(new GlobMatcher(pattern).matches(name)).toBe(expected)
   })
 
+  it.each([
+    ['a.com', 'a.co', false],
+    ['[a', '[a', true],
+    ['\u{fdd0}', '*', true],
+    ['\u{fdd0}', 'a', false],
+  ])('matches a plain pattern %j against its own text alone', (pattern, name, expected) => {
+    expect(new GlobMatcher(pattern).matches(name)).toBe(expected)
+  })
+
   it('shares one matcher per pattern and kind', () => {
     expect(globMatcher('a*')).toBe(globMatcher('a*'))
     expect(globMatcher('a*', true)).not.toBe(globMatcher('a*'))

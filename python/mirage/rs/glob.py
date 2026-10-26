@@ -81,6 +81,13 @@ def _position(result: _Reply) -> int | None:
     return result
 
 
+def _reply(stream: Stream) -> _Reply:
+    out = bytearray(stream.finish())
+    while stream.busy():
+        out.extend(stream.drain())
+    return cast(_Reply, json.loads(out))
+
+
 def _text(result: _Reply) -> str:
     assert isinstance(result, list)
     assert all(
@@ -133,10 +140,7 @@ class Glob:
         stream = self._prepare(name, operation)
         if not reuse:
             stream.feed(_encoded(name))
-        out = bytearray(stream.finish())
-        while stream.busy():
-            out.extend(stream.drain())
-        return cast(_Reply, json.loads(out))
+        return _reply(stream)
 
     async def _run_async(self, name: str, operation: _Operation) -> _Reply:
         reuse = self._subject == name
@@ -208,7 +212,9 @@ class Glob:
 
 class GlobMatcher:
     """One compiled pattern asked whether whole names match, one native
-    call per name: what a filter walking many names needs.
+    call per name, or none where the grammar reads the pattern as plain
+    text and the name is compared with it here: what a filter walking
+    many names needs.
 
     Args:
         pattern (str): pattern with quoting sentinels intact.
@@ -230,8 +236,13 @@ class GlobMatcher:
         self._stream = Stream(
             "glob", _config(pattern, extglob, period, dialect)
         )
+        self._stream.begin(b'{"kind":"literal"}')
+        literal = _reply(self._stream)
+        self._literal = None if literal is None else _text(literal)
 
     def matches(self, name: str) -> bool:
+        if self._literal is not None:
+            return name == self._literal
         data = _encoded(name)
         with self._lock:
             return self._stream.test(data)
