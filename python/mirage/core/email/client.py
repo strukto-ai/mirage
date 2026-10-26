@@ -19,7 +19,7 @@ from contextlib import asynccontextmanager
 from typing import Any, cast
 
 from mirage.accessor.email import EmailAccessor
-from mirage.accessor.imap import IMAPClient, IMAPResponse
+from mirage.accessor.imap import IMAPClient, IMAPResponse, check_line
 from mirage.core.email._parse import parse_rfc822, parse_with_payloads
 
 logger = logging.getLogger(__name__)
@@ -229,6 +229,7 @@ async def fetch_raw_message(
     folder: str,
     uid: str,
 ) -> bytes:
+    _check_uid(uid)
     async with lock_mailbox(accessor, folder) as imap:
         response = await imap.uid("fetch", uid, "(BODY.PEEK[])")
     return _extract_body(response)
@@ -239,6 +240,7 @@ async def fetch_message(
     folder: str,
     uid: str,
 ) -> dict[str, Any]:
+    _check_uid(uid)
     async with lock_mailbox(accessor, folder) as imap:
         # BODY.PEEK[] instead of RFC822: reading a rendered file must not
         # flip \Seen on the mailbox, matching the imapflow client in the TS
@@ -268,9 +270,14 @@ async def fetch_headers(
         header_only (bool): fetch the header block alone, which names a
             message's file (Subject, Date, INTERNALDATE for a message
             without one) without its body.
+
+    Raises:
+        ValueError: a uid holds a CR, LF or NUL.
     """
     if not uids:
         return []
+    for uid in uids:
+        _check_uid(uid)
     items = (
         "(UID INTERNALDATE BODY.PEEK[HEADER])" if header_only else FETCH_ITEMS
     )
@@ -295,6 +302,7 @@ async def fetch_attachment(
     uid: str,
     filename: str,
 ) -> bytes | None:
+    _check_uid(uid)
     async with lock_mailbox(accessor, folder) as imap:
         response = await imap.uid("fetch", uid, "(BODY.PEEK[])")
     raw_bytes = _extract_body(response)
@@ -412,3 +420,19 @@ def _extract_flags_from_line(line: str) -> list[str]:
         return line[start:end].split()
     except ValueError:
         return []
+
+
+def _check_uid(uid: str) -> None:
+    """Refuse a uid holding a CR, LF or NUL before any connection.
+
+    IMAPClient refuses one too, but only once the mailbox is selected;
+    checking first keeps a refused read off the server, as the
+    TypeScript client does.
+
+    Args:
+        uid (str): the uid or uid set, as given.
+
+    Raises:
+        ValueError: the uid would end the command line early.
+    """
+    check_line(uid)

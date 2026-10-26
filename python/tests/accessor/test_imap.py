@@ -143,6 +143,26 @@ async def test_non_ascii_keys_are_searched_as_utf8(imap_server):
     assert received[-1].split(" ", 1)[1] == 'SEARCH CHARSET UTF-8 FROM "José"'
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("bad", ["\r", "\n", "\0"])
+@pytest.mark.parametrize(
+    "send",
+    [
+        lambda client, text: client.uid("fetch", text, "(UID)"),
+        lambda client, text: client.search(text),
+    ],
+    ids=["uid", "search"],
+)
+async def test_an_argument_that_would_end_the_line_is_never_sent(
+    imap_server, send, bad
+):
+    client, received = await imap_server(_answers)
+    with pytest.raises(ValueError, match="line break or NUL"):
+        await send(client, f"1{bad}X1 EXPUNGE")
+    assert (await client.search("ALL")).result == "OK"
+    assert [line.split(" ", 1)[1] for line in received] == ["SEARCH ALL"]
+
+
 async def _append_server(
     refuse: bool, got: dict[str, bytes]
 ) -> tuple[asyncio.Server, int]:

@@ -19,8 +19,10 @@ import pytest
 
 from mirage.accessor.email import EmailAccessor
 from mirage.core.email.client import (
+    fetch_attachment,
     fetch_headers,
     fetch_message,
+    fetch_raw_message,
     list_folder_entries,
     list_folders,
     list_message_uids,
@@ -398,3 +400,32 @@ def test_quote_string_refuses_a_line_break():
         quote_string("two\nlines")
     with pytest.raises(ValueError):
         quote_string("two\rlines")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("bad", ["\r", "\n", "\0"])
+@pytest.mark.parametrize(
+    "fetch",
+    [
+        lambda accessor, uid: fetch_raw_message(accessor, "INBOX", uid),
+        lambda accessor, uid: fetch_message(accessor, "INBOX", uid),
+        lambda accessor, uid: fetch_attachment(accessor, "INBOX", uid, "f"),
+        lambda accessor, uid: fetch_headers(
+            accessor, "INBOX", ["2", uid, "3"]
+        ),
+    ],
+    ids=[
+        "fetch_raw_message",
+        "fetch_message",
+        "fetch_attachment",
+        "fetch_headers",
+    ],
+)
+async def test_a_uid_that_would_end_the_line_is_refused_before_connecting(
+    accessor, fetch, bad, monkeypatch
+):
+    get_imap = AsyncMock()
+    monkeypatch.setattr(accessor, "get_imap", get_imap)
+    with pytest.raises(ValueError, match="line break or NUL"):
+        await fetch(accessor, f"1{bad}X1 EXPUNGE")
+    get_imap.assert_not_awaited()
