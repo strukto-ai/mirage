@@ -691,6 +691,20 @@ describe('codex-exec', () => {
     expect(err.endsWith('policy denied: the vault is sealed\n')).toBe(true)
   })
 
+  it('runs a command the key profile allows', async () => {
+    const ws = new Workspace(
+      { '/': new RAMVFS() },
+      { mode: MountMode.WRITE, profiles: { narrow: { commands: { allow: ['echo'] } } } },
+    )
+    const h = await startHarness(MountMode.WRITE, ws)
+    const client = await codex(h, bindKey(h, 'mirage-profile="narrow"'))
+    const allowed = await client.run('p', 'echo hi')
+    const [, err, code] = await client.run('q', 'cat /etc')
+    expect(allowed).toEqual(['hi\n', '', 0])
+    expect(code).not.toBe(0)
+    expect(err.endsWith('policy denied: cat is not allowed\n')).toBe(true)
+  })
+
   it('closes its session when the channel ends', async () => {
     const h = await startHarness()
     const client = await codex(h)

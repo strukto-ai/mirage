@@ -9,7 +9,6 @@ from mirage.process.handle import ProcessHandle
 from mirage.process.stdio import ProcessInput, ProcessOutput
 from mirage.process.types import ProcessInfo
 from mirage.shell.errors import PipeClosed
-from mirage.types import Refusal
 
 logger = logging.getLogger(__name__)
 
@@ -46,14 +45,6 @@ class ChildProcess:
     @property
     def pid(self) -> int:
         return self._process.info.pid
-
-    @property
-    def refusal(self) -> Refusal | None:
-        """What a policy refused in the process's line and why, once
-        the line has ended; None when nothing was refused. Its stderr
-        stays the command's own words, so a text surface reads the
-        reason from here (``refusal_line``)."""
-        return self._output.refusal
 
     def close_output(self, stream: Literal["stdout", "stderr"]) -> None:
         (

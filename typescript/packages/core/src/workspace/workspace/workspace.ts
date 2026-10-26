@@ -815,7 +815,6 @@ export class Workspace {
               ),
             )
           })
-          output.refusal = result.refusal
           return result.exitCode
         } finally {
           input.stop()

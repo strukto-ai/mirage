@@ -2,7 +2,6 @@ import { PipeClosed } from '../shell/errors.ts'
 import { materialize } from '../io/types.ts'
 import type { ProcessHandle } from './handle.ts'
 import type { ProcessInfo } from './types.ts'
-import type { Refusal } from '../types.ts'
 import type { ProcessInput, ProcessOutput } from './stdio.ts'
 
 export interface ProcessResult {
@@ -30,14 +29,6 @@ export class ChildProcess {
   }
   get pid(): number {
     return this.process.info.pid
-  }
-  /**
-   * What a policy refused in the process's line and why, once the line has
-   * ended; null when nothing was refused. Its stderr stays the command's own
-   * words, so a text surface reads the reason from here (`refusalLine`).
-   */
-  get refusal(): Refusal | null {
-    return this.output.refusal
   }
   closeOutput(stream: 'stdout' | 'stderr'): void {
     this.output[stream].stop()

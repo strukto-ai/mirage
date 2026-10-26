@@ -27,15 +27,12 @@ it('preserves literal argv and uses the admission gate', async () => {
       JSON.stringify(await child.wait()) + new TextDecoder().decode(result.stderr),
     ).toBe(0)
     expect(new TextDecoder().decode(result.stdout)).toBe("a b|$(echo bad)|*|a'b||`|")
-    expect(child.refusal).toBeNull()
     ws.createSession('limited', {
       profile: { commands: { deny: [{ commands: ['printf'], reason: 'no' }] } },
     })
-    const limited = ws.spawn({ argv }, 'limited')
-    const denied = await limited.communicate()
+    const denied = await ws.spawn({ argv }, 'limited').communicate()
     expect(denied.exitCode).not.toBe(0)
     expect(denied.stdout.byteLength).toBe(0)
-    expect(limited.refusal).toMatchObject({ kind: 'deny', reason: 'no' })
   } finally {
     await ws.close()
   }

@@ -748,6 +748,25 @@ async def test_codex_runs_under_the_key_profile(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_a_command_the_key_profile_allows_runs(tmp_path):
+    ws = Workspace(
+        {"/": (RAMVFS(), MountMode.WRITE)},
+        profiles={"narrow": {"commands": {"allow": ["echo"]}}},
+    )
+    harness = await start_harness(tmp_path, ws)
+    narrow = bind_key(harness, 'mirage-profile="narrow"')
+    try:
+        async with codex(harness, key=narrow) as client:
+            allowed = await client.run("p", "echo hi")
+            _, err, code = await client.run("q", "cat /etc")
+    finally:
+        await stop_harness(harness)
+    assert allowed == (b"hi\n", b"", 0)
+    assert code != 0
+    assert err.endswith(b"policy denied: cat is not allowed\n")
+
+
+@pytest.mark.asyncio
 async def test_the_session_is_closed_on_exit(ssh):
     async with codex(ssh) as client:
         await client.run("p", "true")

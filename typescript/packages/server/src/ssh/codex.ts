@@ -24,9 +24,6 @@ import { MountCore, type MountAttrs } from '@struktoai/mirage-node'
 import { OWNER } from '@struktoai/mirage-node/mount/constants'
 import type { OpenMode } from '@struktoai/mirage-core/runtime/handles/index'
 import { eexist, enoent } from '@struktoai/mirage-core/errors/fs'
-import { PipeClosed } from '@struktoai/mirage-core/io/errors'
-import { refusalLine } from '@struktoai/mirage-core/workspace/tools/io_text'
-import type { Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import type { ServerChannel } from 'ssh2'
 import type { WebSocket } from 'ws'
 import type { WorkspaceEntry, WorkspaceRegistry } from '../registry.ts'
@@ -53,7 +50,7 @@ import {
 } from './constants.ts'
 import { CodexRPCError } from './errors.ts'
 import { newSessionId, openLogin, openSession, type ChannelRequest } from './session.ts'
-import { ChannelInput, ChannelOutput, Mark, type Send } from './stream.ts'
+import { ChannelInput, ChannelOutput, Mark, deliver } from './stream.ts'
 
 type Message = Record<string, JsonValue>
 type Handler = (params: Message) => Promise<JsonValue>
@@ -472,81 +469,19 @@ class CodexProcess {
 }
 
 /**
- * Run one process's line, streaming its output as the line produces it.
- *
- * The line runs as `bash -c` spawned from the session, as the exec-server
- * starts a shell for each command: it gets the session's exported variables
- * and records into its history, keeps what it changes to itself, and waits
- * on no other line, so Codex's commands run side by side. A policy's reason
- * follows the output on stderr, as it does after a typed line. `stdin` null
- * reads as `/dev/null`; `merged` joins stderr to stdout, as on a terminal.
- * Throws with the reason when the process could not run.
- */
-async function runProcess(
-  ws: Workspace,
-  sessionId: string,
-  line: string,
-  cwd: string,
-  env: Record<string, string>,
-  stdin: ProcessInput | null,
-  merged: boolean,
-  signal: AbortSignal,
-  send: Send,
-): Promise<number> {
-  const child = ws.spawn(
-    {
-      argv: ['bash', '-c', line],
-      cwd: PathSpec.fromStrPath(cwd),
-      ...(Object.keys(env).length > 0 ? { env } : {}),
-      mergeStderr: merged,
-    },
-    sessionId,
-  )
-  const stop = (): void => {
-    child.terminate()
-  }
-  signal.addEventListener('abort', stop, { once: true })
-  void (async () => {
-    try {
-      if (stdin !== null) for await (const data of stdin) await child.stdin.write(data)
-    } catch (err) {
-      if (err instanceof PipeClosed)
-        console.debug(`codex: process ${String(child.pid)} closed its input`)
-      else console.warn(`codex: input to process ${String(child.pid)} failed`, err)
-    } finally {
-      child.stdin.close()
-    }
-  })()
-  const pump = async (stream: AsyncIterable<Uint8Array>, stderr: boolean): Promise<void> => {
-    for await (const data of stream) await send(data, stderr)
-  }
-  try {
-    await Promise.all([pump(child.stdout, false), pump(child.stderr, true)])
-    const info = await child.wait()
-    if (info.failure !== null) throw new Error(info.failure)
-    const reason = refusalLine(child.refusal)
-    if (reason !== '') await send(encoder.encode(reason), true)
-    return info.exitCode ?? 1
-  } finally {
-    signal.removeEventListener('abort', stop)
-    if (child.poll() === null) child.terminate()
-  }
-}
-
-/**
  * One codex-exec channel: Codex's exec-server over one session.
  *
  * Codex runs its agent where it is and sends each tool call here: a
- * process runs as a shell spawned from the channel's session, beside the
- * channel's other processes (`runProcess`), and a file call lands on the
- * MountCore SFTP uses, so both see the tree, modes and policies a shell in
- * that session sees. Requests are answered one at a time, in order, as the
- * exec-server answers them by default, except `process/read`, which may
- * wait for output and so runs beside them. A process runs on in the
- * background and reports through notifications; once it has closed,
- * `process/terminate` forgets it, as Codex sends after every command. The
- * transport feeds each message in through `receive`, writes each answer
- * with `write`, and calls `shutdown` once its input ends.
+ * process runs as a line on a fork of the channel's session, beside the
+ * channel's other processes, and a file call lands on the MountCore SFTP
+ * uses, so both see the tree, modes and policies a shell in that session
+ * sees. Requests are answered one at a time, in order, as the exec-server
+ * answers them by default, except `process/read`, which may wait for output
+ * and so runs beside them. A process runs on in the background and reports
+ * through notifications; once it has closed, `process/terminate` forgets it,
+ * as Codex sends after every command. The transport feeds each message in
+ * through `receive`, writes each answer with `write`, and calls `shutdown`
+ * once its input ends.
  */
 class CodexChannel {
   private readonly core: MountCore
@@ -734,17 +669,25 @@ class CodexChannel {
   ): Promise<void> {
     let code: number
     try {
-      code = await runProcess(
-        this.entry.runner.ws,
-        this.sessionId,
-        line,
+      // On a fork of the session, as a background job runs: the line reads
+      // the session's variables and records into its history, keeps what it
+      // changes to itself, and waits on no other line, so Codex's processes
+      // run side by side.
+      const ws = this.entry.runner.ws
+      const execution = await ws.shell(line, {
+        sessionId: this.sessionId,
+        session: ws.getSession(this.sessionId).fork(),
+        stdin: proc.stdin ?? new Uint8Array(0),
+        signal: controller.signal,
         cwd,
-        env,
-        proc.stdin,
-        proc.tty,
-        controller.signal,
-        (data, stderr) => this.emit(proc, data, stderr),
-      )
+        ...(Object.keys(env).length > 0 ? { env } : {}),
+        stream: true,
+      })
+      try {
+        code = (await deliver(execution, (data, stderr) => this.emit(proc, data, stderr))).exitCode
+      } finally {
+        await execution.close()
+      }
     } catch (err) {
       if (controller.signal.aborted) {
         code = CODEX_INTERRUPTED

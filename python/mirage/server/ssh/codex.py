@@ -22,7 +22,7 @@ import posixpath
 import shlex
 import stat
 from collections import deque
-from collections.abc import AsyncIterator, Awaitable, Callable, Coroutine
+from collections.abc import Awaitable, Callable, Coroutine
 from typing import Any, TypeVar
 from urllib.parse import quote, unquote, urlsplit
 
@@ -38,10 +38,9 @@ from mirage.errors.classify import failure_text
 from mirage.errors.fs import eexist, enoent
 from mirage.errors.posix import posix_errno, posix_phrase
 from mirage.errors.types import NoMountError
-from mirage.io.errors import PipeClosed
+from mirage.io.types import ByteSource
 from mirage.mount.core import MountCore
 from mirage.mount.types import MountAttrs
-from mirage.process.types import SpawnRequest
 from mirage.runtime.handles.mode import OpenMode
 from mirage.server.registry import WorkspaceEntry, WorkspaceRegistry
 from mirage.server.rpc.constants import (
@@ -64,12 +63,11 @@ from mirage.server.ssh.stream import (
     Mark,
     Send,
     decode,
+    deliver,
     encode,
 )
-from mirage.shell.bytes import encode_text
 from mirage.types import JsonValue, PathSpec
 from mirage.utils.abort import MirageAbortError
-from mirage.workspace.tools.io_text import refusal_line
 
 logger = logging.getLogger(__name__)
 
@@ -513,19 +511,19 @@ async def run_process(
     line: str,
     cwd: str,
     env: dict[str, str],
-    stdin: ProcessInput | None,
-    merged: bool,
+    stdin: ByteSource,
     send: Send,
 ) -> int:
-    """Run one process's line, streaming its output as the line
-    produces it.
+    """Run one process's line as the session, streaming its output as
+    the line produces it.
 
-    The line runs as ``bash -c`` spawned from the session, as the
-    exec-server starts a shell for each command: it gets the session's
-    exported variables and records into its history, keeps what it
-    changes to itself, and waits on no other line, so Codex's commands
-    run side by side. A policy's reason follows the output on stderr,
-    as it does after a typed line. Runs on the workspace's loop.
+    The line runs on a fork of the session, as a background job of it
+    does: it reads the session's variables and records into its
+    history, keeps what it changes to itself, and waits on no other
+    line, so Codex's commands run side by side, as on its own
+    exec-server. Runs on the workspace's loop. The status is read once
+    the output has ended, because a streaming command settles it only
+    then.
 
     Args:
         ws (Workspace): the workspace.
@@ -533,57 +531,24 @@ async def run_process(
         line (str): the shell line.
         cwd (str): where it runs.
         env (dict[str, str]): variables it sets for itself.
-        stdin (ProcessInput | None): what Codex writes to it; None
-            reads as ``/dev/null``.
-        merged (bool): whether stderr joins stdout, as on a terminal.
+        stdin (ByteSource): its input; empty, like ``/dev/null``, when
+            Codex does not pipe one.
         send (Send): where output goes.
 
     Returns:
         int: the line's exit status.
-
-    Raises:
-        RuntimeError: the process could not run, with the reason.
     """
-    child = ws.spawn(
-        SpawnRequest(
-            argv=("bash", "-c", line),
-            cwd=PathSpec.from_str_path(cwd),
-            env=env or None,
-            merge_stderr=merged,
-        ),
-        session_id,
-    )
-
-    async def feed() -> None:
-        try:
-            if stdin is not None:
-                async for data in stdin:
-                    await child.stdin.write(data)
-        except PipeClosed:
-            logger.debug("codex: process %d closed its input", child.pid)
-        finally:
-            child.stdin.close()
-
-    async def pump(stream: AsyncIterator[bytes], stderr: bool) -> None:
-        async for data in stream:
-            await send(data, stderr)
-
-    feeding = asyncio.create_task(feed())
-    try:
-        await asyncio.gather(
-            pump(child.stdout, False), pump(child.stderr, True)
-        )
-        info = await child.wait()
-    finally:
-        feeding.cancel()
-        if child.poll() is None:
-            child.terminate()
-    if info.failure is not None:
-        raise RuntimeError(info.failure)
-    reason = refusal_line(child.refusal)
-    if reason:
-        await send(encode_text(reason), True)
-    return info.exit_code if info.exit_code is not None else 1
+    async with await ws.shell(
+        line,
+        session_id=session_id,
+        stdin=stdin,
+        cwd=cwd,
+        env=env or None,
+        stream=True,
+        session=ws.get_session(session_id).fork(),
+    ) as execution:
+        io = await deliver(execution, send)
+    return io.exit_code
 
 
 async def run_quiet(
@@ -612,7 +577,7 @@ class CodexChannel:
     """One codex-exec channel: Codex's exec-server over one session.
 
     Codex runs its agent where it is and sends each tool call here: a
-    process runs as a shell spawned from the channel's session, beside
+    process runs as a line on a fork of the channel's session, beside
     the channel's other processes (``run_process``), and a file call
     lands on the MountCore SFTP uses, so both see the tree, modes and
     policies a shell in that session sees. Requests are answered one
@@ -854,16 +819,10 @@ class CodexChannel:
                 )
             )
 
+        stdin: ByteSource = b"" if proc.stdin is None else proc.stdin
         proc.future = asyncio.run_coroutine_threadsafe(
             run_process(
-                runner.ws,
-                self._session_id,
-                line,
-                cwd,
-                env,
-                proc.stdin,
-                proc.tty,
-                send,
+                runner.ws, self._session_id, line, cwd, env, stdin, send
             ),
             runner.loop,
         )

@@ -14,24 +14,14 @@ async def test_spawn_preserves_literal_argv_and_uses_admission():
     ws = Workspace({"/data": RAMVFS()}, runtimes=[])
     try:
         argv = ("printf", "%s|", "a b", "$(echo bad)", "*", "a'b", "", "`")
-        child = ws.spawn(SpawnRequest(argv))
-        result = await child.communicate()
+        result = await ws.spawn(SpawnRequest(argv)).communicate()
         assert result.stdout == b"a b|$(echo bad)|*|a'b||`|"
-        assert child.refusal is None
         ws.create_session(
-            "limited",
-            profile={
-                "commands": {
-                    "deny": [{"commands": ["printf"], "reason": "no"}]
-                }
-            },
+            "limited", profile={"commands": {"deny": ["printf"]}}
         )
-        limited = ws.spawn(SpawnRequest(argv), "limited")
-        refused = await limited.communicate()
+        refused = await ws.spawn(SpawnRequest(argv), "limited").communicate()
         assert refused.exit_code != 0
         assert refused.stdout == b""
-        assert limited.refusal is not None
-        assert (limited.refusal.kind, limited.refusal.reason) == ("deny", "no")
     finally:
         await ws.close()
 
