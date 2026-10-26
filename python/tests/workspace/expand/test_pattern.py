@@ -102,5 +102,9 @@ def test_tilde_expands_in_an_unquoted_pattern():
     assert _expand("~/x", env={"HOME": "/home/u"}) == "/home/u/x"
 
 
+def test_a_pattern_of_many_pieces_expands_whole():
+    assert _expand("x\\a" * 70000 + '""') == "xa" * 70000
+
+
 def test_escaped_tilde_stays_literal():
     assert _expand(r"\~", env={"HOME": "/home/u"}) == "~"

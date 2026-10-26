@@ -55,8 +55,9 @@ function unquotedPieces(text: string): Piece[] {
  * the next one, an expansion's value is live when unquoted and literal inside
  * double quotes, and a leading tilde names the home directory as literal
  * text. Patterns are never word-split, so `$p` holding `a b` matches the word
- * `a b`. `leading` says whether the node starts the word, the only place a
- * tilde prefix stands.
+ * `a b`. `leading` says whether a tilde prefix may start the node: it starts
+ * the word, and the prefix, which runs to the first unquoted slash, ends
+ * inside it (`~""` stays literal).
  */
 async function patternPieces(
   tsNode: TSNodeLike,
@@ -101,16 +102,12 @@ async function patternPieces(
       // followed by the string node; the `$` is the translation marker,
       // not text (same rule as expandNode).
       if (child.type === '$' && children[position + 1]?.type === NT.STRING) continue
-      pieces.push(
-        ...(await patternPieces(
-          child,
-          context,
-          executeFn,
-          callStack,
-          view,
-          leading && pieces.length === 0,
-        )),
-      )
+      const prefix =
+        leading &&
+        pieces.length === 0 &&
+        (position + 1 === children.length || child.text.includes('/'))
+      for (const piece of await patternPieces(child, context, executeFn, callStack, view, prefix))
+        pieces.push(piece)
     }
     return pieces
   }

@@ -99,7 +99,7 @@ def _cond_into(node: TSNodeLike, out: list[ExprToken]) -> None:
     """
     for child in node.children:
         ctype = child.type
-        if ctype in ("[[", "]]"):
+        if ctype in ("[[", "]]", NT.COMMENT):
             continue
         if not child.is_named and ctype != "$":
             out.append(ExprToken(op=ctype))

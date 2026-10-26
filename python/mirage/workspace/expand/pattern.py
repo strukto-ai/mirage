@@ -76,8 +76,9 @@ async def _pattern_pieces(
         context (EvaluationContext): the evaluation's session and frame.
         execute_fn (Callable): evaluator for command substitutions.
         call_stack (CallStack | None): function-call scope, if any.
-        leading (bool): whether the node starts the word, the only
-            place a tilde prefix stands.
+        leading (bool): whether a tilde prefix may start the node: it
+            starts the word, and the prefix, which runs to the first
+            unquoted slash, ends inside it (``~""`` stays literal).
     """
     ntype = ts_node.type
     if ntype in (NT.WORD, NT.EXTGLOB_PATTERN, NT.REGEX):
@@ -119,14 +120,14 @@ async def _pattern_pieces(
                 and children[position + 1].type == NT.STRING
             ):
                 continue
+            prefix = (
+                leading
+                and not pieces
+                and (position + 1 == len(children) or "/" in get_text(child))
+            )
             pieces.extend(
                 await _pattern_pieces(
-                    child,
-                    context,
-                    execute_fn,
-                    call_stack,
-                    view,
-                    leading and not pieces,
+                    child, context, execute_fn, call_stack, view, prefix
                 )
             )
         return pieces

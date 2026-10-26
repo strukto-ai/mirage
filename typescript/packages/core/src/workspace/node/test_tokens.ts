@@ -89,7 +89,7 @@ export function condTokens(node: TSNodeLike): ExprToken[] {
 function condInto(node: TSNodeLike, out: ExprToken[]): void {
   for (const child of node.children) {
     const ctype = child.type
-    if (ctype === '[[' || ctype === ']]') continue
+    if (ctype === '[[' || ctype === ']]' || ctype === NT.COMMENT) continue
     if (child.isNamed !== true && ctype !== '$') {
       out.push({ op: ctype, operand: null, negative: false })
     } else if (ctype === NT.TEST_OPERATOR) {

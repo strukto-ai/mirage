@@ -1084,6 +1084,76 @@
         "stdout": "1\n0\n0\n2\n2\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "dbl_comment_inside_conditional",
+      "seq": 18500013,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "[[ -n x # comment\n   && -n y ]]; echo $?; [[ # c\n a ]]; echo $?; [[ a =~ b # c\n ]]; echo $?",
+      "expect": {
+        "exit": 0,
+        "stdout": "0\n0\n1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "dbl_pattern_tilde_prefix_needs_its_whole_word",
+      "seq": 18500014,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "( HOME=/h/u; [[ /h/u =~ ~\"\" ]]; echo $?; [[ /h/u == ~'' ]]; echo $?; e=; [[ /h/u == ~$e ]]; echo $?; [[ /h/u/x == ~\"/x\" ]]; echo $?; [[ /h/u/ == ~/\"\" ]]; echo $?; case /h/u in ~\"\") echo y;; *) echo n;; esac )",
+      "expect": {
+        "exit": 0,
+        "stdout": "1\n1\n1\n1\n0\nn\n",
+        "stderr": ""
+      }
     }
   ]
 }
