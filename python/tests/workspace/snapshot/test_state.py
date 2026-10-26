@@ -63,6 +63,7 @@ from mirage.vfs.s3 import S3VFS, S3Config
 from mirage.vfs.secrets import REDACTED_SECRET
 from mirage.workspace.snapshot.keys import (
     CacheKey,
+    JobKey,
     MountKey,
     StateKey,
     VFSStateKey,
@@ -73,6 +74,7 @@ from mirage.workspace.snapshot.state import (
     requires_vfs_override,
     to_state_dict,
 )
+from mirage.workspace.store import RAMWorkspaceStateStore
 from mirage.workspace.workspace.types import VFSMount
 
 
@@ -1530,3 +1532,25 @@ async def test_copy_keeps_the_workspace_clock(track):
     assert await copied._cache.exists("/c.txt") is True
     clock.advance(1)
     assert await copied._cache.exists("/c.txt") is False
+
+
+@pytest.mark.asyncio
+async def test_a_snapshot_takes_the_finished_jobs_another_workspace_ran():
+    store = RAMWorkspaceStateStore()
+    a, b = (
+        Workspace(
+            {"/m": RAMVFS()},
+            workspace_id="shared",
+            session_id="s",
+            store=store,
+        )
+        for _ in range(2)
+    )
+    try:
+        await a.shell("true &", session_id="s")
+        await a.job_table.wait(1, "s")
+        state = await to_state_dict(b)
+        assert [j[JobKey.COMMAND] for j in state[StateKey.JOBS]] == ["true"]
+    finally:
+        await a.close()
+        await b.close()

@@ -13,11 +13,13 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import threading
 
 import pytest
 
 from mirage.shell.console import Channel
 from mirage.shell.job_table.ram import RAMJobStore
+from mirage.workspace.record.types import generation_of
 
 
 def _list(*names: str, generation: int = 1) -> dict:
@@ -79,3 +81,29 @@ async def test_an_owner_lives_while_its_lease_holds():
     assert await store.alive("o")
     await asyncio.sleep(0.1)
     assert not await store.alive("o")
+
+
+def test_lists_written_from_many_threads_lose_no_write():
+    store = RAMJobStore()
+
+    async def bump(times: int) -> None:
+        for _ in range(times):
+            while True:
+                fields = await store.load("s")
+                count = fields["count"] if fields else 0
+                generation = generation_of(fields)
+                written = {"count": count + 1, "generation": generation + 1}
+                if await store.cas_set("s", written, generation):
+                    break
+
+    threads = [
+        threading.Thread(target=asyncio.run, args=(bump(200),))
+        for _ in range(4)
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    stored = asyncio.run(store.load("s"))
+    assert stored is not None
+    assert stored["count"] == 800

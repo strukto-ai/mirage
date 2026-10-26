@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import copy
+import threading
 import time
 
 from mirage.shell.console import ConsoleStore, RAMConsoleStore
@@ -35,8 +36,10 @@ class RAMJobStore(JobStore):
     """JobStore held in process memory (the default).
 
     Workspaces that share one provider in a process share their jobs
-    through it. A console is dropped once no list names it; a reader
-    already holding it keeps reading, as a console outlives its entry.
+    through it, from any thread: a sync workspace runs its loop on a
+    thread of its own, so a list is compared and written under a lock.
+    A console is dropped once no list names it; a reader already holding
+    it keeps reading, as a console outlives its entry.
 
     Args:
         lease_seconds (float | None): see JobStore; None by default,
@@ -48,6 +51,7 @@ class RAMJobStore(JobStore):
         self._lists: dict[str, RecordFields] = {}
         self._consoles: dict[str, RAMConsoleStore] = {}
         self._leases: dict[str, float] = {}
+        self._lock = threading.Lock()
 
     async def load(self, session_id: str) -> RecordFields | None:
         fields = self._lists.get(session_id)
@@ -56,15 +60,18 @@ class RAMJobStore(JobStore):
     async def cas_set(
         self, session_id: str, fields: RecordFields, expected_generation: int
     ) -> bool:
-        stored = self._lists.get(session_id)
-        if generation_of(stored) != expected_generation:
-            return False
-        self._lists[session_id] = copy.deepcopy(fields)
-        self._drop(_console_names(stored) - _console_names(fields))
+        written = copy.deepcopy(fields)
+        with self._lock:
+            stored = self._lists.get(session_id)
+            if generation_of(stored) != expected_generation:
+                return False
+            self._lists[session_id] = written
+            self._drop(_console_names(stored) - _console_names(fields))
         return True
 
     async def delete(self, session_id: str) -> None:
-        self._drop(_console_names(self._lists.pop(session_id, None)))
+        with self._lock:
+            self._drop(_console_names(self._lists.pop(session_id, None)))
 
     def console(self, name: str) -> ConsoleStore:
         return self._consoles.setdefault(name, RAMConsoleStore())

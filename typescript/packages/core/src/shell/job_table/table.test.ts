@@ -23,7 +23,7 @@ import {
   RAMConsoleStore,
   type ReadResult,
 } from '../console/index.ts'
-import { STOP_WAIT_SECONDS } from './constants.ts'
+import { STOP_WAIT_SECONDS, WATCH_RETRY_SECONDS } from './constants.ts'
 import { RAMJobStore } from './ram.ts'
 import { JobTable } from './table.ts'
 import { Job, type JobResult, type JobRunner, JobStatus } from './types.ts'
@@ -282,15 +282,17 @@ describe('JobTable.kill', () => {
     expect(abort.signal.aborted).toBe(true)
   })
 
-  it('returns a settled job, so callers never see a half-dead one', async () => {
+  it('answers killed at once and ends the console once the runner stops', async () => {
     const jt = new JobTable()
     const abort = new AbortController()
     const j = await jt.submit({ command: 'sleep', run: pending(abort), abort, cwd: '/' })
     expect(await jt.kill(j.id)).toBe(true)
+    expect(j.status).toBe(JobStatus.KILLED)
+    await j.process?.join()
     expect(j.console.finished).toBe(true)
   })
 
-  it('settles a job whose runner never observes the abort, instead of joining it', async () => {
+  it('answers killed without joining a runner that never observes the abort', async () => {
     const jt = new JobTable()
     const abort = new AbortController()
     const release: { fire?: () => void } = {}
@@ -302,13 +304,14 @@ describe('JobTable.kill', () => {
 
     expect(j.status).toBe(JobStatus.KILLED)
     expect(j.exitCode).toBe(137)
-    expect(j.console.finished).toBe(true)
+    expect(j.console.finished).toBe(false)
 
-    // The runner unwinding afterwards must not reopen or relabel the job.
+    // The runner finishing afterwards must not relabel the job.
     release.fire?.()
-    await new Promise((r) => setTimeout(r, 0))
+    await j.process?.join()
     expect(j.status).toBe(JobStatus.KILLED)
     expect(j.exitCode).toBe(137)
+    expect(await j.console.outcome()).toBe('killed:137')
   })
 
   it('returns false for unknown and already-finished jobs', async () => {
@@ -850,5 +853,255 @@ describe('JobTable on a shared store', () => {
     expect(a.listJobs('s')).toEqual([])
     expect((await sleeping(a)).id).toBe(1)
     await a.killAll()
+  })
+})
+
+/** A runner that ends only once `gate` opens, exiting with `code`. */
+function gated(gate: Promise<void>, code = 0): JobRunner {
+  return async () => {
+    await gate
+    return [new IOResult({ exitCode: code }), new ExecutionNode({ exitCode: code })]
+  }
+}
+
+/** A console whose first watch fails, as a dropped connection does. */
+class FailsFirstWatch implements ConsoleStore {
+  private failed = false
+
+  constructor(private readonly inner: ConsoleStore) {}
+
+  append(channel: Channel, data: Uint8Array): Promise<ConsoleChunk> {
+    return this.inner.append(channel, data)
+  }
+
+  readFrom(seq: number, limit?: number): Promise<ReadResult> {
+    return this.inner.readFrom(seq, limit)
+  }
+
+  get closed(): boolean {
+    return this.inner.closed
+  }
+
+  wait(seq: number): Promise<void> {
+    return this.inner.wait(seq)
+  }
+
+  waitEnded(signal?: AbortSignal): Promise<void> {
+    if (!this.failed) {
+      this.failed = true
+      return Promise.reject(new Error('connection dropped'))
+    }
+    return this.inner.waitEnded(signal)
+  }
+
+  close(): Promise<void> {
+    return this.inner.close()
+  }
+}
+
+/** A job store whose consoles each fail their first watch. */
+class DroppedWatches extends RAMJobStore {
+  override console(name: string): ConsoleStore {
+    return new FailsFirstWatch(super.console(name))
+  }
+}
+
+/** A job store whose consoles' output can expire, as Redis's does. */
+class ExpiringOutput extends RAMJobStore {
+  readonly expired = new Set<string>()
+
+  override console(name: string): ConsoleStore {
+    return this.expired.has(name) ? new RAMConsoleStore() : super.console(name)
+  }
+}
+
+/** A console that counts the reads parked on it at once. */
+class CountedWaits implements ConsoleStore {
+  constructor(
+    private readonly inner: ConsoleStore,
+    private readonly count: { parked: number; most: number },
+  ) {}
+
+  append(channel: Channel, data: Uint8Array): Promise<ConsoleChunk> {
+    return this.inner.append(channel, data)
+  }
+
+  readFrom(seq: number, limit?: number): Promise<ReadResult> {
+    return this.inner.readFrom(seq, limit)
+  }
+
+  get closed(): boolean {
+    return this.inner.closed
+  }
+
+  async wait(seq: number): Promise<void> {
+    this.count.parked += 1
+    this.count.most = Math.max(this.count.most, this.count.parked)
+    try {
+      await this.inner.wait(seq)
+    } finally {
+      this.count.parked -= 1
+    }
+  }
+
+  waitEnded(signal?: AbortSignal): Promise<void> {
+    return this.inner.waitEnded(signal)
+  }
+
+  close(): Promise<void> {
+    return this.inner.close()
+  }
+}
+
+/** A job store whose consoles count the reads parked on them. */
+class CountingWaits extends RAMJobStore {
+  readonly count = { parked: 0, most: 0 }
+
+  override console(name: string): ConsoleStore {
+    return new CountedWaits(super.console(name), this.count)
+  }
+}
+
+describe('JobTable on a shared store, across reuse and failure', () => {
+  it('a stale reap never drops a job that took its number', async () => {
+    const store = new RAMJobStore()
+    const a = new JobTable(store)
+    const b = new JobTable(store)
+    const abort = new AbortController()
+    await a.submit({ command: 'true', run: exitWith(0), abort, cwd: '/', sessionId: 's' })
+    await a.wait(1, 's')
+    await b.sync('s')
+    await b.reap(1, 's')
+    expect((await sleeping(b)).id).toBe(1)
+    expect((await a.popCompleted('s')).map((j) => j.command)).toEqual(['true'])
+    await b.sync('s')
+    expect(b.listJobs('s').map((j) => j.command)).toEqual(['sleep 30'])
+    await b.killAll()
+  })
+
+  it('a sync takes the job that took a reaped number', async () => {
+    const store = new RAMJobStore()
+    const a = new JobTable(store)
+    const b = new JobTable(store)
+    const abort = new AbortController()
+    await a.submit({ command: 'true', run: exitWith(0), abort, cwd: '/', sessionId: 's' })
+    await a.wait(1, 's')
+    await b.sync('s')
+    await b.reap(1, 's')
+    await sleeping(b)
+    await a.sync('s')
+    const [seen] = a.listJobs('s')
+    expect([seen?.command, seen?.status]).toEqual(['sleep 30', JobStatus.RUNNING])
+    expect(await a.popCompleted('s')).toEqual([])
+    await b.sync('s')
+    expect(b.listJobs('s').map((j) => j.command)).toEqual(['sleep 30'])
+    await b.killAll()
+  })
+
+  // A program that handled the kill leaves its own status, and the ending
+  // every workspace reads carries it, not the signal's.
+  it('a handled kill answers one status everywhere', async () => {
+    const store = new RAMJobStore()
+    const a = new JobTable(store)
+    const b = new JobTable(store)
+    const abort = new AbortController()
+    let started = (): void => undefined
+    const up = new Promise<void>((resolve) => {
+      started = resolve
+    })
+    const run: JobRunner = (job) =>
+      new Promise((_resolve, reject) => {
+        started()
+        abort.signal.addEventListener('abort', () => {
+          setTimeout(() => {
+            job.process?.programExited(3)
+            reject(new DOMException('aborted', 'AbortError'))
+          }, 50)
+        })
+      })
+    const j = await a.submit({ command: 'prog', run, abort, cwd: '/', simple: true })
+    await up
+    await b.sync()
+    expect(await a.kill(j.id, '', 15)).toBe(true)
+    expect((await b.wait(j.id)).exitCode).toBe(3)
+    expect((await a.wait(j.id)).exitCode).toBe(3)
+  })
+
+  it('a kill before the runner begins ends the console at once', async () => {
+    const jt = new JobTable()
+    const abort = new AbortController()
+    const j = await jt.submit({ command: 'never', run: pending(abort), abort, cwd: '/' })
+    expect(await jt.kill(j.id, '', 15)).toBe(true)
+    expect((await jt.wait(j.id)).exitCode).toBe(143)
+    expect(dec(await j.console.snapshot(Channel.STDERR))).toBe('Killed')
+  })
+
+  it('close ends a killed job still stopping', async () => {
+    const jt = new JobTable()
+    const abort = new AbortController()
+    const release: { fire?: () => void } = {}
+    const j = await jt.submit({ command: 'deaf', run: deaf(release), abort, cwd: '/' })
+    expect(await jt.kill(j.id, '', 15)).toBe(true)
+    expect(j.console.finished).toBe(false)
+    await jt.close()
+    expect(await j.console.outcome()).toBe('killed:143')
+    release.fire?.()
+    await j.process?.join()
+  })
+
+  it('a watch that failed a read still heeds a kill', async () => {
+    vi.useFakeTimers()
+    try {
+      const store = new DroppedWatches()
+      const a = new JobTable(store)
+      const b = new JobTable(store)
+      const job = await sleeping(a)
+      await vi.advanceTimersByTimeAsync(0)
+      await b.sync('s')
+      expect(await b.kill(1, 's', 15)).toBe(true)
+      await vi.advanceTimersByTimeAsync(WATCH_RETRY_SECONDS * 1000 * 3)
+      await job.process?.join()
+      expect([job.status, job.exitCode]).toEqual([JobStatus.KILLED, 143])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('a finished job outlives its expired output', async () => {
+    const store = new ExpiringOutput(0.05)
+    const a = new JobTable(store)
+    const abort = new AbortController()
+    const job = await a.submit({
+      command: 'true',
+      run: exitWith(0),
+      abort,
+      cwd: '/',
+      sessionId: 's',
+    })
+    await job.process?.join()
+    store.expired.add(job.consoleName)
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    const fresh = new JobTable(store)
+    await fresh.sync('s')
+    const [seen] = fresh.listJobs('s')
+    expect([seen?.status, seen?.exitCode]).toEqual([JobStatus.COMPLETED, 0])
+  })
+
+  it('a long wait elsewhere keeps one read across lease checks', async () => {
+    const store = new CountingWaits(0.03)
+    const a = new JobTable(store)
+    const b = new JobTable(store)
+    let release = (): void => undefined
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const abort = new AbortController()
+    await a.submit({ command: 'slow', run: gated(gate), abort, cwd: '/', sessionId: 's' })
+    await b.sync('s')
+    const waiting = b.wait(1, 's')
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    release()
+    expect((await waiting).exitCode).toBe(0)
+    expect(store.count.most).toBe(1)
   })
 })

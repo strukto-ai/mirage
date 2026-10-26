@@ -59,10 +59,13 @@ const KEPT_ON_SYSTEM_CLOCK: Record<string, string> = {
     'store sharing it, and those stores may hold different clocks, so they stay on ' +
     'the process monotonic clock; listing expiry already reads the store clock',
   'shell/job_table/table.ts setTimeout':
-    'bounds the join on a stopping job with a loop timer, which fake timers ' +
-    'already replace; on a manual clock a clock sleep would end the bound before ' +
-    "the job stops. It also paces the owner's lease, renewing it and checking " +
-    "another owner's, which expires on real time in the store",
+    "bounds a killed job's stop with a loop timer, which fake timers already " +
+    'replace; on a manual clock a clock sleep would end the bound before the job ' +
+    "stops. It also paces the owner's lease, renewing it and checking another " +
+    "owner's, which expires on real time in the store",
+  'shell/job_table/table.ts sleep':
+    'paces the retry of a failed watch, which reads the store on real time; a ' +
+    "manual clock's sleep returns at once and would spin the retry",
   'shell/job_table/ram.ts performance.now':
     "an owner's lease is compared by every table sharing the store, and those " +
     'tables may hold different clocks, so it stays on the process monotonic ' +

@@ -176,6 +176,9 @@ export async function toStateDict(ws: WorkspaceLike): Promise<WorkspaceStateDict
   const sessions: SessionSnapshot[] = ws.sessionManager
     .list()
     .map((s) => s.toDict() as unknown as SessionSnapshot)
+  // The lists live in the job store, where other workspaces on it add jobs
+  // this one has not read yet.
+  for (const s of ws.sessionManager.list()) await ws.jobTable.sync(s.sessionId)
   // Output is stored per channel rather than chunk by chunk: the manifest
   // externalizes byte fields into tar entries, so keeping chunks would
   // write one entry per write a job ever made. The cost is that a restored

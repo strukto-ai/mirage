@@ -38,7 +38,9 @@ class Job:
     ``simple`` job is one simple command, which the job is, so a program
     it ran that handled a ``kill`` leaves the job its own status. Its
     ``owner`` is the job table that runs it; a job another workspace
-    runs has no ``process`` here.
+    runs has no ``process`` here. Its ``console_name`` is the name its
+    job store keeps the console under, which tells apart two jobs a
+    reused number gave the same id.
     """
 
     id: int
@@ -52,6 +54,7 @@ class Job:
     process: ProcessHandle | None = None
     simple: bool = False
     owner: str = ""
+    console_name: str = ""
 
     @property
     def execution_id(self) -> str | None:

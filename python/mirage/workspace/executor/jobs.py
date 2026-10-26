@@ -431,14 +431,15 @@ async def handle_background(
             limit=session.processes.max,
             simple=_one_program(left, session),
         )
-    except Exception as exc:
+    except BaseException as exc:
         release_job()
         for source in held_inputs:
             await source.lines.unhold()
         # A submission that fails (a console the table cannot build, a
-        # session at its process cap) starts no runner, so nothing would
-        # ever revoke the job's hand-off: its grants would stay reserved
-        # for good, neither spent nor on offer to any later line.
+        # session at its process cap) or is cancelled while the job store
+        # answers starts no runner, so nothing would ever revoke the
+        # job's hand-off: its grants would stay reserved for good,
+        # neither spent nor on offer to any later line.
         if job_handed is not None and decisions is not None:
             await decisions.revoke(session.session_id, job_handed)
         if isinstance(exc, BlockingIOError):

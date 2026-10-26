@@ -583,3 +583,236 @@ async def test_a_reap_elsewhere_drops_the_job_from_its_owner():
     assert a.list_jobs("s") == []
     assert (await a.submit("next", _run_forever, "/", session_id="s")).id == 1
     await a.kill_all()
+
+
+@pytest.mark.asyncio
+async def test_a_stale_reap_never_drops_a_job_that_took_its_number():
+    store = RAMJobStore()
+    a, b = JobTable(store), JobTable(store)
+    await a.submit("true", partial(_exit_with, 0), "/", session_id="s")
+    await a.wait(1, "s")
+    await b.sync("s")
+    await b.reap(1, "s")
+    fresh = await b.submit("sleep 30", _run_forever, "/", session_id="s")
+    assert fresh.id == 1
+    assert [j.command for j in await a.pop_completed("s")] == ["true"]
+    await b.sync("s")
+    assert [j.command for j in b.list_jobs("s")] == ["sleep 30"]
+    await b.kill_all()
+
+
+@pytest.mark.asyncio
+async def test_a_sync_takes_the_job_that_took_a_reaped_number():
+    store = RAMJobStore()
+    a, b = JobTable(store), JobTable(store)
+    await a.submit("true", partial(_exit_with, 0), "/", session_id="s")
+    await a.wait(1, "s")
+    await b.sync("s")
+    await b.reap(1, "s")
+    await b.submit("sleep 30", _run_forever, "/", session_id="s")
+    await a.sync("s")
+    [seen] = a.list_jobs("s")
+    assert (seen.command, seen.status) == ("sleep 30", JobStatus.RUNNING)
+    assert await a.pop_completed("s") == []
+    await b.sync("s")
+    assert [j.command for j in b.list_jobs("s")] == ["sleep 30"]
+    await b.kill_all()
+
+
+# A program that handled the kill leaves its own status, and the ending
+# every workspace reads carries it, not the signal's.
+@pytest.mark.asyncio
+async def test_a_handled_kill_answers_one_status_everywhere():
+    store = RAMJobStore()
+    a, b = JobTable(store), JobTable(store)
+    stopped: list[str] = []
+    job, started = await _submit_handling(a, True, stopped)
+    await started.wait()
+    await b.sync()
+    assert await a.kill(job.id, "", 15)
+    async with asyncio.timeout(2):
+        assert (await b.wait(job.id)).exit_code == 3
+        assert (await a.wait(job.id)).exit_code == 3
+    assert stopped == ["handled"]
+
+
+@pytest.mark.asyncio
+async def test_a_kill_before_the_runner_begins_ends_the_console_at_once():
+    table = JobTable()
+    job = await table.submit("never", _run_forever, "/")
+    assert await table.kill(job.id, "", 15)
+    async with asyncio.timeout(2):
+        assert (await table.wait(job.id)).exit_code == 143
+    assert await job.console.snapshot(Channel.STDERR) == b"Killed"
+
+
+@pytest.mark.asyncio
+async def test_close_ends_a_killed_job_still_stopping():
+    table = JobTable()
+    release = asyncio.Event()
+
+    async def run(job: Job) -> tuple[IOResult, ExecutionNode]:
+        try:
+            await asyncio.Event().wait()
+        finally:
+            await asyncio.shield(release.wait())
+        return IOResult(), ExecutionNode()
+
+    job = await table.submit("deaf", run, "/")
+    await asyncio.sleep(0)
+    assert await table.kill(job.id, "", 15)
+    assert not job.console.finished
+    await table.close()
+    assert await job.console.outcome() == "killed:143"
+    release.set()
+    assert job.process is not None
+    await job.process.join()
+
+
+class _FailsFirstWatch:
+    """A console whose first watch fails, as a dropped connection does."""
+
+    def __init__(self, inner: ConsoleStore) -> None:
+        self._inner = inner
+        self._failed = False
+
+    async def append(self, channel: Channel, data: bytes) -> ConsoleChunk:
+        return await self._inner.append(channel, data)
+
+    async def read_from(
+        self, seq: int, limit: int | None = None
+    ) -> ReadResult:
+        return await self._inner.read_from(seq, limit)
+
+    @property
+    def closed(self) -> bool:
+        return self._inner.closed
+
+    async def wait(self, seq: int) -> None:
+        await self._inner.wait(seq)
+
+    async def wait_ended(self) -> None:
+        if not self._failed:
+            self._failed = True
+            raise ConnectionError("connection dropped")
+        await self._inner.wait_ended()
+
+    async def close(self) -> None:
+        await self._inner.close()
+
+
+class _DroppedWatches(RAMJobStore):
+    """A job store whose consoles each fail their first watch."""
+
+    def console(self, name: str) -> ConsoleStore:
+        return _FailsFirstWatch(super().console(name))
+
+
+@pytest.mark.asyncio
+async def test_a_watch_that_failed_a_read_still_heeds_a_kill(monkeypatch):
+    monkeypatch.setattr(
+        "mirage.shell.job_table.table.WATCH_RETRY_SECONDS", 0.01
+    )
+    store = _DroppedWatches()
+    a, b = JobTable(store), JobTable(store)
+    job = await a.submit("sleep 30", _run_forever, "/", session_id="s")
+    await asyncio.sleep(0.02)
+    await b.sync("s")
+    assert await b.kill(1, "s", 15)
+    assert job.process is not None
+    async with asyncio.timeout(2):
+        await job.process.join()
+    assert (job.status, job.exit_code) == (JobStatus.KILLED, 143)
+
+
+class _ExpiringOutput(RAMJobStore):
+    """A job store whose consoles' output can expire, as Redis's does."""
+
+    def __init__(self, lease_seconds: float | None = None) -> None:
+        super().__init__(lease_seconds)
+        self.expired: set[str] = set()
+
+    def console(self, name: str) -> ConsoleStore:
+        if name in self.expired:
+            return RAMConsoleStore()
+        return super().console(name)
+
+
+@pytest.mark.asyncio
+async def test_a_finished_job_outlives_its_expired_output():
+    store = _ExpiringOutput(lease_seconds=0.05)
+    a = JobTable(store)
+    job = await a.submit("true", partial(_exit_with, 0), "/", session_id="s")
+    assert job.process is not None
+    await job.process.join()
+    store.expired.add(job.console_name)
+    await asyncio.sleep(0.1)
+    fresh = JobTable(store)
+    await fresh.sync("s")
+    [seen] = fresh.list_jobs("s")
+    assert (seen.status, seen.exit_code) == (JobStatus.COMPLETED, 0)
+
+
+class _CountedWaits:
+    """A console that counts the reads parked on it at once."""
+
+    def __init__(self, inner: ConsoleStore, count: dict[str, int]) -> None:
+        self._inner = inner
+        self._count = count
+
+    async def append(self, channel: Channel, data: bytes) -> ConsoleChunk:
+        return await self._inner.append(channel, data)
+
+    async def read_from(
+        self, seq: int, limit: int | None = None
+    ) -> ReadResult:
+        return await self._inner.read_from(seq, limit)
+
+    @property
+    def closed(self) -> bool:
+        return self._inner.closed
+
+    async def wait(self, seq: int) -> None:
+        self._count["parked"] += 1
+        self._count["most"] = max(self._count["most"], self._count["parked"])
+        try:
+            await self._inner.wait(seq)
+        finally:
+            self._count["parked"] -= 1
+
+    async def wait_ended(self) -> None:
+        await self._inner.wait_ended()
+
+    async def close(self) -> None:
+        await self._inner.close()
+
+
+class _CountingWaits(RAMJobStore):
+    """A job store whose consoles count the reads parked on them."""
+
+    def __init__(self, lease_seconds: float | None = None) -> None:
+        super().__init__(lease_seconds)
+        self.count = {"parked": 0, "most": 0}
+
+    def console(self, name: str) -> ConsoleStore:
+        return _CountedWaits(super().console(name), self.count)
+
+
+@pytest.mark.asyncio
+async def test_a_long_wait_elsewhere_keeps_one_read_across_lease_checks():
+    store = _CountingWaits(lease_seconds=0.03)
+    a, b = JobTable(store), JobTable(store)
+    gate = asyncio.Event()
+
+    async def run(job: Job) -> tuple[IOResult, ExecutionNode]:
+        await gate.wait()
+        return IOResult(), ExecutionNode()
+
+    await a.submit("slow", run, "/", session_id="s")
+    await b.sync("s")
+    waiting = asyncio.ensure_future(b.wait(1, "s"))
+    await asyncio.sleep(0.1)
+    gate.set()
+    async with asyncio.timeout(2):
+        assert (await waiting).exit_code == 0
+    assert store.count["most"] == 1

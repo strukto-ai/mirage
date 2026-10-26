@@ -341,6 +341,10 @@ async def to_state_dict(ws: WorkspaceLike) -> dict[str, Any]:
         for name, install in ws.registry.clis.items().items()
     ]
 
+    # The lists live in the job store, where other workspaces on it add
+    # jobs this one has not read yet.
+    for s in ws._session_mgr.list():
+        await ws.job_table.sync(s.session_id)
     finished_jobs = [
         await _job_to_dict(j)
         for j in ws.job_table.all_jobs()

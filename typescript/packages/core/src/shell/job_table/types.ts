@@ -38,6 +38,8 @@ export type JobRunner = (job: Job) => Promise<JobResult>
  * job is one simple command, which the job is, so a program it ran that
  * handled a `kill` leaves the job its own status. Its `owner` is the job
  * table that runs it; a job another workspace runs has no `process` here.
+ * Its `consoleName` is the name its job store keeps the console under,
+ * which tells apart two jobs a reused number gave the same id.
  */
 export class Job {
   readonly id: number
@@ -52,6 +54,7 @@ export class Job {
   console: JobConsole
   readonly simple: boolean
   owner: string
+  consoleName: string
 
   status: JobStatus = JobStatus.RUNNING
   exitCode = 0
@@ -68,6 +71,7 @@ export class Job {
     console?: JobConsole
     simple?: boolean
     owner?: string
+    consoleName?: string
   }) {
     this.id = init.id
     this.command = init.command
@@ -78,6 +82,7 @@ export class Job {
     this.console = init.console ?? new JobConsole()
     this.simple = init.simple ?? false
     this.owner = init.owner ?? ''
+    this.consoleName = init.consoleName ?? ''
     if (init.status !== undefined) this.status = init.status
     if (init.exitCode !== undefined) this.exitCode = init.exitCode
   }

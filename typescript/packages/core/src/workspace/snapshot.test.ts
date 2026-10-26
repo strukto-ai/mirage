@@ -53,6 +53,7 @@ import {
 import type { MountSnapshot } from './snapshot/types.ts'
 import { ScriptSource } from '../runtime/types.ts'
 import { ExecutionNode } from './types.ts'
+import { RAMWorkspaceStateStore } from './store/ram.ts'
 import { Workspace } from './workspace/workspace.ts'
 import { ManualClock } from '../utils/clock.ts'
 import type { NOOPAccessor } from '../accessor/base.ts'
@@ -603,6 +604,21 @@ describe('Workspace.fromState — sessions and finished jobs', () => {
     expect(err?.message).toContain('/a/')
     expect(err?.message).toContain('/b/')
     await ws.close()
+  })
+
+  it('takes the finished jobs another workspace on its store ran', async () => {
+    const options = { workspaceId: 'shared', sessionId: 's', store: new RAMWorkspaceStateStore() }
+    const a = new Workspace({ '/m': new RAMVFS() }, options)
+    const b = new Workspace({ '/m': new RAMVFS() }, options)
+    try {
+      await a.shell('true &', { sessionId: 's' })
+      await a.jobTable.wait(1, 's')
+      const state = await toStateDict(b)
+      expect(state.jobs.map((j) => j.command)).toEqual(['true'])
+    } finally {
+      await a.close()
+      await b.close()
+    }
   })
 })
 

@@ -86,14 +86,16 @@ KEPT_ON_SYSTEM_CLOCK = {
         "listing expiry already reads the store clock"
     ),
     ("shell/job_table/table.py", "asyncio.timeout"): (
-        "bounds the join on a stopping job with a loop timer, which a "
-        "simulated loop already keeps on virtual time; on a manual clock "
-        "a clock sleep would end the bound before the job stops"
+        "bounds a killed job's stop with a loop timer, which a simulated "
+        "loop already keeps on virtual time; on a manual clock a clock "
+        "sleep would end the bound before the job stops. It also paces "
+        "the checks of another owner's lease, which expires on real time "
+        "in the store"
     ),
     ("shell/job_table/table.py", "asyncio.sleep"): (
         "paces the renewal of the owner's lease, which expires on real "
-        "time in the store; a manual clock's sleep returns at once and "
-        "would spin the renewal"
+        "time in the store, and the retry of a failed watch; a manual "
+        "clock's sleep returns at once and would spin both"
     ),
     ("shell/job_table/ram.py", "time.monotonic"): (
         "an owner's lease is compared by every table sharing the store, "
