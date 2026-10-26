@@ -118,6 +118,8 @@ function subsystem(client: Client, name: string): Promise<ClientChannel> {
 
 const b64 = (text: string): string => Buffer.from(text).toString('base64')
 const unb64 = (text: unknown): string => Buffer.from(String(text), 'base64').toString()
+const readText = (read: Message): string =>
+  (read.chunks as Message[]).map((c) => unb64(c.chunk)).join('')
 
 /** Codex's side of one codex-exec channel, one request at a time. */
 class CodexClient {
@@ -590,10 +592,8 @@ describe('codex-exec', () => {
     await client.noteAny('b', 'process/exited')
     const a = await client.result('process/read', { processId: 'a', afterSeq: 0 })
     const b = await client.result('process/read', { processId: 'b', afterSeq: 0 })
-    const text = (read: Message): string =>
-      (read.chunks as Message[]).map((c) => unb64(c.chunk as string)).join('')
-    expect(text(a)).toBe('from-a\n')
-    expect(text(b)).toBe('got:go\n')
+    expect(readText(a)).toBe('from-a\n')
+    expect(readText(b)).toBe('got:go\n')
   })
 
   it('stops a process on interrupt and terminate', async () => {
