@@ -1263,9 +1263,9 @@ jobs:
         working-directory: typescript
         run: pnpm install --frozen-lockfile=false
 
-      - name: Build mirage-core and mirage-node
+      - name: Build mirage-core, mirage-node and mirage-browser
         working-directory: typescript
-        run: pnpm --filter @struktoai/mirage-core --filter @struktoai/mirage-node build
+        run: pnpm --filter @struktoai/mirage-core --filter @struktoai/mirage-node --filter @struktoai/mirage-browser build
 
       - name: Run declarative battery on tidb-filesystem (typescript, background)
         run: |
