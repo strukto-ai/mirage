@@ -14,6 +14,7 @@
 
 import asyncio
 import concurrent.futures
+import hashlib
 import logging
 import os
 import tempfile
@@ -123,12 +124,13 @@ class WasmExecution:
         engine settings fails deserialization and is recompiled; an
         unwritable directory just skips the disk cache.
 
-        Deserializing trusts the bytes, so a reader only ever meets a
-        whole cache: it is read once and those bytes are the ones
-        checked, and a new one is written to a temp file beside it,
-        synced and renamed into place. A process writing it at the same
-        time, one killed while writing, or a power cut after the rename
-        leaves the old cache or the new one, never part of one.
+        Deserializing trusts the bytes, so a cache is used only when it
+        is whole: the SHA-256 of the compiled bytes follows them, and a
+        cache read back whose digest does not match (torn by a crash or
+        a power cut, or written before the digest was) is compiled
+        again. A new cache is written to a temp file beside it, synced
+        and renamed into place, so a process reading it meanwhile meets
+        the old one or the new one.
         """
         with self._compile_lock:
             if self._closed:
@@ -143,13 +145,23 @@ class WasmExecution:
                 ):
                     try:
                         cached = self._cache.read_bytes()
-                        with wasmtime.Module.deserialize(engine, cached):
+                        body = cached[: -hashlib.sha256().digest_size]
+                        if (
+                            hashlib.sha256(body).digest()
+                            != cached[len(body) :]
+                        ):
+                            raise ValueError("digest does not match")
+                        with wasmtime.Module.deserialize(engine, body):
                             pass
-                        self._serialized = cached
-                        return cached
-                    except (OSError, wasmtime.WasmtimeError) as exc:
+                        self._serialized = body
+                        return body
+                    except (
+                        OSError,
+                        ValueError,
+                        wasmtime.WasmtimeError,
+                    ) as exc:
                         logger.debug(
-                            "stale %s cache, recompiling: %s",
+                            "unusable %s cache, recompiling: %s",
                             self._cache.name,
                             exc,
                         )
@@ -165,6 +177,7 @@ class WasmExecution:
                     )
                     with os.fdopen(fd, "wb") as f:
                         f.write(serialized)
+                        f.write(hashlib.sha256(serialized).digest())
                         f.flush()
                         os.fsync(f.fileno())
                     os.replace(staged, self._cache)
