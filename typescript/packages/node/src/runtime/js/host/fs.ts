@@ -889,7 +889,13 @@ class HostFs implements Record<
           yield typed ? entry : named
         }
         if (magic === -1 || !isDirectory || level >= depth) continue
-        const real = follow ? await routed.realpath(path) : path
+        // A mounted directory's name is where the namespace's links lead,
+        // which needs no lookup; a host one is node's own realpath.
+        const real = !follow
+          ? path
+          : this.mounted(path)
+            ? this.files.walked(path)
+            : await routed.realpath(path)
         if (follow && walked.includes(real)) continue
         const branch = follow ? [...walked, real] : walked
         const children = (await routed.readdir(path, { withFileTypes: true })) as unknown as {

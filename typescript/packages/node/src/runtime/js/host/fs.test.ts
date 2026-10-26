@@ -1048,6 +1048,17 @@ describe('patchNodeFs — calls node makes on its own', () => {
     expect(
       await names(fs.promises.glob('/data/m*/**/*.txt', { followSymlinks: true } as object)),
     ).toEqual(['/data/ma/toB/y.txt', '/data/ma/x.txt', '/data/mb/toA/x.txt', '/data/mb/y.txt'])
+    // The walk names a mounted directory by the namespace's links, so it
+    // looks up nothing above the pattern's base.
+    ws.policies.add({
+      preVfs: (ctx) =>
+        ctx.call.name === 'stat' && ctx.path.virtual.replace(/\/$/, '') === '/data'
+          ? { kind: 'deny', reason: 'no stat of /data' }
+          : null,
+    })
+    expect(
+      await names(fs.promises.glob('/data/d/**/*.txt', { followSymlinks: true } as object)),
+    ).toEqual(['/data/d/a.txt', '/data/d/sub/b.txt', '/data/d/sub/deep/c.txt'])
     await ws.close()
   })
 
