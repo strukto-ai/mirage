@@ -183,3 +183,24 @@ it('lands a job write made before its statement landed after the statement', asy
   for (const [, data] of await shell.take()) out.push(decode(await materialize(data)))
   expect(out.join('')).toBe('statement\nlate\nafter\n')
 })
+
+it('keeps a job write made once the recording ended behind what it recorded', async () => {
+  // What a job writes once the recording ended waits until what was
+  // recorded has landed, so it cannot overtake it.
+  const encode = (text: string): Uint8Array => new TextEncoder().encode(text)
+  const session = new SessionState({ sessionId: 't' })
+  const shell = new Recorder()
+  const jobs = new JobOutput(shell)
+  session.jobOutput = jobs
+  const recorder = new Recorder()
+  const leave = recordJobs(session, recorder)
+  await jobs.emit(Channel.STDOUT, encode('a\n'))
+  await jobs.emit(Channel.STDOUT, encode('b\n'))
+  const landing = landLate(recorder, leave, null, shell, [], new IOResult())
+  const late = jobs.emit(Channel.STDOUT, encode('c\n'))
+  await landing
+  await late
+  const out: string[] = []
+  for (const [, data] of await shell.take()) out.push(decode(await materialize(data)))
+  expect(out.join('')).toBe('a\nb\nc\n')
+})

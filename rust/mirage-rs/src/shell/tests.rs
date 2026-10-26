@@ -439,6 +439,33 @@ fn a_pattern_keeps_the_expansions_in_it() {
 }
 
 #[test]
+fn a_raw_c_style_header_splits_at_its_outer_semicolons() {
+    let tree = read("for (( i=${x}0; i<$(echo 11; :); i++ )) do :; done");
+    assert!(
+        tree.contains("condition: (concatenation (word=i<) (command_substitution"),
+        "{tree}"
+    );
+    assert!(tree.contains("update: (word=i++)"), "{tree}");
+    refused("for (( a; b; c; d )) do :; done");
+}
+
+#[test]
+fn an_in_alias_is_a_command_only_where_one_starts() {
+    let aliases = [b"in".to_vec()];
+    assert_eq!(
+        sexp(&parse_with_aliases(b"in", &aliases)),
+        "(program (command name: (command_name (word=in))))"
+    );
+    for header in [
+        &b"for v in a; do :; done"[..],
+        b"case x in x) :;; esac",
+        b"select s in; do :; done",
+    ] {
+        assert_eq!(parse_with_aliases(header, &aliases).error, None);
+    }
+}
+
+#[test]
 fn tokens_the_executor_reads_by_kind() {
     let kinds = |source: &str| {
         let tree = parse(source.as_bytes());

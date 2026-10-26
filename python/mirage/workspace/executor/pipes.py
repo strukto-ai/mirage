@@ -570,6 +570,9 @@ async def handle_subshell(
             merged_io, last_exec = await _subshell_ended(
                 sig, recorder, session, sink, all_stdout, merged_io
             )
+            merged_io = await land_late(
+                recorder, leave, session.terminal, sink, all_stdout, merged_io
+            )
             break
         except PipeClosed:
             # The subshell's own write met a closed pipe: SIGPIPE ends it.

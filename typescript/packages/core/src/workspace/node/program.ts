@@ -319,6 +319,7 @@ async function runProgram(
         allStdout,
         mergedIo,
       )
+      mergedIo = await landLate(recorder, leave, own, sink, allStdout, mergedIo)
       let resumes: boolean
       ;[resumes, mergedIo, lastExec] = await unwound(
         err,

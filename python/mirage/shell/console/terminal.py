@@ -14,7 +14,8 @@
 
 import asyncio
 from collections import deque
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
+from typing import Any
 
 from mirage.io.cooperative import CHUNK_SIZE
 from mirage.shell.console.job_console import JobConsole
@@ -195,6 +196,50 @@ class JobOutput(JobConsole):
         self.target = target
         self.recorder: JobConsole | None = None
         self._taken: list[JobConsole] = []
+        self._tail: asyncio.Future[Any] | None = None
+        self._turns = 0
+
+    def hold_until(self, after: asyncio.Future[None]) -> None:
+        """Keep what jobs write from now behind ``after``, in the order
+        they write: a statement that stops recording them still lands
+        what it recorded first.
+
+        Args:
+            after (asyncio.Future[None]): resolved once that has landed.
+        """
+        self._queue(
+            after if self._tail is None else asyncio.gather(self._tail, after)
+        )
+
+    def _queue(self, turn: asyncio.Future[Any]) -> None:
+        self._turns += 1
+        self._tail = turn
+        turn.add_done_callback(self._turned)
+
+    def _turned(self, turn: asyncio.Future[Any]) -> None:
+        self._turns -= 1
+        if self._turns == 0:
+            self._tail = None
+
+    async def _in_turn(self, write: Callable[[], Awaitable[None]]) -> None:
+        """Run ``write`` once every write queued before it has run.
+
+        Args:
+            write (Callable[[], Awaitable[None]]): the write.
+        """
+        before = self._tail
+        done: asyncio.Future[None] = asyncio.get_running_loop().create_future()
+        self._queue(done)
+        try:
+            if before is not None:
+                await asyncio.shield(before)
+            await write()
+        finally:
+            if not done.done():
+                done.set_result(None)
+
+    def _destination(self) -> JobConsole:
+        return self.recorder if self.recorder is not None else self.target
 
     def record(self, recorder: JobConsole) -> Callable[[], None]:
         """Send what jobs write into ``recorder`` until the returned call
@@ -227,8 +272,12 @@ class JobOutput(JobConsole):
             channel (Channel): stdout or stderr.
             data (bytes): the bytes.
         """
-        to = self.recorder if self.recorder is not None else self.target
-        await to.emit(channel, data)
+        if self._tail is None:
+            await self._destination().emit(channel, data)
+        else:
+            await self._in_turn(
+                lambda: self._destination().emit(channel, data)
+            )
 
     async def emit_to(self, stream: OwnedStream, data: bytes) -> None:
         """Write what a job wrote to a stream a level owns, keeping the
@@ -238,8 +287,12 @@ class JobOutput(JobConsole):
             stream (OwnedStream): the stream the bytes were written to.
             data (bytes): the bytes.
         """
-        to = self.recorder if self.recorder is not None else self.target
-        await to.emit_to(stream, data)
+        if self._tail is None:
+            await self._destination().emit_to(stream, data)
+        else:
+            await self._in_turn(
+                lambda: self._destination().emit_to(stream, data)
+            )
 
     def passes(
         self, streams: set[Channel | OwnedStream]

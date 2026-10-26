@@ -388,38 +388,52 @@ export async function recording<T>(recorder: Recorder, run: () => Promise<T>): P
  * statement writes, until the returned call ends it. The recording lasts past
  * the statement, until `landLate` has landed what was recorded, so a job
  * writing in between cannot reach the shell's own output ahead of the
- * statement. Mirrors Python's record_jobs.
+ * statement. Ended with `after`, what jobs write next waits for it. Mirrors
+ * Python's record_jobs.
  */
-export function recordJobs(session: SessionState, recorder: Recorder): () => void {
-  return (session.jobOutput ?? session.tty.jobs).record(recorder)
+export function recordJobs(
+  session: SessionState,
+  recorder: Recorder,
+): (after?: Promise<void>) => void {
+  const jobs = session.jobOutput ?? session.tty.jobs
+  const leave = jobs.record(recorder)
+  return (after) => {
+    leave()
+    if (after !== undefined) jobs.holdUntil(after)
+  }
 }
 
 /**
  * Land what jobs wrote into `recorder` once the statement's output was taken,
- * and end the recording (`recordJobs`). One pass lands, still recording, what
- * they wrote while that output landed; then the recording ends, so a later
- * write goes on to the shell's own output, and what was already on its way
- * lands. A job that never stops writing cannot hold the statement open.
- * Mirrors Python's land_late.
+ * and end the recording (`recordJobs`). What jobs write from the end on waits
+ * until what was recorded has landed, so nothing written later overtakes it,
+ * and nothing is left in `recorder` unread. Mirrors Python's land_late.
  */
 export async function landLate(
   recorder: Recorder,
-  leave: () => void,
+  leave: (after?: Promise<void>) => void,
   own: StreamOwner | null,
   sink: JobConsole | null,
   allStdout: (ByteSource | null)[],
   mergedIo: IOResult,
 ): Promise<IOResult> {
-  const pass = async (): Promise<IOResult> =>
-    land(
-      await statementOutput(recorder, null, new IOResult(), own, sink),
-      sink,
-      allStdout,
-      mergedIo,
-    )
-  if (recorder.busy) mergedIo = await pass()
-  leave()
-  while (recorder.busy) mergedIo = await pass()
+  let landed = (): void => undefined
+  leave(
+    new Promise<void>((resolve) => {
+      landed = resolve
+    }),
+  )
+  try {
+    while (recorder.busy)
+      mergedIo = await land(
+        await statementOutput(recorder, null, new IOResult(), own, sink),
+        sink,
+        allStdout,
+        mergedIo,
+      )
+  } finally {
+    landed()
+  }
   return mergedIo
 }
 

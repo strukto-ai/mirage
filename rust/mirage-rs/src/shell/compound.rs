@@ -143,8 +143,8 @@ impl Parser<'_> {
                 None => return self.fail(at),
             }
         }
-        self.skip_space_before(b"in");
-        if self.at_word(b"in") {
+        self.skip_space_before_in();
+        if self.at_spelled(b"in") {
             children.push(self.keyword("in")?);
             loop {
                 self.skip_blank();
@@ -183,12 +183,12 @@ impl Parser<'_> {
         Ok(Syn::node("for_statement", children))
     }
 
-    /// Skip newlines when `word` follows them, as bash allows before a for
+    /// Skip newlines when `in` follows them, as bash allows before a for
     /// loop's `in`.
-    fn skip_space_before(&mut self, word: &[u8]) {
+    fn skip_space_before_in(&mut self) {
         let mark = self.mark();
         self.skip_space();
-        if !self.at_word(word) {
+        if !self.at_spelled(b"in") {
             self.reset(mark);
             self.skip_blank();
         }

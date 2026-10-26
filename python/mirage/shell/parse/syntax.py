@@ -1083,6 +1083,15 @@ class _LineReader:
 
     # -- grammar ------------------------------------------------------------
 
+    def header_in(self, tok: ReaderToken) -> bool:
+        """Whether a token is a for, select or case header's ``in``, which
+        stands where no command starts, so no alias spells it.
+
+        Args:
+            tok (ReaderToken): the token.
+        """
+        return tok.kind == "word" and tok.plain and tok.text == "in"
+
     def keyword(self, tok: ReaderToken) -> str | None:
         """The reserved word a token is where a command starts, if any.
 
@@ -1494,7 +1503,7 @@ class _LineReader:
         separated = self.peek().kind == "newline"
         self.linebreak()
         tok = self.peek()
-        if self.keyword(tok) == "in":
+        if self.header_in(tok):
             self.take(tok)
             while (tok := self.peek()).kind == "word":
                 self.take(tok)
@@ -1566,7 +1575,7 @@ class _LineReader:
         self.take(subject)
         self.linebreak()
         tok = self.peek()
-        if self.keyword(tok) != "in":
+        if not self.header_in(tok):
             self.fail_token(tok)
         self.take(tok)
         after_in = self.peek().kind != "newline"

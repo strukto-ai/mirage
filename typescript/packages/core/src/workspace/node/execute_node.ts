@@ -600,7 +600,7 @@ async function runRedirected(
         registry,
         namespace,
         inner,
-        withOwnRedirects(inner, redirects),
+        inner === null ? redirects : withOwnRedirects(inner, redirects),
         signal,
         processes,
         sink,
@@ -609,7 +609,7 @@ async function runRedirected(
         callStack,
       ),
     )
-    return negated(stdout, io, execNode, context, inner)
+    return negated(stdout, io, execNode, context, inner ?? command)
   }
   const pipeNode =
     (redirects.find((r) => r.pipeline != null)?.pipeline as TSNodeLike | null) ?? null
@@ -1195,7 +1195,8 @@ async function executeNodeBody(
     // Assignments with redirects among them and no command name
     // (`a=1 > f b=$a`): bash assigns in order, as an assignment statement
     // does, then opens the redirects with no command; one that fails fails
-    // the line, the assignments standing.
+    // the line, the assignments standing, and else the status is the last
+    // substitution's, a redirect's included.
     const subSeq = context.frame.cmdsubSeq
     let mergedIo = new IOResult()
     for (const child of node.namedChildren) {
@@ -1203,7 +1204,6 @@ async function executeNodeBody(
       const [, io] = await recurse(child, context, stdin, callStack, { ownDiagnostics: false })
       mergedIo = await mergedIo.merge(io)
     }
-    const code = assignmentStatus(context.frame, subSeq)
     const runner = redirectRunnerFor(node)
     const [, opened] =
       runner === null
@@ -1224,7 +1224,8 @@ async function executeNodeBody(
           )
         : await runner(noCommand, undefined, '', [])
     mergedIo = await mergedIo.merge(opened)
-    mergedIo.exitCode = opened.exitCode !== 0 ? opened.exitCode : code
+    mergedIo.exitCode =
+      opened.exitCode !== 0 ? opened.exitCode : assignmentStatus(context.frame, subSeq)
     const ran: Result = [
       null,
       mergedIo,
@@ -1610,6 +1611,15 @@ async function executeNodeBody(
 
   if (kind === NodeKind.NEGATED) {
     const inner = getNegatedCommand(node)
+    // A bare `!` negates the empty command, which succeeds.
+    if (inner === null)
+      return negated(
+        null,
+        new IOResult(),
+        new ExecutionNode({ command: '', exitCode: 0 }),
+        context,
+        node,
+      )
     const [stdout, io, execNode] = await ignoringErrexit(context.session, () =>
       stream(inner, context, stdin, callStack),
     )

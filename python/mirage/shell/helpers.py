@@ -399,6 +399,8 @@ def _pipeline_head(stage: TSNodeLike) -> PipelineStages:
         body, hoisted = found, tuple(parsed)
     if body.type == NT.NEGATED_COMMAND:
         negated = get_negated_command(body)
+        if negated is None:
+            return single
         return PipelineStages(
             commands=(negated,),
             stderr_flags=(),
@@ -990,9 +992,10 @@ def get_unset_args(node: TSNodeLike) -> list[str]:
         return [get_text(c) for c in node.named_children]
 
 
-def get_negated_command(node: TSNodeLike) -> TSNodeLike:
-    """Get inner command from negated_command (! cmd)."""
-    return node.named_children[0]
+def get_negated_command(node: TSNodeLike) -> TSNodeLike | None:
+    """Get inner command from negated_command (! cmd); None for a bare
+    ``!``, which negates the empty command."""
+    return node.named_children[0] if node.named_children else None
 
 
 def get_heredoc_parts(redirect_node: TSNodeLike) -> tuple[str, str]:

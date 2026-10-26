@@ -319,6 +319,9 @@ async def _run_program(
                 all_stdout,
                 merged_io,
             )
+            merged_io = await land_late(
+                recorder, leave, own, sink, all_stdout, merged_io
+            )
             resumes, merged_io, last_exec = await _unwound(
                 sig,
                 child,

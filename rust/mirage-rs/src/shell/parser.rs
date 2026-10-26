@@ -533,13 +533,18 @@ impl Parser<'_> {
 
     /// Whether the reserved word `word` is next. An alias of that name is
     /// a command instead, as bash expands it before it reads a reserved
-    /// word; `in` stands where no alias expands.
+    /// word.
     pub(super) fn at_word(&self, word: &[u8]) -> bool {
-        let next = is_word(self.s, self.i, word)
+        self.at_spelled(word) && !self.aliases.iter().any(|alias| alias == word)
+    }
+
+    /// Whether the word `word` is next, whatever aliases there are: a
+    /// header's `in`, where no alias expands.
+    pub(super) fn at_spelled(&self, word: &[u8]) -> bool {
+        is_word(self.s, self.i, word)
             || (self.in_backtick
                 && self.s[self.i..].starts_with(word)
-                && self.s.get(self.i + word.len()) == Some(&b'`'));
-        next && (word == b"in" || !self.aliases.iter().any(|alias| alias == word))
+                && self.s.get(self.i + word.len()) == Some(&b'`'))
     }
 
     fn at_close(&self, close: Close) -> bool {
@@ -837,9 +842,15 @@ impl Parser<'_> {
         self.command()
     }
 
-    /// A keyword token at the cursor, consumed.
+    /// A keyword token at the cursor, consumed. A header's `in` is read
+    /// whatever aliases there are.
     pub(super) fn keyword(&mut self, word: &'static str) -> R<Syn> {
-        if !self.at_word(word.as_bytes()) {
+        let spelled = if word == "in" {
+            self.at_spelled(word.as_bytes())
+        } else {
+            self.at_word(word.as_bytes())
+        };
+        if !spelled {
             return self.fail(self.i);
         }
         let at = self.i;

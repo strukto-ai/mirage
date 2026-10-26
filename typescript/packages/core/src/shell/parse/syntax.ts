@@ -874,6 +874,12 @@ class LineReader {
 
   // -- grammar -------------------------------------------------------------------
 
+  /** Whether a token is a for, select or case header's `in`, which stands
+   * where no command starts, so no alias spells it. */
+  headerIn(tok: ReaderToken): boolean {
+    return tok.kind === 'word' && tok.plain && tok.text === 'in'
+  }
+
   /** The reserved word a token is where a command starts, if any. A closing
    * word an alias spells is a command, except inside that alias's own text
    * and inside a substitution. */
@@ -1228,7 +1234,7 @@ class LineReader {
     let separated = this.peek().kind === 'newline'
     this.linebreak()
     let next = this.peek()
-    if (this.keyword(next) === 'in') {
+    if (this.headerIn(next)) {
       this.take(next)
       for (next = this.peek(); next.kind === 'word'; next = this.peek()) this.take(next)
       if (next.kind === 'op' && next.text === ';') this.take(next)
@@ -1277,7 +1283,7 @@ class LineReader {
     this.take(subject)
     this.linebreak()
     const word = this.peek()
-    if (this.keyword(word) !== 'in') this.failToken(word)
+    if (!this.headerIn(word)) this.failToken(word)
     this.take(word)
     let afterIn = this.peek().kind !== 'newline'
     this.linebreak()

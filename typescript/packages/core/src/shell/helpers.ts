@@ -328,6 +328,7 @@ function pipelineHead(stage: TSNodeLike): PipelineStages {
   }
   if (body.type === NT.NEGATED_COMMAND) {
     const inner = getNegatedCommand(body)
+    if (inner === null) return single
     return {
       commands: [inner],
       stderrFlags: [],
@@ -876,10 +877,9 @@ export function getUnsetArgs(node: TSNodeLike): string[] {
   return node.namedChildren.map((c) => getText(c))
 }
 
-export function getNegatedCommand(node: TSNodeLike): TSNodeLike {
-  const first = node.namedChildren[0]
-  if (first === undefined) throw new Error('negated_command: missing inner')
-  return first
+/** The command a `!` negates; null for a bare `!`, which negates the empty command. */
+export function getNegatedCommand(node: TSNodeLike): TSNodeLike | null {
+  return node.namedChildren[0] ?? null
 }
 
 // The body opens with the empty lines tree-sitter dropped before its

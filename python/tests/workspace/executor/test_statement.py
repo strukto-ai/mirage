@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
+
 import pytest
 
 from mirage.io import IOResult
@@ -176,3 +178,24 @@ async def test_a_job_writing_before_its_statement_lands_follows_it():
     assert b"".join([data for _, data in await shell.take()]) == (
         b"statement\nlate\nafter\n"
     )
+
+
+@pytest.mark.asyncio
+async def test_a_job_writing_once_its_statement_stopped_recording_waits():
+    # What a job writes once the recording ended waits until what was
+    # recorded has landed, so it cannot overtake it.
+    session = SessionState(session_id="t")
+    shell = Recorder()
+    jobs = JobOutput(shell)
+    session.job_output = jobs
+    recorder = Recorder()
+    leave = record_jobs(session, recorder)
+    await jobs.emit(Channel.STDOUT, b"a\n")
+    await jobs.emit(Channel.STDOUT, b"b\n")
+    landing = asyncio.ensure_future(
+        land_late(recorder, leave, None, shell, [], IOResult())
+    )
+    await asyncio.sleep(0)
+    await jobs.emit(Channel.STDOUT, b"c\n")
+    await landing
+    assert b"".join([data for _, data in await shell.take()]) == b"a\nb\nc\n"

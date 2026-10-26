@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 from collections.abc import Awaitable, Callable, Iterator, Sequence
 from contextlib import aclosing, contextmanager
 from dataclasses import dataclass
@@ -491,24 +492,33 @@ def recording(recorder: Recorder) -> Iterator[None]:
 
 def record_jobs(
     session: SessionState, recorder: Recorder
-) -> Callable[[], None]:
+) -> Callable[..., None]:
     """Send what the jobs this shell started write into ``recorder``, among
     what its statement writes, until the returned call ends it.
 
     The recording lasts past the statement, until ``land_late`` has landed
     what was recorded, so a job writing in between cannot reach the
-    shell's own output ahead of the statement.
+    shell's own output ahead of the statement. Ended with a future, what
+    jobs write next waits for it.
 
     Args:
         session (SessionState): the shell running the statement.
         recorder (Recorder): where the statement writes.
     """
-    return (session.job_output or session.tty.jobs).record(recorder)
+    jobs = session.job_output or session.tty.jobs
+    leave = jobs.record(recorder)
+
+    def end(after: asyncio.Future[None] | None = None) -> None:
+        leave()
+        if after is not None:
+            jobs.hold_until(after)
+
+    return end
 
 
 async def land_late(
     recorder: Recorder,
-    leave: Callable[[], None],
+    leave: Callable[..., None],
     own: StreamOwner | None,
     sink: JobConsole | None,
     all_stdout: list[ByteSource | None],
@@ -517,33 +527,30 @@ async def land_late(
     """Land what jobs wrote into ``recorder`` once the statement's output
     was taken, and end the recording (``record_jobs``).
 
-    One pass lands, still recording, what they wrote while that output
-    landed; then the recording ends, so a later write goes on to the
-    shell's own output, and what was already on its way lands. A job
-    that never stops writing cannot hold the statement open.
+    What jobs write from the end on waits until what was recorded has
+    landed, so nothing written later overtakes it, and nothing is left in
+    ``recorder`` unread.
 
     Args:
         recorder (Recorder): the statement's recorder.
-        leave (Callable[[], None]): ends the recording.
+        leave (Callable[..., None]): ends the recording.
         own (StreamOwner | None): the stream owner of the shell's terminal.
         sink (JobConsole | None): the shell's sink, if it has one.
         all_stdout (list[ByteSource | None]): stdout the shell returns.
         merged_io (IOResult): the shell's result so far.
     """
-
-    async def landed(merged: IOResult) -> IOResult:
-        return await land(
-            await statement_output(recorder, None, IOResult(), own, sink),
-            sink,
-            all_stdout,
-            merged,
-        )
-
-    if recorder.busy:
-        merged_io = await landed(merged_io)
-    leave()
-    while recorder.busy:
-        merged_io = await landed(merged_io)
+    landed: asyncio.Future[None] = asyncio.get_running_loop().create_future()
+    leave(landed)
+    try:
+        while recorder.busy:
+            merged_io = await land(
+                await statement_output(recorder, None, IOResult(), own, sink),
+                sink,
+                all_stdout,
+                merged_io,
+            )
+    finally:
+        landed.set_result(None)
     return merged_io
 
 

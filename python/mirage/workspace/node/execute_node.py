@@ -765,14 +765,18 @@ async def _run_redirected(
                 namespace,
                 view,
                 inner,
-                with_own_redirects(inner, redirects),
+                redirects
+                if inner is None
+                else with_own_redirects(inner, redirects),
                 processes,
                 context,
                 stdin,
                 call_stack,
                 sink=sink,
             )
-        return await _negated(stdout, io, exec_node, context, inner)
+        return await _negated(
+            stdout, io, exec_node, context, command if inner is None else inner
+        )
     pipe_node = next(
         (r.pipeline for r in redirects if r.pipeline is not None), None
     )
@@ -1337,7 +1341,8 @@ async def _execute_node(
         # Assignments with redirects among them and no command name
         # (`a=1 > f b=$a`): bash assigns in order, as an assignment
         # statement does, then opens the redirects with no command; one
-        # that fails fails the line, the assignments standing.
+        # that fails fails the line, the assignments standing, and else the
+        # status is the last substitution's, a redirect's included.
         sub_seq = context.frame.cmdsub_seq
         merged_io = IOResult()
         for assignment in node.named_children:
@@ -1346,7 +1351,6 @@ async def _execute_node(
                     assignment, context, stdin, cs, own_diagnostics=False
                 )
                 merged_io = await merged_io.merge(io)
-        code = assignment_status(context.frame, sub_seq)
         runner = redirect_runner_for(node.id)
         if runner is None:
             _, opened, _ = await _run_redirected(
@@ -1366,7 +1370,9 @@ async def _execute_node(
         else:
             _, opened, _ = await runner(_no_command, None, "", ())
         merged_io = await merged_io.merge(opened)
-        merged_io.exit_code = opened.exit_code or code
+        merged_io.exit_code = opened.exit_code or assignment_status(
+            context.frame, sub_seq
+        )
         ran: RedirectResult = (
             None,
             merged_io,
@@ -1755,6 +1761,15 @@ async def _execute_node(
 
     if kind == NodeKind.NEGATED:
         inner = get_negated_command(node)
+        if inner is None:
+            # A bare `!` negates the empty command, which succeeds.
+            return await _negated(
+                None,
+                IOResult(),
+                ExecutionNode(command="", exit_code=0),
+                context,
+                node,
+            )
         with ignoring_errexit(session):
             stdout, io, exec_node = await stream(inner, context, stdin, cs)
         return await _negated(stdout, io, exec_node, context, inner)

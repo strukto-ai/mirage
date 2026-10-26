@@ -552,6 +552,10 @@ export async function handleSubshell(
         throw err
       }
       ;[mergedIo, lastExec] = await subshellEnded(sig, recorder, session, sink, allStdout, mergedIo)
+      // A closed pipe takes nothing more; anything else drains what jobs
+      // wrote meanwhile.
+      if (!(err instanceof PipeClosed))
+        mergedIo = await landLate(recorder, leave, session.terminal, sink, allStdout, mergedIo)
       break
     } finally {
       leave()

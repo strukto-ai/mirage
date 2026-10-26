@@ -167,6 +167,7 @@ import type {
 import { Mount } from '../mount/spec.ts'
 import { EventManager } from './events.ts'
 import { placementRefused } from './failure.ts'
+import { expandingAliases } from '../executor/builtins/alias/alias.ts'
 
 export { ExecuteResult } from './types.ts'
 export type { ExecuteOptions, MountSpec, SessionExecuteOptions, WorkspaceOptions } from './types.ts'
@@ -1178,8 +1179,9 @@ export class Workspace {
     const session = this.getSession(sessionId === '' ? this.defaultSessionId : sessionId)
     const parser = new ParseScope()
     try {
-      const reparse = (text: string): TSNodeLike => parser.parse(text)
-      const root = parser.parse(line)
+      const aliases = expandingAliases(session)
+      const reparse = (text: string): TSNodeLike => parser.parse(text, aliases)
+      const root = parser.parse(line, aliases)
       const verdicts = await explainLine(
         root,
         session,

@@ -284,43 +284,72 @@ impl Parser<'_> {
     /// The three parts of a C-style for header as raw bodies; false when
     /// the header does not hold three.
     fn c_style_raw(&mut self, start: usize, end: usize, children: &mut Vec<Syn>) -> bool {
-        let mut parts = Vec::new();
-        let mut part = start;
-        let mut depth = 0usize;
-        for at in start..end {
-            match self.s[at] {
-                b'(' => depth += 1,
-                b')' => depth = depth.saturating_sub(1),
-                b';' if depth == 0 && parts.len() < 2 => {
-                    parts.push((part, at));
-                    part = at + 1;
-                }
-                _ => {}
-            }
+        let separators = self.header_separators(start, end);
+        if separators.len() != 2 {
+            return false;
         }
-        parts.push((part, end));
         let fields = ["initializer", "condition", "update"];
-        let count = parts.len();
-        for (index, (mut from, mut to)) in parts.into_iter().enumerate() {
-            let separator = to;
-            while from < to && is_space(self.s[from]) {
-                from += 1;
+        let mut from = start;
+        for (index, to) in separators.iter().copied().chain([end]).enumerate() {
+            let (mut first, mut last) = (from, to);
+            while first < last && is_space(self.s[first]) {
+                first += 1;
             }
-            while to > from && is_space(self.s[to - 1]) {
-                to -= 1;
+            while last > first && is_space(self.s[last - 1]) {
+                last -= 1;
             }
-            if let Some(body) = self.raw_body(from, to) {
+            if let Some(body) = self.raw_body(first, last) {
                 children.push(body.with_field(fields[index]));
             }
-            if index + 1 < count {
-                children.push(Syn::token(";", separator, separator + 1));
+            if to < end {
+                children.push(Syn::token(";", to, to + 1));
             }
+            from = to + 1;
         }
-        let separators = self.s[start..end]
-            .iter()
-            .filter(|byte| **byte == b';')
-            .count();
-        count == 3 && separators == 2
+        true
+    }
+
+    /// The `;`s that split a C-style for header: outside its quotes,
+    /// substitutions and parentheses, where bash splits it.
+    fn header_separators(&self, start: usize, end: usize) -> Vec<usize> {
+        let mut found = Vec::new();
+        let mut depth = 0usize;
+        let mut at = start;
+        while at < end {
+            at = match self.s[at] {
+                b'\\' => at + 2,
+                b'\'' => super::lex::quote_end(self.s, at, b'\'').unwrap_or(end),
+                b'"' | b'`' | b'$' => self.piece_end(at).unwrap_or(at + 1),
+                b'(' => {
+                    depth += 1;
+                    at + 1
+                }
+                b')' => {
+                    depth = depth.saturating_sub(1);
+                    at + 1
+                }
+                b';' => {
+                    if depth == 0 {
+                        found.push(at);
+                    }
+                    at + 1
+                }
+                _ => at + 1,
+            };
+        }
+        found
+    }
+
+    /// Where the quoted string, substitution or expansion at `at` ends, as
+    /// a double-quoted word reads it; None when none starts there.
+    fn piece_end(&self, at: usize) -> Option<usize> {
+        let mut probe = self.probe(at);
+        let read = match self.s[at] {
+            b'"' => probe.string().map(Some),
+            b'`' => probe.backtick().map(Some),
+            _ => probe.dollar_in_string(),
+        };
+        matches!(read, Ok(Some(_))).then_some(probe.i)
     }
 
     fn c_style_header(&mut self, children: &mut Vec<Syn>) -> R<()> {

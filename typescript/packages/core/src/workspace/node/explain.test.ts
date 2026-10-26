@@ -260,6 +260,15 @@ describe('explain', () => {
     expect([second?.command, second?.outcome]).toEqual(['rm', Outcome.DENY])
   })
 
+  it('reads a reserved word alias as a command', async () => {
+    const w = await ws()
+    await w.shell("shopt -s expand_aliases; alias fi='echo works'", { sessionId: 's' })
+    const said = await w.explain('fi', 's')
+    expect(said.node.children.map((child) => ('command' in child ? child.command : null))).toEqual([
+      'fi',
+    ])
+  })
+
   it('says exactly what the run would say', async () => {
     const w = await ws()
     for (const line of ['rm /data/prod/x.txt', 'git push origin main', 'gerp x']) {
