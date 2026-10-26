@@ -221,6 +221,33 @@ def test_mv_of_several_sources_into_a_mount_root_is_allowed():
     _run(go())
 
 
+def test_mv_refuses_a_mount_root_reached_through_a_link():
+    # The policy sees a source as typed; a parent link resolves it to a
+    # mount root only for the handler, which refuses it before copying.
+    async def go():
+        ws = Workspace(
+            {
+                "/ram": (RAMVFS(), MountMode.WRITE),
+                "/data": (RAMVFS(), MountMode.WRITE),
+                "/data/inner": (RAMVFS(), MountMode.WRITE),
+            }
+        )
+        await _exec(
+            ws, "touch /ram/payload /data/inner/keep && mkdir /ram/dst"
+        )
+        await _exec(ws, "ln -s /data /ram/alias")
+        r = await _exec(ws, "mv /ram/payload /ram/alias/inner /ram/dst")
+        assert r.exit_code == 1
+        assert r.stderr == (
+            b"mv: cannot move '/ram/alias/inner' to '/ram/dst/inner': "
+            b"Device or resource busy\n"
+        )
+        assert (await _exec(ws, "ls /data/inner")).stdout == b"keep\n"
+        assert (await _exec(ws, "ls /ram/dst")).stdout == b"payload\n"
+
+    _run(go())
+
+
 def test_mv_across_mounts_leaves_a_nested_mount_root():
     # GNU 9.7: the copy takes the nested mount's files and removes them,
     # but its mountpoint is busy, so it stays and mv exits 1.

@@ -545,7 +545,11 @@ async def mv_generic(
         # so GNU's rename answers EBUSY once the gates let it run, before
         # any subdirectory verdict (coreutils 9.7). Across mounts GNU
         # copies it and then refuses to remove it; mirage refuses first.
-        busy = typed_name(src) in (".", "..")
+        # A mount root as a source is busy too: the policy refuses one
+        # typed, and this one is reached through a link it cannot see.
+        busy = typed_name(src) in (".", "..") or (
+            mount_root is not None and mount_root(src.virtual)
+        )
         if not busy and key_of(target).startswith(key_of(src) + "/"):
             errors.append(
                 f"mv: cannot move '{src.raw_path}' to a "

@@ -143,6 +143,30 @@ describe('mount-root protection — mv', () => {
     await ws.close()
   })
 
+  it('mv refuses a mount root reached through a link', async () => {
+    // The policy sees a source as typed; a parent link resolves it to a mount
+    // root only for the handler, which refuses it before copying.
+    const ws = new Workspace(
+      {
+        '/': new RAMVFS(),
+        '/ram': new RAMVFS(),
+        '/data': new RAMVFS(),
+        '/data/inner': new RAMVFS(),
+      },
+      { mode: MountMode.WRITE },
+    )
+    await ws.shell('touch /ram/payload /data/inner/keep && mkdir /ram/dst')
+    await ws.shell('ln -s /data /ram/alias')
+    const r = await ws.shell('mv /ram/payload /ram/alias/inner /ram/dst')
+    expect(r.exitCode).toBe(1)
+    expect(r.stderrText).toBe(
+      "mv: cannot move '/ram/alias/inner' to '/ram/dst/inner': Device or resource busy\n",
+    )
+    expect((await ws.shell('ls /data/inner')).stdoutText).toBe('keep\n')
+    expect((await ws.shell('ls /ram/dst')).stdoutText).toBe('payload\n')
+    await ws.close()
+  })
+
   it('mv across mounts leaves a nested mount root', async () => {
     // GNU 9.7: the copy takes the nested mount's files and removes them,
     // but its mountpoint is busy, so it stays and mv exits 1.

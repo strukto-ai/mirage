@@ -441,8 +441,11 @@ export async function mvGeneric(
     // A source typed as `.` or `..` names no entry a rename can take, so
     // GNU's rename answers EBUSY once the gates let it run, before any
     // subdirectory verdict (coreutils 9.7). Across mounts GNU copies it and
-    // then refuses to remove it; mirage refuses first.
-    const busy = typedName(src) === '.' || typedName(src) === '..'
+    // then refuses to remove it; mirage refuses first. A mount root as a
+    // source is busy too: the policy refuses one typed, and this one is
+    // reached through a link it cannot see.
+    const busy =
+      typedName(src) === '.' || typedName(src) === '..' || mountRoot?.(src.virtual) === true
     if (!busy && keyOf(target).startsWith(keyOf(src) + '/')) {
       errors.push(
         `mv: cannot move '${src.rawPath}' to a subdirectory of itself, '${target.rawPath}'`,
