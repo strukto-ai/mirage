@@ -20,6 +20,8 @@ from collections.abc import Awaitable, Callable
 from dataclasses import fields, replace
 from typing import TYPE_CHECKING, Any, TypeVar, overload
 
+from mirage.commands.spec import SPECS, parse_command, parse_to_kwargs
+from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.usage import operand_exit_code
 from mirage.context.session_context import (
     Caller,
@@ -40,6 +42,7 @@ from mirage.policy.constants import POLICY_DENIED_EXIT
 from mirage.policy.decisions import Decisions, ask_rule, op_question
 from mirage.policy.errors import Explained, PolicyDenied, PolicyError
 from mirage.policy.match.decide import source_of
+from mirage.policy.match.rule import operand_paths
 from mirage.policy.mixin import SessionScopedMixin
 from mirage.policy.types import (
     VALIDITY,
@@ -63,7 +66,7 @@ from mirage.policy.types import (
     VfsResultContext,
     policy_caller,
 )
-from mirage.types import Limit, MountMode, PathSpec, Refusal
+from mirage.types import FileType, Limit, MountMode, PathSpec, Refusal
 from mirage.utils.abort import MirageAbortError
 from mirage.vfs.types import VfsCall
 from mirage.view.types import FileView, SessionView
@@ -109,6 +112,161 @@ def render_deny(subject: str, deny: Deny | Pending) -> tuple[bytes, int]:
         line = f"{subject}: {deny.reason}\n"
         return line.encode(), operand_exit_code(subject)
     return f"{subject}: Permission denied\n".encode(), POLICY_DENIED_EXIT
+
+
+async def render_command_deny(
+    subject: str, deny: Deny | Pending, ctx: CommandContext
+) -> tuple[bytes, int]:
+    """``render_deny`` for a refused command whose context is at hand.
+
+    A Deny about a cp or mv operand says what GNU says when the step
+    that operand's role takes is refused, which the bare path line
+    does not: the context says which operand is a source and which the
+    target, and its file view whether each is a directory. Every other
+    refusal renders as ``render_deny`` renders it.
+
+    Args:
+        subject (str): the command name.
+        deny (Deny | Pending): the action, or the ledger's open question.
+        ctx (CommandContext): the refused command.
+    """
+    if isinstance(deny, Deny) and deny.path is not None:
+        lines = await transfer_lines(subject, deny.path, ctx)
+        if lines is not None:
+            return lines.encode(), operand_exit_code(subject)
+    return render_deny(subject, deny)
+
+
+async def transfer_lines(
+    subject: str, path: str, ctx: CommandContext
+) -> str | None:
+    """GNU's lines for the cp or mv operand a path deny names; None for
+    another command, or a path that is none of its operands.
+
+    The deny lands before the command touches a file, so each line is
+    the one GNU prints when that operand's step is refused: cp opens a
+    source file for reading, reads a source directory and creates each
+    copy, and mv moves each source onto its target. A target given by
+    ``-t``, after more than one source or that is a directory takes each
+    source by its base name, unless ``-T``. A
+    source named ``.`` or ``..``, or a link cp copies as a link, keeps
+    ``render_deny``'s line: GNU's there depends on what the directory
+    or the link holds.
+
+    Args:
+        subject (str): the command name.
+        path (str): the operand the deny names.
+        ctx (CommandContext): the refused command.
+    """
+    if subject not in ("cp", "mv"):
+        return None
+    spec = SPECS[subject]
+    parsed = parse_command(spec, list(ctx.argv), ctx.cwd, subject)
+    flags = FlagView(parse_to_kwargs(parsed), spec=spec)
+    named = flags.as_str("target_directory")
+    operands = operand_paths(ctx)
+    directory = next(
+        (
+            p
+            for p in ctx.paths
+            if named is not None and named in (p.raw_path, p.virtual)
+        ),
+        None,
+    )
+    if directory is not None:
+        sources, target = operands, directory
+    elif len(operands) > 1:
+        sources, target = operands[:-1], operands[-1]
+    else:
+        return None
+    named_source = next(
+        (s for s in sources if path in (s.raw_path, s.virtual)), None
+    )
+    if named_source is not None:
+        refused = [named_source]
+    elif path in (target.raw_path, target.virtual):
+        refused = list(sources)
+    else:
+        return None
+    typed_target = parsed.raw_path_flags.get("target_directory")
+    goal = (
+        typed_target
+        if directory is not None and isinstance(typed_target, str)
+        else target.raw_path or target.virtual
+    )
+    into = directory is not None or (
+        not flags.as_bool("no_target_directory")
+        and (
+            len(sources) > 1
+            or await _file_type(ctx, target) == FileType.DIRECTORY
+        )
+    )
+
+    def landing(name: str) -> str:
+        if not into:
+            return goal
+        return f"{goal.rstrip('/')}/{name.rstrip('/').rsplit('/', 1)[-1]}"
+
+    recursive = subject == "cp" and (
+        flags.as_bool("r")
+        or flags.as_bool("recursive")
+        or flags.as_bool("archive")
+    )
+    typed = (
+        flags.typed_order("dereference", "no_dereference", "H", "d", "archive")
+        if subject == "cp"
+        else []
+    )
+    follows = typed[-1] in ("dereference", "H") if typed else not recursive
+    lines = []
+    for src in refused:
+        shown = src.raw_path or src.virtual
+        if shown.rstrip("/").rsplit("/", 1)[-1] in (".", ".."):
+            return None
+        if subject == "mv":
+            line = f"cannot move '{shown}' to '{landing(shown)}'"
+        elif (
+            not follows
+            and await _file_type(ctx, src, nofollow=True) == FileType.SYMLINK
+        ):
+            return None
+        elif await _file_type(ctx, src) != FileType.DIRECTORY:
+            line = (
+                f"cannot open '{shown}' for reading"
+                if named_source is not None
+                else f"cannot create regular file '{landing(shown)}'"
+            )
+        elif not recursive:
+            lines.append(
+                f"cp: -r not specified; omitting directory '{shown}'\n"
+            )
+            continue
+        else:
+            line = (
+                f"cannot access '{shown}'"
+                if named_source is not None
+                else f"cannot create directory '{landing(shown)}'"
+            )
+        lines.append(f"{subject}: {line}: Permission denied\n")
+    return "".join(lines)
+
+
+async def _file_type(
+    ctx: CommandContext, operand: PathSpec, nofollow: bool = False
+) -> FileType | None:
+    if ctx.vfs is None:
+        return None
+    token = set_explaining(DryRun.DECIDING)
+    try:
+        found = await ctx.vfs.stat(operand, nofollow=nofollow)
+    except Exception as exc:
+        logger.debug(
+            "no stat for refused operand %s: %s", operand.virtual, exc
+        )
+        return None
+    finally:
+        reset_explaining(token)
+    return found.type
 
 
 def refusal_of(action: Deny | Pending) -> Refusal | None:

@@ -22,7 +22,7 @@ import {
   askRule,
   policyDenied,
   refusalOf,
-  renderDeny,
+  renderCommandDeny,
 } from '../../policy/index.ts'
 import type {
   Ask,
@@ -577,7 +577,7 @@ export async function gate(
     write: writes(name, args, operands, session, registry, namespace, implied),
     // The methods read the session this command is judged in, which for a
     // line explain walks is the walked one, not the stored one.
-    ...(rulesOnly ? null : registry.policies.views?.(session.sessionId, session)),
+    ...registry.policies.views?.(session.sessionId, session),
   }
   const answers = (await registry.policies.answers('preCommand', ctx, every, rulesOnly)).filter(
     (a): a is Deny | Ask => a.kind !== 'route',
@@ -672,7 +672,7 @@ export async function admit(
       granted,
     })
   }
-  const [stderr, exitCode] = renderDeny(name, action)
+  const [stderr, exitCode] = await renderCommandDeny(name, action, ctx)
   return { stderr, exitCode, refusal: refusalOf(action) }
 }
 

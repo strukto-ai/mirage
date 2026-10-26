@@ -30,6 +30,7 @@ export {
   describeRefusal,
   policyDenied,
   refusalOf,
+  renderCommandDeny,
   renderDeny,
 } from './policies.ts'
 export {

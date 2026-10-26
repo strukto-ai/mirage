@@ -179,7 +179,35 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "cp: /scratch/locked/y: Permission denied\n"
+        "stderr": "cp: cannot open '/scratch/locked/y' for reading: Permission denied\n"
+      }
+    },
+    {
+      "id": "a_sealed_directory_cp_names_without_r_is_omitted",
+      "seq": 923110,
+      "targets": [
+        "ram-commands"
+      ],
+      "session": "frozen",
+      "command": "cp /scratch/wk/sealed /scratch/sealcopy",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "cp: -r not specified; omitting directory '/scratch/wk/sealed'\n"
+      }
+    },
+    {
+      "id": "a_sealed_directory_cp_r_names_is_one_it_cannot_access",
+      "seq": 923111,
+      "targets": [
+        "ram-commands"
+      ],
+      "session": "frozen",
+      "command": "cp -r /scratch/wk/sealed /scratch/sealcopy",
+      "expect": {
+        "exit": 1,
+        "stdout": "",
+        "stderr": "cp: cannot access '/scratch/wk/sealed': Permission denied\n"
       }
     },
     {

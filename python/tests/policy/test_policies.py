@@ -16,6 +16,7 @@ import errno
 
 import pytest
 
+from mirage import Workspace
 from mirage.errors.fs import ebusy
 from mirage.policy import (
     Action,
@@ -181,6 +182,108 @@ async def test_builtin_runs_first_then_user_policies_in_order():
         b"tar: x: Cannot open\n",
         2,
     )
+
+
+SEALED_TRANSFERS = (
+    (
+        "cp /data/sec/k /data/out/",
+        "cp: cannot open '/data/sec/k' for reading: Permission denied\n",
+    ),
+    (
+        "cp /data/open /data/sec/sub",
+        "cp: cannot create regular file '/data/sec/sub/open': "
+        "Permission denied\n",
+    ),
+    (
+        "cp -T /data/open /data/sec/sub",
+        "cp: cannot create regular file '/data/sec/sub': Permission denied\n",
+    ),
+    (
+        "cp -t /data/sec/sub /data/open /data/b",
+        "cp: cannot create regular file '/data/sec/sub/open': "
+        "Permission denied\n"
+        "cp: cannot create regular file '/data/sec/sub/b': "
+        "Permission denied\n",
+    ),
+    (
+        "cp /data/sec/dir /data/out/d",
+        "cp: -r not specified; omitting directory '/data/sec/dir'\n",
+    ),
+    (
+        "cp -r /data/sec/dir /data/out/d",
+        "cp: cannot access '/data/sec/dir': Permission denied\n",
+    ),
+    (
+        "cp -r /data/tree /data/sec/sub",
+        "cp: cannot create directory '/data/sec/sub/tree': "
+        "Permission denied\n",
+    ),
+    (
+        "mv /data/sec/k /data/out",
+        "mv: cannot move '/data/sec/k' to '/data/out/k': Permission denied\n",
+    ),
+    (
+        "cp /data/sec/lnk /data/out/l",
+        "cp: cannot open '/data/sec/lnk' for reading: Permission denied\n",
+    ),
+    (
+        "cp -P /data/sec/lnk /data/out/l",
+        "cp: /data/sec/lnk: Permission denied\n",
+    ),
+    (
+        "cp -r /data/sec/dir/. /data/out/d",
+        "cp: /data/sec/dir/.: Permission denied\n",
+    ),
+    ("cat /data/sec/k", "cat: /data/sec/k: Permission denied\n"),
+    (
+        "cp -r /data/tree /data/sec/new/",
+        "cp: cannot create directory '/data/sec/new/': Permission denied\n",
+    ),
+    (
+        "cd /data && cp --target-directory=sec/sub open",
+        "cp: cannot create regular file 'sec/sub/open': Permission denied\n",
+    ),
+    (
+        "cd /data && cp -tsec/sub open",
+        "cp: cannot create regular file 'sec/sub/open': Permission denied\n",
+    ),
+)
+
+
+class RefusesTargetStat(Policy):
+    async def pre_vfs(self, ctx: VfsContext) -> Action | None:
+        if ctx.call.name == "stat" and ctx.path.virtual == "/data/sec/sub":
+            return Deny("no looking")
+        return None
+
+
+@pytest.mark.asyncio
+async def test_a_refused_cp_or_mv_operand_reads_as_gnu_reports_it():
+    # GNU (coreutils 9.7) names the step the operand's role takes: cp
+    # opens a source, reads a source directory and creates each copy, mv
+    # moves a source onto its target. A link cp copies as a link, or a
+    # source named "dir/.", keeps the plain line. The wording's own stats
+    # are a deciding read, so a coded policy never changes them.
+    ws = Workspace(
+        {"/data/": RAMVFS()},
+        mode=MountMode.WRITE,
+        policies=[RefusesTargetStat()],
+    )
+    rule = {"reason": "sealed", "paths": ["/data/sec/*"]}
+    ws.create_session("agent", profile={"commands": {"deny": [rule]}})
+    try:
+        await ws.shell(
+            "mkdir -p /data/sec/sub /data/sec/dir /data/out /data/tree; "
+            "echo k > /data/sec/k; echo o > /data/open; echo b > /data/b; "
+            "echo t > /data/tree/t; ln -s /data/open /data/sec/lnk"
+        )
+        for line, stderr in SEALED_TRANSFERS:
+            run = await ws.shell(line, session_id="agent")
+            judged = await ws.explain(line, session_id="agent")
+            assert (run.exit_code, await run.stderr_str()) == (1, stderr), line
+            assert (judged.exit_code, judged.stderr) == (1, stderr), line
+    finally:
+        await ws.close()
 
 
 @pytest.mark.asyncio

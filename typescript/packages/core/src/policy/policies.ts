@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { FlagView, SPECS, parseCommand } from '../commands/spec/index.ts'
+import { parseToKwargs } from '../commands/spec/parser.ts'
 import { operandExitCode } from '../commands/spec/usage.ts'
 import { asyncContextIsolatesTasks } from '../utils/async_context.ts'
 import {
@@ -25,13 +27,15 @@ import {
 import { eacces, erofs } from '../errors/fs.ts'
 import { commandRecords } from '../observe/context.ts'
 import { fsErrorLine } from '../errors/render.ts'
-import { Limit, type PathSpec, type Refusal } from '../types.ts'
+import { FileType, Limit, type PathSpec, type Refusal } from '../types.ts'
+import { rstripSlash } from '../utils/slash.ts'
 import type { Policy } from './base.ts'
 import { MountModePolicy } from './builtin/mount_mode.ts'
 import { PermissionsPolicy } from './builtin/permissions.ts'
 import { POLICY_DENIED_EXIT } from './constants.ts'
 import { Explained, PolicyDenied, PolicyError } from './errors.ts'
 import { sourceOf } from './match/decide.ts'
+import { operandPaths } from './match/rule.ts'
 import { isSessionScoped } from './mixin.ts'
 import { Decisions, askRule, opQuestion, sameRule } from './decisions.ts'
 import {
@@ -83,6 +87,138 @@ export function renderDeny(subject: string, deny: Deny | Pending): [Uint8Array, 
     return [new TextEncoder().encode(`${subject}: ${deny.reason}\n`), operandExitCode(subject)]
   }
   return [new TextEncoder().encode(`${subject}: Permission denied\n`), POLICY_DENIED_EXIT]
+}
+
+/**
+ * Opt in by assigning a debug sink, as Python's module logger is off until
+ * configured.
+ */
+export const logger: { debug?: (message: string) => void } = {}
+
+/**
+ * `renderDeny` for a refused command whose context is at hand. A Deny about
+ * a cp or mv operand says what GNU says when the step that operand's role
+ * takes is refused, which the bare path line does not: the context says
+ * which operand is a source and which the target, and its file view whether
+ * each is a directory. Every other refusal renders as `renderDeny` renders
+ * it.
+ */
+export async function renderCommandDeny(
+  subject: string,
+  deny: Deny | Pending,
+  ctx: CommandContext,
+): Promise<[Uint8Array, number]> {
+  if (deny.kind === 'deny' && deny.path !== undefined) {
+    const lines = await transferLines(subject, deny.path, ctx)
+    if (lines !== null) return [new TextEncoder().encode(lines), operandExitCode(subject)]
+  }
+  return renderDeny(subject, deny)
+}
+
+/**
+ * GNU's lines for the cp or mv operand a path deny names; null for another
+ * command, or a path that is none of its operands. The deny lands before the
+ * command touches a file, so each line is the one GNU prints when that
+ * operand's step is refused: cp opens a source file for reading, reads a
+ * source directory and creates each copy, and mv moves each source onto its
+ * target. A target given by `-t`, after more than one source or that is a
+ * directory takes each source by its base name, unless `-T`. A source named `.` or `..`, or a link cp copies as a link,
+ * keeps `renderDeny`'s line: GNU's there depends on what the directory or
+ * the link holds.
+ */
+async function transferLines(
+  subject: string,
+  path: string,
+  ctx: CommandContext,
+): Promise<string | null> {
+  if (subject !== 'cp' && subject !== 'mv') return null
+  const spec = SPECS[subject]
+  if (spec === undefined) return null
+  const parsed = parseCommand(spec, [...ctx.argv], ctx.cwd, subject)
+  const flags = new FlagView(parseToKwargs(parsed), spec)
+  const named = flags.asStr('target_directory') ?? null
+  const operands = operandPaths(ctx)
+  const directory =
+    named === null ? undefined : ctx.paths.find((p) => named === p.rawPath || named === p.virtual)
+  const lastOperand = operands[operands.length - 1]
+  let sources: PathSpec[]
+  let target: PathSpec
+  if (directory !== undefined) {
+    sources = operands
+    target = directory
+  } else if (operands.length > 1 && lastOperand !== undefined) {
+    sources = operands.slice(0, -1)
+    target = lastOperand
+  } else {
+    return null
+  }
+  const namedSource = sources.find((s) => path === s.rawPath || path === s.virtual)
+  let refused: PathSpec[]
+  if (namedSource !== undefined) refused = [namedSource]
+  else if (path === target.rawPath || path === target.virtual) refused = sources
+  else return null
+  const typedTarget = parsed.rawPathFlags.target_directory
+  const goal =
+    directory !== undefined && typeof typedTarget === 'string'
+      ? typedTarget
+      : target.rawPath || target.virtual
+  const into =
+    directory !== undefined ||
+    (!flags.asBool('no_target_directory') &&
+      (sources.length > 1 || (await fileType(ctx, target)) === FileType.DIRECTORY))
+  const landing = (name: string): string => {
+    if (!into) return goal
+    const base = rstripSlash(name)
+    return `${rstripSlash(goal)}/${base.slice(base.lastIndexOf('/') + 1)}`
+  }
+  const recursive =
+    subject === 'cp' && (flags.asBool('r') || flags.asBool('recursive') || flags.asBool('archive'))
+  const typed =
+    subject === 'cp' ? flags.typedOrder('dereference', 'no_dereference', 'H', 'd', 'archive') : []
+  const last = typed[typed.length - 1]
+  const follows = last !== undefined ? last === 'dereference' || last === 'H' : !recursive
+  const lines: string[] = []
+  for (const src of refused) {
+    const shown = src.rawPath || src.virtual
+    const trimmed = rstripSlash(shown)
+    const base = trimmed.slice(trimmed.lastIndexOf('/') + 1)
+    if (base === '.' || base === '..') return null
+    let line: string
+    if (subject === 'mv') {
+      line = `cannot move '${shown}' to '${landing(shown)}'`
+    } else if (!follows && (await fileType(ctx, src, true)) === FileType.SYMLINK) {
+      return null
+    } else if ((await fileType(ctx, src)) !== FileType.DIRECTORY) {
+      line =
+        namedSource !== undefined
+          ? `cannot open '${shown}' for reading`
+          : `cannot create regular file '${landing(shown)}'`
+    } else if (!recursive) {
+      lines.push(`cp: -r not specified; omitting directory '${shown}'\n`)
+      continue
+    } else {
+      line =
+        namedSource !== undefined
+          ? `cannot access '${shown}'`
+          : `cannot create directory '${landing(shown)}'`
+    }
+    lines.push(`${subject}: ${line}: Permission denied\n`)
+  }
+  return lines.join('')
+}
+
+async function fileType(
+  ctx: CommandContext,
+  operand: PathSpec,
+  nofollow = false,
+): Promise<FileType | null> {
+  if (ctx.vfs === undefined) return null
+  try {
+    return (await ctx.vfs.stat(operand, undefined, { nofollow })).type
+  } catch (err) {
+    logger.debug?.(`no stat for refused operand ${operand.virtual}: ${String(err)}`)
+    return null
+  }
 }
 
 /**
