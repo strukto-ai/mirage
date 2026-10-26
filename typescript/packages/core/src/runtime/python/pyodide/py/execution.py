@@ -272,7 +272,7 @@ class MiragePopen:
         inherited = b""
         source = None
         if stdin is None:
-            source = _process_stdio[0].buffer.raw
+            source = _process_stdio[0].buffer
             offset = source.taken
             inherited = source.rest()
         result = _process_call(
@@ -449,10 +449,12 @@ subprocess.Popen = MiragePopen
 shutil.which = process_which
 
 
-class PipeInput(io.RawIOBase):
+class PipeInput(io.BufferedIOBase):
     """The run's input, as a pipe hands it over: the host sends each
     piece as the guest reads it, so a writer that never ends holds back
-    only a read that waits on it."""
+    only a read that waits on it. It is the buffer itself, so what the
+    guest has read is exactly ``taken``, and a child that inherits the
+    input gets every byte after it."""
 
     def __init__(self):
         super().__init__()
@@ -472,17 +474,43 @@ class PipeInput(io.RawIOBase):
         else:
             self.ended = True
 
-    def readinto(self, target):
+    def _take(self, size):
+        data = bytes(self.held[:size])
+        del self.held[:size]
+        self.taken += len(data)
+        return data
+
+    def read(self, size=-1):
         self._checkClosed()
-        if not target:
-            return 0
+        if size is None or size < 0:
+            while not self.ended:
+                self._pull()
+            return self._take(len(self.held))
+        while len(self.held) < size and not self.ended:
+            self._pull()
+        return self._take(size)
+
+    def read1(self, size=-1):
+        self._checkClosed()
         if not self.held and not self.ended:
             self._pull()
-        size = min(len(target), len(self.held))
-        target[:size] = self.held[:size]
-        del self.held[:size]
-        self.taken += size
-        return size
+        return self._take(len(self.held) if size is None or size < 0 else size)
+
+    def peek(self, size=0):
+        self._checkClosed()
+        if not self.held and not self.ended:
+            self._pull()
+        return bytes(self.held)
+
+    def readinto(self, target):
+        data = self.read(len(target))
+        target[: len(data)] = data
+        return len(data)
+
+    def readinto1(self, target):
+        data = self.read1(len(target))
+        target[: len(data)] = data
+        return len(data)
 
     def rest(self):
         """The input left, read to its end and kept for the guest's own
@@ -545,6 +573,11 @@ class OutputCapture(io.RawIOBase):
         if self.text.buffer is not None and not self.text.closed:
             self.text.flush()
         self._send(text.encode("utf-8", errors="replace"))
+
+    def finish(self):
+        """Flush what the guest left buffered, as CPython's exit does."""
+        if self.text.buffer is not None and not self.text.closed:
+            self.text.flush()
 
     def __exit__(self, *exc):
         try:
@@ -697,7 +730,7 @@ def run(request, arm_interrupt, disarm_interrupt):
 
     stdin_pipe = PipeInput()
     stdin_text = io.TextIOWrapper(
-        io.BufferedReader(stdin_pipe), encoding="utf-8", errors="replace"
+        stdin_pipe, encoding="utf-8", errors="replace"
     )
 
     flags = dict(init_flags) if init_flags is not None else {}
@@ -794,6 +827,18 @@ def run(request, arm_interrupt, disarm_interrupt):
             os.getcwd = saved_getcwd
             os._exit = saved_exit
             saved_chdir(saved_cwd)
+        # CPython flushes stdout as it exits, and a flush that fails is
+        # reported and makes the exit status 120, whatever the program's.
+        if _exit_status is None:
+            try:
+                out_bytes.finish()
+            except BrokenPipeError as exc:
+                when = "while" if sys.version_info >= (3, 14) else "on"
+                err_bytes.diagnostic(
+                    f"Exception ignored {when} flushing sys.stdout:\n"
+                    + "".join(traceback.format_exception_only(exc))
+                )
+                exit_code = 120
 
     if _exit_status is not None:
         exit_code = _exit_status

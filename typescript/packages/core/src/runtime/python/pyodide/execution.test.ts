@@ -429,6 +429,44 @@ small = [str(i).encode() for i in range(100000)]
     }
   })
 
+  // CPython reports a stdout flush that fails as it exits and makes the
+  // exit 120, whatever the program's own; the WASI guest answers the same.
+  it('reports a stdout its reader left as it exits, as CPython does', async () => {
+    const guest = new PyodideExecution(await loadPyodideRuntime())
+    const errors: number[] = []
+    try {
+      const result = guest.run(
+        {
+          code: 'import sys\nprint(1)\nsys.exit(3)',
+          argv: ['-c'],
+          cwd: '/',
+          flags: {},
+          script_cli: false,
+          filename: null,
+          script: false,
+          env: {},
+          stdin: null,
+        },
+        () => undefined,
+        () => undefined,
+        {
+          read: () => new Uint8Array(),
+          write: (fd, bytes) => {
+            if (fd === 1) return false
+            errors.push(...bytes)
+            return true
+          },
+        },
+      )
+      expect(result[2]).toBe(120)
+      expect(new TextDecoder().decode(new Uint8Array(errors))).toMatch(
+        /^Exception ignored (while|on) flushing sys\.stdout:\nBrokenPipeError: \[Errno \d+\] Broken pipe\n$/,
+      )
+    } finally {
+      guest.close()
+    }
+  })
+
   it('registers an isolated main module for imports and pickling across exits', async () => {
     const pyodide = await loadPyodideRuntime()
     const guest = new PyodideExecution(pyodide)
