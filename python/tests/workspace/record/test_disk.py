@@ -13,10 +13,17 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import errno
+import json
 import os
 import threading
+import time
+from itertools import count
 from pathlib import Path
+from types import SimpleNamespace
+from typing import Literal
 
+import aiofiles.os
 import pytest
 
 import mirage.workspace.record.disk as disk
@@ -121,3 +128,231 @@ async def test_cancel_during_acquisition_releases_lock(
         os.fstat(fds[0])
     monkeypatch.setattr(disk, "_acquire_lock", original)
     assert await client.cas_put("k", {"generation": 1}, 0)
+
+
+def _race_two_reclaimers(
+    monkeypatch, lock_path: str, late_step: Literal["unlink", "open"]
+) -> None:
+    """Hold the first two stats of ``lock_path`` until both have run, then
+    delay the later waiter's ``late_step``: its unlink of the lock (both
+    reclaim at once) or its open of the reclaim guard (it reclaims after
+    the earlier waiter has taken a new lock).
+
+    Args:
+        monkeypatch (pytest.MonkeyPatch): the test's patcher.
+        lock_path (str): the lockfile both waiters contend for.
+        late_step (Literal["unlink", "open"]): the os call delayed.
+    """
+    both_saw_it = threading.Barrier(2)
+    stats = count()
+    late_calls = count()
+    late_path = lock_path if late_step == "unlink" else f"{lock_path}.reclaim"
+    real_stat = os.stat
+    real_late = getattr(os, late_step)
+
+    def stat(path, *args, **kwargs):
+        result = real_stat(path, *args, **kwargs)
+        if path == lock_path and next(stats) < 2:
+            both_saw_it.wait(5)
+        return result
+
+    def late(path, *args, **kwargs):
+        if path == late_path and next(late_calls) == 1:
+            time.sleep(0.2)
+        return real_late(path, *args, **kwargs)
+
+    monkeypatch.setattr(os, "stat", stat)
+    monkeypatch.setattr(os, late_step, late)
+
+
+def _stale_lock(
+    client: DiskRecordClient, name: str, suffix: str = ".lock"
+) -> str:
+    lock_path = client.path(name) + suffix
+    Path(lock_path).write_text("424242")
+    old = time.time() - 100
+    os.utime(lock_path, (old, old))
+    return lock_path
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "late_step", ["unlink", "open"], ids=["together", "after"]
+)
+async def test_two_claims_over_one_stale_lock_have_one_winner(
+    tmp_path, monkeypatch, late_step
+):
+    client = DiskRecordClient(str(tmp_path), "")
+    await client.put("ws", {"generation": 0, "owner": None})
+    _race_two_reclaimers(monkeypatch, _stale_lock(client, "ws"), late_step)
+    read = client.get
+
+    async def slow_get(name: str):
+        found = await read(name)
+        await asyncio.sleep(0.3)
+        return found
+
+    monkeypatch.setattr(client, "get", slow_get)
+    won = await asyncio.gather(
+        client.cas_put("ws", {"generation": 1, "owner": "alice"}, 0),
+        client.cas_put("ws", {"generation": 1, "owner": "bob"}, 0),
+    )
+    assert sorted(won) == [False, True]
+    assert sorted(os.listdir(tmp_path)) == ["ws.json"]
+
+
+@pytest.mark.asyncio
+async def test_a_stale_guard_does_not_cost_the_next_claim(tmp_path):
+    client = DiskRecordClient(str(tmp_path), "")
+    _stale_lock(client, "k")
+    _stale_lock(client, "k", ".lock.reclaim")
+    assert await client.cas_put("k", {"generation": 1}, 0)
+    assert os.listdir(tmp_path) == ["k.json"]
+
+
+@pytest.mark.asyncio
+async def test_a_guard_reclaimed_mid_reclaim_still_lets_the_claim_win(
+    tmp_path, monkeypatch
+):
+    client = DiskRecordClient(str(tmp_path), "")
+    lock_path = _stale_lock(client, "k")
+    stats = count()
+    real_stat = os.stat
+
+    def stat(path, *args, **kwargs):
+        if path == lock_path and next(stats) == 1:
+            os.unlink(f"{lock_path}.reclaim")
+        return real_stat(path, *args, **kwargs)
+
+    monkeypatch.setattr(os, "stat", stat)
+    assert await client.cas_put("k", {"generation": 1}, 0)
+    assert os.listdir(tmp_path) == ["k.json"]
+
+
+@pytest.mark.asyncio
+async def test_a_reclaimer_that_loses_the_guard_leaves_the_lock(
+    tmp_path, monkeypatch
+):
+    client = DiskRecordClient(str(tmp_path), "")
+    lock_path = _stale_lock(client, "k")
+    guard = _stale_lock(client, "k", ".lock.reclaim")
+    opens = count()
+    real_open = os.open
+
+    def open_(path, *args, **kwargs):
+        if path == guard and next(opens) == 1:
+            raise FileExistsError(guard)
+        return real_open(path, *args, **kwargs)
+
+    monkeypatch.setattr(os, "open", open_)
+    assert not disk._reclaim_stale_lock(lock_path)
+    assert os.listdir(tmp_path) == ["k.json.lock"]
+
+
+def _refuse_full_sync(fd: int, cmd: int) -> None:
+    raise OSError(errno.ENOTSUP, "full sync not supported")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "platform, refused, how",
+    [
+        ("darwin", False, "full sync"),
+        ("darwin", True, "fsync"),
+        ("linux", False, "fsync"),
+    ],
+    ids=["darwin", "darwin-refused", "linux"],
+)
+async def test_a_record_reaches_the_disk_before_it_is_renamed_in(
+    tmp_path, monkeypatch, platform, refused, how
+):
+    steps: list[tuple[str, int, int]] = []
+    real_fsync = os.fsync
+    real_replace = aiofiles.os.replace
+
+    def synced(fd: int, how: str) -> None:
+        held = os.fstat(fd)
+        steps.append((how, held.st_size, held.st_ino))
+
+    def full_sync(fd: int, cmd: int) -> None:
+        synced(fd, "full sync")
+
+    def fsync(fd: int) -> None:
+        synced(fd, "fsync")
+        real_fsync(fd)
+
+    async def replace(src: str, dst: str) -> None:
+        moved = os.stat(src)
+        steps.append(("replace", moved.st_size, moved.st_ino))
+        await real_replace(src, dst)
+
+    sync = _refuse_full_sync if refused else full_sync
+    fake = SimpleNamespace(F_FULLFSYNC=51, fcntl=sync)
+    monkeypatch.setattr(disk.sys, "platform", platform)
+    monkeypatch.setattr(disk, "fcntl", fake, raising=False)
+    monkeypatch.setattr(os, "fsync", fsync)
+    monkeypatch.setattr(aiofiles.os, "replace", replace)
+    client = DiskRecordClient(str(tmp_path), "")
+    await client.put("k", {"generation": 0})
+    body = len(json.dumps({"generation": 0}))
+    record = os.stat(client.path("k")).st_ino
+    assert steps == [(how, body, record), ("replace", body, record)]
+
+
+@pytest.mark.asyncio
+async def test_release_closes_the_lock_before_unlinking_it(
+    tmp_path, monkeypatch
+):
+    client = DiskRecordClient(str(tmp_path), "")
+    fd = await client.lock("k")
+    lock_path = client.path("k") + ".lock"
+    steps: list[str] = []
+    real_close = os.close
+    real_unlink = os.unlink
+
+    def close(target: int) -> None:
+        if target == fd:
+            steps.append("close")
+        real_close(target)
+
+    def unlink(path, *args, **kwargs):
+        if path == lock_path:
+            steps.append("unlink")
+        return real_unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(os, "close", close)
+    monkeypatch.setattr(os, "unlink", unlink)
+    await client.unlock("k", fd)
+    assert steps == ["close", "unlink"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "after_check, retaken",
+    [(False, False), (False, True), (True, False)],
+    ids=["before", "retaken", "after"],
+)
+async def test_release_after_its_lock_vanished(
+    tmp_path, monkeypatch, after_check, retaken
+):
+    client = DiskRecordClient(str(tmp_path), "")
+    fd = await client.lock("k")
+    lock_path = client.path("k") + ".lock"
+    real_stat = os.stat
+
+    def stat(path, *args, **kwargs):
+        found = real_stat(path, *args, **kwargs)
+        if path == lock_path:
+            os.unlink(path)
+        return found
+
+    if after_check:
+        monkeypatch.setattr(os, "stat", stat)
+    else:
+        os.unlink(lock_path)
+    theirs = await client.lock("k") if retaken else None
+    await client.unlock("k", fd)
+    assert os.listdir(tmp_path) == (["k.json.lock"] if retaken else [])
+    if theirs is not None:
+        await client.unlock("k", theirs)
+        assert os.listdir(tmp_path) == []

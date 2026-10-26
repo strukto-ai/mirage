@@ -40,7 +40,14 @@ function parseFiles(files: Map<string, Uint8Array>): EventDict[] {
     if (!key.endsWith('.jsonl')) continue
     const text = decoder.decode(files.get(key))
     for (const line of text.split('\n')) {
-      if (line) out.push(JSON.parse(line) as EventDict)
+      if (!line) continue
+      try {
+        out.push(JSON.parse(line) as EventDict)
+      } catch (err) {
+        // A crash mid-append tears a line and the entry appended onto it.
+        if (!(err instanceof SyntaxError)) throw err
+        console.debug(`skipping unparseable history line in ${key}: ${String(err)}`)
+      }
     }
   }
   return out

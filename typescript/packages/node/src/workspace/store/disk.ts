@@ -58,7 +58,7 @@ export interface DiskWorkspaceStateStoreOptions extends WorkspaceStateStoreOverr
  *
  * The layout mirrors the S3 store file-for-object; mutable records get
  * the same generation-CAS contract via the lockfile protocol
- * (O_CREAT|O_EXCL mutex, tmp write, rename(2)), so multiple local
+ * (O_CREAT|O_EXCL mutex, tmp write and sync, rename(2)), so multiple local
  * processes share one workspace with zero infrastructure: a CLI-created
  * workspace survives restart like `git init`. Local filesystems only;
  * anything cross-machine belongs on redis or s3. Mirrors the Python

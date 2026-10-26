@@ -292,3 +292,32 @@ def test_an_empty_history_sets_no_floor():
     asyncio.run(obs.log_command_text("a", session="s"))
     events = asyncio.run(obs.events())
     assert [e["timestamp"] for e in events] == [-1000]
+
+
+def test_a_torn_line_costs_only_itself_and_the_entry_appended_onto_it():
+    store = RAMObserverStore()
+    obs = Observer(store=store, clock=ManualClock(start=NEW_YEAR))
+    _log_command(obs, "first", "s1", NEW_YEAR)
+    [path] = store.files
+    torn = b'{"type": "command", "session": "s1", "command": "caf\xc3'
+    asyncio.run(store.append(path, torn))
+    _log_command(obs, "second", "s1", NEW_YEAR + 1)
+    _log_command(obs, "third", "s1", NEW_YEAR + 2)
+    shown = asyncio.run(obs.session_command_events("s1"))
+    assert [e["command"] for e in shown] == ["first", "third"]
+    every = asyncio.run(obs.command_events())
+    assert [e["command"] for e in every] == ["first", "third"]
+
+
+def test_an_entry_whose_command_holds_a_line_separator_is_kept():
+    store = RAMObserverStore()
+    obs = Observer(store=store, clock=ManualClock(start=NEW_YEAR))
+    _log_command(obs, "first", "s1", NEW_YEAR)
+    [path] = store.files
+    raw = (
+        '{"type": "command", "session": "s1", "timestamp": 1609459201000, '
+        '"command": "a\u2028b\u0085c"}\n'
+    )
+    asyncio.run(store.append(path, raw.encode()))
+    shown = asyncio.run(obs.session_command_events("s1"))
+    assert [e["command"] for e in shown] == ["first", "a\u2028b\u0085c"]
