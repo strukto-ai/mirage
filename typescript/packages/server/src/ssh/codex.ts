@@ -672,7 +672,8 @@ class CodexChannel {
       // On a fork of the session, as a background job runs: the line reads
       // the session's variables and records into its history, keeps what it
       // changes to itself, and waits on no other line, so Codex's processes
-      // run side by side.
+      // run side by side: `nvidia-smi` answers while `python3 train.py` still
+      // runs.
       const ws = this.entry.runner.ws
       const execution = await ws.shell(line, {
         sessionId: this.sessionId,

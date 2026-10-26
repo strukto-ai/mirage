@@ -521,7 +521,8 @@ async def run_process(
     does: it reads the session's variables and records into its
     history, keeps what it changes to itself, and waits on no other
     line, so Codex's commands run side by side, as on its own
-    exec-server. Runs on the workspace's loop. The status is read once
+    exec-server: ``nvidia-smi`` answers while ``python3 train.py``
+    still runs. Runs on the workspace's loop. The status is read once
     the output has ended, because a streaming command settles it only
     then.
 
