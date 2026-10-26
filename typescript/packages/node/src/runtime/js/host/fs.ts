@@ -24,6 +24,7 @@ import { classify } from '@struktoai/mirage-core/errors/classify'
 import { ebadf, einval, isMissingPath } from '@struktoai/mirage-core/errors/fs'
 import { posixErrno, posixPhrase } from '@struktoai/mirage-core/errors/posix'
 import type { FsCondition } from '@struktoai/mirage-core/errors/types'
+import { linkView } from '@struktoai/mirage-core/commands/builtin/utils/links'
 import { workspaceBridge } from '@struktoai/mirage-core/runtime/binding'
 import { MountCore } from '@struktoai/mirage-core/mount/core'
 import { type Descriptor, RuntimeFiles } from '@struktoai/mirage-core/runtime/files'
@@ -415,6 +416,9 @@ class HostFs implements Record<
         })
       }
     }
+    // Where a link leads, so a file reads as one inode whichever spelling
+    // reached it.
+    const links = linkView(ws.vfs)
     this.files = new RuntimeFiles(
       workspaceBridge(
         async (name, path, args, kwargs) => (await dispatch(name, path, args, kwargs))[0],
@@ -423,7 +427,7 @@ class HostFs implements Record<
         () => [],
         (directory) => ws.namespace.linkNamesUnder(directory),
       ),
-      null,
+      links === undefined ? null : links.resolve.bind(links),
       new MountCore(ws.vfs.over(dispatch)),
     )
     this.descriptors = new Descriptors(this.files, native)
@@ -577,7 +581,12 @@ class HostFs implements Record<
   async cp(src: string, dst: string, options?: Options): Promise<void> {
     const opts = fieldsOf(options)
     const filter = opts.filter as ((from: string, to: string) => unknown) | undefined
-    if (posix.resolve(src) === posix.resolve(dst)) {
+    if (filter !== undefined && !(await filter(src, dst))) return
+    // node compares the two files, so a link that makes them one is
+    // caught as one spelling is.
+    const follow = opts.dereference === true
+    const [source, target] = [await this.identity(src, follow), await this.identity(dst, follow)]
+    if (source === target) {
       throw cpRefusal(
         'ERR_FS_CP_EINVAL',
         'Invalid src or dest',
@@ -586,8 +595,7 @@ class HostFs implements Record<
         dst,
       )
     }
-    if (filter !== undefined && !(await filter(src, dst))) return
-    const from = await this.entryOf(src, opts.dereference === true)
+    const from = await this.entryOf(src, follow)
     if (from.isDirectory()) {
       if (opts.recursive !== true) {
         throw cpRefusal(
@@ -598,7 +606,7 @@ class HostFs implements Record<
           src,
         )
       }
-      if (posix.resolve(dst).startsWith(`${posix.resolve(src)}/`)) {
+      if (target.startsWith(`${source}/`)) {
         throw cpRefusal(
           'ERR_FS_CP_EINVAL',
           'Invalid src or dest',
@@ -608,7 +616,31 @@ class HostFs implements Record<
         )
       }
     }
+    // node makes the destination's missing parents first.
+    const parent = posix.dirname(posix.resolve(dst))
+    try {
+      await routed.stat(parent)
+    } catch (err) {
+      if (!isMissingPath(err)) throw err
+      await routed.mkdir(parent, { recursive: true })
+    }
     await this.copied(src, dst, from, opts)
+  }
+
+  /** The file `path` names once its links are followed, as node's `cp`
+   * tells two files apart: its directories always, its last name when
+   * `follow`, and a name not there as it is spelled. */
+  private async identity(path: string, follow: boolean): Promise<string> {
+    const absolute = posix.resolve(path)
+    if (absolute === '/') return absolute
+    if (follow) {
+      try {
+        return await routed.realpath(absolute)
+      } catch (err) {
+        if (!isMissingPath(err)) throw err
+      }
+    }
+    return posix.join(await this.identity(posix.dirname(absolute), true), posix.basename(absolute))
   }
 
   /** A path's own entry, or its target's, through the patched calls, so
@@ -649,6 +681,8 @@ class HostFs implements Record<
         if (filter !== undefined && !(await filter(child, target))) continue
         await this.copied(child, target, await this.entryOf(child, opts.dereference === true), opts)
       }
+      // A directory it made takes the source's mode, once its entries are in.
+      if (to === null) await routed.chmod(dst, from.mode & 0o7777)
       return
     }
     if (to?.isDirectory() === true) {
@@ -684,6 +718,7 @@ class HostFs implements Record<
     }
     await routed.copyFile(src, dst, typeof opts.mode === 'number' ? opts.mode : 0)
     if (opts.preserveTimestamps === true) await routed.utimes(dst, from.atime, from.mtime)
+    await routed.chmod(dst, from.mode & 0o7777)
   }
 
   /** The names `pattern` matches, as node's `fs.promises.glob` yields
@@ -707,7 +742,8 @@ class HostFs implements Record<
       const magic = parts.findIndex((part) => GLOB_MAGIC.test(part))
       const base = `/${parts.slice(0, magic === -1 ? parts.length : magic).join('/')}`
       const rest = magic === -1 ? '' : parts.slice(magic).join('/')
-      const depth = rest.split('/').includes('**') ? Infinity : rest.split('/').length
+      // A `**` anywhere, inside braces too, may match at any depth.
+      const depth = rest.includes('**') ? Infinity : rest.split('/').length
       const skipped = (path: string, entry: unknown): boolean => {
         if (typeof exclude === 'function') return Boolean((exclude as Fn)(typed ? entry : path))
         return Array.isArray(exclude) && exclude.some((ex) => posix.matchesGlob(path, String(ex)))
@@ -794,6 +830,7 @@ class HostFs implements Record<
         await this.readdir(path, {
           withFileTypes: true,
           recursive: fieldsOf(options).recursive === true,
+          encoding: fieldsOf(options).encoding,
         }),
       )
     } catch (err) {
@@ -846,7 +883,9 @@ class HostFs implements Record<
     const walk = async (directory: string, prefix: string): Promise<void> => {
       for (const row of await this.files.readdir(directory, typed || recursive)) {
         const name = entryName(row.path)
-        out.push(typed ? dirent(directory, row) : prefix + name)
+        out.push(
+          typed ? dirent(directory, row, encoded(name, options)) : encoded(prefix + name, options),
+        )
         if (recursive && row.isDir && row.isLink !== true) {
           await walk(posix.join(directory, name), `${prefix}${name}/`)
         }

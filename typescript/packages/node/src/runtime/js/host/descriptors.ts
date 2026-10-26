@@ -118,7 +118,7 @@ export class Descriptors {
       this.files,
       await this.files.open(path, mode),
       mode,
-      path,
+      this.files.walked(path),
       row?.isDir === true,
     )
     const fd = (this.native.openSync as (p: string, f: string) => number)(devNull, 'r')

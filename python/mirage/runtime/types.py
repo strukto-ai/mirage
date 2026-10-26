@@ -205,6 +205,9 @@ class VFSStat:
         gid (int | None): the group's numeric id, read the same way.
         source (FileStat | None): original row for checking retained metadata
             without losing unknown size or backend-specific fields.
+        name (str | None): the path the row's file has once the links
+            are followed, which names its inode however the path that
+            reached it was spelled; None when the row is not a mount's.
     """
 
     size: int
@@ -217,6 +220,7 @@ class VFSStat:
     uid: int | None = None
     gid: int | None = None
     source: FileStat | None = field(default=None, repr=False, compare=False)
+    name: str | None = field(default=None, compare=False)
 
 
 @dataclass(frozen=True, slots=True)

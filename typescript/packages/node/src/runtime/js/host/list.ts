@@ -14,7 +14,6 @@
 
 import { constants } from 'node:fs'
 import type { VFSEntry } from '@struktoai/mirage-core/runtime/types'
-import { entryName } from '@struktoai/mirage-core/utils/remnants'
 
 const { S_IFMT, S_IFREG, S_IFDIR, S_IFCHR, S_IFLNK } = constants
 
@@ -24,11 +23,12 @@ const { S_IFMT, S_IFREG, S_IFDIR, S_IFCHR, S_IFLNK } = constants
  *
  * @param directory - the directory listed.
  * @param row - the listing's row for the entry.
+ * @param name - its name in the encoding the call asked for.
  */
-export function dirent(directory: string, row: VFSEntry): unknown {
+export function dirent(directory: string, row: VFSEntry, name: unknown): unknown {
   const kind = row.isLink === true ? S_IFLNK : row.isDir ? S_IFDIR : (row.mode ?? 0) & S_IFMT
   return {
-    name: entryName(row.path),
+    name,
     parentPath: directory,
     path: directory,
     isFile: () => kind === S_IFREG,

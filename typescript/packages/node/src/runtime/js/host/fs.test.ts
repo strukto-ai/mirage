@@ -878,6 +878,57 @@ describe('patchNodeFs — calls node makes on its own', () => {
     expect(readFileSync(join(scratch, 'out', 'sub', 'b.txt'), 'utf-8')).toBe('b')
     await ws.close()
   })
+
+  // Pinned against node 24 on the host: a copy onto the file itself
+  // through a link is refused with the source kept, missing parents are
+  // made, and each new file and directory takes its source's mode.
+  it('cp tells files apart through links, makes parents and keeps modes', async () => {
+    const [ws, fs] = await world()
+    await ws.vfs.symlink('/data/dl', 'd')
+    await expect(fs.promises.cp('/data/d/a.txt', '/data/dl/a.txt')).rejects.toMatchObject({
+      code: 'ERR_FS_CP_EINVAL',
+    })
+    expect(await fs.promises.readFile('/data/d/a.txt', 'utf-8')).toBe('a')
+    await expect(
+      fs.promises.cp('/data/d', '/data/dl/sub/x', { recursive: true }),
+    ).rejects.toMatchObject({ code: 'ERR_FS_CP_EINVAL' })
+    await fs.promises.cp('/data/d/a.txt', '/data/new/deep/a.txt')
+    expect(await fs.promises.readFile('/data/new/deep/a.txt', 'utf-8')).toBe('a')
+    await fs.promises.cp('/data/d/sub', '/data/n2/deep/sub', { recursive: true })
+    expect((await fs.promises.readdir('/data/n2/deep/sub')).sort()).toEqual(['b.txt', 'up'])
+    await fs.promises.chmod('/data/d/a.txt', 0o751)
+    await fs.promises.chmod('/data/d/sub', 0o701)
+    await fs.promises.cp('/data/d/a.txt', '/data/m.txt')
+    await fs.promises.cp('/data/d/sub', '/data/msub', { recursive: true })
+    expect([
+      (await fs.promises.stat('/data/m.txt')).mode & 0o777,
+      (await fs.promises.stat('/data/msub')).mode & 0o777,
+    ]).toEqual([0o751, 0o701])
+    await ws.close()
+  })
+
+  it('glob walks any depth for a ** inside braces, as node matches it', async () => {
+    const [ws, fs] = await world()
+    await ws.vfs.mkdir('/data/d/sub/deep')
+    await ws.vfs.write('/data/d/sub/deep/c.txt', 'c')
+    expect(await names(fs.promises.glob('/data/{d/**,x}/*.txt'))).toEqual([
+      '/data/d/a.txt',
+      '/data/d/sub/b.txt',
+      '/data/d/sub/deep/c.txt',
+    ])
+    await ws.close()
+  })
+
+  it('a listing names its entries in the encoding asked for', async () => {
+    const [ws, fs] = await world()
+    const dir = await fs.promises.opendir('/data/d', { encoding: 'buffer' as BufferEncoding })
+    const entry = (await dir.read()) as unknown as { name: unknown }
+    await dir.close()
+    expect(Buffer.isBuffer(entry.name)).toBe(true)
+    const listed = await fs.promises.readdir('/data/d', { encoding: 'buffer' })
+    expect(listed.every((name) => Buffer.isBuffer(name))).toBe(true)
+    await ws.close()
+  })
 })
 
 describe('patchNodeFs — access', () => {

@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import dataclasses
 import logging
 from collections.abc import Awaitable, Callable, Coroutine, Iterator
 from dataclasses import dataclass
@@ -689,11 +690,17 @@ class RuntimeFiles:
                 and gates that read exactly as it gates ``readlink``.
         """
         if self._core is None:
-            return stat_row(self.call("stat", path, nofollow=nofollow))
-        # Through the core, so what the files open there wrote and have
-        # not landed counts, as write(2) is seen at once.
-        return stat_row(
-            self._on_core(lambda core: core.stat(path, not nofollow))
+            row = stat_row(self.call("stat", path, nofollow=nofollow))
+        else:
+            # Through the core, so what the files open there wrote and
+            # have not landed counts, as write(2) is seen at once.
+            row = stat_row(
+                self._on_core(lambda core: core.stat(path, not nofollow))
+            )
+        # One file is one inode whichever spelling reached it, so a copy
+        # through a link onto the file itself is told apart (samefile).
+        return dataclasses.replace(
+            row, name=self.walked(path, follow=not nofollow)
         )
 
     def stat_or_none(

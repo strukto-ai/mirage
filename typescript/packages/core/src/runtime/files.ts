@@ -539,6 +539,12 @@ export class RuntimeFiles {
    *   the flag and gates that read exactly as it gates `readlink`.
    */
   async stat(path: string, nofollow = false): Promise<VFSStat> {
+    // One file is one inode whichever spelling reached it, so a copy
+    // through a link onto the file itself is told apart (samefile).
+    return { ...(await this.mountRow(path, nofollow)), name: this.walked(path, !nofollow) }
+  }
+
+  private async mountRow(path: string, nofollow: boolean): Promise<VFSStat> {
     // Through the core, so what the files open there wrote and have not
     // landed counts, as write(2) is seen at once.
     if (this.core !== null) return statRow(await this.onCore((core) => core.stat(path, !nofollow)))

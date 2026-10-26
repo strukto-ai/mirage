@@ -74,7 +74,8 @@ def posix_stat(
 
     Args:
         row (VFSStat): the mount's row for the path.
-        path (str): the path, which names the inode.
+        path (str): the path, which names the inode when the row names
+            none of its own.
         prefix (str): the owning mount's prefix, which names the device.
         uid (int): the owner a row without one reports: a host
             process's own, 0 in a sandbox.
@@ -84,7 +85,7 @@ def posix_stat(
     mtime = unknown_ns if row.mtime_ns is None else row.mtime_ns
     return PosixStat(
         mode=row.mode,
-        ino=ident(path),
+        ino=ident(row.name or path),
         dev=ident(prefix),
         nlink=2 if row.is_dir else 1,
         uid=uid if row.uid is None else row.uid,
