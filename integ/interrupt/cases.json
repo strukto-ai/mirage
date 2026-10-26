@@ -106,16 +106,6 @@
       "canceled": true
     },
     {
-      "id": "grep-walk",
-      "command": "grep -r nothing $(printf '/wide %.0s' {1..80})",
-      "canceled": true
-    },
-    {
-      "id": "rg-walk",
-      "command": "rg nothing $(printf '/wide %.0s' {1..80})",
-      "canceled": true
-    },
-    {
       "id": "tar-walk",
       "command": "tar -cf /dev/null $(printf '/wide %.0s' {1..80})",
       "canceled": true

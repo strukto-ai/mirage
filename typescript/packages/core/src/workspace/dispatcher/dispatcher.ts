@@ -2646,7 +2646,9 @@ export class Dispatcher {
    * guest left open, within the stop's grace) waits its turn. One holding
    * its names runs to the end and the caller waits for it and for `after`
    * (the bookkeeping), since an abort cannot stop a store's call under way,
-   * as Python's cancelled line is joined whole.
+   * as Python's cancelled line is joined whole; an abort that lands during
+   * that call still makes it late, since the line may have gone on past
+   * its grace, so the landing takes the owner-checked `landed`.
    * `after` runs only for a caller still waiting: a call that lands after
    * its caller left runs `landed` instead, which drops what the landing
    * made stale where its names still belong to the mount that ran it (a
@@ -2737,12 +2739,18 @@ export class Dispatcher {
         throw err
       }
     }
+    const lateOnAbort = (): void => {
+      if (turn.started && !turn.settled) turn.late = true
+    }
+    signal?.addEventListener('abort', lateOnAbort, { once: true })
     let value: unknown
     try {
       value = await answer
     } catch (err) {
-      if (turn.started && !turn.settled) turn.late = true
+      lateOnAbort()
       throw err
+    } finally {
+      signal?.removeEventListener('abort', lateOnAbort)
     }
     await finished
     return value

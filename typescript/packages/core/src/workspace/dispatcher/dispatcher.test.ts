@@ -26,6 +26,7 @@ import { materialize, OpReport, type ByteSource } from '../../io/types.ts'
 import { runWithSession } from '../../context/session_context.ts'
 import { record, revisionFor, runWithRecording, startOp } from '../../observe/context.ts'
 import { MountEntry } from '../mount/mount.ts'
+import { Dispatcher } from './dispatcher.ts'
 import { BatchedRAM, dispatched, render } from '../../test-utils.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { POLICY_WRITE_OPS, READ_AHEAD_BYTES } from './constants.ts'
@@ -3932,6 +3933,38 @@ it('a write queued behind a stalled one never runs once its line is aborted', as
     await new Promise((resolve) => setTimeout(resolve, 20))
     expect(DEC.decode((await ws.shell('cat /data/f')).stdout)).toBe('new\n')
   } finally {
+    store.release()
+    await ws.close()
+  }
+})
+
+it('lands a write its line left mid-call through the owner-checked path', async () => {
+  // The line's abort lands while the store call runs: the call still ends,
+  // and its landing takes `landed`, which checks each name still belongs to
+  // the mount that ran it, in place of the bookkeeping a waiting caller gets.
+  const store = new StalledWriteRAM()
+  const ws = new Workspace({ '/data': [store, MountMode.WRITE] }, { mode: MountMode.WRITE })
+  const settle = vi.spyOn(
+    Dispatcher.prototype as unknown as { settleWrite: () => Promise<void> },
+    'settleWrite',
+  )
+  try {
+    await ws.shell('echo keep > /data/f')
+    store.armed = true
+    const controller = new AbortController()
+    const writing = ws.shell('echo new > /data/f', { signal: controller.signal })
+    await vi.waitFor(() => {
+      expect(store.calls).toBe(1)
+    })
+    settle.mockClear()
+    controller.abort()
+    await expect(writing).rejects.toMatchObject({ name: 'AbortError' })
+    store.armed = false
+    store.release()
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(settle).not.toHaveBeenCalled()
+  } finally {
+    settle.mockRestore()
     store.release()
     await ws.close()
   }
