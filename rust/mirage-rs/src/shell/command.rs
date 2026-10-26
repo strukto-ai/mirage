@@ -55,6 +55,13 @@ impl Parser<'_> {
             }
         }
         self.skip_blank();
+        // After redirects alone, a declaration builtin is still one, whose
+        // assignments bash reads unsplit.
+        if !prefix.is_empty() && !assigned {
+            if let Some((word, kind)) = self.at_declaration() {
+                return self.declaration(prefix, word, kind);
+            }
+        }
         if prefix.is_empty() && self.at_command_end() {
             return self.fail(self.i);
         }
@@ -447,6 +454,28 @@ impl Parser<'_> {
         Ok(words)
     }
 
+    /// Whether a redirect stands among the words of the `[` here, before
+    /// its `]`: `[` is a command to bash, so a `<` or `>` there redirects.
+    pub(super) fn redirect_in_brackets(&mut self) -> bool {
+        let mark = self.mark();
+        self.i += 1;
+        let found = loop {
+            self.skip_blank();
+            if self.at_redirect() || self.at_herestring() {
+                break true;
+            }
+            if self.at_command_end() || self.at_word(b"]") {
+                break false;
+            }
+            match self.scan_word(self.i) {
+                Ok(end) if end > self.i => self.i = end,
+                _ => break false,
+            }
+        };
+        self.reset(mark);
+        found
+    }
+
     /// Past the redirects and herestrings from here, each with its word;
     /// false at one the scanner cannot read, which the parse refuses.
     fn skip_redirects(&mut self) -> bool {
@@ -574,17 +603,24 @@ impl Parser<'_> {
     }
 
     /// `declare`, `local` and their kin, or `unset`: names, words, and for
-    /// a declaration assignments. One with redirects among its words is
-    /// wrapped with the redirects after them, so its redirects apply in
-    /// the order written.
-    pub(super) fn declaration(&mut self, word: &'static str, kind: &'static str) -> R<Syn> {
-        let mut children = vec![self.keyword(word)?];
+    /// a declaration assignments, after the redirects in `prefix`. One
+    /// with redirects among its words is wrapped with the redirects after
+    /// them, so its redirects apply in the order written.
+    pub(super) fn declaration(
+        &mut self,
+        prefix: Vec<Syn>,
+        word: &'static str,
+        kind: &'static str,
+    ) -> R<Syn> {
+        let mut wrapped = !prefix.is_empty();
         let mut redirected = false;
+        let mut children = prefix;
+        children.push(self.keyword(word)?);
         loop {
             self.skip_blank();
             if (self.at_redirect() || self.at_herestring()) && self.words_after_redirects()? {
                 children.extend(self.redirect_run()?);
-                redirected = true;
+                (wrapped, redirected) = (true, true);
                 continue;
             }
             if self.at_command_end() {
@@ -594,7 +630,8 @@ impl Parser<'_> {
                 if self.subscripted_array() {
                     return self.fail(self.i);
                 }
-                // bash refuses an array value after a redirect.
+                // bash refuses an array value after a redirect among the
+                // words, though not after one before the builtin.
                 if redirected && self.at_compound_assignment() {
                     let open = self.s[self.i..]
                         .iter()
@@ -615,12 +652,12 @@ impl Parser<'_> {
             }
         }
         let node = Syn::node(kind, children);
-        if !redirected {
+        if !wrapped {
             return Ok(node);
         }
-        let mut wrapped = vec![node.with_field("body")];
-        wrapped.extend(self.redirect_run()?);
-        Ok(Syn::node("redirected_statement", wrapped))
+        let mut statement = vec![node.with_field("body")];
+        statement.extend(self.redirect_run()?);
+        Ok(Syn::node("redirected_statement", statement))
     }
 
     /// A word that is only a name, which the grammar reads as one.

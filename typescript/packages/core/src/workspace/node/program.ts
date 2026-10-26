@@ -24,6 +24,9 @@ import type { JobTable } from '../../shell/job_table/index.ts'
 import { getText, sameLine } from '../../shell/helpers.ts'
 import { pipelineTransparent } from '../../shell/node_kind.ts'
 import { NodeType as NT } from '../../shell/types.ts'
+import { PARSED_WORDS } from '../../shell/parse/constants.ts'
+import { expandingAliases } from '../executor/builtins/alias/alias.ts'
+import { compareCodePoints } from '../../utils/sort.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
 import { isFsError } from '../../errors/fs.ts'
 import { carried, isUnwinding, LoopSignal, type Unwinding } from '../executor/control.ts'
@@ -172,20 +175,41 @@ async function runProgram(
   let mergedIo = new IOResult()
   let lastExec = new ExecutionNode({ command: '', exitCode: 0 })
   const ran: ExecutionNode[] = []
-  const sourceLines = getText(node).split('\n')
-  let echoedRow = -1
+  // The text starts at the first statement's row, after the blank rows an
+  // input read again keeps before it.
+  const firstRow = node.startPosition?.row ?? 0
+  const sourceLines = [...Array<string>(firstRow).fill(''), ...getText(node).split('\n')]
+  let echoedRow = firstRow - 1
   const bound = fd0Binding(session)
+  // bash reads its input a line at a time: lines before one it refuses
+  // run first, and a line after a change to what it parses with (an alias
+  // of a reserved word, `extglob`) is read with it.
+  const reader = (node.parent ?? null) === null ? executeFn : null
+  const refused = reader !== null ? refusedRow(node) : null
+  const parsed = reader !== null ? parseState(session) : null
+  let lastRow = -1
 
   let i = 0
   while (i < children.length) {
     const child = children[i]
-    if (child?.isNamed !== true || child.type === NT.COMMENT || child.type === NT.ERROR) {
+    if (child === undefined) break
+    const startRow = child.startPosition?.row ?? 0
+    const endRow = child.endPosition?.row ?? startRow
+    const reread =
+      reader !== null &&
+      child.isNamed === true &&
+      child.type !== NT.COMMENT &&
+      ((refused !== null && endRow >= refused) ||
+        (parsed !== null && lastRow >= 0 && startRow > lastRow && parseState(session) !== parsed))
+    if (
+      !reread &&
+      (child.isNamed !== true || child.type === NT.COMMENT || child.type === NT.ERROR)
+    ) {
       i += 1
       continue
     }
     if (session.shellOptions.noexec === true) break
-    const startRow = child.startPosition?.row ?? 0
-    if (startRow > echoedRow) {
+    if (!reread && startRow > echoedRow) {
       const first = echoedRow + 1
       const last = child.endPosition?.row ?? startRow
       if (session.shellOptions.verbose === true && last >= first) {
@@ -200,7 +224,8 @@ async function runProgram(
       echoedRow = last
     }
 
-    if (children[i + 1]?.type === NT.BACKGROUND) {
+    lastRow = endRow
+    if (!reread && children[i + 1]?.type === NT.BACKGROUND) {
       let launched: [ByteSource | null, IOResult, ExecutionNode]
       try {
         launched = await handleBackground(
@@ -258,7 +283,9 @@ async function runProgram(
       const childStdin = statementStdin(session, stdin, bound)
       let s: ByteSource | null
       ;[s, io, lastExec] = await recording(recorder, () =>
-        recurse(child, context, childStdin, callStack, { sink: recorder }),
+        reread
+          ? readOn(reader, node, child, session, childStdin, recorder, callStack)
+          : recurse(child, context, childStdin, callStack, { sink: recorder }),
       )
       ran.push(lastExec)
       let stdout: ByteSource | null
@@ -279,7 +306,8 @@ async function runProgram(
         lastExec.exitCode = io.exitCode
         stdout = null
       }
-      recordStatus(session, io.exitCode, pipelineTransparent(child))
+      // What was read again stamped its own statuses.
+      recordStatus(session, io.exitCode, reread || pipelineTransparent(child))
       // An `exec` redirect sends the shell's own output to a file: every
       // statement after the `exec` diverts here, so nothing bubbles to the
       // terminal and stderr lands in its own target.
@@ -299,7 +327,7 @@ async function runProgram(
           child,
           io.exitCode,
           session,
-          armed,
+          armed && !reread,
           stdin,
           callStack,
           lastExec,
@@ -334,7 +362,7 @@ async function runProgram(
         mergedIo,
       )
       ran.push(lastExec)
-      if (resumes) {
+      if (resumes && !reread) {
         i = nextLine(node, children, at)
         continue
       }
@@ -356,6 +384,7 @@ async function runProgram(
       }
       break
     }
+    if (reread) break
   }
 
   // Statements run in turn are one `;` node, so the line's tree keeps every
@@ -473,4 +502,60 @@ async function exitShell(
   const merged = await mergedIo.merge(new IOResult({ stderr: cleanup.stderr }))
   merged.exitCode = cleanup.exitCode
   return merged
+}
+
+/**
+ * The row of the first line a parsed input's refusal belongs to, when lines
+ * bash reads and runs come before it: bash reads its input a line at a
+ * time, so those run first and the rest is read again from that row
+ * (`readOn`). Null when the input is refused from its first line, or not
+ * at all. Mirrors Python's refused_row.
+ */
+export function refusedRow(node: TSNodeLike): number | null {
+  const statements = node.children.filter((c) => c.isNamed === true && c.type !== NT.COMMENT)
+  const last = statements[statements.length - 1]
+  if (last?.type !== NT.ERROR) return null
+  const refused = last.startPosition?.row ?? 0
+  const first = statements.find((c) => (c.endPosition?.row ?? 0) >= refused)
+  const row = first?.startPosition?.row ?? refused
+  if (!statements.some((c) => (c.endPosition?.row ?? 0) < row)) return null
+  return row
+}
+
+/**
+ * What a later line's parse depends on: the aliases expanding now of the
+ * words the parser reads as syntax, and `extglob`. Any other alias expands
+ * as its command runs. Mirrors Python's _parse_state.
+ */
+function parseState(session: SessionState): string {
+  const names = [...expandingAliases(session)].filter((name) => PARSED_WORDS.has(name))
+  return JSON.stringify([names.sort(compareCodePoints), session.shopts.extglob ?? false])
+}
+
+/**
+ * Read the input again from `child` on, as bash reads its next line: with
+ * the aliases as they are now, and refused there if bash refuses it. The
+ * rows before it stay as blank lines, so its diagnostics and `$LINENO`
+ * keep their numbers. Mirrors Python's _read_on.
+ */
+async function readOn(
+  executeFn: ExecuteFn,
+  node: TSNodeLike,
+  child: TSNodeLike,
+  session: SessionState,
+  stdin: ByteSource | null,
+  sink: JobConsole | null,
+  callStack: CallStack | null,
+): Promise<[ByteSource | null, IOResult, ExecutionNode]> {
+  const original = node.sourceText ?? node.text
+  const at = node.offsets?.[child.startIndex ?? 0] ?? 0
+  const rest = original.slice(at)
+  const rows = original.slice(0, at).split('\n').length - 1
+  const io = await executeFn('\n'.repeat(rows) + rest, {
+    sessionId: session.sessionId,
+    stdin,
+    ...(sink === null ? {} : { sink }),
+    ...(callStack === null ? {} : { callStack }),
+  })
+  return [io.stdout, io, new ExecutionNode({ command: rest, exitCode: io.exitCode })]
 }

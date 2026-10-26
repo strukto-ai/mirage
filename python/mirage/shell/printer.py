@@ -13,14 +13,16 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import re
-from collections.abc import Sequence
+from collections.abc import Callable, Mapping, Sequence
 from functools import partial
 
 from mirage._rs import ShellHeredoc
 from mirage.shell.bytes import decode_text
 from mirage.shell.escapes import decode_ansi_c
 from mirage.shell.helpers import (
+    ALIAS_WORD_TYPES,
     REDIRECT_NODE_TYPES,
+    alias_rewrite,
     get_case_items,
     get_for_parts,
     get_function_redirects,
@@ -40,39 +42,57 @@ _RESERVED = BASH_KEYWORDS | {"!", "{", "}", "[[", "]]", "time", "coproc"}
 
 
 def stored_function_text(
-    name: str, source: str, aliases: frozenset[str] = frozenset()
+    name: str, source: str, aliases: Mapping[str, str] | None = None
 ) -> str:
     """Render a portable function without keeping its parsed tree.
 
     Args:
         name (str): the function's stored name.
         source (str): its definition as shell source.
-        aliases (frozenset[str]): the alias names its body is read with.
+        aliases (Mapping[str, str] | None): the aliases its body is read
+            with, by name.
     """
+    aliases = aliases or {}
     scope = ParseScope()
+    parse = partial(scope.parse, aliases=frozenset(aliases))
     try:
         return function_text(
-            name, parse_function(source, partial(scope.parse, aliases=aliases))
+            name, parse_function(source, parse), _Aliases(aliases, parse)
         )
     finally:
         scope.release()
 
 
-def function_text(name: str, body: FunctionBody) -> str:
+def function_text(
+    name: str, body: FunctionBody, aliases: "_Aliases | None" = None
+) -> str:
     """A function as ``declare -f`` and ``type`` print it.
 
     bash prints its own rendering of the parsed definition, not the text
     that was typed: a body of statements one per line with
     four-space indents, ``;`` between them, ``elif`` as an ``if`` nested
     in ``else``, redirects respelled after the words (``>&2`` is
-    ``1>&2``), ``$'...'`` decoded into single quotes, and every
-    substitution's command printed the same way.
+    ``1>&2``), ``$'...'`` decoded into single quotes, every
+    substitution's command printed the same way, and each alias it read
+    the definition with expanded.
 
     Args:
         name (str): the function's name.
         body (FunctionBody): the body the definition stored.
+        aliases (_Aliases | None): the aliases to expand, if any.
     """
-    return _Printer(True).definition(name, _definition_of(body), "")
+    return _Printer(True, aliases).definition(name, _definition_of(body), "")
+
+
+class _Aliases:
+    """The aliases a body was read with, and the parser that reads an
+    expansion again."""
+
+    def __init__(
+        self, values: Mapping[str, str], parse: Callable[[str], TSNodeLike]
+    ) -> None:
+        self.values = values
+        self.parse = parse
 
 
 def _definition_of(body: FunctionBody) -> TSNodeLike:
@@ -92,8 +112,17 @@ class _Printer:
     Heredoc bodies wait for the end of the line their operator is on.
     """
 
-    def __init__(self, in_function: bool) -> None:
+    def __init__(
+        self,
+        in_function: bool,
+        aliases: _Aliases | None = None,
+        owners: Sequence[frozenset[str]] | None = None,
+    ) -> None:
         self.in_function = in_function
+        self.aliases = aliases
+        # The aliases being expanded at each byte of the tree printed, for
+        # one an alias rewrote.
+        self.owners = owners
         self.deferred: list[str] = []
 
     def definition(self, name: str, node: TSNodeLike, indent: str) -> str:
@@ -204,6 +233,9 @@ class _Printer:
                 )
             return self.command(body, indent) + self.redirects(redirects)
         if kind == NT.COMMAND:
+            expanded = self._expanded(node, indent)
+            if expanded is not None:
+                return expanded
             words = [
                 self.word(c)
                 for c in node.named_children
@@ -260,11 +292,60 @@ class _Printer:
             "declaration_command",
             "unset_command",
         ):
-            words = [self.word(c) for c in node.named_children]
-            if node.children and not node.children[0].is_named:
-                words.insert(0, get_text(node.children[0]))
-            return " ".join(words)
+            words = [
+                self.word(c)
+                for c in node.named_children
+                if c.type not in REDIRECT_NODE_TYPES
+            ]
+            keyword = next((c for c in node.children if not c.is_named), None)
+            if keyword is not None:
+                words.insert(0, get_text(keyword))
+            redirects = [
+                c for c in node.named_children if c.type in REDIRECT_NODE_TYPES
+            ]
+            return " ".join(words) + self.redirects(redirects)
         return self.word(node)
+
+    def _expanded(self, node: TSNodeLike, indent: str) -> str | None:
+        """A command named by an alias, printed as what bash read it as.
+
+        Args:
+            node (TSNodeLike): a simple command.
+            indent (str): the indent of the line it starts on.
+        """
+        if self.aliases is None:
+            return None
+        name = node.child_by_field_name("name")
+        head = name.named_children[0] if name is not None else None
+        if head is None or head.type not in ALIAS_WORD_TYPES:
+            return None
+        values = self.aliases.values
+        guards = (
+            self.owners[node.start_byte : node.end_byte]
+            if self.owners is not None
+            else (frozenset(),) * len(node.text or b"")
+        )
+        rewrite = alias_rewrite(
+            node,
+            head,
+            lambda name, blocked: (
+                None if name in blocked else values.get(name)
+            ),
+            guards,
+        )
+        if rewrite is None:
+            return None
+        text, owners = rewrite
+        root = self.aliases.parse(text)
+        mapped = (*owners, frozenset())
+        printer = _Printer(
+            self.in_function,
+            self.aliases,
+            tuple(mapped[i] for i in getattr(root, "offsets", ())),
+        )
+        out = printer.statements(root.children, indent, False)
+        self.deferred.extend(printer.deferred)
+        return out
 
     def condition(self, node: TSNodeLike) -> str:
         """A ``[[ ]]`` expression as bash prints its parsed form: one space

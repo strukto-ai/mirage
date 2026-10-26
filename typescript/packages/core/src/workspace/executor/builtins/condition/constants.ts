@@ -21,7 +21,7 @@ export const INT_COMPARATORS: ReadonlyMap<string, (li: bigint, ri: bigint) => bo
   ['-ge', (li: bigint, ri: bigint) => li >= ri],
 ])
 
-const STRING_BINARY = new Set(['=', '==', '!='])
+const STRING_BINARY = new Set(['=', '==', '!=', '<', '>'])
 const NUMERIC_BINARY = new Set(INT_COMPARATORS.keys())
 // `-nt`/`-ot` compare modification times; `-ef` asks for the same file,
 // which mirage answers as the same resolved path (a mount has no device or

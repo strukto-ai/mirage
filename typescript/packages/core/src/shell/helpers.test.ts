@@ -15,6 +15,7 @@
 import { assert, describe, expect, it } from 'vitest'
 import type { TSNodeLike } from './types.ts'
 import {
+  aliasRewrite,
   braceExpands,
   byteOffset,
   getCommandName,
@@ -631,4 +632,26 @@ it.each([
   } finally {
     program.release()
   }
+})
+
+describe('aliasRewrite', () => {
+  const rewrite = (line: string, aliases: Record<string, string>) => {
+    const command = parse(line).children[0] as TSNodeLike
+    const head = command.namedChildren[0]?.namedChildren[0]
+    assert(head)
+    const guards = Array<ReadonlySet<string>>(command.text.length).fill(new Set())
+    return aliasRewrite(command, head, (name) => aliases[name] ?? null, guards)
+  }
+
+  it('rewrites a call whose text is longer than a call can spread', () => {
+    const word = 'x'.repeat(300_000)
+    const out = rewrite(`e ${word}`, { e: 'echo' })
+    assert(out)
+    expect(out[0]).toBe(`echo ${word}`)
+    expect(out[1]).toHaveLength(out[0].length)
+  })
+
+  it('reads a word of digits after a value ending in a blank', () => {
+    expect(rewrite('a 1 b', { a: 'echo ', 1: 'one' })?.[0]).toBe('echo  one b')
+  })
 })

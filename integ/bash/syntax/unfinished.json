@@ -427,6 +427,39 @@
         "stdout": "",
         "stderr": "mirage: unexpected EOF while looking for matching `)'\n"
       }
+    },
+    {
+      "id": "syntax_lines_before_a_refused_line_run_first",
+      "seq": 1338233,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "bash -c 'echo a\necho b; fi\necho c'; echo \"st=$?\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "a\nst=2\n",
+        "stderr": "mirage: syntax error near 'fi'\n"
+      },
+      "flags": []
     }
   ]
 }

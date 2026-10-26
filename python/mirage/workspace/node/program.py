@@ -21,7 +21,7 @@ from mirage.io.types import ByteSource
 from mirage.policy.decisions import Decisions
 from mirage.policy.types import HandOff
 from mirage.runtime.types import DispatchFn
-from mirage.shell.bytes import encode_text
+from mirage.shell.bytes import decode_text, encode_text
 from mirage.shell.call_stack import CallStack
 from mirage.shell.console import Channel, JobConsole
 from mirage.shell.descriptors import Recorder, StreamOwner
@@ -29,9 +29,11 @@ from mirage.shell.errors import DiscardSignal, ExitSignal, ReturnSignal
 from mirage.shell.helpers import get_text, same_line
 from mirage.shell.job_table import JobTable
 from mirage.shell.node_kind import pipeline_transparent
+from mirage.shell.parse.constants import PARSED_WORDS
 from mirage.shell.types import NodeType as NT
 from mirage.shell.types import TSNodeLike
 from mirage.workspace.evaluation import EvaluationContext
+from mirage.workspace.executor.builtins.alias.alias import expanding_aliases
 from mirage.workspace.executor.builtins.exec import divert_statement
 from mirage.workspace.executor.control import (
     UNWINDING,
@@ -177,20 +179,43 @@ async def _run_program(
     merged_io = IOResult()
     last_exec = ExecutionNode(command="", exit_code=0)
     ran: list[ExecutionNode] = []
-    source_lines = get_text(node).split("\n")
-    echoed_row = -1
+    # The text starts at the first statement's row, after the blank rows
+    # an input read again keeps before it.
+    first_row = node.start_point[0]
+    source_lines = [""] * first_row + get_text(node).split("\n")
+    echoed_row = first_row - 1
     bound = fd0_binding(session)
+    # bash reads its input a line at a time: lines before one it refuses
+    # run first, and a line after a change to what it parses with (an
+    # alias of a reserved word, ``extglob``) is read with it.
+    reader = execute_fn if node.parent is None else None
+    refused = refused_row(node) if reader is not None else None
+    parsed = _parse_state(session) if reader is not None else None
+    last_row = -1
 
     i = 0
     while i < len(children):
         child = children[i]
 
-        if not child.is_named or child.type in (NT.ERROR, NT.COMMENT):
+        reread = (
+            child.is_named
+            and child.type != NT.COMMENT
+            and (
+                refused is not None
+                and child.end_point[0] >= refused
+                or parsed is not None
+                and child.start_point[0] > last_row >= 0
+                and _parse_state(session) != parsed
+            )
+        )
+        if not reread and (
+            not child.is_named or child.type in (NT.ERROR, NT.COMMENT)
+        ):
             i += 1
             continue
         if session.shell_options.get("noexec"):
             break
-        if child.start_point[0] > echoed_row:
+        if not reread and child.start_point[0] > echoed_row:
             first = echoed_row + 1
             last = child.end_point[0]
             if session.shell_options.get("verbose") and last >= first:
@@ -203,7 +228,12 @@ async def _run_program(
                 )
             echoed_row = last
 
-        if i + 1 < len(children) and children[i + 1].type == NT.BACKGROUND:
+        last_row = child.end_point[0]
+        if (
+            not reread
+            and i + 1 < len(children)
+            and children[i + 1].type == NT.BACKGROUND
+        ):
             try:
                 stdout, io, last_exec = await handle_background(
                     recurse,
@@ -255,13 +285,24 @@ async def _run_program(
                 # `exec < file` feeds the shell's stdin: a later `read` or
                 # `while read` sees it, and each statement reads on from
                 # where the one before it stopped.
-                stdout, io, last_exec = await recurse(
-                    child,
-                    context,
-                    statement_stdin(session, stdin, bound),
-                    call_stack,
-                    sink=recorder,
-                )
+                if reread and reader is not None:
+                    stdout, io, last_exec = await _read_on(
+                        reader,
+                        node,
+                        child,
+                        session,
+                        statement_stdin(session, stdin, bound),
+                        recorder,
+                        call_stack,
+                    )
+                else:
+                    stdout, io, last_exec = await recurse(
+                        child,
+                        context,
+                        statement_stdin(session, stdin, bound),
+                        call_stack,
+                        sink=recorder,
+                    )
             ran.append(last_exec)
             try:
                 stdout = await materialize(stdout)
@@ -276,8 +317,11 @@ async def _run_program(
                 io.stderr = existing + encode_text(f"{exc}\n")
                 io.exit_code = 1
                 stdout = None
+            # What was read again stamped its own statuses.
             record_status(
-                session, io.exit_code, transparent=pipeline_transparent(child)
+                session,
+                io.exit_code,
+                transparent=reread or pipeline_transparent(child),
             )
             # An `exec` redirect sends the shell's own output to a file:
             # every statement after the `exec` diverts here, so nothing
@@ -298,7 +342,7 @@ async def _run_program(
                     child,
                     io.exit_code,
                     session,
-                    armed,
+                    armed and not reread,
                     stdin,
                     call_stack,
                     last_exec,
@@ -335,7 +379,7 @@ async def _run_program(
                 merged_io,
             )
             ran.append(last_exec)
-            if resumes:
+            if resumes and not reread:
                 i = _next_line(node, children, at)
                 continue
             break
@@ -352,6 +396,8 @@ async def _run_program(
                     all_stdout,
                     merged_io,
                 )
+            break
+        if reread:
             break
 
     # Statements run in turn are one ``;`` node, so the line's tree keeps
@@ -517,3 +563,81 @@ def _next_line(
     while j < len(children) and same_line(node, children[j - 1], children[j]):
         j += 1
     return j
+
+
+def refused_row(node: TSNodeLike) -> int | None:
+    """The row of the first line a parsed input's refusal belongs to, when
+    lines bash reads and runs come before it: bash reads its input a line
+    at a time, so those run first and the rest is read again from that
+    row (``_read_on``). None when the input is refused from its first
+    line, or not at all.
+
+    Args:
+        node (TSNodeLike): a parsed input's root.
+    """
+    statements = [
+        c for c in node.children if c.is_named and c.type != NT.COMMENT
+    ]
+    if not statements or statements[-1].type != NT.ERROR:
+        return None
+    refused = statements[-1].start_point[0]
+    row = next(
+        c.start_point[0] for c in statements if c.end_point[0] >= refused
+    )
+    if not any(c.end_point[0] < row for c in statements):
+        return None
+    return row
+
+
+def _parse_state(session: SessionState) -> tuple[frozenset[str], bool]:
+    """What a later line's parse depends on: the aliases expanding now of
+    the words the parser reads as syntax, and ``extglob``. Any other
+    alias expands as its command runs.
+
+    Args:
+        session (SessionState): shell session state.
+    """
+    return (
+        expanding_aliases(session) & PARSED_WORDS,
+        bool(session.shopts.get("extglob", False)),
+    )
+
+
+async def _read_on(
+    execute_fn: Callable[..., Any],
+    node: TSNodeLike,
+    child: TSNodeLike,
+    session: SessionState,
+    stdin: ByteSource | None,
+    sink: JobConsole | None,
+    call_stack: CallStack | None,
+) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
+    """Read the input again from ``child`` on, as bash reads its next
+    line: with the aliases as they are now, and refused there if bash
+    refuses it. The rows before it stay as blank lines, so its
+    diagnostics and ``$LINENO`` keep their numbers.
+
+    Args:
+        execute_fn (Callable[..., Any]): runs a nested line.
+        node (TSNodeLike): the input's root.
+        child (TSNodeLike): the statement the rest starts at.
+        session (SessionState): shell session state.
+        stdin (ByteSource | None): the statement's standard input.
+        sink (JobConsole | None): where its statements write.
+        call_stack (CallStack | None): the program's frames.
+    """
+    original: bytes = getattr(node, "source_text", b"")
+    at: int = getattr(node, "offsets", ())[child.start_byte]
+    rest = original[at:]
+    io = await execute_fn(
+        decode_text(b"\n" * original.count(b"\n", 0, at) + rest),
+        session_id=session.session_id,
+        stdin=stdin,
+        sink=sink,
+        call_stack=call_stack,
+    )
+    return (
+        io.stdout,
+        io,
+        ExecutionNode(command=decode_text(rest), exit_code=io.exit_code),
+    )
