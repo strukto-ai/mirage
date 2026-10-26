@@ -69,12 +69,69 @@ it.each([
     ['https://ghe.test/o/r.git'],
     { C: WORK },
   ],
+  [
+    'cd /w && gh repo clone ghe.test/o/r',
+    'https://GHE.test:443/api/v3',
+    ['https://ghe.test/o/r.git'],
+    { C: WORK },
+  ],
+  [
+    'cd /w && gh repo clone ghe.test/o/r -- -q https://ghe.test/o/x.git',
+    'https://ghe.test:443/api/v3',
+    ['https://ghe.test/o/x.git', 'https://ghe.test/o/r.git'],
+    { quiet: true, C: WORK },
+  ],
+  [
+    'cd /w && gh repo clone ghe.test/o/r',
+    'https://u:p@ghe.test/api/v3',
+    ['https://ghe.test/o/r.git'],
+    { C: WORK },
+  ],
+  [
+    'cd /w && gh repo clone ghe.test/o/r',
+    'http://ghe.test:80/api/v3',
+    ['http://ghe.test/o/r.git'],
+    { C: WORK },
+  ],
+  [
+    'cd /w && gh repo clone ghe.test/o/r',
+    'http://ghe.test:443/api/v3',
+    ['http://ghe.test:443/o/r.git'],
+    { C: WORK },
+  ],
+  [
+    'cd /w && gh repo clone o/r',
+    'http://[::1]:8080/api/v3',
+    ['http://[::1]:8080/o/r.git'],
+    { C: WORK },
+  ],
 ])('hands git clone the url and flags of %s', async (line, base, texts, flags) => {
   const calls = clones()
   const result = await run(line, base)
   expect([result.exitCode, result.stderr.length]).toEqual([0, 0])
   expect([calls[0]?.[0], calls[0]?.[1].flags, calls[0]?.[2]]).toEqual([texts, flags, TOKEN])
 })
+
+it.each([
+  'ghe.test/api/v3',
+  '//ghe.test/api/v3',
+  'ghe.test:8080/api/v3',
+  'http://:8080/api/v3',
+  'git://ghe.test/api/v3',
+  'https://ghe.test:99999/api/v3',
+  'https://ghe.test:abc/api/v3',
+])(
+  'refuses an API base that is not an http(s) URL with a host on gh repo clone: %s',
+  async (base) => {
+    const calls = clones()
+    const result = await run('cd /w && gh repo clone o/r', base)
+    expect([result.exitCode, new TextDecoder().decode(result.stderr), calls]).toEqual([
+      1,
+      'gh repo clone: Invalid URL\n',
+      [],
+    ])
+  },
+)
 
 it.each([
   [

@@ -51,14 +51,22 @@ export function checkHost(accessor: GitHubAccount, host: string | null): void {
 /**
  * The origin the install's GitHub serves its pages and git from: github.com
  * for GitHub's own API, else the API host's own origin, as a GitHub Enterprise
- * server and a local stand-in serve them.
+ * server and a local stand-in serve them. Throws `Invalid URL` unless the API
+ * base is an http(s) URL with a host.
  */
 export function webOrigin(accessor: GitHubAccount): string {
   const base = accessor.config.baseUrl
   if (base === undefined || base.replace(/\/+$/, '') === GITHUB_API_BASE) {
     return `https://${GITHUB_HOST}`
   }
-  return new URL(base).origin
+  let url: URL
+  try {
+    url = new URL(base)
+  } catch (err) {
+    throw new TypeError('Invalid URL', { cause: err })
+  }
+  if (!['http:', 'https:'].includes(url.protocol)) throw new TypeError('Invalid URL')
+  return url.origin
 }
 
 /**

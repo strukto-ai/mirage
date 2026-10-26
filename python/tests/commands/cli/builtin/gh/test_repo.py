@@ -77,6 +77,42 @@ async def _run(line: str, base: str | None = None) -> IOResult:
             ["https://ghe.test/o/r.git"],
             {"C": WORK},
         ),
+        (
+            "cd /w && gh repo clone ghe.test/o/r",
+            "https://GHE.test:443/api/v3",
+            ["https://ghe.test/o/r.git"],
+            {"C": WORK},
+        ),
+        (
+            "cd /w && gh repo clone ghe.test/o/r -- -q https://ghe.test/o/x.git",
+            "https://ghe.test:443/api/v3",
+            ["https://ghe.test/o/x.git", "https://ghe.test/o/r.git"],
+            {"quiet": True, "C": WORK},
+        ),
+        (
+            "cd /w && gh repo clone ghe.test/o/r",
+            "https://u:p@ghe.test/api/v3",
+            ["https://ghe.test/o/r.git"],
+            {"C": WORK},
+        ),
+        (
+            "cd /w && gh repo clone ghe.test/o/r",
+            "http://ghe.test:80/api/v3",
+            ["http://ghe.test/o/r.git"],
+            {"C": WORK},
+        ),
+        (
+            "cd /w && gh repo clone ghe.test/o/r",
+            "http://ghe.test:443/api/v3",
+            ["http://ghe.test:443/o/r.git"],
+            {"C": WORK},
+        ),
+        (
+            "cd /w && gh repo clone o/r",
+            "http://[::1]:8080/api/v3",
+            ["http://[::1]:8080/o/r.git"],
+            {"C": WORK},
+        ),
     ],
 )
 async def test_clone_hands_git_clone_the_url_and_its_flags(
@@ -86,6 +122,28 @@ async def test_clone_hands_git_clone_the_url_and_its_flags(
     assert (result.exit_code, result.stderr) == (0, None)
     seen, ctx, sent = clones[0]
     assert (seen, ctx.flags, sent) == (texts, flags, TOKEN)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "base",
+    [
+        "ghe.test/api/v3",
+        "//ghe.test/api/v3",
+        "ghe.test:8080/api/v3",
+        "http://:8080/api/v3",
+        "git://ghe.test/api/v3",
+        "https://ghe.test:99999/api/v3",
+        "https://ghe.test:abc/api/v3",
+    ],
+)
+async def test_clone_refuses_an_api_base_not_http_with_a_host(clones, base):
+    result = await _run("cd /w && gh repo clone o/r", base)
+    assert (result.exit_code, result.stderr, clones) == (
+        1,
+        b"gh repo clone: Invalid URL\n",
+        [],
+    )
 
 
 @pytest.mark.asyncio
