@@ -105,8 +105,7 @@ describe('interpreters at the line deadline', () => {
     }
   }, 60_000)
 
-  // QuickJS holds the event loop, so only its interrupt hook, which fires the
-  // deadline (atDeadline, fireDue), can end the line.
+  // QuickJS runs on a worker, which the line's abort ends at the deadline.
   it('a busy JS loop trips the deadline instead of wedging the event loop', async () => {
     const ws = lineWs(['quickjs', 'workspace'], 0.3)
     try {

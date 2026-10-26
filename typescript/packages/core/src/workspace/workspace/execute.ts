@@ -1167,8 +1167,8 @@ async function runParsedLine(
       if (filled !== null) return filled
     }
     const runBody = async (): Promise<[ByteSource | null, IOResult, ExecutionNode]> => {
-      // atDeadline, not a bare timer: an engine that holds the event loop
-      // (QuickJS) fires it from its interrupt hook.
+      // atDeadline, as `timeout` arms its own: a deadline past one timer's
+      // reach is waited out in turns.
       const disarm =
         deadline === null
           ? undefined
