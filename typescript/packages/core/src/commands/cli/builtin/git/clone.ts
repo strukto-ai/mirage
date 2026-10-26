@@ -103,6 +103,7 @@ export async function clone(
   if (url === undefined) {
     throw new UsageError('', `fatal: You must specify a repository to clone.\n\n${verbUsage(ctx)}`)
   }
+  if (texts.length > 2) throw new UsageError('', `fatal: Too many arguments.\n\n${verbUsage(ctx)}`)
   const name = named ?? defaultDirectory(url)
   const quiet = fl.asBool('quiet')
   const vfs = requireVfs(ctx)
