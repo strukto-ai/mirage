@@ -192,6 +192,21 @@ async def test_ttl_bounds_retention(prefix):
 
 
 @pytest.mark.asyncio
+async def test_expire_pushes_the_keys_out_again(prefix):
+    s = RedisConsoleStore(url=REDIS_URL, key_prefix=prefix, ttl_seconds=60)
+    client = aioredis.from_url(REDIS_URL)
+    try:
+        await s.append(Channel.STDOUT, b"x")
+        await client.expire(f"{prefix}stream", 5)
+        await s.expire()
+        assert await client.ttl(f"{prefix}stream") > 5
+    finally:
+        await client.aclose()
+        await s.clear()
+        await s.close()
+
+
+@pytest.mark.asyncio
 async def test_no_ttl_by_default(prefix, store):
     await store.append(Channel.STDOUT, b"x")
     client = aioredis.from_url(REDIS_URL)
@@ -200,3 +215,25 @@ async def test_no_ttl_by_default(prefix, store):
         assert await client.ttl(f"{prefix}seq") == -1
     finally:
         await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_wait_ended_returns_once_the_ending_lands(store, monkeypatch):
+    monkeypatch.setattr("mirage.shell.console.redis.store.ENDED_POLL_MS", 10)
+    waiter = asyncio.ensure_future(store.wait_ended())
+    await store.append(Channel.STDOUT, b"out")
+    await asyncio.sleep(0.05)
+    assert not waiter.done()
+    await store.append(Channel.CONTROL, b"exit:0")
+    await asyncio.wait_for(waiter, 2)
+
+
+@pytest.mark.asyncio
+async def test_a_shared_client_outlives_its_console(prefix):
+    client = aioredis.from_url(REDIS_URL)
+    console = RedisConsoleStore(key_prefix=prefix, client=client)
+    await console.append(Channel.STDOUT, b"x")
+    await console.close()
+    assert await client.exists(f"{prefix}stream")
+    await client.delete(f"{prefix}stream", f"{prefix}seq", f"{prefix}ended")
+    await client.aclose()

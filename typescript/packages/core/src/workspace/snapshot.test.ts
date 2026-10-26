@@ -53,6 +53,7 @@ import {
 import type { MountSnapshot } from './snapshot/types.ts'
 import { ScriptSource } from '../runtime/types.ts'
 import { ExecutionNode } from './types.ts'
+import { RAMWorkspaceStateStore } from './store/ram.ts'
 import { Workspace } from './workspace/workspace.ts'
 import { ManualClock } from '../utils/clock.ts'
 import type { NOOPAccessor } from '../accessor/base.ts'
@@ -501,7 +502,7 @@ describe('Workspace.fromState — sessions and finished jobs', () => {
     // leaves PWD stale, which the old wholesale env replacement hid.
     setCwd(worker, '/data')
     seedVar(worker, 'ROLE', 'bg')
-    ws.jobTable.submit({
+    await ws.jobTable.submit({
       command: 'sleep 0',
       run: () => Promise.resolve([new IOResult(), new ExecutionNode()] as JobResult),
       abort: new AbortController(),
@@ -603,6 +604,49 @@ describe('Workspace.fromState — sessions and finished jobs', () => {
     expect(err?.message).toContain('/a/')
     expect(err?.message).toContain('/b/')
     await ws.close()
+  })
+
+  it('leaves out a killed job still stopping', async () => {
+    const ws = new Workspace({ '/m': new RAMVFS() }, {})
+    let release = (): void => undefined
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    try {
+      const job = await ws.jobTable.submit({
+        command: 'deaf',
+        run: async () => {
+          await gate
+          return [new IOResult(), new ExecutionNode()] as JobResult
+        },
+        abort: new AbortController(),
+        cwd: '/',
+      })
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      expect(await ws.jobTable.kill(job.id)).toBe(true)
+      expect((await toStateDict(ws)).jobs).toEqual([])
+      release()
+      await job.process?.join()
+      expect((await toStateDict(ws)).jobs.length).toBe(1)
+    } finally {
+      release()
+      await ws.close()
+    }
+  })
+
+  it('takes the finished jobs another workspace on its store ran', async () => {
+    const options = { workspaceId: 'shared', sessionId: 's', store: new RAMWorkspaceStateStore() }
+    const a = new Workspace({ '/m': new RAMVFS() }, options)
+    const b = new Workspace({ '/m': new RAMVFS() }, options)
+    try {
+      await a.shell('true &', { sessionId: 's' })
+      await a.jobTable.wait(1, 's')
+      const state = await toStateDict(b)
+      expect(state.jobs.map((j) => j.command)).toEqual(['true'])
+    } finally {
+      await a.close()
+      await b.close()
+    }
   })
 })
 

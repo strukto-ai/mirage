@@ -67,7 +67,6 @@ export { ScriptSource } from './runtime/types.ts'
 export { buildRuntime } from './runtime/table.ts'
 export type { RunResult, FilesystemOperation } from './runtime/types.ts'
 export { JobConsole } from './shell/console/index.ts'
-export type { ConsoleFactory } from './shell/job_table/index.ts'
 export {
   ContentType,
   DEFAULT_READ_TTL,

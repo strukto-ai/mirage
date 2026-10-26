@@ -17,6 +17,7 @@ import logging
 import threading
 import time
 
+from mirage.shell.console.constants import END_OF_CONSOLE
 from mirage.shell.console.types import Channel, ConsoleChunk, ReadResult
 
 logger = logging.getLogger(__name__)
@@ -51,6 +52,11 @@ class RAMConsoleStore:
     outside it. The mutex guards only registry membership, never bytes,
     and is never held across an await.
 
+    The ending chunk is terminal here as it is in Redis: an append after
+    a CONTROL chunk is dropped, so a runner that outlived an ending
+    written through another handle on this store (a kill from another
+    workspace sharing it) cannot append past it.
+
     Args:
         max_bytes (int | None): retention budget. When set, the oldest
             chunks are dropped once the total exceeds it, and a reader
@@ -68,6 +74,7 @@ class RAMConsoleStore:
         self._base_seq = self._chunks[0].seq if self._chunks else 0
         self._next_seq = self._chunks[-1].seq + 1 if self._chunks else 0
         self._bytes = sum(len(c.data) for c in self._chunks)
+        self._ended = any(c.channel == Channel.CONTROL for c in self._chunks)
         self._max_bytes = max_bytes
         self._waiters: list[Waiter] = []
         self._lock = threading.Lock()
@@ -78,6 +85,9 @@ class RAMConsoleStore:
         return self._closed
 
     async def append(self, channel: Channel, data: bytes) -> ConsoleChunk:
+        if self._ended:
+            return self._chunks[-1]
+        self._ended = channel == Channel.CONTROL
         chunk = ConsoleChunk(
             seq=self._next_seq, ts=time.time(), channel=channel, data=data
         )
@@ -117,6 +127,15 @@ class RAMConsoleStore:
             self._waiters.append((seq, loop, future))
         await future
 
+    async def wait_ended(self) -> None:
+        loop = asyncio.get_running_loop()
+        future: asyncio.Future[None] = loop.create_future()
+        with self._lock:
+            if self._closed or self._ended:
+                return
+            self._waiters.append((END_OF_CONSOLE, loop, future))
+        await future
+
     async def close(self) -> None:
         with self._lock:
             self._closed = True
@@ -140,12 +159,14 @@ class RAMConsoleStore:
 
     def _wake(self) -> None:
         with self._lock:
-            matured = [w for w in self._waiters if w[0] < self._next_seq]
+            matured = [
+                w
+                for w in self._waiters
+                if w[0] < self._next_seq or self._ended
+            ]
             if not matured:
                 return
-            self._waiters = [
-                w for w in self._waiters if w[0] >= self._next_seq
-            ]
+            self._waiters = [w for w in self._waiters if w not in matured]
         for _, loop, future in matured:
             self._schedule(loop, future)
 

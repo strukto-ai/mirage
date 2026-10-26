@@ -55,9 +55,6 @@ from mirage.core.email.config import EmailConfig
 from mirage.core.github.client import GitHubApiError, github_request
 from mirage.core.hf_hub.commit import Addition, commit
 from mirage.runtime.types import ScriptSource
-from mirage.shell.console import JobConsole
-from mirage.shell.console.redis import RedisConsoleStore
-from mirage.shell.job_table import ConsoleFactory
 from mirage.types import JsonValue, ReadSpec, WritePolicy
 from mirage.utils.clock import ManualClock
 from mirage.vfs.airtable import AirtableConfig, AirtableVFS
@@ -128,6 +125,8 @@ from mirage.vfs.tidb_filesystem import (
 from mirage.vfs.trello import TrelloConfig, TrelloVFS
 from mirage.vfs.wasabi import WasabiConfig, WasabiVFS
 from mirage.workspace.mount.spec import Mount
+from mirage.workspace.store import RAMWorkspaceStateStore, WorkspaceStateStore
+from mirage.workspace.store.redis import RedisWorkspaceStateStore
 from mirage.workspace.workspace.types import VFSMount
 
 from .commands import CLI as COMMAND_CLI
@@ -3330,44 +3329,45 @@ async def teardown_target(
         await service.teardown()
 
 
-def _redis_console(url: str, prefix: str, job_id: int) -> JobConsole:
-    """One job's console on its own Redis stream.
+def job_store(target: dict, run_id: str) -> WorkspaceStateStore | None:
+    """Build the target's state store with its jobs plane on Redis, or
+    None for the in-memory default.
 
-    The nonce beside the id matters because battery cases reap jobs and
-    ids restart at 1; a reused stream would replay the previous case's
-    chunks, ending chunk included.
-
-    Args:
-        url (str): Redis connection URL.
-        prefix (str): this run's key namespace.
-        job_id (int): the job the console is being built for.
-    """
-    key_prefix = f"{prefix}{uuid.uuid4().hex[:8]}-{job_id}:"
-    # Battery keys must not accumulate in the shared redis db.
-    return JobConsole(
-        store=RedisConsoleStore(
-            url=url, key_prefix=key_prefix, ttl_seconds=3600
-        )
-    )
-
-
-def console_factory(target: dict, run_id: str) -> ConsoleFactory | None:
-    """Build the target's console factory, or None for in-memory.
-
-    A target opts in with ``"console": {"type": "redis"}``; the stream
-    keys ride REDIS_URL under a per-run namespace.
+    A target opts in with ``"jobs": {"type": "redis"}``; job lists and
+    consoles ride REDIS_URL under a per-run key prefix, and every other
+    plane stays in memory.
 
     Args:
         target (dict): the target manifest entry.
         run_id (str): this open's unique id.
     """
-    block = target.get("console")
-    if block is None:
+    if (target.get("jobs") or {}).get("type") != "redis":
         return None
-    url = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
-    return functools.partial(
-        _redis_console, url, f"mirage-integ-console-{run_id}:"
+    return RAMWorkspaceStateStore(
+        jobs=RedisWorkspaceStateStore(
+            url=os.environ.get("REDIS_URL", "redis://localhost:6379/0"),
+            key_prefix=f"mirage-integ-jobs-{run_id}:",
+        )
     )
+
+
+def _drop_jobs(
+    store: WorkspaceStateStore, ws: Workspace
+) -> Callable[[], Awaitable[None]]:
+    """A cleanup that deletes a run's job keys and closes its store.
+
+    Battery keys must not accumulate in the shared redis db.
+
+    Args:
+        store (WorkspaceStateStore): the run's state store.
+        ws (Workspace): the workspace whose plane to clear.
+    """
+
+    async def drop() -> None:
+        await store.jobs(ws.workspace_id).clear()
+        await store.close()
+
+    return drop
 
 
 def cache_config(target: dict, run_id: str) -> RedisCacheConfig | None:
@@ -3398,7 +3398,7 @@ async def open_target(
     if target.get("secrets") is not None:
         env_block, secrets_cleanup = build_secrets_env(target["secrets"])
         cleanups.append(secrets_cleanup)
-    factory = console_factory(target, run_id)
+    store = job_store(target, run_id)
     cache = cache_config(target, run_id)
     # The target's profiles, and which one shapes a session that names
     # none. A profile is the whole permission document, so this is every
@@ -3412,7 +3412,7 @@ async def open_target(
             mounts,
             mode=MountMode.WRITE,
             read=read,
-            console_factory=factory,
+            store=store,
             cache=cache,
             profiles=profiles,
             profile=default_profile,
@@ -3423,13 +3423,15 @@ async def open_target(
         ws = Workspace(
             mounts,
             mode=MountMode.WRITE,
-            console_factory=factory,
+            store=store,
             cache=cache,
             profiles=profiles,
             profile=default_profile,
             env=env_block,
             clock=clock,
         )
+    if store is not None:
+        cleanups.append(_drop_jobs(store, ws))
     for cli_name in target.get("clis", []):
         spec, config = cli_install(service, cli_name)
         ws.register_cli(cli_name, spec, config)

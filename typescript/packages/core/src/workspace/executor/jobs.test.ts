@@ -20,6 +20,7 @@ import { type JobResult, type JobRunner, JobStatus, JobTable } from '../../shell
 import { MountMode } from '../../types.ts'
 import { stdoutStr, stderrStr } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { Workspace } from '../workspace/workspace.ts'
+import { RAMWorkspaceStateStore } from '../store/ram.ts'
 import { parseSessionProfile } from '../../policy/profile.ts'
 import { ExecutionNode } from '../types.ts'
 import { handleFg, handleJobs, handleKill, handlePs, handleWait } from './jobs.ts'
@@ -48,7 +49,7 @@ function decode(b: Uint8Array): string {
 describe('handleWait', () => {
   it('waits for all jobs when no id given', async () => {
     const jt = new JobTable()
-    jt.submit({
+    await jt.submit({
       command: 'a',
       run: quiet,
       abort: new AbortController(),
@@ -82,7 +83,7 @@ describe('handleWait', () => {
       await job.console.emit(Channel.STDERR, new TextEncoder().encode('done'))
       return [new IOResult({ exitCode: 3 }), new ExecutionNode({ command: 'foo', exitCode: 3 })]
     }
-    const j = jt.submit({ command: 'foo', run, abort: new AbortController(), cwd: '/' })
+    const j = await jt.submit({ command: 'foo', run, abort: new AbortController(), cwd: '/' })
     const [resStdout, resIo] = await handleWait(jt, ['wait', j.id.toString()])
     expect(resStdout).toBeNull()
     expect(resIo.exitCode).toBe(3)
@@ -91,7 +92,7 @@ describe('handleWait', () => {
 
   it('accepts %N job id syntax', async () => {
     const jt = new JobTable()
-    const j = jt.submit({
+    const j = await jt.submit({
       command: 'foo',
       run: quiet,
       abort: new AbortController(),
@@ -138,7 +139,7 @@ describe('handleKill', () => {
     const jt = new JobTable()
     const abort = new AbortController()
     const task = pendingRun(abort)
-    const j = jt.submit({ command: 'sleep', run: task, abort, cwd: '/' })
+    const j = await jt.submit({ command: 'sleep', run: task, abort, cwd: '/' })
     const [, io] = await handleKill(jt, ['kill', j.id.toString()])
     expect(io.exitCode).toBe(0)
     expect(jt.get(j.id)?.status).toBe(JobStatus.KILLED)
@@ -146,16 +147,16 @@ describe('handleKill', () => {
 })
 
 describe('handleJobs', () => {
-  it('returns empty output when no jobs', () => {
+  it('returns empty output when no jobs', async () => {
     const jt = new JobTable()
-    const [out, io] = handleJobs(jt, ['jobs'])
+    const [out, io] = await handleJobs(jt, ['jobs'])
     expect((out as Uint8Array).byteLength).toBe(0)
     expect(io.exitCode).toBe(0)
   })
 
   it('lists jobs with id, status, command', async () => {
     const jt = new JobTable()
-    const j = jt.submit({
+    const j = await jt.submit({
       command: 'foo',
       run: quiet,
       abort: new AbortController(),
@@ -163,9 +164,9 @@ describe('handleJobs', () => {
     })
     const abort = new AbortController()
     const task = pendingRun(abort)
-    jt.submit({ command: 'bar', run: task, abort, cwd: '/' })
+    await jt.submit({ command: 'bar', run: task, abort, cwd: '/' })
     await jt.wait(j.id)
-    const [out] = handleJobs(jt, ['jobs'])
+    const [out] = await handleJobs(jt, ['jobs'])
     const text = decode(out as Uint8Array)
     expect(text).toMatch(/\[1\] completed foo/)
     expect(text).toMatch(/\[2\] running bar/)
@@ -173,24 +174,24 @@ describe('handleJobs', () => {
 
   it('removes completed jobs from the table', async () => {
     const jt = new JobTable()
-    const j = jt.submit({
+    const j = await jt.submit({
       command: 'foo',
       run: quiet,
       abort: new AbortController(),
       cwd: '/',
     })
     await jt.wait(j.id)
-    handleJobs(jt, ['jobs'])
+    await handleJobs(jt, ['jobs'])
     expect(jt.listJobs()).toHaveLength(0)
   })
 })
 
 describe('handlePs', () => {
-  it('lists only running jobs', () => {
+  it('lists only running jobs', async () => {
     const jt = new JobTable()
     const abort = new AbortController()
     const task = pendingRun(abort)
-    jt.submit({ command: 'sleep', run: task, abort, cwd: '/' })
+    await jt.submit({ command: 'sleep', run: task, abort, cwd: '/' })
     const [out] = handlePs(jt, ['ps'])
     expect(decode(out as Uint8Array)).toMatch(/1\tsleep/)
   })
@@ -223,7 +224,7 @@ describe('handleWait with an invocation signal', () => {
   it('releases the caller on abort and leaves the job running', async () => {
     const jt = new JobTable()
     const jobAbort = new AbortController()
-    jt.submit({ command: 'a', run: pendingRun(jobAbort), abort: jobAbort, cwd: '/' })
+    await jt.submit({ command: 'a', run: pendingRun(jobAbort), abort: jobAbort, cwd: '/' })
     const controller = new AbortController()
     const waiting = handleWait(jt, ['wait'], null, null, controller.signal)
     controller.abort()
@@ -243,7 +244,7 @@ describe('handleFg without an operand', () => {
       await job.console.emit(Channel.STDOUT, new TextEncoder().encode('body'))
       return [new IOResult({ exitCode: 3 }), new ExecutionNode({ command: 'quick', exitCode: 3 })]
     }
-    const job = jt.submit({ command: 'quick', run, abort: new AbortController(), cwd: '/' })
+    const job = await jt.submit({ command: 'quick', run, abort: new AbortController(), cwd: '/' })
     await jt.wait(job.id)
     const [stdout, io] = await handleFg(jt, ['fg'])
     expect(decode(stdout as Uint8Array)).toBe('quick\n')
@@ -252,7 +253,7 @@ describe('handleFg without an operand', () => {
 
   // bash's current job is the newest one still running; a finished job
   // answers only when nothing runs. The older job holds until fg has picked,
-  // which it does before its first await.
+  // which it has done by the next turn.
   it('prefers a running job to a finished one', async () => {
     const jt = new JobTable()
     let release = (): void => undefined
@@ -264,10 +265,16 @@ describe('handleFg without an operand', () => {
       await job.console.emit(Channel.STDOUT, new TextEncoder().encode('late'))
       return [new IOResult(), new ExecutionNode({ command: 'older' })]
     }
-    jt.submit({ command: 'older', run: late, abort: new AbortController(), cwd: '/' })
-    const done = jt.submit({ command: 'newer', run: quiet, abort: new AbortController(), cwd: '/' })
+    await jt.submit({ command: 'older', run: late, abort: new AbortController(), cwd: '/' })
+    const done = await jt.submit({
+      command: 'newer',
+      run: quiet,
+      abort: new AbortController(),
+      cwd: '/',
+    })
     await jt.wait(done.id)
     const fg = handleFg(jt, ['fg'])
+    await new Promise((resolve) => setTimeout(resolve, 0))
     release()
     const [stdout] = await fg
     expect(decode(stdout as Uint8Array)).toBe('older\n')
@@ -286,7 +293,7 @@ describe('handleFg with a sink', () => {
       await job.console.emit(Channel.STDOUT, new TextEncoder().encode('late'))
       return [new IOResult(), new ExecutionNode({ command: 'held' })]
     }
-    jt.submit({ command: 'held', run: held, abort: new AbortController(), cwd: '/' })
+    await jt.submit({ command: 'held', run: held, abort: new AbortController(), cwd: '/' })
     const sink = new JobConsole()
     const fg = handleFg(jt, ['fg'], null, null, undefined, sink)
     await new Promise((resolve) => setTimeout(resolve, 0))
@@ -301,7 +308,7 @@ describe('handleFg with an invocation signal', () => {
   it('releases the caller on abort and leaves the job running', async () => {
     const jt = new JobTable()
     const jobAbort = new AbortController()
-    jt.submit({ command: 'a', run: pendingRun(jobAbort), abort: jobAbort, cwd: '/' })
+    await jt.submit({ command: 'a', run: pendingRun(jobAbort), abort: jobAbort, cwd: '/' })
     const controller = new AbortController()
     const waiting = handleFg(jt, ['fg'], null, null, controller.signal)
     controller.abort()
@@ -781,4 +788,65 @@ describe('a job that is one program', () => {
       await ws.close()
     }
   })
+})
+
+/** A workspace on a state store another workspace shares. */
+function sharing(store: RAMWorkspaceStateStore): Workspace {
+  return new Workspace(
+    { '/m': [new RAMVFS(), MountMode.WRITE] },
+    { mode: MountMode.WRITE, workspaceId: 'shared', sessionId: 's', store },
+  )
+}
+
+it("a workspace lists, kills and waits on another's job", async () => {
+  const store = new RAMWorkspaceStateStore()
+  const a = sharing(store)
+  const b = sharing(store)
+  try {
+    expect((await a.shell('sleep 30 &', { sessionId: 's' })).exitCode).toBe(0)
+    expect(stdoutStr(await b.shell('jobs', { sessionId: 's' }))).toBe('[1] running sleep 30\n')
+    expect((await b.shell('kill %1', { sessionId: 's' })).exitCode).toBe(0)
+    await a.jobTable.sync('s')
+    const job = a.jobTable.get(1, 's')
+    expect(job?.process).not.toBeNull()
+    expect([job?.status, job?.exitCode]).toEqual([JobStatus.KILLED, 143])
+    expect(stdoutStr(await b.shell('wait %1; echo $?', { sessionId: 's' }))).toBe('143\n')
+    expect(stdoutStr(await b.shell('jobs', { sessionId: 's' }))).toBe('')
+    expect(stdoutStr(await a.shell('jobs', { sessionId: 's' }))).toBe('')
+    await job?.process?.join()
+  } finally {
+    await a.close()
+    await b.close()
+  }
+})
+
+it("a workspace waits for another's job status", async () => {
+  const store = new RAMWorkspaceStateStore()
+  const a = sharing(store)
+  const b = sharing(store)
+  try {
+    await a.shell('false &', { sessionId: 's' })
+    expect(stdoutStr(await b.shell('wait %1; echo $?', { sessionId: 's' }))).toBe('1\n')
+    await a.shell('sleep 0.05 & sleep 0.05 &', { sessionId: 's' })
+    expect(stdoutStr(await b.shell('wait; echo $?', { sessionId: 's' }))).toBe('0\n')
+    expect(stdoutStr(await a.shell('jobs', { sessionId: 's' }))).toBe('')
+  } finally {
+    await a.close()
+    await b.close()
+  }
+})
+
+it("a substitution lists another's jobs", async () => {
+  const store = new RAMWorkspaceStateStore()
+  const a = sharing(store)
+  const b = sharing(store)
+  try {
+    await a.shell('sleep 30 &', { sessionId: 's' })
+    expect(stdoutStr(await b.shell('echo "$(jobs)"', { sessionId: 's' }))).toBe(
+      '[1] running sleep 30\n',
+    )
+  } finally {
+    await a.close()
+    await b.close()
+  }
 })

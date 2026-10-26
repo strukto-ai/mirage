@@ -14,6 +14,7 @@
 
 import type { ObserverStore } from '../../observe/store.ts'
 import type { NamespaceStore } from '../mount/namespace/store.ts'
+import type { JobStore } from '../../shell/job_table/store.ts'
 import { CAS_MAX_RETRIES, generationOf } from '../record/types.ts'
 
 // One workspace's metadata record: the JSON-able discovery payload
@@ -26,23 +27,25 @@ export interface WorkspaceStateStoreOverrides {
   namespace?: WorkspaceStateStore
   observer?: WorkspaceStateStore
   workspace?: WorkspaceStateStore
+  jobs?: WorkspaceStateStore
 }
 
 /**
  * Provider for a workspace's whole control-plane state.
  *
- * One store, four planes, each scoped by workspace id: namespace nodes
+ * One store, five planes, each scoped by workspace id: namespace nodes
  * (symlinks, attribute overlays), observer events (command history),
- * the session table (mount grants, cwd, env), and the workspace
- * metadata record (discovery: which sessions exist, which is the
- * default). Handing two processes the same store config plus a
- * workspace id gives them the same workspace state, which is the seam
- * that lets a kernel tier bind a session-bound mountpoint created by
- * another daemon.
+ * the session table (mount grants, cwd, env), the workspace metadata
+ * record (discovery: which sessions exist, which is the default), and
+ * the jobs (each session's job list and each job's console). Handing two
+ * processes the same store config plus a workspace id gives them the same
+ * workspace state, which is the seam that lets a kernel tier bind a
+ * session-bound mountpoint created by another daemon, and lets any of
+ * them list, wait on and kill a session's jobs.
  *
- * The node table and the session table are two NamespaceStores and the
- * observer keeps its ObserverStore; this provider only unifies their
- * construction, connection, and key scoping. Per-group overrides
+ * The node table and the session table are two NamespaceStores, the
+ * observer keeps its ObserverStore and the jobs their JobStore; this
+ * provider only unifies their construction, connection, and key scoping. Per-group overrides
  * redirect a plane group to a different provider (e.g. large observer
  * logs elsewhere while everything else stays on Redis). Sessions and
  * metadata form one inseparable group: the default-session pointer in
@@ -53,11 +56,13 @@ export abstract class WorkspaceStateStore {
   private readonly namespaceOverride: WorkspaceStateStore | null
   private readonly observerOverride: WorkspaceStateStore | null
   private readonly workspaceOverride: WorkspaceStateStore | null
+  private readonly jobsOverride: WorkspaceStateStore | null
 
   constructor(overrides: WorkspaceStateStoreOverrides = {}) {
     this.namespaceOverride = overrides.namespace ?? null
     this.observerOverride = overrides.observer ?? null
     this.workspaceOverride = overrides.workspace ?? null
+    this.jobsOverride = overrides.jobs ?? null
   }
 
   /** The namespace plane (nodes) for one workspace. */
@@ -73,6 +78,11 @@ export abstract class WorkspaceStateStore {
   /** The session table for one workspace. */
   sessions(workspaceId: string): NamespaceStore {
     return (this.workspaceOverride ?? this).makeSessions(workspaceId)
+  }
+
+  /** The job plane (job lists, consoles, leases) for one workspace. */
+  jobs(workspaceId: string): JobStore {
+    return (this.jobsOverride ?? this).makeJobs(workspaceId)
   }
 
   /** Read one workspace's metadata record; null when never written. */
@@ -133,22 +143,31 @@ export abstract class WorkspaceStateStore {
     await this.namespace(workspaceId).clear()
     await this.observer(workspaceId).clear()
     await this.sessions(workspaceId).clear()
+    await this.jobs(workspaceId).clear()
     const providers = new Set<WorkspaceStateStore>([this])
-    for (const override of [this.namespaceOverride, this.observerOverride, this.workspaceOverride])
-      if (override !== null) providers.add(override)
+    for (const override of this.overrides()) providers.add(override)
     for (const provider of providers) await provider.forgetSelf(workspaceId)
   }
 
   /** Release connections held by this provider and its overrides. */
   async close(): Promise<void> {
-    for (const override of [this.namespaceOverride, this.observerOverride, this.workspaceOverride])
-      if (override !== null) await override.close()
+    for (const override of this.overrides()) await override.close()
     await this.closeSelf()
+  }
+
+  private overrides(): WorkspaceStateStore[] {
+    return [
+      this.namespaceOverride,
+      this.observerOverride,
+      this.workspaceOverride,
+      this.jobsOverride,
+    ].filter((override) => override !== null)
   }
 
   protected abstract makeNamespace(workspaceId: string): NamespaceStore
   protected abstract makeObserver(workspaceId: string): ObserverStore
   protected abstract makeSessions(workspaceId: string): NamespaceStore
+  protected abstract makeJobs(workspaceId: string): JobStore
   protected abstract readMeta(workspaceId: string): Promise<WorkspaceFields | null>
   protected abstract casWriteMeta(
     workspaceId: string,

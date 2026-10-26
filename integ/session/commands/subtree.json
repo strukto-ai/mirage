@@ -121,7 +121,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "mv: /scratch/locked: Permission denied\n"
+        "stderr": "mv: cannot move '/scratch/locked' to '/scratch/moved': Permission denied\n"
       }
     },
     {
@@ -135,7 +135,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "mv: /scratch/locked: Permission denied\n"
+        "stderr": "mv: cannot move '/scratch/mv1' to '/scratch/locked/mv1': Permission denied\n"
       }
     },
     {

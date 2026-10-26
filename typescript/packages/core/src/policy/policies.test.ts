@@ -249,6 +249,95 @@ describe('Policies', () => {
     ).toEqual(['tar: x: Cannot open\n', 2])
   })
 
+  it('reads a refused cp or mv operand as GNU reports it', async () => {
+    // GNU (coreutils 9.7) names the step the operand's role takes: cp opens
+    // a source, reads a source directory and creates each copy, mv moves a
+    // source onto its target. A link cp copies as a link, or a source named
+    // "dir/.", keeps the plain line. The wording's own stats are a deciding
+    // read, so a coded policy never changes them.
+    const refusesTargetStat: Policy = {
+      preVfs: (ctx: VfsContext): Action | null =>
+        ctx.call.name === 'stat' && ctx.path.virtual === '/data/sec/sub'
+          ? { kind: 'deny', reason: 'no looking' }
+          : null,
+    }
+    const ws = new Workspace(
+      { '/data/': new RAMVFS() },
+      { mode: MountMode.WRITE, policies: [refusesTargetStat] },
+    )
+    const rule = { reason: 'sealed', paths: ['/data/sec/*'] }
+    ws.createSession('agent', { profile: { commands: { deny: [rule] } } })
+    try {
+      await ws.shell(
+        'mkdir -p /data/sec/sub /data/sec/dir /data/out /data/tree; ' +
+          'echo k > /data/sec/k; echo o > /data/open; echo b > /data/b; ' +
+          'echo t > /data/tree/t; ln -s /data/open /data/sec/lnk',
+      )
+      const cases: [string, string][] = [
+        [
+          'cp /data/sec/k /data/out/',
+          "cp: cannot open '/data/sec/k' for reading: Permission denied\n",
+        ],
+        [
+          'cp /data/open /data/sec/sub',
+          "cp: cannot create regular file '/data/sec/sub/open': Permission denied\n",
+        ],
+        [
+          'cp -T /data/open /data/sec/sub',
+          "cp: cannot create regular file '/data/sec/sub': Permission denied\n",
+        ],
+        [
+          'cp -t /data/sec/sub /data/open /data/b',
+          "cp: cannot create regular file '/data/sec/sub/open': Permission denied\n" +
+            "cp: cannot create regular file '/data/sec/sub/b': Permission denied\n",
+        ],
+        [
+          'cp /data/sec/dir /data/out/d',
+          "cp: -r not specified; omitting directory '/data/sec/dir'\n",
+        ],
+        [
+          'cp -r /data/sec/dir /data/out/d',
+          "cp: cannot access '/data/sec/dir': Permission denied\n",
+        ],
+        [
+          'cp -r /data/tree /data/sec/sub',
+          "cp: cannot create directory '/data/sec/sub/tree': Permission denied\n",
+        ],
+        [
+          'mv /data/sec/k /data/out',
+          "mv: cannot move '/data/sec/k' to '/data/out/k': Permission denied\n",
+        ],
+        [
+          'cp /data/sec/lnk /data/out/l',
+          "cp: cannot open '/data/sec/lnk' for reading: Permission denied\n",
+        ],
+        ['cp -P /data/sec/lnk /data/out/l', 'cp: /data/sec/lnk: Permission denied\n'],
+        ['cp -r /data/sec/dir/. /data/out/d', 'cp: /data/sec/dir/.: Permission denied\n'],
+        ['cat /data/sec/k', 'cat: /data/sec/k: Permission denied\n'],
+        [
+          'cp -r /data/tree /data/sec/new/',
+          "cp: cannot create directory '/data/sec/new/': Permission denied\n",
+        ],
+        [
+          'cd /data && cp --target-directory=sec/sub open',
+          "cp: cannot create regular file 'sec/sub/open': Permission denied\n",
+        ],
+        [
+          'cd /data && cp -tsec/sub open',
+          "cp: cannot create regular file 'sec/sub/open': Permission denied\n",
+        ],
+      ]
+      for (const [line, stderr] of cases) {
+        const run = await ws.shell(line, { sessionId: 'agent' })
+        const judged = await ws.explain(line, 'agent')
+        expect([line, run.exitCode, run.stderrText]).toEqual([line, 1, stderr])
+        expect([line, judged.exitCode, judged.stderr]).toEqual([line, 1, stderr])
+      }
+    } finally {
+      await ws.close()
+    }
+  })
+
   it('skips undefined methods and honors policy instances', async () => {
     const policies = new Policies()
     policies.add(silent)

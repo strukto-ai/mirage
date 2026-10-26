@@ -18,11 +18,11 @@ import { CommandSpec, Argument } from '../../commands/spec/types.ts'
 import { IOResult } from '../../io/types.ts'
 import { CapacityState } from '../../types.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
-import { type JobRunner, JobStatus } from '../../shell/job_table/index.ts'
+import { type JobRunner, JobStatus, RAMJobStore } from '../../shell/job_table/index.ts'
 import {
   type Channel,
   type ConsoleChunk,
-  JobConsole,
+  type ConsoleStore,
   RAMConsoleStore,
 } from '../../shell/console/index.ts'
 import { MountMode } from '../../types.ts'
@@ -141,6 +141,17 @@ class LateWriteStore extends RAMConsoleStore {
   }
 }
 
+/** A job store whose every job writes one given console. */
+class OneConsole extends RAMJobStore {
+  constructor(private readonly store: RAMConsoleStore) {
+    super()
+  }
+
+  override console(): ConsoleStore {
+    return this.store
+  }
+}
+
 /** A runner that ends only through its abort, as `sleep` does. */
 function untilAborted(abort: AbortController): JobRunner {
   return () =>
@@ -161,18 +172,16 @@ describe('closeWorkspace', () => {
   // those writes.
   it('keeps a console open until its runner settles', async () => {
     const store = new LateWriteStore()
-    const ws = new Workspace(
-      { '/m': [new RAMVFS(), MountMode.WRITE] },
-      { mode: MountMode.WRITE, consoleFactory: () => new JobConsole(store) },
-    )
+    const ws = new Workspace({ '/m': [new RAMVFS(), MountMode.WRITE] }, { mode: MountMode.WRITE })
+    ws.jobTable.store = new OneConsole(store)
     const abort = new AbortController()
-    const job = ws.jobTable.submit({
+    const job = await ws.jobTable.submit({
       command: 'sleep 30',
       run: untilAborted(abort),
       abort,
       cwd: '/',
     })
-    ws.jobTable.disown(job.id)
+    await ws.jobTable.disown(job.id)
     expect(job.process?.terminate()).toBe(true)
     await vi.waitFor(() => {
       expect(job.status).toBe(JobStatus.KILLED)
@@ -183,7 +192,7 @@ describe('closeWorkspace', () => {
     await closing
 
     expect(store.late).toEqual([])
-    expect(store.closed).toBe(true)
+    expect(store.closed).toBe(false)
   })
 
   // A bare abort leaves such a job RUNNING with no ending chunk, so
@@ -193,7 +202,7 @@ describe('closeWorkspace', () => {
   it('settles a job whose runner never observes the abort', async () => {
     const ws = buildWs()
     const release: { fire?: () => void } = {}
-    const job = ws.jobTable.submit({
+    const job = await ws.jobTable.submit({
       command: 'long',
       run: deaf(release),
       abort: new AbortController(),
@@ -223,7 +232,7 @@ describe('closeWorkspace', () => {
   it('returns while a runner that ignores its abort is still stopping', async () => {
     const ws = buildWs()
     const release: { fire?: () => void } = {}
-    const job = ws.jobTable.submit({
+    const job = await ws.jobTable.submit({
       command: 'long',
       run: deaf(release),
       abort: new AbortController(),
@@ -241,7 +250,7 @@ describe('closeWorkspace', () => {
   it('is idempotent with a job running', async () => {
     const ws = buildWs()
     const release: { fire?: () => void } = {}
-    const job = ws.jobTable.submit({
+    const job = await ws.jobTable.submit({
       command: 'long',
       run: deaf(release),
       abort: new AbortController(),

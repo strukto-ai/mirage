@@ -31,7 +31,8 @@ import { Runtime } from '../../runtime/base.ts'
 import { LINE_EXECUTOR, type LineExecutor } from '../../runtime/mixin.ts'
 import type { RunResult } from '../../runtime/types.ts'
 import type { Context } from '../../commands/config.ts'
-import type { JobConsole } from '../../shell/console/index.ts'
+import type { ConsoleStore } from '../../shell/console/index.ts'
+import { RAMJobStore } from '../../shell/job_table/index.ts'
 import { registerSecrets } from '../../secrets/registry.ts'
 import { MountMode, type PathSpec } from '../../types.ts'
 import { parseSessionProfile } from '../../policy/profile.ts'
@@ -197,6 +198,16 @@ function answering(asked: string[], outcome: Outcome, scope = Scope.ONCE): AskHa
   return (record) => {
     asked.push(record.id)
     return Promise.resolve({ ...record, outcome, scope })
+  }
+}
+
+/** A job store that cannot open a console, counting the tries. */
+class NoConsoles extends RAMJobStore {
+  asked = 0
+
+  override console(): ConsoleStore {
+    this.asked += 1
+    throw new Error('no console')
   }
 }
 
@@ -1098,27 +1109,26 @@ describe('prejudge', () => {
     // the hand-off stays a holder short of release for good and its
     // grant is neither spent nor on offer to any later line.
     const asked: string[] = []
-    let consoles = 0
     const w = new Workspace(
       { '/data': new RAMVFS() },
       {
         mode: MountMode.WRITE,
         profiles: { r: PROFILE },
         onAsk: answering(asked, Outcome.ALLOW),
-        consoleFactory: (): JobConsole => {
-          consoles += 1
-          throw new Error('no console')
-        },
       },
     )
     open.push(w)
     await w.shell('echo s > /data/secret.txt')
     w.createSession('s', { profile: 'r' })
+    const store = w.jobTable.store
+    const refusing = new NoConsoles()
+    w.jobTable.store = refusing
     const ran = await w.shell('cat /data/secret.txt & ls /data', { sessionId: 's' })
     expect(ran.exitCode).not.toBe(0)
-    expect(consoles).toBe(1)
+    expect(refusing.asked).toBe(1)
     expect(asked).toHaveLength(1)
     expect(w.decisions.list('s')).toEqual([])
+    w.jobTable.store = store
     const again = await w.shell('cat /data/secret.txt', { sessionId: 's' })
     expect(again.exitCode).toBe(0)
     expect(DEC.decode(again.stdout)).toBe('s\n')

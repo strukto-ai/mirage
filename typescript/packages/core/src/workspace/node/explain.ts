@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { YieldBudget } from '../../io/yield_budget.ts'
-import { PermissionsPolicy, refusalOf, renderDeny } from '../../policy/index.ts'
+import { PermissionsPolicy, refusalOf, renderCommandDeny, renderDeny } from '../../policy/index.ts'
 import { isPending } from '../../policy/decisions.ts'
 import { sourceOf } from '../../policy/match/decide.ts'
 import { hasRules, readsArgs, scopesPaths } from '../../policy/match/reads.ts'
@@ -353,7 +353,7 @@ async function explained(
   const action: Deny | Pending | null =
     asked !== null && asked.kind === 'ask' ? await registry.decisions.held(ctx, asked) : asked
   if (action === null) return base
-  const [stderr, exitCode] = renderDeny(ctx.command, action)
+  const [stderr, exitCode] = await renderCommandDeny(ctx.command, action, ctx)
   return {
     ...base,
     reason: base.reason === '' ? action.reason : base.reason,
@@ -1122,7 +1122,7 @@ async function admitted(
     handed === null ? null : { line: handed, occurrence: one.occurrence },
   )
   if (action === null) return null
-  const [stderr, exitCode] = renderDeny(judgment.command, action)
+  const [stderr, exitCode] = await renderCommandDeny(judgment.command, action, one.ctx)
   return { stderr, exitCode, refusal: refusalOf(action) }
 }
 

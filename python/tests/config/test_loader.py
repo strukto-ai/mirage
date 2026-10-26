@@ -41,8 +41,9 @@ from mirage.policy.profile import (
 )
 from mirage.runtime.types import ScriptSource
 from mirage.secrets.config import EnvVar, SecretRef
-from mirage.shell.console import JobConsole
 from mirage.shell.console.redis import RedisConsoleStore
+from mirage.shell.job_table import RAMJobStore
+from mirage.shell.job_table.redis import RedisJobStore
 from mirage.types import ReadPolicy, ReadSpec, WritePolicy
 from mirage.vfs.ram import RAMVFS
 from mirage.vfs.s3 import S3VFS
@@ -985,42 +986,64 @@ def test_shared_yaml_scalars(case, tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_console_redis_block_builds_factory():
+async def test_store_jobs_group_puts_job_lists_and_consoles_on_redis():
     cfg = load_config(
         {
-            "console": {
-                "type": "redis",
-                "url": "redis://localhost:6379/5",
-                "key_prefix": "test_console:",
+            "store": {
+                "type": "ram",
+                "jobs": {
+                    "type": "redis",
+                    "url": "redis://localhost:6379/5",
+                    "key_prefix": "test_jobs:",
+                },
             },
             "mounts": {"/": {"vfs": "ram"}},
         }
     )
-    kwargs = cfg.to_workspace_kwargs()
-    factory = kwargs["console_factory"]
-    first = factory(1)
-    second = factory(1)
-    assert isinstance(first, JobConsole)
-    assert isinstance(first.store, RedisConsoleStore)
-    assert isinstance(second.store, RedisConsoleStore)
-    # Fresh keys per console: job ids restart at 1 when the table
-    # empties, so two consoles built for "job 1" must not share a
-    # stream (a shared one would replay the first job's chunks). The
-    # minted prefix is public: it is the address an embedder hands to
-    # a reader in another process.
-    assert first.store.key_prefix != second.store.key_prefix
-    assert first.store.key_prefix.startswith("test_console:")
+    assert isinstance(cfg.store.jobs, RedisStoreBlock)
+    store = cfg.to_workspace_kwargs()["store"]
+    assert isinstance(store, RAMWorkspaceStateStore)
+    assert isinstance(store.namespace("ws1"), RAMNamespaceStore)
+    jobs = store.jobs("ws1")
+    assert isinstance(jobs, RedisJobStore)
+    first, second = jobs.console("a"), jobs.console("b")
+    assert isinstance(first, RedisConsoleStore)
+    assert first.key_prefix == "test_jobs:ws1:jobs:console:a:"
+    assert first.key_prefix != second.key_prefix
+    await store.close()
 
 
 @pytest.mark.asyncio
-async def test_console_ram_block_emits_no_factory():
+async def test_a_disk_store_keeps_jobs_in_memory(tmp_path):
     cfg = load_config(
         {
-            "console": {"type": "ram"},
+            "store": {"type": "disk", "root": str(tmp_path)},
             "mounts": {"/": {"vfs": "ram"}},
         }
     )
-    assert "console_factory" not in cfg.to_workspace_kwargs()
+    store = cfg.to_workspace_kwargs()["store"]
+    assert isinstance(store.jobs("ws1"), RAMJobStore)
+
+
+@pytest.mark.parametrize("backend", ["disk", "s3"])
+def test_store_jobs_group_refuses_a_backend_that_cannot_stream(backend):
+    with pytest.raises(ValueError, match="store.jobs"):
+        load_config(
+            {
+                "store": {"type": "ram", "jobs": {"type": backend}},
+                "mounts": {"/": {"vfs": "ram"}},
+            }
+        )
+
+
+def test_the_console_block_is_gone():
+    with pytest.raises(ValueError):
+        load_config(
+            {
+                "console": {"type": "redis"},
+                "mounts": {"/": {"vfs": "ram"}},
+            }
+        )
 
 
 def test_shared_rejection_fixture_is_refused():

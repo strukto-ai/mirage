@@ -19,6 +19,8 @@ import redis.asyncio as aioredis
 
 from mirage.observe.redis_store import RedisObserverStore
 from mirage.observe.store import ObserverStore
+from mirage.shell.job_table.redis import RedisJobStore
+from mirage.shell.job_table.store import JobStore
 from mirage.workspace.mount.namespace.redis import (
     CAS_SCRIPT,
     RedisNamespaceStore,
@@ -36,11 +38,12 @@ class RedisWorkspaceStateStore(WorkspaceStateStore):
     - ``{prefix}{ws}:namespace:nodes`` — node table
     - ``{prefix}{ws}:observer:*`` — observer plane
     - ``{prefix}{ws}:sessions`` — session table
+    - ``{prefix}{ws}:jobs:*``: job lists, consoles and owner leases
 
     All plane state survives restarts and is visible to every process
     pointed at the same url and prefix, so a workspace rebuilt from its
     config alone gets identical overlays, history, sessions, and
-    grants.
+    grants, and sees the jobs every other one runs.
     """
 
     def __init__(
@@ -51,9 +54,13 @@ class RedisWorkspaceStateStore(WorkspaceStateStore):
         namespace: WorkspaceStateStore | None = None,
         observer: WorkspaceStateStore | None = None,
         workspace: WorkspaceStateStore | None = None,
+        jobs: WorkspaceStateStore | None = None,
     ) -> None:
         super().__init__(
-            namespace=namespace, observer=observer, workspace=workspace
+            namespace=namespace,
+            observer=observer,
+            workspace=workspace,
+            jobs=jobs,
         )
         self._url = url
         self._prefix = key_prefix
@@ -65,6 +72,7 @@ class RedisWorkspaceStateStore(WorkspaceStateStore):
         self._namespaces: dict[str, RedisNamespaceStore] = {}
         self._observers: dict[str, RedisObserverStore] = {}
         self._sessions: dict[str, RedisNamespaceStore] = {}
+        self._jobs: dict[str, RedisJobStore] = {}
 
     def _make_namespace(self, workspace_id: str) -> NamespaceStore:
         if workspace_id not in self._namespaces:
@@ -91,6 +99,14 @@ class RedisWorkspaceStateStore(WorkspaceStateStore):
             )
         return self._sessions[workspace_id]
 
+    def _make_jobs(self, workspace_id: str) -> JobStore:
+        if workspace_id not in self._jobs:
+            self._jobs[workspace_id] = RedisJobStore(
+                url=self._url,
+                key_prefix=f"{self._prefix}{workspace_id}:jobs:",
+            )
+        return self._jobs[workspace_id]
+
     async def _load_meta(self, workspace_id: str) -> WorkspaceFields | None:
         raw = await cast(
             Awaitable[Any],
@@ -115,7 +131,12 @@ class RedisWorkspaceStateStore(WorkspaceStateStore):
         return bool(result)
 
     async def _forget(self, workspace_id: str) -> None:
-        for handles in (self._namespaces, self._observers, self._sessions):
+        for handles in (
+            self._namespaces,
+            self._observers,
+            self._sessions,
+            self._jobs,
+        ):
             handle = handles.pop(workspace_id, None)
             if handle is not None:
                 await handle.close()
@@ -131,4 +152,6 @@ class RedisWorkspaceStateStore(WorkspaceStateStore):
             await ob.close()
         for sess in self._sessions.values():
             await sess.close()
+        for jobs in self._jobs.values():
+            await jobs.close()
         await self._meta_client.aclose()

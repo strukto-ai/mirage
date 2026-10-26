@@ -83,7 +83,7 @@ export async function closeWorkspace(deps: CloseDeps): Promise<void> {
       }
     },
   ])
-  await settle([() => deps.jobTable.closeConsoles()])
+  await settle([() => deps.jobTable.close()])
   await settle([...deps.registry.retiringMounts.values()].map((task) => () => task))
   const mounts = new Set(deps.registry.allMounts().map((mount) => mount.vfs))
   await settle(

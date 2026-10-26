@@ -595,7 +595,7 @@
         "typescript-node"
       ],
       "service": "redis",
-      "console": {
+      "jobs": {
         "type": "redis"
       },
       "mounts": [

@@ -12,7 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { EXIT_OUTCOME, KILLED_OUTCOME } from './constants.ts'
+
 /** Outcome text for a job that ran to completion. */
 export function exitOutcome(exitCode: number): string {
-  return `exit:${exitCode.toString()}`
+  return `${EXIT_OUTCOME}:${exitCode.toString()}`
+}
+
+/** Outcome text for a job stopped by a signal, answering 128 plus it. */
+export function killedOutcome(exitCode: number): string {
+  return `${KILLED_OUTCOME}:${exitCode.toString()}`
 }

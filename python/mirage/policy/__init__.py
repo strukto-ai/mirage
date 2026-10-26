@@ -52,6 +52,7 @@ if TYPE_CHECKING:
         pre_session_gate,
         pre_vfs_gate,
         refusal_of,
+        render_command_deny,
         render_deny,
     )
     from mirage.policy.profile import (
@@ -139,6 +140,7 @@ _EXPORTS: dict[str, tuple[str, ...]] = {
         "pre_session_gate",
         "pre_vfs_gate",
         "refusal_of",
+        "render_command_deny",
         "render_deny",
     ),
     "mirage.policy.profile": (
@@ -247,6 +249,7 @@ __all__ = [
     "describe_refusal",
     "policy_denied",
     "refusal_of",
+    "render_command_deny",
     "render_deny",
     "resolve_limit",
     "resolve_producer",

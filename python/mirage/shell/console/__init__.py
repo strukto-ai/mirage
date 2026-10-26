@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING
 from mirage.utils.loader import lazy_exports
 
 if TYPE_CHECKING:
-    from mirage.shell.console.constants import KILLED_OUTCOME
+    from mirage.shell.console.constants import EXIT_OUTCOME, KILLED_OUTCOME
     from mirage.shell.console.job_console import JobConsole
     from mirage.shell.console.ram import RAMConsoleStore
     from mirage.shell.console.store import ConsoleStore
@@ -28,10 +28,10 @@ if TYPE_CHECKING:
         OwnedStream,
         ReadResult,
     )
-    from mirage.shell.console.utils import exit_outcome
+    from mirage.shell.console.utils import exit_outcome, killed_outcome
 
 _EXPORTS: dict[str, tuple[str, ...]] = {
-    "mirage.shell.console.constants": ("KILLED_OUTCOME",),
+    "mirage.shell.console.constants": ("EXIT_OUTCOME", "KILLED_OUTCOME"),
     "mirage.shell.console.job_console": ("JobConsole",),
     "mirage.shell.console.ram": ("RAMConsoleStore",),
     "mirage.shell.console.store": ("ConsoleStore",),
@@ -47,10 +47,11 @@ _EXPORTS: dict[str, tuple[str, ...]] = {
         "OwnedStream",
         "ReadResult",
     ),
-    "mirage.shell.console.utils": ("exit_outcome",),
+    "mirage.shell.console.utils": ("exit_outcome", "killed_outcome"),
 }
 
 __all__ = [
+    "EXIT_OUTCOME",
     "KILLED_OUTCOME",
     "Channel",
     "ConsoleChunk",
@@ -64,6 +65,7 @@ __all__ = [
     "Tee",
     "Terminal",
     "exit_outcome",
+    "killed_outcome",
 ]
 
 __getattr__ = lazy_exports(__name__, _EXPORTS)

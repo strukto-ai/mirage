@@ -244,7 +244,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "cp: /scratch/vaultc/secret: Permission denied\n"
+        "stderr": "cp: cannot open '/scratch/vaultc/secret' for reading: Permission denied\n"
       }
     },
     {
@@ -258,7 +258,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "mv: /scratch/vaultc/secret: Permission denied\n"
+        "stderr": "mv: cannot move '/scratch/vaultc/secret' to '/scratch/outbox/deep/moved': Permission denied\n"
       }
     },
     {

@@ -104,6 +104,36 @@ describe('RAMConsoleStore', () => {
     await store.close()
     await waiter
   })
+
+  it('drops an append after the ending', async () => {
+    const store = new RAMConsoleStore()
+    await store.append(Channel.STDOUT, enc('out'))
+    const ending = await store.append(Channel.CONTROL, enc('killed:143'))
+    expect(await store.append(Channel.STDOUT, enc('late'))).toEqual(ending)
+    const [chunks] = await store.readFrom(0)
+    expect(chunks.map((c) => dec(c.data))).toEqual(['out', 'killed:143'])
+  })
+
+  it('waitEnded wakes on the ending alone', async () => {
+    const store = new RAMConsoleStore()
+    let done = false
+    const waiter = store.waitEnded().then(() => {
+      done = true
+    })
+    await store.append(Channel.STDOUT, enc('out'))
+    await Promise.resolve()
+    expect(done).toBe(false)
+    await store.append(Channel.CONTROL, enc('exit:0'))
+    await waiter
+    await store.waitEnded()
+  })
+
+  it('waitEnded returns on close', async () => {
+    const store = new RAMConsoleStore()
+    const waiter = store.waitEnded()
+    await store.close()
+    await waiter
+  })
 })
 
 describe('JobConsole', () => {
@@ -285,5 +315,14 @@ describe('JobConsole', () => {
     const c = new JobConsole()
     await c.close()
     await c.waitFinished()
+  })
+
+  it('outcome reads the ending once it is stored', async () => {
+    const c = new JobConsole()
+    expect(await c.outcome()).toBeNull()
+    await c.emit(Channel.STDOUT, enc('out'))
+    expect(await c.outcome()).toBeNull()
+    await c.finish('killed:143')
+    expect(await c.outcome()).toBe('killed:143')
   })
 })

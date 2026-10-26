@@ -40,6 +40,7 @@ from mirage.policy import (
     ShellExplanation,
     ShellNode,
     refusal_of,
+    render_command_deny,
     render_deny,
 )
 from mirage.policy.builtin.permissions import PermissionsPolicy
@@ -232,7 +233,7 @@ def unreadable(raw: str) -> str:
     return f"cannot read {raw} before the runtime expands it"
 
 
-def _explained(
+async def _explained(
     ctx: CommandContext,
     registry: MountRegistry,
     asked: Deny | Ask | None,
@@ -289,7 +290,7 @@ def _explained(
     )
     if action is None:
         return base
-    err, code = render_deny(ctx.command, action)
+    err, code = await render_command_deny(ctx.command, action, ctx)
     return dataclasses.replace(
         base,
         reason=action.reason if base.reason == "" else base.reason,
@@ -599,7 +600,8 @@ async def _judge_words(
         return
     yield Judged(
         dataclasses.replace(
-            _explained(ctx, registry, asked, answers), words=words_read
+            await _explained(ctx, registry, asked, answers),
+            words=words_read,
         ),
         occurrence,
         stated,
@@ -1374,7 +1376,7 @@ async def _admitted(
     )
     if action is None:
         return None
-    err, code = render_deny(judgment.command, action)
+    err, code = await render_command_deny(judgment.command, action, one.ctx)
     return Refused(err, code, refusal_of(action))
 
 
