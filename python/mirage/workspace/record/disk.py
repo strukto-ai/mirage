@@ -115,8 +115,8 @@ def _release_lock(fd: int, lock_path: str) -> None:
             os.unlink(lock_path)
             return
         except FileNotFoundError:
-            owned = False
-    # Another writer reclaimed this lock as stale; leave it to its holder.
+            pass
+    # The lock vanished or changed hands before release; nothing to undo.
     logger.warning("lock %s was reclaimed before release", lock_path)
 
 
@@ -232,7 +232,7 @@ class DiskRecordClient:
             fd = f.fileno()
 
             def sync() -> None:
-                # As libuv does: full sync on macOS, fsync where a volume refuses.
+                # Full sync on macOS; plain fsync where the volume refuses it.
                 if sys.platform == "darwin":
                     try:
                         fcntl.fcntl(fd, fcntl.F_FULLFSYNC)

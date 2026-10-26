@@ -16,11 +16,11 @@ import asyncio
 import errno
 import json
 import os
-import sys
 import threading
 import time
 from itertools import count
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Literal
 
 import aiofiles.os
@@ -257,6 +257,26 @@ async def test_a_guard_reclaimed_mid_reclaim_still_lets_the_claim_win(
 
 
 @pytest.mark.asyncio
+async def test_a_reclaimer_that_loses_the_guard_leaves_the_lock(
+    tmp_path, monkeypatch
+):
+    client = DiskRecordClient(str(tmp_path), "")
+    _stale_lock(client, "k")
+    guard = _stale_lock(client, "k", ".lock.reclaim")
+    opens = count()
+    real_open = os.open
+
+    def open_(path, *args, **kwargs):
+        if path == guard and next(opens) == 1:
+            raise FileExistsError(guard)
+        return real_open(path, *args, **kwargs)
+
+    monkeypatch.setattr(os, "open", open_)
+    assert not await client.cas_put("k", {"generation": 1}, 0)
+    assert os.listdir(tmp_path) == ["k.json.lock"]
+
+
+@pytest.mark.asyncio
 async def test_release_leaves_a_lock_another_writer_took(tmp_path):
     client = DiskRecordClient(str(tmp_path), "")
     mine = await client.lock("k")
@@ -269,64 +289,62 @@ async def test_release_leaves_a_lock_another_writer_took(tmp_path):
     assert os.listdir(tmp_path) == []
 
 
+def _refuse_full_sync(fd: int, cmd: int) -> None:
+    raise OSError(errno.ENOTSUP, "full sync not supported")
+
+
 @pytest.mark.asyncio
+@pytest.mark.parametrize("platform", ["darwin", "linux"])
 async def test_a_record_reaches_the_disk_before_it_is_renamed_in(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, platform
 ):
     steps: list[tuple[str, int, int]] = []
+    real_fsync = os.fsync
     real_replace = aiofiles.os.replace
 
-    def synced(fd: int) -> None:
+    def synced(fd: int, how: str) -> None:
         held = os.fstat(fd)
-        steps.append(("sync", held.st_size, held.st_ino))
+        steps.append((how, held.st_size, held.st_ino))
 
-    if sys.platform == "darwin":
-        real_fcntl = disk.fcntl.fcntl
+    def full_sync(fd: int, cmd: int) -> None:
+        synced(fd, "full sync")
 
-        def fcntl(fd: int, cmd: int, *args):
-            if cmd == disk.fcntl.F_FULLFSYNC:
-                synced(fd)
-            return real_fcntl(fd, cmd, *args)
-
-        monkeypatch.setattr(disk.fcntl, "fcntl", fcntl)
-    else:
-        real_fsync = os.fsync
-
-        def fsync(fd: int) -> None:
-            synced(fd)
-            real_fsync(fd)
-
-        monkeypatch.setattr(os, "fsync", fsync)
+    def fsync(fd: int) -> None:
+        synced(fd, "fsync")
+        real_fsync(fd)
 
     async def replace(src: str, dst: str) -> None:
         moved = os.stat(src)
         steps.append(("replace", moved.st_size, moved.st_ino))
         await real_replace(src, dst)
 
+    fake = SimpleNamespace(F_FULLFSYNC=51, fcntl=full_sync)
+    monkeypatch.setattr(disk.sys, "platform", platform)
+    monkeypatch.setattr(disk, "fcntl", fake, raising=False)
+    monkeypatch.setattr(os, "fsync", fsync)
     monkeypatch.setattr(aiofiles.os, "replace", replace)
     client = DiskRecordClient(str(tmp_path), "")
     await client.put("k", {"generation": 0})
     body = len(json.dumps({"generation": 0}))
     record = os.stat(client.path("k")).st_ino
-    assert steps == [("sync", body, record), ("replace", body, record)]
+    how = "full sync" if platform == "darwin" else "fsync"
+    assert steps == [(how, body, record), ("replace", body, record)]
 
 
 @pytest.mark.asyncio
-@pytest.mark.skipif(sys.platform != "darwin", reason="F_FULLFSYNC is macOS")
 async def test_a_volume_without_full_sync_falls_back_to_fsync(
     tmp_path, monkeypatch
 ):
     sizes: list[int] = []
     real_fsync = os.fsync
 
-    def refuse(fd: int, cmd: int, *args):
-        raise OSError(errno.ENOTSUP, "full sync not supported")
-
     def fsync(fd: int) -> None:
         sizes.append(os.fstat(fd).st_size)
         real_fsync(fd)
 
-    monkeypatch.setattr(disk.fcntl, "fcntl", refuse)
+    fake = SimpleNamespace(F_FULLFSYNC=51, fcntl=_refuse_full_sync)
+    monkeypatch.setattr(disk.sys, "platform", "darwin")
+    monkeypatch.setattr(disk, "fcntl", fake, raising=False)
     monkeypatch.setattr(os, "fsync", fsync)
     client = DiskRecordClient(str(tmp_path), "")
     await client.put("k", {"generation": 0})
@@ -361,9 +379,24 @@ async def test_release_closes_the_lock_before_unlinking_it(
 
 
 @pytest.mark.asyncio
-async def test_release_after_the_lock_was_deleted(tmp_path):
+@pytest.mark.parametrize("after_check", [False, True], ids=["before", "after"])
+async def test_release_survives_its_lock_vanishing(
+    tmp_path, monkeypatch, after_check
+):
     client = DiskRecordClient(str(tmp_path), "")
     fd = await client.lock("k")
-    os.unlink(client.path("k") + ".lock")
+    lock_path = client.path("k") + ".lock"
+    real_stat = os.stat
+
+    def stat(path, *args, **kwargs):
+        found = real_stat(path, *args, **kwargs)
+        if path == lock_path:
+            os.unlink(path)
+        return found
+
+    if after_check:
+        monkeypatch.setattr(os, "stat", stat)
+    else:
+        os.unlink(lock_path)
     await client.unlock("k", fd)
     assert os.listdir(tmp_path) == []

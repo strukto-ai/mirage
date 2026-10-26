@@ -186,12 +186,15 @@ export class DiskRecordClient {
     }
   }
 
-  // True when the lock is gone or was stale and removed; false when a
-  // live writer still holds it or another waiter is reclaiming it.
-  // Reclaimers serialize on a `.reclaim` guard, a lock of its own and
-  // reclaimed the same way, and re-check the age under it: no waiter
-  // creates a lock while the stale one exists, so the lock found stale
-  // is the one removed, unless a live holder outlived the stale window.
+  /**
+   * True when the lock is gone or was stale and removed; false when a
+   * live writer still holds it or another waiter is reclaiming it.
+   *
+   * Reclaimers serialize on a `.reclaim` guard, a lock of its own and
+   * reclaimed the same way, and re-check the age under it: no waiter
+   * creates a lock while the stale one exists, so the lock found stale
+   * is the one removed, unless a live holder outlived the stale window.
+   */
   private async reclaimStaleLock(lockPath: string): Promise<boolean> {
     const age = async (): Promise<number | null> => {
       try {
@@ -227,7 +230,7 @@ export class DiskRecordClient {
     }
   }
 
-  // Unlink only after closing: Windows refuses to unlink an open file.
+  // Unlink only after closing: on Windows an open, unlinked lock blocks the next one.
   private async releaseLock(fh: FileHandle, lockPath: string): Promise<void> {
     let owned = false
     try {
@@ -247,7 +250,7 @@ export class DiskRecordClient {
         if (!isMissing(e)) throw e
       }
     }
-    // Another writer reclaimed this lock as stale; leave it to its holder.
+    // The lock vanished or changed hands before release; nothing to undo.
     console.warn(`mirage: lock ${lockPath} was reclaimed before release`)
   }
 

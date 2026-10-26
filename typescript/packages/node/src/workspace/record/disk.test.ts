@@ -160,6 +160,21 @@ describe('DiskRecordClient lock reclaim and release', () => {
     expect(readdirSync(root)).toEqual(['k.json'])
   })
 
+  it('leaves the lock when a reclaimer loses the guard it freed', async () => {
+    const client = new DiskRecordClient(root, '')
+    staleLock(client, 'k')
+    const guard = staleLock(client, 'k', '.lock.reclaim')
+    let opens = 0
+    vi.mocked(fs.open).mockImplementation((async (...args: Parameters<typeof fs.open>) => {
+      if (args[0] === guard && opens++ === 1) {
+        throw Object.assign(new Error(`EEXIST: ${guard}`), { code: 'EEXIST' })
+      }
+      return real.open(...args)
+    }) as typeof fs.open)
+    expect(await client.casPut('k', { generation: 1 }, 0)).toBe(false)
+    expect(readdirSync(root)).toEqual(['k.json.lock'])
+  })
+
   it('leaves a lock another writer took on release', async () => {
     const client = new DiskRecordClient(root, '')
     const mine = await client.lock('k')
@@ -190,16 +205,28 @@ describe('DiskRecordClient lock reclaim and release', () => {
     expect(steps).toEqual(['close', 'unlink'])
   })
 
-  it('releases a lock that was deleted meanwhile', async () => {
+  it.each([
+    ['before', false],
+    ['after', true],
+  ])('releases a lock that vanished %s its ownership check', async (_, afterCheck) => {
     const client = new DiskRecordClient(root, '')
     const fh = await client.lock('k')
-    rmSync(`${client.path('k')}.lock`)
+    const lock = `${client.path('k')}.lock`
+    if (afterCheck) {
+      vi.mocked(fs.stat).mockImplementation((async (p: string, opts?: { bigint?: boolean }) => {
+        const found = await real.stat(p, opts)
+        if (p === lock) await real.unlink(p)
+        return found
+      }) as typeof fs.stat)
+    } else {
+      rmSync(lock)
+    }
     await client.unlock('k', fh)
     expect(readdirSync(root)).toEqual([])
   })
 
   it('puts a record on disk before renaming it in', async () => {
-    const steps: (string | bigint)[][] = []
+    const steps: ([string, bigint, bigint] | ['close'])[] = []
     vi.mocked(fs.open).mockImplementation((async (...args: Parameters<typeof fs.open>) => {
       const fh = await real.open(...args)
       const sync = fh.sync.bind(fh)
