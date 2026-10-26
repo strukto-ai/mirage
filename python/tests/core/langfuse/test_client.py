@@ -189,4 +189,18 @@ async def test_fetch_dataset_runs_lists_experiments_by_dataset_id():
     runs = await fetch_dataset_runs(api, "eval-basic")
 
     assert [r["name"] for r in runs] == ["run-alpha"]
-    assert api.experiments.list.await_args.kwargs["dataset_id"] == "ds-1"
+    kwargs = api.experiments.list.await_args.kwargs
+    assert kwargs["dataset_id"] == "ds-1"
+    assert "filter" not in kwargs
+
+    await fetch_dataset_runs(api, "eval-basic", "run,alpha")
+
+    kwargs = api.experiments.list.await_args.kwargs
+    assert json.loads(kwargs["filter"]) == [
+        {
+            "type": "string",
+            "column": "name",
+            "operator": "=",
+            "value": "run,alpha",
+        }
+    ]

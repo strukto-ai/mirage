@@ -272,18 +272,26 @@ export async function fetchDatasetItems(
   return getData(body)
 }
 
-/** The experiments run on a dataset. */
+/** The experiments run on a dataset, or only the one named `runName`. */
 export async function fetchDatasetRuns(
   transport: LangfuseTransport,
   datasetName: string,
+  runName?: string,
 ): Promise<Record<string, unknown>[]> {
   const dataset = asObject(
     await transport.request(`/api/public/v2/datasets/${encodeURIComponent(datasetName)}`),
   )
   const datasetId = typeof dataset.id === 'string' ? dataset.id : ''
-  return collect(transport, '/api/public/experiments', {
+  const query: Record<string, string | number | undefined> = {
     fromStartTime: EXPERIMENTS_FROM,
     datasetId,
     fields: EXPERIMENT_FIELDS,
-  })
+  }
+  // The name parameter splits on commas; the filter matches whole names.
+  if (runName !== undefined) {
+    query.filter = JSON.stringify([
+      { type: 'string', column: 'name', operator: '=', value: runName },
+    ])
+  }
+  return collect(transport, '/api/public/experiments', query)
 }

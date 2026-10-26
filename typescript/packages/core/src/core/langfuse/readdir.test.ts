@@ -226,12 +226,13 @@ describe('langfuse bounded trace listing', () => {
     })
   }
 
-  it('short of the limit is the directory', async () => {
+  it('short of the limit is still not the directory', async () => {
+    // A trace whose root observation never arrived is absent from any page.
     const out = await readdir(
       accessor(new RecordingTransport(TRACES), { defaultTraceLimit: 3 }),
       spec('/traces'),
     )
-    expect((out as DirListing).partial).toBe(false)
+    expect((out as DirListing).partial).toBe(true)
   })
 })
 

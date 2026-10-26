@@ -46,20 +46,6 @@ function promptVersions(record: Record<string, unknown>): string[] {
   return numbers.sort((a, b) => a - b).map(String)
 }
 
-/**
- * Whether a trace listing may have left traces out.
- *
- * It is one page of at most `defaultTraceLimit` traces from
- * `defaultFromTimestamp` on, so a full page or a set window is a truncated
- * view, not the directory: cached as complete it would prove an older
- * trace absent while read fetches it by id. Mirrors python's `_bounded`.
- */
-function bounded(accessor: LangfuseAccessor, traces: readonly Record<string, unknown>[]): boolean {
-  const limit = accessor.config.defaultTraceLimit ?? DEFAULT_TRACE_LIMIT
-  const from = accessor.config.defaultFromTimestamp
-  return traces.length >= limit || (from !== undefined && from !== '')
-}
-
 function sessionExtra(match: ScopeMatch): Record<string, string> {
   return { session_id: match.slots.session_id ?? '' }
 }
@@ -83,6 +69,9 @@ function dirs(names: readonly string[]): FileStat[] {
   return names.map((name) => new FileStat({ name, type: FileType.DIRECTORY }))
 }
 
+// A trace listing is never the directory: it is one page of root
+// observations, and a trace whose root never arrived has none. Cached as
+// complete it would prove such a trace absent while read fetches it by id.
 function traceRows(roots: readonly Record<string, unknown>[]): FileStat[] {
   // A trace can hold more than one root observation.
   const ids = new Set(roots.map((r) => pickString(r, 'traceId')))
@@ -102,7 +91,7 @@ async function listTraces(accessor: LangfuseAccessor, _match: ScopeMatch): Promi
   // fetchTrace per entry. Traces and prompts stay size-unknown until a read
   // hydrates them; the dataset .jsonl files are sized because their listing
   // already carries every item.
-  return new DirListing({ entries: traceRows(traces), partial: bounded(accessor, traces) })
+  return new DirListing({ entries: traceRows(traces), partial: true })
 }
 
 async function listSessions(accessor: LangfuseAccessor, _match: ScopeMatch): Promise<DirListing> {
@@ -124,7 +113,7 @@ async function listSessionTraces(
     limit: accessor.config.defaultTraceLimit ?? DEFAULT_TRACE_LIMIT,
     fromTimestamp: accessor.config.defaultFromTimestamp,
   })
-  return new DirListing({ entries: traceRows(traces), partial: bounded(accessor, traces) })
+  return new DirListing({ entries: traceRows(traces), partial: true })
 }
 
 async function listPrompts(accessor: LangfuseAccessor, _match: ScopeMatch): Promise<DirListing> {

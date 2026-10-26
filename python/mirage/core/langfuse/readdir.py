@@ -30,19 +30,6 @@ from mirage.core.render.json import jsonl_bytes
 from mirage.types import DirListing, FileStat, FileType
 
 
-def _bounded(accessor: LangfuseAccessor, traces: list[dict[str, Any]]) -> bool:
-    """Whether a trace listing may have left traces out.
-
-    It is one page of at most ``default_trace_limit`` traces from
-    ``default_from_timestamp`` on, so a full page or a set window is a
-    truncated view, not the directory: cached as complete it would prove
-    an older trace absent while read fetches it by id.
-    """
-    return len(traces) >= accessor.config.default_trace_limit or bool(
-        accessor.config.default_from_timestamp
-    )
-
-
 def _session_extra(match: ScopeMatch) -> dict[str, str]:
     return {"session_id": match.slots["session_id"]}
 
@@ -67,6 +54,9 @@ def _dirs(names: list[str]) -> list[FileStat]:
     return [FileStat(name=name, type=FileType.DIRECTORY) for name in names]
 
 
+# A trace listing is never the directory: it is one page of root
+# observations, and a trace whose root never arrived has none. Cached as
+# complete it would prove such a trace absent while read fetches it by id.
 def _trace_rows(roots: list[dict[str, Any]]) -> list[FileStat]:
     # A trace can hold more than one root observation.
     ids = dict.fromkeys(r.get("traceId", "") for r in roots)
@@ -86,9 +76,7 @@ async def _list_traces(
     # cost one fetch_trace per entry. Traces and prompts stay size-unknown
     # until a read hydrates them; the dataset .jsonl files below are sized
     # because their listing already carries every item.
-    return DirListing(
-        entries=_trace_rows(traces), partial=_bounded(accessor, traces)
-    )
+    return DirListing(entries=_trace_rows(traces), partial=True)
 
 
 async def _list_sessions(
@@ -113,9 +101,7 @@ async def _list_session_traces(
         limit=accessor.config.default_trace_limit,
         from_timestamp=accessor.config.default_from_timestamp,
     )
-    return DirListing(
-        entries=_trace_rows(traces), partial=_bounded(accessor, traces)
-    )
+    return DirListing(entries=_trace_rows(traces), partial=True)
 
 
 async def _list_prompts(

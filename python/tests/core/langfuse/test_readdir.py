@@ -353,12 +353,14 @@ async def test_a_bounded_trace_listing_is_not_cached_as_the_directory(knobs):
 
 
 @pytest.mark.asyncio
-async def test_a_trace_listing_short_of_the_limit_is_the_directory():
+async def test_a_trace_listing_short_of_the_limit_is_not_the_directory():
+    """A trace whose root observation never arrived is absent from any
+    page, so even a short listing cannot prove a trace missing."""
     accessor = _bounded_accessor(default_trace_limit=3)
     result = await _list_traces_dir(
         accessor, [{"traceId": "t1"}, {"traceId": "t2"}]
     )
-    assert result.partial is False
+    assert result.partial is True
 
 
 @pytest.mark.asyncio

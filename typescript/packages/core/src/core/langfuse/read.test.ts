@@ -77,6 +77,10 @@ describe('langfuse read dataset run', () => {
       '/api/public/experiments',
     ])
     expect(transport.queries[1]).toMatchObject({ datasetId: 'ds-1' })
+    // A whole-name filter: the name parameter would split a name on commas.
+    expect(JSON.parse(String(transport.queries[1]?.filter))).toEqual([
+      { type: 'string', column: 'name', operator: '=', value: 'run-alpha' },
+    ])
   })
 
   it('raises ENOENT when the named run is absent', async () => {
@@ -197,5 +201,26 @@ describe('langfuse read of a session trace', () => {
     expect((JSON.parse(new TextDecoder().decode(own)) as { sessionId: string }).sessionId).toBe(
       's2',
     )
+  })
+})
+
+describe('langfuse read of a trace with roots in two sessions', () => {
+  it('opens under every session one of its roots names', async () => {
+    const transport = new RecordingTransport({
+      '/api/public/v2/observations': {
+        data: [
+          { id: 'early', traceId: 't1', startTime: 'a', sessionId: 's1', isRootObservation: true },
+          { id: 'late', traceId: 't1', startTime: 'b', sessionId: 's2', isRootObservation: true },
+          { id: 'leaf', traceId: 't1', startTime: 'c', sessionId: 's3' },
+        ],
+      },
+    })
+    for (const session of ['s1', 's2']) {
+      const own = await read(accessor(transport), spec(`/sessions/${session}/t1.json`))
+      expect((JSON.parse(DEC.decode(own)) as { id: string }).id).toBe('early')
+    }
+    await expect(read(accessor(transport), spec('/sessions/s3/t1.json'))).rejects.toMatchObject({
+      code: 'ENOENT',
+    })
   })
 })

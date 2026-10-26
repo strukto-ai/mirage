@@ -147,7 +147,7 @@ async def test_read_dataset_run_renders_jsonl(accessor):
         "mirage.core.langfuse.read.fetch_dataset_runs",
         new_callable=AsyncMock,
         return_value=runs,
-    ):
+    ) as fetch:
         result = await read(
             accessor,
             PathSpec(
@@ -157,6 +157,7 @@ async def test_read_dataset_run_renders_jsonl(accessor):
             ),
         )
 
+    assert fetch.await_args.args[1:] == ("qa-eval", "run-a")
     text = result.decode()
     assert text.endswith("\n")
     assert text.count("\n") == 1
@@ -228,3 +229,42 @@ async def test_read_refuses_another_sessions_trace(accessor):
             ),
         )
     assert json.loads(own)["sessionId"] == "s2"
+
+
+@pytest.mark.asyncio
+async def test_read_session_trace_with_a_later_root_in_that_session(accessor):
+    """A trace is listed under every session one of its root
+    observations names, so each of those paths must open."""
+    trace = {
+        "traceId": "t1",
+        "sessionId": "s1",
+        "isRootObservation": True,
+        "observations": [
+            {"id": "late", "isRootObservation": True, "sessionId": "s2"},
+            {"id": "leaf", "sessionId": "s3"},
+        ],
+    }
+    with patch(
+        "mirage.core.langfuse.read.fetch_trace",
+        new_callable=AsyncMock,
+        return_value=trace,
+    ):
+        for session in ("s1", "s2"):
+            own = await read(
+                accessor,
+                PathSpec(
+                    vfs_path=f"sessions/{session}/t1.json",
+                    virtual=f"/sessions/{session}/t1.json",
+                    directory=f"/sessions/{session}/t1.json",
+                ),
+            )
+            assert json.loads(own)["traceId"] == "t1"
+        with pytest.raises(FileNotFoundError):
+            await read(
+                accessor,
+                PathSpec(
+                    vfs_path="sessions/s3/t1.json",
+                    virtual="/sessions/s3/t1.json",
+                    directory="/sessions/s3/t1.json",
+                ),
+            )

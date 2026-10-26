@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import json
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from typing import Any, TypeVar, cast
@@ -235,20 +236,34 @@ async def fetch_dataset_items(
 async def fetch_dataset_runs(
     api: AsyncLangfuseAPI,
     dataset_name: str,
+    run_name: str | None = None,
 ) -> list[dict[str, Any]]:
     """The experiments run on a dataset.
 
     Args:
         api (AsyncLangfuseAPI): the Langfuse API client.
         dataset_name (str): the dataset's name.
+        run_name (str | None): only the experiment of this name.
 
     Returns:
         list[dict[str, Any]]: experiments, latest activity first.
     """
     dataset = await api.datasets.get(dataset_name)
-    return await _collect(
-        api.experiments.list,
-        from_start_time=EXPERIMENTS_FROM,
-        dataset_id=dataset.id,
-        fields=EXPERIMENT_FIELDS,
-    )
+    kwargs: dict[str, Any] = {
+        "from_start_time": EXPERIMENTS_FROM,
+        "dataset_id": dataset.id,
+        "fields": EXPERIMENT_FIELDS,
+    }
+    # The name parameter splits on commas; the filter matches whole names.
+    if run_name is not None:
+        kwargs["filter"] = json.dumps(
+            [
+                {
+                    "type": "string",
+                    "column": "name",
+                    "operator": "=",
+                    "value": run_name,
+                }
+            ]
+        )
+    return await _collect(api.experiments.list, **kwargs)
