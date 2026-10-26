@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { execFileSync } from 'node:child_process'
 import type fs from 'node:fs'
 import {
   existsSync,
@@ -913,6 +914,31 @@ describe('patchNodeFs — calls node makes on its own', () => {
       (await fs.promises.stat('/data/m.txt')).mode & 0o777,
       (await fs.promises.stat('/data/msub')).mode & 0o777,
     ]).toEqual([0o751, 0o701])
+    await ws.close()
+  })
+
+  // Pinned against node 24 on the host: a FIFO is refused before anything
+  // is touched, a link onto a file fails at its own symlink with the file
+  // kept, and a link replaces a link whatever `force` says.
+  it('cp refuses a FIFO and copies a link as node does', async () => {
+    const [ws, fs] = await world()
+    const pipe = join(scratch, 'pipe')
+    execFileSync('mkfifo', [pipe])
+    await expect(fs.promises.cp(pipe, '/data/p')).rejects.toMatchObject({
+      code: 'ERR_FS_CP_FIFO_PIPE',
+      message:
+        'Cannot copy a FIFO pipe: cp returned EINVAL (cannot copy a FIFO pipe: /data/p) /data/p',
+    })
+    expect(await ws.vfs.exists('/data/p')).toBe(false)
+    await ws.vfs.symlink('/data/lk', 'd/a.txt')
+    await ws.vfs.write('/data/keep.txt', 'keep')
+    await expect(fs.promises.cp('/data/lk', '/data/keep.txt')).rejects.toMatchObject({
+      code: 'EEXIST',
+    })
+    expect(await fs.promises.readFile('/data/keep.txt', 'utf-8')).toBe('keep')
+    await ws.vfs.symlink('/data/lk2', 'd/sub/b.txt')
+    await fs.promises.cp('/data/lk', '/data/lk2', { force: false })
+    expect(await fs.promises.readlink('/data/lk2')).toBe('/data/d/a.txt')
     await ws.close()
   })
 

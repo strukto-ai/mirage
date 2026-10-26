@@ -697,6 +697,26 @@ class HostFs implements Record<
         dst,
       )
     }
+    if (from.isSymbolicLink()) {
+      const target = await routed.readlink(src)
+      const kept =
+        opts.verbatimSymlinks === true || posix.isAbsolute(target)
+          ? target
+          : posix.resolve(posix.dirname(src), target)
+      // A link replaces a link there, whatever `force` says; onto any
+      // other entry the symlink itself refuses the name, as node's does.
+      if (to?.isSymbolicLink() === true) await routed.unlink(dst)
+      await routed.symlink(kept, dst)
+      return
+    }
+    if (!from.isFile() && !from.isCharacterDevice() && !from.isBlockDevice()) {
+      const [code, kind] = from.isSocket()
+        ? ['ERR_FS_CP_SOCKET', 'a socket file']
+        : from.isFIFO()
+          ? ['ERR_FS_CP_FIFO_PIPE', 'a FIFO pipe']
+          : ['ERR_FS_CP_UNKNOWN', 'an unknown file type']
+      throw cpRefusal(code, `Cannot copy ${kind}`, 'EINVAL', `cannot copy ${kind}: ${dst}`, dst)
+    }
     if (to !== null) {
       if (opts.force === false) {
         if (opts.errorOnExist !== true) return
@@ -709,15 +729,6 @@ class HostFs implements Record<
         )
       }
       await routed.unlink(dst)
-    }
-    if (from.isSymbolicLink()) {
-      const target = await routed.readlink(src)
-      const kept =
-        opts.verbatimSymlinks === true || posix.isAbsolute(target)
-          ? target
-          : posix.resolve(posix.dirname(src), target)
-      await routed.symlink(kept, dst)
-      return
     }
     await routed.copyFile(src, dst, typeof opts.mode === 'number' ? opts.mode : 0)
     if (opts.preserveTimestamps === true) await routed.utimes(dst, from.atime, from.mtime)
