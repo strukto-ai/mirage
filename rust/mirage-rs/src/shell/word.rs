@@ -477,14 +477,14 @@ impl Parser<'_> {
     /// `$(< file)` form.
     fn substitution_body(&mut self, close: Close) -> R<Vec<Syn>> {
         self.skip_space();
-        let start = self.i;
+        let mark = self.mark();
         if self.at_redirect() && !self.starts(b"<<") {
             let redirect = self.redirect(false)?;
             self.skip_space();
             if self.peek() == b')' {
                 return Ok(vec![redirect.with_field("redirect")]);
             }
-            self.i = start;
+            self.reset(mark);
         }
         self.statements(close, None, false)
     }

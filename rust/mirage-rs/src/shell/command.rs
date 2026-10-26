@@ -437,13 +437,44 @@ impl Parser<'_> {
     /// Whether a word follows the redirects that start here. bash gives
     /// each redirect one word and the command the words after it, so
     /// such redirects stand among the command's words; a run that ends
-    /// the command is left to the statement around it.
+    /// the command is left to the statement around it. The scanner reads
+    /// past each target without building it, so nested targets are not
+    /// parsed once per level.
     pub(super) fn words_after_redirects(&mut self) -> R<bool> {
         let mark = self.mark();
-        self.redirect_run()?;
-        let words = !self.at_command_end();
+        let words = self.skip_redirects() && !self.at_command_end();
         self.reset(mark);
         Ok(words)
+    }
+
+    /// Past the redirects and herestrings from here, each with its word;
+    /// false at one the scanner cannot read, which the parse refuses.
+    fn skip_redirects(&mut self) -> bool {
+        let ops: &[&str] = &[
+            "&>>", "&>", ">>", ">&-", "<&-", ">&", "<&", ">|", "<>", "<<<", "<<-", "<<", ">", "<",
+        ];
+        while self.at_redirect() || self.at_herestring() {
+            self.i = digits_end(self.s, self.i);
+            let Some(op) = ops.iter().find(|op| self.starts(op.as_bytes())) else {
+                return false;
+            };
+            self.i += op.len();
+            let closes = *op == ">&-" || *op == "<&-";
+            if !(closes && (is_blank(self.peek()) || self.at_command_end())) {
+                self.skip_blank();
+                let end = if op.starts_with("<<") && *op != "<<<" {
+                    self.word_extent(self.i)
+                } else {
+                    self.scan_word(self.i)
+                };
+                match end {
+                    Ok(end) if end > self.i => self.i = end,
+                    _ => return false,
+                }
+            }
+            self.skip_blank();
+        }
+        true
     }
 
     /// The redirects and herestrings from here to the next word.
@@ -551,7 +582,7 @@ impl Parser<'_> {
         let mut redirected = false;
         loop {
             self.skip_blank();
-            if self.at_redirect() && self.words_after_redirects()? {
+            if (self.at_redirect() || self.at_herestring()) && self.words_after_redirects()? {
                 children.extend(self.redirect_run()?);
                 redirected = true;
                 continue;

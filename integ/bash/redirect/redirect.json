@@ -1959,10 +1959,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(f() { local x=1 > /dev/null y=2; echo \"$x $y\"; }; f; declare v=1 > /dev/null w=2; echo \"$v $w\"; a=1; b=2; unset a > /dev/null b; echo \"${a-unset} ${b-unset}\")",
+      "command": "(f() { local x=1 > /dev/null y=2; echo \"$x $y\"; }; f; declare v=1 > /dev/null w=2; echo \"$v $w\"; declare c=1 <<< x d=2; echo \"$c $d\"; a=1; b=2; unset a > /dev/null b; echo \"${a-unset} ${b-unset}\")",
       "expect": {
         "exit": 0,
-        "stdout": "1 2\n1 2\nunset unset\n",
+        "stdout": "1 2\n1 2\n1 2\nunset unset\n",
         "stderr": ""
       }
     },
@@ -2025,11 +2025,44 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "[ a = a ] > /dev/null ]; echo \"st=$?\"",
+      "command": "[ a = a ] > /dev/null ]; echo \"st=$?\"; [ a ] <<< x b; echo \"st=$?\"",
       "expect": {
         "exit": 0,
-        "stdout": "st=2\n",
-        "stderr": "bash: [: too many arguments\n"
+        "stdout": "st=2\nst=2\n",
+        "stderr": "bash: [: too many arguments\nbash: [: missing `]'\n"
+      }
+    },
+    {
+      "id": "redirect_file_read_with_a_command_runs_it",
+      "seq": 501186,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "echo $(< \"$(cat <<E)\" cat)\n/dev/null\nE\necho after",
+      "expect": {
+        "exit": 0,
+        "stdout": "\nafter\n",
+        "stderr": "mirage: line 1: warning: command substitution: 1 unterminated here-document\n"
       }
     }
   ]

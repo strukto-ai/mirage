@@ -1162,7 +1162,9 @@ impl Parser<'_> {
             if let Ok(node) = self.test_command(false) {
                 let after = self.mark();
                 self.skip_blank();
-                if !(self.at_redirect() && self.words_after_redirects()?) {
+                if !((self.at_redirect() || self.at_herestring())
+                    && self.words_after_redirects()?)
+                {
                     self.reset(after);
                     return Ok(node);
                 }

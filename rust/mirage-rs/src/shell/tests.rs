@@ -117,6 +117,20 @@ fn a_redirect_takes_one_word() {
     assert!(read("echo $(< f g)").contains(
         "(command redirect: (file_redirect destination: (word=f)) name: (command_name (word=g)))"
     ));
+    assert!(read("declare a=1 <<< x b=2").contains(
+        "redirect: (herestring_redirect (word=x)) (variable_assignment name: (variable_name=b)"
+    ));
+    assert!(read("[ a ] <<< x b").starts_with("(program (command name: (command_name (word=[))"));
+    // Each target is read once, however deep its substitutions nest.
+    let mut nested = String::from(":");
+    for _ in 0..20 {
+        nested = format!(": >x$({nested})");
+    }
+    read(&nested);
+    // A `$(< f cmd)` that is no file read queues its heredoc once.
+    let (text, heredocs) = lowered("echo $(< \"$(cat <<E)\" cat)\n/dev/null\nE\necho after");
+    assert!(text.ends_with(")\necho after"), "{text:?}");
+    assert_eq!(heredocs, vec![heredoc("E", "/dev/null\n", true)]);
     // After a compound command, or before an array value, bash refuses a
     // word.
     for (line, near) in [
