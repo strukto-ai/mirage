@@ -34,10 +34,13 @@ class MongoClientAccessor(Accessor):
 
     Args:
         uri (SecretStr): the server's connection string.
+        timeout (float): seconds to connect, and to wait on a socket read
+            or write.
     """
 
-    def __init__(self, uri: SecretStr) -> None:
+    def __init__(self, uri: SecretStr, timeout: float) -> None:
         self._uri = uri
+        self._timeout_ms = timeout * 1000
         self._clients: dict[int, AsyncMongoClient[dict[str, Any]]] = {}
 
     @property
@@ -54,7 +57,11 @@ class MongoClientAccessor(Accessor):
         key = id(loop) if loop is not None else 0
         client = self._clients.get(key)
         if client is None:
-            client = AsyncMongoClient(reveal_secret(self._uri))
+            client = AsyncMongoClient(
+                reveal_secret(self._uri),
+                connectTimeoutMS=self._timeout_ms,
+                socketTimeoutMS=self._timeout_ms,
+            )
             self._clients[key] = client
         return client
 
@@ -69,7 +76,7 @@ class MongoDBAccessor(MongoClientAccessor):
     def __init__(
         self, config: MongoDBConfig, listing_cache_ttl: float = 5.0
     ) -> None:
-        super().__init__(config.uri)
+        super().__init__(config.uri, config.timeout)
         self.config = config
         # The database and collection names an existence check reads.
         self.listings = ResponseCache[str, list[str]](listing_cache_ttl)

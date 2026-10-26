@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import Callable
 from datetime import date, datetime
 
 from mirage.accessor.google_api import GoogleApiAccessor
@@ -25,9 +26,21 @@ class GCalAccessor(GoogleApiAccessor):
     config: GCalConfig
 
     def __init__(
-        self, config: GCalConfig, token_manager: TokenManager
+        self,
+        config: GCalConfig,
+        token_manager: TokenManager,
+        capped: Callable[[], bool] = lambda: True,
     ) -> None:
+        """Args:
+        config (GCalConfig): the account and the listing window.
+        token_manager (TokenManager): its tokens.
+        capped (Callable[[], bool]): whether the mount walks under a
+            ``walk_limit``, asked when a listing runs, since the mount
+            settles its own once mounted; a listing then keeps each
+            event's unsearched text for the search.
+        """
         super().__init__(config, token_manager)
+        self.capped = capped
         self.time_range = TimeRange.from_strings(
             config.start_time, config.end_time
         )

@@ -32,11 +32,10 @@ export interface GCSConfig {
   profile?: string
   endpoint?: string
   region?: string
-  timeoutMs?: number
+  timeout?: number
   forcePathStyle?: boolean
   keyPrefix?: string
   proxy?: string
-  walkLimit?: number
 }
 
 const GCSConfigSchema = z.object({
@@ -67,11 +66,10 @@ export function gcsToS3Config(config: GCSConfig): S3Config {
     ...(config.secretAccessKey !== undefined ? { secretAccessKey: config.secretAccessKey } : {}),
     ...(config.sessionToken !== undefined ? { sessionToken: config.sessionToken } : {}),
     ...(config.profile !== undefined ? { profile: config.profile } : {}),
-    ...(config.timeoutMs !== undefined ? { timeoutMs: config.timeoutMs } : {}),
+    ...(config.timeout !== undefined ? { timeout: config.timeout } : {}),
     ...(config.forcePathStyle !== undefined ? { forcePathStyle: config.forcePathStyle } : {}),
     ...(config.keyPrefix !== undefined ? { keyPrefix: config.keyPrefix } : {}),
     ...(config.proxy !== undefined ? { proxy: config.proxy } : {}),
-    ...(config.walkLimit !== undefined ? { walkLimit: config.walkLimit } : {}),
   }
 }
 

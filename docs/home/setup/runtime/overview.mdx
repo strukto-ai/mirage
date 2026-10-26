@@ -121,17 +121,14 @@ steps first.
 
 ## Resource limits
 
-`command_limits` apply to a runtime's programs as to any command: past
-`timeout_seconds` a program exits 124 (`python3: timed out after Ns`), and
-`max_bytes` and `max_lines` cap its output.
+`command_limits` apply to a runtime's programs as to any command: a line past
+its `line` entry's `timeout_seconds` exits 124 (`line: timed out after Ns`), and
+`max_bytes` and `max_lines` cap a program's output.
 
 ```yaml
-mounts:
-  /data:
-    vfs: ram
-    command_limits:
-      python3:
-        timeout_seconds: 30
+command_limits:
+  line:
+    timeout_seconds: 30
 ```
 
 The deadline also stops the run in Monty, WASI, Pyodide, QuickJS, `local` and

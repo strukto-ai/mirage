@@ -132,7 +132,8 @@ export class BoxDeltaHook implements DeltaHook {
     const mapper = new BoxEventHook(this.accessor, state.paths)
     const events: FileEvent[] = []
     for (const event of ordered(entries)) {
-      events.push(...(await mapper.toEvents(root, event.event_type ?? '', event as JsonValue)))
+      for (const item of await mapper.toEvents(root, event.event_type ?? '', event as JsonValue))
+        events.push(item)
     }
     return new Delta({
       changes: eventsUnder(root, events),

@@ -70,7 +70,6 @@ class DropboxVFS(BaseVFS):
     def __init__(self, config: DropboxConfig) -> None:
         super().__init__()
         self.config = config
-        self.walk_limit = config.walk_limit
         self.accessor = DropboxAccessor(config, DropboxTokenManager(config))
 
     async def readdir(

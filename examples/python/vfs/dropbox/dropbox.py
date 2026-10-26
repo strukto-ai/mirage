@@ -18,7 +18,7 @@ import uuid
 
 from dotenv import load_dotenv
 
-from mirage import MountMode, Workspace
+from mirage import Limit, MountMode, Workspace
 from mirage.vfs.dropbox import DropboxConfig, DropboxVFS
 
 load_dotenv(".env.development")
@@ -30,13 +30,16 @@ config = DropboxConfig(
     # Mount a subfolder instead of the account root by setting
     # DROPBOX_ROOT_PATH, e.g. "/Team/data".
     root_path=os.environ.get("DROPBOX_ROOT_PATH") or "/",
-    # grep -rw and rg -w narrow recursive scans via /2/files/search_v2.
-    # On a plan without full-text search (below Professional), set
-    # DROPBOX_WALK_LIMIT=-1 to read every file instead.
-    walk_limit=int(os.environ.get("DROPBOX_WALK_LIMIT", "1000")),
 )
 backend = DropboxVFS(config)
-ws = Workspace({"/dropbox": backend}, mode=MountMode.WRITE)
+# grep -rw and rg -w narrow recursive scans via /2/files/search_v2. On a
+# plan without full-text search (below Professional), set
+# DROPBOX_WALK_LIMIT=-1 to read every file instead.
+walks = Limit(walk_limit=int(os.environ.get("DROPBOX_WALK_LIMIT", "1000")))
+ws = Workspace(
+    {"/dropbox": (backend, MountMode.WRITE, {"*": walks})},
+    mode=MountMode.WRITE,
+)
 
 
 async def show(cmd: str, max_chars: int = 600) -> None:

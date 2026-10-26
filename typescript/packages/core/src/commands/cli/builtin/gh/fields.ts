@@ -272,7 +272,7 @@ async function readToEnd(fetch: Fetch, node: Node, pages: Pages): Promise<void> 
   while (info?.hasNextPage === true && typeof info.endCursor === 'string') {
     const cursor = info.endCursor
     const page = pages.at(await fetch(pages.select(AFTER), cursor))
-    rows.push(...nodesOf(page))
+    for (const item of nodesOf(page)) rows.push(item)
     info = page.pageInfo
     if (info?.endCursor === cursor) throw new Error('GitHub returned a non-advancing cursor')
   }

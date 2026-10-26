@@ -22,13 +22,15 @@ import type { DiscordConfig } from '../core/discord/config.ts'
 
 export class DiscordAccessor extends Accessor {
   readonly timeRange: TimeRange
+  readonly timeout: number | undefined
   readonly listedDay = new ResponseCache<string, Record<string, unknown>[]>(LISTING_TRUST_WINDOW)
   constructor(
     public readonly transport: DiscordTransport,
-    config: { startTime?: string | null; endTime?: string | null } = {},
+    config: { startTime?: string | null; endTime?: string | null; timeout?: number } = {},
   ) {
     super()
     this.timeRange = new TimeRange(config.startTime, config.endTime)
+    this.timeout = config.timeout
   }
 
   override caches(): readonly ResponseCache<unknown, unknown>[] {
@@ -43,7 +45,7 @@ export class DiscordAccessor extends Accessor {
  */
 export function discordAccessor(config: unknown): DiscordAccessor {
   const cfg = config as DiscordConfig
-  return new DiscordAccessor(new NodeDiscordTransport(cfg.token, cfg.baseUrl))
+  return new DiscordAccessor(new NodeDiscordTransport(cfg.token, cfg.baseUrl, cfg.timeout))
 }
 
 export interface DiscordResourceLike extends BaseVFS {

@@ -49,7 +49,6 @@ Nextcloud) rather than your account password.
 | <code style={{ whiteSpace: 'nowrap' }}>password</code><br />secret | Basic Auth password; use an app password (Settings → Security) rather than the account password. |
 | <code style={{ whiteSpace: 'nowrap' }}>verify_ssl</code><br />default `True` | Verify the server's TLS certificate on the WebDAV requests mirage sends itself (copy, checksum, quota, properties, search); reads, writes and listings go through OpenDAL, which always verifies. |
 | <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `30` | Seconds one WebDAV request mirage sends itself (copy, checksum, quota, properties, search) may take; reads, writes and listings go through OpenDAL and its own timeouts. |
-| <code style={{ whiteSpace: 'nowrap' }}>walk_limit</code><br />default `1000` | Most files one command walks under a folder: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit. |
 
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table nextcloud end */}

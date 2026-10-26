@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { stallTimeout } from '../api/client.ts'
 import type { S3BrowserPresignedUrlProvider, S3Config } from '../../vfs/s3/config.ts'
 import type { S3Module, S3SendClient } from './types.ts'
 
@@ -212,6 +213,7 @@ async function sendBrowserCommand(
   provider: S3BrowserPresignedUrlProvider,
   defaultContentType: string | undefined,
   cmd: unknown,
+  send: typeof fetch,
 ): Promise<Record<string, unknown>> {
   const browserCmd = cmd as BrowserCommand<BrowserCmdTag, Record<string, unknown>>
   if (typeof browserCmd.__mirageTag !== 'string') {
@@ -238,7 +240,7 @@ async function sendBrowserCommand(
         )
       }
       const url = await provider(`/${key}`, 'GET')
-      const resp = await fetch(url)
+      const resp = await send(url)
       if (resp.status === 404) throw makeNotFound(key)
       if (!resp.ok) {
         throw new Error(`S3 GET ${key} failed: ${String(resp.status)} ${resp.statusText}`)
@@ -260,7 +262,7 @@ async function sendBrowserCommand(
       const key = keyFromInput(browserCmd.input)
       refuseVersionPin('HEAD', key, browserCmd.input)
       const url = await provider(`/${key}`, 'HEAD')
-      const resp = await fetch(url, { method: 'HEAD' })
+      const resp = await send(url, { method: 'HEAD' })
       if (resp.status === 404) throw makeNotFound(key)
       if (!resp.ok) {
         throw new Error(`S3 HEAD ${key} failed: ${String(resp.status)} ${resp.statusText}`)
@@ -294,7 +296,7 @@ async function sendBrowserCommand(
       if (input.ContinuationToken !== undefined)
         opts.listContinuationToken = input.ContinuationToken
       const url = await provider('/', 'LIST', opts)
-      const resp = await fetch(url)
+      const resp = await send(url)
       if (!resp.ok) {
         throw new Error(`S3 LIST failed: ${String(resp.status)} ${resp.statusText}`)
       }
@@ -310,7 +312,7 @@ async function sendBrowserCommand(
           : (defaultContentType ?? 'application/octet-stream')
       const url = await provider(`/${key}`, 'PUT', { contentType })
       const body = input.Body as Uint8Array | Blob | string | undefined
-      const resp = await fetch(url, {
+      const resp = await send(url, {
         method: 'PUT',
         headers: { 'Content-Type': contentType },
         body: body as BodyInit,
@@ -332,7 +334,7 @@ async function sendBrowserCommand(
       }
       if (typeof input.Key === 'string') {
         const url = await provider(`/${input.Key}`, 'DELETE')
-        const resp = await fetch(url, { method: 'DELETE' })
+        const resp = await send(url, { method: 'DELETE' })
         if (resp.status !== 404 && !resp.ok) {
           throw new Error(
             `S3 DELETE ${input.Key} failed: ${String(resp.status)} ${resp.statusText}`,
@@ -344,7 +346,7 @@ async function sendBrowserCommand(
       await Promise.all(
         objects.map(async (o) => {
           const url = await provider(`/${o.Key}`, 'DELETE')
-          await fetch(url, { method: 'DELETE' })
+          await send(url, { method: 'DELETE' })
         }),
       )
       return { Deleted: objects.map((o) => ({ Key: o.Key })) }
@@ -355,7 +357,7 @@ async function sendBrowserCommand(
       const copySrcRaw = typeof input.CopySource === 'string' ? input.CopySource : ''
       const srcKey = copySrcRaw.replace(/^\/?[^/]+\//, '')
       const url = await provider(`/${dstKey}`, 'COPY', { copySource: srcKey })
-      const resp = await fetch(url, {
+      const resp = await send(url, {
         method: 'PUT',
         headers: { 'x-amz-copy-source': `/${srcKey}` },
       })
@@ -377,7 +379,8 @@ export function createBrowserS3Client(config: S3Config): S3SendClient {
   if (provider === undefined) {
     throw new Error('createBrowserS3Client called without presignedUrlProvider')
   }
+  const send = stallTimeout(config.timeout)
   return {
-    send: (cmd) => sendBrowserCommand(provider, config.defaultContentType, cmd),
+    send: (cmd) => sendBrowserCommand(provider, config.defaultContentType, cmd, send),
   }
 }

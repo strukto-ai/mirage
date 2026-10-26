@@ -18,6 +18,10 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
+from mirage.policy.builtin.output_cap import (
+    check_command_limits,
+    command_limits_to_json,
+)
 from mirage.policy.constants import (
     DEFAULT_ASK_REASON,
     DEFAULT_DENY_REASON,
@@ -690,6 +694,15 @@ class SessionProfile(BaseModel):
     command_limits: dict[str, Limit] | None = None
     processes: ProcessPermissions | None = None
 
+    @field_validator("command_limits")
+    @classmethod
+    def _v_command_limits(
+        cls, v: dict[str, Limit] | None
+    ) -> dict[str, Limit] | None:
+        if v is not None:
+            check_command_limits(v, "profile", takes_line=True)
+        return v
+
     @model_validator(mode="before")
     @classmethod
     def _v_script_is_policy(cls, data: Any) -> Any:
@@ -817,10 +830,7 @@ def profile_to_dict(profile: SessionProfile) -> dict[str, Any]:
             for name, entry in profile.env.items()
         }
     if profile.command_limits is not None:
-        doc["command_limits"] = {
-            name: limit.model_dump(mode="json")
-            for name, limit in profile.command_limits.items()
-        }
+        doc["command_limits"] = command_limits_to_json(profile.command_limits)
     if profile.processes is not None:
         doc["processes"] = profile.processes.model_dump(mode="json")
     if profile.mounts is not None:

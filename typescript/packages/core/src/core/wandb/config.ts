@@ -6,9 +6,11 @@ import {
   type ConfigOf,
   type RedactedConfig,
 } from '../../vfs/secrets.ts'
+import { timeoutShape } from '../api/config.ts'
 
 export const WandbConfigSchema = z
   .object({
+    ...timeoutShape,
     entities: z
       .array(
         z
@@ -45,11 +47,6 @@ export const WandbConfigSchema = z
       .describe(
         'The most pages one listing or history read fetches. Past it the read fails rather than return a partial result.',
       ),
-    walkLimit: z.number().int().min(-1).optional().meta({
-      description:
-        'Most files one command walks under a folder: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit.',
-      default: 1000,
-    }),
   })
   .strict()
 export type WandbConfig = ConfigOf<typeof WandbConfigSchema>

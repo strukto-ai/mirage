@@ -203,7 +203,7 @@ function readTabList(raw: string, tabs: TabList): boolean {
       if (named === null) return false
       given = named
     }
-    waiting.push(...misplaced)
+    for (const item of misplaced) waiting.push(item)
   }
   return true
 }

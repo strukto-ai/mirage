@@ -14,14 +14,14 @@
 
 from collections.abc import Awaitable, Callable
 
-from pydantic import BaseModel, ConfigDict, Field, SecretStr
+from pydantic import ConfigDict, SecretStr
 
-from mirage.vfs.constants import WALK_LIMIT
+from mirage.core.api.config import TimeoutConfig
 
 EmbedFn = Callable[[str], Awaitable[list[float]]]
 
 
-class QdrantConfig(BaseModel):
+class QdrantConfig(TimeoutConfig):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     url: str | None = None
@@ -79,7 +79,3 @@ class QdrantConfig(BaseModel):
     embed: EmbedFn | None = None
     """Async function that turns a `search` query into a vector in-process,
     `(text: str) -> list[float]`."""
-    walk_limit: int = Field(default=WALK_LIMIT, ge=-1)
-    """Most files one command walks under a folder: `grep -r`, `find` and other
-    walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is
-    refused. `-1` lifts the limit."""

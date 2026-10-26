@@ -480,7 +480,7 @@ async function matches(
       matches?: Record<string, unknown>[]
       paging?: { pages?: number }
     }
-    found.push(...(block.matches ?? []))
+    for (const item of block.matches ?? []) found.push(item)
     if (page >= (block.paging?.pages ?? 1)) return found
     if (page >= MAX_PAGES) return null
   }
@@ -531,7 +531,7 @@ async function hitsOf(
       if (key === 'files') {
         const shared = sharesOf(item.shares)
         if (shared === null) return null
-        hits.push(...shared)
+        for (const item of shared) hits.push(item)
         continue
       }
       const day = dayOf(item.ts)

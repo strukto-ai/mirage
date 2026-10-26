@@ -12,25 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-type ValueTransform = (value: unknown) => unknown
-
 export interface FieldNormalizer {
   /** Explicit `python_snake_case` → `tsCamelCase` overrides. */
   rename?: Record<string, string>
-  /** Optional per-source-key value transforms (run before rename). */
-  transform?: Record<string, ValueTransform>
   /** Source keys to drop silently (e.g. unsupported fields). */
   drop?: readonly string[]
-}
-
-/**
- * Python states a timeout in seconds where TypeScript uses milliseconds, so
- * the S3 family and the Hub configs rename `timeout` to `timeoutMs` and
- * convert through this. A non-number passes untouched for the schema to
- * refuse, rather than being multiplied into a different wrong number.
- */
-export function secondsToMs(value: unknown): unknown {
-  return typeof value === 'number' ? value * 1000 : value
 }
 
 export function snakeToCamel(snake: string): string {
@@ -49,8 +35,6 @@ export function normalizedKey(key: string, spec: FieldNormalizer = {}): string {
  *   1. `drop` — silently skipped.
  *   2. `rename` — used as the output key.
  *   3. Default — `snakeToCamel(key)`. Already-camelCase keys round-trip unchanged.
- *
- * Values pass through untouched unless `transform[key]` is set.
  */
 export function normalizeFields(
   input: Record<string, unknown>,
@@ -60,8 +44,7 @@ export function normalizeFields(
   const out: Record<string, unknown> = {}
   for (const [key, value] of Object.entries(input)) {
     if (drop.has(key)) continue
-    const transformer = spec.transform?.[key]
-    out[normalizedKey(key, spec)] = transformer !== undefined ? transformer(value) : value
+    out[normalizedKey(key, spec)] = value
   }
   return out
 }

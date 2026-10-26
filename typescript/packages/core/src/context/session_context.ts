@@ -29,7 +29,7 @@ import { eacces, enoent, erofs } from '../errors/fs.ts'
 import { norm, parent } from '../utils/path.ts'
 import type { DecisionOwner, DryRun, EntryGate, HandOff, VfsExplanation } from '../policy/types.ts'
 import type { OpRecord } from '../observe/record.ts'
-import type { PathSpec, Refusal, Visibility, WalkProbe } from '../types.ts'
+import type { Limit, PathSpec, Refusal, Visibility, WalkProbe } from '../types.ts'
 import { MountMode, weakerMode } from '../types.ts'
 
 /** Whoever binds sessions: one per workspace, compared by identity. */
@@ -72,6 +72,12 @@ export interface LineAbortFrame {
   signal: AbortSignal | undefined
   sessions: readonly SessionState[]
   writer: symbol
+  /**
+   * What the line's tree runs on, its deadline folded into `signal`, which
+   * a nested line inherits as its own; absent when it is `signal`. A
+   * deadline past stops the tree, not the line's own status write.
+   */
+  stop?: AbortSignal
 }
 
 /**
@@ -114,6 +120,11 @@ export interface Caller {
   readonly commandSink: readonly [OpRecord[] | null, OpRecord[]] | null
   // When the running command started.
   readonly started: number | null
+  // The running command's name, which its walks resolve their walkLimit by.
+  readonly command: string | null
+  // The running registered command's own limit, the layer under the
+  // workspace's its walks resolve by.
+  readonly declared: Limit | null
   // The recorder of the innermost level running a command, for a level whose
   // output is a value (a substitution's) to send another level's stream
   // bytes toward it.
@@ -165,6 +176,8 @@ const UNBOUND: Caller = {
   write: null,
   ownVersion: null,
   started: null,
+  command: null,
+  declared: null,
   enclosing: null,
   execution: null,
   process: null,
@@ -316,7 +329,7 @@ export function lineSignal(session: SessionState): AbortSignal | undefined {
   const signals = new Set(
     lineFrames()
       .filter((frame) => frame.sessions.includes(session))
-      .map((frame) => frame.signal),
+      .map((frame) => frame.stop ?? frame.signal),
   )
   return signals.size === 1 ? [...signals][0] : undefined
 }
@@ -989,6 +1002,7 @@ export function sessionAccess(session: SessionAccess | null): SessionAccess {
       umask: DEFAULT_UMASK,
       shopts: {},
       mountModes: null,
+      commandLimits: {},
     }
   )
 }

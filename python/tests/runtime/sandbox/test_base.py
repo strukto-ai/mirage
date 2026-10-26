@@ -177,19 +177,19 @@ async def test_line_timeout_answers_124():
             await asyncio.sleep(0.5)
             return await super().exec_line(line, stdin, env, cwd)
 
-    guards = {"python3": Limit(timeout_seconds=0.05)}
     box = SlowBox(captures=("python3",))
     ws = Workspace(
-        {"/data": (RAMVFS(), MountMode.EXEC, guards)},
+        {"/data": RAMVFS()},
         mode=MountMode.EXEC,
         runtimes=[box, "workspace"],
+        command_limits={"line": Limit(timeout_seconds=0.05)},
     )
     try:
-        # A captured line obeys the same command_limits as any
-        # command: the mount's python3 timeout answers exit 124.
+        # A captured whole line runs under the line deadline like a
+        # walked one: it answers exit 124.
         io = await ws.shell("python3 train.py")
         assert io.exit_code == 124
-        assert b"timed out" in await materialize(io.stderr)
+        assert await materialize(io.stderr) == b"line: timed out after 0.05s\n"
     finally:
         await ws.close()
 

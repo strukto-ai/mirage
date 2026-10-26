@@ -119,7 +119,6 @@ class GSheetsVFS(BaseVFS):
     def __init__(self, config: GSheetsConfig) -> None:
         super().__init__()
         self.config = config
-        self.walk_limit = config.walk_limit
         self.accessor = GSheetsAccessor(self.config, TokenManager(config))
 
     async def readdir(self, path: PathSpec) -> list[FileStat] | DirListing:

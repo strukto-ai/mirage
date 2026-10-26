@@ -24,7 +24,6 @@ import type { PathSpec, FileStat } from '../../types.ts'
 import { readdir as langfuseReaddir } from '../../core/langfuse/readdir.ts'
 import { read as langfuseRead } from '../../core/langfuse/read.ts'
 import { stat as langfuseStat } from '../../core/langfuse/stat.ts'
-import { WALK_LIMIT } from '../constants.ts'
 
 export const VFS_MD = `{prefix}
   traces/
@@ -57,16 +56,16 @@ export class LangfuseVFS extends BaseVFS {
   readonly config: LangfuseConfig
   override readonly accessor: LangfuseAccessor
 
-  override readonly walkLimit: number
   constructor(config: LangfuseConfig) {
     super()
     this.config = config
-    this.walkLimit = config.walkLimit ?? WALK_LIMIT
-    const transportOpts: { publicKey: string; secretKey: string; host?: string } = {
-      publicKey: config.publicKey,
-      secretKey: config.secretKey,
-    }
+    const transportOpts: { publicKey: string; secretKey: string; host?: string; timeout?: number } =
+      {
+        publicKey: config.publicKey,
+        secretKey: config.secretKey,
+      }
     if (config.host !== undefined) transportOpts.host = config.host
+    if (config.timeout !== undefined) transportOpts.timeout = config.timeout
     const accessorConfig: {
       defaultTraceLimit?: number
       defaultFromTimestamp?: string

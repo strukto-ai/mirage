@@ -29,7 +29,6 @@ import { ScriptSource } from '../runtime/types.ts'
 import { Channel, JobConsole } from '../shell/console/index.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { Limit, MountMode, VFSName, type PathSpec } from '../types.ts'
-import { DEFAULT_COMMAND_LIMITS } from '../policy/builtin/output_cap.ts'
 import { Workspace } from './workspace/workspace.ts'
 import type { WorkspaceOptions } from './workspace/types.ts'
 import type { Policy } from '../policy/base.ts'
@@ -702,23 +701,26 @@ describe('whole-line runtimes', () => {
         return running
       }
     }
-    DEFAULT_COMMAND_LIMITS.anything = new Limit({ timeoutSeconds: 0.2 })
     const box = new SettlingBox()
     box.captures = ['*']
     const ws = new Workspace(
       { '/': new RAMVFS() },
-      { mode: MountMode.EXEC, runtimes: [box, 'workspace'] },
+      {
+        mode: MountMode.EXEC,
+        runtimes: [box, 'workspace'],
+        commandLimits: { line: new Limit({ timeoutSeconds: 0.2 }) },
+      },
     )
     try {
       const result = await ws.shell('anything')
       expect(result.exitCode).toBe(124)
+      expect(DEC.decode(result.stderr)).toContain('line: timed out after 0.2s')
     } finally {
-      delete DEFAULT_COMMAND_LIMITS.anything
       await ws.close()
     }
   }, 10_000)
 
-  it('times out a program whose runtime ignores its stop', async () => {
+  it('cuts a program whose runtime ignores its stop at the line deadline', async () => {
     class Deaf extends LanguageRuntime {
       readonly language = 'python'
       readonly name = 'deaf'
@@ -735,15 +737,19 @@ describe('whole-line runtimes', () => {
         return new Promise<RunResult>(() => undefined)
       }
     }
-    DEFAULT_COMMAND_LIMITS.python3 = new Limit({ timeoutSeconds: 0.2 })
     const ws = new Workspace(
       { '/': new RAMVFS() },
-      { mode: MountMode.EXEC, runtimes: [new Deaf(), 'workspace'] },
+      {
+        mode: MountMode.EXEC,
+        runtimes: [new Deaf(), 'workspace'],
+        commandLimits: { line: new Limit({ timeoutSeconds: 0.2 }) },
+      },
     )
     try {
-      expect((await ws.shell('python3 -c x | cat')).exitCode).toBe(124)
+      const result = await ws.shell('python3 -c x | cat')
+      expect(result.exitCode).toBe(124)
+      expect(DEC.decode(result.stderr)).toContain('line: timed out after 0.2s')
     } finally {
-      delete DEFAULT_COMMAND_LIMITS.python3
       await ws.close()
     }
   }, 30_000)

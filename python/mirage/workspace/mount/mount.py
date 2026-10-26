@@ -17,14 +17,26 @@ import dataclasses
 import functools
 import inspect
 import logging
-from collections.abc import AsyncIterator, Awaitable, Iterable, Iterator
+from collections.abc import (
+    AsyncIterator,
+    Awaitable,
+    Iterable,
+    Iterator,
+)
 from contextlib import (
     AbstractAsyncContextManager,
     asynccontextmanager,
     contextmanager,
     nullcontext,
 )
-from typing import Any, Callable, Literal, TypeVar, cast, overload
+from typing import (
+    Any,
+    Callable,
+    Literal,
+    TypeVar,
+    cast,
+    overload,
+)
 
 from mirage.accessor.base import Accessor, NOOPAccessor
 from mirage.accessor.ram import RAMAccessor
@@ -38,10 +50,6 @@ from mirage.cache.index.ram import ListingCheckStore
 from mirage.cache.index.store import IndexCacheStore
 from mirage.cache.manager import CacheManager
 from mirage.cache.types import WriteContext
-from mirage.commands.builtin.utils.limit import (
-    run_with_timeout,
-    with_pull_timeout,
-)
 from mirage.commands.builtin.utils.links import dispatch_of, link_view
 from mirage.commands.builtin.utils.paths import (
     dispatch_stat,
@@ -96,7 +104,6 @@ from mirage.observe.context import (
     command_records,
     with_mount_context,
 )
-from mirage.policy import resolve_limit
 from mirage.runtime.python.host.host_io import host_io, with_host_io
 from mirage.shell.bytes import encode_text
 from mirage.types import (
@@ -543,16 +550,10 @@ class MountEntry:
         self.mount_id = (ids if ids is not None else SystemIdSource()).uuid7()
         self.prefix = prefix
         self.vfs = vfs
-        # The functions the VFS answers itself, read once when it is
-        # mounted: each dispatcher call it defines, its own ``@vfs_call``
-        # functions among them, and ``read_range`` when a read fetches only
-        # the range asked for. A command asks its mount's row
-        # (``MountView.answers``).
-        self.calls = frozenset(
-            name
-            for name in {*CALLS, *declared_calls(type(vfs))}
-            if vfs.supports(name)
-        ) | ({"read_range"} if vfs.reads_ranges else set())
+        # The backend's own walk_limit, kept from before any mount
+        # settles the VFS's; a later mount of the VFS takes the first's.
+        self.backend_walk_limit = vfs.walk_limit
+        self.calls = self.answered_calls()
         self.mode = mode
         # How this mount's cached bytes are revalidated. Read by the
         # gate (Reconciler.may_serve_cached) and by the cache write path
@@ -621,6 +622,26 @@ class MountEntry:
         self._prefix_index: dict[str, list[int]] | None = None
         self.command_limits: dict[str, Limit] = {}
         # key: (cmd_name, target_resource_type)
+
+    def answered_calls(self) -> frozenset[str]:
+        """The functions the VFS answers itself, read when it is mounted
+        and again when its ``walk_limit`` is settled (a backend answers
+        ``files_containing`` only under a cap): each dispatcher call it
+        defines, its own ``@vfs_call`` functions among them, and
+        ``read_range`` when a read fetches only the range asked for. A
+        command asks its mount's row (``MountView.answers``)."""
+        vfs = self.vfs
+        return frozenset(
+            name
+            for name in {*CALLS, *declared_calls(type(vfs))}
+            if vfs.supports(name)
+        ) | ({"read_range"} if vfs.reads_ranges else set())
+
+    @property
+    def default_limit(self) -> Limit:
+        """The bottom layer of a command's limit on this mount: its
+        backend's ``walk_limit``."""
+        return Limit(walk_limit=self.vfs.walk_limit)
 
     @asynccontextmanager
     async def use(self) -> AsyncIterator[None]:
@@ -1050,7 +1071,6 @@ class MountEntry:
         texts: list[str],
         flag_kwargs: dict[str, FlagValue],
         ctx: Context = Context(),
-        limit_override: Limit | None = None,
     ) -> tuple[ByteSource | None, IOResult]:
         """Execute a command on this mount's VFS.
 
@@ -1069,8 +1089,6 @@ class MountEntry:
                 with the facts only this mount can supply added. A
                 handler reads the fields it wants, so no list of command
                 names is kept here.
-            limit_override (Limit | None): the caller's output limit,
-                which the mount applies itself.
         """
         async with self.use():
             handlers = await self._pick_handlers(
@@ -1105,7 +1123,6 @@ class MountEntry:
                         self._command_ctx(
                             flags, ctx, self.prefix if user else ""
                         ),
-                        limit_override,
                         paths,
                     )
                     if result is not None:
@@ -1365,17 +1382,12 @@ class MountEntry:
         paths: list[PathSpec],
         texts: list[str],
         ctx: Context,
-        limit_override: Limit | None,
         typed: list[PathSpec],
     ) -> CommandFnResult:
-        """Run one handler under the mount-resolved timeout, through the
-        runner a CLI leaf shares, in this mount's voice.
+        """Run one handler through the runner a CLI leaf shares, in this
+        mount's voice.
 
-        The dispatch-level guard only sees default limits (the mount is
-        unknown before routing), so the mount-resolved timeout must also
-        bound the command body: eager commands do their work inside
-        cmd.fn, where the stream-consumption guard never runs. A user
-        command that declares a write reaches its backend through its
+        A user command that declares a write reaches its backend through its
         own handle, past the dispatcher's per-path invalidation, so this
         mount drops its caches once it has run; mirage's own commands
         write through the dispatcher and drop nothing.
@@ -1386,37 +1398,35 @@ class MountEntry:
             paths (list[PathSpec]): the keyed path operands.
             texts (list[str]): positional text args.
             ctx (Context): the handler's context.
-            limit_override (Limit | None): the caller's output limit.
             typed (list[PathSpec]): the operands as the line typed them,
                 which a file error names.
         """
-        limit = resolve_limit(
-            cmd_name,
-            command_default=cmd.limit,
-            mount_override=limit_override or self.command_limits.get(cmd_name),
-        )
         ctx = dataclasses.replace(ctx, spec=_named_spec(cmd, cmd_name))
-        with host_io():
-            return await run_handler(
-                cmd.fn(self.vfs.accessor, paths, texts, ctx),
-                cmd_name,
-                limit,
-                Producer(
-                    command=cmd_name,
-                    prefixes=(self.prefix,),
-                    declared=cmd.limit,
-                ),
-                mount_voice(cmd_name, typed),
-                drop=(
-                    self.drop_caches
-                    if cmd.write and self._is_user_command(cmd)
-                    else None
-                ),
-                scope=lambda result: _wrap_mount_streams(
-                    result, self.activity
-                ),
-                vfs=ctx.vfs,
-            )
+        # The command's walks resolve their walk_limit with its own.
+        token = bind_caller(current_caller().changed({"declared": cmd.limit}))
+        try:
+            with host_io():
+                return await run_handler(
+                    cmd.fn(self.vfs.accessor, paths, texts, ctx),
+                    cmd_name,
+                    Producer(
+                        command=cmd_name,
+                        prefixes=(self.prefix,),
+                        declared=cmd.limit,
+                    ),
+                    mount_voice(cmd_name, typed),
+                    drop=(
+                        self.drop_caches
+                        if cmd.write and self._is_user_command(cmd)
+                        else None
+                    ),
+                    scope=lambda result: _wrap_mount_streams(
+                        result, self.activity
+                    ),
+                    vfs=ctx.vfs,
+                )
+        finally:
+            reset_caller(token)
 
     async def run_leaf(
         self,
@@ -1426,7 +1436,6 @@ class MountEntry:
         paths: list[PathSpec],
         texts: list[str],
         ctx: Context,
-        limit: Limit | None,
     ) -> CommandFnResult:
         """Run one leaf of a command tree this mount serves.
 
@@ -1444,7 +1453,6 @@ class MountEntry:
             paths (list[PathSpec]): the leaf's path operands.
             texts (list[str]): the leaf's text operands.
             ctx (Context): the leaf's context.
-            limit (Limit | None): the resolved limit.
         """
         root = self.resolve_command(cli.spec.name)
         fn = handler.fn
@@ -1469,31 +1477,41 @@ class MountEntry:
                 refusal = self._command_refusal(prog, leaf, {}, root)
                 if refusal is not None:
                     return None, refusal
-                with host_io():
-                    return await run_handler(
-                        answered(
-                            call_leaf(
-                                fn, self.vfs.accessor, keyed, texts, run_ctx
-                            )
-                        ),
-                        prog,
-                        limit,
-                        Producer(
-                            command=prog,
-                            prefixes=(self.prefix,),
-                            declared=handler.limit,
-                        ),
-                        cli_voice(prog),
-                        drop=(
-                            self.drop_caches
-                            if handler.write and self._is_user_command(root)
-                            else None
-                        ),
-                        scope=lambda result: _wrap_mount_streams(
-                            result, self.activity
-                        ),
-                        vfs=run_ctx.vfs,
-                    )
+                token = bind_caller(
+                    current_caller().changed({"declared": handler.limit})
+                )
+                try:
+                    with host_io():
+                        return await run_handler(
+                            answered(
+                                call_leaf(
+                                    fn,
+                                    self.vfs.accessor,
+                                    keyed,
+                                    texts,
+                                    run_ctx,
+                                )
+                            ),
+                            prog,
+                            Producer(
+                                command=prog,
+                                prefixes=(self.prefix,),
+                                declared=handler.limit,
+                            ),
+                            cli_voice(prog),
+                            drop=(
+                                self.drop_caches
+                                if handler.write
+                                and self._is_user_command(root)
+                                else None
+                            ),
+                            scope=lambda result: _wrap_mount_streams(
+                                result, self.activity
+                            ),
+                            vfs=run_ctx.vfs,
+                        )
+                finally:
+                    reset_caller(token)
 
     async def drop_caches(self, bodies: bool = True) -> None:
         """Drop what this mount keeps after a write that went past the
@@ -2248,7 +2266,6 @@ class MountEntry:
         scope: PathSpec,
         args: tuple[Any, ...],
         kwargs: dict[str, Any],
-        op_timeout: float | None,
         found: dict[str, FileStat | None] | None = None,
     ) -> Any:
         """Run one function with the stats it declares.
@@ -2265,7 +2282,6 @@ class MountEntry:
             scope (PathSpec): its path, keyed below the mount.
             args (tuple[Any, ...]): its positionals after the path.
             kwargs (dict[str, Any]): its keywords, ``index`` among them.
-            op_timeout (float | None): the op's timeout.
             found (dict[str, FileStat | None] | None): the stats already
                 found for ``fn``, None to find them here.
         """
@@ -2277,7 +2293,7 @@ class MountEntry:
         )
         try:
             return await self._invoke(
-                name, fn, scope, args, {**kwargs, **handed}, op_timeout
+                name, fn, scope, args, {**kwargs, **handed}
             )
         except FileNotFoundError as exc:
             if all(stat is None for stat in handed.values()) or (
@@ -2292,9 +2308,7 @@ class MountEntry:
             )
         await self._forget(scope, kwargs, index)
         handed = await self._handed(fn, scope, kwargs, index)
-        return await self._invoke(
-            name, fn, scope, args, {**kwargs, **handed}, op_timeout
-        )
+        return await self._invoke(name, fn, scope, args, {**kwargs, **handed})
 
     async def _invoke(
         self,
@@ -2303,10 +2317,8 @@ class MountEntry:
         scope: PathSpec,
         args: tuple[Any, ...],
         kwargs: dict[str, Any],
-        op_timeout: float | None,
     ) -> Any:
-        """Call one function with the keywords it takes, under the op's
-        timeout.
+        """Call one function with the keywords it takes.
 
         Args:
             name (str): the op name.
@@ -2314,11 +2326,10 @@ class MountEntry:
             scope (PathSpec): its path, keyed below the mount.
             args (tuple[Any, ...]): its positionals after the path.
             kwargs (dict[str, Any]): the keywords on offer.
-            op_timeout (float | None): the op's timeout.
         """
         result = fn(scope, *args, **_taken(name, fn, kwargs))
         if inspect.isawaitable(result):
-            result = await run_with_timeout(result, op_timeout, name)
+            result = await result
         return result
 
     async def _forget(
@@ -2434,7 +2445,6 @@ class MountEntry:
             scope = self._scope(path)
             kwargs.setdefault("index", self.index)
             index = kwargs["index"]
-            op_timeout = self.op_timeout(name)
             token = bind_caller(self._on_mount(current_caller()))
             try:
                 # The backend's own paths are host paths, so the process
@@ -2464,7 +2474,6 @@ class MountEntry:
                                 scope,
                                 args,
                                 kwargs,
-                                op_timeout,
                                 handed,
                             )
                             handed = None
@@ -2533,18 +2542,6 @@ class MountEntry:
             vfs_path=mount_key(virtual, prefix),
         )
 
-    def op_timeout(self, name: str) -> float | None:
-        """The op entry's timeout for ``name``, None for none.
-
-        A file call is never cut: only the op entry's timeout applies,
-        bounding the backend call itself.
-
-        Args:
-            name (str): operation name.
-        """
-        override = self.command_limits.get(name)
-        return override.timeout_seconds if override is not None else None
-
     async def can_copy_from(self, source: "MountEntry", src: str) -> bool:
         """Whether this mount's store may copy ``src`` from ``source``'s,
         store to store.
@@ -2575,7 +2572,7 @@ class MountEntry:
         self, source: "MountEntry", src: str, dst: str
     ) -> None:
         """Copy a file from ``source``'s store into this mount's, store to
-        store, under the mount's ``copy`` timeout.
+        store.
 
         For ``cp`` and ``mv`` between two mounts, once the dispatcher
         has judged ``src`` as a read and ``dst`` as a create and
@@ -2591,7 +2588,6 @@ class MountEntry:
         async with self.use(), source.use():
             self.require_writable("write", PathSpec.from_str_path(dst), ())
             await self._framed(
-                "copy",
                 lambda: self.vfs.copy_from(
                     source.vfs, source._scope(src), self._scope(dst)
                 ),
@@ -2600,8 +2596,7 @@ class MountEntry:
     async def search_many(
         self, paths: list[str], query: SearchQuery
     ) -> list[tuple[str, str]] | None:
-        """Rank several scopes on this mount as one query, under the
-        mount's ``search`` timeout.
+        """Rank several scopes on this mount as one query.
 
         For the dispatcher, once it has walked, followed and admitted
         each scope as it does a ``search``'s one.
@@ -2612,7 +2607,6 @@ class MountEntry:
         """
         async with self.use():
             return await self._framed(
-                "search",
                 lambda: self.vfs.search_many(
                     [self._scope(p) for p in paths], query
                 ),
@@ -2621,8 +2615,7 @@ class MountEntry:
     async def read_many(
         self, paths: list[str], limit: int
     ) -> dict[str, bytes]:
-        """Read several whole files on this mount in one request, under
-        the mount's ``read`` timeout.
+        """Read several whole files on this mount in one request.
 
         For the dispatcher's read-ahead, once it has walked and followed
         each path; keyed by virtual path, a file left out is read on its
@@ -2634,25 +2627,22 @@ class MountEntry:
         """
         async with self.use():
             return await self._framed(
-                "read",
                 lambda: self._read_many(
                     [self._scope(p) for p in paths], limit
                 ),
             )
 
-    async def _framed(self, op: str, work: Callable[[], Awaitable[T]]) -> T:
+    async def _framed(self, work: Callable[[], Awaitable[T]]) -> T:
         """Run one backend call as ``call`` frames its own: as the caller
-        on this mount (``_on_mount``), past the host-I/O patch, under the
-        op's timeout.
+        on this mount (``_on_mount``), past the host-I/O patch.
 
         Args:
-            op (str): the op whose timeout bounds the call.
             work (Callable[[], Awaitable[T]]): starts the call.
         """
         token = bind_caller(self._on_mount(current_caller()))
         try:
             with host_io():
-                return await run_with_timeout(work(), self.op_timeout(op), op)
+                return await work()
         finally:
             reset_caller(token)
 
@@ -2727,9 +2717,8 @@ class MountEntry:
         The backend runs on each pull, after this frame is gone, so every
         pull gets what ``call`` sets up around one call: the caller's
         context (session, recorder), the mount's recording and write
-        contexts, its revision pins, the host-I/O bypass, and the read's
-        timeout, which bounds each pull rather than the whole stream. The
-        mount is held until the stream ends or is closed. A read that is
+        contexts, its revision pins and the host-I/O bypass. The mount is
+        held until the stream ends or is closed. A read that is
         neither a coroutine nor handed stats is called as the stream opens,
         so what it binds (a pipe) is bound before the path can be released.
 
@@ -2749,14 +2738,8 @@ class MountEntry:
             if _wants(read) or inspect.iscoroutinefunction(read)
             else _as_stream(read(scope, **_handed_on(read, self.index)))
         )
-        limit = self.command_limits.get("read")
-        stream = with_pull_timeout(
-            source,
-            limit.timeout_seconds if limit is not None else None,
-            "read",
-        )
         caller = self._on_mount(current_caller())
         return cast(
             AsyncIterator[bytes],
-            self.activity.hold(with_caller(with_host_io(stream), caller)),
+            self.activity.hold(with_caller(with_host_io(source), caller)),
         )

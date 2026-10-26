@@ -91,7 +91,7 @@ def test_pair_tuple_carries_its_own_mode():
 
 
 def test_triple_tuple_carries_limits():
-    guard = Limit(timeout_seconds=1)
+    guard = Limit(max_lines=1)
     specs = normalize_mounts(
         {"/a": (RAMVFS(), MountMode.READ, {"curl": guard})},
         MountMode.WRITE,
@@ -146,7 +146,7 @@ def test_kernel_targets_selects_only_real_mountpoints():
 
 
 def test_limits_are_copied_not_aliased():
-    guard = Limit(timeout_seconds=1)
+    guard = Limit(max_lines=1)
     source = {"curl": guard}
     specs = normalize_mounts(
         {"/a": (RAMVFS(), MountMode.READ, source)}, MountMode.WRITE, ReadSpec()

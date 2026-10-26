@@ -30,6 +30,7 @@ const grep: CommandFn = async (_accessor, paths, texts, ctx) => {
     (p) => files.readdir(p),
     files.stat,
     files.answers('read_tree'),
+    files.signal,
   )
   return grepGeneric(
     'grep',

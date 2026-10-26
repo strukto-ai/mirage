@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
-import { MountMode } from '@struktoai/mirage-core/types'
+import { Limit, MountMode } from '@struktoai/mirage-core/types'
 import { ManualClock } from '@struktoai/mirage-core/utils/clock'
 import { GoogleDriveVFS } from '@struktoai/mirage-core/vfs/gdrive/gdrive'
 import { Workspace, buildVfs, type SlackVFS } from '@struktoai/mirage-node'
@@ -22,7 +22,8 @@ import { z } from '@struktoai/mirage-core/vfs/secrets'
 import type { SecretEntries } from '@struktoai/mirage-core/secrets/config'
 import { registerSecrets } from '@struktoai/mirage-core/secrets/registry'
 import { buildOverrideMounts, cloneWorkspaceWithOverride } from './clone.ts'
-import type { Mount } from '@struktoai/mirage-core/workspace/mount/spec'
+import { Mount } from '@struktoai/mirage-core/workspace/mount/spec'
+import { ALL_COMMANDS } from '@struktoai/mirage-core/policy/builtin/output_cap'
 
 const AccountConfig = z.strictObject({ account: z.string().default('default') })
 type AccountConfig = z.infer<typeof AccountConfig>
@@ -37,6 +38,12 @@ function brokenBootstrap(source: string): SecretEntries {
   return {
     prod: { source, config: { account: { from: 'dotenv', ref: '/no/such/file', key: 'ACCOUNT' } } },
   }
+}
+
+function capped(): Mount {
+  return new Mount(new RAMVFS(), {
+    commandLimits: { [ALL_COMMANDS]: new Limit({ walkLimit: 3 }) },
+  })
 }
 
 describe('cloneWorkspaceWithOverride', () => {
@@ -74,6 +81,22 @@ describe('cloneWorkspaceWithOverride', () => {
     // null means absent, as on every other entry point.
     const built = await buildOverrideMounts({ mounts: { '/r': { vfs: 'ram', write: null } } }, null)
     expect((built['/r/'] as Mount).options.write).toBeUndefined()
+  })
+
+  it('keeps a mount limit unless the override names one', async () => {
+    const src = new Workspace({ '/a': capped(), '/b': capped() })
+    try {
+      const clone = await cloneWorkspaceWithOverride(src, {
+        mounts: { '/b': { vfs: 'ram', command_limits: { [ALL_COMMANDS]: { walk_limit: 5 } } } },
+      })
+      try {
+        expect(['/a/', '/b/'].map((p) => clone.mount(p).vfs.walkLimit)).toEqual([3, 5])
+      } finally {
+        await clone.close()
+      }
+    } finally {
+      await src.close()
+    }
   })
 
   it('keeps the declared source instances', async () => {

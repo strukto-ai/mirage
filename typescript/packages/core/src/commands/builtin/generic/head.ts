@@ -26,7 +26,7 @@ import { asyncChain, closeQuietly } from '../../../io/stream.ts'
 import { chunks } from '../../../io/cooperative.ts'
 import { SharedInput } from '../../../io/async_line_iterator.ts'
 import { YieldBudget } from '../../../io/yield_budget.ts'
-import { deadlineCheck, truncateStream } from '../utils/limit.ts'
+import { truncateStream } from '../utils/limit.ts'
 import { reportFsError, splitOpened } from '../utils/operands.ts'
 import { resolveSource } from '../utils/stream.ts'
 import { FlagView } from '../../spec/flag_view.ts'
@@ -68,8 +68,8 @@ function parseFlags(bag: Record<string, FlagValue>): HeadFlags | string {
  * but the last N lines, 0 = nothing. A final line without a trailing newline is
  * preserved as-is (no newline is appended). head takes its input whole, writes
  * the producer's chunks on and may be called outside the factory's guard, so
- * each pull races the abort and checks `overdue` (the invocation's deadline),
- * and a line count checks both and yields to timers every 64 lines. A held
+ * each pull races the abort, and a line count checks it and yields to timers
+ * every 64 lines. A held
  * line split across chunks is joined once.
  */
 async function* headStream(
@@ -78,9 +78,8 @@ async function* headStream(
   bytesMode: number | null,
   zeroTerminated = false,
   signal?: AbortSignal,
-  overdue?: () => void,
 ): AsyncGenerator<Uint8Array> {
-  const pulls = chunks(source, signal, false, overdue)
+  const pulls = chunks(source, signal, false)
   if (bytesMode !== null) {
     if (bytesMode === 0) return
     if (bytesMode > 0) {
@@ -110,7 +109,7 @@ async function* headStream(
   }
 
   const delimiter = recordSeparator(zeroTerminated)
-  const budget = new YieldBudget(signal, overdue)
+  const budget = new YieldBudget(signal)
   if (lines >= 0) {
     if (lines === 0) return
     let emitted = 0
@@ -183,14 +182,13 @@ async function* headMulti(
   unread: ReadonlySet<string>,
   refused: ReadonlySet<string>,
   signal?: AbortSignal,
-  overdue?: () => void,
 ): AsyncIterable<Uint8Array> {
   let printed = false
   for (const p of paths) {
     // A directory opened: its header prints and its read fails.
     const body = unread.has(p.virtual)
       ? null
-      : headStream(stream(p), lines, bytesMode, zeroTerminated, signal, overdue)
+      : headStream(stream(p), lines, bytesMode, zeroTerminated, signal)
     try {
       // The first pull opens the file, and `stream` names in `refused` one
       // whose open it refused, which prints no header, as GNU opens a file
@@ -279,20 +277,12 @@ export async function headGeneric(
         unread,
         refused,
         ctx.signal,
-        deadlineCheck(ctx),
       ),
       io,
     ]
   }
   const source = resolveSource(ctx.stdin)
-  const body = headStream(
-    source,
-    parsed.lines,
-    parsed.bytesMode,
-    parsed.zeroTerminated,
-    ctx.signal,
-    deadlineCheck(ctx),
-  )
+  const body = headStream(source, parsed.lines, parsed.bytesMode, parsed.zeroTerminated, ctx.signal)
   // -v heads a stdin nobody named with the name it gives `-`.
   return [
     parsed.verbose && !parsed.quiet ? asyncChain([operandHeader(null), body]) : body,

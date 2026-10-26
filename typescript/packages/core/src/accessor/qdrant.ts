@@ -25,6 +25,7 @@ type QdrantClientCtor = new (opts: {
   port?: number
   https?: boolean
   apiKey?: string
+  timeout?: number
 }) => QdrantClient
 
 export class QdrantAccessor extends Accessor {
@@ -49,11 +50,14 @@ export class QdrantAccessor extends Accessor {
         () => import(/* @vite-ignore */ '@qdrant/js-client-rest'),
         { feature: 'QdrantVFS', packageName: '@qdrant/js-client-rest' },
       )) as { QdrantClient: QdrantClientCtor }
-      const auth = this.config.apiKey !== null ? { apiKey: this.config.apiKey } : {}
+      const common = {
+        timeout: this.config.timeout * 1000,
+        ...(this.config.apiKey !== null ? { apiKey: this.config.apiKey } : {}),
+      }
       this.opened = new mod.QdrantClient(
         this.config.url !== null
-          ? { url: this.config.url, ...auth }
-          : { host: this.config.host, port: this.config.port, https: this.config.https, ...auth },
+          ? { url: this.config.url, ...common }
+          : { host: this.config.host, port: this.config.port, https: this.config.https, ...common },
       )
     }
     return this.opened

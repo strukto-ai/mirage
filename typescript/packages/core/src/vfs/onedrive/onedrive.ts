@@ -28,7 +28,6 @@ import { copy } from '../../core/onedrive/copy.ts'
 import { truncate } from '../../core/onedrive/truncate.ts'
 import { filesContaining } from '../../core/msgraph/search.ts'
 import { driveLoc } from '../../core/onedrive/client.ts'
-import { WALK_LIMIT } from '../constants.ts'
 
 export interface OneDriveVFSState {
   type: string
@@ -51,12 +50,9 @@ export class OneDriveVFS extends BaseVFS {
   override readonly accessor: OneDriveAccessor
   private readonly config: OneDriveConfig
 
-  override readonly walkLimit: number
-
   constructor(config: OneDriveConfig) {
     super()
     this.config = config
-    this.walkLimit = config.walkLimit ?? WALK_LIMIT
     this.accessor = new OneDriveAccessor(config)
   }
 

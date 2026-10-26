@@ -31,7 +31,7 @@ import type { EnvEntries, SecretEntries } from '../../secrets/config.ts'
 import type { ResolvedSecret } from '../../secrets/types.ts'
 import { VarAttr } from '../../shell/variable.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
-import { MountMode, type PathSpec } from '../../types.ts'
+import { Limit, MountMode, type PathSpec } from '../../types.ts'
 import type { Action, CommandContext, Policy } from '../../policy/index.ts'
 import { parseSessionProfile, type SessionProfile } from '../../policy/profile.ts'
 import { parse } from '../../shell/parse/parse.ts'
@@ -178,6 +178,28 @@ function sharedCliSpec(probe: CLIVerbFn): CLI {
 }
 
 describe('fillEnv through execute', () => {
+  // Twin of test_a_fetch_before_the_run_spends_the_line_deadline.
+  it('spends the line deadline on a fetch before the run', async () => {
+    registerSecrets('fake-slow', FakeConfig, async () => {
+      await new Promise((resolve) => setTimeout(resolve, 300))
+      return { fields: { TOKEN: 't0' } }
+    })
+    const ws = new Workspace(
+      { '/': new RAMVFS() },
+      {
+        mode: MountMode.WRITE,
+        env: { TOKEN: { from: 'fake-slow', ref: 'r' } },
+        commandLimits: { line: new Limit({ timeoutSeconds: 0.2 }) },
+      },
+    )
+    try {
+      const io = await ws.shell('echo $TOKEN')
+      expect([io.exitCode, stderrStr(io)]).toEqual([124, 'line: timed out after 0.2s\n'])
+    } finally {
+      await ws.close()
+    }
+  })
+
   it('lazy fetches only when referenced and only once', async () => {
     const { calls, fetch } = countingSource({ TOKEN: 't0' })
     registerSecrets('fake-lazy', FakeConfig, fetch)

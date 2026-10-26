@@ -143,7 +143,7 @@ export async function hashObject(
   const names = [...texts]
   if (fl.asBool('stdin_paths')) {
     const listed = new TextDecoder().decode((await readStdinAsync(ctx.stdin)) ?? new Uint8Array())
-    names.push(...listed.split('\n').filter((line) => line !== ''))
+    for (const item of listed.split('\n').filter((line) => line !== '')) names.push(item)
   }
   for (const name of names) contents.push(await content(vfs, base, name))
   if (!fl.asBool('literally') && !contents.every((data) => wellFormed(kind, data))) {

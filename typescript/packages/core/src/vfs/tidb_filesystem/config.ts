@@ -21,6 +21,7 @@ import {
   secretStr,
 } from '../secrets.ts'
 import { rstripSlash } from '../../utils/slash.ts'
+import { timeoutShape } from '../../core/api/config.ts'
 
 function normalizeRootPath(value: string): string {
   const parts = value.split('/').filter((p) => p !== '' && p !== '.')
@@ -32,6 +33,7 @@ function normalizeRootPath(value: string): string {
 }
 
 const TiDBFilesystemConfigSchema = z.object({
+  ...timeoutShape,
   host: z
     .string()
     .transform(rstripSlash)
@@ -46,16 +48,6 @@ const TiDBFilesystemConfigSchema = z.object({
     .describe(
       'Directory inside the file system that becomes the mount root, such as `/projects/a` for a token scoped to it; `..` segments are refused.',
     ),
-  timeout: z
-    .number()
-    .positive()
-    .default(30)
-    .describe('Seconds one request may take before it fails.'),
-  walkLimit: z.number().int().min(-1).optional().meta({
-    description:
-      'Most files one command walks under a folder: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit.',
-    default: 1000,
-  }),
 })
 
 export type TiDBFilesystemConfig = ConfigOf<typeof TiDBFilesystemConfigSchema>

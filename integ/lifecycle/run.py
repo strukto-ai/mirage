@@ -115,12 +115,11 @@ register_vfs("listed-ram", ListedRAMVFS)
 
 
 class LimitedRAMVFS(RAMVFS):
-    """A local fixture holding each walk to ``walk_limit`` files."""
+    """A local fixture holding ``files``, its walks held by its mount's
+    ``walk_limit``."""
 
-    def __init__(
-        self, files: dict[str, str] | None = None, walk_limit: int = -1
-    ) -> None:
-        super().__init__(walk_limit=walk_limit)
+    def __init__(self, files: dict[str, str] | None = None) -> None:
+        super().__init__()
         files = files or {}
         self.load_state(
             {

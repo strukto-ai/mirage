@@ -18,6 +18,7 @@ import {
   z,
 } from '@struktoai/mirage-core/vfs/secrets'
 import type { ConfigOf } from '@struktoai/mirage-core/vfs/secrets'
+import { timeoutShape } from '@struktoai/mirage-core/core/api/config'
 
 const JaegerConfigSchema = z.object({
   host: z.string().optional().meta({
@@ -39,15 +40,7 @@ const JaegerConfigSchema = z.object({
     .string()
     .optional()
     .describe('Upper bound of trace listings, an ISO 8601 timestamp. Unset means now.'),
-  requestTimeout: z.number().optional().meta({
-    description: 'Seconds to wait for one HTTP request to Jaeger.',
-    default: 30,
-  }),
-  walkLimit: z.number().int().min(-1).optional().meta({
-    description:
-      'Most files one command walks under a folder: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit.',
-    default: 1000,
-  }),
+  ...timeoutShape,
 })
 
 export type JaegerConfig = ConfigOf<typeof JaegerConfigSchema>

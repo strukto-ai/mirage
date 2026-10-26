@@ -33,9 +33,8 @@ export interface SupabaseConfig {
   profile?: string
   forcePathStyle?: boolean
   keyPrefix?: string
-  timeoutMs?: number
+  timeout?: number
   proxy?: string
-  walkLimit?: number
 }
 
 const SupabaseConfigSchema = z.object({
@@ -84,9 +83,8 @@ export function supabaseToS3Config(config: SupabaseConfig): S3Config {
     ...(config.profile !== undefined ? { profile: config.profile } : {}),
     forcePathStyle: config.forcePathStyle ?? true,
     ...(config.keyPrefix !== undefined ? { keyPrefix: config.keyPrefix } : {}),
-    ...(config.timeoutMs !== undefined ? { timeoutMs: config.timeoutMs } : {}),
+    ...(config.timeout !== undefined ? { timeout: config.timeout } : {}),
     ...(config.proxy !== undefined ? { proxy: config.proxy } : {}),
-    ...(config.walkLimit !== undefined ? { walkLimit: config.walkLimit } : {}),
   }
 }
 

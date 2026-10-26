@@ -137,9 +137,9 @@ export function quotePath(path: string, porcelain: boolean, fully = true): strin
   const out: number[] = []
   for (const byte of raw) {
     const escape = ESCAPES[byte]
-    if (escape !== undefined) out.push(...ENC.encode(escape))
+    if (escape !== undefined) for (const item of ENC.encode(escape)) out.push(item)
     else if (mustQuote(byte, fully))
-      out.push(...ENC.encode(`\\${byte.toString(8).padStart(3, '0')}`))
+      for (const item of ENC.encode(`\\${byte.toString(8).padStart(3, '0')}`)) out.push(item)
     else out.push(byte)
   }
   return `"${decodeText(new Uint8Array(out))}"`
@@ -219,7 +219,7 @@ export function shortFormat(
   fully = true,
 ): string {
   const lines = header === null ? [] : [header]
-  lines.push(...rows.map((row) => shortLine(row, fully)))
+  for (const item of rows.map((row) => shortLine(row, fully))) lines.push(item)
   return lines.map((line) => `${line}\n`).join('')
 }
 
@@ -335,14 +335,19 @@ export function longFormat(
   // A merge in progress removes the unstage hint, because unstaging is not what
   // resolving a conflict means and git stops offering it.
   const stagedHints = merging ? [] : [noCommits ? UNCACHE_HINT : UNSTAGE_HINT]
-  lines.push(...section(STAGED_HEADER, stagedHints, staged))
-  lines.push(...section(UNMERGED_HEADER, [RESOLVE_HINT], unmerged))
+  for (const item of section(STAGED_HEADER, stagedHints, staged)) lines.push(item)
+  for (const item of section(UNMERGED_HEADER, [RESOLVE_HINT], unmerged)) lines.push(item)
   // Read off the rendered lines rather than the rows, so the hint can only ever
   // describe entries this section actually prints: an unmerged path can also
   // carry a D and is reported elsewhere.
   const deleted = work.some((line) => line.startsWith(`\t${WORK_LABELS.D ?? ''}`))
-  lines.push(...section(WORK_HEADER, [deleted ? WORK_HINT_DELETED : WORK_HINT, DISCARD_HINT], work))
-  lines.push(...section(UNTRACKED_HEADER, [UNTRACKED_HINT], untracked))
+  for (const item of section(
+    WORK_HEADER,
+    [deleted ? WORK_HINT_DELETED : WORK_HINT, DISCARD_HINT],
+    work,
+  ))
+    lines.push(item)
+  for (const item of section(UNTRACKED_HEADER, [UNTRACKED_HINT], untracked)) lines.push(item)
   const ignored = rows
     .filter((row) => row.indexStatus === '!')
     .map((row) => `\t${quotePath(row.path, false, fully)}`)
@@ -353,7 +358,8 @@ export function longFormat(
       ignored,
     ),
   )
-  lines.push(...trailer(staged, work, unmerged, untracked, noCommits, hideUntracked))
+  for (const item of trailer(staged, work, unmerged, untracked, noCommits, hideUntracked))
+    lines.push(item)
   return lines.map((line) => `${line}\n`).join('')
 }
 

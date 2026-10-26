@@ -17,7 +17,6 @@ import type { ByteSource } from '../../io/types.ts'
 import { VFSName } from '../../types.ts'
 import { BaseVFS } from '../base.ts'
 import { LOCAL_WALK_LIMIT } from '../constants.ts'
-import { VFSConfigError } from '../errors.ts'
 import { RAMStore, type RAMAttrs } from './store.ts'
 import type { PathSpec, FileStat, SetAttrFields } from '../../types.ts'
 import type { Handed } from '../types.ts'
@@ -40,7 +39,6 @@ import { tree as ramTree } from '../../core/ram/readdir.ts'
 
 export interface RAMVFSState {
   type: string
-  config?: { walk_limit: number }
   files?: Record<string, Uint8Array>
   dirs?: string[]
   modified?: Record<string, string>
@@ -59,22 +57,7 @@ export class RAMVFS extends BaseVFS {
 
   override readonly local: boolean = true
 
-  override readonly walkLimit: number
-
-  /**
-   * @param options.walkLimit the most files one command walks under a directory: searches and
-   *   listings stop there, and a glob matching more, tar -c, cp -r, rm -r and the like are refused;
-   *   -1 for no cap.
-   */
-  constructor(options: { walkLimit?: number } = {}) {
-    super()
-    let limit: unknown = options.walkLimit
-    if (limit === undefined) limit = LOCAL_WALK_LIMIT
-    if (typeof limit !== 'number' || !Number.isInteger(limit) || limit < -1) {
-      throw new VFSConfigError('ram: walk_limit: must be an integer of -1 or more')
-    }
-    this.walkLimit = limit
-  }
+  override walkLimit: number = LOCAL_WALK_LIMIT
 
   override readTree(path: PathSpec): Promise<Map<string, FileStat> | null> {
     return ramTree(this.accessor, path)
@@ -180,7 +163,6 @@ export class RAMVFS extends BaseVFS {
     for (const [k, v] of this.store.attrs) attrs[k] = { ...v }
     return {
       type: this.name,
-      config: { walk_limit: this.walkLimit },
       files,
       dirs: [...this.store.dirs],
       modified,

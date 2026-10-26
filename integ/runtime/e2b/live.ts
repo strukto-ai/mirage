@@ -72,7 +72,7 @@ try {
     {
       mode: MountMode.EXEC,
       runtimes: [e2b, 'workspace'],
-      commandLimits: { '/home/user': { exec: new Limit({ timeoutSeconds: 5 }) } },
+      commandLimits: { line: new Limit({ timeoutSeconds: 5 }) },
     },
   )
   try {

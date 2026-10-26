@@ -74,9 +74,9 @@ inside is the Python build, whichever SDK the host uses.
 
 ## Timeouts
 
-`command_limits` apply to a sandboxed program as to any command: past
-`timeout_seconds` it exits 124, and `max_bytes` and `max_lines` cap its
-output.
+`command_limits` apply to a sandboxed program as to any command: a line past
+its `line` entry's `timeout_seconds` exits 124, and `max_bytes` and
+`max_lines` cap the program's output.
 
 <Warning>
   A timeout stops the program. Sandlock kills it. For the other providers,

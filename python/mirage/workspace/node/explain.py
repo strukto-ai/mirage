@@ -24,6 +24,7 @@ from collections.abc import (
 from dataclasses import dataclass
 from typing import Any
 
+from mirage.io.yield_budget import YieldBudget
 from mirage.policy import (
     AdmissionRules,
     Ask,
@@ -1166,9 +1167,13 @@ async def line_judgments(
     """
     judged: list[tuple[Walked, list[Judged]]] = []
     frame = root_frame(ast, handed.origin)
+    # Each command's gates answer without suspending: a long script
+    # would hold the loop, and its cancel, until every command was judged.
+    budget = YieldBudget()
     for item in _walked_line(ast, session, frame):
         if item.words[0].text is None:
             continue
+        await budget.run()
         judged.append(
             (
                 item,

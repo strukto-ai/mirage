@@ -70,12 +70,12 @@ class DiskVFS(BaseVFS):
 
     reads_ranges: bool = True
     local: bool = True
+    walk_limit: int = LOCAL_WALK_LIMIT
 
     def __init__(
         self,
         root: str,
         folder_versions: bool = True,
-        walk_limit: int = LOCAL_WALK_LIMIT,
     ) -> None:
         """Args:
         root (str): the host directory the mount mirrors.
@@ -83,24 +83,11 @@ class DiskVFS(BaseVFS):
             version. Folder versions assume a local POSIX filesystem;
             turn them off for an NFS, SMB or FUSE root, whose change
             times may not move with the folder's entries.
-        walk_limit (int): the most files one command walks under a
-            directory: searches and listings stop there, and a glob
-            matching more, tar -c, cp -r, rm -r and the like are
-            refused; -1 for no cap.
         """
         if not isinstance(folder_versions, bool):
             raise VFSConfigError("disk: folder_versions: must be a boolean")
-        if (
-            isinstance(walk_limit, bool)
-            or not isinstance(walk_limit, int)
-            or walk_limit < -1
-        ):
-            raise VFSConfigError(
-                "disk: walk_limit: must be an integer of -1 or more"
-            )
         super().__init__()
         self.folder_versions = folder_versions
-        self.walk_limit = walk_limit
         if not folder_versions:
             self.listing_version = ListingVersion.NONE
         self.root = Path(root).resolve()
@@ -231,7 +218,6 @@ class DiskVFS(BaseVFS):
             "config": {
                 "root": str(self.root),
                 "folder_versions": self.folder_versions,
-                "walk_limit": self.walk_limit,
             },
             "files": files,
             "modes": modes,

@@ -20,6 +20,7 @@ import {
   type RedactedConfig,
   secretSchema,
 } from '../secrets.ts'
+import { timeoutShape } from '../../core/api/config.ts'
 
 function validVolumePart(value: string): boolean {
   return value !== '' && !value.includes('/')
@@ -67,6 +68,7 @@ function validToken(value: string): boolean {
 }
 
 const DatabricksVolumeConfigSchema = z.object({
+  ...timeoutShape,
   catalog: z
     .string()
     .refine(validVolumePart, 'must be a non-empty path segment')
@@ -100,16 +102,6 @@ const DatabricksVolumeConfigSchema = z.object({
   ).describe(
     'Bearer token as a string, or a function, synchronous or asynchronous, that returns one for each request.',
   ),
-  timeout: z
-    .number()
-    .positive()
-    .default(30)
-    .describe('Seconds one request may take before it fails.'),
-  walkLimit: z.number().int().min(-1).optional().meta({
-    description:
-      'Most files one command walks under a folder: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit.',
-    default: 1000,
-  }),
 })
 
 export type DatabricksVolumeConfig = ConfigOf<typeof DatabricksVolumeConfigSchema>

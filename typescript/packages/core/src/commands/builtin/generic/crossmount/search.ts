@@ -274,7 +274,7 @@ export async function runSearch(
     }
     const runs = await runOperands(execute, name, [scope.path], [...texts], local)
     if (scope.stat?.type === FileType.DIRECTORY) walked.add(results.length)
-    results.push(...runs)
+    for (const item of runs) results.push(item)
     if (stops && runs.at(-1)?.io.exitCode === 0) break
   }
   const code = combinedExit(

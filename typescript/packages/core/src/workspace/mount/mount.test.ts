@@ -28,7 +28,7 @@ import {
 import { readVersioned } from '../../cache/context.ts'
 import type { Handed } from '../../vfs/types.ts'
 import { BaseVFS } from '../../vfs/base.ts'
-import { FileStat, FileType, Limit, MountMode, PathSpec } from '../../types.ts'
+import { FileStat, FileType, MountMode, PathSpec } from '../../types.ts'
 import { Workspace } from '../workspace/workspace.ts'
 import { MountEntry } from './mount.ts'
 import type { DispatchFn } from '../../runtime/types.ts'
@@ -47,7 +47,6 @@ const BASIC_SPEC = new CommandSpec({
 
 const OK_CMD: CommandFn = () => [null, new IOResult({ exitCode: 0 })]
 const OK_CMD_STDOUT: CommandFn = () => [new TextEncoder().encode('ok'), new IOResult()]
-const HANG_CMD: CommandFn = () => new Promise(() => undefined)
 
 function makeMount(mode: MountMode = MountMode.WRITE, vfs: BaseVFS = new StubVFS()): MountEntry {
   return new MountEntry({ prefix: '/ram/', vfs, mode })
@@ -419,19 +418,6 @@ describe('Mount.runCommand', () => {
 
     await m.runCommand('cat', [PathSpec.fromStrPath('/file.tally')], [], {}, { vfs })
     expect(fired).toEqual(['/file.tally'])
-  })
-
-  it('a null limitOverride does not shadow the mount own table', async () => {
-    // A caller with no profile, mount or workspace entry passes null,
-    // which must fall through to the serving mount's command_limits.
-    const m = makeMount()
-    m.commandLimits.set('cat', new Limit({ timeoutSeconds: 0.05 }))
-    const [cmd] = command({ name: 'cat', vfs: 'ram', spec: BASIC_SPEC, fn: HANG_CMD })
-    if (cmd === undefined) throw new Error('missing')
-    m.register(cmd)
-    await expect(
-      m.runCommand('cat', [PathSpec.fromStrPath('/x.txt')], [], {}, {}, null),
-    ).rejects.toThrow(/cat: timed out after 0.05s/)
   })
 })
 

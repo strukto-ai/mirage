@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import math
 from collections.abc import AsyncIterator, Iterable
 from contextlib import asynccontextmanager
 from functools import partial
@@ -34,6 +35,7 @@ async def _open(config: QdrantConfig) -> AsyncIterator[AsyncQdrantClient]:
         if config.api_key is not None
         else None,
         "cloud_inference": config.cloud_inference,
+        "timeout": math.ceil(config.timeout),
     }
     if config.url:
         kwargs["url"] = config.url

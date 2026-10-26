@@ -37,7 +37,6 @@ import { rename as boxRename } from '../../core/box/rename.ts'
 import { copy as boxCopy } from '../../core/box/copy.ts'
 import { truncate as boxTruncate } from '../../core/box/truncate.ts'
 import { filesContaining as boxFilesContaining } from '../../core/box/search.ts'
-import { WALK_LIMIT } from '../constants.ts'
 
 export const VFS_MD = `{prefix}
   Mirrors Box folder hierarchy. Every item is served as its raw bytes:
@@ -91,12 +90,9 @@ export class BoxVFS extends BaseVFS {
   readonly config: BoxConfig
   override readonly accessor: BoxAccessor
 
-  override readonly walkLimit: number
-
   constructor(config: BoxConfig) {
     super()
     this.config = config
-    this.walkLimit = config.walkLimit ?? WALK_LIMIT
     // The whole config goes to the token manager, never a hand-picked
     // subset: a field added to BoxConfig would silently stop reaching it
     // (that is how gdrive lost apiBase and kept refreshing at the real

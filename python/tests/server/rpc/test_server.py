@@ -6,7 +6,9 @@ from unittest.mock import AsyncMock
 import pytest
 
 from mirage import MountMode, Workspace
+from mirage.policy.builtin.output_cap import ALL_COMMANDS
 from mirage.server.rpc.server import MirageRpcServer
+from mirage.types import Limit
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace.workspace import Session
 
@@ -194,7 +196,16 @@ async def test_serve_answers_lines_and_cancels_a_running_request():
 @pytest.mark.asyncio
 async def test_a_glob_past_the_walk_limit_is_invalid_params():
     rpc = MirageRpcServer(
-        Workspace({"/": RAMVFS(walk_limit=2)}, mode=MountMode.WRITE)
+        Workspace(
+            {
+                "/": (
+                    RAMVFS(),
+                    MountMode.WRITE,
+                    {ALL_COMMANDS: Limit(walk_limit=2)},
+                )
+            },
+            mode=MountMode.WRITE,
+        )
     )
     for name in "abc":
         await call(

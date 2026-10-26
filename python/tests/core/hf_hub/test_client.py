@@ -306,23 +306,15 @@ def test_quote_path_encodes_each_segment_without_a_leading_slash():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("seconds", [0, -1])
-async def test_a_download_under_no_bound_is_not_cut_off(hub_url, seconds):
-    async with HfAccountAccessor(HfConfig(), timeout=seconds) as account:
-        chunks = [c async for c in hub_stream(account, hub_url + "/drip", 2)]
-    assert b"".join(chunks) == b"abcdefgh"
-
-
-@pytest.mark.asyncio
 async def test_a_download_that_keeps_flowing_outlives_the_bound(hub_url):
-    async with HfAccountAccessor(HfConfig(), timeout=STALL) as account:
+    async with HfAccountAccessor(HfConfig(timeout=STALL)) as account:
         chunks = [c async for c in hub_stream(account, hub_url + "/drip", 2)]
     assert b"".join(chunks) == b"abcdefgh"
 
 
 @pytest.mark.asyncio
 async def test_a_download_that_stops_flowing_fails_at_the_bound(hub_url):
-    async with HfAccountAccessor(HfConfig(), timeout=STALL) as account:
+    async with HfAccountAccessor(HfConfig(timeout=STALL)) as account:
         with pytest.raises(asyncio.TimeoutError):
             async for _ in hub_stream(account, hub_url + "/stall", 2):
                 pass

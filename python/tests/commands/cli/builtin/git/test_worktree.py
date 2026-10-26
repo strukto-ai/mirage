@@ -24,7 +24,8 @@ from mirage.commands.cli.builtin.git.worktree import (
     scan,
     tracked_directories,
 )
-from mirage.types import LINK_TARGET_KEY, FileType, MountMode
+from mirage.policy.builtin.output_cap import ALL_COMMANDS
+from mirage.types import LINK_TARGET_KEY, FileType, Limit, MountMode
 from mirage.vfs.disk import DiskVFS
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
@@ -204,7 +205,13 @@ async def test_a_work_tree_past_the_walk_limit_fails_unless_named(
         (repo_path / "sub" / name).write_text("x\n", encoding="utf-8")
     index = (repo_path / ".git" / "index").read_bytes()
     with Workspace(
-        {MOUNT: DiskVFS(root=str(repo_path), walk_limit=limit)},
+        {
+            MOUNT: (
+                DiskVFS(root=str(repo_path)),
+                MountMode.WRITE,
+                {ALL_COMMANDS: Limit(walk_limit=limit)},
+            )
+        },
         mode=MountMode.WRITE,
     ) as ws:
         ws.register_cli("git", GIT)
@@ -224,8 +231,10 @@ class TreeRAM(RAMVFS):
     """A RAM work tree held to ten files, noting each subtree read and
     the limit it was handed."""
 
+    walk_limit = 10
+
     def __init__(self, *dirs: str) -> None:
-        super().__init__(walk_limit=10)
+        super().__init__()
         self.trees: list[tuple[str, int | None]] = []
         self._store.dirs.update({"/.git", *dirs})
 

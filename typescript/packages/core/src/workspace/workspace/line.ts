@@ -38,6 +38,7 @@ import { envSnapshot } from '../session/state.ts'
 import { commandName } from './utils.ts'
 import { ExecutionNode } from '../types.ts'
 import { makeAbortError } from '../../utils/abort.ts'
+import { LINE } from '../../policy/builtin/output_cap.ts'
 import { concat } from '../../utils/bytes.ts'
 import { isControlFlowError } from './failure.ts'
 import { PathSpec, type Refusal } from '../../types.ts'
@@ -56,8 +57,8 @@ export interface LineResult extends RunResult {
  * Mirrors the Python `run_whole_line` in `workspace/line.py`.
  *
  * A whole line is a command like any other: the same limit
- * resolution and boundary rule as the tree, so `timeoutSeconds` answers
- * 124 and `maxBytes`/`maxLines` cap the output. `registry` holds the
+ * resolution and boundary rule as the tree, so its deadline answers 124
+ * and `maxBytes`/`maxLines` cap the output. `registry` holds the
  * workspace's mounts, every one of which the line may span (a whole-line
  * runtime sees the full workspace), its policies and its command
  * defaults; it settles the line when it ends (`MountRegistry.settle`).
@@ -78,6 +79,11 @@ export async function runWholeLine(
   route: RouteContext | null = null,
   // Where the line writes; absent returns its output in the result.
   sink?: JobConsole,
+  // The line's deadline in seconds; null for a line nested in one that
+  // holds it.
+  timeout: number | null = null,
+  // When the line's budget began (`performance.now()`).
+  start?: number,
 ): Promise<LineResult> {
   const name = commandName(command)
   const mounts = registry.allMounts()
@@ -89,7 +95,6 @@ export async function runWholeLine(
     registry.commandLimits,
     session.commandLimits,
   )
-  const timeout = guard?.timeoutSeconds ?? null
   const ctx: Context = {
     flags: { c: command },
     stdin,
@@ -107,7 +112,8 @@ export async function runWholeLine(
           { kind: 'line', output, errors },
         ),
         timeout,
-        name,
+        LINE,
+        start,
       )
     } catch (err) {
       // A run past its deadline is stopped before its runtime settles,

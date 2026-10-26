@@ -14,7 +14,11 @@
 
 import { parseProcessPermissions, type ProcessPermissions } from '../process/config.ts'
 import type { Limit } from '../types.ts'
-import { commandLimitsToJSON, parseCommandLimits } from './builtin/output_cap.ts'
+import {
+  checkCommandLimits,
+  commandLimitsToJSON,
+  parseCommandLimits,
+} from './builtin/output_cap.ts'
 import { DEFAULT_ASK_REASON, DEFAULT_DENY_REASON, METHODS, PROGRAM_RUNTIME } from './constants.ts'
 import type {
   CommandRule,
@@ -464,7 +468,7 @@ export function parsePathsBlock(raw: unknown, where = 'paths'): PathsBlock {
   for (const [i, entry] of asList(obj.hide, `${where}.hide`).entries()) {
     if (isPlainObject(entry)) {
       const group = parseHideGroup(entry, `${where}.hide[${String(i)}] group`)
-      flat.push(...group.patterns)
+      for (const item of group.patterns) flat.push(item)
       reasons.push(group)
     } else {
       flat.push(entry)
@@ -695,7 +699,10 @@ export function parseSessionProfile(raw: unknown, where = 'profile'): SessionPro
     commandLimits?: Readonly<Record<string, Limit>> | null
     processes?: ProcessPermissions
   } = {}
-  if (obj.command_limits != null) out.commandLimits = parseCommandLimits(obj.command_limits)
+  if (obj.command_limits != null) {
+    out.commandLimits = parseCommandLimits(obj.command_limits)
+    checkCommandLimits(out.commandLimits, 'profile', true)
+  }
   if (obj.processes != null) out.processes = parseProcessPermissions(obj.processes)
   if (obj.policy !== undefined && obj.policy !== null) {
     out.policy = parseProfilePolicy(obj.policy, `${where}.policy`)

@@ -18,6 +18,7 @@ from types import MappingProxyType
 from typing import Any
 
 from mirage.io.async_line_iterator import SharedInput, release_inputs
+from mirage.policy.builtin.output_cap import command_limits_to_json
 from mirage.policy.types import (
     AdmissionRules,
     Decision,
@@ -369,7 +370,6 @@ class SessionState:
     # the manager by id so a fork shares them, never another session's.
     decisions: tuple[Decision, ...] = ()
     generation: int = 0
-    pipeline_timeout_seconds: float | None = None
     last_bg_job_id: int | None = None
     positional_args: list[str] = field(default_factory=list)
     # What `$0` expands to. None is the shell itself; a nested `bash`/`sh`
@@ -642,10 +642,9 @@ class SessionState:
         if self.scripts:
             data["scripts"] = scripts_to_dict(self.scripts)
         if self.command_limits:
-            data["command_limits"] = {
-                name: limit.model_dump()
-                for name, limit in self.command_limits.items()
-            }
+            data["command_limits"] = command_limits_to_json(
+                self.command_limits
+            )
         if self.processes != ProcessPermissions():
             data["processes"] = self.processes.model_dump()
         if self.profile is not None:

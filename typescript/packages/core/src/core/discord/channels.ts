@@ -42,7 +42,7 @@ export async function listChannels(
 ): Promise<DiscordChannel[]> {
   const out: DiscordChannel[] = []
   for await (const page of listChannelsStream(accessor, guildId)) {
-    out.push(...page)
+    for (const item of page) out.push(item)
   }
   return out
 }

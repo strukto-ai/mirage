@@ -12,10 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { Limit, OnExceed, type Producer } from '../../types.ts'
+import { Limit, type LimitInit, OnExceed, type Producer } from '../../types.ts'
+import { compareCodePoints } from '../../utils/sort.ts'
 
 const DEFAULT_MAX_LINES = 2000
-const DEFAULT_TIMEOUT_SECONDS = 600
 
 // Null prototype: command names are script-controlled, so a name like
 // `toString` must fall through to the fallback instead of resolving an
@@ -25,18 +25,23 @@ export const DEFAULT_COMMAND_LIMITS: Record<string, Limit> = Object.assign(
   Object.fromEntries(
     ['cat', 'grep', 'rg', 'head', 'tail'].map((name) => [
       name,
-      new Limit({
-        maxLines: DEFAULT_MAX_LINES,
-        timeoutSeconds: DEFAULT_TIMEOUT_SECONDS,
-      }),
+      new Limit({ maxLines: DEFAULT_MAX_LINES }),
     ]),
   ),
 )
 
-export const FALLBACK_LIMIT = new Limit({ timeoutSeconds: DEFAULT_TIMEOUT_SECONDS })
+/** The line's time limit when no `line` entry names one. Mirrors Python's LINE_TIMEOUT_SECONDS. */
+export const LINE_TIMEOUT_SECONDS = 600
+
+/** The entry naming every command in a limit table. Mirrors Python's ALL_COMMANDS. */
+export const ALL_COMMANDS = '*'
+
+/** The entry naming the whole line, whose `timeoutSeconds` is its one time limit. Mirrors Python's LINE. */
+export const LINE = 'line'
 
 interface LimitMount {
   commandLimits: Map<string, Limit>
+  defaultLimit: Limit
 }
 
 /**
@@ -48,12 +53,19 @@ export function ownLimit(table: Readonly<Record<string, Limit>>, name: string): 
   return Object.hasOwn(table, name) ? (table[name] ?? null) : null
 }
 
+function entries(table: Readonly<Record<string, Limit>>, name: string): (Limit | null)[] {
+  return [ownLimit(table, name), ownLimit(table, ALL_COMMANDS)]
+}
+
 /**
- * Resolve one command's limit, the one entry point.
+ * Resolve one command's limit, the one precedence engine.
  *
- * Profile override, mount override, workspace default, command default,
- * then the built-in table. Entries replace whole Limits; absent names
- * inherit. Multiple mounts resolve individually and aggregate tightly.
+ * Field by field, from the most specific layer that sets it: the profile's
+ * entry for the command, then its `*` entry for every command, then the
+ * mount's two, the workspace's two, the command's own default and the
+ * built-in table; on a mount, its backend's default (`walkLimit`) last. A layer that names one bound inherits the rest. A command across
+ * several mounts resolves on each and keeps the tightest bound. Mirrors
+ * Python's resolve_limit.
  */
 export function resolveLimit(
   name: string,
@@ -63,59 +75,86 @@ export function resolveLimit(
   workspaceLimits: Readonly<Record<string, Limit>> = {},
   profileLimits: Readonly<Record<string, Limit>> = {},
 ): Limit | null {
-  const profile = ownLimit(profileLimits, name)
-  if (profile !== null) return profile
-  if (mountOverride !== null) return mountOverride
-  if (mounts.length > 0)
-    return Limit.aggr(
-      mounts.map((m) =>
-        resolveLimit(name, [], commandDefault, m.commandLimits.get(name) ?? null, workspaceLimits),
-      ),
-    )
-  return (
-    ownLimit(workspaceLimits, name) ??
-    commandDefault ??
-    DEFAULT_COMMAND_LIMITS[name] ??
-    FALLBACK_LIMIT
+  const above = [...entries(profileLimits, name), mountOverride]
+  const below = [
+    ...entries(workspaceLimits, name),
+    commandDefault,
+    DEFAULT_COMMAND_LIMITS[name] ?? null,
+  ]
+  if (mounts.length === 0) return Limit.layered([...above, ...below])
+  return Limit.aggr(
+    mounts.map((m) =>
+      Limit.layered([
+        ...above,
+        m.commandLimits.get(name) ?? null,
+        m.commandLimits.get(ALL_COMMANDS) ?? null,
+        ...below,
+        m.defaultLimit,
+      ]),
+    ),
   )
 }
 
-export type OverrideLookup = (prefix: string, name: string) => Limit | null
+/**
+ * How many files one walk lists on `mount`, -1 for no cap: the `walkLimit`
+ * of `command`, resolved as resolveLimit resolves every bound; without a
+ * command, the one every command shares (the `*` entries), which a glob
+ * counts against. A layer naming the bound as null lifts it. Mirrors
+ * Python's walk_bound.
+ */
+export function walkBound(
+  mount: LimitMount,
+  command: string | null = null,
+  commandDefault: Limit | null = null,
+  workspaceLimits: Readonly<Record<string, Limit>> = {},
+  profileLimits: Readonly<Record<string, Limit>> = {},
+): number {
+  const found = resolveLimit(
+    command ?? ALL_COMMANDS,
+    [mount],
+    commandDefault,
+    null,
+    workspaceLimits,
+    profileLimits,
+  )
+  return found?.walkLimit ?? -1
+}
+
+export type MountLookup = (prefix: string) => LimitMount | null
 
 /**
- * Resolve producer facts for command output guards and dispatch timeouts.
- * Uses the same profile, mount, workspace and command precedence,
- * aggregated to the tightest value across the spanned mounts.
+ * Resolve producer facts for command output guards and dispatch timeouts,
+ * through the same layers as resolveLimit on the mounts its prefixes name.
+ * Mirrors Python's resolve_producer.
  */
 export function resolveProducer(
   producer: Producer,
-  overrideFor: OverrideLookup,
+  mountAt: MountLookup,
   workspaceLimits: Readonly<Record<string, Limit>> = {},
   profileLimits: Readonly<Record<string, Limit>> = {},
 ): Limit | null {
   if (producer.command === '') return null
-  if (producer.prefixes.length === 0) {
-    return resolveLimit(
-      producer.command,
-      [],
-      producer.declared,
-      null,
-      workspaceLimits,
-      profileLimits,
-    )
-  }
-  const perMount = producer.prefixes.map((prefix) =>
-    resolveLimit(
-      producer.command,
-      [],
-      producer.declared,
-      overrideFor(prefix, producer.command),
-      workspaceLimits,
-      profileLimits,
-    ),
+  const mounts = producer.prefixes
+    .map((prefix) => mountAt(prefix))
+    .filter((m): m is LimitMount => m !== null)
+  return resolveLimit(
+    producer.command,
+    mounts,
+    producer.declared,
+    null,
+    workspaceLimits,
+    profileLimits,
   )
-  return Limit.aggr(perMount)
 }
+
+// Each Limit field as config spells it.
+const WIRE_FIELDS: readonly (readonly [string, keyof LimitInit])[] = [
+  ['max_lines', 'maxLines'],
+  ['max_bytes', 'maxBytes'],
+  ['timeout_seconds', 'timeoutSeconds'],
+  ['walk_limit', 'walkLimit'],
+  ['on_exceed', 'onExceed'],
+]
 
 /** The canonical snake_case command-limit mapping used by config and stored sessions. */
 export function parseCommandLimits(raw: unknown): Record<string, Limit> {
@@ -128,10 +167,10 @@ export function parseCommandLimits(raw: unknown): Record<string, Limit> {
       throw new Error(`command_limits.${name} must be a mapping`)
     const block = value as Record<string, unknown>
     for (const key of Object.keys(block)) {
-      if (!['max_lines', 'max_bytes', 'timeout_seconds', 'on_exceed'].includes(key))
+      if (!['max_lines', 'max_bytes', 'timeout_seconds', 'walk_limit', 'on_exceed'].includes(key))
         throw new Error(`command_limits.${name}: unknown field ${key}`)
     }
-    for (const key of ['max_lines', 'max_bytes', 'timeout_seconds']) {
+    for (const key of ['max_lines', 'max_bytes', 'timeout_seconds', 'walk_limit']) {
       const v = block[key]
       if (v != null && typeof v !== 'number')
         throw new Error(`command_limits.${name}.${key} must be a number or null`)
@@ -142,28 +181,83 @@ export function parseCommandLimits(raw: unknown): Record<string, Limit> {
       block.on_exceed !== OnExceed.TRUNCATE
     )
       throw new Error(`command_limits.${name}.on_exceed must be truncate or error`)
-    result[name] = new Limit({
-      maxLines: (block.max_lines as number | null | undefined) ?? null,
-      maxBytes: (block.max_bytes as number | null | undefined) ?? null,
-      timeoutSeconds: (block.timeout_seconds as number | null | undefined) ?? null,
-      onExceed: block.on_exceed ?? OnExceed.TRUNCATE,
-    })
+    const init: LimitInit = {}
+    for (const [key, field] of WIRE_FIELDS) {
+      if (key in block) Object.assign(init, { [field]: block[key] })
+    }
+    result[name] = new Limit(init)
   }
   return result
 }
 
+/**
+ * A limit table as config spells it, each entry with only the fields it names
+ * (a null among them), so a stored entry still inherits the rest. Mirrors
+ * Python's command_limits_to_json.
+ */
 export function commandLimitsToJSON(
   limits: Readonly<Record<string, Limit>>,
 ): Record<string, unknown> {
   return Object.fromEntries(
     Object.entries(limits).map(([name, limit]) => [
       name,
-      {
-        max_lines: limit.maxLines,
-        max_bytes: limit.maxBytes,
-        timeout_seconds: limit.timeoutSeconds,
-        on_exceed: limit.onExceed,
-      },
+      Object.fromEntries(
+        WIRE_FIELDS.filter(([, field]) => limit.fieldsSet.has(field)).map(([key, field]) => [
+          key,
+          field === 'onExceed' ? limit.onExceed : limit[field],
+        ]),
+      ),
     ]),
   )
+}
+
+/**
+ * The whole line's deadline, the one time limit a line runs under: the
+ * `line` entry's `timeoutSeconds`, the profile's over the workspace's, else
+ * `LINE_TIMEOUT_SECONDS`. An entry naming it as null or 0 lifts it. Mirrors
+ * Python's line_timeout.
+ */
+export function lineTimeout(
+  workspaceLimits: Readonly<Record<string, Limit>> = {},
+  profileLimits: Readonly<Record<string, Limit>> = {},
+): number | null {
+  const found = Limit.layered([ownLimit(profileLimits, LINE), ownLimit(workspaceLimits, LINE)])
+  if (!found?.fieldsSet.has('timeoutSeconds')) return LINE_TIMEOUT_SECONDS
+  return found.timeoutSeconds !== null && found.timeoutSeconds > 0 ? found.timeoutSeconds : null
+}
+
+/**
+ * Refuse a table that names time where no time limit applies. A line runs
+ * under one time limit, the `line` entry's `timeoutSeconds`; no command or
+ * op entry takes one, and the `line` entry takes nothing else. A mount
+ * names no line, since a line spans mounts. Mirrors Python's
+ * check_command_limits.
+ */
+export function checkCommandLimits(
+  limits: Readonly<Record<string, Limit>>,
+  where: string,
+  takesLine: boolean,
+): void {
+  for (const [name, limit] of Object.entries(limits)) {
+    if (name !== LINE) {
+      if (limit.fieldsSet.has('timeoutSeconds')) {
+        throw new Error(
+          `${where}: command_limits['${name}'].timeout_seconds: a line has one time limit, set it on '${LINE}'`,
+        )
+      }
+      continue
+    }
+    if (!takesLine) {
+      throw new Error(
+        `${where}: command_limits['${LINE}']: a line spans mounts, set it on the workspace or a profile`,
+      )
+    }
+    const extra = [...limit.fieldsSet].filter((field) => field !== 'timeoutSeconds')
+    if (extra.length > 0) {
+      const named = extra.map((field) => field.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`))
+      throw new Error(
+        `${where}: command_limits['${LINE}'] takes only timeout_seconds, not ${named.sort(compareCodePoints).join(', ')}`,
+      )
+    }
+  }
 }

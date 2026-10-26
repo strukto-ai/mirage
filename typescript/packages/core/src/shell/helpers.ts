@@ -845,7 +845,8 @@ export function getFunctionRedirects(node: TSNodeLike): TSNodeLike[] {
     outer.namedChildren[0]?.id !== undefined &&
     outer.namedChildren[0].id === node.id
   ) {
-    redirects.push(...outer.namedChildren.slice(1).filter((c) => REDIRECT_NODE_TYPES.has(c.type)))
+    for (const item of outer.namedChildren.slice(1).filter((c) => REDIRECT_NODE_TYPES.has(c.type)))
+      redirects.push(item)
   }
   return redirects
 }
@@ -889,7 +890,7 @@ export function getFunctionSource(node: TSNodeLike): string {
     if (current === undefined) break
     const doc = current.heredoc
     if (doc !== undefined && doc.bodyStart >= end) documents.set(doc.bodyStart, doc.end)
-    pending.push(...current.namedChildren)
+    for (const child of current.namedChildren) pending.push(child)
   }
   if (documents.size > 0)
     text +=

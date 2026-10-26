@@ -62,7 +62,6 @@ class SharePointVFS(BaseVFS):
     def __init__(self, config: SharePointConfig) -> None:
         super().__init__()
         self.config = config
-        self.walk_limit = config.walk_limit
         self.accessor = SharePointAccessor(self.config)
 
     async def readdir(

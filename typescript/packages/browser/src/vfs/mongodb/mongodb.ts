@@ -30,7 +30,6 @@ import { VFS_MD } from '@struktoai/mirage-core/vfs/mongodb/mongodb'
 import { VFSName } from '@struktoai/mirage-core/types'
 
 import { HttpMongoDriver } from './http_driver.ts'
-import { WALK_LIMIT } from '@struktoai/mirage-core/vfs/constants'
 
 export interface MongoDBVFSOptions {
   config: MongoDBConfig
@@ -54,7 +53,6 @@ export class MongoDBVFS extends MongoDBVFSBase {
   readonly driver: MongoDriver
   override readonly accessor: MongoDBAccessor
 
-  override readonly walkLimit: number
   constructor(options: MongoDBVFSOptions | MongoDBConfig) {
     super()
     const { config, prefix, driver, endpoint } =
@@ -62,8 +60,9 @@ export class MongoDBVFS extends MongoDBVFSBase {
         ? options
         : { config: options, prefix: undefined, driver: undefined, endpoint: undefined }
     this.config = resolveMongoDBConfig(config)
-    this.walkLimit = config.walkLimit ?? WALK_LIMIT
-    this.driver = driver ?? new HttpMongoDriver({ endpoint: endpoint ?? this.config.uri })
+    this.driver =
+      driver ??
+      new HttpMongoDriver({ endpoint: endpoint ?? this.config.uri, timeout: this.config.timeout })
     this.accessor = new MongoDBAccessor(this.driver, this.config)
     this.vfsMd = prefix === undefined ? VFS_MD : VFS_MD.replace('{prefix}', prefix)
   }

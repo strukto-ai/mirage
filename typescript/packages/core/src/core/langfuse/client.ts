@@ -50,6 +50,7 @@ export interface HttpLangfuseTransportOptions {
   publicKey: string
   secretKey: string
   host?: string
+  timeout?: number
 }
 
 function encodeBasicAuth(publicKey: string, secretKey: string): string {
@@ -83,10 +84,12 @@ export class HttpLangfuseTransport implements LangfuseTransport {
   protected readonly fetch: typeof fetch = globalThis.fetch.bind(globalThis)
   private readonly host: string
   private readonly auth: string
+  private readonly timeout: number | undefined
 
   constructor(opts: HttpLangfuseTransportOptions) {
     this.host = opts.host ?? 'https://cloud.langfuse.com'
     this.auth = encodeBasicAuth(opts.publicKey, opts.secretKey)
+    this.timeout = opts.timeout
   }
 
   async request(
@@ -95,6 +98,7 @@ export class HttpLangfuseTransport implements LangfuseTransport {
   ): Promise<unknown> {
     const text = (await apiRequest('GET', buildUrl(this.host, path, query), {
       fetchFn: this.fetch,
+      timeout: this.timeout,
       headers: {
         Authorization: `Basic ${this.auth}`,
         Accept: 'application/json',
@@ -180,7 +184,7 @@ export async function fetchTraces(
     })
     const data = getData(body)
     if (data.length === 0) break
-    out.push(...data)
+    for (const item of data) out.push(item)
     if (data.length < pageLimit) break
     page += 1
   }

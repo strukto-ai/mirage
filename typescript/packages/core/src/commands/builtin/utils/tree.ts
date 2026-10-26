@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { classify } from '../../../errors/classify.ts'
+import { YieldBudget } from '../../../io/yield_budget.ts'
 import { isEnotdir, isFsError } from '../../../errors/fs.ts'
 import type { FsCondition, WalkDeclinedError } from '../../../errors/types.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
@@ -249,14 +250,20 @@ async function level(
  * under the next one, as `readdir` would be. `whole` false reads levels only,
  * for a walk a depth bounds or a single listing. Mirrors Python's
  * `tree_walk`.
+ *
+ * An answer from the tree resolves in a microtask, so the walk spends a
+ * yield budget under `signal` (the line's abort and deadline) and stops once
+ * it fires.
  */
 export function treeWalk<D, S>(
   readTree: ReadTree | undefined,
   readdir: WalkCall<D>,
   stat: WalkCall<S>,
   whole = true,
+  signal?: AbortSignal,
 ): [WalkCall<D>, WalkCall<S>] {
   if (readTree === undefined) return [readdir, stat]
+  const budget = new YieldBudget(signal)
   const roots = new Map<string, [Map<string, FileStat>, Map<string, string[]>]>()
   const levels = new Map<string, [Map<string, FileStat>, string[]] | null>()
   const asked = new Set<string>()
@@ -269,6 +276,7 @@ export function treeWalk<D, S>(
     return null
   }
   const treeReaddir: WalkCall<D> = async (path, nofollow, limit) => {
+    await budget.run()
     const virtual = path.virtual.replace(/\/+$/, '') || '/'
     let hit = answerable(path) ? covering(virtual) : null
     if (hit === null && whole && !asked.has(virtual) && path.pattern === null) {
@@ -306,6 +314,7 @@ export function treeWalk<D, S>(
     return readdir(path, nofollow, limit)
   }
   const treeStat: WalkCall<S> = async (path, nofollow) => {
+    await budget.run()
     const virtual = path.virtual.replace(/\/+$/, '') || '/'
     const hit = answerable(path) ? covering(virtual) : null
     if (hit !== null && hit[1] !== '') {

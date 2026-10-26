@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import httpx
 from mem0 import AsyncMemoryClient
 
 from mirage.accessor.base import Accessor
@@ -30,5 +31,6 @@ class Mem0Accessor(Accessor):
             self._client = AsyncMemoryClient(
                 api_key=reveal_secret(self.config.api_key),
                 host=self.config.host,
+                client=httpx.AsyncClient(timeout=self.config.timeout),
             )
         return self._client

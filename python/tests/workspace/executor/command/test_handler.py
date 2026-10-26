@@ -55,7 +55,7 @@ async def _stream(*chunks, error=None):
 
 
 def _run(body, voice=LEAF, **kwargs):
-    return run_handler(body, "x", None, PRODUCER, voice, **kwargs)
+    return run_handler(body, "x", PRODUCER, voice, **kwargs)
 
 
 class Drops:

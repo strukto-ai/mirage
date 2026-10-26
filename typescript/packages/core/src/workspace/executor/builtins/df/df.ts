@@ -308,7 +308,7 @@ export async function handleDf(
     const cap = await mount.use(() => mount.vfs.capacity())
     const cells = [mount.vfs.name]
     if (showType) cells.push(mount.vfs.name)
-    cells.push(...numCells(cap, human, si, block, inodes))
+    for (const item of numCells(cap, human, si, block, inodes)) cells.push(item)
     cells.push(pctCell(cap, inodes))
     cells.push(rstripSlash(mount.prefix) || '/')
     data.push(cells)

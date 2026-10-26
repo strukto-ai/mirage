@@ -39,7 +39,7 @@ async def test_accessor_reuses_session_and_closes_it():
     second = dify_accessor.pool.get()
 
     assert first is second
-    assert first.timeout == aiohttp.ClientTimeout(total=30.0)
+    assert first.timeout == api_client.stall_timeout(30)
 
     await dify_accessor.close()
 
@@ -48,19 +48,19 @@ async def test_accessor_reuses_session_and_closes_it():
 
 
 @pytest.mark.asyncio
-async def test_accessor_uses_configured_request_timeout():
+async def test_accessor_uses_configured_timeout():
     dify_accessor = DifyAccessor(
         DifyConfig(
             api_key="secret",
             base_url="https://dify.example/v1",
             dataset_id="dataset-1",
-            request_timeout=12.5,
+            timeout=12.5,
         )
     )
 
     session = dify_accessor.pool.get()
 
-    assert session.timeout == aiohttp.ClientTimeout(total=12.5)
+    assert session.timeout == api_client.stall_timeout(12.5)
 
     await dify_accessor.close()
 

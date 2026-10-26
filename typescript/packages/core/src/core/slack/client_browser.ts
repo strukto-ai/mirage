@@ -18,11 +18,12 @@ import { rstripSlash } from '../../utils/slash.ts'
 export interface BrowserSlackTransportOptions {
   proxyUrl: string
   getHeaders?: () => Promise<Record<string, string>> | Record<string, string>
+  timeout?: number
 }
 
 export class BrowserSlackTransport extends HttpSlackTransport {
   constructor(private readonly opts: BrowserSlackTransportOptions) {
-    super()
+    super(opts.timeout)
     // Reject query strings and fragments — they would silently corrupt the
     // resolved URL when the endpoint is appended.
     const probe = new URL(opts.proxyUrl, 'http://localhost')

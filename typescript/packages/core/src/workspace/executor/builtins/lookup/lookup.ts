@@ -78,7 +78,7 @@ export function handleType(
       if (mode === null) errLines.push(`bash: type: ${name}: not found\n`)
       continue
     }
-    if (mode === 't') outLines.push(...kinds.map((kind) => `${kind}\n`))
+    if (mode === 't') for (const item of kinds.map((kind) => `${kind}\n`)) outLines.push(item)
     else if (mode === 'p') {
       for (const kind of kinds) if (kind === NameKind.FILE) outLines.push(`${programFile(name)}\n`)
     } else outLines.push(...kinds.map((kind) => `${describe(name, kind, session, parser)}\n`))

@@ -25,7 +25,6 @@ from mirage import Workspace
 from mirage.commands.config import command
 from mirage.commands.spec.types import CommandSpec
 from mirage.context import reset_current_session, set_current_session
-from mirage.errors.types import CommandTimeoutError
 from mirage.io import IOResult
 from mirage.io.types import materialize
 from mirage.policy import (
@@ -39,7 +38,6 @@ from mirage.policy import (
 from mirage.types import (
     FileType,
     HiddenPaths,
-    Limit,
     MountMode,
     PathSpec,
     Visibility,
@@ -182,23 +180,6 @@ class _LateStatRAM(RAMVFS):
             if gate is not None:
                 self.asked.set()
                 await gate.wait()
-
-
-class _StuckWriteRAM(RAMVFS):
-    def __init__(self) -> None:
-        super().__init__()
-        self.stuck = asyncio.Event()
-        self.writing = asyncio.Event()
-        self.stats = 0
-
-    async def write(self, path, data):
-        self.writing.set()
-        await self.stuck.wait()
-        await super().write(path, data)
-
-    async def stat(self, path):
-        self.stats += 1
-        return await super().stat(path)
 
 
 class TestFreshStat:
@@ -454,52 +435,6 @@ class TestFreshStat:
             assert (await ws.cache.fingerprints(["/data/d/inner/f.txt"]))[
                 0
             ] == "v1"
-        finally:
-            await ws.close()
-
-    @pytest.mark.asyncio
-    async def test_a_held_path_counts_against_the_stat_timeout(self):
-        vfs = _StuckWriteRAM()
-        ws = Workspace({"/data": vfs}, mode=MountMode.WRITE)
-        try:
-            ws.mount("/data").command_limits["stat"] = Limit(
-                timeout_seconds=0.1
-            )
-            writing = asyncio.create_task(ws.vfs.write("/data/f.txt", b"x"))
-            await vfs.writing.wait()
-            before = vfs.stats
-            with pytest.raises(CommandTimeoutError):
-                await ws.vfs.stat("/data/f.txt", fresh=True)
-            vfs.stuck.set()
-            await writing
-            for _ in range(5):
-                await asyncio.sleep(0)
-            assert vfs.stats == before
-        finally:
-            await ws.close()
-
-    @pytest.mark.asyncio
-    async def test_the_stat_timeout_never_cuts_a_reconcile_short(self):
-        vfs = RAMVFS()
-        vfs.caches_reads = True
-        ws = Workspace({"/data": vfs}, mode=MountMode.WRITE)
-        try:
-            mount = ws.mount("/data")
-            mount.command_limits["stat"] = Limit(timeout_seconds=0.1)
-            await ws.vfs.write("/data/f.txt", b"old")
-            await ws.cache.set("/data/f.txt", b"old", fingerprint="v1")
-            manager = mount.cache_manager
-            assert manager is not None
-            keep = manager.keep_version
-
-            async def slow_keep(path, version):
-                await asyncio.sleep(0.3)
-                await keep(path, version)
-
-            manager.keep_version = slow_keep
-            row = await ws.vfs.stat("/data/f.txt", fresh=True)
-            assert row.size == 3
-            assert (await ws.cache.fingerprints(["/data/f.txt"]))[0] == "v1"
         finally:
             await ws.close()
 

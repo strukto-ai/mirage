@@ -54,14 +54,12 @@ import type { ExecuteNodeOpts } from '../executor/command/types.ts'
 import { aliasCommandText, aliasMark, expandingAliases } from '../executor/builtins/alias/index.ts'
 import { syntaxRefusal } from '../../shell/parse/index.ts'
 import type { ParseScope } from '../../shell/parse/scope.ts'
-import { INTERPRETER_NAMES } from '../lookup/constants.ts'
-import { guardIO, maybeWithTimeout, runWithTimeout } from '../../commands/builtin/utils/limit.ts'
+import { guardIO } from '../../commands/builtin/utils/limit.ts'
 import {
   PolicyDenied,
   postCommandGate,
   refusalOf,
   renderDeny,
-  resolveLimit,
   resolveProducer,
   type Claimant,
   type HandOff,
@@ -556,21 +554,6 @@ async function runCommandBody(
   )
   if (expanded !== undefined) expanded.words = [argv.name, ...argv.args]
 
-  // Limits resolve against the expanded name, so `$CMD`-style
-  // invocations get their real command's policy.
-  // Mount, CLI and external dispatch own their resolved deadlines.
-  const consumer = lookup(argv.name, session, registry, context.frame.routing)
-  const ownsDeadline =
-    !argv.name.includes('/') &&
-    (consumer === Consumer.EXTERNAL ||
-      consumer === Consumer.MOUNT ||
-      consumer === Consumer.CLI ||
-      INTERPRETER_NAMES.has(argv.name))
-  const resolved =
-    argv.name !== '' && !ownsDeadline
-      ? resolveLimit(argv.name, [], null, null, registry.commandLimits, session.commandLimits)
-      : null
-  const timeout = resolved !== null ? resolved.timeoutSeconds : null
   // Capture xtrace before the body runs so `set -x` itself is not
   // traced (bash enables tracing only for the following commands). A body
   // that writes as it runs is traced before it starts.
@@ -579,33 +562,28 @@ async function runCommandBody(
     await sink.emit(Channel.STDERR, traceCommand([argv.name, ...argv.args]))
     xtrace = false
   }
-  const [rawStdout, io, execNode] = await runWithTimeout(
-    runArgv(
-      recurse,
-      dispatch,
-      registry,
-      namespace,
-      executeFn,
-      argv,
-      context,
-      stdin,
-      callStack,
-      jobTable,
-      signal,
-      readRow(node),
-      redirectPathsFor(node),
-      claimant,
-      sink,
-      redirectRunnerFor(node),
-      parser,
-      seedPrefix,
-      assigned,
-    ),
-    timeout,
-    argv.name !== '' ? argv.name : '?',
+  const [ranStdout, io, execNode] = await runArgv(
+    recurse,
+    dispatch,
+    registry,
+    namespace,
+    executeFn,
+    argv,
+    context,
+    stdin,
+    callStack,
+    jobTable,
+    signal,
+    readRow(node),
+    redirectPathsFor(node),
+    claimant,
+    sink,
+    redirectRunnerFor(node),
+    parser,
+    seedPrefix,
+    assigned,
   )
-  // A builtin that streams (xargs) runs on after it returns.
-  let stdout = maybeWithTimeout(rawStdout, resolved, argv.name !== '' ? argv.name : '?')
+  let stdout = ranStdout
   if (io.producer === null && argv.name !== '') {
     // Builtins and other non-mount routes return no rider; stamp the
     // expanded name here so postExecute policies keyed on a command
@@ -621,7 +599,7 @@ async function runCommandBody(
     ) {
       const bound = resolveProducer(
         io.producer,
-        (prefix, name) => registry.limitOverride(prefix, name),
+        (prefix) => registry.limitMount(prefix),
         registry.commandLimits,
         session.commandLimits,
       )
@@ -807,13 +785,17 @@ async function runArgv(
     const judging = gated !== null && (await policies.wantsFor('postCommand', sessionId))
     const watched = judging || (await policies.wantsFor('postExecute', sessionId))
     let mine: OpRecord[] = []
-    // The command's own layer of the caller: once admitted, its gate.
+    // The command's own layer of the caller: once admitted, its gate, and
+    // no declared limit until its mount binds its own, so a command a
+    // registered one runs keeps none of that one's.
     const outer = currentCaller()
-    const result = await runWithCaller({ ...outer, gate: gated ?? outer.gate }, () =>
-      commandRecords((records) => {
-        mine = records
-        return route()
-      }, true),
+    const result = await runWithCaller(
+      { ...outer, gate: gated ?? outer.gate, command: argv.name, declared: null },
+      () =>
+        commandRecords((records) => {
+          mine = records
+          return route()
+        }, true),
     )
     if (!watched) return result
     const [stdout, io, node] = result
@@ -829,7 +811,7 @@ async function runArgv(
       // A function hands back its last command's node, which keeps the
       // records that command made.
       node.exitCode = io.exitCode
-      node.records.push(...mine)
+      for (const item of mine) node.records.push(item)
       const late = io.stderr
       if (
         node.stderr === saved &&
@@ -878,7 +860,7 @@ async function runArgv(
             try {
               return await pulled.next()
             } finally {
-              mine.push(...more)
+              for (const item of more) mine.push(item)
             }
           }, true)
           if (next.done === true) {
@@ -945,8 +927,8 @@ async function routeArgv(
   // Every handler below reaches the dispatcher through this one function,
   // so a line whose caller was already released starts no further op
   // between its operands (`rm l1 l2` with the first unlink held past
-  // the grace). Python needs nothing here: its cancelled task never
-  // reaches the next operand.
+  // the grace), and a walk the index answers yields often enough for the
+  // abort or timeout to fire.
   const dispatch = guardDispatch(dispatchIn, mergeSignals(signal, context.frame.abortSignal))
   const name = argv.name
   const args = [...argv.args]

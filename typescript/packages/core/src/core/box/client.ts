@@ -19,11 +19,12 @@ import { encodeBase64 } from '../../utils/base64.ts'
 import type { ApiResponse } from '../api/client.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import { type ByteWindow } from '../../utils/ranges.ts'
-import { apiRequest } from '../api/client.ts'
+import { apiRequest, stallTimeout } from '../api/client.ts'
 import { TokenManager as OAuthTokenManager } from '../api/oauth.ts'
 import { BOX_API_BASE, BOX_TOKEN_URL, BOX_UPLOAD_BASE, TOKEN_BUFFER_SECONDS } from './constants.ts'
 
 export interface BoxConfig {
+  timeout?: number
   // API origin override (e.g. an integ fake: http://127.0.0.1:5096). Token,
   // API and upload URLs derive from it; defaults to the real Box hosts.
   endpoint?: string
@@ -120,6 +121,7 @@ async function refreshAccessToken(
     body.set('client_secret', config.clientSecret)
   }
   const data = (await apiRequest('POST', tokenUrlOf(config), {
+    timeout: config.timeout,
     errorOf: (r, text) =>
       new BoxApiError(`Box token refresh → ${String(r.status)} ${text}`, r.status),
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -153,6 +155,7 @@ async function fetchCcgToken(
     box_subject_id: config.enterpriseId ?? '',
   })
   const data = (await apiRequest('POST', tokenUrlOf(config), {
+    timeout: config.timeout,
     errorOf: (r, text) => new BoxApiError(`Box CCG token → ${String(r.status)} ${text}`, r.status),
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: body.toString(),
@@ -169,7 +172,7 @@ export class BoxTokenManager extends OAuthTokenManager {
   private currentRefreshToken: string
 
   constructor(config: BoxConfig) {
-    super(TOKEN_BUFFER_SECONDS)
+    super(TOKEN_BUFFER_SECONDS, undefined, config.timeout)
     this.config = config
     // API and upload bases for every non-token call; api.ts reads these instead
     // of the constants so a config endpoint override reaches every request.
@@ -250,6 +253,7 @@ export async function boxGet(
   params?: Record<string, string | number>,
 ): Promise<unknown> {
   return apiRequest('GET', url, {
+    timeout: tm.timeout,
     errorOf: errorOf('GET', url),
     headers: await boxAuthHeaders(tm),
     params,
@@ -258,6 +262,7 @@ export async function boxGet(
 
 export async function boxOptions(tm: BoxTokenManager, url: string): Promise<unknown> {
   return apiRequest('OPTIONS', url, {
+    timeout: tm.timeout,
     errorOf: errorOf('OPTIONS', url),
     headers: await boxAuthHeaders(tm),
   })
@@ -270,6 +275,7 @@ export async function boxGetBytes(
   window?: ByteWindow,
 ): Promise<Uint8Array> {
   const data = await apiRequest('GET', url, {
+    timeout: tm.timeout,
     errorOf: errorOf('GET', url),
     headers: await boxAuthHeaders(tm),
     params,
@@ -285,7 +291,7 @@ export async function* boxGetStream(
   params?: Record<string, string | number>,
 ): AsyncIterable<Uint8Array> {
   const headers = await boxAuthHeaders(tm)
-  const r = await fetch(buildUrl(url, params), { headers, redirect: 'follow' })
+  const r = await stallTimeout(tm.timeout)(buildUrl(url, params), { headers, redirect: 'follow' })
   if (!r.ok) {
     const text = await r.text().catch(() => '')
     throw new BoxApiError(`Box GET ${url} → ${String(r.status)} ${text}`, r.status)
@@ -305,6 +311,7 @@ export async function boxPostJson(
   body: Record<string, unknown>,
 ): Promise<unknown> {
   return apiRequest('POST', url, {
+    timeout: tm.timeout,
     errorOf: errorOf('POST', url),
     headers: { ...(await boxAuthHeaders(tm)), 'Content-Type': 'application/json' },
     json: body,
@@ -317,6 +324,7 @@ export async function boxPutJson(
   body: Record<string, unknown>,
 ): Promise<unknown> {
   return apiRequest('PUT', url, {
+    timeout: tm.timeout,
     errorOf: errorOf('PUT', url),
     headers: { ...(await boxAuthHeaders(tm)), 'Content-Type': 'application/json' },
     json: body,
@@ -330,6 +338,7 @@ export async function boxDelete(
   headers: Record<string, string> = {},
 ): Promise<void> {
   await apiRequest('DELETE', url, {
+    timeout: tm.timeout,
     errorOf: errorOf('DELETE', url),
     headers: { ...(await boxAuthHeaders(tm)), ...headers },
     params,
@@ -349,6 +358,7 @@ export async function boxUploadMultipart(
   form.set('attributes', JSON.stringify(attributes))
   form.set('file', new Blob([data as BlobPart]), filename)
   return apiRequest('POST', url, {
+    timeout: tm.timeout,
     errorOf: errorOf('upload', url),
     headers: { ...(await boxAuthHeaders(tm)), ...headers },
     body: form,
@@ -391,6 +401,7 @@ export async function boxUploadSession(
         partDigest.update(chunk)
       }
       const response = (await apiRequest('PUT', endpoints.upload_part, {
+        timeout: tm.timeout,
         errorOf: errorOf('upload part', url),
         headers: {
           ...(await boxAuthHeaders(tm)),
@@ -409,6 +420,7 @@ export async function boxUploadSession(
     if (etag !== null) headers['If-Match'] = etag
     for (let attempt = 0; attempt < 10; attempt++) {
       const response = (await apiRequest('POST', endpoints.commit, {
+        timeout: tm.timeout,
         errorOf: errorOf('commit upload', url),
         headers: { ...(await boxAuthHeaders(tm)), ...headers },
         json: { parts },

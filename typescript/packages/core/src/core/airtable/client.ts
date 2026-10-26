@@ -85,6 +85,7 @@ async function request(
     json: options.json,
     retry: options.retry ?? RETRY,
     fetchFn: accessor.fetchFn,
+    timeout: accessor.config.timeout,
   })
 }
 

@@ -79,6 +79,9 @@ export class LanceDBStore implements LanceDriver {
       if (this.config.uri.startsWith('db://')) {
         options.region = this.config.region
         if (this.config.hostOverride !== null) options.hostOverride = this.config.hostOverride
+        options.clientConfig = {
+          timeoutConfig: { connectTimeout: this.config.timeout, readTimeout: this.config.timeout },
+        }
       }
       const { connect } = await loadOptionalPeer(() => import('@lancedb/lancedb'), {
         feature: 'LanceDBVFS',

@@ -110,17 +110,16 @@ mirage       workspace delete cross_loaded
 ## 6. Per-mount command limits (Python CLI)
 
 A mount can cap what a command streams back with `command_limits`,
-so a runaway `cat`/`grep`/`rg` can't flood the agent or hang forever.
-Each entry sets `max_lines` / `max_bytes` (output cap) and/or
-`timeout_seconds` (deadline), with `on_exceed: truncate` (stop, exit 0,
-add a notice) or `on_exceed: error` (stop, exit 1, add a notice).
+so a runaway `cat`/`grep`/`rg` can't flood the agent. Each entry sets
+`max_lines` / `max_bytes` (output cap), with `on_exceed: truncate` (stop,
+exit 0, add a notice) or `on_exceed: error` (stop, exit 1, add a notice).
+Time is the line's: the workspace's `command_limits: {line: {timeout_seconds: N}}`, 600 s unless set; `timeout` bounds one command.
 
 Both CLIs parse and apply the same `command_limits` block (the cross
 harness pins this). This walkthrough uses the Python CLI against its own
 workspace (`cross_sg`) from [workspace_limits.yaml](workspace_limits.yaml),
 so the steps above are untouched. That file guards `/s3` with:
-`head` → 10 lines / truncate, `grep` → 20 lines / error, `rg` → a 1 ms
-timeout.
+`head` → 10 lines / truncate, `grep` → 20 lines / error.
 
 ```bash
 set -a && source .env.development && set +a
@@ -148,11 +147,10 @@ the 20-line cap, and fails with exit `1`:
 mirage shell --workspace_id cross_sg --command "grep mirage /s3/data/example.jsonl"
 ```
 
-`timeout_seconds` — the 1 ms deadline trips on any real read, exit `124`
-with `rg: timed out after 0.001s`:
+`timeout` — a 1 ms bound on one command trips on any real read, exit `124`:
 
 ```bash
-mirage shell --workspace_id cross_sg --command "rg mirage /s3/data/example.jsonl"
+mirage shell --workspace_id cross_sg --command "timeout 0.001 rg mirage /s3/data/example.jsonl"
 ```
 
 Commands below their cap are untouched, so the earlier shapes still work

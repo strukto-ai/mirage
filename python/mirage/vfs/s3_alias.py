@@ -14,13 +14,13 @@
 
 from typing import Any, ClassVar
 
-from pydantic import BaseModel, ConfigDict, Field, SecretStr
+from pydantic import ConfigDict, SecretStr
 
-from mirage.vfs.constants import WALK_LIMIT
+from mirage.core.api.config import TimeoutConfig
 from mirage.vfs.s3 import S3VFS, S3Config
 
 
-class S3AliasConfig(BaseModel):
+class S3AliasConfig(TimeoutConfig):
     """Shared shape for the S3-compatible providers.
 
     Every alias is the same handful of credentials plus one endpoint rule,
@@ -65,15 +65,8 @@ class S3AliasConfig(BaseModel):
     """Key prefix inside the bucket that the mount treats as its root; keys
     outside it are not visible. Leading slashes are dropped and a trailing
     `/` is added."""
-    timeout: int = 30
-    """Seconds to wait to connect, and for each read of a response, before
-    the request fails."""
     proxy: SecretStr | None = None
     """Proxy URL for every HTTP and HTTPS request to the endpoint."""
-    walk_limit: int = Field(default=WALK_LIMIT, ge=-1)
-    """Most files one command walks under a folder: `grep -r`, `find` and other
-    walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is
-    refused. `-1` lifts the limit."""
 
     def resolved_endpoint_url(self) -> str:
         raise NotImplementedError
@@ -91,7 +84,6 @@ class S3AliasConfig(BaseModel):
             key_prefix=self.key_prefix,
             timeout=self.timeout,
             proxy=self.proxy,
-            walk_limit=self.walk_limit,
         )
 
 

@@ -23,10 +23,12 @@ import {
   ContentType,
   FileStat,
   FileType,
+  Limit,
   MountMode,
   type PathSpec,
   WritePolicy,
 } from '@struktoai/mirage-core/types'
+import { ALL_COMMANDS } from '@struktoai/mirage-core/policy/builtin/output_cap'
 import { enoent } from '@struktoai/mirage-core/errors/fs'
 import { Mount } from '@struktoai/mirage-core/workspace/mount/spec'
 import { MountKey } from '@struktoai/mirage-core/workspace/snapshot/keys'
@@ -259,11 +261,21 @@ describe('snapshot rebuild through the registry', () => {
 })
 
 // Twin of test_a_rebuilt_local_mount_keeps_its_walk_limit: a disk
-// mount comes back as RAM holding the limit it was saved with.
+// mount comes back as RAM held to the workspace's or its own limit.
 describe('a rebuilt disk mount', () => {
-  it.each([2, -1])('keeps its walk limit (%d)', async (limit) => {
+  it.each([
+    [2, 'workspace'],
+    [-1, 'workspace'],
+    [2, 'mount'],
+    [-1, 'mount'],
+  ])('keeps its walk limit (%d, %s)', async (limit, scope) => {
     const root = await mkdtemp(join(tmpdir(), 'mirage-limit-'))
-    const ws = new Workspace({ '/d': new DiskVFS({ root, walkLimit: limit }) })
+    const commandLimits = { [ALL_COMMANDS]: new Limit({ walkLimit: limit }) }
+    const vfs = new DiskVFS({ root })
+    const ws =
+      scope === 'workspace'
+        ? new Workspace({ '/d': vfs }, { commandLimits })
+        : new Workspace({ '/d': new Mount(vfs, { commandLimits }) })
     try {
       const restored = await Workspace.fromState(await toStateDict(ws))
       try {

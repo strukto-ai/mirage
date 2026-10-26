@@ -61,10 +61,12 @@ export async function downloadFile(
   url: string,
   offset = 0,
   size: number | null = null,
+  timeout?: number,
 ): Promise<Uint8Array> {
   const window = windowFor(offset, size)
   return (await apiRequest('GET', url, {
     errorOf: downloadError,
+    timeout,
     read: 'bytes',
     ...(window !== undefined ? { window } : {}),
   })) as Uint8Array
@@ -74,6 +76,11 @@ export async function downloadFile(
 export function downloadFileStream(
   url: string,
   signal?: AbortSignal,
+  timeout?: number,
 ): AsyncGenerator<Uint8Array, void> {
-  return apiStream(url, { errorOf: downloadError, ...(signal === undefined ? {} : { signal }) })
+  return apiStream(url, {
+    errorOf: downloadError,
+    timeout,
+    ...(signal === undefined ? {} : { signal }),
+  })
 }

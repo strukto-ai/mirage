@@ -15,7 +15,8 @@
 import { appendFileSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { MountMode } from '@struktoai/mirage-core/types'
+import { ALL_COMMANDS } from '@struktoai/mirage-core/policy/builtin/output_cap'
+import { Limit, MountMode } from '@struktoai/mirage-core/types'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { Workspace } from '@struktoai/mirage-node'
 import ssh2, { type Client, type ClientChannel } from 'ssh2'
@@ -455,7 +456,10 @@ describe('codex-exec', () => {
   // Twin of test_walk_stops_at_the_limit_of_the_mount_it_lists.
   it('stops a walk at the limit of the mount it lists', async () => {
     const ws = new Workspace(
-      { '/': new RAMVFS({ walkLimit: -1 }), '/w': new RAMVFS({ walkLimit: 2 }) },
+      {
+        '/': [new RAMVFS(), MountMode.WRITE, { [ALL_COMMANDS]: new Limit({ walkLimit: -1 }) }],
+        '/w': [new RAMVFS(), MountMode.WRITE, { [ALL_COMMANDS]: new Limit({ walkLimit: 2 }) }],
+      },
       { mode: MountMode.WRITE },
     )
     const client = await codex(await startHarness(MountMode.WRITE, ws))

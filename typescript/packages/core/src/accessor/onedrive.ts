@@ -37,7 +37,6 @@ export interface OneDriveConfig extends MsGraphConfig {
   groupId?: string
   userId?: string
   keyPrefix?: string
-  walkLimit?: number
 }
 
 const DRIVE_TARGETS = ['driveId', 'siteId', 'groupId', 'userId'] as const
@@ -77,11 +76,6 @@ const OneDriveConfigSchema = z
       .string()
       .optional()
       .describe('Folder path from the drive root that the mount uses as its root.'),
-    walkLimit: z.number().int().min(-1).optional().meta({
-      description:
-        'Most files one command walks under a folder: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit and reads every file without asking Graph search, which lags writes and covers only extracted text.',
-      default: 1000,
-    }),
   })
   // With four fields and a fixed precedence, setting two would make the
   // mount silently address whichever won, which is the kind of

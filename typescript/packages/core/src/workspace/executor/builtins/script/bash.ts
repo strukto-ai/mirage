@@ -103,7 +103,7 @@ export function parseBashArgs(args: string[]): BashArgs {
     for (const ch of word.other) {
       if (!BASH_START_FLAGS.has(ch)) return bashArgs({ invalid: tok.charAt(0) + ch })
     }
-    settings.push(...word.settings)
+    for (const item of word.settings) settings.push(item)
     readStdin = readStdin || word.other.includes('s')
     if (word.other.includes('c')) {
       const next = args[i + word.consumed]

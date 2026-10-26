@@ -15,7 +15,7 @@
 import pytest
 
 from mirage.accessor.hf_buckets import HfBucketsAccessor
-from mirage.accessor.hf_hub import stall_timeout
+from mirage.core.api.client import stall_timeout
 from mirage.vfs.hf_buckets.config import HfBucketsConfig
 
 

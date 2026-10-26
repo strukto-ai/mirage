@@ -160,7 +160,6 @@ export interface SessionInit {
    */
   decisions?: readonly Decision[]
   generation?: number
-  pipelineTimeoutSeconds?: number | null
   lastBgJobId?: number | null
 }
 
@@ -540,7 +539,6 @@ export class SessionState {
   processDepth: number
   decisions: readonly Decision[]
   generation: number
-  pipelineTimeoutSeconds: number | null
   lastBgJobId: number | null
 
   constructor(init: SessionInit) {
@@ -570,7 +568,6 @@ export class SessionState {
     this.processes = parseProcessPermissions(init.processes ?? DEFAULT_PROCESS_PERMISSIONS)
     this.decisions = init.decisions ?? []
     this.generation = init.generation ?? 0
-    this.pipelineTimeoutSeconds = init.pipelineTimeoutSeconds ?? null
     this.lastBgJobId = init.lastBgJobId ?? null
     // bash exports $PWD from startup, so a session that has never run
     // `cd` still has one. Seeding here rather than at lookup time is what
@@ -644,7 +641,6 @@ export class SessionState {
       processDepth: overrides.processDepth ?? this.processDepth,
       decisions: overrides.decisions ?? this.decisions,
       generation: overrides.generation ?? this.generation,
-      pipelineTimeoutSeconds: overrides.pipelineTimeoutSeconds ?? this.pipelineTimeoutSeconds,
       lastBgJobId: overrides.lastBgJobId ?? this.lastBgJobId,
     })
     // A fork is the same shell going on, so a startup variable the source

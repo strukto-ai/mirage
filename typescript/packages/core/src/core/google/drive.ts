@@ -182,7 +182,7 @@ async function queryFiles(
     if (pageToken !== null) params.pageToken = pageToken
     const url = `${driveBase(tm)}/files`
     const data = (await googleGet(tm, url, params)) as ListResponse
-    if (data.files !== undefined) files.push(...data.files)
+    if (data.files !== undefined) for (const item of data.files) files.push(item)
     if (limit !== null && files.length >= limit) break
     pageToken = data.nextPageToken ?? null
     if (pageToken === null) break
@@ -205,7 +205,7 @@ export async function listSharedDrives(
     if (pageToken !== null) params.pageToken = pageToken
     const url = `${driveBase(tm)}/drives`
     const data = (await googleGet(tm, url, params)) as ListDrivesResponse
-    if (data.drives !== undefined) drives.push(...data.drives)
+    if (data.drives !== undefined) for (const item of data.drives) drives.push(item)
     pageToken = data.nextPageToken ?? null
     if (pageToken === null) break
   }
@@ -256,7 +256,7 @@ export async function listAllFiles(
     if (pageToken !== null) params.pageToken = pageToken
     const url = `${driveBase(tm)}/files`
     const data = (await googleGet(tm, url, params)) as ListResponse
-    if (data.files !== undefined) files.push(...data.files)
+    if (data.files !== undefined) for (const item of data.files) files.push(item)
     if (data.incompleteSearch === true) complete = false
     pageToken = data.nextPageToken ?? null
     if (pageToken === null) break
@@ -435,7 +435,7 @@ export async function listChanges(
       includeItemsFromAllDrives: 'true',
       supportsAllDrives: 'true',
     })) as ChangesResponse
-    found.push(...(data.changes ?? []))
+    for (const item of data.changes ?? []) found.push(item)
     if (data.newStartPageToken !== undefined && data.newStartPageToken !== '') {
       return [found, data.newStartPageToken]
     }

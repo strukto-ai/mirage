@@ -12,12 +12,13 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from pydantic import BaseModel, ConfigDict, SecretStr
+from pydantic import ConfigDict, SecretStr
 
+from mirage.core.api.config import TimeoutConfig
 from mirage.core.hf_hub.constants import API_BASE
 
 
-class HfConfig(BaseModel):
+class HfConfig(TimeoutConfig):
     """What an `hf` install is configured with.
 
     An account CLI, so it declares this and reaches the Hub directly;

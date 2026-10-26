@@ -60,6 +60,35 @@ def test_log_execution_writes_jsonl():
     assert parsed["exit_code"] == 0
 
 
+def test_a_long_line_lets_the_loop_run_while_it_logs():
+    obs = Observer(store=RAMObserverStore(), clock=ManualClock(start=NEW_YEAR))
+    rec = OpRecord(
+        op="read",
+        path="/f",
+        source="ram",
+        bytes=1,
+        timestamp=int(NEW_YEAR * 1000),
+        duration_ms=1,
+    )
+
+    async def run() -> int:
+        turns = 0
+
+        async def other() -> None:
+            nonlocal turns
+            while True:
+                turns += 1
+                await asyncio.sleep(0)
+
+        task = asyncio.create_task(other())
+        records = [rec] * 10_000
+        await obs.log_execution("grep -r x /d", IOResult(), records, "s")
+        task.cancel()
+        return turns
+
+    assert asyncio.run(run()) > 0
+
+
 def test_multiple_entries_appended():
     store = RAMObserverStore()
     obs = Observer(store=store, clock=ManualClock(start=NEW_YEAR))

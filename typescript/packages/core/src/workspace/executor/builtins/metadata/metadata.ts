@@ -43,6 +43,7 @@ import { expandOperands, result } from '../shared.ts'
 import type { Result } from '../types.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
 import { posixPhrase } from '../../../../errors/posix.ts'
+import { callerSignal } from '../../../../context/session_context.ts'
 
 export function parseOwner(text: string): [number | string | null, number | string | null] {
   const sep = text.indexOf(':')
@@ -280,6 +281,8 @@ export async function walkStats(
     dispatchedReadTree(dispatch, links.mounts(false), null, true),
     readdirOp(dispatch),
     async (path) => (await dispatch('stat', path))[0] as FileStat,
+    true,
+    callerSignal(),
   )
   const entries: WalkEntry[] = []
   // An explicit stack, so a deep tree costs no recursion: a directory's

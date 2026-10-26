@@ -14,11 +14,8 @@
 
 from typing import Literal
 
-from pydantic import Field
-
 from mirage.core.google.config import GoogleConfig
 from mirage.core.time_config import TimeRangeConfig
-from mirage.vfs.constants import WALK_LIMIT
 
 
 class GCalConfig(GoogleConfig, TimeRangeConfig):
@@ -40,8 +37,3 @@ class GCalConfig(GoogleConfig, TimeRangeConfig):
     """Day (`YYYY-MM-DD`) the default listing's 90-day future horizon is
     measured from, for tests and snapshots. Unset uses the current date in
     the mount's time zone."""
-    walk_limit: int = Field(default=WALK_LIMIT, ge=-1)
-    """Most files one command walks under a folder: `grep -r`, `find` and other
-    walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is
-    refused. `-1` lifts the limit and reads every event without asking
-    Calendar's search; the listing then keeps no event text."""

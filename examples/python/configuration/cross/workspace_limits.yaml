@@ -21,7 +21,3 @@ mounts:
       grep:
         max_lines: 20
         on_exceed: error
-      # Deliberately tiny deadline so any real read trips the timeout
-      # (exit 124). A production value would be seconds, not milliseconds.
-      rg:
-        timeout_seconds: 0.001

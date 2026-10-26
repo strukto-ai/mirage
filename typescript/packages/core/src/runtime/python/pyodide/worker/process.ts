@@ -142,7 +142,7 @@ export class GuestProcessTable {
       const inherited = { stdout: [] as Uint8Array[], stderr: [] as Uint8Array[] }
       for (const entry of this.children.values()) {
         for (const stream of ['stdout', 'stderr'] as const)
-          inherited[stream].push(...entry.inherited[stream].splice(0))
+          for (const item of entry.inherited[stream].splice(0)) inherited[stream].push(item)
       }
       const consumed = Object.fromEntries(
         [...this.children].map(([pid, entry]) => [pid, entry.child.stdin.bytesRead]),

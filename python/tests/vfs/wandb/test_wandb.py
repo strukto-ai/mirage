@@ -3,6 +3,8 @@ from unittest.mock import AsyncMock
 import pytest
 
 from mirage import MountMode, Workspace
+from mirage.policy.builtin.output_cap import ALL_COMMANDS
+from mirage.types import Limit
 from mirage.vfs.wandb import WandbConfig, WandbVFS
 
 
@@ -61,9 +63,10 @@ async def _project_page(query: str, variables: dict) -> dict:
 # paged no further than one past what the walk can keep.
 @pytest.mark.asyncio
 async def test_find_pages_projects_no_further_than_its_walk_limit() -> None:
-    vfs = WandbVFS(WandbConfig(entities=["lab"], page_size=1, walk_limit=2))
+    vfs = WandbVFS(WandbConfig(entities=["lab"], page_size=1))
     vfs.accessor.client.request = AsyncMock(side_effect=_project_page)
-    ws = Workspace({"/wandb": vfs})
+    limits = {ALL_COMMANDS: Limit(walk_limit=2)}
+    ws = Workspace({"/wandb": (vfs, MountMode.READ, limits)})
     try:
         await ws.shell("find /wandb/lab -maxdepth 1")
         assert vfs.accessor.client.request.await_count == 3

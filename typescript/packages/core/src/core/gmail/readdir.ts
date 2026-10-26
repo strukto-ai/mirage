@@ -24,7 +24,6 @@ import { extractAttachments, extractHeader, messageJsonBytes } from './messages.
 import { detectScope } from './scope.ts'
 import { globSpan, hasGlobSpan } from '../../utils/glob_walk.ts'
 import { dateDirToGmailQuery, spanToGmailQuery } from './date_query.ts'
-import { WALK_LIMIT } from '../../vfs/constants.ts'
 
 const TITLE_MAX = 80
 export const MSG_SUFFIX = '.gmail.json'
@@ -173,10 +172,7 @@ async function listLabel(
     entries.push(
       new FileStat({ name: dateStr, type: FileType.DIRECTORY, extra: { label_id: labelId } }),
     )
-    const { children, seeds: attSeeds } = dateChildren(
-      groups.get(dateStr) ?? [],
-      (accessor.config.walkLimit ?? WALK_LIMIT) >= 0,
-    )
+    const { children, seeds: attSeeds } = dateChildren(groups.get(dateStr) ?? [], accessor.capped())
     seeds.set(dateStr, children)
     for (const [attDir, attEntries] of attSeeds) seeds.set(`${dateStr}/${attDir}`, attEntries)
   }
@@ -196,10 +192,7 @@ async function listDay(accessor: GmailAccessor, match: ScopeMatch, own: FileStat
     maxResults: MAX_MESSAGES,
   })
   const groups = await groupByDate(accessor, msgIds)
-  const { children, seeds } = dateChildren(
-    groups.get(day) ?? [],
-    (accessor.config.walkLimit ?? WALK_LIMIT) >= 0,
-  )
+  const { children, seeds } = dateChildren(groups.get(day) ?? [], accessor.capped())
   return new DirListing({ entries: children, seeds, window: true })
 }
 

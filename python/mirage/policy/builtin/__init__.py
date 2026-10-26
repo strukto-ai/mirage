@@ -12,22 +12,41 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.policy.builtin.mount_root import MountRootPolicy
-from mirage.policy.builtin.output_cap import (
-    DEFAULT_COMMAND_LIMITS,
-    FALLBACK_LIMIT,
-    resolve_limit,
-    resolve_producer,
-)
-from mirage.policy.builtin.permissions import PermissionsPolicy
-from mirage.policy.builtin.placement import PlacementPolicy
+from typing import TYPE_CHECKING
+
+from mirage.utils.loader import lazy_exports
+
+if TYPE_CHECKING:
+    from mirage.policy.builtin.mount_root import MountRootPolicy
+    from mirage.policy.builtin.output_cap import (
+        ALL_COMMANDS,
+        DEFAULT_COMMAND_LIMITS,
+        resolve_limit,
+        resolve_producer,
+    )
+    from mirage.policy.builtin.permissions import PermissionsPolicy
+    from mirage.policy.builtin.placement import PlacementPolicy
+
+_EXPORTS: dict[str, tuple[str, ...]] = {
+    "mirage.policy.builtin.mount_root": ("MountRootPolicy",),
+    "mirage.policy.builtin.output_cap": (
+        "ALL_COMMANDS",
+        "DEFAULT_COMMAND_LIMITS",
+        "resolve_limit",
+        "resolve_producer",
+    ),
+    "mirage.policy.builtin.permissions": ("PermissionsPolicy",),
+    "mirage.policy.builtin.placement": ("PlacementPolicy",),
+}
 
 __all__ = [
+    "ALL_COMMANDS",
     "DEFAULT_COMMAND_LIMITS",
-    "FALLBACK_LIMIT",
     "MountRootPolicy",
     "PermissionsPolicy",
     "PlacementPolicy",
     "resolve_producer",
     "resolve_limit",
 ]
+
+__getattr__ = lazy_exports(__name__, _EXPORTS)

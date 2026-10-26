@@ -13,21 +13,14 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
-import time
 from collections.abc import AsyncIterator
 
 import pytest
 
-from mirage.commands.builtin.utils.limit import (
-    guard_output,
-    maybe_with_timeout,
-    run_with_timeout,
-    with_timeout,
-)
+from mirage.commands.builtin.utils.limit import guard_output, run_with_timeout
 from mirage.errors.types import CommandTimeoutError
 from mirage.io.types import materialize
 from mirage.types import Limit, OnExceed
-from tests.fixtures.held_loop import HeldLoop, run_on_held_loop
 
 _TEN = b"".join(f"line{i}\n".encode() for i in range(10))
 
@@ -37,17 +30,8 @@ async def _stream(data: bytes) -> AsyncIterator[bytes]:
         yield data[i : i + 7]
 
 
-async def _slow_stream() -> AsyncIterator[bytes]:
-    await asyncio.sleep(5)
-    yield b"x"
-
-
 async def _const(value):
     return value
-
-
-async def _sleep_forever():
-    await asyncio.sleep(5)
 
 
 @pytest.mark.asyncio
@@ -97,36 +81,6 @@ async def test_streaming_input_truncates_and_stops_early():
     assert b"truncated" in (await materialize(err))
 
 
-def test_maybe_with_timeout_passthrough_when_no_limit():
-    stream = _stream(_TEN)
-    assert maybe_with_timeout(stream, None, "cat") is stream
-
-
-def test_maybe_with_timeout_passthrough_when_bytes():
-    assert maybe_with_timeout(_TEN, Limit(timeout_seconds=1), "cat") == _TEN
-
-
-def test_maybe_with_timeout_passthrough_when_no_timeout():
-    stream = _stream(_TEN)
-    assert maybe_with_timeout(stream, Limit(max_lines=3), "cat") is stream
-
-
-def test_maybe_with_timeout_passthrough_when_nonpositive():
-    stream = _stream(_TEN)
-    assert (
-        maybe_with_timeout(stream, Limit(timeout_seconds=0), "cat") is stream
-    )
-
-
-@pytest.mark.asyncio
-async def test_maybe_with_timeout_wraps_and_fires():
-    wrapped = maybe_with_timeout(
-        _slow_stream(), Limit(timeout_seconds=0.1), "cat"
-    )
-    with pytest.raises(CommandTimeoutError):
-        await materialize(wrapped)
-
-
 @pytest.mark.asyncio
 async def test_run_with_timeout_returns_result_when_under_budget():
     assert await run_with_timeout(_const(42), 1.0, "sleep") == 42
@@ -135,12 +89,6 @@ async def test_run_with_timeout_returns_result_when_under_budget():
 @pytest.mark.asyncio
 async def test_run_with_timeout_no_timeout_when_seconds_falsy():
     assert await run_with_timeout(_const(7), None, "sleep") == 7
-
-
-@pytest.mark.asyncio
-async def test_run_with_timeout_raises_on_overrun():
-    with pytest.raises(CommandTimeoutError):
-        await run_with_timeout(_sleep_forever(), 0.1, "sleep")
 
 
 @pytest.mark.asyncio
@@ -185,39 +133,6 @@ async def test_limit_closes_its_source_when_output_is_cut():
     assert closed
 
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize("pending_pull", [False, True])
-async def test_timeout_wrapper_retains_owned_producer_close(pending_pull):
-    closed = asyncio.Event()
-
-    class Source:
-        def __init__(self):
-            self.sent = False
-
-        def __aiter__(self):
-            return self
-
-        async def __anext__(self):
-            if not self.sent:
-                self.sent = True
-                return b"prefix"
-            await asyncio.Event().wait()
-
-        async def aclose(self):
-            closed.set()
-
-    wrapped = maybe_with_timeout(Source(), Limit(timeout_seconds=30), "writer")
-    pending = None
-    if pending_pull:
-        assert await anext(wrapped) == b"prefix"
-        pending = asyncio.create_task(anext(wrapped))
-        await asyncio.sleep(0)
-    await asyncio.wait_for(wrapped.aclose(), 1)
-    if pending is not None:
-        await asyncio.gather(pending, return_exceptions=True)
-    assert closed.is_set()
-
-
 async def _connection_timeout():
     raise TimeoutError("connect failed")
 
@@ -229,33 +144,16 @@ async def test_an_inner_timeout_keeps_its_own_reason():
 
 
 @pytest.mark.asyncio
-async def test_run_with_timeout_cancels_the_call_it_gives_up_on():
+async def test_run_with_timeout_closes_the_producer_its_call_reads():
     closed = asyncio.Event()
 
     async def follow():
         try:
             await asyncio.Event().wait()
+            yield b"x"
         finally:
             closed.set()
 
-    with pytest.raises(CommandTimeoutError):
-        await run_with_timeout(follow(), 0.05, "follow")
+    with pytest.raises(CommandTimeoutError, match="line: timed out"):
+        await run_with_timeout(materialize(follow()), 0.05, "line")
     assert closed.is_set()
-
-
-async def _slow_chunks(pause: float) -> AsyncIterator[bytes]:
-    yield b"a"
-    time.sleep(pause)
-    yield b"b"
-
-
-async def _drain_slow(loop: HeldLoop) -> list[bytes]:
-    return [
-        chunk async for chunk in with_timeout(_slow_chunks(0.05), 0.01, "cat")
-    ]
-
-
-def test_with_timeout_spends_the_loop_clock_not_real_time():
-    # A loop that keeps virtual time spends none while a source
-    # computes, so a deadline on it must not fire on real time.
-    assert run_on_held_loop(_drain_slow) == [b"a", b"b"]

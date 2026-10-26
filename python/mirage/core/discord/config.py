@@ -12,10 +12,12 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from pydantic import BaseModel, ConfigDict, SecretStr
+from pydantic import ConfigDict, SecretStr
+
+from mirage.core.api.config import TimeoutConfig
 
 
-class DiscordConfig(BaseModel):
+class DiscordConfig(TimeoutConfig):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     token: SecretStr

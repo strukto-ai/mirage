@@ -41,7 +41,6 @@ interface Mount {
   lines?: 'bytes' | 'stream' | 'decline' | null
   upper?: boolean
   resource?: boolean
-  walkLimit?: number
 }
 
 // A RAM mount whose search answers by substring, counting reads. Like a real
@@ -54,7 +53,7 @@ class SearchRAM extends RAMVFS {
   streams: AsyncIterable<Uint8Array>[] = []
 
   constructor(readonly mount: Mount = {}) {
-    super({ walkLimit: mount.walkLimit ?? 10000 })
+    super()
     if (mount.files === false) Object.assign(this, { filesContaining: undefined })
     if (mount.lines === null) Object.assign(this, { linesContaining: undefined })
     if (mount.resource === true) Object.assign(this, { search: () => Promise.resolve(null) })
@@ -412,7 +411,8 @@ it.each<[number, [string, string, number] | null]>([
     ['/d/a.txt:ada here\n', 'grep: /d: stopped after 1 files (walk_limit); narrow the path\n', 2],
   ],
 ])('counts only the files a search leaves to a limit of %d', async (limit, out) => {
-  const vfs = new SearchRAM({ lines: null, walkLimit: limit })
+  const vfs = new SearchRAM({ lines: null })
+  vfs.walkLimit = limit
   const line = 'grep -r ada /d'
   expect(await run(vfs, line)).toEqual(out ?? (await run(new RAMVFS(), line)))
   expect([...vfs.reads].sort()).toEqual(['d/a.txt', 'd/sub/d.txt'].slice(0, limit))

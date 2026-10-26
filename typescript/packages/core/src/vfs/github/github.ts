@@ -80,13 +80,11 @@ export class GitHubVFS extends BaseVFS {
   override readonly wholeWordSearch: boolean = true
   readonly config: GitHubConfig
   override readonly accessor: GitHubAccessor
-
-  override readonly walkLimit: number
+  override walkLimit: number = WALK_LIMIT
 
   private constructor(config: GitHubConfig, accessor: GitHubAccessor) {
     super()
     this.config = config
-    this.walkLimit = config.walkLimit ?? WALK_LIMIT
     this.accessor = accessor
     this.listingsPin = pinOf(config.ref)
   }

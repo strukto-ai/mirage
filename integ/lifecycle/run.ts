@@ -30,10 +30,12 @@ import type { Handed } from '@struktoai/mirage-core/vfs/types'
 import type { BaseVFS } from '@struktoai/mirage-core/vfs/base'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import type {
+  MountSpec,
   Workspace,
   WorkspaceOptions,
 } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import { parseSessionProfile } from '@struktoai/mirage-core/policy/profile'
+import { parseCommandLimits } from '@struktoai/mirage-core/policy/builtin/output_cap'
 import { classify } from '@struktoai/mirage-core/errors/classify'
 import { ScriptSource } from '@struktoai/mirage-core/runtime/types'
 import { Channel, JobConsole } from '@struktoai/mirage-core/shell/console/index'
@@ -77,6 +79,7 @@ import type { WorkspaceStateDict } from '@struktoai/mirage-core/workspace/snapsh
 interface ResourceConfig {
   vfs: string
   config?: Record<string, unknown>
+  command_limits?: Record<string, Record<string, unknown>>
 }
 
 interface Case {
@@ -253,7 +256,7 @@ function profileDocument(raw: Record<string, unknown>) {
 
 interface Host {
   name: string
-  workspace: new (mounts: Record<string, BaseVFS>, options: WorkspaceOptions) => Workspace
+  workspace: new (mounts: Record<string, MountSpec>, options: WorkspaceOptions) => Workspace
   build: (name: string, config: Record<string, unknown>) => Promise<BaseVFS>
   load: (tar: Uint8Array) => Promise<Workspace>
 }
@@ -291,10 +294,10 @@ class ListedRAMVFS extends RAMVFS {
   }
 }
 
-/** A local fixture holding each walk to `walkLimit` files. */
+/** A local fixture holding `files`, its walks held by its mount's `walkLimit`. */
 class LimitedRAMVFS extends RAMVFS {
-  constructor(files: Record<string, string>, walkLimit: number) {
-    super({ walkLimit })
+  constructor(files: Record<string, string>) {
+    super()
     const dirs = new Set(['/'])
     for (const path of Object.keys(files)) {
       const parts = path.split('/')
@@ -448,12 +451,7 @@ for (const register of [registerNodeVfs, registerBrowserVfs]) {
     ),
   )
   register('limited-ram', (config) =>
-    Promise.resolve(
-      new LimitedRAMVFS(
-        (config.files ?? {}) as Record<string, string>,
-        (config.walk_limit as number | undefined) ?? -1,
-      ),
-    ),
+    Promise.resolve(new LimitedRAMVFS((config.files ?? {}) as Record<string, string>)),
   )
   register('cached-ram', (config) => {
     const vfs = new CachedRAMVFS()
@@ -844,9 +842,13 @@ async function reload(host: Host, ws: Workspace): Promise<Workspace> {
 }
 
 async function run(host: Host, testCase: Case): Promise<number> {
-  const mounts: Record<string, BaseVFS> = {}
+  const mounts: Record<string, MountSpec> = {}
   for (const [prefix, config] of Object.entries(testCase.settings.mounts)) {
-    mounts[prefix] = await host.build(config.vfs, config.config ?? {})
+    const vfs = await host.build(config.vfs, config.config ?? {})
+    mounts[prefix] =
+      config.command_limits === undefined
+        ? vfs
+        : [vfs, testCase.settings.mode, parseCommandLimits(config.command_limits)]
   }
   const profiles = Object.fromEntries(
     Object.entries(testCase.settings.profiles ?? {}).map(([name, profile]) => [

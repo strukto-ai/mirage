@@ -307,11 +307,6 @@ async def run_on_mount(
                 ),
                 argv=argv,
             ),
-            limit_override=(
-                session.command_limits.get(cmd_name)
-                or mount.command_limits.get(cmd_name)
-                or registry.command_limits.get(cmd_name)
-            ),
         )
     except UsageError as exc:
         # Command-owned usage errors (extra operands, missing patterns)

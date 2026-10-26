@@ -26,7 +26,6 @@ import { rename } from '../../core/sharepoint/rename.ts'
 import { copy } from '../../core/sharepoint/copy.ts'
 import { truncate } from '../../core/sharepoint/truncate.ts'
 import { filesContaining } from '../../core/sharepoint/search.ts'
-import { WALK_LIMIT } from '../constants.ts'
 
 export const VFS_MD = `{prefix}
   SharePoint Enterprise document libraries. Multi-site, multi-drive discovery.
@@ -59,12 +58,9 @@ export class SharePointVFS extends BaseVFS {
   override readonly accessor: SharePointAccessor
   private readonly config: SharePointConfig
 
-  override readonly walkLimit: number
-
   constructor(config: SharePointConfig) {
     super()
     this.config = config
-    this.walkLimit = config.walkLimit ?? WALK_LIMIT
     this.accessor = new SharePointAccessor(config)
   }
 

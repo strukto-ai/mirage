@@ -20,8 +20,10 @@ import {
   z,
 } from '@struktoai/mirage-core/vfs/secrets'
 import type { ConfigOf, RedactedConfig } from '@struktoai/mirage-core/vfs/secrets'
+import { timeoutShape } from '@struktoai/mirage-core/core/api/config'
 
 const GridFSConfigSchema = z.object({
+  ...timeoutShape,
   uri: secretStr().describe('MongoDB connection URI.'),
   database: z.string().describe('Database that holds the GridFS bucket.'),
   bucket: z.string().optional().meta({
@@ -46,11 +48,6 @@ const GridFSConfigSchema = z.object({
     .describe(
       "Revisions kept per file, newest first: a write or an `rm` deletes the rest, under the file's name and in the trash `rm` moves revisions to (`/trash/<filename>`, which no mount path reaches). Unset keeps every revision, so a snapshot pinned to any of them still reads.",
     ),
-  walkLimit: z.number().int().min(-1).optional().meta({
-    description:
-      'Most files one command walks under a folder: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit.',
-    default: 1000,
-  }),
 })
 
 export type GridFSConfig = ConfigOf<typeof GridFSConfigSchema>

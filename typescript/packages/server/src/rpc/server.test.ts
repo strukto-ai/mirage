@@ -14,7 +14,8 @@
 
 import { Readable } from 'node:stream'
 import { stderr, stdout } from 'node:process'
-import { MountMode } from '@struktoai/mirage-core/types'
+import { ALL_COMMANDS } from '@struktoai/mirage-core/policy/builtin/output_cap'
+import { Limit, MountMode } from '@struktoai/mirage-core/types'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { Session } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import { Workspace } from '@struktoai/mirage-node'
@@ -189,7 +190,10 @@ describe('MirageRpcServer', () => {
 describe('glob past the walk_limit', () => {
   it('is invalid params, with the reason', async () => {
     const rpc = new MirageRpcServer(
-      new Workspace({ '/': new RAMVFS({ walkLimit: 2 }) }, { mode: MountMode.WRITE }),
+      new Workspace(
+        { '/': [new RAMVFS(), MountMode.WRITE, { [ALL_COMMANDS]: new Limit({ walkLimit: 2 }) }] },
+        { mode: MountMode.WRITE },
+      ),
     )
     for (const name of ['a', 'b', 'c']) {
       await call(rpc, 'vfs/write', { path: `/${name}.txt`, data: b64('x') })

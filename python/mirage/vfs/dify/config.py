@@ -1,17 +1,15 @@
 from pydantic import (
-    BaseModel,
     ConfigDict,
-    Field,
     PositiveFloat,
     PositiveInt,
     SecretStr,
     field_validator,
 )
 
-from mirage.vfs.constants import WALK_LIMIT
+from mirage.core.api.config import TimeoutConfig
 
 
-class DifyConfig(BaseModel):
+class DifyConfig(TimeoutConfig):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     api_key: SecretStr
@@ -25,18 +23,12 @@ class DifyConfig(BaseModel):
     mount. A document without it is mounted under its document name."""
     max_concurrency: PositiveInt = 10
     """The most Dify API requests in flight at once."""
-    request_timeout: PositiveFloat = 30.0
-    """Seconds to wait for one HTTP request to Dify."""
     retry_attempts: PositiveInt = 4
     """Attempts per request, the first included. A 429, a 5xx or a
     transport error is retried."""
     retry_max_delay: PositiveFloat = 30.0
     """Longest wait in seconds before a retry, whether from backoff or
     `Retry-After`."""
-    walk_limit: int = Field(default=WALK_LIMIT, ge=-1)
-    """Most files one command walks under a folder: `grep -r`, `find` and other
-    walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is
-    refused. `-1` lifts the limit."""
 
     @field_validator("base_url")
     @classmethod

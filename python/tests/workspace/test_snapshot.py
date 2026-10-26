@@ -653,12 +653,12 @@ async def test_copy_carries_a_directly_installed_spec():
 
 
 class _MountCliCfg(_CliCfg):
-    walk_limit: int = 1000
+    start_time: str | None = None
 
 
 @pytest.mark.asyncio
 async def test_a_subclass_config_instance_survives_snapshot_and_copy():
-    # A mount config subclassing the CLI's model (GDocsConfig for gws)
+    # A mount config subclassing the CLI's model (SlackConfig for slack)
     # carries fields the CLI does not declare, at their defaults here;
     # the install keeps only the model's, so neither the snapshot nor
     # the copy's reinstall meets an unknown key.

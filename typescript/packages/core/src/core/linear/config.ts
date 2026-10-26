@@ -20,8 +20,10 @@ import {
   type RedactedConfig,
   secretStr,
 } from '../../vfs/secrets.ts'
+import { timeoutShape } from '../api/config.ts'
 
 export const LinearConfigSchema = z.object({
+  ...timeoutShape,
   apiKey: secretStr().describe('Linear personal API key.'),
   workspace: z.string().optional().describe('Accepted for compatibility; not read.'),
   teamIds: z
@@ -32,11 +34,6 @@ export const LinearConfigSchema = z.object({
   baseUrl: z.string().optional().meta({
     description: 'Linear GraphQL endpoint; override to point at a fake or proxy.',
     default: 'https://api.linear.app/graphql',
-  }),
-  walkLimit: z.number().int().min(-1).optional().meta({
-    description:
-      "Most files one command walks under a folder: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit and reads every file without asking Linear's search, which lags writes.",
-    default: 1000,
   }),
 })
 

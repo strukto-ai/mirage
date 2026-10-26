@@ -67,8 +67,6 @@ import {
 import { resolveNewerRefs } from '../find_refs.ts'
 import type { ExecuteFn } from '../../expand/types.ts'
 import { FindParseError } from '../../../commands/errors.ts'
-import { maybeWithTimeout } from '../../../commands/builtin/utils/limit.ts'
-import { resolveProducer, resolveLimit } from '../../../policy/index.ts'
 import {
   type JobHandlerResult,
   handleDisown,
@@ -812,15 +810,7 @@ export async function handleCommand(
       declared: null,
     }
     csExec.paths = pathScopes
-    return [
-      maybeWithTimeout(
-        csStdout,
-        resolveLimit(cmdName, mounts, null, null, registry.commandLimits, session.commandLimits),
-        cmdName,
-      ),
-      csIo,
-      csExec,
-    ]
+    return [csStdout, csIo, csExec]
   }
 
   // Path-flag targets count: a command bound to one mount cannot write its
@@ -996,16 +986,5 @@ export async function handleCommand(
     const existing = await materialize(io.stderr)
     io.stderr = concat([warnBytes, existing])
   }
-  const resolved =
-    io.producer !== null
-      ? resolveProducer(
-          io.producer,
-          (prefix, name) => registry.limitOverride(prefix, name),
-          registry.commandLimits,
-          session.commandLimits,
-        )
-      : null
-  stdout = maybeWithTimeout(stdout, resolved, cmdName)
-  io.stderr = maybeWithTimeout(io.stderr, resolved, cmdName)
   return [stdout, io, await execNode(cmdStr, io, paths)]
 }

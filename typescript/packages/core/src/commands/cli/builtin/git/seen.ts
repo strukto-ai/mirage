@@ -393,7 +393,7 @@ async function* sightings(repo: Repo): AsyncGenerator<[string, string], void> {
     if (read.type === 'tag') {
       pending.push(read.object.object)
     } else if (read.type === 'commit') {
-      pending.push(...read.object.parent)
+      for (const item of read.object.parent) pending.push(item)
       yield* walk(read.object.tree, '')
     }
   }

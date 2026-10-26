@@ -31,6 +31,7 @@ from mirage.core.disk.utils import open_regular
 from mirage.io.config import IOConfig
 from mirage.observe.log_entry import EVENT_CLEAR, EVENT_COMMAND, EVENT_DELETE
 from mirage.observe.observer import Observer
+from mirage.policy.builtin.output_cap import command_limits_to_json
 from mirage.policy.policies import Policies
 from mirage.policy.profile import (
     SessionProfile,
@@ -302,6 +303,10 @@ async def to_state_dict(ws: WorkspaceLike) -> dict[str, Any]:
         # mounts and lets the new workspace add its own.
         if ws._implicit_root and m.prefix == "/":
             row[MountKey.ANCHOR] = True
+        if m.command_limits:
+            row[MountKey.COMMAND_LIMITS] = command_limits_to_json(
+                m.command_limits
+            )
         mounts_state.append(row)
 
     # Only a RAM cache holds entries the snapshot can carry; a Redis
@@ -376,10 +381,9 @@ async def to_state_dict(ws: WorkspaceLike) -> dict[str, Any]:
             for name, profile in ws._profiles.items()
         },
         StateKey.PROFILE: ws._default_profile_name,
-        StateKey.COMMAND_LIMITS: {
-            name: limit.model_dump()
-            for name, limit in ws.registry.command_limits.items()
-        },
+        StateKey.COMMAND_LIMITS: command_limits_to_json(
+            ws.registry.command_limits
+        ),
     }
 
 
@@ -531,15 +535,22 @@ def build_mount_args(
                 f"write: {write.value}; the override asks write: "
                 f"{asked.value}"
             )
-        # command_limits is deliberately absent: a mount entry has never
-        # carried one, so there is nothing to restore. Emitting Mount
-        # objects makes the slot exist, but filling it needs a new
-        # snapshot key, which is not this change.
+        # The mount's own limits, its "*" walk_limit among them, come back
+        # as saved unless the override names its own.
+        limits = (
+            override.command_limits
+            if isinstance(override, Mount) and override.command_limits
+            else {
+                name: Limit.model_validate(limit)
+                for name, limit in m.get(MountKey.COMMAND_LIMITS, {}).items()
+            }
+        )
         mount_args[m[MountKey.PREFIX]] = Mount(
             vfs=prov,
             mode=MountMode(m[MountKey.MODE]),
             read=read,
             write=write,
+            command_limits=limits,
             vfs_ref=ref,
             index=restore_index_config(
                 m.get(MountKey.INDEX_CONFIG),
@@ -980,9 +991,7 @@ def _construct_vfs(mount_state: dict[str, Any]) -> BaseVFS:
     if ptype in (VFSName.RAM, VFSName.DISK):
         saved = vfs_state.get(VFSStateKey.CONFIG) or {}
         knobs = {
-            key: saved[key]
-            for key in ("folder_versions", "walk_limit")
-            if key in saved
+            key: saved[key] for key in ("folder_versions",) if key in saved
         }
         for key in unknown_kwargs(cls, knobs):
             del knobs[key]

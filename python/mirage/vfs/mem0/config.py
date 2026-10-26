@@ -13,18 +13,16 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from pydantic import (
-    BaseModel,
     ConfigDict,
-    Field,
     PositiveInt,
     SecretStr,
     model_validator,
 )
 
-from mirage.vfs.constants import WALK_LIMIT
+from mirage.core.api.config import TimeoutConfig
 
 
-class Mem0Config(BaseModel):
+class Mem0Config(TimeoutConfig):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     api_key: SecretStr
@@ -44,10 +42,6 @@ class Mem0Config(BaseModel):
     """Memories fetched per request while listing the scope."""
     default_search_limit: PositiveInt = 10
     """How many results `search` returns unless the line sets `top_k`."""
-    walk_limit: int = Field(default=WALK_LIMIT, ge=-1)
-    """Most files one command walks under a folder: `grep -r`, `find` and other
-    walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is
-    refused. `-1` lifts the limit."""
 
     @model_validator(mode="after")
     def _exactly_one_entity(self) -> "Mem0Config":

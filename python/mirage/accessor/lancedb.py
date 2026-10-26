@@ -15,10 +15,12 @@
 from collections.abc import AsyncIterator, Iterable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
+from datetime import timedelta
 from functools import partial
 from typing import Any
 
 import lancedb
+from lancedb import remote
 
 from mirage.accessor.base import Accessor
 from mirage.accessor.pool import LoopClientCache
@@ -52,6 +54,12 @@ async def _open(config: LanceDBConfig) -> AsyncIterator[_Connection]:
         kwargs["region"] = config.region
         if config.host_override:
             kwargs["host_override"] = config.host_override
+        stall = timedelta(seconds=config.timeout)
+        kwargs["client_config"] = remote.ClientConfig(
+            timeout_config=remote.TimeoutConfig(
+                connect_timeout=stall, read_timeout=stall
+            )
+        )
     db = await lancedb.connect_async(config.uri, **kwargs)
     try:
         yield _Connection(db=db)

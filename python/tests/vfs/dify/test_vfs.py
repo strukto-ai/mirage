@@ -34,7 +34,7 @@ async def test_dify_vfs_is_registered_and_redacts_api_key():
     assert vfs.config.base_url == "https://api.dify.ai/v1"
     assert vfs.config.slug_metadata_name == "slug"
     assert vfs.config.max_concurrency == 10
-    assert vfs.config.request_timeout == 30.0
+    assert vfs.config.timeout == 30
     assert vfs.config.retry_attempts == 4
     assert vfs.config.retry_max_delay == 30.0
     assert vfs.accessor.config is vfs.config
@@ -47,7 +47,7 @@ async def test_dify_vfs_is_registered_and_redacts_api_key():
     assert state["config"]["dataset_id"] == "dataset-1"
     assert state["config"]["slug_metadata_name"] == "slug"
     assert state["config"]["max_concurrency"] == 10
-    assert state["config"]["request_timeout"] == 30.0
+    assert state["config"]["timeout"] == 30
     assert state["config"]["retry_attempts"] == 4
     assert state["config"]["retry_max_delay"] == 30.0
 
@@ -71,7 +71,7 @@ async def test_dify_vfs_accepts_configured_slug_metadata_name():
     "field",
     [
         "max_concurrency",
-        "request_timeout",
+        "timeout",
         "retry_attempts",
         "retry_max_delay",
     ],

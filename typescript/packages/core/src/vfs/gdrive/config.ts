@@ -18,16 +18,9 @@ import {
   redactConfigWithSchema,
   type ConfigOf,
   type RedactedConfig,
-  z,
 } from '../secrets.ts'
 
-const GDriveConfigSchema = GoogleConfigSchema.extend({
-  walkLimit: z.number().int().min(-1).optional().meta({
-    description:
-      'Most files one command walks under a folder: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit and reads every file without asking Drive full-text search, which lags writes and covers only extracted text.',
-    default: 1000,
-  }),
-})
+const GDriveConfigSchema = GoogleConfigSchema
 
 export type GDriveConfig = ConfigOf<typeof GDriveConfigSchema>
 

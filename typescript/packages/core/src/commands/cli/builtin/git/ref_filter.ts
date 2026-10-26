@@ -184,7 +184,7 @@ async function ancestry(repo: Repo, oids: readonly string[]): Promise<Set<string
   for (let oid = stack.pop(); oid !== undefined; oid = stack.pop()) {
     if (seen.has(oid)) continue
     seen.add(oid)
-    stack.push(...(await commitFacts(repo, oid)).parents)
+    for (const item of (await commitFacts(repo, oid)).parents) stack.push(item)
   }
   return seen
 }

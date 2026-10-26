@@ -12,19 +12,52 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { neon, types, type NeonQueryFunction } from '@neondatabase/serverless'
+import { neon, neonConfig, types, type NeonQueryFunction } from '@neondatabase/serverless'
 import { readAsText } from '@struktoai/mirage-core/accessor/postgres'
 import type { PgDriver, PgQueryResult } from '@struktoai/mirage-core/core/postgres/_driver'
+import { stallTimeout } from '@struktoai/mirage-core/core/api/client'
+import { DEFAULT_TIMEOUT } from '@struktoai/mirage-core/core/api/constants'
 
 interface FullResultsRow<R> {
   rows: R[]
   rowCount: number | null
 }
 
+// The seconds a query may stall, riding its fetch options to the one fetch
+// function the Neon client keeps for the whole page.
+const STALL = Symbol('stall seconds')
+
+type StallInit = RequestInit & { [STALL]?: number }
+
+/**
+ * Bound each Neon request's stalls by the seconds its query names
+ * (`stallTimeout`). The client fetches through one function for the whole
+ * page and spreads a query's `fetchOptions` into the init it hands it, so
+ * this wraps the function it finds there, once, and a request that names no
+ * seconds goes through as before.
+ */
+function boundNeonFetch(): void {
+  const found = neonConfig.fetchFunction as (typeof fetch & { [STALL]?: true }) | undefined
+  if (found?.[STALL] === true) return
+  const previous: typeof fetch = found ?? ((input, init) => fetch(input, init))
+  const bounded = (input: RequestInfo | URL, init?: StallInit): Promise<Response> => {
+    const seconds = init?.[STALL]
+    return seconds === undefined
+      ? previous(input, init)
+      : stallTimeout(seconds, previous)(input, init)
+  }
+  neonConfig.fetchFunction = Object.assign(bounded, { [STALL]: true as const })
+}
+
 export class NeonPgDriver implements PgDriver {
   private readonly sql: NeonQueryFunction<false, true>
 
-  constructor(dsn: string) {
+  /** `timeout` is the seconds each query's request may stall. */
+  constructor(
+    dsn: string,
+    private readonly timeout: number = DEFAULT_TIMEOUT,
+  ) {
+    boundNeonFetch()
     this.sql = neon(dsn, { fullResults: true, types: readAsText(types) })
   }
 
@@ -32,10 +65,9 @@ export class NeonPgDriver implements PgDriver {
     text: string,
     params?: readonly unknown[],
   ): Promise<PgQueryResult<R>> {
-    const result = (await this.sql.query(
-      text,
-      params as unknown[] | undefined,
-    )) as unknown as FullResultsRow<R>
+    const result = (await this.sql.query(text, params as unknown[] | undefined, {
+      fetchOptions: { [STALL]: this.timeout },
+    })) as unknown as FullResultsRow<R>
     return { rows: result.rows, rowCount: result.rowCount ?? result.rows.length }
   }
 

@@ -206,7 +206,7 @@ export function unsearchedText(event: CalendarEntryRow): string {
   for (const field of SEARCHED_FIELDS) {
     const value = event[field]
     if (typeof value === 'string') {
-      kept.push(...nonPlainWords(value))
+      for (const item of nonPlainWords(value)) kept.push(item)
     }
   }
   return kept.join(' ').toLowerCase()
@@ -331,5 +331,5 @@ export async function readdir(
   const days = scopedBucket(accessor, match.slots.bucket ?? '', tz, path.virtual)
   const [timeMin, timeMax] = dayBounds(days[0] ?? '', tz, days.length)
   const events = await accessor.calendar.listEvents(calId, timeMin, timeMax, tz, accessor.timeRange)
-  return eventEntries(events, days, tz, freeBusy, size > 1, accessor.config.walkLimit >= 0)
+  return eventEntries(events, days, tz, freeBusy, size > 1, accessor.capped())
 }

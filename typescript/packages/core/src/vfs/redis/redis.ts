@@ -18,8 +18,6 @@ import { VFSName } from '../../types.ts'
 import { stripSlash } from '../../utils/slash.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 import { BaseVFS, type VFSStateBase } from '../base.ts'
-import { WALK_LIMIT } from '../constants.ts'
-import { VFSConfigError } from '../errors.ts'
 import { REDACTED_SECRET } from '../secrets.ts'
 import type { RedisStoreLike } from './store.ts'
 import type { CapacityResult, PathSpec, FileStat, SetAttrFields } from '../../types.ts'
@@ -71,14 +69,9 @@ export class RedisVFS extends BaseVFS {
   override readonly indexTtl: number = 0
   readonly store: RedisStoreLike
   override readonly accessor: RedisAccessor
-  override readonly walkLimit: number
 
-  constructor(store: RedisStoreLike, walkLimit: number = WALK_LIMIT) {
-    if (!Number.isInteger(walkLimit) || walkLimit < -1) {
-      throw new VFSConfigError('redis: walk_limit: must be an integer of -1 or more')
-    }
+  constructor(store: RedisStoreLike) {
     super()
-    this.walkLimit = walkLimit
     this.store = store
     this.accessor = new RedisAccessor(store)
   }

@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { concat } from '../../utils/bytes.ts'
+import { DEFAULT_TIMEOUT } from '../api/constants.ts'
 import type { S3Client } from '@aws-sdk/client-s3'
 import { loadOptionalPeer } from '../../utils/optional_peer.ts'
 import * as kp from '../../utils/key_prefix.ts'
@@ -85,14 +86,10 @@ export async function createS3Client(config: S3Config): Promise<S3Client> {
       ...(config.sessionToken !== undefined ? { sessionToken: config.sessionToken } : {}),
     }
   }
-  const requestHandler: Record<string, unknown> = {
-    ...(config.timeoutMs !== undefined
-      ? { connectionTimeout: config.timeoutMs, requestTimeout: config.timeoutMs }
-      : {}),
+  options.requestHandler = {
+    connectionTimeout: (config.timeout ?? DEFAULT_TIMEOUT) * 1000,
+    requestTimeout: (config.timeout ?? DEFAULT_TIMEOUT) * 1000,
     ...(config.httpAgentProvider !== undefined ? config.httpAgentProvider() : {}),
-  }
-  if (Object.keys(requestHandler).length > 0) {
-    options.requestHandler = requestHandler
   }
   return new mod.S3Client(options)
 }

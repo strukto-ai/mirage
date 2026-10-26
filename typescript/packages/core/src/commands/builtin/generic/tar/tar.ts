@@ -384,7 +384,8 @@ function openFailure(
       : [cannot(shown, 'open', String(fsStrerror(err)), who)]
   lines.push(voiced(FATAL_TRAILER, who))
   if (compression !== null) {
-    if (reading && code !== 'ENOENT') lines.push(...(EMPTY_PIPE[compression] ?? []))
+    if (reading && code !== 'ENOENT')
+      for (const item of EMPTY_PIPE[compression] ?? []) lines.push(item)
     lines.push(CHILD_STATUS.replace('{}', String(CREATE_ERROR_EXIT)), FATAL_TRAILER)
   }
   const stderr = stderrOf(lines)

@@ -20,10 +20,13 @@ import {
   type RedactedConfig,
   secretStr,
 } from '../secrets.ts'
+import { timeoutShape } from '../../core/api/config.ts'
+import { DEFAULT_TIMEOUT } from '../../core/api/constants.ts'
 
 // `dsn` is the credential, so it carries the secret marker the redactor
 // reads; the rest are the knobs python's `PostgresConfig` declares.
 const PostgresConfigSchema = z.object({
+  ...timeoutShape,
   dsn: secretStr().describe(
     "Postgres connection string. The default browser driver connects over Neon's HTTP transport, so a browser mount needs a Neon connection string.",
   ),
@@ -52,16 +55,12 @@ const PostgresConfigSchema = z.object({
         'Most bytes of `rows.jsonl` one read returns; a whole read past it is refused (`File too large`).',
       default: 10 * 1024 * 1024,
     }),
-  walkLimit: z.number().int().min(-1).optional().meta({
-    description:
-      'Most files one command walks under a folder: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit.',
-    default: 1000,
-  }),
 })
 
 export type PostgresConfig = ConfigOf<typeof PostgresConfigSchema>
 
 export interface PostgresConfigResolved {
+  timeout: number
   dsn: string
   schemas: readonly string[] | null
   defaultRowLimit: number
@@ -75,6 +74,7 @@ export function normalizePostgresConfig(input: Record<string, unknown>): Postgre
 
 export function resolvePostgresConfig(config: PostgresConfig): PostgresConfigResolved {
   return {
+    timeout: config.timeout ?? DEFAULT_TIMEOUT,
     dsn: config.dsn,
     schemas: config.schemas ?? null,
     defaultRowLimit: config.defaultRowLimit ?? 1000,

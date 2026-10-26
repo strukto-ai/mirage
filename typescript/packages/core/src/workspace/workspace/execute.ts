@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { CommandTimeoutError } from '../../errors/types.ts'
+import { LINE, lineTimeout } from '../../policy/builtin/output_cap.ts'
 import type { Runtime } from '../../runtime/base.ts'
 import { EvaluationContext, childContext } from '../evaluation.ts'
 import { ParseScope } from '../../shell/parse/scope.ts'
@@ -48,6 +50,7 @@ import { DiscardSignal, ExitSignal } from '../../shell/errors.ts'
 import { formatFsError } from '../../errors/render.ts'
 import { isFsError } from '../../errors/fs.ts'
 import {
+  atDeadline,
   hasAborted,
   makeAbortError,
   mergeSignals,
@@ -436,13 +439,31 @@ async function runPreparedLine(
   // itself; the caller's route comes back when it ends.
   const outerRouting = context.frame.routing
   try {
+    // The outermost line, recorded or not, runs under its `line` deadline,
+    // which a nested one shares: past it the tree is stopped like an abort
+    // and the line answers 124, as Python's asyncio.timeout does. The
+    // deadline is in the line's stop, the one object the tree runs on, so a
+    // nested line (`eval`) still finds the one signal its line answers to.
+    const lineSeconds =
+      options.record !== false || currentCaller().lineAbort === null
+        ? lineTimeout(env.registry.commandLimits, effectiveSession.commandLimits)
+        : null
+    const expiry = lineSeconds !== null && lineSeconds > 0 ? new AbortController() : null
+    const lineSignal = mergeSignals(options.signal, context.frame.abortSignal)
+    const stop = mergeSignals(lineSignal, expiry?.signal)
+    // Its budget runs from here, through the passes that judge the line and
+    // read its variables to whichever route runs it.
+    const deadline =
+      expiry === null || lineSeconds === null || stop === undefined
+        ? null
+        : { expiry, seconds: lineSeconds, signal: stop, start: performance.now() }
     // The line's signal, the caller's folded with the session's kill
     // channel, rides the async context so the status write can refuse an
     // orphan of this line and no other, and every status the line stamps,
     // a syntax error's or a deny's included, is the line's to put back.
     // Python sets the line writer at the same point.
     return await runWithLineAbort(
-      mergeSignals(options.signal, context.frame.abortSignal),
+      lineSignal,
       [targetSession, effectiveSession],
       frame.writer,
       async () => {
@@ -499,6 +520,7 @@ async function runPreparedLine(
               env.namespace,
               handed,
               reparse,
+              stop,
             ))
           // Placement waits on admission, judged with the line's refusal sink
           // bound, so an op a policy script makes while the line is judged is
@@ -793,6 +815,7 @@ async function runPreparedLine(
                 nested,
                 handed,
                 judged,
+                deadline,
               ),
             env.sessions,
           )
@@ -801,6 +824,7 @@ async function runPreparedLine(
           parser.release()
         }
       },
+      deadline?.signal,
     )
   } finally {
     effectiveSession.aliasView = outerView
@@ -844,6 +868,10 @@ async function runParsedLine(
   nested: NestedRefusal,
   handed: HandOff,
   judged: () => Promise<[Walked, Judged[]][]>,
+  // The top-level line's deadline: the controller its timer aborts, its
+  // seconds, the line's signal with it folded in and when its budget began;
+  // null for a nested line, or one whose deadline is lifted.
+  deadline: { expiry: AbortController; seconds: number; signal: AbortSignal; start: number } | null,
 ): Promise<ExecuteResult> {
   const effectiveSession = context.session
   const cacheFacts = env.dispatcher.captureCacheFacts()
@@ -1026,6 +1054,8 @@ async function runParsedLine(
           claimantFor(rootNode, handed),
           route,
           options.sink,
+          deadline?.seconds ?? null,
+          deadline?.start,
         )
       // The runtime's file calls are the line's, recorded as a tree's are,
       // and handed over however the run ends: a call it finished before it
@@ -1060,7 +1090,7 @@ async function runParsedLine(
           killed,
         )
       } catch (error) {
-        env.records.push(...lineRecords)
+        for (const item of lineRecords) env.records.push(item)
         if (isLine) {
           const aborted = killed?.aborted === true
           const failed = failureResult(aborted ? makeAbortError(killed) : error)
@@ -1069,7 +1099,7 @@ async function runParsedLine(
         }
         throw error
       }
-      env.records.push(...lineRecords)
+      for (const item of lineRecords) env.records.push(item)
       const refusal = result.refusal ?? nested.latest
       held = isPending(refusal)
       recordStatus(targetSession, result.exitCode)
@@ -1136,6 +1166,19 @@ async function runParsedLine(
       if (filled !== null) return filled
     }
     const runBody = async (): Promise<[ByteSource | null, IOResult, ExecutionNode]> => {
+      // atDeadline, as `timeout` arms its own: a deadline past one timer's
+      // reach is waited out in turns. What the passes before the run spent
+      // is gone from it, and a budget they spent whole stops the run before
+      // it starts, as a timer would only after a tree that never waits.
+      const left =
+        deadline === null ? 0 : deadline.seconds - (performance.now() - deadline.start) / 1000
+      if (deadline !== null && left <= 0) deadline.expiry.abort()
+      const disarm =
+        deadline === null || left <= 0
+          ? undefined
+          : atDeadline(left, () => {
+              deadline.expiry.abort()
+            })
       try {
         // The one cancellation seam, the twin of Python's run_cancellable:
         // a responsive tree unwinds at its checkpoints and reports its own
@@ -1144,7 +1187,7 @@ async function runParsedLine(
         // stop side effects and free producers, not to release the caller.
         const release = deps.parser instanceof ParseScope ? deps.parser.retain() : undefined
         const running = runCommandTree(
-          deps,
+          deadline === null ? deps : { ...deps, signal: deadline.signal },
           rootNode,
           context,
           stdin,
@@ -1157,10 +1200,13 @@ async function runParsedLine(
         // A `kill` names a signal, and what the line started gets the stop
         // bound to answer it, as Python joins the cancelled line whole.
         const runner = currentCaller().process
-        const result = await joinOrAbort(running, killed, () =>
-          (runner?.signal ?? stopSignal(killed)) === null
-            ? ABORT_JOIN_MS
-            : STOP_WAIT_SECONDS * 1000,
+        const result = await joinOrAbort(
+          running,
+          mergeSignals(killed, deadline?.expiry.signal),
+          () =>
+            (runner?.signal ?? stopSignal(killed)) === null
+              ? ABORT_JOIN_MS
+              : STOP_WAIT_SECONDS * 1000,
         )
         if (killed?.aborted === true) throw makeAbortError(killed)
         return result
@@ -1171,10 +1217,19 @@ async function runParsedLine(
         // a throw. Once the caller aborted, the line's answer is the abort,
         // whatever a leaf threw while unwinding.
         const aborted = killed?.aborted === true
-        executionFailure = { error: aborted ? makeAbortError(killed) : error }
+        const expired = !aborted && deadline?.expiry.signal.aborted === true
+        executionFailure = {
+          error: aborted
+            ? makeAbortError(killed)
+            : expired
+              ? new CommandTimeoutError(LINE, deadline.seconds)
+              : error,
+        }
         const failed = failureResult(executionFailure.error)
         if (aborted) failed.exitCode = 130
         return [null, new IOResult(failed), new ExecutionNode({ command, ...failed })]
+      } finally {
+        disarm?.()
       }
     }
     try {
@@ -1262,7 +1317,7 @@ async function runParsedLine(
   // observer op events. The command event's exit_code says whether the
   // line that emitted them succeeded. Internal evals (record:false) have
   // an empty opRecords here: their ops were accounted by the line above.
-  env.records.push(...opRecords)
+  for (const record of opRecords) env.records.push(record)
   // bash adds a line to history only when it is non-empty
   // (anything before its newline): a blank line is skipped, while a
   // whitespace-only or comment-only line is kept.

@@ -70,7 +70,12 @@ CLI_SERVICES: dict[str, tuple[str, ...]] = {
     "trello": ("trello",),
 }
 # The modules under accessor/ and core/ that serve no one service.
-SHARED_CLIENTS = ("accessor/base", "core/jq", "core/render")
+SHARED_CLIENTS = (
+    "accessor/base",
+    "core/api/constants",
+    "core/jq",
+    "core/render",
+)
 
 
 class Rule(NamedTuple):

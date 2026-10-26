@@ -89,7 +89,7 @@ async function request(
     },
     errorOf,
     retry: NO_RETRY,
-    timeoutSeconds: accessor.config.timeout,
+    timeout: accessor.config.timeout,
   })
 }
 
@@ -167,7 +167,7 @@ export async function* downloadStream(
   yield* apiStream(url(accessor, 'files', path), {
     headers: requestHeaders,
     errorOf,
-    signal: AbortSignal.timeout(Math.ceil(accessor.config.timeout * 1000)),
+    timeout: accessor.config.timeout,
   })
 }
 

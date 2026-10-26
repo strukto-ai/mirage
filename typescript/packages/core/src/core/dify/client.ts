@@ -154,7 +154,7 @@ export async function getDocumentSegments(
 ): Promise<Record<string, unknown>[]> {
   const segments: Record<string, unknown>[] = []
   for await (const pageSegments of iterSegmentPages(accessor, documentId)) {
-    segments.push(...pageSegments)
+    for (const item of pageSegments) segments.push(item)
   }
   return segments
 }

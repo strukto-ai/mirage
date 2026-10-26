@@ -47,7 +47,6 @@ class TiDBFilesystemVFS(BaseVFS):
     def __init__(self, config: TiDBFilesystemConfig) -> None:
         super().__init__()
         self.config = config
-        self.walk_limit = config.walk_limit
         self.accessor = TiDBFilesystemAccessor(self.config)
 
     async def readdir(self, path: PathSpec) -> list[FileStat]:

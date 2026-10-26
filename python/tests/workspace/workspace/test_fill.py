@@ -43,7 +43,7 @@ from mirage.secrets.errors import SecretsError
 from mirage.secrets.registry import register_secrets
 from mirage.secrets.types import ResolvedSecret
 from mirage.shell.variable import ManagedRef, ShellVar, VarAttr
-from mirage.types import HiddenVars, Visibility
+from mirage.types import HiddenVars, Limit, Visibility
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace.snapshot.state import to_state_dict
 
@@ -67,6 +67,11 @@ def counting_source(fields: dict[str, str]) -> tuple[list[str], FetchFn]:
         return ResolvedSecret(fields=dict(fields))
 
     return calls, fetch
+
+
+async def slow_fetch(config: FakeConfig, ref: str) -> ResolvedSecret:
+    await asyncio.sleep(0.3)
+    return ResolvedSecret(fields={"TOKEN": "t0"})
 
 
 def dead_source() -> FetchFn:
@@ -96,6 +101,21 @@ async def test_lazy_fetches_only_when_referenced_and_only_once():
         io = await ws.shell("echo $TOKEN")
         assert (await io.stdout_str()) == "t0\n"
         assert calls == ["r"]
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_fetch_before_the_run_spends_the_line_deadline():
+    register_secrets("fake", FakeConfig, slow_fetch)
+    ws = _ws(
+        {"TOKEN": {"from": "fake", "ref": "r"}},
+        command_limits={"line": Limit(timeout_seconds=0.2)},
+    )
+    try:
+        io = await ws.shell("echo $TOKEN")
+        assert io.exit_code == 124
+        assert "line: timed out after 0.2s" in (await io.stderr_str())
     finally:
         await ws.close()
 

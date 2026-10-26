@@ -237,7 +237,8 @@ async function duOperands(
   // An unmatched glob reaches GNU as the literal pattern, which it then
   // reports as unreadable.
   if (resolved.length === 0) {
-    missing.push(...targets.map((p): [string, string] => [p.rawPath, posixPhrase('ENOENT')]))
+    for (const item of targets.map((p): [string, string] => [p.rawPath, posixPhrase('ENOENT')]))
+      missing.push(item)
   }
   for (const path of resolved) {
     // A missing path is the diagnostic, not an error to propagate. Any
@@ -580,10 +581,10 @@ export async function du(
       mounts,
       directories,
     )
-    lines.push(...block)
+    for (const item of block) lines.push(item)
     grand += total
     if (measured === null) records = null
-    else records?.push(...measured)
+    else if (records !== null) for (const record of measured) records.push(record)
   }
   // GNU still prints the grand total when every operand failed ("0 total"), so
   // this stays outside the loop guard.

@@ -922,7 +922,7 @@ class Simplifier {
       const followed = this.followed.get(top) ?? []
       const waiting = followed.filter((parent) => this.known(parent) === null)
       if (waiting.length) {
-        stack.push(...waiting.reverse())
+        for (const item of waiting.reverse()) stack.push(item)
         continue
       }
       const out = new Set<string>()
@@ -969,7 +969,7 @@ async function* walkHistory(
       if (excluded.has(oid)) continue
       excluded.add(oid)
       const known = visited.get(oid)
-      if (known !== undefined) stack.push(...known.parents)
+      if (known !== undefined) for (const item of known.parents) stack.push(item)
       else if (!seen.has(oid)) {
         seen.add(oid)
         queue.push(await commitFacts(repo, oid))
@@ -1070,7 +1070,7 @@ function sortCommits(
     for (;;) {
       const commit = freed.length > 0 ? freed.pop() : tips[upcoming++]
       if (commit === undefined) return printed
-      freed.push(...printCommit(commit))
+      for (const item of printCommit(commit)) freed.push(item)
     }
   }
   // The ready commits on a heap keyed newest first and then earliest readied,
@@ -1373,7 +1373,7 @@ export async function select(
  */
 export function inPrintOrder(walk: Walk, flags: LogFlags): CommitFacts[] {
   const selected = walk.steps.filter((step) => step.shown).map((step) => step.commit)
-  selected.push(...walk.boundary)
+  for (const item of walk.boundary) selected.push(item)
   if (flags.reverse) selected.reverse()
   return selected
 }

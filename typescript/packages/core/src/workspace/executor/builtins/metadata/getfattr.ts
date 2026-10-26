@@ -31,6 +31,7 @@ import type { Result } from '../types.ts'
 import { GETFATTR_USAGE, attrError, attrOperands, attrUsageRefusal } from './xattr.ts'
 import { rstripSlash } from '../../../../utils/slash.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
+import { callerSignal } from '../../../../context/session_context.ts'
 
 const ENCODINGS = new Set(['text', 'hex', 'base64'])
 const DEFAULT_MATCH = '^user\\.'
@@ -57,7 +58,7 @@ export function encodeValue(value: Uint8Array, encoding: string | null): Uint8Ar
   const out: number[] = [0x22]
   for (const b of body) {
     if (b === 0 || b === 0x0a || b === 0x0d)
-      out.push(...encodeText('\\' + b.toString(8).padStart(3, '0')))
+      for (const item of encodeText('\\' + b.toString(8).padStart(3, '0'))) out.push(item)
     else if (b === 0x22 || b === 0x5c) out.push(0x5c, b)
     else out.push(b)
   }
@@ -160,7 +161,7 @@ async function fileBlock(
   let missing = false
   for (const attr of names) {
     if (!want.dump && !want.onlyValues) {
-      block.push(...encodeText(`${attr}\n`))
+      for (const item of encodeText(`${attr}\n`)) block.push(item)
       continue
     }
     let value: Uint8Array
@@ -175,7 +176,7 @@ async function fileBlock(
       missing = true
       continue
     }
-    if (want.onlyValues) out.push(...value)
+    if (want.onlyValues) for (const item of value) out.push(item)
     else block.push(...encodeText(`${attr}=`), ...encodeValue(value, want.encoding), 0x0a)
   }
   if (block.length > 0) out.push(...encodeText(`# file: ${header}\n`), ...block, 0x0a)
@@ -251,6 +252,8 @@ export async function handleGetfattr(
     ),
     readdirOp(dispatch),
     async (path) => (await dispatch('stat', path, [], { nofollow: true }))[0] as FileStat,
+    true,
+    callerSignal(),
   )
   for (const target of targets) {
     const typed = target.rawPath
@@ -282,7 +285,7 @@ export async function handleGetfattr(
         errors.push("getfattr: Removing leading '/' from absolute path names\n")
         warned = true
       }
-      out.push(...block)
+      for (const item of block) out.push(item)
       failed = failed || missing
     }
     for (const line of budget.stopped) errors.push(`getfattr: ${line}\n`)

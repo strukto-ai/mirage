@@ -14,7 +14,8 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Handed } from '../../vfs/types.ts'
-import { MountMode, type PathSpec } from '../../types.ts'
+import { ALL_COMMANDS } from '../../policy/builtin/output_cap.ts'
+import { Limit, MountMode, type PathSpec } from '../../types.ts'
 import { GmailVFS } from '../../vfs/gmail/gmail.ts'
 import { Mount } from '../../workspace/mount/spec.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
@@ -231,8 +232,12 @@ type Ran = [string, number, string[], string[]]
 
 async function onGmail(line: string, fake = new FakeGmail(), walkLimit = 1000): Promise<Ran> {
   vi.stubGlobal('fetch', fake.fetch)
-  const vfs = new CountingGmail({ accessToken: 't', apiBase: BASE, walkLimit })
-  const ws = new Workspace({ '/gmail': new Mount(vfs, { mode: MountMode.READ }) })
+  const vfs = new CountingGmail({ accessToken: 't', apiBase: BASE })
+  const limits = { [ALL_COMMANDS]: new Limit({ walkLimit }) }
+  const ws = new Workspace(
+    { '/gmail': new Mount(vfs, { mode: MountMode.READ, commandLimits: limits }) },
+    {},
+  )
   try {
     const result = await ws.shell(line)
     const reads = vfs.reads.map((name) => name.replace('.gmail.json', '')).sort()

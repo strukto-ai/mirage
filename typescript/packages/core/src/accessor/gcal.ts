@@ -21,10 +21,17 @@ import type { GCalConfig } from '../vfs/gcal/config.ts'
 export class GCalAccessor extends GoogleApiAccessor {
   readonly timeRange: TimeRange
   readonly config: GCalConfig
+  /**
+   * Whether the mount walks under a `walkLimit`, asked when a listing runs,
+   * since the mount settles its own once mounted; a listing then keeps each
+   * event's unsearched text for the search.
+   */
+  readonly capped: () => boolean
 
-  constructor(opts: { tokenManager: TokenManager; config: GCalConfig }) {
+  constructor(opts: { tokenManager: TokenManager; config: GCalConfig; capped?: () => boolean }) {
     super(opts)
     this.config = opts.config
+    this.capped = opts.capped ?? (() => true)
     this.timeRange = new TimeRange(opts.config.startTime, opts.config.endTime)
   }
 

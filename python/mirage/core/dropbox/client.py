@@ -91,7 +91,7 @@ class DropboxTokenManager(OAuthTokenManager):
     """Caches the short-lived access token, refreshing before expiry."""
 
     def __init__(self, config: DropboxConfig) -> None:
-        super().__init__(TOKEN_BUFFER_SECONDS)
+        super().__init__(TOKEN_BUFFER_SECONDS, timeout=config.timeout)
         self._config = config
         if config.endpoint:
             base = f"{config.endpoint.rstrip('/')}/2"

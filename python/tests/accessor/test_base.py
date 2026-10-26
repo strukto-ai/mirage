@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import aiohttp
 import pytest
 
 from mirage.accessor.base import Accessor, NOOPAccessor, SessionAccessor
@@ -50,6 +49,11 @@ async def test_the_context_manager_drains_the_pool():
 
 @pytest.mark.asyncio
 async def test_the_timeout_reaches_the_session():
-    acc = SessionAccessor(timeout=aiohttp.ClientTimeout(total=7))
-    assert acc.pool.get().timeout.total == 7
+    acc = SessionAccessor(timeout=7)
+    timeout = acc.pool.get().timeout
+    assert (timeout.total, timeout.sock_connect, timeout.sock_read) == (
+        None,
+        7,
+        7,
+    )
     await acc.close()

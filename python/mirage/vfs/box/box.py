@@ -81,7 +81,6 @@ class BoxVFS(BaseVFS):
     def __init__(self, config: BoxConfig) -> None:
         super().__init__()
         self.config = config
-        self.walk_limit = config.walk_limit
         self.accessor = BoxAccessor(self.config, BoxTokenManager(config))
 
     async def readdir(

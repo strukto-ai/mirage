@@ -78,7 +78,7 @@ async def test_cancel_cat_releases_stalled_attachment(
     session.close = AsyncMock()
     monkeypatch.setattr(
         "mirage.core.api.client.resolve_session",
-        lambda value: (session, False),
+        lambda value, timeout: (session, False),
     )
     ws = Workspace({"/chat": SlackVFS(config)})
     path = "/chat/channels/general__C1/2026-04-24/files/report__F1.txt"

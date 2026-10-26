@@ -16,12 +16,17 @@ import { yieldBytes } from '../../io/stream.ts'
 
 import { type CallerDispatchFn, currentCaller } from '../../context/session_context.ts'
 import type { EntryGate } from '../../policy/types.ts'
+import { ALL_COMMANDS } from '../../policy/builtin/output_cap.ts'
+import { Command } from '../../commands/config.ts'
+import { CLI, CLIHandler } from '../../commands/cli/types.ts'
+import { CommandSpec } from '../../commands/spec/types.ts'
 import type { IOResult } from '../../io/types.ts'
 import { describe, expect, it, vi } from 'vitest'
 import { materialize, OpReport, type ByteSource } from '../../io/types.ts'
 import { runWithSession } from '../../context/session_context.ts'
-import { markLost, record, revisionFor, runWithRecording, startOp } from '../../observe/context.ts'
+import { record, revisionFor, runWithRecording, startOp } from '../../observe/context.ts'
 import { MountEntry } from '../mount/mount.ts'
+import { Dispatcher } from './dispatcher.ts'
 import { BatchedRAM, dispatched, render } from '../../test-utils.ts'
 import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { POLICY_WRITE_OPS, READ_AHEAD_BYTES } from './constants.ts'
@@ -30,7 +35,6 @@ import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { BaseVFS } from '../../vfs/base.ts'
 import type { Handed } from '../../vfs/types.ts'
 import { eacces, enoent, erofs, exdev } from '../../errors/fs.ts'
-import { CommandTimeoutError } from '../../errors/types.ts'
 import type { Policy } from '../../policy/base.ts'
 import type { DispatchFn } from '../../runtime/types.ts'
 import type { Action, VfsContext, VfsResultContext } from '../../policy/types.ts'
@@ -1825,32 +1829,10 @@ class TreeCopyRAM extends RAMVFS {
  * give the loop a turn, and write the whole file back.
  */
 class SplicingRAMVFS extends RAMVFS {
-  constructor(private readonly pause = 0) {
-    super()
-  }
-
   override async pwrite(path: PathSpec, data: Uint8Array, offset: number): Promise<void> {
     const whole = await materialize(await this.read(path))
-    await new Promise((resolve) => setTimeout(resolve, this.pause))
+    await new Promise((resolve) => setTimeout(resolve, 0))
     await this.write(path, spliceWindow(whole, offset, data))
-  }
-}
-
-/** A RAM mount whose one op never answers until the test releases it. */
-class StalledRAMVFS extends RAMVFS {
-  calls = 0
-  release = (): void => undefined
-
-  constructor(stalled = 'pwrite') {
-    super()
-    Object.assign(this, {
-      [stalled]: () => {
-        this.calls += 1
-        return new Promise<void>((resolve) => {
-          this.release = resolve
-        })
-      },
-    })
   }
 }
 
@@ -1900,289 +1882,6 @@ describe('dispatch runs writers to one path one at a time', () => {
         ),
       )
       expect(DEC.decode((await ws.dispatch('read', '/b/f')) as Uint8Array)).toBe('A12B45C78D')
-    } finally {
-      await ws.close()
-    }
-  })
-
-  it('times out a writer queued behind a call that never answers', async () => {
-    // The stalled call keeps the path, since it may still write; a writer
-    // queued behind it times out on its own budget and then never runs.
-    const store = new StalledRAMVFS()
-    const ws = new Workspace(
-      {
-        '/data': [store, MountMode.WRITE, { pwrite: new Limit({ timeoutSeconds: 0.01 }) }],
-      },
-      { mode: MountMode.WRITE },
-    )
-    try {
-      await ws.dispatch('write', '/data/f', [ENC.encode('0123456789')])
-      await expect(ws.dispatch('pwrite', '/data/f', [ENC.encode('A'), 0])).rejects.toThrow()
-      await expect(ws.dispatch('pwrite', '/data/f', [ENC.encode('B'), 3])).rejects.toThrow()
-      store.release()
-      await new Promise((resolve) => setTimeout(resolve, 20))
-      expect(store.calls).toBe(1)
-    } finally {
-      store.release()
-      await ws.close()
-    }
-  })
-
-  it('lets an unmount go ahead once a stalled write has timed out', async () => {
-    // The hold outlives the timeout, the mount's activity does not: a store
-    // call that never answers must not keep the store from being removed.
-    const store = new StalledRAMVFS()
-    const ws = new Workspace(
-      {
-        '/data': [store, MountMode.WRITE, { pwrite: new Limit({ timeoutSeconds: 0.01 }) }],
-        '/other': new RAMVFS(),
-      },
-      { mode: MountMode.WRITE },
-    )
-    try {
-      await ws.dispatch('write', '/data/f', [ENC.encode('0123456789')])
-      await expect(ws.dispatch('pwrite', '/data/f', [ENC.encode('A'), 0])).rejects.toThrow()
-      await ws.unmount('/data')
-      expect(store.calls).toBe(1)
-    } finally {
-      store.release()
-      await ws.close()
-    }
-  })
-
-  it('keeps a late call off a mount that replaced its own', async () => {
-    // By the time a timed-out rename lands, its mount may be gone and
-    // another store mounted at the prefix: the late call must not touch
-    // the new mount's links.
-    const store = new StalledRAMVFS('rename')
-    const ws = new Workspace(
-      { '/data': [store, MountMode.WRITE, { rename: new Limit({ timeoutSeconds: 0.01 }) }] },
-      { mode: MountMode.WRITE },
-    )
-    try {
-      await ws.dispatch('write', '/data/a', [ENC.encode('a')])
-      await expect(
-        ws.dispatch('rename', '/data/a', [PathSpec.fromStrPath('/data/b')]),
-      ).rejects.toThrow()
-      await ws.unmount('/data')
-      ws.addMount('/data', new RAMVFS(), MountMode.WRITE)
-      await ws.dispatch('symlink', '/data/b', [], { target: 'x' })
-      store.release()
-      await new Promise((resolve) => setTimeout(resolve, 20))
-      expect(ws.namespace.isLink('/data/b')).toBe(true)
-    } finally {
-      store.release()
-      await ws.close()
-    }
-  })
-
-  it('keeps a late rename off a mount now over its destination', async () => {
-    // The source's mount stays, but a mount added under the destination
-    // after the timeout owns that name now: the late rename must not touch
-    // its links.
-    const store = new StalledRAMVFS('rename')
-    const ws = new Workspace(
-      { '/data': [store, MountMode.WRITE, { rename: new Limit({ timeoutSeconds: 0.01 }) }] },
-      { mode: MountMode.WRITE },
-    )
-    try {
-      await ws.dispatch('write', '/data/a', [ENC.encode('a')])
-      await ws.dispatch('mkdir', '/data/sub')
-      await expect(
-        ws.dispatch('rename', '/data/a', [PathSpec.fromStrPath('/data/sub/b')]),
-      ).rejects.toThrow()
-      ws.addMount('/data/sub', new RAMVFS(), MountMode.WRITE)
-      await ws.dispatch('symlink', '/data/sub/b', [], { target: 'x' })
-      store.release()
-      await new Promise((resolve) => setTimeout(resolve, 20))
-      expect(ws.namespace.isLink('/data/sub/b')).toBe(true)
-    } finally {
-      store.release()
-      await ws.close()
-    }
-  })
-
-  it('keeps the versions a mount now over a late rename destination holds', async () => {
-    // The source's mount stays, but a mount added at the destination after
-    // the timeout owns that name now: the late rename's cleanup must leave
-    // the versions kept for files read there.
-    class CachingRAMVFS extends RAMVFS {
-      override readonly cachesReads: boolean = true
-      override readonly local: boolean = false
-    }
-    const store = new StalledRAMVFS('rename')
-    const ws = new Workspace(
-      { '/data': [store, MountMode.WRITE, { rename: new Limit({ timeoutSeconds: 0.01 }) }] },
-      { mode: MountMode.WRITE },
-    )
-    try {
-      await ws.dispatch('mkdir', '/data/d')
-      await expect(
-        ws.dispatch('rename', '/data/d', [PathSpec.fromStrPath('/data/e')]),
-      ).rejects.toThrow()
-      ws.addMount('/data/e', new CachingRAMVFS(), MountMode.WRITE)
-      await ws.cache.keepFingerprints({ '/data/e/f': 'seen' })
-      store.release()
-      await new Promise((resolve) => setTimeout(resolve, 20))
-      expect((await ws.cache.fingerprints(['/data/e/f']))[0]).toBe('seen')
-    } finally {
-      store.release()
-      await ws.close()
-    }
-  })
-
-  it('keeps the version a late rename lost on', async () => {
-    // A timed-out rename whose store refuses a child's condition as it
-    // lands marks the child lost: the late cleanup keeps the version it
-    // lost on, so a retry without a read is refused again.
-    let release = (): void => undefined
-    const gate = new Promise<void>((resolve) => {
-      release = resolve
-    })
-    class LosingRAMVFS extends RAMVFS {
-      override readonly cachesReads: boolean = true
-      override readonly local: boolean = false
-      override async rename(): Promise<void> {
-        await gate
-        markLost(PathSpec.fromStrPath('/data/d/f'), 'refused')
-      }
-    }
-    const ws = new Workspace(
-      {
-        '/data': [
-          new LosingRAMVFS(),
-          MountMode.WRITE,
-          { rename: new Limit({ timeoutSeconds: 0.01 }) },
-        ],
-      },
-      { mode: MountMode.WRITE },
-    )
-    try {
-      await ws.dispatch('mkdir', '/data/d')
-      await ws.dispatch('write', '/data/d/f', [ENC.encode('f')])
-      await expect(
-        ws.dispatch('rename', '/data/d', [PathSpec.fromStrPath('/data/e')]),
-      ).rejects.toThrow()
-      release()
-      await new Promise((resolve) => setTimeout(resolve, 20))
-      expect((await ws.cache.fingerprints(['/data/d/f']))[0]).toBe('refused')
-    } finally {
-      release()
-      await ws.close()
-    }
-  })
-
-  it('lets go of a name when a rename gives up waiting for the other', async () => {
-    // The rename holds /data/f and waits for /data/g, which a stalled
-    // pwrite keeps; once the rename times out, /data/f is free again.
-    const store = new StalledRAMVFS()
-    const limit = new Limit({ timeoutSeconds: 0.01 })
-    const ws = new Workspace(
-      { '/data': [store, MountMode.WRITE, { pwrite: limit, rename: limit }] },
-      { mode: MountMode.WRITE },
-    )
-    try {
-      await ws.dispatch('write', '/data/f', [ENC.encode('f')])
-      await ws.dispatch('write', '/data/g', [ENC.encode('g')])
-      await expect(ws.dispatch('pwrite', '/data/g', [ENC.encode('G'), 0])).rejects.toThrow()
-      await expect(
-        ws.dispatch('rename', '/data/f', [PathSpec.fromStrPath('/data/g')]),
-      ).rejects.toThrow()
-      await ws.dispatch('write', '/data/f', [ENC.encode('after')])
-      expect(DEC.decode((await ws.dispatch('read', '/data/f')) as Uint8Array)).toBe('after')
-    } finally {
-      store.release()
-      await ws.close()
-    }
-  })
-
-  it('drops what a read cached once a timed-out write lands', async () => {
-    // The timeout evicts, but the store's call goes on: a read before it
-    // lands caches the old bytes, so the landing evicts again.
-    let release = (): void => undefined
-    const gate = new Promise<void>((resolve) => {
-      release = resolve
-    })
-    class LateRAMVFS extends RAMVFS {
-      override readonly cachesReads: boolean = true
-      override readonly local: boolean = false
-      held = false
-      override async write(path: PathSpec, data: Uint8Array): Promise<void> {
-        if (this.held) await gate
-        await super.write(path, data)
-      }
-    }
-    const store = new LateRAMVFS()
-    const ws = new Workspace(
-      { '/data': [store, MountMode.WRITE, { write: new Limit({ timeoutSeconds: 0.01 }) }] },
-      { mode: MountMode.WRITE },
-    )
-    try {
-      await ws.dispatch('write', '/data/f', [ENC.encode('old')])
-      store.held = true
-      await expect(ws.dispatch('write', '/data/f', [ENC.encode('new')])).rejects.toThrow()
-      expect(DEC.decode((await ws.dispatch('read', '/data/f')) as Uint8Array)).toBe('old')
-      release()
-      await new Promise((resolve) => setTimeout(resolve, 20))
-      expect(DEC.decode((await ws.dispatch('read', '/data/f')) as Uint8Array)).toBe('new')
-    } finally {
-      release()
-      await ws.close()
-    }
-  })
-
-  it('reports a call that fails after its timeout', async () => {
-    // The caller already has its timeout, so the store's own failure
-    // reaches no one else: it is reported, not dropped.
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
-    class LateFailingRAMVFS extends RAMVFS {
-      override async pwrite(): Promise<void> {
-        await new Promise((resolve) => setTimeout(resolve, 50))
-        throw new Error('store went away')
-      }
-    }
-    const ws = new Workspace(
-      {
-        '/data': [
-          new LateFailingRAMVFS(),
-          MountMode.WRITE,
-          { pwrite: new Limit({ timeoutSeconds: 0.01 }) },
-        ],
-      },
-      { mode: MountMode.WRITE },
-    )
-    try {
-      await ws.dispatch('write', '/data/f', [ENC.encode('0123456789')])
-      await expect(ws.dispatch('pwrite', '/data/f', [ENC.encode('A'), 0])).rejects.toThrow()
-      await new Promise((resolve) => setTimeout(resolve, 100))
-      expect(warn).toHaveBeenCalledTimes(1)
-      expect(String(warn.mock.calls[0]?.[0])).toContain('store went away')
-    } finally {
-      warn.mockRestore()
-      await ws.close()
-    }
-  })
-
-  it('holds the path past a timeout until the store has answered', async () => {
-    // A timeout rejects the caller but cannot stop the call: the timed-out
-    // pwrite still writes back what it read, so the next writer (a whole
-    // write, which has no timeout) must land after it, not under it.
-    const ws = new Workspace(
-      {
-        '/data': [
-          new SplicingRAMVFS(50),
-          MountMode.WRITE,
-          { pwrite: new Limit({ timeoutSeconds: 0.01 }) },
-        ],
-      },
-      { mode: MountMode.WRITE },
-    )
-    try {
-      await ws.dispatch('write', '/data/f', [ENC.encode('0123456789')])
-      await expect(ws.dispatch('pwrite', '/data/f', [ENC.encode('A'), 0])).rejects.toThrow()
-      await ws.dispatch('write', '/data/f', [ENC.encode('XXXXXXXXXX')])
-      await new Promise((resolve) => setTimeout(resolve, 100))
-      expect(DEC.decode((await ws.dispatch('read', '/data/f')) as Uint8Array)).toBe('XXXXXXXXXX')
     } finally {
       await ws.close()
     }
@@ -2294,31 +1993,6 @@ describe('a streamed read', () => {
       const got = await ws.dispatch('read', TAPE, [], { ...window, stream: true })
       expect(got).toBeInstanceOf(Uint8Array)
       expect(tape.reads).toBe(1)
-    } finally {
-      await ws.close()
-    }
-  })
-
-  it('gives each pull the whole timeout', async () => {
-    const tape = new Tape()
-    tape.delay = 50
-    const ws = new Workspace(
-      { '/tape': [tape, MountMode.WRITE, { read: new Limit({ timeoutSeconds: 0.2 }) }] },
-      { mode: MountMode.WRITE },
-    )
-    try {
-      const stream = await ws.dispatch('read', TAPE, [], { stream: true })
-      const got: Uint8Array[] = []
-      for await (const chunk of stream as AsyncIterable<Uint8Array>) {
-        got.push(chunk)
-        await sleep(100)
-      }
-      expect(got).toHaveLength(5)
-      tape.files.set('b.txt', tape.files.get('a.txt') ?? new Uint8Array())
-      tape.delay = 500
-      await expect(
-        ws.dispatch('read', '/tape/b.txt', [], { stream: true, filetype: null }),
-      ).rejects.toBeInstanceOf(CommandTimeoutError)
     } finally {
       await ws.close()
     }
@@ -2954,10 +2628,7 @@ class SearchedRAM extends RAMVFS {
 // Python's TreeCountingRAM.
 class TreeCountingRAM extends RAMVFS {
   trees = 0
-
-  constructor() {
-    super({ walkLimit: -1 })
-  }
+  override walkLimit = -1
 
   override readTree(path: PathSpec): Promise<Map<string, FileStat> | null> {
     this.trees += 1
@@ -2968,9 +2639,7 @@ class TreeCountingRAM extends RAMVFS {
 // A RAM mount held to a `walkLimit` with no guard of its own. Twin of
 // Python's LimitedRAM.
 class LimitedRAM extends RAMVFS {
-  constructor() {
-    super({ walkLimit: 2 })
-  }
+  override walkLimit = 2
 }
 
 // The same mount with no tree read, so a walk is counted by listing each
@@ -3022,7 +2691,7 @@ class LinedRAM extends LimitedRAM {
   }
 }
 
-function limited(cls: typeof LimitedRAM, files: number): LimitedRAM {
+function limited<T extends RAMVFS>(cls: new () => T, files: number): T {
   const vfs = new cls()
   vfs.store.dirs.add('/d')
   vfs.store.dirs.add('/d/secret')
@@ -3361,6 +3030,23 @@ describe('a hide filters a one-call read', () => {
     }
   })
 
+  // Twin of test_a_glob_counts_against_the_profiles_walk_limit.
+  it("counts a glob against the profile's walk limit", async () => {
+    const ws = new Workspace({ '/ram': limited(RAMVFS, 3) })
+    try {
+      ws.createSession('capped', {
+        profile: { commandLimits: { [ALL_COMMANDS]: new Limit({ walkLimit: 2 }) } },
+      })
+      const result = await ws.shell('echo /ram/d/*; echo $?', { sessionId: 'capped' })
+      expect([result.stdoutText, new TextDecoder().decode(result.stderr)]).toEqual([
+        '126\n',
+        `echo: Argument list too long\necho: ${refused}\n`,
+      ])
+    } finally {
+      await ws.close()
+    }
+  })
+
   // Twin of test_a_named_file_counts_nothing_against_a_walk.
   it('counts a named file nothing against a walk', async () => {
     const vfs = new LimitedRAM()
@@ -3406,13 +3092,19 @@ describe('a hide filters a one-call read', () => {
   it.each(['path', 'modified'])(
     'counts each file of a planned rg against its own mount (--sort %s)',
     async (sort) => {
-      const top = new RAMVFS({ walkLimit: -1 })
+      const top = new RAMVFS()
       top.store.files.set('/t.txt', new TextEncoder().encode('hello\n'))
-      const remote = new RAMVFS({ walkLimit: 2 })
+      const remote = new RAMVFS()
       for (let i = 0; i < 4; i++) {
         remote.store.files.set(`/r${String(i)}.txt`, new TextEncoder().encode('hello\n'))
       }
-      const ws = new Workspace({ '/a': top, '/a/remote': remote })
+      const ws = new Workspace(
+        {
+          '/a': [top, MountMode.READ, { [ALL_COMMANDS]: new Limit({ walkLimit: -1 }) }],
+          '/a/remote': [remote, MountMode.READ, { [ALL_COMMANDS]: new Limit({ walkLimit: 2 }) }],
+        },
+        {},
+      )
       try {
         const out = await ws.shell(`rg --sort ${sort} -l hello /a`)
         expect([
@@ -3432,14 +3124,20 @@ describe('a hide filters a one-call read', () => {
 
   // Twin of test_a_glob_counts_each_match_against_its_own_mount.
   it.each(['cat', 'echo'])('counts each glob match against its own mount (%s)', async (command) => {
-    const top = new RAMVFS({ walkLimit: -1 })
+    const top = new RAMVFS()
     top.store.dirs.add('/b')
     top.store.files.set('/b/t.txt', new TextEncoder().encode('t\n'))
-    const remote = new RAMVFS({ walkLimit: 2 })
+    const remote = new RAMVFS()
     for (let i = 0; i < 3; i++) {
       remote.store.files.set(`/r${String(i)}.txt`, new TextEncoder().encode('r\n'))
     }
-    const ws = new Workspace({ '/a': top, '/a/remote': remote })
+    const ws = new Workspace(
+      {
+        '/a': [top, MountMode.READ, { [ALL_COMMANDS]: new Limit({ walkLimit: -1 }) }],
+        '/a/remote': [remote, MountMode.READ, { [ALL_COMMANDS]: new Limit({ walkLimit: 2 }) }],
+      },
+      {},
+    )
     const refused = '/a/*/*.txt: matches more than 2 files (walk_limit); narrow the path'
     try {
       const out = await ws.shell(`${command} /a/*/*.txt; echo $?`)
@@ -3453,13 +3151,20 @@ describe('a hide filters a one-call read', () => {
   })
 
   it('counts a glob through a link against the target mount', async () => {
-    const top = new RAMVFS({ walkLimit: -1 })
+    const top = new RAMVFS()
     top.store.dirs.add('/data')
     for (let i = 0; i < 3; i++) {
       top.store.files.set(`/data/t${String(i)}.txt`, new TextEncoder().encode('t\n'))
     }
     const ws = new Workspace(
-      { '/a': top, '/a/remote': new RAMVFS({ walkLimit: 2 }) },
+      {
+        '/a': [top, MountMode.WRITE, { [ALL_COMMANDS]: new Limit({ walkLimit: -1 }) }],
+        '/a/remote': [
+          new RAMVFS(),
+          MountMode.WRITE,
+          { [ALL_COMMANDS]: new Limit({ walkLimit: 2 }) },
+        ],
+      },
       { mode: MountMode.WRITE },
     )
     try {
@@ -3516,6 +3221,153 @@ describe('a hide filters a one-call read', () => {
         'tar: more than 2 files in scope (walk_limit); narrow the path\n',
         1,
       ])
+    } finally {
+      await ws.close()
+    }
+  })
+
+  // Twin of test_a_full_walk_follows_the_commands_walk_limit.
+  it("follows the command's walk limit on a full walk", async () => {
+    const vfs = limited(RAMVFS, 3)
+    const ws = new Workspace(
+      { '/ram': [vfs, MountMode.WRITE, { rm: new Limit({ walkLimit: 2 }) }] },
+      { mode: MountMode.WRITE },
+    )
+    try {
+      const out = await ws.shell('rm -r /ram/d')
+      expect([new TextDecoder().decode(out.stderr), out.exitCode]).toEqual([
+        'rm: more than 2 files in scope (walk_limit); narrow the path\n',
+        1,
+      ])
+    } finally {
+      await ws.close()
+    }
+    expect(vfs.store.files.size).toBe(3)
+  })
+
+  // Twin of test_a_backend_walk_rule_is_asked_within_the_commands_limit.
+  it("asks a backend's walk rule within the command's walk limit", async () => {
+    const vfs = new SearchedRAM()
+    vfs.store.dirs.add('/d')
+    for (let i = 0; i < 3; i++) {
+      vfs.store.files.set(`/d/a${String(i)}.txt`, new TextEncoder().encode('a\n'))
+    }
+    const ws = new Workspace(
+      { '/ram': [vfs, MountMode.WRITE, { rm: new Limit({ walkLimit: 2 }) }] },
+      { mode: MountMode.WRITE },
+    )
+    try {
+      const refused = await ws.shell('rm -r /ram/d')
+      expect([new TextDecoder().decode(refused.stderr), [...vfs.counted]]).toEqual([
+        'rm: more than 2 files in scope (walk_limit); narrow the path\n',
+        [],
+      ])
+      const ran = await ws.shell('rm /ram/d/a0.txt && rm -r /ram/d')
+      expect([ran.exitCode, vfs.counted]).toEqual([0, [2]])
+    } finally {
+      await ws.close()
+    }
+  })
+
+  // Twin of test_a_null_walk_limit_lifts_the_mounts.
+  it.each([
+    ['tar', 'cd /ram && tar -cf d.tar d; echo $?', '0\n'],
+    ['find', 'find /ram/d -type f | wc -l', '3\n'],
+  ])("lifts the mount's walk limit with a null one: %s", async (name, line, out) => {
+    const ws = new Workspace(
+      {
+        '/ram': [
+          limited(LimitedRAM, 3),
+          MountMode.WRITE,
+          { [name]: new Limit({ walkLimit: null }) },
+        ],
+      },
+      { mode: MountMode.WRITE },
+    )
+    try {
+      const result = await ws.shell(line)
+      expect([result.stdoutText, new TextDecoder().decode(result.stderr)]).toEqual([out, ''])
+    } finally {
+      await ws.close()
+    }
+  })
+
+  // Twin of test_a_registered_command_walks_under_its_declared_limit.
+  it('walks a registered command under its declared limit', async () => {
+    const ws = new Workspace({ '/ram': limited(RAMVFS, 3) })
+    try {
+      const mount = ws.mount('/ram')
+      const find = mount.resolveCommand('find')
+      if (find === null) throw new Error('no find')
+      mount.registerCommands([
+        new Command({
+          name: find.name,
+          spec: find.spec,
+          vfs: find.vfs,
+          filetype: find.filetype,
+          fn: find.fn,
+          aggregate: find.aggregate,
+          write: find.write,
+          limit: new Limit({ walkLimit: 2 }),
+        }),
+      ])
+      const result = await ws.shell('find /ram/d')
+      expect([result.stdoutText, new TextDecoder().decode(result.stderr), result.exitCode]).toEqual(
+        [
+          '/ram/d\n/ram/d/a0.txt\n/ram/d/a1.txt\n',
+          'find: /ram/d: stopped after 2 files (walk_limit); narrow the path\n',
+          1,
+        ],
+      )
+    } finally {
+      await ws.close()
+    }
+  })
+
+  // Twin of test_a_command_a_registered_one_runs_keeps_none_of_its_limit.
+  it("keeps none of a registered command's limit in a command it runs", async () => {
+    const tree = new CLI({
+      spec: new CommandSpec({ name: 'outer' }),
+      handlers: {
+        '': new CLIHandler({
+          fn: async (_accessor, _paths, _texts, ctx) => {
+            if (ctx.shell === undefined) throw new Error('no shell')
+            const inner = await ctx.shell('chmod -R 700 /ram/d')
+            return [inner.stdout, inner]
+          },
+          limit: new Limit({ walkLimit: -1 }),
+        }),
+      },
+    })
+    const ws = new Workspace({ '/ram': limited(LimitedRAM, 3) }, { mode: MountMode.WRITE })
+    try {
+      ws.mount('/ram').registerCommands([tree])
+      const result = await ws.shell('outer')
+      expect(new TextDecoder().decode(result.stderr)).toBe(
+        'chmod: more than 2 files in scope (walk_limit); narrow the path\n',
+      )
+    } finally {
+      await ws.close()
+    }
+  })
+
+  // Twin of test_two_mounts_of_one_vfs_settle_on_one_walk_limit.
+  it('settles two mounts of one VFS on one walk limit', async () => {
+    const capped = { [ALL_COMMANDS]: new Limit({ walkLimit: 2 }) }
+    const lone = limited(RAMVFS, 3)
+    expect(() => new Workspace({ '/a': [lone, MountMode.READ, capped], '/b': lone })).toThrow(
+      "mount /a/: walk_limit 2 differs from /b/'s 10000 on the same VFS",
+    )
+    const vfs = limited(RAMVFS, 3)
+    const ws = new Workspace({
+      '/a': [vfs, MountMode.READ, capped],
+      '/b': [vfs, MountMode.READ, capped],
+    })
+    try {
+      const result = await ws.shell('ls -R /b/d')
+      expect(new TextDecoder().decode(result.stderr)).toBe(
+        'ls: /b/d: stopped after 2 files (walk_limit); narrow the path\n',
+      )
     } finally {
       await ws.close()
     }
@@ -4040,3 +3892,85 @@ it('keeps the bytes of a copy from a pipe under file hooks', async () => {
     await ws.close()
   }
 })
+
+class StalledWriteRAM extends RAMVFS {
+  armed = false
+  calls = 0
+  release = (): void => undefined
+
+  override async write(path: PathSpec, data: ByteSource): Promise<void> {
+    if (this.armed) {
+      this.calls += 1
+      await new Promise<void>((resolve) => {
+        this.release = resolve
+      })
+    }
+    return super.write(path, data)
+  }
+}
+
+it('a write queued behind a stalled one never runs once its line is aborted', async () => {
+  // rm waits for the path's writer hold; its line's abort releases it from
+  // the queue, so the unlink never lands once the stalled write lets go.
+  const store = new StalledWriteRAM()
+  const ws = new Workspace({ '/data': [store, MountMode.WRITE] }, { mode: MountMode.WRITE })
+  ws.createSession('other')
+  try {
+    await ws.shell('echo keep > /data/f')
+    store.armed = true
+    const stalled = ws.shell('echo new > /data/f')
+    await vi.waitFor(() => {
+      expect(store.calls).toBe(1)
+    })
+    const controller = new AbortController()
+    const removing = ws.shell('rm /data/f', { sessionId: 'other', signal: controller.signal })
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    controller.abort()
+    await expect(removing).rejects.toMatchObject({ name: 'AbortError' })
+    store.armed = false
+    store.release()
+    await stalled
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(DEC.decode((await ws.shell('cat /data/f')).stdout)).toBe('new\n')
+  } finally {
+    store.release()
+    await ws.close()
+  }
+})
+
+it.each([false, true])(
+  'lands a write its line left mid-call, a mount taking its name: %s',
+  async (taken) => {
+    // The line's abort lands while the store call runs: the call still ends.
+    // Its bookkeeping runs while its name is still the mount's that ran it (a
+    // rename still moves its links); a name a mount took meanwhile is that
+    // mount's, so only the owner-checked `landed` runs.
+    const store = new StalledWriteRAM()
+    const ws = new Workspace({ '/data': [store, MountMode.WRITE] }, { mode: MountMode.WRITE })
+    const settle = vi.spyOn(
+      Dispatcher.prototype as unknown as { settleWrite: () => Promise<void> },
+      'settleWrite',
+    )
+    try {
+      await ws.shell('echo keep > /data/f')
+      store.armed = true
+      const controller = new AbortController()
+      const writing = ws.shell('echo new > /data/f', { signal: controller.signal })
+      await vi.waitFor(() => {
+        expect(store.calls).toBe(1)
+      })
+      settle.mockClear()
+      controller.abort()
+      await expect(writing).rejects.toMatchObject({ name: 'AbortError' })
+      if (taken) ws.addMount('/data/f', new RAMVFS(), MountMode.WRITE)
+      store.armed = false
+      store.release()
+      await new Promise((resolve) => setTimeout(resolve, 20))
+      expect(settle.mock.calls.length > 0).toBe(!taken)
+    } finally {
+      settle.mockRestore()
+      store.release()
+      await ws.close()
+    }
+  },
+)

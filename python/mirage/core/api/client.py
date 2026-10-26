@@ -32,6 +32,7 @@ from tenacity import (
     stop_after_attempt,
 )
 
+from mirage.core.api.constants import DEFAULT_TIMEOUT
 from mirage.core.api.errors import ResponseTooLargeError
 from mirage.io.cooperative import CHUNK_SIZE, chunks
 from mirage.types import JsonValue
@@ -111,6 +112,24 @@ class RetryPolicy:
 NO_RETRY = RetryPolicy()
 
 
+def stall_timeout(seconds: float) -> aiohttp.ClientTimeout:
+    """How long a request may go without progress.
+
+    The clock runs while connecting and waiting for the answer, and
+    restarts on every chunk of the body, so a download that keeps flowing
+    is never cut off.
+
+    Args:
+        seconds (float): the configured timeout.
+
+    Returns:
+        aiohttp.ClientTimeout: the bound, for a session.
+    """
+    return aiohttp.ClientTimeout(
+        total=None, sock_connect=seconds, sock_read=seconds
+    )
+
+
 class SessionPool:
     """One lazily created keep-alive session, recreated after close.
 
@@ -121,19 +140,19 @@ class SessionPool:
     OAuth backends, ``SessionAccessor`` for the rest.
 
     Args:
-        timeout (aiohttp.ClientTimeout | None): applied to the session
-            at creation; None takes aiohttp's default.
+        timeout (float): seconds a request on the session may go without
+            progress (``stall_timeout``).
         retry_connection (bool): allow aiohttp's automatic replay after
             a connection failure, independently of the API retry policy.
     """
 
     def __init__(
         self,
-        timeout: aiohttp.ClientTimeout | None = None,
+        timeout: float = DEFAULT_TIMEOUT,
         *,
         retry_connection: bool = True,
     ) -> None:
-        self._timeout = timeout
+        self._timeout = stall_timeout(timeout)
         self._retry_connection = retry_connection
         self._session: aiohttp.ClientSession | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
@@ -201,6 +220,7 @@ async def api_stream(
     sleep: Callable[[float], Awaitable[None]] | None = None,
     chunk_size: int = CHUNK_SIZE,
     on_response: Callable[[Mapping[str, str]], None] | None = None,
+    timeout: float = DEFAULT_TIMEOUT,
 ) -> AsyncGenerator[bytes, None]:
     """Pull a GET response in bounded chunks, closing it on early exit.
 
@@ -218,10 +238,12 @@ async def api_stream(
         on_response (Callable[[Mapping[str, str]], None] | None): told the
             answering response's headers, lower-cased, once and before the
             first chunk, so an empty body reports them too.
+        timeout (float): seconds an owned session's request may go without
+            progress; a pooled or borrowed one already carries its own.
     """
     wait = asyncio.sleep if sleep is None else sleep
     yielded = False
-    sess, own = resolve_session(session)
+    sess, own = resolve_session(session, timeout)
     try:
         for attempt in range(retry.max_retries + 1):
             last = attempt == retry.max_retries
@@ -259,7 +281,7 @@ async def api_stream(
 
 
 def resolve_session(
-    session: SessionArg, timeout: aiohttp.ClientTimeout | None = None
+    session: SessionArg, timeout: float = DEFAULT_TIMEOUT
 ) -> tuple[aiohttp.ClientSession, bool]:
     """The live session for one request, plus whether the caller owns it.
 
@@ -271,8 +293,9 @@ def resolve_session(
     Args:
         session (SessionArg): a pool to draw from, a live session to
             borrow, or None to own one for this request.
-        timeout (aiohttp.ClientTimeout | None): applied only to an owned
-            session; a pooled or borrowed one already carries its own.
+        timeout (float): seconds a request on an owned session may go
+            without progress; a pooled or borrowed one already carries
+            its own.
 
     Returns:
         tuple[aiohttp.ClientSession, bool]: the session to send on, and
@@ -282,7 +305,7 @@ def resolve_session(
         return session.get(), False
     if session is not None:
         return session, False
-    return aiohttp.ClientSession(timeout=timeout), True
+    return aiohttp.ClientSession(timeout=stall_timeout(timeout)), True
 
 
 class _RetryableStatus(Exception):
@@ -576,7 +599,7 @@ async def api_request(
     window: ByteWindow | None = None,
     max_body_bytes: int = MAX_BODY_BYTES,
     session: SessionArg = None,
-    timeout: aiohttp.ClientTimeout | None = None,
+    timeout: float = DEFAULT_TIMEOUT,
     sleep: Callable[[float], Awaitable[None]] | None = None,
 ) -> Any:
     """One round-trip against an HTTP API, with retry and error mapping.
@@ -617,8 +640,8 @@ async def api_request(
             the SessionPool it should come from -- a pool materializes
             its session only here, when the request actually sends; the
             kit opens and closes its own when absent.
-        timeout (aiohttp.ClientTimeout | None): timeout for a kit-owned
-            session; a reused session already carries its own.
+        timeout (float): seconds a kit-owned session's request may go
+            without progress; a reused session already carries its own.
         sleep (Callable[[float], Awaitable[None]] | None): the wait
             between attempts, in seconds, injectable so a test or a
             simulated clock spends no real time; None is ``asyncio.sleep``.

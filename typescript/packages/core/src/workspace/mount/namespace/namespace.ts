@@ -17,6 +17,7 @@ import {
   FileStat,
   FileType,
   LINK_TARGET_KEY,
+  type Limit,
   type MountMode,
   type PathSpec,
   type Visibility,
@@ -477,12 +478,18 @@ export class Namespace {
    * absolute path, so a link or an attr overlay below the source names a path
    * that no longer exists once the backend has moved the bytes. No backend can
    * report those entries, which is why nothing below the dispatcher can do this.
+   * Entries in a mount below stay, as purgeUnder keeps them: the mount stays
+   * where it is, so its links and overlays are still its own, whenever it was
+   * mounted. Mirrors Python's `rename_under`.
    */
   async renameUnder(src: string, dst: string): Promise<number> {
     const base = rstripSlash(src) + '/'
+    const roots = this.registry.descendantMounts(src).map((m) => rstripSlash(m.prefix))
     const moved: [string, NodeMeta][] = []
     for (const [path, meta] of this.nodeTable) {
-      if (path.startsWith(base)) moved.push([path, meta])
+      if (!path.startsWith(base)) continue
+      if (roots.some((r) => path === r || path.startsWith(r + '/'))) continue
+      moved.push([path, meta])
     }
     if (moved.length === 0) return 0
     const landing = rstripSlash(dst)
@@ -541,6 +548,11 @@ export class Namespace {
 
   mountPrefixes(): string[] {
     return this.registry.mountPrefixes()
+  }
+
+  /** The workspace's command limits, the layer under each mount's. */
+  get commandLimits(): Readonly<Record<string, Limit>> {
+    return this.registry.commandLimits
   }
 
   /**

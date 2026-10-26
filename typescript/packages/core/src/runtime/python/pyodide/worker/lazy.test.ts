@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 import { CommandSpec } from '../../../../commands/spec/types.ts'
-import { CLIHandler } from '../../../../commands/cli/types.ts'
 
 import { readFileSync } from 'node:fs'
 import { AsyncLocalStorage } from 'node:async_hooks'
@@ -216,26 +215,30 @@ describe('Pyodide lazy VFS', { timeout: 60_000 }, () => {
   })
 
   it.each([false, true])(
-    'stops a timed-out script CLI and recovers (warm worker: %s)',
+    'stops a script CLI at the line deadline and recovers (warm worker: %s)',
     async (warm) => {
       const rt = new PyodideRuntime()
       const ws = new Workspace(
         { '/data': new RAMVFS() },
-        { mode: MountMode.EXEC, runtimes: [rt, 'workspace'] },
+        {
+          mode: MountMode.EXEC,
+          runtimes: [rt, 'workspace'],
+          profiles: { short: { commandLimits: { line: new Limit({ timeoutSeconds: 0.1 }) } } },
+        },
       )
       ws.registerCli(
         'spin',
         new CLI({
           spec: new CommandSpec({ name: 'spin' }),
-          handlers: { '': new CLIHandler({ limit: new Limit({ timeoutSeconds: 0.1 }) }) },
           script: new ScriptSource('while True: pass'),
           runtime: 'pyodide',
         }),
       )
+      ws.createSession('short', { profile: 'short' })
       try {
         // Cover both cancellation during startup and an already executing guest.
         if (warm) expect((await ws.shell("python3 -c 'pass'")).exitCode).toBe(0)
-        expect((await ws.shell('spin')).exitCode).toBe(124)
+        expect((await ws.shell('spin', { sessionId: 'short' })).exitCode).toBe(124)
         const next = await ws.shell("python3 -c 'print(42)'")
         expect(next.exitCode).toBe(0)
         expect(DEC.decode(next.stdout)).toBe('42\n')

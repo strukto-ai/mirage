@@ -18,13 +18,14 @@ import {
   secretStr,
   z,
 } from '@struktoai/mirage-core/vfs/secrets'
-import { WALK_LIMIT } from '@struktoai/mirage-core/vfs/constants'
 import type { ConfigOf, RedactedConfig } from '@struktoai/mirage-core/vfs/secrets'
+import { timeoutShape } from '@struktoai/mirage-core/core/api/config'
 
 // Doubles as the himalaya CLI's configModel: parse applies the same
 // defaults buildEmailConfig fills in, and secretStr marks the password
 // for snapshot redaction.
 export const EmailConfigSchema = z.object({
+  ...timeoutShape,
   imapHost: z.string().describe('IMAP server hostname.'),
   imapPort: z.number().default(993).describe('IMAP server port.'),
   smtpHost: z.string().describe('SMTP server hostname `himalaya` sends mail through.'),
@@ -48,11 +49,6 @@ export const EmailConfigSchema = z.object({
     .describe(
       "How many of a folder's newest messages the mount lists and `grep` searches, and the window `himalaya envelope list` and `search` page through.",
     ),
-  walkLimit: z.number().int().min(-1).default(WALK_LIMIT).meta({
-    description:
-      'Most files one command walks under a folder: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit and reads every message without asking the server (IMAP `SEARCH TEXT`), which searches headers and body, not the mounted JSON.',
-    default: 1000,
-  }),
   /**
    * Upstream himalaya's message.send.save-copy, whose default is true
    * since pimalaya/himalaya#536.
@@ -93,9 +89,9 @@ export function buildEmailConfig(input: EmailConfigInput): EmailConfig {
     password: input.password,
     useSsl: input.useSsl ?? true,
     maxMessages: input.maxMessages ?? 200,
-    walkLimit: input.walkLimit ?? WALK_LIMIT,
     saveCopy: input.saveCopy ?? true,
     sentFolder: input.sentFolder ?? null,
+    ...(input.timeout !== undefined ? { timeout: input.timeout } : {}),
   }
 }
 

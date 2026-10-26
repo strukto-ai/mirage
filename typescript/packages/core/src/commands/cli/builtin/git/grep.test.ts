@@ -13,7 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { MountMode } from '../../../../types.ts'
+import { ALL_COMMANDS } from '../../../../policy/builtin/output_cap.ts'
+import { Limit, MountMode } from '../../../../types.ts'
 import { RAMVFS } from '../../../../vfs/ram/ram.ts'
 import { Workspace } from '../../../../workspace/workspace/workspace.ts'
 import { GIT } from './index.ts'
@@ -28,7 +29,10 @@ describe('git grep past the walk limit', () => {
     ['grep -e e -- c.txt', 0, 'c.txt:three\n', ''],
     ['grep -q -e one', 0, '', ''],
   ])('git %s', async (line, code, out, err) => {
-    const ws = new Workspace({ '/repo': new RAMVFS({ walkLimit: 2 }) }, { mode: MountMode.WRITE })
+    const ws = new Workspace(
+      { '/repo': [new RAMVFS(), MountMode.WRITE, { [ALL_COMMANDS]: new Limit({ walkLimit: 2 }) }] },
+      { mode: MountMode.WRITE },
+    )
     ws.registerCli('git', GIT)
     try {
       await ws.shell(
@@ -52,7 +56,10 @@ describe('git grep over a work tree on another mount', () => {
     ['--cached ', 'a.txt:one\nc.txt:three\n0\n', ''],
   ])('git grep %s-e e', async (flag, out, err) => {
     const ws = new Workspace(
-      { '/meta': new RAMVFS({ walkLimit: -1 }), '/data': new RAMVFS({ walkLimit: 2 }) },
+      {
+        '/meta': [new RAMVFS(), MountMode.WRITE, { [ALL_COMMANDS]: new Limit({ walkLimit: -1 }) }],
+        '/data': [new RAMVFS(), MountMode.WRITE, { [ALL_COMMANDS]: new Limit({ walkLimit: 2 }) }],
+      },
       { mode: MountMode.WRITE },
     )
     ws.registerCli('git', GIT)

@@ -115,7 +115,7 @@ export async function exercise(config: { sandboxId: string; apiKey: string }): P
     {
       mode: MountMode.EXEC,
       runtimes: [cancellable, 'workspace'],
-      commandLimits: { '/home/user': { exec: new Limit({ timeoutSeconds: 5 }) } },
+      commandLimits: { line: new Limit({ timeoutSeconds: 5 }) },
     },
   )
   try {

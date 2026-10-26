@@ -189,17 +189,19 @@ describe('RemoteSandbox', () => {
       }
     }
     const box = new SlowBox({ captures: ['python3'] })
-    const guards = { python3: new Limit({ timeoutSeconds: 0.05 }) }
     const ws = new Workspace(
-      { '/data': [new RAMVFS(), MountMode.EXEC, guards] },
-      { mode: MountMode.EXEC, runtimes: [box, 'workspace'] },
+      { '/data': new RAMVFS() },
+      {
+        mode: MountMode.EXEC,
+        runtimes: [box, 'workspace'],
+        commandLimits: { line: new Limit({ timeoutSeconds: 0.05 }) },
+      },
     )
     try {
-      // A captured line obeys the same command limits as any
-      // command: the mount's python3 timeout answers exit 124.
+      // A captured line runs under the line's deadline as any other line.
       const io = await ws.shell('python3 train.py')
       expect(io.exitCode).toBe(124)
-      expect(DEC.decode(io.stderr)).toContain('timed out')
+      expect(DEC.decode(io.stderr)).toContain('line: timed out after 0.05s')
     } finally {
       await ws.close()
     }

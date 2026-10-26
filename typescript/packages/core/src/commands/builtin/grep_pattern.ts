@@ -92,7 +92,7 @@ export function mergePatternList(
   if (fileData !== null && fileData.length > 0) {
     let text = decodeText(fileData)
     if (text.endsWith('\n')) text = text.slice(0, -1)
-    parts.push(...text.split('\n'))
+    for (const item of text.split('\n')) parts.push(item)
   }
   if (parts.length === 0) return null
   return parts.join('\n')

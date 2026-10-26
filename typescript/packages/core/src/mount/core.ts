@@ -705,9 +705,10 @@ export class MountCore {
   private writesOn(key: string, ctx: Handle | null): [number, Uint8Array][] {
     const out: [number, Uint8Array][] = []
     for (const other of this.openOn(key)) {
-      if (other !== ctx && !other.mode.append) out.push(...(other.writeBuf ?? []))
+      if (other !== ctx && !other.mode.append)
+        for (const item of other.writeBuf ?? []) out.push(item)
     }
-    if (ctx !== null) out.push(...(ctx.writeBuf ?? []))
+    if (ctx !== null) for (const item of ctx.writeBuf ?? []) out.push(item)
     return out
   }
 

@@ -12,12 +12,10 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import aiohttp
-from pydantic import Field, model_validator
+from pydantic import model_validator
 
 from mirage.accessor.base import SessionAccessor
 from mirage.core.msgraph.config import MsGraphConfig
-from mirage.vfs.constants import WALK_LIMIT
 
 DRIVE_TARGETS = ("drive_id", "site_id", "group_id", "user_id")
 
@@ -37,11 +35,6 @@ class OneDriveConfig(MsGraphConfig):
     """User ID or UPN whose drive the mount uses, under app-only auth."""
     key_prefix: str | None = None
     """Folder path from the drive root that the mount uses as its root."""
-    walk_limit: int = Field(default=WALK_LIMIT, ge=-1)
-    """Most files one command walks under a folder: `grep -r`, `find` and other
-    walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is
-    refused. `-1` lifts the limit and reads every file without asking Graph
-    search, which lags writes and covers only extracted text."""
 
     @model_validator(mode="after")
     def _one_drive_target(self) -> "OneDriveConfig":
@@ -63,7 +56,7 @@ class OneDriveConfig(MsGraphConfig):
 
 class OneDriveAccessor(SessionAccessor):
     def __init__(self, config: OneDriveConfig) -> None:
-        super().__init__(timeout=aiohttp.ClientTimeout(total=config.timeout))
+        super().__init__(timeout=config.timeout)
         self.config = config
         # The drive's Graph `driveType` (personal, business or
         # documentLibrary), asked once and kept: it decides whether the

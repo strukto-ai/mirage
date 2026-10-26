@@ -10,6 +10,8 @@ from mirage.context.session_context import (
     set_current_session,
 )
 from mirage.policy import Decision, Outcome, VfsContext
+from mirage.policy.builtin.output_cap import ALL_COMMANDS
+from mirage.types import Limit
 from mirage.workspace.files import Files
 from mirage.workspace.store.ram import RAMWorkspaceStateStore
 from mirage.workspace.tools.tool_operations import TOOL_NAMES, number_lines
@@ -635,7 +637,16 @@ async def test_a_path_ask_waits_on_the_host_outside_a_line():
 
 @pytest.mark.asyncio
 async def test_glob_past_the_walk_limit_says_why():
-    ops = Workspace({"/": RAMVFS(walk_limit=2)}, mode=MountMode.WRITE).tools
+    ops = Workspace(
+        {
+            "/": (
+                RAMVFS(),
+                MountMode.WRITE,
+                {ALL_COMMANDS: Limit(walk_limit=2)},
+            )
+        },
+        mode=MountMode.WRITE,
+    ).tools
     for name in "abc":
         await ops.write(f"/{name}.py", "x")
     result = await ops.glob("*.py", "/")

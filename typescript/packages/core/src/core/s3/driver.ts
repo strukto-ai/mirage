@@ -621,8 +621,8 @@ async function deletePrefixIf(conn: S3Conn, pfx: string, known: KnownVersions): 
   try {
     for await (const listed of knownPages(conn, pfx, known)) {
       const [pageLost, pageFailed] = await deleteBatch(conn, listed)
-      lost.push(...pageLost)
-      failed.push(...pageFailed)
+      for (const item of pageLost) lost.push(item)
+      for (const item of pageFailed) failed.push(item)
     }
   } catch (err) {
     raiseLostBefore(lost, err, new Map())
@@ -677,8 +677,8 @@ async function movePrefixIf(
         conn,
         moved.slice(start, start + DELETE_BATCH),
       )
-      lost.push(...batchLost)
-      failed.push(...batchFailed)
+      for (const item of batchLost) lost.push(item)
+      for (const item of batchFailed) failed.push(item)
     }
   } catch (err) {
     raiseLostBefore(lost, err, untouched)

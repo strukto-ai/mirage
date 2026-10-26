@@ -19,12 +19,9 @@ import {
   z,
 } from '@struktoai/mirage-core/vfs/secrets'
 import type { ConfigOf, RedactedConfig } from '@struktoai/mirage-core/vfs/secrets'
-import { type FieldNormalizer, secondsToMs } from '@struktoai/mirage-core/utils/normalize'
+import { timeoutShape } from '@struktoai/mirage-core/core/api/config'
 
 export const HF_ENDPOINT = 'https://huggingface.co'
-
-// python's `timeout: int = 30`, in the milliseconds this side stores.
-export const HF_TIMEOUT_MS = 30_000
 
 export function assertHfRepoId(value: string, field: string): string {
   const parts = value.split('/')
@@ -59,17 +56,8 @@ export interface HfBucketsConfig {
   bucket: string
   token?: string
   endpoint?: string
-  timeoutMs?: number
+  timeout?: number
   keyPrefix?: string
-  walkLimit?: number
-}
-
-// Python states the timeout in seconds; the redactor fills `endpoint`
-// from HF_ENDPOINT, so it is optional on the wire exactly as python's
-// default makes it.
-const HF_NORMALIZER: FieldNormalizer = {
-  rename: { timeout: 'timeoutMs' },
-  transform: { timeout: secondsToMs },
 }
 
 const HfBucketsConfigSchema = z.object({
@@ -79,22 +67,13 @@ const HfBucketsConfigSchema = z.object({
     description: 'Hub origin requests go to, for a mirror or a self-hosted Hub.',
     default: 'https://huggingface.co',
   }),
-  timeoutMs: z.number().optional().meta({
-    description:
-      "Milliseconds one Hub request may go without progress: connecting, waiting for the answer, or between two chunks of a download. `0` turns the bound off; a config's `timeout` key is read in seconds.",
-    default: 30_000,
-  }),
+  ...timeoutShape,
   keyPrefix: z
     .string()
     .optional()
     .describe(
       'Path inside the bucket that becomes the mount root; files outside it are not listed.',
     ),
-  walkLimit: z.number().int().min(-1).optional().meta({
-    description:
-      'Most files one command walks under a folder: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit.',
-    default: 1000,
-  }),
 })
 
 // Only the redacted twin derives: the schema is the resolved shape, with
@@ -112,7 +91,7 @@ export function redactHfBucketsConfig(config: HfBucketsConfig): HfBucketsConfigR
 }
 
 export function normalizeHfBucketsConfig(input: Record<string, unknown>): HfBucketsConfig {
-  const config = parseConfigWithSchema(HfBucketsConfigSchema, input, HF_NORMALIZER)
+  const config = parseConfigWithSchema(HfBucketsConfigSchema, input)
   assertHfRepoId(config.bucket, 'bucket')
   return config
 }
@@ -121,7 +100,7 @@ export interface HfRepoConfig {
   repoId: string
   token?: string
   endpoint?: string
-  timeoutMs?: number
+  timeout?: number
   keyPrefix?: string
   revision?: string
   // Whether the listing asks the Hub for each path's last commit, which
@@ -133,7 +112,6 @@ export interface HfRepoConfig {
   // dataset pays one wasted page rather than a twentyfold walk. true and
   // false force it either way.
   expandCommits?: boolean
-  walkLimit?: number
 }
 
 const HfRepoConfigSchema = z.object({
@@ -151,11 +129,7 @@ const HfRepoConfigSchema = z.object({
     description: 'Hub origin requests go to, for a mirror or a self-hosted Hub.',
     default: 'https://huggingface.co',
   }),
-  timeoutMs: z.number().optional().meta({
-    description:
-      "Milliseconds one Hub request may go without progress: connecting, waiting for the answer, or between two chunks of a download. `0` turns the bound off; a config's `timeout` key is read in seconds.",
-    default: 30_000,
-  }),
+  ...timeoutShape,
   keyPrefix: z
     .string()
     .optional()
@@ -172,11 +146,6 @@ const HfRepoConfigSchema = z.object({
     .describe(
       "Fetch each file's last commit so listings carry modification times, at 50 entries per request instead of 1000. Unset does so only when the whole repository fits in one page.",
     ),
-  walkLimit: z.number().int().min(-1).optional().meta({
-    description:
-      'Most files one command walks under a folder: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit.',
-    default: 1000,
-  }),
 })
 
 // Only the redacted twin derives: the schema is the resolved shape, with
@@ -191,7 +160,7 @@ export function redactHfRepoConfig(config: HfRepoConfig): HfRepoConfigRedacted {
 }
 
 export function normalizeHfRepoConfig(input: Record<string, unknown>): HfRepoConfig {
-  const config = parseConfigWithSchema(HfRepoConfigSchema, input, HF_NORMALIZER)
+  const config = parseConfigWithSchema(HfRepoConfigSchema, input)
   assertHfRepoRef(config.repoId, 'repo_id')
   return config
 }

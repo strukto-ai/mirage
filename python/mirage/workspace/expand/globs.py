@@ -16,9 +16,10 @@ import dataclasses
 import functools
 import posixpath
 
-from mirage.context import session_visibility
+from mirage.context import current_caller, session_visibility
 from mirage.errors.constants import WALK_ERRORS
 from mirage.errors.types import GlobLimitError
+from mirage.policy.builtin.output_cap import walk_bound
 from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import encode_text
 from mirage.shell.constants import SHOPT_DEFAULTS
@@ -728,8 +729,15 @@ async def resolve_globs(
                     resolved = kept
                 # Each match counts against the mount serving it, as a
                 # word can reach into a mount below its own or follow a
-                # link into another.
+                # link into another, and against the walk_limit every
+                # command shares there: a word expands before its
+                # command runs.
                 counts: dict[str, int] = {}
+                bounds: dict[str, int] = {}
+                session = current_caller().session
+                profile = (
+                    session.command_limits if session is not None else None
+                )
                 for match in resolved:
                     served = (
                         links.follow_parent(match.virtual)
@@ -738,7 +746,13 @@ async def resolve_globs(
                     )
                     owner = _mount_of(registry, served, mount)
                     counts[owner.prefix] = counts.get(owner.prefix, 0) + 1
-                    limit = owner.vfs.walk_limit
+                    if owner.prefix not in bounds:
+                        bounds[owner.prefix] = walk_bound(
+                            owner,
+                            workspace_limits=registry.command_limits,
+                            profile_limits=profile,
+                        )
+                    limit = bounds[owner.prefix]
                     if 0 <= limit < counts[owner.prefix]:
                         refused = GlobLimitError(
                             unmark_globs(typed.raw_path), limit

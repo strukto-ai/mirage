@@ -48,6 +48,7 @@ class MountKey(StrEnum):
     INDEX_CONFIG = "index_config"
     VFS_STATE = "vfs_state"
     ANCHOR = "anchor"
+    COMMAND_LIMITS = "command_limits"
 
 
 class CacheKey(StrEnum):

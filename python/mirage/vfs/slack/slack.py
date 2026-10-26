@@ -84,7 +84,6 @@ class SlackVFS(BaseVFS):
     def __init__(self, config: SlackConfig) -> None:
         super().__init__()
         self.config = config
-        self.walk_limit = config.walk_limit
         self.accessor = SlackAccessor(
             self.config,
             TimeRange.from_strings(config.start_time, config.end_time),

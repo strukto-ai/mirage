@@ -2,6 +2,7 @@ import pytest
 from pydantic import ValidationError
 
 from mirage.accessor.databricks_volume import DatabricksVolumeAccessor
+from mirage.core.api.client import stall_timeout
 from mirage.vfs.databricks_volume import DatabricksVolumeConfig
 
 
@@ -17,7 +18,7 @@ def test_pool_is_lazy_and_uses_configured_timeout():
     )
     assert accessor.config.host == "https://example.com"
     assert accessor.pool._session is None
-    assert accessor.pool._timeout.total == 17
+    assert accessor.pool._timeout == stall_timeout(17)
 
 
 @pytest.mark.parametrize(

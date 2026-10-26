@@ -54,7 +54,7 @@ export async function listCalendars(
   for (let i = 0; i < MAX_PAGES; i += 1) {
     const page = token !== null ? { ...base, pageToken: token } : base
     const data = await googleGet(tokenManager, url, page)
-    items.push(...rows(data))
+    for (const item of rows(data)) items.push(item)
     token = nextToken(data)
     if (token === null) break
   }
@@ -103,7 +103,7 @@ export async function listEvents(
   for (let i = 0; i < MAX_PAGES; i += 1) {
     const page = token !== null ? { ...base, pageToken: token } : base
     const data = await googleGet(tokenManager, url, page)
-    items.push(...rows(data))
+    for (const item of rows(data)) items.push(item)
     token = nextToken(data)
     if (token === null) break
   }
@@ -150,7 +150,7 @@ export async function syncEvents(
   for (let i = 0; i < MAX_PAGES; i += 1) {
     const page = token !== null ? { ...base, pageToken: token } : base
     const data = await googleGet(tokenManager, url, page)
-    items.push(...rows(data))
+    for (const item of rows(data)) items.push(item)
     token = nextToken(data)
     if (token === null) {
       const done = (data as Record<string, unknown>).nextSyncToken

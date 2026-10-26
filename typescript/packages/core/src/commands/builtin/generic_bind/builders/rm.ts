@@ -130,7 +130,7 @@ const rm: CommandFn = async (_accessor, paths, _texts, ctx) => {
               `rm: skipping '${operandSpelling(root, p)}', since it's on a different device`,
             )
           if (failures.length > 0) {
-            if (verbose) lines.push(...entryLines)
+            if (verbose) for (const item of entryLines) lines.push(item)
             continue
           }
         } else if (dirFlag) {
@@ -159,7 +159,7 @@ const rm: CommandFn = async (_accessor, paths, _texts, ctx) => {
       )
       continue
     }
-    if (verbose) lines.push(...entryLines)
+    if (verbose) for (const item of entryLines) lines.push(item)
   }
   return [formatOptionalRecords(lines), operandsIo(errors.map((line) => `${line}\n`).join(''))]
 }

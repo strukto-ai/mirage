@@ -221,7 +221,8 @@ export function unsearchedText(card: Json): string {
   )
   const kept = [new TextDecoder().decode(toJsonBytes(rest))]
   for (const [key, value] of Object.entries(normalized)) {
-    if (SEARCHED_FIELDS.has(key) && typeof value === 'string') kept.push(...nonPlainWords(value))
+    if (SEARCHED_FIELDS.has(key) && typeof value === 'string')
+      for (const item of nonPlainWords(value)) kept.push(item)
   }
   return kept.join(' ').toLowerCase()
 }

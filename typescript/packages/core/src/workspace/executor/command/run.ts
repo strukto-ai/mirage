@@ -25,7 +25,6 @@ import { envSnapshot, sessionView } from '../../session/state.ts'
 import { Files } from '../../files.ts'
 import { MountCommandUnsupported, type MountRegistry } from '../../mount/registry.ts'
 import { MountCommandAmbiguous } from '../../mount/errors.ts'
-import { ownLimit } from '../../../policy/builtin/output_cap.ts'
 import type { Runtime } from '../../../runtime/base.ts'
 import { WorkspaceRuntime } from '../../../runtime/workspace.ts'
 import type { RouteDecision } from '../../../runtime/types.ts'
@@ -230,13 +229,6 @@ export async function runOnMount(
   let flags = flagKwargs
   if (cmdName === 'find') flags = scalarFindFlags(flags)
 
-  // The profile, serving mount and workspace entries, in precedence order;
-  // the mount folds in the command's declared default and the built-in.
-  const limitOverride =
-    ownLimit(session.commandLimits, cmdName) ??
-    mount.commandLimits.get(cmdName) ??
-    ownLimit(registry.commandLimits, cmdName)
-
   const routing = context.frame.routing
   if (routing === undefined) throw new Error(`${cmdName}: run outside a routed line`)
   const [lineRuntime, denial] = lineRuntimeFor(cmdName, routing)
@@ -249,41 +241,34 @@ export async function runOnMount(
   if (signal?.aborted === true) throw makeAbortError(signal)
   const access = sessionAccess(session)
   try {
-    return await mount.runCommand(
-      cmdName,
-      paths,
-      texts,
-      flags,
-      {
-        admission: ctx.admission,
-        ...(registry.diff === undefined ? {} : { diff: registry.diff }),
-        ids: registry.ids,
-        stdin: opts.stdin ?? null,
-        cwd: PathSpec.fromStrPath(session.cwd),
-        vfs: new Files(
-          dispatch,
-          namespace === undefined ? null : namespace.readers(() => session.visibility),
-          null,
-          { follow: ctx.follow ?? null, ledger: false },
-        ),
-        env: envSnapshot(session),
-        session: sessionView(session, registry.policies, context.frame.diagnostics),
-        ...(registry.processView === undefined ? {} : { processes: registry.processView(session) }),
-        runtime: {
-          execAllowed: registry.isExecAllowed(access),
-          execPathAllowed: (virtual: string) => registry.execAllowedAt(virtual, access),
-          ...(lineRuntime !== undefined
-            ? { bound: lineRuntime, settle: () => registry.settle(lineRuntime) }
-            : {}),
-        },
-        ...(signal !== undefined ? { signal } : {}),
-        ...(ctx.executeFn !== undefined
-          ? { shell: nestedShell(ctx.executeFn, session, signal) }
+    return await mount.runCommand(cmdName, paths, texts, flags, {
+      admission: ctx.admission,
+      ...(registry.diff === undefined ? {} : { diff: registry.diff }),
+      ids: registry.ids,
+      stdin: opts.stdin ?? null,
+      cwd: PathSpec.fromStrPath(session.cwd),
+      vfs: new Files(
+        dispatch,
+        namespace === undefined ? null : namespace.readers(() => session.visibility),
+        null,
+        { follow: ctx.follow ?? null, ledger: false },
+      ),
+      env: envSnapshot(session),
+      session: sessionView(session, registry.policies, context.frame.diagnostics),
+      ...(registry.processView === undefined ? {} : { processes: registry.processView(session) }),
+      runtime: {
+        execAllowed: registry.isExecAllowed(access),
+        execPathAllowed: (virtual: string) => registry.execAllowedAt(virtual, access),
+        ...(lineRuntime !== undefined
+          ? { bound: lineRuntime, settle: () => registry.settle(lineRuntime) }
           : {}),
-        ...(opts.argv !== undefined ? { argv: opts.argv } : {}),
       },
-      limitOverride,
-    )
+      ...(signal !== undefined ? { signal } : {}),
+      ...(ctx.executeFn !== undefined
+        ? { shell: nestedShell(ctx.executeFn, session, signal) }
+        : {}),
+      ...(opts.argv !== undefined ? { argv: opts.argv } : {}),
+    })
   } catch (err) {
     // Command-owned usage errors (extra operands, missing patterns) become
     // this command's IOResult so the rest of the line keeps running, like a

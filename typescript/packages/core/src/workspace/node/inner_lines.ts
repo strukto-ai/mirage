@@ -262,7 +262,7 @@ function findInner(args: readonly Word[]): InnerLine[] {
     i += 1
     const start = i
     while (i < args.length && ![';', '+'].includes(valueAt(args, i))) i += 1
-    inner.push(...asArgv(args.slice(start, i), true))
+    for (const item of asArgv(args.slice(start, i), true)) inner.push(item)
   }
   return inner
 }

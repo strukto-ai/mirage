@@ -38,7 +38,7 @@ export async function listGuilds(
 ): Promise<DiscordGuild[]> {
   const out: DiscordGuild[] = []
   for await (const page of listGuildsStream(accessor, pageSize)) {
-    out.push(...page)
+    for (const item of page) out.push(item)
   }
   return out
 }

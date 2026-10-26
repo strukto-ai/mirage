@@ -20,10 +20,12 @@ import {
   type RedactedConfig,
   secretStr,
 } from '../../vfs/secrets.ts'
+import { timeoutShape } from '../api/config.ts'
 
 /** Credentials and bounds for one Airtable account. */
 export const AirtableConfigSchema = z
   .object({
+    ...timeoutShape,
     token: secretStr().describe(
       'Personal access token (or OAuth access token), sent as `Authorization: Bearer`.',
     ),
@@ -47,11 +49,6 @@ export const AirtableConfigSchema = z
       description:
         'Requests per second per base. Airtable allows 5 and answers a burst with a 30-second penalty.',
       default: 5,
-    }),
-    walkLimit: z.number().int().min(-1).optional().meta({
-      description:
-        'Most files one command walks under a folder: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit.',
-      default: 1000,
     }),
   })
   .strict()

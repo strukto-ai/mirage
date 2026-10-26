@@ -19,9 +19,10 @@ import { SPECS } from '../../spec/index.ts'
 import { IOResult, materialize } from '../../../io/types.ts'
 import { runWithMountGate } from '../../../context/session_context.ts'
 import { BUILDERS } from './builders/index.ts'
+import { ALL_COMMANDS } from '../../../policy/builtin/output_cap.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
 import { runDispatch } from './dispatch.ts'
-import { type FileStat, MountMode, PathSpec } from '../../../types.ts'
+import { type FileStat, Limit, MountMode, PathSpec } from '../../../types.ts'
 import { BaseVFS } from '../../../vfs/base.ts'
 import type { Handed } from '../../../vfs/types.ts'
 import { eacces } from '../../../errors/fs.ts'
@@ -86,11 +87,17 @@ it.each([false, true])(
 it('charges each mount its own limit in a du walk', async () => {
   // A du that reports no measurement leaves the line to this walk.
   const enc = new TextEncoder()
-  const outer = new RAMVFS({ walkLimit: -1 })
-  const inner = new RAMVFS({ walkLimit: 2 })
+  const outer = new RAMVFS()
+  const inner = new RAMVFS()
   for (let i = 0; i < 4; i++) outer.store.files.set(`/f${String(i)}`, enc.encode('x'))
   for (let i = 0; i < 3; i++) inner.store.files.set(`/g${String(i)}`, enc.encode('y'))
-  const ws = new Workspace({ '/a': outer, '/a/b': inner }, { mode: MountMode.WRITE })
+  const ws = new Workspace(
+    {
+      '/a': [outer, MountMode.WRITE, { [ALL_COMMANDS]: new Limit({ walkLimit: -1 }) }],
+      '/a/b': [inner, MountMode.WRITE, { [ALL_COMMANDS]: new Limit({ walkLimit: 2 }) }],
+    },
+    { mode: MountMode.WRITE },
+  )
   const spec = SPECS.du
   if (spec === undefined) throw new Error('Missing spec: du')
   for (const cmd of command({

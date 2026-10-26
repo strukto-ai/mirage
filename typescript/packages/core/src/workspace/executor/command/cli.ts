@@ -37,11 +37,8 @@ import type { FollowOperands, SessionView } from '../../../view/types.ts'
 import type { Files } from '../../files.ts'
 import { flagKwargName } from '../../../commands/spec/constants.ts'
 import { UsageStyle, Argument, type FlagValue } from '../../../commands/spec/types.ts'
-import { CommandTimeoutError } from '../../../errors/types.ts'
-import { mergeSignals } from '../../../utils/abort.ts'
 import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import { closeQuietly } from '../../../io/stream.ts'
-import { maybeWithTimeout } from '../../../commands/builtin/utils/limit.ts'
 import type { CLIInstall } from '../../cli/types.ts'
 import type { MountEntry } from '../../mount/mount.ts'
 import type { SessionState } from '../../session/session.ts'
@@ -184,9 +181,6 @@ function missing(message: string): IOResult {
  * @param script the install's embedded program.
  * @param runtime the selected interpreter entry.
  * @param prog the installed head word.
- * @param timeout the limit, which an engine that blocks its event loop
- *   must interrupt itself at.
- * @param signal aborted when the limit trips.
  * @param settle settles the runtime once the program ends, however it ends.
  */
 function scriptOutput(
@@ -195,8 +189,6 @@ function scriptOutput(
   script: ScriptSource,
   runtime: LanguageRuntime,
   prog: string,
-  timeout: number | null,
-  signal: AbortSignal,
   settle: ((runtime: Runtime) => Promise<void>) | undefined,
 ): [ByteSource | null, IOResult] {
   const env: Record<string, string> = { ...ctx.env }
@@ -214,7 +206,6 @@ function scriptOutput(
     flags,
     env,
     spec: new CommandSpec({ ...spec, name: prog }),
-    ...(timeout !== null && timeout > 0 ? { timeoutSeconds: timeout } : {}),
   }
   const run = async (output: OutputFn, errors: OutputFn, stop: AbortSignal): Promise<RunResult> => {
     try {
@@ -225,9 +216,6 @@ function scriptOutput(
         { output, errors },
       )
     } catch (err) {
-      // A limit interrupt is named after the CLI, as the workspace's own
-      // timer names it.
-      if (err instanceof CommandTimeoutError) throw new CommandTimeoutError(prog, err.seconds)
       // The interpreter is missing, not the program: 127, as the
       // interpreter command answers for the same runtime.
       if (!runtimeUnavailable(err)) throw err
@@ -240,7 +228,7 @@ function scriptOutput(
       await settle?.(runtime)
     }
   }
-  return runOutput(run, null, undefined, ctx.stdin, mergeSignals(ctx.signal, signal))
+  return runOutput(run, null, undefined, ctx.stdin, ctx.signal)
 }
 
 /**
@@ -545,7 +533,7 @@ export async function handleMountCli(
     ]
   }
   const run = (ctx: Context): Promise<CommandFnResult> =>
-    mount.runLeaf(walked.prog, cli, walked.handler, paths, walked.texts, ctx, limit)
+    mount.runLeaf(walked.prog, cli, walked.handler, paths, walked.texts, ctx)
   return runWalked(walked, session, stdin, context, limit, run)
 }
 
@@ -562,9 +550,6 @@ async function runCli(
   if (Array.isArray(walked)) return walked
   const { prog, handler: binding } = walked
 
-  // The outer timer bounds the whole invocation; the runtime deadline
-  // also interrupts engines that block their event loop. Unlike Python's
-  // asyncio cancellation, racing a promise does not stop its work.
   const limit = resolveLimit(
     prog,
     [],
@@ -573,9 +558,8 @@ async function runCli(
     context.commandLimits,
     session.commandLimits,
   )
-  const timeout = limit?.timeoutSeconds ?? null
   const script = install.cli.script
-  let start: (ctx: Context, signal: AbortSignal) => Promise<[ByteSource | null, IOResult]>
+  let start: (ctx: Context) => Promise<[ByteSource | null, IOResult]>
   if (script !== null) {
     const [runtime, refused] = selectRuntime(
       prog,
@@ -594,10 +578,8 @@ async function runCli(
         new ExecutionNode({ command: walked.cmdStr, exitCode: refused.exitCode, stderr }),
       ]
     }
-    start = (ctx, signal) =>
-      Promise.resolve(
-        scriptOutput(install.config, ctx, script, runtime, prog, timeout, signal, context.settle),
-      )
+    start = (ctx) =>
+      Promise.resolve(scriptOutput(install.config, ctx, script, runtime, prog, context.settle))
   } else {
     const fn = binding.fn
     if (fn === null) {
@@ -609,22 +591,13 @@ async function runCli(
     // Defer the call into the promise: a synchronously-thrown leaf error
     // must land in the runner's catch arms, exactly as when the call sat
     // inside its try.
-    // The leaf stops at the line's abort or its own timeout's.
-    start = (ctx, signal) =>
-      answered(
-        Promise.resolve().then(() =>
-          fn(install.accessor, walked.paths, walked.texts, {
-            ...ctx,
-            signal: mergeSignals(ctx.signal, signal) ?? signal,
-          }),
-        ),
-      )
+    start = (ctx) =>
+      answered(Promise.resolve().then(() => fn(install.accessor, walked.paths, walked.texts, ctx)))
   }
   const run = (ctx: Context): Promise<CommandFnResult> => {
-    const abort = new AbortController()
-    const body = start(ctx, abort.signal)
+    const body = start(ctx)
     // Racing a promise does not stop its work: a body, or a renderer of the
-    // rows it handed over, still running past its timeout keeps the
+    // rows it handed over, still running past its abort keeps the
     // install's accessor until the answer settles.
     const settled = install.activity.acquire()
     // The leaf's `write` is the one answer: the gate hands it to policy as
@@ -635,13 +608,12 @@ async function runCli(
     return runHandler(
       body,
       prog,
-      limit,
       { command: prog, prefixes: [], declared: binding.limit ?? null },
       cliVoice(prog),
       {
-        abort,
         settle: settled,
         ...(binding.write && dropCaches !== null ? { drop: dropCaches } : {}),
+        ...(ctx.signal !== undefined ? { signal: ctx.signal } : {}),
         ...(ctx.vfs !== undefined ? { vfs: ctx.vfs } : {}),
       },
     )
@@ -652,12 +624,9 @@ async function runCli(
 /**
  * Run a walked leaf with the one Context a leaf gets, and record it.
  *
- * The leaf's declared limit bounds the handler body and its streams,
- * exactly like mount dispatch: without the wrap a blocking leaf hangs
- * forever and an unbounded-output leaf ignores its own limits. A failure
- * the runner framed is recorded as it is; an answer gets the parse's
- * warnings ahead of its stderr and the limit's stream guards. Mirrors
- * Python's `run_walked`.
+ * The leaf's declared limit caps its output, exactly like mount dispatch.
+ * A failure the runner framed is recorded as it is; an answer gets the
+ * parse's warnings ahead of its stderr. Mirrors Python's `run_walked`.
  */
 export async function runWalked(
   walked: LeafCall,
@@ -690,12 +659,12 @@ export async function runWalked(
     env: envSnapshot(session),
     argv: walked.argv,
     spec: walked.path.length > 0 ? walked.leaf : new CommandSpec({ ...leaf, name: walked.prog }),
+    ...(context.signal !== undefined ? { signal: context.signal } : {}),
     ...(context.vfs !== undefined ? { vfs: context.vfs } : {}),
     ...(context.session !== undefined ? { session: context.session } : {}),
     ...(context.processes === undefined ? {} : { processes: context.processes }),
     ...(context.shell !== undefined ? { shell } : {}),
     ...(context.ids === undefined ? {} : { ids: context.ids }),
-    ...(context.signal === undefined ? {} : { signal: context.signal }),
   }
   let out: CommandFnResult
   try {
@@ -709,7 +678,7 @@ export async function runWalked(
   // back, so the shell stays live until that output settles.
   if (io.output !== null && !io.output.settled) io.output.callbacks.push(ended)
   else ended()
-  let stdout = answer
+  const stdout = answer
   if (io.producer === null) {
     const stderr = await io.materializeStderr()
     return [
@@ -731,8 +700,6 @@ export async function runWalked(
     const existing = await materialize(io.stderr)
     io.stderr = concat([warn, existing])
   }
-  stdout = maybeWithTimeout(stdout, limit, prog)
-  io.stderr = maybeWithTimeout(io.stderr, limit, prog)
 
   return [stdout, io, await execNode(walked.cmdStr, io, walked.paths)]
 }

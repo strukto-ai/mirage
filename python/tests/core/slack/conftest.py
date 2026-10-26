@@ -19,7 +19,8 @@ from typing import Any
 import pytest
 
 import mirage.core.slack.read as read_mod
-from mirage.types import MountMode
+from mirage.policy.builtin.output_cap import ALL_COMMANDS
+from mirage.types import Limit, MountMode
 from mirage.vfs.slack.config import SlackConfig
 from mirage.vfs.slack.slack import SlackVFS
 from mirage.workspace.workspace import Workspace
@@ -214,11 +215,17 @@ def slack(monkeypatch):
     """Run a line over a Slack mount served by a ``FakeSlack``.
 
     Returns:
-        an async ``run(line, fake=None, **config)`` giving the output, the
-        exit code, the channel days read and the queries searched.
+        an async ``run(line, fake=None, walk_limit=None, **config)`` giving
+        the output, the exit code, the channel days read and the queries
+        searched; ``walk_limit`` is the mount's ``"*"`` command limit.
     """
 
-    async def run(line: str, fake: FakeSlack | None = None, **config: Any):
+    async def run(
+        line: str,
+        fake: FakeSlack | None = None,
+        walk_limit: int | None = None,
+        **config: Any,
+    ):
         fake = fake or FakeSlack()
         for module in ("paginate", "readdir", "search"):
             monkeypatch.setattr(
@@ -237,8 +244,14 @@ def slack(monkeypatch):
 
         monkeypatch.setattr(read_mod, "get_history_jsonl", counted)
         settings = {"token": "xoxp-test"} | config
+        limits = (
+            {}
+            if walk_limit is None
+            else {ALL_COMMANDS: Limit(walk_limit=walk_limit)}
+        )
+        vfs = SlackVFS(SlackConfig(**settings))
         ws = Workspace(
-            {"/slack": SlackVFS(SlackConfig(**settings))}, mode=MountMode.READ
+            {"/slack": (vfs, MountMode.READ, limits)}, mode=MountMode.READ
         )
         try:
             result = await ws.shell(line)

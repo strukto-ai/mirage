@@ -14,8 +14,10 @@
 
 import { parseConfigWithSchema, redactConfigWithSchema, secretStr, z } from '../../vfs/secrets.ts'
 import type { ConfigOf, RedactedConfig } from '../../vfs/secrets.ts'
+import { timeoutShape } from '../api/config.ts'
 
 export const TrelloConfigSchema = z.object({
+  ...timeoutShape,
   apiKey: secretStr().describe('Trello API key.'),
   apiToken: secretStr().describe('Trello API token.'),
   workspaceId: z
@@ -34,11 +36,6 @@ export const TrelloConfigSchema = z.object({
   baseUrl: z.string().optional().meta({
     description: 'Trello API root; override to point at a fake or proxy.',
     default: 'https://api.trello.com/1',
-  }),
-  walkLimit: z.number().int().min(-1).optional().meta({
-    description:
-      "Most files one command walks under a folder: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit and reads every file without asking Trello's search, which lags writes.",
-    default: 1000,
   }),
 })
 

@@ -72,6 +72,7 @@ export class PostgresStore implements PgDriver {
     }
     const pool = new Pool({
       connectionString: this.config.dsn,
+      connectionTimeoutMillis: this.config.timeout * 1000,
       options: Object.entries(SESSION)
         .map(([name, value]) => `-c ${name}=${value}`)
         .join(' '),
