@@ -25,18 +25,21 @@ import { checkDestParents, checkRename, lookupError } from './dest.ts'
 // store keeps subdirectories as members of their own set, so moving only
 // the files leaves those behind. The phantom tree the orphans imply makes
 // the old name reappear in its parent's listing and then stat as missing
-// -- the same shape checkDestParents refuses on the way in.
+// -- the same shape checkDestParents refuses on the way in. The whole new
+// tree is written before any old key is deleted: a full Redis refuses
+// writes but still runs deletes, so a refused write must find the old tree
+// intact.
 async function moveSubtree(store: RedisAccessor['store'], s: string, d: string): Promise<void> {
   const prefix = rstripSlash(s) + '/'
   const dPrefix = rstripSlash(d) + '/'
-  for (const key of [...(await store.listDirs())].sort(compareCodePoints)) {
-    if (!key.startsWith(prefix)) continue
+  const dirs = [...(await store.listDirs())]
+    .sort(compareCodePoints)
+    .filter((k) => k.startsWith(prefix))
+  const moved: string[] = []
+  for (const key of dirs) {
     const newKey = dPrefix + key.slice(prefix.length)
     const mod = await store.getModified(key)
     const attrs = await store.getAttrs(key)
-    await store.removeDir(key)
-    await store.delModified(key)
-    await store.delAttrs(key)
     await store.addDir(newKey)
     if (mod !== null) await store.setModified(newKey, mod)
     if (Object.keys(attrs).length > 0) await store.setAttrs(newKey, attrs)
@@ -48,12 +51,20 @@ async function moveSubtree(store: RedisAccessor['store'], s: string, d: string):
     if (data === null) continue
     const mod = await store.getModified(key)
     const attrs = await store.getAttrs(key)
-    await store.delFile(key)
-    await store.delModified(key)
-    await store.delAttrs(key)
     await store.setFile(newKey, data)
     if (mod !== null) await store.setModified(newKey, mod)
     if (Object.keys(attrs).length > 0) await store.setAttrs(newKey, attrs)
+    moved.push(key)
+  }
+  for (const key of moved) {
+    await store.delFile(key)
+    await store.delModified(key)
+    await store.delAttrs(key)
+  }
+  for (const key of dirs) {
+    await store.removeDir(key)
+    await store.delModified(key)
+    await store.delAttrs(key)
   }
 }
 
@@ -64,30 +75,32 @@ export async function rename(accessor: RedisAccessor, src: PathSpec, dst: PathSp
   const store = accessor.store
   await checkDestParents(store, dst, d)
   await checkRename(store, src, s, dst, d)
+  // Onto itself is a no-op: the write-then-delete below would erase it.
+  if (s === d && ((await store.hasFile(s)) || (await store.hasDir(s)))) return
   if (await store.hasFile(s)) {
     const data = await store.getFile(s)
     const mod = await store.getModified(s)
     const attrs = await store.getAttrs(s)
     if (data === null) throw enoent(src)
-    await store.delFile(s)
-    await store.delModified(s)
-    await store.delAttrs(s)
     await store.setFile(d, data)
     await store.setModified(d, mod ?? now)
     if (Object.keys(attrs).length > 0) await store.setAttrs(d, attrs)
+    await store.delFile(s)
+    await store.delModified(s)
+    await store.delAttrs(s)
     // A file has nothing beneath it: both ends take the unlink flavor.
     return
   }
   if (await store.hasDir(s)) {
     const mod = await store.getModified(s)
     const attrs = await store.getAttrs(s)
-    await store.removeDir(s)
-    await store.delModified(s)
-    await store.delAttrs(s)
     await store.addDir(d)
     await store.setModified(d, mod ?? now)
     if (Object.keys(attrs).length > 0) await store.setAttrs(d, attrs)
     await moveSubtree(store, s, d)
+    await store.removeDir(s)
+    await store.delModified(s)
+    await store.delAttrs(s)
     return
   }
   throw await lookupError(store, src, s)

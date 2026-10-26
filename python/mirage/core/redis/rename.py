@@ -33,6 +33,10 @@ async def _move_subtree(store: RedisStore, s: str, d: str) -> None:
     listing and then stat as missing -- the same shape
     ``check_dest_parents`` refuses on the way in.
 
+    The whole new tree is written before any old key is deleted: a full
+    Redis refuses writes but still runs deletes, so a refused write must
+    find the old tree intact.
+
     Args:
         store (RedisStore): the backing store.
         s (str): normalized source key.
@@ -40,33 +44,35 @@ async def _move_subtree(store: RedisStore, s: str, d: str) -> None:
     """
     prefix = s.rstrip("/") + "/"
     new_prefix = d.rstrip("/") + "/"
-    for key in sorted(await store.list_dirs()):
-        if key.startswith(prefix):
-            new_key = new_prefix + key[len(prefix) :]
-            mod = await store.get_modified(key)
-            attrs = await store.get_attrs(key)
-            await store.remove_dir(key)
-            await store.del_modified(key)
-            await store.del_attrs(key)
-            await store.add_dir(new_key)
-            if mod:
-                await store.set_modified(new_key, mod)
-            if attrs:
-                await store.set_attrs(new_key, attrs)
-    for key in await store.list_files():
-        if key.startswith(prefix):
-            new_key = new_prefix + key[len(prefix) :]
-            data = await store.get_file(key) or b""
-            mod = await store.get_modified(key)
-            attrs = await store.get_attrs(key)
-            await store.del_file(key)
-            await store.del_modified(key)
-            await store.del_attrs(key)
-            await store.set_file(new_key, data)
-            if mod:
-                await store.set_modified(new_key, mod)
-            if attrs:
-                await store.set_attrs(new_key, attrs)
+    dirs = [k for k in sorted(await store.list_dirs()) if k.startswith(prefix)]
+    files = [k for k in await store.list_files() if k.startswith(prefix)]
+    for key in dirs:
+        new_key = new_prefix + key[len(prefix) :]
+        mod = await store.get_modified(key)
+        attrs = await store.get_attrs(key)
+        await store.add_dir(new_key)
+        if mod:
+            await store.set_modified(new_key, mod)
+        if attrs:
+            await store.set_attrs(new_key, attrs)
+    for key in files:
+        new_key = new_prefix + key[len(prefix) :]
+        data = await store.get_file(key) or b""
+        mod = await store.get_modified(key)
+        attrs = await store.get_attrs(key)
+        await store.set_file(new_key, data)
+        if mod:
+            await store.set_modified(new_key, mod)
+        if attrs:
+            await store.set_attrs(new_key, attrs)
+    for key in files:
+        await store.del_file(key)
+        await store.del_modified(key)
+        await store.del_attrs(key)
+    for key in dirs:
+        await store.remove_dir(key)
+        await store.del_modified(key)
+        await store.del_attrs(key)
 
 
 async def rename(
@@ -81,27 +87,30 @@ async def rename(
     now = now_iso()
     await check_dest_parents(store, dst_spec, d)
     await check_rename(store, src_spec, s, dst_spec, d)
+    if s == d and (await store.has_file(s) or await store.has_dir(s)):
+        # Onto itself is a no-op: the write-then-delete below would erase it.
+        return
     if await store.has_file(s):
         data = await store.get_file(s) or b""
         mod = await store.get_modified(s)
         attrs = await store.get_attrs(s)
-        await store.del_file(s)
-        await store.del_modified(s)
-        await store.del_attrs(s)
         await store.set_file(d, data)
         await store.set_modified(d, mod or now)
         if attrs:
             await store.set_attrs(d, attrs)
+        await store.del_file(s)
+        await store.del_modified(s)
+        await store.del_attrs(s)
     elif await store.has_dir(s):
         mod = await store.get_modified(s)
         attrs = await store.get_attrs(s)
-        await store.remove_dir(s)
-        await store.del_modified(s)
-        await store.del_attrs(s)
         await store.add_dir(d)
         await store.set_modified(d, mod or now)
         if attrs:
             await store.set_attrs(d, attrs)
         await _move_subtree(store, s, d)
+        await store.remove_dir(s)
+        await store.del_modified(s)
+        await store.del_attrs(s)
     else:
         raise await lookup_error(store, src_spec, s)
