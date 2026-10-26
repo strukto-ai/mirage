@@ -160,12 +160,13 @@ async def test_cross_mount_cat_honors_command_default_limit(restore_defaults):
     assert "output truncated" in err
 
 
+def _find_lines(lines: int | None) -> dict[str, Limit]:
+    return {"find": Limit(max_lines=lines)} if lines else {}
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("parent,child", [(None, 2), (2, 9)])
 async def test_fan_out_uses_tightest_limit_among_mounts(parent, child):
-    def table(lines):
-        return {"find": Limit(max_lines=lines)} if lines else {}
-
     top = RAMVFS()
     sub = RAMVFS()
     top._store.dirs.add("/")
@@ -174,8 +175,8 @@ async def test_fan_out_uses_tightest_limit_among_mounts(parent, child):
     sub._store.files["/b.txt"] = b"yo\n"
     ws = Workspace(
         {
-            "/p/": (top, MountMode.WRITE, table(parent)),
-            "/p/sub/": (sub, MountMode.WRITE, table(child)),
+            "/p/": (top, MountMode.WRITE, _find_lines(parent)),
+            "/p/sub/": (sub, MountMode.WRITE, _find_lines(child)),
         },
         mode=MountMode.WRITE,
     )

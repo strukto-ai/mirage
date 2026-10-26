@@ -18,6 +18,8 @@ import { type CallerDispatchFn, currentCaller } from '../../context/session_cont
 import type { EntryGate } from '../../policy/types.ts'
 import { ALL_COMMANDS } from '../../policy/builtin/output_cap.ts'
 import { Command } from '../../commands/config.ts'
+import { CLI, CLIHandler } from '../../commands/cli/types.ts'
+import { CommandSpec } from '../../commands/spec/types.ts'
 import type { IOResult } from '../../io/types.ts'
 import { describe, expect, it, vi } from 'vitest'
 import { materialize, OpReport, type ByteSource } from '../../io/types.ts'
@@ -3315,6 +3317,33 @@ describe('a hide filters a one-call read', () => {
           'find: /ram/d: stopped after 2 files (walk_limit); narrow the path\n',
           1,
         ],
+      )
+    } finally {
+      await ws.close()
+    }
+  })
+
+  // Twin of test_a_command_a_registered_one_runs_keeps_none_of_its_limit.
+  it("keeps none of a registered command's limit in a command it runs", async () => {
+    const tree = new CLI({
+      spec: new CommandSpec({ name: 'outer' }),
+      handlers: {
+        '': new CLIHandler({
+          fn: async (_accessor, _paths, _texts, ctx) => {
+            if (ctx.shell === undefined) throw new Error('no shell')
+            const inner = await ctx.shell('chmod -R 700 /ram/d')
+            return [inner.stdout, inner]
+          },
+          limit: new Limit({ walkLimit: -1 }),
+        }),
+      },
+    })
+    const ws = new Workspace({ '/ram': limited(LimitedRAM, 3) }, { mode: MountMode.WRITE })
+    try {
+      ws.mount('/ram').registerCommands([tree])
+      const result = await ws.shell('outer')
+      expect(new TextDecoder().decode(result.stderr)).toBe(
+        'chmod: more than 2 files in scope (walk_limit); narrow the path\n',
       )
     } finally {
       await ws.close()

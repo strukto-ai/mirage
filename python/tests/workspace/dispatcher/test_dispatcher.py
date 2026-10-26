@@ -24,6 +24,8 @@ import pytest
 
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.cache.index.scope import command_scope
+from mirage.commands.cli.types import CLI, CLIHandler
+from mirage.commands.spec.types import CommandSpec
 from mirage.context import (
     Caller,
     current_caller,
@@ -3338,6 +3340,29 @@ async def test_a_registered_command_walks_under_its_declared_limit():
             b"find: /ram/d: stopped after 2 files (walk_limit); "
             b"narrow the path\n",
             1,
+        )
+
+
+async def _nested_chmod(accessor, paths, texts, ctx):
+    assert ctx.shell is not None
+    inner = await ctx.shell("chmod -R 700 /ram/d")
+    return inner.stdout, inner
+
+
+@pytest.mark.asyncio
+async def test_a_command_a_registered_one_runs_keeps_none_of_its_limit():
+    unbounded = Limit(walk_limit=-1)
+    tree = CLI(
+        spec=CommandSpec(name="outer"),
+        handlers={"": CLIHandler(fn=_nested_chmod, limit=unbounded)},
+    )
+    with Workspace(
+        {"/ram/": _limited(LimitedRAM, 3)}, mode=MountMode.WRITE
+    ) as ws:
+        ws.mount("/ram/").register_commands([tree])
+        result = await ws.shell("outer")
+        assert await result.stderr_str() == (
+            "chmod: more than 2 files in scope (walk_limit); narrow the path\n"
         )
 
 

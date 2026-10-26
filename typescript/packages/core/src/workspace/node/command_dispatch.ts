@@ -785,10 +785,12 @@ async function runArgv(
     const judging = gated !== null && (await policies.wantsFor('postCommand', sessionId))
     const watched = judging || (await policies.wantsFor('postExecute', sessionId))
     let mine: OpRecord[] = []
-    // The command's own layer of the caller: once admitted, its gate.
+    // The command's own layer of the caller: once admitted, its gate, and
+    // no declared limit until its mount binds its own, so a command a
+    // registered one runs keeps none of that one's.
     const outer = currentCaller()
     const result = await runWithCaller(
-      { ...outer, gate: gated ?? outer.gate, command: argv.name },
+      { ...outer, gate: gated ?? outer.gate, command: argv.name, declared: null },
       () =>
         commandRecords((records) => {
           mine = records

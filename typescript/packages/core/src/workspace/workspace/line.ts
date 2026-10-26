@@ -82,6 +82,8 @@ export async function runWholeLine(
   // The line's deadline in seconds; null for a line nested in one that
   // holds it.
   timeout: number | null = null,
+  // When the line's budget began (`performance.now()`).
+  start?: number,
 ): Promise<LineResult> {
   const name = commandName(command)
   const mounts = registry.allMounts()
@@ -111,6 +113,7 @@ export async function runWholeLine(
         ),
         timeout,
         LINE,
+        start,
       )
     } catch (err) {
       // A run past its deadline is stopped before its runtime settles,

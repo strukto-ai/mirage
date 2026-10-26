@@ -40,6 +40,12 @@ function brokenBootstrap(source: string): SecretEntries {
   }
 }
 
+function capped(): Mount {
+  return new Mount(new RAMVFS(), {
+    commandLimits: { [ALL_COMMANDS]: new Limit({ walkLimit: 3 }) },
+  })
+}
+
 describe('cloneWorkspaceWithOverride', () => {
   it('runs the clone on the source clock', async () => {
     const vfs = new GoogleDriveVFS({ clientId: 'c', refreshToken: 'r' })
@@ -78,10 +84,6 @@ describe('cloneWorkspaceWithOverride', () => {
   })
 
   it('keeps a mount limit unless the override names one', async () => {
-    const capped = () =>
-      new Mount(new RAMVFS(), {
-        commandLimits: { [ALL_COMMANDS]: new Limit({ walkLimit: 3 }) },
-      })
     const src = new Workspace({ '/a': capped(), '/b': capped() })
     try {
       const clone = await cloneWorkspaceWithOverride(src, {

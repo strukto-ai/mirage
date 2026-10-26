@@ -50,16 +50,21 @@ function withDeadline<T>(promise: Promise<T>, ms: number): Promise<T | typeof TI
  * Wait for `promise` until its deadline, then throw a timeout error. The call
  * itself runs on, and a stream it answers after the deadline is closed, since
  * no one reads it and it may hold the backend open (an SSH follow's remote
- * `tail`). Mirrors Python's `run_with_timeout`, whose deadline cancels the
- * call itself.
+ * `tail`). `start` is when the budget began (`performance.now()`), when work
+ * before this call already spent part of it. Mirrors Python's
+ * `run_with_timeout`, whose deadline cancels the call itself.
  */
 export async function runWithTimeout<T>(
   promise: Promise<T>,
   seconds: number | null,
   name: string,
+  start?: number,
 ): Promise<T> {
   if (seconds === null || seconds <= 0) return await promise
-  const result = await withDeadline(promise, seconds * 1000)
+  const left = seconds * 1000 - (start === undefined ? 0 : performance.now() - start)
+  // Spent before the call: a race against no time left loses to a call that
+  // settles in a microtask.
+  const result = left > 0 ? await withDeadline(promise, left) : TIMED_OUT
   if (result === TIMED_OUT) {
     void promise.then(
       async (late) => {

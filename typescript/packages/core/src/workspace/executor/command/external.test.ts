@@ -258,18 +258,18 @@ describe('external program capture', () => {
   })
 })
 
-describe('external program at the line deadline', () => {
-  function lineWs(probe: Runtime): Workspace {
-    return new Workspace(
-      { '/': new RAMVFS() },
-      {
-        mode: MountMode.EXEC,
-        runtimes: [probe],
-        commandLimits: { line: new Limit({ timeoutSeconds: 0.05 }) },
-      },
-    )
-  }
+function lineWs(probe: Runtime): Workspace {
+  return new Workspace(
+    { '/': new RAMVFS() },
+    {
+      mode: MountMode.EXEC,
+      runtimes: [probe],
+      commandLimits: { line: new Limit({ timeoutSeconds: 0.05 }) },
+    },
+  )
+}
 
+describe('external program at the line deadline', () => {
   it('aborts the process', async () => {
     const probe = new DelayedProcessProbe()
     const ws = lineWs(probe)

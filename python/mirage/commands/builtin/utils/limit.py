@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import inspect
 import logging
 from collections.abc import AsyncIterator, Awaitable
 from typing import TypeVar
@@ -29,7 +30,10 @@ T = TypeVar("T")
 
 
 async def run_with_timeout(
-    coro: Awaitable[T], seconds: float | None, name: str
+    coro: Awaitable[T],
+    seconds: float | None,
+    name: str,
+    start: float | None = None,
 ) -> T:
     """Wrap a coroutine with a deadline, mapping overrun to a timeout error.
 
@@ -40,10 +44,24 @@ async def run_with_timeout(
         coro (Awaitable[T]): the awaitable to run.
         seconds (float | None): timeout budget, or None to disable.
         name (str): command/op name for the timeout message.
+        start (float | None): the loop time the budget began, when work
+            before this call already spent part of it; None for now.
     """
     if not seconds or seconds <= 0:
         return await coro
-    deadline = asyncio.timeout(seconds)
+    if start is not None and asyncio.get_running_loop().time() >= (
+        start + seconds
+    ):
+        # Spent before the call: a deadline already past fires only at
+        # the call's first suspension, which a quick call never reaches.
+        if inspect.iscoroutine(coro):
+            coro.close()
+        raise CommandTimeoutError(name or "?", seconds)
+    deadline = (
+        asyncio.timeout(seconds)
+        if start is None
+        else asyncio.timeout_at(start + seconds)
+    )
     try:
         async with deadline:
             return await coro

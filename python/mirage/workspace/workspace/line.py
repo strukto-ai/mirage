@@ -58,6 +58,7 @@ async def run_whole_line(
     route: RouteContext | None = None,
     sink: JobConsole | None = None,
     timeout: float | None = None,
+    start: float | None = None,
 ) -> IOResult:
     """Hand the raw line to one runtime instead of walking its tree.
 
@@ -87,6 +88,7 @@ async def run_whole_line(
             its output in the result.
         timeout (float | None): the line's deadline in seconds; None for
             a line nested in one that holds it.
+        start (float | None): the loop time the line's budget began.
     """
     assert isinstance(runtime, Runtime)
     name = command_name(command)
@@ -112,6 +114,7 @@ async def run_whole_line(
                 ),
                 timeout,
                 LINE,
+                start,
             )
         finally:
             await registry.settle(runtime)

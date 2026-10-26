@@ -699,6 +699,9 @@ async def run_prepared_line(
     # The `line` deadline is the outermost line's, recorded or not; a
     # nested one runs inside it.
     top_level = is_line or line_status_writer() is None
+    # Its budget runs from here, through the passes that judge the line
+    # and read its variables to whichever route runs it.
+    budget_start = asyncio.get_running_loop().time()
     scope = RecordingScope(
         active=is_line, ledger=ws.records, clock=ws.registry.clock
     )
@@ -928,6 +931,7 @@ async def run_prepared_line(
                         if top_level
                         else None
                     ),
+                    budget_start,
                 )
                 if io.refusal is None:
                     io.refusal = nested.latest
@@ -1069,6 +1073,7 @@ async def run_prepared_line(
                     else None
                 ),
                 LINE,
+                budget_start,
             )
             # A record a nested line earned is the line's to report when
             # its own tree earned none (see NestedRefusal).

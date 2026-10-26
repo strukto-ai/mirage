@@ -858,13 +858,16 @@ async def _run_argv(
             await policies.wants_for("post_command", sid)
         )
         watched = judging or await policies.wants_for("post_execute", sid)
-        # The command's own layer of the caller: once admitted, its gate.
+        # The command's own layer of the caller: once admitted, its gate,
+        # and no declared limit until its mount binds its own, so a
+        # command a registered one runs keeps none of that one's.
         outer = current_caller()
         token = bind_caller(
             dataclasses.replace(
                 outer,
                 gate=admitted if admitted is not None else outer.gate,
                 command=argv.name,
+                declared=None,
             )
         )
         try:

@@ -451,10 +451,12 @@ async function runPreparedLine(
     const expiry = lineSeconds !== null && lineSeconds > 0 ? new AbortController() : null
     const lineSignal = mergeSignals(options.signal, context.frame.abortSignal)
     const stop = mergeSignals(lineSignal, expiry?.signal)
+    // Its budget runs from here, through the passes that judge the line and
+    // read its variables to whichever route runs it.
     const deadline =
       expiry === null || lineSeconds === null || stop === undefined
         ? null
-        : { expiry, seconds: lineSeconds, signal: stop }
+        : { expiry, seconds: lineSeconds, signal: stop, start: performance.now() }
     // The line's signal, the caller's folded with the session's kill
     // channel, rides the async context so the status write can refuse an
     // orphan of this line and no other, and every status the line stamps,
@@ -867,9 +869,9 @@ async function runParsedLine(
   handed: HandOff,
   judged: () => Promise<[Walked, Judged[]][]>,
   // The top-level line's deadline: the controller its timer aborts, its
-  // seconds, and the line's signal with it folded in; null for a nested
-  // line, or one whose deadline is lifted.
-  deadline: { expiry: AbortController; seconds: number; signal: AbortSignal } | null,
+  // seconds, the line's signal with it folded in and when its budget began;
+  // null for a nested line, or one whose deadline is lifted.
+  deadline: { expiry: AbortController; seconds: number; signal: AbortSignal; start: number } | null,
 ): Promise<ExecuteResult> {
   const effectiveSession = context.session
   const cacheFacts = env.dispatcher.captureCacheFacts()
@@ -1053,6 +1055,7 @@ async function runParsedLine(
           route,
           options.sink,
           deadline?.seconds ?? null,
+          deadline?.start,
         )
       // The runtime's file calls are the line's, recorded as a tree's are,
       // and handed over however the run ends: a call it finished before it
@@ -1164,11 +1167,16 @@ async function runParsedLine(
     }
     const runBody = async (): Promise<[ByteSource | null, IOResult, ExecutionNode]> => {
       // atDeadline, as `timeout` arms its own: a deadline past one timer's
-      // reach is waited out in turns.
+      // reach is waited out in turns. What the passes before the run spent
+      // is gone from it, and a budget they spent whole stops the run before
+      // it starts, as a timer would only after a tree that never waits.
+      const left =
+        deadline === null ? 0 : deadline.seconds - (performance.now() - deadline.start) / 1000
+      if (deadline !== null && left <= 0) deadline.expiry.abort()
       const disarm =
-        deadline === null
+        deadline === null || left <= 0
           ? undefined
-          : atDeadline(deadline.seconds, () => {
+          : atDeadline(left, () => {
               deadline.expiry.abort()
             })
       try {
