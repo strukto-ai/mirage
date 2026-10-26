@@ -16,6 +16,7 @@ import asyncio
 import json
 import logging
 import os
+import sys
 import time
 from collections.abc import Iterable
 from itertools import count
@@ -25,8 +26,11 @@ from urllib.parse import quote, unquote
 import aiofiles
 import aiofiles.os
 
-from mirage.concurrency.limiter import settle
+from mirage.concurrency.limiter import run_blocking, settle
 from mirage.workspace.record.types import generation_of
+
+if sys.platform == "darwin":
+    import fcntl
 
 logger = logging.getLogger(__name__)
 
@@ -227,7 +231,21 @@ class DiskRecordClient:
         async with aiofiles.open(tmp, "wb") as f:
             await f.write(json.dumps(fields).encode())
             await f.flush()
-            await asyncio.to_thread(os.fsync, f.fileno())
+            fd = f.fileno()
+
+            def sync() -> None:
+                # As libuv does: full sync on macOS, fsync where a volume refuses.
+                if sys.platform == "darwin":
+                    try:
+                        fcntl.fcntl(fd, fcntl.F_FULLFSYNC)
+                        return
+                    except OSError:
+                        logger.debug(
+                            "F_FULLFSYNC refused on %s", tmp, exc_info=True
+                        )
+                os.fsync(fd)
+
+            await run_blocking(sync)
         await aiofiles.os.replace(tmp, path)
 
     async def list_names(self) -> list[str]:

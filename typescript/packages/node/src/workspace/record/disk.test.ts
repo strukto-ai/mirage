@@ -178,27 +178,32 @@ describe('DiskRecordClient lock reclaim and release', () => {
   })
 
   it('puts a record on disk before renaming it in', async () => {
-    const steps: [string, bigint][] = []
+    const steps: (string | bigint)[][] = []
     vi.mocked(fs.open).mockImplementation((async (...args: Parameters<typeof fs.open>) => {
       const fh = await real.open(...args)
       const sync = fh.sync.bind(fh)
+      const close = fh.close.bind(fh)
       fh.sync = async () => {
-        steps.push(['sync', (await fh.stat({ bigint: true })).ino])
+        const held = await fh.stat({ bigint: true })
+        steps.push(['sync', held.size, held.ino])
         await sync()
+      }
+      fh.close = async () => {
+        steps.push(['close'])
+        await close()
       }
       return fh
     }) as typeof fs.open)
     vi.mocked(fs.rename).mockImplementation(async (src, dst) => {
-      steps.push(['rename', (await real.stat(src, { bigint: true })).ino])
+      const moved = await real.stat(src, { bigint: true })
+      steps.push(['rename', moved.size, moved.ino])
       await real.rename(src, dst)
     })
     const client = new DiskRecordClient(root, '')
     await client.put('k', { generation: 0 })
+    const body = BigInt(JSON.stringify({ generation: 0 }).length)
     const record = (await real.stat(client.path('k'), { bigint: true })).ino
-    expect(steps).toEqual([
-      ['sync', record],
-      ['rename', record],
-    ])
+    expect(steps).toEqual([['sync', body, record], ['close'], ['rename', body, record]])
   })
 })
 

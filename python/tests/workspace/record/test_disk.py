@@ -13,7 +13,10 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import errno
+import json
 import os
+import sys
 import threading
 import time
 from itertools import count
@@ -236,24 +239,64 @@ async def test_release_leaves_a_lock_another_writer_took(tmp_path):
 async def test_a_record_reaches_the_disk_before_it_is_renamed_in(
     tmp_path, monkeypatch
 ):
-    steps: list[tuple[str, int]] = []
-    real_fsync = os.fsync
+    steps: list[tuple[str, int, int]] = []
     real_replace = aiofiles.os.replace
 
-    def fsync(fd: int) -> None:
-        steps.append(("fsync", os.fstat(fd).st_ino))
-        real_fsync(fd)
+    def synced(fd: int) -> None:
+        held = os.fstat(fd)
+        steps.append(("sync", held.st_size, held.st_ino))
+
+    if sys.platform == "darwin":
+        real_fcntl = disk.fcntl.fcntl
+
+        def fcntl(fd: int, cmd: int, *args):
+            if cmd == disk.fcntl.F_FULLFSYNC:
+                synced(fd)
+            return real_fcntl(fd, cmd, *args)
+
+        monkeypatch.setattr(disk.fcntl, "fcntl", fcntl)
+    else:
+        real_fsync = os.fsync
+
+        def fsync(fd: int) -> None:
+            synced(fd)
+            real_fsync(fd)
+
+        monkeypatch.setattr(os, "fsync", fsync)
 
     async def replace(src: str, dst: str) -> None:
-        steps.append(("replace", os.stat(src).st_ino))
+        moved = os.stat(src)
+        steps.append(("replace", moved.st_size, moved.st_ino))
         await real_replace(src, dst)
 
-    monkeypatch.setattr(os, "fsync", fsync)
     monkeypatch.setattr(aiofiles.os, "replace", replace)
     client = DiskRecordClient(str(tmp_path), "")
     await client.put("k", {"generation": 0})
+    body = len(json.dumps({"generation": 0}))
     record = os.stat(client.path("k")).st_ino
-    assert steps == [("fsync", record), ("replace", record)]
+    assert steps == [("sync", body, record), ("replace", body, record)]
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(sys.platform != "darwin", reason="F_FULLFSYNC is macOS")
+async def test_a_volume_without_full_sync_falls_back_to_fsync(
+    tmp_path, monkeypatch
+):
+    sizes: list[int] = []
+    real_fsync = os.fsync
+
+    def refuse(fd: int, cmd: int, *args):
+        raise OSError(errno.ENOTSUP, "full sync not supported")
+
+    def fsync(fd: int) -> None:
+        sizes.append(os.fstat(fd).st_size)
+        real_fsync(fd)
+
+    monkeypatch.setattr(disk.fcntl, "fcntl", refuse)
+    monkeypatch.setattr(os, "fsync", fsync)
+    client = DiskRecordClient(str(tmp_path), "")
+    await client.put("k", {"generation": 0})
+    assert sizes == [len(json.dumps({"generation": 0}))]
 
 
 @pytest.mark.asyncio
