@@ -127,7 +127,7 @@ async def test_failed_connect_retries_on_the_next_line():
 
 @pytest.mark.asyncio
 async def test_cwd_passes_through_verbatim_and_env_merges():
-    box = RecordingSandbox(captures=("*",), config={"env": {"BASE": "1"}})
+    box = RecordingSandbox(captures=("@line",), config={"env": {"BASE": "1"}})
     cwd = PathSpec.from_str_path("/data/deep")
     ctx = Context(flags={"c": "nvidia-smi"}, env={"LINE": "2"}, cwd=cwd)
     result = await box.run_line(None, [], [], ctx)
@@ -141,7 +141,7 @@ async def test_cwd_passes_through_verbatim_and_env_merges():
 
 @pytest.mark.asyncio
 async def test_stdin_bytes_reach_exec_line():
-    box = RecordingSandbox(captures=("*",))
+    box = RecordingSandbox(captures=("@line",))
     ws = Workspace(
         {"/data": RAMVFS()}, mode=MountMode.EXEC, runtimes=[box, "workspace"]
     )
@@ -182,7 +182,7 @@ async def test_line_timeout_answers_124():
         {"/data": RAMVFS()},
         mode=MountMode.EXEC,
         runtimes=[box, "workspace"],
-        command_limits={"line": Limit(timeout_seconds=0.05)},
+        command_limits={"@line": Limit(timeout_seconds=0.05)},
     )
     try:
         # A captured whole line runs under the line deadline like a

@@ -17,7 +17,7 @@
           }
         },
         "command_limits": {
-          "line": {
+          "@line": {
             "timeout_seconds": 1
           }
         }

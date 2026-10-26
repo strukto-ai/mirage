@@ -468,7 +468,7 @@ one inside a link.
 
 Every issue is read when the word is a key of the issue JSON (`title`,
 `priority`) or a JSON literal, has a digit or only the letters a to f, which an
-id can hold, and when a search fails, returns 250 issues or finds nothing. `walk_limit: -1` in the mount's `"*"` [command limit](/home/core/output-limits) reads every file instead, since Linear indexes a write some time after it lands.
+id can hold, and when a search fails, returns 250 issues or finds nothing. `walk_limit: -1` in the mount's `"@all"` [command limit](/home/core/output-limits) reads every file instead, since Linear indexes a write some time after it lands.
 
 Members, projects, cycles and documents are listed with their whole JSON, so
 `grep -r` and `rg` list them once more and read only the files whose text holds

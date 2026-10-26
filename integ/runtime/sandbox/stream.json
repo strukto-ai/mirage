@@ -52,7 +52,7 @@
           }
         },
         "command_limits": {
-          "line": {
+          "@line": {
             "timeout_seconds": 20
           }
         }
@@ -150,7 +150,7 @@
           }
         },
         "command_limits": {
-          "line": {
+          "@line": {
             "timeout_seconds": 20
           }
         }

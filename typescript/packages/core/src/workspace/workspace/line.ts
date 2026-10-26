@@ -38,7 +38,7 @@ import { envSnapshot } from '../session/state.ts'
 import { commandName } from './utils.ts'
 import { ExecutionNode } from '../types.ts'
 import { makeAbortError } from '../../utils/abort.ts'
-import { LINE } from '../../policy/builtin/output_cap.ts'
+import { LINE_NAME } from '../../policy/builtin/output_cap.ts'
 import { concat } from '../../utils/bytes.ts'
 import { isControlFlowError } from './failure.ts'
 import { PathSpec, type Refusal } from '../../types.ts'
@@ -112,7 +112,7 @@ export async function runWholeLine(
           { kind: 'line', output, errors },
         ),
         timeout,
-        LINE,
+        LINE_NAME,
         start,
       )
     } catch (err) {

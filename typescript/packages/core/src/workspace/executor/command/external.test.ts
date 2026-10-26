@@ -266,7 +266,7 @@ function lineWs(probe: Runtime, seconds = 0.05): Workspace {
     {
       mode: MountMode.EXEC,
       runtimes: [probe],
-      commandLimits: { line: new Limit({ timeoutSeconds: seconds }) },
+      commandLimits: { '@line': new Limit({ timeoutSeconds: seconds }) },
     },
   )
 }

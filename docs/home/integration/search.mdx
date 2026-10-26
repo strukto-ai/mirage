@@ -373,7 +373,7 @@ it.
 
 Every built-in VFS starts at 1000, or 5000 on GitHub, where each file is one
 request, and 10000 on disk, RAM and OPFS. A mount's `command_limits` change it:
-the `"*"` entry, for every command, else the workspace's, sets the mount's own
+the `"@all"` entry, for every command, else the workspace's, sets the mount's own
 `walk_limit`, and an entry named for one command, such as `find`, changes only
 how far that command walks. On the VFSs above from Google Drive to GitHub, the
 mount's own `-1` also turns the service's search off, so every file is read and
@@ -394,7 +394,7 @@ no match is missed:
         )
     )
     ws = Workspace(
-        {"/slack": (slack, MountMode.READ, {"*": Limit(walk_limit=5000)})},
+        {"/slack": (slack, MountMode.READ, {"@all": Limit(walk_limit=5000)})},
         mode=MountMode.READ,
     )
     ```
@@ -408,7 +408,7 @@ no match is missed:
       searchToken: process.env.SLACK_USER_TOKEN,
     })
     const ws = new Workspace(
-      { '/slack': [slack, MountMode.READ, { '*': new Limit({ walkLimit: 5000 }) }] },
+      { '/slack': [slack, MountMode.READ, { '@all': new Limit({ walkLimit: 5000 }) }] },
       { mode: MountMode.READ },
     )
     ```
@@ -423,7 +423,7 @@ no match is missed:
           token: ${SLACK_BOT_TOKEN}
           search_token: ${SLACK_USER_TOKEN}
         command_limits:
-          "*":
+          "@all":
             walk_limit: 5000
     ```
   </Tab>

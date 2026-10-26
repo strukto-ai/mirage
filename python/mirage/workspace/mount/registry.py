@@ -624,7 +624,7 @@ class MountRegistry:
     def settle_walk_limit(self, entry: MountEntry) -> None:
         """Set the mount's ``walk_limit``, which decides how its backend
         searches (its own search API under a cap, every file without):
-        the mount's ``"*"`` entry, else the workspace's, else the
+        the mount's ``"@all"`` entry, else the workspace's, else the
         backend's default, a None one lifting the cap. A command's own
         ``walk_limit`` changes only how far that command walks. The
         mounts of one VFS share its search, so they settle on one limit.

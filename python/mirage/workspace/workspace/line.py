@@ -33,7 +33,7 @@ from mirage.policy import (
     render_deny,
     resolve_limit,
 )
-from mirage.policy.builtin.output_cap import LINE
+from mirage.policy.builtin.output_cap import LINE_NAME
 from mirage.policy.types import RouteContext
 from mirage.runtime.base import Runtime
 from mirage.runtime.mixin import LineExecutorMixin
@@ -113,7 +113,7 @@ async def run_whole_line(
                     [], [], ctx, kind="line", output=output, errors=errors
                 ),
                 timeout,
-                LINE,
+                LINE_NAME,
                 start,
             )
         finally:

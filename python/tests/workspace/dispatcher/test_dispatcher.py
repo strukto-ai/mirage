@@ -3119,7 +3119,7 @@ async def test_a_glob_past_the_walk_limit_is_refused(line, out, err):
 async def test_a_glob_counts_against_the_profiles_walk_limit():
     with Workspace({"/ram/": _limited(RAMVFS, 3)}) as ws:
         ws.create_session(
-            "capped", profile={"command_limits": {"*": {"walk_limit": 2}}}
+            "capped", profile={"command_limits": {"@all": {"walk_limit": 2}}}
         )
         result = await ws.shell("echo /ram/d/*; echo $?", session_id="capped")
         assert (await result.stdout_str(), await result.stderr_str()) == (

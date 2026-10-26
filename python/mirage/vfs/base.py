@@ -176,7 +176,7 @@ class BaseVFS:
     # tar -c, zip -r, cp -r, rm -r, chmod -R, chown -R, chgrp -R, mv to
     # another mount and diff -r of a directory holding more
     # (``before_full_walk``); -1 for no cap. This is the backend's own
-    # value: the mount's ``"*"`` command limit, else the workspace's,
+    # value: the mount's ``"@all"`` command limit, else the workspace's,
     # replaces it when the VFS is mounted.
     walk_limit: int = WALK_LIMIT
 

@@ -418,7 +418,7 @@ What Google Drive answers through its own API, so fewer files are read. [Integra
 
 `grep -rw` and
 `rg -w` read only the files Drive full-text search names; every file is read
-when the search fails or finds nothing. `walk_limit: -1` in the mount's `"*"` [command limit](/home/core/output-limits) reads every file instead, since Drive searches
+when the search fails or finds nothing. `walk_limit: -1` in the mount's `"@all"` [command limit](/home/core/output-limits) reads every file instead, since Drive searches
 the text it extracted, not the bytes `grep` reads, and indexes a write some
 time after it lands, so a file that holds the word can be left out: a Docs,
 Sheets or Slides file (its JSON keys and ids), an office file, PDF or archive,

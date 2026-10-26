@@ -223,7 +223,7 @@ describe('Pyodide lazy VFS', { timeout: 60_000 }, () => {
         {
           mode: MountMode.EXEC,
           runtimes: [rt, 'workspace'],
-          profiles: { short: { commandLimits: { line: new Limit({ timeoutSeconds: 0.1 }) } } },
+          profiles: { short: { commandLimits: { '@line': new Limit({ timeoutSeconds: 0.1 }) } } },
         },
       )
       ws.registerCli(

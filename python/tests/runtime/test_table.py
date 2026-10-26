@@ -81,6 +81,16 @@ def test_bind_commands_first_capturer_wins():
     assert bindings["python"] is local
 
 
+@pytest.mark.parametrize("capture", ["*", "@all", "@lines"])
+def test_bind_commands_refuses_a_group_it_does_not_have(capture):
+    with pytest.raises(ValueError) as refused:
+        bind_commands([FakeRuntime(captures=[capture])])
+    assert str(refused.value) == (
+        f"{capture!r} is not a program or a group; the groups are"
+        " '@external' and '@line'"
+    )
+
+
 def test_bind_commands_workspace_runtime_binds_nothing():
     assert bind_commands([WorkspaceRuntime()]) == {}
 
@@ -132,7 +142,7 @@ def test_named_capture_does_not_take_the_whole_line():
 
 def test_only_star_takes_the_whole_line():
     box, star = _LineRuntime(), _LineRuntime()
-    bindings = {"nvidia-smi": box, "*": star}
+    bindings = {"nvidia-smi": box, "@line": star}
     assert whole_line_runtime(bindings) is star
 
 

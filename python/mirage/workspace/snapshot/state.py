@@ -541,7 +541,7 @@ def build_mount_args(
                 f"write: {write.value}; the override asks write: "
                 f"{asked.value}"
             )
-        # The mount's own limits, its "*" walk_limit among them, come back
+        # The mount's own limits, its "@all" walk_limit among them, come back
         # as saved unless the override names its own.
         limits = (
             override.command_limits

@@ -17,7 +17,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from mirage.runtime.base import Runtime
-from mirage.runtime.constants import EXTERNAL_COMMANDS
+from mirage.runtime.constants import EXTERNAL_COMMANDS, WHOLE_LINE
 from mirage.runtime.js.quickjs import QuickJsRuntime
 from mirage.runtime.mixin import LineExecutorMixin, ProcessExecutorMixin
 from mirage.runtime.python.local import LocalRuntime
@@ -191,8 +191,18 @@ def bind_commands(entries: list[Runtime[Any]]) -> dict[str, Runtime[Any]]:
     bindings: dict[str, Runtime[Any]] = {}
     seen: set[str] = set()
     for entry in entries:
-        if "*" in entry.captures and not isinstance(entry, LineExecutorMixin):
-            raise ValueError("* requires shell execution")
+        for capture in entry.captures:
+            if capture not in (EXTERNAL_COMMANDS, WHOLE_LINE) and (
+                capture == "*" or capture.startswith("@")
+            ):
+                raise ValueError(
+                    f"{capture!r} is not a program or a group; the groups"
+                    f" are {EXTERNAL_COMMANDS!r} and {WHOLE_LINE!r}"
+                )
+        if WHOLE_LINE in entry.captures and not isinstance(
+            entry, LineExecutorMixin
+        ):
+            raise ValueError(f"{WHOLE_LINE} requires shell execution")
         if EXTERNAL_COMMANDS in entry.captures and not isinstance(
             entry, (LineExecutorMixin, ProcessExecutorMixin)
         ):
@@ -211,7 +221,7 @@ def whole_line_runtime(
 ) -> LineExecutorMixin[Any] | None:
     """The runtime that runs this entire line, if any.
 
-    Only an explicit "*" capture claims a whole line. Named captures
+    Only an explicit WHOLE_LINE capture claims a whole line. Named captures
     and EXTERNAL_COMMANDS execute individual commands. The workspace
     runtime never matches here because it carries no mixin: the
     workspace executor IS the path a workspace-resolved line takes
@@ -221,9 +231,9 @@ def whole_line_runtime(
         bindings (Mapping[str, Runtime | None]): the line's resolved
             command bindings (a RouteDecision's or the registry's).
     """
-    star = bindings.get("*")
-    if isinstance(star, LineExecutorMixin):
-        return star
+    whole = bindings.get(WHOLE_LINE)
+    if isinstance(whole, LineExecutorMixin):
+        return whole
     return None
 
 

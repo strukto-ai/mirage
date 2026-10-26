@@ -163,7 +163,7 @@ async def exercise_cancellation(runtime):
             "/home/user": (RAMVFS(), MountMode.EXEC),
         },
         mode=MountMode.EXEC,
-        command_limits={"line": Limit(timeout_seconds=5)},
+        command_limits={"@line": Limit(timeout_seconds=5)},
         runtimes=[runtime, "workspace"],
     )
     try:

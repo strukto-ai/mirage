@@ -607,7 +607,7 @@ export class MountRegistry {
    */
   /**
    * Set the mount's `walkLimit`, which decides how its backend searches (its
-   * own search API under a cap, every file without): the mount's `*` entry,
+   * own search API under a cap, every file without): the mount's `@all` entry,
    * else the workspace's, else the backend's default, a null one lifting the
    * cap. A command's own `walkLimit` changes only how far that command walks.
    * The mounts of one VFS share its search, so they settle on one limit; one

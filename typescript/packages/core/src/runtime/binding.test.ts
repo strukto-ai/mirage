@@ -333,7 +333,7 @@ it('does not share process views by profile or follow reused session IDs', async
 })
 
 it('refuses a native runtime before running with hidden files', async () => {
-  const runtime = new ShellProbe({ captures: ['*'] })
+  const runtime = new ShellProbe({ captures: ['@line'] })
   const ws = world([runtime])
   try {
     ws.createSession('restricted', { profile: { paths: { hide: ['/data/secret'] } } })

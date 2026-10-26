@@ -62,7 +62,7 @@ describe('interpreters at the line deadline', () => {
       {
         mode: MountMode.EXEC,
         runtimes,
-        commandLimits: { line: new Limit({ timeoutSeconds: seconds }) },
+        commandLimits: { '@line': new Limit({ timeoutSeconds: seconds }) },
       },
     )
   }
@@ -211,7 +211,7 @@ describe('background job kill', () => {
   }, 60_000)
 })
 
-const UNCAPPED = { '*': new Limit({ walkLimit: -1 }) }
+const UNCAPPED = { '@all': new Limit({ walkLimit: -1 }) }
 
 function wideRam(): RAMVFS {
   const ram = new RAMVFS()

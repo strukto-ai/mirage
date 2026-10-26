@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { CommandTimeoutError } from '../../errors/types.ts'
-import { LINE, lineTimeout } from '../../policy/builtin/output_cap.ts'
+import { LINE_NAME, lineTimeout } from '../../policy/builtin/output_cap.ts'
 import type { Runtime } from '../../runtime/base.ts'
 import { EvaluationContext, childContext } from '../evaluation.ts'
 import { ParseScope } from '../../shell/parse/scope.ts'
@@ -439,7 +439,7 @@ async function runPreparedLine(
   // itself; the caller's route comes back when it ends.
   const outerRouting = context.frame.routing
   try {
-    // The outermost line, recorded or not, runs under its `line` deadline,
+    // The outermost line, recorded or not, runs under its `@line` deadline,
     // which a nested one shares: past it the tree is stopped like an abort
     // and the line answers 124, as Python's asyncio.timeout does. The
     // deadline is in the line's stop, the one object the tree runs on, so a
@@ -1222,7 +1222,7 @@ async function runParsedLine(
           error: aborted
             ? makeAbortError(killed)
             : expired
-              ? new CommandTimeoutError(LINE, deadline.seconds)
+              ? new CommandTimeoutError(LINE_NAME, deadline.seconds)
               : error,
         }
         const failed = failureResult(executionFailure.error)

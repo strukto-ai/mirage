@@ -47,8 +47,8 @@ class RemoteSandbox(
 ):
     """A runtime that executes programs in a sandbox the user runs.
 
-    Captures default to unresolved program names. An explicit "*"
-    delegates whole shell lines.
+    Captures default to unresolved program names. An explicit
+    WHOLE_LINE delegates whole shell lines.
 
     Mirage never creates, provisions, or deletes sandboxes: you bring
     your own (a running container, a live Daytona or E2B sandbox) and

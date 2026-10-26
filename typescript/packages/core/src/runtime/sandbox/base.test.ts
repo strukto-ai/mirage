@@ -135,7 +135,7 @@ describe('RemoteSandbox', () => {
   })
 
   it('passes cwd through verbatim and merges env', async () => {
-    const box = new RecordingSandbox({ captures: ['*'], config: { env: { BASE: '1' } } })
+    const box = new RecordingSandbox({ captures: ['@line'], config: { env: { BASE: '1' } } })
     const result = await box.runLine(undefined, [], [], {
       flags: { c: 'nvidia-smi' },
       stdin: null,
@@ -157,7 +157,7 @@ describe('RemoteSandbox', () => {
   })
 
   it('passes stdin bytes through to execLine', async () => {
-    const box = new RecordingSandbox({ captures: ['*'] })
+    const box = new RecordingSandbox({ captures: ['@line'] })
     const ws = sandboxWorkspace(box)
     try {
       await ws.shell('wc -l', { stdin: ENC.encode('a\nb\n') })
@@ -194,7 +194,7 @@ describe('RemoteSandbox', () => {
       {
         mode: MountMode.EXEC,
         runtimes: [box, 'workspace'],
-        commandLimits: { line: new Limit({ timeoutSeconds: 0.05 }) },
+        commandLimits: { '@line': new Limit({ timeoutSeconds: 0.05 }) },
       },
     )
     try {

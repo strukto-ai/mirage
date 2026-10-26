@@ -26,6 +26,7 @@ import type {
 import { opQuestion } from '../../policy/decisions.ts'
 import { agreed, settled } from '../../policy/policies.ts'
 import type { Runtime } from '../../runtime/base.ts'
+import { WHOLE_LINE } from '../../runtime/constants.ts'
 import { bindCommands, catchAll, runtimeBindingsFor } from '../../runtime/table.ts'
 import { WorkspaceRuntime } from '../../runtime/workspace.ts'
 import type { MountRegistry } from '../mount/registry.ts'
@@ -139,7 +140,7 @@ export class Router {
   private routed(name: string): RouteDecision<Runtime> {
     if (name !== 'workspace') return this.placed(name)
     const entries = this.runtimes.entries
-    const kept = entries.filter((entry) => !entry.captures.includes('*'))
+    const kept = entries.filter((entry) => !entry.captures.includes(WHOLE_LINE))
     // Null prototype: captures are arbitrary command names.
     const bindings = Object.create(null) as Record<string, Runtime | null>
     for (const entry of entries) {

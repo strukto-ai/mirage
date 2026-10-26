@@ -52,7 +52,7 @@ To choose a runtime for each command line, see [Route Runtime](/home/policy/rout
 | --- | --- |
 | A name, such as `python3` or `ffmpeg` | That program |
 | `@external` | Every program Mirage does not have itself, such as `gcc`, `ffmpeg`, `perl` or a vendor CLI |
-| `*` | The whole line, Mirage's own commands included (sandboxes only) |
+| `@line` | The whole line, Mirage's own commands included (sandboxes only) |
 
 | Runtime | Default `captures` |
 | --- | --- |
@@ -122,12 +122,12 @@ steps first.
 ## Resource limits
 
 `command_limits` apply to a runtime's programs as to any command: a line past
-its `line` entry's `timeout_seconds` exits 124 (`line: timed out after Ns`), and
+its `@line` entry's `timeout_seconds` exits 124 (`line: timed out after Ns`), and
 `max_bytes` and `max_lines` cap a program's output.
 
 ```yaml
 command_limits:
-  line:
+  "@line":
     timeout_seconds: 30
 ```
 

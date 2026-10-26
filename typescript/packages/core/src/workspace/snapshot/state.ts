@@ -433,7 +433,7 @@ export function buildMountArgs(
       )
     }
     const index = restoreIndexConfig(m.index_config, placed?.options.index, m.prefix)
-    // The mount's own limits, its "*" walk_limit among them, come back as
+    // The mount's own limits, its "@all" walk_limit among them, come back as
     // saved unless the override names its own. Mirrors python.
     // An override that names no limits keeps the saved ones, as Python's,
     // whose Mount cannot tell an omitted table from an empty one.

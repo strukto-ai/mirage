@@ -266,8 +266,8 @@ it("lets a profile raise the workspace's line deadline", async () => {
     { '/data': new RAMVFS() },
     {
       mode: MountMode.EXEC,
-      commandLimits: { line: new Limit({ timeoutSeconds: 0.005 }) },
-      profiles: { relaxed: { commandLimits: { line: new Limit({ timeoutSeconds: 1 }) } } },
+      commandLimits: { '@line': new Limit({ timeoutSeconds: 0.005 }) },
+      profiles: { relaxed: { commandLimits: { '@line': new Limit({ timeoutSeconds: 1 }) } } },
     },
   )
   try {
@@ -284,7 +284,7 @@ it("lets a profile raise the workspace's line deadline", async () => {
 it('cuts a registered CLI that ignores its abort at the line deadline', async () => {
   const ws = new Workspace(
     { '/data': new RAMVFS() },
-    { commandLimits: { line: new Limit({ timeoutSeconds: 0.01 }) } },
+    { commandLimits: { '@line': new Limit({ timeoutSeconds: 0.01 }) } },
   )
   const spec = new CLI({
     spec: new CommandSpec({ name: 'prog' }),

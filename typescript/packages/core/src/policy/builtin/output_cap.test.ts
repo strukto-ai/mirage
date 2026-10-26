@@ -224,7 +224,7 @@ describe('checkCommandLimits', () => {
     expect(() => {
       checkCommandLimits({ sleep: new Limit({ timeoutSeconds: 1 }) }, 'workspace', true)
     }).toThrow(
-      "workspace: command_limits['sleep'].timeout_seconds: a line has one time limit, set it on 'line'",
+      "workspace: command_limits['sleep'].timeout_seconds: a line has one time limit, set it on '@line'",
     )
   })
 
@@ -233,7 +233,7 @@ describe('checkCommandLimits', () => {
     expect(() => {
       checkCommandLimits({ [LINE]: line }, 'profile', true)
     }).toThrow(
-      "profile: command_limits['line'] takes only timeout_seconds, not max_lines, walk_limit",
+      "profile: command_limits['@line'] takes only timeout_seconds, not max_lines, walk_limit",
     )
   })
 
@@ -241,7 +241,15 @@ describe('checkCommandLimits', () => {
     expect(() => {
       checkCommandLimits({ [LINE]: new Limit({ timeoutSeconds: 1 }) }, 'mount /data/', false)
     }).toThrow(
-      "mount /data/: command_limits['line']: a line spans mounts, set it on the workspace or a profile",
+      "mount /data/: command_limits['@line']: a line spans mounts, set it on the workspace or a profile",
+    )
+  })
+
+  it.each(['*', '@lines'])('refuses a key that is neither a command nor a group: %s', (name) => {
+    expect(() => {
+      checkCommandLimits({ [name]: new Limit({ walkLimit: 2 }) }, 'workspace', true)
+    }).toThrow(
+      `workspace: command_limits['${name}']: not a command or a group; the groups are '@all' and '@line'`,
     )
   })
 })

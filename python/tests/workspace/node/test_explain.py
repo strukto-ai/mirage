@@ -959,7 +959,7 @@ async def test_a_nested_line_spelled_twice_costs_two_nods_and_no_more():
 class _LineBox(Runtime, LineExecutorMixin):
     name = "sandbox"
     reach = "workspace"
-    captures = ("*",)
+    captures = ("@line",)
 
     def __init__(self) -> None:
         self.lines: list[str] = []
