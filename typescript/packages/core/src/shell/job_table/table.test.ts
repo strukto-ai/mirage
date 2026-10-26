@@ -1760,6 +1760,35 @@ describe('JobTable process plane', () => {
     await b.close()
   })
 
+  // The lease of a workspace that runs only processes, no job, is kept on
+  // the table's own renewal timer while they run, whatever a publish round
+  // costs, and dropped once the publishing stops.
+  it('holds the lease for a plain process while it runs', async () => {
+    const store = new RAMJobStore(30)
+    const a = publishing(store)
+    const abort = new AbortController()
+    const runner = a.processes.start({
+      sessionId: 's',
+      command: 'sleep 30',
+      cwd: PathSpec.fromStrPath('/'),
+      cancel: () => {
+        abort.abort()
+      },
+      run: () =>
+        new Promise<number>((_resolve, reject) => {
+          abort.signal.addEventListener('abort', () => {
+            reject(new DOMException('aborted', 'AbortError'))
+          })
+        }),
+    })
+    const table = a as unknown as { lease: unknown }
+    await until(async () => table.lease !== null && (await store.alive(a.owner)))
+    runner.terminate()
+    await runner.join()
+    await until(() => Promise.resolve(table.lease === null))
+    await a.close()
+  })
+
   // A table that closes drops its record, so it never reads as lapsed.
   it('drops its record once closed', async () => {
     const store = new RAMJobStore(30)

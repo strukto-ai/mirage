@@ -1343,6 +1343,12 @@ async def test_a_closed_table_drops_its_record():
     assert await store.processes() == {}
 
 
+async def _forever() -> int:
+    """A process body that never finishes on its own."""
+    await asyncio.Event().wait()
+    return 0
+
+
 class _VouchedStore(RAMJobStore):
     """A store that notes, at every write of a non-empty record, whether
     the owner's lease vouched for it."""
@@ -1368,16 +1374,11 @@ async def test_a_record_is_vouched_for_and_written_again(monkeypatch):
     store = _VouchedStore()
     store.lease_seconds = 0.03
     a = _publishing(store)
-
-    async def forever() -> int:
-        await asyncio.Event().wait()
-        return 0
-
     runner = a.processes.start(
         session_id="s",
         command="sleep 30",
         cwd=PathSpec.from_str_path("/"),
-        run=forever,
+        run=_forever,
     )
 
     async def written_again() -> bool:
@@ -1513,3 +1514,32 @@ async def test_a_child_shells_table_reaches_the_process_plane(monkeypatch):
         await job.process.join()
     await a.close()
     await b.close()
+
+
+# The lease of a workspace that runs only processes, no job, is kept on
+# the table's own renewal timer while they run, whatever a publish round
+# costs, and dropped once the publishing stops.
+@pytest.mark.asyncio
+async def test_a_plain_process_holds_the_lease_while_it_runs(monkeypatch):
+    monkeypatch.setattr(table_module, "PUBLISH_SECONDS", 0.01)
+    store = RAMJobStore(lease_seconds=30.0)
+    a = _publishing(store)
+    runner = a.processes.start(
+        session_id="s",
+        command="sleep 30",
+        cwd=PathSpec.from_str_path("/"),
+        run=_forever,
+    )
+
+    async def leased() -> bool:
+        return a._lease is not None and await store.alive(a.owner)
+
+    await _until(leased)
+    runner.terminate()
+    await runner.join()
+
+    async def dropped() -> bool:
+        return a._lease is None
+
+    await _until(dropped)
+    await a.close()

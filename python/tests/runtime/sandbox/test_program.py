@@ -630,6 +630,10 @@ async def test_a_left_host_run_is_reaped_only_while_it_is_the_same(tmp_path):
             await child.wait()
 
 
+def _denied(group: int, signum: int) -> None:
+    raise PermissionError(errno.EPERM, "Operation not permitted")
+
+
 # A group this workspace may not signal is out of its reach while its
 # leader still runs, so a workspace with the rights can stop it later; a
 # group whose leader is gone was stopped already.
@@ -646,11 +650,7 @@ async def test_a_host_run_it_may_not_signal_is_out_of_reach(
     )
     pid = await _wait_for_pid(pid_file)
     run = host_run(pid, ["sh"])
-
-    def denied(group: int, signum: int) -> None:
-        raise PermissionError(errno.EPERM, "Operation not permitted")
-
-    monkeypatch.setattr(os, "killpg", denied)
+    monkeypatch.setattr(os, "killpg", _denied)
     try:
         assert not await reap_host_run(run, 15)
     finally:

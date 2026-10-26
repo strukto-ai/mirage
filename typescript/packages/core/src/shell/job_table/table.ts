@@ -1194,32 +1194,33 @@ export class JobTable {
 
   /**
    * Publish the processes this workspace runs every `PUBLISH_SECONDS`
-   * while it runs any, renewing its lease with them, and stop those other
-   * workspaces asked it to stop. Once it runs none, its record goes and the
-   * publishing stops. The lease is renewed every third of it, counted in
-   * rounds, ahead of the record it vouches for, and the record is written
-   * again with it, so it outlives its store's expiry and comes back should a
-   * workspace have taken this one for lapsed. A failed round is logged and
-   * tried again the next one, and a stop that fails leaves the others it
-   * came with to be applied; the sleep between rounds keeps no host alive
-   * on its own.
+   * while it runs any, and stop those other workspaces asked it to stop.
+   * Once it runs none, its record goes and the publishing stops. The
+   * owner's lease is renewed once ahead of the first record it vouches for,
+   * then kept by the table's lease renewal (`keepLease`) while any process
+   * runs, on its own timer whatever a round costs. The record is written
+   * again every third of the lease, so it outlives its store's expiry and
+   * comes back should a workspace have taken this one for lapsed. A failed
+   * round is logged and tried again the next one, and a stop that fails
+   * leaves the others it came with to be applied; the sleep between rounds
+   * keeps no host alive on its own.
    */
   private async publish(): Promise<void> {
     let published: string | null = null
     const lease = this.store.leaseSeconds
-    const renewal = lease !== null ? Math.max(1, Math.floor(lease / 3 / PUBLISH_SECONDS)) : 0
+    const rewrite = lease !== null ? Math.max(1, Math.floor(lease / 3 / PUBLISH_SECONDS)) : 0
+    let renewed = lease === null
     let rounds = 0
-    let due = 0
     for (;;) {
       const records = this.records()
       const text = JSON.stringify(records)
       try {
-        if (renewal > 0 && rounds >= due) {
+        if (!renewed) {
           await this.store.renew(this.owner)
-          await this.store.publish(this.owner, records)
-          published = text
-          due = rounds + renewal
-        } else if (text !== published) {
+          renewed = true
+          this.keepLease()
+        }
+        if (text !== published || (rewrite > 0 && rounds % rewrite === 0)) {
           await this.store.publish(this.owner, records)
           published = text
         }
@@ -1235,6 +1236,7 @@ export class JobTable {
       }
       if (this.closed || (published === '{}' && this.processes.live().length === 0)) {
         this.publishing = null
+        this.dropLease()
         return
       }
       rounds += 1
@@ -1327,13 +1329,16 @@ export class JobTable {
   }
 
   /**
-   * Stop renewing once every job this table runs has ended its console: a
-   * killed one still stopping keeps the lease, or other workspaces would
-   * end it as hung up.
+   * Stop renewing once every job this table runs has ended its console and
+   * no process it publishes runs: a killed one still stopping keeps the
+   * lease, or other workspaces would end it as hung up, and a published
+   * process keeps it, or they would take its record for lapsed; the
+   * publishing drops it as it stops.
    */
   private dropLease(): void {
     if (this.lease === null) return
     if (
+      (this.publishing !== null && this.processes.live().length > 0) ||
       [...this.allJobs(), ...this.disowned].some((j) => j.process !== null && !j.console.finished)
     )
       return

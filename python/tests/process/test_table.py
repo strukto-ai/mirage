@@ -468,6 +468,10 @@ async def test_started_runs_before_the_runner_with_the_process_live():
     assert order == ["started 1", "run [1]"]
 
 
+async def _exits_0() -> int:
+    return 0
+
+
 # A table that publishes the live runners learns each one that started,
 # once it is live, so the next publish lists it.
 @pytest.mark.asyncio
@@ -476,16 +480,12 @@ async def test_a_started_runner_tells_the_publisher():
     processes = ProcessTable(
         changed=lambda: live.append(len(processes.live()))
     )
-
-    async def run() -> int:
-        return 0
-
     for _ in range(2):
         handle = processes.start(
             session_id="s",
             command="true",
             cwd=PathSpec.from_str_path("/"),
-            run=run,
+            run=_exits_0,
         )
         await handle.join()
     assert live == [1, 1]

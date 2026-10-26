@@ -1285,11 +1285,21 @@ class JobTable:
 
     def _drop_lease(self) -> None:
         """Stop renewing once every job this table runs has ended its
-        console: a killed one still stopping keeps the lease, or other
-        workspaces would end it as hung up."""
-        if self._lease is None or any(
-            j.process is not None and not j.console.finished
-            for j in [*self.all_jobs(), *self._disowned]
+        console and no process it publishes runs: a killed one still
+        stopping keeps the lease, or other workspaces would end it as
+        hung up, and a published process keeps it, or they would take
+        its record for lapsed; the publishing drops it as it stops."""
+        if (
+            self._lease is None
+            or (
+                self._publishing is not None
+                and not self._publishing.done()
+                and self.processes.live()
+            )
+            or any(
+                j.process is not None and not j.console.finished
+                for j in [*self.all_jobs(), *self._disowned]
+            )
         ):
             return
         self._lease.cancel()
@@ -1367,34 +1377,36 @@ class JobTable:
 
     async def _publish(self) -> None:
         """Publish the processes this workspace runs every
-        ``PUBLISH_SECONDS`` while it runs any, renewing its lease with
-        them, and stop those other workspaces asked it to stop. Once it
-        runs none, its record goes and the publishing stops.
+        ``PUBLISH_SECONDS`` while it runs any, and stop those other
+        workspaces asked it to stop. Once it runs none, its record goes
+        and the publishing stops.
 
-        The lease is renewed every third of it, counted in rounds, ahead
-        of the record it vouches for, and the record is written again with
-        it, so it outlives its store's expiry and comes back should a
-        workspace have taken this one for lapsed. A failed round is logged
-        and tried again the next one, and a stop that fails leaves the
-        others it came with to be applied.
+        The owner's lease is renewed once ahead of the first record it
+        vouches for, then kept by the table's lease renewal
+        (``_keep_lease``) while any process runs, on its own timer
+        whatever a round costs. The record is written again every third
+        of the lease, so it outlives its store's expiry and comes back
+        should a workspace have taken this one for lapsed. A failed round
+        is logged and tried again the next one, and a stop that fails
+        leaves the others it came with to be applied.
         """
         published: dict[str, RecordFields] | None = None
         lease = self.store.lease_seconds
-        renewal = (
+        rewrite = (
             max(1, int(lease / 3 / PUBLISH_SECONDS))
             if lease is not None
             else 0
         )
-        rounds = due = 0
+        renewed = lease is None
+        rounds = 0
         while True:
             records = self._records()
             try:
-                if renewal and rounds >= due:
+                if not renewed:
                     await self.store.renew(self.owner)
-                    await self.store.publish(self.owner, records)
-                    published = records
-                    due = rounds + renewal
-                elif records != published:
+                    renewed = True
+                    self._keep_lease()
+                if records != published or (rewrite and rounds % rewrite == 0):
                     await self.store.publish(self.owner, records)
                     published = records
                 for pid, signal in await self.store.take_stops(self.owner):
@@ -1405,6 +1417,7 @@ class JobTable:
             except Exception as exc:
                 logger.debug("process publish failed: %s", exc)
             if published == {} and not self._records():
+                self._drop_lease()
                 return
             rounds += 1
             await asyncio.sleep(PUBLISH_SECONDS)
