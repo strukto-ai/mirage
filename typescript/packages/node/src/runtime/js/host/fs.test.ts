@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { execFileSync } from 'node:child_process'
 import type fs from 'node:fs'
 import {
   existsSync,
@@ -24,6 +23,7 @@ import {
   writeFileSync,
 } from 'node:fs'
 import { createRequire } from 'node:module'
+import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join, relative } from 'node:path'
 import { promisify } from 'node:util'
@@ -917,18 +917,24 @@ describe('patchNodeFs — calls node makes on its own', () => {
     await ws.close()
   })
 
-  // Pinned against node 24 on the host: a FIFO is refused before anything
-  // is touched, a link onto a file fails at its own symlink with the file
-  // kept, and a link replaces a link whatever `force` says.
-  it('cp refuses a FIFO and copies a link as node does', async () => {
+  // Pinned against node 24 on the host: a socket (as a FIFO) is refused
+  // before anything is touched, a link onto a file fails at its own
+  // symlink with the file kept, and a link replaces a link whatever
+  // `force` says.
+  it('cp refuses a socket and copies a link as node does', async () => {
     const [ws, fs] = await world()
-    const pipe = join(scratch, 'pipe')
-    execFileSync('mkfifo', [pipe])
-    await expect(fs.promises.cp(pipe, '/data/p')).rejects.toMatchObject({
-      code: 'ERR_FS_CP_FIFO_PIPE',
-      message:
-        'Cannot copy a FIFO pipe: cp returned EINVAL (cannot copy a FIFO pipe: /data/p) /data/p',
-    })
+    const sock = join(scratch, 'sock')
+    const server = createServer()
+    await new Promise<void>((resolve) => server.listen(sock, resolve))
+    try {
+      await expect(fs.promises.cp(sock, '/data/p')).rejects.toMatchObject({
+        code: 'ERR_FS_CP_SOCKET',
+        message:
+          'Cannot copy a socket file: cp returned EINVAL (cannot copy a socket file: /data/p) /data/p',
+      })
+    } finally {
+      server.close()
+    }
     expect(await ws.vfs.exists('/data/p')).toBe(false)
     await ws.vfs.symlink('/data/lk', 'd/a.txt')
     await ws.vfs.write('/data/keep.txt', 'keep')
