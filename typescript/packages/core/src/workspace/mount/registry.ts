@@ -617,7 +617,10 @@ export class MountRegistry {
         : null,
       new Limit({ walkLimit: entry.vfs.walkLimit }),
     ])
-    if (found?.walkLimit != null) entry.vfs.walkLimit = found.walkLimit
+    if (found?.walkLimit != null) {
+      entry.vfs.walkLimit = found.walkLimit
+      entry.calls = entry.answeredCalls()
+    }
     this.rowCache = null
   }
 

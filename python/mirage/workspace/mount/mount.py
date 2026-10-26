@@ -549,16 +549,7 @@ class MountEntry:
         self.mount_id = (ids if ids is not None else SystemIdSource()).uuid7()
         self.prefix = prefix
         self.vfs = vfs
-        # The functions the VFS answers itself, read once when it is
-        # mounted: each dispatcher call it defines, its own ``@vfs_call``
-        # functions among them, and ``read_range`` when a read fetches only
-        # the range asked for. A command asks its mount's row
-        # (``MountView.answers``).
-        self.calls = frozenset(
-            name
-            for name in {*CALLS, *declared_calls(type(vfs))}
-            if vfs.supports(name)
-        ) | ({"read_range"} if vfs.reads_ranges else set())
+        self.calls = self.answered_calls()
         self.mode = mode
         # How this mount's cached bytes are revalidated. Read by the
         # gate (Reconciler.may_serve_cached) and by the cache write path
@@ -627,6 +618,20 @@ class MountEntry:
         self._prefix_index: dict[str, list[int]] | None = None
         self.command_limits: dict[str, Limit] = {}
         # key: (cmd_name, target_resource_type)
+
+    def answered_calls(self) -> frozenset[str]:
+        """The functions the VFS answers itself, read when it is mounted
+        and again when its ``walk_limit`` is settled (a backend answers
+        ``files_containing`` only under a cap): each dispatcher call it
+        defines, its own ``@vfs_call`` functions among them, and
+        ``read_range`` when a read fetches only the range asked for. A
+        command asks its mount's row (``MountView.answers``)."""
+        vfs = self.vfs
+        return frozenset(
+            name
+            for name in {*CALLS, *declared_calls(type(vfs))}
+            if vfs.supports(name)
+        ) | ({"read_range"} if vfs.reads_ranges else set())
 
     @property
     def default_limit(self) -> Limit:

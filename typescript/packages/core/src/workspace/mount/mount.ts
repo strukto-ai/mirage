@@ -413,7 +413,7 @@ export class MountEntry {
   // The functions the VFS answers itself, read once when it is mounted: each
   // dispatcher call it defines, and `read_range` when a read fetches only the
   // range asked for. A command asks its mount's row (`MountView.answers`).
-  readonly calls: ReadonlySet<string>
+  calls: ReadonlySet<string>
   mode: MountMode
   readonly read: ReadSpec
   readonly write: WritePolicy
@@ -448,6 +448,23 @@ export class MountEntry {
   private readonly cmdSpecs = new Map<string, CommandSpec>()
   readonly commandLimits = new Map<string, Limit>()
 
+  /**
+   * The functions the VFS answers itself, read when it is mounted and again
+   * when its `walkLimit` is settled (a backend answers `files_containing` only
+   * under a cap), plus `read_range` when a read fetches only the range asked
+   * for. Mirrors Python's `answered_calls`.
+   */
+  answeredCalls(): ReadonlySet<string> {
+    const vfs = this.vfs
+    const calls = new Set(
+      [...declaredCalls(vfs.constructor as { prototype: unknown }).keys()].filter((name) =>
+        vfs.supports(name),
+      ),
+    )
+    if (vfs.readsRanges) calls.add('read_range')
+    return calls
+  }
+
   /** The bottom layer of a command's limit on this mount: its backend's `walkLimit`. */
   get defaultLimit(): Limit {
     return new Limit({ walkLimit: this.vfs.walkLimit })
@@ -478,14 +495,7 @@ export class MountEntry {
     this.mountId = (init.ids ?? new SystemIdSource()).uuid7()
     this.prefix = prefix
     this.vfs = init.vfs
-    const vfs = init.vfs
-    const calls = new Set(
-      [...declaredCalls(vfs.constructor as { prototype: unknown }).keys()].filter((name) =>
-        vfs.supports(name),
-      ),
-    )
-    if (vfs.readsRanges) calls.add('read_range')
-    this.calls = calls
+    this.calls = this.answeredCalls()
     this.mode = init.mode ?? MountMode.READ
     // A frozen copy carrying the coerced policy, not the caller's object.
     //

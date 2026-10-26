@@ -639,6 +639,7 @@ class MountRegistry:
         )
         if found is not None and found.walk_limit is not None:
             entry.vfs.walk_limit = found.walk_limit
+            entry.calls = entry.answered_calls()
         self._rows = None
 
     def limit_mount(self, prefix: str) -> MountEntry | None:
