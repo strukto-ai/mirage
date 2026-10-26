@@ -457,8 +457,8 @@ impl Parser<'_> {
 
     /// `` `...` `` or `` $`...` ``.
     /// bash reads a backtick substitution's text when it runs it: what
-    /// the grammar cannot read here, or a body that leaves a heredoc
-    /// open at its end, is one raw word.
+    /// the grammar cannot read here, or a body that reads the body of a
+    /// heredoc opened before it or leaves one open, is one raw word.
     pub(super) fn backtick(&mut self) -> R<Syn> {
         if self.in_backtick {
             return self.fail(self.i);
@@ -470,14 +470,21 @@ impl Parser<'_> {
             return Err(Fail::eof(at, '`'));
         };
         let mark = self.mark();
-        let pending = self.pending.len();
+        let (pending, reads) = (self.pending.len(), self.taken.len());
         let open = self.expect(open)?;
         let mut children = vec![open];
         self.in_backtick = true;
         let body = self.statements(Close::Backtick, None, false);
         self.in_backtick = false;
+        let own = self.pending.len() == pending
+            && self
+                .taken
+                .iter()
+                .skip(reads)
+                .flatten()
+                .all(|(index, _)| *index >= pending);
         match body {
-            Ok(body) if self.i == end - 1 && self.pending.len() == pending => children.extend(body),
+            Ok(body) if self.i == end - 1 && own => children.extend(body),
             _ => {
                 self.forget(mark);
                 if end - 1 > at + 1 {
