@@ -2771,7 +2771,7 @@ class Workspace:
             return await run(tty=session.tty), source
         finally:
             reset_current_session(token)
-            session.tty.hand_over(source.tty.jobs)
+            session.tty.hand_over(source.tty)
 
     @overload
     async def shell(

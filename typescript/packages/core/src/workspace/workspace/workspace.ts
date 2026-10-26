@@ -1982,7 +1982,7 @@ export class Workspace {
         tty: session.tty,
       })
     } finally {
-      session.tty.handOver(source.tty.jobs)
+      session.tty.handOver(source.tty)
     }
     // Stamped in a frame of its own, so the status is never credited to a
     // line still waiting on the session: where tasks share one frame stack

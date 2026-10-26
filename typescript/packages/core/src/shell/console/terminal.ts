@@ -17,13 +17,6 @@ import { CHUNK_SIZE } from '../../io/cooperative.ts'
 import { JobConsole } from './job_console.ts'
 import { Channel, type OwnedStream } from './types.ts'
 
-/** Host diagnostics stay separate from what the shell writes. */
-const logger = {
-  debug(message: string): void {
-    console.error(message)
-  },
-}
-
 /**
  * A shell's screen: what its lines and its background jobs wrote, in the
  * order it arrived, until a line takes it.
@@ -116,15 +109,15 @@ export class Terminal extends JobConsole {
   }
 
   /**
-   * Once its last line has ended, send on to `reader` what is left here and
-   * what jobs write from now on, without waiting for it to take them: it may
-   * be another line's to stream.
+   * Once its last line has ended, give `to` what is left here, ahead of what
+   * reached it meanwhile, and send there what jobs write from now on.
    */
-  handOver(reader: JobConsole): void {
-    void this.attach(reader).catch((error: unknown) => {
-      const reason = error instanceof Error ? error.message : String(error)
-      logger.debug(`late job output was not handed over: ${reason}`)
-    })
+  handOver(to: Terminal): void {
+    to.chunks = [...this.chunks, ...to.chunks]
+    this.chunks = []
+    this.prefix = new Uint8Array(CHUNK_SIZE)
+    this.prefixSize = 0
+    this.reader = to.jobs
   }
 
   /** What reached the terminal so far, taken out to be bounded and put back. */

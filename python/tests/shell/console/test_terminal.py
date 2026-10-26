@@ -178,16 +178,14 @@ async def test_an_abandoned_line_keeps_only_its_jobs_output():
 
 
 @pytest.mark.asyncio
-async def test_a_hand_over_passes_on_what_is_left_without_waiting():
-    tty = Terminal()
+async def test_a_hand_over_puts_what_is_left_ahead_on_the_next_terminal():
+    tty, to = Terminal(), Terminal()
     await tty.jobs.emit(Channel.STDOUT, b"left\n")
-    reader = _Stalled()
-    tty.hand_over(reader)
-    await asyncio.wait_for(reader.entered.wait(), 5)
-    job = asyncio.create_task(tty.jobs.emit(Channel.STDOUT, b"after\n"))
-    reader.release.set()
-    await asyncio.wait_for(job, 5)
-    assert await reader.snapshot(Channel.STDOUT) == b"left\nafter\n"
+    await to.jobs.emit(Channel.STDOUT, b"meanwhile\n")
+    tty.hand_over(to)
+    assert not tty.chunks
+    await tty.jobs.emit(Channel.STDOUT, b"after\n")
+    assert to.take() == (b"left\nmeanwhile\nafter\n", b"")
 
 
 @pytest.mark.asyncio
