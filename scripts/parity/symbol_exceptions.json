@@ -1,5 +1,5 @@
 {
-  "baseline": 2984,
+  "baseline": 2983,
  "modules": {
   "vfs/ram/store": {
    "python_only": {
@@ -978,7 +978,9 @@
   },
   "io/yield_budget": {
    "python_only": {
-    "YIELD_SWITCHES": "Python yields every few GIL switch intervals, since a loop that yields more often keeps its other threads from the GIL; TypeScript runs every workspace on one thread and keeps a fixed YIELD_INTERVAL."
+    "YIELD_SWITCHES": "Python yields every few GIL switch intervals, since a loop that yields more often keeps its other threads from the GIL; TypeScript runs every workspace on one thread and keeps a fixed YIELD_INTERVAL.",
+    "_TASK_BUDGETS": "The budget task_turn keeps per asyncio task; TypeScript has no task identity, so guardDispatch and treeWalk each own a budget per command.",
+    "task_turn": "Spends the running asyncio task's budget at the dispatcher, where a command's ops meet; TypeScript has no task identity, so guardDispatch and treeWalk each own a budget per command."
    },
    "typescript_only": {
     "YIELD_INTERVAL": "TypeScript has no GIL and yields on a fixed interval; Python derives its interval from the GIL switch interval (YIELD_SWITCHES)."

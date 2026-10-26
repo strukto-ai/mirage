@@ -30,7 +30,15 @@ from contextlib import (
     contextmanager,
     nullcontext,
 )
-from typing import Any, Callable, Literal, TypeVar, cast, overload
+from typing import (
+    Any,
+    Callable,
+    Literal,
+    NamedTuple,
+    TypeVar,
+    cast,
+    overload,
+)
 
 from mirage.accessor.base import Accessor, NOOPAccessor
 from mirage.accessor.ram import RAMAccessor
@@ -506,6 +514,19 @@ async def _read_window(
     if whole:
         return data
     return slice_window(data, offset, size)
+
+
+class LimitTables(NamedTuple):
+    """The workspace's and the session profile's command limits, which a
+    mount resolves a command's limit through with its own.
+
+    Args:
+        workspace (Mapping[str, Limit] | None): the workspace's.
+        profile (Mapping[str, Limit] | None): the session profile's.
+    """
+
+    workspace: Mapping[str, Limit] | None = None
+    profile: Mapping[str, Limit] | None = None
 
 
 class MountEntry:
@@ -1067,8 +1088,7 @@ class MountEntry:
         texts: list[str],
         flag_kwargs: dict[str, FlagValue],
         ctx: Context = Context(),
-        workspace_limits: Mapping[str, Limit] | None = None,
-        profile_limits: Mapping[str, Limit] | None = None,
+        tables: LimitTables | None = None,
     ) -> tuple[ByteSource | None, IOResult]:
         """Execute a command on this mount's VFS.
 
@@ -1087,11 +1107,9 @@ class MountEntry:
                 with the facts only this mount can supply added. A
                 handler reads the fields it wants, so no list of command
                 names is kept here.
-            workspace_limits (Mapping[str, Limit] | None): the
-                workspace's command limits, which the mount resolves the
+            tables (LimitTables | None): the workspace's and the session
+                profile's command limits, which the mount resolves the
                 command's bound through with its own.
-            profile_limits (Mapping[str, Limit] | None): the session
-                profile's command limits, above the mount's.
         """
         async with self.use():
             handlers = await self._pick_handlers(
@@ -1126,7 +1144,7 @@ class MountEntry:
                         self._command_ctx(
                             flags, ctx, self.prefix if user else ""
                         ),
-                        (workspace_limits, profile_limits),
+                        tables or LimitTables(),
                         paths,
                     )
                     if result is not None:
@@ -1386,9 +1404,7 @@ class MountEntry:
         paths: list[PathSpec],
         texts: list[str],
         ctx: Context,
-        tables: tuple[
-            Mapping[str, Limit] | None, Mapping[str, Limit] | None
-        ],
+        tables: LimitTables,
         typed: list[PathSpec],
     ) -> CommandFnResult:
         """Run one handler under the mount-resolved timeout, through the
@@ -1409,8 +1425,8 @@ class MountEntry:
             paths (list[PathSpec]): the keyed path operands.
             texts (list[str]): positional text args.
             ctx (Context): the handler's context.
-            tables (tuple[Mapping[str, Limit] | None, Mapping[str, Limit]
-                | None]): the workspace's and the profile's command limits.
+            tables (LimitTables): the workspace's and the profile's
+                command limits.
             typed (list[PathSpec]): the operands as the line typed them,
                 which a file error names.
         """
@@ -1418,8 +1434,8 @@ class MountEntry:
             cmd_name,
             [self],
             command_default=cmd.limit,
-            workspace_limits=tables[0],
-            profile_limits=tables[1],
+            workspace_limits=tables.workspace,
+            profile_limits=tables.profile,
         )
         ctx = dataclasses.replace(ctx, spec=_named_spec(cmd, cmd_name))
         with host_io():

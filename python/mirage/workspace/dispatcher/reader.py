@@ -14,7 +14,6 @@
 
 import posixpath
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
 
 from mirage.context.session_context import current_caller
 from mirage.policy.builtin.output_cap import resolve_limit
@@ -45,16 +44,6 @@ def sees(
     if vis is None or links is None:
         return True
     return not leads_hidden(vis, virtual, links.symlink_targets())
-
-
-@dataclass(frozen=True, slots=True)
-class _RowLimits:
-    command_limits: Mapping[str, Limit]
-    walk: int
-
-    @property
-    def default_limit(self) -> Limit:
-        return Limit(walk_limit=self.walk)
 
 
 class NamespaceReader:
@@ -411,7 +400,7 @@ class NamespaceReader:
                 return row.walk_limit
             found = resolve_limit(
                 command,
-                [_RowLimits(row.command_limits, row.walk_limit)],
+                [row],
                 workspace_limits=row.workspace_limits,
                 profile_limits=profile,
             )

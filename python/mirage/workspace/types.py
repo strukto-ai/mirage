@@ -69,6 +69,12 @@ class MountRow:
     workspace_limits: Mapping[str, Limit] = field(default_factory=dict)
     calls: frozenset[str] = frozenset()
 
+    @property
+    def default_limit(self) -> Limit:
+        """The bottom layer of a command's limit here: the mount's
+        ``walk_limit``."""
+        return Limit(walk_limit=self.walk_limit)
+
 
 @dataclass
 class ExecutionNode:

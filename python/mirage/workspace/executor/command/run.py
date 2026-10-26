@@ -46,6 +46,7 @@ from mirage.workspace.mount import (
     MountRegistry,
 )
 from mirage.workspace.mount.errors import MountCommandAmbiguous
+from mirage.workspace.mount.mount import LimitTables
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.session import env_snapshot, session_view
 from mirage.workspace.types import ExecuteLine, ExecutionNode
@@ -307,8 +308,9 @@ async def run_on_mount(
                 ),
                 argv=argv,
             ),
-            workspace_limits=registry.command_limits,
-            profile_limits=session.command_limits,
+            tables=LimitTables(
+                registry.command_limits, session.command_limits
+            ),
         )
     except UsageError as exc:
         # Command-owned usage errors (extra operands, missing patterns)
