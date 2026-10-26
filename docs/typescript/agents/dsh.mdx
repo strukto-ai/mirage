@@ -64,7 +64,7 @@ Each command is a clean slate: `cd`, `export`, and function definitions inside o
 await ctx.plugin(MirageShellExecutor, { sessionId: 'agent-1' }).await()
 ```
 
-A bound session keeps its cwd, exports, and functions across calls. It is created on first use (an existing session is adopted as is), and two executors bound to different sessions stay fully apart on one workspace.
+A bound session keeps its cwd, exports, and functions across calls. It is created on first use (an existing session is adopted as is), and two executors bound to different sessions stay fully apart on one workspace. While one command still runs in the session, such as one left in the background, the next runs beside it on a copy of the session instead of waiting for it to end, so that command's `cd` and `export` last for it alone.
 
 dsh sends a working directory and a set of managed `DSH_*` variables with every call, and in Mirage a per-call directory or environment forks a subshell. Taken at face value, a bound session would therefore have nothing left to persist, so both are checked first. The workdir dsh computed on its own machine is not a directory in this world, so it is ignored: the executor's own `workdir` when unbound, the session's cwd when bound, and `ctx.fs` resolves relative paths against the same base. The `DSH_*` variables are set in the session once instead of riding along per call. A workdir that does exist here, or any other per-call variable, still forks a subshell, which is what "only this command" should mean.
 

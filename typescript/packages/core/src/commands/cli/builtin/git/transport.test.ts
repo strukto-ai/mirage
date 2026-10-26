@@ -256,7 +256,7 @@ it('withholds the gh token from another origin on gh repo clone', async () => {
   const listener = backend(join(tmp, 'elsewhere'), [], seen)
   const other = `${await listen(listener)}/repo.git`
   try {
-    const ws = await workspace()
+    const ws = workspace()
     ws.registerCli('gh', GH, { token: 't0k', base_url: 'https://ghe.test/api/v3' })
     const result = await ws.shell(`cd /w && gh repo clone o/r ${other} -- -b`)
     expect([result.exitCode, DEC.decode(result.stderr)]).toEqual([

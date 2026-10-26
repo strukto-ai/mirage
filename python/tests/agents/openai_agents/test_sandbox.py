@@ -310,6 +310,19 @@ def test_a_long_command_keeps_running_in_the_background():
     asyncio.run(_run())
 
 
+def test_a_command_runs_beside_a_background_one():
+    async def _run():
+        session = await _make_client().create()
+        started = await session.pty_exec_start("sleep 30", yield_time_s=0.25)
+        assert started.process_id is not None
+        quick = await session.pty_exec_start("echo fast")
+        assert quick.exit_code == 0
+        assert quick.output == b"fast\n"
+        await session.pty_terminate_all()
+
+    asyncio.run(_run())
+
+
 def test_a_quick_background_command_answers_at_once():
     async def _run():
         session = await _make_client().create()

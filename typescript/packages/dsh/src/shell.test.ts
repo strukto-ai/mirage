@@ -731,6 +731,32 @@ describe('start', () => {
     expect(proc.readOutput().delta).toBe('')
   })
 
+  it('runs a command beside one still running in a bound session', async () => {
+    const { shell } = await makeShell({}, { sessionId: 'agent' })
+    await runOn(shell, shell.resolve({ command: 'cd /data && export KEPT=1' }))
+    const proc = await shell.execute(shell.resolve({ command: 'sleep 30' }))
+    const beside = await runOn(
+      shell,
+      shell.resolve({ command: 'echo $KEPT; pwd; cd /; export LOST=1' }),
+    )
+    expect(beside.stdout.text).toBe('1\n/data\n')
+    expect(proc.status).toBe('running')
+    proc.kill()
+    await proc.done
+    const after = await runOn(shell, shell.resolve({ command: 'pwd; echo ${LOST:-unset}' }))
+    expect(after.stdout.text).toBe('/data\nunset\n')
+  })
+
+  it('runs a command beside a background one', async () => {
+    const { shell } = await makeShell()
+    const proc = await shell.execute(shell.resolve({ command: 'sleep 30' }))
+    const out = await runOn(shell, shell.resolve({ command: 'echo fast' }))
+    expect(out.stdout.text).toBe('fast\n')
+    expect(proc.status).toBe('running')
+    proc.kill()
+    await proc.done
+  })
+
   it('kill aborts a running command and is idempotent about completion', async () => {
     const { shell } = await makeShell()
     const proc = await shell.execute(shell.resolve({ command: 'sleep 30' }))

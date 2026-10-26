@@ -12,25 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { readFileSync } from 'node:fs'
-import { createRequire } from 'node:module'
-import { beforeAll, expect, it } from 'vitest'
-import { createShellParser, type ShellParser } from '../../../../shell/parse/index.ts'
+import { expect, it } from 'vitest'
 import { MountMode } from '../../../../types.ts'
 import { RAMVFS } from '../../../../vfs/ram/ram.ts'
 import { Workspace } from '../../../../workspace/workspace/workspace.ts'
 import { defaultDirectory, remoteHead } from './clone.ts'
 import { GIT } from './index.ts'
 import type { Advertisement } from './transport.ts'
-
-const require = createRequire(import.meta.url)
-let parser: ShellParser
-beforeAll(async () => {
-  parser = await createShellParser({
-    engineWasm: readFileSync(require.resolve('web-tree-sitter/web-tree-sitter.wasm')),
-    grammarWasm: readFileSync(require.resolve('tree-sitter-bash/tree-sitter-bash.wasm')),
-  })
-})
 
 const C = 'c'.repeat(40)
 const B = 'b'.repeat(40)
@@ -81,7 +69,7 @@ it('checks out a detached remote HEAD detached', () => {
 })
 
 it('refuses a third operand as too many arguments', async () => {
-  const ws = new Workspace({ '/w': new RAMVFS() }, { mode: MountMode.WRITE, shellParser: parser })
+  const ws = new Workspace({ '/w': new RAMVFS() }, { mode: MountMode.WRITE })
   ws.registerCli('git', GIT)
   try {
     await ws.shell('mkdir /w/b && echo x > /w/b/f')

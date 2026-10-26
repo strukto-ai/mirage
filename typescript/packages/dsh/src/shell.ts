@@ -95,7 +95,10 @@ export interface MirageShellConfig {
    * dsh's bash tool. With a session bound, `cd`, `export`, and function
    * definitions persist across calls, the persistent-shell contract. The
    * session is created on first use if the workspace does not have it; an
-   * existing session is adopted as is.
+   * existing session is adopted as is. While one command still runs in the
+   * session (one left running in the background), the next runs on a copy
+   * of the session beside it rather than waiting for it to end, so its
+   * `cd` and `export` last for that command alone.
    *
    * A spec carrying an explicit `env`, or a `workdir` that names a real
    * directory in this world, still runs as a one-call subshell of the
@@ -483,6 +486,7 @@ export class MirageShellExecutor extends ShellExecutor {
   private readonly seeding = new Map<string, Promise<unknown>>()
   private issued = 0
   private readonly seeded = new Map<string, number>()
+  private readonly inSession = new Map<string, number>()
 
   constructor(ctx: Context, config: MirageShellConfig = {}) {
     super(ctx)
@@ -877,13 +881,30 @@ export class MirageShellExecutor extends ShellExecutor {
       return new MirageShellExecution(null, parts)
     }
     const { ws, sessionId, bound, workdir } = prepared
-    return new MirageShellExecution(
-      (sink) =>
-        ws.shell(
-          spec.command,
-          executeOptions(spec, workdir, controller.signal, sessionId, bound, this.workdir, sink),
-        ),
-      parts,
-    )
+    return new MirageShellExecution((sink) => {
+      const options = executeOptions(
+        spec,
+        workdir,
+        controller.signal,
+        sessionId,
+        bound,
+        this.workdir,
+        sink,
+      )
+      if (sessionId === undefined || options.cwd !== undefined || options.env !== undefined) {
+        return ws.shell(spec.command, options)
+      }
+      // The command runs in the bound session itself, where a session runs
+      // one line at a time. While another still runs there, it runs on a
+      // copy of the session instead, beside that one.
+      const running = this.inSession.get(sessionId) ?? 0
+      if (running > 0) {
+        return ws.shell(spec.command, { ...options, cwd: ws.getSession(sessionId).cwd })
+      }
+      this.inSession.set(sessionId, running + 1)
+      return ws.shell(spec.command, options).finally(() => {
+        this.inSession.set(sessionId, (this.inSession.get(sessionId) ?? 1) - 1)
+      })
+    }, parts)
   }
 }

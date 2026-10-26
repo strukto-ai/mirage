@@ -36,6 +36,7 @@ from mirage.shell.constants import (
     SHELL_ARGV0,
 )
 from mirage.shell.descriptors import Descriptor, StreamOwner
+from mirage.shell.job_table.table import JobTable
 from mirage.shell.job_table.waits import JobWaits
 from mirage.shell.types import AliasExpansion
 from mirage.shell.variable import (
@@ -393,6 +394,10 @@ class SessionState:
     tty: Terminal = field(default_factory=Terminal, repr=False)
     job_output: JobOutput | None = field(default=None, repr=False)
     job_waits: JobWaits | None = field(default=None, repr=False)
+    # The jobs this shell's lines start theirs in when no caller hands a
+    # table: a per-call line's own, so a callback fired in it reaches
+    # them; None for the workspace's.
+    job_table: JobTable | None = field(default=None, repr=False)
     # Transient `set -e` marker: True when the failure just returned
     # came from a short-circuited &&/|| branch or a `!`-negated command,
     # which bash exempts from errexit. Reset on every node execution.
