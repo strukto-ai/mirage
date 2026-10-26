@@ -83,7 +83,13 @@ pub(super) fn lower(data: &[u8], bodies: &[Body]) -> Lowered {
     let mut edits: Vec<Edit> = Vec::new();
     for (index, (heredoc, offsets)) in read.iter().enumerate() {
         if heredoc.end > heredoc.body_start {
-            edits.push((heredoc.body_start, heredoc.end, Vec::new(), Vec::new(), None));
+            edits.push((
+                heredoc.body_start,
+                heredoc.end,
+                Vec::new(),
+                Vec::new(),
+                None,
+            ));
         }
         if read[index + 1..]
             .iter()
@@ -95,7 +101,13 @@ pub(super) fn lower(data: &[u8], bodies: &[Body]) -> Lowered {
         let mut replacement = vec![b'<'];
         replacement.extend(word);
         places.insert(0, heredoc.operator);
-        edits.push((heredoc.operator, heredoc.word_end, replacement, places, Some(heredoc.clone())));
+        edits.push((
+            heredoc.operator,
+            heredoc.word_end,
+            replacement,
+            places,
+            Some(heredoc.clone()),
+        ));
     }
     edits.sort_by_key(|edit| edit.0);
     let mut source = Vec::with_capacity(data.len());
@@ -177,7 +189,10 @@ fn quoted_body(heredoc: &Heredoc, offsets: &[usize]) -> (Vec<u8>, Vec<usize>) {
 
 /// Bytes after which a `#` opens a comment.
 fn comment_preceder(byte: u8) -> bool {
-    matches!(byte, b' ' | b'\t' | b'\n' | b';' | b'|' | b'&' | b'(' | b')' | b'<' | b'>')
+    matches!(
+        byte,
+        b' ' | b'\t' | b'\n' | b';' | b'|' | b'&' | b'(' | b')' | b'<' | b'>'
+    )
 }
 
 /// The byte closing the construct that opens at `index`: `${` its brace,
@@ -259,7 +274,12 @@ fn construct_end(data: &[u8], start: usize, closer: u8, depth: usize) -> Option<
         return None;
     }
     let paren = closer == b')';
-    let mut index = start + if matches!(data[start], b'(' | b'[') { 1 } else { 2 };
+    let mut index = start
+        + if matches!(data[start], b'(' | b'[') {
+            1
+        } else {
+            2
+        };
     let mut cases = 0usize;
     while index < data.len() {
         let byte = data[index];
@@ -365,7 +385,8 @@ impl Tree {
                 }
                 if !heredoc.terminated {
                     let line = body.strip_suffix(b"\n").unwrap_or(body);
-                    let escaped = line.iter().rev().take_while(|byte| **byte == b'\\').count() % 2 == 1;
+                    let escaped =
+                        line.iter().rev().take_while(|byte| **byte == b'\\').count() % 2 == 1;
                     if !heredoc.quoted && escaped {
                         bodies.push(b'\n');
                     }

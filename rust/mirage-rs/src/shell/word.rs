@@ -44,7 +44,12 @@ impl Parser<'_> {
             let word = pieces
                 .last()
                 .is_some_and(|last| last.is("word") && last.end == self.i);
-            if self.peek() == b'(' && word && !ctx.conditional && self.options.extglob && self.at_extglob_group() {
+            if self.peek() == b'('
+                && word
+                && !ctx.conditional
+                && self.options.extglob
+                && self.at_extglob_group()
+            {
                 self.extglob_group(&mut pieces, "word")?;
                 continue;
             }

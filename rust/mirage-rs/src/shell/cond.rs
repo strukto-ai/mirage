@@ -20,7 +20,10 @@ const OPERATORS: &[&[u8]] = &[
 
 /// Bytes that end an unquoted word.
 fn word_break(byte: u8) -> bool {
-    matches!(byte, b' ' | b'\t' | b'\n' | b';' | b'&' | b'|' | b'(' | b')' | b'<' | b'>')
+    matches!(
+        byte,
+        b' ' | b'\t' | b'\n' | b';' | b'&' | b'|' | b'(' | b')' | b'<' | b'>'
+    )
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -45,7 +48,11 @@ struct Tok {
 /// it stopped at.
 enum Stop {
     Refused(Fail),
-    Test { lines: Vec<Vec<u8>>, at: Tok, eof: bool },
+    Test {
+        lines: Vec<Vec<u8>>,
+        at: Tok,
+        eof: bool,
+    },
 }
 
 impl From<Fail> for Stop {
@@ -195,7 +202,10 @@ impl Cond<'_, '_> {
                 j += 2;
                 continue;
             }
-            if !matches!(self.s()[j], b';' | b'&' | b'|' | b'<' | b'>' | b'(' | b')' | b'-') {
+            if !matches!(
+                self.s()[j],
+                b';' | b'&' | b'|' | b'<' | b'>' | b'(' | b')' | b'-'
+            ) {
                 break;
             }
             spelled.push(self.s()[j]);
@@ -301,7 +311,11 @@ impl Cond<'_, '_> {
             return test("syntax error in conditional expression".into(), tok);
         }
         test(
-            self.naming("syntax error in conditional expression: unexpected token `", tok, "'"),
+            self.naming(
+                "syntax error in conditional expression: unexpected token `",
+                tok,
+                "'",
+            ),
             tok,
         )
     }
@@ -372,7 +386,11 @@ impl Cond<'_, '_> {
             )?;
             if arg.kind != Kind::Word || self.is_close(arg) {
                 return test(
-                    self.naming("unexpected argument `", arg, "' to conditional unary operator"),
+                    self.naming(
+                        "unexpected argument `",
+                        arg,
+                        "' to conditional unary operator",
+                    ),
                     arg,
                 );
             }
@@ -394,7 +412,11 @@ impl Cond<'_, '_> {
             let arg = operand("unexpected argument to conditional binary operator", arg)?;
             if arg.kind != Kind::Word || self.is_close(arg) {
                 return test(
-                    self.naming("unexpected argument `", arg, "' to conditional binary operator"),
+                    self.naming(
+                        "unexpected argument `",
+                        arg,
+                        "' to conditional binary operator",
+                    ),
                     arg,
                 );
             }
@@ -410,7 +432,11 @@ impl Cond<'_, '_> {
             return test("conditional binary operator expected".into(), op);
         }
         test(
-            self.naming("unexpected token `", op, "', conditional binary operator expected"),
+            self.naming(
+                "unexpected token `",
+                op,
+                "', conditional binary operator expected",
+            ),
             op,
         )
     }
@@ -419,7 +445,12 @@ impl Cond<'_, '_> {
     fn test_group(&mut self, tok: Tok) -> S<()> {
         if self.parser.nesting + self.depth >= super::parser::MAX_NESTING {
             let line = b"syntax error near unexpected token `('".to_vec();
-            return Err(Stop::Refused(self.parser.refusal(tok.start, tok.end, vec![line], false)));
+            return Err(Stop::Refused(self.parser.refusal(
+                tok.start,
+                tok.end,
+                vec![line],
+                false,
+            )));
         }
         self.take(tok);
         self.depth += 1;
@@ -445,7 +476,10 @@ impl Cond<'_, '_> {
         if close.kind == Kind::Word && !self.is_close(close) {
             return test("expected `)'".into(), close);
         }
-        test(self.naming("unexpected token `", close, "', expected `)'"), close)
+        test(
+            self.naming("unexpected token `", close, "', expected `)'"),
+            close,
+        )
     }
 
     /// The right side of `==`, `=` or `!=`, read with extglob on.
@@ -502,7 +536,10 @@ impl Cond<'_, '_> {
                 j = self.parser.scan_matched(j + 1, j, b'(', b')')? + 1;
                 continue;
             }
-            if matches!(byte, b' ' | b'\t' | b'\n' | b';' | b'<' | b'>' | b')' | b'&') {
+            if matches!(
+                byte,
+                b' ' | b'\t' | b'\n' | b';' | b'<' | b'>' | b')' | b'&'
+            ) {
                 break;
             }
             j = self.parser.scan_word_char(j)?;

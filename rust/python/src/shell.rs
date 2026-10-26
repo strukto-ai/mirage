@@ -49,10 +49,13 @@ impl ShellTree {
     /// status; None when bash reads the line.
     #[getter]
     fn error<'py>(&self, py: Python<'py>) -> Option<(usize, Bound<'py, PyBytes>, u8)> {
-        self.tree
-            .error
-            .as_ref()
-            .map(|refusal| (refusal.at, PyBytes::new(py, &refusal.message), refusal.status))
+        self.tree.error.as_ref().map(|refusal| {
+            (
+                refusal.at,
+                PyBytes::new(py, &refusal.message),
+                refusal.status,
+            )
+        })
     }
 
     /// What the nodes read: the line with its heredoc bodies folded in and
@@ -315,10 +318,13 @@ impl ShellNode {
     /// The tree's refusal, as `ShellTree.error` gives it.
     #[getter]
     fn error<'py>(&self, py: Python<'py>) -> Option<(usize, Bound<'py, PyBytes>, u8)> {
-        self.tree
-            .error
-            .as_ref()
-            .map(|refusal| (refusal.at, PyBytes::new(py, &refusal.message), refusal.status))
+        self.tree.error.as_ref().map(|refusal| {
+            (
+                refusal.at,
+                PyBytes::new(py, &refusal.message),
+                refusal.status,
+            )
+        })
     }
 
     fn child_by_field_name(&self, name: &str) -> Option<ShellNode> {

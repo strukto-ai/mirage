@@ -1,5 +1,5 @@
-use super::lex::{is_blank, is_space, is_word};
 use super::heredoc::Body;
+use super::lex::{is_blank, is_space, is_word};
 use super::lower::lower;
 use super::tree::{Refusal, Syn, Tree, lay_out, place_comments};
 
@@ -174,14 +174,26 @@ pub(super) fn parse(source: &[u8], options: &super::Options) -> Tree {
     let bodies = &first.bodies;
     if bodies.is_empty() {
         let offsets = (0..=source.len()).collect();
-        return joined(source.to_vec(), first, options, ended, offsets, Vec::new(), source);
+        return joined(
+            source.to_vec(),
+            first,
+            options,
+            ended,
+            offsets,
+            Vec::new(),
+            source,
+        );
     }
     let mut warned = std::collections::HashSet::new();
     let closes = first
         .closes
         .iter()
         .filter_map(|(close, opened)| {
-            let fresh: Vec<usize> = opened.iter().copied().filter(|at| warned.insert(*at)).collect();
+            let fresh: Vec<usize> = opened
+                .iter()
+                .copied()
+                .filter(|at| warned.insert(*at))
+                .collect();
             (!fresh.is_empty()).then_some((*close, fresh))
         })
         .collect();
@@ -334,15 +346,25 @@ fn refusals(source: &[u8], options: &super::Options, ended: bool, first: Fail) -
     }
     Refusal {
         at: found[0].at,
-        message: found.iter().flat_map(|fail| &fail.lines).flat_map(|line| worded(line)).collect(),
+        message: found
+            .iter()
+            .flat_map(|fail| &fail.lines)
+            .flat_map(|line| worded(line))
+            .collect(),
         status: found.last().map_or(2, |last| last.status),
     }
 }
 
 /// One of bash's diagnostic lines as mirage prints it.
 fn worded(line: &[u8]) -> Vec<u8> {
-    for opener in [&b"syntax error near unexpected token `"[..], b"syntax error near `"] {
-        if let Some(text) = line.strip_prefix(opener).and_then(|rest| rest.strip_suffix(b"'")) {
+    for opener in [
+        &b"syntax error near unexpected token `"[..],
+        b"syntax error near `",
+    ] {
+        if let Some(text) = line
+            .strip_prefix(opener)
+            .and_then(|rest| rest.strip_suffix(b"'"))
+        {
             return [&b"mirage: syntax error near '"[..], text, b"'\n"].concat();
         }
     }
@@ -466,11 +488,7 @@ fn scan_verbatim(source: &[u8], mut at: usize, spans: &mut Vec<(usize, usize)>) 
 
 impl<'a> Parser<'a> {
     /// A parser at the start of `s`, spending from `budget`.
-    pub(super) fn new(
-        s: &'a [u8],
-        budget: &'a Budget,
-        options: &'a super::Options,
-    ) -> Self {
+    pub(super) fn new(s: &'a [u8], budget: &'a Budget, options: &'a super::Options) -> Self {
         Self {
             s,
             i: 0,
@@ -554,7 +572,11 @@ impl Parser<'_> {
     /// otherwise inside a substitution 127, and 2 elsewhere.
     pub(super) fn refusal(&self, at: usize, end: usize, lines: Vec<Vec<u8>>, eof: bool) -> Fail {
         let status = if eof {
-            if self.frames.contains(&Frame::Array) { 1 } else { 2 }
+            if self.frames.contains(&Frame::Array) {
+                1
+            } else {
+                2
+            }
         } else {
             match self.frames.last() {
                 None => 2,
@@ -591,12 +613,14 @@ impl Parser<'_> {
         }
         let close = at + memchr::memchr(b'}', &self.s[at..])?;
         let name = &self.s[at + 1..close];
-        let named = name.first().is_some_and(|byte| super::lex::is_name_start(*byte))
+        let named = name
+            .first()
+            .is_some_and(|byte| super::lex::is_name_start(*byte))
             && name.iter().all(|byte| super::lex::is_name(*byte));
         (named
             && matches!(self.s.get(close + 1), Some(b'<' | b'>'))
             && self.s.get(close + 2) != Some(&b'('))
-            .then_some(close + 1)
+        .then_some(close + 1)
     }
 
     /// What bash says when the input ends where it waits for more.
@@ -627,11 +651,19 @@ impl Parser<'_> {
             Err(fail) => return fail,
         };
         let end = at + token.len().max(1);
-        let token = if token == b"\n" { b"newline".to_vec() } else { token };
+        let token = if token == b"\n" {
+            b"newline".to_vec()
+        } else {
+            token
+        };
         self.refusal(
             at,
             end,
-            vec![line(&[b"syntax error near unexpected token `", &token, b"'"])],
+            vec![line(&[
+                b"syntax error near unexpected token `",
+                &token,
+                b"'",
+            ])],
             false,
         )
     }
@@ -875,10 +907,9 @@ impl Parser<'_> {
         let mut children = Vec::new();
         let mut terminated = true;
         while let Some(items) = self.next_statement(close, field)? {
-            terminated = items.last().is_some_and(|last| {
-                matches!(last.kind, ";" | "&" | "")
-                    || ends_compound(last)
-            });
+            terminated = items
+                .last()
+                .is_some_and(|last| matches!(last.kind, ";" | "&" | "") || ends_compound(last));
             children.extend(items);
             if !terminated && !self.at_close(close) {
                 return self.fail(self.i);
@@ -1015,8 +1046,16 @@ impl Parser<'_> {
         self.skip_blank();
         let compound = self.peek() == b'('
             || [
-                &b"{"[..], b"[[", b"if", b"while", b"until", b"for", b"select", b"case",
-                b"function", b"coproc",
+                &b"{"[..],
+                b"[[",
+                b"if",
+                b"while",
+                b"until",
+                b"for",
+                b"select",
+                b"case",
+                b"function",
+                b"coproc",
             ]
             .iter()
             .any(|word| self.at_word(word));
@@ -1135,8 +1174,10 @@ impl Parser<'_> {
     /// word, as a `(` does too where extglob does not take it.
     fn at_bang(&self) -> bool {
         self.peek() == b'!'
-            && (matches!(self.at(1), 0 | b' ' | b'\t' | b'\n' | b';' | b'&' | b'|' | b'<' | b'>' | b')')
-                || self.at(1) == b'(' && !self.options.extglob)
+            && (matches!(
+                self.at(1),
+                0 | b' ' | b'\t' | b'\n' | b';' | b'&' | b'|' | b'<' | b'>' | b')'
+            ) || self.at(1) == b'(' && !self.options.extglob)
     }
 
     fn negated(&mut self) -> R<Syn> {

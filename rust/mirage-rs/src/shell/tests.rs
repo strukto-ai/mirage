@@ -46,7 +46,13 @@ fn lowered(source: &str) -> (String, Vec<(String, String, bool)>) {
     let heredocs = tree
         .heredocs
         .iter()
-        .map(|heredoc| (text(&heredoc.delimiter), text(&heredoc.body), heredoc.terminated))
+        .map(|heredoc| {
+            (
+                text(&heredoc.delimiter),
+                text(&heredoc.body),
+                heredoc.terminated,
+            )
+        })
         .collect();
     (text(&tree.source), heredocs)
 }
@@ -128,7 +134,10 @@ fn a_comment_sits_between_the_children_around_it() {
 fn a_heredoc_body_folds_into_its_line() {
     assert_eq!(
         lowered("cat <<EOF | wc\na $x\nEOF\necho"),
-        ("cat <\"a $x\n\" | wc\necho".into(), vec![heredoc("EOF", "a $x\n", true)])
+        (
+            "cat <\"a $x\n\" | wc\necho".into(),
+            vec![heredoc("EOF", "a $x\n", true)]
+        )
     );
     assert_eq!(
         read("cat <<EOF | wc\na $x\nEOF\necho"),
@@ -163,8 +172,14 @@ fn heredocs_after_a_line_are_read_in_order() {
         vec![heredoc("A", "a\n", true)]
     );
     // An unquoted body joins continued lines; a quoted one keeps them.
-    assert_eq!(lowered("cat <<E\na\\\nE\nE").1, vec![heredoc("E", "aE\n", true)]);
-    assert_eq!(lowered("cat <<'E'\na\\\nE").1, vec![heredoc("E", "a\\\n", true)]);
+    assert_eq!(
+        lowered("cat <<E\na\\\nE\nE").1,
+        vec![heredoc("E", "aE\n", true)]
+    );
+    assert_eq!(
+        lowered("cat <<'E'\na\\\nE").1,
+        vec![heredoc("E", "a\\\n", true)]
+    );
 }
 
 #[test]
@@ -232,7 +247,10 @@ fn bash_parses_these_only_when_it_runs_them() {
 fn refusals_are_in_bash_words() {
     let said = |source: &str| {
         let refusal = refused(source);
-        (String::from_utf8_lossy(&refusal.message).into_owned(), refusal.status)
+        (
+            String::from_utf8_lossy(&refusal.message).into_owned(),
+            refusal.status,
+        )
     };
     assert_eq!(refused("if a; then").at, 10);
     assert_eq!(
@@ -284,7 +302,10 @@ fn reserved_words_follow_a_compound_command_bare() {
 #[test]
 fn deep_nesting_is_refused_not_overflowed() {
     let deep = format!("{}a{}", "! ".repeat(5000), ")".repeat(5000));
-    assert_eq!(refused(&deep).message, b"mirage: syntax error: nesting too deep\n");
+    assert_eq!(
+        refused(&deep).message,
+        b"mirage: syntax error: nesting too deep\n"
+    );
     let wide = format!("a{}", " && a".repeat(100_000));
     assert_eq!(parse(wide.as_bytes()).error, None);
 }
@@ -380,14 +401,23 @@ fn an_array_element_opens_a_subscript_only_at_its_start() {
 
 #[test]
 fn heredoc_delimiters_read_as_bash_reads_them() {
-    assert_eq!(lowered("cat <<$'\\x41'\nb\nA\necho").1, vec![heredoc("A", "b\n", true)]);
-    assert_eq!(lowered("cat <<$'\\''\nb\n'\necho").1, vec![heredoc("'", "b\n", true)]);
+    assert_eq!(
+        lowered("cat <<$'\\x41'\nb\nA\necho").1,
+        vec![heredoc("A", "b\n", true)]
+    );
+    assert_eq!(
+        lowered("cat <<$'\\''\nb\n'\necho").1,
+        vec![heredoc("'", "b\n", true)]
+    );
     // A substitution's quotes stay in the delimiter and quote nothing.
     let (source, heredocs) = lowered("cat <<$(echo 'a')\n$x\n$(echo 'a')");
     assert_eq!(source, "cat <\"$x\n\"\n");
     assert_eq!(heredocs, vec![heredoc("$(echo 'a')", "$x\n", true)]);
     // A continuation inside the word is gone before the word is read.
-    assert_eq!(lowered("cat <<$\\\n\"END\"\nx\nEND\n").1, vec![heredoc("END", "x\n", true)]);
+    assert_eq!(
+        lowered("cat <<$\\\n\"END\"\nx\nEND\n").1,
+        vec![heredoc("END", "x\n", true)]
+    );
     // A quoted body keeps its continuations, its `$` and backticks
     // escaped in the word it becomes.
     assert_eq!(
@@ -409,7 +439,10 @@ fn bash_readings_from_review() {
     refused("for i in a & do :; done");
     refused("select i & do :; done");
     let bangs = format!("{}a", "! ".repeat(200));
-    assert_eq!(refused(&bangs).message, b"mirage: syntax error: nesting too deep\n");
+    assert_eq!(
+        refused(&bangs).message,
+        b"mirage: syntax error: nesting too deep\n"
+    );
     // Too deep to read, a loop header is raw text bash reads when it runs.
     let chain = format!("for (({}1;;)); do :; done", "a=".repeat(200));
     assert!(read(&chain).contains("(word=a=a=a="));
@@ -574,7 +607,10 @@ fn a_line_nested_past_the_reader_is_refused_at_the_next_opener() {
     // A `!` chain or quotes nested past what the reader takes are refused,
     // not read on a stack they would overflow.
     let bangs = format!("[[ {}x ]]", "! ".repeat(5000));
-    assert_eq!(refused(&bangs).message, b"mirage: syntax error: nesting too deep\n");
+    assert_eq!(
+        refused(&bangs).message,
+        b"mirage: syntax error: nesting too deep\n"
+    );
     let quotes = format!("echo \"{}", "$(\"".repeat(100_000));
     refused(&quotes);
     let expansions = format!("echo {}", "${x:-".repeat(100_000));

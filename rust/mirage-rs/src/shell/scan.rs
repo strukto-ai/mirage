@@ -38,7 +38,12 @@ impl Parser<'_> {
     pub(super) fn too_deep(&self) -> super::parser::Fail {
         super::parser::Fail {
             status: 2,
-            ..self.refusal(self.i, self.i, vec![b"syntax error: nesting too deep".to_vec()], false)
+            ..self.refusal(
+                self.i,
+                self.i,
+                vec![b"syntax error: nesting too deep".to_vec()],
+                false,
+            )
         }
     }
 
@@ -142,7 +147,13 @@ impl Parser<'_> {
 
     /// Where the `right` that matches an opener closes, read as text:
     /// quotes, `$'...'` and `$(` skipped, any other expansion text.
-    pub(super) fn scan_matched(&self, mut j: usize, opened: usize, left: u8, right: u8) -> R<usize> {
+    pub(super) fn scan_matched(
+        &self,
+        mut j: usize,
+        opened: usize,
+        left: u8,
+        right: u8,
+    ) -> R<usize> {
         self.deeper(|| {
             let mut depth = 1usize;
             while j < self.s.len() {
@@ -213,7 +224,6 @@ impl Parser<'_> {
         }
     }
 
-
     /// Where the text bash quotes back from where its reader stopped
     /// lies: back over blanks, then to a blank or past one of `;&|`.
     pub(super) fn near_span(&self, at: usize) -> (usize, usize) {
@@ -241,7 +251,12 @@ impl Parser<'_> {
     pub(super) fn near(&self, at: usize, eof: bool) -> super::parser::Fail {
         let (from, to) = self.near_span(at);
         if from == to {
-            return self.refusal(self.s.len(), self.s.len(), vec![self.eof_line().into()], true);
+            return self.refusal(
+                self.s.len(),
+                self.s.len(),
+                vec![self.eof_line().into()],
+                true,
+            );
         }
         let line = super::parser::line(&[b"syntax error near `", &self.s[from..to], b"'"]);
         self.refusal(from, to, vec![line], eof)
@@ -263,7 +278,10 @@ impl Parser<'_> {
                 at = self.scan_extended_pattern(at)?;
                 continue;
             }
-            if matches!(byte, b' ' | b'\t' | b'\n' | b';' | b'&' | b'|' | b'(' | b')' | b'<' | b'>') {
+            if matches!(
+                byte,
+                b' ' | b'\t' | b'\n' | b';' | b'&' | b'|' | b'(' | b')' | b'<' | b'>'
+            ) {
                 if matches!(byte, b'<' | b'>') && self.char_at(at + 1) == b'(' {
                     at = self.scan_process_substitution(at)?;
                     continue;

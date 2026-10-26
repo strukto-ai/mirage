@@ -212,10 +212,11 @@ impl Parser<'_> {
                 let start = self.i;
                 self.read_body(heredoc.clone());
                 let end = match self.bodies.last() {
-                    Some(body) if body.terminated => {
-                        memchr::memrchr(b'\n', &self.s[start..body.end.saturating_sub(1).max(start)])
-                            .map_or(start, |offset| start + offset + 1)
-                    }
+                    Some(body) if body.terminated => memchr::memrchr(
+                        b'\n',
+                        &self.s[start..body.end.saturating_sub(1).max(start)],
+                    )
+                    .map_or(start, |offset| start + offset + 1),
                     _ => self.s.len(),
                 };
                 let mut text = Vec::new();
