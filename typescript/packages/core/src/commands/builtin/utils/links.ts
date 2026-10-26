@@ -231,8 +231,8 @@ export function linkView(files: Files | undefined): LinkView | undefined {
 export function mountView(
   files: Files | undefined,
   crossing = false,
-  command: string | null = null,
-  profile: Readonly<Record<string, Limit>> = {},
+  command?: string | null,
+  profile?: Readonly<Record<string, Limit>>,
 ): MountView | undefined {
   if (files === undefined) return undefined
   return readerOf(files).mounts(crossing, command, profile)

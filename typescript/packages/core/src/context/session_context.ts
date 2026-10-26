@@ -114,6 +114,8 @@ export interface Caller {
   readonly commandSink: readonly [OpRecord[] | null, OpRecord[]] | null
   // When the running command started.
   readonly started: number | null
+  // The running command's name, which its walks resolve their walkLimit by.
+  readonly command: string | null
   // The recorder of the innermost level running a command, for a level whose
   // output is a value (a substitution's) to send another level's stream
   // bytes toward it.
@@ -165,6 +167,7 @@ const UNBOUND: Caller = {
   write: null,
   ownVersion: null,
   started: null,
+  command: null,
   enclosing: null,
   execution: null,
   process: null,

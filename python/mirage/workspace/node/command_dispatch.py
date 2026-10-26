@@ -819,7 +819,9 @@ async def _run_argv(
         outer = current_caller()
         token = bind_caller(
             dataclasses.replace(
-                outer, gate=admitted if admitted is not None else outer.gate
+                outer,
+                gate=admitted if admitted is not None else outer.gate,
+                command=argv.name,
             )
         )
         try:

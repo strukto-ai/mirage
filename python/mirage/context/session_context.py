@@ -154,6 +154,8 @@ class Caller:
         own_version (tuple | None): the version a write's own read
             stamped.
         command_started (int | None): when the running command started.
+        command (str | None): the running command's name, which its walks
+            resolve their ``walk_limit`` by.
         enclosing (JobConsole | None): the recorder of the innermost
             level running a command, for a level whose output is a value
             (a substitution's) to send another level's stream bytes
@@ -196,6 +198,7 @@ class Caller:
     write_context: WriteContext | None = None
     own_version: tuple[str, str | OwnRead | None] | None = None
     command_started: int | None = None
+    command: str | None = None
     enclosing: JobConsole | None = None
     execution: str | None = None
     process: ProcessHandle | None = None

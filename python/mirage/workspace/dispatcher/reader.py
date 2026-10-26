@@ -16,6 +16,7 @@ import posixpath
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 
+from mirage.context.session_context import current_caller
 from mirage.policy.builtin.output_cap import resolve_limit
 from mirage.types import FileStat, Limit, PathSpec, Visibility
 from mirage.utils.hidden import hidden_under, leads_hidden, path_visible
@@ -352,6 +353,7 @@ class NamespaceReader:
         A walk's ``walk_limit`` on each mount is ``command``'s, resolved
         through the session's ``profile``, the mount's and the
         workspace's command limits; without a command, the mount's own.
+        Both default to the running command's and its session's.
 
         Args:
             crossing (bool): the walk goes through the dispatcher.
@@ -359,6 +361,11 @@ class NamespaceReader:
             profile (Mapping[str, Limit] | None): the session profile's
                 command limits.
         """
+        caller = current_caller()
+        if command is None:
+            command = caller.command
+        if profile is None and caller.session is not None:
+            profile = caller.session.command_limits
 
         def below(virtual: str) -> list[str]:
             if crossing:

@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { currentCaller } from '../../context/session_context.ts'
 import { resolveLimit } from '../../policy/builtin/output_cap.ts'
 import { type FileStat, Limit, PathSpec, type Visibility } from '../../types.ts'
 import { hiddenUnder, leadsHidden, pathVisible } from '../../utils/hidden.ts'
@@ -277,12 +278,13 @@ export class NamespaceReader implements NamespaceLinks {
    * root; and it takes no mount's shortcut, so no mount answers a function
    * for it or narrows its search. A walk's `walkLimit` on each mount is
    * `command`'s, resolved through the session's `profile`, the mount's and
-   * the workspace's command limits; without a command, the mount's own.
+   * the workspace's command limits; without a command, the mount's own. Both
+   * default to the running command's and its session's.
    */
   mounts(
     crossing: boolean,
-    command: string | null = null,
-    profile: Readonly<Record<string, Limit>> = {},
+    command: string | null = currentCaller().command,
+    profile: Readonly<Record<string, Limit>> = currentCaller().session?.commandLimits ?? {},
   ): MountView {
     const below = (path: string): string[] => {
       if (crossing) return []

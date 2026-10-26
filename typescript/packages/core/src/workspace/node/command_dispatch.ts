@@ -772,7 +772,9 @@ async function runArgv(
     let mine: OpRecord[] = []
     // The command's own layer of the caller: once admitted, its gate.
     const outer = currentCaller()
-    const result = await runWithCaller({ ...outer, gate: gated ?? outer.gate }, () =>
+    const result = await runWithCaller(
+      { ...outer, gate: gated ?? outer.gate, command: argv.name },
+      () =>
       commandRecords((records) => {
         mine = records
         return route()
