@@ -1380,6 +1380,30 @@ async def test_a_workspace_waits_for_anothers_job_status():
 
 
 @pytest.mark.asyncio
+async def test_a_pid_names_the_runner_here_before_anothers_job_number():
+    store = RAMWorkspaceStateStore()
+    a, b = _sharing(store), _sharing(store)
+    try:
+        await a.shell(
+            "for i in 1 2 3 4 5 6; do sleep 30 & done", session_id="s"
+        )
+        killed = await b.shell('sleep 30 & kill "$!"', session_id="s")
+        assert killed.exit_code == 0
+        async with asyncio.timeout(5):
+            waited = await b.shell(
+                'false & wait "$!"; echo $?', session_id="s"
+            )
+        assert waited.stdout == b"1\n"
+        await a.job_table.sync("s")
+        assert [j.status for j in a.job_table.list_jobs("s")][:6] == [
+            JobStatus.RUNNING
+        ] * 6
+    finally:
+        await a.close()
+        await b.close()
+
+
+@pytest.mark.asyncio
 async def test_a_substitution_lists_anothers_jobs():
     store = RAMWorkspaceStateStore()
     a, b = _sharing(store), _sharing(store)

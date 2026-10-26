@@ -52,8 +52,13 @@ export abstract class JobStore {
     expectedGeneration: number,
   ): Promise<boolean>
 
-  /** Drop one session's job list (the session closed). */
-  abstract delete(sessionId: string): Promise<void>
+  /**
+   * Drop one session's job list (the session closed) iff its generation
+   * matches, so a job another workspace started after the list was read
+   * is never dropped unstopped. True when the list is gone, false on
+   * conflict.
+   */
+  abstract delete(sessionId: string, expectedGeneration: number): Promise<boolean>
 
   /**
    * The console stream a job list names. Every call for one name reaches

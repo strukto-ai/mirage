@@ -60,7 +60,9 @@ describe.skipIf(REDIS_URL === '')('RedisJobStore', () => {
     expect(await store.casSet('s', { next: 2, generation: 1 }, 0)).toBe(true)
     expect(await store.casSet('s', { next: 3, generation: 1 }, 0)).toBe(false)
     expect(await store.load('s')).toEqual({ next: 2, generation: 1 })
-    await store.delete('s')
+    expect(await store.delete('s', 0)).toBe(false)
+    expect(await store.load('s')).toEqual({ next: 2, generation: 1 })
+    expect(await store.delete('s', 1)).toBe(true)
     expect(await store.load('s')).toBeNull()
   })
 

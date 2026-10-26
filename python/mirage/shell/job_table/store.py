@@ -74,11 +74,17 @@ class JobStore(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    async def delete(self, session_id: str) -> None:
-        """Drop one session's job list (the session closed).
+    async def delete(self, session_id: str, expected_generation: int) -> bool:
+        """Drop one session's job list (the session closed) iff its
+        generation matches, so a job another workspace started after the
+        list was read is never dropped unstopped.
 
         Args:
             session_id (str): the session.
+            expected_generation (int): generation the caller last saw.
+
+        Returns:
+            bool: True when the list is gone, False on conflict.
         """
         raise NotImplementedError
 

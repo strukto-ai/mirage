@@ -24,6 +24,10 @@ const S3_BUCKET = process.env.STORE_S3_BUCKET ?? 'mirage-state'
 const WORKSPACE_ID = 'xstore'
 const MARKER = 'xstore-history-marker'
 const JOBS_WORKSPACE_ID = 'xjobs'
+// Enough sleeps that the peer's own PIDs share numbers with the owner's jobs,
+// which a bare PID must not reach.
+const SLEEP_COUNT = 16
+const SLEEPS = `for i in ${Array.from({ length: SLEEP_COUNT }, (_, i) => String(i)).join(' ')}; do sleep 30 & done`
 const JOBS_SESSION = 's'
 
 // The store under test: redis for every plane, or (STORE_BACKEND=s3) the
@@ -282,6 +286,9 @@ async function jobsOwn(prefix: string): Promise<void> {
   const failing = await ws.shell('false &', { sessionId: JOBS_SESSION })
   check('ts own: false started', failing.exitCode === 0)
   check("ts own: the peer's wait reaped false", await until(reaped))
+  const sleeps = await ws.shell(SLEEPS, { sessionId: JOBS_SESSION })
+  check('ts own: the sleeps started', sleeps.exitCode === 0)
+  check("ts own: the peer's kill and wait reaped them", await until(reaped))
   await plane.clear()
   await ws.close()
   await store.close()
@@ -317,6 +324,27 @@ async function jobsPeer(prefix: string): Promise<void> {
     status.stdoutText === '1\n',
     JSON.stringify(status.stdoutText),
   )
+  const sleeping = async (): Promise<boolean> => {
+    const found = await plane.load(JOBS_SESSION)
+    return found !== null && Object.keys(found.jobs ?? {}).length === SLEEP_COUNT
+  }
+  check("ts peer: the owner's sleeps are listed", await until(sleeping))
+  const own = await ws.shell('sleep 30 & kill "$!"', { sessionId: JOBS_SESSION })
+  check('ts peer: kill $!', own.exitCode === 0, own.stderrText)
+  const listing = await ws.shell('jobs', { sessionId: JOBS_SESSION })
+  check(
+    "ts peer: kill $! left every one of the owner's sleeps running",
+    listing.stdoutText.split('running').length - 1 === SLEEP_COUNT,
+    JSON.stringify(listing.stdoutText),
+  )
+  const waited = await Promise.race([
+    ws.shell('false & wait "$!"; echo $?', { sessionId: JOBS_SESSION }).then((r) => r.stdoutText),
+    new Promise<string>((resolve) => setTimeout(() => resolve('timed out'), 10_000).unref()),
+  ])
+  check('ts peer: wait $! waits for its own job', waited === '1\n', JSON.stringify(waited))
+  const specs = Array.from({ length: SLEEP_COUNT }, (_, i) => `%${String(i + 1)}`).join(' ')
+  const reaped = await ws.shell(`kill ${specs}; wait`, { sessionId: JOBS_SESSION })
+  check("ts peer: kill and wait the owner's sleeps", reaped.exitCode === 0, reaped.stderrText)
   await ws.close()
   await store.close()
 }

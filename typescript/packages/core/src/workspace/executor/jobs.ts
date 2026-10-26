@@ -495,6 +495,21 @@ function jobNumbered(jobs: readonly Job[], jobId: number): Job | null {
 }
 
 /**
+ * The job a bare PID names. A job whose runner is here answers by its
+ * runner's PID. One with no runner here, restored or another workspace's,
+ * answers by the job number standing in for one, but only where no runner
+ * here holds that PID: another workspace numbers its jobs on the shared
+ * list, so its `%2` can share a number with a PID handed out here.
+ */
+function jobWithPid(jobs: readonly Job[], pid: number): Job | null {
+  return (
+    jobs.find((j) => j.process !== null && j.pid === pid) ??
+    jobs.find((j) => j.process === null && j.pid === pid) ??
+    null
+  )
+}
+
+/**
  * The job a `wait`/`disown` operand names, or bash's refusal. A `%N`
  * spec naming no job is `no such job`; a bare number is a managed PID,
  * also returned by `$!`, so an unknown one is `pid N is not a child of
@@ -507,7 +522,7 @@ function resolveSpec(jobs: readonly Job[], spec: string): [Job | null, string] {
     return [job, job !== null ? '' : `${spec}: no such job`]
   }
   if (/^[0-9]+$/.test(spec)) {
-    const job = jobs.find((j) => j.pid === Number(spec)) ?? null
+    const job = jobWithPid(jobs, Number(spec))
     return [job, job !== null ? '' : `pid ${spec} is not a child of this shell`]
   }
   return [null, `\`${spec}': not a pid or valid job spec`]
@@ -938,7 +953,7 @@ export async function handleKill(
       if (signal === 0) found = processes.probe(pid)
       else {
         found = processes.terminate(pid, signal)
-        const job = jobs.find((j) => j.pid === pid)
+        const job = jobs.find((j) => j.process !== null && j.pid === pid)
         if (found && job !== undefined) await jobTable.kill(job.id, sid, signal)
       }
     } catch (err) {

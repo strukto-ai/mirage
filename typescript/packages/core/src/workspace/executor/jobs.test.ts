@@ -836,6 +836,27 @@ it("a workspace waits for another's job status", async () => {
   }
 })
 
+it("a PID names the runner here before another's job number", async () => {
+  const store = new RAMWorkspaceStateStore()
+  const a = sharing(store)
+  const b = sharing(store)
+  try {
+    await a.shell('for i in 1 2 3 4 5 6; do sleep 30 & done', { sessionId: 's' })
+    expect((await b.shell('sleep 30 & kill "$!"', { sessionId: 's' })).exitCode).toBe(0)
+    expect(stdoutStr(await b.shell('false & wait "$!"; echo $?', { sessionId: 's' }))).toBe('1\n')
+    await a.jobTable.sync('s')
+    expect(
+      a.jobTable
+        .listJobs('s')
+        .slice(0, 6)
+        .map((j) => j.status),
+    ).toEqual(Array(6).fill(JobStatus.RUNNING))
+  } finally {
+    await a.close()
+    await b.close()
+  }
+}, 10_000)
+
 it("a substitution lists another's jobs", async () => {
   const store = new RAMWorkspaceStateStore()
   const a = sharing(store)

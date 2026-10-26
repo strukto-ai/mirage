@@ -594,6 +594,27 @@ def _job_numbered(jobs: list[Job], job_id: int) -> Job | None:
     return next((j for j in jobs if j.id == job_id), None)
 
 
+def _job_with_pid(jobs: list[Job], pid: int) -> Job | None:
+    """The job a bare PID names.
+
+    A job whose runner is here answers by its runner's PID. One with no
+    runner here, restored or another workspace's, answers by the job
+    number standing in for one, but only where no runner here holds that
+    PID: another workspace numbers its jobs on the shared list, so its
+    ``%2`` can share a number with a PID handed out here.
+
+    Args:
+        jobs (list[Job]): the jobs the builtin can see.
+        pid (int): the PID as typed.
+    """
+    ran = next(
+        (j for j in jobs if j.process is not None and j.pid == pid), None
+    )
+    if ran is not None:
+        return ran
+    return next((j for j in jobs if j.process is None and j.pid == pid), None)
+
+
 def _resolve_spec(jobs: list[Job], spec: str) -> tuple[Job | None, str]:
     """The job a `wait`/`disown` operand names, or bash's refusal.
 
@@ -611,7 +632,7 @@ def _resolve_spec(jobs: list[Job], spec: str) -> tuple[Job | None, str]:
         job = _job_numbered(jobs, int(raw)) if raw.isdigit() else None
         return job, "" if job is not None else f"{spec}: no such job"
     if spec.isdigit():
-        job = next((j for j in jobs if j.pid == int(spec)), None)
+        job = _job_with_pid(jobs, int(spec))
         return job, "" if job is not None else (
             f"pid {spec} is not a child of this shell"
         )
@@ -1110,7 +1131,14 @@ async def handle_kill(
                 found = processes.probe(pid)
             else:
                 found = processes.terminate(pid, signal)
-                job = next((j for j in jobs if j.pid == pid), None)
+                job = next(
+                    (
+                        j
+                        for j in jobs
+                        if j.process is not None and j.pid == pid
+                    ),
+                    None,
+                )
                 if found and job is not None:
                     await job_table.kill(job.id, sid, signal)
         except PermissionError:

@@ -30,7 +30,7 @@ from mirage.shell.job_table.ram import RAMJobStore
 from mirage.shell.job_table.table import JobTable
 from mirage.shell.job_table.types import Job, JobStatus
 from mirage.utils.clock import ManualClock
-from mirage.workspace.record.types import RecordFields
+from mirage.workspace.record.types import RecordFields, generation_of
 from mirage.workspace.types import ExecutionNode
 
 
@@ -1041,3 +1041,148 @@ async def test_a_kill_before_the_runner_begins_keeps_its_ending_and_lease():
     assert stored is not None
     assert stored["jobs"][str(job.id)]["ending"] == "killed:143"
     assert table._lease is None
+
+
+class _StartsOnDelete(RAMJobStore):
+    """A job store on which another table starts a job just as a list is
+    about to go; with ``replaces``, after another close deleted it."""
+
+    def __init__(self, replaces: bool = False) -> None:
+        super().__init__()
+        self.replaces = replaces
+        self.peer: JobTable | None = None
+        self.started: list[Job] = []
+
+    async def delete(self, session_id: str, expected_generation: int) -> bool:
+        if self.peer is not None and not self.started:
+            if self.replaces:
+                stored = generation_of(await self.load(session_id))
+                assert await super().delete(session_id, stored)
+            self.started.append(
+                await self.peer.submit(
+                    "late", _run_forever, "/", session_id=session_id
+                )
+            )
+        return await super().delete(session_id, expected_generation)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("replaces", [False, True])
+async def test_a_close_stops_a_job_started_while_it_closed(replaces):
+    store = _StartsOnDelete(replaces)
+    a, b = JobTable(store), JobTable(store)
+    store.peer = b
+    await a.submit("sleep 30", _run_forever, "/", session_id="s")
+    stopped = await a.close_session("s")
+    [late] = store.started
+    assert [j.command for j in stopped] == ["sleep 30", "late"]
+    assert late.process is not None
+    async with asyncio.timeout(2):
+        await late.process.join()
+    assert (late.status, late.exit_code) == (JobStatus.KILLED, 137)
+    assert await store.load("s") is None
+
+
+@pytest.mark.asyncio
+async def test_a_job_whose_list_was_deleted_elsewhere_stops(monkeypatch):
+    monkeypatch.setattr(
+        "mirage.shell.job_table.table.LIST_CHECK_SECONDS", 0.02
+    )
+    store = RAMJobStore()
+    table = JobTable(store)
+    job = await table.submit("sleep 30", _run_forever, "/", session_id="s")
+    await asyncio.sleep(0)
+    await store.clear()
+    assert job.process is not None
+    async with asyncio.timeout(2):
+        await job.process.join()
+    assert (job.status, job.exit_code) == (JobStatus.KILLED, 137)
+
+
+@pytest.mark.asyncio
+async def test_a_listed_or_disowned_job_runs_on_past_its_checks(monkeypatch):
+    monkeypatch.setattr(
+        "mirage.shell.job_table.table.LIST_CHECK_SECONDS", 0.02
+    )
+    table = JobTable(RAMJobStore())
+    listed = await table.submit("one", _run_forever, "/", session_id="s")
+    disowned = await table.submit("two", _run_forever, "/", session_id="s")
+    assert await table.disown(disowned.id, "s")
+    await asyncio.sleep(0.1)
+    assert [listed.status, disowned.status] == [JobStatus.RUNNING] * 2
+    await table.kill_all()
+
+
+@pytest.mark.asyncio
+async def test_a_dropped_job_deaf_to_its_stop_still_ends(monkeypatch):
+    monkeypatch.setattr(
+        "mirage.shell.job_table.table.LIST_CHECK_SECONDS", 0.02
+    )
+    monkeypatch.setattr("mirage.shell.job_table.table.STOP_WAIT_SECONDS", 0.05)
+    store = RAMJobStore()
+    table = JobTable(store)
+    release = asyncio.Event()
+
+    async def deaf(job: Job) -> tuple[IOResult, ExecutionNode]:
+        while not release.is_set():
+            try:
+                await release.wait()
+            except asyncio.CancelledError:
+                continue
+        return IOResult(), ExecutionNode()
+
+    job = await table.submit("deaf", deaf, "/", session_id="s")
+    await asyncio.sleep(0)
+    await store.clear()
+    async with asyncio.timeout(2):
+        ended = await table.wait(job.id, "s")
+    assert (ended.status, ended.exit_code) == (JobStatus.KILLED, 137)
+    release.set()
+    assert job.process is not None
+    await job.process.join()
+
+
+class _FailsReads(_FailsFirstWatch):
+    """A console whose reads fail while its store counts failures down."""
+
+    def __init__(self, inner: ConsoleStore, store: "_FailingReads") -> None:
+        super().__init__(inner)
+        self._failed = True
+        self._store = store
+
+    async def read_from(
+        self, seq: int, limit: int | None = None
+    ) -> ReadResult:
+        if self._store.failures > 0:
+            self._store.failures -= 1
+            raise ConnectionError("connection dropped")
+        return await super().read_from(seq, limit)
+
+
+class _FailingReads(RAMJobStore):
+    """A job store whose consoles fail its next ``failures`` reads."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.failures = 0
+
+    def console(self, name: str) -> ConsoleStore:
+        return _FailsReads(super().console(name), self)
+
+
+@pytest.mark.asyncio
+async def test_a_list_check_that_failed_a_read_checks_again(monkeypatch):
+    monkeypatch.setattr(
+        "mirage.shell.job_table.table.LIST_CHECK_SECONDS", 0.02
+    )
+    store = _FailingReads()
+    table = JobTable(store)
+    job = await table.submit("sleep 30", _run_forever, "/", session_id="s")
+    await asyncio.sleep(0)
+    store.failures = 1
+    await store.clear()
+    assert job.process is not None
+    async with asyncio.timeout(2):
+        await job.process.join()
+    assert (job.status, job.exit_code) == (JobStatus.KILLED, 137)
+    assert store.failures == 0

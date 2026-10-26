@@ -23,6 +23,11 @@ export const STOP_WAIT_SECONDS = 10
 // read of it failed.
 export const WATCH_RETRY_SECONDS = 1
 
+// How often a table that runs jobs checks that their sessions' lists still
+// hold them: a list deleted with its workspace ends no console the owner
+// could read.
+export const LIST_CHECK_SECONDS = 10
+
 // How long an owner's lease lasts on a store other processes share. The
 // owner renews it at a third of that while it runs jobs, so a workspace that
 // dies is seen as gone at most this long after its last renewal.
@@ -37,6 +42,11 @@ export const HANGUP_EXIT_CODE = 129
 // reaps, or whose owner died, do not accumulate. How a job ended outlives
 // it in the job's list entry.
 export const CONSOLE_TTL_SECONDS = 86400
+
+// How many random bits a newly written job list's generation starts from:
+// few enough that every later generation stays an exact JSON number on both
+// hosts and in Redis's Lua.
+export const GENERATION_BITS = 52
 
 // How many times a job-list write retries against other writers before it
 // gives up: every workspace of a session writes the one record.

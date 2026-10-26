@@ -23,12 +23,12 @@ import {
   RAMConsoleStore,
   type ReadResult,
 } from '../console/index.ts'
-import { STOP_WAIT_SECONDS, WATCH_RETRY_SECONDS } from './constants.ts'
+import { LIST_CHECK_SECONDS, STOP_WAIT_SECONDS, WATCH_RETRY_SECONDS } from './constants.ts'
 import { RAMJobStore } from './ram.ts'
 import { JobTable } from './table.ts'
 import { Job, type JobResult, type JobRunner, JobStatus } from './types.ts'
 import { ManualClock } from '../../utils/clock.ts'
-import type { RecordFields } from '../../workspace/record/types.ts'
+import { generationOf, type RecordFields } from '../../workspace/record/types.ts'
 
 const dec = (b: Uint8Array | undefined): string =>
   b === undefined ? '' : new TextDecoder().decode(b)
@@ -909,6 +909,71 @@ class DroppedWatches extends RAMJobStore {
   }
 }
 
+/** A console whose reads fail while its store counts failures down. */
+class FailsReads implements ConsoleStore {
+  constructor(
+    private readonly inner: ConsoleStore,
+    private readonly store: FailingReads,
+  ) {}
+
+  append(channel: Channel, data: Uint8Array): Promise<ConsoleChunk> {
+    return this.inner.append(channel, data)
+  }
+
+  readFrom(seq: number, limit?: number): Promise<ReadResult> {
+    if (this.store.failures > 0) {
+      this.store.failures -= 1
+      return Promise.reject(new Error('connection dropped'))
+    }
+    return this.inner.readFrom(seq, limit)
+  }
+
+  get closed(): boolean {
+    return this.inner.closed
+  }
+
+  wait(seq: number): Promise<void> {
+    return this.inner.wait(seq)
+  }
+
+  waitEnded(signal?: AbortSignal): Promise<void> {
+    return this.inner.waitEnded(signal)
+  }
+
+  close(): Promise<void> {
+    return this.inner.close()
+  }
+}
+
+/** A job store whose consoles fail its next `failures` reads. */
+class FailingReads extends RAMJobStore {
+  failures = 0
+
+  override console(name: string): ConsoleStore {
+    return new FailsReads(super.console(name), this)
+  }
+}
+
+/** A job store on which another table starts a job just as a list is about
+ * to go; with `replaces`, after another close deleted it. */
+class StartsOnDelete extends RAMJobStore {
+  peer: JobTable | null = null
+  readonly started: Job[] = []
+
+  constructor(private readonly replaces = false) {
+    super()
+  }
+
+  override async delete(sessionId: string, expectedGeneration: number): Promise<boolean> {
+    if (this.peer !== null && this.started.length === 0) {
+      if (this.replaces)
+        expect(await super.delete(sessionId, generationOf(await this.load(sessionId)))).toBe(true)
+      this.started.push(await sleeping(this.peer))
+    }
+    return super.delete(sessionId, expectedGeneration)
+  }
+}
+
 /** A job store whose consoles' output can expire, as Redis's does. */
 class ExpiringOutput extends RAMJobStore {
   readonly expired = new Set<string>()
@@ -1328,5 +1393,96 @@ describe('JobTable on a shared store, across retaken numbers and early kills', (
     const stored = (await store.load('s'))?.jobs as Record<string, { ending?: string }>
     expect(stored[job.id.toString()]?.ending).toBe('killed:143')
     expect((jt as unknown as { lease: unknown }).lease).toBeNull()
+  })
+
+  it.each([false, true])(
+    'a close stops a job started while it closed (replaces: %s)',
+    async (replaces) => {
+      const store = new StartsOnDelete(replaces)
+      const a = new JobTable(store)
+      store.peer = new JobTable(store)
+      await sleeping(a)
+      const stopped = await a.closeSession('s')
+      const [late] = store.started
+      expect(stopped.map((j) => j.consoleName)).toEqual(expect.arrayContaining([late?.consoleName]))
+      expect(stopped).toHaveLength(2)
+      await late?.process?.join()
+      expect([late?.status, late?.exitCode]).toEqual([JobStatus.KILLED, 137])
+      expect(await store.load('s')).toBeNull()
+    },
+  )
+
+  it('a job whose list was deleted elsewhere stops', async () => {
+    vi.useFakeTimers()
+    try {
+      const store = new RAMJobStore()
+      const job = await sleeping(new JobTable(store))
+      await vi.advanceTimersByTimeAsync(0)
+      await store.clear()
+      await vi.advanceTimersByTimeAsync(LIST_CHECK_SECONDS * 1000 * 2)
+      await job.process?.join()
+      expect([job.status, job.exitCode]).toEqual([JobStatus.KILLED, 137])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('a listed or disowned job runs on past its checks', async () => {
+    vi.useFakeTimers()
+    try {
+      const jt = new JobTable(new RAMJobStore())
+      const listed = await sleeping(jt)
+      const disowned = await sleeping(jt)
+      expect(await jt.disown(disowned.id, 's')).toBe(true)
+      await vi.advanceTimersByTimeAsync(LIST_CHECK_SECONDS * 1000 * 3)
+      expect([listed.status, disowned.status]).toEqual([JobStatus.RUNNING, JobStatus.RUNNING])
+      await jt.killAll()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('a list check that failed a read checks again', async () => {
+    vi.useFakeTimers()
+    try {
+      const store = new FailingReads()
+      const job = await sleeping(new JobTable(store))
+      await vi.advanceTimersByTimeAsync(0)
+      store.failures = 1
+      await store.clear()
+      await vi.advanceTimersByTimeAsync(LIST_CHECK_SECONDS * 1000 * 3)
+      await job.process?.join()
+      expect([job.status, job.exitCode]).toEqual([JobStatus.KILLED, 137])
+      expect(store.failures).toBe(0)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('a dropped job deaf to its stop still ends', async () => {
+    vi.useFakeTimers()
+    try {
+      const store = new RAMJobStore()
+      const jt = new JobTable(store)
+      const release: { fire?: () => void } = {}
+      const abort = new AbortController()
+      const job = await jt.submit({
+        command: 'deaf',
+        run: deaf(release),
+        abort,
+        cwd: '/',
+        sessionId: 's',
+      })
+      await vi.advanceTimersByTimeAsync(0)
+      await store.clear()
+      const waited = jt.wait(job.id, 's')
+      await vi.advanceTimersByTimeAsync((LIST_CHECK_SECONDS + STOP_WAIT_SECONDS) * 1000 * 2)
+      const ended = await waited
+      expect([ended.status, ended.exitCode]).toEqual([JobStatus.KILLED, 137])
+      release.fire?.()
+      await job.process?.join()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })
