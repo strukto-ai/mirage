@@ -81,6 +81,18 @@ describe.skipIf(REDIS_URL === '')('RedisJobStore', () => {
     expect(await store.alive('o')).toBe(false)
   })
 
+  it("a renewal keeps a running job's console", async () => {
+    const store = open()
+    await store.console('c').append(Channel.STDOUT, new TextEncoder().encode('x'))
+    const client = createClient({ url: REDIS_URL })
+    await client.connect()
+    await client.expire(`${prefix}console:c:stream`, 5)
+    await store.renew('o', ['c'])
+    const ttl = await client.ttl(`${prefix}console:c:stream`)
+    await client.quit()
+    expect(ttl).toBeGreaterThan(5)
+  })
+
   it('clear drops lists, consoles and leases', async () => {
     const store = open()
     await store.casSet('s', { generation: 1 }, 0)

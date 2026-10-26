@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { ConsoleStore } from '@struktoai/mirage-core/shell/console/index'
 import {
   CONSOLE_TTL_SECONDS,
   LEASE_SECONDS,
@@ -38,7 +37,8 @@ export interface RedisJobStoreOptions {
  * - `{prefix}lists`: a hash of session id to job list JSON, written with
  *   the session table's compare-and-set script
  * - `{prefix}console:{name}:*`: one console stream per job
- *   (`RedisConsoleStore`), expiring a day after its job ended
+ *   (`RedisConsoleStore`), expiring a day after its last write or its
+ *   owner's last renewal
  * - `{prefix}owner:{id}`: an owner's lease, a key that expires
  *
  * One connection serves the lists, the leases and every console, so a
@@ -83,7 +83,7 @@ export class RedisJobStore extends JobStore {
     await c.hDel(this.listsKey, sessionId)
   }
 
-  console(name: string): ConsoleStore {
+  console(name: string): RedisConsoleStore {
     return new RedisConsoleStore({
       url: this.url,
       keyPrefix: `${this.prefix}console:${name}:`,
@@ -92,12 +92,14 @@ export class RedisJobStore extends JobStore {
     })
   }
 
-  async renew(owner: string): Promise<void> {
-    if (this.leaseSeconds === null) return
-    const c = await this.redis.client()
-    await c.set(`${this.prefix}owner:${owner}`, '1', {
-      PX: Math.round(this.leaseSeconds * 1000),
-    })
+  async renew(owner: string, consoles: readonly string[] = []): Promise<void> {
+    if (this.leaseSeconds !== null) {
+      const c = await this.redis.client()
+      await c.set(`${this.prefix}owner:${owner}`, '1', {
+        PX: Math.round(this.leaseSeconds * 1000),
+      })
+    }
+    for (const name of consoles) await this.console(name).expire()
   }
 
   async alive(owner: string): Promise<boolean> {

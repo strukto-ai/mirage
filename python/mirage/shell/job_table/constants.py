@@ -32,8 +32,9 @@ LEASE_SECONDS = 30.0
 # answers when its terminal goes.
 HANGUP_EXIT_CODE = 129
 
-# How long a shared console's output is kept after its job ended, so
-# the streams of jobs nobody reaps do not accumulate. How a job ended
+# How long a shared console's output is kept after its last write, or
+# after its owner last renewed it while the job ran, so the streams of
+# jobs nobody reaps, or whose owner died, do not accumulate. How a job ended
 # outlives it in the job's list entry.
 CONSOLE_TTL_SECONDS = 86400
 

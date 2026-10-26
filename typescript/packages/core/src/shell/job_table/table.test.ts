@@ -1268,3 +1268,64 @@ describe('JobTable on a shared store, across launches, restores and abandoned wa
     await a.killAll()
   })
 })
+
+/** A console whose watch never wakes, as an owner that has not looked yet. */
+class Unwatched extends FailsFirstWatch {
+  override waitEnded(signal?: AbortSignal): Promise<void> {
+    return new Promise((resolve) => {
+      signal?.addEventListener(
+        'abort',
+        () => {
+          resolve()
+        },
+        { once: true },
+      )
+    })
+  }
+}
+
+/** A job store whose owners never notice an ending on their own. */
+class UnwatchedConsoles extends RAMJobStore {
+  override console(name: string): ConsoleStore {
+    return new Unwatched(super.console(name))
+  }
+}
+
+describe('JobTable on a shared store, across retaken numbers and early kills', () => {
+  it('a number retaken elsewhere lists the new job', async () => {
+    const store = new UnwatchedConsoles()
+    const a = new JobTable(store)
+    const b = new JobTable(store)
+    const old = await sleeping(a)
+    await b.sync('s')
+    expect(await b.kill(1, 's', 15)).toBe(true)
+    expect((await b.wait(1, 's')).exitCode).toBe(143)
+    await b.reap(1, 's')
+    const abort = new AbortController()
+    await b.submit({ command: 'next', run: pending(abort), abort, cwd: '/', sessionId: 's' })
+    await a.sync('s')
+    expect(a.get(1, 's')?.command).toBe('next')
+    expect(old.status).toBe(JobStatus.RUNNING)
+    await a.killAll()
+    await old.process?.join()
+    await b.killAll()
+  })
+
+  it('a killed job keeps its ending and drops the lease', async () => {
+    const store = new RAMJobStore(30)
+    const jt = new JobTable(store)
+    const abort = new AbortController()
+    const job = await jt.submit({
+      command: 'never',
+      run: pending(abort),
+      abort,
+      cwd: '/',
+      sessionId: 's',
+    })
+    expect(await jt.kill(job.id, 's', 15)).toBe(true)
+    await job.process?.join()
+    const stored = (await store.load('s'))?.jobs as Record<string, { ending?: string }>
+    expect(stored[job.id.toString()]?.ending).toBe('killed:143')
+    expect((jt as unknown as { lease: unknown }).lease).toBeNull()
+  })
+})

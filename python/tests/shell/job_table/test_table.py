@@ -991,3 +991,52 @@ async def test_a_restore_never_hides_a_job_that_holds_its_number():
         (live.id + 1, "old"),
     ]
     await b.kill_all()
+
+
+class _Unwatched(_FailsFirstWatch):
+    """A console whose watch never wakes, as an owner that has not looked
+    at it yet."""
+
+    async def wait_ended(self) -> None:
+        await asyncio.Event().wait()
+
+
+class _UnwatchedConsoles(RAMJobStore):
+    """A job store whose owners never notice an ending on their own."""
+
+    def console(self, name: str) -> ConsoleStore:
+        return _Unwatched(super().console(name))
+
+
+@pytest.mark.asyncio
+async def test_a_number_retaken_elsewhere_lists_the_new_job():
+    store = _UnwatchedConsoles()
+    a, b = JobTable(store), JobTable(store)
+    old = await a.submit("sleep 30", _run_forever, "/", session_id="s")
+    await asyncio.sleep(0)
+    await b.sync("s")
+    assert await b.kill(1, "s", 15)
+    assert (await b.wait(1, "s")).exit_code == 143
+    await b.reap(1, "s")
+    await b.submit("next", _run_forever, "/", session_id="s")
+    await a.sync("s")
+    listed = a.get(1, "s")
+    assert listed is not None and listed.command == "next"
+    assert old.status is JobStatus.RUNNING
+    await a.kill_all()
+    assert old.process is not None
+    async with asyncio.timeout(2):
+        await old.process.join()
+    await b.kill_all()
+
+
+@pytest.mark.asyncio
+async def test_a_kill_before_the_runner_begins_keeps_its_ending_and_lease():
+    store = RAMJobStore(lease_seconds=30)
+    table = JobTable(store)
+    job = await table.submit("never", _run_forever, "/", session_id="s")
+    assert await table.kill(job.id, "s", 15)
+    stored = await store.load("s")
+    assert stored is not None
+    assert stored["jobs"][str(job.id)]["ending"] == "killed:143"
+    assert table._lease is None

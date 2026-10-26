@@ -407,7 +407,8 @@ export class JobTable {
    * matched after the last read, with no wait between, so one it started
    * meanwhile is never taken for another workspace's; a running one the
    * list no longer names stays listed, unless the list holds it as
-   * disowned.
+   * disowned or another job took its number, and then it runs on unlisted,
+   * as a disowned job does.
    */
   async sync(sessionId = ''): Promise<void> {
     let fields: RecordFields | null = null
@@ -441,7 +442,7 @@ export class JobTable {
     }
     for (const job of mine.values()) {
       if (job.process === null || job.status !== JobStatus.RUNNING) continue
-      if (job.consoleName in held) this.disowned.push(job)
+      if (job.consoleName in held || jobs.has(job.id)) this.disowned.push(job)
       else jobs.set(job.id, job)
     }
     this.jobs.set(sessionId, new Map([...jobs].sort(([a], [b]) => a - b)))
@@ -509,6 +510,8 @@ export class JobTable {
     if (job.process !== null) {
       if (!job.process.begun) {
         await stop(job, signal)
+        await this.recordEnding(job)
+        this.dropLease()
         return true
       }
       job.process.terminate(signal)
@@ -932,7 +935,11 @@ export class JobTable {
     return this.store.casSet(sessionId, record, expected)
   }
 
-  /** Renew this table's lease while it runs jobs on a store that leases owners. */
+  /**
+   * Renew this table's lease while it runs jobs on a store that leases
+   * owners, with the consoles of the jobs it still runs, so a quiet one
+   * keeps its output while this table lives.
+   */
   private keepLease(): void {
     const lease = this.store.leaseSeconds
     if (lease === null || this.lease !== null) return
@@ -942,7 +949,10 @@ export class JobTable {
           // A failed renewal is logged and retried: should the lease lapse
           // meanwhile, other workspaces end this table's jobs as hung up and
           // the watchers here stop them, so the two never disagree.
-          this.store.renew(this.owner).catch((err: unknown) => {
+          const consoles = [...this.allJobs(), ...this.disowned]
+            .filter((j) => j.process !== null && !j.console.finished)
+            .map((j) => j.consoleName)
+          this.store.renew(this.owner, consoles).catch((err: unknown) => {
             console.debug('job lease renewal failed:', err)
           })
           if (this.lease !== null) renew()

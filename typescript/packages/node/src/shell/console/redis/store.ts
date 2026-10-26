@@ -30,7 +30,7 @@ interface StreamEntry {
 export interface RedisConsoleStoreOptions {
   url?: string
   keyPrefix?: string
-  /** Expire the keys this long after the ending chunk; absent keeps them. */
+  /** Expire the keys this long after the last append or expire(); absent keeps them. */
   ttlSeconds?: number
   /**
    * A connection the caller owns and shares between consoles (a job
@@ -79,10 +79,11 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
  * `waitEnded` polls the ending flag instead, so a watcher costs nothing
  * per chunk.
  * There is no retention trim, so readFrom never reports a truncated
- * cursor; retention is bounded by `ttlSeconds` instead, counted from the
- * ending chunk, so a console expires that long after its job ended and
- * never while it runs, however long it stays quiet: a reader parked on it
- * would not see a restarted sequence.
+ * cursor; retention is bounded by `ttlSeconds` instead, refreshed on every
+ * append and by `expire()`, which a job's owner calls while the job runs,
+ * so a console expires that long after its job ended or its owner went,
+ * and never under a quiet job still running: a reader parked on it would
+ * not see a restarted sequence.
  */
 export class RedisConsoleStore implements ConsoleStore {
   readonly url: string
@@ -206,6 +207,15 @@ export class RedisConsoleStore implements ConsoleStore {
       if ((await c.exists(this.endedKey)) > 0) return
       await sleep(ENDED_POLL_MS, signal)
     }
+  }
+
+  /** Push the keys' expiry out again, as an append does. */
+  async expire(): Promise<void> {
+    if (this.isClosed || this.ttlSeconds <= 0) return
+    const c = await this.client()
+    await Promise.all(
+      [this.streamKey, this.counterKey, this.endedKey].map((key) => c.expire(key, this.ttlSeconds)),
+    )
   }
 
   async close(): Promise<void> {

@@ -66,7 +66,7 @@ export class RAMJobStore extends JobStore {
     return store
   }
 
-  renew(owner: string): Promise<void> {
+  renew(owner: string, _consoles: readonly string[] = []): Promise<void> {
     if (this.leaseSeconds !== null) {
       this.leases.set(owner, performance.now() + this.leaseSeconds * 1000)
     }

@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from abc import ABC, abstractmethod
+from collections.abc import Sequence
 
 from mirage.shell.console import ConsoleStore
 from mirage.workspace.record.types import RecordFields
@@ -94,11 +95,17 @@ class JobStore(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    async def renew(self, owner: str) -> None:
-        """Keep an owner alive for another lease_seconds.
+    async def renew(self, owner: str, consoles: Sequence[str] = ()) -> None:
+        """Keep an owner alive for another lease_seconds, and the
+        consoles of the jobs it still runs with it.
+
+        A store that expires consoles pushes their expiry out here, so a
+        quiet job keeps its output while its owner lives, and loses it a
+        while after the owner dies with nobody left to end it.
 
         Args:
             owner (str): the owning job table's id.
+            consoles (Sequence[str]): the consoles of the jobs it runs.
         """
         raise NotImplementedError
 

@@ -181,12 +181,25 @@ async def test_ttl_bounds_retention(prefix):
     try:
         assert s.key_prefix == prefix
         await s.append(Channel.STDOUT, b"x")
-        assert await client.ttl(f"{prefix}stream") == -1
-        assert await client.ttl(f"{prefix}seq") == -1
-        await s.append(Channel.CONTROL, b"exit:0")
         assert await client.ttl(f"{prefix}stream") > 0
         assert await client.ttl(f"{prefix}seq") > 0
+        await s.append(Channel.CONTROL, b"exit:0")
         assert await client.ttl(f"{prefix}ended") > 0
+    finally:
+        await client.aclose()
+        await s.clear()
+        await s.close()
+
+
+@pytest.mark.asyncio
+async def test_expire_pushes_the_keys_out_again(prefix):
+    s = RedisConsoleStore(url=REDIS_URL, key_prefix=prefix, ttl_seconds=60)
+    client = aioredis.from_url(REDIS_URL)
+    try:
+        await s.append(Channel.STDOUT, b"x")
+        await client.expire(f"{prefix}stream", 5)
+        await s.expire()
+        assert await client.ttl(f"{prefix}stream") > 5
     finally:
         await client.aclose()
         await s.clear()

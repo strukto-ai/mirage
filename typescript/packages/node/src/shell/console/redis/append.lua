@@ -9,7 +9,7 @@ if ARGV[4] == '1' then
   redis.call('SET', KEYS[3], '1')
 end
 local ttl = tonumber(ARGV[5])
-if ttl > 0 and ARGV[4] == '1' then
+if ttl > 0 then
   redis.call('EXPIRE', KEYS[1], ttl)
   redis.call('EXPIRE', KEYS[2], ttl)
   redis.call('EXPIRE', KEYS[3], ttl)

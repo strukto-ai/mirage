@@ -51,16 +51,18 @@ class RedisConsoleStore:
     local ``close`` is noticed within one round; ``wait_ended`` polls
     the ending flag instead, so a watcher costs nothing per chunk. There is no retention
     trim, so ``read_from`` never reports a truncated cursor; retention
-    is bounded by ``ttl_seconds`` instead, counted from the ending
-    chunk, so a console expires that long after its job ended and never
-    while it runs, however long it stays quiet: a reader parked on it
+    is bounded by ``ttl_seconds`` instead, refreshed on every append
+    and by ``expire``, which a job's owner calls while the job runs, so
+    a console expires that long after its job ended or its owner went,
+    and never under a quiet job still running: a reader parked on it
     would not see a restarted sequence.
 
     Args:
         url (str): Redis connection URL.
         key_prefix (str): namespace for this one console's keys.
         ttl_seconds (int | None): expire the keys this long after the
-            ending chunk. None keeps them until deleted by hand.
+            last append or ``expire``. None keeps them until deleted by
+            hand.
         client (aioredis.Redis | None): a client the caller owns and
             shares between consoles (a job store's); None connects to
             ``url`` and closes that connection on ``close``.
@@ -145,6 +147,15 @@ class RedisConsoleStore:
             if await self._client.exists(self._ended):
                 return
             await asyncio.sleep(ENDED_POLL_MS / 1000)
+
+    async def expire(self) -> None:
+        """Push the keys' expiry out again, as an append does."""
+        self._check_open()
+        if self._ttl:
+            pipe = self._client.pipeline()
+            for key in (self._stream, self._counter, self._ended):
+                pipe.expire(key, self._ttl)
+            await pipe.execute()
 
     async def close(self) -> None:
         self._closed = True

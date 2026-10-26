@@ -165,13 +165,12 @@ describe.skipIf(REDIS_URL === '')('RedisConsoleStore', () => {
     opened.push(store)
     expect(store.keyPrefix).toBe(prefix)
     await store.append(Channel.STDOUT, ENC.encode('x'))
+    await store.append(Channel.CONTROL, ENC.encode('exit:0'))
     const bare = makeStore(`test:console:${randomUUID()}:`)
     await bare.append(Channel.STDOUT, ENC.encode('x'))
     const { createClient } = await import('redis')
     const client = createClient({ url: REDIS_URL })
     await client.connect()
-    expect(await client.ttl(`${prefix}stream`)).toBe(-1)
-    await store.append(Channel.CONTROL, ENC.encode('exit:0'))
     const ttls = await Promise.all([
       client.ttl(`${prefix}stream`),
       client.ttl(`${prefix}seq`),
@@ -183,6 +182,21 @@ describe.skipIf(REDIS_URL === '')('RedisConsoleStore', () => {
     expect(ttls[1]).toBeGreaterThan(0)
     expect(ttls[2]).toBeGreaterThan(0)
     expect(ttls[3]).toBe(-1)
+  })
+
+  it('expire pushes the keys out again', async () => {
+    const prefix = `test:console:${randomUUID()}:`
+    const store = new RedisConsoleStore({ url: REDIS_URL, keyPrefix: prefix, ttlSeconds: 60 })
+    opened.push(store)
+    await store.append(Channel.STDOUT, ENC.encode('x'))
+    const { createClient } = await import('redis')
+    const client = createClient({ url: REDIS_URL })
+    await client.connect()
+    await client.expire(`${prefix}stream`, 5)
+    await store.expire()
+    const ttl = await client.ttl(`${prefix}stream`)
+    await client.quit()
+    expect(ttl).toBeGreaterThan(5)
   })
 
   it('waitEnded returns once the ending lands', async () => {

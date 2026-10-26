@@ -13,12 +13,11 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import json
-from collections.abc import Awaitable
+from collections.abc import Awaitable, Sequence
 from typing import Any, cast
 
 import redis.asyncio as aioredis
 
-from mirage.shell.console import ConsoleStore
 from mirage.shell.console.redis import RedisConsoleStore
 from mirage.shell.job_table.constants import (
     CONSOLE_TTL_SECONDS,
@@ -37,7 +36,8 @@ class RedisJobStore(JobStore):
     - ``{prefix}lists``: a hash of session id to job list JSON, written
       with the session table's compare-and-set script
     - ``{prefix}console:{name}:*``: one console stream per job
-      (``RedisConsoleStore``), expiring a day after its job ended
+      (``RedisConsoleStore``), expiring a day after its last write or
+      its owner's last renewal
     - ``{prefix}owner:{id}``: an owner's lease, a key that expires
 
     One client serves the lists, the leases and every console, so a
@@ -83,7 +83,7 @@ class RedisJobStore(JobStore):
             "Awaitable[Any]", self._client.hdel(self._lists, session_id)
         )
 
-    def console(self, name: str) -> ConsoleStore:
+    def console(self, name: str) -> RedisConsoleStore:
         return RedisConsoleStore(
             url=self._url,
             key_prefix=f"{self._prefix}console:{name}:",
@@ -91,13 +91,15 @@ class RedisJobStore(JobStore):
             client=self._client,
         )
 
-    async def renew(self, owner: str) -> None:
+    async def renew(self, owner: str, consoles: Sequence[str] = ()) -> None:
         if self.lease_seconds is not None:
             await self._client.set(
                 f"{self._prefix}owner:{owner}",
                 b"1",
                 px=int(self.lease_seconds * 1000),
             )
+        for name in consoles:
+            await self.console(name).expire()
 
     async def alive(self, owner: str) -> bool:
         if self.lease_seconds is None:

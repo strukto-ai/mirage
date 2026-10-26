@@ -484,7 +484,8 @@ class JobTable:
         This table's own jobs are matched after the last read, with no
         wait between, so one it started meanwhile is never taken for
         another workspace's; a running one the list no longer names stays
-        listed, unless the list holds it as disowned.
+        listed, unless the list holds it as disowned or another job took
+        its number, and then it runs on unlisted, as a disowned job does.
 
         Args:
             session_id (str): the session whose list to refresh.
@@ -529,7 +530,7 @@ class JobTable:
         for job in mine.values():
             if job.process is None or job.status != JobStatus.RUNNING:
                 continue
-            if job.console_name in held:
+            if job.console_name in held or job.id in jobs:
                 self._disowned.append(job)
             else:
                 jobs[job.id] = job
@@ -616,6 +617,8 @@ class JobTable:
         if job.process is not None:
             if not job.process.begun:
                 await _stop(job, signal)
+                await self._record_ending(job)
+                self._drop_lease()
                 return True
             cancel_job(job, signal)
             job.status = JobStatus.KILLED
@@ -1097,7 +1100,9 @@ class JobTable:
         self._lease = None
 
     async def _renew(self, interval: float) -> None:
-        """Renew this table's lease every ``interval`` seconds.
+        """Renew this table's lease every ``interval`` seconds, with the
+        consoles of the jobs it still runs, so a quiet one keeps its
+        output while this table lives.
 
         A failed renewal is logged and retried: should the lease lapse
         meanwhile, other workspaces end this table's jobs as hung up and
@@ -1109,6 +1114,13 @@ class JobTable:
         while True:
             await asyncio.sleep(interval)
             try:
-                await self.store.renew(self.owner)
+                await self.store.renew(
+                    self.owner,
+                    [
+                        j.console_name
+                        for j in [*self.all_jobs(), *self._disowned]
+                        if j.process is not None and not j.console.finished
+                    ],
+                )
             except Exception as exc:
                 logger.debug("job lease renewal failed: %s", exc)

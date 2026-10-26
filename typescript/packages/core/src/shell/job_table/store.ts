@@ -62,8 +62,14 @@ export abstract class JobStore {
    */
   abstract console(name: string): ConsoleStore
 
-  /** Keep an owner alive for another `leaseSeconds`. */
-  abstract renew(owner: string): Promise<void>
+  /**
+   * Keep an owner alive for another `leaseSeconds`, and the consoles of
+   * the jobs it still runs with it. A store that expires consoles pushes
+   * their expiry out here, so a quiet job keeps its output while its owner
+   * lives, and loses it a while after the owner dies with nobody left to
+   * end it.
+   */
+  abstract renew(owner: string, consoles?: readonly string[]): Promise<void>
 
   /** Whether an owner's lease still holds. */
   abstract alive(owner: string): Promise<boolean>

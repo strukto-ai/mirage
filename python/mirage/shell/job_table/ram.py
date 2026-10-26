@@ -15,6 +15,7 @@
 import copy
 import threading
 import time
+from collections.abc import Sequence
 
 from mirage.shell.console import ConsoleStore, RAMConsoleStore
 from mirage.shell.job_table.store import JobStore
@@ -77,7 +78,7 @@ class RAMJobStore(JobStore):
     def console(self, name: str) -> ConsoleStore:
         return self._consoles.setdefault(name, RAMConsoleStore())
 
-    async def renew(self, owner: str) -> None:
+    async def renew(self, owner: str, consoles: Sequence[str] = ()) -> None:
         if self.lease_seconds is not None:
             self._leases[owner] = time.monotonic() + self.lease_seconds
 

@@ -18,6 +18,7 @@ import uuid
 
 import pytest
 import pytest_asyncio
+import redis.asyncio as aioredis
 
 from mirage.io import IOResult
 from mirage.shell.console import Channel
@@ -128,3 +129,16 @@ async def test_a_job_whose_owner_died_ends_as_hung_up(stores):
     async with asyncio.timeout(5):
         assert (await b.wait(1, "s")).exit_code == 129
     await a.kill_all()
+
+
+@pytest.mark.asyncio
+async def test_a_renewal_keeps_a_running_jobs_console(stores, prefix):
+    store = stores()
+    await store.console("c").append(Channel.STDOUT, b"x")
+    client = aioredis.from_url(REDIS_URL)
+    try:
+        await client.expire(f"{prefix}console:c:stream", 5)
+        await store.renew("o", ["c"])
+        assert await client.ttl(f"{prefix}console:c:stream") > 5
+    finally:
+        await client.aclose()
