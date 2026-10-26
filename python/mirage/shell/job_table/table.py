@@ -16,7 +16,6 @@ import asyncio
 import errno
 import logging
 import secrets
-import time
 import uuid
 from collections.abc import Awaitable, Callable
 
@@ -1341,29 +1340,33 @@ class JobTable:
         them, and stop those other workspaces asked it to stop. Once it
         runs none, its record goes and the publishing stops.
 
-        A failed round is logged and tried again the next one.
+        The lease is renewed every third of it, counted in rounds. A
+        failed round is logged and tried again the next one.
         """
         published: dict[str, RecordFields] | None = None
-        renewed = float("-inf")
         lease = self.store.lease_seconds
+        renewal = (
+            max(1, int(lease / 3 / PUBLISH_SECONDS))
+            if lease is not None
+            else 0
+        )
+        rounds = due = 0
         while True:
             records = self._records()
             try:
                 if records != published:
                     await self.store.publish(self.owner, records)
                     published = records
-                if (
-                    lease is not None
-                    and time.monotonic() - renewed >= lease / 3
-                ):
+                if renewal and rounds >= due:
                     await self.store.renew(self.owner)
-                    renewed = time.monotonic()
+                    due = rounds + renewal
                 for pid, signal in await self.store.take_stops(self.owner):
                     await self._stop_asked(pid, signal)
             except Exception as exc:
                 logger.debug("process publish failed: %s", exc)
             if published == {} and not self._records():
                 return
+            rounds += 1
             await asyncio.sleep(PUBLISH_SECONDS)
 
     async def _stop_asked(self, pid: int, signal: int) -> None:

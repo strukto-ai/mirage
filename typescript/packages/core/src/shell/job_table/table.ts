@@ -1172,13 +1172,16 @@ export class JobTable {
    * Publish the processes this workspace runs every `PUBLISH_SECONDS`
    * while it runs any, renewing its lease with them, and stop those other
    * workspaces asked it to stop. Once it runs none, its record goes and the
-   * publishing stops. A failed round is logged and tried again the next
-   * one; the sleep between rounds keeps no host alive on its own.
+   * publishing stops. The lease is renewed every third of it, counted in
+   * rounds. A failed round is logged and tried again the next one; the
+   * sleep between rounds keeps no host alive on its own.
    */
   private async publish(): Promise<void> {
     let published: string | null = null
-    let renewed = -Infinity
     const lease = this.store.leaseSeconds
+    const renewal = lease !== null ? Math.max(1, Math.floor(lease / 3 / PUBLISH_SECONDS)) : 0
+    let rounds = 0
+    let due = 0
     for (;;) {
       const records = this.records()
       const text = JSON.stringify(records)
@@ -1187,9 +1190,9 @@ export class JobTable {
           await this.store.publish(this.owner, records)
           published = text
         }
-        if (lease !== null && performance.now() - renewed >= (lease * 1000) / 3) {
+        if (renewal > 0 && rounds >= due) {
           await this.store.renew(this.owner)
-          renewed = performance.now()
+          due = rounds + renewal
         }
         for (const [pid, signal] of await this.store.takeStops(this.owner))
           await this.stopAsked(pid, signal)
@@ -1200,6 +1203,7 @@ export class JobTable {
         this.publishing = null
         return
       }
+      rounds += 1
       await new Promise<void>((wake) => {
         const timer = setTimeout(wake, PUBLISH_SECONDS * 1000)
         ;(timer as { unref?: () => void }).unref?.()
