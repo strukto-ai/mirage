@@ -20,6 +20,7 @@ from typing import Any
 from mirage.commands.errors import UsageError, WalkLimitError
 from mirage.errors.classify import classify
 from mirage.errors.types import FsCondition, WalkDeclinedError
+from mirage.io.yield_budget import YieldBudget
 from mirage.runtime.types import DispatchFn
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.view.types import MountView
@@ -248,7 +249,9 @@ def tree_walk(
     follows it as opendir(3) does and meets whatever refuses the
     directory it leads to. Both take the path first and pass everything
     else through; a listing's ``limit`` reaches ``read_tree`` too, which
-    may then answer None for a subtree past it.
+    may then answer None for a subtree past it. An answer from the tree
+    never suspends, so the walk spends a yield budget, where the line's
+    cancel and the command's timeout land.
 
     Args:
         read_tree (ReadTree | None): the mount's ``read_tree``, bound to
@@ -260,6 +263,7 @@ def tree_walk(
         return readdir, stat
     roots: dict[str, tuple[dict[str, FileStat], dict[str, list[str]]]] = {}
     asked: set[str] = set()
+    budget = YieldBudget()
 
     def covering(virtual: str) -> tuple[str, str] | None:
         for root in roots:
@@ -273,6 +277,7 @@ def tree_walk(
     async def tree_readdir(
         path: PathSpec, *args: Any, limit: int | None = None, **kwargs: Any
     ) -> Any:
+        await budget.run()
         virtual = path.virtual.rstrip("/") or "/"
         hit = covering(virtual) if _answerable(path) else None
         if hit is None and virtual not in asked and not path.pattern:
@@ -302,6 +307,7 @@ def tree_walk(
         )
 
     async def tree_stat(path: PathSpec, *args: Any, **kwargs: Any) -> Any:
+        await budget.run()
         virtual = path.virtual.rstrip("/") or "/"
         hit = covering(virtual) if _answerable(path) else None
         if hit is not None and hit[1]:

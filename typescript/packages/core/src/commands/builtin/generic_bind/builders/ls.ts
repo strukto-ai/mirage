@@ -30,6 +30,7 @@ const ls: CommandFn = async (_accessor, paths, _texts, ctx) => {
     recursive && files.answers('read_tree') ? files.readTree : undefined,
     files.readdir,
     files.stat,
+    files.signal,
   )
   return lsGeneric(resolved, ctx, readdir, stat)
 }

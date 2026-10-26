@@ -73,6 +73,7 @@ from mirage.errors.fs import (
     walk_refusal,
 )
 from mirage.io import IOResult, OpReport
+from mirage.io.yield_budget import task_turn
 from mirage.io.stream import close_quietly
 from mirage.io.types import PipeStream
 from mirage.observe.context import (
@@ -953,6 +954,7 @@ class Dispatcher:
             report (OpReport | None): the caller's report.
             **kwargs (Any): the op's own arguments.
         """
+        await task_turn()
         try:
             if caller is None:
                 caller = current_caller()

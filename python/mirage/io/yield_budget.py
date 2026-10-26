@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 import asyncio
 import sys
+from weakref import WeakKeyDictionary
 
 YIELD_SWITCHES = 2
 YIELD_CALLS = 4096
@@ -59,3 +60,26 @@ class YieldBudget:
         await asyncio.sleep(0.000001)
         self._calls = 0
         self._next_yield = loop.time() + self._interval
+
+
+_TASK_BUDGETS: "WeakKeyDictionary[asyncio.Task[object], YieldBudget]" = (
+    WeakKeyDictionary()
+)
+
+
+async def task_turn() -> None:
+    """Spend the running task's budget, yielding once it is due.
+
+    Every dispatcher op spends it: a walk the index answers awaits
+    coroutines that never suspend, and a task that never suspends meets
+    no cancellation or ``asyncio.timeout``. A command runs as one task
+    (each pipeline stage as its own), so the budget is the command's, as
+    the TypeScript guard keeps one per command.
+    """
+    task = asyncio.current_task()
+    if task is None:
+        return
+    budget = _TASK_BUDGETS.get(task)
+    if budget is None:
+        budget = _TASK_BUDGETS[task] = YieldBudget()
+    await budget.run()

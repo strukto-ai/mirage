@@ -369,6 +369,42 @@ describe('large in-memory commands', () => {
     }
   })
 
+  // A walk the index answers awaits only microtasks; the op guard and the
+  // tree walk hand the abort a turn.
+  it.each([
+    'find /wide -name nothing',
+    'ls -lR /wide',
+    'du -a /wide',
+    'tree /wide',
+    'grep -r nothing /wide',
+    'rg nothing /wide',
+    'cp -r /wide /copy',
+    'chmod -R 700 /wide',
+    'tar -cf /wide.tar /wide',
+    'zip -qr /wide.zip /wide',
+  ])('honors a caller abort during the walk of %s', async (command) => {
+    const ram = new RAMVFS({ walkLimit: -1 })
+    ram.store.dirs.add('/wide')
+    for (let d = 0; d < 100; d++) {
+      ram.store.dirs.add(`/wide/d${String(d)}`)
+      for (let f = 0; f < 200; f++)
+        ram.store.files.set(`/wide/d${String(d)}/f${String(f)}`, new Uint8Array([120, 10]))
+    }
+    const ws = new Workspace({ '/': ram }, { mode: MountMode.WRITE, shellParser: parser })
+    const abort = new AbortController()
+    const timer = setTimeout(() => {
+      abort.abort()
+    }, 5)
+    try {
+      await expect(ws.shell(command, { signal: abort.signal })).rejects.toMatchObject({
+        name: 'AbortError',
+      })
+    } finally {
+      clearTimeout(timer)
+      await ws.close()
+    }
+  })
+
   it('lets a caller abort tr after output starts', async () => {
     const ram = new RAMVFS()
     ram.store.files.set('/big', new TextEncoder().encode('line\n'.repeat(500_000)))

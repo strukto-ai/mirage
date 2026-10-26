@@ -14,6 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { IOResult } from '../io/types.ts'
+import { YIELD_CALLS } from '../io/yield_budget.ts'
 import type { DispatchFn } from '../runtime/types.ts'
 import { PathSpec } from '../types.ts'
 import { guardDispatch } from './abort.ts'
@@ -47,9 +48,25 @@ describe('guardDispatch', () => {
     expect(seen).toEqual([])
   })
 
-  it('is the dispatch itself without a signal', () => {
-    const seen: string[] = []
-    const inner = recording(seen)
-    expect(guardDispatch(inner, undefined)).toBe(inner)
-  })
+  it.each([false, true])(
+    'hands a timer a turn in a run of microtask ops, signal %s, and stops there',
+    async (withSignal) => {
+      const seen: string[] = []
+      const controller = new AbortController()
+      const guarded = guardDispatch(recording(seen), withSignal ? controller.signal : undefined)
+      let fired = false
+      setTimeout(() => {
+        fired = true
+        controller.abort(new Error('released'))
+      }, 0)
+      const run = async (): Promise<void> => {
+        while (!fired) await guarded('stat', path)
+        await guarded('stat', path)
+      }
+      if (withSignal) await expect(run()).rejects.toMatchObject({ name: 'AbortError' })
+      else await run()
+      expect(fired).toBe(true)
+      expect(seen.length).toBeLessThanOrEqual(YIELD_CALLS + 1)
+    },
+  )
 })

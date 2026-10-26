@@ -29,6 +29,7 @@ const grep: CommandFn = async (_accessor, paths, texts, ctx) => {
     files.answers('read_tree') ? files.readTree : undefined,
     (p) => files.readdir(p),
     files.stat,
+    files.signal,
   )
   return grepGeneric(
     'grep',

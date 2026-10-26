@@ -37,6 +37,7 @@ const rg: CommandFn = async (_accessor, paths, texts, ctx) => {
       files.answers('read_tree') ? files.readTree : undefined,
       readdir,
       stat,
+      files.signal,
     ),
   )
 }

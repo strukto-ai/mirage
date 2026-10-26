@@ -558,3 +558,45 @@ async def test_large_ram_command_honors_caller_cancel(command):
     finally:
         timer.cancel()
     assert fired[0] < 1
+
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "command",
+    [
+        "find /wide -name nothing",
+        "ls -lR /wide",
+        "du -a /wide",
+        "tree /wide",
+        "grep -r nothing /wide",
+        "rg nothing /wide",
+        "cp -r /wide /copy",
+        "chmod -R 700 /wide",
+        "tar -cf /wide.tar /wide",
+        "zip -qr /wide.zip /wide",
+    ],
+)
+async def test_ram_walk_honors_caller_cancel(command):
+    # A walk the index answers awaits coroutines that never suspend; the
+    # dispatcher's task budget and the tree walk's budget let the cancel
+    # land.
+    from mirage.utils.abort import MirageAbortError
+
+    ram = RAMVFS(walk_limit=-1)
+    store = ram.accessor.store
+    store.dirs.add("/wide")
+    for d in range(100):
+        store.dirs.add(f"/wide/d{d}")
+        for f in range(200):
+            store.files[f"/wide/d{d}/f{f}"] = b"x\n"
+    ws = Workspace({"/": ram}, mode=MountMode.WRITE)
+    cancel = asyncio.Event()
+    loop = asyncio.get_running_loop()
+    timer = loop.call_later(0.005, cancel.set)
+    try:
+        with pytest.raises(MirageAbortError):
+            await ws.shell(command, cancel=cancel)
+    finally:
+        timer.cancel()
+        await ws.close()

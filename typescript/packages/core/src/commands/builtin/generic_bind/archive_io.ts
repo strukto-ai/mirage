@@ -62,6 +62,7 @@ export function walkOf(
     files.answers('read_tree') ? files.readTree : undefined,
     files.readdir,
     files.stat,
+    files.signal,
   )
   return walkWith((spec) => readdir(spec), stat, dispatch, command)
 }

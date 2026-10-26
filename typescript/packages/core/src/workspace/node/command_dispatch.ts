@@ -908,8 +908,8 @@ async function routeArgv(
   // Every handler below reaches the dispatcher through this one function,
   // so a line whose caller was already released starts no further op
   // between its operands (`rm l1 l2` with the first unlink held past
-  // the grace). Python needs nothing here: its cancelled task never
-  // reaches the next operand.
+  // the grace), and a walk the index answers yields often enough for the
+  // abort or timeout to fire.
   const dispatch = guardDispatch(dispatchIn, mergeSignals(signal, context.frame.abortSignal))
   const name = argv.name
   const args = [...argv.args]

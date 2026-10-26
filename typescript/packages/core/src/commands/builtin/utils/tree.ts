@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { classify } from '../../../errors/classify.ts'
+import { YieldBudget } from '../../../io/yield_budget.ts'
 import { isEnotdir, isFsError } from '../../../errors/fs.ts'
 import type { FsCondition, WalkDeclinedError } from '../../../errors/types.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
@@ -204,14 +205,18 @@ function answerable(path: PathSpec): boolean {
  * `readdir`, which follows it as opendir(3) does and meets whatever refuses
  * the directory it leads to. Both take the path first and pass the rest
  * through; a listing's `limit` reaches `readTree` too, which may then answer
- * null for a subtree past it. Mirrors Python's `tree_walk`.
+ * null for a subtree past it. An answer from the tree resolves in a microtask,
+ * so the walk spends a yield budget under `signal` (the line's abort and the
+ * command's deadline) and stops once it fires. Mirrors Python's `tree_walk`.
  */
 export function treeWalk<D, S>(
   readTree: ReadTree | undefined,
   readdir: WalkCall<D>,
   stat: WalkCall<S>,
+  signal?: AbortSignal,
 ): [WalkCall<D>, WalkCall<S>] {
   if (readTree === undefined) return [readdir, stat]
+  const budget = new YieldBudget(signal)
   const roots = new Map<string, [Map<string, FileStat>, Map<string, string[]>]>()
   const asked = new Set<string>()
   const covering = (virtual: string): [string, string] | null => {
@@ -223,6 +228,7 @@ export function treeWalk<D, S>(
     return null
   }
   const treeReaddir: WalkCall<D> = async (path, nofollow, limit) => {
+    await budget.run()
     const virtual = path.virtual.replace(/\/+$/, '') || '/'
     let hit = answerable(path) ? covering(virtual) : null
     if (hit === null && !asked.has(virtual) && path.pattern === null) {
@@ -251,6 +257,7 @@ export function treeWalk<D, S>(
     return readdir(path, nofollow, limit)
   }
   const treeStat: WalkCall<S> = async (path, nofollow) => {
+    await budget.run()
     const virtual = path.virtual.replace(/\/+$/, '') || '/'
     const hit = answerable(path) ? covering(virtual) : null
     if (hit !== null && hit[1] !== '') {
