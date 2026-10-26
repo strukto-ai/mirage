@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import os
 import threading
 from pathlib import Path
 from unittest.mock import Mock
@@ -205,6 +206,53 @@ async def test_close_releases_pooled_native_modules(tmp_path):
         compiled.ptr()
     with pytest.raises(ValueError, match="closed"):
         engine.ptr()
+
+
+@pytest.mark.asyncio
+async def test_a_torn_cache_is_compiled_again_and_replaced_whole(tmp_path):
+    wasmtime = pytest.importorskip("wasmtime")
+    module = tmp_path / "empty.wasm"
+    module.write_bytes(wasmtime.wat2wasm('(module (func (export "_start")))'))
+    first = WasmExecution(module, "probe")
+    await first.run([], None, [], WasmView())
+    await first.close()
+    cache = tmp_path / "empty.cwasm"
+    whole = cache.read_bytes()
+    cache.write_bytes(whole[: len(whole) // 2])
+    again = WasmExecution(module, "probe")
+    assert await again.run([], None, [], WasmView()) == (b"", None, 0)
+    await again.close()
+    assert cache.read_bytes() == whole
+    assert sorted(p.name for p in tmp_path.iterdir()) == [
+        "empty.cwasm",
+        "empty.wasm",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_new_cache_is_synced_before_it_takes_its_name(
+    tmp_path, monkeypatch
+):
+    wasmtime = pytest.importorskip("wasmtime")
+    module = tmp_path / "empty.wasm"
+    module.write_bytes(wasmtime.wat2wasm('(module (func (export "_start")))'))
+    events: list[str] = []
+    fsync, replace = os.fsync, os.replace
+
+    def synced(fd: int) -> None:
+        events.append("fsync")
+        fsync(fd)
+
+    def renamed(src: str, dst: str) -> None:
+        events.append(f"replace {Path(dst).name}")
+        replace(src, dst)
+
+    monkeypatch.setattr(os, "fsync", synced)
+    monkeypatch.setattr(os, "replace", renamed)
+    execution = WasmExecution(module, "probe")
+    await execution.run([], None, [], WasmView())
+    await execution.close()
+    assert events == ["fsync", "replace empty.cwasm"]
 
 
 @pytest.mark.asyncio
