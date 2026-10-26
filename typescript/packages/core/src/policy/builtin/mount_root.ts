@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { Policy } from '../base.ts'
-import { operandPaths } from '../match/rule.ts'
+import { operandPaths, targetDirectory } from '../match/rule.ts'
 import type { Action, CommandContext, Deny, MountRootQuery } from '../types.ts'
 import { isCreateMode } from '../../commands/builtin/generic/tar/mode.ts'
 import { expandTableLong } from '../../commands/spec/compile.ts'
@@ -175,6 +175,26 @@ function firstRoot(
   return null
 }
 
+// Where mv's refusal says a source was going, as typed. Several sources, or
+// `-t`, land inside the destination under their own names, as GNU names
+// them. Two operands name the destination itself: GNU names DST/NAME when DST
+// is a directory, which the policy cannot tell before anything is stat'd. A
+// `-t` value is read back from argv already resolved, so it is named
+// absolute. A lone operand has no destination and names `?`. Mirrors Python's
+// mv_destination.
+function mvDestination(
+  operands: readonly PathSpec[],
+  source: PathSpec,
+  target: string | null,
+): string {
+  if (target === null && operands.length < 3) {
+    return operands.length === 2 && operands[1] !== undefined ? operands[1].rawPath : '?'
+  }
+  const parent = target ?? operands[operands.length - 1]?.rawPath ?? ''
+  const name = source.rawPath.replace(/\/+$/, '').split('/').at(-1) ?? ''
+  return `${parent.replace(/\/+$/, '')}/${name}`
+}
+
 /**
  * The built-in rule: a mount root is not an ordinary directory.
  *
@@ -232,17 +252,18 @@ export class MountRootPolicy implements Policy {
     }
 
     if (cmd === 'mv') {
-      // The source is a slot, so it is read off the positionals:
-      // `mv -t /mnt f` moves INTO a mount root, which is ordinary.
-      const source = operands[0]
-      if (source !== undefined && namesRoot(source)) {
-        const dst = ctx.paths[1] !== undefined ? ctx.paths[1].virtual : '?'
-        return deny(
-          `cannot move '${source.virtual}' to '${dst}': Device or resource busy`,
-          ebusy(source),
-        )
-      }
-      return null
+      // Sources are read off the positionals: `mv f /mnt` and
+      // `mv -t /mnt f` move INTO a mount root, which is ordinary.
+      // The refusal stops the whole line, as rm's does; GNU would
+      // move the other sources.
+      const target = targetDirectory(ctx)
+      const sources = target !== null || operands.length < 2 ? operands : operands.slice(0, -1)
+      const root = firstRoot(namesRoot, sources)
+      if (root === null) return null
+      return deny(
+        `cannot move '${root.rawPath}' to '${mvDestination(operands, root, target)}': Device or resource busy`,
+        ebusy(root),
+      )
     }
 
     if (cmd === 'mkdir') {

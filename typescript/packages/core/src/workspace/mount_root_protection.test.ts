@@ -107,6 +107,41 @@ describe('mount-root protection — mv', () => {
     expect(r.stderrText).toMatch(/Device or resource busy/)
     await ws.close()
   })
+
+  // A mount root after the first source would be copied out and its mount
+  // emptied; -t makes the last operand a source too. The rows also pin how
+  // the refusal names operands: as typed, except the documented divergences
+  // (two operands name DST, -t is resolved) and a lone operand, which has no
+  // destination to name ('?').
+  it.each([
+    ['mv /ram/payload /r2 /ram/dst', "'/r2' to '/ram/dst/r2'"],
+    ['mv -t /ram/dst /ram/payload /r2', "'/r2' to '/ram/dst/r2'"],
+    ['mv --target-directory=/ram/dst /r2', "'/r2' to '/ram/dst/r2'"],
+    ['mv /ram/payload /r2 /ram/dst/', "'/r2' to '/ram/dst/r2'"],
+    ['mv /r2 /ram/x > /ram/log', "'/r2' to '/ram/x'"],
+    ['cd /ram && mv payload ../r2 dst', "'../r2' to 'dst/r2'"],
+    ['cd /ram && mv ../r2 x', "'../r2' to 'x'"],
+    ['mv /ram/payload /r2/ /ram/dst', "'/r2/' to '/ram/dst/r2'"],
+    ['mv /r2', "'/r2' to '?'"],
+    ['mv /r2 /ram/dst', "'/r2' to '/ram/dst'"],
+    ['cd /ram && mv -t dst ../r2', "'../r2' to '/ram/dst/r2'"],
+  ])('mv refuses a mount root as any source: %s', async (line, named) => {
+    const ws = twoMountWs()
+    await ws.shell('touch /ram/payload /r2/keep && mkdir /ram/dst')
+    const r = await ws.shell(line)
+    expect(r.exitCode).toBe(1)
+    expect(r.stderrText).toBe(`mv: cannot move ${named}: Device or resource busy\n`)
+    expect((await ws.shell('ls /r2')).stdoutText).toBe('keep\n')
+    await ws.close()
+  })
+
+  it('mv of several sources into a mount root is allowed', async () => {
+    const ws = twoMountWs()
+    await ws.shell('touch /ram/a /ram/b')
+    expect((await ws.shell('mv /ram/a /ram/b /r2')).exitCode).toBe(0)
+    expect((await ws.shell('ls /r2')).stdoutText).toBe('a\nb\n')
+    await ws.close()
+  })
 })
 
 describe('mount-root protection — mkdir', () => {

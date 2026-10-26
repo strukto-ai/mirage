@@ -32,6 +32,8 @@ that the user can navigate but not accidentally destroy.
 
 import asyncio
 
+import pytest
+
 from mirage.types import MountMode
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
@@ -170,6 +172,51 @@ def test_mv_into_mount_root_is_allowed():
         await _exec(ws, "touch /ram/payload")
         r = await _exec(ws, "mv /ram/payload /r2/payload")
         assert r.exit_code == 0
+
+    _run(go())
+
+
+@pytest.mark.parametrize(
+    "line,named",
+    [
+        ("mv /ram/payload /r2 /ram/dst", "'/r2' to '/ram/dst/r2'"),
+        ("mv -t /ram/dst /ram/payload /r2", "'/r2' to '/ram/dst/r2'"),
+        ("mv --target-directory=/ram/dst /r2", "'/r2' to '/ram/dst/r2'"),
+        ("mv /ram/payload /r2 /ram/dst/", "'/r2' to '/ram/dst/r2'"),
+        ("mv /r2 /ram/x > /ram/log", "'/r2' to '/ram/x'"),
+        ("cd /ram && mv payload ../r2 dst", "'../r2' to 'dst/r2'"),
+        ("cd /ram && mv ../r2 x", "'../r2' to 'x'"),
+        ("mv /ram/payload /r2/ /ram/dst", "'/r2/' to '/ram/dst/r2'"),
+        ("mv /r2", "'/r2' to '?'"),
+        ("mv /r2 /ram/dst", "'/r2' to '/ram/dst'"),
+        ("cd /ram && mv -t dst ../r2", "'../r2' to '/ram/dst/r2'"),
+    ],
+)
+def test_mv_refuses_a_mount_root_as_any_source(line, named):
+    # A mount root after the first source would be copied out and its
+    # mount emptied; -t makes the last operand a source too. The rows
+    # also pin how the refusal names operands: as typed, except the
+    # documented divergences (two operands name DST, -t is resolved) and
+    # a lone operand, which has no destination to name ('?').
+    async def go():
+        ws = _ws_two_mounts()
+        await _exec(ws, "touch /ram/payload /r2/keep && mkdir /ram/dst")
+        r = await _exec(ws, line)
+        assert r.exit_code == 1
+        assert r.stderr == (
+            f"mv: cannot move {named}: Device or resource busy\n".encode()
+        )
+        assert (await _exec(ws, "ls /r2")).stdout == b"keep\n"
+
+    _run(go())
+
+
+def test_mv_of_several_sources_into_a_mount_root_is_allowed():
+    async def go():
+        ws = _ws_two_mounts()
+        await _exec(ws, "touch /ram/a /ram/b")
+        assert (await _exec(ws, "mv /ram/a /ram/b /r2")).exit_code == 0
+        assert (await _exec(ws, "ls /r2")).stdout == b"a\nb\n"
 
     _run(go())
 

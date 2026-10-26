@@ -33,7 +33,7 @@ export function operandPaths(ctx: CommandContext): PathSpec[] {
     word.kind === WordKind.OPERAND && word.path !== null ? [word.path] : [],
   )
 }
-function targetDirectory(ctx: CommandContext): string | null {
+export function targetDirectory(ctx: CommandContext): string | null {
   const spec = SPECS.mv
   if (spec === undefined) return null
   return (
