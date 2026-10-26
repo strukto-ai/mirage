@@ -162,7 +162,7 @@ describe('DiskRecordClient lock reclaim and release', () => {
 
   it('leaves the lock when a reclaimer loses the guard it freed', async () => {
     const client = new DiskRecordClient(root, '')
-    staleLock(client, 'k')
+    const lock = staleLock(client, 'k')
     const guard = staleLock(client, 'k', '.lock.reclaim')
     let opens = 0
     vi.mocked(fs.open).mockImplementation((async (...args: Parameters<typeof fs.open>) => {
@@ -171,7 +171,8 @@ describe('DiskRecordClient lock reclaim and release', () => {
       }
       return real.open(...args)
     }) as typeof fs.open)
-    expect(await client.casPut('k', { generation: 1 }, 0)).toBe(false)
+    const reclaim = client as unknown as { reclaimStaleLock(path: string): Promise<boolean> }
+    expect(await reclaim.reclaimStaleLock(lock)).toBe(false)
     expect(readdirSync(root)).toEqual(['k.json.lock'])
   })
 

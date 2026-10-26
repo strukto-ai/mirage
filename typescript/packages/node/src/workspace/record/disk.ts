@@ -230,7 +230,7 @@ export class DiskRecordClient {
     }
   }
 
-  // Unlink only after closing: on Windows an open, unlinked lock blocks the next one.
+  // Unlink only after closing: on Windows an open, unlinked lock can block the next one.
   private async releaseLock(fh: FileHandle, lockPath: string): Promise<void> {
     let owned = false
     try {
@@ -251,7 +251,7 @@ export class DiskRecordClient {
       }
     }
     // The lock vanished or changed hands before release; nothing to undo.
-    console.warn(`mirage: lock ${lockPath} was reclaimed before release`)
+    console.warn(`mirage: lock ${lockPath} was gone or taken before release`)
   }
 
   private async writeRecord(target: string, fields: Record<string, unknown>): Promise<void> {

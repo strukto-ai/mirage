@@ -290,7 +290,7 @@ describe('a clock behind stored history', () => {
 })
 
 describe('a damaged history file', () => {
-  it('costs only a torn line and the entry appended onto it', async () => {
+  it('costs only the torn line and the entry appended onto it', async () => {
     const store = new RAMObserverStore()
     const o = new Observer(store, new ManualClock(NEW_YEAR))
     await logCommand(o, 'first', 's1', NEW_YEAR)

@@ -117,7 +117,7 @@ def _release_lock(fd: int, lock_path: str) -> None:
         except FileNotFoundError:
             pass
     # The lock vanished or changed hands before release; nothing to undo.
-    logger.warning("lock %s was reclaimed before release", lock_path)
+    logger.warning("lock %s was gone or taken before release", lock_path)
 
 
 async def _acquire_owned(lock_path: str) -> int | None:

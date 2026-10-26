@@ -294,7 +294,7 @@ def test_an_empty_history_sets_no_floor():
     assert [e["timestamp"] for e in events] == [-1000]
 
 
-def test_a_torn_line_costs_only_itself_and_the_line_appended_onto_it():
+def test_a_torn_line_costs_only_itself_and_the_entry_appended_onto_it():
     store = RAMObserverStore()
     obs = Observer(store=store, clock=ManualClock(start=NEW_YEAR))
     _log_command(obs, "first", "s1", NEW_YEAR)

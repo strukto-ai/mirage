@@ -261,7 +261,7 @@ async def test_a_reclaimer_that_loses_the_guard_leaves_the_lock(
     tmp_path, monkeypatch
 ):
     client = DiskRecordClient(str(tmp_path), "")
-    _stale_lock(client, "k")
+    lock_path = _stale_lock(client, "k")
     guard = _stale_lock(client, "k", ".lock.reclaim")
     opens = count()
     real_open = os.open
@@ -272,7 +272,7 @@ async def test_a_reclaimer_that_loses_the_guard_leaves_the_lock(
         return real_open(path, *args, **kwargs)
 
     monkeypatch.setattr(os, "open", open_)
-    assert not await client.cas_put("k", {"generation": 1}, 0)
+    assert not disk._reclaim_stale_lock(lock_path)
     assert os.listdir(tmp_path) == ["k.json.lock"]
 
 
