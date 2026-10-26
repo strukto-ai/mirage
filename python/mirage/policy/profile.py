@@ -18,6 +18,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
+from mirage.policy.builtin.output_cap import command_limits_to_json
 from mirage.policy.constants import (
     DEFAULT_ASK_REASON,
     DEFAULT_DENY_REASON,
@@ -35,7 +36,6 @@ from mirage.policy.types import (
 from mirage.process.config import ProcessPermissions
 from mirage.runtime.types import ScriptSource
 from mirage.secrets.config import EnvVar
-from mirage.policy.builtin.output_cap import command_limits_to_json
 from mirage.types import (
     DEFAULT_VISIBILITY,
     Limit,

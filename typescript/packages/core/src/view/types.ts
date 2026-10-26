@@ -14,14 +14,7 @@
 
 import { type ShellValue, type VarAttr } from '../shell/variable.ts'
 import type { IndexCacheStore } from '../cache/index/store.ts'
-import type {
-  FileStat,
-  Limit,
-  MountMode,
-  PathSpec,
-  SetAttrFields,
-  Visibility,
-} from '../types.ts'
+import type { FileStat, Limit, MountMode, PathSpec, SetAttrFields, Visibility } from '../types.ts'
 import type { ByteSource, IOResult, OpReport } from '../io/types.ts'
 
 /**

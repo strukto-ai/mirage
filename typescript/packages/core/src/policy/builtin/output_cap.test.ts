@@ -123,7 +123,7 @@ describe('resolveLimit across mounts', () => {
     ])
   })
 
-  it('puts each layer\'s every-command entry below its own', () => {
+  it("puts each layer's every-command entry below its own", () => {
     const workspace = {
       [ALL_COMMANDS]: new Limit({ timeoutSeconds: 9, walkLimit: 7 }),
       find: new Limit({ walkLimit: 50 }),

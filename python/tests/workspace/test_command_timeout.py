@@ -560,7 +560,6 @@ async def test_large_ram_command_honors_caller_cancel(command):
     assert fired[0] < 1
 
 
-
 _UNCAPPED = {"*": Limit(walk_limit=-1)}
 
 

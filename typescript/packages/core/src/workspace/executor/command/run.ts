@@ -229,7 +229,6 @@ export async function runOnMount(
   let flags = flagKwargs
   if (cmdName === 'find') flags = scalarFindFlags(flags)
 
-
   const routing = context.frame.routing
   if (routing === undefined) throw new Error(`${cmdName}: run outside a routed line`)
   const [lineRuntime, denial] = lineRuntimeFor(cmdName, routing)

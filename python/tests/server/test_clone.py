@@ -16,10 +16,10 @@ import pytest
 from pydantic import BaseModel, ConfigDict
 
 from mirage import Mount, MountMode, Workspace
+from mirage.policy.builtin.output_cap import ALL_COMMANDS
 from mirage.secrets.errors import SecretsError
 from mirage.secrets.registry import register_secrets
 from mirage.secrets.types import ResolvedSecret
-from mirage.policy.builtin.output_cap import ALL_COMMANDS
 from mirage.server.clone import (
     build_override_mounts,
     clone_workspace_with_override,

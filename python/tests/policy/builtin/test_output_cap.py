@@ -17,7 +17,6 @@ from types import SimpleNamespace
 import pytest
 from pydantic import ValidationError
 
-
 from mirage.policy.builtin.output_cap import (
     ALL_COMMANDS,
     DEFAULT_COMMAND_LIMITS,
@@ -67,7 +66,9 @@ def test_resolve_walks_profile_mount_workspace_declared_then_table():
     assert _lines(declared, mount, workspace, {}) == 2
     assert _lines(declared, None, workspace, {}) == 3
     assert _lines(declared, None, {}, {}) == 4
-    assert _lines(None, None, {}, {}) == DEFAULT_COMMAND_LIMITS["cat"].max_lines
+    assert (
+        _lines(None, None, {}, {}) == DEFAULT_COMMAND_LIMITS["cat"].max_lines
+    )
     assert _lines(None, None, workspace, {"head": Limit()}) == 3
 
 
@@ -120,7 +121,9 @@ def test_resolve_unknown_command_returns_fallback_limit():
 
 
 def _mounts(table):
-    return lambda prefix: _mount(table.get(prefix)) if prefix in table else None
+    return lambda prefix: (
+        _mount(table.get(prefix)) if prefix in table else None
+    )
 
 
 def test_resolve_producer_prefers_the_mount_override():

@@ -73,9 +73,9 @@ from mirage.errors.fs import (
     walk_refusal,
 )
 from mirage.io import IOResult, OpReport
-from mirage.io.yield_budget import task_turn
 from mirage.io.stream import close_quietly
 from mirage.io.types import PipeStream
+from mirage.io.yield_budget import task_turn
 from mirage.observe.context import (
     RecordingScope,
     active_lost,

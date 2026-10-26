@@ -770,9 +770,9 @@ class Limit(BaseModel):
         Field(allow_inf_nan=False),
         Aggr(_min_positive),
     ] = None
-    walk_limit: Annotated[
-        int | None, Field(ge=-1), Aggr(_tightest_walk)
-    ] = None
+    walk_limit: Annotated[int | None, Field(ge=-1), Aggr(_tightest_walk)] = (
+        None
+    )
     on_exceed: Annotated[OnExceed, Aggr(_prefer_error)] = OnExceed.TRUNCATE
 
     @classmethod

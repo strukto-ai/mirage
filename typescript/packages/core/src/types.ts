@@ -414,7 +414,6 @@ export class Limit {
     return this.exceed ?? OnExceed.TRUNCATE
   }
 
-
   /**
    * Each field from the first limit that names it, most specific first: a
    * layer naming one bound inherits the others from the layers below it, and

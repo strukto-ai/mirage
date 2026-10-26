@@ -148,10 +148,7 @@ type Ran = [string, string, number]
 async function run(vfs: GitHubVFS | RAMVFS, line: string, limit?: number): Promise<Ran> {
   const commandLimits =
     limit === undefined ? {} : { [ALL_COMMANDS]: new Limit({ walkLimit: limit }) }
-  const ws = new Workspace(
-    { '/gh': new Mount(vfs, { mode: MountMode.READ, commandLimits }) },
-    {},
-  )
+  const ws = new Workspace({ '/gh': new Mount(vfs, { mode: MountMode.READ, commandLimits }) }, {})
   try {
     const result = await ws.shell(line)
     return [DEC.decode(result.stdout), DEC.decode(result.stderr), result.exitCode]

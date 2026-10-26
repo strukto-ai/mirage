@@ -18,6 +18,7 @@ from types import MappingProxyType
 from typing import Any
 
 from mirage.io.async_line_iterator import SharedInput, release_inputs
+from mirage.policy.builtin.output_cap import command_limits_to_json
 from mirage.policy.types import (
     AdmissionRules,
     Decision,
@@ -46,7 +47,6 @@ from mirage.shell.variable import (
     copy_var,
     stored_attrs,
 )
-from mirage.policy.builtin.output_cap import command_limits_to_json
 from mirage.types import (
     DEFAULT_VISIBILITY,
     HiddenPaths,
