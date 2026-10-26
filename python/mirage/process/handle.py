@@ -154,11 +154,13 @@ class ProcessHandle:
         error = None if cancelled else task.exception()
         if error is not None:
             logger.debug("process %d failed: %s", self._info.pid, error)
-        if cancelled:
-            code = 128 + (self._signal or 9)
-        else:
-            code = 1 if error is not None else task.result()
         with self._lock:
+            # Read with the exit published, so a KILL another thread sends
+            # meanwhile is either refused or the status it reports.
+            if cancelled:
+                code = 128 + (self._signal or 9)
+            else:
+                code = 1 if error is not None else task.result()
             self._info = replace(
                 self._info,
                 state=ProcessState.EXITED,
