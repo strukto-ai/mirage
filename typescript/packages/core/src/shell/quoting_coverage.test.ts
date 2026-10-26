@@ -248,7 +248,7 @@ describe('shell quoting coverage (port of tests/shell/test_quoting_coverage.py)'
     }
   })
   describe('whitespace between expansions inside double quotes', () => {
-    // tree-sitter folds the separating whitespace into the *second*
+    // The parser folds the separating whitespace into the *second*
     // node's extent, so each expansion branch has to re-emit it.
     const cases: [string, string][] = [
       ['echo "$(echo a) $(echo b)"', 'a b\n'],
@@ -284,8 +284,8 @@ describe('shell quoting coverage (port of tests/shell/test_quoting_coverage.py)'
     }
   })
   describe('adjacent backtick substitutions', () => {
-    // tree-sitter merges pairs separated by nothing or whitespace into
-    // one node, so the region is re-lexed during expansion.
+    // Pairs separated by nothing or whitespace each run as a line of
+    // their own.
     const cases: [string, string][] = [
       ['echo `echo a` `echo b`', 'a b\n'],
       ['echo "`echo a` `echo b`"', 'a b\n'],

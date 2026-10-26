@@ -148,7 +148,7 @@ export function envGet(session: SessionState, name: string): string | null {
  * points at; a write to the reference itself (`declare -n r=w`,
  * `unset -n r`) asks about the reference.
  */
-function envIsReadonly(session: SessionState, name: string, followRef = true): boolean {
+export function envIsReadonly(session: SessionState, name: string, followRef = true): boolean {
   const resolved = followRef ? deref(session, name) : name
   if (varHidden(session.visibility, resolved)) return false
   const v = sessionEntry(session.vars, resolved)

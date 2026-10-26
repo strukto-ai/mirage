@@ -21,16 +21,11 @@ def split_backtick_region(raw: str) -> list[BacktickSegment]:
     """Split a backtick region into its commands and the text between
     them, each with its span in the region.
 
-    tree-sitter-bash lexes the gap between two backtick substitutions
-    as a single token when that gap is empty or whitespace-only, so
-    ``\\`a\\` \\`b\\``` arrives as ONE command_substitution node holding
-    both commands and the literal text between them, and the node's
-    subtree merges the two commands into one that never runs.
-    Re-lexing the node's own text on unescaped backticks recovers the
-    real segments; a single pair simply yields one command segment.
-    The evaluator runs each command as a line of its own and the
-    judging pass reads it the same way, so this is the one lexer both
-    share, and the spans are what let each pair stand at its own place
+    The node's subtree is not what runs: bash removes the backslashes
+    of a backtick body before it parses it, so the body is lexed again
+    from the node's own text. The evaluator runs each command as a line
+    of its own and the judging pass reads it the same way, so this is
+    the one lexer both share, and the spans are what place each command
     on the line.
 
     Inside a command, POSIX keeps the backslash literal except before

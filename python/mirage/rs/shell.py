@@ -17,19 +17,23 @@ from collections.abc import Iterable
 from mirage._rs import ShellTree
 
 
-def parse_shell(source: str | bytes, aliases: Iterable[str] = ()) -> ShellTree:
-    """Parse a shell program with mirage's own bash parser.
+def parse_shell(
+    source: str | bytes, aliases: Iterable[str] = (), extglob: bool = True
+) -> ShellTree:
+    """Parse a line with mirage's own bash parser.
 
-    The tree has tree-sitter-bash's node kinds, field names and byte and
-    point spans, and bash's reading where that grammar misreads bash, so
-    its root node walks as a ``TSNodeLike``.
+    The tree reads the line with each heredoc body folded into it as a
+    ``<`` redirect from a double-quoted word and its line continuations
+    dropped; its nodes walk as ``TSNodeLike``, and ``error`` holds bash's
+    refusal of a line it cannot read.
 
     Args:
         source (str | bytes): the program; in text, a lone surrogate
             stands for the byte it escapes.
         aliases (Iterable[str]): the names the shell expands as aliases;
             one is a command where a command starts, never a reserved word.
+        extglob (bool): whether extglob's pattern groups are on.
     """
     if isinstance(source, str):
         source = source.encode("utf-8", "surrogateescape")
-    return ShellTree(source, list(aliases))
+    return ShellTree(source, list(aliases), extglob)

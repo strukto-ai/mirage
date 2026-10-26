@@ -156,7 +156,7 @@ async def expand_array_items(
     (``a=($(cmd) /data/*.txt)``), with zero-match globs kept literal.
 
     Args:
-        array_node (Any): the tree-sitter ``array`` node.
+        array_node (Any): the ``array`` node.
         context (EvaluationContext): the evaluation's session and frame.
         execute_fn (Callable): workspace execute for substitutions.
         registry (MountRegistry): mount registry for glob resolution.
@@ -187,7 +187,7 @@ async def expand_array_items(
     return [word_text(w) for w in resolved]
 
 
-_SUBSCRIPT_LITERAL_TYPES = frozenset({NT.WORD, NT.NUMBER, NT.ERROR})
+_SUBSCRIPT_LITERAL_TYPES = frozenset({NT.WORD, NT.NUMBER})
 
 
 async def _subscript_key_text(
@@ -208,7 +208,7 @@ async def _subscript_key_text(
     arithmetic.
 
     Args:
-        subscript_node (Any): the tree-sitter ``subscript`` node.
+        subscript_node (Any): the ``subscript`` node.
         name (str): the array variable's name, for the raw slice.
         context (EvaluationContext): the evaluation's session and frame.
         execute_fn (Callable): evaluator for command substitutions.
@@ -245,7 +245,7 @@ async def execute_assignment(
     and the scalar/array invariant.
 
     Args:
-        node (Any): the tree-sitter ``variable_assignment`` node.
+        node (Any): the ``variable_assignment`` node.
         context (EvaluationContext): the evaluation's session and frame.
         execute_fn (Callable): recursive execute for substitutions.
         registry (MountRegistry): mount registry for glob resolution.

@@ -193,7 +193,7 @@ async def zgrep_generic(
                     hit = False
                     selected: list[tuple[int, str]] = []
                     try:
-                        hit = line_selected(compiled, line) != f.invert
+                        hit = await line_selected(compiled, line) != f.invert
                         if not hit:
                             pass
                         elif f.only_matching and not (
@@ -203,7 +203,7 @@ async def zgrep_generic(
                             or f.files_only
                             or f.files_without_match
                         ):
-                            selected = line_pieces(compiled, line)
+                            selected = await line_pieces(compiled, line)
                         else:
                             selected = [(0, line)]
                     except SearchLimit as exc:

@@ -18,7 +18,7 @@ import { Workspace } from '../../../workspace.ts'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { Limit, MountMode, PathSpec } from '@struktoai/mirage-core/types'
 import { E2BRuntime } from '@struktoai/mirage-core/runtime/sandbox/e2b/runtime'
-import { ProcessSupervisor } from '@struktoai/mirage-core/process/supervisor'
+import { ProcessTable } from '@struktoai/mirage-core/process/table'
 import { runWithExecution } from '@struktoai/mirage-core/context/session_context'
 import type { E2bSdk } from '@struktoai/mirage-core/runtime/sandbox/e2b/sdk'
 import { PTY_MARK, PTY_RAW } from '@struktoai/mirage-core/runtime/sandbox/e2b/constants'
@@ -413,7 +413,7 @@ describe('E2B cancellation and validation', () => {
     const runtime = makeRuntime()
     await runtime.connect()
     const abort = new AbortController()
-    const runner = new ProcessSupervisor(runWithExecution).start({
+    const runner = new ProcessTable(runWithExecution).start({
       sessionId: 's',
       command: 'sleep',
       cwd: PathSpec.fromStrPath('/'),

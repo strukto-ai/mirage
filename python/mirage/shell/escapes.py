@@ -250,3 +250,15 @@ def unescape_dquoted(text: str) -> str:
     text = text.replace("\\`", "`")
     text = text.replace("\\\n", "")
     return text.replace("\x00", "\\")
+
+
+def ends_escaped(text: str | bytes | bytearray) -> bool:
+    """Whether an odd run of backslashes ends ``text``, so its last
+    backslash escapes what follows: the newline it continues, or the end
+    of the input it quotes. An even run is escaped backslashes only.
+
+    Args:
+        text (str | bytes | bytearray): a line, without its newline.
+    """
+    tail = text.rstrip("\\") if isinstance(text, str) else text.rstrip(b"\\")
+    return (len(text) - len(tail)) % 2 == 1

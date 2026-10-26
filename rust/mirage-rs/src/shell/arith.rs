@@ -193,6 +193,7 @@ impl Parser<'_> {
     pub(super) fn bracket_arithmetic(&mut self) -> R<Syn> {
         self.enter()?;
         let at = self.i;
+        self.scan_matched(at + 2, at, b'[', b']')?;
         let Some(end) = super::lex::bracket_end(self.s, at + 1) else {
             return self.fail(at);
         };
@@ -241,6 +242,12 @@ impl Parser<'_> {
     /// `for ((init; condition; update)) body`.
     pub(super) fn c_style_for(&mut self, keyword: Syn) -> R<Syn> {
         let open_at = self.i;
+        let close = self.scan_matched(open_at + 2, open_at, b'(', b')')?;
+        if self.s.get(close + 1) != Some(&b')') {
+            let end_of_line = matches!(self.s.get(close + 1), None | Some(b'\n'));
+            return Err(self.near(if end_of_line { close + 1 } else { close + 3 }, false));
+        }
+        let parts = semicolons(&self.s[open_at + 2..close]);
         let mut children = vec![keyword, self.expect("((")?];
         let mark = self.mark();
         let kept = children.len();
@@ -248,19 +255,11 @@ impl Parser<'_> {
             // bash splits the header at its `;`s and evaluates each part
             // when the loop runs: a part the grammar cannot read is a raw
             // body.
-            let Some(end) = self.double_paren_end(open_at) else {
-                return self.fail(self.i);
-            };
             self.forget(mark);
             children.truncate(kept);
-            self.check_raw(open_at + 2, end - 2, false)?;
-            if !self.c_style_raw(open_at + 2, end - 2, &mut children) {
-                return Err(super::parser::Fail {
-                    at: open_at,
-                    message: "syntax error: arithmetic expression required".into(),
-                });
-            }
-            self.i = end - 2;
+            self.check_raw(open_at + 2, close, false)?;
+            self.c_style_raw(open_at + 2, close, &mut children);
+            self.i = close;
         }
         children.push(self.expect("))")?);
         self.skip_blank();
@@ -278,15 +277,29 @@ impl Parser<'_> {
             self.do_group()?
         };
         children.push(body.with_field("body"));
+        // bash counts the header's expressions once the body is read.
+        if parts != 2 {
+            let first = if parts < 2 {
+                "arithmetic expression required"
+            } else {
+                "`;' unexpected"
+            };
+            let whole = &self.s[open_at..close + 2];
+            let lines = vec![
+                super::parser::line(&[b"syntax error: ", first.as_bytes()]),
+                super::parser::line(&[b"syntax error: `", whole, b"'"]),
+            ];
+            return Err(self.refusal(open_at, close + 2, lines, false));
+        }
         Ok(Syn::node("c_style_for_statement", children))
     }
 
-    /// The three parts of a C-style for header as raw bodies; false when
-    /// the header does not hold three.
-    fn c_style_raw(&mut self, start: usize, end: usize, children: &mut Vec<Syn>) -> bool {
+    /// The three parts of a C-style for header as raw bodies; none when
+    /// the header does not hold three, which bash refuses.
+    fn c_style_raw(&mut self, start: usize, end: usize, children: &mut Vec<Syn>) {
         let separators = self.header_separators(start, end);
         if separators.len() != 2 {
-            return false;
+            return;
         }
         let fields = ["initializer", "condition", "update"];
         let mut from = start;
@@ -306,7 +319,6 @@ impl Parser<'_> {
             }
             from = to + 1;
         }
-        true
     }
 
     /// The `;`s that split a C-style for header: outside its quotes,
@@ -598,4 +610,37 @@ impl Parser<'_> {
             _ => self.fail(at),
         }
     }
+}
+
+/// How many `;`s divide an arithmetic `for` header's expressions, as bash
+/// counts them: outside quotes, `${...}` and parentheses.
+fn semicolons(body: &[u8]) -> usize {
+    let mut count = 0;
+    let mut depth = 0isize;
+    let mut quote = 0u8;
+    let mut at = 0;
+    while at < body.len() {
+        let byte = body[at];
+        if quote != 0 {
+            if byte == b'\\' && quote != b'\'' {
+                at += 1;
+            } else if byte == quote {
+                quote = 0;
+            }
+        } else if matches!(byte, b'\'' | b'"' | b'`') {
+            quote = byte;
+        } else if byte == b'\\' {
+            at += 1;
+        } else if body[at..].starts_with(b"${") {
+            at = memchr::memchr(b'}', &body[at..]).map_or(body.len(), |offset| at + offset);
+        } else if byte == b'(' {
+            depth += 1;
+        } else if byte == b')' {
+            depth -= 1;
+        } else if byte == b';' && depth == 0 {
+            count += 1;
+        }
+        at += 1;
+    }
+    count
 }

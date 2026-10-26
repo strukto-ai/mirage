@@ -26,7 +26,7 @@ from mirage.cache.file.mixin import FileCacheMixin
 from mirage.concurrency.limiter import run_blocking
 from mirage.io.async_line_iterator import release_inputs
 from mirage.observe.store import ObserverStore
-from mirage.process.supervisor import ProcessSupervisor
+from mirage.process.table import ProcessTable
 from mirage.runtime.python.host.fs import HostFs, make_rmtree, os_routing
 from mirage.runtime.python.host.open import make_open
 from mirage.shell.job_table import JobTable, cancel_job
@@ -57,7 +57,7 @@ class CloseDeps:
         closers (list[Callable[[], Awaitable[None]]]): the policy
             scripts and line runtimes, closed once the jobs stop.
         job_table (JobTable): the background jobs.
-        processes (ProcessSupervisor): the managed runners.
+        processes (ProcessTable): the managed runners.
         registry (MountRegistry): the mounts.
         shared_mounts (set[int]): ids of the VFSes a sibling workspace
             still uses.
@@ -79,7 +79,7 @@ class CloseDeps:
     state_store: WorkspaceStateStore
     closers: list[Callable[[], Awaitable[None]]]
     job_table: JobTable
-    processes: ProcessSupervisor
+    processes: ProcessTable
     registry: MountRegistry
     shared_mounts: set[int]
     kernel_mounts: KernelMounts
@@ -188,7 +188,7 @@ async def close_workspace(deps: CloseDeps) -> list[BaseException]:
     records the outcome and finishes each console, which is what releases
     a reader parked on ``wait_finished``; a bare cancel leaves the job
     RUNNING with no ending chunk and that reader waits forever. The
-    supervisor then joins the managed runners before their mounts are
+    process table then joins the managed runners before their mounts are
     released, and the consoles close only after that join: a runner still
     unwinding writes its ending chunk as it settles, and a Redis console
     written after close reconnects a client that nothing closes again.

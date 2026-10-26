@@ -1,5 +1,5 @@
 use super::lex::{digits_end, is_blank, is_name, is_name_start, is_operator, is_space, name_end};
-use super::parser::{Fail, Mark, Parser, R};
+use super::parser::{Mark, Parser, R};
 use super::tree::Syn;
 
 impl Parser<'_> {
@@ -60,10 +60,10 @@ impl Parser<'_> {
         }
         // `name[` opens a subscript bash reads to its `]` at the start of a
         // command.
-        if prefix.is_empty() && is_name_start(self.peek()) {
+        if !assigned && is_name_start(self.peek()) {
             let end = name_end(self.s, self.i);
-            if self.s.get(end) == Some(&b'[') && super::lex::bracket_end(self.s, end).is_none() {
-                return Err(Fail::eof(self.s.len(), ']'));
+            if self.s.get(end) == Some(&b'[') {
+                self.scan_bracket(end + 1, end)?;
             }
         }
         if self.at_command_end() || self.at_word(b"}") && !prefix.is_empty() {
@@ -88,9 +88,20 @@ impl Parser<'_> {
                 b"let",
             ]
             .contains(&&self.s[name.start..name.end]);
+        let unprefixed = prefix.is_empty();
         let mut children = prefix;
         children.push(Syn::node("command_name", vec![name]).with_field("name"));
         self.skip_blank();
+        // A name and `(` begin a function definition, which needs its `)`.
+        if unprefixed && !coproc && self.peek() == b'(' && !self.at_process_substitution() {
+            let open = self.i;
+            self.i += 1;
+            self.skip_blank();
+            if self.peek() != b')' {
+                return self.fail(self.i);
+            }
+            self.i = open;
+        }
         if coproc && !self.at_command_end() && !self.starts(b"(") {
             let at = self.i;
             if let Some(word) = self.literal_opt(super::word::Ctx::default())? {
@@ -264,23 +275,6 @@ impl Parser<'_> {
             .any(|word| self.at_word(word))
     }
 
-    /// bash reads an array element that starts with a bare `[` as a
-    /// subscript that runs to a `]` however far off; one with none is
-    /// refused. With `names`, an element that starts `name[` is one too, as
-    /// bash reads a first assignment's elements after a redirect.
-    fn check_array_subscripts(&self, array: &Syn, names: bool) -> R<()> {
-        for element in array.children.iter().filter(|element| element.named) {
-            let mut at = element.start;
-            if names && is_name_start(self.s[at]) {
-                at = name_end(self.s, at);
-            }
-            if self.s.get(at) == Some(&b'[') && super::lex::bracket_end(self.s, at).is_none() {
-                return Err(Fail::eof(self.s.len(), ']'));
-            }
-        }
-        Ok(())
-    }
-
     /// `name=value`, `name+=value` or `name[index]=value`; `names` checks
     /// an array value's elements as after a redirect.
     fn assignment(&mut self, names: bool) -> R<Syn> {
@@ -302,9 +296,7 @@ impl Parser<'_> {
         let mut children = vec![name.with_field("name"), Syn::token(op, op_at, self.i)];
         let byte = self.peek();
         if byte == b'(' {
-            let array = self.array()?;
-            self.check_array_subscripts(&array, names)?;
-            children.push(array.with_field("value"));
+            children.push(self.array(names)?.with_field("value"));
         } else if byte == b'#' {
             // The grammar ends a `#` value at an expansion or a quote; bash
             // reads the rest of the word into it.
@@ -323,20 +315,52 @@ impl Parser<'_> {
         Ok(Syn::node("variable_assignment", children))
     }
 
-    pub(super) fn array(&mut self) -> R<Syn> {
+    /// `(...)`; with `names` an element's `name[` opens a subscript, as
+    /// bash reads a first assignment's elements after a redirect.
+    pub(super) fn array(&mut self, names: bool) -> R<Syn> {
+        let open = self.i;
         let mut children = vec![self.expect("(")?];
+        self.frames.push(super::parser::Frame::Array);
+        let elements = self.elements(open, names, &mut children);
+        self.frames.pop();
+        elements?;
+        children.push(self.expect(")")?);
+        Ok(Syn::node("array", children))
+    }
+
+    /// An array's elements up to its `)`, which opens at `open`. bash
+    /// reads an element's subscript to its `]` first.
+    fn elements(&mut self, open: usize, names: bool, children: &mut Vec<Syn>) -> R<()> {
         loop {
             self.array_space()?;
             if self.peek() == b')' {
-                break;
+                return Ok(());
+            }
+            if self.eof() {
+                return Err(self.matching(open, ')'));
+            }
+            // A redirect is no element: `{fd}>` and digits before `<` or
+            // `>` are bash's tokens for one.
+            let digits = digits_end(self.s, self.i);
+            if self.redirvar_end(self.i).is_some()
+                || digits > self.i
+                    && matches!(self.s.get(digits), Some(b'<' | b'>'))
+                    && self.s.get(digits + 1) != Some(&b'(')
+            {
+                return self.fail(self.i);
+            }
+            let mut at = self.i;
+            if names && is_name_start(self.s[at]) {
+                at = name_end(self.s, at);
+            }
+            if self.s.get(at) == Some(&b'[') {
+                self.scan_bracket(at + 1, at)?;
             }
             match self.literal_opt(super::word::Ctx::default())? {
                 Some(value) => children.push(value),
                 None => return self.fail(self.i),
             }
         }
-        children.push(self.expect(")")?);
-        Ok(Syn::node("array", children))
     }
 
     pub(super) fn subscript(&mut self, name_at: usize) -> R<Syn> {
@@ -416,7 +440,7 @@ impl Parser<'_> {
             children.push(Syn::leaf("file_descriptor", digits, self.i).with_field("descriptor"));
         }
         if self.starts(b"<<") && !self.starts(b"<<<") {
-            return self.heredoc(children);
+            return self.heredoc(children, greedy);
         }
         let at = self.i;
         let ops: &[&'static str] = &[

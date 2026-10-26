@@ -52,8 +52,7 @@ import { argumentListTooLong } from '../executor/command/handler.ts'
 import { fillTreeEnv, handleCommand, madeByCommand } from '../executor/command/command.ts'
 import type { ExecuteNodeOpts } from '../executor/command/types.ts'
 import { aliasCommandText, aliasMark, expandingAliases } from '../executor/builtins/alias/index.ts'
-import { checkSyntax, sourceOffsets, syntaxErrorResult } from '../../shell/parse/index.ts'
-import { findSyntaxIssue } from '../../shell/parse/syntax.ts'
+import { syntaxRefusal } from '../../shell/parse/index.ts'
 import type { ParseScope } from '../../shell/parse/scope.ts'
 import { guardIO } from '../../commands/builtin/utils/limit.ts'
 import {
@@ -208,16 +207,13 @@ export async function executeCommand(
       const scope = parser.fork()
       try {
         const aliases = new Set([...expandingAliases(session), ...names])
-        const ast = scope.parse(line, parserAliases(line, aliases, owners))
-        const found =
-          checkSyntax(
-            line,
-            aliases,
-            (name, at) => owners[at]?.has(name) ?? false,
-            session.shopts.extglob ?? false,
-          ) ?? findSyntaxIssue(ast)
-        if (found !== null) {
-          const io = syntaxErrorResult(found)
+        const ast = scope.parse(
+          line,
+          parserAliases(line, aliases, owners),
+          session.shopts.extglob ?? false,
+        )
+        const io = syntaxRefusal(ast)
+        if (io !== null) {
           const bad = io.stderr instanceof Uint8Array ? io.stderr : new Uint8Array()
           return [
             null,
@@ -228,7 +224,7 @@ export async function executeCommand(
         const mapped = [...owners, new Set<string>()]
         session.aliasExpansion = {
           root: ast.id,
-          owners: sourceOffsets(line, ast).map((i) => {
+          owners: Array.from(ast.offsets ?? [], (i) => {
             const owner = mapped[i]
             if (owner === undefined) throw new Error('alias source offset is out of bounds')
             return owner

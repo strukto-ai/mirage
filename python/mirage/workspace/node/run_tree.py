@@ -85,7 +85,7 @@ async def run_command_tree(
         namespace (Namespace): addressing authority for symlink ops.
         job_table (JobTable): background job management.
         execute_fn (Callable): recursive execute (for source/eval).
-        ast (Any): parsed tree-sitter root node.
+        ast (Any): parsed root node.
         context (EvaluationContext): the evaluation's session and frame.
         stdin (Any): input stream.
         cancel (asyncio.Event | None): event used to abort mid-flight.

@@ -250,7 +250,7 @@ export function parameterChunks(
  * Structural pieces of one `${...}` expansion. `subscript` is the raw
  * text between the brackets and serves the literal checks (`@`/`*`)
  * and the arithmetic path, which wants the unexpanded spelling;
- * `subscriptNodes` are the tree-sitter children behind it, which the
+ * `subscriptNodes` are the parsed children behind it, which the
  * associative path expands properly (`${m[$k]}`, `${m["a b"]}`) since
  * a key is a word, not an expression.
  */
@@ -383,7 +383,7 @@ function dquotedPattern(inner: string, session: SessionState, callStack: CallSta
 
 // Render an opaque pattern token with bash quoting semantics.
 // Pattern operands (${f%$ext}, ${v#x"a*"}) arrive as opaque `regex` nodes
-// tree-sitter does not parse further, but bash still honors quoting inside
+// the parser does not parse further, but bash still honors quoting inside
 // them: quoted segments (single, double, or ANSI-C) match literally, a
 // backslash binds the next character, an unquoted $-reference splices a
 // live pattern while a double-quoted one splices literal text, and every
@@ -811,7 +811,7 @@ export function isAtSplat(node: TSNodeLike): boolean {
   return isAtSplatParse(p) && !p.lengthOp
 }
 
-const SUBSCRIPT_LITERAL_TYPES: ReadonlySet<string> = new Set([NT.WORD, NT.NUMBER, NT.ERROR])
+const SUBSCRIPT_LITERAL_TYPES: ReadonlySet<string> = new Set([NT.WORD, NT.NUMBER])
 
 // The operators whose word bash expands only once the parameter's state
 // selects it (a default, an alternate, an assignment, a message).

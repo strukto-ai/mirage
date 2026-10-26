@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { ShellTreeNode } from '../../rs/shell.ts'
 import type { ShellNode, TSNodeLike } from '../types.ts'
 
 /** One parse of a line: its tree, where each of its chars sits in the line as
@@ -22,11 +23,13 @@ export class ParsedProgram {
   references = 1
   private released = false
 
+  readonly offsets: Uint32Array
+
   constructor(
     readonly original: string,
-    root: ShellNode,
-    readonly offsets: readonly number[],
+    root: ShellTreeNode,
   ) {
+    this.offsets = root.offsets
     this.root = new ProgramNode(root, this)
   }
 
@@ -71,6 +74,12 @@ export class ProgramNode implements ShellNode {
   get warnings() {
     return this.node.warnings ?? ''
   }
+  get offsets() {
+    return this.program.offsets
+  }
+  get error() {
+    return this.node.error ?? null
+  }
   get sourceText() {
     return this.node.sourceText ?? this.node.text
   }
@@ -100,12 +109,6 @@ export class ProgramNode implements ShellNode {
   }
   get isNamed(): boolean {
     return this.node.isNamed
-  }
-  get isMissing(): boolean {
-    return this.node.isMissing
-  }
-  get hasError(): boolean {
-    return this.node.hasError
   }
   get childCount(): number {
     return this.node.childCount

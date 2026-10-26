@@ -22,7 +22,7 @@ from mirage.shell.types import NodeType as NT
 class NodeKind(StrEnum):
     """Statement kinds the executor dispatches on.
 
-    `node_kind` owns every tree-sitter node-type check, including the
+    `node_kind` owns every node-type check, including the
     lookahead that distinguishes `select` from `for`, `until` from
     `while` and a `(( ))` command from a `{ }` group.
     """
@@ -110,7 +110,7 @@ def pipeline_transparent(node: Any) -> bool:
     it rather than stamping its own exit status.
 
     Args:
-        node (Any): tree-sitter node of the statement that just finished.
+        node (Any): parsed node of the statement that just finished.
     """
     kind = node_kind(node)
     if kind == NodeKind.REDIRECT:
@@ -152,7 +152,7 @@ def simple_command(node: Any) -> bool:
     forked the same way reports a subshell's (``{ : ${U?}; } &`` is 1).
 
     Args:
-        node (Any): tree-sitter node of the statement.
+        node (Any): parsed node of the statement.
     """
     kind = node_kind(node)
     if kind == NodeKind.REDIRECT:
@@ -169,15 +169,14 @@ def simple_command(node: Any) -> bool:
 
 
 def node_kind(node: Any) -> NodeKind:
-    """Classify a tree-sitter node into the shared statement kind.
+    """Classify a parsed node into the shared statement kind.
 
     Args:
-        node (Any): tree-sitter node.
+        node (Any): parsed node.
 
     Returns:
         NodeKind: statement kind, or UNSUPPORTED for node types
-        neither walker implements (tree-sitter ERROR nodes, future
-        grammar additions).
+        neither walker implements (future grammar additions).
     """
     ntype = node.type
     simple = _SIMPLE_KINDS.get(ntype)

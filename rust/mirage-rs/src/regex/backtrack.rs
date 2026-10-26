@@ -122,6 +122,12 @@ impl Scratch {
         trim(&mut self.seen);
         self.seen_used = self.seen_used.min(self.seen.len());
     }
+
+    /// Drops where a search that ran out of steps stopped, so the next one
+    /// starts over.
+    pub(crate) fn forget(&mut self) {
+        self.paused = None;
+    }
 }
 
 fn trim<T>(buffer: &mut Vec<T>) {
@@ -642,7 +648,8 @@ impl Program {
     /// back-references the search remembers every state it has failed
     /// from, so it takes time in proportion to the text, and an iteration
     /// that consumes nothing is never taken; with them it spends `budget`
-    /// as `run` does.
+    /// as `run` does, and out of steps keeps its place in `scratch` for a
+    /// call with `resume` to go on from.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn captures(
         &self,
@@ -654,7 +661,8 @@ impl Program {
         backrefs: bool,
         scratch: &mut Scratch,
         budget: &mut u64,
-    ) -> Option<Vec<Option<usize>>> {
+        resume: bool,
+    ) -> Step<Option<Vec<Option<usize>>>> {
         let Scratch {
             registers,
             undo,
@@ -662,16 +670,18 @@ impl Program {
             visited,
             ..
         } = scratch;
-        registers.clear();
-        registers.resize(self.registers, None);
-        undo.clear();
-        stack.clear();
-        stack.push((0, start, 0));
         let width = stop - start + 1;
         let remember = !backrefs && self.insts.len().saturating_mul(width) <= VISITED_LIMIT;
-        if remember {
-            visited.clear();
-            visited.resize((self.insts.len() * width).div_ceil(64), 0);
+        if !resume {
+            registers.clear();
+            registers.resize(self.registers, None);
+            undo.clear();
+            stack.clear();
+            stack.push((0, start, 0));
+            if remember {
+                visited.clear();
+                visited.resize((self.insts.len() * width).div_ceil(64), 0);
+            }
         }
         while let Some((mut pc, mut pos, mark)) = stack.pop() {
             while undo.len() > mark {
@@ -692,7 +702,8 @@ impl Program {
                     visited[word] |= mask;
                 } else {
                     if *budget == 0 {
-                        return None;
+                        stack.push((pc, pos, undo.len()));
+                        return Step::Paused;
                     }
                     *budget -= 1;
                 }
@@ -701,7 +712,7 @@ impl Program {
                         let mut found = registers[..self.slots].to_vec();
                         found[0] = Some(start);
                         found[1] = Some(stop);
-                        return Some(found);
+                        return Step::Done(Some(found));
                     }
                     break;
                 }
@@ -717,7 +728,7 @@ impl Program {
                 }
             }
         }
-        None
+        Step::Done(None)
     }
 
     /// The leftmost match in the record `hay[begin..end]` starting at or

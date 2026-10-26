@@ -265,7 +265,7 @@ def test_echo_quoting_matrix(input_text, expected):
 @pytest.mark.parametrize(
     "line,expected",
     [
-        # tree-sitter folds the separating whitespace into the *second*
+        # The parser folds the separating whitespace into the *second*
         # node's extent, so each expansion branch has to re-emit it.
         ('echo "$(echo a) $(echo b)"', b"a b\n"),
         ('echo "$(echo a) $(echo b) $(echo c)"', b"a b c\n"),
@@ -303,8 +303,8 @@ def test_whitespace_between_expansions_survives(line, expected):
 @pytest.mark.parametrize(
     "line,expected",
     [
-        # tree-sitter merges pairs separated by nothing or whitespace
-        # into one node, so the region is re-lexed during expansion.
+        # Pairs separated by nothing or whitespace each run as a line
+        # of their own.
         ("echo `echo a` `echo b`", b"a b\n"),
         ('echo "`echo a` `echo b`"', b"a b\n"),
         ("echo `echo a``echo b`", b"ab\n"),

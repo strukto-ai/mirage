@@ -758,7 +758,7 @@ def set_redirect_paths(
     The redirect layer expands the targets before the command executes
     (a ``$()`` in one runs exactly once there), so the admission gate
     deep in command dispatch cannot re-derive them; it reads them here
-    instead. Keyed by the tree-sitter node id so a nested line expanded
+    instead. Keyed by the node id so a nested line expanded
     on the way to the command (a ``$()`` operand, an ``eval``) never
     inherits the outer statement's targets.
 

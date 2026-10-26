@@ -72,14 +72,17 @@ async function evalLeaf(
     return (await applyUnary(ctx, node.op, node.operand)) ? 0 : 1
   }
   if (node.kind === 'binary') {
-    if (node.op === '=~') return regexStatus(ctx, node)
+    if (node.op === '=~') return await regexStatus(ctx, node)
     return (await evalCondBinary(ctx, node)) ? 0 : 1
   }
   return node.value !== '' ? 0 : 1
 }
 
 /** Match [[ left =~ right ]], filling BASH_REMATCH on a match. */
-function regexStatus(ctx: CondContext, node: Extract<CondNode, { kind: 'binary' }>): number {
+async function regexStatus(
+  ctx: CondContext,
+  node: Extract<CondNode, { kind: 'binary' }>,
+): Promise<number> {
   const pattern = node.rightLiteral ? posixEscape(node.right) : node.right
   // The shell's own locale, which an unexported LC_ALL sets as well.
   const utf8 = utf8Locale(visibleEnv(ctx.session))
@@ -88,7 +91,11 @@ function regexStatus(ctx: CondContext, node: Extract<CondNode, { kind: 'binary' 
   // POSIX_EXTENDED syntax, where `\d` is a `d` and `(?` is refused.
   let found
   try {
-    found = posixRegex(byteView(pattern, utf8), true, 'posix', false, utf8).search(left)
+    found = await posixRegex(byteView(pattern, utf8), true, 'posix', false, utf8).search(
+      left,
+      0,
+      ctx.signal,
+    )
   } catch (err) {
     if (!(err instanceof RegexError)) throw err
     return 2

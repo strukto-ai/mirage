@@ -14,6 +14,7 @@ impl Parser<'_> {
     pub(super) fn expansion(&mut self) -> R<Syn> {
         self.enter()?;
         let at = self.i;
+        self.scan_brace(at + 2, at)?;
         let mark = self.mark();
         self.i += 2;
         let mut children = vec![Syn::token("${", at, at + 2)];
@@ -231,7 +232,7 @@ impl Parser<'_> {
                 continue;
             }
             let piece = match self.peek() {
-                b'(' => self.array()?,
+                b'(' => self.array(false)?,
                 b'"' => self.string()?,
                 b'\'' => self.raw_string()?,
                 b'$' => self.dollar()?,

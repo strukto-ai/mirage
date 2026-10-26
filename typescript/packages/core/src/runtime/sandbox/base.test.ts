@@ -25,7 +25,7 @@ import { LanguageRuntime } from '../language.ts'
 import { isLineExecutor } from '../mixin.ts'
 import type { RunResult } from '../types.ts'
 import type { RuntimeOptions } from '../config.ts'
-import { ProcessSupervisor } from '../../process/supervisor.ts'
+import { ProcessTable } from '../../process/table.ts'
 import { runWithExecution } from '../../context/session_context.ts'
 
 const ENC = new TextEncoder()
@@ -290,7 +290,7 @@ describe('RemoteSandbox', () => {
       cwd: PathSpec.fromStrPath('/'),
       signal: abort.signal,
     }
-    const runner = new ProcessSupervisor(runWithExecution).start({
+    const runner = new ProcessTable(runWithExecution).start({
       sessionId: 's',
       command: 'yes',
       cwd: ctx.cwd,

@@ -934,7 +934,7 @@ def statement_redirects_raw(node: Any) -> list[Redirect]:
     """Find redirects bound to this command along the last-command chain.
 
     Args:
-        node (Any): the command's tree-sitter node.
+        node (Any): the command's parsed node.
     """
     owner = node
     parent = owner.parent
@@ -961,7 +961,7 @@ def statement_stdin(node: Any) -> bytes | None:
     """Mark redirected input without opening or expanding its source.
 
     Args:
-        node (Any): the command's tree-sitter node.
+        node (Any): the command's parsed node.
     """
     return (
         b"" if any(r.fd == 0 for r in statement_redirects_raw(node)) else None
@@ -987,7 +987,7 @@ def statement_redirects(node: Any, home: str | None) -> tuple[Word, ...]:
     so none is claimed here and the dispatcher judges the write.
 
     Args:
-        node (Any): the command's tree-sitter node.
+        node (Any): the command's parsed node.
         home (str | None): the home directory a leading ``~`` names.
     """
     return tuple(

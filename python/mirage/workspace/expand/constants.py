@@ -48,7 +48,7 @@ BRACE_LITERAL_TYPES = frozenset(
     }
 )
 
-# Arithmetic operator tokens from tree-sitter that pass through as-is
+# Arithmetic operator tokens from the parser that pass through as-is
 # when the expression text is reconstructed for the shared evaluator
 # (mirage.shell.arith).
 ARITH_OPERATORS = frozenset(

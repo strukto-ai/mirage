@@ -55,7 +55,8 @@ interface Exports {
 // Linear memory only grows, so an instance a large stream (a big sort) grew
 // is dropped once no stream is open and the next stream gets a fresh one.
 // Movable streams (the matchers a cache keeps) do not hold it: they close
-// with it, and their owners open them again on the next instance.
+// with it, and their owners open them again on the next instance. One in the
+// middle of a search (busy) does hold it, so the search keeps its progress.
 const RECYCLE_BYTES = 32 * 1024 * 1024
 
 const encoder = new TextEncoder()
@@ -267,7 +268,8 @@ export class OpenStream {
     const held = movables.get(this.exports)
     if (
       this.exports.mirage_rs_open_count() === (held?.size ?? 0) &&
-      this.exports.memory.buffer.byteLength > RECYCLE_BYTES
+      this.exports.memory.buffer.byteLength > RECYCLE_BYTES &&
+      ![...(held ?? [])].some((stream) => stream.busy())
     )
       retire(this.exports, false)
   }
@@ -412,6 +414,12 @@ export class MovableStream {
     private readonly config: Readonly<Record<string, util.JSONType>>,
   ) {
     this.stream = this.open()
+  }
+
+  /** Close the stream now rather than when its owner is collected. */
+  close(): void {
+    movableFinalizer.unregister(this)
+    this.stream.close()
   }
 
   /** The stream, opened again first when its instance retired. */

@@ -2,16 +2,15 @@ import type { Claimant, HandOff, Occurrence } from '../../policy/types.ts'
 import { splitBacktickRegion } from '../../shell/backticks.ts'
 import { shellJoin } from '../../shell/join.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
-import { getFunctionName } from '../../shell/helpers.ts'
-import { treeRoot } from '../../shell/parse/heredoc/prefix.ts'
+import { getFunctionName, treeRoot } from '../../shell/helpers.ts'
 import type { SessionState } from '../session/session.ts'
 
 /**
  * What opens and closes a substitution's body, in the order the openers
  * are tried; the body between them is the text a nested line is parsed
- * from. A backtick region is not here: tree-sitter lexes touching pairs
- * as one node, so it is split into lines (`segmentFrames`) rather than
- * framed as one body.
+ * from. A backtick region is not here: its body loses its backslashes
+ * before it is parsed, so it is lexed into lines (`segmentFrames`) rather
+ * than framed as one body.
  */
 export const SUBSTITUTION_DELIMITERS: readonly (readonly [string, string])[] = [
   ['$(', ')'],
@@ -179,8 +178,8 @@ export function occurrenceIn(node: TSNodeLike, frame: Frame): Occurrence {
  * The occurrence of a frame's whole text, for words a command runs
  * without a parse of their own (`xargs cat`, `find -exec`).
  *
- * The end is the parser's own unit: web-tree-sitter places a node in
- * UTF-16 code units, which is what a string index counts, so no
+ * The end is the parser's own unit: it places a node here in UTF-16
+ * code units, which is what a string index counts, so no
  * measuring is needed here. The Python parser counts bytes, and that
  * side measures every span it computes from text (`byte_offset`).
  */
@@ -191,7 +190,7 @@ export function wholeOccurrence(frame: Frame): Occurrence {
 /**
  * The frame of a substitution's body, as the nested line that evaluates
  * it will parse it: `$( )`, `<( )` or `>( )`, with the whitespace
- * tree-sitter folds into the opening token set aside as expansion sets
+ * the parser folds into the opening token set aside as expansion sets
  * it aside. Null for a node that is not a substitution the evaluator
  * would run.
  */
@@ -210,11 +209,9 @@ export function bodyFrame(node: TSNodeLike, frame: Frame): Frame | null {
 }
 
 /**
- * The occurrence of one span of a node's text, for a node that holds
- * several lines: a backtick region, which tree-sitter lexes as one node
- * when the pairs touch and the evaluator splits again. Each pair is its
- * own place on the line, as it would be had the grammar kept them
- * apart.
+ * The occurrence of one span of a node's text, for a node whose line is
+ * not its whole text: a backtick region, which the evaluator lexes
+ * again. Each command is its own place on the line.
  */
 export function partOf(occurrence: Occurrence, start: number, end: number): Occurrence {
   return {
@@ -230,11 +227,11 @@ export function partOf(occurrence: Occurrence, start: number, end: number): Occu
  * be parsed on its own under the pair's own place on the line; empty
  * for a node that is not a backtick region.
  *
- * The region's subtree is not what runs: tree-sitter lexes touching
- * pairs as one node and merges their commands into one, so the pass
- * reads the region as the evaluator does, split by the one lexer both
- * share (`splitBacktickRegion`), with the folded whitespace set aside
- * first as expansion sets it aside.
+ * The region's subtree is not what runs: bash removes a backtick body's
+ * backslashes before it parses it, so the pass reads the region as the
+ * evaluator does, split by the one lexer both share
+ * (`splitBacktickRegion`), with the folded whitespace set aside first as
+ * expansion sets it aside.
  */
 export function segmentFrames(node: TSNodeLike, frame: Frame): Frame[] {
   const text = node.text

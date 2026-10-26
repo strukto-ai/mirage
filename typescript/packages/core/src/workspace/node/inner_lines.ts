@@ -63,7 +63,6 @@ const TEST_NESTS: ReadonlySet<string> = new Set([
   NT.UNARY_EXPRESSION,
   NT.NEGATION_EXPRESSION,
   NT.PARENTHESIZED_EXPRESSION,
-  NT.ERROR,
 ])
 const TEST_SKIPS: ReadonlySet<string> = new Set(['[', ']', '[[', ']]'])
 

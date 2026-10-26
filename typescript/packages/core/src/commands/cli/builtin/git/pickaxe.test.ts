@@ -29,12 +29,12 @@ it.each<[string, string, string, boolean]>([
   ['ab\nab\n', 'ab\nab\nab', '^', false],
   ['ab\nab\n', 'ab\nab\nab', '$', true],
   ['a\n\nc\n', 'a\n\n\nc\n', 'b*', true],
-])('counts %j to %j under %s as git does', (old, now, pattern, listed) => {
+])('counts %j to %j under %s as git does', async (old, now, pattern, listed) => {
   const regex = new PosixRegex(pattern, true, 'posix', false, true, true)
-  expect(contains(old, regex) !== contains(now, regex)).toBe(listed)
+  expect((await contains(old, regex)) !== (await contains(now, regex))).toBe(listed)
 })
 
-it('steps over a whole character past an empty match', () => {
+it('steps over a whole character past an empty match', async () => {
   const regex = new PosixRegex('x*', true, 'posix', false, true, true)
-  expect(contains('😀😀', regex)).toBe(2)
+  expect(await contains('😀😀', regex)).toBe(2)
 })

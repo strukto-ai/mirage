@@ -12,44 +12,46 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { IOResult } from '../../io/types.ts'
 import { parseShell } from '../../rs/shell.ts'
+import { encodeText } from '../bytes.ts'
 import { ParsedProgram } from './program.ts'
-import { heredocOperators } from './heredoc/index.ts'
-import { discoverHeredocs, readPlanned } from './heredoc/reader.ts'
-import { heredocPlan } from './syntax.ts'
-import { dropSourceChars, lowerHeredocs } from './heredoc/lower.ts'
-import { HeredocNode } from './heredoc/node.ts'
-import { continuationIndices, joinContinuations, sourceOffsets } from './source.ts'
-import type { ShellNode } from '../types.ts'
+import type { ShellNode, TSNodeLike } from '../types.ts'
 
 /**
- * Parse shell structure after the source reader gathers heredocs. Bodies
- * become inline expansion words with reader-owned input metadata; nodes
- * retain their original source for nested evaluation. A line the reader
- * refuses takes its heredocs from the parser's tree. Line continuations are
- * joined first, so a word's text is what bash reads. `aliases` are the names
- * the shell expands as aliases: one is a command where a command starts. A
- * line the parser refuses ends in an `ERROR` node. Mirrors Python's parse.
+ * Parse a line as bash reads it. The parser folds each heredoc body into its
+ * line as a `<` redirect from a double-quoted word, whose node carries the
+ * heredoc, and drops the line continuations, so a word's text is what bash
+ * reads; each node's `offsets` map the text back to the line as typed.
+ * `aliases` are the names the shell expands as aliases: one is a command
+ * where a command starts. `extglob` says whether extglob's pattern groups are
+ * on. A line the parser refuses ends in an `ERROR` node, and its `error`
+ * holds bash's refusal. Mirrors Python's parse.
  */
-export function parse(command: string, aliases: ReadonlySet<string> = new Set()): ShellNode {
-  const plan = command.includes('<<') ? heredocPlan(command) : null
-  const documents = !command.includes('<<')
-    ? []
-    : plan !== null
-      ? readPlanned(command, plan)
-      : discoverHeredocs(command, heredocOperators(parseShell(command, aliases).rootNode))
-  if (documents.length === 0)
-    return parseShell(joinContinuations(command, aliases), aliases).rootNode
-  const lowered = lowerHeredocs(command, documents, plan?.closes)
-  const source = dropSourceChars(lowered, continuationIndices(lowered.source, aliases))
-  return new HeredocNode(parseShell(source.source, aliases).rootNode, source)
+export function parse(
+  command: string,
+  aliases: ReadonlySet<string> = new Set(),
+  extglob = true,
+): ShellNode {
+  return parseShell(command, aliases, extglob).rootNode
 }
 
 /** Parse a line into a program its holders release when done with it. */
 export function parseProgram(
   command: string,
   aliases: ReadonlySet<string> = new Set(),
+  extglob = true,
 ): ParsedProgram {
-  const root = parse(command, aliases)
-  return new ParsedProgram(command, root, sourceOffsets(command, root, aliases))
+  return new ParsedProgram(command, parseShell(command, aliases, extglob).rootNode)
+}
+
+/**
+ * What a line bash refuses yields: its diagnostic and status, null when bash
+ * reads it. Status 2 is a syntax error, 1 an array bash cannot read, 127 a
+ * substitution whose body bash cannot parse. Mirrors Python's syntax_refusal.
+ */
+export function syntaxRefusal(root: TSNodeLike): IOResult | null {
+  const error = root.error
+  if (error === undefined || error === null) return null
+  return new IOResult({ exitCode: error.status, stderr: encodeText(error.message) })
 }

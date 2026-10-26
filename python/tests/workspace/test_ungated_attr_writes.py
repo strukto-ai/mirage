@@ -48,6 +48,12 @@ ALLOWED = {
     ): "execute_command's seeding, run once the command's words are "
     "expanded, of values its `pre_session_gate` loop already admitted",
     (
+        "mirage/workspace/node/explain.py",
+        "_seeded",
+    ): "the line pass's preview of a command's own prefix, on a fork of "
+    "the walked session that only policies read and nothing runs in; the "
+    "run seeds it again through execute_command's gated loop",
+    (
         "mirage/workspace/session/shell_dirs.py",
         "change_dir",
     ): "the shell's own bookkeeping for the two fixed names PWD and "

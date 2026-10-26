@@ -809,6 +809,8 @@ async def source_kind(
         return None, FsCondition.ENOTDIR
     except DotWalkLoop:
         return None, FsCondition.ELOOP
+    except PermissionError:
+        return None, FsCondition.EACCES
     except (FileNotFoundError, ValueError) as exc:
         _logger.debug("no source at %s: %s", path.virtual, exc)
     else:
@@ -1429,6 +1431,29 @@ async def _copy_entry(
             await close_quietly(data)
 
 
+def copy_failed(
+    cmd_name: str, src: PathSpec, dst: PathSpec, exc: OSError
+) -> str:
+    """GNU's line for a file copy that failed: the source's open when
+    the error names the source, else the destination's create.
+
+    Args:
+        cmd_name (str): ``cp`` or ``mv``, for the error line.
+        src (PathSpec): the file being copied.
+        dst (PathSpec): where it was going.
+        exc (OSError): the failure.
+    """
+    if getattr(exc, "filename", None) == src.virtual:
+        return (
+            f"{cmd_name}: cannot open '{src.raw_path}' "
+            f"for reading: {fs_strerror(exc)}"
+        )
+    return (
+        f"{cmd_name}: cannot create regular file "
+        f"'{dst.raw_path}': {fs_strerror(exc)}"
+    )
+
+
 async def transfer_file(
     strategy: PrimitiveCopy | PrimitiveMove,
     src: PathSpec,
@@ -1465,13 +1490,7 @@ async def transfer_file(
             elif classify(exc) not in (FsCondition.EXDEV, FsCondition.ENOTSUP):
                 if not isinstance(exc, FS_ERRORS):
                     raise
-                errors.append(
-                    f"{cmd_name}: cannot open '{src.raw_path}' "
-                    f"for reading: {fs_strerror(exc)}"
-                    if getattr(exc, "filename", None) == src.virtual
-                    else f"{cmd_name}: cannot create regular file "
-                    f"'{dst.raw_path}': {fs_strerror(exc)}"
-                )
+                errors.append(copy_failed(cmd_name, src, dst, exc))
                 return False
     read_failed = False
 
@@ -2294,10 +2313,7 @@ async def cp_generic(
                 try:
                     await _copy_entry(strategy, copies, entry, entry_dst)
                 except FS_ERRORS as exc:
-                    errors.append(
-                        f"cp: cannot create regular file "
-                        f"'{entry_dst.raw_path}': {fs_strerror(exc)}"
-                    )
+                    errors.append(copy_failed("cp", entry, entry_dst, exc))
                     continue
             if copies is not None:
                 await copy_tree_links(
@@ -2359,10 +2375,7 @@ async def cp_generic(
             try:
                 await _copy_entry(copier, copies, src, target)
             except FS_ERRORS as exc:
-                errors.append(
-                    f"cp: cannot create regular file "
-                    f"'{target.raw_path}': {fs_strerror(exc)}"
-                )
+                errors.append(copy_failed("cp", src, target, exc))
                 continue
         created.add(key_of(target))
     output = "\n".join(lines) + "\n" if lines else None

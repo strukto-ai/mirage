@@ -36,7 +36,7 @@ import { READ_USAGE, READ_VALUE_LETTERS } from './constants.ts'
 import type { BuiltinCall, Result } from '../types.ts'
 import { sessionView } from '../../../session/state.ts'
 import { decodeText, encodeText } from '../../../../shell/bytes.ts'
-import { endsEscaped } from '../../../../shell/parse/heredoc/line.ts'
+import { endsEscaped } from '../../../../shell/escapes.ts'
 
 /** Split on whitespace runs with a maxsplit, like Python's split(None, n). */
 function splitOnWhitespace(text: string, maxsplit: number): string[] {

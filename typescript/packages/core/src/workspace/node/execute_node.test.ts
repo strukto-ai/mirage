@@ -302,7 +302,7 @@ describe('executeNode dispatcher', () => {
     expect(session.lastExitCode).toBe(0)
   })
 
-  it('COMMENT node dispatches as a no-op (regression: tree-sitter-bash trailing # comments)', async () => {
+  it('COMMENT node dispatches as a no-op (regression: trailing # comments)', async () => {
     const reg = plainRegistry()
     const comment: TSNodeLike = {
       type: NT.COMMENT,
@@ -322,9 +322,9 @@ describe('executeNode dispatcher', () => {
   })
 
   it('PROGRAM skips trailing COMMENT siblings (e.g. `ls -la /x   # note`)', async () => {
-    // Regression: `ls -la /r2/Review        # -l, -a clustered` produced
-    // "unsupported tree-sitter node type: comment" because the program loop
-    // dispatched the comment sibling as if it were a statement.
+    // Regression: `ls -la /r2/Review        # -l, -a clustered` failed as an
+    // unsupported node type because the program loop dispatched the comment
+    // sibling as if it were a statement.
     const reg = plainRegistry()
     const trueCmd: TSNodeLike = {
       type: NT.COMMAND,

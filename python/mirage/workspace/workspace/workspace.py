@@ -91,7 +91,7 @@ from mirage.policy.builtin.output_cap import check_command_limits
 from mirage.policy.types import DryRun, PolicyCaller, policy_caller
 from mirage.process.child import ChildProcess
 from mirage.process.stdio import ProcessInput, ProcessOutput
-from mirage.process.supervisor import ProcessSupervisor
+from mirage.process.table import ProcessTable
 from mirage.process.types import SpawnRequest
 from mirage.process.view import ProcessView
 from mirage.rs.diff_pool import DiffPool
@@ -338,7 +338,7 @@ class Workspace:
         # VFS overrides) stay open here; their origin closes them.
         self._shared_mounts: set[int] = set()
         self._drift = DriftQueue()
-        self.processes = ProcessSupervisor(self._ids, bind=run_with_execution)
+        self.processes = ProcessTable(self._ids, bind=run_with_execution)
         self.job_table = JobTable(
             console_factory, self.processes, clock=self._clock
         )

@@ -16,10 +16,9 @@ import type { TSNodeLike } from '../types.ts'
 import * as constants from './constants.ts'
 
 /**
- * Whether two facade nodes name the same tree node. Web-tree-sitter
- * hands out a fresh wrapper per lookup, so `===` alone cannot tell a
- * node from a re-read of it; identity rides `id` when the facade has
- * one.
+ * Whether two facade nodes name the same tree node. The parser hands out
+ * a fresh wrapper per lookup, so `===` alone cannot tell a node from a
+ * re-read of it; identity rides `id` when the facade has one.
  */
 export function sameNode(a: TSNodeLike, b: TSNodeLike): boolean {
   return a === b || (a.id !== undefined && a.id === b.id)

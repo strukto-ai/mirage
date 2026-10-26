@@ -45,8 +45,7 @@ import {
 } from '../../context/session_context.ts'
 import { STOP_WAIT_SECONDS } from '../../shell/job_table/constants.ts'
 import { type JobTable, JobWaits } from '../../shell/job_table/index.ts'
-import { checkSyntax, syntaxErrorResult } from '../../shell/parse/index.ts'
-import { findSyntaxIssue } from '../../shell/parse/syntax.ts'
+import { syntaxRefusal } from '../../shell/parse/index.ts'
 import { DiscardSignal, ExitSignal } from '../../shell/errors.ts'
 import { formatFsError } from '../../errors/render.ts'
 import { isFsError } from '../../errors/fs.ts'
@@ -471,18 +470,14 @@ async function runPreparedLine(
         effectiveSession.aliasExpansion = null
         try {
           const aliases = expandingAliases(effectiveSession)
-          const root = argv === undefined ? parser.parse(command, aliases) : literalTree(argv)
-          // Syntax gates before policy, mirroring bash: an unparsable line exits 2
-          // and the policy is never consulted about it. bash's reading of the
-          // line decides; the grammar's own errors only stop a line it cannot
-          // build.
-          const found =
+          const root =
             argv === undefined
-              ? (checkSyntax(command, aliases, null, effectiveSession.shopts.extglob ?? false) ??
-                findSyntaxIssue(root))
-              : null
-          if (found !== null) {
-            const io = syntaxErrorResult(found)
+              ? parser.parse(command, aliases, effectiveSession.shopts.extglob ?? false)
+              : literalTree(argv)
+          // Syntax gates before policy, mirroring bash: an unparsable line exits 2
+          // and the policy is never consulted about it.
+          const io = argv === undefined ? syntaxRefusal(root) : null
+          if (io !== null) {
             const callStack = options.callStack
             // A substitution bash cannot parse ends the shell, from `eval` and
             // `source` too: 127, or 1 out of a child.

@@ -17,9 +17,11 @@ import pytest
 from mirage.io.types import materialize
 from mirage.runtime.language import LanguageRuntime
 from mirage.runtime.types import RunResult
+from mirage.shell.parse import parse, syntax_refusal
 from mirage.types import MountMode
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
+from mirage.workspace.node.command_dispatch import parser_aliases
 
 
 def _ws() -> Workspace:
@@ -86,3 +88,35 @@ async def test_a_lazy_run_shells_out_under_its_prefix(line):
         assert after.stdout == b"[]\n"
     finally:
         await ws.close()
+
+
+@pytest.mark.parametrize(
+    ("line", "own", "word"),
+    [
+        ("echo F; fi", {"fi": (0, 10)}, "fi"),
+        ("echo F; fi", {"fi": (0, 7)}, None),
+        ("echo C; fi echo F", {"c": (0, 11), "fi": (11, 17)}, None),
+        ("echo C; echo F; fi", {"c": (0, 8), "fi": (8, 18)}, "fi"),
+        ("echo F \\\n; fi", {"fi": (0, 13)}, "fi"),
+        ("echo F \\\n; fi", {"fi": (0, 10)}, None),
+    ],
+)
+def test_an_alias_name_is_reserved_inside_its_own_text(line, own, word):
+    # Pinned against bash 5.2.37: a name stays reserved only inside the
+    # text its alias put there, a trailing blank's chained one included.
+    # Spans are in the line as typed, which a continuation shifts.
+    owners = tuple(
+        frozenset(
+            name for name, (start, end) in own.items() if start <= at < end
+        )
+        for at in range(len(line))
+    )
+    aliases = parser_aliases(
+        line, frozenset(own), owners, tuple(range(len(line) + 1))
+    )
+    io = syntax_refusal(parse(line, aliases))
+    assert (io and io.stderr) == (
+        None
+        if word is None
+        else f"mirage: syntax error near '{word}'\n".encode()
+    )

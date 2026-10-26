@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use crate::regex::parse::Dialect;
 use crate::regex::posix::{Options, Posix};
+use crate::regex::unbounded;
 
 use super::value::MAX_LEN;
 
@@ -179,7 +180,7 @@ pub(super) fn split(
             let regex = regexes.get(fs)?;
             let (mut start, mut pos) = (0, 0);
             while pos <= record.len() {
-                let Some((from, to)) = regex.find(record, pos) else {
+                let Some((from, to)) = unbounded(|budget| regex.find(record, pos, budget)) else {
                     break;
                 };
                 if from == to {
@@ -221,7 +222,7 @@ pub(super) fn take_record(
             let regex = regexes.get(rs)?;
             let mut pos = start;
             while pos <= buf.len() {
-                let Some((from, to)) = regex.find(buf, pos) else {
+                let Some((from, to)) = unbounded(|budget| regex.find(buf, pos, budget)) else {
                     break;
                 };
                 if from == to {
@@ -326,7 +327,7 @@ pub(super) fn substitute(
     let mut out = Vec::with_capacity(subject.len());
     let (mut count, mut pos, mut last_end) = (0, 0, None);
     while pos <= subject.len() {
-        let Some((from, to)) = regex.find(subject, pos) else {
+        let Some((from, to)) = unbounded(|budget| regex.find(subject, pos, budget)) else {
             break;
         };
         grow(&mut out, &subject[pos..from])?;

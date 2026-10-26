@@ -204,9 +204,14 @@ function compileOrRefuse(pattern: string, utf8: boolean): PosixRegex {
 // as the single byte `c3`. Under a UTF-8 locale (`utf8`) both are text and
 // the same two answer the whole character, counted by code point. Mirrors
 // Python's colon_match.
-function colonMatch(subject: string, pattern: string, utf8 = false): string {
+async function colonMatch(
+  subject: string,
+  pattern: string,
+  utf8 = false,
+  signal?: AbortSignal,
+): Promise<string> {
   const regex = compileOrRefuse(pattern, utf8)
-  let found = regex.search(subject)
+  let found = await regex.search(subject, 0, signal)
   // The leftmost match is the one at the start, when there is one.
   if (found !== null && found[0]?.[0] !== 0) found = null
   if (regex.groups > 0) {
@@ -287,6 +292,7 @@ class ExprReader {
   constructor(
     readonly words: readonly string[],
     private readonly utf8 = false,
+    private readonly signal?: AbortSignal,
   ) {}
 
   done(): boolean {
@@ -319,38 +325,38 @@ class ExprReader {
   }
 
   // `A | B`: A unless it is null or 0, else B unless it is, else 0.
-  either(live: boolean): string {
-    let left = this.both(live)
+  async either(live: boolean): Promise<string> {
+    let left = await this.both(live)
     while (this.takeIf('|') !== null) {
-      const right = this.both(live && isNull(left))
+      const right = await this.both(live && isNull(left))
       if (live && isNull(left)) left = isNull(right) ? '0' : right
     }
     return left
   }
 
   // `A & B`: A when neither is null or 0, else 0.
-  both(live: boolean): string {
-    let left = this.relation(live)
+  async both(live: boolean): Promise<string> {
+    let left = await this.relation(live)
     while (this.takeIf('&') !== null) {
-      const right = this.relation(live && !isNull(left))
+      const right = await this.relation(live && !isNull(left))
       if (live) left = isNull(left) || isNull(right) ? '0' : left
     }
     return left
   }
 
-  relation(live: boolean): string {
-    let left = this.sum(live)
+  async relation(live: boolean): Promise<string> {
+    let left = await this.sum(live)
     for (let op = this.takeIf(CMP_OPS); op !== null; op = this.takeIf(CMP_OPS)) {
-      const right = this.sum(live)
+      const right = await this.sum(live)
       if (live) left = compare(left, op, right)
     }
     return left
   }
 
-  sum(live: boolean): string {
-    let left = this.product(live)
+  async sum(live: boolean): Promise<string> {
+    let left = await this.product(live)
     for (let op = this.takeIf(ADD_OPS); op !== null; op = this.takeIf(ADD_OPS)) {
-      const right = this.product(live)
+      const right = await this.product(live)
       if (live) {
         const a = parseIntOperand(left)
         const b = parseIntOperand(right)
@@ -360,10 +366,10 @@ class ExprReader {
     return left
   }
 
-  product(live: boolean): string {
-    let left = this.matching(live)
+  async product(live: boolean): Promise<string> {
+    let left = await this.matching(live)
     for (let op = this.takeIf(MUL_OPS); op !== null; op = this.takeIf(MUL_OPS)) {
-      const right = this.matching(live)
+      const right = await this.matching(live)
       if (live) {
         const a = parseIntOperand(left)
         const b = parseIntOperand(right)
@@ -375,11 +381,11 @@ class ExprReader {
     return left
   }
 
-  matching(live: boolean): string {
-    let left = this.operand(live)
+  async matching(live: boolean): Promise<string> {
+    let left = await this.operand(live)
     while (this.takeIf(':') !== null) {
-      const right = this.operand(live)
-      if (live) left = colonMatch(left, right, this.utf8)
+      const right = await this.operand(live)
+      if (live) left = await colonMatch(left, right, this.utf8, this.signal)
     }
     return left
   }
@@ -389,7 +395,7 @@ class ExprReader {
   // 1 1` is `a`. Those chains are kept on a list here rather than on the call
   // stack: GNU reads one of any length, and only parentheses count toward the
   // nesting limit.
-  operand(live: boolean): string {
+  async operand(live: boolean): Promise<string> {
     const waiting: [string, string[]][] = []
     for (;;) {
       const word = this.readWord()
@@ -397,34 +403,34 @@ class ExprReader {
         waiting.push([word, []])
         continue
       }
-      let value = this.simple(word, live)
+      let value = await this.simple(word, live)
       for (let top = waiting.at(-1); top !== undefined; top = waiting.at(-1)) {
         const [keyword, given] = top
         given.push(value)
         if (given.length < (KEYWORD_ARITY.get(keyword) ?? 0)) break
         waiting.pop()
-        value = live ? this.keyword(keyword, given) : ''
+        value = live ? await this.keyword(keyword, given) : ''
       }
       if (waiting.length === 0) return value
     }
   }
 
-  keyword(keyword: string, given: readonly string[]): string {
+  async keyword(keyword: string, given: readonly string[]): Promise<string> {
     const [first = '', second = '', third = ''] = given
     if (keyword === 'length') return String(Array.from(first).length)
     if (keyword === 'index') return doIndex(first, second)
     if (keyword === 'substr') return doSubstr(first, second, third)
-    return colonMatch(first, second, this.utf8)
+    return colonMatch(first, second, this.utf8, this.signal)
   }
 
   // `+ WORD`, `( EXPR )` or a word standing for itself, the word already read.
-  simple(word: string, live: boolean): string {
+  async simple(word: string, live: boolean): Promise<string> {
     if (word === '+') return this.readWord()
     if (word === ')') throw new ExprError(UNEXPECTED_CLOSE)
     if (word !== '(') return word
     if (this.depth >= MAX_NESTING) throw new ExprError(NESTING_TOO_DEEP)
     this.depth++
-    const value = this.either(live)
+    const value = await this.either(live)
     this.depth--
     if (this.takeIf(')') === null) {
       throw new ExprError(expectingClose(this.ahead(), this.lastRead(), this.utf8))
@@ -438,28 +444,33 @@ class ExprReader {
 // 1 means "the answer was zero or empty" and exit 2 is the only error
 // status. The words in and the value out are byte views, or text under a
 // UTF-8 locale (`utf8`).
-export function exprEval(args: string[], utf8 = false): [string, number] {
-  const reader = new ExprReader(args, utf8)
-  const value = reader.either(true)
+export async function exprEval(
+  args: string[],
+  utf8 = false,
+  signal?: AbortSignal,
+): Promise<[string, number]> {
+  const reader = new ExprReader(args, utf8, signal)
+  const value = await reader.either(true)
   const leftover = reader.ahead()
   if (leftover !== null) throw new ExprError(unexpectedArgument(leftover, utf8))
   return [value, isNull(value) ? 1 : 0]
 }
 
-function expr(
+async function expr(
   _accessor: Accessor,
   paths: PathSpec[],
   texts: string[],
   ctx: Context,
-): CommandFnResult {
+): Promise<CommandFnResult> {
   if (texts.length === 0) {
     return [null, new IOResult({ exitCode: 2, stderr: fromByteView(MISSING_OPERAND) })]
   }
   const utf8 = utf8Locale(ctx.env)
   try {
-    const [result, exitCode] = exprEval(
+    const [result, exitCode] = await exprEval(
       texts.map((text) => byteView(text, utf8)),
       utf8,
+      ctx.signal,
     )
     return [fromByteView(result + '\n', utf8), new IOResult({ exitCode })]
   } catch (err) {

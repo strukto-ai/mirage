@@ -3,7 +3,7 @@ use std::collections::VecDeque;
 use memchr::{memchr, memchr_iter, memrchr};
 use serde::Deserialize;
 
-use crate::regex::{Options, Regex, Step, Syntax};
+use crate::regex::{Options, Regex, STEPS, Step, Syntax};
 use crate::{Stream, StreamError, parse_config};
 
 #[derive(Deserialize, Clone, Copy, PartialEq, Eq, Default)]
@@ -89,12 +89,6 @@ struct Begin {
 /// The digits of the largest signed 64-bit count, the width -T pads to when
 /// the input's size is unknown.
 const UNKNOWN_SIZE_WIDTH: usize = 19;
-
-/// The work one `feed`, `drain` or `finish` may do, a few milliseconds of
-/// it: a step is a backtracking instruction or a byte searched. A scan
-/// that needs more is `busy`, and the host yields between the `drain`
-/// calls that finish it.
-const STEPS: u64 = 1 << 20;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Stop {

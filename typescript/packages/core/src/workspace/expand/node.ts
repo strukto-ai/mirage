@@ -39,7 +39,7 @@ import type { TSNodeLike } from '../../shell/types.ts'
 import { recordStatus } from '../executor/statement.ts'
 import { decodeText } from '../../shell/bytes.ts'
 
-// Whitespace tree-sitter folds into an expansion's opening token.
+// Whitespace the parser folds into an expansion's opening token.
 // Inside a double-quoted string, a run of whitespace between two
 // expansions is not emitted as string content: it lands inside the
 // following node's extent, so `"$a $(b)"` yields a command substitution
@@ -70,8 +70,8 @@ async function expandBacktickRegion(
       out += segment.text
       continue
     }
-    // Each pair is its own place on the line: the node holds every
-    // touching pair, so the span within it says which one runs.
+    // The command is its own place on the line: the span within the node
+    // says where it stands.
     const io = await childLine(context, executeFn, segment.text, node, callStack, [
       offset + segment.start,
       offset + segment.end,
@@ -119,46 +119,6 @@ export async function childLine(
     callStack: (callStack ?? new CallStack()).fork(true, false),
     ...(span === undefined ? {} : { span }),
   })
-}
-
-const DOLLAR_NODE_TYPES: ReadonlySet<string> = new Set([
-  NT.SIMPLE_EXPANSION,
-  NT.EXPANSION,
-  NT.COMMAND_SUBSTITUTION,
-  NT.ARITHMETIC_EXPANSION,
-])
-
-function collectDollarNodes(node: TSNodeLike, acc: TSNodeLike[]): void {
-  for (const c of node.namedChildren) {
-    if (DOLLAR_NODE_TYPES.has(c.type)) acc.push(c)
-    else collectDollarNodes(c, acc)
-  }
-}
-
-// Textually substitute `$`-expansions inside a node, keeping all other
-// source text verbatim (gap-filled from spans). Used to reconstruct
-// arithmetic expression text when tree-sitter parses `$((expr))` as a
-// command substitution (heredoc bodies do this).
-async function substituteDollarRefs(
-  node: TSNodeLike,
-  context: EvaluationContext,
-  executeFn: ExecuteFn,
-  callStack: CallStack | null,
-  view?: SessionView,
-): Promise<string> {
-  const acc: TSNodeLike[] = []
-  collectDollarNodes(node, acc)
-  const base = node.startIndex ?? 0
-  const text = node.text
-  let out = ''
-  let pos = 0
-  for (const c of acc) {
-    if (c.startIndex === undefined || c.endIndex === undefined) continue
-    out += text.slice(pos, c.startIndex - base)
-    out += await expandNode(c, context, executeFn, callStack, view)
-    pos = c.endIndex - base
-  }
-  return out + text.slice(pos)
 }
 
 // Reconstruct arithmetic expression text for the shared evaluator.
@@ -282,7 +242,7 @@ async function arithSubscript(
   return `${name}[${parts.join('')}]`
 }
 
-// Expand a tree-sitter node to the string it stands for.
+// Expand a parsed node to the string it stands for.
 export async function expandNode(
   tsNode: TSNodeLike,
   context: EvaluationContext,
@@ -522,21 +482,9 @@ async function substitution(
   }
   const rawSub = (tsNode.inlined ?? tsNode.sourceText ?? tsNode.text).slice(prefix.length)
   if (rawSub.startsWith('`') && rawSub.endsWith('`')) {
-    // Backtick regions are re-lexed here rather than trusted from the
-    // grammar, which merges adjacent pairs (see splitBacktickRegion).
+    // A backtick body loses its backslashes before it is parsed, so it is
+    // lexed again here (see splitBacktickRegion).
     return expandBacktickRegion(rawSub, context, executeFn, tsNode, prefix.length, callStack)
-  }
-  if (rawSub.startsWith('$((') && rawSub.endsWith('))')) {
-    // Inside heredoc bodies tree-sitter parses `$((expr))` as a
-    // command substitution wrapping a subshell; evaluate it as
-    // arithmetic (python mirrors via a reparse; here the expression
-    // text is reconstructed with `$`-refs substituted).
-    const sub = tsNode.namedChildren
-    const only = sub[0]
-    if (sub.length === 1 && only?.type === NT.SUBSHELL) {
-      const parenExpr = await substituteDollarRefs(only, context, executeFn, callStack, view)
-      return arithValue(session, view, parenExpr.slice(1, -1))
-    }
   }
   // The whole body goes to the evaluator: bash substitutes the full
   // statement list, and picking child nodes dropped every statement

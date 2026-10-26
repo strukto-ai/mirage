@@ -26,6 +26,31 @@
       "canceled": true
     },
     {
+      "id": "sed-backreference",
+      "command": "printf '%s\\n' 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa!' | sed -E 's/^(a*)*\\1b$/x/'",
+      "canceled": true
+    },
+    {
+      "id": "csplit-backreference",
+      "command": "printf '%s\\n' 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa!' | csplit -f /split- - '/^\\(a*\\)*\\1b$/'",
+      "canceled": true
+    },
+    {
+      "id": "nl-backreference",
+      "command": "printf '%s\\n' 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa!' | nl -b 'p^\\(a*\\)*\\1b$'",
+      "canceled": true
+    },
+    {
+      "id": "expr-backreference",
+      "command": "expr 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa!' : '\\(a*\\)*\\1b'",
+      "canceled": true
+    },
+    {
+      "id": "test-backreference",
+      "command": "re='^(a*)*\\1b$'; [[ 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa!' =~ $re ]]",
+      "canceled": true
+    },
+    {
       "id": "rg-regex",
       "command": "printf '%s\\n' 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa!' | rg '^(a+)+$'",
       "canceled": false

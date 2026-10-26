@@ -12,6 +12,7 @@ use serde::Deserialize;
 use crate::printf::number::render_integer;
 use crate::regex::parse::Dialect;
 use crate::regex::posix::{Options, Posix};
+use crate::regex::{STEPS as REGEX_STEPS, Step};
 use crate::request::{Io, Opening, Refused, Reply, Request, WriteMode, bytes, read_failure};
 use crate::{Stream, StreamError, parse_config, quoted};
 
@@ -514,6 +515,8 @@ struct Csplit {
     failed: bool,
     asked: bool,
     stderr: Vec<u8>,
+    /// The backtracking steps a `drain`'s searches may still take.
+    regex_budget: u64,
 }
 
 pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
@@ -571,6 +574,7 @@ pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
         },
         texts,
         patterns: Vec::new(),
+        regex_budget: REGEX_STEPS,
         utf8: config.utf8,
         keep: config.keep,
         silent: config.silent,
@@ -838,7 +842,14 @@ impl Csplit {
         let Cut::Regex { regex, .. } = &mut self.patterns[self.pattern].cut else {
             return;
         };
-        if index < self.seen || !regex.test(content(&line)) {
+        let hit = index >= self.seen
+            && match regex.test(content(&line), &mut self.regex_budget) {
+                Step::Done(hit) => hit,
+                // Out of steps: the line waits for the next `drain`, where
+                // the search goes on.
+                Step::Paused => return self.lines.ahead.push_front(line),
+            };
+        if !hit {
             if offset >= 0 {
                 self.run.put(To::Piece(&mut self.current), &line);
                 return;
@@ -956,8 +967,9 @@ impl Stream for Csplit {
     }
 
     fn drain(&mut self, _out: &mut Vec<u8>) -> Result<(), StreamError> {
+        self.regex_budget = REGEX_STEPS;
         for _ in 0..STEPS {
-            if !self.busy() {
+            if !self.busy() || self.regex_budget == 0 {
                 break;
             }
             self.step();

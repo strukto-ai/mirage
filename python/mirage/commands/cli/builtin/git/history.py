@@ -1222,7 +1222,9 @@ def _hits(pattern: LinePattern, text: str) -> bool:
         text (str): the line or identity.
     """
     if isinstance(pattern, PosixRegex):
-        return pattern.search(byte_view(text, pattern.utf8)) is not None
+        return (
+            pattern.search_blocking(byte_view(text, pattern.utf8)) is not None
+        )
     return pattern.search(text) is not None
 
 

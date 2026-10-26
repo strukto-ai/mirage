@@ -21,6 +21,7 @@ from functools import lru_cache
 from itertools import accumulate
 from typing import Literal, TypeAlias
 
+from mirage.io.yield_budget import YieldBudget
 from mirage.rs.errors import RegexError, SearchLimit, StreamRefusal
 from mirage.rs.stream import OpenStream, open_stream
 from mirage.shell.bytes import encode_text, from_byte_view
@@ -100,6 +101,90 @@ def _open(config: Mapping[str, JsonValue]) -> OpenStream:
         raise RegexError(exc.message) from exc
 
 
+class _StreamPool:
+    """The regex streams one compiled expression searches with.
+
+    A search out of steps stays in its stream, busy, until the caller's
+    drains finish it, so each search takes a stream of its own: an idle
+    one, or a new one while every stream is in a search (another task's,
+    or a git worker thread's). A stream a canceled search left busy still
+    holds its subject, so it is dropped rather than given back. The lock
+    guards only the idle list.
+
+    Args:
+        config (Mapping[str, JsonValue]): the regex stream's config.
+
+    Raises:
+        RegexError: the expression is refused.
+    """
+
+    def __init__(self, config: Mapping[str, JsonValue]) -> None:
+        self._config = config
+        self._lock = threading.Lock()
+        self._idle = [_open(config)]
+        self.metadata = json.loads(self._idle[0].metadata())
+
+    def _take(self) -> OpenStream:
+        with self._lock:
+            if self._idle:
+                return self._idle.pop()
+        return _open(self._config)
+
+    def _give(self, stream: OpenStream) -> None:
+        if stream.busy():
+            return
+        with self._lock:
+            self._idle.append(stream)
+
+    async def ask(
+        self, request: Mapping[str, JsonValue], data: bytes
+    ) -> bytes:
+        """The answer to ``request`` about ``data``, yielding to the loop
+        between the drains of a long search.
+
+        Args:
+            request (Mapping[str, JsonValue]): the begin request.
+            data (bytes): the subject.
+
+        Raises:
+            StreamRefusal: the search was refused, with what it found.
+        """
+        stream = self._take()
+        try:
+            stream.begin(request)
+            parts = [stream.feed(data), stream.finish()]
+            budget = YieldBudget()
+            while stream.busy():
+                await budget.run()
+                parts.append(stream.drain())
+            return b"".join(parts)
+        finally:
+            self._give(stream)
+
+    def ask_blocking(
+        self, request: Mapping[str, JsonValue], data: bytes
+    ) -> bytes:
+        """``ask`` for code already off the event loop, git's walks in
+        their worker threads: the drains run back to back.
+
+        Args:
+            request (Mapping[str, JsonValue]): the begin request.
+            data (bytes): the subject.
+
+        Raises:
+            StreamRefusal: the search was refused, with what it found.
+        """
+        stream = self._take()
+        try:
+            stream.begin(request)
+            parts = [stream.feed(data), stream.finish()]
+            while stream.busy():
+                parts.append(stream.drain())
+            return b"".join(parts)
+        finally:
+            self._give(stream)
+
+
 class PosixRegex:
     """One POSIX expression, searched against whole subjects.
 
@@ -107,7 +192,9 @@ class PosixRegex:
     where the first way of matching that text puts them, trying a
     repetition's longer counts and an alternation's earlier branches
     first. Offsets count elements of the byte view the subject arrives
-    as.
+    as. A search yields to the loop between the bounded calls of a long
+    one; the ``_blocking`` forms are for git's walks, which run in
+    worker threads.
 
     Args:
         pattern (str): the expression as a byte view.
@@ -138,11 +225,7 @@ class PosixRegex:
         word: bool = False,
     ) -> None:
         self.utf8 = utf8
-        # One stream answers every caller of a cached expression, and
-        # git's filters run in worker threads: a request's begin, feed and
-        # finish go through it together.
-        self._lock = threading.Lock()
-        self._stream = _open(
+        self._streams = _StreamPool(
             {
                 "mode": "posix",
                 "pattern": _latin1(from_byte_view(pattern, utf8)),
@@ -154,15 +237,7 @@ class PosixRegex:
                 "word": word,
             }
         )
-        self.groups: int = json.loads(self._stream.metadata())["groups"]
-
-    def _ask(
-        self, subject: _Subject, request: Mapping[str, JsonValue]
-    ) -> bytes:
-        with self._lock:
-            self._stream.begin(request)
-            self._stream.feed(subject.data)
-            return self._stream.finish()
+        self.groups: int = self._streams.metadata["groups"]
 
     def _groups(self, subject: _Subject, words: Sequence[int]) -> Groups:
         out: Groups = []
@@ -175,7 +250,7 @@ class PosixRegex:
             )
         return out
 
-    def search(self, text: str, at: int = 0) -> Groups | None:
+    async def search(self, text: str, at: int = 0) -> Groups | None:
         """The leftmost-longest match at or after ``at``, and its groups.
 
         Args:
@@ -184,38 +259,52 @@ class PosixRegex:
                 whole subject.
         """
         subject = _Subject(text, self.utf8)
-        words = _words(
-            self._ask(subject, {"op": "search", "at": subject.offset(at)})
-        )
+        request: dict[str, JsonValue] = {
+            "op": "search",
+            "at": subject.offset(at),
+        }
+        words = _words(await self._streams.ask(request, subject.data))
         return self._groups(subject, words) if words else None
 
-    def all(self, text: str) -> list[Groups]:
+    def search_blocking(self, text: str) -> Groups | None:
+        """``search`` from the start, for a git worker thread.
+
+        Args:
+            text (str): the subject as a byte view.
+        """
+        subject = _Subject(text, self.utf8)
+        request: dict[str, JsonValue] = {"op": "search", "at": 0}
+        words = _words(self._streams.ask_blocking(request, subject.data))
+        return self._groups(subject, words) if words else None
+
+    async def all(self, text: str) -> list[Groups]:
         """Every match a global substitution replaces, as sed walks them.
 
         Args:
             text (str): the subject as a byte view.
         """
         subject = _Subject(text, self.utf8)
-        words = _words(self._ask(subject, {"op": "all"}))
+        words = _words(await self._streams.ask({"op": "all"}, subject.data))
         width = 2 * (self.groups + 1)
         return [
             self._groups(subject, words[at : at + width])
             for at in range(0, len(words), width)
         ]
 
-    def contains(self, text: str) -> int:
+    def contains_blocking(self, text: str) -> int:
         """How many times git's pickaxe counts the expression in ``text``:
         each match stays in its line, each search resumes where the last
         one ended (a character further after an empty one), and ``^``
-        never holds where it resumes.
+        never holds where it resumes. The pickaxe runs in git's worker
+        threads.
 
         Args:
             text (str): the subject as a byte view.
         """
-        subject = _Subject(text, self.utf8)
-        return _words(self._ask(subject, {"op": "contains"}))[0]
+        data = from_byte_view(text, self.utf8)
+        return _words(self._streams.ask_blocking({"op": "contains"}, data))[0]
 
-    def matches(self, text: str) -> bool:
+    async def matches(self, text: str) -> bool:
         """Whether the expression matches anywhere in ``text``, as sed's
         addresses ask: with no groups to place, a ``$`` reads a newline
         the match goes on to consume even in a pattern with groups.
@@ -223,8 +312,8 @@ class PosixRegex:
         Args:
             text (str): the subject as a byte view.
         """
-        subject = _Subject(text, self.utf8)
-        return _words(self._ask(subject, {"op": "test"}))[0] == 1
+        data = from_byte_view(text, self.utf8)
+        return _words(await self._streams.ask({"op": "test"}, data))[0] == 1
 
 
 @lru_cache(maxsize=_CACHE_SIZE)
@@ -283,8 +372,7 @@ class LineRegex:
         self._utf8 = utf8
         self.ignore_case = ignore_case
         self.unicode_folds = ignore_case and utf8
-        self._lock = threading.Lock()
-        self._stream = _open(
+        self._streams = _StreamPool(
             {
                 "mode": "lines",
                 "patterns": [
@@ -297,7 +385,7 @@ class LineRegex:
                 "line": line,
             }
         )
-        meta = json.loads(self._stream.metadata())
+        meta = self._streams.metadata
         self.warnings: tuple[str, ...] = tuple(meta["warnings"])
         needles = meta["needles"]
         self.needles: tuple[bytes, ...] | None = (
@@ -306,13 +394,7 @@ class LineRegex:
             else tuple(needle.encode("ascii") for needle in needles)
         )
 
-    def _ask(self, subject: _Subject, op: str) -> bytes:
-        with self._lock:
-            self._stream.begin({"op": op})
-            self._stream.feed(subject.data)
-            return self._stream.finish()
-
-    def matches(self, line: str) -> bool:
+    async def matches(self, line: str) -> bool:
         """Whether the line, without its terminator, matches.
 
         Args:
@@ -321,12 +403,13 @@ class LineRegex:
         Raises:
             SearchLimit: a -P search gave up at PCRE2's match limit.
         """
+        data = from_byte_view(line, self._utf8)
         try:
-            return self._ask(_Subject(line, self._utf8), "test") == b"\x01"
+            return await self._streams.ask({"op": "test"}, data) == b"\x01"
         except StreamRefusal as exc:
             raise SearchLimit(exc.message, []) from exc
 
-    def extents(self, line: str) -> list[Span]:
+    async def extents(self, line: str) -> list[Span]:
         """Each match grep -o prints from the line.
 
         Args:
@@ -338,7 +421,8 @@ class LineRegex:
         """
         subject = _Subject(line, self._utf8)
         try:
-            return _spans(subject, self._ask(subject, "extents"))
+            found = await self._streams.ask({"op": "extents"}, subject.data)
+            return _spans(subject, found)
         except StreamRefusal as exc:
             raise SearchLimit(
                 exc.message, _spans(subject, exc.output)

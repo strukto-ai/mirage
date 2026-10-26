@@ -16,11 +16,6 @@ import re
 
 ARITH_OPEN_TOKEN = "(("
 
-QUOTES = (b"'", b'"')
-
-# Nodes whose backslashes escape nothing, so a backslash-newline in one
-# is text rather than a line continuation.
-VERBATIM_TYPES = frozenset({"raw_string", "ansi_c_string", "comment"})
 
 BASH_KEYWORDS = frozenset(
     {
@@ -42,140 +37,16 @@ BASH_KEYWORDS = frozenset(
     }
 )
 
-# The case-item terminators: a list ends at one only inside a case item.
-CASE_TERMINATORS = frozenset({";;", ";&", ";;&"})
 
 # The characters that end an unquoted word.
 WORD_BREAKS = frozenset(" \t\n;&|()<>")
 
-# Every operator bash reads, longest first, so the first one a line
-# starts with is its token.
-OPERATORS = (
-    ";;&",
-    "&>>",
-    "<<<",
-    "<<-",
-    ";;",
-    ";&",
-    "&&",
-    "||",
-    "|&",
-    "&>",
-    "<<",
-    ">>",
-    "<&",
-    ">&",
-    "<>",
-    ">|",
-    ";",
-    "&",
-    "|",
-    "<",
-    ">",
-    "(",
-    ")",
-)
-
-# The characters operators are spelled with (the `-` of `<<-`).
-OPERATOR_CHARS = frozenset(";&|<>()-")
-
-REDIRECTIONS = frozenset(
-    {"<", ">", ">>", "<&", ">&", "<>", ">|", "&>", "&>>", "<<<", "<<", "<<-"}
-)
-
-# The reserved words that close or continue a compound command. Spelled
-# by an alias, one is a command where a command starts, except inside
-# that alias's own text, where its name stays reserved.
-CLOSING_WORDS = frozenset(
-    {"then", "else", "elif", "fi", "do", "done", "esac", "}", "in", "]]"}
-)
-
-# Every reserved word. bash takes one as such only where a command starts
-# (and after a compound command), never after a command's own words.
-RESERVED_WORDS = CLOSING_WORDS | {
-    "if",
-    "case",
-    "for",
-    "select",
-    "while",
-    "until",
-    "function",
-    "time",
-    "{",
-    "!",
-    "[[",
-    "coproc",
-}
-
-# The reserved words opening a compound command: what a function body or
-# a named coproc must start with.
-COMPOUND_OPENERS = frozenset(
-    {"{", "if", "while", "until", "for", "select", "case", "[["}
-)
-
-# The builtins whose arguments read `name=(` as an array, as an
-# assignment before a command does.
-ARRAY_BUILTINS = frozenset(
-    {
-        "alias",
-        "declare",
-        "eval",
-        "export",
-        "let",
-        "local",
-        "readonly",
-        "typeset",
-    }
-)
-
-# The `[[ ]]` operators taking one operand, and those taking two (with
-# `<` and `>`, which are operator tokens).
-UNARY_TESTS = frozenset(
-    "-a -b -c -d -e -f -g -h -k -p -r -s -t -u -w -x -G -L -N -O -S -z -n "
-    "-o -v -R".split()
-)
-BINARY_TESTS = frozenset(
-    "== = != =~ -eq -ne -lt -le -gt -ge -nt -ot -ef".split()
-)
-
-# The characters a shell name is spelled with; it cannot start with a
-# digit.
-NAME_START = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_")
-NAME_CHARS = NAME_START | frozenset("0123456789")
-
-# The characters that open an extended pattern before `(`, which the
-# right side of `==`, `=` and `!=` in `[[ ]]` reads with extglob on.
-EXTGLOB_OPENERS = frozenset("@!+*?")
-
-# bash's `syntax error near `X'` without "unexpected token" quotes the
-# line back from where its reader stopped: to a blank, or to one of these,
-# which it keeps.
-NEAR_TEXT_STOPS = frozenset(";&|")
 
 # How deep the syntax reader nests compound commands, substitutions and
 # `[[ ]]` groups before it refuses a line at the next opener, as bash
 # refuses a line nested past its own reader (thousands deep there).
 MAX_NESTING = 64
 
-# How the syntax reader takes the next token: whether `name=(` opens an
-# array, `name[` reads a subscript up to its `]` across blanks, `((`
-# opens arithmetic (and, where a command starts, is read again as two
-# subshells when it does not close on its line), a leading `[` opens an
-# array element's subscript, digits before `<` or `>` stay a word inside
-# `[[ ]]`, an array in a function body reads reserved words as such, and
-# the first array after a redirection reads an element's `name[` as a
-# subscript.
-READ_ARRAYS = 1
-READ_SUBSCRIPTS = 2
-READ_ARITH = 4
-READ_START = 8
-READ_ELEMENT = 16
-READ_TEST = 32
-READ_BODY = 64
-READ_KEYS = 128
-READ_PREFIX = READ_ARRAYS | READ_SUBSCRIPTS
-READ_FOLLOW = READ_PREFIX | READ_ARITH
-READ_COMMAND = READ_FOLLOW | READ_START
 
 # Where a `variable_name` node is a write target rather than a read:
 # the assignment's name and the for loop's variable. Everything else --
@@ -222,76 +93,3 @@ ARITH_TEST_OPERATORS = frozenset({"-eq", "-ne", "-lt", "-le", "-gt", "-ge"})
 
 # A shell identifier, as the names a word reads are found.
 IDENTIFIER_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
-
-# The nodes whose text the respelling pass leaves to their own grammar:
-# tests, arithmetic, strings, expansions, heredoc bodies and comments.
-UNLEXED = frozenset(
-    {
-        "test_command",
-        "arithmetic_expansion",
-        "string_content",
-        "raw_string",
-        "ansi_c_string",
-        "expansion",
-        "heredoc_content",
-        "comment",
-        "binary_expression",
-        "unary_expression",
-        "postfix_expression",
-    }
-)
-
-# The bytes a word can start after, so a digit string there is a
-# redirect's descriptor rather than the tail of a word.
-WORD_START = b" \t\n;&|(){}"
-
-# A run of digits at the respelling position.
-DIGIT_RUN = re.compile(rb"\d+")
-
-# A backslash before a blank, which escapes the blank into the word it
-# opens.
-ESCAPED_BLANK = re.compile(rb"\\[ \t]")
-
-# What follows a case arm's terminator when the arm is the last one.
-LAST_CASE_ARM = re.compile(rb"\s*esac(?![^\s;&|()<>])")
-
-# Test operators the grammar lexes apart from a word in an argument list or
-# an error region, where bash reads a word.
-BARE_WORDS = frozenset({"==", "=~"})
-
-# A `$` that no name, digit, special parameter, brace, paren, bracket or
-# quote follows, which bash reads as a literal `$`.
-LITERAL_DOLLAR = re.compile(rb"\$(?![\w@*#?$!{(\['\"-])")
-
-# The list and pipe operators, which end a `[` command's words.
-LIST_TOKENS = frozenset({"&&", "||", "|", "|&", ";", "&", ";;"})
-
-# The expression nodes a `[` test is built from, walked for a list
-# operator the grammar folded into it.
-TEST_PARTS = frozenset(
-    {
-        "binary_expression",
-        "unary_expression",
-        "negation_expression",
-        "parenthesized_expression",
-        "ERROR",
-    }
-)
-
-# A for or select header's variable spelled as a name.
-HEADER_NAME = re.compile(rb"\w+")
-
-# The `in` or `do` after a for or select header's variable.
-HEADER_FOLLOWER = re.compile(rb"\s*(in|do)(?![^\s;&|()<>])")
-
-# The nodes a newline between two children of cannot be whitespace, so a
-# newline the grammar folded into one ends the statement.
-STATEMENT_NODES = frozenset(
-    {
-        "command",
-        "declaration_command",
-        "file_redirect",
-        "redirected_statement",
-        "unset_command",
-    }
-)

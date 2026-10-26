@@ -13,7 +13,9 @@ mod cond;
 mod expansion;
 mod heredoc;
 mod lex;
+mod lower;
 mod parser;
+mod scan;
 mod test_command;
 mod tree;
 mod word;
@@ -21,16 +23,34 @@ mod word;
 #[cfg(test)]
 mod tests;
 
-pub use tree::{FIELDS, KINDS, Node, Tree, field_id};
+pub use lower::Heredoc;
+pub use tree::{FIELDS, KINDS, Node, Refusal, Tree, field_id};
 
-/// Parse a program.
-pub fn parse(source: &[u8]) -> Tree {
-    parser::parse(source, &[])
+/// How a line is read: the names the shell expands as aliases, each a
+/// command where a command starts, as bash expands it before it reads a
+/// reserved word; and whether extglob's pattern groups are on, which a
+/// `[[` pattern reads either way.
+#[derive(Debug, Clone)]
+pub struct Options {
+    pub aliases: Vec<Vec<u8>>,
+    pub extglob: bool,
 }
 
-/// Parse a program where `aliases` are the names the shell expands as
-/// aliases: one is a command where a command starts, as bash expands it
-/// before it reads a reserved word.
-pub fn parse_with_aliases(source: &[u8], aliases: &[Vec<u8>]) -> Tree {
-    parser::parse(source, aliases)
+impl Default for Options {
+    fn default() -> Self {
+        Self {
+            aliases: Vec::new(),
+            extglob: true,
+        }
+    }
+}
+
+/// Parse a program, extglob's groups on.
+pub fn parse(source: &[u8]) -> Tree {
+    parser::parse(source, &Options::default())
+}
+
+/// Parse a program read as `options` say.
+pub fn parse_with(source: &[u8], options: &Options) -> Tree {
+    parser::parse(source, options)
 }

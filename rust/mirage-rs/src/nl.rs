@@ -2,6 +2,7 @@ use serde::Deserialize;
 
 use crate::regex::parse::Dialect;
 use crate::regex::posix::{Options, Posix};
+use crate::regex::{STEPS, Step};
 use crate::{Stream, StreamError, parse_config, quoted};
 
 const INTMAX: i128 = i64::MAX as i128;
@@ -299,6 +300,7 @@ impl Nl {
     /// input that has ended is numbered to its last line and left.
     fn step(&mut self, out: &mut Vec<u8>) {
         let limit = out.len() + OUTPUT;
+        let mut budget = STEPS;
         let pending = std::mem::take(&mut self.pending);
         self.more = false;
         loop {
@@ -336,8 +338,17 @@ impl Nl {
                 self.more = true;
                 break;
             }
+            let selected = match self.selects(line, &mut budget) {
+                Step::Done(selected) => selected,
+                // Out of steps: the line waits for the next `drain`, where
+                // the search goes on.
+                Step::Paused => {
+                    self.more = true;
+                    break;
+                }
+            };
             self.at = next;
-            self.line(line, limit, out);
+            self.line(line, selected, limit, out);
         }
         self.pending = pending;
         if !self.more {
@@ -347,7 +358,23 @@ impl Nl {
         }
     }
 
-    fn line(&mut self, line: &[u8], limit: usize, out: &mut Vec<u8>) {
+    /// Whether the section's pattern numbers `line`: false for a section
+    /// delimiter and for a style that numbers by no pattern.
+    fn selects(&mut self, line: &[u8], budget: &mut u64) -> Step<bool> {
+        if self
+            .sections
+            .iter()
+            .any(|delimiter| !delimiter.is_empty() && delimiter == line)
+        {
+            return Step::Done(false);
+        }
+        match &mut self.styles[self.section] {
+            Style::Pattern(regex) => regex.test(line, budget),
+            _ => Step::Done(false),
+        }
+    }
+
+    fn line(&mut self, line: &[u8], selected: bool, limit: usize, out: &mut Vec<u8>) {
         if let Some(section) = self
             .sections
             .iter()
@@ -361,7 +388,7 @@ impl Nl {
             out.push(b'\n');
             return;
         }
-        let style = &mut self.styles[self.section];
+        let style = &self.styles[self.section];
         let blank = line.is_empty() && matches!(style, Style::All);
         self.blank_run = if blank {
             self.blank_run.saturating_add(1)
@@ -372,7 +399,7 @@ impl Nl {
             Style::All => !blank || self.blank_run >= self.join,
             Style::Text => !line.is_empty(),
             Style::None => false,
-            Style::Pattern(regex) => regex.test(line),
+            Style::Pattern(_) => selected,
         };
         if !numbered {
             let pad = (self.width + self.separator.len()) as u64;
@@ -549,6 +576,28 @@ mod tests {
             .0,
             b"     1\ta\n\n     2\tb\n"
         );
+    }
+
+    #[test]
+    fn a_long_back_referenced_pattern_goes_on_across_drains() {
+        let pattern = r#"{"options":[["body_numbering","p^\\(a\\|aa\\)*\\1c$"]]}"#;
+        let line = "a".repeat(26);
+        let input = format!("{line}b\n{line}c\n");
+        let mut stream = open(config(DEFAULTS, pattern).as_bytes()).unwrap();
+        let mut out = Vec::new();
+        stream.feed_input(0, input.as_bytes(), &mut out).unwrap();
+        stream.end_input(0, &mut out).unwrap();
+        let mut drains = 0;
+        while stream.busy() {
+            stream.drain(&mut out).unwrap();
+            drains += 1;
+        }
+        stream.finish(&mut out).unwrap();
+        assert_eq!(
+            String::from_utf8(out).unwrap(),
+            format!("       {line}b\n     1\t{line}c\n")
+        );
+        assert!(drains > 2, "{drains}");
     }
 
     #[test]

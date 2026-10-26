@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest'
 import { PathSpec } from '../types.ts'
-import { ProcessSupervisor } from './supervisor.ts'
+import { ProcessTable } from './table.ts'
 import { currentExecutionId, runWithExecution } from '../context/session_context.ts'
 import type { ProcessHandle } from './handle.ts'
 
@@ -18,11 +18,11 @@ function gate() {
 }
 
 it('isolates execution context between concurrent runners', async () => {
-  const supervisor = new ProcessSupervisor(runWithExecution)
+  const processes = new ProcessTable(runWithExecution)
   const release = gate()
   const seen: (string | null)[][] = []
   const handles = ['first', 'second'].map((executionId) =>
-    supervisor.start({
+    processes.start({
       sessionId: 'same',
       command: 'probe',
       cwd: PathSpec.fromStrPath('/'),
@@ -47,12 +47,12 @@ it('isolates execution context between concurrent runners', async () => {
 })
 
 it('does not give execution ancestry cancellation ownership', async () => {
-  const supervisor = new ProcessSupervisor()
+  const processes = new ProcessTable()
   const started = gate(),
     release = gate()
   const abort = new AbortController()
   const children: ProcessHandle[] = []
-  const root = supervisor.start({
+  const root = processes.start({
     sessionId: 'a',
     command: 'parent',
     cwd: PathSpec.fromStrPath('/'),
@@ -62,7 +62,7 @@ it('does not give execution ancestry cancellation ownership', async () => {
     },
     run: async () => {
       children.push(
-        supervisor.start({
+        processes.start({
           sessionId: 'a',
           command: 'detached',
           cwd: PathSpec.fromStrPath('/'),
@@ -98,12 +98,12 @@ it('does not give execution ancestry cancellation ownership', async () => {
 })
 
 it('does not claim exit before finally completes', async () => {
-  const supervisor = new ProcessSupervisor()
+  const processes = new ProcessTable()
   const entered = gate(),
     cleaning = gate(),
     release = gate()
   const abort = new AbortController()
-  const process = supervisor.start({
+  const process = processes.start({
     sessionId: 'a',
     command: 'work',
     cwd: PathSpec.fromStrPath('/'),
@@ -129,7 +129,7 @@ it('does not claim exit before finally completes', async () => {
       return 0
     },
   })
-  const view = supervisor.view('a')
+  const view = processes.view('a')
   await entered.promise
   expect(process.terminate()).toBe(true)
   expect(process.terminate()).toBe(false)
@@ -142,7 +142,7 @@ it('does not claim exit before finally completes', async () => {
   })
   await Promise.resolve()
   expect(joined).toBe(false)
-  expect(supervisor.live()).toEqual([process])
+  expect(processes.live()).toEqual([process])
   release.release()
   expect(await joining).toMatchObject({
     state: 'exited',
@@ -154,10 +154,10 @@ it('does not claim exit before finally completes', async () => {
 })
 
 it('scopes immutable views and revokes them when a session ID is reused', async () => {
-  const supervisor = new ProcessSupervisor(),
+  const processes = new ProcessTable(),
     release = gate()
   const start = (sessionId: string) =>
-    supervisor.start({
+    processes.start({
       sessionId,
       command: sessionId,
       cwd: PathSpec.fromStrPath('/'),
@@ -169,12 +169,12 @@ it('scopes immutable views and revokes them when a session ID is reused', async 
     })
   const a = start('a'),
     b = start('b')
-  const oldView = supervisor.view('a')
+  const oldView = processes.view('a')
   expect(oldView.list()).toEqual([a.info])
   expect(Object.isFrozen(a.info)).toBe(true)
   expect(Object.isFrozen(oldView.list())).toBe(true)
-  supervisor.revokeSession('a')
-  const newView = supervisor.view('a'),
+  processes.revokeSession('a')
+  const newView = processes.view('a'),
     replacement = start('a')
   expect(oldView.list()).toEqual([])
   expect(newView.list()).toEqual([replacement.info])
@@ -183,12 +183,12 @@ it('scopes immutable views and revokes them when a session ID is reused', async 
   expect(
     (await Promise.all([a.join(), b.join(), replacement.join()])).map((info) => info.exitCode),
   ).toEqual([7, 7, 7])
-  expect(supervisor.live()).toEqual([])
+  expect(processes.live()).toEqual([])
 })
 
 it('observes runner failures and retires them', async () => {
-  const supervisor = new ProcessSupervisor()
-  const process = supervisor.start({
+  const processes = new ProcessTable()
+  const process = processes.start({
     sessionId: 'a',
     command: 'work',
     cwd: PathSpec.fromStrPath('/'),
@@ -196,13 +196,13 @@ it('observes runner failures and retires them', async () => {
     run: () => Promise.reject(new Error('failed cleanup')),
   })
   expect(await process.join()).toMatchObject({ exitCode: 1, failure: 'failed cleanup' })
-  expect(supervisor.live()).toEqual([])
+  expect(processes.live()).toEqual([])
 })
 
 it('keeps natural exit distinct from a cancellation request that was ignored', async () => {
-  const supervisor = new ProcessSupervisor(),
+  const processes = new ProcessTable(),
     release = gate()
-  const process = supervisor.start({
+  const process = processes.start({
     sessionId: 'a',
     command: 'work',
     cwd: PathSpec.fromStrPath('/'),
@@ -223,7 +223,7 @@ it('keeps natural exit distinct from a cancellation request that was ignored', a
 })
 
 it('closes admission and requests cancellation of every live runner', async () => {
-  const supervisor = new ProcessSupervisor(),
+  const processes = new ProcessTable(),
     release = gate()
   const cancelled: string[] = []
   const init = (sessionId: string) => ({
@@ -238,23 +238,23 @@ it('closes admission and requests cancellation of every live runner', async () =
       return 0
     },
   })
-  const a = supervisor.start(init('a')),
-    b = supervisor.start(init('b'))
-  supervisor.stop()
-  supervisor.stop()
+  const a = processes.start(init('a')),
+    b = processes.start(init('b'))
+  processes.stop()
+  processes.stop()
   expect(cancelled).toEqual(['a', 'b'])
-  expect(() => supervisor.start(init('a'))).toThrow('stopped')
+  expect(() => processes.start(init('a'))).toThrow('stopped')
   release.release()
   expect(
     (await Promise.all([a.join(), b.join()])).every((info) => info.cancellationRequested),
   ).toBe(true)
-  expect(supervisor.live()).toEqual([])
+  expect(processes.live()).toEqual([])
 })
 
 it('a workspace list grants no kill', async () => {
-  const supervisor = new ProcessSupervisor(),
+  const processes = new ProcessTable(),
     release = gate()
-  const child = supervisor.start({
+  const child = processes.start({
     sessionId: 'other',
     command: 'secret argument',
     cwd: PathSpec.fromStrPath('/private'),
@@ -264,7 +264,7 @@ it('a workspace list grants no kill', async () => {
       return 0
     },
   })
-  const view = supervisor.view('observer', () => ({
+  const view = processes.view('observer', () => ({
     list: 'workspace',
     kill: 'session',
     max: null,
@@ -273,7 +273,7 @@ it('a workspace list grants no kill', async () => {
   expect(() => view.terminate(child.info.pid, 15)).toThrow(
     expect.objectContaining({ code: 'EPERM' }),
   )
-  supervisor.revokeSession('observer')
+  processes.revokeSession('observer')
   expect(() => {
     view.checkSpawn()
   }).toThrow('not permitted')
@@ -283,10 +283,10 @@ it('a workspace list grants no kill', async () => {
 })
 
 it('start refuses a session at its limit', async () => {
-  const supervisor = new ProcessSupervisor(),
+  const processes = new ProcessTable(),
     release = gate()
   const start = (sessionId: string) =>
-    supervisor.start({
+    processes.start({
       sessionId,
       command: 'work',
       cwd: PathSpec.fromStrPath('/'),
@@ -308,7 +308,7 @@ it('start refuses a session at its limit', async () => {
 })
 
 it('group cancellation reaches grandchildren after an intermediate exits', async () => {
-  const supervisor = new ProcessSupervisor(),
+  const processes = new ProcessTable(),
     release = gate()
   const init = {
     sessionId: 'a',
@@ -322,28 +322,26 @@ it('group cancellation reaches grandchildren after an intermediate exits', async
       return 0
     },
   }
-  const root = supervisor.start(init)
-  const middle = supervisor.start({
+  const root = processes.start(init)
+  const middle = processes.start({
     ...init,
     parentPid: root.info.pid,
     run: () => Promise.resolve(0),
   })
-  const leaf = supervisor.start({ ...init, parentPid: middle.info.pid })
+  const leaf = processes.start({ ...init, parentPid: middle.info.pid })
   await middle.join()
   expect(leaf.info.groupId).toBe(root.info.pid)
   root.terminate()
-  expect(() => supervisor.start({ ...init, parentPid: root.info.pid })).toThrow(
-    'accepting children',
-  )
-  await supervisor.drain()
+  expect(() => processes.start({ ...init, parentPid: root.info.pid })).toThrow('accepting children')
+  await processes.drain()
   expect((await leaf.join()).cancellationRequested).toBe(true)
-  expect(supervisor.live()).toEqual([])
+  expect(processes.live()).toEqual([])
 })
 
 // A runner that already exited has nothing left to cancel, but stopping it
 // still stops what it left running (`sh -c 'sleep 100 &'`).
 it('stopping an exited runner stops what it left running', async () => {
-  const supervisor = new ProcessSupervisor(),
+  const processes = new ProcessTable(),
     release = gate()
   const init = {
     sessionId: 'a',
@@ -354,8 +352,8 @@ it('stopping an exited runner stops what it left running', async () => {
     },
     run: () => Promise.resolve(0),
   }
-  const parent = supervisor.start(init)
-  const left = supervisor.start({
+  const parent = processes.start(init)
+  const left = processes.start({
     ...init,
     command: 'sleep',
     parentPid: parent.info.pid,
@@ -373,10 +371,10 @@ it('stopping an exited runner stops what it left running', async () => {
 // A kill reaches the whole group with the signal it named, so a native
 // program a child runner started receives that signal too.
 it('a group stopped with a signal passes it to every child', async () => {
-  const supervisor = new ProcessSupervisor()
+  const processes = new ProcessTable()
   const start = (parentPid: number | null): ProcessHandle => {
     const abort = new AbortController()
-    return supervisor.start({
+    return processes.start({
       sessionId: 'a',
       command: 'runner',
       cwd: PathSpec.fromStrPath('/'),
@@ -405,9 +403,9 @@ it('a group stopped with a signal passes it to every child', async () => {
 // $BASHPID) runs before the runner does, with the process already live,
 // so a runner that starts at once sees both.
 it('runs started before the runner with the process live', async () => {
-  const supervisor = new ProcessSupervisor()
+  const processes = new ProcessTable()
   const order: string[] = []
-  const handle = supervisor.start({
+  const handle = processes.start({
     sessionId: 's',
     command: 'probe',
     cwd: PathSpec.fromStrPath('/'),
@@ -416,7 +414,7 @@ it('runs started before the runner with the process live', async () => {
       order.push(`started ${String(info.pid)}`)
     },
     run: () => {
-      order.push(`run ${JSON.stringify(supervisor.live().map((p) => p.info.pid))}`)
+      order.push(`run ${JSON.stringify(processes.live().map((p) => p.info.pid))}`)
       return Promise.resolve(0)
     },
   })

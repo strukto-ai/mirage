@@ -71,11 +71,9 @@ from mirage.shell.helpers import (
     split_env_prefix,
 )
 from mirage.shell.job_table import JobTable
-from mirage.shell.parse import check_syntax, syntax_error_result
 from mirage.shell.parse.constants import WORD_BREAKS
+from mirage.shell.parse.parse import syntax_refusal
 from mirage.shell.parse.scope import ParseScope
-from mirage.shell.parse.source import source_offsets
-from mirage.shell.parse.syntax import find_syntax_issue
 from mirage.shell.types import AliasExpansion, TSNodeLike
 from mirage.shell.types import NodeType as NT
 from mirage.shell.variable import TempEnv, VarAttr
@@ -283,16 +281,12 @@ async def execute_command(
             try:
                 aliases = expanding_aliases(session) | names
                 ast = scope.parse(
-                    line, parser_aliases(line, aliases, owners, offsets)
-                )
-                found = check_syntax(
                     line,
-                    aliases,
-                    lambda name, at: name in owners[offsets[at]],
-                    extglob=session.shopts.get("extglob", False),
-                ) or find_syntax_issue(ast)
-                if found is not None:
-                    io = syntax_error_result(found)
+                    parser_aliases(line, aliases, owners, offsets),
+                    session.shopts.get("extglob", False),
+                )
+                io = syntax_refusal(ast)
+                if io is not None:
                     bad = io.stderr if isinstance(io.stderr, bytes) else b""
                     return (
                         None,
@@ -304,7 +298,7 @@ async def execute_command(
                 mapped = owners + (frozenset(),)
                 session._alias_expansion = AliasExpansion(
                     ast.id,
-                    tuple(mapped[i] for i in source_offsets(line, ast)),
+                    tuple(mapped[i] for i in getattr(ast, "offsets", ())),
                     names,
                 )
                 # The rewritten line is read from this node, so it runs as

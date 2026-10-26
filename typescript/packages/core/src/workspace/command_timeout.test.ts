@@ -306,8 +306,10 @@ describe('large in-memory commands', () => {
           fired = true
           abort.abort()
         }, 0)
-        // Elapsed work must let the real abort timer run, regardless of CPU speed.
-        now = 1_000_000
+        // Elapsed work must let the real abort timer run, regardless of CPU speed:
+        // from here each read of the clock is a second later, so the budget
+        // yields at every turn until the timer is due.
+        clock.mockImplementation(() => (now += 1_000))
         async function consume(): Promise<void> {
           for await (const event of execution.events) expect(event.stream).toBe('stdout')
         }

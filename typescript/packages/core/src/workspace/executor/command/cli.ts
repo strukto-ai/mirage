@@ -515,7 +515,6 @@ export async function handleMountCli(
     context.commandLimits,
     session.commandLimits,
   )
-  const signal = context.signal
   const paths =
     follow === undefined
       ? walked.paths
@@ -534,14 +533,7 @@ export async function handleMountCli(
     ]
   }
   const run = (ctx: Context): Promise<CommandFnResult> =>
-    mount.runLeaf(
-      walked.prog,
-      cli,
-      walked.handler,
-      paths,
-      walked.texts,
-      signal === undefined ? ctx : { ...ctx, signal },
-    )
+    mount.runLeaf(walked.prog, cli, walked.handler, paths, walked.texts, ctx)
   return runWalked(walked, session, stdin, context, limit, run)
 }
 

@@ -105,7 +105,7 @@ async def expand_words(
     call_stack: CallStack | None = None,
     view: SessionView | None = None,
 ) -> list[str]:
-    """Expand tree-sitter child nodes to words that still know their quoting.
+    """Expand parsed child nodes to words that still know their quoting.
 
     Each node expands to its pieces, which IFS then splits into fields,
     so an unquoted expansion anywhere in a word splits (``q$x`` too) and

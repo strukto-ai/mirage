@@ -14,10 +14,15 @@
 
 import { describe, expect, it } from 'vitest'
 import { RegexError } from './errors.ts'
-import { LineRegex, PosixRegex, posixEscape } from './regex.ts'
+import { LineRegex, PosixRegex, posixEscape, posixRegex } from './regex.ts'
 
-function texts(regex: PosixRegex, subject: string): (string | null)[] {
-  const found = regex.search(subject)
+// Backtracking through every way to split the a's before refusing the b:
+// millions of steps, so the search pauses and the loop runs between.
+const LONG_PATTERN = '^\\(a\\|aa\\)*\\1c$'
+const LONG_SUBJECT = 'a'.repeat(26) + 'b'
+
+async function texts(regex: PosixRegex, subject: string): Promise<(string | null)[]> {
+  const found = await regex.search(subject)
   expect(found).not.toBeNull()
   return (found ?? []).map((span) => (span === null ? null : subject.slice(span[0], span[1])))
 }
@@ -31,21 +36,23 @@ describe('PosixRegex', () => {
     ['(a*)+', 'aa', ['aa', 'aa']],
     ['(a?)*', 'aa', ['aa', 'a']],
     ['((a)|b)*', 'ab', ['ab', 'b', 'a']],
-  ])('places the groups of %s on %s as glibc does', (pattern, subject, want) => {
-    expect(texts(new PosixRegex(pattern, true, 'sed'), subject)).toEqual(want)
+  ])('places the groups of %s on %s as glibc does', async (pattern, subject, want) => {
+    expect(await texts(new PosixRegex(pattern, true, 'sed'), subject)).toEqual(want)
   })
 
-  it('counts offsets in characters of the view', () => {
-    expect(new PosixRegex('é.', false, 'posix', false, true).search('aéb')).toEqual([[1, 3]])
-    expect(new PosixRegex('😀.', false, 'posix', false, true).search('a😀b')).toEqual([[1, 4]])
-    expect(new PosixRegex('\\(.\\)').search('\xc3\xa9')).toEqual([
+  it('counts offsets in characters of the view', async () => {
+    expect(await new PosixRegex('é.', false, 'posix', false, true).search('aéb')).toEqual([[1, 3]])
+    expect(await new PosixRegex('😀.', false, 'posix', false, true).search('a😀b')).toEqual([
+      [1, 4],
+    ])
+    expect(await new PosixRegex('\\(.\\)').search('\xc3\xa9')).toEqual([
       [0, 1],
       [0, 1],
     ])
   })
 
-  it('passes over an empty match where one ended in a global walk', () => {
-    const found = new PosixRegex('a*', false, 'sed').all('baaac')
+  it('passes over an empty match where one ended in a global walk', async () => {
+    const found = await new PosixRegex('a*', false, 'sed').all('baaac')
     expect(found.map((spans) => spans[0])).toEqual([
       [0, 0],
       [1, 4],
@@ -64,59 +71,105 @@ describe('PosixRegex', () => {
     )
   })
 
-  it("takes in regcomp's basic syntax what sed refuses", () => {
-    expect(new PosixRegex('a**').search('aa')).toEqual([[0, 2]])
-    expect(new PosixRegex('[z-a]x').search('x')).toBeNull()
+  it("takes in regcomp's basic syntax what sed refuses", async () => {
+    expect(await new PosixRegex('a**').search('aa')).toEqual([[0, 2]])
+    expect(await new PosixRegex('[z-a]x').search('x')).toBeNull()
     expect(() => new PosixRegex('[z-a]', false, 'sed')).toThrow('Invalid range end')
   })
 
-  it('reads the newlines a match consumes at its anchors', () => {
-    expect(new PosixRegex('a.^b', true, 'sed').search('a\nb')).toEqual([[0, 3]])
-    expect(new PosixRegex('^b', false, 'sed').search('a\nb')).toBeNull()
-    expect(new PosixRegex('b$.', true, 'sed').search('b\nc')).toEqual([[0, 2]])
-    expect(new PosixRegex('(b)$.', true, 'sed').search('b\nc')).toBeNull()
-    expect(new PosixRegex('^b', false, 'sed', false, false, true).search('a\nb')).toEqual([[2, 3]])
+  it('reads the newlines a match consumes at its anchors', async () => {
+    expect(await new PosixRegex('a.^b', true, 'sed').search('a\nb')).toEqual([[0, 3]])
+    expect(await new PosixRegex('^b', false, 'sed').search('a\nb')).toBeNull()
+    expect(await new PosixRegex('b$.', true, 'sed').search('b\nc')).toEqual([[0, 2]])
+    expect(await new PosixRegex('(b)$.', true, 'sed').search('b\nc')).toBeNull()
+    expect(await new PosixRegex('^b', false, 'sed', false, false, true).search('a\nb')).toEqual([
+      [2, 3],
+    ])
   })
 
-  it('skips NUL at a dot for regcomp only', () => {
-    expect(new PosixRegex('a.b').search('a\0b')).toBeNull()
-    expect(new PosixRegex('a[^x]b').search('a\0b')).toEqual([[0, 3]])
-    expect(new PosixRegex('a.b', false, 'sed').search('a\0b')).toEqual([[0, 3]])
+  it('skips NUL at a dot for regcomp only', async () => {
+    expect(await new PosixRegex('a.b').search('a\0b')).toBeNull()
+    expect(await new PosixRegex('a[^x]b').search('a\0b')).toEqual([[0, 3]])
+    expect(await new PosixRegex('a.b', false, 'sed').search('a\0b')).toEqual([[0, 3]])
   })
 
-  it('reads classes and case by Unicode under UTF-8', () => {
-    expect(new PosixRegex('[[:alpha:]]', false, 'posix', false, true).search('-é')).toEqual([
+  it('reads classes and case by Unicode under UTF-8', async () => {
+    expect(await new PosixRegex('[[:alpha:]]', false, 'posix', false, true).search('-é')).toEqual([
       [1, 2],
     ])
-    expect(new PosixRegex('é', false, 'posix', true, true).search('É')).not.toBeNull()
-    expect(new PosixRegex('[[:alpha:]]').search('\xc3\xa9')).toBeNull()
+    expect(await new PosixRegex('é', false, 'posix', true, true).search('É')).not.toBeNull()
+    expect(await new PosixRegex('[[:alpha:]]').search('\xc3\xa9')).toBeNull()
   })
 
-  it('never finds a raw byte inside a character', () => {
+  it('never finds a raw byte inside a character', async () => {
     const regex = new PosixRegex('\udca9', false, 'posix', false, true)
-    expect(regex.search('é')).toBeNull()
-    expect(regex.search('a\udca9')).toEqual([[1, 2]])
+    expect(await regex.search('é')).toBeNull()
+    expect(await regex.search('a\udca9')).toEqual([[1, 2]])
   })
 
-  it('wraps the match in word edges', () => {
+  it('wraps the match in word edges', async () => {
     const regex = new PosixRegex('ab|abc', true, 'posix', false, false, false, true)
-    expect(regex.search('abcd abc')).toEqual([[5, 8]])
+    expect(await regex.search('abcd abc')).toEqual([[5, 8]])
   })
 
-  it('escapes a literal to match only itself', () => {
+  it('escapes a literal to match only itself', async () => {
     const text = 'a.b*c[d]^$\\(e)'
-    expect(new PosixRegex(posixEscape(text), true).search('x' + text)).toEqual([
+    expect(await new PosixRegex(posixEscape(text), true).search('x' + text)).toEqual([
       [1, 1 + text.length],
     ])
   })
 })
 
+describe('a long search', () => {
+  it('lets the loop run between its steps', async () => {
+    let ticks = 0
+    const done = new AbortController()
+    const ticker = (async () => {
+      while (!done.signal.aborted) {
+        ticks += 1
+        await new Promise<void>((resolve) => setTimeout(resolve, 0))
+      }
+    })()
+    try {
+      expect(await new PosixRegex(LONG_PATTERN).matches(LONG_SUBJECT)).toBe(false)
+    } finally {
+      done.abort()
+      await ticker
+    }
+    expect(ticks).toBeGreaterThan(1)
+  })
+
+  it('keeps the searches of tasks sharing one expression apart', async () => {
+    const regex = posixRegex(LONG_PATTERN)
+    const found = await Promise.all([
+      regex.matches(LONG_SUBJECT),
+      regex.search('a'.repeat(26) + 'c'),
+      regex.matches('aac'),
+    ])
+    expect(found).toEqual([
+      false,
+      [
+        [0, 27],
+        [24, 25],
+      ],
+      true,
+    ])
+  })
+
+  it('stops at an abort and leaves the expression usable', async () => {
+    const regex = new PosixRegex(LONG_PATTERN)
+    const signal = AbortSignal.timeout(1)
+    await expect(regex.matches('a'.repeat(40) + 'b', signal)).rejects.toThrow()
+    expect(await regex.matches('aac')).toBe(true)
+  })
+})
+
 describe('LineRegex', () => {
-  it('selects and extends lines as grep does', () => {
+  it('selects and extends lines as grep does', async () => {
     const regex = new LineRegex(['ab|abcd', 'x'], 'extended', false, false, true)
-    expect(regex.matches('abcd y')).toBe(true)
-    expect(regex.matches('abcde')).toBe(false)
-    expect(regex.extents('abcd x')).toEqual([
+    expect(await regex.matches('abcd y')).toBe(true)
+    expect(await regex.matches('abcde')).toBe(false)
+    expect(await regex.extents('abcd x')).toEqual([
       [0, 4],
       [5, 6],
     ])

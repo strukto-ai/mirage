@@ -193,13 +193,13 @@ export async function zgrepGeneric(
           let hit = false
           let selected: [number, string][] = []
           try {
-            hit = lineSelected(pattern, line) !== parsed.invert
+            hit = (await lineSelected(pattern, line, ctx.signal)) !== parsed.invert
             if (!hit) selected = []
             else if (
               pieces &&
               !(parsed.invert || parsed.count || quiet || filesOnly || filesWithoutMatch)
             )
-              selected = linePieces(pattern, line)
+              selected = await linePieces(pattern, line, ctx.signal)
             else selected = [[0, line]]
           } catch (err) {
             if (!(err instanceof SearchLimit)) throw err

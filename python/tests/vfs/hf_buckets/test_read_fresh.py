@@ -123,7 +123,9 @@ async def test_a_refused_probe_keeps_the_overlay(route, status, code):
             # "no such file" drops the overlay; a plain cat never reaches it.
             cp = await ws.shell("cp /m/a.txt /r/x")
             assert cp.exit_code == 1
-            assert await cp.stderr_str() == "cp: /m/a.txt: Permission denied\n"
+            assert await cp.stderr_str() == (
+                "cp: cannot stat '/m/a.txt': Permission denied\n"
+            )
             hub.fail.clear()
             meta = ws.namespace.meta_for("/m/a.txt")
             assert meta is not None and meta.mode == 0o600

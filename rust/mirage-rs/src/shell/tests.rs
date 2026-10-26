@@ -1,4 +1,4 @@
-use super::{FIELDS, KINDS, Tree, parse, parse_with_aliases};
+use super::{FIELDS, KINDS, Options, Refusal, Tree, parse, parse_with};
 
 /// The tree as an s-expression: named nodes with their fields, a leaf's
 /// text after `=`.
@@ -37,10 +37,42 @@ fn read(source: &str) -> String {
     sexp(&tree)
 }
 
-fn refused(source: &str) -> (usize, String) {
+/// The text the tree reads, and each heredoc's delimiter, body and
+/// whether its delimiter line ended it.
+fn lowered(source: &str) -> (String, Vec<(String, String, bool)>) {
     let tree = parse(source.as_bytes());
-    assert!(tree.nodes[0].has_error, "{source:?}");
-    tree.error.expect("a refusal")
+    assert_eq!(tree.error, None, "{source:?}");
+    let text = |bytes: &[u8]| String::from_utf8_lossy(bytes).into_owned();
+    let heredocs = tree
+        .heredocs
+        .iter()
+        .map(|heredoc| {
+            (
+                text(&heredoc.delimiter),
+                text(&heredoc.body),
+                heredoc.terminated,
+            )
+        })
+        .collect();
+    (text(&tree.source), heredocs)
+}
+
+fn aliased(source: &[u8], aliases: &[Vec<u8>]) -> Tree {
+    parse_with(
+        source,
+        &Options {
+            aliases: aliases.to_vec(),
+            ..Options::default()
+        },
+    )
+}
+
+fn heredoc(delimiter: &str, body: &str, terminated: bool) -> (String, String, bool) {
+    (delimiter.into(), body.into(), terminated)
+}
+
+fn refused(source: &str) -> Refusal {
+    parse(source.as_bytes()).error.expect("a refusal")
 }
 
 #[test]
@@ -99,33 +131,72 @@ fn a_comment_sits_between_the_children_around_it() {
 }
 
 #[test]
-fn a_heredoc_body_follows_its_line() {
+fn a_heredoc_body_folds_into_its_line() {
+    assert_eq!(
+        lowered("cat <<EOF | wc\na $x\nEOF\necho"),
+        (
+            "cat <\"a $x\n\" | wc\necho".into(),
+            vec![heredoc("EOF", "a $x\n", true)]
+        )
+    );
     assert_eq!(
         read("cat <<EOF | wc\na $x\nEOF\necho"),
-        "(program (redirected_statement body: (command name: (command_name (word=cat))) \
-         redirect: (heredoc_redirect (heredoc_start=EOF) (pipeline (command name: (command_name (word=wc)))) \
-         (heredoc_body (simple_expansion (variable_name=x)) (heredoc_content=)) (heredoc_end=EOF))) \
+        "(program (pipeline (redirected_statement body: (command name: (command_name (word=cat))) \
+         redirect: (file_redirect destination: (string (string_content=a ) (simple_expansion \
+         (variable_name=x))))) (command name: (command_name (word=wc)))) \
          (command name: (command_name (word=echo))))"
     );
+    let tree = parse(b"cat <<E \\\nx\nbody\nE\n");
+    assert_eq!(tree.source, b"cat <\"body\n\" x\n");
+    assert_eq!(tree.offsets[5], 12);
+    assert_eq!(tree.offsets[tree.source.len()], 19);
 }
 
 #[test]
 fn heredocs_after_a_line_are_read_in_order() {
-    let tree = read("cat <<A; cat <<B\na\nA\nb\nB");
-    assert!(
-        tree.contains("(heredoc_body=a\n) (heredoc_end=A) (heredoc_body=b\n) (heredoc_end=B)"),
-        "{tree}"
+    assert_eq!(
+        lowered("cat <<A; cat <<B\na\nA\nb\nB").1,
+        vec![heredoc("A", "a\n", true), heredoc("B", "b\n", true)]
     );
     // A substitution's heredocs come first.
-    let tree = read("cat <<A; echo \"$(cat <<B)\"\nb\nB\na\nA");
-    assert!(
-        tree.contains("(heredoc_body=b\n) (heredoc_end=B) (heredoc_body=a\n) (heredoc_end=A)"),
-        "{tree}"
+    assert_eq!(
+        lowered("cat <<A; echo \"$(cat <<B)\"\nb\nB\na\nA"),
+        (
+            "cat <\"a\n\"; echo \"$(cat <\"b\n\")\"\n".into(),
+            vec![heredoc("A", "a\n", true), heredoc("B", "b\n", true)]
+        )
     );
     // A newline inside a substitution reads only the heredocs opened in it.
-    let tree = read("cat <<A; echo $(echo b\necho c)\na\nA");
+    assert_eq!(
+        lowered("cat <<A; echo $(echo b\necho c)\na\nA").1,
+        vec![heredoc("A", "a\n", true)]
+    );
+    // An unquoted body joins continued lines; a quoted one keeps them.
+    assert_eq!(
+        lowered("cat <<E\na\\\nE\nE").1,
+        vec![heredoc("E", "aE\n", true)]
+    );
+    assert_eq!(
+        lowered("cat <<'E'\na\\\nE").1,
+        vec![heredoc("E", "a\\\n", true)]
+    );
+    // bash reads a backtick's text first: a heredoc left open in it ends
+    // with it, and the lines after are commands.
+    for line in [
+        "echo `cat <<A`\nA",
+        "echo `cat <<A;`\nA",
+        "echo $`cat <<A`\nA",
+    ] {
+        let tree = read(line);
+        assert!(
+            tree.ends_with("(command name: (command_name (word=A))))"),
+            "{tree}"
+        );
+    }
+    // Nor does a newline in it read a heredoc opened before it.
+    let tree = read("cat <<A; echo `echo\nA\ncat <<B`\nB\nA");
     assert!(
-        tree.ends_with("(heredoc_body=a\n) (heredoc_end=A))"),
+        tree.ends_with("(heredoc_body=B\n) (heredoc_end=A))"),
         "{tree}"
     );
 }
@@ -167,12 +238,15 @@ fn bash_reads_what_the_grammar_misreads() {
 fn a_continuation_joins_the_halves_of_a_word() {
     assert_eq!(
         read("ec\\\nho a"),
-        "(program (command name: (command_name (word=ec\\\nho)) argument: (word=a)))"
+        "(program (command name: (command_name (word=echo)) argument: (word=a)))"
     );
+    assert_eq!(parse(b"ec\\\nho a").offsets, [0, 1, 4, 5, 6, 7, 8]);
     assert_eq!(
         read("echo 'a\\\nb' # c\\\n"),
         "(program (command name: (command_name (word=echo)) argument: (raw_string='a\\\nb')) (comment=# c\\))"
     );
+    // A backslash ending the input continues onto nothing.
+    assert_eq!(parse(b"echo a\\").source, b"echo a");
 }
 
 #[test]
@@ -190,23 +264,47 @@ fn bash_parses_these_only_when_it_runs_them() {
 
 #[test]
 fn refusals_are_in_bash_words() {
+    let said = |source: &str| {
+        let refusal = refused(source);
+        (
+            String::from_utf8_lossy(&refusal.message).into_owned(),
+            refusal.status,
+        )
+    };
+    assert_eq!(refused("if a; then").at, 10);
     assert_eq!(
-        refused("if a; then"),
-        (10, "syntax error: unexpected end of file".into())
+        said("if a; then"),
+        ("mirage: syntax error: unexpected end of file\n".into(), 2)
+    );
+    assert_eq!(said("echo a; fi").0, "mirage: syntax error near 'fi'\n");
+    // A redirect with no word is refused at the newline bash supposes
+    // at the end of the input.
+    assert_eq!(said("echo >").0, "mirage: syntax error near 'newline'\n");
+    // A substitution bash cannot parse is refused with 127, an array
+    // with 1, and after an array's refusal bash reads on from the next
+    // line.
+    assert_eq!(
+        said("echo $(fi)"),
+        ("mirage: syntax error near 'fi'\n".into(), 127)
     );
     assert_eq!(
-        refused("echo a; fi"),
-        (8, "syntax error near unexpected token `fi'".into())
+        said("x=(1 ;)\necho ${a"),
+        (
+            "mirage: syntax error near ';'\nmirage: unexpected EOF while looking for matching `}'\n"
+                .into(),
+            1
+        )
+    );
+    assert_eq!(said("x=1 > f y=(b)").0, "mirage: syntax error near '('\n");
+    // `[[` words its own refusals before the text it stopped at.
+    assert_eq!(
+        said("[[ a -a b ]]").0,
+        "mirage: conditional binary operator expected\nmirage: syntax error near '-a'\n"
     );
     assert_eq!(
-        refused("echo $(fi)").1,
-        "syntax error near unexpected token `fi'"
+        said("for ((a b)); do :; done").0,
+        "mirage: syntax error: arithmetic expression required\nmirage: syntax error: `((a b))'\n"
     );
-    assert_eq!(
-        refused("x=1 > f y=(b)").1,
-        "syntax error near unexpected token `('"
-    );
-    assert!(refused("[[ a -o b ]]").1.contains("conditional"));
     refused("( ! )");
     refused("echo | ! a");
 }
@@ -222,8 +320,11 @@ fn reserved_words_follow_a_compound_command_bare() {
 
 #[test]
 fn deep_nesting_is_refused_not_overflowed() {
-    let deep = format!("{}a{}", "$(".repeat(5000), ")".repeat(5000));
-    assert_eq!(refused(&deep).1, "syntax error: nesting too deep");
+    let deep = format!("{}a{}", "! ".repeat(5000), ")".repeat(5000));
+    assert_eq!(
+        refused(&deep).message,
+        b"mirage: syntax error: nesting too deep\n"
+    );
     let wide = format!("a{}", " && a".repeat(100_000));
     assert_eq!(parse(wide.as_bytes()).error, None);
 }
@@ -233,6 +334,14 @@ fn backtracking_over_nested_input_is_bounded() {
     let nested = format!("{}a{}", "[ $(".repeat(40), ")".repeat(40));
     let tree = parse(nested.as_bytes());
     assert!(tree.error.is_some());
+}
+
+#[test]
+fn backtick_pairs_are_read_once() {
+    let line = format!("echo{}", " `date`".repeat(50_000));
+    assert_eq!(parse(line.as_bytes()).error, None);
+    let lines = "echo a `date` b\n".repeat(50_000);
+    assert_eq!(parse(lines.as_bytes()).error, None);
 }
 
 #[test]
@@ -283,27 +392,26 @@ fn a_process_substitution_opening_a_subshell_is_read_when_it_runs() {
 #[test]
 fn a_heredoc_pending_across_an_array_is_read_again() {
     // The body read at the array's newline becomes the delimiter of a
-    // second read, which ends only at the end of the input...
+    // second read, which ends only at the end of the input; the redirect
+    // gets that one...
+    let tree = parse(b"cat <<EOF; x=(1\nbody\nEOF\n2)\nfi");
+    assert_eq!(tree.source, b"cat <\"fi\n\"; x=(1\n2)\n");
     assert_eq!(
-        read("cat <<EOF; x=(1\nbody\nEOF\n2)\nfi"),
-        "(program (redirected_statement body: (command name: (command_name (word=cat))) \
-         redirect: (heredoc_redirect (heredoc_start=EOF))) (variable_assignment name: (variable_name=x) \
-         value: (array (number=1) (number=2))) (heredoc_body=fi))"
+        String::from_utf8_lossy(&tree.warnings()),
+        "mirage: line 5: warning: here-document at line 4 delimited by end-of-file (wanted `body\n')\n"
     );
     // ...unless that body was empty.
     assert_eq!(
-        read("cat <<EOF; x=(1\nEOF\n2)\necho a\n\necho b"),
-        "(program (redirected_statement body: (command name: (command_name (word=cat))) \
-         redirect: (heredoc_redirect (heredoc_start=EOF))) (variable_assignment name: (variable_name=x) \
-         value: (array (number=1) (number=2))) (heredoc_body=echo a\n) (heredoc_end=) \
-         (command name: (command_name (word=echo)) argument: (word=b)))"
+        lowered("cat <<EOF; x=(1\nEOF\n2)\necho a\n\necho b"),
+        (
+            "cat <\"echo a\n\"; x=(1\n2)\necho b".into(),
+            vec![heredoc("", "echo a\n", true)]
+        )
     );
     // An empty delimiter ends the body at the first empty line.
     assert_eq!(
-        read("cat <<''\n\necho x"),
-        "(program (redirected_statement body: (command name: (command_name (word=cat))) \
-         redirect: (heredoc_redirect (heredoc_start='') (heredoc_body=) (heredoc_end=))) \
-         (command name: (command_name (word=echo)) argument: (word=x)))"
+        lowered("cat <<''\n\necho x"),
+        ("cat <\"\"\necho x".into(), vec![heredoc("", "", true)])
     );
 }
 
@@ -320,16 +428,28 @@ fn an_array_element_opens_a_subscript_only_at_its_start() {
 
 #[test]
 fn heredoc_delimiters_read_as_bash_reads_them() {
-    assert!(read("cat <<$'\\x41'\nb\nA\necho").contains("(heredoc_end=A)"));
-    assert!(read("cat <<$'\\''\nb\n'\necho").contains("(heredoc_end=')"));
+    assert_eq!(
+        lowered("cat <<$'\\x41'\nb\nA\necho").1,
+        vec![heredoc("A", "b\n", true)]
+    );
+    assert_eq!(
+        lowered("cat <<$'\\''\nb\n'\necho").1,
+        vec![heredoc("'", "b\n", true)]
+    );
     // A substitution's quotes stay in the delimiter and quote nothing.
-    let tree = read("cat <<$(echo 'a')\n$x\n$(echo 'a')");
-    assert!(tree.contains("(heredoc_body (simple_expansion"), "{tree}");
-    // A quoted body keeps its continuations, read after its line too.
-    let tree = read("cat <<'E'; :\na\\\nE\necho");
-    assert!(
-        tree.contains("(heredoc_body=a\\\n) (heredoc_end=E)"),
-        "{tree}"
+    let (source, heredocs) = lowered("cat <<$(echo 'a')\n$x\n$(echo 'a')");
+    assert_eq!(source, "cat <\"$x\n\"\n");
+    assert_eq!(heredocs, vec![heredoc("$(echo 'a')", "$x\n", true)]);
+    // A continuation inside the word is gone before the word is read.
+    assert_eq!(
+        lowered("cat <<$\\\n\"END\"\nx\nEND\n").1,
+        vec![heredoc("END", "x\n", true)]
+    );
+    // A quoted body keeps its continuations, its `$` and backticks
+    // escaped in the word it becomes.
+    assert_eq!(
+        lowered("cat <<'E'; :\na\\\n$x`\nE\necho").0,
+        "cat <\"a\\\\\n\\$x\\`\n\"; :\necho"
     );
 }
 
@@ -346,7 +466,10 @@ fn bash_readings_from_review() {
     refused("for i in a & do :; done");
     refused("select i & do :; done");
     let bangs = format!("{}a", "! ".repeat(200));
-    assert_eq!(refused(&bangs).1, "syntax error: nesting too deep");
+    assert_eq!(
+        refused(&bangs).message,
+        b"mirage: syntax error: nesting too deep\n"
+    );
     // Too deep to read, a loop header is raw text bash reads when it runs.
     let chain = format!("for (({}1;;)); do :; done", "a=".repeat(200));
     assert!(read(&chain).contains("(word=a=a=a="));
@@ -356,20 +479,16 @@ fn bash_readings_from_review() {
 fn a_failed_read_puts_back_every_heredoc_it_took() {
     // The expansion's word fails to parse after reading B's body, and is
     // read raw: A is pending again with its own delimiter.
-    let tree = read("cat <<A; echo ${x:-$(cat <<B\nb\nB\n)(a\na\nA\n|)}\nafter\nA\necho done");
-    assert!(
-        tree.ends_with(
-            "(heredoc_body=after\n) (heredoc_end=A) (command name: (command_name (word=echo)) \
-             argument: (word=done)))"
-        ),
-        "{tree}"
-    );
+    let (source, heredocs) =
+        lowered("cat <<A; echo ${x:-$(cat <<B\nb\nB\n)(a\na\nA\n|)}\nafter\nA\necho done");
+    assert!(source.ends_with("\necho done"), "{source:?}");
+    assert_eq!(heredocs, vec![heredoc("A", "after\n", true)]);
 }
 
 #[test]
 fn an_alias_is_a_command_where_a_reserved_word_would_start() {
     let aliases = [b"fi".to_vec(), b"in".to_vec()];
-    let tree = parse_with_aliases(b"fi; for i in a; do :; done", &aliases);
+    let tree = aliased(b"fi; for i in a; do :; done", &aliases);
     assert_eq!(tree.error, None);
     assert!(
         sexp(&tree).starts_with("(program (command name: (command_name (word=fi))) (for_statement"),
@@ -453,7 +572,7 @@ fn a_raw_c_style_header_splits_at_its_outer_semicolons() {
 fn an_in_alias_is_a_command_only_where_one_starts() {
     let aliases = [b"in".to_vec()];
     assert_eq!(
-        sexp(&parse_with_aliases(b"in", &aliases)),
+        sexp(&aliased(b"in", &aliases)),
         "(program (command name: (command_name (word=in))))"
     );
     for header in [
@@ -461,7 +580,7 @@ fn an_in_alias_is_a_command_only_where_one_starts() {
         b"case x in x) :;; esac",
         b"select s in; do :; done",
     ] {
-        assert_eq!(parse_with_aliases(header, &aliases).error, None);
+        assert_eq!(aliased(header, &aliases).error, None);
     }
 }
 
@@ -477,4 +596,114 @@ fn tokens_the_executor_reads_by_kind() {
     assert!(!kinds("for f do :; done").contains(&"in"));
     assert!(kinds("for f in; do :; done").contains(&"in"));
     assert!(kinds("cat <>f").contains(&"<>"));
+}
+
+#[test]
+fn heredoc_warnings_name_the_lines_bash_names() {
+    // The heredoc is named by the line its body starts after.
+    let tree = parse(b"cat <<E \\\nx\nbody");
+    assert_eq!(
+        String::from_utf8_lossy(&tree.warnings()),
+        "mirage: line 3: warning: here-document at line 2 delimited by end-of-file (wanted `E')\n"
+    );
+    // A substitution closing with a body still to read.
+    let tree = parse(b"echo $(cat <<E)\nx\nE\n");
+    assert_eq!(
+        String::from_utf8_lossy(&tree.warnings()),
+        "mirage: line 1: warning: command substitution: 1 unterminated here-document\n"
+    );
+    let substitution = (0..tree.nodes.len())
+        .find(|index| KINDS[usize::from(tree.nodes[*index].kind)].0 == "command_substitution")
+        .expect("a substitution");
+    assert_eq!(tree.inlined(substitution), b"$(cat <<E\nx\nE\n)");
+}
+
+#[test]
+fn a_line_nested_past_the_reader_is_refused_at_the_next_opener() {
+    let braces = |n: usize| format!("{}a; {}", "{ ".repeat(n), "} ".repeat(n));
+    assert_eq!(parse(braces(64).as_bytes()).error, None);
+    assert_eq!(
+        refused(&braces(65)).message,
+        b"mirage: syntax error near '{'\n"
+    );
+    let substitutions = format!("echo {}x{}; fi", "$(echo ".repeat(4096), ")".repeat(4096));
+    assert_eq!(
+        refused(&substitutions).message,
+        b"mirage: syntax error near '$('\n"
+    );
+    // A `!` chain or quotes nested past what the reader takes are refused,
+    // not read on a stack they would overflow.
+    let bangs = format!("[[ {}x ]]", "! ".repeat(5000));
+    assert_eq!(
+        refused(&bangs).message,
+        b"mirage: syntax error: nesting too deep\n"
+    );
+    let quotes = format!("echo \"{}", "$(\"".repeat(100_000));
+    refused(&quotes);
+    let expansions = format!("echo {}", "${x:-".repeat(100_000));
+    refused(&expansions);
+}
+
+#[test]
+fn substitutions_nested_in_expansions_are_scanned_once() {
+    // Each `${` scans the `$(` inside it; read again at every level, the
+    // work doubled per level and a short line ran out of budget.
+    for depth in [12, 24] {
+        let line = format!(
+            "echo {}ok{}",
+            "${x:-$(echo ".repeat(depth),
+            ")}".repeat(depth)
+        );
+        assert_eq!(parse(line.as_bytes()).error, None, "{depth}");
+    }
+}
+
+#[test]
+fn only_a_substitution_carries_its_heredoc_bodies_inlined() {
+    // Each list around the substitution would copy the whole body again.
+    let tree = parse(b"echo $(cat <<E) && true && true\nx\nE\n");
+    let carriers: Vec<&str> = (0..tree.nodes.len())
+        .filter(|index| !tree.inlined(*index).is_empty())
+        .map(|index| KINDS[usize::from(tree.nodes[index].kind)].0)
+        .collect();
+    assert_eq!(carriers, ["command_substitution"]);
+}
+
+#[test]
+fn heredocs_read_as_bash_orders_and_keeps_them() {
+    let bodies = |source: &[u8]| {
+        parse(source)
+            .heredocs
+            .iter()
+            .map(|heredoc| String::from_utf8_lossy(&heredoc.body).into_owned())
+            .collect::<Vec<_>>()
+    };
+    // A quoted body the joined line brings to light keeps its continuation.
+    assert_eq!(
+        bodies(b"i\\\nf true; then cat <<'E'\na\\\nb\nE\nfi"),
+        ["a\\\nb\n"]
+    );
+    // Siblings hand their heredocs out in the order they close, however
+    // deep each sits; a substitution's come before the line's own.
+    assert_eq!(
+        bodies(b"echo \"$(cat <<A)\" \"$(echo $(cat <<B))\"\na\nA\nb\nB"),
+        ["a\n", "b\n"]
+    );
+    assert_eq!(
+        bodies(b"cat <<OUT; echo \"$(cat <<IN)\"\nin\nIN\nout\nOUT"),
+        ["out\n", "in\n"]
+    );
+}
+
+#[test]
+fn a_case_pattern_takes_an_extglob_group_only_with_extglob_on() {
+    let line = b"case a in @(a)) echo yes;; esac";
+    let off = Options {
+        extglob: false,
+        ..Options::default()
+    };
+    let refusal = parse_with(line, &off).error.expect("a refusal");
+    assert_eq!(refusal.message, b"mirage: syntax error near '('\n");
+    assert_eq!(parse(line).error, None);
+    assert_eq!(parse_with(b"[[ a == @(a) ]]", &off).error, None);
 }

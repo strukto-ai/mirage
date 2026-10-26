@@ -78,7 +78,7 @@ async function expandBraceWord(
 }
 
 /**
- * Expand tree-sitter child nodes to words that still know their quoting.
+ * Expand parsed child nodes to words that still know their quoting.
  *
  * Each node expands to its pieces, which IFS then splits into fields, so
  * an unquoted expansion anywhere in a word splits (`q$x` too) and quoted

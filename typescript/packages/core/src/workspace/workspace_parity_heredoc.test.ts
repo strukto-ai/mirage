@@ -271,10 +271,8 @@ describe('workspace: job table cleanup', () => {
   })
 })
 
-// tree-sitter-bash used to lex a heredoc body line opening with a backslash
-// as more words of the operator line, and to skip the first line's leading
-// whitespace; parse() shields such bodies so the workspace reads them as
-// bash does (issue #1050).
+// A heredoc body line opening with a backslash is body text, and the first
+// line keeps its leading whitespace, as bash reads them (issue #1050).
 describe('workspace: heredoc bodies the lexer would swallow', () => {
   it('keeps a leading backslash line', async () => {
     const { ws } = makeWorkspace()
@@ -391,9 +389,8 @@ describe('workspace: heredoc leading empty lines and escaped delimiters', () => 
 })
 
 // A backslash before a newline in the delimiter is the reader's line
-// continuation rather than quoting, so the body it opens expands, and the
-// terminator line tree-sitter leaves in that body is not body text
-// (issue #1050).
+// continuation rather than quoting, so the body it opens expands, and its
+// terminator line is not body text (issue #1050).
 describe('workspace: heredoc continued delimiters', () => {
   it('expands the body of a continued delimiter', async () => {
     const { ws } = makeWorkspace()
@@ -465,9 +462,9 @@ describe('workspace: heredoc operator lines that hold a case or a nested quote',
 
 // Pinned against bash 5.2 on debian:stable-slim: the `&&`/`||` written on
 // a heredoc's operator line wraps the heredoc'd command, as it would any
-// other command. tree-sitter parses that tail inside the heredoc, which
-// used to make `|| echo` a phantom pipe stage: the body was lost and the
-// recovery never ran.
+// other command. Read inside the heredoc, that tail used to make
+// `|| echo` a phantom pipe stage: the body was lost and the recovery never
+// ran.
 describe('workspace: heredoc operator-line list', () => {
   it.each([
     ["false <<'EOF' || echo recovered\nignored\nEOF", 'recovered\n', 0],
