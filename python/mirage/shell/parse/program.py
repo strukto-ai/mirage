@@ -1,6 +1,7 @@
 from collections.abc import Callable, Sequence
 from typing import Any
 
+from mirage._rs import ShellNode
 from mirage.shell.types import TSNodeLike
 
 
@@ -14,15 +15,12 @@ class ParsedProgram:
 
     Args:
         original (str): the line as typed.
-        root (TSNodeLike): the parsed tree.
-        offsets (tuple[int, ...]): ``source_offsets(original, root)``.
+        root (ShellNode): the parsed tree.
     """
 
-    def __init__(
-        self, original: str, root: TSNodeLike, offsets: tuple[int, ...]
-    ) -> None:
+    def __init__(self, original: str, root: ShellNode) -> None:
         self.original = original
-        self.offsets = offsets
+        self.offsets = tuple(root.offsets)
         self.references = 1
         self._released = False
         self.root = ProgramNode(root, self)
@@ -101,16 +99,6 @@ class ProgramNode:
     def is_named(self) -> bool:
         self.program.check()
         return self._node.is_named
-
-    @property
-    def is_missing(self) -> bool:
-        self.program.check()
-        return self._node.is_missing
-
-    @property
-    def has_error(self) -> bool:
-        self.program.check()
-        return self._node.has_error
 
     @property
     def children(self) -> list["ProgramNode"]:

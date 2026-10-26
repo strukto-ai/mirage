@@ -32,7 +32,9 @@ impl Parser<'_> {
             ("[", "]", Closer::Single)
         };
         let mut children = vec![self.expect(open)?];
-        let inside = self.i;
+        if double {
+            self.check_conditional(self.i)?;
+        }
         self.skip_space();
         if !self.at_test_close(closer) {
             let expression = if double {
@@ -45,9 +47,6 @@ impl Parser<'_> {
         }
         if !self.at_test_close(closer) {
             return self.fail(self.i);
-        }
-        if double {
-            self.check_conditional(inside, self.i)?;
         }
         children.push(self.expect(close)?);
         self.leave();

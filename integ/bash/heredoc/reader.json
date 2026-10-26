@@ -2623,6 +2623,70 @@
         "gdrive",
         "gdrive-folder"
       ]
+    },
+    {
+      "id": "heredoc_reader_pending_across_an_array_takes_its_last_body",
+      "command": "cat <<EOF; x=(1\nbody\nEOF\n2)\nfi",
+      "expect": {
+        "exit": 0,
+        "stdout": "fi\n",
+        "stderr": "mirage: line 5: warning: here-document at line 4 delimited by end-of-file (wanted `body\n')\n"
+      },
+      "seq": 509982,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder"
+      ]
+    },
+    {
+      "id": "heredoc_reader_warning_names_the_line_its_body_starts_after",
+      "command": "cat <<E \\\n-\nbody",
+      "expect": {
+        "exit": 0,
+        "stdout": "body\n",
+        "stderr": "mirage: line 3: warning: here-document at line 2 delimited by end-of-file (wanted `E')\n"
+      },
+      "seq": 509983,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "s3-prefix",
+        "databricks-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder"
+      ]
     }
   ]
 }

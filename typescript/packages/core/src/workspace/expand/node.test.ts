@@ -12,9 +12,18 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-export { heredocBodies, nextLine, terminatorLine } from './body.ts'
-export { ansiCEnd, cleanDelimiter, delimiterQuoted } from './delimiter.ts'
-export { constructCloser, constructEnd, operatorLineEnd, quoteEnd, reservedWord } from './line.ts'
-export { bodyPrefix, treeRoot } from './prefix.ts'
-export { heredocOperators } from './shield.ts'
-export type { HeredocOperator } from './types.ts'
+import { expect, it } from 'vitest'
+import { makeIntegrationWS, run } from '../../../tests/workspace/fixtures/integration_fixture.ts'
+
+it('expands a heredoc body by its own escapes', async () => {
+  // The body rides in a double-quoted word, but a quote is plain text in it
+  // and a backslash escapes only `$`, a backtick and itself.
+  const { ws } = makeIntegrationWS()
+  try {
+    expect(await run(ws, 'x=v; cat <<E\n"$x" \\"y\\" \\q \\$x \\\\ `echo t`\nE')).toBe(
+      '"v" \\"y\\" \\q $x \\ t\n',
+    )
+  } finally {
+    await ws.close()
+  }
+})

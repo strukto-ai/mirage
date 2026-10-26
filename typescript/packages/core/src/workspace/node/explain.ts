@@ -689,9 +689,9 @@ function* walkNode(
     // here exactly where that line will place them.
     const segments = segmentFrames(node, frame)
     if (segments.length > 0) {
-      // A backtick region is read as the evaluator runs it: one line per
-      // pair, parsed on its own, because tree-sitter lexes touching pairs
-      // as one node whose subtree is not what runs.
+      // A backtick region is read as the evaluator runs it: its body
+      // parsed again once its backslashes are gone, because the node's
+      // subtree is not what runs.
       for (const inner of segments) {
         yield* walkSubstitution(reparse(inner.text), session, home, inner, reparse, lost, elsewhere)
       }

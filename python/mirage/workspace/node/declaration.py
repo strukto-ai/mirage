@@ -187,7 +187,7 @@ async def execute_declaration(
     marks.
 
     Args:
-        node (Any): the tree-sitter ``declaration_command`` node.
+        node (Any): the ``declaration_command`` node.
         context (EvaluationContext): the evaluation's session and frame.
         execute_fn (Callable): recursive execute for substitutions.
         registry (MountRegistry): mount registry for glob resolution.

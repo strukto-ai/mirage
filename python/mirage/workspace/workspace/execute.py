@@ -48,9 +48,8 @@ from mirage.shell.errors import DiscardSignal, ExitSignal
 from mirage.shell.helpers import input_substitution_redirect
 from mirage.shell.job_table import JobTable, JobWaits
 from mirage.shell.literal import literal_tree
-from mirage.shell.parse import check_syntax, syntax_error_result
+from mirage.shell.parse.parse import syntax_refusal
 from mirage.shell.parse.scope import ParseScope
-from mirage.shell.parse.syntax import find_syntax_issue
 from mirage.shell.types import NodeType as NT
 from mirage.shell.types import TSNodeLike
 from mirage.types import PathSpec, Refusal
@@ -224,9 +223,9 @@ async def recurse(
             standing nowhere the pass could have placed them, so its
             gates ask afresh.
         span (tuple[int, int] | None): the span of ``cmd`` within the
-            node's text when the node holds several lines (a backtick
-            region, whose touching pairs tree-sitter lexes as one
-            node), so each stands at its own place.
+            node's text when it is not the node's whole text (a
+            backtick body, lexed again from the node), so it stands at
+            its own place.
         handed (HandOff | None): the hand-off of the subtree that runs
             this evaluation, bound by the walker at its entry point
             (``execute_node``): the line's own for a command in the
@@ -722,39 +721,37 @@ async def run_prepared_line(
     try:
         aliases = expanding_aliases(effective_session)
         ast = (
-            parse_scope.parse(command, aliases)
+            parse_scope.parse(
+                command,
+                aliases,
+                effective_session.shopts.get("extglob", False),
+            )
             if argv is None
             else literal_tree(argv)
         )
         # Syntax gates before policy, mirroring the TS order and
         # bash: an unparsable line exits 2 and the policy is never
-        # consulted about it. bash's reading of the line decides; the
-        # grammar's own errors only stop a line it cannot build.
-        found = None
-        if argv is None:
-            found = check_syntax(
-                command,
-                aliases,
-                extglob=effective_session.shopts.get("extglob", False),
-            ) or find_syntax_issue(ast)
-        if found is not None:
-            io = syntax_error_result(found)
-            if call_stack is not None and io.exit_code == 127:
+        # consulted about it.
+        unreadable = syntax_refusal(ast) if argv is None else None
+        if unreadable is not None:
+            if call_stack is not None and unreadable.exit_code == 127:
                 # A substitution bash cannot parse ends the shell, from
                 # `eval` and `source` too: 127, or 1 out of a child.
                 raise ExitSignal(
-                    127, await io.materialize_stderr(), contained_code=1
+                    127,
+                    await unreadable.materialize_stderr(),
+                    contained_code=1,
                 )
             if (
                 call_stack is not None
                 and call_stack.subshell
-                and io.exit_code == 1
+                and unreadable.exit_code == 1
             ):
                 # An array bash cannot read discards its line: `eval`
                 # and `source` return 1, and a child shell ends there.
-                raise DiscardSignal(await io.materialize_stderr())
-            record_status(session, io.exit_code)
-            return io
+                raise DiscardSignal(await unreadable.materialize_stderr())
+            record_status(session, unreadable.exit_code)
+            return unreadable
         nested = NestedRefusal()
 
         def note(refusal: Refusal) -> None:

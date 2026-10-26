@@ -22,6 +22,4 @@ export {
   referencedNames,
   sameNode,
 } from './names.ts'
-export { parse } from './parse.ts'
-export { joinContinuations, sourceOffsets } from './source.ts'
-export { checkSyntax, syntaxErrorResult } from './syntax.ts'
+export { parse, syntaxRefusal } from './parse.ts'

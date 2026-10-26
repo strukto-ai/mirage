@@ -45,7 +45,7 @@ async def _out(ws: Workspace, cmd: str) -> str:
 
 @pytest.mark.asyncio
 async def test_redirect_target_expands_after_cd_in_list():
-    # tree-sitter hoists the trailing redirect over the && list; the
+    # The parser hoists the trailing redirect over the && list; the
     # target must still expand with the cwd the last command sees.
     ws = await _workspace()
     await ws.shell("cd /data && echo hi > OUT")
@@ -674,9 +674,9 @@ async def test_stdin_from_a_closed_or_write_only_descriptor_is_unreadable(
 
 # Pinned against bash 5.2 on debian:stable-slim: the `&&`/`||` written on
 # a heredoc's operator line wraps the heredoc'd command, as it would any
-# other command. tree-sitter parses that tail inside the heredoc, which
-# used to make `|| echo` a phantom pipe stage: the body was lost and the
-# recovery never ran.
+# other command. Read inside the heredoc, that tail used to make
+# `|| echo` a phantom pipe stage: the body was lost and the recovery never
+# ran.
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "line,expected",

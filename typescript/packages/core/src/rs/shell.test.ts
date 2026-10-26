@@ -51,11 +51,22 @@ describe('parseShell', () => {
 
   it('reports a refused line in bash words', () => {
     const tree = parseShell('if true; then')
-    expect(tree.rootNode.hasError).toBe(true)
-    expect(tree.error).toEqual({ index: 13, message: 'syntax error: unexpected end of file' })
+    expect(tree.error).toEqual({
+      index: 13,
+      message: 'mirage: syntax error: unexpected end of file\n',
+      status: 2,
+    })
     expect(parseShell('echo a; fi').error).toEqual({
       index: 8,
-      message: "syntax error near unexpected token `fi'",
+      message: "mirage: syntax error near 'fi'\n",
+      status: 2,
+    })
+    // With extglob off a pattern group is no word.
+    expect(parseShell('echo @(a)').error).toBeNull()
+    expect(parseShell('echo @(a)', [], false).error).toEqual({
+      index: 6,
+      message: "mirage: syntax error near '('\n",
+      status: 2,
     })
   })
 
@@ -94,5 +105,60 @@ describe('parseShell', () => {
     const two = parseShell('a').rootNode
     expect(one.id).not.toBe(two.id)
     expect(one.children[0]?.id).toBe(one.children[0]?.id)
+  })
+})
+
+describe('the text a tree reads', () => {
+  it.each([
+    // An odd-length trailing run ends in a live continuation.
+    ['echo a\\', 'echo a'],
+    ['echo a\\\\\\', 'echo a\\\\'],
+    ['echo \\', 'echo '],
+    // An even-length run is all escaped backslashes, so nothing goes.
+    ['echo a\\\\', 'echo a\\\\'],
+    ['echo a\\\\\\\\', 'echo a\\\\\\\\'],
+    ['echo a', 'echo a'],
+    ['echo a\\ b', 'echo a\\ b'],
+    // Mid-line, the pair goes wherever the reader sees it.
+    ['echo a\\\nb', 'echo ab'],
+    ['echo "a\\\nb"', 'echo "ab"'],
+    ['echo $\\\n{x} $((1\\\n+2))', 'echo ${x} $((1+2))'],
+    ['ec\\\nho a', 'echo a'],
+    ['echo a\\\\\nb', 'echo a\\\\\nb'],
+    ['echo a\\\\\\\nb', 'echo a\\\\b'],
+    // Single-quoted and ANSI-C text and comments keep theirs.
+    ["echo 'a\\\nb'", "echo 'a\\\nb'"],
+    ["echo $'a\\\nb'", "echo $'a\\\nb'"],
+    ['echo a # c \\\necho b', 'echo a # c \\\necho b'],
+    ['echo "$(echo \'u\\\nv\')"', 'echo "$(echo \'u\\\nv\')"'],
+    ['echo "it\'s a\\\nb"', 'echo "it\'s ab"'],
+  ])('drops the continuations of %j', (command, expected) => {
+    expect(parseShell(command).source).toBe(expected)
+  })
+
+  it('keeps a quoted heredoc body whole', () => {
+    const tree = parseShell("cat <<'E' | \\\ntr a b\na\\\nb\nE")
+    expect(tree.source).toBe('cat <"a\\\\\nb\n" | tr a b\n')
+    expect(tree.rootNode.sourceText).toBe("cat <<'E' | \\\ntr a b\na\\\nb\nE")
+  })
+
+  it('joins an unquoted heredoc body', () => {
+    expect(parseShell('cat <<E | \\\ntr a b\na\\\nb $x\nE').source).toBe(
+      'cat <"ab $x\n" | tr a b\n',
+    )
+  })
+
+  it.each([
+    ['continuation', 'echo A; \\\n fi'],
+    ['expansion', 'echo /api/$c/$id.json; fi'],
+    ['bang', '! echo A \\\n; fi'],
+    ['time', 'time echo A \\\n; fi'],
+    ['heredoc', 'cat <<E; fi\nbody\nE'],
+  ])('points a %s node back into the line as typed', (_label, command) => {
+    // The stray `fi` is where the parser refuses each line.
+    const root = parseShell(command).rootNode
+    const errors = root.children.filter((node) => node.type === 'ERROR')
+    expect(errors).toHaveLength(1)
+    expect(root.offsets[errors[0]?.startIndex ?? -1]).toBe(command.lastIndexOf('fi'))
   })
 })

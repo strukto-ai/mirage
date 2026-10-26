@@ -28,34 +28,29 @@ impl Parser<'_> {
 
     /// `((`: an arithmetic command, or, when what follows does not read as
     /// one, a subshell whose first command is a subshell, as bash rereads
-    /// it.
+    /// it. One whose matched text ends its line bash rereads that way up
+    /// to there and refuses, unless something inside fails first.
     pub(super) fn double_paren(&mut self) -> R<Syn> {
-        if self.double_paren_end(self.i).is_some() {
+        let at = self.i;
+        let end = self.scan_matched(at + 2, at, b'(', b')')?;
+        if self.s.get(end + 1) == Some(&b')') && self.double_paren_end(at).is_some() {
             return self.arithmetic_command();
         }
-        // bash refuses a `((` whose first unmatched `)` ends a line.
-        if self.paren_close_at_newline(self.i) {
-            return self.fail(self.i);
+        if matches!(self.s.get(end + 1), None | Some(b'\n')) {
+            let mut reread = Parser {
+                i: at + 1,
+                ended: true,
+                frames: self.frames.clone(),
+                comsub: self.comsub,
+                nesting: self.nesting,
+                ..Parser::new(&self.s[..=end], self.budget, self.options)
+            };
+            return Err(match reread.statements(Close::Paren, None, true) {
+                Err(fail) if !fail.eof || fail.matching => fail,
+                _ => self.near(end + 1, true),
+            });
         }
         self.subshell()
-    }
-
-    /// Whether the first `)` that closes nothing after the `((` at `at` is
-    /// followed by a newline.
-    fn paren_close_at_newline(&self, at: usize) -> bool {
-        let mut depth = 0usize;
-        let mut end = at + 2;
-        while end < self.s.len() {
-            match self.s[end] {
-                b'\\' => end += 1,
-                b'(' => depth += 1,
-                b')' if depth > 0 => depth -= 1,
-                b')' => return self.s.get(end + 1) == Some(&b'\n'),
-                _ => {}
-            }
-            end += 1;
-        }
-        false
     }
 
     pub(super) fn if_statement(&mut self) -> R<Syn> {

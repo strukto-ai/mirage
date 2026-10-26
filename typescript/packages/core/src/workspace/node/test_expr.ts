@@ -38,7 +38,7 @@ const COND_OP_TOKENS = new Set(['=', '==', '!=', '=~', '<', '>', '&&', '||'])
 /**
  * Expand a test_command `[ ... ]` into flat argv, tokens in source order.
  *
- * tree-sitter nests `-a`/`-o` chains unpredictably, so the shape is
+ * The parser nests `-a`/`-o` chains by its own precedence, so the shape is
  * discarded: every operator token and expanded operand is re-serialized
  * and the flat bash arity rules take over. Unquoted expansions
  * word-split like bash (an empty one drops out of argv).
@@ -68,9 +68,9 @@ export async function expandTestExpr(
 /**
  * Build a structured condition tree from a `[[ ... ]]` node.
  *
- * tree-sitter nests the expression by its own precedence (`=~` looser than
+ * The parser nests the expression by its own precedence (`=~` looser than
  * `||`, `!` tighter than `=~`), so its tokens are read again as bash parses
- * them; a shape that reading refuses keeps tree-sitter's tree.
+ * them; a shape that reading refuses keeps the parser's tree.
  */
 export async function expandDoubleBracket(
   node: TSNodeLike,
@@ -86,7 +86,7 @@ export async function expandDoubleBracket(
     tree = new CondParser(condTokens(node)).parse()
   } catch (error) {
     if (!(error instanceof CondSyntax)) throw error
-    console.debug(`[[ ]] keeps tree-sitter's reading: ${String(error)}`)
+    console.debug(`[[ ]] keeps the parser's reading: ${String(error)}`)
     return buildCond(first, context, executeFn, cs, view)
   }
   return condNode(tree, context, executeFn, cs, view)
@@ -275,7 +275,7 @@ async function comparison(
 ): Promise<CondNode> {
   if (op === '=~' && right.type === NT.REGEX) {
     const raw = right.text
-    // After =~ tree-sitter lexes even a quoted operand as one regex
+    // After =~ the parser lexes even a quoted operand as one regex
     // token; quoted means bash matches it literally.
     const singleQuoted = raw.length >= 2 && raw.startsWith("'") && raw.endsWith("'")
     const doubleQuoted = raw.length >= 2 && raw.startsWith('"') && raw.endsWith('"')

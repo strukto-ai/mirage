@@ -179,9 +179,8 @@ def test_command_dispatches_to_mount():
 
 
 def test_trailing_comment_is_ignored_at_program_level():
-    # Regression: tree-sitter-bash emits a `comment` sibling under `program`
-    # for `cmd # text`. Previously this raised
-    # "unsupported tree-sitter node type: comment".
+    # Regression: the parser emits a `comment` sibling under `program`
+    # for `cmd # text`, which once failed as an unsupported node type.
     stdout, io, _, _, mount, _ = _exec(
         "cat /data/file.txt        # -l, -a clustered"
     )

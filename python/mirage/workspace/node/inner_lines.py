@@ -84,7 +84,6 @@ _TEST_NESTS = frozenset(
         NT.UNARY_EXPRESSION,
         NT.NEGATION_EXPRESSION,
         NT.PARENTHESIZED_EXPRESSION,
-        NT.ERROR,
     }
 )
 _TEST_SKIPS = frozenset({"[", "]", "[[", "]]"})

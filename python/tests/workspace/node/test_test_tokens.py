@@ -41,7 +41,7 @@ def _spelled(token: ExprToken) -> str:
 
 
 def test_flat_tokens_are_the_words_test_is_given():
-    # A `-N` tree-sitter splits is one operand again, as test reads it.
+    # A `-N` the parser splits is one operand again, as test reads it.
     node = _test_node("[ -e x -o ! 1 -lt -2 ]")
     assert [_spelled(t) for t in flat_tokens(node)] == [
         "-e",

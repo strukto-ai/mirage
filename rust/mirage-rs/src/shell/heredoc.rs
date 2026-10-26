@@ -2,63 +2,89 @@
 // https://github.com/tree-sitter/tree-sitter-bash
 // Licensed under MIT. See licenses/third_party/tree-sitter-bash-parser.txt.
 use super::lex::{ansi_c_end, blank_end, is_space, pair_end, quote_end};
-use super::parser::{Fail, Parser, R};
+use super::parser::{Parser, R};
 use super::tree::Syn;
 
 /// A heredoc whose operator line has been read and whose body has not.
 #[derive(Debug, Clone)]
 pub(super) struct Pending {
+    /// Where its `<<` stands.
+    pub operator: usize,
+    /// Where its delimiter word starts and ends.
+    pub word_start: usize,
+    pub word_end: usize,
     pub delimiter: Vec<u8>,
     /// How many substitutions enclose its operator: bash reads the bodies
     /// of the innermost first.
     pub depth: usize,
-    /// A quoted delimiter: the body is not expanded.
+    /// A quoted delimiter: the body is not expanded, and a backslash
+    /// ending one of its lines continues nothing.
     pub raw: bool,
     /// `<<-`: leading tabs are stripped.
     pub dash: bool,
 }
 
+/// A body as bash reads it: its lines, continued ones joined unless the
+/// delimiter was quoted and leading tabs stripped for `<<-`, each ended
+/// by a newline.
+#[derive(Debug, Clone)]
+pub(super) struct Body {
+    pub heredoc: Pending,
+    /// Where its first line starts.
+    pub start: usize,
+    /// Past its delimiter line, or the end of the input.
+    pub end: usize,
+    pub text: Vec<u8>,
+    /// Where each byte of `text` sits in the source; a newline joined in
+    /// sits at the newline it stands for.
+    pub offsets: Vec<usize>,
+    /// Whether the delimiter line ended it, not the end of the input.
+    pub terminated: bool,
+    /// The line bash's reader stands on when the input ends inside it.
+    pub eof_line: usize,
+}
+
 impl Parser<'_> {
-    /// `<<word` and what follows it on its line, then its body. `children`
-    /// holds the descriptor, if any. A second heredoc on a line, or one
-    /// whose line goes on past what the grammar nests in its redirect,
-    /// leaves its body to be read after the line.
-    pub(super) fn heredoc(&mut self, mut children: Vec<Syn>) -> R<Syn> {
+    /// `<<word`: its body is read after the newline that ends its line.
+    /// `children` holds the descriptor, if any; a `greedy` one takes the
+    /// words after it, as a file redirect does.
+    pub(super) fn heredoc(&mut self, mut children: Vec<Syn>, greedy: bool) -> R<Syn> {
         let at = self.i;
         let dash = self.starts(b"<<-");
         let op = if dash { "<<-" } else { "<<" };
         self.i += op.len();
         children.push(Syn::token(op, at, self.i));
-        self.i = blank_end(self.s, self.i);
+        loop {
+            self.i = blank_end(self.s, self.i);
+            if !self.starts(b"\\\n") {
+                break;
+            }
+            self.i += 2;
+        }
         let (start, end, delimiter, raw) = self.heredoc_word()?;
         children.push(Syn::leaf("heredoc_start", start, end));
-        let pending = Pending {
+        self.pending.push(Pending {
+            operator: at,
+            word_start: start,
+            word_end: end,
             delimiter,
             depth: self.comsub,
             raw,
             dash,
-        };
-        if !self.pending.is_empty() {
-            self.pending.push(pending);
-            return Ok(Syn::node("heredoc_redirect", children));
-        }
-        self.skip_blank();
-        if self.peek() == b'\n' || self.eof() {
-            return self.heredoc_finish(children, pending);
-        }
-        let mark = self.mark();
-        let kept = children.len();
-        match self.heredoc_tail(&mut children) {
-            Ok(()) if (self.peek() == b'\n' || self.eof()) && self.pending.is_empty() => {
-                self.heredoc_finish(children, pending)
-            }
-            _ => {
-                self.reset(mark);
-                children.truncate(kept);
-                self.pending.push(pending);
-                Ok(Syn::node("heredoc_redirect", children))
+        });
+        if greedy {
+            loop {
+                self.skip_blank();
+                if self.at_command_end() || self.at_redirect() || self.starts(b"<<<") {
+                    break;
+                }
+                match self.literal_opt(super::word::Ctx::default())? {
+                    Some(word) => children.push(word.with_field("argument")),
+                    None => break,
+                }
             }
         }
+        Ok(Syn::node("heredoc_redirect", children))
     }
 
     /// The delimiter word: its span, its text with quotes removed, and
@@ -70,7 +96,7 @@ impl Parser<'_> {
             return self.fail(start);
         }
         self.i = end;
-        let (text, raw) = unquote(&self.s[start..end]);
+        let (text, raw) = unquote(&joined(&self.s[start..end]));
         Ok((start, end, text, raw))
     }
 
@@ -88,7 +114,7 @@ impl Parser<'_> {
             end = match byte {
                 b'\\' => end + 2,
                 b'\'' | b'"' | b'`' => {
-                    quote_end(s, end, byte).ok_or_else(|| self.unexpected(s.len()))?
+                    quote_end(s, end, byte).ok_or_else(|| self.matching(end, char::from(byte)))?
                 }
                 b'$' if matches!(s.get(end + 1), Some(b'(' | b'{')) => {
                     let (open, close) = if s[end + 1] == b'(' {
@@ -96,10 +122,11 @@ impl Parser<'_> {
                     } else {
                         (b'{', b'}')
                     };
-                    pair_end(s, end + 1, open, close).ok_or_else(|| self.unexpected(s.len()))?
+                    pair_end(s, end + 1, open, close)
+                        .ok_or_else(|| self.matching(end, char::from(close)))?
                 }
                 b'$' if s.get(end + 1) == Some(&b'\'') => {
-                    ansi_c_end(s, end).ok_or_else(|| self.unexpected(s.len()))?
+                    ansi_c_end(s, end).ok_or_else(|| self.matching(end, '\''))?
                 }
                 _ => end + 1,
             };
@@ -107,117 +134,14 @@ impl Parser<'_> {
         Ok(end.min(s.len()))
     }
 
-    /// What tree-sitter-bash reads after a heredoc's word on its line: a
-    /// pipe into a statement, redirects and an and-or tail, an and-or
-    /// tail, or more words of the command.
-    fn heredoc_tail(&mut self, children: &mut Vec<Syn>) -> R<()> {
-        if self.peek() == b'|' && self.at(1) != b'|' {
-            let at = self.i;
-            let op = if self.at(1) == b'&' { "|&" } else { "|" };
-            self.i += op.len();
-            self.skip_space();
-            let statement = self.heredoc_pipeline()?;
-            children.push(Syn::node(
-                "pipeline",
-                vec![Syn::token(op, at, at + op.len()), statement],
-            ));
-            return Ok(());
-        }
-        let mut redirected = false;
-        while self.at_redirect() && !self.starts(b"<<") || self.starts(b"<<<") {
-            let redirect = if self.starts(b"<<<") {
-                self.herestring()?
-            } else {
-                self.redirect(true)?
-            };
-            children.push(redirect.with_field("redirect"));
-            redirected = true;
-            self.skip_blank();
-        }
-        if self.starts(b"&&") || self.starts(b"||") {
-            let at = self.i;
-            let op = if self.peek() == b'&' { "&&" } else { "||" };
-            self.i += 2;
-            children.push(Syn::token(op, at, at + 2).with_field("operator"));
-            self.skip_space();
-            children.push(self.statement()?.with_field("right"));
-            return Ok(());
-        }
-        if redirected {
-            return Ok(());
-        }
-        let mut any = false;
-        loop {
-            self.skip_blank();
-            if self.at_command_end() {
+    /// Read the bodies of the heredocs a newline at the cursor's left
+    /// reads, in bash's order.
+    pub(super) fn pending_bodies(&mut self) {
+        for heredoc in self.take_readable() {
+            if self.read_body(heredoc) {
                 break;
             }
-            match self.literal_opt(super::word::Ctx::default())? {
-                Some(word) => {
-                    children.push(word.with_field("argument"));
-                    any = true;
-                }
-                None => break,
-            }
         }
-        if any { Ok(()) } else { self.fail(self.i) }
-    }
-
-    /// The statement a heredoc's line pipes into. A redirect after a
-    /// pipeline there wraps only its last two commands, as the grammar
-    /// reduces it.
-    fn heredoc_pipeline(&mut self) -> R<Syn> {
-        let statement = self.statement()?;
-        if !statement.is("redirected_statement") {
-            return Ok(statement);
-        }
-        let mut statement = statement;
-        let mut children = std::mem::take(&mut statement.children);
-        let mut body = children.remove(0);
-        if !body.is("pipeline") || body.children.len() < 5 {
-            children.insert(0, body);
-            return Ok(Syn::node("redirected_statement", children));
-        }
-        let mut stages = std::mem::take(&mut body.children);
-        let tail = stages.split_off(stages.len() - 3);
-        children.insert(0, Syn::node("pipeline", tail).with_field("body"));
-        stages.push(Syn::node("redirected_statement", children));
-        Ok(Syn::node("pipeline", stages))
-    }
-
-    /// The newline after the operator line, the body and the delimiter.
-    fn heredoc_finish(&mut self, mut children: Vec<Syn>, pending: Pending) -> R<Syn> {
-        if self.peek() == b'\n' {
-            let end = self.body_newline_end(Some(&pending));
-            children.push(Syn::hidden(self.i, end));
-            self.i = end;
-        }
-        if !self.pending.is_empty() {
-            return Err(Fail {
-                at: self.i,
-                message: "here-document read out of order".into(),
-            });
-        }
-        children.extend(self.heredoc_body(&pending)?);
-        Ok(Syn::node("heredoc_redirect", children))
-    }
-
-    /// Read the bodies of every pending heredoc after a newline, in order.
-    pub(super) fn pending_bodies(&mut self) -> R<Vec<Syn>> {
-        let pending = self.take_readable();
-        let mut nodes: Vec<Syn> = Vec::new();
-        for heredoc in &pending {
-            // An empty delimiter's line is its own newline.
-            if nodes
-                .last()
-                .is_some_and(|end| end.is("heredoc_end") && end.start == end.end)
-                && self.peek() == b'\n'
-            {
-                self.i += 1;
-            }
-            nodes.extend(self.heredoc_body(heredoc)?);
-        }
-        Ok(nodes)
     }
 
     /// Take the pending heredocs a newline here reads, the deepest first:
@@ -271,27 +195,6 @@ impl Parser<'_> {
         }
     }
 
-    /// The heredoc a newline here reads first, if any: the deepest, the
-    /// earliest of those.
-    pub(super) fn first_readable(&self) -> Option<&Pending> {
-        self.pending
-            .iter()
-            .filter(|heredoc| heredoc.depth >= self.comsub)
-            .rev()
-            .max_by_key(|heredoc| heredoc.depth)
-    }
-
-    /// Where the newline token before heredoc bodies ends, `first` the
-    /// heredoc read first: the grammar lexes the blank lines after it into
-    /// the token, but an empty delimiter ends a body at the first of them.
-    pub(super) fn body_newline_end(&self, first: Option<&Pending>) -> usize {
-        if first.is_some_and(|heredoc| heredoc.delimiter.is_empty()) {
-            self.i + 1
-        } else {
-            self.newline_end()
-        }
-    }
-
     /// The blanks, comments and newlines between an array's elements.
     /// bash reads the pending heredocs' bodies at a newline there, then
     /// keeps them pending with each body's text as the delimiter: the next
@@ -307,10 +210,10 @@ impl Parser<'_> {
             let mut pending = self.take_readable();
             for heredoc in &mut pending {
                 let start = self.i;
-                let nodes = self.heredoc_body(heredoc)?;
-                let end = match nodes.last() {
-                    Some(node) if node.is("heredoc_end") => {
-                        memchr::memrchr(b'\n', &self.s[start..node.start])
+                self.read_body(heredoc.clone());
+                let end = match self.bodies.last() {
+                    Some(body) if body.terminated => {
+                        memchr::memrchr(b'\n', &self.s[start..body.end.saturating_sub(1).max(start)])
                             .map_or(start, |offset| start + offset + 1)
                     }
                     _ => self.s.len(),
@@ -325,240 +228,197 @@ impl Parser<'_> {
                     text.extend_from_slice(&line[tabs..]);
                 }
                 heredoc.delimiter = text;
-                if end < self.s.len() && self.peek() == b'\n' {
-                    self.i += 1;
-                }
             }
             self.pending.extend(pending);
         }
     }
 
-    /// One body and its delimiter line, noting a quoted one's span.
-    fn heredoc_body(&mut self, heredoc: &Pending) -> R<Vec<Syn>> {
+    /// Read one body from the cursor, as bash's reader takes it, and note
+    /// it. Inside a substitution a line that opens with the delimiter and
+    /// closes the substitution after it ends the body there too: the rest
+    /// of that line is read on, and the bodies still pending are dropped,
+    /// which this answers true for.
+    fn read_body(&mut self, heredoc: Pending) -> bool {
         let start = self.i;
-        let nodes = self.body_nodes(heredoc)?;
-        if heredoc.raw {
-            self.raw_bodies.push((start, self.i));
+        let mut lines = read_lines(self.s, start, &heredoc, self.comsub > 0);
+        let cut = lines.resume.is_some();
+        if let Some(resume) = lines.resume {
+            // The body is the lines before the delimiter's, as if the
+            // input ended there.
+            let line = memchr::memrchr(b'\n', &self.s[..resume]).map_or(0, |at| at + 1);
+            lines = read_lines(&self.s[..line], start, &heredoc, false);
+            lines.end = resume;
+            lines.terminated = true;
         }
-        Ok(nodes)
+        self.i = lines.end;
+        // The rest of a delimiter line inside a substitution is read as the
+        // next command.
+        self.line_break = cut;
+        self.bodies.push(Body {
+            heredoc,
+            start,
+            end: lines.end,
+            text: lines.text,
+            offsets: lines.offsets,
+            terminated: lines.terminated,
+            eof_line: lines.eof_line,
+        });
+        cut
     }
+}
 
-    /// One body and its delimiter line, as tree-sitter-bash's scanner
-    /// tokenizes them: text runs as `heredoc_content` around the
-    /// expansions an unquoted body holds, or one plain body.
-    fn body_nodes(&mut self, heredoc: &Pending) -> R<Vec<Syn>> {
-        let mut children = Vec::new();
-        let mut body_start = None;
-        let mut started = false;
-        loop {
-            let token_start = self.i;
-            match self.scan_content(heredoc) {
-                Content::End { start, end } => {
-                    // The text before the delimiter line, then the line.
-                    let first = *body_start.get_or_insert(start);
-                    if started {
-                        children.push(Syn::leaf("heredoc_content", start, end));
-                    }
-                    let body = if started {
-                        body_node(std::mem::take(&mut children), first)
-                    } else {
-                        Syn::leaf("heredoc_body", start, end)
-                    };
-                    let delimiter_end = self.delimiter_end(heredoc);
-                    let mut nodes = vec![body];
-                    if let Some(stop) = delimiter_end {
-                        nodes.push(Syn::leaf("heredoc_end", self.i, stop));
-                        self.i = stop;
-                        // The rest of a delimiter line inside a command
-                        // substitution is read as the next command.
-                        self.line_break = !matches!(self.s.get(stop), None | Some(b'\n'));
-                    }
-                    return Ok(nodes);
-                }
-                Content::Expansion { start, end } => {
-                    if started {
-                        if end > start || body_start.is_some() {
-                            children.push(Syn::leaf("heredoc_content", start, end));
-                        }
-                    } else {
-                        body_start = Some(start);
-                        started = true;
-                    }
-                    self.i = end;
-                    let mark = self.mark();
-                    let parsed = match self.at(1) {
-                        b'{' => self.expansion(),
-                        b'(' if self.at(2) == b'(' => self.arithmetic_or_substitution(),
-                        b'(' => self.command_substitution(),
-                        _ => self.simple_expansion().ok_or_else(|| self.unexpected(end)),
-                    };
-                    match parsed {
-                        Ok(node) => children.push(node),
-                        Err(_) => {
-                            // bash reads a body's substitutions when it
-                            // expands them: one that does not parse is text
-                            // here.
-                            self.reset(mark);
-                            let text_end = self.text_through_line(end);
-                            children.push(Syn::leaf("heredoc_content", end, text_end));
-                            self.i = text_end;
-                        }
-                    }
-                }
-                Content::Unterminated => {
-                    // bash takes the body to the end of the input.
-                    let first = body_start.unwrap_or(token_start);
-                    let end = self.s.len();
-                    self.i = end;
-                    if !started {
-                        return Ok(vec![Syn::leaf("heredoc_body", first, end)]);
-                    }
-                    let rest = &self.s[token_start..end];
-                    let mut nodes = Vec::new();
-                    if rest.is_empty() || rest == b"\n" {
-                        nodes.push(body_node(std::mem::take(&mut children), first));
-                        nodes.push(Syn::leaf("heredoc_end", end, end));
-                    } else {
-                        children.push(Syn::leaf("heredoc_content", token_start, end));
-                        nodes.push(body_node(std::mem::take(&mut children), first));
-                    }
-                    return Ok(nodes);
-                }
+/// What `read_lines` read.
+struct Lines {
+    text: Vec<u8>,
+    offsets: Vec<usize>,
+    end: usize,
+    terminated: bool,
+    eof_line: usize,
+    /// Inside a substitution, where a line holding the delimiter and then
+    /// the substitution's close goes on after the delimiter.
+    resume: Option<usize>,
+}
+
+/// Read a body's lines from `start` up to its delimiter line, or to the
+/// end of `s`.
+fn read_lines(s: &[u8], start: usize, heredoc: &Pending, nested: bool) -> Lines {
+    let mut text = Vec::new();
+    let mut offsets = Vec::new();
+    let mut at = start;
+    let mut eof_line = memchr::memchr_iter(b'\n', s).count() + usize::from(!s.ends_with(b"\n"));
+    while at < s.len() {
+        let mut line = Vec::new();
+        let mut places = Vec::new();
+        let mut continued = false;
+        while at < s.len() {
+            let newline = memchr::memchr(b'\n', &s[at..]).map(|offset| at + offset);
+            let end = newline.unwrap_or(s.len());
+            line.extend_from_slice(&s[at..end]);
+            places.extend(at..end);
+            at = newline.map_or(s.len(), |newline| newline + 1);
+            continued = !heredoc.raw && ends_escaped(&line) && newline.is_some();
+            if !continued {
+                break;
             }
+            line.pop();
+            places.pop();
         }
+        if continued && line.is_empty() {
+            break;
+        }
+        let tabs = if heredoc.dash {
+            line.iter().take_while(|byte| **byte == b'\t').count()
+        } else {
+            0
+        };
+        let kept = &line[tabs..];
+        if kept == heredoc.delimiter.as_slice() {
+            return Lines {
+                text,
+                offsets,
+                end: at,
+                terminated: true,
+                eof_line,
+                resume: None,
+            };
+        }
+        if nested
+            && kept.starts_with(&heredoc.delimiter)
+            && closes_substitution(&kept[heredoc.delimiter.len()..])
+        {
+            let resume = places
+                .get(tabs + heredoc.delimiter.len())
+                .copied()
+                .unwrap_or(at);
+            return Lines {
+                text,
+                offsets,
+                end: resume,
+                terminated: true,
+                eof_line,
+                resume: Some(resume),
+            };
+        }
+        if continued {
+            eof_line += 1;
+        }
+        text.extend_from_slice(kept);
+        offsets.extend_from_slice(&places[tabs..]);
+        text.push(b'\n');
+        offsets.push(at.saturating_sub(1).min(s.len()));
     }
-
-    /// The end of the line holding `at`, past its newline.
-    fn text_through_line(&self, at: usize) -> usize {
-        memchr::memchr(b'\n', &self.s[at..]).map_or(self.s.len(), |offset| at + offset + 1)
+    Lines {
+        text,
+        offsets,
+        end: at,
+        terminated: false,
+        eof_line,
+        resume: None,
     }
+}
 
-    /// Whether the line at the cursor is the delimiter's, after the tabs
-    /// `<<-` strips, which it moves past.
-    fn at_delimiter_line(&mut self, heredoc: &Pending) -> bool {
-        let line = self.i;
-        if heredoc.dash {
-            while self.peek() == b'\t' {
-                self.i += 1;
+/// Whether an odd run of backslashes ends `line`, so its last one escapes
+/// what follows it.
+pub(super) fn ends_escaped(line: &[u8]) -> bool {
+    line.iter().rev().take_while(|byte| **byte == b'\\').count() % 2 == 1
+}
+
+/// Whether a heredoc line's text after its delimiter holds an unquoted
+/// `)`: inside a substitution, such a line ends the body there.
+fn closes_substitution(rest: &[u8]) -> bool {
+    let mut quote = 0u8;
+    let mut at = 0;
+    while at < rest.len() {
+        let byte = rest[at];
+        if quote != 0 {
+            if byte == b'\\' && quote == b'"' {
+                at += 1;
+            } else if byte == quote {
+                quote = 0;
             }
-        }
-        if self.delimiter_end(heredoc).is_some() {
+        } else if matches!(byte, b'\'' | b'"') {
+            quote = byte;
+        } else if byte == b'\\' {
+            at += 1;
+        } else if byte == b')' {
             return true;
         }
-        self.i = line;
-        false
+        at += 1;
     }
-
-    /// Where the delimiter line's match ends, when the line at the cursor
-    /// is the delimiter. Inside a command substitution bash also ends the
-    /// body at a line that only starts with it, and the line goes on.
-    fn delimiter_end(&self, heredoc: &Pending) -> Option<usize> {
-        if heredoc.delimiter.contains(&b'\n') {
-            return None;
-        }
-        let rest = &self.s[self.i..];
-        let end = self.i + heredoc.delimiter.len();
-        let whole = matches!(self.s.get(end), None | Some(b'\n'));
-        let prefix = self.comsub > 0 && !heredoc.delimiter.is_empty();
-        (rest.starts_with(&heredoc.delimiter) && (whole || prefix)).then_some(end)
-    }
-
-    /// Scan body text from the cursor up to the next expansion or the
-    /// delimiter line.
-    fn scan_content(&mut self, heredoc: &Pending) -> Content {
-        let mut start = self.i;
-        let mut advanced = false;
-        let mut skipped = false;
-        let column0 = |at: usize, s: &[u8]| at == 0 || s[at - 1] == b'\n';
-        loop {
-            if self.eof() {
-                return Content::Unterminated;
-            }
-            match self.peek() {
-                b'\\' => {
-                    advanced = true;
-                    self.i += 2;
-                    self.i = self.i.min(self.s.len());
-                }
-                b'$' if !heredoc.raw => {
-                    let next = self.at(1);
-                    if next.is_ascii_alphabetic() || matches!(next, b'{' | b'(') {
-                        return Content::Expansion {
-                            start: if advanced { start } else { self.i },
-                            end: self.i,
-                        };
-                    }
-                    advanced = true;
-                    self.i += 1;
-                }
-                b'\n' if heredoc.delimiter.is_empty() && column0(self.i, self.s) => {
-                    return Content::End {
-                        start: if advanced { start } else { self.i },
-                        end: self.i,
-                    };
-                }
-                b'\n' => {
-                    self.i += 1;
-                    if !advanced {
-                        start = self.i;
-                    }
-                    advanced = true;
-                    if self.at_delimiter_line(heredoc) {
-                        return Content::End { start, end: self.i };
-                    }
-                }
-                _ => {
-                    if column0(self.i, self.s) {
-                        if self.at_delimiter_line(heredoc) {
-                            if !advanced {
-                                start = self.i;
-                            }
-                            return Content::End { start, end: self.i };
-                        }
-                        if !advanced && !skipped && !heredoc.delimiter.is_empty() {
-                            // The first line's leading blanks are no part of
-                            // the body's span, as the grammar scans it.
-                            skipped = true;
-                            while is_space(self.peek()) && !self.eof() {
-                                self.i += 1;
-                                start = self.i;
-                            }
-                            if self.eof() {
-                                return Content::Unterminated;
-                            }
-                            if column0(self.i, self.s) && self.at_delimiter_line(heredoc) {
-                                return Content::End { start, end: self.i };
-                            }
-                            continue;
-                        }
-                    }
-                    advanced = true;
-                    self.i += 1;
-                }
-            }
-        }
-    }
+    false
 }
 
-/// A body of text runs and expansions, which starts at `start`.
-fn body_node(children: Vec<Syn>, start: usize) -> Syn {
-    let mut body = Syn::node("heredoc_body", children);
-    body.start = start;
-    body
-}
-
-enum Content {
-    /// Text from `start` to `end`, then the delimiter line at the cursor.
-    End {
-        start: usize,
-        end: usize,
-    },
-    /// Text from `start` to `end`, then an expansion at `end`.
-    Expansion {
-        start: usize,
-        end: usize,
-    },
-    Unterminated,
+/// A word with its line continuations dropped, as bash's reader drops
+/// them before it reads the word: not inside single quotes or `$'...'`.
+fn joined(word: &[u8]) -> std::borrow::Cow<'_, [u8]> {
+    if memchr::memmem::find(word, b"\\\n").is_none() {
+        return std::borrow::Cow::Borrowed(word);
+    }
+    let mut out = Vec::with_capacity(word.len());
+    let mut double = false;
+    let mut at = 0;
+    while at < word.len() {
+        let end = match word[at] {
+            b'\\' if word.get(at + 1) == Some(&b'\n') => {
+                at += 2;
+                continue;
+            }
+            b'\\' => at + 2,
+            b'"' => {
+                double = !double;
+                at + 1
+            }
+            b'\'' if !double => quote_end(word, at, b'\'').unwrap_or(word.len()),
+            b'$' if !double && word.get(at + 1) == Some(&b'\'') => {
+                ansi_c_end(word, at).unwrap_or(word.len())
+            }
+            _ => at + 1,
+        };
+        let end = end.min(word.len());
+        out.extend_from_slice(&word[at..end]);
+        at = end;
+    }
+    std::borrow::Cow::Owned(out)
 }
 
 /// A delimiter word with its quotes removed, and whether it had any.

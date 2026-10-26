@@ -3,7 +3,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyString};
-use streams::shell::{FIELDS, KINDS, Node, Tree, field_id};
+use streams::shell::{FIELDS, Heredoc, KINDS, Node, Options, Tree, field_id};
 
 /// Gives each tree a number, so node ids differ across trees.
 static TREES: AtomicU64 = AtomicU64::new(0);
@@ -18,13 +18,17 @@ pub struct ShellTree {
 #[pymethods]
 impl ShellTree {
     /// `aliases` are the names the shell expands as aliases: one is a
-    /// command where a command starts, never a reserved word.
+    /// command where a command starts, never a reserved word. `extglob`
+    /// says whether extglob's pattern groups are on.
     #[new]
-    #[pyo3(signature = (source, aliases = Vec::new()))]
-    fn new(py: Python<'_>, source: &[u8], aliases: Vec<String>) -> Self {
+    #[pyo3(signature = (source, aliases = Vec::new(), extglob = true))]
+    fn new(py: Python<'_>, source: &[u8], aliases: Vec<String>, extglob: bool) -> Self {
         let source = source.to_vec();
-        let aliases: Vec<Vec<u8>> = aliases.into_iter().map(String::into_bytes).collect();
-        let tree = py.detach(|| streams::shell::parse_with_aliases(&source, &aliases));
+        let options = Options {
+            aliases: aliases.into_iter().map(String::into_bytes).collect(),
+            extglob,
+        };
+        let tree = py.detach(|| streams::shell::parse_with(&source, &options));
         Self {
             tree: Arc::new(tree),
             serial: TREES.fetch_add(1, Ordering::Relaxed),
@@ -40,10 +44,104 @@ impl ShellTree {
         }
     }
 
-    /// The first syntax error: its byte offset and message, or None.
+    /// What bash reports of the line when it refuses it: where in the line
+    /// as typed, the diagnostic lines as mirage prints them, and the
+    /// status; None when bash reads the line.
     #[getter]
-    fn error(&self) -> Option<(usize, String)> {
-        self.tree.error.clone()
+    fn error<'py>(&self, py: Python<'py>) -> Option<(usize, Bound<'py, PyBytes>, u8)> {
+        self.tree
+            .error
+            .as_ref()
+            .map(|refusal| (refusal.at, PyBytes::new(py, &refusal.message), refusal.status))
+    }
+
+    /// What the nodes read: the line with its heredoc bodies folded in and
+    /// its line continuations dropped.
+    #[getter]
+    fn source<'py>(&self, py: Python<'py>) -> Bound<'py, PyBytes> {
+        PyBytes::new(py, &self.tree.source)
+    }
+
+    /// The heredocs folded into `source`, in its order.
+    #[getter]
+    fn heredocs(&self) -> Vec<ShellHeredoc> {
+        self.tree
+            .heredocs
+            .iter()
+            .map(|heredoc| ShellHeredoc {
+                heredoc: heredoc.clone(),
+            })
+            .collect()
+    }
+}
+
+/// A heredoc folded into its line as a `<` redirect from a double-quoted
+/// word; offsets are in the line as typed.
+#[pyclass(module = "mirage._rs", frozen)]
+pub struct ShellHeredoc {
+    heredoc: Heredoc,
+}
+
+#[pymethods]
+impl ShellHeredoc {
+    #[getter]
+    fn operator_start(&self) -> usize {
+        self.heredoc.operator
+    }
+
+    #[getter]
+    fn word_end(&self) -> usize {
+        self.heredoc.word_end
+    }
+
+    /// The delimiter word as typed.
+    #[getter]
+    fn word<'py>(&self, py: Python<'py>) -> Bound<'py, PyBytes> {
+        PyBytes::new(py, &self.heredoc.word)
+    }
+
+    /// The delimiter as bash reads it, quotes removed.
+    #[getter]
+    fn delimiter<'py>(&self, py: Python<'py>) -> Bound<'py, PyBytes> {
+        PyBytes::new(py, &self.heredoc.delimiter)
+    }
+
+    #[getter]
+    fn quoted(&self) -> bool {
+        self.heredoc.quoted
+    }
+
+    /// `<<-`: its lines lose their leading tabs.
+    #[getter]
+    fn dash(&self) -> bool {
+        self.heredoc.dash
+    }
+
+    #[getter]
+    fn body_start(&self) -> usize {
+        self.heredoc.body_start
+    }
+
+    #[getter]
+    fn end(&self) -> usize {
+        self.heredoc.end
+    }
+
+    /// The body as bash reads it.
+    #[getter]
+    fn body<'py>(&self, py: Python<'py>) -> Bound<'py, PyBytes> {
+        PyBytes::new(py, &self.heredoc.body)
+    }
+
+    #[getter]
+    fn terminated(&self) -> bool {
+        self.heredoc.terminated
+    }
+
+    /// Where its `<` stands in the tree's source.
+    #[getter]
+    fn at(&self) -> usize {
+        self.heredoc.at
     }
 }
 
@@ -177,16 +275,50 @@ impl ShellNode {
         self.node().named
     }
 
-    /// Always false: the parser refuses a line instead of inventing a
-    /// missing token.
+    /// The heredoc a `file_redirect` was folded from, or None.
     #[getter]
-    fn is_missing(&self) -> bool {
-        false
+    fn heredoc(&self) -> Option<ShellHeredoc> {
+        self.tree
+            .heredoc(self.index as usize)
+            .map(|heredoc| ShellHeredoc {
+                heredoc: heredoc.clone(),
+            })
     }
 
+    /// The node's text in the line as typed, the heredoc bodies it holds
+    /// included.
     #[getter]
-    fn has_error(&self) -> bool {
-        self.node().has_error
+    fn source_text<'py>(&self, py: Python<'py>) -> Bound<'py, PyBytes> {
+        PyBytes::new(py, self.tree.source_text(self.index as usize))
+    }
+
+    /// The node's text with the heredoc bodies the line reads after a
+    /// substitution in it moved inside it; empty when none is.
+    #[getter]
+    fn inlined<'py>(&self, py: Python<'py>) -> Bound<'py, PyBytes> {
+        PyBytes::new(py, &self.tree.inlined(self.index as usize))
+    }
+
+    /// Where each byte of the tree's source came from in the line as
+    /// typed, then the end.
+    #[getter]
+    fn offsets(&self) -> Vec<usize> {
+        self.tree.offsets.clone()
+    }
+
+    /// What bash warns of while it reads the tree's heredocs.
+    #[getter]
+    fn warnings<'py>(&self, py: Python<'py>) -> Bound<'py, PyBytes> {
+        PyBytes::new(py, &self.tree.warnings())
+    }
+
+    /// The tree's refusal, as `ShellTree.error` gives it.
+    #[getter]
+    fn error<'py>(&self, py: Python<'py>) -> Option<(usize, Bound<'py, PyBytes>, u8)> {
+        self.tree
+            .error
+            .as_ref()
+            .map(|refusal| (refusal.at, PyBytes::new(py, &refusal.message), refusal.status))
     }
 
     fn child_by_field_name(&self, name: &str) -> Option<ShellNode> {

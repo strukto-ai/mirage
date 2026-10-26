@@ -6,7 +6,7 @@ use super::lex::{
     blank_end, digits_end, is_blank, is_name, is_name_start, is_space, name_end, number_end,
     word_end,
 };
-use super::parser::{Close, Fail, Parser, R};
+use super::parser::{Close, Parser, R};
 use super::tree::Syn;
 
 /// What closes the construct a word sits in, which ends the word.
@@ -40,12 +40,11 @@ impl Parser<'_> {
     pub(super) fn word_from(&mut self, first: Syn, ctx: Ctx) -> R<Syn> {
         let mut pieces = vec![first];
         loop {
-            // bash reads an extglob group in any word; the extglob option
-            // only decides whether it may run, which the syntax check knows.
+            // With extglob on, bash reads a group in any word.
             let word = pieces
                 .last()
                 .is_some_and(|last| last.is("word") && last.end == self.i);
-            if self.peek() == b'(' && word && !ctx.conditional && self.at_extglob_group() {
+            if self.peek() == b'(' && word && !ctx.conditional && self.options.extglob && self.at_extglob_group() {
                 self.extglob_group(&mut pieces, "word")?;
                 continue;
             }
@@ -77,7 +76,7 @@ impl Parser<'_> {
         let mut run = self.i;
         loop {
             if self.eof() {
-                return Err(Fail::eof(self.s.len(), ')'));
+                return Err(self.matching(self.s.len(), ')'));
             }
             let at = self.i;
             let piece = match self.peek() {
@@ -268,7 +267,7 @@ impl Parser<'_> {
                 self.i = at + 1 + offset + 1;
                 Ok(Syn::leaf("raw_string", at, self.i))
             }
-            None => Err(Fail::eof(at, '\'')),
+            None => Err(self.matching(at, '\'')),
         }
     }
 
@@ -276,7 +275,7 @@ impl Parser<'_> {
     fn ansi_c_string(&mut self) -> R<Syn> {
         let at = self.i;
         let Some(end) = super::lex::ansi_c_end(self.s, at) else {
-            return Err(Fail::eof(at, '\''));
+            return Err(self.matching(at, '\''));
         };
         self.i = end;
         Ok(Syn::leaf("ansi_c_string", at, end))
@@ -308,7 +307,7 @@ impl Parser<'_> {
                 }
             }
             if self.eof() {
-                return Err(Fail::eof(open_at, '"'));
+                return Err(self.matching(open_at, '"'));
             }
             match self.peek() {
                 b'"' => {
@@ -418,6 +417,7 @@ impl Parser<'_> {
     /// `$(...)` or `$(< file)`.
     pub(super) fn command_substitution(&mut self) -> R<Syn> {
         self.enter()?;
+        self.nest(b"$(")?;
         let open = self.expect("$(")?;
         let mut children = vec![open];
         let body = self.substituted(|parser| parser.substitution_body(Close::Paren));
@@ -427,13 +427,36 @@ impl Parser<'_> {
         Ok(Syn::node("command_substitution", children))
     }
 
+    /// Refuse a substitution nested `MAX_NESTING` deep at its `opener`.
+    fn nest(&self, opener: &[u8]) -> R<()> {
+        if self.nesting < super::parser::MAX_NESTING {
+            return Ok(());
+        }
+        let line = super::parser::line(&[b"syntax error near unexpected token `", opener, b"'"]);
+        Err(self.refusal(self.i, self.i + opener.len(), vec![line], false))
+    }
+
     /// `read` inside a `$(...)` or `<(...)`, where a backtick is text and
-    /// a newline reads only the heredocs opened inside.
+    /// a newline reads only the heredocs opened inside. Those still to read
+    /// at its close are noted with it: their bodies follow the line.
     fn substituted<T>(&mut self, read: impl FnOnce(&mut Self) -> T) -> T {
         let saved = self.in_backtick;
         self.in_backtick = false;
         self.comsub += 1;
+        self.nesting += 1;
+        self.frames.push(super::parser::Frame::Substitution);
         let body = read(self);
+        self.frames.pop();
+        self.nesting -= 1;
+        let opened: Vec<usize> = self
+            .pending
+            .iter()
+            .filter(|heredoc| heredoc.depth >= self.comsub)
+            .map(|heredoc| heredoc.operator)
+            .collect();
+        if !opened.is_empty() {
+            self.closes.push((self.i, opened));
+        }
         self.comsub -= 1;
         self.in_backtick = saved;
         body
@@ -465,7 +488,7 @@ impl Parser<'_> {
         self.enter()?;
         let at = self.i;
         let Some(end) = super::lex::quote_end(self.s, at, b'`') else {
-            return Err(Fail::eof(at, '`'));
+            return Err(self.matching(at, '`'));
         };
         let mark = self.mark();
         let open = self.expect("`")?;
@@ -509,11 +532,9 @@ impl Parser<'_> {
         self.enter()?;
         let at = self.i;
         let op = if self.peek() == b'<' { "<(" } else { ">(" };
+        self.nest(op.as_bytes())?;
         let raw_end = if self.at(2) == b'(' {
-            Some(
-                super::lex::pair_end(self.s, at + 1, b'(', b')')
-                    .ok_or_else(|| Fail::eof(self.s.len(), ')'))?,
-            )
+            Some(self.scan_matched(at + 2, at, b'(', b')')? + 1)
         } else {
             None
         };
@@ -540,6 +561,11 @@ impl Parser<'_> {
     /// command substitution whose first command is a subshell, which bash
     /// parses when it runs it.
     pub(super) fn arithmetic_or_substitution(&mut self) -> R<Syn> {
+        let start = self.i;
+        let end = self.scan_matched(self.joined(start + 2) + 1, start, b'(', b')')?;
+        if self.s.get(end + 1) != Some(&b')') {
+            self.scan_matched(start + 2, start, b'(', b')')?;
+        }
         if self.double_paren_end(self.i + 1).is_some() {
             return self.arithmetic_expansion();
         }
@@ -649,7 +675,9 @@ impl Parser<'_> {
             depth: self.depth,
             comsub: self.comsub,
             braces: self.braces,
-            ..Parser::new(self.s, self.work, self.aliases)
+            frames: self.frames.clone(),
+            nesting: self.nesting,
+            ..Parser::new(self.s, self.budget, self.options)
         }
     }
 }

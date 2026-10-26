@@ -1477,10 +1477,9 @@ async def test_a_held_line_keeps_its_jobs_grant_reserved(ws):
 
 @pytest.mark.asyncio
 async def test_touching_backtick_pairs_hold_the_line_as_the_lines_they_run(ws):
-    # tree-sitter lexes the two pairs as one node whose subtree is one
-    # merged command that never runs. Judged on that spelling, the pass
-    # saw no readable cat and nothing held the line: the echo ran, and
-    # only then did the cat's gate, running its own pair as a line, ask.
+    # Judged on a spelling that is not what runs, the pass saw no
+    # readable cat and nothing held the line: the echo ran, and only
+    # then did the cat's gate, running its own pair as a line, ask.
     # Read as the lines the evaluator runs, the pass asks first and
     # holds the whole line.
     line = "echo x && echo `cat /data/secret.txt` `echo ok`"

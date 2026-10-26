@@ -1,9 +1,11 @@
 use super::lex::{is_blank, is_space, is_word};
-use super::tree::{Syn, Tree, lay_out, place_comments};
+use super::heredoc::Body;
+use super::lower::lower;
+use super::tree::{Refusal, Syn, Tree, lay_out, place_comments};
 
 /// How deep constructs may nest before the parser refuses the line, so a
 /// hostile line cannot run the host out of stack.
-const MAX_DEPTH: usize = 128;
+const MAX_DEPTH: usize = 192;
 
 /// How many constructs a parse may enter per byte of input, plus a base:
 /// a line takes a few per byte with its look aheads, and one whose look
@@ -47,17 +49,28 @@ fn ends_compound(statement: &Syn) -> bool {
 #[derive(Debug, Clone)]
 pub(super) struct Fail {
     pub at: usize,
-    pub message: String,
+    /// Past the text bash names: a refused array's line is read on from
+    /// the line after it.
+    pub end: usize,
+    /// bash's diagnostic lines, without its prefix, the line's own bytes
+    /// in them as typed.
+    pub lines: Vec<Vec<u8>>,
+    /// 2 for a syntax error, 1 for an array bash cannot read, 127 for a
+    /// substitution whose body bash cannot parse.
+    pub status: u8,
+    /// The input ended inside a construct.
+    pub eof: bool,
+    /// The input ended inside a quote or a matched pair.
+    pub matching: bool,
 }
 
-impl Fail {
-    /// bash's refusal of input that ends before the `closer` it waits for.
-    pub(super) fn eof(at: usize, closer: char) -> Self {
-        Self {
-            at,
-            message: format!("unexpected EOF while looking for matching `{closer}'"),
-        }
-    }
+/// A construct whose refusal bash gives a status of its own.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Frame {
+    /// `$(...)`, `<(...)` or `>(...)`.
+    Substitution,
+    /// `name=(...)`.
+    Array,
 }
 
 pub(super) type R<T> = Result<T, Fail>;
@@ -69,9 +82,30 @@ pub(super) struct Mark {
     comments: usize,
     pending: usize,
     taken: usize,
-    raw_bodies: usize,
+    bodies: usize,
+    closes: usize,
     depth: usize,
+    ended: bool,
 }
+
+/// What a parse and its look aheads spend: the constructs they entered,
+/// which a parse that backtracks over nested input would otherwise let
+/// grow without bound, and how deep bash's reader's scan of quotes and
+/// expansions has nested.
+#[derive(Default)]
+pub(super) struct Budget {
+    pub work: std::cell::Cell<usize>,
+    pub scans: std::cell::Cell<usize>,
+}
+
+/// How deep the scan of quotes and expansions nests, or a `!` chain in a
+/// conditional, before the parser refuses the line.
+pub(super) const MAX_SCAN: usize = 1000;
+
+/// How many compound commands, substitutions and conditional groups may
+/// nest; bash refuses the next opener, as it does one nested past its own
+/// reader.
+pub(super) const MAX_NESTING: usize = 64;
 
 /// What ends a statement list.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -102,9 +136,11 @@ pub(super) struct Parser<'a> {
     /// The heredocs each read of bodies took, with their places in
     /// `pending`, for a reset to put back.
     pub taken: Vec<Vec<(usize, super::heredoc::Pending)>>,
-    /// The quoted heredoc bodies read so far, whose continuations bash
-    /// keeps.
-    pub raw_bodies: Vec<(usize, usize)>,
+    /// The heredoc bodies read so far, in the order bash reads them.
+    pub bodies: Vec<Body>,
+    /// Each substitution closed with heredocs opened inside still to
+    /// read: its `)` and their `<<`s.
+    pub closes: Vec<(usize, Vec<usize>)>,
     /// How many command substitutions enclose the cursor.
     pub comsub: usize,
     /// A heredoc's delimiter line ended mid-line: what follows on it is
@@ -113,66 +149,132 @@ pub(super) struct Parser<'a> {
     /// How many brace groups enclose the cursor, where a `}` case pattern
     /// closes the group instead.
     pub braces: usize,
-    /// Constructs entered so far by this parse and its look aheads, which
-    /// a parse that backtracks over nested input would otherwise let grow
-    /// without bound.
-    pub work: &'a std::cell::Cell<usize>,
-    /// The names the shell expands as aliases: one is a command where a
-    /// command starts, never a reserved word.
-    pub aliases: &'a [Vec<u8>],
+    /// The substitutions and arrays the cursor is inside, innermost last.
+    pub frames: Vec<Frame>,
+    /// The newline bash supposes at the end of the input was read, so the
+    /// input's end is no longer a `newline` token.
+    pub ended: bool,
+    /// How many compound commands and substitutions enclose the cursor.
+    pub nesting: usize,
+    /// What this parse and its look aheads have spent.
+    pub budget: &'a Budget,
+    /// How the line is read.
+    pub options: &'a super::Options,
 }
 
-/// Parse a whole program.
-pub(super) fn parse(source: &[u8], aliases: &[Vec<u8>]) -> Tree {
-    let mut pass = parse_pass(source, aliases);
-    let dropped = continuations(source, &pass);
-    if !dropped.is_empty() {
-        let mut logical = Vec::with_capacity(source.len());
-        let mut map = Vec::with_capacity(source.len() + 1);
+/// Parse a whole program as bash reads it: each heredoc's body folded
+/// into its line as a `<` redirect from a double-quoted word, then the
+/// line continuations dropped. The tree reads that text; its offsets map
+/// it back to `source`.
+pub(super) fn parse(source: &[u8], options: &super::Options) -> Tree {
+    // Whether the line as typed ends in a newline, or in a backslash that
+    // continues onto nothing, decides on every pass whether its end is one.
+    let ended = source.ends_with(b"\n") || super::heredoc::ends_escaped(source);
+    let first = parse_pass(source, options, ended);
+    let bodies = &first.bodies;
+    if bodies.is_empty() {
+        let offsets = (0..=source.len()).collect();
+        return joined(source.to_vec(), first, options, ended, offsets, Vec::new(), source);
+    }
+    let mut warned = std::collections::HashSet::new();
+    let closes = first
+        .closes
+        .iter()
+        .filter_map(|(close, opened)| {
+            let fresh: Vec<usize> = opened.iter().copied().filter(|at| warned.insert(*at)).collect();
+            (!fresh.is_empty()).then_some((*close, fresh))
+        })
+        .collect();
+    let lowered = lower(source, bodies);
+    let pass = parse_pass(&lowered.source, options, ended);
+    let mut tree = joined(
+        lowered.source,
+        pass,
+        options,
+        ended,
+        lowered.offsets,
+        lowered.heredocs,
+        source,
+    );
+    tree.closes = closes;
+    tree
+}
+
+/// Lay out a pass over `text`, its line continuations dropped first:
+/// `offsets` map `text` to `source`, and each heredoc's `at` is in `text`.
+/// The error is the last pass's, as bash reads the line joined.
+fn joined(
+    text: Vec<u8>,
+    mut pass: Pass,
+    options: &super::Options,
+    ended: bool,
+    mut offsets: Vec<usize>,
+    mut heredocs: Vec<super::lower::Heredoc>,
+    source: &[u8],
+) -> Tree {
+    let dropped = continuations(&text, &pass);
+    let text = if dropped.is_empty() {
+        text
+    } else {
+        let mut logical = Vec::with_capacity(text.len());
+        let mut kept = Vec::with_capacity(text.len() + 1);
         let mut next = dropped.iter().peekable();
-        for (at, byte) in source.iter().enumerate() {
+        for (at, byte) in text.iter().enumerate() {
             if next.peek() == Some(&&at) {
                 next.next();
                 continue;
             }
             logical.push(*byte);
-            map.push(at);
+            kept.push(offsets[at]);
         }
-        map.push(source.len());
-        pass = parse_pass(&logical, aliases);
-        remap(&mut pass.root, &map);
-        for comment in &mut pass.comments {
-            *comment = span(*comment, &map);
+        kept.push(offsets[text.len()]);
+        offsets = kept;
+        for heredoc in &mut heredocs {
+            heredoc.at -= dropped.partition_point(|&at| at < heredoc.at);
         }
-        if let Some((at, _)) = &mut pass.error {
-            *at = map[(*at).min(map.len() - 1)];
-        }
-    }
+        pass = parse_pass(&logical, options, ended);
+        logical
+    };
     let Pass {
         mut root,
         comments,
         error,
         ..
     } = pass;
+    let error = error.map(|fail| {
+        let to_source = |at: usize| offsets[at.min(text.len())];
+        let first = Fail {
+            at: to_source(fail.at),
+            end: to_source(fail.end),
+            ..fail
+        };
+        refusals(source, options, ended, first)
+    });
     place_comments(&mut root, &comments);
     root.start = root
         .children
         .first()
-        .map_or(source.len(), |child| child.start);
-    root.end = source.len();
-    lay_out(source.to_vec(), root, error)
+        .map_or(text.len(), |child| child.start);
+    root.end = text.len();
+    let mut tree = lay_out(text, root, error);
+    tree.original = source.to_vec();
+    tree.offsets = offsets;
+    tree.heredocs = heredocs;
+    tree
 }
 
 struct Pass {
     root: Syn,
     comments: Vec<(usize, usize)>,
-    raw_bodies: Vec<(usize, usize)>,
-    error: Option<(usize, String)>,
+    bodies: Vec<Body>,
+    closes: Vec<(usize, Vec<usize>)>,
+    error: Option<Fail>,
 }
 
-fn parse_pass(source: &[u8], aliases: &[Vec<u8>]) -> Pass {
-    let work = std::cell::Cell::new(0);
-    let mut parser = Parser::new(source, &work, aliases);
+fn parse_pass(source: &[u8], options: &super::Options, ended: bool) -> Pass {
+    let budget = Budget::default();
+    let mut parser = Parser::new(source, &budget, options);
+    parser.ended = ended;
     let mut children = Vec::new();
     let mut error = None;
     loop {
@@ -186,7 +288,7 @@ fn parse_pass(source: &[u8], aliases: &[Vec<u8>]) -> Pass {
                 node.end = source.len();
                 children.push(node);
                 parser.comments.retain(|&(at, _)| at < start);
-                error = Some((fail.at, fail.message));
+                error = Some(fail);
                 break;
             }
         }
@@ -194,20 +296,72 @@ fn parse_pass(source: &[u8], aliases: &[Vec<u8>]) -> Pass {
     Pass {
         root: Syn::node("program", children),
         comments: parser.comments,
-        raw_bodies: parser.raw_bodies,
+        bodies: parser.bodies,
+        closes: parser.closes,
         error,
     }
 }
 
+/// Every refusal bash reports for the line as typed, `source`, which fails
+/// with `first`: an array bash cannot read discards only its physical
+/// line, and bash reads on from the next, where a later refusal's status
+/// wins, but for one that ends inside a quote or pair after an earlier
+/// one.
+fn refusals(source: &[u8], options: &super::Options, ended: bool, first: Fail) -> Refusal {
+    let mut found = vec![first];
+    while let Some(last) = found.last().filter(|last| last.status == 1 && !last.eof) {
+        let Some(newline) = memchr::memchr(b'\n', &source[last.end.min(source.len())..]) else {
+            break;
+        };
+        let budget = Budget::default();
+        let mut parser = Parser::new(source, &budget, options);
+        parser.ended = ended;
+        parser.i = last.end + newline + 1;
+        let mut fail = loop {
+            match parser.next_statement(Close::Eof, None) {
+                Ok(Some(_)) => {}
+                Ok(None) => break None,
+                Err(fail) => break Some(fail),
+            }
+        };
+        let Some(mut fail) = fail.take() else {
+            break;
+        };
+        if fail.matching || found.iter().any(|earlier| earlier.matching) {
+            fail.status = last.status;
+        }
+        found.push(fail);
+    }
+    Refusal {
+        at: found[0].at,
+        message: found.iter().flat_map(|fail| &fail.lines).flat_map(|line| worded(line)).collect(),
+        status: found.last().map_or(2, |last| last.status),
+    }
+}
+
+/// One of bash's diagnostic lines as mirage prints it.
+fn worded(line: &[u8]) -> Vec<u8> {
+    for opener in [&b"syntax error near unexpected token `"[..], b"syntax error near `"] {
+        if let Some(text) = line.strip_prefix(opener).and_then(|rest| rest.strip_suffix(b"'")) {
+            return [&b"mirage: syntax error near '"[..], text, b"'\n"].concat();
+        }
+    }
+    [&b"mirage: "[..], line, b"\n"].concat()
+}
+
+/// A diagnostic line from its pieces.
+pub(super) fn line(pieces: &[&[u8]]) -> Vec<u8> {
+    pieces.concat()
+}
+
 /// The bytes bash's reader deletes as line continuations: a backslash
-/// that an odd run ends, before a newline or the end, and that newline.
-/// Single-quoted and ANSI-C text, a comment and a quoted heredoc's body
-/// keep theirs.
+/// that an odd run ends, before a newline or the end of the input, and
+/// that newline. Single-quoted and ANSI-C text and a comment keep theirs.
 fn continuations(source: &[u8], pass: &Pass) -> Vec<usize> {
-    if memchr::memmem::find(source, b"\\\n").is_none() {
+    if memchr::memmem::find(source, b"\\\n").is_none() && !source.ends_with(b"\\") {
         return Vec::new();
     }
-    let mut verbatim = [&pass.comments[..], &pass.raw_bodies[..]].concat();
+    let mut verbatim = pass.comments.clone();
     collect_verbatim(&pass.root, source, &mut verbatim);
     if let Some(error) = pass
         .root
@@ -233,7 +387,9 @@ fn continuations(source: &[u8], pass: &Pass) -> Vec<usize> {
         while let Some(&(_, to)) = spans.next_if(|span| span.0 <= last) {
             covered = covered.max(to);
         }
-        let live = (end - start) % 2 == 1 && source.get(end) == Some(&b'\n') && covered <= last;
+        let live = (end - start) % 2 == 1
+            && matches!(source.get(end), None | Some(b'\n'))
+            && covered <= last;
         if live {
             dropped.push(last);
             if end < source.len() {
@@ -308,27 +464,12 @@ fn scan_verbatim(source: &[u8], mut at: usize, spans: &mut Vec<(usize, usize)>) 
     }
 }
 
-/// A span of the joined text as a span of the source.
-fn span((start, end): (usize, usize), map: &[usize]) -> (usize, usize) {
-    let from = map[start.min(map.len() - 1)];
-    let to = if end > start { map[end - 1] + 1 } else { from };
-    (from, to)
-}
-
-fn remap(root: &mut Syn, map: &[usize]) {
-    let mut stack = vec![root];
-    while let Some(node) = stack.pop() {
-        (node.start, node.end) = span((node.start, node.end), map);
-        stack.extend(node.children.iter_mut());
-    }
-}
-
 impl<'a> Parser<'a> {
-    /// A parser at the start of `s`, counting its work in `work`.
+    /// A parser at the start of `s`, spending from `budget`.
     pub(super) fn new(
         s: &'a [u8],
-        work: &'a std::cell::Cell<usize>,
-        aliases: &'a [Vec<u8>],
+        budget: &'a Budget,
+        options: &'a super::Options,
     ) -> Self {
         Self {
             s,
@@ -338,12 +479,16 @@ impl<'a> Parser<'a> {
             in_backtick: false,
             pending: Vec::new(),
             taken: Vec::new(),
-            raw_bodies: Vec::new(),
+            bodies: Vec::new(),
+            closes: Vec::new(),
             comsub: 0,
             line_break: false,
             braces: 0,
-            work,
-            aliases,
+            frames: Vec::new(),
+            ended: s.ends_with(b"\n"),
+            nesting: 0,
+            budget,
+            options,
         }
     }
 }
@@ -355,8 +500,10 @@ impl Parser<'_> {
             comments: self.comments.len(),
             pending: self.pending.len(),
             taken: self.taken.len(),
-            raw_bodies: self.raw_bodies.len(),
+            bodies: self.bodies.len(),
+            closes: self.closes.len(),
             depth: self.depth,
+            ended: self.ended,
         }
     }
 
@@ -366,8 +513,10 @@ impl Parser<'_> {
     pub(super) fn reset(&mut self, mark: Mark) {
         self.i = mark.i;
         self.depth = mark.depth;
+        self.ended = mark.ended;
         self.comments.truncate(mark.comments);
-        self.raw_bodies.truncate(mark.raw_bodies);
+        self.bodies.truncate(mark.bodies);
+        self.closes.truncate(mark.closes);
         let reads: Vec<_> = self.taken.drain(mark.taken..).collect();
         self.put_back(reads, mark.pending);
         self.pending.truncate(mark.pending);
@@ -400,22 +549,96 @@ impl Parser<'_> {
         Err(self.unexpected(at))
     }
 
-    /// bash's refusal of the token at `at`.
-    pub(super) fn unexpected(&self, at: usize) -> Fail {
-        if at >= self.s.len() {
-            return Fail {
-                at,
-                message: "syntax error: unexpected end of file".into(),
-            };
-        }
-        let token = self.token_text(at);
+    /// A refusal at `at` in bash's `lines`, its status set by where the
+    /// parser stands: inside an array 1, the input ending there too;
+    /// otherwise inside a substitution 127, and 2 elsewhere.
+    pub(super) fn refusal(&self, at: usize, end: usize, lines: Vec<Vec<u8>>, eof: bool) -> Fail {
+        let status = if eof {
+            if self.frames.contains(&Frame::Array) { 1 } else { 2 }
+        } else {
+            match self.frames.last() {
+                None => 2,
+                Some(Frame::Array) => 1,
+                Some(Frame::Substitution) => 127,
+            }
+        };
         Fail {
             at,
-            message: format!("syntax error near unexpected token `{token}'"),
+            end,
+            lines,
+            status,
+            eof,
+            matching: false,
         }
     }
 
-    fn token_text(&self, at: usize) -> String {
+    /// bash's refusal of input that ends before the `closer` the construct
+    /// at `at` waits for.
+    pub(super) fn matching(&self, at: usize, closer: char) -> Fail {
+        let mut closer_bytes = [0; 4];
+        let closer = closer.encode_utf8(&mut closer_bytes).as_bytes();
+        let line = line(&[b"unexpected EOF while looking for matching `", closer, b"'"]);
+        Fail {
+            matching: true,
+            ..self.refusal(at, self.s.len(), vec![line], true)
+        }
+    }
+
+    /// Past the `{name}` of a `{name}>` or `{name}<` redirect at `at`.
+    pub(super) fn redirvar_end(&self, at: usize) -> Option<usize> {
+        if self.s.get(at) != Some(&b'{') {
+            return None;
+        }
+        let close = at + memchr::memchr(b'}', &self.s[at..])?;
+        let name = &self.s[at + 1..close];
+        let named = name.first().is_some_and(|byte| super::lex::is_name_start(*byte))
+            && name.iter().all(|byte| super::lex::is_name(*byte));
+        (named
+            && matches!(self.s.get(close + 1), Some(b'<' | b'>'))
+            && self.s.get(close + 2) != Some(&b'('))
+            .then_some(close + 1)
+    }
+
+    /// What bash says when the input ends where it waits for more.
+    pub(super) fn eof_line(&self) -> &'static str {
+        if self.frames.contains(&Frame::Substitution) {
+            "unexpected EOF while looking for matching `)'"
+        } else {
+            "syntax error: unexpected end of file"
+        }
+    }
+
+    /// bash's refusal of the token at `at`. At the end of the input it is
+    /// the newline bash supposes there, unless that was read.
+    pub(super) fn unexpected(&self, at: usize) -> Fail {
+        // `{name}>` is one token, which bash names by the text up to it.
+        if let Some(end) = self.redirvar_end(at) {
+            return self.near(end + 1, false);
+        }
+        if at >= self.s.len() {
+            if !self.ended {
+                let line = "syntax error near unexpected token `newline'".into();
+                return self.refusal(at, at, vec![line], false);
+            }
+            return self.refusal(at, at, vec![self.eof_line().into()], true);
+        }
+        let token = match self.token_text(at) {
+            Ok(token) => token,
+            Err(fail) => return fail,
+        };
+        let end = at + token.len().max(1);
+        let token = if token == b"\n" { b"newline".to_vec() } else { token };
+        self.refusal(
+            at,
+            end,
+            vec![line(&[b"syntax error near unexpected token `", &token, b"'"])],
+            false,
+        )
+    }
+
+    /// The token at `at` as bash names it; bash's lexer reads a word
+    /// whole first, refusing one that the input ends inside.
+    fn token_text(&self, at: usize) -> R<Vec<u8>> {
         let rest = &self.s[at..];
         let ops: &[&[u8]] = &[
             b";;&", b";;", b";&", b"&&", b"||", b"|&", b">>", b"<<", b"&>", b">&", b"<&", b">|",
@@ -423,15 +646,21 @@ impl Parser<'_> {
         ];
         for op in ops {
             if rest.starts_with(op) {
-                return if *op == b"\n" {
-                    "newline".into()
-                } else {
-                    String::from_utf8_lossy(op).into_owned()
-                };
+                return Ok(op.to_vec());
             }
         }
-        let end = super::lex::word_end(self.s, at).max(at + 1);
-        String::from_utf8_lossy(&self.s[at..end]).into_owned()
+        let end = self.scan_word(at)?.max(at + 1);
+        let mut word = Vec::with_capacity(end - at);
+        let mut from = at;
+        while from < end {
+            if self.s[from..end].starts_with(b"\\\n") {
+                from += 2;
+                continue;
+            }
+            word.push(self.s[from]);
+            from += 1;
+        }
+        Ok(word)
     }
 
     /// Where the next token after `at` starts, blanks and newlines skipped.
@@ -444,20 +673,19 @@ impl Parser<'_> {
 
     pub(super) fn enter(&mut self) -> R<()> {
         self.depth += 1;
-        self.work.set(self.work.get() + 1);
-        if self.depth > MAX_DEPTH {
-            return Err(Fail {
-                at: self.i,
-                message: "syntax error: nesting too deep".into(),
-            });
-        }
-        if self.work.get() > WORK_PER_BYTE * self.s.len() + WORK_BASE {
-            return Err(Fail {
-                at: self.i,
-                message: "syntax error: too complex to parse".into(),
-            });
-        }
-        Ok(())
+        let work = &self.budget.work;
+        work.set(work.get() + 1);
+        let line = if self.depth > MAX_DEPTH {
+            "syntax error: nesting too deep"
+        } else if work.get() > WORK_PER_BYTE * self.s.len() + WORK_BASE {
+            "syntax error: too complex to parse"
+        } else {
+            return Ok(());
+        };
+        Err(Fail {
+            status: 2,
+            ..self.refusal(self.i, self.i, vec![line.into()], false)
+        })
     }
 
     pub(super) fn leave(&mut self) {
@@ -482,13 +710,15 @@ impl Parser<'_> {
         }
     }
 
-    /// Skip blanks, newlines, continuations and comments.
+    /// Skip blanks, newlines, continuations and comments, the newline
+    /// bash supposes at the end of the input too.
     pub(super) fn skip_space(&mut self) {
         loop {
             self.skip_blank();
             if self.peek() == b'\n' {
                 self.i += 1;
             } else {
+                self.ended |= self.eof();
                 break;
             }
         }
@@ -496,16 +726,15 @@ impl Parser<'_> {
 
     /// `skip_space`, reading the body of each pending heredoc at the
     /// newline it starts after.
-    fn skip_space_bodies(&mut self, out: &mut Vec<Syn>) -> R<()> {
+    fn skip_space_bodies(&mut self) {
         loop {
             self.skip_blank();
             if self.peek() != b'\n' {
-                return Ok(());
+                self.ended |= self.eof();
+                return;
             }
             self.i += 1;
-            if !self.pending.is_empty() {
-                out.extend(self.pending_bodies()?);
-            }
+            self.pending_bodies();
         }
     }
 
@@ -533,9 +762,10 @@ impl Parser<'_> {
 
     /// Whether the reserved word `word` is next. An alias of that name is
     /// a command instead, as bash expands it before it reads a reserved
-    /// word.
+    /// word, but for inside a substitution, which bash reads first.
     pub(super) fn at_word(&self, word: &[u8]) -> bool {
-        self.at_spelled(word) && !self.aliases.iter().any(|alias| alias == word)
+        self.at_spelled(word)
+            && (self.comsub > 0 || !self.options.aliases.iter().any(|alias| alias == word))
     }
 
     /// Whether the word `word` is next, whatever aliases there are: a
@@ -576,7 +806,7 @@ impl Parser<'_> {
         field: Option<&'static str>,
     ) -> R<Option<Vec<Syn>>> {
         let mut items = Vec::new();
-        self.skip_space_bodies(&mut items)?;
+        self.skip_space_bodies();
         if self.at_close(close) || self.eof() {
             if self.eof() && close != Close::Eof {
                 return self.fail(self.i);
@@ -601,19 +831,32 @@ impl Parser<'_> {
             self.i += 1;
             items.push(Syn::token("&", at, at + 1));
         } else if self.peek() == b'\n' {
-            self.i = self.body_newline_end(self.first_readable());
+            self.i = if self.pending.is_empty() {
+                self.newline_end()
+            } else {
+                at + 1
+            };
             items.push(Syn::hidden(at, self.i));
-            if !self.pending.is_empty() {
-                items.extend(self.pending_bodies()?);
-            }
+            self.pending_bodies();
         } else if !self.at_close(close)
             && !self.eof()
             && !(ends_compound(&items[index]) && self.at_any_closer())
         {
+            // After a compound command bash reads `((` as arithmetic first,
+            // naming what it holds.
+            if ends_compound(&items[index]) && self.starts(b"((") {
+                let end = self.scan_matched(at + 2, at, b'(', b')')?;
+                if self.s.get(end + 1) == Some(&b')') {
+                    let inner = &self.s[at + 2..end];
+                    let line = line(&[b"syntax error near unexpected token `", inner, b"'"]);
+                    return Err(self.refusal(at, end + 2, vec![line], false));
+                }
+            }
             return self.fail(at);
         }
-        if self.eof() && !self.pending.is_empty() {
-            items.extend(self.pending_bodies()?);
+        if self.eof() {
+            self.ended = true;
+            self.pending_bodies();
         }
         if let Some(field) = field {
             items = Syn::fielded(items, field);
@@ -633,7 +876,7 @@ impl Parser<'_> {
         let mut terminated = true;
         while let Some(items) = self.next_statement(close, field)? {
             terminated = items.last().is_some_and(|last| {
-                matches!(last.kind, ";" | "&" | "" | "heredoc_body" | "heredoc_end")
+                matches!(last.kind, ";" | "&" | "")
                     || ends_compound(last)
             });
             children.extend(items);
@@ -663,7 +906,7 @@ impl Parser<'_> {
                 let op = if self.peek() == b'&' { "&&" } else { "||" };
                 self.i += 2;
                 let mut children = vec![left, Syn::token(op, at, at + 2)];
-                self.skip_space_bodies(&mut children)?;
+                self.skip_space_bodies();
                 let right = self.primary()?;
                 children.push(self.pipeline_rest(right)?);
                 left = Syn::node("list", children);
@@ -704,8 +947,8 @@ impl Parser<'_> {
             let op = if self.at(1) == b'&' { "|&" } else { "|" };
             self.i += op.len();
             children.push(Syn::token(op, at, self.i));
-            self.skip_space_bodies(&mut children)?;
-            if self.peek() == b'!' && (is_space(self.at(1)) || self.at(1) == 0) {
+            self.skip_space_bodies();
+            if self.at_bang() {
                 return self.fail(self.i);
             }
             children.push(self.element()?);
@@ -764,17 +1007,37 @@ impl Parser<'_> {
         self.eof()
             || self.peek() == b'\n'
             || (self.peek() == b';' && !self.starts(b";;") && !self.starts(b";&"))
-            || (self.peek() == b'&' && !self.starts(b"&&") && !self.starts(b"&>"))
     }
 
-    /// A command or a compound command, as one stage of a pipeline.
+    /// A command or a compound command, as one stage of a pipeline; a
+    /// compound one nested `MAX_NESTING` deep is refused at its opener.
     pub(super) fn element(&mut self) -> R<Syn> {
         self.skip_blank();
+        let compound = self.peek() == b'('
+            || [
+                &b"{"[..], b"[[", b"if", b"while", b"until", b"for", b"select", b"case",
+                b"function", b"coproc",
+            ]
+            .iter()
+            .any(|word| self.at_word(word));
+        if !compound {
+            return self.element_body();
+        }
+        if self.nesting >= MAX_NESTING {
+            return self.fail(self.i);
+        }
+        self.nesting += 1;
+        let node = self.element_body();
+        self.nesting -= 1;
+        node
+    }
+
+    fn element_body(&mut self) -> R<Syn> {
         let at = self.i;
         if self.eof() {
             return self.fail(at);
         }
-        if self.peek() == b'!' && (is_space(self.at(1)) || self.at(1) == 0) {
+        if self.at_bang() {
             return self.negated();
         }
         if self.starts(b"((") {
@@ -866,6 +1129,14 @@ impl Parser<'_> {
         let at = self.i;
         self.i += text.len();
         Ok(Syn::token(text, at, self.i))
+    }
+
+    /// Whether a `!` that negates a pipeline is next: one that ends its
+    /// word, as a `(` does too where extglob does not take it.
+    fn at_bang(&self) -> bool {
+        self.peek() == b'!'
+            && (matches!(self.at(1), 0 | b' ' | b'\t' | b'\n' | b';' | b'&' | b'|' | b'<' | b'>' | b')')
+                || self.at(1) == b'(' && !self.options.extglob)
     }
 
     fn negated(&mut self) -> R<Syn> {

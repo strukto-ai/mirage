@@ -21,14 +21,11 @@ from mirage.shell.parse.names import (
     identifier_names,
     referenced_names,
 )
-from mirage.shell.parse.parse import parse
-from mirage.shell.parse.source import join_continuations, source_offsets
-from mirage.shell.parse.syntax import check_syntax, syntax_error_result
+from mirage.shell.parse.parse import parse, syntax_refusal
 
 __all__ = [
     "arith_reads",
     "assignment_values",
-    "check_syntax",
     "command_invocations",
     "command_words",
     "env_reads",
@@ -37,7 +34,5 @@ __all__ = [
     "opaque_reads",
     "parse",
     "referenced_names",
-    "join_continuations",
-    "source_offsets",
-    "syntax_error_result",
+    "syntax_refusal",
 ]

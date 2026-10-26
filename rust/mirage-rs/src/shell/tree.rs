@@ -389,8 +389,6 @@ pub struct Node {
     /// Field id in its parent, 0 for none.
     pub field: u8,
     pub named: bool,
-    /// Whether the node is or holds an `ERROR` node.
-    pub has_error: bool,
     pub start: u32,
     pub end: u32,
     pub start_row: u32,
@@ -403,13 +401,36 @@ pub struct Node {
     pub child_count: u32,
 }
 
+/// What bash reports of a line it refuses.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Refusal {
+    /// Where its first refusal stands in the line as typed.
+    pub at: usize,
+    /// Its diagnostic lines as mirage prints them, each ended by a
+    /// newline, the line's own bytes in them as typed.
+    pub message: Vec<u8>,
+    /// The status the line is refused with.
+    pub status: u8,
+}
+
 /// A parsed program.
 #[derive(Debug, Clone)]
 pub struct Tree {
+    /// What the nodes read: the line with its heredoc bodies folded in
+    /// and its line continuations dropped.
     pub source: Vec<u8>,
     pub nodes: Vec<Node>,
-    /// The first syntax error bash would report: where, and its words.
-    pub error: Option<(usize, String)>,
+    /// What bash reports of the line when it refuses it.
+    pub error: Option<Refusal>,
+    /// The line as typed.
+    pub original: Vec<u8>,
+    /// Where each byte of `source` came from in `original`, then the end.
+    pub offsets: Vec<usize>,
+    /// The heredocs folded into `source`, in its order.
+    pub heredocs: Vec<super::lower::Heredoc>,
+    /// Each substitution that closes with heredocs opened inside still to
+    /// read: its `)` and their `<<`s, in the line as typed.
+    pub closes: Vec<(usize, Vec<usize>)>,
 }
 
 /// `KINDS`' names sorted, with their ids.
@@ -451,7 +472,7 @@ fn drop_hidden(root: &mut Syn) {
 }
 
 /// Lay a built tree out level by level, with its points.
-pub(crate) fn lay_out(source: Vec<u8>, mut root: Syn, error: Option<(usize, String)>) -> Tree {
+pub(crate) fn lay_out(source: Vec<u8>, mut root: Syn, error: Option<Refusal>) -> Tree {
     drop_hidden(&mut root);
     let lines: Vec<usize> = std::iter::once(0)
         .chain(memchr::memchr_iter(b'\n', &source).map(|at| at + 1))
@@ -460,7 +481,6 @@ pub(crate) fn lay_out(source: Vec<u8>, mut root: Syn, error: Option<(usize, Stri
         let row = lines.partition_point(|&start| start <= offset) - 1;
         (to_u32(row), to_u32(offset - lines[row]))
     };
-    let error_kind = kind_id("ERROR");
     let mut nodes: Vec<Node> = Vec::new();
     let mut queue = std::collections::VecDeque::new();
     queue.push_back((&root, u32::MAX));
@@ -482,7 +502,6 @@ pub(crate) fn lay_out(source: Vec<u8>, mut root: Syn, error: Option<(usize, Stri
                 field_id(name).unwrap_or_else(|| panic!("unknown field {name:?}"))
             }),
             named: syn.named,
-            has_error: kind == error_kind,
             start: to_u32(syn.start),
             end: to_u32(syn.end),
             start_row,
@@ -497,18 +516,14 @@ pub(crate) fn lay_out(source: Vec<u8>, mut root: Syn, error: Option<(usize, Stri
             queue.push_back((child, index));
         }
     }
-    // Children come after their parents: one backward pass carries each
-    // error up.
-    for index in (1..nodes.len()).rev() {
-        if nodes[index].has_error {
-            let parent = nodes[index].parent as usize;
-            nodes[parent].has_error = true;
-        }
-    }
     Tree {
         source,
         nodes,
         error,
+        original: Vec::new(),
+        offsets: Vec::new(),
+        heredocs: Vec::new(),
+        closes: Vec::new(),
     }
 }
 

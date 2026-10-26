@@ -1,288 +1,557 @@
-use super::lex::{blank_end, is_space};
-use super::parser::{Fail, Parser, R};
+use super::parser::{Fail, Parser, R, line};
 
-/// Unary operators of a conditional command, without their dash.
+/// Unary operators of a conditional command.
 const UNARY: &[&[u8]] = &[
-    b"a", b"b", b"c", b"d", b"e", b"f", b"g", b"h", b"k", b"p", b"r", b"s", b"t", b"u", b"w", b"x",
-    b"G", b"L", b"N", b"O", b"S", b"z", b"n", b"o", b"v", b"R",
+    b"-a", b"-b", b"-c", b"-d", b"-e", b"-f", b"-g", b"-h", b"-k", b"-p", b"-r", b"-s", b"-t",
+    b"-u", b"-w", b"-x", b"-G", b"-L", b"-N", b"-O", b"-S", b"-z", b"-n", b"-o", b"-v", b"-R",
 ];
 
-/// Binary operators of a conditional command.
+/// Binary operators of a conditional command spelled as words.
 const BINARY: &[&[u8]] = &[
-    b"==", b"=", b"!=", b"<", b">", b"=~", b"-eq", b"-ne", b"-lt", b"-le", b"-gt", b"-ge", b"-ef",
-    b"-nt", b"-ot",
+    b"==", b"=", b"!=", b"=~", b"-eq", b"-ne", b"-lt", b"-le", b"-gt", b"-ge", b"-nt", b"-ot",
+    b"-ef",
 ];
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Token {
-    And,
-    Or,
-    Not,
-    Open,
-    Close,
-    Less,
-    Greater,
-    Newline,
-    End,
-    /// A word and its span.
-    Word(usize, usize),
+/// Every operator bash reads, longest first.
+const OPERATORS: &[&[u8]] = &[
+    b";;&", b"&>>", b"<<<", b"<<-", b";;", b";&", b"&&", b"||", b"|&", b"&>", b"<<", b">>", b"<&",
+    b">&", b"<>", b">|", b";", b"&", b"|", b"<", b">", b"(", b")",
+];
+
+/// Bytes that end an unquoted word.
+fn word_break(byte: u8) -> bool {
+    matches!(byte, b' ' | b'\t' | b'\n' | b';' | b'&' | b'|' | b'(' | b')' | b'<' | b'>')
 }
 
-impl Token {
-    fn ends_term(self) -> bool {
-        matches!(self, Token::End | Token::And | Token::Or | Token::Close)
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Kind {
+    Word,
+    Op,
+    Newline,
+    Eof,
+}
+
+#[derive(Clone, Copy)]
+struct Tok {
+    kind: Kind,
+    start: usize,
+    end: usize,
+    /// No quote, escape or expansion in it.
+    plain: bool,
+}
+
+/// What stops a conditional: a refusal from inside a word, or one of the
+/// conditional's own, which bash words as its own lines and then the text
+/// it stopped at.
+enum Stop {
+    Refused(Fail),
+    Test { lines: Vec<Vec<u8>>, at: Tok, eof: bool },
+}
+
+impl From<Fail> for Stop {
+    fn from(fail: Fail) -> Self {
+        Stop::Refused(fail)
     }
 }
 
-/// bash's grammar for the inside of `[[ ... ]]`, checked over the text
-/// the tree was built from: the grammar's expression rules take more
-/// than bash does, so a tree alone cannot tell a refused line.
+type S<T> = Result<T, Stop>;
+
+fn test<T>(line: Vec<u8>, at: Tok) -> S<T> {
+    Err(Stop::Test {
+        lines: vec![line],
+        at,
+        eof: at.kind == Kind::Eof,
+    })
+}
+
+/// bash's reading of `[[ ... ]]`, which refuses what the tree's grammar
+/// takes and words its refusals in a family of its own.
 struct Cond<'p, 'a> {
     parser: &'p Parser<'a>,
-    at: usize,
-    end: usize,
+    pos: usize,
+    /// The newline bash supposes at the end of the input was read.
+    ended: bool,
+    /// How many `(` groups enclose the cursor.
+    depth: usize,
 }
 
 impl Cond<'_, '_> {
-    fn fail<T>(&self, at: usize) -> R<T> {
-        Err(Fail {
-            at,
-            message: "syntax error in conditional expression".into(),
+    fn s(&self) -> &[u8] {
+        self.parser.s
+    }
+
+    fn n(&self) -> usize {
+        self.parser.s.len()
+    }
+
+    fn byte(&self, at: usize) -> u8 {
+        self.s().get(at).copied().unwrap_or(0)
+    }
+
+    fn char_at(&self, at: usize) -> u8 {
+        self.parser.char_at(at)
+    }
+
+    fn text(&self, tok: Tok) -> Vec<u8> {
+        match tok.kind {
+            Kind::Newline => b"newline".to_vec(),
+            Kind::Eof => b"EOF".to_vec(),
+            _ => {
+                let raw = &self.s()[tok.start..tok.end];
+                let mut out = Vec::with_capacity(raw.len());
+                let mut at = 0;
+                while at < raw.len() {
+                    if raw[at..].starts_with(b"\\\n") {
+                        at += 2;
+                        continue;
+                    }
+                    out.push(raw[at]);
+                    at += 1;
+                }
+                out
+            }
+        }
+    }
+
+    /// A line with the token's text between `before` and `after`.
+    fn naming(&self, before: &str, tok: Tok, after: &str) -> Vec<u8> {
+        line(&[before.as_bytes(), &self.text(tok), after.as_bytes()])
+    }
+
+    fn is(&self, tok: Tok, kind: Kind, text: &[u8]) -> bool {
+        tok.kind == kind && self.text(tok) == text
+    }
+
+    fn is_close(&self, tok: Tok) -> bool {
+        tok.kind == Kind::Word && tok.plain && self.text(tok) == b"]]"
+    }
+
+    fn blank_end(&self, mut at: usize) -> usize {
+        loop {
+            if at < self.n() && matches!(self.s()[at], b' ' | b'\t') {
+                at += 1;
+            } else if self.s()[at.min(self.n())..].starts_with(b"\\\n") {
+                at += 2;
+            } else {
+                return at;
+            }
+        }
+    }
+
+    fn extglob_at(&self, j: usize) -> bool {
+        matches!(self.byte(j), b'@' | b'!' | b'+' | b'*' | b'?') && self.byte(j + 1) == b'('
+    }
+
+    // -- tokens ---------------------------------------------------------
+
+    fn lex(&self, mut at: usize) -> R<Tok> {
+        loop {
+            at = self.blank_end(at);
+            if self.byte(at) == b'#' && at < self.n() {
+                at = memchr::memchr(b'\n', &self.s()[at..]).map_or(self.n(), |offset| at + offset);
+                continue;
+            }
+            break;
+        }
+        if at >= self.n() {
+            let kind = if self.ended { Kind::Eof } else { Kind::Newline };
+            return Ok(Tok {
+                kind,
+                start: self.n(),
+                end: self.n(),
+                plain: true,
+            });
+        }
+        let byte = self.s()[at];
+        if byte == b'\n' {
+            return Ok(Tok {
+                kind: Kind::Newline,
+                start: at,
+                end: at + 1,
+                plain: true,
+            });
+        }
+        if matches!(byte, b'<' | b'>') && self.char_at(at + 1) == b'(' {
+            return self.word(at);
+        }
+        if let Some(end) = self.operator(at) {
+            return Ok(Tok {
+                kind: Kind::Op,
+                start: at,
+                end,
+                plain: true,
+            });
+        }
+        self.word(at)
+    }
+
+    /// Where the operator at `at` ends, continued lines joined.
+    fn operator(&self, at: usize) -> Option<usize> {
+        let mut spelled = Vec::new();
+        let mut ends = Vec::new();
+        let mut j = at;
+        while spelled.len() < 3 && j < self.n() {
+            if self.s()[j..].starts_with(b"\\\n") {
+                j += 2;
+                continue;
+            }
+            if !matches!(self.s()[j], b';' | b'&' | b'|' | b'<' | b'>' | b'(' | b')' | b'-') {
+                break;
+            }
+            spelled.push(self.s()[j]);
+            j += 1;
+            ends.push(j);
+        }
+        OPERATORS
+            .iter()
+            .find(|op| spelled.starts_with(op))
+            .map(|op| ends[op.len() - 1])
+    }
+
+    fn word(&self, at: usize) -> R<Tok> {
+        let mut j = at;
+        let mut plain = true;
+        while j < self.n() {
+            let byte = self.s()[j];
+            if byte == b'\\' {
+                if self.byte(j + 1) != b'\n' {
+                    plain = false;
+                }
+                j += 2;
+                continue;
+            }
+            if self.parser.options.extglob && self.extglob_at(j) {
+                j = self.parser.scan_extended_pattern(j)?;
+                plain = false;
+                continue;
+            }
+            if word_break(byte) {
+                if matches!(byte, b'<' | b'>') && self.char_at(j + 1) == b'(' {
+                    j = self.parser.scan_process_substitution(j)?;
+                    plain = false;
+                    continue;
+                }
+                break;
+            }
+            if matches!(byte, b'\'' | b'"' | b'`' | b'$') {
+                plain = false;
+            }
+            j = self.parser.scan_word_char(j)?;
+        }
+        Ok(Tok {
+            kind: Kind::Word,
+            start: at,
+            end: j.min(self.n()),
+            plain,
         })
     }
 
-    fn text(&self, start: usize, end: usize) -> &[u8] {
-        &self.parser.s[start..end]
+    fn peek(&self) -> R<Tok> {
+        self.lex(self.pos)
     }
 
-    /// The next token, the cursor left after it.
-    fn next(&mut self) -> R<Token> {
-        let s = self.parser.s;
-        self.at = blank_end(s, self.at).min(self.end);
-        if self.at >= self.end {
-            return Ok(Token::End);
+    fn take(&mut self, tok: Tok) {
+        self.pos = tok.end;
+        if tok.kind == Kind::Newline && tok.start == tok.end {
+            self.ended = true;
         }
-        let at = self.at;
-        let rest = &s[at..self.end];
-        let (token, len) = if rest.starts_with(b"&&") {
-            (Token::And, 2)
-        } else if rest.starts_with(b"||") {
-            (Token::Or, 2)
-        } else if rest[0] == b'\n' {
-            (Token::Newline, 1)
-        } else if rest[0] == b'(' {
-            (Token::Open, 1)
-        } else if rest[0] == b')' {
-            (Token::Close, 1)
-        } else if rest[0] == b'<' && rest.get(1) != Some(&b'(') {
-            (Token::Less, 1)
-        } else if rest[0] == b'>' && rest.get(1) != Some(&b'(') {
-            (Token::Greater, 1)
-        } else if rest[0] == b'!' && rest.get(1).is_none_or(|byte| is_space(*byte)) {
-            (Token::Not, 1)
-        } else if matches!(rest[0], b';' | b'&' | b'|')
-            || (matches!(rest[0], b'<' | b'>') && rest.get(1) != Some(&b'('))
-        {
-            return self.fail(at);
-        } else {
-            let word_end = self.word_end(at)?;
-            if &s[at..word_end] == b"]]" {
-                return self.fail(at);
-            }
-            self.at = word_end;
-            return Ok(Token::Word(at, word_end));
-        };
-        self.at = at + len;
-        Ok(token)
     }
 
-    /// Where a word starting at `at` ends; an extglob's `(...)` is part
-    /// of it.
-    fn word_end(&self, at: usize) -> R<usize> {
-        let s = self.parser.s;
-        let mut probe = self.parser.probe(at);
-        let mut end = match probe.literal_opt(super::word::Ctx::default())? {
-            Some(_) => probe.i,
-            None => return self.fail(at),
-        };
-        while s.get(end) == Some(&b'(')
-            && end > at
-            && matches!(s[end - 1], b'@' | b'!' | b'*' | b'+' | b'?')
-            && !super::lex::escaped(s, end - 1)
-        {
-            let Some(close) = super::lex::pair_end(s, end, b'(', b')') else {
-                return self.fail(end);
-            };
-            end = close;
-            let mut probe = self.parser.probe(end);
-            if probe.concat_continues(super::word::Ctx::default())
-                && probe.literal_opt(super::word::Ctx::default())?.is_some()
-            {
-                end = probe.i;
-            }
-        }
-        Ok(end)
-    }
-
-    /// The next token, newlines skipped where bash allows them.
-    fn next_skipping(&mut self) -> R<Token> {
+    fn linebreak(&mut self) -> R<()> {
         loop {
-            let token = self.next()?;
-            if token != Token::Newline {
-                return Ok(token);
+            let tok = self.peek()?;
+            if tok.kind != Kind::Newline {
+                return Ok(());
             }
+            self.take(tok);
         }
     }
 
-    fn or(&mut self, first: Token) -> R<Token> {
-        let mut after = self.and(first)?;
-        while after == Token::Or {
-            let next = self.next_skipping()?;
-            after = self.and(next)?;
-        }
-        Ok(after)
+    // -- the grammar ----------------------------------------------------
+
+    /// The next token, newlines skipped.
+    fn test_peek(&mut self) -> R<Tok> {
+        self.linebreak()?;
+        self.peek()
     }
 
-    fn and(&mut self, first: Token) -> R<Token> {
-        let mut after = self.term(first)?;
-        while after == Token::And {
-            let next = self.next_skipping()?;
-            after = self.term(next)?;
+    /// The token after a whole test; ending inside a quote there, bash
+    /// adds that it was looking for `]]`.
+    fn test_after(&mut self) -> S<Tok> {
+        if self.depth > 0 {
+            return Ok(self.test_peek()?);
         }
-        Ok(after)
+        operand("unexpected EOF while looking for `]]'", self.test_peek())
     }
 
-    /// One term from `first`; returns the token after it.
-    fn term(&mut self, first: Token) -> R<Token> {
-        match first {
-            Token::Not => {
-                let next = self.next_skipping()?;
-                self.term(next)
+    fn test_close(&mut self) -> S<()> {
+        let tok = self.test_after()?;
+        if self.is_close(tok) {
+            self.take(tok);
+            return Ok(());
+        }
+        if tok.kind == Kind::Eof {
+            return Err(Stop::Test {
+                lines: vec!["unexpected EOF while looking for `]]'".into()],
+                at: tok,
+                eof: true,
+            });
+        }
+        if tok.kind == Kind::Word {
+            return test("syntax error in conditional expression".into(), tok);
+        }
+        test(
+            self.naming("syntax error in conditional expression: unexpected token `", tok, "'"),
+            tok,
+        )
+    }
+
+    fn test_or(&mut self) -> S<()> {
+        self.test_and()?;
+        loop {
+            let tok = self.test_after()?;
+            if !self.is(tok, Kind::Op, b"||") {
+                return Ok(());
             }
-            Token::Open => {
-                let next = self.next_skipping()?;
-                let close = self.or(next)?;
-                if close != Token::Close {
-                    return self.fail(self.at);
-                }
-                self.next_skipping()
-            }
-            Token::Word(start, end) => {
-                let word = self.text(start, end);
-                if word.len() > 1 && word[0] == b'-' && UNARY.contains(&&word[1..]) {
-                    let operand = self.next()?;
-                    if let Token::Word(..) = operand {
-                        return self.next_skipping();
-                    }
-                    if !operand.ends_term() {
-                        return self.fail(self.at);
-                    }
-                    return self.fail(start);
-                }
-                let after = self.next()?;
-                match after {
-                    _ if after.ends_term() => Ok(after),
-                    Token::Less | Token::Greater => self.right(false),
-                    Token::Word(op_start, op_end)
-                        if BINARY.contains(&self.text(op_start, op_end)) =>
-                    {
-                        let regex = self.text(op_start, op_end) == b"=~";
-                        self.right(regex)
-                    }
-                    _ => self.fail(self.at),
-                }
-            }
-            _ => self.fail(self.at),
+            self.take(tok);
+            self.test_and()?;
         }
     }
 
-    /// A binary operator's right side, and the token after it.
-    fn right(&mut self, regex: bool) -> R<Token> {
-        if regex {
-            return self.regex();
-        }
-        match self.next()? {
-            Token::Word(..) => self.after_term(),
-            _ => self.fail(self.at),
-        }
-    }
-
-    /// The token after a whole term: the end, a `)`, `&&` or `||`.
-    fn after_term(&mut self) -> R<Token> {
-        let after = self.next_skipping()?;
-        if after.ends_term() {
-            Ok(after)
-        } else {
-            self.fail(self.at)
-        }
-    }
-
-    /// The word after `=~`: up to a blank or `&` outside parentheses,
-    /// where a `;` or redirection operator outside them is refused. A
-    /// `&&` right after the operator leaves the regex empty.
-    fn regex(&mut self) -> R<Token> {
-        let s = self.parser.s;
-        self.at = blank_end(s, self.at).min(self.end);
-        if s[self.at..self.end].starts_with(b"&&") {
-            return self.next();
-        }
-        let start = self.at;
-        let mut depth = 0usize;
-        while self.at < self.end {
-            match s[self.at] {
-                b'\\' => self.at += 1,
-                b'\'' | b'"' => {
-                    self.at = super::lex::quote_end(s, self.at, s[self.at]).unwrap_or(self.end) - 1;
-                }
-                b'$' if s.get(self.at + 1) == Some(&b'\'') => {
-                    self.at = super::lex::ansi_c_end(s, self.at).unwrap_or(self.end) - 1;
-                }
-                b'$' if matches!(s.get(self.at + 1), Some(b'(' | b'{')) => {
-                    let mut probe = self.parser.probe(self.at);
-                    let parsed = if s[self.at + 1] == b'(' {
-                        probe.command_substitution()
-                    } else {
-                        probe.expansion()
-                    };
-                    if parsed.is_err() {
-                        return self.fail(self.at);
-                    }
-                    self.at = probe.i;
-                    continue;
-                }
-                b'(' => depth += 1,
-                b')' if depth > 0 => depth -= 1,
-                b')' | b'&' if depth == 0 => break,
-                b';' | b'<' | b'>' if depth == 0 => return self.fail(self.at),
-                byte if is_space(byte) && depth == 0 => break,
-                _ => {}
+    fn test_and(&mut self) -> S<()> {
+        self.test_term()?;
+        loop {
+            let tok = self.test_after()?;
+            if !self.is(tok, Kind::Op, b"&&") {
+                return Ok(());
             }
-            self.at += 1;
+            self.take(tok);
+            self.test_term()?;
         }
-        if self.at == start {
-            return self.fail(start);
+    }
+
+    fn test_term(&mut self) -> S<()> {
+        let mut tok = self.test_peek()?;
+        let mut bangs = 0;
+        while tok.kind == Kind::Word && tok.plain && self.text(tok) == b"!" {
+            bangs += 1;
+            if bangs >= super::parser::MAX_SCAN {
+                return Err(Stop::Refused(self.parser.too_deep()));
+            }
+            self.take(tok);
+            tok = self.test_peek()?;
         }
-        self.after_term()
+        if tok.kind == Kind::Eof {
+            return Err(Stop::Test {
+                lines: vec!["unexpected token `EOF' in conditional command".into()],
+                at: tok,
+                eof: true,
+            });
+        }
+        if self.is_close(tok) {
+            return Err(Stop::Test {
+                lines: Vec::new(),
+                at: tok,
+                eof: false,
+            });
+        }
+        if self.is(tok, Kind::Op, b"(") {
+            return self.test_group(tok);
+        }
+        if tok.kind != Kind::Word {
+            return test(
+                self.naming("unexpected token `", tok, "' in conditional command"),
+                tok,
+            );
+        }
+        if tok.plain && UNARY.contains(&self.text(tok).as_slice()) {
+            self.take(tok);
+            let arg = operand(
+                "unexpected argument to conditional unary operator",
+                self.peek(),
+            )?;
+            if arg.kind != Kind::Word || self.is_close(arg) {
+                return test(
+                    self.naming("unexpected argument `", arg, "' to conditional unary operator"),
+                    arg,
+                );
+            }
+            self.take(arg);
+            return Ok(());
+        }
+        self.take(tok);
+        let op = operand("conditional binary operator expected", self.peek())?;
+        let text = self.text(op);
+        let binary = (op.kind == Kind::Word && op.plain && BINARY.contains(&text.as_slice()))
+            || (op.kind == Kind::Op && matches!(text.as_slice(), b"<" | b">"));
+        if binary {
+            self.take(op);
+            let arg = match text.as_slice() {
+                b"=~" => self.regex_word(),
+                b"==" | b"=" | b"!=" => self.pattern_word(),
+                _ => self.peek(),
+            };
+            let arg = operand("unexpected argument to conditional binary operator", arg)?;
+            if arg.kind != Kind::Word || self.is_close(arg) {
+                return test(
+                    self.naming("unexpected argument `", arg, "' to conditional binary operator"),
+                    arg,
+                );
+            }
+            self.take(arg);
+            return Ok(());
+        }
+        if (op.kind == Kind::Op && matches!(text.as_slice(), b"&&" | b"||" | b")"))
+            || self.is_close(op)
+        {
+            return Ok(());
+        }
+        if op.kind == Kind::Word {
+            return test("conditional binary operator expected".into(), op);
+        }
+        test(
+            self.naming("unexpected token `", op, "', conditional binary operator expected"),
+            op,
+        )
+    }
+
+    /// `( EXPR )`: every refusal inside adds that bash expected the `)`.
+    fn test_group(&mut self, tok: Tok) -> S<()> {
+        if self.parser.nesting + self.depth >= super::parser::MAX_NESTING {
+            let line = b"syntax error near unexpected token `('".to_vec();
+            return Err(Stop::Refused(self.parser.refusal(tok.start, tok.end, vec![line], false)));
+        }
+        self.take(tok);
+        self.depth += 1;
+        let inside = self.test_or().and_then(|()| Ok(self.test_peek()?));
+        self.depth -= 1;
+        let close = match inside {
+            Ok(close) => close,
+            Err(Stop::Test { mut lines, at, eof }) => {
+                lines.push("expected `)'".into());
+                return Err(Stop::Test { lines, at, eof });
+            }
+            Err(Stop::Refused(mut fail)) => {
+                if fail.eof {
+                    fail.lines.push("expected `)'".into());
+                }
+                return Err(Stop::Refused(fail));
+            }
+        };
+        if self.is(close, Kind::Op, b")") {
+            self.take(close);
+            return Ok(());
+        }
+        if close.kind == Kind::Word && !self.is_close(close) {
+            return test("expected `)'".into(), close);
+        }
+        test(self.naming("unexpected token `", close, "', expected `)'"), close)
+    }
+
+    /// The right side of `==`, `=` or `!=`, read with extglob on.
+    fn pattern_word(&self) -> R<Tok> {
+        let at = self.blank_end(self.pos);
+        let tok = self.lex(at)?;
+        if tok.kind != Kind::Word && !self.extglob_at(at) {
+            return Ok(tok);
+        }
+        let mut j = at;
+        let mut extended = false;
+        while j < self.n() {
+            if self.extglob_at(j) {
+                j = self.parser.scan_extended_pattern(j)?;
+                extended = true;
+                continue;
+            }
+            if word_break(self.s()[j]) {
+                break;
+            }
+            j = self.parser.scan_word_char(j)?;
+        }
+        if !extended {
+            return Ok(tok);
+        }
+        Ok(Tok {
+            kind: Kind::Word,
+            start: at,
+            end: j.min(self.n()),
+            plain: false,
+        })
+    }
+
+    /// The right side of `=~`: parentheses group blanks into it and `|`
+    /// is part of it; `;`, `<`, `>`, `)` and `&` end it, and one of them
+    /// first is an empty pattern.
+    fn regex_word(&self) -> R<Tok> {
+        let at = self.blank_end(self.pos);
+        if at >= self.n() || matches!(self.s()[at], b'\n' | b'#') {
+            return self.lex(at);
+        }
+        if matches!(self.s()[at], b';' | b'<' | b'>' | b')' | b'&') {
+            return Ok(Tok {
+                kind: Kind::Word,
+                start: at,
+                end: at,
+                plain: true,
+            });
+        }
+        let mut j = at;
+        while j < self.n() {
+            let byte = self.s()[j];
+            if byte == b'(' {
+                j = self.parser.scan_matched(j + 1, j, b'(', b')')? + 1;
+                continue;
+            }
+            if matches!(byte, b' ' | b'\t' | b'\n' | b';' | b'<' | b'>' | b')' | b'&') {
+                break;
+            }
+            j = self.parser.scan_word_char(j)?;
+        }
+        let tok = Tok {
+            kind: Kind::Word,
+            start: at,
+            end: j.min(self.n()),
+            plain: false,
+        };
+        let plain = self.text(tok) == b"]]";
+        Ok(Tok { plain, ..tok })
     }
 }
 
+/// A test's next token; ending inside a quote there, bash adds `line`.
+fn operand(line: &str, read: R<Tok>) -> S<Tok> {
+    read.map_err(|mut fail| {
+        if fail.eof {
+            fail.lines.push(line.into());
+        }
+        Stop::Refused(fail)
+    })
+}
+
 impl Parser<'_> {
-    /// Check `start..end`, the inside of a `[[ ... ]]`, against bash's
-    /// conditional grammar.
-    pub(super) fn check_conditional(&self, start: usize, end: usize) -> R<()> {
+    /// Read `[[ ... ]]` from `start`, just past its `[[`, as bash does:
+    /// where it ends, or bash's refusal of it.
+    pub(super) fn check_conditional(&self, start: usize) -> R<usize> {
         let mut cond = Cond {
             parser: self,
-            at: start,
-            end,
+            pos: start,
+            ended: self.ended,
+            depth: 0,
         };
-        let first = cond.next_skipping()?;
-        if first == Token::End {
-            return cond.fail(start);
+        let read = cond.test_or().and_then(|()| cond.test_close());
+        match read {
+            Ok(()) => Ok(cond.pos),
+            Err(Stop::Refused(fail)) => Err(fail),
+            Err(Stop::Test { mut lines, at, eof }) => {
+                if eof {
+                    lines.push(self.eof_line().into());
+                    return Err(self.refusal(self.s.len(), self.s.len(), lines, true));
+                }
+                let reach = at.end + usize::from(at.kind != Kind::Newline);
+                let (from, to) = self.near_span(reach);
+                lines.push(line(&[b"syntax error near `", &self.s[from..to], b"'"]));
+                Err(self.refusal(from, to, lines, false))
+            }
         }
-        let after = cond.or(first)?;
-        if after != Token::End {
-            return cond.fail(cond.at);
-        }
-        Ok(())
     }
 }

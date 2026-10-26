@@ -18,7 +18,7 @@ import { NodeType as NT } from './types.ts'
 /**
  * Statement kinds the executor dispatches on.
  *
- * `nodeKind` owns every tree-sitter node-type check, including the
+ * `nodeKind` owns every node-type check, including the
  * lookahead that distinguishes `select` from `for`, `until` from `while`
  * and a `(( ))` command from a `{ }` group.
  */
@@ -149,9 +149,9 @@ export function simpleCommand(node: KindNodeLike): boolean {
 }
 
 /**
- * Classify a tree-sitter node into the shared statement kind, or
- * UNSUPPORTED for node types neither walker implements (tree-sitter
- * ERROR nodes, future grammar additions).
+ * Classify a parsed node into the shared statement kind, or
+ * UNSUPPORTED for node types neither walker implements (future grammar
+ * additions).
  */
 export function nodeKind(node: KindNodeLike): NodeKind {
   const ntype = node.type

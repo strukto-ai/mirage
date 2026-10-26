@@ -63,13 +63,13 @@ async def expand_test_expr(
     """Expand a test_command ``[ ... ]`` into flat argv, tokens in
     source order.
 
-    tree-sitter nests ``-a``/``-o`` chains unpredictably, so the shape
+    The parser nests ``-a``/``-o`` chains by its own precedence, so the shape
     is discarded: every operator token and expanded operand is
     re-serialized and the flat bash arity rules take over. Unquoted
     expansions word-split like bash (an empty one drops out of argv).
 
     Args:
-        node (TSNodeLike): tree-sitter test_command node.
+        node (TSNodeLike): the test_command node.
         context (EvaluationContext): the evaluation expanding it.
         execute_fn (ExecuteFn): workspace execute for command substitutions.
         cs (CallStack | None): call stack for positional parameters.
@@ -104,13 +104,13 @@ async def expand_double_bracket(
 ) -> CondNode:
     """Build a structured condition tree from a ``[[ ... ]]`` node.
 
-    tree-sitter nests the expression by its own precedence (``=~``
+    The parser nests the expression by its own precedence (``=~``
     looser than ``||``, ``!`` tighter than ``=~``), so its tokens are
     read again as bash parses them; a shape that reading refuses keeps
-    tree-sitter's tree.
+    the parser's tree.
 
     Args:
-        node (TSNodeLike): tree-sitter test_command node opened with ``[[``.
+        node (TSNodeLike): the test_command node opened with ``[[``.
         context (EvaluationContext): the evaluation expanding it.
         execute_fn (ExecuteFn): workspace execute for command substitutions.
         cs (CallStack | None): call stack for positional parameters.
@@ -121,7 +121,7 @@ async def expand_double_bracket(
     try:
         tree = CondParser(cond_tokens(node)).parse()
     except CondSyntax as exc:
-        logger.debug("[[ ]] keeps tree-sitter's reading: %s", exc)
+        logger.debug("[[ ]] keeps the parser's reading: %s", exc)
         return await _build_cond(exprs[0], context, execute_fn, cs, view=view)
     return await _cond_node(tree, context, execute_fn, cs, view)
 
@@ -198,7 +198,7 @@ async def _build_cond(
     """Recursively translate one expression node into a CondNode.
 
     Args:
-        node (TSNodeLike): tree-sitter expression node.
+        node (TSNodeLike): the expression node.
         context (EvaluationContext): the evaluation expanding it.
         execute_fn (ExecuteFn): workspace execute for command substitutions.
         cs (CallStack | None): call stack for positional parameters.
@@ -227,7 +227,7 @@ async def _build_unary(
     """Translate a unary/negation expression node.
 
     Args:
-        node (TSNodeLike): tree-sitter unary_expression or negation_expression.
+        node (TSNodeLike): the unary_expression or negation_expression.
         context (EvaluationContext): the evaluation expanding it.
         execute_fn (ExecuteFn): workspace execute for command substitutions.
         cs (CallStack | None): call stack for positional parameters.
@@ -272,7 +272,7 @@ async def _build_binary(
     """Translate a binary expression node (logical or comparison).
 
     Args:
-        node (TSNodeLike): tree-sitter binary_expression.
+        node (TSNodeLike): the binary_expression.
         context (EvaluationContext): the evaluation expanding it.
         execute_fn (ExecuteFn): workspace execute for command substitutions.
         cs (CallStack | None): call stack for positional parameters.
@@ -331,14 +331,14 @@ async def _comparison(
     Args:
         op (str): the operator.
         left_text (str): the expanded left operand.
-        right_node (TSNodeLike): the right operand's tree-sitter node.
+        right_node (TSNodeLike): the right operand's parsed node.
         context (EvaluationContext): the evaluation expanding it.
         execute_fn (ExecuteFn): workspace execute for command substitutions.
         cs (CallStack | None): call stack for positional parameters.
     """
     if op == "=~" and right_node.type == NT.REGEX:
         raw = get_text(right_node)
-        # After =~ tree-sitter lexes even a quoted operand as one regex
+        # After =~ the parser lexes even a quoted operand as one regex
         # token; quoted means bash matches it literally.
         if len(raw) >= 2 and raw[0] == raw[-1] and raw[0] in "'\"":
             return CondBinary(

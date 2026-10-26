@@ -74,7 +74,6 @@ from mirage.shell.helpers import (
     get_unset_args,
     get_while_parts,
     read_row,
-    take_continuation,
     with_own_redirects,
 )
 from mirage.shell.job_table import JobTable
@@ -165,7 +164,7 @@ async def _eval_cfor_expr(
     """Evaluate one C-style for expression slot.
 
     Args:
-        exprs (list[Any]): the slot's tree-sitter expression nodes, one
+        exprs (list[Any]): the slot's parsed expression nodes, one
             per comma-separated expression; empty for an empty slot.
         default (int): value an empty slot yields (1 for the condition
             so `for ((;;))` loops, 0 for init/update).
@@ -658,8 +657,7 @@ async def _run_redirected(
     *,
     sink: JobConsole | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
-    """Run a redirected statement: the command under its redirects, then
-    the pipeline a heredoc's operator line fed it into.
+    """Run a redirected statement: the command under its redirects.
 
     The parse hoists a trailing redirect over whatever precedes it, so
     the redirects are bound where bash binds them first: past a list to
@@ -708,7 +706,7 @@ async def _run_redirected(
         # (get_function_body), not to the definition.
         return await recurse(command, context, stdin, call_stack)
     if command is not None and command.type == NT.LIST:
-        # tree-sitter hoists a trailing redirect over the whole
+        # the parser hoists a trailing redirect over the whole
         # &&/|| list; bash binds it to the last command:
         #   redirected(list(L, op, R), r) == list(L, op, redirected(R, r))
         # Re-associate and defer target expansion until R runs, so
@@ -777,9 +775,6 @@ async def _run_redirected(
         return await _negated(
             stdout, io, exec_node, context, command if inner is None else inner
         )
-    pipe_node = next(
-        (r.pipeline for r in redirects if r.pipeline is not None), None
-    )
     forked = forks(command, context.session)
     expand = partial(
         expand_redirect,
@@ -852,7 +847,7 @@ async def _run_redirected(
                     context,
                     stdin,
                     call_stack,
-                    sink=sink if pipe_node is None else None,
+                    sink=sink,
                     expand=partial(expand, forked=ran_forked),
                     guard=guard,
                     name=name,
@@ -869,7 +864,7 @@ async def _run_redirected(
                     context,
                     stdin,
                     call_stack,
-                    sink=sink if pipe_node is None else None,
+                    sink=sink,
                     own_diagnostics=False,
                 )
             finally:
@@ -883,7 +878,7 @@ async def _run_redirected(
                 context,
                 stdin,
                 call_stack,
-                sink=sink if pipe_node is None else None,
+                sink=sink,
                 expand=expand,
                 forked=forked,
             )
@@ -897,110 +892,7 @@ async def _run_redirected(
         raise
     finally:
         context.frame.diagnostics = outer
-    if pipe_node is not None and stdout is not None:
-        stdout, io2, exec_node2 = await recurse(
-            pipe_node, context, stdout, call_stack
-        )
-        io = await io.merge(io2)
-        exec_node = exec_node2
     return stdout, io, exec_node
-
-
-async def _run_continuation(
-    recurse: Callable[..., Awaitable[RedirectResult]],
-    run_left: Callable[..., Awaitable[RedirectResult]],
-    left: TSNodeLike,
-    steps: tuple[tuple[str, TSNodeLike], ...],
-    context: EvaluationContext,
-    stdin: ByteSource | None,
-    call_stack: CallStack | None,
-    execute_fn: ExecuteFn | None = None,
-) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
-    """Fold the ``&&``/``||`` steps a heredoc's operator line carried
-    around the statement, left to right.
-
-    The last step's operator joins everything before it to its right
-    operand, so the fold is ``handle_connection`` with the statement's
-    node standing for that left side; the wrapper below runs the
-    remaining steps when asked for it and recurses normally for the
-    right operand. The list semantics (short-circuit, ``$?``,
-    ``PIPESTATUS``, ``set -e`` immunity) are therefore the ``list``
-    node's own, not a second copy.
-
-    Args:
-        recurse (Callable): the plain execute_node recursion.
-        run_left (Callable): runs the redirected statement itself, given
-            ``(session, stdin, call_stack)``.
-        left (Any): the redirected_statement node, standing for the
-            left side in ``handle_connection``.
-        steps (tuple[tuple[str, TSNodeLike], ...]): the ``(operator, right)``
-            steps, in order.
-        context (EvaluationContext): the evaluation's session and frame.
-        stdin (Any): input stream.
-        call_stack (CallStack | None): shell call stack.
-        execute_fn (Callable[..., Any] | None): runs the ERR action.
-    """
-    if not steps:
-        return await run_left(context, stdin, call_stack)
-    op, right = steps[-1]
-    wrapped = partial(
-        _recurse_continuation,
-        recurse,
-        run_left,
-        left,
-        steps[:-1],
-        execute_fn,
-    )
-    return await handle_connection(
-        wrapped,
-        left,
-        op,
-        right,
-        context,
-        stdin,
-        call_stack,
-        execute_fn,
-    )
-
-
-async def _recurse_continuation(
-    recurse: Callable[..., Awaitable[RedirectResult]],
-    run_left: Callable[..., Awaitable[RedirectResult]],
-    left: TSNodeLike,
-    steps: tuple[tuple[str, TSNodeLike], ...],
-    execute_fn: ExecuteFn | None,
-    node: TSNodeLike,
-    context: EvaluationContext,
-    stdin: ByteSource | None = None,
-    call_stack: CallStack | None = None,
-) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
-    """Recurse wrapper for a heredoc continuation: the statement's own
-    node runs the steps before the current one, anything else recurses.
-
-    Args:
-        recurse (Callable): the plain execute_node recursion.
-        run_left (Callable): runs the redirected statement itself.
-        left (Any): the redirected_statement node.
-        steps (tuple[tuple[str, TSNodeLike], ...]): the steps before the
-            current one.
-        execute_fn (Callable[..., Any] | None): runs the ERR action.
-        node (Any): the node ``handle_connection`` asks for.
-        context (EvaluationContext): the evaluation's session and frame.
-        stdin (Any): input stream.
-        call_stack (CallStack | None): shell call stack.
-    """
-    if node is left:
-        return await _run_continuation(
-            recurse,
-            run_left,
-            left,
-            steps,
-            context,
-            stdin,
-            call_stack,
-            execute_fn,
-        )
-    return await recurse(node, context, stdin, call_stack)
 
 
 def _is_bare_exec(command: TSNodeLike | None) -> bool:
@@ -1009,7 +901,7 @@ def _is_bare_exec(command: TSNodeLike | None) -> bool:
     `exec cmd` is a command.
 
     Args:
-        command (Any): the tree-sitter command node under the redirect,
+        command (Any): the command node under the redirect,
             or None for a command-less redirect (`> file`).
     """
     if command is None or command.type != NT.COMMAND:
@@ -1159,7 +1051,7 @@ async def _execute_node(
     execution_scope: ExecutionScope | None = None,
     own_diagnostics: bool = True,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
-    """Walk tree-sitter AST and dispatch each node.
+    """Walk the parsed tree and dispatch each node.
 
     ``set -n`` stops every node at any depth, as GNU answers ``if true;
     then set -n; echo BAD; fi`` with nothing; the program loop's own stop
@@ -1171,7 +1063,7 @@ async def _execute_node(
         namespace (Namespace): addressing authority for symlink ops.
         job_table (JobTable): background job management.
         execute_fn (Callable): recursive execute (for source/eval).
-        node (Any): tree-sitter node to execute.
+        node (Any): parsed node to execute.
         context (EvaluationContext): the evaluation's session and frame.
         stdin (Any): input stream.
         call_stack (CallStack): shell call stack.
@@ -1469,13 +1361,7 @@ async def _execute_node(
 
     if kind == NodeKind.REDIRECT:
         command, redirects = get_redirects(node)
-        # The `&&`/`||` steps a heredoc's operator line carried
-        # (`false <<EOF || echo x`) wrap the whole statement, hoisted
-        # list and all, exactly as a `list` node would have wrapped it
-        # had the parser read the line the way bash does.
-        continuation = take_continuation(redirects)
-        run_left = partial(
-            _run_redirected,
+        ran = await _run_redirected(
             recurse,
             dispatch,
             execute_fn,
@@ -1485,21 +1371,11 @@ async def _execute_node(
             command,
             redirects,
             job_table.processes if job_table is not None else None,
+            context,
+            stdin,
+            cs,
             sink=sink,
         )
-        if not continuation:
-            ran = await run_left(context, stdin, cs)
-        else:
-            ran = await _run_continuation(
-                recurse,
-                run_left,
-                node,
-                continuation,
-                context,
-                stdin,
-                cs,
-                execute_fn,
-            )
         return ran if sink is None else await drained(sink, *ran)
 
     if kind == NodeKind.SUBSHELL:
@@ -1800,7 +1676,7 @@ async def _execute_node(
         )
 
     # Constructs the parser accepts but the executor cannot honor
-    # (tree-sitter ERROR nodes, future grammar additions).
+    # (future grammar additions).
     return fail(
         get_text(node),
         f"mirage: unsupported shell construct: {node.type}\n",

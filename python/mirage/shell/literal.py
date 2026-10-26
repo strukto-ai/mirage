@@ -15,8 +15,6 @@ class LiteralNode:
     prev_sibling: TSNodeLike | None = None
     next_sibling: TSNodeLike | None = None
     is_named: bool = True
-    is_missing: bool = False
-    has_error: bool = False
 
     @property
     def id(self) -> int:

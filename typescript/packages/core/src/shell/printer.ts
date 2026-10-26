@@ -23,9 +23,7 @@ import {
 } from './helpers.ts'
 import type { ParseScope } from './parse/scope.ts'
 import { BASH_KEYWORDS } from './parse/constants.ts'
-import { delimiterEnd } from './parse/heredoc/reader.ts'
-import type { Heredoc } from './parse/heredoc/types.ts'
-import { NodeType as NT, type TSNodeLike } from './types.ts'
+import { NodeType as NT, type Heredoc, type TSNodeLike } from './types.ts'
 import { singleQuote } from '../utils/quote.ts'
 
 const INDENT = '    '
@@ -406,8 +404,7 @@ class Printer {
   redirect(node: TSNodeLike): string {
     const fdNode = node.children.find((c) => c.type === NT.FILE_DESCRIPTOR)
     const fd = fdNode === undefined ? null : getText(fdNode)
-    if (node.heredoc !== undefined || node.type === NT.HEREDOC_REDIRECT)
-      return this.heredoc(node, fd, node.heredoc)
+    if (node.heredoc !== undefined) return this.heredoc(fd, node.heredoc)
     const text = getText(node)
     const opNode = node.children.find((c) => c.isNamed !== true && c.type !== '(' && c.type !== ')')
     const op = opNode === undefined ? '' : getText(opNode)
@@ -426,27 +423,11 @@ class Printer {
     return `${shown}${op} ${word}`
   }
 
-  private heredoc(node: TSNodeLike, fd: string | null, document: Heredoc | undefined): string {
-    const text = node.sourceText ?? node.text
-    const operator = text.startsWith('<<-') ? '<<-' : '<<'
-    let at = operator.length
-    while (at < text.length && (text[at] === ' ' || text[at] === '\t')) at += 1
-    const word = text.slice(at, delimiterEnd(text, at) ?? at)
-    let body: string
-    let delimiter: string
-    let quoted: boolean
-    if (document !== undefined) {
-      body = document.body
-      delimiter = document.delimiter
-      quoted = document.quoted
-    } else {
-      body = getText(node.children.find((c) => c.type === 'heredoc_body') ?? node)
-      delimiter = word.replace(/^['"]|['"]$/g, '')
-      quoted = delimiter !== word
-    }
-    this.deferred.push(`${body}${delimiter}\n`)
+  private heredoc(fd: string | null, document: Heredoc): string {
+    this.deferred.push(`${document.body}${document.delimiter}\n`)
     const shown = fd !== null && /[1-9]/.test(fd) ? fd : ''
-    return shown + operator + (quoted ? singleQuote(delimiter) : word)
+    const operator = document.dash ? '<<-' : '<<'
+    return shown + operator + (document.quoted ? singleQuote(document.delimiter) : document.word)
   }
 
   /**

@@ -41,9 +41,7 @@ def _sexp(node: Any, field: str | None = None) -> str:
 
 
 @pytest.mark.parametrize("line,sexp", BASH)
-def test_tree_reads_as_bash_reads(
-    line: str, sexp: str
-) -> None:
+def test_tree_reads_as_bash_reads(line: str, sexp: str) -> None:
     tree = parse_shell(line)
     assert tree.error is None
     assert _sexp(tree.root_node) == sexp
@@ -51,11 +49,22 @@ def test_tree_reads_as_bash_reads(
 
 def test_a_refused_line_reports_bash_words() -> None:
     tree = parse_shell("if true; then")
-    assert tree.root_node.has_error
-    assert tree.error == (13, "syntax error: unexpected end of file")
+    assert tree.error == (
+        13,
+        b"mirage: syntax error: unexpected end of file\n",
+        2,
+    )
     assert parse_shell("echo a; fi").error == (
         8,
-        "syntax error near unexpected token `fi'",
+        b"mirage: syntax error near 'fi'\n",
+        2,
+    )
+    # With extglob off a pattern group is no word.
+    assert parse_shell("echo @(a)").error is None
+    assert parse_shell("echo @(a)", extglob=False).error == (
+        6,
+        b"mirage: syntax error near '('\n",
+        2,
     )
 
 
@@ -85,3 +94,65 @@ def test_ids_differ_across_trees() -> None:
     assert one.id != two.id
     assert one.children[0].id == one.children[0].id
     assert len({hash(node) for node in (one, two)}) == 2
+
+
+@pytest.mark.parametrize(
+    "command,expected",
+    [
+        # An odd-length trailing run ends in a live continuation.
+        ("echo a\\", "echo a"),
+        ("echo a\\\\\\", "echo a\\\\"),
+        ("echo \\", "echo "),
+        # An even-length run is all escaped backslashes, so nothing goes.
+        ("echo a\\\\", "echo a\\\\"),
+        ("echo a\\\\\\\\", "echo a\\\\\\\\"),
+        ("echo a", "echo a"),
+        ("echo a\\ b", "echo a\\ b"),
+        # Mid-line, the pair goes wherever the reader sees it.
+        ("echo a\\\nb", "echo ab"),
+        ('echo "a\\\nb"', 'echo "ab"'),
+        ("echo $\\\n{x} $((1\\\n+2))", "echo ${x} $((1+2))"),
+        ("ec\\\nho a", "echo a"),
+        ("echo a\\\\\nb", "echo a\\\\\nb"),
+        ("echo a\\\\\\\nb", "echo a\\\\b"),
+        # Single-quoted and ANSI-C text and comments keep theirs.
+        ("echo 'a\\\nb'", "echo 'a\\\nb'"),
+        ("echo $'a\\\nb'", "echo $'a\\\nb'"),
+        ("echo a # c \\\necho b", "echo a # c \\\necho b"),
+        ("echo \"$(echo 'u\\\nv')\"", "echo \"$(echo 'u\\\nv')\""),
+        ('echo "it\'s a\\\nb"', 'echo "it\'s ab"'),
+    ],
+)
+def test_the_tree_reads_the_line_with_its_continuations_dropped(
+    command: str, expected: str
+) -> None:
+    assert parse_shell(command).source == expected.encode()
+
+
+def test_a_quoted_heredoc_body_keeps_its_continuations() -> None:
+    tree = parse_shell("cat <<'E' | \\\ntr a b\na\\\nb\nE")
+    assert tree.source == b'cat <"a\\\\\nb\n" | tr a b\n'
+    assert tree.root_node.source_text == b"cat <<'E' | \\\ntr a b\na\\\nb\nE"
+
+
+def test_an_unquoted_heredoc_body_joins_its_lines() -> None:
+    tree = parse_shell("cat <<E | \\\ntr a b\na\\\nb $x\nE")
+    assert tree.source == b'cat <"ab $x\n" | tr a b\n'
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "echo A; \\\n fi",
+        "echo /api/$c/$id.json; fi",
+        "! echo A \\\n; fi",
+        "time echo A \\\n; fi",
+        "cat <<E; fi\nbody\nE",
+    ],
+    ids=["continuation", "expansion", "bang", "time", "heredoc"],
+)
+def test_offsets_point_back_into_the_line_as_typed(command: str) -> None:
+    # The stray `fi` is where the parser refuses each line.
+    root = parse_shell(command).root_node
+    (error,) = (node for node in root.children if node.type == "ERROR")
+    assert root.offsets[error.start_byte] == command.encode().rindex(b"fi")
