@@ -1750,11 +1750,11 @@ jobs:
             --predicate '(process == "fskitd" OR process == "fskit_agent") AND messageType == error' \
             2>/dev/null | tail -40 || true
 
-  # The suite battery is split in six: the runner, both in-process hosts and
-  # the CLI driver all take the same suite-name filter, so one leg's list
-  # drives every step that costs time. Legs A to E name folders or suites;
-  # leg F is whatever is left, so a new folder or suite under integ/runtime
-  # joins a leg instead of leaving CI.
+  # The suite battery is split in eight: the runner, both in-process hosts
+  # and the CLI driver all take the same suite-name filter, so one leg's
+  # list drives every step that costs time. Legs A to G name folders or
+  # suites; leg H is whatever is left, so a new folder or suite under
+  # integ/runtime joins a leg instead of leaving CI.
   integ-runtime:
     needs: [changes, typescript-build]
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.runtime == 'true') }}
@@ -1763,7 +1763,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        leg: [a, b, c, d, e, f]
+        leg: [a, b, c, d, e, f, g, h]
     services:
       redis:
         image: redis:7
@@ -1810,15 +1810,17 @@ jobs:
       # each case on every backend it lists, so they cost more than cli.sh,
       # mostly Pyodide starting a fresh interpreter for each run (about 2 s
       # on a runner). Legs split by top-level folder of integ/runtime, and
-      # path by suite, balanced using run 40250411233: the `suite
-      # <host>/<name> <n>s` lines cli.sh prints, and the Pyodide runs per
-      # folder in the JSON drivers' output. Re-read both before moving a
-      # folder across.
-      LEG_A_SUITES: "path/cwd path/rename path/stat policy"
+      # path by suite, balanced using run 40260308235: each leg's job time,
+      # the `suite <host>/<name> <n>s` lines cli.sh prints, and the gaps
+      # between the `ok` lines the JSON drivers stream once cli.sh is done.
+      # Re-read them before moving a folder across.
+      LEG_A_SUITES: "path/cwd path/rename path/stat"
       LEG_B_SUITES: "path/exists path/link path/remove path/symlink path/unlink path/utime path/xattr"
-      LEG_C_SUITES: "open quickjs"
-      LEG_D_SUITES: "dir facade read"
-      LEG_E_SUITES: "program routing workspace write"
+      LEG_C_SUITES: "open"
+      LEG_D_SUITES: "dir facade"
+      LEG_E_SUITES: "read routing workspace"
+      LEG_F_SUITES: "write"
+      LEG_G_SUITES: "policy program quickjs"
     steps:
       - uses: actions/checkout@v7
 
@@ -1888,32 +1890,33 @@ jobs:
               { for (i = 1; i <= n; i++) if ($0 == entries[i] || index($0, entries[i] "/") == 1) { print; next } }
             ' <<<"$all"
           }
-          a=$(select_suites "$LEG_A_SUITES")
-          b=$(select_suites "$LEG_B_SUITES")
-          c=$(select_suites "$LEG_C_SUITES")
-          d=$(select_suites "$LEG_D_SUITES")
-          e=$(select_suites "$LEG_E_SUITES")
-          named=$(printf '%s\n' "$a" "$b" "$c" "$d" "$e" | grep -v '^$' | sort)
+          named=""
+          for leg in A B C D E F G; do
+            var="LEG_${leg}_SUITES"
+            picked=$(select_suites "${!var:-}")
+            if [ -z "$picked" ]; then
+              echo "leg $leg is empty" >&2
+              exit 1
+            fi
+            named+="$picked"$'\n'
+          done
+          named=$(grep -v '^$' <<<"$named" | sort)
           overlap=$(uniq -d <<<"$named")
           if [ -n "$overlap" ]; then
             echo "suites claimed by two legs: $overlap" >&2
             exit 1
           fi
-          f=$(comm -23 <(printf '%s\n' "$all") <(printf '%s\n' "$named"))
-          for leg in "$a" "$b" "$c" "$d" "$e" "$f"; do
-            if [ -z "$leg" ]; then
-              echo "a leg is empty" >&2
-              exit 1
-            fi
-          done
+          rest=$(comm -23 <(printf '%s\n' "$all") <(printf '%s\n' "$named"))
+          if [ -z "$rest" ]; then
+            echo "leg H is empty" >&2
+            exit 1
+          fi
           # Refuse a matrix leg with no corresponding suite selection.
           case "$LEG" in
-            a) suites="$a" ;;
-            b) suites="$b" ;;
-            c) suites="$c" ;;
-            d) suites="$d" ;;
-            e) suites="$e" ;;
-            f) suites="$f" ;;
+            [a-g])
+              var="LEG_$(tr a-g A-G <<<"$LEG")_SUITES"
+              suites=$(select_suites "${!var}") ;;
+            h) suites="$rest" ;;
             *) echo "no suite list for leg '$LEG'" >&2; exit 1 ;;
           esac
           echo "SUITES=$(printf '%s' "$suites" | tr '\n' ' ')" >> "$GITHUB_ENV"
