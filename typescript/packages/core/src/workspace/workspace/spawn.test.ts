@@ -69,6 +69,18 @@ it('revokes captured process entry points on profile replacement', async () => {
   }
 })
 
+it('terminate stops a child with the signal it names', async () => {
+  const ws = new Workspace({}, { runtimes: [] })
+  try {
+    const child = ws.spawn({ argv: ['sleep', '30'] })
+    child.terminate(15)
+    expect((await child.wait()).exitCode).toBe(143)
+    expect(child.poll()).toBe(143)
+  } finally {
+    await ws.close()
+  }
+})
+
 it('Monty keeps its unsupported subprocess import', async () => {
   const ws = new Workspace({}, { mode: MountMode.EXEC, runtimes: [new MontyRuntime()] })
   try {

@@ -28,7 +28,7 @@ class ChildProcess:
         process: ProcessHandle,
         stdin: ProcessInput,
         output: ProcessOutput,
-        cancel: Callable[[], None],
+        cancel: Callable[[int], None],
     ) -> None:
         def finished(_: asyncio.Task[int]) -> None:
             stdin.stop()
@@ -54,8 +54,14 @@ class ChildProcess:
     def poll(self) -> int | None:
         return self._process.info.exit_code
 
-    def terminate(self) -> None:
-        self._cancel()
+    def terminate(self, signal: int = 9) -> None:
+        """Stop the child with ``signal``; its status is 128 plus it.
+
+        Args:
+            signal (int): what the stop stands for, KILL (9) unless the
+                caller names another (``Popen.terminate`` sends TERM).
+        """
+        self._cancel(signal)
 
     async def wait(self) -> ProcessInfo:
         return await self._process.join()

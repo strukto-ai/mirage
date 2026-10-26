@@ -118,7 +118,9 @@ class ProcessHandle:
 
         A runner that already exited has nothing to cancel, but what it
         started may still run (``sh -c 'sleep 100 &'``), so its children
-        are stopped all the same.
+        are stopped all the same. A KILL while the runner still stops
+        under another signal cuts the grace that signal gave its program
+        short, as a second ``kill -KILL`` does.
 
         Args:
             signal (int): what the stop stands for, KILL (9) unless a
@@ -127,6 +129,12 @@ class ProcessHandle:
         with self._lock:
             exited = self._info.state == ProcessState.EXITED
             stopped = not exited and not self._info.cancellation_requested
+            escalated = (
+                not exited
+                and not stopped
+                and signal == 9
+                and self._signal != 9
+            )
             if stopped:
                 self._signal = signal
                 self.task.get_loop().call_soon_threadsafe(self.task.cancel)
@@ -135,20 +143,24 @@ class ProcessHandle:
                     state=ProcessState.STOPPING,
                     cancellation_requested=True,
                 )
-        if stopped or exited:
+            elif escalated:
+                self._signal = signal
+        if stopped or exited or escalated:
             self._cancel_children(signal)
-        return stopped
+        return stopped or escalated
 
     def _settle(self, task: asyncio.Task[int]) -> None:
         cancelled = task.cancelled()
         error = None if cancelled else task.exception()
         if error is not None:
             logger.debug("process %d failed: %s", self._info.pid, error)
-        if cancelled:
-            code = 128 + (self._signal or 9)
-        else:
-            code = 1 if error is not None else task.result()
         with self._lock:
+            # Read with the exit published, so a KILL another thread sends
+            # meanwhile is either refused or the status it reports.
+            if cancelled:
+                code = 128 + (self._signal or 9)
+            else:
+                code = 1 if error is not None else task.result()
             self._info = replace(
                 self._info,
                 state=ProcessState.EXITED,

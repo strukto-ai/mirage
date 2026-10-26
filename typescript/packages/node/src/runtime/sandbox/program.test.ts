@@ -119,6 +119,23 @@ describe('runProgram', () => {
     expect(await ended(child)).toBe(true)
   })
 
+  // A KILL while a program still has the grace an earlier TERM gave it ends
+  // that grace: what ignores TERM is killed at once, as a second
+  // `kill -KILL` does, not a second later.
+  it('ends the grace when a KILL follows the TERM', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mirage-program-'))
+    const pidFile = join(dir, 'pid')
+    const runner = shRunner(`trap '' TERM; echo $$ > ${pidFile}; while :; do sleep 0.05; done`)
+    const child = await escapedPid(pidFile)
+    expect(runner.terminate(15)).toBe(true)
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    const killed = Date.now()
+    expect(runner.terminate(9)).toBe(true)
+    expect((await runner.join()).exitCode).toBe(137)
+    expect(Date.now() - killed).toBeLessThan(500)
+    expect(await ended(child)).toBe(true)
+  })
+
   // A child that is the program itself and exits on its own after a gentler
   // signal leaves its status with the runner; a client's (`docker exec`)
   // says nothing about the program, and a child the signal ended has none.

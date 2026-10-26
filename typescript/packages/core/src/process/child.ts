@@ -18,7 +18,7 @@ export class ChildProcess {
     private readonly process: ProcessHandle,
     readonly stdin: ProcessInput,
     private readonly output: ProcessOutput,
-    private readonly cancel: () => void,
+    private readonly cancel: (signal: number) => void,
   ) {
     void process.join().then(() => {
       stdin.stop()
@@ -36,8 +36,14 @@ export class ChildProcess {
   poll(): number | null {
     return this.process.info.exitCode
   }
-  terminate(): void {
-    this.cancel()
+  /**
+   * Stop the child with `signal`; its status is 128 plus it.
+   *
+   * @param signal what the stop stands for, KILL (9) unless the caller
+   *   names another (`Popen.terminate` sends TERM).
+   */
+  terminate(signal = 9): void {
+    this.cancel(signal)
   }
   wait(): Promise<ProcessInfo> {
     return this.process.join()

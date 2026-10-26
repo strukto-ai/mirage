@@ -362,8 +362,10 @@ export class JobTable {
     }
     job.process = process
     this.sessionJobs(sessionId).set(job.id, job)
+    // An abort from elsewhere stops the runner; one the runner's own stop
+    // sent is that stop, which a KILL here would cut short.
     const onAbort = () => {
-      process.terminate()
+      if (!process.info.cancellationRequested) process.terminate()
     }
     init.abort.signal.addEventListener('abort', onAbort, { once: true })
     if (init.abort.signal.aborted) process.terminate()

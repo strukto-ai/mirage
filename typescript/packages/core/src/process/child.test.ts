@@ -21,7 +21,7 @@ function spawnChild(
       abort.abort()
     },
   })
-  return new ChildProcess(process, stdin, output, () => process.terminate())
+  return new ChildProcess(process, stdin, output, (signal) => process.terminate(signal))
 }
 
 describe('ChildProcess', () => {
