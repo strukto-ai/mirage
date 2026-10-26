@@ -30,7 +30,7 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from pathlib import Path
 from types import ModuleType
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit, urlunsplit
 
 import aiohttp
 import asyncpg
@@ -134,6 +134,7 @@ from .commands import CommandService
 from .secrets import build_secrets_env
 
 REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
+LOOPBACK_SWAP = {"localhost": "127.0.0.1", "127.0.0.1": "localhost"}
 EMAIL_IMAP_PORT = int(os.environ.get("EMAIL_IMAP_PORT", "3143"))
 EMAIL_SMTP_PORT = int(os.environ.get("EMAIL_SMTP_PORT", "3025"))
 EMAIL_USERNAME = "integ@example.com"
@@ -2632,12 +2633,12 @@ def build_redis(
     safe_path = owner.strip("/").replace("/", "-") or "root"
     prefix = f"mirage-integ-{run_id}-{safe_path}/"
     url = REDIS_URL
-    if "keyspace_of" in mount:
-        url = (
-            url.replace("localhost", "127.0.0.1")
-            if "localhost" in url
-            else url.replace("127.0.0.1", "localhost")
-        )
+    parts = urlsplit(url)
+    other = LOOPBACK_SWAP.get(parts.hostname or "")
+    if "keyspace_of" in mount and other is not None:
+        userinfo, at, hostport = parts.netloc.rpartition("@")
+        hostport = hostport.replace(parts.hostname or "", other, 1)
+        url = urlunsplit(parts._replace(netloc=userinfo + at + hostport))
     return RedisVFS(url=url, key_prefix=prefix), _noop
 
 
