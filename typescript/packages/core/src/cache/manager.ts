@@ -657,7 +657,8 @@ export class CacheManager {
   }
 
   /**
-   * Return the cached render's byte length, without revalidating.
+   * Return each cached render's byte length, in path order, without
+   * revalidating or fetching the bytes.
    *
    * The size backfill a render-dependent backend cannot answer for itself
    * (the dispatcher's stat) runs only where the backend reported no size,
@@ -665,12 +666,13 @@ export class CacheManager {
    * backend stat. It answers a length rather than content, so nothing can
    * serve unverified bytes through it.
    */
-  async cachedSize(path: PathSpec): Promise<number | null> {
-    const key = this.cacheKey(path)
-    const cache = this.readableCache(key)
-    if (cache === null) return null
-    const cached = await cache.get(key)
-    return cached === null ? null : cached.length
+  async cachedSizes(paths: readonly PathSpec[]): Promise<(number | null)[]> {
+    const keys = paths.map((path) => this.cacheKey(path))
+    const held = keys.filter((key) => this.readableCache(key) !== null)
+    if (held.length === 0 || this.fileCache === null) return keys.map(() => null)
+    const got = await this.fileCache.sizes(held)
+    const sizes = new Map(held.map((key, i) => [key, got[i] ?? null]))
+    return keys.map((key) => sizes.get(key) ?? null)
   }
 
   /**

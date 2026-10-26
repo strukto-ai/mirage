@@ -25,7 +25,9 @@ WriteKind = Literal["put", "copy", "delete"]
 class CacheInvalidator(Protocol):
     """The active cache operations a backend needs from its cache manager."""
 
-    async def cached_size(self, path: PathSpec) -> int | None: ...
+    async def cached_sizes(
+        self, paths: list[PathSpec]
+    ) -> list[int | None]: ...
 
     async def is_cached(self, path: PathSpec) -> bool: ...
 

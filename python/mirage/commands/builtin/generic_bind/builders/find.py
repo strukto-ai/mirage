@@ -56,18 +56,21 @@ async def find_walk(
         texts (list[str]): the raw expression words.
         ctx (Context): the invocation's context.
     """
-    whole_readdir, whole_stat = tree_walk(
-        files.read_tree if files.answers("read_tree") else None,
-        files.readdir,
-        files.stat,
+    readdir, stat = tree_walk(
+        files.read_tree, files.readdir, files.stat, False
     )
     return await find_walk_generic(
         resolved,
         list(texts),
         ctx,
-        readdir=files.readdir,
-        stat=files.stat,
-        unbounded=(whole_readdir, whole_stat),
+        readdir=readdir,
+        stat=stat,
+        unbounded=tree_walk(
+            files.read_tree,
+            files.readdir,
+            files.stat,
+            files.answers("read_tree"),
+        ),
     )
 
 

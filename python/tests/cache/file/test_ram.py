@@ -403,6 +403,19 @@ async def test_a_version_kept_without_bytes_is_never_read():
 
 
 @pytest.mark.asyncio
+async def test_sizes_answer_only_live_bytes_in_key_order():
+    clock = ManualClock(start=1000.0)
+    cache = RAMFileCacheStore(clock=clock)
+    await cache.set("/a", b"abc")
+    await cache.set("/empty", b"")
+    await cache.set("/old", b"x", ttl=1)
+    await cache.keep_fingerprints({"/v": "v1"})
+    clock.advance(10)
+    keys = ["/a", "/empty", "/old", "/v", "/none"]
+    assert await cache.sizes(keys) == [3, 0, None, None, None]
+
+
+@pytest.mark.asyncio
 async def test_a_version_never_replaces_bytes_written_since():
     cache = RAMFileCacheStore()
     await cache.set("/a", b"theirs", fingerprint="v2")

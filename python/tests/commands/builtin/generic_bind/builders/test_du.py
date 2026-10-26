@@ -97,6 +97,8 @@ class _Mount:
         if name == "readdir":
             return await self.readdir(path), IOResult()
         if name == "read_tree":
+            if self.read_tree is None or kwargs.get("level"):
+                return None, IOResult()
             return await self.read_tree(path), IOResult()
         raise AssertionError(name)
 

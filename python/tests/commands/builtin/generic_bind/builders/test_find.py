@@ -136,19 +136,27 @@ def _tree() -> dict[str, FileStat]:
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "texts, trees",
-    [([], ["/mnt"]), (["-maxdepth", "1"], [])],
+    [([], ["/mnt"]), (["-maxdepth", "1"], ["level /mnt"])],
     ids=["unbounded", "maxdepth-lists-its-levels"],
 )
 async def test_find_reads_the_tree_in_one_call(texts, trees):
     asked: list[str] = []
+    stats: list[str] = []
 
-    async def read_tree(path: PathSpec) -> dict[str, FileStat]:
-        asked.append(path.virtual)
-        return _tree()
+    async def read_tree(
+        path: PathSpec, level: bool = False
+    ) -> dict[str, FileStat]:
+        asked.append(f"level {path.virtual}" if level else path.virtual)
+        return {
+            key: row
+            for key, row in _tree().items()
+            if not level or "/" not in key
+        }
 
-    whole = await _lines(_mount([], read_tree), [_root()], texts)
+    whole = await _lines(_mount(stats, read_tree), [_root()], texts)
     assert whole == await _lines(_mount([]), [_root()], texts)
     assert asked == trees
+    assert stats == ["/mnt"]
 
 
 class AskedRAM(RAMVFS):

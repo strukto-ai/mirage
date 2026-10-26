@@ -37,17 +37,19 @@ def _found() -> dict[str, FileStat]:
 
 
 class _Mount:
-    def __init__(self, answer=None, refuse=None) -> None:
+    def __init__(self, answer=None, refuse=None, level=None) -> None:
         self.answer = answer
         self.refuse = refuse
+        self.level = level
         self.asked: list[str] = []
+        self.levels: list[str] = []
         self.calls: list[str] = []
 
-    async def read_tree(self, path: PathSpec):
-        self.asked.append(path.virtual)
+    async def read_tree(self, path: PathSpec, level: bool = False):
+        (self.levels if level else self.asked).append(path.virtual)
         if self.refuse is not None:
             raise self.refuse("ram", "read_tree", path)
-        return self.answer
+        return self.level if level else self.answer
 
     async def readdir(self, path: PathSpec, index=None) -> list[str]:
         self.calls.append(f"readdir {path.virtual}")
@@ -118,6 +120,39 @@ async def test_no_answer_walks_the_usual_way_and_asks_once(mount):
         await readdir(PathSpec.from_str_path("/m"))
     assert mount.calls == ["readdir /m", "readdir /m"]
     assert mount.asked == ["/m"]
+
+
+@pytest.mark.asyncio
+async def test_a_level_lists_its_directory_and_answers_its_childrens_stats():
+    mount = _Mount(
+        level={
+            "e": FileStat(name="e", type=DIR),
+            "b.txt": FileStat(name="b.txt", type=FILE, size=2),
+            "l/x": FileStat(name="x", type=FileType.SYMLINK),
+        }
+    )
+    readdir, stat = tree_walk(
+        mount.read_tree, mount.readdir, mount.stat, False
+    )
+    root = PathSpec.from_str_path("/m")
+    assert await readdir(root) == ["/m/e", "/m/b.txt", "/m/l"]
+    assert (await stat(PathSpec.from_str_path("/m/b.txt"))).size == 2
+    await stat(PathSpec.from_str_path("/m/l"))
+    await readdir(PathSpec.from_str_path("/m/e"))
+    await stat(PathSpec.from_str_path("/m/l/x"))
+    assert mount.asked == []
+    assert mount.levels == ["/m", "/m/e"]
+    assert mount.calls == ["stat /m/l", "stat /m/l/x"]
+
+
+@pytest.mark.asyncio
+async def test_a_level_that_gives_way_is_asked_once():
+    mount = _Mount()
+    readdir, _ = tree_walk(mount.read_tree, mount.readdir, mount.stat, False)
+    for _ in range(2):
+        await readdir(PathSpec.from_str_path("/m"))
+    assert mount.levels == ["/m"]
+    assert mount.calls == ["readdir /m", "readdir /m"]
 
 
 @pytest.mark.asyncio

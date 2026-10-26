@@ -34,6 +34,11 @@ export interface FileCache {
   remove(key: string, options?: { subtree?: boolean; excluded?: readonly string[] }): Promise<void>
   exists(key: string | PathSpec): Promise<boolean>
   /**
+   * The byte length of each key's live cached copy, in key order, null where
+   * none is held, asked without fetching the bytes.
+   */
+  sizes(keys: readonly string[]): Promise<(number | null)[]>
+  /**
    * The backend token each key's cached copy was stored with, in key order:
    * the version a conditional write sends. An entry past its bound still
    * answers where the store keeps it, since the token stays true for the

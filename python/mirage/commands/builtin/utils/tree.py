@@ -19,7 +19,11 @@ from typing import Any
 
 from mirage.commands.errors import UsageError, WalkLimitError
 from mirage.errors.classify import classify
-from mirage.errors.types import FsCondition, WalkDeclinedError
+from mirage.errors.types import (
+    FsCondition,
+    OperationNotSupportedError,
+    WalkDeclinedError,
+)
 from mirage.runtime.types import DispatchFn
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.view.types import MountView
@@ -228,10 +232,48 @@ def _answerable(path: PathSpec) -> bool:
     return path.dotted is None and path.walk_error is None
 
 
+async def _level(
+    read_tree: ReadTree, path: PathSpec, limit: int | None
+) -> tuple[dict[str, FileStat], list[str]] | None:
+    """One level of ``path``: each child's stat by its name, and the
+    listing, in the order the answer gives it; None where the read gives
+    way to the walk's own listing. A name only an entry below implies (a
+    link's parent the namespace holds) is listed with no row, so its stat
+    asks the dispatcher.
+
+    Args:
+        read_tree (ReadTree): the walk's ``read_tree``.
+        path (PathSpec): the directory.
+        limit (int | None): the listing's limit.
+    """
+    try:
+        found = await (
+            read_tree(path, level=True)
+            if limit is None
+            else read_tree(path, limit=limit, level=True)
+        )
+    except (WalkDeclinedError, NotADirectoryError):
+        return None
+    except OperationNotSupportedError as exc:
+        logger.debug("no level read of %s: %s", path.virtual, exc)
+        return None
+    if found is None:
+        return None
+    rows: dict[str, FileStat] = {}
+    names: dict[str, None] = {}
+    for key, row in found.items():
+        name = key.split("/", 1)[0]
+        names.setdefault(name)
+        if name == key:
+            rows[name] = row
+    return rows, list(names)
+
+
 def tree_walk(
     read_tree: ReadTree | None,
     readdir: WalkCall,
     stat: WalkCall,
+    whole: bool = True,
 ) -> tuple[WalkCall, WalkCall]:
     """A walk's ``readdir`` and ``stat``, answered from the mount's
     ``read_tree``.
@@ -250,15 +292,24 @@ def tree_walk(
     else through; a listing's ``limit`` reaches ``read_tree`` too, which
     may then answer None for a subtree past it.
 
+    A directory no whole answer covers is read one level at a time
+    (``read_tree(path, level=True)``): its listing and each child's stat
+    in one call, so a walk the mount reads no subtree for, or one a
+    depth bounds, stats no child on its own either. A listing a limit
+    cuts is read again under the next one, as ``readdir`` would be.
+
     Args:
         read_tree (ReadTree | None): the mount's ``read_tree``, bound to
             its accessor and index, called as ``read_tree(path)``.
         readdir (WalkCall): the walk's own readdir.
         stat (WalkCall): the walk's own stat.
+        whole (bool): ask for whole subtrees; False reads one level at a
+            time, for a walk a depth bounds or a single listing.
     """
     if read_tree is None:
         return readdir, stat
     roots: dict[str, tuple[dict[str, FileStat], dict[str, list[str]]]] = {}
+    levels: dict[str, tuple[dict[str, FileStat], list[str]] | None] = {}
     asked: set[str] = set()
 
     def covering(virtual: str) -> tuple[str, str] | None:
@@ -275,7 +326,7 @@ def tree_walk(
     ) -> Any:
         virtual = path.virtual.rstrip("/") or "/"
         hit = covering(virtual) if _answerable(path) else None
-        if hit is None and virtual not in asked and not path.pattern:
+        if hit is None and whole and virtual not in asked and not path.pattern:
             asked.add(virtual)
             try:
                 found = await (
@@ -295,6 +346,13 @@ def tree_walk(
             if listing is not None:
                 base = root.rstrip("/") + "/"
                 return [base + name for name in listing]
+        elif _answerable(path) and not path.pattern:
+            if limit is not None or virtual not in levels:
+                levels[virtual] = await _level(read_tree, path, limit)
+            level = levels[virtual]
+            if level is not None:
+                base = virtual.rstrip("/") + "/"
+                return [base + name for name in level[1]]
         return await (
             readdir(path, *args, **kwargs)
             if limit is None
@@ -308,6 +366,10 @@ def tree_walk(
             found = roots[hit[0]][0].get(hit[1])
             if found is not None:
                 return found
+        folder, _, name = virtual.rpartition("/")
+        level = levels.get(folder or "/") if _answerable(path) else None
+        if level is not None and name in level[0]:
+            return level[0][name]
         return await stat(path, *args, **kwargs)
 
     return tree_readdir, tree_stat

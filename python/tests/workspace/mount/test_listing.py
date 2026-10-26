@@ -317,6 +317,26 @@ async def test_a_subtree_read_is_kept_and_answers_the_walk_after_it():
 
 
 @pytest.mark.asyncio
+async def test_one_level_is_the_listing_with_each_childs_stat():
+    store = Folders()
+    d = store.add("d")
+    store.add("sub", d)
+    store.add("f.txt", d, b"f")
+    ws = _workspace(store)
+    level, _ = await ws.dispatch("read_tree", _at("/f/d"), level=True)
+    assert {name: row.type for name, row in level.items()} == {
+        "sub": FileType.DIRECTORY,
+        "f.txt": FileType.FILE,
+    }
+    assert level["f.txt"].size == 1
+    assert store.calls == [("list", "root"), ("list", d)]
+    store.calls.clear()
+    listed, _ = await ws.dispatch("readdir", _at("/f/d"))
+    assert sorted(listed) == ["/f/d/f.txt", "/f/d/sub"]
+    assert store.calls == []
+
+
+@pytest.mark.asyncio
 async def test_a_stat_asks_the_backend_once_its_listing_expires():
     store = Folders()
     a = store.add("a.txt", data=b"a")

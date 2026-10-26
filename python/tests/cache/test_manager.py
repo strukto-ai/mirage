@@ -187,7 +187,7 @@ async def _cached_size_case(data: bytes) -> int | None:
     cache, index = _stores()
     await cache.set("/data/x.txt", data)
     manager = CacheManager(cache, index, "/data/", True)
-    return await manager.cached_size(_spec())
+    return (await manager.cached_sizes([_spec()]))[0]
 
 
 def test_cached_size_reports_the_length():
@@ -205,11 +205,24 @@ def test_cached_size_of_an_empty_render_is_zero_not_none():
 async def _cached_size_miss_case() -> int | None:
     cache, index = _stores()
     manager = CacheManager(cache, index, "/data/", True)
-    return await manager.cached_size(_spec())
+    return (await manager.cached_sizes([_spec()]))[0]
 
 
 def test_cached_size_miss_returns_none():
     assert _run(_cached_size_miss_case()) is None
+
+
+async def _cached_sizes_case() -> list[int | None]:
+    cache, index = _stores()
+    await cache.set("/data/x.txt", b"cached")
+    await cache.set("/data/e.txt", b"")
+    manager = CacheManager(cache, index, "/data/", True)
+    paths = ["/data/x.txt", "/data/miss.txt", "/data/e.txt", "/other/x.txt"]
+    return await manager.cached_sizes([_spec(p) for p in paths])
+
+
+def test_cached_sizes_answer_each_path_in_order():
+    assert _run(_cached_sizes_case()) == [6, None, 0, None]
 
 
 async def _no_index_case() -> bool:

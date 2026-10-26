@@ -26,8 +26,8 @@ async def test_walk_does_not_read_cached_bytes_for_non_files(
     kind, monkeypatch
 ):
     cache = RAMFileCacheStore()
-    get = AsyncMock(wraps=cache.get)
-    monkeypatch.setattr(cache, "get", get)
+    sizes = AsyncMock(wraps=cache.sizes)
+    monkeypatch.setattr(cache, "sizes", sizes)
     manager = CacheManager(cache, RAMIndexCacheStore(), "", True)
     stats = {
         "/": FileStat(name="", type=FileType.DIRECTORY, size=0),
@@ -49,7 +49,7 @@ async def test_walk_does_not_read_cached_bytes_for_non_files(
         reset_caller(previous)
 
     assert result == ["/", "/entry"]
-    get.assert_not_awaited()
+    sizes.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -58,8 +58,8 @@ async def test_walk_backfills_an_unknown_file_size_from_cached_bytes(
 ):
     cache = RAMFileCacheStore()
     await cache.set("/entry", b"cached")
-    get = AsyncMock(wraps=cache.get)
-    monkeypatch.setattr(cache, "get", get)
+    sizes = AsyncMock(wraps=cache.sizes)
+    monkeypatch.setattr(cache, "sizes", sizes)
     manager = CacheManager(cache, RAMIndexCacheStore(), "", True)
     stats = {
         "/": FileStat(name="", type=FileType.DIRECTORY, size=0),
@@ -81,4 +81,4 @@ async def test_walk_backfills_an_unknown_file_size_from_cached_bytes(
         reset_caller(previous)
 
     assert result == ["/entry"]
-    assert get.await_count > 0
+    assert sizes.await_count > 0
