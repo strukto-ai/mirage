@@ -15,6 +15,7 @@
 import asyncio
 import logging
 import threading
+from collections.abc import AsyncIterator
 
 import pytest
 
@@ -596,6 +597,43 @@ async def test_two_sessions_each_keep_their_own_loop_values():
         assert a.stdout == b"A:A1\nA:A2\nA:A3\n"
         assert b.stdout == b"B:B1\nB:B2\nB:B3\n"
     finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_line_on_a_fork_runs_beside_its_session():
+    ws = _make_ws()
+    ws.create_session("one")
+    reading = asyncio.Event()
+    release = asyncio.Event()
+
+    async def held() -> AsyncIterator[bytes]:
+        reading.set()
+        await release.wait()
+        yield b"go\n"
+
+    slow = asyncio.create_task(
+        ws.shell("read x; echo got:$x", session_id="one", stdin=held())
+    )
+    try:
+        await asyncio.wait_for(reading.wait(), 5)
+        fast = await asyncio.wait_for(
+            ws.shell(
+                "X=forked; echo fast",
+                session_id="one",
+                session=ws.get_session("one").fork(),
+            ),
+            5,
+        )
+        assert fast.stdout == b"fast\n"
+        assert not slow.done()
+        release.set()
+        assert (await slow).stdout == b"got:go\n"
+        after = await ws.shell("echo ${X:-unset}", session_id="one")
+        assert after.stdout == b"unset\n"
+    finally:
+        release.set()
+        await asyncio.gather(slow, return_exceptions=True)
         await ws.close()
 
 

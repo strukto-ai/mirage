@@ -567,6 +567,68 @@ async def test_a_piped_process_reads_what_codex_writes(ssh):
 
 
 @pytest.mark.asyncio
+async def test_processes_run_side_by_side(ssh):
+    async with codex(ssh) as client:
+        await client.start("slow", "read x; echo got:$x", pipeStdin=True)
+        fast = await client.run("fast", "echo fast")
+        waiting = await client.result(
+            "process/read", {"processId": "slow", "afterSeq": 0}
+        )
+        await client.result(
+            "process/write",
+            {"processId": "slow", "writeId": "w", "chunk": b64(b"go\n")},
+        )
+        out = await client.note("process/output", "slow")
+        exited = await client.note("process/exited", "slow")
+    assert fast == (b"fast\n", b"", 0)
+    assert not waiting["exited"]
+    assert base64.b64decode(out["chunk"]) == b"got:go\n"
+    assert exited["exitCode"] == 0
+
+
+@pytest.mark.asyncio
+async def test_a_process_keeps_what_it_sets_to_itself(ssh):
+    async with codex(ssh) as client:
+        await client.run("p", "export LEAK=1")
+        out, _, _ = await client.run("q", "echo $USER ${LEAK:-unset}")
+    assert out == f"{ssh.entry.id} unset\n".encode()
+
+
+@pytest.mark.asyncio
+async def test_wait_sees_only_the_jobs_its_process_started(ssh):
+    async with codex(ssh) as client:
+        await client.start("a", "sleep 30 & echo started; wait")
+        await client.note("process/output", "a")
+        done = await asyncio.wait_for(client.run("b", "wait; echo done"), 5)
+    assert done == (b"done\n", b"", 0)
+
+
+@pytest.mark.asyncio
+async def test_a_job_writes_to_the_process_that_started_it(ssh):
+    async with codex(ssh) as client:
+        await client.start("a", "{ sleep 1; echo from-a; } & wait")
+        await client.start("b", "read x; echo got:$x", pipeStdin=True)
+        await client.note("process/exited", "a")
+        await client.result(
+            "process/write",
+            {"processId": "b", "writeId": "w", "chunk": b64(b"go\n")},
+        )
+        await client.note("process/exited", "b")
+        a = await client.result(
+            "process/read", {"processId": "a", "afterSeq": 0}
+        )
+        b = await client.result(
+            "process/read", {"processId": "b", "afterSeq": 0}
+        )
+    assert b"".join(base64.b64decode(c["chunk"]) for c in a["chunks"]) == (
+        b"from-a\n"
+    )
+    assert b"".join(base64.b64decode(c["chunk"]) for c in b["chunks"]) == (
+        b"got:go\n"
+    )
+
+
+@pytest.mark.asyncio
 async def test_interrupt_and_terminate_stop_a_process(ssh):
     async with codex(ssh) as client:
         await client.start("i", "sleep 30")
@@ -715,7 +777,27 @@ async def test_codex_runs_under_the_key_profile(tmp_path):
         await stop_harness(harness)
     assert base64.b64decode(opened["dataBase64"]) == b"token\n"
     assert refused["code"] == RPC_INTERNAL_ERROR
-    assert code != 0 and err
+    assert code != 0
+    assert err.endswith(b"policy denied: the vault is sealed\n")
+
+
+@pytest.mark.asyncio
+async def test_a_command_the_key_profile_allows_runs(tmp_path):
+    ws = Workspace(
+        {"/": (RAMVFS(), MountMode.WRITE)},
+        profiles={"narrow": {"commands": {"allow": ["echo"]}}},
+    )
+    harness = await start_harness(tmp_path, ws)
+    narrow = bind_key(harness, 'mirage-profile="narrow"')
+    try:
+        async with codex(harness, key=narrow) as client:
+            allowed = await client.run("p", "echo hi")
+            _, err, code = await client.run("q", "cat /etc")
+    finally:
+        await stop_harness(harness)
+    assert allowed == (b"hi\n", b"", 0)
+    assert code != 0
+    assert err.endswith(b"policy denied: cat is not allowed\n")
 
 
 @pytest.mark.asyncio

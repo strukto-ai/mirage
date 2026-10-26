@@ -18,6 +18,7 @@ import { posix } from 'node:path'
 import { linkView, mountView } from '@struktoai/mirage-core/commands/builtin/utils/links'
 import { WalkBudget } from '@struktoai/mirage-core/commands/builtin/utils/tree'
 import { classify, failureText } from '@struktoai/mirage-core/errors/classify'
+import { JobOutput } from '@struktoai/mirage-core/shell/console/terminal'
 import { PathSpec, type JsonValue } from '@struktoai/mirage-core/types'
 import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
 import { MountCore, type MountAttrs } from '@struktoai/mirage-node'
@@ -472,15 +473,16 @@ class CodexProcess {
  * One codex-exec channel: Codex's exec-server over one session.
  *
  * Codex runs its agent where it is and sends each tool call here: a
- * process runs as a line in the channel's session, and a file call lands
- * on the MountCore SFTP uses, so both see the tree, modes and policies a
- * shell in that session sees. Requests are answered one at a time, in
- * order, as the exec-server answers them by default, except `process/read`,
- * which may wait for output and so runs beside them. A process runs on in
- * the background and reports through notifications; once it has closed,
- * `process/terminate` forgets it, as Codex sends after every command. The
- * transport feeds each message in through `receive`, writes each answer
- * with `write`, and calls `shutdown` once its input ends.
+ * process runs as a line on a fork of the channel's session, beside the
+ * channel's other processes, and a file call lands on the MountCore SFTP
+ * uses, so both see the tree, modes and policies a shell in that session
+ * sees. Requests are answered one at a time, in order, as the exec-server
+ * answers them by default, except `process/read`, which may wait for output
+ * and so runs beside them. A process runs on in the background and reports
+ * through notifications; once it has closed, `process/terminate` forgets it,
+ * as Codex sends after every command. The transport feeds each message in
+ * through `receive`, writes each answer with `write`, and calls `shutdown`
+ * once its input ends.
  */
 class CodexChannel {
   private readonly core: MountCore
@@ -668,8 +670,19 @@ class CodexChannel {
   ): Promise<void> {
     let code: number
     try {
-      const execution = await this.entry.runner.ws.shell(line, {
+      // On a fork of the session, as a background job runs: the line reads
+      // the session's variables and records into its history, keeps what it
+      // changes to itself, and waits on no other line, so Codex's processes
+      // run side by side: `nvidia-smi` answers while `python3 train.py` still
+      // runs. Like `bash -c`, it has jobs of its own, which its `wait` waits
+      // on and whose output it reports.
+      const ws = this.entry.runner.ws
+      const session = ws.getSession(this.sessionId).fork()
+      session.jobOutput = new JobOutput(session.jobOutput ?? session.tty.jobs)
+      const execution = await ws.shell(line, {
         sessionId: this.sessionId,
+        session,
+        jobTable: ws.jobTable.child(),
         stdin: proc.stdin ?? new Uint8Array(0),
         signal: controller.signal,
         cwd,
