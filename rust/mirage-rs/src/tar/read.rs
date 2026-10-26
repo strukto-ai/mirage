@@ -9,7 +9,9 @@ use std::collections::HashSet;
 use serde::Deserialize;
 
 use super::header::{self, BLOCK, Block, Kind, Member, Pax, Rows, padding};
-use super::{Codec, Config, FAILED, FATAL, Mode, TRAILER, escaped, lines, open_failure, read};
+use super::{
+    Codec, Config, FAILED, FATAL, Mode, TRAILER, WINDOW, escaped, lines, open_failure, read,
+};
 use crate::Stream;
 use crate::request::{Opening, Reply};
 use crate::task::{File, Host};
@@ -21,6 +23,8 @@ const FEED: usize = 16 * 1024;
 const NOT_TAR: &str = "tar: This does not look like a tar archive";
 const SKIPPING: &str = "tar: Skipping to next header";
 const UNEXPECTED_EOF: &str = "tar: Unexpected EOF in archive";
+/// What a sparse member's holes are written from.
+static ZEROS: [u8; WINDOW] = [0; WINDOW];
 
 /// A compressor's failure as its stream reports it.
 #[derive(Deserialize)]
@@ -162,9 +166,15 @@ impl Input<'_> {
     }
 
     /// A member's `size` bytes of data and the rest of its last block, as
-    /// many whole blocks at a time as are at hand, each handed to `sink`;
-    /// false when the input ends first, after the whole blocks it held.
-    async fn copy(&mut self, size: u64, sink: &mut Sink<'_>) -> bool {
+    /// many whole blocks at a time as are at hand, each handed to `sink`,
+    /// through `holes` for a sparse member; false when the input ends
+    /// first, after the whole blocks it held.
+    async fn copy(
+        &mut self,
+        size: u64,
+        sink: &mut Sink<'_>,
+        mut holes: Option<&mut Holes>,
+    ) -> bool {
         let host = self.raw.host;
         let (mut left, mut blocks) = (size, size.saturating_add(padding(size) as u64));
         while blocks > 0 {
@@ -173,7 +183,11 @@ impl Input<'_> {
             }
             let have = ((self.held() / BLOCK * BLOCK) as u64).min(blocks);
             let data = have.min(left) as usize;
-            sink.take(host, &self.buf[self.at..self.at + data]).await;
+            let bytes = &self.buf[self.at..self.at + data];
+            match holes.as_deref_mut() {
+                Some(holes) => holes.take(host, sink, bytes).await,
+                None => sink.take(host, bytes).await,
+            }
             self.at += have as usize;
             self.taken += have / BLOCK as u64;
             (left, blocks) = (left - data as u64, blocks - have);
@@ -182,15 +196,100 @@ impl Input<'_> {
     }
 
     async fn skip(&mut self, size: u64) -> bool {
-        self.copy(size, &mut Sink::Skip).await
+        self.copy(size, &mut Sink::Skip, None).await
     }
 
     /// A meta header's data whole; none when the input ends first.
     async fn whole(&mut self, size: u64) -> Option<Vec<u8>> {
         let mut data = Vec::new();
-        self.copy(size, &mut Sink::Keep(&mut data))
+        self.copy(size, &mut Sink::Keep(&mut data), None)
             .await
             .then_some(data)
+    }
+
+    /// A member's data as the file it holds: a sparse member's runs at
+    /// their offsets, with zeros between and after them.
+    async fn data(&mut self, member: &Member, sink: &mut Sink<'_>) -> bool {
+        let Some(sparse) = &member.sparse else {
+            return self.copy(member.size, sink, None).await;
+        };
+        let mut holes = Holes {
+            runs: sparse.runs.clone(),
+            next: 0,
+            left: 0,
+            at: 0,
+        };
+        let whole = self.copy(member.size, sink, Some(&mut holes)).await;
+        if whole {
+            holes.zeros(self.raw.host, sink, sparse.real).await;
+        }
+        whole
+    }
+
+    /// The runs a pax 1.0 sparse member's data starts with, as decimal
+    /// lines (their count, then each offset and length) up to the end of
+    /// their block, taken off its `size`; none when the input ends first.
+    async fn runs(&mut self, size: &mut u64) -> Option<Vec<u64>> {
+        let mut text = Vec::new();
+        loop {
+            let ended = text.iter().filter(|&&b| b == b'\n').count();
+            let numbers: Vec<u64> = text
+                .split(|&b| b == b'\n')
+                .take(ended)
+                .map_while(|line| std::str::from_utf8(line).ok()?.parse().ok())
+                .collect();
+            if let Some(&count) = numbers.first() {
+                let want = usize::try_from(count).ok().and_then(|n| n.checked_mul(2));
+                if let Some(runs) = want.and_then(|want| numbers.get(1..=want)) {
+                    return Some(runs.to_vec());
+                }
+            }
+            if numbers.len() < ended || *size < BLOCK as u64 {
+                return Some(numbers.get(1..).unwrap_or_default().to_vec());
+            }
+            text.extend(self.block().await?);
+            *size -= BLOCK as u64;
+        }
+    }
+}
+
+/// A sparse member's data on its way to its sink: the runs it fills, each
+/// an offset and a length, the bytes left of the current one and where in
+/// the file it is.
+struct Holes {
+    runs: Vec<u64>,
+    next: usize,
+    left: u64,
+    at: u64,
+}
+
+impl Holes {
+    /// Zeros up to `end` in the file.
+    async fn zeros(&mut self, host: &Host, sink: &mut Sink<'_>, end: u64) {
+        while self.at < end {
+            let n = (end - self.at).min(WINDOW as u64);
+            sink.take(host, &ZEROS[..n as usize]).await;
+            self.at += n;
+        }
+    }
+
+    /// Archived bytes, each run's after the hole before it; bytes past the
+    /// last run are dropped.
+    async fn take(&mut self, host: &Host, sink: &mut Sink<'_>, mut data: &[u8]) {
+        while !data.is_empty() {
+            if self.left == 0 {
+                let Some(&[offset, length]) = self.runs.get(self.next..self.next + 2) else {
+                    return;
+                };
+                self.next += 2;
+                self.zeros(host, sink, offset).await;
+                self.left = length;
+                continue;
+            }
+            let n = self.left.min(data.len() as u64) as usize;
+            sink.take(host, &data[..n]).await;
+            (self.at, self.left, data) = (self.at + n as u64, self.left - n as u64, &data[n..]);
+        }
     }
 }
 
@@ -349,7 +448,7 @@ impl Run<'_, '_> {
                     if config.verbose {
                         self.say(escaped(&member.name));
                     }
-                    let whole = input.copy(member.size, &mut Sink::Print).await;
+                    let whole = input.data(member, &mut Sink::Print).await;
                     if !whole {
                         self.say(UNEXPECTED_EOF);
                     }
@@ -377,7 +476,7 @@ impl Run<'_, '_> {
                     }
                 }
                 let mut file = File::new(path);
-                let whole = input.copy(member.size, &mut Sink::File(&mut file)).await;
+                let whole = input.data(member, &mut Sink::File(&mut file)).await;
                 if file.failed.is_none() {
                     file.close(host).await;
                 }
@@ -528,10 +627,33 @@ pub(super) async fn run(host: &Host, config: &Config) -> i32 {
             }
             continue;
         }
+        // GNU's sparse header goes on in blocks of 21 entries, each saying
+        // whether another follows.
+        let mut more = flag == b'S' && block[482] != 0;
+        while more {
+            let Some(next) = input.block().await else {
+                cut = true;
+                break;
+            };
+            if let Some(sparse) = member.sparse.as_mut() {
+                sparse.runs.extend(header::runs(&next[..504]));
+            }
+            more = next[504] != 0;
+        }
+        if cut {
+            break;
+        }
         member.name = long_name.take().unwrap_or(member.name);
         member.target = long_link.take().unwrap_or(member.target);
         global.apply(&mut member);
         std::mem::take(&mut pax).apply(&mut member);
+        if let Some(sparse) = member.sparse.as_mut().filter(|sparse| sparse.inline) {
+            let Some(runs) = input.runs(&mut member.size).await else {
+                cut = true;
+                break;
+            };
+            sparse.runs = runs;
+        }
         if member.kind == Kind::File && member.name.ends_with(b"/") {
             member.kind = Kind::Dir;
         }

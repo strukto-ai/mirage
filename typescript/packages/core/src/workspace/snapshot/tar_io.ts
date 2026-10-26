@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { createTarDecoder, createTarPacker, packTar, unpackTar } from 'modern-tar'
+import { createTarDecoder, createTarPacker, packTar, unpackTar, type TarEntry } from 'modern-tar'
 import { VFSName } from '../../types.ts'
 import { gzip, gunzip } from '../../utils/compress.ts'
 import {
@@ -45,23 +45,17 @@ export async function writeSnapshotTar(
   blobs: Record<string, Uint8Array | string>,
   compress: CompressMode = null,
 ): Promise<Uint8Array> {
-  const entries = [[MANIFEST_NAME, ENC.encode(JSON.stringify(manifest, null, 2))] as const]
-  const files = [...entries, ...Object.entries(blobs)]
-  const tarBytes = await packTar(
-    await Promise.all(
-      files.map(async ([name, data]) => {
-        const body = typeof data === 'string' ? await readRegular(data) : data
-        const header = {
-          name,
-          size: body.byteLength,
-          type: 'file' as const,
-          mode: 0o644,
-          mtime: new Date(0),
-        }
-        return { header, body }
-      }),
-    ),
-  )
+  const files = [
+    [MANIFEST_NAME, ENC.encode(JSON.stringify(manifest, null, 2))] as const,
+    ...Object.entries(blobs),
+  ]
+  const entries: TarEntry[] = []
+  for (const [name, data] of files) {
+    const body = typeof data === 'string' ? await readRegular(data) : data
+    const header = { name, size: body.byteLength, type: 'file' as const, mode: 0o644 }
+    entries.push({ header: { ...header, mtime: new Date(0) }, body })
+  }
+  const tarBytes = await packTar(entries)
   if (compress === 'gz') return gzip(tarBytes)
   return tarBytes
 }

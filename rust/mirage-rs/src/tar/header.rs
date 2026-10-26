@@ -32,7 +32,7 @@ pub(super) enum Kind {
 impl Kind {
     fn of(flag: u8) -> Kind {
         match flag {
-            b'0' | b'\0' | b'7' => Kind::File,
+            b'0' | b'\0' | b'7' | b'S' => Kind::File,
             b'1' => Kind::Hard,
             b'2' => Kind::Link,
             b'3' => Kind::Char,
@@ -59,6 +59,28 @@ pub(super) struct Member {
     pub(super) mtime: i64,
     pub(super) major: u64,
     pub(super) minor: u64,
+    pub(super) sparse: Option<Sparse>,
+}
+
+/// A sparse member's layout: the offset and length of each run of data its
+/// archived bytes hold, in order, and the whole file's size; `inline` when
+/// the runs are the decimal lines its data starts with (pax format 1.0).
+#[derive(Clone, Default)]
+pub(super) struct Sparse {
+    pub(super) runs: Vec<u64>,
+    pub(super) real: u64,
+    pub(super) inline: bool,
+}
+
+/// The runs a GNU sparse header's 24-byte entries hold, up to the first
+/// that is no offset and length.
+pub(super) fn runs(entries: &[u8]) -> Vec<u64> {
+    let field = |field: &[u8]| u64::try_from(number(field)??).ok();
+    entries
+        .chunks_exact(24)
+        .map_while(|entry| Some([field(&entry[..12])?, field(&entry[12..])?]))
+        .flatten()
+        .collect()
 }
 
 /// What one block holds.
@@ -176,6 +198,14 @@ pub(super) fn decode(block: &[u8]) -> Block {
         name = [&prefix[..], b"/", &name].concat();
     }
     let flag = block[156];
+    let sparse = (flag == b'S').then(|| Sparse {
+        runs: runs(&block[386..482]),
+        real: number(&block[483..495])
+            .flatten()
+            .and_then(|real| u64::try_from(real).ok())
+            .unwrap_or(size as u64),
+        inline: false,
+    });
     let mode = read(&block[100..108], "mode_t", &mut lines);
     let member = Member {
         name,
@@ -190,6 +220,7 @@ pub(super) fn decode(block: &[u8]) -> Block {
         mtime: read(&block[136..148], "time_t", &mut lines) as i64,
         major: unsigned(read(&block[329..337], "major_t", &mut lines)),
         minor: unsigned(read(&block[337..345], "minor_t", &mut lines)),
+        sparse,
     };
     Block::Head(member, flag, lines)
 }
@@ -205,6 +236,12 @@ pub(super) struct Pax {
     uname: Option<Vec<u8>>,
     gname: Option<Vec<u8>>,
     mtime: Option<i64>,
+    /// GNU's sparse records: the file's name and size, its runs (formats
+    /// 0.0 and 0.1), and whether its data starts with them (1.0).
+    sparse_name: Option<Vec<u8>>,
+    real: Option<u64>,
+    runs: Vec<u64>,
+    inline: bool,
 }
 
 impl Pax {
@@ -216,7 +253,7 @@ impl Pax {
             let Some(len) = std::str::from_utf8(&data[at..at + space])
                 .ok()
                 .and_then(|len| len.parse::<usize>().ok())
-                .filter(|&len| len > space + 1 && at + len <= data.len())
+                .filter(|&len| len > space + 1 && len <= data.len() - at)
             else {
                 break;
             };
@@ -236,6 +273,15 @@ impl Pax {
                 b"uname" => self.uname = Some(value),
                 b"gname" => self.gname = Some(value),
                 b"mtime" => self.mtime = seconds(&value),
+                b"GNU.sparse.name" => self.sparse_name = Some(value),
+                b"GNU.sparse.size" | b"GNU.sparse.realsize" => self.real = decimal(),
+                b"GNU.sparse.offset" | b"GNU.sparse.numbytes" => self.runs.extend(decimal()),
+                b"GNU.sparse.map" => {
+                    let numbers = value.split(|&b| b == b',');
+                    let number = |text: &[u8]| std::str::from_utf8(text).ok()?.parse().ok();
+                    self.runs = numbers.map_while(number).collect();
+                }
+                b"GNU.sparse.major" => self.inline = value == b"1",
                 _ => {}
             }
         }
@@ -249,6 +295,7 @@ impl Pax {
             }
         };
         pick(&self.path, &mut member.name);
+        pick(&self.sparse_name, &mut member.name);
         pick(&self.linkpath, &mut member.target);
         pick(&self.uname, &mut member.uname);
         pick(&self.gname, &mut member.gname);
@@ -256,6 +303,10 @@ impl Pax {
         member.uid = self.uid.unwrap_or(member.uid);
         member.gid = self.gid.unwrap_or(member.gid);
         member.mtime = self.mtime.unwrap_or(member.mtime);
+        if let Some(real) = self.real {
+            let (runs, inline) = (self.runs.clone(), self.inline);
+            member.sparse = Some(Sparse { runs, real, inline });
+        }
     }
 }
 
@@ -410,7 +461,11 @@ impl Rows {
         .concat();
         let size = match member.kind {
             Kind::Char | Kind::Block => format!("{},{}", member.major, member.minor),
-            _ => member.size.to_string(),
+            _ => member
+                .sparse
+                .as_ref()
+                .map_or(member.size, |sparse| sparse.real)
+                .to_string(),
         };
         self.width = self.width.max(owner.len() + 1 + size.len());
         let pad = self.width - owner.len() - size.len();

@@ -209,6 +209,41 @@
         "stdout": "c8c9c666254939430c4f470fe36bb622  -\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "tar_lays_out_a_sparse_member_from_its_gnu_and_pax_maps",
+      "seq": 15100077,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "printf %s 'H4sIAAAAAAACA+3aTQrCMBAG0BylR2jSNh7EExQsWNCNP/dXKyi16k5FfW+TYWaR5NsFsg2vVx7luh7Wo5s15aa8zM79OKvzLBTzN5wt7Le7dlMU4WNGNx/Ea50e9PMoyWuCuZykORpMLLt2EQAAAICftu49/wEAAAAAAABOdm2/+ubzd2/Y4/n//zt1jCk2f/X/vyqrVI9TeMkGAAAAAAAAAPyoA+l+I7UAUAAA' | base64 -d | gzip -d | tar -tvf -; echo rc=$?; printf %s 'H4sIAAAAAAACA+3b30rDMBTH8V73KfYApTtp/nS96K16JYL4AHUGLK46lg2GT2/XoWzrpqBuon4/Nwk5kBTCCfTilw6vquWFr+78LAxDdBTScsZ0Y2t3lCx3b/NuXYnREg2W0QkswryatcdH/1PmBueXN2mYVrPg01A/+zJbXYKJtyuPi+Z28jR+CGVbUVuVqvFliG2+udhU01ISI4VLnLXaraeqcE5GidbtfH1KIrGWQTWv2z1UXmixI21dWhRWXCEqW1XH/apWzmrj4ghflA7bW7vuLu2snvhUFd//Crzf/5mzYnb6Xylto4HQ/0d33z79dAEAAAAAAH9bU/P7DwAAAAAAAAAAAAAr86qe/ObvTzfzP/44Z3yY/zHSy/+IIv9zCnvyP6q7hYP5H7Uv/+PjrJf/We9zMOHzmuEh4fOz/d/L//hT939vrpTkjvwPAAAAAAAAAACf9QIWzOZsAFAAAA==' | base64 -d | gzip -d | tar -tvf -; echo rc=$?; printf %s 'H4sIAAAAAAACA+3bzUrDQBiF4aznKnoF6Tc/mTaLbtWVCOIFDDpgpK2SVChevZNYJbTUhZqg9X02Gb4pJHQ4KV2cfHoVthcx3MW6mTbZICTxznXXZP8qxtqPdTfX4ozOJttsBM/NJtTp9tn/ZMzk/PImb55C3cR8FR4e64VWe9NqnaaijO5P12EVF42y0h/WMSyb6iUuTHuSrt0Nmyp9UM9KK8XcFj4vy0J8Kdq0u7eHu1b7wjqvMgwvn6bTu+4O76xaxtzYn38LfJ5/MyvE7eVfa5vyL+R/cE6JclJ65YvC+relLr2XubI2rXc5FtJ4mu7TTz/fAgAAAAAAp21V8fcfAAAAAAAAAAAAAFqbUC3/8vPn/f5XHOYeX+l/iaX/NYZv9r/isf6X7o7ySP/rveFF/+sX5P+g/xVHzr/uvwt2/S+ZGfpfY9Bql1QaXgAAAAAAAMDJeQWxnq+hAFAAAA==' | base64 -d | gzip -d | tar -tvf -; echo rc=$?; printf %s 'H4sIAAAAAAACA+3aTQrCMBAG0BylR2jSNh7EExQsWNCNP/dXKyi16k5FfW+TYWaR5NsFsg2vVx7luh7Wo5s15aa8zM79OKvzLBTzN5wt7Le7dlMU4WNGNx/Ea50e9PMoyWuCuZykORpMLLt2EQAAAICftu49/wEAAAAAAABOdm2/+ubzd2/Y4/n//zt1jCk2f/X/vyqrVI9TeMkGAAAAAAAAAPyoA+l+I7UAUAAA' | base64 -d | gzip -d | tar -xOf - s | md5sum; mkdir x y; printf %s 'H4sIAAAAAAACA+3b30rDMBTH8V73KfYApTtp/nS96K16JYL4AHUGLK46lg2GT2/XoWzrpqBuon4/Nwk5kBTCCfTilw6vquWFr+78LAxDdBTScsZ0Y2t3lCx3b/NuXYnREg2W0QkswryatcdH/1PmBueXN2mYVrPg01A/+zJbXYKJtyuPi+Z28jR+CGVbUVuVqvFliG2+udhU01ISI4VLnLXaraeqcE5GidbtfH1KIrGWQTWv2z1UXmixI21dWhRWXCEqW1XH/apWzmrj4ghflA7bW7vuLu2snvhUFd//Crzf/5mzYnb6Xylto4HQ/0d33z79dAEAAAAAAH9bU/P7DwAAAAAAAAAAAAAr86qe/ObvTzfzP/44Z3yY/zHSy/+IIv9zCnvyP6q7hYP5H7Uv/+PjrJf/We9zMOHzmuEh4fOz/d/L//hT939vrpTkjvwPAAAAAAAAAACf9QIWzOZsAFAAAA==' | base64 -d | gzip -d | tar -xf - -C x; printf %s 'H4sIAAAAAAACA+3bzUrDQBiF4aznKnoF6Tc/mTaLbtWVCOIFDDpgpK2SVChevZNYJbTUhZqg9X02Gb4pJHQ4KV2cfHoVthcx3MW6mTbZICTxznXXZP8qxtqPdTfX4ozOJttsBM/NJtTp9tn/ZMzk/PImb55C3cR8FR4e64VWe9NqnaaijO5P12EVF42y0h/WMSyb6iUuTHuSrt0Nmyp9UM9KK8XcFj4vy0J8Kdq0u7eHu1b7wjqvMgwvn6bTu+4O76xaxtzYn38LfJ5/MyvE7eVfa5vyL+R/cE6JclJ65YvC+relLr2XubI2rXc5FtJ4mu7TTz/fAgAAAAAAp21V8fcfAAAAAAAAAAAAAFqbUC3/8vPn/f5XHOYeX+l/iaX/NYZv9r/isf6X7o7ySP/rveFF/+sX5P+g/xVHzr/uvwt2/S+ZGfpfY9Bql1QaXgAAAAAAAMDJeQWxnq+hAFAAAA==' | base64 -d | gzip -d | tar -xvf - -C y; echo rc=$?; md5sum x/s x/e y/s y/e; wc -c y/s y/e",
+      "expect": {
+        "exit": 0,
+        "stdout": "-rw-r--r-- 0/0          200004 1970-01-01 00:00 s\n-rw-r--r-- 0/0          100000 1970-01-01 00:00 e\nrc=0\n-rw-r--r-- 0/0          200004 1970-01-01 00:00 s\n-rw-r--r-- 0/0          100000 1970-01-01 00:00 e\nrc=0\n-rw-r--r-- 0/0          200004 1970-01-01 00:00 s\n-rw-r--r-- 0/0          100000 1970-01-01 00:00 e\nrc=0\n3477dab701cdb38a2e9a5d2b1d76fdc8  -\ns\ne\nrc=0\n3477dab701cdb38a2e9a5d2b1d76fdc8  x/s\n0019d23bef56a136a1891211d7007f6f  x/e\n3477dab701cdb38a2e9a5d2b1d76fdc8  y/s\n0019d23bef56a136a1891211d7007f6f  y/e\n200004 y/s\n100000 y/e\n300004 total\n",
+        "stderr": ""
+      }
     }
   ]
 }

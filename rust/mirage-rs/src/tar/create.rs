@@ -148,7 +148,7 @@ async fn file(out: &mut Output<'_>, entry: &Entry, fd: u32) -> Option<Trouble> {
     let mut seen = 0u64;
     let mut trouble = None;
     while let Some(data) = next {
-        let keep = data.len().min((size - seen.min(size)) as usize);
+        let keep = (size - seen.min(size)).min(data.len() as u64) as usize;
         out.put(&data[..keep]).await;
         seen += data.len() as u64;
         next = match read(host, fd, None).await {
@@ -163,7 +163,7 @@ async fn file(out: &mut Output<'_>, entry: &Entry, fd: u32) -> Option<Trouble> {
         host.ask(Request::Close { fd: SPOOL }).await;
     }
     if seen < size {
-        let zeros = vec![0; ((size - seen) as usize).min(READ as usize)];
+        let zeros = vec![0; (size - seen).min(READ) as usize];
         let mut left = size - seen;
         while left > 0 {
             let take = left.min(zeros.len() as u64);

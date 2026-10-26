@@ -145,6 +145,13 @@ fn strip_components_counts_from_the_name_without_its_slashes() {
 }
 
 #[test]
+fn a_pax_record_longer_than_its_header_ends_the_records() {
+    let mut pax = header::Pax::default();
+    pax.read(b"6 a=b\n18446744073709551615 x=y\n");
+    pax.read(b"6 a=b\n4294967295 x=y\n");
+}
+
+#[test]
 fn the_escape_style_is_gnu_tars() {
     // GNU tar 1.35 on debian:stable-slim (LC_ALL=C.UTF-8), `tar -tf` of
     // members created under each name: a space stays bare.

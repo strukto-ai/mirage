@@ -96,6 +96,9 @@ async def main() -> None:
     async def read_bytes(path: PathSpec) -> bytes:
         return await materialize(source())
 
+    async def read_whole(path: PathSpec) -> AsyncIterator[bytes]:
+        yield await read_bytes(path)
+
     async def consume(output: ByteSource | None) -> None:
         if output is None:
             return
@@ -138,7 +141,7 @@ async def main() -> None:
             [INPUT],
             [],
             TarFlags(create=True, archive=STDOUT),
-            stream=read_stream,
+            stream=read_whole if args.whole_read else read_stream,
             stat=stat,
             walk=unexpected,
             is_dir=unexpected,
