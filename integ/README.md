@@ -33,13 +33,18 @@ implementations cannot drift apart.
   `loop_lag.ts`) and write the summary to a file as they stop; `run.py`
   prints it per host and deployment. No route serves it. `inapp.ts` is
   the in-app access on TypeScript. CI uses `--host-jobs 2` to overlap both
-  hosts on one runner; each host keeps its own home, ports and snapshot
-  prefix, and the route and command gates still cover both hosts. Shell and
+  hosts on one runner and `--suite-jobs 3` to run three suites of each
+  at once; each host keeps its own home, ports and snapshot prefix, each
+  suite its own workspace under its access's prefix, and the route and
+  command gates still cover both hosts. Shell and
   stdin cases with `output_stream` also run over HTTP `?stream=true` and the
   CLI's raw output. A case with `output_gate` holds its line on a VFS file
   the access creates only once the first output byte reaches it, so HTTP,
   the CLI and SSH must deliver output before the line ends; MCP progress
-  cases gate the same way on the first preview.
+  cases gate the same way on the first preview. A case with `beside` first
+  sends a line with its own cwd that marks `up` and then waits for `go`,
+  which only the case's own line writes, so the case passes only on an
+  access that runs its line beside the held one rather than behind it.
 - `interrupt/`: cancellation through real FastAPI and Fastify servers. One
   `cases.json` covers both hosts; `python/.venv/bin/python integ/interrupt/run.py`
   launches isolated servers and an external watchdog. It checks CPU work,
