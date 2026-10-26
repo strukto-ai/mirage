@@ -33,7 +33,7 @@ function buildWs(line: number | null = null): Workspace {
     { '/data': ram },
     {
       mode: MountMode.WRITE,
-      ...(line === null ? {} : { commandLimits: { line: new Limit({ timeoutSeconds: line }) } }),
+      ...(line === null ? {} : { commandLimits: { '@line': new Limit({ timeoutSeconds: line }) } }),
     },
   )
 }

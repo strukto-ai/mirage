@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 import { invokedEnvNames, suppliedEnvNames } from '../../commands/cli/walk.ts'
 import type { Runtime } from '../../runtime/base.ts'
+import { WHOLE_LINE } from '../../runtime/constants.ts'
 import type { RouteDecision } from '../../runtime/types.ts'
 import { WorkspaceRuntime } from '../../runtime/workspace.ts'
 import { SecretsError } from '../../secrets/errors.ts'
@@ -170,7 +171,7 @@ export function lineNodes(node: TSNodeLike, session: SessionState): TSNodeLike[]
  */
 export function guestBound(nodes: TSNodeLike[], decision: RouteDecision<Runtime>): boolean {
   const bindings = decision.bindings
-  const words = new Set<string>(['*'])
+  const words = new Set<string>([WHOLE_LINE])
   for (const node of nodes) {
     for (const word of commandWords(node)) words.add(word)
   }

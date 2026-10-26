@@ -616,7 +616,7 @@ async def test_what_a_runtime_reads_is_in_its_lines_report():
     # A runtime's reads are the line's: they reach the workspace's ledger
     # and the observer's account of the line, as a command's do.
     box = ReadingBox()
-    box.captures = ("*",)
+    box.captures = ("@line",)
     ws = Workspace(
         {"/ram": RAMVFS()}, mode=MountMode.EXEC, runtimes=[box, "workspace"]
     )
@@ -661,7 +661,7 @@ async def test_what_an_aborted_runtime_read_stays_on_the_books():
     # The runtime finished its read before the line was aborted: the read
     # happened, so it reaches the ledger and the line's record all the same.
     box = StallingBox()
-    box.captures = ("*",)
+    box.captures = ("@line",)
     ws = Workspace(
         {"/ram": RAMVFS()}, mode=MountMode.EXEC, runtimes=[box, "workspace"]
     )
@@ -711,7 +711,7 @@ async def test_named_capture_keeps_pipeline_and_redirects_in_mirage():
 @pytest.mark.asyncio
 async def test_star_captures_any_line_and_stdin_arrives():
     box = LineBox()
-    box.captures = ("*",)
+    box.captures = ("@line",)
     ws = Workspace(
         {"/ram": RAMVFS()}, mode=MountMode.EXEC, runtimes=[box, "workspace"]
     )
@@ -724,7 +724,7 @@ async def test_star_captures_any_line_and_stdin_arrives():
 @pytest.mark.asyncio
 async def test_a_route_to_the_workspace_keeps_a_line_in_mirage():
     box = LineBox()
-    box.captures = ("*",)
+    box.captures = ("@line",)
     ws = Workspace(
         {"/ram": RAMVFS()},
         mode=MountMode.EXEC,
@@ -744,7 +744,7 @@ async def test_a_route_to_the_workspace_keeps_a_line_in_mirage():
 @pytest.mark.asyncio
 async def test_runtime_argument_places_the_whole_line():
     box = LineBox()
-    box.captures = ("*",)
+    box.captures = ("@line",)
     ws = Workspace(
         {"/ram": RAMVFS()},
         mode=MountMode.EXEC,

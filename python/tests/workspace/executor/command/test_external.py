@@ -265,7 +265,7 @@ async def test_the_line_deadline_cancels_an_external_process():
         {"/": RAMVFS()},
         mode=MountMode.EXEC,
         runtimes=[probe],
-        command_limits={"line": Limit(timeout_seconds=0.05)},
+        command_limits={"@line": Limit(timeout_seconds=0.05)},
     ) as ws:
         result = await ws.shell("native-tool")
         assert result.exit_code == 124

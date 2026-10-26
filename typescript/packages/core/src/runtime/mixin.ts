@@ -30,7 +30,7 @@ export const LINE_EXECUTOR: unique symbol = Symbol.for('mirage.lineExecutor')
  * owns any line routed to it wholesale: pipes, redirects, and every
  * command in the line run inside the runtime's world (its own cat,
  * its own grep), the workspace shell never splits the line. A line
- * lands on it whole only with an explicit "*" capture; named captures
+ * lands on it whole only with an explicit WHOLE_LINE capture; named captures
  * receive one safely quoted command. Interpreter runtimes never implement it: they are the engine
  * inside one command (python3, node), never the line. The workspace runtime
  * does not either: a line resolved to workspace runs on the workspace

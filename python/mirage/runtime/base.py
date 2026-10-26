@@ -103,8 +103,8 @@ class Runtime(ABC, Generic[E]):
         Args:
             captures (Sequence[str] | None): commands this runtime
                 claims, overriding the class default; EXTERNAL_COMMANDS
-                captures unresolved program names. ("*",) claims
-                every line for a line-executing runtime. None keeps
+                captures unresolved program names. WHOLE_LINE
+                claims every line for a line-executing runtime. None keeps
                 the default.
             config (RuntimeConfig | dict[str, Any] | None): the
                 runtime's implementation knobs, coerced through its

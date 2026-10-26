@@ -26,8 +26,12 @@ DEFAULT_COMMAND_LIMITS: dict[str, Limit] = {
 
 LINE_TIMEOUT_SECONDS = 600.0
 
-ALL_COMMANDS = "*"
-LINE = "line"
+# The groups a limit table names besides commands, spelled with the `@`
+# a runtime's captures use for theirs, so no command name can clash.
+ALL_COMMANDS = "@all"
+LINE = "@line"
+# What a line past its time limit is called: `line: timed out after Ns`.
+LINE_NAME = "line"
 
 
 class LimitMount(Protocol):
@@ -57,7 +61,7 @@ def resolve_limit(
     """Resolve one command's bound, the one precedence engine.
 
     Field by field, from the most specific layer that sets it: the
-    profile's entry for the command, then its ``"*"`` entry for every
+    profile's entry for the command, then its ``"@all"`` entry for every
     command, then the mount's two, the workspace's two, the command's
     own default and the built-in table; on a mount, its backend's
     default (``walk_limit``) last. A layer that names one
@@ -109,7 +113,7 @@ def walk_bound(
 
     The ``walk_limit`` of ``command``, resolved as ``resolve_limit``
     resolves every bound; without a command, the one every command
-    shares (the ``"*"`` entries), which a glob counts against. A layer
+    shares (the ``"@all"`` entries), which a glob counts against. A layer
     naming the bound as None lifts it.
 
     Args:
@@ -191,7 +195,7 @@ def line_timeout(
     profile_limits: Mapping[str, Limit] | None = None,
 ) -> float | None:
     """The whole line's deadline, the one time limit a line runs under:
-    the ``line`` entry's ``timeout_seconds``, the profile's over the
+    the ``@line`` entry's ``timeout_seconds``, the profile's over the
     workspace's, else ``LINE_TIMEOUT_SECONDS``. An entry naming it as
     None or 0 lifts it.
 
@@ -217,20 +221,29 @@ def check_command_limits(
 ) -> None:
     """Refuse a table that names time where no time limit applies.
 
-    A line runs under one time limit, the ``line`` entry's
+    A line runs under one time limit, the ``@line`` entry's
     ``timeout_seconds``; no command or op entry takes one, and the
-    ``line`` entry takes nothing else. A mount names no line, since a
-    line spans mounts.
+    ``@line`` entry takes nothing else. A mount names no line, since a
+    line spans mounts. A key is a command or one of the two groups,
+    ``@all`` and ``@line``.
 
     Args:
         limits (Mapping[str, Limit]): the table, keyed by command.
         where (str): what the table belongs to, for the message.
-        takes_line (bool): whether the table may hold a ``line`` entry.
+        takes_line (bool): whether the table may hold a ``@line`` entry.
 
     Raises:
-        ValueError: an entry names a bound it cannot take.
+        ValueError: an entry names a bound it cannot take, or a group
+            that is not one.
     """
     for name, limit in limits.items():
+        if name not in (ALL_COMMANDS, LINE) and (
+            name == "*" or name.startswith("@")
+        ):
+            raise ValueError(
+                f"{where}: command_limits[{name!r}]: not a command or a"
+                f" group; the groups are {ALL_COMMANDS!r} and {LINE!r}"
+            )
         if name != LINE:
             if "timeout_seconds" in limit.model_fields_set:
                 raise ValueError(

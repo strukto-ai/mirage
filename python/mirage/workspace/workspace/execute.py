@@ -35,7 +35,7 @@ from mirage.observe.context import RecordingScope, active_records
 from mirage.observe.observer import Observer
 from mirage.observe.record import OpRecord
 from mirage.policy import Deny, HandOff, Pending
-from mirage.policy.builtin.output_cap import LINE, line_timeout
+from mirage.policy.builtin.output_cap import LINE_NAME, line_timeout
 from mirage.policy.decisions import is_pending
 from mirage.process.table import ProcessTable
 from mirage.process.types import ProcessInfo
@@ -1039,7 +1039,7 @@ async def run_prepared_line(
                         names = plan_names(nodes)
             # No seam of its own: the whole line is one task under
             # ``Workspace.shell``, and a cancel lands on whichever await
-            # the tree is in. A top-level line runs under its ``line``
+            # the tree is in. A top-level line runs under its ``@line``
             # deadline, which a nested one shares.
             io, _ = await run_with_timeout(
                 run_command_tree(
@@ -1072,7 +1072,7 @@ async def run_prepared_line(
                     if top_level
                     else None
                 ),
-                LINE,
+                LINE_NAME,
                 budget_start,
             )
             # A record a nested line earned is the line's to report when

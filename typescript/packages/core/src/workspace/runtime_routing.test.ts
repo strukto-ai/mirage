@@ -613,7 +613,7 @@ describe('whole-line runtimes', () => {
       }
     }
     const box = new ReadingBox()
-    box.captures = ['*']
+    box.captures = ['@line']
     const ws = new Workspace(
       { '/': new RAMVFS() },
       { mode: MountMode.EXEC, runtimes: [box, 'workspace'] },
@@ -651,7 +651,7 @@ describe('whole-line runtimes', () => {
     }
     const seen: [number, string][] = []
     const box = new BrokenBox()
-    box.captures = ['*']
+    box.captures = ['@line']
     const ws = new Workspace(
       { '/': new RAMVFS() },
       {
@@ -702,13 +702,13 @@ describe('whole-line runtimes', () => {
       }
     }
     const box = new SettlingBox()
-    box.captures = ['*']
+    box.captures = ['@line']
     const ws = new Workspace(
       { '/': new RAMVFS() },
       {
         mode: MountMode.EXEC,
         runtimes: [box, 'workspace'],
-        commandLimits: { line: new Limit({ timeoutSeconds: 0.2 }) },
+        commandLimits: { '@line': new Limit({ timeoutSeconds: 0.2 }) },
       },
     )
     try {
@@ -742,7 +742,7 @@ describe('whole-line runtimes', () => {
       {
         mode: MountMode.EXEC,
         runtimes: [new Deaf(), 'workspace'],
-        commandLimits: { line: new Limit({ timeoutSeconds: 0.2 }) },
+        commandLimits: { '@line': new Limit({ timeoutSeconds: 0.2 }) },
       },
     )
     try {
@@ -775,7 +775,7 @@ describe('whole-line runtimes', () => {
       }
     }
     const box = new StallingBox()
-    box.captures = ['*']
+    box.captures = ['@line']
     const ws = new Workspace(
       { '/': new RAMVFS() },
       { mode: MountMode.EXEC, runtimes: [box, 'workspace'] },
@@ -819,7 +819,7 @@ describe('whole-line runtimes', () => {
 
   it('a "*" capture claims any line and stdin arrives', async () => {
     const box = new LineBox()
-    box.captures = ['*']
+    box.captures = ['@line']
     const ws = new Workspace(
       { '/': new RAMVFS() },
       { mode: MountMode.EXEC, runtimes: [box, 'workspace'] },
@@ -835,7 +835,7 @@ describe('whole-line runtimes', () => {
 
   it('a route to the workspace keeps a line in Mirage', async () => {
     const box = new LineBox()
-    box.captures = ['*']
+    box.captures = ['@line']
     const ws = new Workspace(
       { '/': new RAMVFS() },
       {
@@ -857,7 +857,7 @@ describe('whole-line runtimes', () => {
 
   it('the runtime argument places the whole line', async () => {
     const box = new LineBox()
-    box.captures = ['*']
+    box.captures = ['@line']
     const ws = new Workspace(
       { '/': new RAMVFS() },
       {
@@ -878,7 +878,7 @@ describe('whole-line runtimes', () => {
 
   it('a sink receives the line the runtime served', async () => {
     const box = new LineBox()
-    box.captures = ['*']
+    box.captures = ['@line']
     const ws = new Workspace(
       { '/': new RAMVFS() },
       { mode: MountMode.EXEC, runtimes: [box, 'workspace'] },

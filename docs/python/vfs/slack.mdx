@@ -422,7 +422,7 @@ messages or finds nothing. With a separate `search_token`, every day is also rea
 when the scope holds a private channel or a DM that token's user is not in (a
 bot's own DMs), since their search never sees it; that token needs
 `channels:read`, `groups:read`, `im:read` and `mpim:read` to list the
-conversations it sees. `walk_limit: -1` in the mount's `"*"` [command limit](/home/core/output-limits) reads every file instead, since Slack indexes a message some
+conversations it sees. `walk_limit: -1` in the mount's `"@all"` [command limit](/home/core/output-limits) reads every file instead, since Slack indexes a message some
 time after it is posted, and a word held only in another field of a message (a
 bot's username, an unfurled link) is not searched.
 

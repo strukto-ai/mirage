@@ -41,7 +41,7 @@ import { SandboxMounts } from './mounts.ts'
 /**
  * A runtime that executes programs in a sandbox the user runs.
  *
- * Captures default to unresolved program names. An explicit "*"
+ * Captures default to unresolved program names. An explicit WHOLE_LINE
  * delegates whole shell lines.
  *
  * Mirage never creates, provisions, or deletes sandboxes: you bring

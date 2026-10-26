@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { EXTERNAL_COMMANDS } from './constants.ts'
+import { EXTERNAL_COMMANDS, WHOLE_LINE } from './constants.ts'
 import type { Runtime } from './base.ts'
 import { isProcessExecutor, isLineExecutor, type LineExecutor } from './mixin.ts'
 import { QuickJsRuntime } from './js/quickjs/runtime.ts'
@@ -195,8 +195,19 @@ export function bindCommands(entries: readonly Runtime[]): Record<string, Runtim
   const bindings: Record<string, Runtime> = Object.create(null) as Record<string, Runtime>
   const seen = new Set<string>()
   for (const entry of entries) {
-    if (entry.captures.includes('*') && !isLineExecutor(entry))
-      throw new Error('* requires shell execution')
+    for (const capture of entry.captures) {
+      if (
+        capture !== EXTERNAL_COMMANDS &&
+        capture !== WHOLE_LINE &&
+        (capture === '*' || capture.startsWith('@'))
+      ) {
+        throw new Error(
+          `'${capture}' is not a program or a group; the groups are '${EXTERNAL_COMMANDS}' and '${WHOLE_LINE}'`,
+        )
+      }
+    }
+    if (entry.captures.includes(WHOLE_LINE) && !isLineExecutor(entry))
+      throw new Error(`${WHOLE_LINE} requires shell execution`)
     if (
       entry.captures.includes(EXTERNAL_COMMANDS) &&
       !isLineExecutor(entry) &&
@@ -218,7 +229,7 @@ export function bindCommands(entries: readonly Runtime[]): Record<string, Runtim
 /**
  * The runtime that runs this entire line, if any.
  *
- * Only an explicit "*" capture claims a whole line. Named captures
+ * Only an explicit WHOLE_LINE capture claims a whole line. Named captures
  * and EXTERNAL_COMMANDS execute individual commands. The workspace runtime never matches here
  * because it carries no capability: the workspace executor IS the
  * path a workspace-resolved line takes anyway, so there is no delegate.
@@ -226,8 +237,8 @@ export function bindCommands(entries: readonly Runtime[]): Record<string, Runtim
 export function wholeLineRuntime(
   bindings: Readonly<Record<string, Runtime | null | undefined>>,
 ): (Runtime & LineExecutor) | null {
-  const star = Object.hasOwn(bindings, '*') ? bindings['*'] : null
-  if (star != null && isLineExecutor(star)) return star
+  const whole = Object.hasOwn(bindings, WHOLE_LINE) ? bindings[WHOLE_LINE] : null
+  if (whole != null && isLineExecutor(whole)) return whole
   return null
 }
 

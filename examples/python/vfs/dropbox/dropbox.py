@@ -37,7 +37,7 @@ backend = DropboxVFS(config)
 # DROPBOX_WALK_LIMIT=-1 to read every file instead.
 walks = Limit(walk_limit=int(os.environ.get("DROPBOX_WALK_LIMIT", "1000")))
 ws = Workspace(
-    {"/dropbox": (backend, MountMode.WRITE, {"*": walks})},
+    {"/dropbox": (backend, MountMode.WRITE, {"@all": walks})},
     mode=MountMode.WRITE,
 )
 

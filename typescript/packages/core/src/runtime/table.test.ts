@@ -36,6 +36,15 @@ class FakeRuntime extends Runtime {
   }
 }
 
+// A runtime capturing one name, for the groups a capture may spell.
+class OneCapture extends Runtime {
+  readonly name = 'one'
+
+  constructor(capture: string) {
+    super({ captures: [capture] })
+  }
+}
+
 describe('runtime table', () => {
   it('captures default is declared once per tier', () => {
     // The head words are a language fact like `language` itself: the
@@ -91,6 +100,13 @@ describe('bindCommands', () => {
 
   it('the workspace runtime binds nothing', () => {
     expect(bindCommands([new WorkspaceRuntime()])).toEqual({})
+  })
+
+  // Twin of test_bind_commands_refuses_a_group_it_does_not_have.
+  it.each(['*', '@all', '@lines'])('refuses a group it does not have: %s', (capture) => {
+    expect(() => bindCommands([new OneCapture(capture)])).toThrow(
+      `'${capture}' is not a program or a group; the groups are '@external' and '@line'`,
+    )
   })
 
   it('rejects duplicate names', () => {

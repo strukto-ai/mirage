@@ -110,7 +110,7 @@ async def test_a_fetch_before_the_run_spends_the_line_deadline():
     register_secrets("fake", FakeConfig, slow_fetch)
     ws = _ws(
         {"TOKEN": {"from": "fake", "ref": "r"}},
-        command_limits={"line": Limit(timeout_seconds=0.2)},
+        command_limits={"@line": Limit(timeout_seconds=0.2)},
     )
     try:
         io = await ws.shell("echo $TOKEN")
@@ -2156,7 +2156,7 @@ async def slow_bootstrap(calls: list[str]) -> FetchFn:
 
 class LineBox(Runtime, LineExecutorMixin):
     name = "sandbox"
-    captures = ("*",)
+    captures = ("@line",)
 
     async def run_line(self, engine, paths, texts, ctx) -> RunResult:
         return RunResult(stdout=b"box", stderr=None, exit_code=0)

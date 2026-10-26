@@ -78,7 +78,7 @@ mounts:
       owner: strukto-ai
       repo: mirage
     command_limits:
-      "*":
+      "@all":
         walk_limit: 2000
   /scratch:
     vfs: ram
@@ -89,7 +89,7 @@ mounts:
   `/scratch` does.
 - `${NAME}` is read from the environment when the config loads, so keys stay
   out of the file. A missing variable is an error.
-- `command_limits` bounds the commands that run on that mount; its `"*"`
+- `command_limits` bounds the commands that run on that mount; its `"@all"`
   entry's `walk_limit` is the most files one command walks there.
 
 ```bash

@@ -1415,8 +1415,8 @@ async def test_global_and_profile_command_limits_from_config():
     "block",
     [
         {"command_limits": {"head": {"max_line": 2}}},
-        {"command_limits": {"line": {"timeout_seconds": -1}}},
-        {"command_limits": {"line": {"timeout_seconds": float("inf")}}},
+        {"command_limits": {"@line": {"timeout_seconds": -1}}},
+        {"command_limits": {"@line": {"timeout_seconds": float("inf")}}},
         {
             "profiles": {
                 "research": {"command_limits": {"head": {"max_line": 2}}}

@@ -364,7 +364,7 @@ are always read.
 
 `walkLimit` is the most files one command walks under a directory, 1000
 unless your VFS starts at another value, as `WikiVFS` starts at 5000; `-1` for
-no limit. A mount's `'*'` [command limit](/home/core/output-limits), else the
+no limit. A mount's `'@all'` [command limit](/home/core/output-limits), else the
 workspace's, replaces it when the VFS is mounted, so read `this.walkLimit` when
 a call runs, not in the constructor. Searches and listings stop past it, keeping what they printed, and a search
 counts only the files it reads, so a file your search rules out costs nothing.

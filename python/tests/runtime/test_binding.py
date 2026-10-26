@@ -385,7 +385,7 @@ async def test_context_vfs_of_a_bare_launch_stays_unscoped_and_unrecorded():
 
 @pytest.mark.asyncio
 async def test_native_runtime_refused_before_running_with_hidden_files():
-    runtime = ShellProbe(captures=["*"])
+    runtime = ShellProbe(captures=["@line"])
     with Workspace(
         {"/data": RAMVFS()}, runtimes=[runtime], mode=MountMode.EXEC
     ) as ws:

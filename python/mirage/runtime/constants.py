@@ -38,6 +38,9 @@ def sdk_install_hint(
 # Capture unresolved program names without taking over the workspace shell.
 EXTERNAL_COMMANDS: Final = "@external"
 
+# Capture the whole line, Mirage's own commands included (a line executor).
+WHOLE_LINE: Final = "@line"
+
 # The most requests one runtime file adapter keeps in flight: classifying
 # an entry is a request of its own on a mount that keeps no listing
 # index, so an unbounded listing puts a whole directory's worth on the

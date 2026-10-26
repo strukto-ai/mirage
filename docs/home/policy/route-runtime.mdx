@@ -48,7 +48,7 @@ the session. It prints its answer:
 | Prints | Effect |
 | --- | --- |
 | `{"kind": "route", "runtime": "docker"}` | that runtime serves every command it captures |
-| `{"kind": "route", "runtime": "workspace"}` | the line runs in Mirage: no whole-line runtime (a `*` capture) takes it |
+| `{"kind": "route", "runtime": "workspace"}` | the line runs in Mirage: no whole-line runtime (an `@line` capture) takes it |
 | nothing | the first capturer in `runtimes` order serves each command |
 | `{"kind": "deny", "reason": "..."}` | the line is refused, as by any `pre_execute` program |
 

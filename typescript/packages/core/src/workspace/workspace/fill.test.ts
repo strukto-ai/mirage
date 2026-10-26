@@ -189,7 +189,7 @@ describe('fillEnv through execute', () => {
       {
         mode: MountMode.WRITE,
         env: { TOKEN: { from: 'fake-slow', ref: 'r' } },
-        commandLimits: { line: new Limit({ timeoutSeconds: 0.2 }) },
+        commandLimits: { '@line': new Limit({ timeoutSeconds: 0.2 }) },
       },
     )
     try {
@@ -1936,7 +1936,7 @@ describe('guestBound', () => {
     expect(guestBound([node], decided({ python3: guest }))).toBe(true)
     expect(guestBound([node], decided({ python3: new WorkspaceRuntime() }))).toBe(false)
     expect(guestBound([node], decided({ other: guest }))).toBe(false)
-    expect(guestBound([node], decided({ '*': guest }))).toBe(true)
+    expect(guestBound([node], decided({ '@line': guest }))).toBe(true)
     expect(guestBound([node], decided({ python3: null }))).toBe(false)
   })
 })

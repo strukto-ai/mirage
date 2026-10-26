@@ -1561,7 +1561,7 @@ class _Box(Runtime, LineExecutorMixin):
 
     name = "box"
     reach = "workspace"
-    captures = ("*",)
+    captures = ("@line",)
 
     def __init__(self) -> None:
         self.lines: list[str] = []

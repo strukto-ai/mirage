@@ -17,6 +17,9 @@ import type { FsCondition } from '../errors/index.ts'
 /** Capture unresolved program names without taking over the workspace shell. */
 export const EXTERNAL_COMMANDS = '@external'
 
+/** Capture the whole line, Mirage's own commands included (a line executor). Mirrors Python's WHOLE_LINE. */
+export const WHOLE_LINE = '@line'
+
 /**
  * The most requests one runtime file adapter keeps in flight.
  *

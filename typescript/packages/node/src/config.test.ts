@@ -1770,8 +1770,8 @@ it('loads global and profile command limits from config', async () => {
 
 it.each([
   { command_limits: { head: { max_line: 2 } } },
-  { command_limits: { line: { timeout_seconds: -1 } } },
-  { command_limits: { line: { timeout_seconds: Infinity } } },
+  { command_limits: { '@line': { timeout_seconds: -1 } } },
+  { command_limits: { '@line': { timeout_seconds: Infinity } } },
   { profiles: { research: { command_limits: { head: { max_line: 2 } } } } },
 ])('rejects bad command limit fields', (block) => {
   expect(() => loadWorkspaceConfig({ mounts: { '/data': { vfs: 'ram' } }, ...block })).toThrow()
