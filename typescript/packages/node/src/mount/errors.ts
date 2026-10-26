@@ -88,7 +88,8 @@ const MESSAGE_ERRNO: [string[], number][] = [
  * (Python's raw OSError.errno passthrough), and the message needles are a
  * last resort for unstamped errors, not a classification channel. A kernel
  * mount and SFTP can hand back only the number, so a policy's reason for
- * a refusal goes to the operator log here.
+ * a refusal goes to the operator log here, and so does an error nothing
+ * names.
  */
 export function classifyErrno(err: unknown): number {
   if (err instanceof PolicyDenied && err.refusal !== null) {
@@ -106,6 +107,8 @@ export function classifyErrno(err: unknown): number {
   for (const [needles, errno] of MESSAGE_ERRNO) {
     if (needles.some((n) => msg.includes(n))) return errno
   }
+  // A bug in the core would otherwise read only as "I/O error".
+  if (code === undefined) console.warn(`unclassified mount error: ${String(err)}`)
   return EIO
 }
 

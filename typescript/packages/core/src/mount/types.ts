@@ -60,6 +60,15 @@ export interface Handle {
   /** The stored length the open saw, where an appending handle's writes start while it holds no bytes. */
   size?: number
   /**
+   * The file's row as its last stat fetched it and when (`performance.now()`),
+   * which a guest's fstat answers by for a moment while nothing changes the
+   * file through the core.
+   */
+  row?: FileStat
+  rowAt?: number
+  /** Bumped whenever the core changes the file's row, so a stat that was out meanwhile does not keep the row it fetched. */
+  restats?: number
+  /**
    * Why the bytes its file had could not be kept when its name went; every
    * read through it reports it rather than read what the name holds now.
    */

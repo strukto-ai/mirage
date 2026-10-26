@@ -16,6 +16,12 @@
     "randomBelowBig": "Python ints are unbounded, so random_below takes every limit; TypeScript draws a limit past one word as a bigint and keeps randomBelow on number."
    }
   },
+  "utils/abort": {
+   "typescript_only": {
+    "SignalStop": "Python's timeout cancels its run and joins it whole; a JavaScript promise cannot be cancelled, so a stop that names a signal carries it as the abort reason, for the line and the handler to give the stopped run a stop's grace.",
+    "stopSignal": "Python's timeout cancels its run and joins it whole; a JavaScript promise cannot be cancelled, so a stop that names a signal carries it as the abort reason, for the line and the handler to give the stopped run a stop's grace."
+   }
+  },
   "commands/builtin/generic/diff": {
    "python_only": {
     "_side": "Python read callbacks are awaitable and partial binds an absent-or-read input factory; TypeScript closures provide a lazy ByteSource.",

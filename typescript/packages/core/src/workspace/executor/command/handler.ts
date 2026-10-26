@@ -27,7 +27,7 @@ import { IOResult, type ByteSource } from '../../../io/types.ts'
 import { encodeText } from '../../../shell/bytes.ts'
 import { STOP_WAIT_SECONDS } from '../../../shell/job_table/constants.ts'
 import type { Limit, PathSpec, Producer } from '../../../types.ts'
-import { ABORT_JOIN_MS, joinOrAbort } from '../../../utils/abort.ts'
+import { ABORT_JOIN_MS, joinOrAbort, stopSignal } from '../../../utils/abort.ts'
 import { concat } from '../../../utils/bytes.ts'
 import { readerOf, type Files } from '../../files.ts'
 
@@ -225,7 +225,7 @@ export async function runHandler(
   // the cancelled handler whole; any other abort releases the caller soon.
   const runner = currentCaller().process
   const grace = (): number =>
-    (runner?.signal ?? null) === null ? ABORT_JOIN_MS : STOP_WAIT_SECONDS * 1000
+    (runner?.signal ?? stopSignal(opts.signal)) === null ? ABORT_JOIN_MS : STOP_WAIT_SECONDS * 1000
   try {
     out = await runWithTimeout(joinOrAbort(answer, opts.signal, grace), timeout, name)
   } catch (err) {

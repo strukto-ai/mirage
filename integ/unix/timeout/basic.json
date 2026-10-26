@@ -569,6 +569,40 @@
         "stdout": "124\n1\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "timeout_stops_a_streamed_filter_quietly",
+      "seq": 1300101,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "while :; do echo y; done | timeout 0.2 grep y | tail -1; while :; do echo y; done | timeout 0.2 sed s/y/z/ | tail -1; while :; do echo y; done | timeout 0.2 awk 1 | tail -1",
+      "expect": {
+        "exit": 0,
+        "stdout": "y\nz\ny\n",
+        "stderr": ""
+      }
     }
   ]
 }

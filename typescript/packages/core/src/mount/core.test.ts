@@ -31,7 +31,10 @@ import {
 import { describe, expect, it, vi } from 'vitest'
 import { render } from '../test-utils.ts'
 import { getTestParser } from '../../tests/workspace/fixtures/workspace_fixture.ts'
+import { LISTING_CONCURRENCY } from './constants.ts'
 import { MountCore } from './core.ts'
+import type { MountAttrs } from './types.ts'
+import type { Files } from '../workspace/files.ts'
 
 const shellParser = await getTestParser()
 
@@ -1456,6 +1459,218 @@ it('judges the fetched row once when a buffered write sizes it', async () => {
     expect(stats).toBe(1)
     await core.release(fd)
   } finally {
+    await ws.close()
+  }
+})
+
+/** A RAM mount whose next stat, once armed, answers the row it read only when the gate opens. */
+class HeldStat extends RAMVFS {
+  armed: Promise<void> | null = null
+  entered: () => void = () => undefined
+
+  override async stat(path: PathSpec): Promise<FileStat> {
+    const row = await super.stat(path)
+    const gate = this.armed
+    this.armed = null
+    if (gate !== null) {
+      this.entered()
+      await gate
+    }
+    return row
+  }
+}
+
+it('keeps no row from a stat that was out across a change', async () => {
+  const ram = new HeldStat()
+  const ws = new Workspace({ '/': ram }, { mode: MountMode.WRITE })
+  try {
+    await ws.vfs.write('/a.txt', new TextEncoder().encode('abc'))
+    const core = new MountCore(ws.vfs)
+    const reader = await core.open('/a.txt', openMode(fsConstants.O_RDONLY, fsConstants))
+    const writer = await core.open('/a.txt', openMode(fsConstants.O_WRONLY, fsConstants))
+    let open = (): void => undefined
+    ram.armed = new Promise<void>((resolve) => {
+      open = resolve
+    })
+    const entered = new Promise<void>((resolve) => {
+      ram.entered = resolve
+    })
+    const late = core.fgetattr('/a.txt', reader)
+    await entered
+    await core.write('/a.txt', writer, new TextEncoder().encode('abcdef'), 0)
+    await core.flush('/a.txt', writer)
+    open()
+    await late
+    expect((await core.fstat(reader)).size).toBe(6)
+    await core.release(writer)
+    await core.release(reader)
+  } finally {
+    await ws.close()
+  }
+})
+
+/** Holds the first batch of stats until the cap is full; its listing reads only readdir and getattr. */
+class ListingCore extends MountCore {
+  inFlight = 0
+  peak = 0
+  calls = 0
+  private full: () => void = () => undefined
+  private readonly started = new Promise<void>((resolve) => {
+    this.full = resolve
+  })
+
+  constructor(
+    files: Files,
+    private readonly names: string[],
+    private readonly refuse: string | null = null,
+  ) {
+    super(files)
+  }
+
+  override readdir(): Promise<string[]> {
+    return Promise.resolve(['.', '..', ...this.names])
+  }
+
+  override async getattr(path: string): Promise<MountAttrs> {
+    this.calls += 1
+    this.inFlight += 1
+    this.peak = Math.max(this.peak, this.inFlight)
+    try {
+      if (this.calls <= LISTING_CONCURRENCY) {
+        if (this.inFlight === LISTING_CONCURRENCY) this.full()
+        await this.started
+      } else {
+        await Promise.resolve()
+      }
+    } finally {
+      this.inFlight -= 1
+    }
+    if (path.endsWith('gone')) throw Object.assign(new Error(path), { code: 'ENOENT' })
+    if (this.refuse !== null && path.endsWith(this.refuse)) {
+      throw Object.assign(new Error(path), { code: 'EACCES' })
+    }
+    return { size: path.length } as MountAttrs
+  }
+}
+
+describe('MountCore listing', () => {
+  it('stats entries together under the cap, leaving out one that vanished', async () => {
+    // Each stat is, on an unindexed mount, a backend request: a wide
+    // directory must not pay them one after another, nor put them all on
+    // the wire at once.
+    const ws = new Workspace({ '/': new RAMVFS() })
+    try {
+      const names = [...Array.from({ length: 40 }, (_, i) => `f${String(i)}`), 'gone']
+      const core = new ListingCore(ws.vfs, names)
+      const rows = await core.listing('/d')
+      expect(rows.map(([name]) => name)).toEqual(['.', '..', ...names.slice(0, -1)])
+      expect(rows[2]?.[1].size).toBe('/d/f0'.length)
+      expect(core.peak).toBe(LISTING_CONCURRENCY)
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('shares one cap between listings at once', async () => {
+    const ws = new Workspace({ '/': new RAMVFS() })
+    try {
+      const core = new ListingCore(
+        ws.vfs,
+        Array.from({ length: 40 }, (_, i) => `f${String(i)}`),
+      )
+      await Promise.all([core.listing('/d'), core.listing('/d')])
+      expect(core.peak).toBe(LISTING_CONCURRENCY)
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('ends the listing at a refused stat without statting the rest', async () => {
+    const ws = new Workspace({ '/': new RAMVFS() })
+    try {
+      const core = new ListingCore(
+        ws.vfs,
+        Array.from({ length: 100 }, (_, i) => `f${String(i)}`),
+        '/d/f2',
+      )
+      await expect(core.listing('/d')).rejects.toMatchObject({ code: 'EACCES' })
+      expect(core.inFlight).toBe(0)
+      expect(core.calls).toBeLessThan(3 * LISTING_CONCURRENCY)
+    } finally {
+      await ws.close()
+    }
+  })
+})
+
+/** A RAM mount that counts the stats that reach it. */
+class CountsStats extends RAMVFS {
+  stats = 0
+
+  override stat(path: PathSpec): Promise<FileStat> {
+    this.stats += 1
+    return super.stat(path)
+  }
+}
+
+it('answers an fstat right after its open by the row the open fetched', async () => {
+  // CPython stats a descriptor again right after opening it; the open's row
+  // answers without a fetch, as a kernel's attr_timeout would, still judged
+  // as a stat, where fgetattr fetches.
+  let judged = 0
+  const ram = new CountsStats()
+  const ws = new Workspace(
+    { '/': ram },
+    {
+      mode: MountMode.WRITE,
+      policies: [
+        {
+          preVfs: (ctx: VfsContext): Action | null => {
+            if (ctx.call.name === 'stat') judged += 1
+            return null
+          },
+        },
+      ],
+    },
+  )
+  try {
+    await ws.vfs.write('/a.txt', new TextEncoder().encode('abc'))
+    const core = new MountCore(ws.vfs)
+    ram.stats = 0
+    judged = 0
+    const fd = await core.open('/a.txt', openMode(fsConstants.O_RDONLY, fsConstants))
+    expect((await core.fstat(fd)).size).toBe(3)
+    expect((await core.fstat(fd)).size).toBe(3)
+    expect([ram.stats, judged]).toEqual([1, 3])
+    expect((await core.fgetattr('/a.txt', fd)).size).toBe(3)
+    expect(ram.stats).toBe(2)
+    await core.release(fd)
+  } finally {
+    await ws.close()
+  }
+})
+
+it('shows an fstat a change through the core at once, and one past it after a moment', async () => {
+  const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })
+  const now = performance.now.bind(performance)
+  try {
+    await ws.vfs.write('/a.txt', new TextEncoder().encode('abc'))
+    const core = new MountCore(ws.vfs)
+    const reader = await core.open('/a.txt', openMode(fsConstants.O_RDONLY, fsConstants))
+    const writer = await core.open('/a.txt', openMode(fsConstants.O_WRONLY, fsConstants))
+    await core.write('/a.txt', writer, new TextEncoder().encode('abcdef'), 0)
+    await core.flush('/a.txt', writer)
+    expect((await core.fstat(reader)).size).toBe(6)
+    const stamp = new Date('2001-02-03T04:05:06Z')
+    await core.setattr('/a.txt', null, null, null, stamp, stamp)
+    expect((await core.fstat(reader)).modified).toBe((await ws.vfs.stat('/a.txt')).modified)
+    await ws.vfs.write('/a.txt', new TextEncoder().encode('x'))
+    expect((await core.fstat(reader)).size).toBe(6)
+    vi.spyOn(performance, 'now').mockImplementation(() => now() + 1000)
+    expect((await core.fstat(reader)).size).toBe(1)
+    await core.release(writer)
+    await core.release(reader)
+  } finally {
+    vi.restoreAllMocks()
     await ws.close()
   }
 })

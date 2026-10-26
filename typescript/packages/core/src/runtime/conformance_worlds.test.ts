@@ -67,13 +67,15 @@ async function structureWorld(): Promise<Workspace> {
  * so hiding is how a deployment puts a mount out of reach, and it
  * answers ENOENT rather than a refusal naming what the profile cannot see.
  */
-async function scopedWorld(): Promise<Workspace> {
+async function scopedWorld(
+  runtime: string | MontyRuntime = new MontyRuntime(),
+): Promise<Workspace> {
   const parser = await getTestParser()
   const open = new RAMVFS()
   const closed = new RAMVFS()
   const ws = new Workspace(
     {},
-    { mode: MountMode.EXEC, shellParser: parser, runtimes: [new MontyRuntime(), 'workspace'] },
+    { mode: MountMode.EXEC, shellParser: parser, runtimes: [runtime, 'workspace'] },
   )
   ws.addMount('/open', open, MountMode.WRITE)
   ws.addMount('/closed', closed, MountMode.WRITE)
@@ -291,38 +293,46 @@ describe('scoped world', () => {
     }
   })
 
-  it('a confined guest cannot read a hidden mount', async () => {
-    const ws = await scopedWorld()
-    try {
-      const [code, out] = await run(
-        ws,
-        `python3 -c "from pathlib import Path; print(Path('/closed/sec.txt').read_text())"`,
-        'agent',
-      )
-      expect(code).not.toBe(0)
-      expect(out).not.toContain('SECRET-xyz')
-    } finally {
-      await ws.close()
-    }
-  })
+  it.each([
+    ['monty', `python3 -c "from pathlib import Path; print(Path('/closed/sec.txt').read_text())"`],
+    ['quickjs', `node -e "console.log(std.open('/closed/sec.txt', 'r').readAsString())"`],
+    ['pyodide', `python3 -c "print(open('/closed/sec.txt').read())"`],
+  ])(
+    'a confined %s guest cannot read a hidden mount',
+    async (runtime, line) => {
+      const ws = await scopedWorld(runtime)
+      try {
+        const [code, out] = await run(ws, line, 'agent')
+        expect(code).not.toBe(0)
+        expect(out).not.toContain('SECRET-xyz')
+      } finally {
+        await ws.close()
+      }
+    },
+    60_000,
+  )
 
-  it('a confined guest cannot write a hidden mount', async () => {
-    const ws = await scopedWorld()
-    try {
-      await run(
-        ws,
-        `python3 -c "from pathlib import Path; Path('/closed/planted.txt').write_text('X')"`,
-        'agent',
-      )
-      // Read back through the unrestricted default session: the
-      // confined one cannot see the mount at all.
-      const [code, out] = await run(ws, 'ls /closed')
-      expect(code).toBe(0)
-      expect(out).not.toContain('planted.txt')
-    } finally {
-      await ws.close()
-    }
-  })
+  it.each([
+    ['monty', `python3 -c "from pathlib import Path; Path('/closed/planted.txt').write_text('X')"`],
+    ['quickjs', `node -e "std.open('/closed/planted.txt', 'w').puts('X')"`],
+    ['pyodide', `python3 -c "open('/closed/planted.txt', 'w').write('X')"`],
+  ])(
+    'a confined %s guest cannot write a hidden mount',
+    async (runtime, line) => {
+      const ws = await scopedWorld(runtime)
+      try {
+        await run(ws, line, 'agent')
+        // Read back through the unrestricted default session: the
+        // confined one cannot see the mount at all.
+        const [code, out] = await run(ws, 'ls /closed')
+        expect(code).toBe(0)
+        expect(out).not.toContain('planted.txt')
+      } finally {
+        await ws.close()
+      }
+    },
+    60_000,
+  )
 
   it('a cross-mount link is not an escape hatch from confinement', async () => {
     const ws = await scopedWorld()

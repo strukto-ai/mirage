@@ -84,6 +84,65 @@ export function sleep(ms: number, signal?: AbortSignal): Promise<void> {
   })
 }
 
+const deadlines = new Set<{ at: number; fire: () => void }>()
+
+/**
+ * Call `fire` once `seconds` have passed, and return what cancels it. Its
+ * timer fires it as usual, but a guest that runs on the event loop and
+ * never yields (a QuickJS `for (;;) {}`) holds every timer back, so the
+ * guest's interrupt hook calls `fireDue`, which fires the deadlines already
+ * past from inside it.
+ */
+export function atDeadline(seconds: number, fire: () => void): () => void {
+  const deadline = { at: performance.now() + seconds * 1000, fire }
+  deadlines.add(deadline)
+  let timer: ReturnType<typeof setTimeout>
+  const arm = (): void => {
+    timer = setTimeout(
+      () => {
+        if (performance.now() < deadline.at) arm()
+        else if (deadlines.delete(deadline)) fire()
+      },
+      Math.min(Math.max(deadline.at - performance.now(), 0), MAX_TIMEOUT_MS),
+    )
+  }
+  arm()
+  return () => {
+    deadlines.delete(deadline)
+    clearTimeout(timer)
+  }
+}
+
+/** Fire every `atDeadline` already past, from a guest holding the event loop. */
+export function fireDue(): void {
+  const now = performance.now()
+  for (const deadline of deadlines) {
+    if (deadline.at > now) continue
+    deadlines.delete(deadline)
+    deadline.fire()
+  }
+}
+
+/**
+ * What a stop that names a signal aborts with (`timeout`'s TERM): what the
+ * stopped run started gets a stop's grace to finish, a guest landing the
+ * file it left open, as one a `kill` stops does through its process's
+ * signal. Python cancels the run and joins it whole, so it needs none.
+ * It is an AbortError, as a plain `abort()` is, since `throwIfAborted`
+ * throws the reason itself and every check keys on that name.
+ */
+export class SignalStop extends DOMException {
+  constructor(readonly signal: number) {
+    super('execute aborted', 'AbortError')
+  }
+}
+
+/** The signal a stop named, through any signal merged over it; null for a plain abort. */
+export function stopSignal(signal: AbortSignal | null | undefined): number | null {
+  const reason: unknown = signal?.aborted === true ? signal.reason : undefined
+  return reason instanceof SignalStop ? reason.signal : null
+}
+
 /** Settle with `promise`, or reject as an abort as soon as `signal` fires. */
 export function abortable<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
   if (signal === undefined) return promise

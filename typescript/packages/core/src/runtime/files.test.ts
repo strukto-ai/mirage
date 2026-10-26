@@ -13,11 +13,24 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it, vi } from 'vitest'
+import { getTestParser } from '../../tests/workspace/fixtures/workspace_fixture.ts'
 import { enotsup } from '../errors/fs.ts'
-import { ContentType, DEVICE_NUMBERS_KEY, FileStat, FileType } from '../types.ts'
+import { MountCore } from '../mount/core.ts'
+import {
+  ContentType,
+  DEVICE_NUMBERS_KEY,
+  FileStat,
+  FileType,
+  MountMode,
+  PathSpec,
+} from '../types.ts'
 import { CHAR_MODE, DIR_MODE, DIR_SIZE, FILE_MODE, LINK_MODE } from '../utils/stat_view.ts'
+import { RAMVFS } from '../vfs/ram/ram.ts'
+import { Workspace } from '../workspace/workspace/workspace.ts'
+import { workspaceBridge } from './binding.ts'
 import { LISTING_ENTRY_CONCURRENCY } from './constants.ts'
 import { CrossMountError } from './errors.ts'
+import { parseMode } from './handles/index.ts'
 import type { BridgeDispatchFn } from './types.ts'
 import { RuntimeFiles } from './files.ts'
 import { PrefixResolver } from './resolver.ts'
@@ -575,5 +588,45 @@ describe('RuntimeFiles append', () => {
       new RuntimeFiles(dispatch, new PrefixResolver(() => ['/a'])).append('/a/x', enc.encode('t')),
     ).rejects.toThrow(/read-only/)
     expect(dispatch.mock.calls.some((c) => c[0] === 'write')).toBe(false)
+  })
+})
+
+describe('RuntimeFiles over a core', () => {
+  it('lets an fstat see a change by path at once', async () => {
+    // A change by path the guest makes past the core's own ops (utimes,
+    // chmod, a whole-file write) reaches the files open there at once, as
+    // fstat after utime(2) does. Mirrors test_files.py.
+    const ws = new Workspace(
+      { '/data': new RAMVFS() },
+      { mode: MountMode.WRITE, shellParser: await getTestParser() },
+    )
+    try {
+      await ws.vfs.write('/data/a.txt', enc.encode('abc'))
+      const files = new RuntimeFiles(
+        workspaceBridge(
+          async (name, path, args, kwargs) =>
+            (await ws.vfs.dispatch(name, PathSpec.fromStrPath(path), args, kwargs))[0],
+        ),
+        undefined,
+        null,
+        new MountCore(ws.vfs),
+      )
+      const fd = await files.open('/data/a.txt', parseMode('r'))
+      try {
+        await files.fstat(fd)
+        const stamp = new Date(981173106 * 1000)
+        await files.setattr('/data/a.txt', { mode: 0o600, mtime: stamp.toISOString() })
+        const row = await files.fstat(fd)
+        expect([row.mode & 0o777, row.mtimeMs]).toEqual([0o600, stamp.getTime()])
+        await files.write('/data/a.txt', enc.encode('abcdef'))
+        expect((await files.fstat(fd)).size).toBe(6)
+        await files.append('/data/a.txt', enc.encode('gh'))
+        expect((await files.fstat(fd)).size).toBe(8)
+      } finally {
+        await files.close(fd)
+      }
+    } finally {
+      await ws.close()
+    }
   })
 })

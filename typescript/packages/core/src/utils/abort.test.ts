@@ -13,7 +13,16 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it, vi } from 'vitest'
-import { abortable, joinOrAbort, makeAbortError, sleep } from './abort.ts'
+import {
+  SignalStop,
+  abortable,
+  atDeadline,
+  fireDue,
+  joinOrAbort,
+  makeAbortError,
+  sleep,
+  stopSignal,
+} from './abort.ts'
 
 function never(): Promise<never> {
   return new Promise<never>(() => undefined)
@@ -170,5 +179,62 @@ describe('sleep', () => {
     const ac = new AbortController()
     ac.abort()
     await expect(sleep(5_000_000_000, ac.signal)).rejects.toThrow()
+  })
+})
+
+describe('atDeadline', () => {
+  it('fires once its timer is due', async () => {
+    let fired = 0
+    atDeadline(0.02, () => {
+      fired++
+    })
+    await sleep(60)
+    expect(fired).toBe(1)
+  })
+
+  // A guest on the event loop that never yields holds every timer back;
+  // its interrupt hook fires what is past, once, and nothing early.
+  it('fires from fireDue while the event loop is held, and only then', () => {
+    let fired = 0
+    const cancel = atDeadline(0.1, () => {
+      fired++
+    })
+    fireDue()
+    expect(fired).toBe(0)
+    const past = performance.now() + 110
+    while (performance.now() < past) {
+      // Hold the event loop past the deadline, as such a guest does.
+    }
+    fireDue()
+    fireDue()
+    expect(fired).toBe(1)
+    cancel()
+  })
+
+  it('fires nothing once cancelled', async () => {
+    let fired = 0
+    const cancel = atDeadline(0.02, () => {
+      fired++
+    })
+    cancel()
+    await sleep(60)
+    fireDue()
+    expect(fired).toBe(0)
+  })
+})
+
+describe('SignalStop', () => {
+  it('is the abort a signal check throws, and names its signal', () => {
+    const controller = new AbortController()
+    controller.abort(new SignalStop(15))
+    let thrown: unknown
+    try {
+      controller.signal.throwIfAborted()
+    } catch (err) {
+      thrown = err
+    }
+    expect(thrown instanceof Error && thrown.name === 'AbortError').toBe(true)
+    expect(stopSignal(controller.signal)).toBe(15)
+    expect(stopSignal(AbortSignal.any([controller.signal]))).toBe(15)
   })
 })

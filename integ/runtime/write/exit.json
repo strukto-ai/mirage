@@ -41,6 +41,57 @@
       ]
     },
     {
+      "id": "a_run_its_deadline_stops_keeps_what_it_wrote",
+      "note": "A write(2) a killed process made stays in its file, so a run timeout stops keeps what the program wrote, though it never closed the file. The JavaScript loop never yields, so the deadline must stop a guest that holds the host's event loop. A first run starts the interpreter, and the Python deadline leaves room for a Pyodide run, which takes about a second to reach its program and more on a slow runner, so the deadline meets the program and not its start.",
+      "runtimes": [
+        "wasi",
+        "pyodide",
+        "quickjs"
+      ],
+      "backends": [
+        "ram",
+        "disk",
+        "ssh",
+        "s3",
+        "redis"
+      ],
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram"
+          }
+        }
+      },
+      "steps": [
+        {
+          "program": {
+            "python": "pass",
+            "js": "0"
+          },
+          "expect": {
+            "exit": 0
+          }
+        },
+        {
+          "command": {
+            "python": "timeout 5 python3 -c 'import os\nfd = os.open(\"/data/out.txt\", os.O_WRONLY | os.O_CREAT)\nos.write(fd, b\"kept\")\nwhile True:\n    pass'",
+            "js": "timeout 2 node -e \"const f = std.open('/data/out.txt', 'w'); f.puts('kept'); f.flush(); for (;;) {}\""
+          },
+          "expect": {
+            "exit": 124,
+            "stdout": ""
+          }
+        },
+        {
+          "command": "cat /data/out.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "kept"
+          }
+        }
+      ]
+    },
+    {
       "id": "a_caught_exit_still_ends_the_program",
       "runtimes": [
         "wasi",

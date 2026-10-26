@@ -304,6 +304,55 @@ async def test_quickjs_cancellation_stops_the_run():
 
 
 @live
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line,code",
+    [
+        ('timeout 1 node -e "for (;;) {}"', 124),
+        ('timeout -s CONT -k 1 1 node -e "for (;;) {}"', 137),
+    ],
+)
+async def test_a_deadline_stops_a_guest_that_never_yields(line, code):
+    ws = Workspace(
+        {"/data": RAMVFS()}, mode=MountMode.EXEC, runtimes=["quickjs"]
+    )
+    try:
+        io = await ws.shell(line)
+        assert io.exit_code == code
+        assert await io.stderr_str() == ""
+    finally:
+        await ws.close()
+
+
+class _SlowRAM(RAMVFS):
+    async def pwrite(self, path, data, offset):
+        await asyncio.sleep(0.6)
+        await super().pwrite(path, data, offset)
+
+    async def write(self, path, data, *, atomic=False):
+        await asyncio.sleep(0.6)
+        await super().write(path, data, atomic=atomic)
+
+
+@live
+@pytest.mark.asyncio
+async def test_a_deadline_joins_the_landing_of_what_a_stopped_guest_wrote():
+    # The run's end closes the file it left open, which takes longer than
+    # a moment: timeout answers once that write has landed.
+    ws = Workspace(
+        {"/data": _SlowRAM()}, mode=MountMode.EXEC, runtimes=["quickjs"]
+    )
+    try:
+        io = await ws.shell(
+            "timeout 1 node -e \"const f = std.open('/data/o', 'w'); "
+            "f.puts('kept'); f.flush(); for (;;) {}\"; cat /data/o"
+        )
+        assert await io.stdout_str() == "kept"
+    finally:
+        await ws.close()
+
+
+@live
 def test_quickjs_reuses_compiled_module():
     rt = QuickJsRuntime()
     first = asyncio.run(_run(rt, Program(code="console.log(1)")))

@@ -272,6 +272,12 @@ class RuntimeFiles:
             through ``dispatch``; None opens nothing.
         caller (Caller | None): who the core's ops run as; None keeps
             the context each op is made in.
+        owner (asyncio.Task[Any] | None): the run's task, which stops a
+            core op once it is cancelled; None stops none.
+        live (list[asyncio.Task[Any]] | None): the owners of the guest
+            calls on the core now, which its every dispatch checks; a
+            call with none (a run's end landing what it wrote) passes,
+            however the run ended.
     """
 
     def __init__(
@@ -282,6 +288,8 @@ class RuntimeFiles:
         resolve: LinkResolve | None = None,
         files: Files | None = None,
         caller: Caller | None = None,
+        owner: asyncio.Task[Any] | None = None,
+        live: list[asyncio.Task[Any]] | None = None,
     ) -> None:
         self._dispatch = dispatch
         self._loop = loop
@@ -289,6 +297,8 @@ class RuntimeFiles:
         self._resolve = resolve
         self._core = None if files is None else MountCore(files)
         self._caller = caller
+        self._owner = owner
+        self._live = [] if live is None else live
         self._no_append: set[str] = set()
         self._pending: set[asyncio.Task[Any]] = set()
         self._aborted = False
@@ -315,6 +325,7 @@ class RuntimeFiles:
         caller = current_caller()
         links = link_view(ctx.vfs)
         owner = asyncio.current_task()
+        live: list[asyncio.Task[Any]] = []
         dispatch = awaits_as(caller, ctx.vfs.dispatch)
 
         async def guarded(
@@ -332,13 +343,34 @@ class RuntimeFiles:
                 raise asyncio.CancelledError()
             return result
 
+        async def held(
+            name: str,
+            path: PathSpec,
+            /,
+            *,
+            report: OpReport | None = None,
+            **kwargs: Any,
+        ) -> tuple[Any, IOResult]:
+            # A cancelled guest call sends nothing more, whichever op of
+            # the core's was under way.
+            for task in live:
+                if task.cancelling():
+                    raise asyncio.CancelledError()
+            result = await dispatch(name, path, report=report, **kwargs)
+            for task in live:
+                if task.cancelling():
+                    raise asyncio.CancelledError()
+            return result
+
         return cls(
             guarded,
             asyncio.get_running_loop(),
             CallerResolver(binding.resolver, caller),
             None if links is None else calls_as(caller, links.resolve),
-            ctx.vfs._over(guarded),
+            ctx.vfs._over(held),
             caller,
+            owner,
+            live,
         )
 
     def walked(self, path: str, *, follow: bool = True) -> str:
@@ -395,9 +427,12 @@ class RuntimeFiles:
                     "guest operation failed during abort", exc_info=result
                 )
 
-    def _wait(self, pending: Coroutine[Any, Any, T]) -> T:
+    def _wait(self, pending: Coroutine[Any, Any, T], lands: bool = False) -> T:
+        # A landing is the run's end's own, so an abort neither refuses
+        # nor cancels it: the run waits for its guest, which waits for it.
+        call = pending if lands else self._tracked(pending)
         try:
-            return run_async_from_sync(self._tracked(pending), self._loop)
+            return run_async_from_sync(call, self._loop)
         except OSError as exc:
             renumbered = numbered(exc)
             if renumbered is exc:
@@ -413,12 +448,18 @@ class RuntimeFiles:
         """
         return self._wait(self._call(name, path, **kwargs))
 
-    def _on_core(self, op: Callable[[MountCore], Awaitable[T]]) -> T:
+    def _on_core(
+        self, op: Callable[[MountCore], Awaitable[T]], lands: bool = False
+    ) -> T:
         """Run one op on the run's open-file core, as the run's caller.
+        An op that only lands what the guest already wrote (``lands``)
+        runs however the run ended, as the run's end would land it
+        anyway.
 
         Args:
             op (Callable[[MountCore], Awaitable[T]]): the op, given the
                 core.
+            lands (bool): the op lands writes the guest already made.
 
         Raises:
             OSError: EBADF when this adapter opens nothing.
@@ -426,14 +467,25 @@ class RuntimeFiles:
         core = self._core
         if core is None:
             raise ebadf("/")
-        caller = self._caller
+        call = op if self._caller is None else awaits_as(self._caller, op)
+        owner = None if lands else self._owner
+        live = self._live
 
         async def run() -> T:
-            if caller is None:
-                return await op(core)
-            return await awaits_as(caller, op)(core)
+            if owner is None:
+                return await call(core)
+            if owner.cancelling():
+                raise asyncio.CancelledError()
+            live.append(owner)
+            try:
+                out = await call(core)
+                if owner.cancelling():
+                    raise asyncio.CancelledError()
+                return out
+            finally:
+                live.remove(owner)
 
-        return self._wait(run())
+        return self._wait(run(), lands)
 
     def path_of(self, fh: int) -> str:
         """The path the core's handle ``fh`` is on now; EBADF for any
@@ -517,7 +569,7 @@ class RuntimeFiles:
             fh (int): the core's handle.
         """
         path = self.path_of(fh)
-        self._on_core(lambda core: core.flush(path, fh))
+        self._on_core(lambda core: core.flush(path, fh), lands=True)
 
     def close(self, fh: int) -> None:
         """Land what an open handle wrote and let it go; a landing that
@@ -526,7 +578,7 @@ class RuntimeFiles:
         Args:
             fh (int): the core's handle.
         """
-        self._on_core(lambda core: core.release(fh))
+        self._on_core(lambda core: core.release(fh), lands=True)
 
     def prefixes(self) -> list[str]:
         """The workspace mount prefixes, longest first, slash-normalized.
@@ -617,6 +669,7 @@ class RuntimeFiles:
 
     def write(self, path: str, data: bytes) -> None:
         self.call("write", path, data=data)
+        self._restat(path)
 
     def stat(self, path: str, *, nofollow: bool = False) -> VFSStat:
         """One path's metadata, projected for a guest encoder.
@@ -929,6 +982,18 @@ class RuntimeFiles:
             mtime=mtime,
             nofollow=nofollow,
         )
+        self._restat(path, not nofollow)
+
+    def _restat(self, path: str, follow: bool = True) -> None:
+        """Have the files open on ``path`` stat it afresh after a change
+        by path that went past the core.
+
+        Args:
+            path (str): guest-absolute virtual path.
+            follow (bool): the change followed a link at ``path``.
+        """
+        if self._core is not None:
+            self._on_core(lambda core: core.restat(path, follow))
 
     def append(self, path: str, data: bytes) -> None:
         """Extend `path` by `data`, falling back to a whole-file write.
@@ -948,6 +1013,7 @@ class RuntimeFiles:
             data (bytes): only the newly appended bytes.
         """
         if self._append_delta(path, data):
+            self._restat(path)
             return
         try:
             whole = self.read(path, raw=True, direct=True) + data

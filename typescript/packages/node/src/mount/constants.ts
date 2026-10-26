@@ -45,9 +45,6 @@ export const OWNER = {
   gid: typeof process.getgid === 'function' ? process.getgid() : 0,
 }
 
-/** Stats a directory listing runs at once. Mirrors Python's LISTING_CONCURRENCY. */
-export const LISTING_CONCURRENCY = 16
-
 /**
  * The files an NFS server keeps open between reads: NFS has no open or
  * close, so a read opens its file and later reads reuse that handle. Past

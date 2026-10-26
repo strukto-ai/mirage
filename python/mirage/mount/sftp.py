@@ -21,7 +21,6 @@ import stat
 from collections.abc import AsyncIterator, Awaitable, Callable, Coroutine
 from dataclasses import dataclass
 from typing import Any, TypeVar, cast
-from weakref import WeakKeyDictionary
 
 import asyncssh
 from asyncssh.constants import (
@@ -40,12 +39,7 @@ from asyncssh.sftp import run_sftp_server
 
 from mirage.errors.fs import eexist, enoent
 from mirage.errors.types import NoMountError
-from mirage.mount.constants import (
-    ENCODING,
-    ERRORS,
-    LISTING_CONCURRENCY,
-    SFTP_VERSION,
-)
+from mirage.mount.constants import ENCODING, ERRORS, SFTP_VERSION
 from mirage.mount.core import MountCore
 from mirage.mount.errors import classify_error
 from mirage.mount.types import MountAttrs
@@ -135,69 +129,6 @@ async def exists(core: MountCore, path: str) -> bool:
     except (FileNotFoundError, NotADirectoryError, NoMountError):
         return False
     return True
-
-
-# One cap per workspace loop, so channels that list at once on one
-# workspace share it rather than each bringing a cap of its own.
-_STATS: WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Semaphore] = (
-    WeakKeyDictionary()
-)
-
-
-async def listing(core: MountCore, path: str) -> list[tuple[str, MountAttrs]]:
-    """A directory's entries with their attributes, in one pass.
-
-    The entries are stat'd together rather than one after another, by at
-    most ``LISTING_CONCURRENCY`` workers, with at most that many stats out
-    at once across every listing on the workspace's loop. A stat that
-    fails ends the listing and cancels the ones still waiting. An entry
-    that vanishes between the listing and its stat is left out, as ``ls``
-    leaves out a file deleted mid-listing.
-
-    Args:
-        core (MountCore): the mount core.
-        path (str): the directory.
-
-    Returns:
-        list[tuple[str, MountAttrs]]: (name, attributes) pairs,
-            ``.`` and ``..`` first.
-    """
-    loop = asyncio.get_running_loop()
-    slots = _STATS.get(loop)
-    if slots is None:
-        slots = _STATS[loop] = asyncio.Semaphore(LISTING_CONCURRENCY)
-
-    async def entry(name: str) -> tuple[str, MountAttrs] | None:
-        if name == ".":
-            child = path
-        elif name == "..":
-            child = posixpath.dirname(path)
-        else:
-            child = posixpath.join(path, name)
-        async with slots:
-            try:
-                return name, await core.getattr(child)
-            except (FileNotFoundError, NotADirectoryError) as exc:
-                logger.debug("sftp: %s vanished while listing: %r", child, exc)
-                return None
-
-    names = await core.readdir(path)
-    rows: list[tuple[str, MountAttrs] | None] = [None] * len(names)
-    todo = iter(enumerate(names))
-
-    async def worker() -> None:
-        for index, name in todo:
-            rows[index] = await entry(name)
-
-    try:
-        async with asyncio.TaskGroup() as group:
-            for _ in range(min(LISTING_CONCURRENCY, len(names))):
-                group.create_task(worker())
-    except BaseExceptionGroup as failed:
-        # The first refusal is the listing's answer, as it was before the
-        # rest were cancelled.
-        raise failed.exceptions[0]
-    return [row for row in rows if row is not None]
 
 
 async def open_file(
@@ -313,8 +244,6 @@ def as_os_error(err: Exception) -> OSError:
         OSError: carrying the classified errno.
     """
     code = classify_error(err)
-    if code == errno.EIO and not isinstance(err, (OSError, ValueError)):
-        logger.warning("sftp: unclassified error: %r", err)
     if code in (errno.EROFS, errno.EPERM):
         # SFTP v3 says permission denied for every refused write; asyncssh
         # would send EROFS as write-protect, which a v3 client cannot read.
@@ -436,7 +365,7 @@ class MirageSFTPServer(asyncssh.SFTPServer):
 
     async def scandir(self, path: bytes) -> AsyncIterator[asyncssh.SFTPName]:
         p = self._path(path)
-        for name, st in await self._call(lambda core: listing(core, p)):
+        for name, st in await self._call(lambda core: core.listing(p)):
             yield asyncssh.SFTPName(self._encode(name), attrs=to_attrs(st))
 
     async def open(
