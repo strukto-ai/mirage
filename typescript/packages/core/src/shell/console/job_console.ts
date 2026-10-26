@@ -59,11 +59,8 @@ export class JobConsole {
   }
 
   /**
-   * Where this console's chunks live.
-   *
-   * Public because the store carries the console's address: a shared
-   * store (`RedisConsoleStore.keyPrefix`) is how an embedder points a
-   * reader in another process at a live console.
+   * Where this console's chunks live. A job's console is the one its job
+   * store names, which every workspace on that store reads and ends.
    */
   get store(): ConsoleStore {
     return this.backing

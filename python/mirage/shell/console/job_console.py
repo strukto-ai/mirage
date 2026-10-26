@@ -66,9 +66,8 @@ class JobConsole:
     def store(self) -> ConsoleStore:
         """Where this console's chunks live.
 
-        Public because the store carries the console's address: a
-        shared store (``RedisConsoleStore.key_prefix``) is how an
-        embedder points a reader in another process at a live console.
+        A job's console is the one its job store names, which every
+        workspace on that store reads and ends.
         """
         return self._store
 

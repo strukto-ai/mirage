@@ -143,7 +143,10 @@ or `redis`. A mount's own `index` replaces this block.
 | `ttl` | `600` | Seconds a listing stays cached. |
 | `url`, `key_prefix` | `mirage:index:` | Redis only. |
 
-`store` holds workspace state. `type` is `ram` (default), `disk` or `redis`.
+`store` holds workspace state: symlinks and file attributes, command history,
+sessions, and background jobs with their output. `type` is `ram` (default),
+`disk` or `redis`, and sets the backend for all of them; each group key below
+moves one part to a backend of its own.
 
 | Key | Default | Purpose |
 | --- | --- | --- |

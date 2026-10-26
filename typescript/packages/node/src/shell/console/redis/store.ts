@@ -63,11 +63,9 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
  * RedisConsoleStore byte for byte, so the reader does not have to be
  * the writer's language.
  *
- * The job owns its keys: a factory must hand every job a prefix nothing
+ * The job owns its keys: its job store hands every job a prefix nothing
  * else has written, because a reused stream replays the previous job's
- * chunks, ending chunk included. `keyPrefix` stays public because it is
- * the console's address: an embedder reads it off a job's store and
- * hands it to the process that should attach.
+ * chunks, ending chunk included.
  *
  * The ending chunk is terminal in the store itself, not only in this
  * process: the append script refuses any append once a CONTROL chunk
