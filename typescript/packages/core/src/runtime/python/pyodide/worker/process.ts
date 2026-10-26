@@ -246,7 +246,7 @@ export class GuestProcessTable {
       case 'kill':
         if (child.poll() === null) {
           entry.killed = request.signal === 15 ? 15 : 9
-          child.terminate()
+          child.terminate(entry.killed)
         }
         return { returncode: entry.code() }
       case 'close':

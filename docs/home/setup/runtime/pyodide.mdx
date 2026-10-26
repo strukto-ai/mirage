@@ -392,6 +392,7 @@ and `b`. The file is read when it is opened.
     | API or behavior | Limitation |
     | --- | --- |
     | `subprocess.run()`, `subprocess.Popen()` | Runs commands inside Mirage. Pending file writes are saved before the command starts. |
+    | `Popen.send_signal()`, `terminate()`, `kill()` | Takes only `SIGTERM` and `SIGKILL`. The command stops with that signal, as `kill` stops a job, so a program it runs gets `SIGTERM` before it is killed. |
   </Accordion>
 </AccordionGroup>
 

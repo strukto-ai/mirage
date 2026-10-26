@@ -1358,8 +1358,8 @@ class Workspace:
         child.process_id = process.info.pid
         child.shell_pid = process.info.pid
 
-        def cancel() -> None:
-            process.terminate()
+        def cancel(signal: int) -> None:
+            process.terminate(signal)
             input_stream.stop()
             output.stop()
 
