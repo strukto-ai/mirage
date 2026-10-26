@@ -371,14 +371,18 @@ class HostFs:
         shares; an owner the row lacks is the host process's own.
 
         Args:
-            virtual (str): the path being statted (the inode's name).
+            virtual (str): the path being statted (the inode's name when
+                the row names none).
             st (VFSStat): the mount's row for it.
             unlinked (bool): the file has no name left, so no link.
         """
+        # The file the links lead to names both its inode and its device,
+        # so a stat through a link and the fstat of its open file agree.
+        named = st.name or virtual
         posix = posix_stat(
             st,
-            virtual,
-            owner_prefix(self._files.mount_prefixes(), virtual) or "/",
+            named,
+            owner_prefix(self._files.mount_prefixes(), named) or "/",
             uid=self._uid,
             gid=self._gid,
             unknown_ns=int(self._now * 1_000_000_000),
@@ -1155,7 +1159,7 @@ class HostFs:
         desc = self._descriptors[fd]
         st = syscall(self._adapter.fstat)(desc.fh)
         unlinked = self._adapter.unlinked(desc.fh)
-        return self._stat_of(desc.opened, st, unlinked)
+        return self._stat_of(self._adapter.walked(desc.opened), st, unlinked)
 
     def fsync(self, fd: int) -> None:
         self._descriptors[fd].land()

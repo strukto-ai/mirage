@@ -282,9 +282,7 @@ class WasmView:
         if self._serving_build(path) is not None:
             return None
         files = self._files_for(path)
-        return Descriptor(
-            files, files.open(path, mode), mode, files.walked(path)
-        )
+        return Descriptor(files, files.open(path, mode), mode, path)
 
     def unlink(self, path: str) -> None:
         self._deny_build(path)

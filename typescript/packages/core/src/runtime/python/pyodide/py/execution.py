@@ -492,6 +492,8 @@ class PipeInput(io.BufferedIOBase):
 
     def read1(self, size=-1):
         self._checkClosed()
+        if size == 0:
+            return b""
         if not self.held and not self.ended:
             self._pull()
         return self._take(len(self.held) if size is None or size < 0 else size)
@@ -503,13 +505,16 @@ class PipeInput(io.BufferedIOBase):
         return bytes(self.held)
 
     def readinto(self, target):
-        data = self.read(len(target))
-        target[: len(data)] = data
+        # Any writable buffer, by its bytes, as BufferedReader takes one.
+        view = memoryview(target).cast("B")
+        data = self.read(len(view))
+        view[: len(data)] = data
         return len(data)
 
     def readinto1(self, target):
-        data = self.read1(len(target))
-        target[: len(data)] = data
+        view = memoryview(target).cast("B")
+        data = self.read1(len(view))
+        view[: len(data)] = data
         return len(data)
 
     def rest(self):

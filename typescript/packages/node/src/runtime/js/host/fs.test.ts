@@ -907,7 +907,7 @@ describe('patchNodeFs — calls node makes on its own', () => {
     await ws.close()
   })
 
-  it('glob walks any depth for a ** inside braces, as node matches it', async () => {
+  it('glob walks any depth for a whole-name ** inside braces, as node matches it', async () => {
     const [ws, fs] = await world()
     await ws.vfs.mkdir('/data/d/sub/deep')
     await ws.vfs.write('/data/d/sub/deep/c.txt', 'c')
@@ -916,6 +916,8 @@ describe('patchNodeFs — calls node makes on its own', () => {
       '/data/d/sub/b.txt',
       '/data/d/sub/deep/c.txt',
     ])
+    // Within a name `**` is a `*`, so the walk stays one level down.
+    expect(await names(fs.promises.glob('/data/d**/*.txt'))).toEqual(['/data/d/a.txt'])
     await ws.close()
   })
 

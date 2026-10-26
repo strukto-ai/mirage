@@ -110,9 +110,7 @@ class Descriptors:
             directory (bool): the path is a directory the open may name.
         """
         fh = syscall(self._adapter.open)(path, facts)
-        desc = Descriptor(
-            self._adapter, fh, facts, self._adapter.walked(path), directory
-        )
+        desc = Descriptor(self._adapter, fh, facts, path, directory)
         if facts.append:
             desc.seek(0, 2)
         return desc

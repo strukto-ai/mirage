@@ -482,14 +482,14 @@
         },
         {
           "program": {
-            "python": "import os, shutil\na, b = os.stat('/data/d/f.txt'), os.stat('/data/lk/f.txt')\nprint(a.st_ino == b.st_ino, a.st_dev == b.st_dev, os.path.samefile('/data/d/f.txt', '/data/lk/f.txt'))\ntry:\n    shutil.copyfile('/data/d/f.txt', '/data/lk/f.txt')\nexcept shutil.SameFileError:\n    print('same file')\nprint(open('/data/d/f.txt').read(), end='')",
+            "python": "import os, shutil\na, b = os.stat('/data/d/f.txt'), os.stat('/data/lk/f.txt')\nprint(a.st_ino == b.st_ino, a.st_dev == b.st_dev, os.path.samefile('/data/d/f.txt', '/data/lk/f.txt'))\nf = open('/data/lk/f.txt')\nf.close()\nfd = os.open('/data/lk/f.txt', os.O_RDONLY)\ns = os.fstat(fd)\nos.close(fd)\nprint(f.name, s.st_ino == a.st_ino, s.st_dev == a.st_dev)\ntry:\n    shutil.copyfile('/data/d/f.txt', '/data/lk/f.txt')\nexcept shutil.SameFileError:\n    print('same file')\nprint(open('/data/d/f.txt').read(), end='')",
             "js": "const [a] = os.stat('/data/d/f.txt')\nconst [b] = os.stat('/data/lk/f.txt')\nconsole.log(a.ino === b.ino, a.dev === b.dev)",
-            "node": "const fsp = require('node:fs').promises\nconst [a, b] = [await fsp.stat('/data/d/f.txt'), await fsp.stat('/data/lk/f.txt')]\nconsole.log(a.ino === b.ino, a.dev === b.dev)\nawait fsp.cp('/data/d/f.txt', '/data/lk/f.txt').catch((e) => console.log(e.code))\nconsole.log((await fsp.readFile('/data/d/f.txt', 'utf8')).trimEnd())"
+            "node": "const fsp = require('node:fs').promises\nconst [a, b] = [await fsp.stat('/data/d/f.txt'), await fsp.stat('/data/lk/f.txt')]\nconsole.log(a.ino === b.ino, a.dev === b.dev)\nconst h = await fsp.open('/data/lk/f.txt')\nconst s = await h.stat()\nawait h.close()\nconsole.log(s.ino === a.ino, s.dev === a.dev)\nawait fsp.cp('/data/d/f.txt', '/data/lk/f.txt').catch((e) => console.log(e.code))\nconsole.log((await fsp.readFile('/data/d/f.txt', 'utf8')).trimEnd())"
           },
           "expect": {
             "python": {
               "exit": 0,
-              "stdout": "True True True\nsame file\nf\n"
+              "stdout": "True True True\n/data/lk/f.txt True True\nsame file\nf\n"
             },
             "js": {
               "exit": 0,
@@ -497,7 +497,7 @@
             },
             "node": {
               "exit": 0,
-              "stdout": "true true\nERR_FS_CP_EINVAL\nf\n"
+              "stdout": "true true\ntrue true\nERR_FS_CP_EINVAL\nf\n"
             }
           }
         }
@@ -511,6 +511,60 @@
         "ram+cache",
         "disk+cache",
         "redis+cache"
+      ]
+    },
+    {
+      "id": "a_link_across_mounts_names_its_target_file",
+      "runtimes": [
+        "wasi",
+        "pyodide",
+        "quickjs",
+        "host"
+      ],
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "f.txt": "f\n"
+            }
+          },
+          "/other": {
+            "vfs": "ram",
+            "files": {
+              "g.txt": "g\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "ln -s /other/g.txt /data/lo",
+          "expect": {
+            "exit": 0
+          }
+        },
+        {
+          "program": {
+            "python": "import os\nl, t = os.stat('/data/lo'), os.stat('/other/g.txt')\nf = open('/data/lo')\nf.close()\nfd = os.open('/data/lo', os.O_RDONLY)\ns = os.fstat(fd)\nos.close(fd)\nprint(l.st_ino == t.st_ino, l.st_dev == t.st_dev, s.st_ino == t.st_ino, s.st_dev == t.st_dev, f.name)",
+            "js": "const [l] = os.stat('/data/lo')\nconst [t] = os.stat('/other/g.txt')\nconsole.log(l.ino === t.ino, l.dev === t.dev)",
+            "node": "const fsp = require('node:fs').promises\nconst [l, t] = [await fsp.stat('/data/lo'), await fsp.stat('/other/g.txt')]\nconst h = await fsp.open('/data/lo')\nconst s = await h.stat()\nawait h.close()\nconsole.log(l.ino === t.ino, l.dev === t.dev, s.ino === t.ino, s.dev === t.dev)"
+          },
+          "expect": {
+            "python": {
+              "exit": 0,
+              "stdout": "True True True True /data/lo\n"
+            },
+            "js": {
+              "exit": 0,
+              "stdout": "true true\n"
+            },
+            "node": {
+              "exit": 0,
+              "stdout": "true true true true\n"
+            }
+          }
+        }
       ]
     }
   ]

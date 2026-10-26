@@ -449,7 +449,10 @@ class HostFs implements Record<
   private statsOf(path: string, st: VFSStat, options?: Options, unlinked = false): unknown {
     // The stat every runtime shares; an owner the row lacks is this
     // process's own.
-    const posix = posixStat(st, path, this.ws.registry.tryMountFor(path)?.prefix ?? '/', {
+    // The file the links lead to names both its inode and its device, so a
+    // stat through a link and the fstat of its open file agree.
+    const named = st.name ?? path
+    const posix = posixStat(st, named, this.ws.registry.tryMountFor(named)?.prefix ?? '/', {
       uid: process.getuid?.() ?? 0,
       gid: process.getgid?.() ?? 0,
       unknownMs: this.born,
@@ -742,8 +745,9 @@ class HostFs implements Record<
       const magic = parts.findIndex((part) => GLOB_MAGIC.test(part))
       const base = `/${parts.slice(0, magic === -1 ? parts.length : magic).join('/')}`
       const rest = magic === -1 ? '' : parts.slice(magic).join('/')
-      // A `**` anywhere, inside braces too, may match at any depth.
-      const depth = rest.includes('**') ? Infinity : rest.split('/').length
+      // A `**` that is a whole name, inside braces too, may match at any
+      // depth; within a name (`foo**`) it is a `*`.
+      const depth = /(^|[/{,])\*\*($|[/},])/.test(rest) ? Infinity : rest.split('/').length
       const skipped = (path: string, entry: unknown): boolean => {
         if (typeof exclude === 'function') return Boolean((exclude as Fn)(typed ? entry : path))
         return Array.isArray(exclude) && exclude.some((ex) => posix.matchesGlob(path, String(ex)))
@@ -1119,7 +1123,14 @@ class HostFs implements Record<
         }
         case 'fstat': {
           const row = await this.files.fstat(desc.fd)
-          return [this.statsOf(desc.opened, row, rest[0] as Options, this.files.unlinked(desc.fd))]
+          return [
+            this.statsOf(
+              this.files.walked(desc.opened),
+              row,
+              rest[0] as Options,
+              this.files.unlinked(desc.fd),
+            ),
+          ]
         }
         case 'ftruncate':
           if (!desc.mode.writable) throw einval(desc.path)

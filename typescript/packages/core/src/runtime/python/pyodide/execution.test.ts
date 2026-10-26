@@ -429,6 +429,55 @@ small = [str(i).encode() for i in range(100000)]
     }
   })
 
+  // As CPython's BufferedReader: an empty read asks nothing of the pipe,
+  // and readinto fills any writable buffer by its bytes.
+  it('reads its input as a BufferedReader does', async () => {
+    const guest = new PyodideExecution(await loadPyodideRuntime())
+    const log: string[] = []
+    let input: Uint8Array | null = new TextEncoder().encode('abcdefgh')
+    try {
+      const result = guest.run(
+        {
+          code: [
+            'import array, sys',
+            "print('a', flush=True)",
+            'empty = sys.stdin.buffer.read1(0)',
+            "print('b', flush=True)",
+            "a = array.array('I', [0, 0])",
+            'print(empty, sys.stdin.buffer.readinto(a), a.tobytes())',
+          ].join('\n'),
+          argv: ['-c'],
+          cwd: '/',
+          flags: {},
+          script_cli: false,
+          filename: null,
+          script: false,
+          env: {},
+          stdin: null,
+          piped: true,
+        },
+        () => undefined,
+        () => undefined,
+        {
+          read: () => {
+            log.push('read')
+            const data = input ?? new Uint8Array()
+            input = null
+            return data
+          },
+          write: (fd, bytes) => {
+            if (fd === 1) log.push(new TextDecoder().decode(bytes))
+            return true
+          },
+        },
+      )
+      expect(result[2]).toBe(0)
+      expect(log).toEqual(['a\n', 'b\n', 'read', "b'' 8 b'abcdefgh'\n"])
+    } finally {
+      guest.close()
+    }
+  })
+
   // CPython reports a stdout flush that fails as it exits and makes the
   // exit 120, whatever the program's own; the WASI guest answers the same.
   it('reports a stdout its reader left as it exits, as CPython does', async () => {
