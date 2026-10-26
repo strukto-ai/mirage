@@ -61,6 +61,8 @@ from mirage.workspace.executor.statement import (
     finish_statement,
     ignoring_errexit,
     land,
+    land_late,
+    record_jobs,
     record_status,
     recording,
     statement_output,
@@ -511,8 +513,9 @@ async def handle_subshell(
             continue
         i += 1
         recorder = Recorder()
+        leave = record_jobs(session, recorder)
         try:
-            with recording(session, recorder):
+            with recording(recorder):
                 stdout, io, last_exec = await execute_node(
                     child,
                     context,
@@ -560,6 +563,9 @@ async def handle_subshell(
                 all_stdout,
                 merged_io,
             )
+            merged_io = await land_late(
+                recorder, leave, session.terminal, sink, all_stdout, merged_io
+            )
         except (ExitSignal, ReturnSignal) as sig:
             merged_io, last_exec = await _subshell_ended(
                 sig, recorder, session, sink, all_stdout, merged_io
@@ -574,6 +580,8 @@ async def handle_subshell(
         except BaseException:
             await recorder.close()
             raise
+        finally:
+            leave()
         if errexit_acts(child, io.exit_code, session):
             break
     cleanup = await run_exit_trap(

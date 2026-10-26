@@ -475,22 +475,76 @@ def as_written(stdout: bytes | None, stderr: bytes | None) -> list[Written]:
 
 
 @contextmanager
-def recording(session: SessionState, recorder: Recorder) -> Iterator[None]:
+def recording(recorder: Recorder) -> Iterator[None]:
     """Run a statement into ``recorder``: what it writes to an enclosing
-    level's stream, and what a job this shell started writes while it
-    runs, land among what it writes.
+    level's stream lands among what it writes.
 
     Args:
-        session (SessionState): the shell running it.
         recorder (Recorder): where it writes.
     """
     enclosing = bind_caller(current_caller().changed({"enclosing": recorder}))
-    leave = (session.job_output or session.tty.jobs).record(recorder)
     try:
         yield
     finally:
-        leave()
         reset_caller(enclosing)
+
+
+def record_jobs(
+    session: SessionState, recorder: Recorder
+) -> Callable[[], None]:
+    """Send what the jobs this shell started write into ``recorder``, among
+    what its statement writes, until the returned call ends it.
+
+    The recording lasts past the statement, until ``land_late`` has landed
+    what was recorded, so a job writing in between cannot reach the
+    shell's own output ahead of the statement.
+
+    Args:
+        session (SessionState): the shell running the statement.
+        recorder (Recorder): where the statement writes.
+    """
+    return (session.job_output or session.tty.jobs).record(recorder)
+
+
+async def land_late(
+    recorder: Recorder,
+    leave: Callable[[], None],
+    own: StreamOwner | None,
+    sink: JobConsole | None,
+    all_stdout: list[ByteSource | None],
+    merged_io: IOResult,
+) -> IOResult:
+    """Land what jobs wrote into ``recorder`` once the statement's output
+    was taken, and end the recording (``record_jobs``).
+
+    One pass lands, still recording, what they wrote while that output
+    landed; then the recording ends, so a later write goes on to the
+    shell's own output, and what was already on its way lands. A job
+    that never stops writing cannot hold the statement open.
+
+    Args:
+        recorder (Recorder): the statement's recorder.
+        leave (Callable[[], None]): ends the recording.
+        own (StreamOwner | None): the stream owner of the shell's terminal.
+        sink (JobConsole | None): the shell's sink, if it has one.
+        all_stdout (list[ByteSource | None]): stdout the shell returns.
+        merged_io (IOResult): the shell's result so far.
+    """
+
+    async def landed(merged: IOResult) -> IOResult:
+        return await land(
+            await statement_output(recorder, None, IOResult(), own, sink),
+            sink,
+            all_stdout,
+            merged,
+        )
+
+    if recorder.busy:
+        merged_io = await landed(merged_io)
+    leave()
+    while recorder.busy:
+        merged_io = await landed(merged_io)
+    return merged_io
 
 
 async def statement_output(

@@ -34,6 +34,8 @@ import {
   ignoringErrexit,
   land,
   recordStatus,
+  landLate,
+  recordJobs,
   recording,
   statementOutput,
   statementStdin,
@@ -502,11 +504,12 @@ export async function handleSubshell(
     }
     i += 1
     const recorder = new Recorder()
+    const leave = recordJobs(session, recorder)
     let io: IOResult
     try {
       const childStdin = statementStdin(session, stdin, bound)
       let stdout: ByteSource | null
-      ;[stdout, io, lastExec] = await recording(session, recorder, () =>
+      ;[stdout, io, lastExec] = await recording(recorder, () =>
         executeNode(child, context, childStdin, callStack, { sink: recorder }),
       )
       stdout = await finishStatement(stdout, io, session, child, lastExec)
@@ -540,6 +543,7 @@ export async function handleSubshell(
         allStdout,
         mergedIo,
       )
+      mergedIo = await landLate(recorder, leave, session.terminal, sink, allStdout, mergedIo)
     } catch (err) {
       // The subshell's own write met a closed pipe: SIGPIPE ends it.
       const sig = err instanceof PipeClosed ? new ExitSignal(141) : err
@@ -549,6 +553,8 @@ export async function handleSubshell(
       }
       ;[mergedIo, lastExec] = await subshellEnded(sig, recorder, session, sink, allStdout, mergedIo)
       break
+    } finally {
+      leave()
     }
     if (errexitActs(child, io.exitCode, session)) break
   }

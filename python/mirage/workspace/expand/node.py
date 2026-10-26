@@ -240,11 +240,10 @@ async def _arith_text(
                     child, context, execute_fn, call_stack, view
                 )
             )
-        elif (
-            child.type in ARITH_OPERATORS
-            or child.type in (NT.NUMBER, NT.VARIABLE_NAME)
-            or child.type == NT.WORD
-            and ts_node.type == NT.CONCATENATION
+        elif child.type in ARITH_OPERATORS or child.type in (
+            NT.NUMBER,
+            NT.VARIABLE_NAME,
+            NT.WORD,
         ):
             parts.append(get_text(child))
         else:

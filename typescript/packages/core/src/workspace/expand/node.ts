@@ -223,7 +223,7 @@ async function arithText(
       ARITH_OPERATORS.has(child.type) ||
       child.type === NT.NUMBER ||
       child.type === NT.VARIABLE_NAME ||
-      (child.type === NT.WORD && tsNode.type === NT.CONCATENATION)
+      child.type === NT.WORD
     ) {
       parts.push(child.text)
     } else {

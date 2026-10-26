@@ -24,9 +24,16 @@ import {
   finishStatement,
   forks,
   ignoringErrexit,
+  land,
+  landLate,
+  recordJobs,
   restoreStatus,
   snapshotStatus,
+  statementOutput,
 } from './statement.ts'
+import { Channel, JobOutput } from '../../shell/console/index.ts'
+import { Recorder } from '../../shell/descriptors.ts'
+import { materialize } from '../../io/types.ts'
 import { parse } from '../../shell/parse/parse.ts'
 
 const decode = (b: Uint8Array | null): string => new TextDecoder().decode(b ?? new Uint8Array())
@@ -153,4 +160,26 @@ describe('errexitActs', () => {
     })
     expect(errexitActs(node, 1, session)).toBe(true)
   })
+})
+
+it('lands a job write made before its statement landed after the statement', async () => {
+  // A job that writes after the statement's output was taken but before it
+  // landed lands after it; one that writes once the recording ended goes
+  // straight on to the shell.
+  const encode = (text: string): Uint8Array => new TextEncoder().encode(text)
+  const session = new SessionState({ sessionId: 't' })
+  const shell = new Recorder()
+  const jobs = new JobOutput(shell)
+  session.jobOutput = jobs
+  const recorder = new Recorder()
+  const leave = recordJobs(session, recorder)
+  await jobs.emit(Channel.STDOUT, encode('statement\n'))
+  const written = await statementOutput(recorder, null, new IOResult(), null, shell)
+  await jobs.emit(Channel.STDOUT, encode('late\n'))
+  const merged = await land(written, shell, [], new IOResult())
+  await landLate(recorder, leave, null, shell, [], merged)
+  await jobs.emit(Channel.STDOUT, encode('after\n'))
+  const out: string[] = []
+  for (const [, data] of await shell.take()) out.push(decode(await materialize(data)))
+  expect(out.join('')).toBe('statement\nlate\nafter\n')
 })

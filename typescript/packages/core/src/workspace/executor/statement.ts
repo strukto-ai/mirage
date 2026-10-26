@@ -19,7 +19,7 @@ import { asyncChain, discardStreams } from '../../io/stream.ts'
 import type { ExecutionFrame } from '../frame.ts'
 import { readFailExitCode } from '../../commands/spec/usage.ts'
 import type { SharedInput } from '../../io/async_line_iterator.ts'
-import type { ByteSource, IOResult } from '../../io/types.ts'
+import { type ByteSource, IOResult } from '../../io/types.ts'
 import { materialize } from '../../io/types.ts'
 import { PipeClosed } from '../../io/errors.ts'
 import { formatFsError } from '../../errors/render.ts'
@@ -377,20 +377,50 @@ export function asWritten(stdout: Uint8Array | null, stderr: Uint8Array | null):
 
 /**
  * Run a statement into `recorder`: what it writes to an enclosing level's
- * stream, and what a job this shell started writes while it runs, land among
- * what it writes. Mirrors Python's recording.
+ * stream lands among what it writes. Mirrors Python's recording.
  */
-export async function recording<T>(
-  session: SessionState,
+export async function recording<T>(recorder: Recorder, run: () => Promise<T>): Promise<T> {
+  return runWithCaller({ ...currentCaller(), enclosing: recorder }, run)
+}
+
+/**
+ * Send what the jobs this shell started write into `recorder`, among what its
+ * statement writes, until the returned call ends it. The recording lasts past
+ * the statement, until `landLate` has landed what was recorded, so a job
+ * writing in between cannot reach the shell's own output ahead of the
+ * statement. Mirrors Python's record_jobs.
+ */
+export function recordJobs(session: SessionState, recorder: Recorder): () => void {
+  return (session.jobOutput ?? session.tty.jobs).record(recorder)
+}
+
+/**
+ * Land what jobs wrote into `recorder` once the statement's output was taken,
+ * and end the recording (`recordJobs`). One pass lands, still recording, what
+ * they wrote while that output landed; then the recording ends, so a later
+ * write goes on to the shell's own output, and what was already on its way
+ * lands. A job that never stops writing cannot hold the statement open.
+ * Mirrors Python's land_late.
+ */
+export async function landLate(
   recorder: Recorder,
-  run: () => Promise<T>,
-): Promise<T> {
-  const leave = (session.jobOutput ?? session.tty.jobs).record(recorder)
-  try {
-    return await runWithCaller({ ...currentCaller(), enclosing: recorder }, run)
-  } finally {
-    leave()
-  }
+  leave: () => void,
+  own: StreamOwner | null,
+  sink: JobConsole | null,
+  allStdout: (ByteSource | null)[],
+  mergedIo: IOResult,
+): Promise<IOResult> {
+  const pass = async (): Promise<IOResult> =>
+    land(
+      await statementOutput(recorder, null, new IOResult(), own, sink),
+      sink,
+      allStdout,
+      mergedIo,
+    )
+  if (recorder.busy) mergedIo = await pass()
+  leave()
+  while (recorder.busy) mergedIo = await pass()
+  return mergedIo
 }
 
 /**

@@ -37,6 +37,8 @@ import {
   fd0Binding,
   land,
   recordStatus,
+  landLate,
+  recordJobs,
   recording,
   statementOutput,
   statementStdin,
@@ -247,6 +249,7 @@ async function runProgram(
     // Ordinary output progresses while the statement runs. Descriptor
     // copies and exec diversions retain their order for routing below.
     const recorder = new StatementRecorder(session, sink)
+    const leave = recordJobs(session, recorder)
     let io: IOResult
     try {
       // `exec < file` feeds the shell's stdin: a later `read` or `while
@@ -254,7 +257,7 @@ async function runProgram(
       // before it stopped.
       const childStdin = statementStdin(session, stdin, bound)
       let s: ByteSource | null
-      ;[s, io, lastExec] = await recording(session, recorder, () =>
+      ;[s, io, lastExec] = await recording(recorder, () =>
         recurse(child, context, childStdin, callStack, { sink: recorder }),
       )
       ran.push(lastExec)
@@ -305,6 +308,7 @@ async function runProgram(
         allStdout,
         mergedIo,
       )
+      mergedIo = await landLate(recorder, leave, own, sink, allStdout, mergedIo)
     } catch (err) {
       if (!isUnwinding(err)) throw err
       // What it wrote before it left; the ERR action answering it left
@@ -334,6 +338,8 @@ async function runProgram(
         continue
       }
       break
+    } finally {
+      leave()
     }
     if (errexitActs(child, io.exitCode, session)) {
       if (!inline) {

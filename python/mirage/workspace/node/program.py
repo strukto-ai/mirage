@@ -45,6 +45,8 @@ from mirage.workspace.executor.statement import (
     failed_read,
     fd0_binding,
     land,
+    land_late,
+    record_jobs,
     record_status,
     recording,
     statement_output,
@@ -247,8 +249,9 @@ async def _run_program(
         # Ordinary output progresses while the statement runs. Descriptor
         # copies and exec diversions retain their order for routing below.
         recorder = StatementRecorder(session, sink)
+        leave = record_jobs(session, recorder)
         try:
-            with recording(session, recorder):
+            with recording(recorder):
                 # `exec < file` feeds the shell's stdin: a later `read` or
                 # `while read` sees it, and each statement reads on from
                 # where the one before it stopped.
@@ -304,6 +307,9 @@ async def _run_program(
                 all_stdout,
                 merged_io,
             )
+            merged_io = await land_late(
+                recorder, leave, own, sink, all_stdout, merged_io
+            )
         except UNWINDING as sig:
             # What it wrote before it left; the ERR action answering it
             # left after that was landed.
@@ -330,6 +336,8 @@ async def _run_program(
                 i = _next_line(node, children, at)
                 continue
             break
+        finally:
+            leave()
         if errexit_acts(child, io.exit_code, session):
             if not inline:
                 merged_io = await _exit_shell(
