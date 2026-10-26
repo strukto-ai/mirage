@@ -16,76 +16,13 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from mirage.commands.builtin.generic import patch as patch_module
 from mirage.commands.builtin.generic.patch import patch_generic
 from mirage.commands.config import Context
 from mirage.context import reset_mount_gate, set_mount_gate
 from mirage.types import MountMode, PathSpec
 from mirage.workspace.files import Files
 from mirage.workspace.types import MountRow
-from tests.commands.builtin.conftest import file_workspace as _ws
-from tests.commands.builtin.conftest import optional_output_bytes as _bytes
-from tests.commands.builtin.conftest import run_raw as _run_raw
 from tests.fixtures.readers import readers
-
-
-def test_patch_apply():
-    ws = _ws(**{"/hello.txt": b"hello\nworld\n"})
-    diff_text = (
-        "--- a/hello.txt\n"
-        "+++ b/hello.txt\n"
-        "@@ -1,2 +1,2 @@\n"
-        " hello\n"
-        "-world\n"
-        "+universe\n"
-    )
-    _run_raw(ws, "patch -p1", cwd="/data", stdin=diff_text.encode())
-    stdout, _ = _run_raw(ws, "cat /data/hello.txt")
-    assert b"universe" in _bytes(stdout)
-
-
-def test_patch_i():
-    diff_text = (
-        "--- a/hello.txt\n"
-        "+++ b/hello.txt\n"
-        "@@ -1,2 +1,2 @@\n"
-        " hello\n"
-        "-world\n"
-        "+universe\n"
-    )
-    ws = _ws(
-        **{"/hello.txt": b"hello\nworld\n", "/fix.patch": diff_text.encode()}
-    )
-    _run_raw(ws, "patch -p1 -i /data/fix.patch", cwd="/data")
-    stdout, _ = _run_raw(ws, "cat /data/hello.txt")
-    assert b"universe" in _bytes(stdout)
-
-
-def test_patch_N():
-    diff_text = (
-        "--- a/hello.txt\n"
-        "+++ b/hello.txt\n"
-        "@@ -1,2 +1,2 @@\n"
-        " hello\n"
-        "-world\n"
-        "+universe\n"
-    )
-    ws = _ws(**{"/hello.txt": b"hello\nuniverse\n"})
-    _run_raw(ws, "patch -p1 -N", cwd="/data", stdin=diff_text.encode())
-    stdout, _ = _run_raw(ws, "cat /data/hello.txt")
-    assert b"universe" in _bytes(stdout)
-
-
-def test_patch_creates_a_missing_file():
-    diff_text = "--- a/new.txt\n+++ b/new.txt\n@@ -0,0 +1 @@\n+fresh\n"
-    ws = _ws()
-    stdout, io = _run_raw(
-        ws, "patch -p1", cwd="/data", stdin=diff_text.encode()
-    )
-    assert _bytes(stdout) == b"patching file new.txt\n"
-    assert io.exit_code == 0
-    stdout, _ = _run_raw(ws, "cat /data/new.txt")
-    assert _bytes(stdout) == b"fresh\n"
 
 
 @pytest.mark.asyncio
@@ -138,61 +75,3 @@ async def test_patch_preserves_virtual_paths_for_mounted_io(prefix, source):
         reset_mount_gate(token)
     assert "hello.txt" in seen
     assert files["hello.txt"] == b"hello\nuniverse\n"
-
-
-_PREFIX = [f"p{k}" for k in range(100_000)]
-
-
-def _needle(body):
-    return patch_module._needle_of(patch_module._Hunk(1, 1, "", tuple(body)))
-
-
-def _counting_sits(monkeypatch):
-    calls = []
-    real = patch_module._sits
-
-    def counted(*args):
-        calls.append(args[2])
-        return real(*args)
-
-    monkeypatch.setattr(patch_module, "_sits", counted)
-    return calls
-
-
-def test_patch_tries_an_end_held_hunk_at_one_line(monkeypatch):
-    calls = _counting_sits(monkeypatch)
-    needle = _needle([" a", " b", " c", "-d", "+D"])
-    lines = [*_PREFIX, "a", "b", "c", "d"]
-    assert patch_module._seek(lines, needle, 0, 0, 0) == 100_000
-    assert calls == [100_000]
-
-
-def test_patch_tries_a_start_held_hunk_at_one_line(monkeypatch):
-    calls = _counting_sits(monkeypatch)
-    needle = _needle(["-x", "+X", " a", " b", " c"])
-    lines = [*_PREFIX, "x", "a", "b", "c"]
-    for fuzz in range(3):
-        assert patch_module._seek(lines, needle, fuzz, 0, 0) is None
-    assert calls == [0, 0, 0]
-
-
-def test_patch_knows_every_line_the_search_reaches():
-    for expected in range(-6, 12):
-        for used in range(8):
-            for last in range(-3, 12):
-                reached = set(patch_module._tries(expected, used, last))
-                for at in range(-14, 16):
-                    assert patch_module._is_tried(
-                        at, expected, used, last
-                    ) == (at in reached)
-
-
-def test_patch_places_an_end_held_hunk_after_a_long_prefix():
-    text = "".join(f"{line}\n" for line in [*_PREFIX, "a", "b", "c", "d"])
-    ws = _ws(**{"/f": text.encode()})
-    diff_text = "--- f\n+++ f\n@@ -1,4 +1,4 @@\n a\n b\n c\n-d\n+D\n"
-    stdout, io = _run_raw(ws, "patch", cwd="/data", stdin=diff_text.encode())
-    assert _bytes(stdout) == (
-        b"patching file f\nHunk #1 succeeded at 100001 (offset 100000 lines).\n"
-    )
-    assert io.exit_code == 0

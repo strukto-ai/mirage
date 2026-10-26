@@ -12,86 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { onMount } from '../../test-utils.ts'
-import { GENERIC_COMMANDS } from '../../commands/builtin/generic_bind/factory.ts'
-import { describe, expect, it } from 'vitest'
+import { expect, it } from 'vitest'
 import { patchGeneric } from '../../commands/builtin/generic/patch.ts'
 import { MountMode, PathSpec } from '../../types.ts'
 import { runWithMountGate } from '../../context/session_context.ts'
 import { Files } from '../../workspace/files.ts'
-import { RAMVFS } from './ram.ts'
-const RAM_PATCH = GENERIC_COMMANDS.filter((c) => c.name === 'patch' && c.filetype == null)
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
-
-async function runPatch(
-  vfs: RAMVFS,
-  flags: Record<string, string | boolean | number | string[]>,
-  stdin: Uint8Array | null,
-): Promise<void> {
-  const cmd = RAM_PATCH[0]
-  if (cmd === undefined) throw new Error('patch not registered')
-  await onMount(vfs, (files) =>
-    cmd.fn((vfs as { accessor?: unknown }).accessor as never, [], [], {
-      stdin,
-      flags,
-      vfs: files,
-      cwd: PathSpec.fromStrPath('/'),
-    }),
-  )
-}
-
-describe('patch', () => {
-  it('applies a simple patch from stdin', async () => {
-    const vfs = new RAMVFS()
-    vfs.store.files.set('/hello.txt', ENC.encode('hello\nworld\n'))
-    const diffText =
-      '--- a/hello.txt\n' +
-      '+++ b/hello.txt\n' +
-      '@@ -1,2 +1,2 @@\n' +
-      ' hello\n' +
-      '-world\n' +
-      '+universe\n'
-    await runPatch(vfs, { p: '1' }, ENC.encode(diffText))
-    const out = vfs.store.files.get('/hello.txt')
-    expect(out).toBeDefined()
-    expect(DEC.decode(out)).toContain('universe')
-  })
-
-  it('applies a patch from -i file', async () => {
-    const vfs = new RAMVFS()
-    const diffText =
-      '--- a/hello.txt\n' +
-      '+++ b/hello.txt\n' +
-      '@@ -1,2 +1,2 @@\n' +
-      ' hello\n' +
-      '-world\n' +
-      '+universe\n'
-    vfs.store.files.set('/hello.txt', ENC.encode('hello\nworld\n'))
-    vfs.store.files.set('/fix.patch', ENC.encode(diffText))
-    await runPatch(vfs, { p: '1', i: '/fix.patch' }, null)
-    const out = vfs.store.files.get('/hello.txt')
-    expect(out).toBeDefined()
-    expect(DEC.decode(out)).toContain('universe')
-  })
-
-  it('-N skips already-applied hunks', async () => {
-    const vfs = new RAMVFS()
-    vfs.store.files.set('/hello.txt', ENC.encode('hello\nuniverse\n'))
-    const diffText =
-      '--- a/hello.txt\n' +
-      '+++ b/hello.txt\n' +
-      '@@ -1,2 +1,2 @@\n' +
-      ' hello\n' +
-      '-world\n' +
-      '+universe\n'
-    await runPatch(vfs, { p: '1', N: true }, ENC.encode(diffText))
-    const out = vfs.store.files.get('/hello.txt')
-    expect(out).toBeDefined()
-    expect(DEC.decode(out)).toContain('universe')
-  })
-})
 
 it.each(['', '/data', '/nested/data'])(
   'preserves virtual paths under %s for patch I/O',

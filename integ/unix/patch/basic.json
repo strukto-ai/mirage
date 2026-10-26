@@ -34,6 +34,76 @@
         "stdout": "rc=0\nrc=2\nrc=2\nrc=2\nrc=2\nroses are red\nviolets are blue\nsugar is sweet\n",
         "stderr": "patch: **** Can't open patch file /data/nope.diff : No such file or directory\npatch: **** Can't open patch file '/data/no such.diff' : No such file or directory\npatch: **** read error : Is a directory\npatch: /data/x: extra operand\npatch: Try 'patch --help' for more information.\n"
       }
+    },
+    {
+      "id": "patch_only_garbage",
+      "seq": 9941409,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/patch_9941409 && touch /data/patch_9941409/.keep; cd /data/patch_9941409 || exit 1; printf 'a\\n' > g.txt && printf 'hello\\nworld\\n' | patch g.txt; echo rc=$?; printf '\\n\\n' | patch g.txt; echo rc=$?; printf -- '--- a\\n+++ b\\n' | patch g.txt; echo rc=$?; patch g.txt < /dev/null; echo rc=$?; printf -- '--- x\\n+++ x\\n--- a\\n+++ b\\n@@ -1 +1 @@\\n-a\\n+b\\n' | patch g.txt; echo rc=$?; cat g.txt; cd /; rm -r /data/patch_9941409",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=2\nrc=2\nrc=2\nrc=0\npatching file g.txt\nrc=0\nb\n",
+        "stderr": "patch: **** Only garbage was found in the patch input.\npatch: **** Only garbage was found in the patch input.\npatch: **** Only garbage was found in the patch input.\n"
+      }
+    },
+    {
+      "id": "patch_bytes_pass_through",
+      "seq": 9941410,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "mkdir -p /data/patch_9941410 && touch /data/patch_9941410/.keep; cd /data/patch_9941410 || exit 1; printf 'a\\377\\r\\nb\\n' > by.txt && printf -- '--- a\\t\\377\\n+++ b\\n@@ -1,2 +1,2 @@\\n a\\377\\r\\n-b\\n+c\\376\\n' | patch by.txt; echo rc=$?; od -An -tx1 by.txt; printf 'q\\n' > bz.txt && printf -- '--- a\\t\\377\\n+++ b\\n@@ -1 +1 @@\\n-z\\n+y\\n' | patch bz.txt; echo rc=$?; od -An -tx1 bz.txt.rej; cd /; rm -r /data/patch_9941410",
+      "expect": {
+        "exit": 0,
+        "stdout": "patching file by.txt\nrc=0\n 61 ff 0d 0a 63 fe 0a\npatching file bz.txt\nHunk #1 FAILED at 1.\n1 out of 1 hunk FAILED -- saving rejects to file bz.txt.rej\nrc=1\n 2d 2d 2d 20 61 09 ff 0a 2b 2b 2b 20 62 0a 40 40\n 20 2d 31 20 2b 31 20 40 40 0a 2d 7a 0a 2b 79 0a\n",
+        "stderr": ""
+      }
     }
   ]
 }
