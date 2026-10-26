@@ -93,12 +93,26 @@ export class RAMConsoleStore implements ConsoleStore {
     return Promise.resolve([window, this.baseSeq + start + window.length, truncated])
   }
 
-  wait(seq: number): Promise<void> {
+  wait(seq: number, signal?: AbortSignal): Promise<void> {
     // A closed store is checked here too, so a reader that re-arms after
     // close() released it resolves instead of parking forever.
-    if (this.isClosed || this.nextSeq > seq) return Promise.resolve()
+    if (this.isClosed || this.nextSeq > seq || signal?.aborted === true) return Promise.resolve()
     return new Promise<void>((resolve) => {
-      this.waiters.push({ seq, resolve })
+      // The abort listener goes with the waiter, so a reader waiting on
+      // chunk after chunk under one signal leaves none behind.
+      const waiter = {
+        seq,
+        resolve: (): void => {
+          signal?.removeEventListener('abort', abandon)
+          resolve()
+        },
+      }
+      const abandon = (): void => {
+        this.waiters = this.waiters.filter((w) => w !== waiter)
+        resolve()
+      }
+      this.waiters.push(waiter)
+      signal?.addEventListener('abort', abandon, { once: true })
     })
   }
 

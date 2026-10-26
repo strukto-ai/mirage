@@ -165,12 +165,13 @@ describe.skipIf(REDIS_URL === '')('RedisConsoleStore', () => {
     opened.push(store)
     expect(store.keyPrefix).toBe(prefix)
     await store.append(Channel.STDOUT, ENC.encode('x'))
-    await store.append(Channel.CONTROL, ENC.encode('exit:0'))
     const bare = makeStore(`test:console:${randomUUID()}:`)
     await bare.append(Channel.STDOUT, ENC.encode('x'))
     const { createClient } = await import('redis')
     const client = createClient({ url: REDIS_URL })
     await client.connect()
+    expect(await client.ttl(`${prefix}stream`)).toBe(-1)
+    await store.append(Channel.CONTROL, ENC.encode('exit:0'))
     const ttls = await Promise.all([
       client.ttl(`${prefix}stream`),
       client.ttl(`${prefix}seq`),

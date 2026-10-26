@@ -38,7 +38,7 @@ export interface RedisJobStoreOptions {
  * - `{prefix}lists`: a hash of session id to job list JSON, written with
  *   the session table's compare-and-set script
  * - `{prefix}console:{name}:*`: one console stream per job
- *   (`RedisConsoleStore`), expiring a day after its last write
+ *   (`RedisConsoleStore`), expiring a day after its job ended
  * - `{prefix}owner:{id}`: an owner's lease, a key that expires
  *
  * One connection serves the lists, the leases and every console, so a

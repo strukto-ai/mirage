@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 import logging
 import os
 from collections.abc import AsyncIterator, Callable
@@ -35,12 +36,14 @@ from mirage import (
 )
 from mirage.cache.file.config import RedisCacheConfig
 from mirage.cache.index import IndexConfig, RedisIndexConfig
+from mirage.io import IOResult
 from mirage.policy import Action, Deny, Policy, PolicyDenied
 from mirage.policy.builtin.output_cap import ALL_COMMANDS
 from mirage.policy.types import SessionContext
 from mirage.secrets import registry
 from mirage.secrets.registry import register_secrets
 from mirage.secrets.types import ResolvedSecret
+from mirage.shell.job_table.types import Job
 from mirage.types import (
     ContentType,
     FileType,
@@ -75,6 +78,7 @@ from mirage.workspace.snapshot.state import (
     to_state_dict,
 )
 from mirage.workspace.store import RAMWorkspaceStateStore
+from mirage.workspace.types import ExecutionNode
 from mirage.workspace.workspace.types import VFSMount
 
 
@@ -1554,3 +1558,29 @@ async def test_a_snapshot_takes_the_finished_jobs_another_workspace_ran():
     finally:
         await a.close()
         await b.close()
+
+
+@pytest.mark.asyncio
+async def test_a_snapshot_leaves_out_a_killed_job_still_stopping():
+    ws = Workspace({"/m": RAMVFS()})
+    release = asyncio.Event()
+
+    async def run(job: Job) -> tuple[IOResult, ExecutionNode]:
+        try:
+            await asyncio.Event().wait()
+        finally:
+            await asyncio.shield(release.wait())
+        return IOResult(), ExecutionNode()
+
+    try:
+        job = await ws.job_table.submit("deaf", run, "/")
+        await asyncio.sleep(0)
+        assert await ws.job_table.kill(job.id)
+        assert (await to_state_dict(ws))[StateKey.JOBS] == []
+        release.set()
+        assert job.process is not None
+        await job.process.join()
+        assert len((await to_state_dict(ws))[StateKey.JOBS]) == 1
+    finally:
+        release.set()
+        await ws.close()

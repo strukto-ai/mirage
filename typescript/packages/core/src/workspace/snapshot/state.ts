@@ -177,7 +177,8 @@ export async function toStateDict(ws: WorkspaceLike): Promise<WorkspaceStateDict
     .list()
     .map((s) => s.toDict() as unknown as SessionSnapshot)
   // The lists live in the job store, where other workspaces on it add jobs
-  // this one has not read yet.
+  // this one has not read yet. A killed job is finished only once its
+  // console ended: its runner may still leave output and a status.
   for (const s of ws.sessionManager.list()) await ws.jobTable.sync(s.sessionId)
   // Output is stored per channel rather than chunk by chunk: the manifest
   // externalizes byte fields into tar entries, so keeping chunks would
@@ -187,7 +188,7 @@ export async function toStateDict(ws: WorkspaceLike): Promise<WorkspaceStateDict
   const jobs: JobSnapshot[] = await Promise.all(
     ws.jobTable
       .allJobs()
-      .filter((j) => j.status !== JobStatus.RUNNING)
+      .filter((j) => j.status !== JobStatus.RUNNING && (j.process === null || j.console.finished))
       .map(async (j) => ({
         id: j.id,
         command: j.command,

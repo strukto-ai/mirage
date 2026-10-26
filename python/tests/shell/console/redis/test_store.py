@@ -181,9 +181,11 @@ async def test_ttl_bounds_retention(prefix):
     try:
         assert s.key_prefix == prefix
         await s.append(Channel.STDOUT, b"x")
+        assert await client.ttl(f"{prefix}stream") == -1
+        assert await client.ttl(f"{prefix}seq") == -1
+        await s.append(Channel.CONTROL, b"exit:0")
         assert await client.ttl(f"{prefix}stream") > 0
         assert await client.ttl(f"{prefix}seq") > 0
-        await s.append(Channel.CONTROL, b"exit:0")
         assert await client.ttl(f"{prefix}ended") > 0
     finally:
         await client.aclose()

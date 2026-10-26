@@ -75,17 +75,18 @@ def test_kill_settles_a_runner_that_ignores_the_cancel():
 
         assert job.status == JobStatus.KILLED
         assert job.exit_code == 137
-        assert job.console.finished
+        assert not job.console.finished
 
         # The runner finishes normally afterwards; it must not relabel
-        # the job it no longer owns.
+        # the job it was told to stop.
         while not _DEAF_RELEASE:
             await asyncio.sleep(0)
         _DEAF_RELEASE[0].set()
-        await asyncio.sleep(0)
-        await asyncio.sleep(0)
+        assert job.process is not None
+        await job.process.join()
         assert job.status == JobStatus.KILLED
         assert job.exit_code == 137
+        assert job.console.finished
 
     asyncio.run(_run())
 
@@ -141,6 +142,7 @@ def test_kill_keeps_output_produced_before_the_kill():
             await asyncio.sleep(0)
 
         assert await table.kill(1)
+        await table.wait(1)
 
         assert job.status == JobStatus.KILLED
         assert job.exit_code == 137
@@ -150,8 +152,8 @@ def test_kill_keeps_output_produced_before_the_kill():
     asyncio.run(_run())
 
 
-def test_kill_returns_a_settled_job():
-    """kill joins, so a caller never sees a half-dead job."""
+def test_kill_answers_killed_at_once_and_ends_the_console_once_stopped():
+    """kill never joins; the console ends once the runner has stopped."""
 
     async def _run():
         table = JobTable()
@@ -161,8 +163,10 @@ def test_kill_returns_a_settled_job():
 
         assert await table.kill(1)
 
-        assert job.console.finished
         assert job.status == JobStatus.KILLED
+        assert job.process is not None
+        await job.process.join()
+        assert job.console.finished
 
     asyncio.run(_run())
 

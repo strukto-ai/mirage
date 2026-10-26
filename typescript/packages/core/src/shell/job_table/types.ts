@@ -42,7 +42,7 @@ export type JobRunner = (job: Job) => Promise<JobResult>
  * which tells apart two jobs a reused number gave the same id.
  */
 export class Job {
-  readonly id: number
+  id: number
   readonly command: string
   // null for jobs restored from a snapshot (already finished, no runner)
   // and for jobs another workspace runs.

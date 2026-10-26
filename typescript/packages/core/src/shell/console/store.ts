@@ -53,9 +53,13 @@ export interface ConsoleStore {
    * Resolve once the console holds a chunk after `seq`.
    *
    * Resolves immediately on a closed store, which is what keeps a reader
-   * that re-arms from parking on a console nobody will write to again.
+   * that re-arms from parking on a console nobody will write to again,
+   * and once `signal` aborts: an abandoned reader stops reading, where
+   * Python cancels its task.
+   *
+   * @param signal ends the wait early
    */
-  wait(seq: number): Promise<void>
+  wait(seq: number, signal?: AbortSignal): Promise<void>
 
   /**
    * Resolve once the console holds its ending chunk.

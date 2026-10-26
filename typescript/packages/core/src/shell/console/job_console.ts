@@ -129,15 +129,18 @@ export class JobConsole {
    * Resolve once the job has ended.
    *
    * Resolves on a closed store too, so a console discarded while someone
-   * was joining on it does not strand them.
+   * was joining on it does not strand them, and once `signal` aborts, so
+   * an abandoned join stops reading.
+   *
+   * @param signal ends the wait early
    */
-  async waitFinished(): Promise<void> {
+  async waitFinished(signal?: AbortSignal): Promise<void> {
     let cursor = 0
-    for (;;) {
+    while (signal?.aborted !== true) {
       const [chunks, next] = await this.backing.readFrom(cursor)
       cursor = next
       if (chunks.some((c) => c.channel === Channel.CONTROL)) return
-      await this.backing.wait(cursor)
+      await this.backing.wait(cursor, signal)
       if (this.backing.closed) return
     }
   }

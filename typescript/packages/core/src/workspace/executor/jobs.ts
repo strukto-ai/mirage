@@ -513,13 +513,21 @@ function resolveSpec(jobs: readonly Job[], spec: string): [Job | null, string] {
   return [null, `\`${spec}': not a pid or valid job spec`]
 }
 
-/** Block until the first of several jobs ends, and return it. */
-async function waitFirst(jobTable: JobTable, jobs: Job[]): Promise<Job> {
+/**
+ * Block until the first of several jobs ends, and return it. Once one has,
+ * the other waits are abandoned, as `signal` abandons them all.
+ */
+async function waitFirst(jobTable: JobTable, jobs: Job[], signal?: AbortSignal): Promise<Job> {
   for (const job of jobs) {
-    if (job.status !== JobStatus.RUNNING) return await jobTable.wait(job.id, job.sessionId)
+    if (job.status !== JobStatus.RUNNING) return await jobTable.wait(job.id, job.sessionId, signal)
   }
-  const races = jobs.map(async (job) => await jobTable.wait(job.id, job.sessionId))
-  return await Promise.race(races)
+  const losers = new AbortController()
+  const done = signal === undefined ? losers.signal : AbortSignal.any([signal, losers.signal])
+  try {
+    return await Promise.race(jobs.map((job) => jobTable.wait(job.id, job.sessionId, done)))
+  } finally {
+    losers.abort()
+  }
 }
 
 /**
@@ -637,14 +645,14 @@ export async function handleWait(
         new ExecutionNode({ command: cmdStr, exitCode: 127 }),
       ]
     }
-    const job = await abortable(waitFirst(jobTable, candidates), signal)
+    const job = await abortable(waitFirst(jobTable, candidates, signal), signal)
     if (varName !== null && view !== null) await view.set(varName, String(job.pid))
     const [stdout, io, node] = await reaped(jobTable, job, cmdStr)
     if (errBytes !== null) io.stderr = errBytes
     return [stdout, io, node]
   }
   if (specs.length === 0) {
-    await abortable(jobTable.waitAll(sid), signal)
+    await abortable(jobTable.waitAll(sid, signal), signal)
     await jobTable.popCompleted(sid)
     return [null, new IOResult(), new ExecutionNode({ command: cmdStr, exitCode: 0 })]
   }
@@ -658,7 +666,7 @@ export async function handleWait(
   let lastCode = 0
   let lastJob: Job | null = null
   for (const job of picked) {
-    const finished = await abortable(jobTable.wait(job.id, sid), signal)
+    const finished = await abortable(jobTable.wait(job.id, sid, signal), signal)
     const [, io] = await reaped(jobTable, finished, cmdStr)
     lastCode = io.exitCode
     lastJob = finished
@@ -785,7 +793,7 @@ export async function handleFg(
   }
   const header = encodeText(target.command + '\n')
   if (sink !== undefined) await sink.emit(Channel.STDOUT, header)
-  const job = await abortable(jobTable.wait(target.id, sid), signal)
+  const job = await abortable(jobTable.wait(target.id, sid, signal), signal)
   await jobTable.reap(target.id, sid)
   return [
     sink === undefined ? header : null,

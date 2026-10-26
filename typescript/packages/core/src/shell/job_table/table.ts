@@ -363,7 +363,9 @@ export class JobTable {
   /**
    * Insert a finished job restored from a snapshot into its session. Its
    * output moves onto a console in the store, so every workspace on it
-   * reads the job the way it reads one that ran there.
+   * reads the job the way it reads one that ran there. It keeps its number
+   * unless another workspace's job holds it, and then takes the next free
+   * one rather than hide that job.
    */
   async load(job: Job): Promise<void> {
     const name = crypto.randomUUID().replaceAll('-', '')
@@ -375,7 +377,7 @@ export class JobTable {
     job.console = restored
     job.owner = this.owner
     job.consoleName = name
-    await this.insert(job.sessionId, job.id, {
+    job.id = await this.insert(job.sessionId, job.id, {
       command: job.command,
       cwd: job.cwd,
       created_at: job.createdAt,
@@ -401,38 +403,48 @@ export class JobTable {
    * the list has not changed since it was read: a store drops the console
    * of a job reaped meanwhile, and attaching then would open an empty one
    * that never ends. So the list is read again after such an attach, and
-   * the sync retried should it have moved.
+   * the sync retried should it have moved. This table's own jobs are
+   * matched after the last read, with no wait between, so one it started
+   * meanwhile is never taken for another workspace's; a running one the
+   * list no longer names stays listed, unless the list holds it as
+   * disowned.
    */
   async sync(sessionId = ''): Promise<void> {
-    const local = this.jobs.get(sessionId) ?? new Map<number, Job>()
-    let jobs = new Map<number, Job>()
+    let fields: RecordFields | null = null
+    let remotes = new Map<string, Job>()
     for (let attempt = 0; attempt < LIST_MAX_RETRIES; attempt++) {
-      const fields = await this.store.load(sessionId)
-      const entries = (fields?.jobs ?? {}) as Record<string, ListEntry>
-      jobs = new Map<number, Job>()
-      let attached = false
-      for (const key of Object.keys(entries).sort((a, b) => Number(a) - Number(b))) {
-        const jobId = Number(key)
-        const entry = entries[key]
-        if (entry === undefined) continue
-        let job = local.get(jobId)
-        if (job?.consoleName !== entry.console) {
-          job = this.remote(jobId, sessionId, entry)
-          attached = true
-        }
-        if (job.process === null && job.status === JobStatus.RUNNING && entry.ending !== undefined)
-          [job.status, job.exitCode] = ended(entry.ending)
-        jobs.set(jobId, job)
-      }
-      if (!attached || generationOf(await this.store.load(sessionId)) === generationOf(fields))
+      fields = await this.store.load(sessionId)
+      const listed = (fields?.jobs ?? {}) as Record<string, ListEntry>
+      const known = new Set(this.listJobs(sessionId).map((j) => j.consoleName))
+      remotes = new Map(
+        Object.entries(listed)
+          .filter(([, entry]) => !known.has(entry.console))
+          .map(([key, entry]) => [entry.console, this.remote(Number(key), sessionId, entry)]),
+      )
+      if (
+        remotes.size === 0 ||
+        generationOf(await this.store.load(sessionId)) === generationOf(fields)
+      )
         break
     }
-    const kept = new Set(jobs.values())
-    for (const job of local.values()) {
-      if (job.process !== null && job.status === JobStatus.RUNNING && !kept.has(job))
-        this.disowned.push(job)
+    const entries = (fields?.jobs ?? {}) as Record<string, ListEntry>
+    const held = (fields?.disowned ?? {}) as Record<string, ListEntry>
+    const mine = new Map(this.listJobs(sessionId).map((j) => [j.consoleName, j]))
+    const jobs = new Map<number, Job>()
+    for (const [key, entry] of Object.entries(entries)) {
+      const job = mine.get(entry.console) ?? remotes.get(entry.console)
+      mine.delete(entry.console)
+      if (job === undefined) continue
+      if (job.process === null && job.status === JobStatus.RUNNING && entry.ending !== undefined)
+        [job.status, job.exitCode] = ended(entry.ending)
+      jobs.set(Number(key), job)
     }
-    this.jobs.set(sessionId, jobs)
+    for (const job of mine.values()) {
+      if (job.process === null || job.status !== JobStatus.RUNNING) continue
+      if (job.consoleName in held) this.disowned.push(job)
+      else jobs.set(job.id, job)
+    }
+    this.jobs.set(sessionId, new Map([...jobs].sort(([a], [b]) => a - b)))
     for (const job of jobs.values()) {
       if (job.process !== null) await adoptEnding(job)
       else if (job.status === JobStatus.RUNNING) await this.refresh(job)
@@ -481,7 +493,8 @@ export class JobTable {
    * until it finished on its own; joining would hang the shell on exactly
    * the runaway job the caller is trying to stop. A runner that has not
    * stopped `STOP_WAIT_SECONDS` later has its console ended for it, with
-   * the status the kill recorded.
+   * the status the kill recorded, and one that has not begun has it ended
+   * at once: no program ran that could leave its own.
    *
    * Another workspace's job is killed by ending its console; its owner
    * sees the ending and stops the runner. Should the job have ended
@@ -494,6 +507,10 @@ export class JobTable {
     const job = this.get(jobId, sessionId)
     if (job?.status !== JobStatus.RUNNING) return false
     if (job.process !== null) {
+      if (!job.process.begun) {
+        await stop(job, signal)
+        return true
+      }
       job.process.terminate(signal)
       job.status = JobStatus.KILLED
       job.exitCode = 128 + signal
@@ -595,23 +612,45 @@ export class JobTable {
    * time (a handler finishes, a sandbox is reaped) and the status it
    * leaves is the one answered, as bash's `wait` answers once the child
    * has gone. An ending another workspace wrote is taken at once, before
-   * this table's watcher stops the runner.
+   * this table's watcher stops the runner. The runner is joined too, for
+   * at most `STOP_WAIT_SECONDS`, so what its task holds is let go before
+   * this returns.
    *
    * Another workspace's job answers the status its ending records. While
    * none is stored its owner's lease is checked every third of it, and a
    * lapsed one ends the job as hung up.
+   *
+   * @param signal abandons the wait, so a caller that gave up stops its
+   *   reads: a promise cannot be cancelled, where Python cancels its task.
+   *   The job keeps running.
    */
-  async wait(jobId: number, sessionId = ''): Promise<Job> {
+  async wait(jobId: number, sessionId = '', signal?: AbortSignal): Promise<Job> {
     const job = this.get(jobId, sessionId)
     if (job === null) {
       throw new Error(`unknown job: ${jobId.toString()}`)
     }
     if (job.process === null) {
-      if (job.status === JobStatus.RUNNING) await this.joinRemote(job)
+      if (job.status === JobStatus.RUNNING) await this.joinRemote(job, signal)
       return job
     }
-    await job.console.waitFinished()
+    await job.console.waitFinished(signal)
+    if (signal?.aborted === true) return job
     await adoptEnding(job)
+    let timer: ReturnType<typeof setTimeout> | undefined
+    let stop = (): void => undefined
+    const late = new Promise<null>((resolve) => {
+      stop = () => {
+        resolve(null)
+      }
+      timer = setTimeout(stop, STOP_WAIT_SECONDS * 1000)
+      signal?.addEventListener('abort', stop, { once: true })
+    })
+    try {
+      await Promise.race([job.process.join(), late])
+    } finally {
+      clearTimeout(timer)
+      signal?.removeEventListener('abort', stop)
+    }
     return job
   }
 
@@ -624,10 +663,10 @@ export class JobTable {
    * snapshots each console right after this returns. Joining a
    * finished job costs one read.
    */
-  async waitAll(sessionId = ''): Promise<Job[]> {
+  async waitAll(sessionId = '', signal?: AbortSignal): Promise<Job[]> {
     const running = this.runningJobs(sessionId)
     for (const job of this.listJobs(sessionId)) {
-      await this.wait(job.id, sessionId)
+      await this.wait(job.id, sessionId, signal)
     }
     return running
   }
@@ -765,16 +804,17 @@ export class JobTable {
   }
 
   /**
-   * Block until another workspace's job ends. One read follows the console
-   * across every lease check, so a long wait never stacks readers.
+   * Block until another workspace's job ends, or `signal` aborts. One read
+   * follows the console across every lease check, so a long wait never
+   * stacks readers, and an abandoned one stops reading.
    */
-  private async joinRemote(job: Job): Promise<void> {
+  private async joinRemote(job: Job, signal?: AbortSignal): Promise<void> {
     const lease = this.store.leaseSeconds
-    const finished = job.console.waitFinished()
+    const finished = job.console.waitFinished(signal)
     finished.catch((err: unknown) => {
       console.debug('job wait failed:', err)
     })
-    while (job.status === JobStatus.RUNNING) {
+    while (job.status === JobStatus.RUNNING && signal?.aborted !== true) {
       if (lease === null) {
         await finished
       } else {
@@ -815,14 +855,22 @@ export class JobTable {
     throw new Error(`job list of session ${sessionId} kept conflicting with another writer`)
   }
 
-  /** Add a job to a session's list under its own number. */
-  private async insert(sessionId: string, jobId: number, entry: ListEntry): Promise<void> {
+  /**
+   * Add a job to a session's list under its own number, or under the next
+   * free one should another job hold it, and return the number it took.
+   */
+  private async insert(sessionId: string, jobId: number, entry: ListEntry): Promise<number> {
     for (let attempt = 0; attempt < LIST_MAX_RETRIES; attempt++) {
       const fields = await this.store.load(sessionId)
       const jobs = { ...((fields?.jobs ?? {}) as Record<string, ListEntry>) }
-      jobs[jobId.toString()] = entry
       const following = Number(fields?.next ?? 1)
-      if (await this.write(sessionId, fields, jobs, Math.max(following, jobId + 1))) return
+      let taken = jobId
+      if (taken.toString() in jobs) {
+        taken = following
+        while (taken.toString() in jobs) taken += 1
+      }
+      jobs[taken.toString()] = entry
+      if (await this.write(sessionId, fields, jobs, Math.max(following, taken + 1))) return taken
     }
     throw new Error(`job list of session ${sessionId} kept conflicting with another writer`)
   }
@@ -859,7 +907,7 @@ export class JobTable {
       const held = { ...((fields.disowned ?? {}) as Record<string, ListEntry>) }
       if (disowned)
         for (const [key, entry] of Object.entries(stored))
-          if (dropped.has(Number(key))) held[entry.console] = entry
+          if (dropped.has(Number(key)) && entry.ending === undefined) held[entry.console] = entry
       if (await this.write(sessionId, fields, jobs, following, held)) return
     }
     throw new Error(`job list of session ${sessionId} kept conflicting with another writer`)

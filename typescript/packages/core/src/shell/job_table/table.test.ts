@@ -261,7 +261,9 @@ describe('JobTable.kill', () => {
       await up
       expect(await jt.kill(j.id, '', 15)).toBe(true)
       const waiting = jt.wait(j.id)
-      await vi.advanceTimersByTimeAsync(STOP_WAIT_SECONDS * 1000)
+      // The console ends at the stop's bound, and wait joins the runner
+      // for one more before it answers.
+      await vi.advanceTimersByTimeAsync(STOP_WAIT_SECONDS * 1000 * 2)
       expect((await waiting).exitCode).toBe(143)
     } finally {
       vi.useRealTimers()
@@ -935,11 +937,11 @@ class CountedWaits implements ConsoleStore {
     return this.inner.closed
   }
 
-  async wait(seq: number): Promise<void> {
+  async wait(seq: number, signal?: AbortSignal): Promise<void> {
     this.count.parked += 1
     this.count.most = Math.max(this.count.most, this.count.parked)
     try {
-      await this.inner.wait(seq)
+      await this.inner.wait(seq, signal)
     } finally {
       this.count.parked -= 1
     }
@@ -1182,5 +1184,87 @@ describe('JobTable on a shared store, across reaps and closes', () => {
     release()
     await job.process?.join()
     expect((await store.load('s'))?.disowned).toBeUndefined()
+  })
+})
+
+describe('JobTable on a shared store, across launches, restores and abandoned waits', () => {
+  it('a job started during a sync stays this table own', async () => {
+    const store = new HookAfterRead()
+    const jt = new JobTable(store)
+    const started: Job[] = []
+    store.afterRead = async () => {
+      started.push(await sleeping(jt))
+    }
+    await jt.sync('s')
+    const [job] = started
+    expect(job).toBeDefined()
+    if (job === undefined) return
+    expect(jt.get(job.id, 's')).toBe(job)
+    expect(job.process).not.toBeNull()
+    await jt.killAll()
+  })
+
+  it('a disown never parks a job that already ended', async () => {
+    const store = new RAMJobStore()
+    const a = new JobTable(store)
+    const b = new JobTable(store)
+    let release = (): void => undefined
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const abort = new AbortController()
+    const job = await a.submit({
+      command: 'slow',
+      run: gated(gate),
+      abort,
+      cwd: '/',
+      sessionId: 's',
+    })
+    await b.sync('s')
+    release()
+    await job.process?.join()
+    expect(await b.disown(1, 's')).toBe(true)
+    expect((await store.load('s'))?.disowned).toBeUndefined()
+  })
+
+  it('a restore never hides a job that holds its number', async () => {
+    const store = new RAMJobStore()
+    const a = new JobTable(store)
+    const b = new JobTable(store)
+    const live = await sleeping(b)
+    const restored = new Job({
+      id: live.id,
+      command: 'old',
+      cwd: '/',
+      createdAt: 0,
+      status: JobStatus.COMPLETED,
+      sessionId: 's',
+      console: new JobConsole(null, true),
+    })
+    await a.load(restored)
+    expect(restored.id).toBe(live.id + 1)
+    await b.sync('s')
+    expect(b.listJobs('s').map((j) => [j.id, j.command])).toEqual([
+      [live.id, 'sleep 30'],
+      [live.id + 1, 'old'],
+    ])
+    await b.killAll()
+  })
+
+  it('an abandoned wait elsewhere stops reading', async () => {
+    const store = new CountingWaits()
+    const a = new JobTable(store)
+    const b = new JobTable(store)
+    const job = await sleeping(a)
+    await b.sync('s')
+    const abandon = new AbortController()
+    const waiting = b.wait(1, 's', abandon.signal)
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    expect(store.count.parked).toBe(1)
+    abandon.abort()
+    await waiting
+    expect(store.count.parked).toBe(0)
+    expect(job.status).toBe(JobStatus.RUNNING)
+    await a.killAll()
   })
 })

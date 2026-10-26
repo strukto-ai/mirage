@@ -342,13 +342,15 @@ async def to_state_dict(ws: WorkspaceLike) -> dict[str, Any]:
     ]
 
     # The lists live in the job store, where other workspaces on it add
-    # jobs this one has not read yet.
+    # jobs this one has not read yet. A killed job is finished only once
+    # its console ended: its runner may still leave output and a status.
     for s in ws._session_mgr.list():
         await ws.job_table.sync(s.session_id)
     finished_jobs = [
         await _job_to_dict(j)
         for j in ws.job_table.all_jobs()
         if j.status != JobStatus.RUNNING
+        and (j.process is None or j.console.finished)
     ]
 
     if mounted != ws.registry.mounts() or any(m.retiring for m in mounted):

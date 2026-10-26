@@ -363,16 +363,22 @@ class JobTable:
         name = uuid.uuid4().hex
         created_at = self.clock.now()
         await self.store.renew(self.owner)
-        job_id = await self._allocate(
-            session_id,
-            {
-                "command": command,
-                "cwd": cwd,
-                "created_at": created_at,
-                "owner": self.owner,
-                "console": name,
-            },
-        )
+        try:
+            job_id = await self._allocate(
+                session_id,
+                {
+                    "command": command,
+                    "cwd": cwd,
+                    "created_at": created_at,
+                    "owner": self.owner,
+                    "console": name,
+                },
+            )
+        except BaseException:
+            # A cancel can land after the store took the entry but before
+            # its answer did; the entry names a job no runner will start.
+            await self._remove(session_id, {name}, give_back=True)
+            raise
         job: Job | None = None
 
         async def execute() -> int:
@@ -427,7 +433,9 @@ class JobTable:
         """Insert a finished job restored from a snapshot into its session.
 
         Its output moves onto a console in the store, so every workspace
-        on it reads the job the way it reads one that ran there.
+        on it reads the job the way it reads one that ran there. It keeps
+        its number unless another workspace's job holds it, and then takes
+        the next free one rather than hide that job.
 
         Args:
             job (Job): the restored job.
@@ -443,7 +451,7 @@ class JobTable:
         job.console = restored
         job.owner = self.owner
         job.console_name = name
-        await self._insert(
+        job.id = await self._insert(
             job.session_id,
             job.id,
             {
@@ -473,44 +481,59 @@ class JobTable:
         the console of a job reaped meanwhile, and attaching then would
         open an empty one that never ends. So the list is read again
         after such an attach, and the sync retried should it have moved.
+        This table's own jobs are matched after the last read, with no
+        wait between, so one it started meanwhile is never taken for
+        another workspace's; a running one the list no longer names stays
+        listed, unless the list holds it as disowned.
 
         Args:
             session_id (str): the session whose list to refresh.
         """
-        local = self._jobs.get(session_id, {})
-        jobs: dict[int, Job] = {}
+        fields: RecordFields | None = None
+        remotes: dict[str, Job] = {}
         for _ in range(LIST_MAX_RETRIES):
             fields = await self.store.load(session_id)
-            entries: RecordFields = fields.get("jobs", {}) if fields else {}
-            jobs = {}
-            attached = False
-            for key in sorted(entries, key=int):
-                job_id = int(key)
-                entry = entries[key]
-                job = local.get(job_id)
-                if job is None or job.console_name != entry["console"]:
-                    job = self._remote(job_id, session_id, entry)
-                    attached = True
-                ending = entry.get("ending")
-                if (
-                    job.process is None
-                    and job.status == JobStatus.RUNNING
-                    and ending is not None
-                ):
-                    job.status, job.exit_code = _ended(ending)
-                jobs[job_id] = job
-            if not attached or generation_of(
+            listed = fields.get("jobs", {}) if fields else {}
+            known = {
+                j.console_name for j in self._jobs.get(session_id, {}).values()
+            }
+            remotes = {
+                entry["console"]: self._remote(int(key), session_id, entry)
+                for key, entry in listed.items()
+                if entry["console"] not in known
+            }
+            if not remotes or generation_of(
                 await self.store.load(session_id)
             ) == generation_of(fields):
                 break
-        for job in local.values():
+        entries: RecordFields = fields.get("jobs", {}) if fields else {}
+        held: RecordFields = fields.get("disowned", {}) if fields else {}
+        mine = {
+            j.console_name: j for j in self._jobs.get(session_id, {}).values()
+        }
+        jobs: dict[int, Job] = {}
+        for key, entry in entries.items():
+            job = mine.pop(entry["console"], None)
+            if job is None:
+                job = remotes.get(entry["console"])
+            if job is None:
+                continue
+            ending = entry.get("ending")
             if (
-                job.process is not None
+                job.process is None
                 and job.status == JobStatus.RUNNING
-                and all(job is not kept for kept in jobs.values())
+                and ending is not None
             ):
+                job.status, job.exit_code = _ended(ending)
+            jobs[int(key)] = job
+        for job in mine.values():
+            if job.process is None or job.status != JobStatus.RUNNING:
+                continue
+            if job.console_name in held:
                 self._disowned.append(job)
-        self._jobs[session_id] = jobs
+            else:
+                jobs[job.id] = job
+        self._jobs[session_id] = dict(sorted(jobs.items()))
         for job in jobs.values():
             if job.process is not None:
                 await _adopt_ending(job)
@@ -573,7 +596,8 @@ class JobTable:
         its own; joining would hang the shell on exactly the runaway job
         the caller is trying to stop. A runner that has not stopped
         ``STOP_WAIT_SECONDS`` later has its console ended for it, with
-        the status the kill recorded.
+        the status the kill recorded, and one that has not begun has it
+        ended at once: no program ran that could leave its own.
 
         Another workspace's job is killed by ending its console; its
         owner sees the ending and stops the runner. Should the job have
@@ -590,6 +614,9 @@ class JobTable:
         if job is None or job.status != JobStatus.RUNNING:
             return False
         if job.process is not None:
+            if not job.process.begun:
+                await _stop(job, signal)
+                return True
             cancel_job(job, signal)
             job.status = JobStatus.KILLED
             job.exit_code = 128 + signal
@@ -707,7 +734,9 @@ class JobTable:
         that time (a handler finishes, a sandbox is reaped) and the
         status it leaves is the one answered, as bash's ``wait`` answers
         once the child has gone. An ending another workspace wrote is
-        taken at once, before this table's watcher stops the runner.
+        taken at once, before this table's watcher stops the runner. The
+        runner is joined too, for at most ``STOP_WAIT_SECONDS``, so what
+        its task holds is let go before this returns.
 
         Another workspace's job answers the status its ending records.
         While none is stored its owner's lease is checked every third of
@@ -724,6 +753,11 @@ class JobTable:
             return job
         await job.console.wait_finished()
         await _adopt_ending(job)
+        try:
+            async with asyncio.timeout(STOP_WAIT_SECONDS):
+                await job.process.join()
+        except TimeoutError:
+            logger.debug("job %d still stopping after wait", job.id)
         return job
 
     async def wait_all(self, session_id: str = "") -> list[Job]:
@@ -931,8 +965,10 @@ class JobTable:
 
     async def _insert(
         self, session_id: str, job_id: int, entry: RecordFields
-    ) -> None:
-        """Add a job to a session's list under its own number.
+    ) -> int:
+        """Add a job to a session's list under its own number, or under
+        the next free one should another job hold it, and return the
+        number it took.
 
         Args:
             session_id (str): the session.
@@ -942,12 +978,17 @@ class JobTable:
         for _ in range(LIST_MAX_RETRIES):
             fields = await self.store.load(session_id)
             jobs = dict(fields.get("jobs", {})) if fields else {}
-            jobs[str(job_id)] = entry
             following = int(fields.get("next", 1)) if fields else 1
+            taken = job_id
+            if str(taken) in jobs:
+                taken = following
+                while str(taken) in jobs:
+                    taken += 1
+            jobs[str(taken)] = entry
             if await self._write(
-                session_id, fields, jobs, max(following, job_id + 1)
+                session_id, fields, jobs, max(following, taken + 1)
             ):
-                return
+                return taken
         raise RuntimeError(
             f"job list of session {session_id!r} kept conflicting "
             "with another writer"
@@ -993,7 +1034,7 @@ class JobTable:
                 held |= {
                     v["console"]: v
                     for k, v in stored.items()
-                    if int(k) in dropped
+                    if int(k) in dropped and "ending" not in v
                 }
             if await self._write(session_id, fields, jobs, following, held):
                 return

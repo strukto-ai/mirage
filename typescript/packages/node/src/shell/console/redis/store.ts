@@ -30,7 +30,7 @@ interface StreamEntry {
 export interface RedisConsoleStoreOptions {
   url?: string
   keyPrefix?: string
-  /** Expire the keys this long after the last append; absent keeps them. */
+  /** Expire the keys this long after the ending chunk; absent keeps them. */
   ttlSeconds?: number
   /**
    * A connection the caller owns and shares between consoles (a job
@@ -79,9 +79,10 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
  * `waitEnded` polls the ending flag instead, so a watcher costs nothing
  * per chunk.
  * There is no retention trim, so readFrom never reports a truncated
- * cursor; retention is bounded by `ttlSeconds` instead, refreshed on
- * every append, so a console expires that long after its job's last
- * write.
+ * cursor; retention is bounded by `ttlSeconds` instead, counted from the
+ * ending chunk, so a console expires that long after its job ended and
+ * never while it runs, however long it stays quiet: a reader parked on it
+ * would not see a restarted sequence.
  */
 export class RedisConsoleStore implements ConsoleStore {
   readonly url: string
@@ -177,13 +178,13 @@ export class RedisConsoleStore implements ConsoleStore {
     return [[], Math.min(seq, total), false]
   }
 
-  async wait(seq: number): Promise<void> {
+  async wait(seq: number, signal?: AbortSignal): Promise<void> {
     // Checked before touching the client: close() nulls the promise,
     // and a wait arriving later must not reconnect a discarded store.
     if (this.isClosed) return
     const c = await this.client()
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- close() flips it across awaits
-    while (!this.isClosed) {
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- close() and the signal flip across awaits
+    while (!this.isClosed && signal?.aborted !== true) {
       let raw: string | null
       try {
         raw = await c.get(this.counterKey)
@@ -195,7 +196,7 @@ export class RedisConsoleStore implements ConsoleStore {
         throw err
       }
       if (raw !== null && Number(raw) > seq) return
-      await sleep(POLL_MS)
+      await sleep(POLL_MS, signal)
     }
   }
 

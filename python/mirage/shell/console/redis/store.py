@@ -51,14 +51,16 @@ class RedisConsoleStore:
     local ``close`` is noticed within one round; ``wait_ended`` polls
     the ending flag instead, so a watcher costs nothing per chunk. There is no retention
     trim, so ``read_from`` never reports a truncated cursor; retention
-    is bounded by ``ttl_seconds`` instead, refreshed on every append,
-    so a console expires that long after its job's last write.
+    is bounded by ``ttl_seconds`` instead, counted from the ending
+    chunk, so a console expires that long after its job ended and never
+    while it runs, however long it stays quiet: a reader parked on it
+    would not see a restarted sequence.
 
     Args:
         url (str): Redis connection URL.
         key_prefix (str): namespace for this one console's keys.
         ttl_seconds (int | None): expire the keys this long after the
-            last append. None keeps them until deleted by hand.
+            ending chunk. None keeps them until deleted by hand.
         client (aioredis.Redis | None): a client the caller owns and
             shares between consoles (a job store's); None connects to
             ``url`` and closes that connection on ``close``.

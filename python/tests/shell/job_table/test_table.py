@@ -894,3 +894,100 @@ async def test_a_disowned_job_drops_its_record_when_it_ends():
     await job.process.join()
     ended = await store.load("s")
     assert ended is not None and "disowned" not in ended
+
+
+@pytest.mark.asyncio
+async def test_a_job_started_during_a_sync_stays_this_tables_own():
+    store = _HookAfterRead()
+    table = JobTable(store)
+    started: list[Job] = []
+
+    async def launch() -> None:
+        started.append(
+            await table.submit("sleep 30", _run_forever, "/", session_id="s")
+        )
+
+    store.after_read = launch
+    await table.sync("s")
+    [job] = started
+    assert table.get(job.id, "s") is job
+    assert job.process is not None
+    await table.kill_all()
+
+
+@pytest.mark.asyncio
+async def test_a_disown_never_parks_a_job_that_already_ended():
+    store = RAMJobStore()
+    a, b = JobTable(store), JobTable(store)
+    gate = asyncio.Event()
+
+    async def run(job: Job) -> tuple[IOResult, ExecutionNode]:
+        await gate.wait()
+        return IOResult(), ExecutionNode()
+
+    job = await a.submit("slow", run, "/", session_id="s")
+    await b.sync("s")
+    gate.set()
+    assert job.process is not None
+    await job.process.join()
+    assert await b.disown(1, "s")
+    stored = await store.load("s")
+    assert stored is not None and "disowned" not in stored
+
+
+class _CancelledAfterWrite(RAMJobStore):
+    """A job store whose first list write lands but whose caller is
+    cancelled before it hears so, as a cancel racing a Redis reply."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.cancel_once = True
+
+    async def cas_set(
+        self, session_id: str, fields: RecordFields, expected_generation: int
+    ) -> bool:
+        written = await super().cas_set(
+            session_id, fields, expected_generation
+        )
+        if written and self.cancel_once:
+            self.cancel_once = False
+            raise asyncio.CancelledError
+        return written
+
+
+@pytest.mark.asyncio
+async def test_a_launch_cancelled_after_its_write_leaves_no_entry():
+    store = _CancelledAfterWrite()
+    table = JobTable(store)
+    with pytest.raises(asyncio.CancelledError):
+        await table.submit("sleep 30", _run_forever, "/", session_id="s")
+    stored = await store.load("s")
+    assert stored is not None and stored["jobs"] == {}
+    assert (
+        await table.submit("next", _run_forever, "/", session_id="s")
+    ).id == 1
+    await table.kill_all()
+
+
+@pytest.mark.asyncio
+async def test_a_restore_never_hides_a_job_that_holds_its_number():
+    store = RAMJobStore()
+    a, b = JobTable(store), JobTable(store)
+    live = await b.submit("sleep 30", _run_forever, "/", session_id="s")
+    restored = Job(
+        id=live.id,
+        command="old",
+        cwd="/",
+        created_at=0.0,
+        status=JobStatus.COMPLETED,
+        session_id="s",
+        console=JobConsole(finished=True),
+    )
+    await a.load(restored)
+    assert restored.id == live.id + 1
+    await b.sync("s")
+    assert [(j.id, j.command) for j in b.list_jobs("s")] == [
+        (live.id, "sleep 30"),
+        (live.id + 1, "old"),
+    ]
+    await b.kill_all()
