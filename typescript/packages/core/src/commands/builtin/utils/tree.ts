@@ -196,8 +196,10 @@ function answerable(path: PathSpec): boolean {
 
 /**
  * One level of `path`: each child's stat by its name, and the listing, in the
- * order a whole read lists it; null where the read gives way to the walk's own
- * listing. Mirrors Python's `_level`.
+ * order the answer gives it; null where the read gives way to the walk's own
+ * listing. A name only an entry below implies (a link's parent the namespace
+ * holds) is listed with no row, so its stat asks the dispatcher. Mirrors
+ * Python's `_level`.
  */
 async function level(
   readTree: ReadTree,
@@ -209,11 +211,18 @@ async function level(
     found = await readTree(path, limit, true)
   } catch (err) {
     if ((err as { code?: unknown }).code !== 'ENOTSUP' && !isEnotdir(err)) throw err
+    console.debug(`no level read of ${path.virtual}: ${String(err)}`)
     return null
   }
   if (found === null) return null
-  const copy = new Map(found)
-  return [copy, listings(copy).get('') ?? []]
+  const rows = new Map<string, FileStat>()
+  const names = new Set<string>()
+  for (const [key, row] of found) {
+    const name = key.split('/', 1)[0] ?? key
+    names.add(name)
+    if (name === key) rows.set(name, row)
+  }
+  return [rows, [...names]]
 }
 
 /**
@@ -235,8 +244,10 @@ async function level(
  * A directory no whole answer covers is read one level at a time
  * (`readTree(path, limit, true)`): its listing and each child's stat in one
  * call, so a walk the mount reads no subtree for, or one a depth bounds,
- * stats no child on its own either. `whole` false reads levels only, for a
- * walk a depth bounds or a single listing. Mirrors Python's `tree_walk`.
+ * stats no child on its own either. A listing a limit cuts is read again
+ * under the next one, as `readdir` would be. `whole` false reads levels only,
+ * for a walk a depth bounds or a single listing. Mirrors Python's
+ * `tree_walk`.
  */
 export function treeWalk<D, S>(
   readTree: ReadTree | undefined,
@@ -282,7 +293,9 @@ export function treeWalk<D, S>(
         return listing.map((name) => base + name) as D
       }
     } else if (answerable(path) && path.pattern === null) {
-      if (!levels.has(virtual)) levels.set(virtual, await level(readTree, path, limit))
+      if (limit !== undefined || !levels.has(virtual)) {
+        levels.set(virtual, await level(readTree, path, limit))
+      }
       const answer = levels.get(virtual)
       if (answer != null) {
         const base = virtual.replace(/\/+$/, '') + '/'

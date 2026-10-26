@@ -1263,16 +1263,19 @@ export class MountEntry {
    * One level of a subtree read: the directory's listing, as `readdir`
    * answers it, each child keyed by its name with the row its `stat` answers
    * from that listing. Null where a stat does not come from the listing: a
-   * mount that keeps none, one under `read: fresh`, whose stats check the
-   * backend, and a child whose row a stat would finish (`whole`). Mirrors
-   * Python's `_level`.
+   * mount that keeps none, or whose index keeps no listing live (a zero ttl),
+   * one under `read: fresh`, whose stats check the backend, a listing the
+   * index does not hold live once listed, and a child whose row a stat would
+   * finish (`whole`). A listing cut at the walk's limit answers for the
+   * children it names, as their stats do. Mirrors Python's `_level`.
    */
   private async level(
     virtual: string,
     limit: number | undefined,
     access?: SessionAccess,
   ): Promise<Map<string, FileStat> | null> {
-    if (!this.lists || this.read.policy === ReadPolicy.FRESH) return null
+    const index = this.index
+    if (!this.lists || this.read.policy === ReadPolicy.FRESH || index.ttl <= 0) return null
     const names = (await this.call(
       'readdir',
       virtual,
@@ -1280,10 +1283,14 @@ export class MountEntry {
       limit === undefined ? {} : { limit },
       access,
     )) as string[]
-    const rows = await this.index.getMany(names)
+    const listing = await index.listDir(indexKey(this.prefix, this.scope(virtual)))
+    const held = listing.entries ?? listing.partialEntries ?? null
+    if (held === null) return null
+    const live = new Set(held)
+    const rows = await index.getMany(names)
     const found = new Map<string, FileStat>()
     for (const child of names) {
-      const row = this.whole(rows.get(child) ?? null)
+      const row = live.has(child) ? this.whole(rows.get(child) ?? null) : null
       if (row === null) return null
       found.set(child.slice(child.lastIndexOf('/') + 1), row)
     }

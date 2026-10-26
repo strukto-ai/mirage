@@ -236,8 +236,10 @@ async def _level(
     read_tree: ReadTree, path: PathSpec, limit: int | None
 ) -> tuple[dict[str, FileStat], list[str]] | None:
     """One level of ``path``: each child's stat by its name, and the
-    listing, in the order a whole read lists it; None where the read
-    gives way to the walk's own listing.
+    listing, in the order the answer gives it; None where the read gives
+    way to the walk's own listing. A name only an entry below implies (a
+    link's parent the namespace holds) is listed with no row, so its stat
+    asks the dispatcher.
 
     Args:
         read_tree (ReadTree): the walk's ``read_tree``.
@@ -255,8 +257,14 @@ async def _level(
         return None
     if found is None:
         return None
-    found = dict(found)
-    return found, _listings(found)[""]
+    rows: dict[str, FileStat] = {}
+    names: dict[str, None] = {}
+    for key, row in found.items():
+        name = key.split("/", 1)[0]
+        names.setdefault(name)
+        if name == key:
+            rows[name] = row
+    return rows, list(names)
 
 
 def tree_walk(
@@ -285,7 +293,8 @@ def tree_walk(
     A directory no whole answer covers is read one level at a time
     (``read_tree(path, level=True)``): its listing and each child's stat
     in one call, so a walk the mount reads no subtree for, or one a
-    depth bounds, stats no child on its own either.
+    depth bounds, stats no child on its own either. A listing a limit
+    cuts is read again under the next one, as ``readdir`` would be.
 
     Args:
         read_tree (ReadTree | None): the mount's ``read_tree``, bound to
@@ -336,7 +345,7 @@ def tree_walk(
                 base = root.rstrip("/") + "/"
                 return [base + name for name in listing]
         elif _answerable(path) and not path.pattern:
-            if virtual not in levels:
+            if limit is not None or virtual not in levels:
                 levels[virtual] = await _level(read_tree, path, limit)
             level = levels[virtual]
             if level is not None:

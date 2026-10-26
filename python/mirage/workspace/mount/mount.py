@@ -2008,23 +2008,42 @@ class MountEntry:
         """One level of a subtree read: the directory's listing, as
         ``readdir`` answers it, each child keyed by its name with the row
         its ``stat`` answers from that listing. None where a stat does
-        not come from the listing: a mount that keeps none, one under
-        ``read: fresh``, whose stats check the backend, and a child whose
-        row a stat would finish (``_whole``).
+        not come from the listing: a mount that keeps none, or whose
+        index keeps no listing live (a zero ttl), one under ``read:
+        fresh``, whose stats check the backend, a listing the index does
+        not hold live once listed, and a child whose row a stat would
+        finish (``_whole``). A listing cut at the walk's limit answers
+        for the children it names, as their stats do.
 
         Args:
             virtual (str): the directory.
             limit (int | None): the listing's limit, as a walk hands it.
         """
-        if not self._lists or self.read.policy is ReadPolicy.FRESH:
+        index = self.index
+        if (
+            not self._lists
+            or self.read.policy is ReadPolicy.FRESH
+            or index.ttl <= 0
+        ):
             return None
         names = await self.call(
             "readdir", virtual, **({} if limit is None else {"limit": limit})
         )
-        rows = await self.index.get_many(names)
+        listing = await index.list_dir(
+            index_key(self.prefix, self._scope(virtual))
+        )
+        held = (
+            listing.entries
+            if listing.entries is not None
+            else listing.partial_entries
+        )
+        if held is None:
+            return None
+        live = set(held)
+        rows = await index.get_many(names)
         found: dict[str, FileStat] = {}
         for child in names:
-            row = self._whole(rows.get(child))
+            row = self._whole(rows.get(child)) if child in live else None
             if row is None:
                 return None
             found[child.rsplit("/", 1)[-1]] = row

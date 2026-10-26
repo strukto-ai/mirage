@@ -126,8 +126,8 @@ async def test_no_answer_walks_the_usual_way_and_asks_once(mount):
 async def test_a_level_lists_its_directory_and_answers_its_childrens_stats():
     mount = _Mount(
         level={
-            "b.txt": FileStat(name="b.txt", type=FILE, size=2),
             "e": FileStat(name="e", type=DIR),
+            "b.txt": FileStat(name="b.txt", type=FILE, size=2),
             "l/x": FileStat(name="x", type=FileType.SYMLINK),
         }
     )
@@ -135,14 +135,14 @@ async def test_a_level_lists_its_directory_and_answers_its_childrens_stats():
         mount.read_tree, mount.readdir, mount.stat, False
     )
     root = PathSpec.from_str_path("/m")
-    assert await readdir(root) == ["/m/b.txt", "/m/e", "/m/l"]
+    assert await readdir(root) == ["/m/e", "/m/b.txt", "/m/l"]
     assert (await stat(PathSpec.from_str_path("/m/b.txt"))).size == 2
-    assert (await stat(PathSpec.from_str_path("/m/l"))).type is DIR
+    await stat(PathSpec.from_str_path("/m/l"))
     await readdir(PathSpec.from_str_path("/m/e"))
     await stat(PathSpec.from_str_path("/m/l/x"))
     assert mount.asked == []
     assert mount.levels == ["/m", "/m/e"]
-    assert mount.calls == ["stat /m/l/x"]
+    assert mount.calls == ["stat /m/l", "stat /m/l/x"]
 
 
 @pytest.mark.asyncio
