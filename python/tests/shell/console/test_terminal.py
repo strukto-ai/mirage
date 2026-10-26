@@ -201,6 +201,24 @@ async def test_an_attached_reader_takes_what_was_handed_back_first():
 
 
 @pytest.mark.asyncio
+async def test_a_cancelled_writer_leaves_the_handed_back_output_whole():
+    tty, to = Terminal(), Terminal()
+    reader = _Stalled()
+    await to.attach(reader)
+    await tty.jobs.emit(Channel.STDOUT, b"saved\n")
+    tty.hand_over(to)
+    writer = asyncio.create_task(to.jobs.emit(Channel.STDOUT, b"newer\n"))
+    await asyncio.wait_for(reader.entered.wait(), 5)
+    writer.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await writer
+    reader.release.set()
+    await asyncio.wait_for(to.emit(Channel.STDOUT, b"later\n"), 5)
+    assert await reader.snapshot(Channel.STDOUT) == b"saved\nnewer\nlater\n"
+    assert to.reader is reader
+
+
+@pytest.mark.asyncio
 async def test_bounded_output_goes_back_ahead_of_later_output():
     tty = Terminal()
     await tty.emit(Channel.STDOUT, b"long line\n")

@@ -17,6 +17,7 @@ from collections import deque
 from collections.abc import Awaitable, Callable
 from typing import Any
 
+from mirage.concurrency.limiter import owned_task
 from mirage.io.cooperative import CHUNK_SIZE
 from mirage.shell.console.job_console import JobConsole
 from mirage.shell.console.types import Channel, OwnedStream
@@ -42,6 +43,7 @@ class Terminal(JobConsole):
         self.ended = 0
         self.attaching: asyncio.Event | None = None
         self._prefix = bytearray()
+        self._draining: asyncio.Task[None] | None = None
 
     @property
     def stdout_prefix(self) -> bytes:
@@ -65,7 +67,8 @@ class Terminal(JobConsole):
         """Pass a chunk to the reader, or keep it for the line; while a
         reader takes what waited (``attach``), keep it and wait. What was
         handed back to an attached reader (``hand_over``) goes to it
-        first.
+        first, all of it even if the writer is cancelled meanwhile: the
+        reader is the line's, not the writer's.
 
         Args:
             channel (Channel): stdout or stderr.
@@ -82,7 +85,8 @@ class Terminal(JobConsole):
         self.chunks.append((channel, data, job))
         if reader is not None:
             self.reader = None
-            await self._pass(reader)
+            self._draining = owned_task(self._pass(reader))
+            await asyncio.shield(self._draining)
         elif self.attaching is not None:
             await self.attaching.wait()
 
