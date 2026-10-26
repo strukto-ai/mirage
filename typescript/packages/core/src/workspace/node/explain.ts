@@ -736,7 +736,8 @@ function moves(node: TSNodeLike, session: SessionState, home: string | null): bo
       }
     }
     const children = current.children
-    stack.push(...children.filter((_, index) => children[index + 1]?.type !== '&'))
+    for (const item of children.filter((_, index) => children[index + 1]?.type !== '&'))
+      stack.push(item)
   }
   return false
 }
@@ -1594,9 +1595,9 @@ function scopeNode(
   for (const [span, ones] of mine) {
     const [start, end] = span.split(':').map(Number)
     const spoken = text.slice(start, end)
-    children.push(...ones.map((one) => commandOf(one, spoken, [], runtimeOf)))
+    for (const item of ones.map((one) => commandOf(one, spoken, [], runtimeOf))) children.push(item)
   }
-  children.push(...take(0, Number.MAX_SAFE_INTEGER))
+  for (const item of take(0, Number.MAX_SAFE_INTEGER)) children.push(item)
   return { type: kind, text, children }
 }
 

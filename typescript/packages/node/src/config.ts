@@ -1247,7 +1247,7 @@ function looksLikeCliSpec(value: unknown): boolean {
         return false
     }
     const subcommands: unknown[] = node.subcommands
-    pending.push(...subcommands)
+    for (const item of subcommands) pending.push(item)
   }
   return true
 }

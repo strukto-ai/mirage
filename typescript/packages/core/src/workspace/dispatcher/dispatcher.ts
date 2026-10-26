@@ -1260,7 +1260,7 @@ export class Dispatcher {
           report,
         )
         if (answer === null) return null
-        hits.push(...(answer as [string, string][]))
+        for (const item of answer as [string, string][]) hits.push(item)
       }
       return hits
     }

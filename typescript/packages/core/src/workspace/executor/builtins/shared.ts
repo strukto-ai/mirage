@@ -209,7 +209,8 @@ export async function expandOperands(
     if (spec.pattern !== null) {
       const mount = namespace.mountFor(spec.virtual)
       try {
-        out.push(...(await expandGlob(dispatch, mount, [spec], mount.vfs.walkLimit)))
+        for (const item of await expandGlob(dispatch, mount, [spec], mount.vfs.walkLimit))
+          out.push(item)
       } catch (err) {
         if (err instanceof GlobLimitError) throw new TooManyMatches(err.message)
         throw err

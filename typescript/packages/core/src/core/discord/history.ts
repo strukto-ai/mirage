@@ -71,7 +71,7 @@ export async function listMessagesForDay(
 ): Promise<DiscordMessage[]> {
   const out: DiscordMessage[] = []
   for await (const page of streamMessagesForDay(accessor, channelId, dateStr, pageSize, after)) {
-    out.push(...page)
+    for (const item of page) out.push(item)
   }
   out.sort((a, b) => {
     const ai = BigInt(a.id)

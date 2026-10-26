@@ -87,7 +87,7 @@ function wordChoiceArguments(): readonly Argument[] {
         `WORD_CHOICE_OPTIONS names ${name} ${spelling}, which that spec does not declare`,
       )
     }
-    found.push(...options)
+    for (const item of options) found.push(item)
   }
   return found
 }
@@ -352,7 +352,7 @@ function setValueFlag(
   flagOccurrences(flags).push(...stored.map((part): [string, ParsedFlagValue] => [name, part]))
   if (cs.multipleDests.has(name)) {
     const previous = flags[name]
-    if (Array.isArray(previous)) previous.push(...stored)
+    if (Array.isArray(previous)) for (const item of stored) previous.push(item)
     else flags[name] = stored
   } else if (Array.isArray(value)) {
     flags[name] = stored
@@ -1263,7 +1263,8 @@ export function parseCommand(
         kinds[index % kinds.length] === 'path' ? resolvePath(part, cwd) : part,
       )
       flags[flagName] = paired
-      pathFlagValues.push(...paired.filter((_, index) => kinds[index % kinds.length] === 'path'))
+      for (const item of paired.filter((_, index) => kinds[index % kinds.length] === 'path'))
+        pathFlagValues.push(item)
     } else if (Array.isArray(val)) {
       const resolvedList = val.map((part) =>
         part === '-' &&
@@ -1273,7 +1274,7 @@ export function parseCommand(
           : resolvePath(part, cwd),
       )
       flags[flagName] = resolvedList
-      pathFlagValues.push(...resolvedList)
+      for (const item of resolvedList) pathFlagValues.push(item)
     } else if (typeof val === 'string') {
       if (val === '-' && STDOUT_DASH_OPTIONS.get(cmdName) === flagName) continue
       const resolved = resolvePath(val, cwd)
@@ -1287,7 +1288,7 @@ export function parseCommand(
     if (kind === 'path' || !(flagName in flags)) continue
     const val = flags[flagName]
     if (Array.isArray(val)) {
-      textFlagValues.push(...val)
+      for (const item of val) textFlagValues.push(item)
     } else if (typeof val === 'string') {
       textFlagValues.push(val)
     }

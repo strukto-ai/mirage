@@ -91,7 +91,7 @@ function sleepOperands(args: string[]): [string[], string | null] {
   const operands: string[] = []
   for (const [index, arg] of args.entries()) {
     if (arg === '--') {
-      operands.push(...args.slice(index + 1))
+      for (const item of args.slice(index + 1)) operands.push(item)
       break
     }
     if (arg.startsWith('-') && arg.length > 1 && !NUMERIC_SHORT.test(arg)) {

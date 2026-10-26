@@ -297,12 +297,7 @@ export function mountRoot(ctx: Context): string {
  * Mirrors Python's mounts_of.
  */
 export function mountsOf(ctx: Context): MountView | undefined {
-  return mountView(
-    ctx.vfs,
-    crossesMounts(ctx),
-    ctx.spec?.name ?? null,
-    ctx.session?.access().commandLimits ?? {},
-  )
+  return mountView(ctx.vfs, crossesMounts(ctx), ctx.spec?.name)
 }
 
 /** The link resolver an invocation carries: null outside a workspace.

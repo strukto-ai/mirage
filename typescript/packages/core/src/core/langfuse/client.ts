@@ -180,7 +180,7 @@ export async function fetchTraces(
     })
     const data = getData(body)
     if (data.length === 0) break
-    out.push(...data)
+    for (const item of data) out.push(item)
     if (data.length < pageLimit) break
     page += 1
   }

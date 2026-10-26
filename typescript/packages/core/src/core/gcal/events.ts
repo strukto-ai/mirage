@@ -184,14 +184,15 @@ export class GCalDeltaHook implements DeltaHook {
         event.status === 'cancelled' ? [] : eventPaths(this.accessor, base, event, tz, freeBusy)
       const updated = textField(event, 'updated')
       const same = known.has(eventId) && stamp === updated
-      changes.push(...changesBetween(before, after, () => !same))
+      for (const item of changesBetween(before, after, () => !same)) changes.push(item)
       if (after.length > 0) known.set(eventId, [after, updated])
       else known.delete(eventId)
     }
     if (whole) {
       for (const eventId of [...known.keys()].sort(compareCodePoints)) {
         if (seen.has(eventId)) continue
-        changes.push(...changesBetween(known.get(eventId)?.[0] ?? [], [], () => false))
+        for (const item of changesBetween(known.get(eventId)?.[0] ?? [], [], () => false))
+          changes.push(item)
         known.delete(eventId)
       }
     }

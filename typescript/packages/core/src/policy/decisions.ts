@@ -463,7 +463,8 @@ export class Decisions extends DecisionOwner {
     const held = lineage(handed).flatMap((h) => h.claimed.map((c) => c.decision))
     const fresh = once.filter((r) => !held.includes(r))
     if (fresh.length === 0) return
-    handed.claimed.push(...fresh.map((decision) => ({ occurrence: claimant.occurrence, decision })))
+    for (const item of fresh.map((decision) => ({ occurrence: claimant.occurrence, decision })))
+      handed.claimed.push(item)
     const live = this.live.get(sessionId) ?? new Set<HandOff>()
     live.add(handed)
     this.live.set(sessionId, live)
@@ -574,7 +575,8 @@ export class Decisions extends DecisionOwner {
   async revoke(sessionId: string, handed: HandOff): Promise<void> {
     const elsewhere: Decision[] = []
     for (const other of this.live.get(sessionId) ?? []) {
-      if (other !== handed) elsewhere.push(...other.claimed.map((c) => c.decision))
+      if (other !== handed)
+        for (const item of other.claimed.map((c) => c.decision)) elsewhere.push(item)
     }
     await this.spend(
       sessionId,
@@ -649,7 +651,8 @@ export class Decisions extends DecisionOwner {
     const parent = handed.parent
     if (parent === null) throw new Error("a typed line's claims are spent, not handed up")
     const known = parent.claimed.map((c) => c.decision)
-    parent.claimed.push(...handed.claimed.filter((c) => !known.includes(c.decision)))
+    for (const item of handed.claimed.filter((c) => !known.includes(c.decision)))
+      parent.claimed.push(item)
     if (parent.claimed.length > 0) {
       const live = this.live.get(sessionId) ?? new Set<HandOff>()
       live.add(parent)

@@ -214,7 +214,7 @@ export async function listRepositoryFields(
         }
       } | null
     )?.repositories
-    rows.push(...(page?.nodes ?? []))
+    for (const item of page?.nodes ?? []) rows.push(item)
     const next = page?.pageInfo?.endCursor ?? null
     if (page?.pageInfo?.hasNextPage !== true || next === null || next === cursor) break
     cursor = next

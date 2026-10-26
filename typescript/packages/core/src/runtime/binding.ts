@@ -114,7 +114,8 @@ export function restrictedMountsFor(session: SessionState, prefixes: readonly st
       .map((e) => e.path),
   )
   for (const rule of [...(session.commands?.ask ?? []), ...(session.commands?.deny ?? [])]) {
-    entries.push(...(rule.paths?.length ? rule.paths : rule.mount ? [rule.mount] : []))
+    for (const item of rule.paths?.length ? rule.paths : rule.mount ? [rule.mount] : [])
+      entries.push(item)
   }
   for (const [prefix, mode] of session.mountModes ?? []) if (mode !== 'exec') entries.push(prefix)
   const mounts = new Map(prefixes.map((p) => [p.replace(/\/+$/, '') || '/', p]))

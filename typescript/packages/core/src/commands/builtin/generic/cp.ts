@@ -1661,7 +1661,7 @@ export async function cpGeneric(
           copied = false
         }
         if (copied) {
-          lines.push(...tree)
+          for (const item of tree) lines.push(item)
           if (copies !== undefined) {
             await copyTreeLinks(
               copies,

@@ -775,10 +775,10 @@ async function runArgv(
     const result = await runWithCaller(
       { ...outer, gate: gated ?? outer.gate, command: argv.name },
       () =>
-      commandRecords((records) => {
-        mine = records
-        return route()
-      }, true),
+        commandRecords((records) => {
+          mine = records
+          return route()
+        }, true),
     )
     if (!watched) return result
     const [stdout, io, node] = result
@@ -794,7 +794,7 @@ async function runArgv(
       // A function hands back its last command's node, which keeps the
       // records that command made.
       node.exitCode = io.exitCode
-      node.records.push(...mine)
+      for (const item of mine) node.records.push(item)
       const late = io.stderr
       if (
         node.stderr === saved &&
@@ -843,7 +843,7 @@ async function runArgv(
             try {
               return await pulled.next()
             } finally {
-              mine.push(...more)
+              for (const item of more) mine.push(item)
             }
           }, true)
           if (next.done === true) {

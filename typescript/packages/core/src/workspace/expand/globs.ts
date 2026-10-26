@@ -120,7 +120,7 @@ export async function expandGlob(
       vfsPath: mountKey(p.virtual, prefix),
       rawPath: p.rawPath,
     })
-    out.push(...(await resolve([spec])))
+    for (const item of await resolve([spec])) out.push(item)
   }
   return out
 }
@@ -286,7 +286,7 @@ async function levelMatches(
       if ((err as { code?: string }).code === undefined) throw err
     }
   }
-  out.push(...namespaceChildren(registry, links, real, seg, access))
+  for (const item of namespaceChildren(registry, links, real, seg, access)) out.push(item)
   return real === dirVirtual ? out : respell(out, dirVirtual)
 }
 
@@ -337,7 +337,16 @@ async function descend(
   for (const child of children) {
     const childSpelled = joinSpelling(spelled, child.split('/').pop() ?? '')
     out.push([child, childSpelled])
-    out.push(...(await descend(registry, mount, links, child, childSpelled, depth + 1, access)))
+    for (const item of await descend(
+      registry,
+      mount,
+      links,
+      child,
+      childSpelled,
+      depth + 1,
+      access,
+    ))
+      out.push(item)
   }
   return out
 }

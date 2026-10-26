@@ -406,11 +406,6 @@ def mounts_of(ctx: Context) -> MountView | None:
         ctx.vfs,
         crossing=crosses_mounts(ctx),
         command=ctx.spec.name if ctx.spec is not None else None,
-        profile=(
-            ctx.session.access().command_limits
-            if ctx.session is not None
-            else None
-        ),
     )
 
 

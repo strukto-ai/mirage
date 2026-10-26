@@ -37,11 +37,11 @@ async function resolveOperands(
       run.push(path)
       continue
     }
-    if (run.length > 0) out.push(...(await resolve(run)))
+    if (run.length > 0) for (const item of await resolve(run)) out.push(item)
     run = []
     out.push(path)
   }
-  if (run.length > 0) out.push(...(await resolve(run)))
+  if (run.length > 0) for (const item of await resolve(run)) out.push(item)
   return out
 }
 

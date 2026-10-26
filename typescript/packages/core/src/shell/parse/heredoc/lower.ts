@@ -31,7 +31,7 @@ export function quotedBody(doc: Heredoc): [string, number[]] {
     }
     if (end !== null) {
       out += doc.body.slice(index, end)
-      offsets.push(...doc.offsets.slice(index, end))
+      for (const item of doc.offsets.slice(index, end)) offsets.push(item)
       index = end
       continue
     }
@@ -70,7 +70,7 @@ export function lowerHeredocs(
     for (let i = cursor; i < start; i += 1) offsets.push(i)
     if (doc !== null) attached.push([out.length, doc])
     out += replacement
-    offsets.push(...positions)
+    for (const item of positions) offsets.push(item)
     cursor = end
   }
   out += text.slice(cursor)

@@ -69,7 +69,7 @@ export async function checksum(
       const values: unknown[] = Array.isArray(sums.checksum) ? sums.checksum : [sums.checksum]
       for (const value of values) {
         if (typeof value === 'string')
-          listed.push(...value.split(/\s+/).filter((word) => word !== ''))
+          for (const item of value.split(/\s+/).filter((word) => word !== '')) listed.push(item)
       }
     }
   }

@@ -681,13 +681,13 @@ class IntegerCoercion {
       result = sessionArith(session, text, this.reader, false, added)
     } catch (err) {
       if (err instanceof ArithError || err instanceof ReadonlyError) {
-        this.writes.push(...err.writes)
+        for (const item of err.writes) this.writes.push(item)
       }
       throw err
     } finally {
       reachAgain()
     }
-    this.writes.push(...result.writes)
+    for (const item of result.writes) this.writes.push(item)
     return result.value.toString()
   }
 }

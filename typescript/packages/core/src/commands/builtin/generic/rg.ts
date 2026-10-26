@@ -649,7 +649,8 @@ export async function ignoreRules(
     try {
       if (dispatch === undefined) throw enoent(path.rawPath)
       const [data] = await dispatch('read', path)
-      lines.push(...decodeText(await materialize(data as ByteSource)).split(/\r?\n/))
+      for (const item of decodeText(await materialize(data as ByteSource)).split(/\r?\n/))
+        lines.push(item)
     } catch (err) {
       if (!isFsError(err)) throw err
       notes.push(`rg: ${path.rawPath}: ${osErrorText(err)}`)

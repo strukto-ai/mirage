@@ -132,7 +132,7 @@ export async function listFolderItems(
       limit: pageSize,
       offset,
     })) as ListItemsResponse
-    out.push(...data.entries)
+    for (const item of data.entries) out.push(item)
     offset += data.entries.length
     named += data.entries.filter((item) => item.type !== 'web_link').length
     if (offset >= data.total_count || data.entries.length === 0) {
@@ -212,7 +212,7 @@ export async function eventsSince(
     if (advanced === null || advanced === position) {
       throw new Error('Box GET /events returned events but did not advance next_stream_position')
     }
-    out.push(...entries)
+    for (const item of entries) out.push(item)
     position = advanced
   }
 }
@@ -298,7 +298,7 @@ export async function searchContent(
       limit: SEARCH_PAGE,
       offset,
     })) as SearchResponse
-    out.push(...data.entries)
+    for (const item of data.entries) out.push(item)
     offset += data.entries.length
     if (out.length >= MAX_SEARCH_MATCHES) return { items: out, truncated: true }
     if (offset >= data.total_count || data.entries.length === 0) {

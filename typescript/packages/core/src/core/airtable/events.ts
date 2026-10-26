@@ -180,7 +180,7 @@ export class AirtableDeltaHook implements DeltaHook {
         return { found, cursor: null, lost: true }
       }
       const rows = asRows(page.payloads)
-      found.push(...rows)
+      for (const item of rows) found.push(item)
       const after = page.cursor
       if (typeof after !== 'number' || !Number.isInteger(after)) return { found, cursor, lost }
       if (after - cursor > rows.length) lost = true

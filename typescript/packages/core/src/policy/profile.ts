@@ -464,7 +464,7 @@ export function parsePathsBlock(raw: unknown, where = 'paths'): PathsBlock {
   for (const [i, entry] of asList(obj.hide, `${where}.hide`).entries()) {
     if (isPlainObject(entry)) {
       const group = parseHideGroup(entry, `${where}.hide[${String(i)}] group`)
-      flat.push(...group.patterns)
+      for (const item of group.patterns) flat.push(item)
       reasons.push(group)
     } else {
       flat.push(entry)

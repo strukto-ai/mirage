@@ -152,7 +152,7 @@ export function standardRequest(
   const shorts = builtin ? (SHORT_STANDARD[name] ?? {}) : {}
   for (const [short, long] of Object.entries(shorts))
     if (offered.includes(long)) offered.push(short)
-  if (builtin) offered.push(...(EXTRA_STANDARD[name] ?? []))
+  if (builtin) for (const item of EXTRA_STANDARD[name] ?? []) offered.push(item)
   if (offered.length === 0) return null
   const whole = parse(name, spec, argv)
   if (builtin && STANDARD_AFTER_SCAN.has(name)) {

@@ -131,7 +131,7 @@ export class LineDiscipline {
   }
 
   private enter(): void {
-    this.echoed.push(...NEWLINE)
+    for (const item of NEWLINE) this.echoed.push(item)
     this.line.push(LF)
     const bytes = Uint8Array.from(this.line)
     this.line = []
@@ -143,7 +143,7 @@ export class LineDiscipline {
     // One code point, not one byte: drop UTF-8 continuation bytes first.
     while (this.line.length > 1 && ((this.line.at(-1) ?? 0) & 0xc0) === 0x80) this.line.pop()
     this.line.pop()
-    this.echoed.push(...ERASE)
+    for (const item of ERASE) this.echoed.push(item)
   }
 
   private skipEscape(b: number): void {

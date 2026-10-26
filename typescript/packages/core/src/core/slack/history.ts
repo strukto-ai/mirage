@@ -70,7 +70,7 @@ export async function fetchMessagesForDay(
     dateStr,
     after === undefined ? {} : { after },
   )) {
-    messages.push(...page)
+    for (const item of page) messages.push(item)
   }
   messages.sort((a, b) => Number.parseFloat(a.ts) - Number.parseFloat(b.ts))
   return messages

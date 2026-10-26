@@ -136,7 +136,7 @@ export async function issueComments(
     if (response.errors?.length) throw new Error(response.errors.map((e) => e.message).join('; '))
     const comments = response.data?.repository?.issueOrPullRequest?.comments
     if (!comments) throw new Error('Could not resolve comments for this issue or pull request')
-    rows.push(...comments.nodes)
+    for (const item of comments.nodes) rows.push(item)
     if (!comments.pageInfo.hasNextPage) return rows
     const next = comments.pageInfo.endCursor
     if (!next || next === cursor) throw new Error('GitHub returned a non-advancing comments cursor')

@@ -599,7 +599,7 @@ export async function revParse(
       else if (!verify && (ended || !word.startsWith('-')) && next < shown.length)
         rows.push(shown[next++] ?? '')
     }
-    rows.push(...shown.slice(next))
+    for (const item of shown.slice(next)) rows.push(item)
     if (failed !== null) {
       const refused = fatal(failed)
       if (refused !== null) return [ENC.encode(rows.join('')), refused[1]]

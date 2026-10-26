@@ -51,7 +51,7 @@ export class WandbClient {
         if (data === null) throw enoent('W&B object not found')
       }
       const connection = data as Connection<T>
-      rows.push(...connection.edges.map((edge) => edge.node))
+      for (const item of connection.edges.map((edge) => edge.node)) rows.push(item)
       if (!connection.pageInfo.hasNextPage) return rows
       if (limit !== undefined && rows.length >= limit) return rows
       cursor = connection.pageInfo.endCursor

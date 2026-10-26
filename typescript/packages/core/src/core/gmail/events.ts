@@ -204,14 +204,16 @@ export class GmailDeltaHook implements DeltaHook {
         ]
         before = added.has(mid) ? [] : messagePaths(prefix, raw, labels, held)
       }
-      changes.push(...changesBetween(before, after, (v) => v.endsWith(MSG_SUFFIX)))
+      for (const item of changesBetween(before, after, (v) => v.endsWith(MSG_SUFFIX)))
+        changes.push(item)
       known.set(mid, after)
     }
     let unknown = false
     for (const mid of new Set(gone)) {
       const was = known.get(mid)
       known.delete(mid)
-      if (was !== undefined) changes.push(...changesBetween(was, [], () => false))
+      if (was !== undefined)
+        for (const item of changesBetween(was, [], () => false)) changes.push(item)
       else if (!added.has(mid)) unknown = true
     }
     const events = changesUnder(root, changes, observed)

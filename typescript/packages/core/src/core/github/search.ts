@@ -58,7 +58,7 @@ export async function narrowPaths(
       .map((r) => r.path)
       .filter((path) => path === pathFilter || path.startsWith(scopePrefix))
     const seen = new Set(hits)
-    narrowed.push(...hits)
+    for (const item of hits) narrowed.push(item)
     for (const k of unsearchableKeys(accessor.tree, key)) if (!seen.has(k)) narrowed.push(k)
   }
   return narrowed.map((n) => {
@@ -146,7 +146,7 @@ export async function search(
     const body = response.data as { items?: unknown[] }
     const items = body.items ?? []
     if (!Array.isArray(items)) throw new Error('invalid search response: items must be an array')
-    rows.push(...items.slice(0, limit - rows.length))
+    for (const item of items.slice(0, limit - rows.length)) rows.push(item)
     if (items.length === 0 || !(response.headers.link ?? '').includes('rel="next"')) break
   }
   return rows

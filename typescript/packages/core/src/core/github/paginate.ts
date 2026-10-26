@@ -44,7 +44,7 @@ export async function githubPages(
           (item): item is Record<string, unknown> => item !== null && typeof item === 'object',
         )
       : []
-    rows.push(...batch.filter((row) => opts.include?.(row) ?? true))
+    for (const item of batch.filter((row) => opts.include?.(row) ?? true)) rows.push(item)
     if (batch.length < size) break
     page += 1
   }

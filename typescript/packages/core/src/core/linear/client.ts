@@ -139,7 +139,7 @@ async function paginate(
   for (;;) {
     const data = await transport.graphql(query, merged)
     const conn = navigate(data, path)
-    nodes.push(...conn.nodes)
+    for (const item of conn.nodes) nodes.push(item)
     if (!conn.pageInfo.hasNextPage) return nodes
     if (limit !== undefined && nodes.length >= limit) return nodes
     merged.after = conn.pageInfo.endCursor

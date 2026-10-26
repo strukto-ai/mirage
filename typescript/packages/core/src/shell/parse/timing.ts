@@ -238,7 +238,7 @@ export function wrapTiming(
         targets.set(node.id, prefixes)
         break
       }
-      stack.push(...[...node.namedChildren].reverse())
+      for (const item of [...node.namedChildren].reverse()) stack.push(item)
     }
   }
   return new PrefixNode(

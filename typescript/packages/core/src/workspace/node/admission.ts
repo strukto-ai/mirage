@@ -217,9 +217,9 @@ export function policyScopes(
   for (const p of operands) {
     if (p instanceof PathSpec) scopes.push(p)
   }
-  scopes.push(...pathFlagScopes(name, [...args], cwd))
+  for (const item of pathFlagScopes(name, [...args], cwd)) scopes.push(item)
   const typed = new Set(scopes.map((p) => p.virtual))
-  scopes.push(...treeFlags.filter((p) => !typed.has(p.virtual)))
+  for (const item of treeFlags.filter((p) => !typed.has(p.virtual))) scopes.push(item)
   if (name.includes('/')) {
     // A slash-carrying head word is a file the line executes, and it
     // lives in argv[0], not the operands, so a path-pattern guard would
@@ -248,7 +248,7 @@ export function policyScopes(
     const targets: (string | PathSpec)[] = [...redirects]
     if (links !== null) {
       const followed = followPaths(links, [...redirects], true, true)
-      targets.push(...followed.filter((p) => p instanceof PathSpec))
+      for (const item of followed.filter((p) => p instanceof PathSpec)) targets.push(item)
     }
     const seen = new Set(scopes.map((p) => p.virtual))
     for (const item of targets) {
@@ -490,7 +490,10 @@ function writes(
   for (const scope of scopes) {
     const owner = registry.tryMountFor(scope.virtual)
     const below = `${rstripSlash(scope.virtual)}/`
-    reached.push(...registry.allMounts().filter((m) => m === owner || m.prefix.startsWith(below)))
+    for (const item of registry
+      .allMounts()
+      .filter((m) => m === owner || m.prefix.startsWith(below)))
+      reached.push(item)
   }
   const extensions = named.length > 0 ? new Set(named.map((p) => getExtension(p.virtual))) : [null]
   const builtins = changesFiles(runs, [runs, ...operands])

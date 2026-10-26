@@ -87,7 +87,7 @@ export function findWalk(
         },
         options,
       )
-      stopped.push(...budget.stopped)
+      for (const item of budget.stopped) stopped.push(item)
       return keys
     },
     undefined,

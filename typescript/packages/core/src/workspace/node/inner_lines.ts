@@ -141,7 +141,7 @@ function testWords(node: TSNodeLike, home: string | null): Word[] {
   for (let child = stack.pop(); child !== undefined; child = stack.pop()) {
     if (TEST_SKIPS.has(child.type)) continue
     if (TEST_NESTS.has(child.type)) {
-      stack.push(...[...child.children].reverse())
+      for (const item of [...child.children].reverse()) stack.push(item)
     } else if (child.isNamed !== true || child.type === NT.TEST_OPERATOR) {
       const text = getText(child)
       words.push({ raw: text, text })
@@ -304,7 +304,7 @@ function findInner(args: readonly Word[]): InnerLine[] {
     i += 1
     const start = i
     while (i < args.length && ![';', '+'].includes(valueAt(args, i))) i += 1
-    inner.push(...asArgv(args.slice(start, i), true))
+    for (const item of asArgv(args.slice(start, i), true)) inner.push(item)
   }
   return inner
 }

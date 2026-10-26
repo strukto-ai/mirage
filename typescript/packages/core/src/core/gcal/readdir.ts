@@ -206,7 +206,7 @@ export function unsearchedText(event: CalendarEntryRow): string {
   for (const field of SEARCHED_FIELDS) {
     const value = event[field]
     if (typeof value === 'string') {
-      kept.push(...nonPlainWords(value))
+      for (const item of nonPlainWords(value)) kept.push(item)
     }
   }
   return kept.join(' ').toLowerCase()

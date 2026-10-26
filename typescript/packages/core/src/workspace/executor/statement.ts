@@ -454,7 +454,8 @@ export async function land(
     }
     return mergedIo
   }
-  allStdout.push(...written.filter(([c]) => c === Channel.STDOUT).map(([, d]) => d))
+  for (const item of written.filter(([c]) => c === Channel.STDOUT).map(([, d]) => d))
+    allStdout.push(item)
   const errors = written.filter(([c]) => c === Channel.STDERR).map(([, d]) => d)
   if (errors.length > 0) mergedIo.stderr = asyncChain([mergedIo.stderr, ...errors])
   return mergedIo

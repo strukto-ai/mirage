@@ -1069,7 +1069,7 @@ async function runParsedLine(
           killed,
         )
       } catch (error) {
-        env.records.push(...lineRecords)
+        for (const item of lineRecords) env.records.push(item)
         if (isLine) {
           const aborted = killed?.aborted === true
           const failed = failureResult(aborted ? makeAbortError(killed) : error)
@@ -1078,7 +1078,7 @@ async function runParsedLine(
         }
         throw error
       }
-      env.records.push(...lineRecords)
+      for (const item of lineRecords) env.records.push(item)
       const refusal = result.refusal ?? nested.latest
       held = isPending(refusal)
       recordStatus(targetSession, result.exitCode)

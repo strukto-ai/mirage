@@ -169,7 +169,8 @@ async function isAncestor(repo: Repo, old: string, fresh: string): Promise<boole
     if (seen.has(oid)) continue
     seen.add(oid)
     if ((await objectType(repo, oid)) === 'commit')
-      stack.push(...(await git.readCommit({ ...repoArgs(repo), oid })).commit.parent)
+      for (const item of (await git.readCommit({ ...repoArgs(repo), oid })).commit.parent)
+        stack.push(item)
   }
   return false
 }
@@ -441,7 +442,8 @@ export async function configuredHeaders(
         if (line.path === 'http.extraheader') values.push(line.value ?? '')
   }
   if (repo !== null)
-    values.push(...(await configValues(repo.vfs, repo.location, 'http.extraheader')))
+    for (const item of await configValues(repo.vfs, repo.location, 'http.extraheader'))
+      values.push(item)
   return extraHeaders(values)
 }
 

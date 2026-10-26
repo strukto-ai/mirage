@@ -197,7 +197,7 @@ export class MongoDBStore implements MongoDriver {
       while (String(cursor.id) !== '0') {
         const more = await db.command({ getMore: wire(cursor.id), collection })
         cursor = more.cursor as SnapshotCursor<T>
-        docs.push(...(cursor.nextBatch ?? []))
+        for (const item of cursor.nextBatch ?? []) docs.push(item)
       }
     } finally {
       // A failed batch leaves the server cursor open.

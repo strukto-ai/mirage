@@ -658,7 +658,7 @@ export function heredocTail(redirectNode: TSNodeLike): [TSNodeLike | null, [stri
       if (stages.length === 1 && only?.type === NT.LIST) {
         const [leaf, spine] = listSpine(only)
         pipeNode = leaf
-        steps.push(...spine)
+        for (const item of spine) steps.push(item)
       } else {
         pipeNode = child
       }
@@ -977,7 +977,8 @@ export function getFunctionRedirects(node: TSNodeLike): TSNodeLike[] {
     outer.namedChildren[0]?.id !== undefined &&
     outer.namedChildren[0].id === node.id
   ) {
-    redirects.push(...outer.namedChildren.slice(1).filter((c) => REDIRECT_NODE_TYPES.has(c.type)))
+    for (const item of outer.namedChildren.slice(1).filter((c) => REDIRECT_NODE_TYPES.has(c.type)))
+      redirects.push(item)
   }
   return redirects
 }

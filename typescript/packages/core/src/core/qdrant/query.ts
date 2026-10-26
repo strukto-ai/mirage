@@ -139,7 +139,7 @@ async function scrollRaw(
       with_payload: true,
       with_vector: false,
     })) as ScrollPage
-    points.push(...(keep === undefined ? res.points : res.points.filter(keep)))
+    for (const item of keep === undefined ? res.points : res.points.filter(keep)) points.push(item)
     const next = res.next_page_offset
     if (next === null || next === undefined) break
     offset = next
