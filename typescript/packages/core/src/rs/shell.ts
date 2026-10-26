@@ -152,7 +152,12 @@ function typed(tree: ShellTree, start: number, end: number): string {
   let out = ''
   let chunk = from
   for (let at = from; at < to - 1; at++) {
-    if (original[at] === '\\' && original[at + 1] === '\n' && kept[at - from] === 0 && kept[at + 1 - from] === 0) {
+    if (
+      original[at] === '\\' &&
+      original[at + 1] === '\n' &&
+      kept[at - from] === 0 &&
+      kept[at + 1 - from] === 0
+    ) {
       out += original.slice(chunk, at)
       chunk = at + 2
       at++
