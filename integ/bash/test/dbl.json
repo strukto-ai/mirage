@@ -763,7 +763,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "[[ -lt -nt b ]]; echo $?; [[ -eq -eq -f ]]; echo $?; [[ -lt = -lt ]]; echo $?; [[ -lt && -gt ]]; echo $?; [[ -n -n ]]; echo $?; [[ -z -z ]]; echo $?; [[ -n ! ]]; echo $?; [[ a == ! ]]; echo $?",
+      "command": "( unset eq f; [[ -lt -nt b ]]; echo $?; [[ -eq -eq -f ]]; echo $?; [[ -lt = -lt ]]; echo $?; [[ -lt && -gt ]]; echo $?; [[ -n -n ]]; echo $?; [[ -z -z ]]; echo $?; [[ -n ! ]]; echo $?; [[ a == ! ]]; echo $? )",
       "expect": {
         "exit": 0,
         "stdout": "1\n0\n0\n0\n0\n1\n0\n1\n",
