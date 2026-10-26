@@ -792,7 +792,7 @@ describe('handleCli script arm', () => {
     await drained(scriptInstall(), ['pager'], new SessionState({ sessionId: 't' }), null, {
       entries: [sleepy],
       signal: AbortSignal.timeout(20),
-    }).catch(() => undefined)
+    })
     expect(sleepy.seen[0]?.signal?.aborted).toBe(true)
   })
 
@@ -812,7 +812,7 @@ describe('handleCli script arm', () => {
       entries: [sleepy],
       settle,
       signal: AbortSignal.timeout(20),
-    }).catch(() => undefined)
+    })
     expect(settled).toEqual([py, sleepy])
   })
 })

@@ -348,7 +348,10 @@ it('every program settles soon after an abort', async () => {
         let stuck: ReturnType<typeof setTimeout> | undefined
         try {
           await Promise.race([
-            ws.shell(`( ${name} ${operand} )`, { signal: abort.signal }).catch(() => null),
+            ws.shell(`( ${name} ${operand} )`, { signal: abort.signal }).catch((err: unknown) => {
+              if (err instanceof Error && err.name === 'AbortError') return null
+              throw err
+            }),
             new Promise((resolve) => {
               stuck = setTimeout(() => {
                 late.push(`${name} ${operand}: still running after 5s`)

@@ -1710,6 +1710,7 @@ export class Dispatcher {
         async () => {
           await this.evictFailedWrite('copy', call.path, dst, [], lostPaths(line), owners)
         },
+        owners,
       )
     } catch (err) {
       await this.evictFailedWrite('copy', call.path, dst, [], lostPaths(line))
@@ -2346,6 +2347,7 @@ export class Dispatcher {
             async () => {
               await this.evictFailedWrite(name, p, dst, others, lostPaths(line), owners)
             },
+            owners,
           )
         } catch (err) {
           await this.evictFailedWrite(name, p, dst, others, lostPaths(line))
@@ -2647,13 +2649,13 @@ export class Dispatcher {
    * its names runs to the end and the caller waits for it and for `after`
    * (the bookkeeping), since an abort cannot stop a store's call under way,
    * as Python's cancelled line is joined whole; an abort that lands during
-   * that call still makes it late, since the line may have gone on past
-   * its grace, so the landing takes the owner-checked `landed`.
-   * `after` runs only for a caller still waiting: a call that lands after
-   * its caller left runs `landed` instead, which drops what the landing
-   * made stale where its names still belong to the mount that ran it (a
-   * read between the abort and the landing may have cached the old bytes);
-   * a failure nobody waits for any more is reported.
+   * that call still makes it late, since the line may have gone on past its
+   * grace. `after` runs for a caller still waiting, and for a late call that
+   * succeeded while every name is still on the mount that ran it (`owners`),
+   * so a rename still moves its links; any other late call runs `landed`,
+   * which drops what the landing made stale where its names still belong to
+   * that mount (a read between the abort and the landing may have cached
+   * the old bytes); a failure nobody waits for any more is reported.
    *
    * Args:
    *   keys: the names to hold, in the one order every writer takes them.
@@ -2661,6 +2663,7 @@ export class Dispatcher {
    *   call: runs the op, handing over the store's own call once it starts.
    *   after: the bookkeeping, run while the caller still waits.
    *   landed: run once a call that outlived its timeout settles.
+   *   owners: the mount each name was on when the call started.
    */
   private async holdWrite(
     keys: readonly string[],
@@ -2671,6 +2674,7 @@ export class Dispatcher {
     ) => Promise<unknown>,
     after: (value: unknown) => Promise<void>,
     landed: () => Promise<void>,
+    owners: ReadonlyMap<string, MountEntry | null>,
   ): Promise<unknown> {
     // The caller's abort (the line's deadline among its reasons) stops the
     // wait for the hold, so a write still queued never runs; a write made
@@ -2709,7 +2713,7 @@ export class Dispatcher {
         )
         finished = stored.then(
           async (value) => {
-            if (turn.late) await landed()
+            if (turn.late && !this.stillOwned(owners)) await landed()
             else await after(value)
           },
           async (err: unknown) => {
@@ -2863,6 +2867,14 @@ export class Dispatcher {
    * The mount serving each of a write's names as it starts, keyed by the
    * name, for the cleanup after a call that lands past its timeout.
    */
+  /** Whether each name is still on the mount it was on in `owners`. */
+  private stillOwned(owners: ReadonlyMap<string, MountEntry | null>): boolean {
+    for (const [virtual, mount] of owners) {
+      if (this.namespace.tryMountFor(rstripSlash(virtual) || '/') !== mount) return false
+    }
+    return true
+  }
+
   private owners(paths: readonly PathSpec[]): ReadonlyMap<string, MountEntry | null> {
     return new Map(
       paths.map((path) => [

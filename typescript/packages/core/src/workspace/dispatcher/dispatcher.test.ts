@@ -3938,34 +3938,39 @@ it('a write queued behind a stalled one never runs once its line is aborted', as
   }
 })
 
-it('lands a write its line left mid-call through the owner-checked path', async () => {
-  // The line's abort lands while the store call runs: the call still ends,
-  // and its landing takes `landed`, which checks each name still belongs to
-  // the mount that ran it, in place of the bookkeeping a waiting caller gets.
-  const store = new StalledWriteRAM()
-  const ws = new Workspace({ '/data': [store, MountMode.WRITE] }, { mode: MountMode.WRITE })
-  const settle = vi.spyOn(
-    Dispatcher.prototype as unknown as { settleWrite: () => Promise<void> },
-    'settleWrite',
-  )
-  try {
-    await ws.shell('echo keep > /data/f')
-    store.armed = true
-    const controller = new AbortController()
-    const writing = ws.shell('echo new > /data/f', { signal: controller.signal })
-    await vi.waitFor(() => {
-      expect(store.calls).toBe(1)
-    })
-    settle.mockClear()
-    controller.abort()
-    await expect(writing).rejects.toMatchObject({ name: 'AbortError' })
-    store.armed = false
-    store.release()
-    await new Promise((resolve) => setTimeout(resolve, 20))
-    expect(settle).not.toHaveBeenCalled()
-  } finally {
-    settle.mockRestore()
-    store.release()
-    await ws.close()
-  }
-})
+it.each([false, true])(
+  'lands a write its line left mid-call, a mount taking its name: %s',
+  async (taken) => {
+    // The line's abort lands while the store call runs: the call still ends.
+    // Its bookkeeping runs while its name is still the mount's that ran it (a
+    // rename still moves its links); a name a mount took meanwhile is that
+    // mount's, so only the owner-checked `landed` runs.
+    const store = new StalledWriteRAM()
+    const ws = new Workspace({ '/data': [store, MountMode.WRITE] }, { mode: MountMode.WRITE })
+    const settle = vi.spyOn(
+      Dispatcher.prototype as unknown as { settleWrite: () => Promise<void> },
+      'settleWrite',
+    )
+    try {
+      await ws.shell('echo keep > /data/f')
+      store.armed = true
+      const controller = new AbortController()
+      const writing = ws.shell('echo new > /data/f', { signal: controller.signal })
+      await vi.waitFor(() => {
+        expect(store.calls).toBe(1)
+      })
+      settle.mockClear()
+      controller.abort()
+      await expect(writing).rejects.toMatchObject({ name: 'AbortError' })
+      if (taken) ws.addMount('/data/f', new RAMVFS(), MountMode.WRITE)
+      store.armed = false
+      store.release()
+      await new Promise((resolve) => setTimeout(resolve, 20))
+      expect(settle.mock.calls.length > 0).toBe(!taken)
+    } finally {
+      settle.mockRestore()
+      store.release()
+      await ws.close()
+    }
+  },
+)
