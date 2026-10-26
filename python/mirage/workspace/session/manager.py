@@ -23,8 +23,13 @@ from mirage.policy.types import AdmissionRules, Decision, ProfileScripts
 from mirage.secrets.config import EnvVar
 from mirage.shell.variable import ShellVar
 from mirage.types import MountMode
-from mirage.workspace.record.types import CAS_MAX_RETRIES, generation_of
-from mirage.workspace.session.ram import RAMSessionStore
+from mirage.workspace.mount.namespace.ram import RAMNamespaceStore
+from mirage.workspace.mount.namespace.store import NamespaceStore
+from mirage.workspace.record.types import (
+    CAS_MAX_RETRIES,
+    RecordFields,
+    generation_of,
+)
 from mirage.workspace.session.resolve import apply_profile, narrow
 from mirage.workspace.session.session import (
     SessionState,
@@ -32,7 +37,6 @@ from mirage.workspace.session.session import (
     vars_from_env,
 )
 from mirage.workspace.session.shell_dirs import set_cwd
-from mirage.workspace.session.store import SessionFields, SessionStore
 
 
 def _holds_managed(session: SessionState) -> bool:
@@ -67,12 +71,13 @@ def _merge_seed_vars(
 
 
 class SessionManager(SessionOwner):
-    """Owns the live session table over a storage-agnostic SessionStore.
+    """Owns the live session table over a storage-agnostic NamespaceStore.
 
-    Mirrors the Namespace/NamespaceStore split: sessions are worked on
-    in memory (creation stays synchronous), the store hydrates once at
-    the first async entry point, and durable fields flush back at async
-    boundaries (end of execute, snapshot, explicit persist). ``close``
+    The same store type the Namespace keeps its nodes in, one table each
+    per workspace: sessions are worked on in memory (creation stays
+    synchronous), the store hydrates once at the first async entry
+    point, and durable fields flush back at async boundaries (end of
+    execute, snapshot, explicit persist). ``close``
     deletes from the store — closing a session revokes it everywhere —
     while process shutdown leaves stored sessions in place.
     """
@@ -80,18 +85,18 @@ class SessionManager(SessionOwner):
     def __init__(
         self,
         default_session_id: str,
-        store: SessionStore | None = None,
+        store: NamespaceStore | None = None,
         seed_vars: dict[str, ShellVar] | None = None,
     ) -> None:
         self._default_id = default_session_id
-        self._store = store if store is not None else RAMSessionStore()
+        self._store = store if store is not None else RAMNamespaceStore()
         self._sessions: dict[str, SessionState] = {}
         self._locks: dict[str, asyncio.Lock] = {}
         self._line_locks: dict[str, asyncio.Lock] = {}
         # What the store last saw from us, per session id. Flush
         # compares against this to skip clean sessions without a
         # network read, and to avoid clobbering other writers.
-        self._persisted: dict[str, SessionFields] = {}
+        self._persisted: dict[str, RecordFields] = {}
         # The workspace's env block, translated: seeded onto the
         # default session now and copied into every created session as
         # its template. The records are frozen, so sharing them across
@@ -250,7 +255,7 @@ class SessionManager(SessionOwner):
         return self._default_id
 
     @property
-    def store(self) -> SessionStore:
+    def store(self) -> NamespaceStore:
         return self._store
 
     @property

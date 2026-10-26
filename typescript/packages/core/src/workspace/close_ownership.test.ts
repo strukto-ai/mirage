@@ -16,7 +16,7 @@ import { describe, expect, it } from 'vitest'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { ops } from '../test-utils.ts'
 import { PathSpec } from '../types.ts'
-import { RAMSessionStore } from './session/ram.ts'
+import { RAMNamespaceStore } from './mount/namespace/ram.ts'
 import { toStateDict } from './snapshot/state.ts'
 import { Workspace } from './workspace/workspace.ts'
 
@@ -29,7 +29,7 @@ class ProbeRAMVFS extends RAMVFS {
   }
 }
 
-class ProbeSessionStore extends RAMSessionStore {
+class ProbeSessionStore extends RAMNamespaceStore {
   closeCalls = 0
 
   override close(): Promise<void> {

@@ -29,8 +29,8 @@ from mirage.policy import Action, CommandContext, Deny, Policy
 from mirage.utils.abort import ABORT_JOIN_SECONDS, MirageAbortError
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace.execution import ExecutionScope
-from mirage.workspace.session.ram import RAMSessionStore
-from mirage.workspace.session.store import SessionFields
+from mirage.workspace.mount.namespace.ram import RAMNamespaceStore
+from mirage.workspace.record.types import RecordFields
 from tests.fixtures.apply_marks import caching_ram_workspace, capture_marks
 
 
@@ -133,13 +133,13 @@ async def test_sync_cli_does_not_block_other_sessions_or_escape_cancellation():
         await ws.close()
 
 
-class _StalledSessionStore(RAMSessionStore):
-    async def load(self) -> dict[str, SessionFields]:
+class _StalledSessionStore(RAMNamespaceStore):
+    async def load(self) -> dict[str, RecordFields]:
         await asyncio.Event().wait()
         return {}
 
 
-class _StallableSessionStore(RAMSessionStore):
+class _StallableSessionStore(RAMNamespaceStore):
     def __init__(self) -> None:
         super().__init__()
         self.stall: str | None = None

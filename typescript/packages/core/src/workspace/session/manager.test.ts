@@ -21,9 +21,9 @@ import { ScriptSource } from '../../runtime/types.ts'
 import { MountMode, type Visibility } from '../../types.ts'
 import { SessionManager } from './manager.ts'
 import { compileProfile } from './resolve.ts'
-import { RAMSessionStore } from './ram.ts'
+import { RAMNamespaceStore } from '../mount/namespace/ram.ts'
 import { SessionState, varsFromEntries } from './session.ts'
-import type { SessionFields } from './store.ts'
+import type { RecordFields } from '../record/types.ts'
 import { VarAttr, type ShellVar } from '../../shell/variable.ts'
 
 /** An empty compiled profile with the given parts filled in. */
@@ -112,9 +112,9 @@ describe('SessionManager', () => {
   })
 })
 
-describe('SessionManager with a SessionStore', () => {
+describe('SessionManager with a session table', () => {
   it('hydrates stored sessions on ensureLoaded', async () => {
-    const store = new RAMSessionStore()
+    const store = new RAMNamespaceStore()
     await store.set('restored', {
       session_id: 'restored',
       cwd: '/w',
@@ -144,7 +144,7 @@ describe('SessionManager with a SessionStore', () => {
   })
 
   it('locally created sessions win a hydration conflict', async () => {
-    const store = new RAMSessionStore()
+    const store = new RAMNamespaceStore()
     await store.set('s1', { session_id: 's1', cwd: '/stale' })
     const m = new SessionManager('def', store)
     const local = m.create('s1')
@@ -154,7 +154,7 @@ describe('SessionManager with a SessionStore', () => {
   })
 
   it('default session adopts stored durable fields', async () => {
-    const store = new RAMSessionStore()
+    const store = new RAMNamespaceStore()
     await store.set('def', {
       session_id: 'def',
       cwd: '/w',
@@ -184,7 +184,7 @@ describe('SessionManager with a SessionStore', () => {
     // hidden shapes land on the default placeholder with the other
     // durable fields, or the first command after restart reads what
     // the spec hides and the next flush erases the restriction.
-    const store = new RAMSessionStore()
+    const store = new RAMNamespaceStore()
     await store.set('def', {
       session_id: 'def',
       cwd: '/w',
@@ -204,7 +204,7 @@ describe('SessionManager with a SessionStore', () => {
     // shapes: a store written by a scripted deployment must not wake a
     // daemon configured without a default profile unjudged, and the
     // next flush must not erase the programs from the record.
-    const store = new RAMSessionStore()
+    const store = new RAMNamespaceStore()
     await store.set('def', {
       session_id: 'def',
       cwd: '/w',
@@ -242,7 +242,7 @@ describe('SessionManager with a SessionStore', () => {
     // like the hides beside them: dropped here, a restarted daemon's
     // carve-out would vanish and the next flush would erase both from
     // the store.
-    const store = new RAMSessionStore()
+    const store = new RAMNamespaceStore()
     await store.set('def', {
       session_id: 'def',
       cwd: '/w',
@@ -270,7 +270,7 @@ describe('SessionManager with a SessionStore', () => {
     // one) must not wake the primary agent unrestricted: the document
     // wins the narrowing fields after hydration, the record keeps the
     // scratch state (cwd, env), and the next flush rewrites the record.
-    const store = new RAMSessionStore()
+    const store = new RAMNamespaceStore()
     await store.set('def', {
       session_id: 'def',
       cwd: '/w',
@@ -308,7 +308,7 @@ describe('SessionManager with a SessionStore', () => {
   })
 
   it('flush writes every session through', async () => {
-    const store = new RAMSessionStore()
+    const store = new RAMNamespaceStore()
     const m = new SessionManager('def', store)
     m.create('agent', { mountModes: new Map([['/s3', MountMode.READ]]) })
     m.cwd = '/moved'
@@ -319,7 +319,7 @@ describe('SessionManager with a SessionStore', () => {
   })
 
   it('close deletes the session from the store', async () => {
-    const store = new RAMSessionStore()
+    const store = new RAMNamespaceStore()
     const m = new SessionManager('def', store)
     m.create('gone')
     await m.flush()
@@ -328,12 +328,12 @@ describe('SessionManager with a SessionStore', () => {
   })
 })
 
-class CountingStore extends RAMSessionStore {
+class CountingStore extends RAMNamespaceStore {
   casCalls = 0
 
   override casSet(
     sessionId: string,
-    fields: Parameters<RAMSessionStore['casSet']>[1],
+    fields: Parameters<RAMNamespaceStore['casSet']>[1],
     expectedGeneration: number,
   ): Promise<boolean> {
     this.casCalls += 1
@@ -355,7 +355,7 @@ describe('SessionManager dirty flush + CAS', () => {
   })
 
   it('flush bumps the generation', async () => {
-    const store = new RAMSessionStore()
+    const store = new RAMNamespaceStore()
     const m = new SessionManager('default', store)
     await m.flush()
     expect(m.get('default').generation).toBe(1)
@@ -366,7 +366,7 @@ describe('SessionManager dirty flush + CAS', () => {
   })
 
   it('a conflict adopts the stored generation and retries', async () => {
-    const store = new RAMSessionStore()
+    const store = new RAMNamespaceStore()
     const m = new SessionManager('default', store)
     await store.set('default', {
       session_id: 'default',
@@ -383,7 +383,7 @@ describe('SessionManager dirty flush + CAS', () => {
   })
 
   it('exhausted retries raise', async () => {
-    class AlwaysConflict extends RAMSessionStore {
+    class AlwaysConflict extends RAMNamespaceStore {
       override casSet(): Promise<boolean> {
         return Promise.resolve(false)
       }
@@ -431,7 +431,7 @@ describe('SessionManager admission rules', () => {
   })
 
   it('the rules ride the session record', async () => {
-    const store = new RAMSessionStore()
+    const store = new RAMNamespaceStore()
     await store.set('restored', {
       session_id: 'restored',
       cwd: '/w',
@@ -491,7 +491,7 @@ describe('SessionManager decision ledger', () => {
   }
 
   it('live on the registered session and persist', async () => {
-    const store = new RAMSessionStore()
+    const store = new RAMNamespaceStore()
     const m = new SessionManager('def', store)
     await m.ensureLoaded()
     const live = m.create('agent')
@@ -520,7 +520,7 @@ describe('SessionManager decision ledger', () => {
   })
 
   it('hydrate onto the default session', async () => {
-    const store = new RAMSessionStore()
+    const store = new RAMNamespaceStore()
     const m = new SessionManager('def', store)
     await m.ensureLoaded()
     const entry = record('d2', 'def')
@@ -577,7 +577,7 @@ describe('hasManagedEnv', () => {
   })
 
   it('a hydrated record carrying a pointer flips it', async () => {
-    const store = new RAMSessionStore()
+    const store = new RAMNamespaceStore()
     await store.casSet(
       'other',
       {
@@ -587,7 +587,7 @@ describe('hasManagedEnv', () => {
         var_attrs: { TOKEN: 'x' },
         managed: { TOKEN: { from: 'env', ref: '', key: 'TOKEN' } },
         generation: 1,
-      } as unknown as SessionFields,
+      } as unknown as RecordFields,
       0,
     )
     const mgr = new SessionManager('s', store)
@@ -616,7 +616,7 @@ describe('restoreSeed', () => {
 
 describe('seed merge on hydration', () => {
   it('merges env entries the record predates, record entries winning', async () => {
-    const store = new RAMSessionStore()
+    const store = new RAMNamespaceStore()
     const old = new SessionManager('default', store)
     old.get('default').vars.KEPT = { value: 'stored', attrs: new Set() }
     old.create('agent')
@@ -637,7 +637,7 @@ describe('seed merge on hydration', () => {
   })
 
   it('lands the merged seed durably on the next flush', async () => {
-    const store = new RAMSessionStore()
+    const store = new RAMNamespaceStore()
     const old = new SessionManager('default', store)
     await old.ensureLoaded()
     await old.flush()
@@ -654,7 +654,7 @@ describe('seed merge on hydration', () => {
 it.each([false, true])(
   'publishes profile changes only after persistence (failure=%s)',
   async (failure) => {
-    const store = new RAMSessionStore()
+    const store = new RAMNamespaceStore()
     const manager = new SessionManager('default', store)
     const original = compiled(
       {
@@ -736,7 +736,7 @@ it.each([false, true])(
 it.each([false, true])(
   'session close waits for profile persistence (failure=%s)',
   async (failure) => {
-    const store = new RAMSessionStore()
+    const store = new RAMNamespaceStore()
     const manager = new SessionManager('default', store)
     manager.create('agent')
     let enter = (): void => undefined
@@ -781,7 +781,7 @@ it.each([false, true])(
 )
 
 it('a final flush after session deletion does not recreate it', async () => {
-  const store = new RAMSessionStore()
+  const store = new RAMNamespaceStore()
   const manager = new SessionManager('default', store)
   manager.create('gone')
   await manager.flush('gone')

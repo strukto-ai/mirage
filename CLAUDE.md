@@ -228,8 +228,10 @@ serde_json-faithful scanner, exit 1 for a bad body and 5 for a bad line).
 
 ### Sessions, policy, history
 
-`workspace/session/`: env, cwd, functions, jobs; stores for RAM, disk,
-redis, s3. `policy/`: `pre_command`, `pre_session`, profiles and scripts;
+`workspace/session/`: env, cwd, functions, jobs, persisted in a
+`NamespaceStore` (`workspace/mount/namespace/store`), the one store the
+node table uses too: RAM, disk, redis, or s3 through a record client.
+`policy/`: `pre_command`, `pre_session`, profiles and scripts;
 builtins `mount_root`, `output_cap`, `permissions`. `observe/`: a hidden
 `Observer` records every top-level command; `/.bash_history` and the
 `history` builtin are two views of that one recording.

@@ -17,8 +17,8 @@ import { Command } from '../commands/config.ts'
 import { CommandSpec, Argument } from '../commands/spec/types.ts'
 import { IOResult } from '../io/types.ts'
 import { RAMObserverStore } from '../observe/store.ts'
-import { RAMSessionStore } from './session/ram.ts'
-import type { SessionFields } from './session/store.ts'
+import { RAMNamespaceStore } from './mount/namespace/ram.ts'
+import type { RecordFields } from './record/types.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { Runtime } from '../runtime/base.ts'
 import { LINE_EXECUTOR, type LineExecutor } from '../runtime/mixin.ts'
@@ -418,8 +418,8 @@ describe('execute({ signal }): mid-flight cancellation', () => {
   })
 
   it('releases the caller when the session store stalls before the line runs', async () => {
-    class Stalled extends RAMSessionStore {
-      override load(): Promise<Map<string, SessionFields>> {
+    class Stalled extends RAMNamespaceStore {
+      override load(): Promise<Map<string, RecordFields>> {
         return new Promise<never>(() => undefined)
       }
     }
@@ -439,11 +439,11 @@ describe('execute({ signal }): mid-flight cancellation', () => {
   it('restores the status when a stalled flush outlives the grace', async () => {
     // The line stamped its status and then its flush never settles: the
     // caller is released after the grace, and `$?` is what the line found.
-    class Stalled extends RAMSessionStore {
+    class Stalled extends RAMNamespaceStore {
       stall = false
       override casSet(
         sessionId: string,
-        fields: SessionFields,
+        fields: RecordFields,
         expectedGeneration: number,
       ): Promise<boolean> {
         if (this.stall) return new Promise<never>(() => undefined)
@@ -471,10 +471,10 @@ describe('execute({ signal }): mid-flight cancellation', () => {
     // The line finished; the flush of its status is what the abort lands
     // on, and it settles inside the grace. The answer is still the abort,
     // and `$?` is what the line found.
-    class Slow extends RAMSessionStore {
+    class Slow extends RAMNamespaceStore {
       override async casSet(
         sessionId: string,
-        fields: SessionFields,
+        fields: RecordFields,
         expectedGeneration: number,
       ): Promise<boolean> {
         await new Promise((resolve) => setTimeout(resolve, 120))

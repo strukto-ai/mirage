@@ -14,7 +14,6 @@
 
 import type { ObserverStore } from '@struktoai/mirage-core/observe/store'
 import type { NamespaceStore } from '@struktoai/mirage-core/workspace/mount/namespace/store'
-import type { SessionStore } from '@struktoai/mirage-core/workspace/session/store'
 import { WorkspaceStateStore } from '@struktoai/mirage-core/workspace/store/base'
 import type {
   WorkspaceFields,
@@ -22,8 +21,7 @@ import type {
 } from '@struktoai/mirage-core/workspace/store/base'
 import { RedisObserverStore } from '../../observe/redis_store.ts'
 import { RedisConnection } from '../../optional_peer.ts'
-import { RedisNamespaceStore } from '../mount/namespace/redis.ts'
-import { CAS_SCRIPT, RedisSessionStore } from '../session/redis.ts'
+import { CAS_SCRIPT, RedisNamespaceStore } from '../mount/namespace/redis.ts'
 
 export interface RedisWorkspaceStateStoreOptions extends WorkspaceStateStoreOverrides {
   url?: string
@@ -36,7 +34,7 @@ export interface RedisWorkspaceStateStoreOptions extends WorkspaceStateStoreOver
  * Key layout under one prefix, everything scoped by workspace id:
  *
  * - `{prefix}workspaces` — hash, workspace id -> metadata JSON
- * - `{prefix}{ws}:namespace:nodes` (+ `:user`) — namespace plane
+ * - `{prefix}{ws}:namespace:nodes` — node table
  * - `{prefix}{ws}:observer:*` — observer plane
  * - `{prefix}{ws}:sessions` — session table
  *
@@ -52,7 +50,7 @@ export class RedisWorkspaceStateStore extends WorkspaceStateStore {
   private readonly redis: RedisConnection
   private readonly namespaces = new Map<string, RedisNamespaceStore>()
   private readonly observers = new Map<string, RedisObserverStore>()
-  private readonly sessionTables = new Map<string, RedisSessionStore>()
+  private readonly sessionTables = new Map<string, RedisNamespaceStore>()
 
   constructor(options: RedisWorkspaceStateStoreOptions = {}) {
     const { url, keyPrefix, ...overrides } = options
@@ -87,12 +85,13 @@ export class RedisWorkspaceStateStore extends WorkspaceStateStore {
     return ob
   }
 
-  protected makeSessions(workspaceId: string): SessionStore {
+  protected makeSessions(workspaceId: string): NamespaceStore {
     let table = this.sessionTables.get(workspaceId)
     if (table === undefined) {
-      table = new RedisSessionStore({
+      table = new RedisNamespaceStore({
         url: this.url,
         keyPrefix: `${this.prefix}${workspaceId}:`,
+        table: 'sessions',
       })
       this.sessionTables.set(workspaceId, table)
     }
@@ -105,7 +104,7 @@ export class RedisWorkspaceStateStore extends WorkspaceStateStore {
     return raw != null ? (JSON.parse(raw) as WorkspaceFields) : null
   }
 
-  // Same generic hash-field CAS the session store uses: the meta hash
+  // Same generic hash-field CAS the session table uses: the meta hash
   // is keyed by workspace id instead of session id.
   protected async casWriteMeta(
     workspaceId: string,

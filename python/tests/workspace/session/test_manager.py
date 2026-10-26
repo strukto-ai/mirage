@@ -42,7 +42,8 @@ from mirage.types import (
 )
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
-from mirage.workspace.session import RAMSessionStore, SessionManager
+from mirage.workspace.mount.namespace.ram import RAMNamespaceStore
+from mirage.workspace.session import SessionManager
 from mirage.workspace.session.session import vars_from_entries
 from mirage.workspace.session.state import seed_var
 
@@ -155,7 +156,7 @@ def test_manager_create_default_unrestricted():
 
 @pytest.mark.asyncio
 async def test_manager_hydrates_from_store():
-    store = RAMSessionStore()
+    store = RAMNamespaceStore()
     await store.set(
         "restored",
         {
@@ -189,7 +190,7 @@ async def test_manager_hydrates_from_store():
 
 @pytest.mark.asyncio
 async def test_manager_hydration_local_wins():
-    store = RAMSessionStore()
+    store = RAMNamespaceStore()
     await store.set("s1", {"session_id": "s1", "cwd": "/stale"})
     mgr = SessionManager("default", store=store)
     local = mgr.create("s1")
@@ -200,7 +201,7 @@ async def test_manager_hydration_local_wins():
 
 @pytest.mark.asyncio
 async def test_manager_default_adopts_stored_fields():
-    store = RAMSessionStore()
+    store = RAMNamespaceStore()
     await store.set(
         "default",
         {
@@ -234,7 +235,7 @@ async def test_manager_default_adopts_stored_hidden_specs():
     # hidden shapes land on the default placeholder with the other
     # durable fields, or the first command after restart reads what
     # the spec hides and the next flush erases the restriction.
-    store = RAMSessionStore()
+    store = RAMNamespaceStore()
     await store.set(
         "default",
         {
@@ -266,7 +267,7 @@ async def test_manager_default_adopts_stored_path_axis():
     # the hides beside them: dropped here, a restarted daemon's carve-out
     # would vanish (every show subtree reads ENOENT again) and the next
     # flush would erase both from the store.
-    store = RAMSessionStore()
+    store = RAMNamespaceStore()
     await store.set(
         "default",
         {
@@ -311,7 +312,7 @@ async def test_manager_default_adopts_stored_scripts():
     # shapes: a store written by a scripted deployment must not wake a
     # daemon configured without a default profile unjudged, and the
     # next flush must not erase the programs from the record.
-    store = RAMSessionStore()
+    store = RAMNamespaceStore()
     await store.set(
         "default",
         {
@@ -374,7 +375,7 @@ async def test_manager_default_profile_outranks_a_stale_record():
     # one) must not wake the primary agent unrestricted: the document
     # wins the narrowing fields after hydration, the record keeps the
     # scratch state (cwd, env), and the next flush rewrites the record.
-    store = RAMSessionStore()
+    store = RAMNamespaceStore()
     await store.set(
         "default",
         {
@@ -404,7 +405,7 @@ async def test_manager_default_profile_outranks_a_stale_record():
 
 @pytest.mark.asyncio
 async def test_manager_flush_writes_through():
-    store = RAMSessionStore()
+    store = RAMNamespaceStore()
     mgr = SessionManager("default", store=store)
     mgr.create("agent", mount_modes={"/s3": MountMode.READ})
     mgr.cwd = "/moved"
@@ -416,7 +417,7 @@ async def test_manager_flush_writes_through():
 
 @pytest.mark.asyncio
 async def test_manager_close_deletes_from_store():
-    store = RAMSessionStore()
+    store = RAMNamespaceStore()
     mgr = SessionManager("default", store=store)
     mgr.create("gone")
     await mgr.flush()
@@ -426,7 +427,7 @@ async def test_manager_close_deletes_from_store():
 
 @pytest.mark.asyncio
 async def test_sessions_persist_across_workspaces_on_shared_store():
-    store = RAMSessionStore()
+    store = RAMNamespaceStore()
     ram = RAMVFS()
     ws_a = Workspace({"/data": ram}, mode=MountMode.EXEC, session_store=store)
     ws_a.create_session("narrow", mounts={"/data": "read"})
@@ -439,7 +440,7 @@ async def test_sessions_persist_across_workspaces_on_shared_store():
     assert result.exit_code != 0
 
 
-class CountingStore(RAMSessionStore):
+class CountingStore(RAMNamespaceStore):
     def __init__(self) -> None:
         super().__init__()
         self.cas_calls = 0
@@ -462,7 +463,7 @@ def test_flush_skips_clean_sessions():
 
 
 def test_flush_bumps_generation():
-    store = RAMSessionStore()
+    store = RAMNamespaceStore()
     mgr = SessionManager("default", store=store)
     _run(mgr.flush())
     assert mgr.get("default").generation == 1
@@ -474,7 +475,7 @@ def test_flush_bumps_generation():
 
 
 def test_flush_conflict_adopts_stored_generation_and_retries():
-    store = RAMSessionStore()
+    store = RAMNamespaceStore()
     mgr = SessionManager("default", store=store)
     # Another writer already advanced the record to generation 5.
     _run(
@@ -497,7 +498,7 @@ def test_flush_conflict_adopts_stored_generation_and_retries():
 
 
 def test_flush_exhausted_retries_raise():
-    class AlwaysConflict(RAMSessionStore):
+    class AlwaysConflict(RAMNamespaceStore):
         async def cas_set(self, session_id, fields, expected_generation):
             return False
 
@@ -556,7 +557,7 @@ def test_commands_of_answers_the_sessions_own_rules():
 
 @pytest.mark.asyncio
 async def test_manager_admission_rules_ride_the_session_record():
-    store = RAMSessionStore()
+    store = RAMNamespaceStore()
     own = AdmissionRules(
         allow=("ls", "git log"),
         deny=(CommandRule(reason="no", commands=("rm",)),),
@@ -600,7 +601,7 @@ async def test_manager_admission_rules_ride_the_session_record():
 
 @pytest.mark.asyncio
 async def test_manager_decisions_live_on_the_registered_session_and_persist():
-    store = RAMSessionStore()
+    store = RAMNamespaceStore()
     mgr = SessionManager("default", store=store)
     await mgr.ensure_loaded()
     live = mgr.create("agent")
@@ -639,7 +640,7 @@ async def test_manager_decisions_live_on_the_registered_session_and_persist():
 
 @pytest.mark.asyncio
 async def test_manager_default_session_hydrates_its_decisions():
-    store = RAMSessionStore()
+    store = RAMNamespaceStore()
     mgr = SessionManager("default", store=store)
     await mgr.ensure_loaded()
     rule = CommandRule(reason="sign-off", commands=("git push",))
@@ -689,7 +690,7 @@ def test_restore_seed_templates_later_sessions():
 def test_hydration_merges_env_entries_the_record_predates():
     """A pointer added to the env block after a record was written must
     reach the hydrated session; the record's own entries win per name."""
-    store = RAMSessionStore()
+    store = RAMNamespaceStore()
 
     async def scenario():
         old = SessionManager("default", store=store)
@@ -719,7 +720,7 @@ def test_hydration_merges_env_entries_the_record_predates():
 def test_merged_seed_lands_durably_on_the_next_flush():
     """Stamped after the baseline, like narrow: the store's record gains
     the new entry rather than needing a re-merge every restart."""
-    store = RAMSessionStore()
+    store = RAMNamespaceStore()
 
     async def scenario():
         old = SessionManager("default", store=store)
@@ -740,7 +741,7 @@ def test_merged_seed_lands_durably_on_the_next_flush():
 async def test_profile_changes_publish_only_after_persistence(
     monkeypatch, failure
 ):
-    store = RAMSessionStore()
+    store = RAMNamespaceStore()
     mgr = SessionManager("default", store=store)
     original = CompiledProfile(
         visibility=Visibility(
@@ -814,7 +815,7 @@ async def test_profile_changes_publish_only_after_persistence(
 async def test_session_close_waits_for_profile_persistence(
     monkeypatch, failure
 ):
-    store = RAMSessionStore()
+    store = RAMNamespaceStore()
     mgr = SessionManager("default", store=store)
     mgr.create("agent")
     entered, release = asyncio.Event(), asyncio.Event()
@@ -849,7 +850,7 @@ async def test_session_close_waits_for_profile_persistence(
             await closing
 
 
-class _StallableStore(RAMSessionStore):
+class _StallableStore(RAMNamespaceStore):
     def __init__(self) -> None:
         super().__init__()
         self.stall = False
@@ -881,7 +882,7 @@ async def test_cancelled_cas_set_rolls_back_the_generation():
     assert mgr.get("default").generation == 1
 
 
-class _CommitThenCancelStore(RAMSessionStore):
+class _CommitThenCancelStore(RAMNamespaceStore):
     """A store whose CAS lands and is then cancelled on the way out.
 
     Not a contrivance: ``DiskRecordClient.cas_put`` releases its

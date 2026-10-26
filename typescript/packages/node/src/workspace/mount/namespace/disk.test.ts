@@ -53,4 +53,13 @@ describe('DiskNamespaceStore', () => {
     await store.clear()
     expect((await store.load()).size).toBe(0)
   })
+
+  it('casSet checks the record generation', async () => {
+    await store.set('/legacy', { mode: 1 })
+    expect(await store.casSet('/legacy', { mode: 2, generation: 1 }, 0)).toBe(true)
+    expect(await store.casSet('/legacy', { mode: 3, generation: 1 }, 0)).toBe(false)
+    expect(await store.casSet('/legacy', { mode: 3, generation: 2 }, 1)).toBe(true)
+    expect((await store.load()).get('/legacy')).toEqual({ mode: 3, generation: 2 })
+    expect(readdirSync(root)).toEqual(['namespace.json'])
+  })
 })

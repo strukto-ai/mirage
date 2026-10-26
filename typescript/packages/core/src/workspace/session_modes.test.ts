@@ -14,7 +14,7 @@
 
 import { afterEach, describe, expect, it } from 'vitest'
 import { runWithSession } from '../context/session_context.ts'
-import { RAMSessionStore } from './session/ram.ts'
+import { RAMNamespaceStore } from './mount/namespace/ram.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { FileType, MountMode, type FileStat } from '../types.ts'
 import {
@@ -315,11 +315,11 @@ describe('structure below a mount whose own content is hidden', () => {
   })
 })
 
-describe('sessions on a shared SessionStore', () => {
+describe('sessions on a shared session table', () => {
   it('a session created by one workspace narrows a sibling on the same store', async () => {
     const parser = await getTestParser()
     const ram = new RAMVFS()
-    const store = new RAMSessionStore()
+    const store = new RAMNamespaceStore()
     const wsA = new Workspace(
       { '/data': ram },
       { mode: MountMode.EXEC, shellParser: parser, sessionStore: store },

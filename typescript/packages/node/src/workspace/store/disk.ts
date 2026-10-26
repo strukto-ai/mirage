@@ -16,8 +16,10 @@ import { rm } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import path from 'node:path'
 import type { ObserverStore } from '@struktoai/mirage-core/observe/store'
-import type { NamespaceStore } from '@struktoai/mirage-core/workspace/mount/namespace/store'
-import type { SessionStore } from '@struktoai/mirage-core/workspace/session/store'
+import {
+  RecordNamespaceStore,
+  type NamespaceStore,
+} from '@struktoai/mirage-core/workspace/mount/namespace/store'
 import { WorkspaceStateStore } from '@struktoai/mirage-core/workspace/store/base'
 import type {
   WorkspaceFields,
@@ -26,7 +28,6 @@ import type {
 import { DiskObserverStore } from '../../observe/disk_store.ts'
 import { DiskNamespaceStore } from '../mount/namespace/disk.ts'
 import { DiskRecordClient, quoteName } from '../record/disk.ts'
-import { DiskSessionStore } from '../session/disk.ts'
 
 export const DEFAULT_STATE_ROOT = '~/.mirage/state'
 
@@ -52,7 +53,7 @@ export interface DiskWorkspaceStateStoreOptions extends WorkspaceStateStoreOverr
  *
  * - `{root}/workspaces/{ws}/workspace.json` — metadata record
  * - `{root}/workspaces/{ws}/sessions/{sid}.json` — session table
- * - `{root}/workspaces/{ws}/namespace.json` — nodes + user, one JSON
+ * - `{root}/workspaces/{ws}/namespace.json` — node table, one JSON
  * - `{root}/workspaces/{ws}/history/<day>/<sid>.jsonl` — history
  *
  * The layout mirrors the S3 store file-for-object; mutable records get
@@ -68,7 +69,7 @@ export class DiskWorkspaceStateStore extends WorkspaceStateStore {
   private readonly meta = new Map<string, DiskRecordClient>()
   private readonly namespaces = new Map<string, DiskNamespaceStore>()
   private readonly observers = new Map<string, DiskObserverStore>()
-  private readonly sessionTables = new Map<string, DiskSessionStore>()
+  private readonly sessionTables = new Map<string, RecordNamespaceStore>()
 
   constructor(options: DiskWorkspaceStateStoreOptions = {}) {
     const { root, ...overrides } = options
@@ -111,10 +112,10 @@ export class DiskWorkspaceStateStore extends WorkspaceStateStore {
     return ob
   }
 
-  protected makeSessions(workspaceId: string): SessionStore {
+  protected makeSessions(workspaceId: string): NamespaceStore {
     let table = this.sessionTables.get(workspaceId)
     if (table === undefined) {
-      table = new DiskSessionStore(this.wsRoot(workspaceId))
+      table = new RecordNamespaceStore(new DiskRecordClient(this.wsRoot(workspaceId), 'sessions/'))
       this.sessionTables.set(workspaceId, table)
     }
     return table

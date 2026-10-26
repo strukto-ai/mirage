@@ -14,10 +14,8 @@
 
 import type { ObserverStore } from '../../observe/store.ts'
 import { normalizeKeyPrefix, type S3Config } from '../../vfs/s3/config.ts'
-import type { NamespaceStore } from '../mount/namespace/store.ts'
+import { RecordNamespaceStore, type NamespaceStore } from '../mount/namespace/store.ts'
 import { S3RecordClient } from '../record/s3.ts'
-import { S3SessionStore } from '../session/s3.ts'
-import type { SessionStore } from '../session/store.ts'
 import {
   WorkspaceStateStore,
   type WorkspaceFields,
@@ -45,7 +43,7 @@ export class S3WorkspaceStateStore extends WorkspaceStateStore {
   private readonly config: S3Config
   private readonly prefix: string
   private readonly meta: S3RecordClient
-  private readonly sessionTables = new Map<string, S3SessionStore>()
+  private readonly sessionTables = new Map<string, RecordNamespaceStore>()
 
   constructor(config: S3Config, overrides: WorkspaceStateStoreOverrides = {}) {
     super(overrides)
@@ -68,10 +66,11 @@ export class S3WorkspaceStateStore extends WorkspaceStateStore {
     )
   }
 
-  protected makeSessions(workspaceId: string): SessionStore {
+  protected makeSessions(workspaceId: string): NamespaceStore {
     let table = this.sessionTables.get(workspaceId)
     if (table === undefined) {
-      table = new S3SessionStore({ ...this.config, keyPrefix: `${this.prefix}${workspaceId}/` })
+      const scoped = normalizeKeyPrefix(`${this.prefix}${workspaceId}/`) ?? ''
+      table = new RecordNamespaceStore(new S3RecordClient(this.config, `${scoped}sessions/`))
       this.sessionTables.set(workspaceId, table)
     }
     return table

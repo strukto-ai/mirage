@@ -29,7 +29,7 @@ from mirage.vfs.gdrive.config import GoogleDriveConfig
 from mirage.vfs.gdrive.gdrive import GoogleDriveVFS
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Session, Workspace
-from mirage.workspace.session import RAMSessionStore
+from mirage.workspace.mount.namespace.ram import RAMNamespaceStore
 from mirage.workspace.snapshot import apply_state_dict, read_tar
 
 SEED_5_IDS = [
@@ -125,7 +125,7 @@ async def test_a_handle_adopts_a_persisted_session_before_creating_one():
     # table, recreate a persisted session bare, and hand the next
     # flush a record that overwrote the stored profile. The entry point
     # hydrates first, so the stored session is adopted as is.
-    store = RAMSessionStore()
+    store = RAMNamespaceStore()
     first = Workspace(
         {"/repo/": RAMVFS()},
         mode=MountMode.WRITE,

@@ -14,7 +14,8 @@
 
 from collections.abc import Iterable
 
-from mirage.workspace.mount.namespace.store import NamespaceStore, NodeFields
+from mirage.workspace.mount.namespace.store import NamespaceStore
+from mirage.workspace.record.types import RecordFields, generation_of
 
 
 class RAMNamespaceStore(NamespaceStore):
@@ -26,20 +27,28 @@ class RAMNamespaceStore(NamespaceStore):
     """
 
     def __init__(self) -> None:
-        self._entries: dict[str, NodeFields] = {}
+        self._entries: dict[str, RecordFields] = {}
 
-    async def load(self) -> dict[str, NodeFields]:
-        return {path: dict(f) for path, f in self._entries.items()}
+    async def load(self) -> dict[str, RecordFields]:
+        return {key: dict(f) for key, f in self._entries.items()}
 
-    async def set(self, path: str, fields: NodeFields) -> None:
-        self._entries[path] = dict(fields)
+    async def set(self, key: str, fields: RecordFields) -> None:
+        self._entries[key] = dict(fields)
 
-    async def delete(self, paths: Iterable[str]) -> None:
-        for path in paths:
-            self._entries.pop(path, None)
+    async def cas_set(
+        self, key: str, fields: RecordFields, expected_generation: int
+    ) -> bool:
+        if generation_of(self._entries.get(key)) != expected_generation:
+            return False
+        self._entries[key] = dict(fields)
+        return True
 
-    async def replace_all(self, entries: dict[str, NodeFields]) -> None:
-        self._entries = {path: dict(f) for path, f in entries.items()}
+    async def delete(self, keys: Iterable[str]) -> None:
+        for key in keys:
+            self._entries.pop(key, None)
+
+    async def replace_all(self, entries: dict[str, RecordFields]) -> None:
+        self._entries = {key: dict(f) for key, f in entries.items()}
 
     async def clear(self) -> None:
         self._entries.clear()

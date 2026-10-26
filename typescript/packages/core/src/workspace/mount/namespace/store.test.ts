@@ -13,19 +13,20 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type * as s3ClientModule from '../../core/s3/client.ts'
-import type { S3Config } from '../../vfs/s3/config.ts'
+import type * as s3ClientModule from '../../../core/s3/client.ts'
+import type { S3Config } from '../../../vfs/s3/config.ts'
 import {
   FakeConditionalS3Client,
   currentFakeS3,
   installFakeS3,
-} from '../../../tests/workspace/fixtures/s3_fake.ts'
-import { S3SessionStore } from './s3.ts'
-import type { SessionFields } from './store.ts'
+} from '../../../../tests/workspace/fixtures/s3_fake.ts'
+import { S3RecordClient } from '../../record/s3.ts'
+import type { RecordFields } from '../../record/types.ts'
+import { RecordNamespaceStore } from './store.ts'
 
-vi.mock('../../core/s3/client.ts', async (importOriginal) => {
+vi.mock('../../../core/s3/client.ts', async (importOriginal) => {
   const original = await importOriginal<typeof s3ClientModule>()
-  const fake = await import('../../../tests/workspace/fixtures/s3_fake.ts')
+  const fake = await import('../../../../tests/workspace/fixtures/s3_fake.ts')
   return {
     ...original,
     createS3Client: () => Promise.resolve(fake.currentFakeS3() as never),
@@ -34,18 +35,23 @@ vi.mock('../../core/s3/client.ts', async (importOriginal) => {
 })
 
 const BUCKET = 'state-bucket'
+const PREFIX = 'mirage/ws1/sessions/'
 
-function config(): S3Config {
-  return {
+function makeStore(): RecordNamespaceStore {
+  const config: S3Config = {
     bucket: BUCKET,
     region: 'us-east-1',
     accessKeyId: 'fake',
     secretAccessKey: 'fake',
-    keyPrefix: 'mirage/ws1/',
   }
+  return new RecordNamespaceStore(new S3RecordClient(config, PREFIX))
 }
 
-async function casIncrement(store: S3SessionStore, worker: string, rounds: number): Promise<void> {
+async function casIncrement(
+  store: RecordNamespaceStore,
+  worker: string,
+  rounds: number,
+): Promise<void> {
   for (let round = 0; round < rounds; round++) {
     let landed = false
     for (let attempt = 0; attempt < 200; attempt++) {
@@ -53,7 +59,7 @@ async function casIncrement(store: S3SessionStore, worker: string, rounds: numbe
       const env = { ...(record.env as Record<string, string>) }
       env[worker] = String(Number(env[worker] ?? '0') + 1)
       const expected = Number(record.generation ?? 0)
-      const fields: SessionFields = { ...record, env, generation: expected + 1 }
+      const fields: RecordFields = { ...record, env, generation: expected + 1 }
       if (await store.casSet('hot', fields, expected)) {
         landed = true
         break
@@ -64,13 +70,13 @@ async function casIncrement(store: S3SessionStore, worker: string, rounds: numbe
   }
 }
 
-describe('S3SessionStore', () => {
+describe('RecordNamespaceStore over S3', () => {
   beforeEach(() => {
     installFakeS3()
   })
 
-  it('round-trips set/load and writes the documented layout', async () => {
-    const store = new S3SessionStore(config())
+  it('round-trips set/load, one object per key', async () => {
+    const store = makeStore()
     await store.set('s1', { session_id: 's1', cwd: '/a', env: {} })
     await store.set('s2', {
       session_id: 's2',
@@ -82,11 +88,11 @@ describe('S3SessionStore', () => {
     await store.close()
     expect(entries.get('s1')?.cwd).toBe('/a')
     expect(entries.get('s2')?.mount_modes).toEqual({ '/data': 'read' })
-    expect(currentFakeS3().entry(BUCKET, 'mirage/ws1/sessions/s1.json')).toBeDefined()
+    expect(currentFakeS3().entry(BUCKET, `${PREFIX}s1.json`)).toBeDefined()
   })
 
   it('deletes, replaces all, and clears', async () => {
-    const store = new S3SessionStore(config())
+    const store = makeStore()
     await store.set('a', { session_id: 'a' })
     await store.set('b', { session_id: 'b' })
     await store.delete(['a', 'missing'])
@@ -99,17 +105,17 @@ describe('S3SessionStore', () => {
   })
 
   it('cas create lands exactly once', async () => {
-    const store = new S3SessionStore(config())
+    const store = makeStore()
     const first = { session_id: 's', generation: 1 }
     expect(await store.casSet('s', first, 0)).toBe(true)
     expect(await store.casSet('s', { session_id: 's', generation: 1 }, 0)).toBe(false)
     await store.close()
-    const stored = currentFakeS3().entry(BUCKET, 'mirage/ws1/sessions/s.json')
+    const stored = currentFakeS3().entry(BUCKET, `${PREFIX}s.json`)
     expect(JSON.parse(stored ?? '')).toEqual(first)
   })
 
   it('rejects a stale generation and accepts the current one', async () => {
-    const store = new S3SessionStore(config())
+    const store = makeStore()
     await store.set('s', { session_id: 's', generation: 2 })
     expect(await store.casSet('s', { session_id: 's', generation: 2 }, 1)).toBe(false)
     expect(await store.casSet('s', { session_id: 's', cwd: '/x', generation: 3 }, 2)).toBe(true)
@@ -119,7 +125,7 @@ describe('S3SessionStore', () => {
   })
 
   it('treats a legacy record without generation as generation 0', async () => {
-    const store = new S3SessionStore(config())
+    const store = makeStore()
     await store.set('s', { session_id: 's' })
     expect(await store.casSet('s', { session_id: 's', generation: 1 }, 0)).toBe(true)
     await store.close()
@@ -145,7 +151,7 @@ describe('S3SessionStore', () => {
       }
     }
     const client = installFakeS3(new RaceOnceClient()) as RaceOnceClient
-    const store = new S3SessionStore(config())
+    const store = makeStore()
     await store.set('s', { session_id: 's', generation: 1 })
     client.raced = false
     expect(await store.casSet('s', { session_id: 's', cwd: '/loser', generation: 2 }, 1)).toBe(
@@ -157,7 +163,7 @@ describe('S3SessionStore', () => {
   })
 
   it('loses nothing under concurrent cas writers', async () => {
-    const store = new S3SessionStore(config())
+    const store = makeStore()
     const workers = ['w0', 'w1', 'w2', 'w3', 'w4']
     await Promise.all(workers.map((worker) => casIncrement(store, worker, 5)))
     const record = (await store.load()).get('hot')

@@ -13,19 +13,19 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { NamespaceStore } from '@struktoai/mirage-core/workspace/mount/namespace/store'
-import type { NodeFields } from '@struktoai/mirage-core/workspace/mount/namespace/store'
+import { generationOf, type RecordFields } from '@struktoai/mirage-core/workspace/record/types'
 import { DiskRecordClient } from '../../record/disk.ts'
 
 const NAMESPACE_RECORD = 'namespace'
 
 interface NamespaceState {
-  nodes: Record<string, NodeFields>
+  nodes: Record<string, RecordFields>
 }
 
 /**
  * NamespaceStore backed by one `namespace.json` per workspace.
  *
- * The whole plane is one human-readable record
+ * The whole node table is one human-readable record
  * `{"nodes": {path: fields}}`: the namespace is bound to
  * the workspace, so it serializes as one JSON file, not per-node
  * files. Read-modify-writes take the record's lockfile so concurrent
@@ -44,35 +44,48 @@ export class DiskNamespaceStore extends NamespaceStore {
   private async state(): Promise<NamespaceState> {
     const [fields] = await this.records.get(NAMESPACE_RECORD)
     if (fields === null) return { nodes: {} }
-    return { nodes: (fields.nodes as Record<string, NodeFields> | undefined) ?? {} }
+    return { nodes: (fields.nodes as Record<string, RecordFields> | undefined) ?? {} }
   }
 
   private async write(state: NamespaceState): Promise<void> {
     await this.records.put(NAMESPACE_RECORD, { nodes: state.nodes })
   }
 
-  async load(): Promise<Map<string, NodeFields>> {
+  async load(): Promise<Map<string, RecordFields>> {
     return new Map(Object.entries((await this.state()).nodes))
   }
 
-  async set(path: string, fields: NodeFields): Promise<void> {
+  async set(key: string, fields: RecordFields): Promise<void> {
     const fh = await this.records.lock(NAMESPACE_RECORD)
     try {
       const state = await this.state()
-      state.nodes[path] = fields
+      state.nodes[key] = fields
       await this.write(state)
     } finally {
       await this.records.unlock(NAMESPACE_RECORD, fh)
     }
   }
 
-  async delete(paths: readonly string[]): Promise<void> {
+  async casSet(key: string, fields: RecordFields, expectedGeneration: number): Promise<boolean> {
     const fh = await this.records.lock(NAMESPACE_RECORD)
     try {
       const state = await this.state()
-      const drop = new Set(paths)
+      if (generationOf(state.nodes[key]) !== expectedGeneration) return false
+      state.nodes[key] = fields
+      await this.write(state)
+      return true
+    } finally {
+      await this.records.unlock(NAMESPACE_RECORD, fh)
+    }
+  }
+
+  async delete(keys: readonly string[]): Promise<void> {
+    const fh = await this.records.lock(NAMESPACE_RECORD)
+    try {
+      const state = await this.state()
+      const drop = new Set(keys)
       state.nodes = Object.fromEntries(
-        Object.entries(state.nodes).filter(([path]) => !drop.has(path)),
+        Object.entries(state.nodes).filter(([key]) => !drop.has(key)),
       )
       await this.write(state)
     } finally {
@@ -80,7 +93,7 @@ export class DiskNamespaceStore extends NamespaceStore {
     }
   }
 
-  async replaceAll(entries: Map<string, NodeFields>): Promise<void> {
+  async replaceAll(entries: Map<string, RecordFields>): Promise<void> {
     const fh = await this.records.lock(NAMESPACE_RECORD)
     try {
       const state = await this.state()

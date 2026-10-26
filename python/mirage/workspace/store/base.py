@@ -19,7 +19,6 @@ from typing import Any
 from mirage.observe.store import ObserverStore
 from mirage.workspace.mount.namespace import NamespaceStore
 from mirage.workspace.record.types import CAS_MAX_RETRIES, generation_of
-from mirage.workspace.session.store import SessionStore
 
 # One workspace's metadata record: the JSON-able discovery payload
 # (workspace_id, default_session_id, created_at, generation). This is
@@ -40,9 +39,9 @@ class WorkspaceStateStore(ABC):
     that lets a kernel tier bind a session-bound mountpoint created by
     another daemon.
 
-    The planes keep their existing narrow interfaces (NamespaceStore,
-    ObserverStore, SessionStore); this provider only unifies their
-    construction, connection, and key scoping. Per-group overrides
+    The node table and the session table are two NamespaceStores and
+    the observer keeps its ObserverStore; this provider only unifies
+    their construction, connection, and key scoping. Per-group overrides
     redirect a plane group to a different provider (e.g. large observer
     logs to disk while everything else stays on Redis). Sessions and
     metadata form one inseparable group: the default-session pointer in
@@ -80,7 +79,7 @@ class WorkspaceStateStore(ABC):
         )
         return target._make_observer(workspace_id)
 
-    def sessions(self, workspace_id: str) -> SessionStore:
+    def sessions(self, workspace_id: str) -> NamespaceStore:
         """The session table for one workspace."""
         target = (
             self._workspace_override
@@ -106,7 +105,7 @@ class WorkspaceStateStore(ABC):
     ) -> bool:
         """Write the metadata record iff its stored generation matches.
 
-        Same optimistic-concurrency contract as SessionStore.cas_set: a
+        Same optimistic-concurrency contract as NamespaceStore.cas_set: a
         missing record (and a legacy record without the field) counts as
         generation 0, so create-if-absent is ``expected_generation=0``.
         Returns True when the write landed, False on conflict.
@@ -196,7 +195,7 @@ class WorkspaceStateStore(ABC):
         """Construct (or return the cached) observer store for a workspace."""
 
     @abstractmethod
-    def _make_sessions(self, workspace_id: str) -> SessionStore:
+    def _make_sessions(self, workspace_id: str) -> NamespaceStore:
         """Construct (or return the cached) session store for a workspace."""
 
     @abstractmethod

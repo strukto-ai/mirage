@@ -860,7 +860,7 @@ export class SessionState {
   }
 
   /**
-   * The durable-field payload persisted by SessionStore and snapshots.
+   * The durable-field payload the session table and snapshots persist.
    * Keys are snake_case, byte-identical to Python's `SessionState.to_dict`,
    * so both languages can share one store (a py daemon creates the
    * session, a node kernel tier binds it).

@@ -165,7 +165,7 @@ from mirage.workspace.node.explain import (
     holds,
     line_judgments,
 )
-from mirage.workspace.session import SessionManager, SessionState, SessionStore
+from mirage.workspace.session import SessionManager, SessionState
 from mirage.workspace.session.constants import DEFAULT_PROFILE
 from mirage.workspace.session.resolve import (
     compile_profile,
@@ -258,7 +258,7 @@ class Workspace:
         owns_store: bool = False,
         observe: ObserverStore | None = None,
         namespace_store: NamespaceStore | None = None,
-        session_store: SessionStore | None = None,
+        session_store: NamespaceStore | None = None,
         console_factory: ConsoleFactory | None = None,
         runtimes: list[Runtime[Any] | str] | None = None,
         route_policy: RoutePolicy | None = None,
