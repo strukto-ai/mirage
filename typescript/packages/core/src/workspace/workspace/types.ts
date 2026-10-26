@@ -21,7 +21,7 @@ import type { CallStack } from '../../shell/call_stack.ts'
 import type { CacheConfig, RedisCacheConfig } from '../../cache/file/config.ts'
 import type { CLI } from '../../commands/cli/types.ts'
 import type { ByteSource } from '../../io/types.ts'
-import type { JobConsole } from '../../shell/console/index.ts'
+import type { JobConsole, Terminal } from '../../shell/console/index.ts'
 import type { ObserverStore } from '../../observe/store.ts'
 import type { IndexConfig, RedisIndexConfig } from '../../cache/index/config.ts'
 import type { Mount } from '../mount/spec.ts'
@@ -236,6 +236,11 @@ export interface ExecuteOptions {
   /** @internal The exact session carried by an evaluator, including an unregistered fork. */
   session?: SessionState
   /**
+   * @internal The terminal a per-call line writes to, its fork's own, as a
+   * typed line writes to its session's.
+   */
+  tty?: Terminal
+  /**
    * Abort the in-progress execution. Observed cooperatively at recursion
    * boundaries between LIST/PIPELINE/loop iterations and inside `sleep`.
    * Long-running synchronous primitives (e.g. a single large file read)
@@ -253,8 +258,9 @@ export interface ExecuteOptions {
    */
   record?: boolean
   /**
-   * Per-call working directory. Providing this runs the command in an
-   * isolated session, like a bash subshell `(cd <cwd> && cmd)`. Mutations
+   * Per-call working directory. Providing this runs the command in a
+   * subshell of its own, like `(cd <cwd> && cmd)`, beside the session's
+   * other lines rather than after them, with jobs of its own. Mutations
    * (cd, export) inside the call do NOT persist back to the workspace's
    * session. To change the persistent cwd, assign `ws.cwd` directly or run
    * `ws.shell('cd <path>')` without this option.
@@ -262,8 +268,8 @@ export interface ExecuteOptions {
   cwd?: string
   /**
    * Per-call environment variable overrides, layered on top of the
-   * session's env. Providing this runs the command in an isolated session,
-   * like `env FOO=bar cmd`. Mutations (export) inside the call do NOT
+   * session's env. Like `cwd`, providing this runs the command in a subshell
+   * of its own, like `env FOO=bar cmd`. Mutations (export) inside the call do NOT
    * persist back to the workspace's session. To change the persistent env,
    * assign `ws.env` directly or run `ws.shell('export FOO=bar')` without
    * this option.
