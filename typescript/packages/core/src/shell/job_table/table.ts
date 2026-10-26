@@ -219,8 +219,9 @@ export class JobTable {
   store: JobStore
   readonly owner = crypto.randomUUID().replaceAll('-', '')
   private jobs = new Map<string, Map<number, Job>>()
-  // Jobs `disown` removed while still running: the shell forgets them,
-  // the workspace still owns their tasks so teardown can stop them.
+  // Jobs `disown` removed while still running, and ones another job's
+  // number displaced: the shell forgets them, the workspace still owns
+  // their tasks so teardown can stop them; each leaves once it finishes.
   private disowned: Job[] = []
   private lease: ReturnType<typeof setTimeout> | null = null
   // The bounds on killed jobs' stops (endKilled): each one's ending, and
@@ -314,6 +315,7 @@ export class JobTable {
           } finally {
             watching.abort()
             await this.recordEnding(job)
+            this.disowned = this.disowned.filter((j) => j !== job)
             this.dropLease()
           }
         },

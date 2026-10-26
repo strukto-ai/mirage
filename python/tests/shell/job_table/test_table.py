@@ -894,6 +894,7 @@ async def test_a_disowned_job_drops_its_record_when_it_ends():
     await job.process.join()
     ended = await store.load("s")
     assert ended is not None and "disowned" not in ended
+    assert table._disowned == []
 
 
 @pytest.mark.asyncio

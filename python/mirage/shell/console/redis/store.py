@@ -89,6 +89,12 @@ class RedisConsoleStore:
     def closed(self) -> bool:
         return self._closed
 
+    @property
+    def keys(self) -> tuple[str, str, str]:
+        """The console's keys: its stream, its counter and its ending
+        flag."""
+        return (self._stream, self._counter, self._ended)
+
     async def append(self, channel: Channel, data: bytes) -> ConsoleChunk:
         """Append one chunk, atomically against the console's ending.
 
@@ -153,7 +159,7 @@ class RedisConsoleStore:
         self._check_open()
         if self._ttl:
             pipe = self._client.pipeline()
-            for key in (self._stream, self._counter, self._ended):
+            for key in self.keys:
                 pipe.expire(key, self._ttl)
             await pipe.execute()
 

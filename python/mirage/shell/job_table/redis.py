@@ -92,14 +92,19 @@ class RedisJobStore(JobStore):
         )
 
     async def renew(self, owner: str, consoles: Sequence[str] = ()) -> None:
+        """One round trip however many jobs the owner runs, so the lease
+        is never late behind its consoles."""
+        pipe = self._client.pipeline(transaction=False)
         if self.lease_seconds is not None:
-            await self._client.set(
+            pipe.set(
                 f"{self._prefix}owner:{owner}",
                 b"1",
                 px=int(self.lease_seconds * 1000),
             )
         for name in consoles:
-            await self.console(name).expire()
+            for key in self.console(name).keys:
+                pipe.expire(key, CONSOLE_TTL_SECONDS)
+        await pipe.execute()
 
     async def alive(self, owner: str) -> bool:
         if self.lease_seconds is None:

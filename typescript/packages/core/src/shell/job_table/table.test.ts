@@ -1184,6 +1184,7 @@ describe('JobTable on a shared store, across reaps and closes', () => {
     release()
     await job.process?.join()
     expect((await store.load('s'))?.disowned).toBeUndefined()
+    expect((jt as unknown as { disowned: Job[] }).disowned).toEqual([])
   })
 })
 

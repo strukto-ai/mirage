@@ -209,13 +209,16 @@ export class RedisConsoleStore implements ConsoleStore {
     }
   }
 
+  /** The console's keys: its stream, its counter and its ending flag. */
+  get keys(): readonly string[] {
+    return [this.streamKey, this.counterKey, this.endedKey]
+  }
+
   /** Push the keys' expiry out again, as an append does. */
   async expire(): Promise<void> {
     if (this.isClosed || this.ttlSeconds <= 0) return
     const c = await this.client()
-    await Promise.all(
-      [this.streamKey, this.counterKey, this.endedKey].map((key) => c.expire(key, this.ttlSeconds)),
-    )
+    await Promise.all(this.keys.map((key) => c.expire(key, this.ttlSeconds)))
   }
 
   async close(): Promise<void> {

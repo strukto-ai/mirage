@@ -306,9 +306,10 @@ class JobTable:
         self.store: JobStore = store if store is not None else RAMJobStore()
         self.owner = uuid.uuid4().hex
         self._jobs: dict[str, dict[int, Job]] = {}
-        # Jobs `disown` removed from the table while they still run. The
-        # shell no longer lists, waits for or reports them, but the
-        # workspace still owns their tasks, so teardown can stop them.
+        # Jobs `disown` removed from the table while they still run, and
+        # ones another job's number displaced. The shell no longer lists,
+        # waits for or reports them, but the workspace still owns their
+        # tasks, so teardown can stop them; each leaves once it finishes.
         self._disowned: list[Job] = []
         self._lease: asyncio.Task[None] | None = None
         # The bounds on killed jobs' stops (``_end_killed``), each with
@@ -392,6 +393,7 @@ class JobTable:
             finally:
                 watcher.cancel()
                 await self._record_ending(job)
+                self._disowned = [j for j in self._disowned if j is not job]
                 self._drop_lease()
 
         try:

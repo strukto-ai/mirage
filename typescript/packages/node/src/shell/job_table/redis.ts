@@ -92,14 +92,19 @@ export class RedisJobStore extends JobStore {
     })
   }
 
+  /**
+   * One round trip however many jobs the owner runs, so the lease is never
+   * late behind its consoles.
+   */
   async renew(owner: string, consoles: readonly string[] = []): Promise<void> {
-    if (this.leaseSeconds !== null) {
-      const c = await this.redis.client()
-      await c.set(`${this.prefix}owner:${owner}`, '1', {
-        PX: Math.round(this.leaseSeconds * 1000),
-      })
-    }
-    for (const name of consoles) await this.console(name).expire()
+    if (this.leaseSeconds === null && consoles.length === 0) return
+    const c = await this.redis.client()
+    const pipe = c.multi()
+    if (this.leaseSeconds !== null)
+      pipe.set(`${this.prefix}owner:${owner}`, '1', { PX: Math.round(this.leaseSeconds * 1000) })
+    for (const name of consoles)
+      for (const key of this.console(name).keys) pipe.expire(key, CONSOLE_TTL_SECONDS)
+    await pipe.exec()
   }
 
   async alive(owner: string): Promise<boolean> {
