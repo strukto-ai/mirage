@@ -25,6 +25,7 @@ import aiofiles.os
 from mirage.context.session_context import current_caller
 from mirage.io.stream import close_quietly, feed
 from mirage.io.types import ByteSource
+from mirage.process.handle import ProcessHandle
 from mirage.runtime.sandbox.constants import (
     EXEC_PRELUDE,
     PIPE_DIAGNOSTIC_BYTES,
@@ -159,7 +160,7 @@ async def run_program(
                 for reader in (reading, erring):
                     reader.cancel()
                 await asyncio.gather(reading, erring, return_exceptions=True)
-                await end_tree(process, signum)
+                await end_tree(process, signum, runner)
         finally:
             stop_tree(process, transport)
             await process.wait()
@@ -359,18 +360,25 @@ def kill_tree(process: asyncio.subprocess.Process, signum: int = 9) -> None:
         logger.debug("process group %d has already exited", process.pid)
 
 
-async def end_tree(process: asyncio.subprocess.Process, signum: int) -> None:
+async def end_tree(
+    process: asyncio.subprocess.Process,
+    signum: int,
+    runner: ProcessHandle | None = None,
+) -> None:
     """Signal a child's process group and give the group
     ``STOP_GRACE_SECONDS`` to end, reading and dropping the child's
     output meanwhile, so a handler that writes is not held on a full
     pipe. The grace is the group's: a descendant still handling the
-    signal after the child exited keeps it. What is left after it is the
-    caller's to kill (``stop_tree``). Mirrors TypeScript's ``endTree``.
+    signal after the child exited keeps it, unless a KILL reaches the
+    runner first. What is left after it is the caller's to kill
+    (``stop_tree``). Mirrors TypeScript's ``endTree``.
 
     Args:
         process (asyncio.subprocess.Process): a child ``run_program`` started,
             with nothing else reading its output.
         signum (int): the signal.
+        runner (ProcessHandle | None): the runner the signal stopped,
+            whose KILL ends the grace.
     """
     kill_tree(process, signum)
     drops = [
@@ -380,7 +388,7 @@ async def end_tree(process: asyncio.subprocess.Process, signum: int) -> None:
     ]
     try:
         async with asyncio.timeout(STOP_GRACE_SECONDS):
-            while True:
+            while runner is None or runner.signal != 9:
                 if sys.platform == "win32":
                     if process.returncode is not None:
                         return

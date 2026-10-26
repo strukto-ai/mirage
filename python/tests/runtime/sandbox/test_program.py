@@ -18,6 +18,7 @@ import os
 import shlex
 import signal
 import sys
+import time
 from collections.abc import AsyncIterator
 
 import pytest
@@ -243,6 +244,28 @@ async def test_a_runner_killed_with_kill_gives_the_child_no_handler(
     async with asyncio.timeout(5):
         info = await runner.join()
     assert not said.exists()
+    assert info.exit_code == 137
+    assert await _ended(child)
+
+
+# A KILL while a program still has the grace an earlier TERM gave it ends
+# that grace: what ignores TERM is killed at once, as a second
+# ``kill -KILL`` does, not a second later.
+@pytest.mark.asyncio
+async def test_a_kill_during_the_grace_ends_it(tmp_path):
+    pid_file = tmp_path / "pid"
+    runner = _start_runner(
+        ProcessTable(bind=run_with_execution),
+        f"trap '' TERM; echo $$ > {pid_file}; while :; do sleep 0.05; done",
+    )
+    child = await _wait_for_pid(pid_file)
+    assert runner.terminate(signal.SIGTERM)
+    await asyncio.sleep(0.1)
+    killed = time.monotonic()
+    assert runner.terminate(signal.SIGKILL)
+    async with asyncio.timeout(5):
+        info = await runner.join()
+    assert time.monotonic() - killed < 0.5
     assert info.exit_code == 137
     assert await _ended(child)
 
