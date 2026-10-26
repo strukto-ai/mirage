@@ -75,14 +75,17 @@ impl Parser<'_> {
     }
 
     /// Where a shell word starting at `at` ends: at an unquoted blank or
-    /// operator, with quotes and `$(...)`, `${...}` and backticks inside
-    /// it taken whole.
+    /// operator, or the backtick closing the body it is in, with quotes
+    /// and `$(...)`, `${...}` and backticks inside it taken whole.
     pub(super) fn word_extent(&self, at: usize) -> R<usize> {
         let s = self.s;
         let mut end = at;
         while end < s.len() {
             let byte = s[end];
-            if is_space(byte) || matches!(byte, b';' | b'&' | b'|' | b'<' | b'>' | b'(' | b')') {
+            if is_space(byte)
+                || matches!(byte, b';' | b'&' | b'|' | b'<' | b'>' | b'(' | b')')
+                || (byte == b'`' && self.in_backtick)
+            {
                 break;
             }
             end = match byte {

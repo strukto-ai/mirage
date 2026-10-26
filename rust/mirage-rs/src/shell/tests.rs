@@ -128,6 +128,15 @@ fn heredocs_after_a_line_are_read_in_order() {
         tree.ends_with("(heredoc_body=a\n) (heredoc_end=A))"),
         "{tree}"
     );
+    // bash reads a backtick's text first: a heredoc left open in it ends
+    // with it, and the lines after are commands.
+    for line in ["echo `cat <<A`\nA", "echo `cat <<A;`\nA"] {
+        let tree = read(line);
+        assert!(
+            tree.ends_with("(command name: (command_name (word=A))))"),
+            "{tree}"
+        );
+    }
 }
 
 #[test]
@@ -233,6 +242,14 @@ fn backtracking_over_nested_input_is_bounded() {
     let nested = format!("{}a{}", "[ $(".repeat(40), ")".repeat(40));
     let tree = parse(nested.as_bytes());
     assert!(tree.error.is_some());
+}
+
+#[test]
+fn backtick_pairs_are_read_once() {
+    let line = format!("echo{}", " `date`".repeat(50_000));
+    assert_eq!(parse(line.as_bytes()).error, None);
+    let lines = "echo a `date` b\n".repeat(50_000);
+    assert_eq!(parse(lines.as_bytes()).error, None);
 }
 
 #[test]
