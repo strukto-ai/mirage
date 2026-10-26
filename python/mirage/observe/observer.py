@@ -19,6 +19,7 @@ from typing import Any
 
 from mirage.context.session_context import current_execution_id
 from mirage.io.types import IOResult
+from mirage.io.yield_budget import YieldBudget
 from mirage.observe.log_entry import (
     EVENT_CLEAR,
     EVENT_COMMAND,
@@ -181,8 +182,11 @@ class Observer:
         """
         # TODO: batch the op lines and the command line into a single
         # store.append so one typed line costs one roundtrip and lands
-        # atomically in the store.
+        # atomically in the store. A store whose append never suspends
+        # still lets the loop run between a long line's records.
+        budget = YieldBudget()
         for rec in op_records:
+            await budget.run()
             await self.log_op(rec, session, cwd)
         stdout = await io.materialize_stdout()
         await self._log(

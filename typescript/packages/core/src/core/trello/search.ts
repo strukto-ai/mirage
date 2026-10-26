@@ -69,7 +69,7 @@ async function cards(
   for (const row of rowsOf(await readdir(accessor, scope, entry, parent))) {
     const below = await cards(accessor, mountedPath(scope, `${base}/${row.name}`), row, entry)
     if (below === null) return null
-    found.push(...below)
+    for (const item of below) found.push(item)
   }
   return found
 }

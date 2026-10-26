@@ -29,7 +29,8 @@ vi.mock('../../core/github/constants.ts', async () => {
 
 import { blobSha, FakeGitHub } from '../../../tests/core/github/_test_util.ts'
 import type { GitHubTreeItem } from '../../core/github/client.ts'
-import { MountMode } from '../../types.ts'
+import { ALL_COMMANDS } from '../../policy/builtin/output_cap.ts'
+import { Limit, MountMode } from '../../types.ts'
 import { Mount } from '../../workspace/mount/spec.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
 import { RAMVFS } from '../ram/ram.ts'
@@ -144,8 +145,10 @@ const REPO: Record<string, string> = {
 
 type Ran = [string, string, number]
 
-async function run(vfs: GitHubVFS | RAMVFS, line: string): Promise<Ran> {
-  const ws = new Workspace({ '/gh': new Mount(vfs, { mode: MountMode.READ }) })
+async function run(vfs: GitHubVFS | RAMVFS, line: string, limit?: number): Promise<Ran> {
+  const commandLimits =
+    limit === undefined ? {} : { [ALL_COMMANDS]: new Limit({ walkLimit: limit }) }
+  const ws = new Workspace({ '/gh': new Mount(vfs, { mode: MountMode.READ, commandLimits }) }, {})
   try {
     const result = await ws.shell(line)
     return [DEC.decode(result.stdout), DEC.decode(result.stderr), result.exitCode]
@@ -154,8 +157,8 @@ async function run(vfs: GitHubVFS | RAMVFS, line: string): Promise<Ran> {
   }
 }
 
-function ram(limit = 10000): RAMVFS {
-  const vfs = new RAMVFS({ walkLimit: limit })
+function ram(): RAMVFS {
+  const vfs = new RAMVFS()
   const enc = new TextEncoder()
   for (const [key, data] of Object.entries(REPO)) {
     const parts = key.split('/')
@@ -180,11 +183,10 @@ async function onGithub(
     owner: 'o',
     repo: 'r',
     baseUrl: hub.url,
-    walkLimit,
     ...ref,
   })
   hub.log.length = 0
-  return [await run(vfs, line), hub]
+  return [await run(vfs, line, walkLimit), hub]
 }
 
 async function read(hub: FakeGitHub): Promise<string[]> {
@@ -260,7 +262,7 @@ describe('grep and rg over code search', () => {
   it('stops at the cap off the default branch', async () => {
     const line = 'grep -rw import /gh'
     const [got, hub] = await onGithub(line, new FakeGitHub(REPO), true, 4)
-    expect(got).toEqual(await run(ram(4), line))
+    expect(got).toEqual(await run(ram(), line, 4))
     expect(got.slice(1)).toEqual([`grep: /gh: ${STOPPED_AT_4}`, 2])
     expect(await read(hub)).toHaveLength(4)
   })
@@ -280,7 +282,7 @@ describe('grep and rg over code search', () => {
     ["rg 'imp.rt' /gh", 'rg'],
   ])('stops %s past the scope cap', async (line, name) => {
     const [got, hub] = await onGithub(line, new FakeGitHub(REPO), false, 4)
-    expect(got).toEqual(await run(ram(4), line))
+    expect(got).toEqual(await run(ram(), line, 4))
     expect(got.slice(1)).toEqual([`${name}: /gh: ${STOPPED_AT_4}`, 2])
     expect(hub.count('blob')).toBe(4)
   })
@@ -314,9 +316,12 @@ describe('grep and rg over code search', () => {
       owner: 'o',
       repo: 'r',
       baseUrl: hub.url,
-      walkLimit: count - 1,
     })
-    const ws = new Workspace({ [prefix]: new Mount(vfs, { mode: MountMode.READ }) })
+    const commandLimits = { [ALL_COMMANDS]: new Limit({ walkLimit: count - 1 }) }
+    const ws = new Workspace(
+      { [prefix]: new Mount(vfs, { mode: MountMode.READ, commandLimits }) },
+      {},
+    )
     try {
       expect((await ws.shell(`ls ${prefix}/docs`)).exitCode).toBe(0)
       hub.set('docs/c.txt', 'c')

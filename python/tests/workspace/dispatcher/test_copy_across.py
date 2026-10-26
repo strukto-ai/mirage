@@ -12,13 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import asyncio
-
 import pytest
 
 from mirage import Mount, MountMode, Workspace
 from mirage.errors.fs import exdev
-from mirage.types import Limit, PathSpec, WritePolicy
+from mirage.types import PathSpec, WritePolicy
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.ram import RAMVFS
 
@@ -131,22 +129,6 @@ async def test_a_conditional_mount_moves_the_bytes(prefix):
     _mount(ws, prefix).write = WritePolicy.CONDITIONAL
     await ws.shell("mv /a/f /b/g")
     assert b.copied == []
-
-
-class SlowStoreRAM(StoreRAM):
-    """A destination whose store copy outlasts any deadline."""
-
-    async def copy_from(self, source, src, dst):
-        await asyncio.sleep(5)
-
-
-@pytest.mark.asyncio
-async def test_a_store_copy_keeps_the_copy_timeout():
-    a, b = StoreRAM(), SlowStoreRAM()
-    ws = await _seeded(a, b)
-    _mount(ws, "/b/").command_limits["copy"] = Limit(timeout_seconds=0.05)
-    io = await ws.shell("cp /a/f /b/g")
-    assert io.exit_code != 0
 
 
 @pytest.mark.asyncio

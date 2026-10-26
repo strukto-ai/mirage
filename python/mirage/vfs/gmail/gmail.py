@@ -106,8 +106,9 @@ class GmailVFS(BaseVFS):
     def __init__(self, config: GmailConfig) -> None:
         super().__init__()
         self.config = config
-        self.walk_limit = config.walk_limit
-        self.accessor = GmailAccessor(self.config, TokenManager(config))
+        self.accessor = GmailAccessor(
+            self.config, TokenManager(config), lambda: self.walk_limit >= 0
+        )
 
     async def readdir(
         self, path: PathSpec, entry: FileStat | None = None

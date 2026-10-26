@@ -15,26 +15,35 @@
 from collections.abc import Callable, Iterable, Mapping
 from typing import Protocol
 
-from mirage.types import Limit, Producer
+from mirage.types import JsonValue, Limit, Producer
 
 _DEFAULT_MAX_LINES = 2000
-_DEFAULT_TIMEOUT_SECONDS = 600.0
 
 DEFAULT_COMMAND_LIMITS: dict[str, Limit] = {
-    name: Limit(
-        max_lines=_DEFAULT_MAX_LINES, timeout_seconds=_DEFAULT_TIMEOUT_SECONDS
-    )
+    name: Limit(max_lines=_DEFAULT_MAX_LINES)
     for name in ("cat", "grep", "rg", "head", "tail")
 }
 
-FALLBACK_LIMIT = Limit(timeout_seconds=_DEFAULT_TIMEOUT_SECONDS)
+LINE_TIMEOUT_SECONDS = 600.0
 
-OverrideLookup = Callable[[str, str], Limit | None]
+ALL_COMMANDS = "*"
+LINE = "line"
 
 
 class LimitMount(Protocol):
     @property
     def command_limits(self) -> Mapping[str, Limit]: ...
+
+    @property
+    def default_limit(self) -> Limit: ...
+
+
+def _entries(
+    table: Mapping[str, Limit] | None, name: str
+) -> tuple[Limit | None, Limit | None]:
+    if table is None:
+        return None, None
+    return table.get(name), table.get(ALL_COMMANDS)
 
 
 def resolve_limit(
@@ -47,61 +56,101 @@ def resolve_limit(
 ) -> Limit | None:
     """Resolve one command's bound, the one precedence engine.
 
-    Profile override, mount override, workspace default, command default,
-    then the built-in table. Each selected entry replaces the whole Limit;
-    absent command names inherit. Multiple mounts aggregate to the tightest
-    bound after resolution. Independent policy ceilings compose separately.
+    Field by field, from the most specific layer that sets it: the
+    profile's entry for the command, then its ``"*"`` entry for every
+    command, then the mount's two, the workspace's two, the command's
+    own default and the built-in table; on a mount, its backend's
+    default (``walk_limit``) last. A layer that names one
+    bound inherits the rest. A command across several mounts resolves
+    on each and keeps the tightest bound.
 
     Args:
         name (str): command name being resolved.
         mounts (Iterable[LimitMount]): the mounts the command spans (may be empty).
         command_default (Limit | None): the registered command's own
             default, when the caller knows it.
-        mount_override (Limit | None): one mount's per-command
-            override, when the caller knows it.
+        mount_override (Limit | None): the caller's override, above
+            every mount's own entries.
         workspace_limits (Mapping[str, Limit] | None): the workspace
             defaults, keyed by command.
         profile_limits (Mapping[str, Limit] | None): the session
             profile's overrides, keyed by command.
     """
-    if profile_limits is not None and name in profile_limits:
-        return profile_limits[name]
-    if mount_override is not None:
-        return mount_override
+    above = (*_entries(profile_limits, name), mount_override)
+    below = (
+        *_entries(workspace_limits, name),
+        command_default,
+        DEFAULT_COMMAND_LIMITS.get(name),
+    )
     spanned = list(mounts)
-    if spanned:
-        return Limit.aggr(
-            resolve_limit(
-                name,
-                command_default=command_default,
-                mount_override=m.command_limits.get(name),
-                workspace_limits=workspace_limits,
+    if not spanned:
+        return Limit.layered((*above, *below))
+    return Limit.aggr(
+        Limit.layered(
+            (
+                *above,
+                *_entries(m.command_limits, name),
+                *below,
+                m.default_limit,
             )
-            for m in spanned
         )
-    if workspace_limits is not None and name in workspace_limits:
-        return workspace_limits[name]
-    if command_default is not None:
-        return command_default
-    return DEFAULT_COMMAND_LIMITS.get(name, FALLBACK_LIMIT)
+        for m in spanned
+    )
+
+
+def walk_bound(
+    mount: LimitMount,
+    command: str | None = None,
+    command_default: Limit | None = None,
+    workspace_limits: Mapping[str, Limit] | None = None,
+    profile_limits: Mapping[str, Limit] | None = None,
+) -> int:
+    """How many files one walk lists on ``mount``, -1 for no cap.
+
+    The ``walk_limit`` of ``command``, resolved as ``resolve_limit``
+    resolves every bound; without a command, the one every command
+    shares (the ``"*"`` entries), which a glob counts against. A layer
+    naming the bound as None lifts it.
+
+    Args:
+        mount (LimitMount): the mount walked.
+        command (str | None): the command walking, None for none.
+        command_default (Limit | None): the command's declared limit.
+        workspace_limits (Mapping[str, Limit] | None): the workspace
+            defaults, keyed by command.
+        profile_limits (Mapping[str, Limit] | None): the session
+            profile's overrides, keyed by command.
+    """
+    found = resolve_limit(
+        ALL_COMMANDS if command is None else command,
+        [mount],
+        command_default,
+        workspace_limits=workspace_limits,
+        profile_limits=profile_limits,
+    )
+    if found is None or found.walk_limit is None:
+        return -1
+    return found.walk_limit
+
+
+MountLookup = Callable[[str], LimitMount | None]
 
 
 def resolve_producer(
     producer: Producer,
-    override_for: OverrideLookup,
+    mount_at: MountLookup,
     workspace_limits: Mapping[str, Limit] | None = None,
     profile_limits: Mapping[str, Limit] | None = None,
 ) -> Limit | None:
     """Resolve the bound a producer's facts name.
 
-    Shared by command output guards and dispatch timeouts. Resolution
-    uses the same profile, mount, workspace and command precedence,
-    aggregated to the tightest value across the spanned mounts.
+    Shared by command output guards and dispatch timeouts, through the
+    same layers as :func:`resolve_limit` on the mounts its prefixes name.
 
     Args:
         producer (Producer): facts stamped at the dispatch site.
-        override_for (OverrideLookup): (prefix, name) -> that mount's
-            configured override.
+        mount_at (MountLookup): prefix -> that mount, None for one
+            unmounted since the stamp.
         workspace_limits (Mapping[str, Limit] | None): the workspace
             defaults, keyed by command.
         profile_limits (Mapping[str, Limit] | None): the session
@@ -109,21 +158,94 @@ def resolve_producer(
     """
     if not producer.command:
         return None
-    if not producer.prefixes:
-        return resolve_limit(
-            producer.command,
-            command_default=producer.declared,
-            workspace_limits=workspace_limits,
-            profile_limits=profile_limits,
-        )
-    per_mount = [
-        resolve_limit(
-            producer.command,
-            command_default=producer.declared,
-            mount_override=override_for(prefix, producer.command),
-            workspace_limits=workspace_limits,
-            profile_limits=profile_limits,
-        )
-        for prefix in producer.prefixes
+    mounts = [
+        m for m in (mount_at(prefix) for prefix in producer.prefixes) if m
     ]
-    return Limit.aggr(per_mount)
+    return resolve_limit(
+        producer.command,
+        mounts,
+        command_default=producer.declared,
+        workspace_limits=workspace_limits,
+        profile_limits=profile_limits,
+    )
+
+
+def command_limits_to_json(
+    limits: Mapping[str, Limit],
+) -> dict[str, dict[str, JsonValue]]:
+    """A limit table as config spells it, each entry with only the
+    fields it names (a None among them), so a stored entry still
+    inherits the rest.
+
+    Args:
+        limits (Mapping[str, Limit]): the table, keyed by command.
+    """
+    return {
+        name: limit.model_dump(mode="json", include=limit.model_fields_set)
+        for name, limit in limits.items()
+    }
+
+
+def line_timeout(
+    workspace_limits: Mapping[str, Limit] | None = None,
+    profile_limits: Mapping[str, Limit] | None = None,
+) -> float | None:
+    """The whole line's deadline, the one time limit a line runs under:
+    the ``line`` entry's ``timeout_seconds``, the profile's over the
+    workspace's, else ``LINE_TIMEOUT_SECONDS``. An entry naming it as
+    None or 0 lifts it.
+
+    Args:
+        workspace_limits (Mapping[str, Limit] | None): the workspace's
+            command limits.
+        profile_limits (Mapping[str, Limit] | None): the session
+            profile's.
+    """
+    found = Limit.layered(
+        (
+            (profile_limits or {}).get(LINE),
+            (workspace_limits or {}).get(LINE),
+        )
+    )
+    if found is None or "timeout_seconds" not in found.model_fields_set:
+        return LINE_TIMEOUT_SECONDS
+    return found.timeout_seconds or None
+
+
+def check_command_limits(
+    limits: Mapping[str, Limit], where: str, *, takes_line: bool
+) -> None:
+    """Refuse a table that names time where no time limit applies.
+
+    A line runs under one time limit, the ``line`` entry's
+    ``timeout_seconds``; no command or op entry takes one, and the
+    ``line`` entry takes nothing else. A mount names no line, since a
+    line spans mounts.
+
+    Args:
+        limits (Mapping[str, Limit]): the table, keyed by command.
+        where (str): what the table belongs to, for the message.
+        takes_line (bool): whether the table may hold a ``line`` entry.
+
+    Raises:
+        ValueError: an entry names a bound it cannot take.
+    """
+    for name, limit in limits.items():
+        if name != LINE:
+            if "timeout_seconds" in limit.model_fields_set:
+                raise ValueError(
+                    f"{where}: command_limits[{name!r}].timeout_seconds:"
+                    f" a line has one time limit, set it on {LINE!r}"
+                )
+            continue
+        if not takes_line:
+            raise ValueError(
+                f"{where}: command_limits[{LINE!r}]: a line spans mounts,"
+                " set it on the workspace or a profile"
+            )
+        extra = sorted(limit.model_fields_set - {"timeout_seconds"})
+        if extra:
+            raise ValueError(
+                f"{where}: command_limits[{LINE!r}] takes only"
+                f" timeout_seconds, not {', '.join(extra)}"
+            )

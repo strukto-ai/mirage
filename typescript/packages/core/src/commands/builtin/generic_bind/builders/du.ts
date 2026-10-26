@@ -107,6 +107,7 @@ function treeOf(files: CommandFiles, listing: (path: PathSpec) => Promise<string
     listing,
     files.stat,
     files.answers('read_tree'),
+    files.signal,
   )
   return { readdir, stat }
 }

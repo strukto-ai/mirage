@@ -23,7 +23,7 @@ import { PartialOutputError } from '../../../commands/errors.ts'
 import { Argument, UsageStyle } from '../../../commands/spec/types.ts'
 import { FlagView } from '../../../commands/spec/flag_view.ts'
 import { IOResult, materialize } from '../../../io/types.ts'
-import { Limit, MountMode, PathSpec } from '../../../types.ts'
+import { MountMode, PathSpec } from '../../../types.ts'
 import type { RAMAccessor } from '../../../accessor/ram.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { parseSessionProfile } from '../../../policy/profile.ts'
@@ -237,106 +237,6 @@ describe('handleCli', () => {
         "Valid arguments are:\n  - 'top'\n  - 'bottom'\n" +
         "Try 'prog message send --help' for more information.\n",
     )
-  })
-
-  it('the leaf limit bounds the handler', async () => {
-    // The declared limit wraps the handler body like mount
-    // dispatch: a blocking leaf times out instead of hanging.
-    const slow: CLIVerbFn = async () => {
-      await new Promise((resolve) => setTimeout(resolve, 500))
-      return [null, new IOResult()]
-    }
-    const spec = new CLI({
-      spec: new CommandSpec({ name: 'prog', subcommands: [new CommandSpec({ name: 'run' })] }),
-      handlers: { run: new CLIHandler({ fn: slow, limit: new Limit({ timeoutSeconds: 0.05 }) }) },
-    })
-    const install = installOf('prog', spec)
-    await expect(
-      handleCli(install, ['prog', 'run'], new SessionState({ sessionId: 't' })),
-    ).rejects.toThrow(/prog run: timed out/)
-  })
-
-  it('drops the caches when a write times out, and again when it settles', async () => {
-    // Racing a promise does not stop its work: the leaf keeps running past
-    // exit 124, and its request may land either side of the deadline.
-    let dropped = 0
-    const dropCaches = (): Promise<void> => {
-      dropped += 1
-      return Promise.resolve()
-    }
-    let settled = false
-    const slow: CLIVerbFn = async () => {
-      await new Promise((resolve) => setTimeout(resolve, 100))
-      settled = true
-      return [null, new IOResult()]
-    }
-    const spec = new CLI({
-      spec: new CommandSpec({ name: 'prog', subcommands: [new CommandSpec({ name: 'run' })] }),
-      handlers: {
-        run: new CLIHandler({ fn: slow, write: true, limit: new Limit({ timeoutSeconds: 0.05 }) }),
-      },
-      configModel: (input) => input,
-    })
-    const install = installOf('prog', spec, {})
-    await expect(
-      handleCli(
-        install,
-        ['prog', 'run'],
-        new SessionState({ sessionId: 't' }),
-        null,
-        {},
-        dropCaches,
-      ),
-    ).rejects.toThrow(/timed out/)
-    expect(dropped).toBe(1)
-    await new Promise((resolve) => setTimeout(resolve, 150))
-    expect(settled).toBe(true)
-    expect(dropped).toBe(2)
-  })
-
-  it('reports a drop that fails after the timeout instead of rejecting into nowhere', async () => {
-    let calls = 0
-    const dropCaches = (): Promise<void> => {
-      calls += 1
-      return calls === 1 ? Promise.resolve() : Promise.reject(new Error('torn down'))
-    }
-    const slow: CLIVerbFn = async () => {
-      await new Promise((resolve) => setTimeout(resolve, 100))
-      return [null, new IOResult()]
-    }
-    const spec = new CLI({
-      spec: new CommandSpec({ name: 'prog', subcommands: [new CommandSpec({ name: 'run' })] }),
-      handlers: {
-        run: new CLIHandler({ fn: slow, write: true, limit: new Limit({ timeoutSeconds: 0.05 }) }),
-      },
-      configModel: (input) => input,
-    })
-    const install = installOf('prog', spec, {})
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
-    const unhandled: unknown[] = []
-    const onUnhandled = (reason: unknown): void => {
-      unhandled.push(reason)
-    }
-    process.on('unhandledRejection', onUnhandled)
-    try {
-      await expect(
-        handleCli(
-          install,
-          ['prog', 'run'],
-          new SessionState({ sessionId: 't' }),
-          null,
-          {},
-          dropCaches,
-        ),
-      ).rejects.toThrow(/timed out/)
-      await new Promise((resolve) => setTimeout(resolve, 150))
-      expect(calls).toBe(2)
-      expect(unhandled).toEqual([])
-      expect(warn).toHaveBeenCalledWith('prog run: cache drop after timeout failed: torn down')
-    } finally {
-      process.off('unhandledRejection', onUnhandled)
-      warn.mockRestore()
-    }
   })
 
   it('carries stdin on the invocation record, never as a flag', async () => {
@@ -887,20 +787,12 @@ describe('handleCli script arm', () => {
     expect(node.exitCode).toBe(3)
   })
 
-  it('the leaf limit bounds the run', async () => {
+  it("the caller's abort stops the run", async () => {
     const sleepy = new SleepingRuntime()
-    const spec = new CLI({
-      spec: new CommandSpec({ name: 'pager' }),
-      handlers: { '': new CLIHandler({ limit: new Limit({ timeoutSeconds: 0.05 }) }) },
-      script: new ScriptSource("print('hi')"),
+    await drained(scriptInstall(), ['pager'], new SessionState({ sessionId: 't' }), null, {
+      entries: [sleepy],
+      signal: AbortSignal.timeout(20),
     })
-    const install = installOf('pager', spec)
-    await expect(
-      drained(install, ['pager'], new SessionState({ sessionId: 't' }), null, {
-        entries: [sleepy],
-      }),
-    ).rejects.toThrow(/pager: timed out/)
-    expect(sleepy.seen[0]?.timeoutSeconds).toBe(0.05)
     expect(sleepy.seen[0]?.signal?.aborted).toBe(true)
   })
 
@@ -916,17 +808,11 @@ describe('handleCli script arm', () => {
       entries: [py],
       settle,
     })
-    const spec = new CLI({
-      spec: new CommandSpec({ name: 'pager' }),
-      handlers: { '': new CLIHandler({ limit: new Limit({ timeoutSeconds: 0.05 }) }) },
-      script: new ScriptSource("print('hi')"),
+    await drained(scriptInstall(), ['pager'], new SessionState({ sessionId: 't' }), null, {
+      entries: [sleepy],
+      settle,
+      signal: AbortSignal.timeout(20),
     })
-    await expect(
-      drained(installOf('pager', spec), ['pager'], new SessionState({ sessionId: 't' }), null, {
-        entries: [sleepy],
-        settle,
-      }),
-    ).rejects.toThrow(/pager: timed out/)
     expect(settled).toEqual([py, sleepy])
   })
 })
@@ -1146,33 +1032,29 @@ it.each([
   }
 })
 
-it.each([null, 1])(
-  'joins native producer when unstarted output closes (timeout=%s)',
-  async (timeout) => {
-    let closed = false
-    const cli = new CLI({
-      spec: new CommandSpec({ name: 'writer' }),
-      handlers: {
-        '': new CLIHandler({
-          limit: timeout === null ? null : new Limit({ timeoutSeconds: timeout }),
-          fn: () => [
-            new HeldSource(new TextEncoder().encode('prefix'), () => {
-              closed = true
-            }),
-            new IOResult(),
-          ],
-        }),
-      },
-    })
-    const [output] = await handleCli(
-      installOf('writer', cli),
-      ['writer'],
-      new SessionState({ sessionId: 'test' }),
-    )
-    await (output as AsyncIterableIterator<Uint8Array>).return?.()
-    expect(closed).toBe(true)
-  },
-)
+it('joins native producer when unstarted output closes', async () => {
+  let closed = false
+  const cli = new CLI({
+    spec: new CommandSpec({ name: 'writer' }),
+    handlers: {
+      '': new CLIHandler({
+        fn: () => [
+          new HeldSource(new TextEncoder().encode('prefix'), () => {
+            closed = true
+          }),
+          new IOResult(),
+        ],
+      }),
+    },
+  })
+  const [output] = await handleCli(
+    installOf('writer', cli),
+    ['writer'],
+    new SessionState({ sessionId: 'test' }),
+  )
+  await (output as AsyncIterableIterator<Uint8Array>).return?.()
+  expect(closed).toBe(true)
+})
 
 /** Yields its bytes once, then waits until it is closed, once. */
 class HeldSource implements AsyncIterableIterator<Uint8Array> {

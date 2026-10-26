@@ -18,7 +18,6 @@ import { runWithEvaluation } from '../../context/session_context.ts'
 import type { ProcessHandle } from '../../process/handle.ts'
 import type { ProcessTable } from '../../process/table.ts'
 import { PathSpec } from '../../types.ts'
-import { runWithTimeout } from '../../commands/builtin/utils/limit.ts'
 import { asyncChain, closeQuietly, discardIo, discardStreams } from '../../io/stream.ts'
 import type { ByteSource } from '../../io/types.ts'
 import { IOResult, materialize } from '../../io/types.ts'
@@ -228,11 +227,7 @@ export async function handlePipe(
     const last = pipes[pipes.length - 1]?.stream() ?? null
     const reading =
       sink === undefined ? materialize(last) : pump(sink, Channel.STDOUT, last).then(() => null)
-    const result = await runWithTimeout(
-      abortable(Promise.all([reading, completed]), parentSignal),
-      session.pipelineTimeoutSeconds,
-      'pipeline',
-    )
+    const result = await abortable(Promise.all([reading, completed]), parentSignal)
     if (parentSignal?.aborted === true) throw makeAbortError(parentSignal)
     lastStdout = result[0]
   } catch (error) {

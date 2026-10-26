@@ -28,7 +28,7 @@ class AirtableAccessor(SessionAccessor):
     """
 
     def __init__(self, config: AirtableConfig) -> None:
-        super().__init__()
+        super().__init__(config.timeout)
         self.config = config
         self.limiter = RateLimiter(config.requests_per_second)
 

@@ -164,9 +164,10 @@ class AskedRAM(RAMVFS):
     each listing is handed."""
 
     read_tree = BaseVFS.read_tree
+    walk_limit = 2
 
     def __init__(self) -> None:
-        super().__init__(walk_limit=2)
+        super().__init__()
         self.asked: list[int | None] = []
         self._store.dirs.add("/d")
         for name in ("a", "b", "c"):

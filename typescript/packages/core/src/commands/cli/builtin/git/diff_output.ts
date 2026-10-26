@@ -232,7 +232,7 @@ export async function renderChanges(repo: Repo, rows: Change[], flags: DiffFlags
       numbers.push(
         `${stat.binary ? '-\t-' : `${String(stat.insertions)}\t${String(stat.deletions)}`}\t${display}`,
       )
-    if (flags.summary) summaries.push(...summaryLines(row, display, shown))
+    if (flags.summary) for (const item of summaryLines(row, display, shown)) summaries.push(item)
     if (flags.patch)
       patches.push(
         await filePatch(

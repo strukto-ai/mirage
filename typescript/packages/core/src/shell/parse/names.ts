@@ -50,7 +50,9 @@ export function* walkTree<T extends { readonly children: readonly T[] }>(root: T
   const stack = [root]
   for (let node = stack.pop(); node !== undefined; node = stack.pop()) {
     yield node
-    stack.push(...node.children)
+    // A loop, not a spread: a long script's root has more children than a
+    // call takes arguments.
+    for (const child of node.children) stack.push(child)
   }
 }
 

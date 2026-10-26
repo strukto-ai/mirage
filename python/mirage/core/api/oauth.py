@@ -21,6 +21,7 @@ from typing import Self
 import aiohttp
 
 from mirage.core.api.client import SessionPool
+from mirage.core.api.constants import DEFAULT_TIMEOUT
 from mirage.utils.clock import Clock, SystemClock, is_system_clock
 
 
@@ -57,16 +58,21 @@ class TokenManager:
         buffer_seconds (float): how long before expiry to refresh.
         clock (Clock | None): the clock expiry and retry waits are read
             on; None is the system clock.
+        timeout (float): seconds a request through the pool may wait to
+            connect, or between two reads of its response.
     """
 
     def __init__(
-        self, buffer_seconds: float = 300.0, clock: Clock | None = None
+        self,
+        buffer_seconds: float = 300.0,
+        clock: Clock | None = None,
+        timeout: float = DEFAULT_TIMEOUT,
     ) -> None:
         self._buffer_seconds = buffer_seconds
         self._access_token: str | None = None
         self._expires_at: float = 0
         self._lock = asyncio.Lock()
-        self.pool = SessionPool()
+        self.pool = SessionPool(timeout)
         self.clock: Clock = clock if clock is not None else SystemClock()
         self._holders: set[Hashable] = set()
 

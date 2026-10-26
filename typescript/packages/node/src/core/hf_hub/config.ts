@@ -14,6 +14,7 @@
 
 import { secretStr, z } from '@struktoai/mirage-core/vfs/secrets'
 import type { ConfigOf } from '@struktoai/mirage-core/vfs/secrets'
+import { timeoutShape } from '@struktoai/mirage-core/core/api/config'
 import { API_BASE } from './constants.ts'
 
 /**
@@ -28,6 +29,7 @@ import { API_BASE } from './constants.ts'
 export const HfConfigSchema = z.object({
   token: secretStr().optional(),
   endpoint: z.string().default(API_BASE),
+  ...timeoutShape,
 })
 
 export type HfConfig = ConfigOf<typeof HfConfigSchema>

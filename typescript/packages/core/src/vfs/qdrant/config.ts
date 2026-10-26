@@ -21,12 +21,15 @@ import {
   secretSchema,
   secretStr,
 } from '../secrets.ts'
+import { timeoutShape } from '../../core/api/config.ts'
+import { DEFAULT_TIMEOUT } from '../../core/api/constants.ts'
 
 // What `search` vectorizes the query with when the caller brings a model:
 // the text in, its embedding out, in the space the collection was built in.
 export type EmbedFn = (text: string) => Promise<number[]>
 
 const QdrantConfigSchema = z.object({
+  ...timeoutShape,
   url: z
     .string()
     .optional()
@@ -120,11 +123,6 @@ const QdrantConfigSchema = z.object({
     .describe(
       'Async function that turns a `search` query into a vector in-process, `(text: string) => Promise<number[]>`.',
     ),
-  walkLimit: z.number().int().min(-1).optional().meta({
-    description:
-      'Most files one command walks under a folder: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit.',
-    default: 1000,
-  }),
 })
 
 export type QdrantConfig = ConfigOf<typeof QdrantConfigSchema>
@@ -134,6 +132,7 @@ export function normalizeQdrantConfig(input: Record<string, unknown>): QdrantCon
 }
 
 export interface QdrantConfigResolved {
+  timeout: number
   url: string | null
   host: string
   port: number
@@ -157,6 +156,7 @@ export interface QdrantConfigResolved {
 
 export function resolveQdrantConfig(config: QdrantConfig): QdrantConfigResolved {
   return {
+    timeout: config.timeout ?? DEFAULT_TIMEOUT,
     url: config.url ?? null,
     host: config.host ?? 'localhost',
     port: config.port ?? 6333,

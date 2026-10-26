@@ -468,7 +468,7 @@ describe('configToWorkspaceArgs', () => {
       secretAccessKey: 'secret',
       endpoint: 'http://localhost:9000',
       forcePathStyle: true,
-      timeoutMs: 5000,
+      timeout: 5,
       keyPrefix: 'mirage/',
     })
   })
@@ -502,7 +502,7 @@ describe('configToWorkspaceArgs', () => {
         '/': {
           vfs: 'ram',
           command_limits: {
-            cat: { max_lines: 10, timeout_seconds: 5, on_exceed: 'error' },
+            cat: { max_lines: 10, max_bytes: 5, on_exceed: 'error' },
           },
         },
       },
@@ -510,7 +510,7 @@ describe('configToWorkspaceArgs', () => {
     const args = await configToWorkspaceArgs(cfg)
     const limits = args.mounts['/']?.options.commandLimits
     expect(limits?.cat?.maxLines).toBe(10)
-    expect(limits?.cat?.timeoutSeconds).toBe(5)
+    expect(limits?.cat?.maxBytes).toBe(5)
     expect(limits?.cat?.onExceed).toBe('error')
   })
 
@@ -1748,8 +1748,8 @@ it('loads global and profile command limits from config', async () => {
 
 it.each([
   { command_limits: { head: { max_line: 2 } } },
-  { command_limits: { sleep: { timeout_seconds: -1 } } },
-  { command_limits: { sleep: { timeout_seconds: Infinity } } },
+  { command_limits: { line: { timeout_seconds: -1 } } },
+  { command_limits: { line: { timeout_seconds: Infinity } } },
   { profiles: { research: { command_limits: { head: { max_line: 2 } } } } },
 ])('rejects bad command limit fields', (block) => {
   expect(() => loadWorkspaceConfig({ mounts: { '/data': { vfs: 'ram' } }, ...block })).toThrow()

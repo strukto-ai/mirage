@@ -24,11 +24,13 @@ import {
   z,
 } from '@struktoai/mirage-core/vfs/secrets'
 import type { ConfigOf, RedactedConfig } from '@struktoai/mirage-core/vfs/secrets'
+import { timeoutShape } from '@struktoai/mirage-core/core/api/config'
 
 type HeaderProvider = () => Promise<Record<string, string>> | Record<string, string>
 
 const SlackConfigSchema = z
   .object({
+    ...timeoutShape,
     ...timeRangeShape,
     proxyUrl: z
       .string()
@@ -40,11 +42,6 @@ const SlackConfigSchema = z
       .describe(
         'Function returning extra headers sent with every request to the proxy, such as your own session credential.',
       ),
-    walkLimit: z.number().int().min(-1).optional().meta({
-      description:
-        'Most files one command walks under a folder: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit and reads every file without asking Slack search, which lags posts and covers only message text, file names, titles and reactions.',
-      default: 1000,
-    }),
   })
   .refine(orderedTimes, timeRangeOrderError)
 

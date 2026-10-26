@@ -570,7 +570,7 @@ export async function handleWait(
       continue
     }
     if (word === '--') {
-      specs.push(...parts.slice(i + 1))
+      for (const item of parts.slice(i + 1)) specs.push(item)
       break
     }
     let j = 1
@@ -1186,7 +1186,7 @@ function parsePs(words: string[]): PsOptions {
       if (option !== '--pid' && option !== '--format') throw new Error('unknown gnu long option')
       const value = equal < 0 ? (words[at++] ?? '') : word.slice(equal + 1)
       if (option === '--pid') for (const pid of psPids(value, option)) pids.add(pid)
-      else columns.push(...psColumns(value, option))
+      else for (const item of psColumns(value, option)) columns.push(item)
       continue
     }
     if (!word.startsWith('-')) {
@@ -1207,7 +1207,7 @@ function parsePs(words: string[]): PsOptions {
       const value = letters !== '' ? letters : (words[at++] ?? '')
       letters = ''
       if (flag === 'p') for (const pid of psPids(value, '-p')) pids.add(pid)
-      else columns.push(...psColumns(value, '-o'))
+      else for (const item of psColumns(value, '-o')) columns.push(item)
     }
   }
   return { pids, all, columns }

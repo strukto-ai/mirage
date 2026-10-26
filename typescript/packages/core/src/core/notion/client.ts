@@ -239,6 +239,7 @@ export interface HttpNotionTransportOptions {
    * every one of them would have to thread.
    */
   apiVersion?: string
+  timeout?: number
 }
 
 export interface RestCall {
@@ -315,11 +316,13 @@ export class HttpNotionTransport implements NotionTransport {
   private readonly apiKey: string
   private readonly baseUrl: string
   private readonly apiVersion: string
+  private readonly timeout: number | undefined
 
   constructor(opts: HttpNotionTransportOptions) {
     this.apiKey = opts.apiKey
     this.baseUrl = opts.baseUrl ?? DEFAULT_API_BASE_URL
     this.apiVersion = opts.apiVersion ?? API_VERSION
+    this.timeout = opts.timeout
   }
 
   // The one place a request is actually made. `ntn api` is a typed path
@@ -337,6 +340,7 @@ export class HttpNotionTransport implements NotionTransport {
     const withBody = call.method !== 'GET' && call.method !== 'DELETE'
     const data = await apiRequest(call.method, `${this.baseUrl}${call.path}`, {
       fetchFn: this.fetch,
+      timeout: this.timeout,
       headers: {
         Authorization: `Bearer ${this.apiKey}`,
         'Notion-Version': this.apiVersion,

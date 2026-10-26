@@ -14,7 +14,6 @@
 
 import { Accessor } from './base.ts'
 import type { LinearTransport } from '../core/linear/client.ts'
-import { WALK_LIMIT } from '../vfs/constants.ts'
 
 /**
  * The mount's handle: the transport plus the configured team filter. The
@@ -26,15 +25,20 @@ import { WALK_LIMIT } from '../vfs/constants.ts'
 export class LinearAccessor extends Accessor {
   readonly transport: LinearTransport
   readonly teamIds: readonly string[] | null
-  readonly walkLimit: number
+  /**
+   * Whether the mount walks under a `walkLimit`, asked when a listing runs,
+   * since the mount settles its own once mounted; a listing then keeps each
+   * issue's unsearched text for the search.
+   */
+  readonly capped: () => boolean
 
   constructor(
     transport: LinearTransport,
-    options: { teamIds?: readonly string[]; walkLimit?: number } = {},
+    options: { teamIds?: readonly string[]; capped?: () => boolean } = {},
   ) {
     super()
     this.transport = transport
     this.teamIds = options.teamIds ?? null
-    this.walkLimit = options.walkLimit ?? WALK_LIMIT
+    this.capped = options.capped ?? (() => true)
   }
 }

@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { YieldBudget } from '../../io/yield_budget.ts'
 import { PermissionsPolicy, refusalOf, renderDeny } from '../../policy/index.ts'
 import { isPending } from '../../policy/decisions.ts'
 import { sourceOf } from '../../policy/match/decide.ts'
@@ -775,7 +776,8 @@ function moves(node: TSNodeLike, session: SessionState, home: string | null): bo
       }
     }
     const children = current.children
-    stack.push(...children.filter((_, index) => children[index + 1]?.type !== '&'))
+    for (const item of children.filter((_, index) => children[index + 1]?.type !== '&'))
+      stack.push(item)
   }
   return false
 }
@@ -952,11 +954,17 @@ export async function lineJudgments(
   namespace: Namespace | null,
   handed: HandOff,
   reparse: (line: string) => TSNodeLike,
+  signal?: AbortSignal,
 ): Promise<[Walked, Judged[]][]> {
   const judged: [Walked, Judged[]][] = []
   const frame = rootFrame(root, handed.origin)
+  // Each command's gates answer in microtasks: a long script would hold
+  // the loop, and its abort, until every command was judged; the line's
+  // signal stops the pass.
+  const budget = new YieldBudget(signal)
   for (const item of walkedLine(root, session, reparse, frame)) {
     if (item.words[0]?.text === null) continue
+    await budget.run()
     const explained: Judged[] = []
     for await (const one of judgeWords(
       item.words,
@@ -1217,7 +1225,7 @@ function definesFunction(node: TSNodeLike): boolean {
   const stack = [node]
   for (let current = stack.pop(); current !== undefined; current = stack.pop()) {
     if (current.type === 'function_definition') return true
-    stack.push(...current.namedChildren)
+    for (const child of current.namedChildren) stack.push(child)
   }
   return false
 }
@@ -1629,9 +1637,9 @@ function scopeNode(
   for (const [span, ones] of mine) {
     const [start, end] = span.split(':').map(Number)
     const spoken = text.slice(start, end)
-    children.push(...ones.map((one) => commandOf(one, spoken, [], runtimeOf)))
+    for (const item of ones.map((one) => commandOf(one, spoken, [], runtimeOf))) children.push(item)
   }
-  children.push(...take(0, Number.MAX_SAFE_INTEGER))
+  for (const item of take(0, Number.MAX_SAFE_INTEGER)) children.push(item)
   return { type: kind, text, children }
 }
 

@@ -29,13 +29,20 @@ const tree: CommandFn = async (_accessor, paths, _texts, ctx) => {
     readdir,
     stat,
     false,
+    files.signal,
   )
   return treeGeneric(
     resolved,
     ctx,
     levelReaddir,
     levelStat,
-    treeWalk<string[], FileStat>(files.readTree, readdir, stat, files.answers('read_tree')),
+    treeWalk<string[], FileStat>(
+      files.readTree,
+      readdir,
+      stat,
+      files.answers('read_tree'),
+      files.signal,
+    ),
   )
 }
 

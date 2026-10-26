@@ -30,7 +30,7 @@ export async function shortlog(
     revisions.length ? revisions : flags.allRefs ? [] : ['HEAD'],
     dashed,
   )
-  if (flags.allRefs) starts.push(...(await refCommits(repo)))
+  if (flags.allRefs) for (const item of await refCommits(repo)) starts.push(item)
   const groups = new Map<string, string[]>()
   for (const commit of (await select(repo, starts, flags, hidden)).reverse()) {
     const identity = mappedIdentity(`${commit.authorName} <${commit.authorEmail}>`, mailmap)

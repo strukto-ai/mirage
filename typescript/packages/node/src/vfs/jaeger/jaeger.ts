@@ -21,7 +21,6 @@ import { VFS_MD } from '@struktoai/mirage-core/vfs/jaeger/jaeger'
 import { VFSName } from '@struktoai/mirage-core/types'
 
 import { redactJaegerConfig, type JaegerConfig, type JaegerConfigRedacted } from './config.ts'
-import { WALK_LIMIT } from '@struktoai/mirage-core/vfs/constants'
 
 export interface JaegerVFSState {
   type: string
@@ -39,14 +38,12 @@ export class JaegerVFS extends JaegerVFSBase {
   readonly config: JaegerConfig
   override readonly accessor: JaegerAccessor
 
-  override readonly walkLimit: number
   constructor(config: JaegerConfig) {
     super()
     this.config = config
-    this.walkLimit = config.walkLimit ?? WALK_LIMIT
     const transportOpts: { host?: string; timeout?: number } = {}
     if (config.host !== undefined) transportOpts.host = config.host
-    if (config.requestTimeout !== undefined) transportOpts.timeout = config.requestTimeout
+    if (config.timeout !== undefined) transportOpts.timeout = config.timeout
     const accessorConfig: {
       defaultTraceLimit?: number
       defaultFromTimestamp?: string

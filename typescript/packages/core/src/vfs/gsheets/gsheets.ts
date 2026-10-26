@@ -33,7 +33,6 @@ import { makeFilename } from './sheet_entry.ts'
 import type { DeltaHook } from '../../events/base.ts'
 import { unlink as gsheetsUnlink } from '../../core/gsheets/unlink.ts'
 import { rename as gsheetsRename } from '../../core/gsheets/rename.ts'
-import { WALK_LIMIT } from '../constants.ts'
 
 export const VFS_MD = `{prefix}
   owned/
@@ -113,12 +112,9 @@ export class GSheetsVFS extends BaseVFS {
   readonly config: GSheetsConfig
   override readonly accessor: GSheetsAccessor
 
-  override readonly walkLimit: number
-
   constructor(config: GSheetsConfig) {
     super()
     this.config = config
-    this.walkLimit = config.walkLimit ?? WALK_LIMIT
     const tm = new TokenManager(config)
     this.accessor = new GSheetsAccessor({ tokenManager: tm })
   }

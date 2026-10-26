@@ -32,7 +32,6 @@ await ws.shell('cat /disk/note.txt')
 | --- | --- | --- |
 | `root` | required | Absolute path on the host. Reads and writes are scoped to this directory. |
 | `folderVersions` | `true` | Store each listing at its folder's version (device, inode, change and modified time), so a `read: fresh` mount re-lists only folders that changed. Must be a boolean. Set `false` for a network or FUSE root (NFS, SMB, rclone, s3fs, mirage's own FUSE), whose change time may not move with its entries. In YAML: `folder_versions`. |
-| `walkLimit` | `10000` | Most files one command walks under a folder: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit. In YAML: `walk_limit`. |
 
 A folder changed in the last 2 seconds gets no version and is re-listed until it has been quiet that long.
 

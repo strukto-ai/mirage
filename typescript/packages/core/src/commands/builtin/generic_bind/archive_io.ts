@@ -22,6 +22,7 @@ import { readdirOp, statOp } from '../generic/crossmount/utils.ts'
 import type { DirProbe, WalkFn } from '../generic/archive/walk.ts'
 import type { CommandFiles } from './files.ts'
 import { beforeFullWalk, treeWalk, type ReadTree, type WalkCall } from '../utils/tree.ts'
+import { callerSignal } from '../../../context/session_context.ts'
 
 function walkWith(
   readdir: WalkFindDeps['readdir'],
@@ -63,6 +64,7 @@ export function walkOf(
     files.readdir,
     files.stat,
     files.answers('read_tree'),
+    files.signal,
   )
   return walkWith((spec) => readdir(spec), stat, dispatch, command)
 }
@@ -134,7 +136,13 @@ export function relayWalkOf(
   command: string,
   readTree?: ReadTree,
 ): WalkFn {
-  const [readdir, stat] = treeWalk(readTree, readdirOp(dispatch), statOp(dispatch))
+  const [readdir, stat] = treeWalk(
+    readTree,
+    readdirOp(dispatch),
+    statOp(dispatch),
+    true,
+    callerSignal(),
+  )
   return walkWith(ownListing(readdir, owed), stat, dispatch, command)
 }
 

@@ -31,7 +31,7 @@ describe('normalizeHfBucketsConfig', () => {
     })
     expect(config.bucket).toBe('ns/data')
     expect(config.keyPrefix).toBe('sub/dir')
-    expect(config.timeoutMs).toBe(30000)
+    expect(config.timeout).toBe(30)
   })
 
   it('rejects buckets without a namespace', () => {

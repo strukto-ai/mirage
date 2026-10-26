@@ -224,9 +224,9 @@ export async function scanOperand(path: PathSpec, deps: ScanDeps): Promise<Scan>
         missing: true,
       }
     }
-    entries.push(...followed)
-    problems.push(...why.map((reason) => ({ path: base, reason })))
-    problems.push(...unreadableProblems(closed))
+    for (const item of followed) entries.push(item)
+    for (const item of why.map((reason) => ({ path: base, reason }))) problems.push(item)
+    for (const item of unreadableProblems(closed)) problems.push(item)
   } else {
     let rootStat: FileStat
     try {
@@ -251,9 +251,9 @@ export async function scanOperand(path: PathSpec, deps: ScanDeps): Promise<Scan>
       entries.push({ namePath: base, kind: 'dir' })
       if (deps.recurse) {
         const [below, found, closed] = await subtree(path, base, base, deps)
-        entries.push(...below)
+        for (const item of below) entries.push(item)
         crossings = found
-        problems.push(...unreadableProblems(closed))
+        for (const item of unreadableProblems(closed)) problems.push(item)
       }
     }
   }
@@ -269,9 +269,10 @@ export async function scanOperand(path: PathSpec, deps: ScanDeps): Promise<Scan>
         problems.push({ path: entry.namePath, reason: unreachable, fatal: true })
         continue
       }
-      expanded.push(...followed)
-      problems.push(...why.map((reason) => ({ path: entry.namePath, reason })))
-      problems.push(...unreadableProblems(closed))
+      for (const item of followed) expanded.push(item)
+      for (const item of why.map((reason) => ({ path: entry.namePath, reason })))
+        problems.push(item)
+      for (const item of unreadableProblems(closed)) problems.push(item)
     }
     entries = expanded
   }

@@ -572,7 +572,9 @@ describe('supports', () => {
       }
     }
     const limited = { apiKey: 'k', apiToken: 't' }
-    expect(new TrelloVFS({ ...limited, walkLimit: -1 }).supports('files_containing')).toBe(false)
+    const uncapped = new TrelloVFS(limited)
+    uncapped.walkLimit = -1
+    expect(uncapped.supports('files_containing')).toBe(false)
     expect(new TrelloVFS(limited).supports('files_containing')).toBe(true)
   })
 })

@@ -133,12 +133,12 @@ async function found(
   for (const scope of under) {
     const dirs = await walked(accessor, scope)
     if (dirs === null) return null
-    issueDirs.push(...dirs[0])
-    keptDirs.push(...dirs[1])
+    for (const item of dirs[0]) issueDirs.push(item)
+    for (const item of dirs[1]) keptDirs.push(item)
   }
   const issues: Walked = []
   for (const [directory, row, above] of issueDirs) {
-    issues.push(...(await listed(accessor, directory, row, above)))
+    for (const item of await listed(accessor, directory, row, above)) issues.push(item)
   }
   const answer = askLinear && issues.length > 0 ? await named(accessor, needle) : null
   const held: PathSpec[] = []

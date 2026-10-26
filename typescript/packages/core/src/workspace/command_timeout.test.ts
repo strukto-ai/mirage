@@ -15,13 +15,14 @@ import { CommandSpec } from '../commands/spec/types.ts'
 import { CLIHandler } from '../commands/cli/types.ts'
 import type { Context } from '../commands/config.ts'
 
-import { afterEach, describe, expect, it, vi } from 'vitest'
-import { DEFAULT_COMMAND_LIMITS } from '../policy/builtin/output_cap.ts'
+import { describe, expect, it, vi } from 'vitest'
 import { LanguageRuntime } from '../runtime/language.ts'
-import type { Program, RunResult } from '../runtime/types.ts'
+import type { RuntimeEntry } from '../runtime/base.ts'
+import { ScriptSource, type Program, type RunResult } from '../runtime/types.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { Limit, MountMode } from '../types.ts'
 import { Workspace } from './workspace/workspace.ts'
+import { programs } from './lookup/lookup.ts'
 import { CLI } from '../commands/cli/types.ts'
 import { IOResult } from '../io/types.ts'
 
@@ -46,210 +47,95 @@ class SignalProbeRuntime extends LanguageRuntime {
 
 const DEC = new TextDecoder()
 
-afterEach(() => {
-  delete DEFAULT_COMMAND_LIMITS.sleep
-})
-
 function buildWs(): Workspace {
   const ram = new RAMVFS()
   return new Workspace({ '/': ram }, { mode: MountMode.WRITE })
 }
 
-describe('command timeout', () => {
-  it('quick command under default does not fire', async () => {
-    DEFAULT_COMMAND_LIMITS.sleep = new Limit({ timeoutSeconds: 1 })
-    const ws = buildWs()
-    try {
-      const r = await ws.shell('sleep 0.05')
-      expect(r.exitCode).toBe(0)
-    } finally {
-      await ws.close()
-    }
-  })
-
-  it('default limit fires with attributed stderr and exit 124', async () => {
-    DEFAULT_COMMAND_LIMITS.sleep = new Limit({ timeoutSeconds: 0.05 })
-    const ws = buildWs()
-    try {
-      const r = await ws.shell('sleep 2')
-      expect(r.exitCode).toBe(124)
-      expect(DEC.decode(r.stderr)).toContain('sleep: timed out after 0.05s')
-    } finally {
-      await ws.close()
-    }
-  })
-
-  it('pipeline: first stage to trip wins', async () => {
-    DEFAULT_COMMAND_LIMITS.sleep = new Limit({ timeoutSeconds: 0.05 })
-    const ws = buildWs()
-    try {
-      const r = await ws.shell('sleep 2 | echo done')
-      expect(r.exitCode).toBe(124)
-      expect(DEC.decode(r.stderr)).toContain('sleep: timed out')
-    } finally {
-      await ws.close()
-    }
-  })
-
-  it('timeout of zero disables the guard', async () => {
-    DEFAULT_COMMAND_LIMITS.sleep = new Limit({ timeoutSeconds: 0 })
-    const ws = buildWs()
-    try {
-      const r = await ws.shell('sleep 0.05')
-      expect(r.exitCode).toBe(0)
-    } finally {
-      await ws.close()
-    }
-  })
-
-  it('a streamed builtin keeps its deadline after it returns', async () => {
-    DEFAULT_COMMAND_LIMITS.xargs = new Limit({ timeoutSeconds: 0.05 })
-    const ws = buildWs()
-    try {
-      const r = await ws.shell("printf '2\\n' | xargs sleep")
-      expect(r.exitCode).toBe(124)
-      expect(DEC.decode(r.stderr)).toContain('xargs: timed out after 0.05s')
-    } finally {
-      delete DEFAULT_COMMAND_LIMITS.xargs
-      await ws.close()
-    }
-  })
-})
-
-// python3 is guarded like any other command: the same limit surface,
-// the same enforcement point, exit 124. ~2s of interpreter work against a
-// 0.25s budget; the deadline SIGKILLs monty's worker, so close() never
-// waits on it.
-const SLOW_SCRIPT = "printf 'n = 0\\nfor i in range(100000000):\\n    n = n + 1\\n' > /data/slow.py"
-
-describe('python3 command timeout', () => {
-  afterEach(() => {
-    delete DEFAULT_COMMAND_LIMITS.python3
-  })
-
-  function buildPyWs(limits?: Record<string, Record<string, Limit>>): Workspace {
-    const ram = new RAMVFS()
+// An interpreter runs under the line's one deadline like any other command:
+// past it the run's signal aborts, a busy guest is interrupted, and the line
+// answers 124.
+describe('interpreters at the line deadline', () => {
+  function lineWs(runtimes: RuntimeEntry[], seconds: number): Workspace {
     return new Workspace(
-      { '/data': [ram, MountMode.EXEC, limits?.['/data'] ?? {}] },
+      { '/data': new RAMVFS() },
       {
         mode: MountMode.EXEC,
-        runtimes: ['monty', 'quickjs', 'workspace'],
+        runtimes,
+        commandLimits: { line: new Limit({ timeoutSeconds: seconds }) },
       },
     )
   }
 
-  it('default limit fires like any other command', async () => {
-    DEFAULT_COMMAND_LIMITS.python3 = new Limit({ timeoutSeconds: 0.25 })
-    const ws = buildPyWs()
-    try {
-      await ws.shell(SLOW_SCRIPT)
-      const r = await ws.shell('python3 /data/slow.py')
-      expect(r.exitCode).toBe(124)
-      expect(DEC.decode(r.stderr)).toContain('python3: timed out after 0.25s')
-    } finally {
-      await ws.close()
-    }
-  }, 60_000)
-
-  it('mount-level limit fires like any other command', async () => {
-    const ws = buildPyWs({
-      '/data': { python3: new Limit({ timeoutSeconds: 0.25 }) },
-    })
-    try {
-      await ws.shell(SLOW_SCRIPT)
-      const r = await ws.shell('cd /data && python3 /data/slow.py')
-      expect(r.exitCode).toBe(124)
-      expect(DEC.decode(r.stderr)).toContain('python3: timed out after 0.25s')
-    } finally {
-      await ws.close()
-    }
-  }, 60_000)
-
-  it('mount-level limit follows the script path, not cwd', async () => {
-    const ws = buildPyWs({
-      '/data': { python3: new Limit({ timeoutSeconds: 0.25 }) },
-    })
-    try {
-      await ws.shell(SLOW_SCRIPT)
-      const r = await ws.shell('python3 /data/slow.py')
-      expect(r.exitCode).toBe(124)
-      expect(DEC.decode(r.stderr)).toContain('python3: timed out after 0.25s')
-    } finally {
-      await ws.close()
-    }
-  }, 60_000)
-
-  it('the timeout aborts the run signal so a runtime can reclaim what it spawned', async () => {
+  it('aborts the run signal so a runtime can reclaim what it spawned', async () => {
+    // The budget starts before the line's passes, so the run has to be given
+    // one they cannot spend on a loaded runner to start at all.
     const probe = new SignalProbeRuntime()
-    const ram = new RAMVFS()
-    const ws = new Workspace(
-      { '/data': ram },
-      {
-        mode: MountMode.EXEC,
-        runtimes: [probe, 'workspace'],
-        commandLimits: { python3: new Limit({ timeoutSeconds: 0.1 }) },
-      },
-    )
+    const ws = lineWs([probe, 'workspace'], 1)
     try {
       const r = await ws.shell('cd /data && python3 -c "hang"')
       expect(r.exitCode).toBe(124)
+      expect(DEC.decode(r.stderr)).toContain('line: timed out after 1s')
       expect(probe.aborted).toBe(true)
     } finally {
       await ws.close()
     }
   }, 60_000)
 
-  it('a busy pyodide loop trips the limit instead of wedging the event loop', async () => {
-    const ram = new RAMVFS()
-    const ws = new Workspace(
-      { '/data': ram },
-      {
-        mode: MountMode.EXEC,
-        runtimes: ['pyodide', 'workspace'],
-        commandLimits: { python3: new Limit({ timeoutSeconds: 0.5 }) },
-      },
-    )
+  it('a busy pyodide loop trips the deadline instead of wedging the event loop', async () => {
+    const ws = lineWs(['pyodide', 'workspace'], 0.5)
     try {
       const started = Date.now()
       const r = await ws.shell('cd /data && python3 -c "while True: pass"')
       expect(r.exitCode).toBe(124)
-      expect(DEC.decode(r.stderr)).toContain('timed out')
+      expect(DEC.decode(r.stderr)).toContain('line: timed out after 0.5s')
       expect(Date.now() - started).toBeLessThan(60_000)
     } finally {
       await ws.close()
     }
   }, 120_000)
 
-  it('a busy monty loop trips the limit and the worker is reclaimed', async () => {
-    const ws = buildPyWs({
-      '/data': { python3: new Limit({ timeoutSeconds: 0.25 }) },
-    })
+  it('a busy monty loop trips the deadline and the worker is reclaimed', async () => {
+    const ws = lineWs(['monty', 'workspace'], 0.25)
     try {
       const r = await ws.shell('cd /data && python3 -c "while True: pass"')
       expect(r.exitCode).toBe(124)
-      expect(DEC.decode(r.stderr)).toContain('python3: timed out after 0.25s')
+      expect(DEC.decode(r.stderr)).toContain('line: timed out after 0.25s')
     } finally {
       // close() must not hang on the killed worker's session.
       await ws.close()
     }
   }, 60_000)
 
-  it('a busy JS loop trips the limit instead of wedging the event loop', async () => {
-    const ram = new RAMVFS()
-    const ws = new Workspace(
-      { '/data': ram },
-      {
-        mode: MountMode.EXEC,
-        runtimes: ['quickjs', 'workspace'],
-        commandLimits: { node: new Limit({ timeoutSeconds: 0.3 }) },
-      },
-    )
+  // QuickJS runs on a worker, which the line's abort ends at the deadline.
+  it('a busy JS loop trips the deadline instead of wedging the event loop', async () => {
+    const ws = lineWs(['quickjs', 'workspace'], 0.3)
     try {
       const started = Date.now()
       const r = await ws.shell('cd /data && node -e "while (true) {}"')
       expect(r.exitCode).toBe(124)
-      expect(DEC.decode(r.stderr)).toContain('timed out')
+      expect(DEC.decode(r.stderr)).toContain('line: timed out after 0.3s')
       expect(Date.now() - started).toBeLessThan(30_000)
+    } finally {
+      await ws.close()
+    }
+  }, 60_000)
+
+  it('a busy JS script CLI trips the deadline through the leaf signal', async () => {
+    const ws = lineWs(['quickjs', 'workspace'], 0.3)
+    ws.registerCli(
+      'spin',
+      new CLI({
+        spec: new CommandSpec({ name: 'spin' }),
+        script: new ScriptSource('while (true) {}', 'js'),
+        runtime: 'quickjs',
+      }),
+    )
+    try {
+      const r = await ws.shell('spin')
+      expect(r.exitCode).toBe(124)
+      expect(DEC.decode(r.stderr)).toContain('line: timed out after 0.3s')
+      expect((await ws.shell('echo next')).exitCode).toBe(0)
     } finally {
       await ws.close()
     }
@@ -325,6 +211,20 @@ describe('background job kill', () => {
   }, 60_000)
 })
 
+const UNCAPPED = { '*': new Limit({ walkLimit: -1 }) }
+
+function wideRam(): RAMVFS {
+  const ram = new RAMVFS()
+  ram.store.files.set('/big', new TextEncoder().encode('line\n'.repeat(20_000)))
+  ram.store.dirs.add('/wide')
+  for (let d = 0; d < 100; d++) {
+    ram.store.dirs.add(`/wide/d${String(d)}`)
+    for (let f = 0; f < 200; f++)
+      ram.store.files.set(`/wide/d${String(d)}/f${String(f)}`, new Uint8Array([120, 10]))
+  }
+  return ram
+}
+
 // CPU work must offer cancellation points even when every read is immediately ready.
 describe('large in-memory commands', () => {
   it.each([
@@ -339,6 +239,38 @@ describe('large in-memory commands', () => {
     ram.store.files.set('/big', new TextEncoder().encode('line\n'.repeat(500_000)))
     ram.store.files.set('/blank', new TextEncoder().encode('\n'.repeat(2_500_000)))
     const ws = new Workspace({ '/': ram })
+    const abort = new AbortController()
+    const timer = setTimeout(() => {
+      abort.abort()
+    }, 5)
+    try {
+      await expect(ws.shell(command, { signal: abort.signal })).rejects.toMatchObject({
+        name: 'AbortError',
+      })
+    } finally {
+      clearTimeout(timer)
+      await ws.close()
+    }
+  })
+
+  // A walk the index answers awaits only microtasks; the op guard and the
+  // tree walk hand the abort a turn.
+  it.each([
+    'find /wide -name nothing',
+    'ls -lR /wide',
+    'du -a /wide',
+    'tree /wide',
+    'grep -r nothing /wide',
+    'rg nothing /wide',
+    'cp -r /wide /copy',
+    'chmod -R 700 /wide',
+    'tar -cf /wide.tar /wide',
+    'zip -qr /wide.zip /wide',
+  ])('honors a caller abort during the walk of %s', async (command) => {
+    const ws = new Workspace(
+      { '/': [wideRam(), MountMode.WRITE, UNCAPPED] },
+      { mode: MountMode.WRITE },
+    )
     const abort = new AbortController()
     const timer = setTimeout(() => {
       abort.abort()
@@ -395,3 +327,50 @@ describe('large in-memory commands', () => {
     }
   })
 })
+
+// Every program the shell resolves, given a big file and a wide directory,
+// ends on its own or within a second of the caller's abort. Each runs in a
+// subshell, so a `cd`, `set` or `exec` leaves the next one's shell as it was.
+it('every program settles soon after an abort', async () => {
+  const ws = new Workspace({ '/': [wideRam(), MountMode.READ, UNCAPPED] }, {})
+  const internals = ws as unknown as {
+    callSession(): Parameters<typeof programs>[0]
+    registry: Parameters<typeof programs>[1]
+  }
+  const late: string[] = []
+  try {
+    for (const name of programs(internals.callSession(), internals.registry)) {
+      for (const operand of ['/big', '/wide']) {
+        const abort = new AbortController()
+        let fired = -1
+        const timer = setTimeout(() => {
+          fired = performance.now()
+          abort.abort()
+        }, 5)
+        let stuck: ReturnType<typeof setTimeout> | undefined
+        try {
+          await Promise.race([
+            ws.shell(`( ${name} ${operand} )`, { signal: abort.signal }).catch((err: unknown) => {
+              if (err instanceof Error && err.name === 'AbortError') return null
+              throw err
+            }),
+            new Promise((resolve) => {
+              stuck = setTimeout(() => {
+                late.push(`${name} ${operand}: still running after 5s`)
+                resolve(null)
+              }, 5000)
+            }),
+          ])
+        } finally {
+          clearTimeout(timer)
+          clearTimeout(stuck)
+        }
+        if (fired >= 0 && performance.now() - fired > 1000)
+          late.push(`${name} ${operand}: ${((performance.now() - fired) / 1000).toFixed(2)}s late`)
+      }
+    }
+  } finally {
+    await ws.close()
+  }
+  expect(late).toEqual([])
+}, 300_000)

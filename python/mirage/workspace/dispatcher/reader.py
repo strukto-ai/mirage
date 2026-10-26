@@ -15,7 +15,9 @@
 import posixpath
 from collections.abc import Callable, Mapping
 
-from mirage.types import FileStat, PathSpec, Visibility
+from mirage.context.session_context import current_caller
+from mirage.policy.builtin.output_cap import walk_bound
+from mirage.types import FileStat, Limit, PathSpec, Visibility
 from mirage.utils.hidden import hidden_under, leads_hidden, path_visible
 from mirage.utils.path import norm, norm_dir, owner_prefix
 from mirage.view.namespace_view import namespace_names
@@ -320,7 +322,12 @@ class NamespaceReader:
             directory,
         )
 
-    def mounts(self, crossing: bool) -> MountView:
+    def mounts(
+        self,
+        crossing: bool,
+        command: str | None = None,
+        profile: Mapping[str, Limit] | None = None,
+    ) -> MountView:
         """Where the mount boundaries are, as the session sees them.
 
         Every mount below a path, hidden or not, is a boundary a
@@ -332,9 +339,26 @@ class NamespaceReader:
         and it takes no mount's shortcut, so no mount answers a function
         for it or narrows its search.
 
+        A walk's ``walk_limit`` on each mount is ``command``'s
+        (``walk_bound``), resolved through the session's ``profile``, the
+        mount's and the workspace's command limits and the running
+        command's declared one; without a command, the one every command
+        shares. Both default to the running command's and its session's.
+
         Args:
             crossing (bool): the walk goes through the dispatcher.
+            command (str | None): the command walking.
+            profile (Mapping[str, Limit] | None): the session profile's
+                command limits.
         """
+        caller = current_caller()
+        declared = (
+            caller.declared if command in (None, caller.command) else None
+        )
+        if command is None:
+            command = caller.command
+        if profile is None and caller.session is not None:
+            profile = caller.session.command_limits
 
         def below(virtual: str) -> list[str]:
             if crossing:
@@ -374,7 +398,11 @@ class NamespaceReader:
 
         def walk_limit(virtual: str) -> int:
             row = owner(virtual)
-            return row.walk_limit if row is not None else -1
+            if row is None:
+                return -1
+            return walk_bound(
+                row, command, declared, row.workspace_limits, profile
+            )
 
         return MountView(
             descendants=below,

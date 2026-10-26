@@ -22,7 +22,6 @@ import { VFS_MD } from '@struktoai/mirage-core/vfs/notion/notion'
 import { VFSName } from '@struktoai/mirage-core/types'
 
 import { redactNotionConfig, type NotionConfig, type NotionConfigRedacted } from './config.ts'
-import { WALK_LIMIT } from '@struktoai/mirage-core/vfs/constants'
 
 export interface NotionVFSState {
   type: string
@@ -36,11 +35,9 @@ export class NotionVFS extends NotionVFSBase {
   readonly config: NotionConfig
   override readonly accessor: NotionAccessor
 
-  override readonly walkLimit: number
   constructor(config: NotionConfig) {
     super()
     this.config = config
-    this.walkLimit = config.walkLimit ?? WALK_LIMIT
     const opts: MCPNotionTransportOptions = { authProvider: config.authProvider }
     if (config.serverUrl !== undefined) opts.serverUrl = config.serverUrl
     this.accessor = new NotionAccessor(new MCPNotionTransport(opts))

@@ -29,6 +29,7 @@ export function trelloAccessor(config: unknown): TrelloAccessor {
     apiKey: cfg.apiKey,
     apiToken: cfg.apiToken,
     ...(cfg.baseUrl !== undefined ? { baseUrl: cfg.baseUrl } : {}),
+    ...(cfg.timeout !== undefined ? { timeout: cfg.timeout } : {}),
   })
   return new TrelloAccessor(transport, {
     ...(cfg.workspaceId !== undefined ? { workspaceId: cfg.workspaceId } : {}),

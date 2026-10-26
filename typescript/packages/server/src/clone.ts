@@ -20,6 +20,7 @@ import type { Workspace as CoreWorkspace } from '@struktoai/mirage-core/workspac
 import type { BaseVFS } from '@struktoai/mirage-core/vfs/base'
 import { Mount } from '@struktoai/mirage-core/workspace/mount/spec'
 import { coerceWritePolicy } from '@struktoai/mirage-core/workspace/mount/write_policy'
+import { parseCommandLimits } from '@struktoai/mirage-core/policy/builtin/output_cap'
 import type { SecretEntries } from '@struktoai/mirage-core/secrets/config'
 import { resolveSourcesFor } from '@struktoai/mirage-core/secrets/sources'
 import { Workspace, buildVfs } from '@struktoai/mirage-node'
@@ -28,6 +29,7 @@ interface OverrideMountBlock {
   vfs: string
   config?: Record<string, unknown>
   write?: string | null
+  command_limits?: Record<string, unknown>
 }
 
 export interface OverrideShape {
@@ -41,7 +43,7 @@ export interface OverrideShape {
  * new workspace will run with.
  *
  * Shared by the clone and load entry points, which both take the same
- * `mounts: {<prefix>: {vfs, config, write}}` shape. An override mount
+ * `mounts: {<prefix>: {vfs, config, write, command_limits}}` shape. An override mount
  * reads a pointer the way a yaml one does, so it is built against those
  * declarations, which are built only when an override config names one:
  * an override that swaps a RAM mount never reads a bootstrap file.
@@ -63,6 +65,9 @@ export async function buildOverrideMounts(
     out[normDir(prefix)] = new Mount(vfs, {
       vfsRef: block.vfs,
       ...(block.write != null ? { write: coerceWritePolicy(block.write) } : {}),
+      ...(block.command_limits != null
+        ? { commandLimits: parseCommandLimits(block.command_limits) }
+        : {}),
     })
   }
   return out

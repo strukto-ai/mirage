@@ -90,7 +90,8 @@ it.each([
 })
 
 it('reads every file when the listing kept no text', async () => {
-  const out = await filesContaining(makeAccessor({ walkLimit: -1 }), 'lunch', [spec('/')])
+  const accessor = makeAccessor({}, () => false)
+  const out = await filesContaining(accessor, 'lunch', [spec('/')])
   expect(out).toBeNull()
 })
 

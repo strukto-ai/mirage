@@ -46,14 +46,13 @@ console.log(res.stdoutText)
 {/* generated: config-table databricks_volume start */}
 | Field | Description |
 | --- | --- |
+| <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `DEFAULT_TIMEOUT` | Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off. |
 | <code style={{ whiteSpace: 'nowrap' }}>catalog</code><br />required | Unity Catalog catalog name; one path segment, no `/`. |
 | <code style={{ whiteSpace: 'nowrap' }}>schema</code><br />required | Unity Catalog schema name; one path segment, no `/`. |
 | <code style={{ whiteSpace: 'nowrap' }}>volume</code><br />required | Unity Catalog volume name; one path segment, no `/`. |
 | <code style={{ whiteSpace: 'nowrap' }}>rootPath</code><br />default `'/'` | Subdirectory inside the volume that becomes the mount root; `..` segments are refused. |
 | <code style={{ whiteSpace: 'nowrap' }}>host</code><br />required | Workspace origin, `http://` or `https://`, with no path, query, fragment or credentials. |
 | <code style={{ whiteSpace: 'nowrap' }}>token</code><br />required, secret | Bearer token as a string, or a function, synchronous or asynchronous, that returns one for each request. |
-| <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `30` | Seconds one request may take before it fails. |
-| <code style={{ whiteSpace: 'nowrap' }}>walkLimit</code><br />default `1000` | Most files one command walks under a folder: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit. |
 
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table databricks_volume end */}

@@ -175,7 +175,7 @@ export async function openGzipInput(
         return null
       }
       if (isEnoent(err)) {
-        if (retry && name === path) names.push(...retries(path, err, suffix))
+        if (retry && name === path) for (const item of retries(path, err, suffix)) names.push(item)
         continue
       }
       if (!isFsError(err)) throw err

@@ -45,7 +45,7 @@ export async function listHistory(
       historyId?: string | number
       nextPageToken?: unknown
     }
-    records.push(...(data.history ?? []))
+    for (const item of data.history ?? []) records.push(item)
     if (data.historyId !== undefined) latest = String(data.historyId)
     token =
       typeof data.nextPageToken === 'string' && data.nextPageToken !== ''

@@ -151,7 +151,7 @@ export function retainPrograms(nodes: readonly TSNodeLike[]): () => void {
     const node = pending.pop()
     if (node === undefined) break
     if (node instanceof ProgramNode) programs.add(node.program)
-    else if (Array.isArray(node.children)) pending.push(...node.children)
+    else if (Array.isArray(node.children)) for (const child of node.children) pending.push(child)
   }
   const leases = [...programs].map((program) => program.retain())
   return () => {

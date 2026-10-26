@@ -78,7 +78,6 @@ class S3VFS(BaseVFS):
     def __init__(self, config: S3Config) -> None:
         super().__init__()
         self.config = config
-        self.walk_limit = config.walk_limit
         self._endpoint = _declared_endpoint(config)
         pinned = (
             config.model_copy(update={"endpoint_url": self._endpoint})

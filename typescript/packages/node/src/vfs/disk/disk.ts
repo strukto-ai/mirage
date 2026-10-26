@@ -51,12 +51,11 @@ export interface DiskVFSOptions {
   // local POSIX filesystem; turn them off for an NFS, SMB or FUSE root, whose
   // change times may not move with the folder's entries.
   folderVersions?: boolean
-  walkLimit?: number
 }
 
 export interface DiskVFSState {
   type: string
-  config?: { root: string; folderVersions: boolean; walk_limit: number }
+  config?: { root: string; folderVersions: boolean }
   /**
    * Each file as bytes, or as a host path read by whoever consumes the
    * state (a snapshot tar, a copy).
@@ -90,7 +89,7 @@ export class DiskVFS extends BaseVFS {
   override readonly listingVersion: ListingVersion = ListingVersion.FOLDER
   readonly root: string
   readonly folderVersions: boolean
-  override readonly walkLimit: number
+  override walkLimit: number = LOCAL_WALK_LIMIT
   override readonly accessor: DiskAccessor
 
   constructor(options: DiskVFSOptions) {
@@ -99,14 +98,8 @@ export class DiskVFS extends BaseVFS {
     if (typeof folderVersions !== 'boolean') {
       throw new VFSConfigError('disk: folder_versions: must be a boolean')
     }
-    let limit: unknown = options.walkLimit
-    if (limit === undefined) limit = LOCAL_WALK_LIMIT
-    if (typeof limit !== 'number' || !Number.isInteger(limit) || limit < -1) {
-      throw new VFSConfigError('disk: walk_limit: must be an integer of -1 or more')
-    }
     super()
     this.folderVersions = folderVersions
-    this.walkLimit = limit
     if (!folderVersions) this.listingVersion = ListingVersion.NONE
     this.root = path.resolve(options.root)
     mkdirSync(this.root, { recursive: true })
@@ -249,7 +242,6 @@ export class DiskVFS extends BaseVFS {
       config: {
         root: this.root,
         folderVersions: this.folderVersions,
-        walk_limit: this.walkLimit,
       },
       files,
       modes,

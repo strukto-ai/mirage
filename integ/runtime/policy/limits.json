@@ -1281,7 +1281,7 @@
       ]
     },
     {
-      "id": "an_interpreter_timeout_names_the_command",
+      "id": "an_interpreter_loop_stops_at_the_line_deadline",
       "world": {
         "runtimes": [
           "quickjs",
@@ -1292,12 +1292,12 @@
             "vfs": "ram",
             "files": {
               "loop.js": "while (true) {}\n"
-            },
-            "limits": {
-              "node": {
-                "timeout_seconds": 1
-              }
             }
+          }
+        },
+        "command_limits": {
+          "line": {
+            "timeout_seconds": 1
           }
         }
       },
@@ -1306,7 +1306,7 @@
           "command": "node /ram/loop.js",
           "expect": {
             "exit": 124,
-            "stderr": "node: timed out after 1s\n"
+            "stderr": "line: timed out after 1s\n"
           }
         }
       ]

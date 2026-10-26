@@ -36,13 +36,13 @@ The `mongodb` driver is an optional peer dependency; it is only loaded when a `G
 {/* generated: config-table gridfs start */}
 | Field | Description |
 | --- | --- |
+| <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `DEFAULT_TIMEOUT` | Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off. |
 | <code style={{ whiteSpace: 'nowrap' }}>uri</code><br />required, secret | MongoDB connection URI. |
 | <code style={{ whiteSpace: 'nowrap' }}>database</code><br />required | Database that holds the GridFS bucket. |
 | <code style={{ whiteSpace: 'nowrap' }}>bucket</code><br />default `'fs'` | GridFS bucket name; its collections are `<bucket>.files` and `<bucket>.chunks`. |
 | <code style={{ whiteSpace: 'nowrap' }}>keyPrefix</code> | Filename prefix the mount treats as its root; files outside it are not listed. |
 | <code style={{ whiteSpace: 'nowrap' }}>chunkSizeBytes</code> | Chunk size in bytes for files the mount writes; unset uses the driver's default, 255 KiB. |
 | <code style={{ whiteSpace: 'nowrap' }}>keepRevisions</code> | Revisions kept per file, newest first: a write or an `rm` deletes the rest, under the file's name and in the trash `rm` moves revisions to (`/trash/<filename>`, which no mount path reaches). Unset keeps every revision, so a snapshot pinned to any of them still reads. |
-| <code style={{ whiteSpace: 'nowrap' }}>walkLimit</code><br />default `1000` | Most files one command walks under a folder: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit. |
 
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table gridfs end */}

@@ -175,7 +175,9 @@ class BaseVFS:
     # walk a work tree fail, a glob matching more is refused, and so are
     # tar -c, zip -r, cp -r, rm -r, chmod -R, chown -R, chgrp -R, mv to
     # another mount and diff -r of a directory holding more
-    # (``before_full_walk``); -1 for no cap.
+    # (``before_full_walk``); -1 for no cap. This is the backend's own
+    # value: the mount's ``"*"`` command limit, else the workspace's,
+    # replaces it when the VFS is mounted.
     walk_limit: int = WALK_LIMIT
 
     # Extensions whose ``read`` is a rendering rather than the stored
@@ -789,9 +791,10 @@ class BaseVFS:
         whole, before the first file it touches there: tar -c, zip -r,
         cp -r, mv across mounts, diff -r, rm -r, chmod -R, chown -R and
         chgrp -R. Return to let the walk run; raise to refuse it, and the
-        error's message is what the command prints. The default refuses
-        more than ``walk_limit`` files. Searches and listings are
-        never refused: they stop after ``walk_limit`` files.
+        error's message is what the command prints. The dispatcher has
+        already refused more than the command's ``walk_limit`` files, so
+        the default lets the walk run. Searches and listings are never
+        refused: they stop after ``walk_limit`` files.
 
         Args:
             path (PathSpec): the directory about to be walked.
@@ -801,12 +804,6 @@ class BaseVFS:
                 its listings that stops one file past it; None when
                 neither counts, and the guard counts them itself.
         """
-        limit = self.walk_limit
-        if limit >= 0 and files is not None and files > limit:
-            raise ValueError(
-                f"more than {limit} files in scope (walk_limit); "
-                "narrow the path"
-            )
         return None
 
     def is_mounted(self) -> bool:

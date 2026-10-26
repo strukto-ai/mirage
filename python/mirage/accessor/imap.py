@@ -27,11 +27,6 @@ _LITERAL = re.compile(rb"\{(\d+)\}\r?\n\Z")
 # literal, read by its count, so only text lines are held to this.
 _LINE_LIMIT = 1 << 20
 
-# How long the server may go quiet inside a command: past it the command is
-# abandoned and the connection closed, so a hung server ends a request
-# instead of holding it.
-_REPLY_TIMEOUT = 120.0
-
 # How much of a literal is read at a time, each piece under the deadline.
 _LITERAL_CHUNK = 1 << 16
 
@@ -112,7 +107,7 @@ class IMAPClient:
     parsers read (``IMAPResponse``).
 
     A command the caller abandons (a timeout, a cancellation), or one the
-    server stops answering for ``_REPLY_TIMEOUT``, closes the connection:
+    server stops answering for its timeout, closes the connection:
     the server may still be mid-answer or waiting for a literal, so
     nothing more can be sent on it.
 
@@ -120,6 +115,9 @@ class IMAPClient:
         reader (asyncio.StreamReader): the connection's read side.
         writer (asyncio.StreamWriter): its write side.
         protocol (_Protocol): the protocol that notes the server's end.
+        timeout (float): seconds the server may go quiet inside a command
+            before it is abandoned, so a hung server ends a request instead
+            of holding it.
     """
 
     def __init__(
@@ -127,7 +125,9 @@ class IMAPClient:
         reader: asyncio.StreamReader,
         writer: asyncio.StreamWriter,
         protocol: _Protocol,
+        timeout: float,
     ) -> None:
+        self._timeout = timeout
         self._reader = reader
         self._writer = writer
         self._protocol = protocol
@@ -136,7 +136,7 @@ class IMAPClient:
 
     @classmethod
     async def connect(
-        cls, host: str, port: int, use_ssl: bool
+        cls, host: str, port: int, use_ssl: bool, timeout: float
     ) -> "IMAPClient":
         """Open a connection and read the server's greeting.
 
@@ -144,6 +144,8 @@ class IMAPClient:
             host (str): the server.
             port (int): its port.
             use_ssl (bool): speak TLS from the start (IMAPS).
+            timeout (float): seconds to connect, and that the server may
+                go quiet inside a command.
 
         Raises:
             ConnectionError: the server greeted with anything but OK.
@@ -151,14 +153,17 @@ class IMAPClient:
         loop = asyncio.get_running_loop()
         reader = asyncio.StreamReader(limit=_LINE_LIMIT, loop=loop)
         protocol = _Protocol(reader, loop=loop)
-        transport, _ = await loop.create_connection(
-            lambda: protocol,
-            host,
-            port,
-            ssl=ssl.create_default_context() if use_ssl else None,
+        transport, _ = await asyncio.wait_for(
+            loop.create_connection(
+                lambda: protocol,
+                host,
+                port,
+                ssl=ssl.create_default_context() if use_ssl else None,
+            ),
+            timeout,
         )
         writer = asyncio.StreamWriter(transport, protocol, reader, loop)
-        client = cls(reader, writer, protocol)
+        client = cls(reader, writer, protocol, timeout)
         try:
             greeting = await client._readline()
         except BaseException:
@@ -381,7 +386,7 @@ class IMAPClient:
         while len(data) < count:
             piece = await asyncio.wait_for(
                 self._reader.read(min(count - len(data), _LITERAL_CHUNK)),
-                _REPLY_TIMEOUT,
+                self._timeout,
             )
             if not piece:
                 raise ConnectionError("the IMAP server closed the connection")
@@ -393,9 +398,9 @@ class IMAPClient:
 
         Raises:
             ConnectionError: the server closed the connection.
-            TimeoutError: the server sent nothing for ``_REPLY_TIMEOUT``.
+            TimeoutError: the server sent nothing for its timeout.
         """
-        raw = await asyncio.wait_for(self._reader.readline(), _REPLY_TIMEOUT)
+        raw = await asyncio.wait_for(self._reader.readline(), self._timeout)
         if not raw:
             raise ConnectionError("the IMAP server closed the connection")
         return raw

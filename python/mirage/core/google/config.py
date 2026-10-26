@@ -14,12 +14,12 @@
 
 from collections.abc import Callable
 
-from pydantic import BaseModel, ConfigDict, Field, SecretStr, model_validator
+from pydantic import ConfigDict, SecretStr, model_validator
 
-from mirage.vfs.constants import WALK_LIMIT
+from mirage.core.api.config import TimeoutConfig
 
 
-class GoogleConfig(BaseModel):
+class GoogleConfig(TimeoutConfig):
     model_config = ConfigDict(
         arbitrary_types_allowed=True, frozen=True, extra="forbid"
     )
@@ -83,9 +83,4 @@ class GoogleConfig(BaseModel):
 
 
 class GoogleAppConfig(GoogleConfig):
-    walk_limit: int = Field(default=WALK_LIMIT, ge=-1)
-    """Most files one command walks under a folder: `grep -r`, `find` and other
-    walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is
-    refused. `-1` lifts the limit and reads every file without asking Drive
-    full-text search, which searches a file's text, not the JSON the mount
-    renders."""
+    pass

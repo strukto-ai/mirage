@@ -123,7 +123,7 @@ function request(
     },
     errorOf,
     retry: options.retry ?? NO_RETRY,
-    timeoutSeconds: accessor.config.timeout,
+    timeout: accessor.config.timeout,
   })
 }
 
@@ -228,7 +228,7 @@ export async function* downloadStream(
   yield* apiStream(url(accessor, remotePath), {
     headers: headers(accessor),
     errorOf,
-    signal: AbortSignal.timeout(Math.ceil(accessor.config.timeout * 1000)),
+    timeout: accessor.config.timeout,
   })
 }
 
@@ -245,7 +245,7 @@ async function putPart(
     errorOf,
     retry: NO_RETRY,
     read: 'response',
-    timeoutSeconds: accessor.config.timeout,
+    timeout: accessor.config.timeout,
   })) as ApiResponse
   return response.headers.etag ?? ''
 }
@@ -373,7 +373,7 @@ export async function appendTo(
           errorOf,
           retry: NO_RETRY,
           read: 'bytes',
-          timeoutSeconds: accessor.config.timeout,
+          timeout: accessor.config.timeout,
         }),
       )
     }

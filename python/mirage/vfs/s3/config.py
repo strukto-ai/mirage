@@ -12,14 +12,14 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from pydantic import ConfigDict, Field, SecretStr, field_validator
+from pydantic import ConfigDict, SecretStr, field_validator
 
+from mirage.core.api.config import TimeoutConfig
 from mirage.secrets.config import AWSAuth
 from mirage.utils import key_prefix as kp
-from mirage.vfs.constants import WALK_LIMIT
 
 
-class S3Config(AWSAuth):
+class S3Config(AWSAuth, TimeoutConfig):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     bucket: str
@@ -32,9 +32,6 @@ class S3Config(AWSAuth):
     path_style: bool = False
     """Address the bucket in the URL path (`<endpoint>/<bucket>/<key>`)
     instead of as a subdomain of the endpoint."""
-    timeout: int = 30
-    """Seconds to wait to connect, and for each read of a response, before
-    the request fails."""
     proxy: SecretStr | None = None
     """Proxy URL for every HTTP and HTTPS request to the endpoint."""
     key_prefix: str | None = None
@@ -44,10 +41,6 @@ class S3Config(AWSAuth):
     default_content_type: str | None = None
     """`Content-Type` stored with every object the mount writes. Unset
     sends none, so the store applies its own default."""
-    walk_limit: int = Field(default=WALK_LIMIT, ge=-1)
-    """Most files one command walks under a folder: `grep -r`, `find` and other
-    walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is
-    refused. `-1` lifts the limit."""
 
     @field_validator("key_prefix")
     @classmethod

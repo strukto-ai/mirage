@@ -12,13 +12,13 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
+from pydantic import ConfigDict, SecretStr, field_validator
 
+from mirage.core.api.config import TimeoutConfig
 from mirage.utils import key_prefix as kp
-from mirage.vfs.constants import WALK_LIMIT
 
 
-class HfBucketsConfig(BaseModel):
+class HfBucketsConfig(TimeoutConfig):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     bucket: str
@@ -27,17 +27,9 @@ class HfBucketsConfig(BaseModel):
     """Hugging Face access token."""
     endpoint: str = "https://huggingface.co"
     """Hub origin requests go to, for a mirror or a self-hosted Hub."""
-    timeout: int = 30
-    """Seconds one Hub request may go without progress: connecting, waiting
-    for the answer, or between two chunks of a download. `0` turns the bound
-    off."""
     key_prefix: str | None = None
     """Path inside the bucket that becomes the mount root; files outside it
     are not listed."""
-    walk_limit: int = Field(default=WALK_LIMIT, ge=-1)
-    """Most files one command walks under a folder: `grep -r`, `find` and other
-    walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is
-    refused. `-1` lifts the limit."""
 
     @field_validator("bucket")
     @classmethod
@@ -55,7 +47,7 @@ class HfBucketsConfig(BaseModel):
         return kp.normalize(v) or None
 
 
-class HfRepoConfig(BaseModel):
+class HfRepoConfig(TimeoutConfig):
     """What a Hub repository mount is configured with.
 
     One shape for all three repo kinds, because the Hub's own API differs
@@ -74,10 +66,6 @@ class HfRepoConfig(BaseModel):
     reach public repositories only."""
     endpoint: str = "https://huggingface.co"
     """Hub origin requests go to, for a mirror or a self-hosted Hub."""
-    timeout: int = 30
-    """Seconds one Hub request may go without progress: connecting, waiting
-    for the answer, or between two chunks of a download. `0` turns the bound
-    off."""
     key_prefix: str | None = None
     """Path inside the repository that becomes the mount root; files outside
     it are not listed."""
@@ -87,10 +75,6 @@ class HfRepoConfig(BaseModel):
     """Fetch each file's last commit so listings carry modification times, at
     50 entries per request instead of 1000. Unset does so only when the
     whole repository fits in one page."""
-    walk_limit: int = Field(default=WALK_LIMIT, ge=-1)
-    """Most files one command walks under a folder: `grep -r`, `find` and other
-    walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is
-    refused. `-1` lifts the limit."""
 
     @field_validator("repo_id")
     @classmethod

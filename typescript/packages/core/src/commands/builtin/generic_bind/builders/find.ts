@@ -68,6 +68,7 @@ export function findWalk(
         files.readdir,
         files.stat,
         whole,
+        files.signal,
       )
       const home = bounded && mounts !== undefined ? landingRoot(mounts, links, root.virtual) : null
       const budget = new WalkBudget(root, mounts ?? null)
@@ -87,7 +88,7 @@ export function findWalk(
         },
         options,
       )
-      stopped.push(...budget.stopped)
+      for (const item of budget.stopped) stopped.push(item)
       return keys
     },
     undefined,

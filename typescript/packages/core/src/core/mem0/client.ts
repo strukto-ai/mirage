@@ -36,7 +36,7 @@ export async function getAllMemories(
       json: { filters: accessor.config.scopeFilter },
     })
     const batch = records(response.results)
-    results.push(...batch)
+    for (const item of batch) results.push(item)
     if (!response.next || batch.length === 0) return results
     if (limit !== undefined && results.length >= limit) return results
     page += 1

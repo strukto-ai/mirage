@@ -1,6 +1,7 @@
 import { Accessor } from './base.ts'
 import { resolveMem0Config, type Mem0Config, type Mem0ConfigResolved } from '../vfs/mem0/config.ts'
 import { md5Hex } from '../utils/hash.ts'
+import { stallTimeout } from '../core/api/client.ts'
 
 const ENCODER = new TextEncoder()
 
@@ -46,7 +47,7 @@ export class Mem0Accessor extends Accessor {
       headers['Content-Type'] = 'application/json'
       init.body = JSON.stringify(options.json)
     }
-    const response = await fetch(url, init)
+    const response = await stallTimeout(this.config.timeout)(url, init)
     if (!response.ok) throw new Mem0Error(response.status)
     const payload: unknown = await response.json()
     if (payload === null || typeof payload !== 'object' || Array.isArray(payload)) {

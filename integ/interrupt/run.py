@@ -184,6 +184,28 @@ async def seed(client):
             timeout=15,
         )
         assert result["exit_code"] == 0, result
+    # A wide tree the walk cases list many times over, every stat answered
+    # from the index: the walk itself has to yield.
+    result = await checked(
+        client,
+        "POST",
+        SHELL,
+        files={
+            "request": (
+                None,
+                json.dumps(
+                    {
+                        "command": "mkdir -p /wide/d{1..50} && "
+                        "touch /wide/d{1..50}/f{1..100}",
+                        "record": False,
+                    }
+                ),
+                "application/json",
+            ),
+        },
+        timeout=180,
+    )
+    assert result["exit_code"] == 0, result
 
 
 async def cpu(client, case):

@@ -244,7 +244,7 @@ async function startingPoints(
   dashed: boolean,
 ): Promise<[CommitFacts[], CommitFacts[]]> {
   const [starts, hidden] = await walkEnds(repo, revisions.length ? revisions : [HEAD], dashed)
-  if (flags.allRefs) starts.push(...(await refCommits(repo)))
+  if (flags.allRefs) for (const item of await refCommits(repo)) starts.push(item)
   return [starts, hidden]
 }
 

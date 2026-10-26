@@ -14,11 +14,11 @@
 
 import re
 
-import aiohttp
 import pytest
 from aioresponses import aioresponses
 
 from mirage.accessor.jaeger import JaegerAccessor
+from mirage.core.api.client import stall_timeout
 from mirage.core.jaeger.client import JaegerApiError, fetch_traces, is_trace_id
 from mirage.vfs.jaeger.config import JaegerConfig
 
@@ -49,12 +49,12 @@ def test_is_trace_id(value, valid):
 
 @pytest.mark.asyncio
 async def test_accessor_reuses_session_and_closes_it():
-    accessor = JaegerAccessor(JaegerConfig(request_timeout=12))
+    accessor = JaegerAccessor(JaegerConfig(timeout=12))
     first = accessor.pool.get()
     second = accessor.pool.get()
 
     assert first is second
-    assert first.timeout == aiohttp.ClientTimeout(total=12)
+    assert first.timeout == stall_timeout(12)
 
     await accessor.close()
 

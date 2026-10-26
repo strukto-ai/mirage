@@ -116,7 +116,6 @@ DOCUMENT = {
         "cat": {
             "max_bytes": 10,
             "max_lines": None,
-            "timeout_seconds": None,
             "on_exceed": "truncate",
         }
     },

@@ -160,13 +160,10 @@ async def wait_for_remote(runtime, command):
 async def exercise_cancellation(runtime):
     workspace = Workspace(
         {
-            "/home/user": (
-                RAMVFS(),
-                MountMode.EXEC,
-                {"exec": Limit(timeout_seconds=5)},
-            )
+            "/home/user": (RAMVFS(), MountMode.EXEC),
         },
         mode=MountMode.EXEC,
+        command_limits={"line": Limit(timeout_seconds=5)},
         runtimes=[runtime, "workspace"],
     )
     try:

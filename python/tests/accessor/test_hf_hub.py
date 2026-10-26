@@ -22,8 +22,8 @@ from mirage.accessor.hf_hub import (
     HfSpacesAccessor,
     account_of,
     hub_for,
-    stall_timeout,
 )
+from mirage.core.api.client import stall_timeout
 from mirage.core.hf_hub.config import HfConfig
 from mirage.vfs.hf_buckets.config import HfRepoConfig
 
@@ -75,21 +75,6 @@ def test_repo_path_joins_the_prefix_exactly_once(prefix, local, expected):
 
 def test_expand_commits_defaults_to_deciding_by_size():
     assert models(HfRepoConfig(repo_id="a/b")).expand_commits is None
-
-
-def test_stall_timeout_bounds_progress_not_the_whole_request():
-    bound = stall_timeout(5)
-    assert (bound.total, bound.sock_connect, bound.sock_read) == (None, 5, 5)
-
-
-@pytest.mark.parametrize("seconds", [0, -1])
-def test_a_bound_of_zero_or_less_is_none(seconds):
-    bound = stall_timeout(seconds)
-    assert (bound.total, bound.sock_connect, bound.sock_read) == (
-        None,
-        None,
-        None,
-    )
 
 
 def test_the_pool_waits_the_configured_timeout_without_progress():

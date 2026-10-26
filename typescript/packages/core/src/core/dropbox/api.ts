@@ -85,13 +85,13 @@ export async function listFolder(
     recursive,
     limit: limit === null ? pageSize : Math.min(pageSize, limit),
   })) as ListFolderResponse
-  out.push(...resp.entries)
+  for (const item of resp.entries) out.push(item)
   while (resp.has_more) {
     if (limit !== null && out.length >= limit) break
     resp = (await dropboxRpc(tm, '/files/list_folder/continue', {
       cursor: resp.cursor,
     })) as ListFolderResponse
-    out.push(...resp.entries)
+    for (const item of resp.entries) out.push(item)
   }
   return out
 }
@@ -130,12 +130,12 @@ export async function continueFolder(
   let resp = (await dropboxRpc(tm, '/files/list_folder/continue', {
     cursor,
   })) as ListFolderResponse
-  out.push(...resp.entries)
+  for (const item of resp.entries) out.push(item)
   while (resp.has_more) {
     resp = (await dropboxRpc(tm, '/files/list_folder/continue', {
       cursor: resp.cursor,
     })) as ListFolderResponse
-    out.push(...resp.entries)
+    for (const item of resp.entries) out.push(item)
   }
   return { entries: out, cursor: resp.cursor }
 }

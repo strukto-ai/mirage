@@ -153,6 +153,9 @@ export async function toStateDict(ws: WorkspaceLike): Promise<WorkspaceStateDict
       // trip, and stays the anchor: a load leaves it out of the mounts and
       // lets the new workspace add its own. Mirrors python.
       ...(ws.syntheticRoot && m.prefix === '/' ? { anchor: true as const } : {}),
+      ...(m.commandLimits.size > 0
+        ? { command_limits: commandLimitsToJSON(Object.fromEntries(m.commandLimits)) }
+        : {}),
     })
   }
   const ramCache = ws.cache instanceof RAMFileCacheStore ? ws.cache : null
@@ -426,19 +429,22 @@ export function buildMountArgs(
       )
     }
     const index = restoreIndexConfig(m.index_config, placed?.options.index, m.prefix)
-    // A `ram` or `disk` mount restores into RAM holding the limit it was
-    // saved with, as Python's `_construct_vfs` passes it to the class.
-    const saved = (m.vfs_state as VFSStateBase).config as { walk_limit?: unknown } | undefined
-    const limit = saved?.walk_limit
+    // The mount's own limits, its "*" walk_limit among them, come back as
+    // saved unless the override names its own. Mirrors python.
+    // An override that names no limits keeps the saved ones, as Python's,
+    // whose Mount cannot tell an omitted table from an empty one.
+    const named = placed?.options.commandLimits
+    const commandLimits =
+      named !== undefined && Object.keys(named).length > 0
+        ? named
+        : parseCommandLimits(m.command_limits)
     mountArgs[m.prefix] = new Mount(
-      placed !== null
-        ? placed.vfs
-        : ((override as BaseVFS | undefined) ??
-            new RAMVFS(typeof limit === 'number' ? { walkLimit: limit } : {})),
+      placed !== null ? placed.vfs : ((override as BaseVFS | undefined) ?? new RAMVFS()),
       {
         mode: m.mode as MountMode,
         read,
         write,
+        commandLimits,
         ...(index === undefined ? {} : { index }),
         vfsRef: placed !== null ? (placed.options.vfsRef ?? null) : savedRef(m),
       },

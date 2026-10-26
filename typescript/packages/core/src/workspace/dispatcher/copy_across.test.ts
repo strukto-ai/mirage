@@ -19,7 +19,7 @@ import { describe, expect, it } from 'vitest'
 
 import { exdev } from '../../errors/fs.ts'
 import { parseSessionProfile } from '../../policy/profile.ts'
-import { Limit, MountMode, type PathSpec, WritePolicy } from '../../types.ts'
+import { MountMode, type PathSpec, WritePolicy } from '../../types.ts'
 import type { BaseVFS } from '../../vfs/base.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import type { Handed } from '../../vfs/types.ts'
@@ -123,12 +123,6 @@ class CachedStoreRAM extends StoreRAM {
 }
 
 /** A destination whose store copy outlasts any deadline. */
-class SlowStoreRAM extends StoreRAM {
-  override async copyFrom(): Promise<void> {
-    await new Promise((resolve) => setTimeout(resolve, 5000))
-  }
-}
-
 describe('a copy a read would answer otherwise', () => {
   // Mirrors python's test_a_cached_source_moves_the_bytes_a_read_gives.
   it('moves the bytes of a cached source', async () => {
@@ -158,14 +152,6 @@ describe('a copy a read would answer otherwise', () => {
     ;(ws.registry.mountFor(path) as { write: string }).write = WritePolicy.CONDITIONAL
     await ws.shell('mv /a/f /b/g')
     expect(b.copied).toEqual([])
-  })
-
-  // Mirrors python's test_a_store_copy_keeps_the_copy_timeout.
-  it('keeps the copy timeout', async () => {
-    const ws = await seeded(new StoreRAM(), new SlowStoreRAM())
-    ws.registry.mountFor('/b/g').commandLimits.set('copy', new Limit({ timeoutSeconds: 0.05 }))
-    const io = await ws.shell('cp /a/f /b/g')
-    expect(io.exitCode).not.toBe(0)
   })
 
   // Mirrors python's test_a_rendered_source_moves_the_bytes_a_read_gives.

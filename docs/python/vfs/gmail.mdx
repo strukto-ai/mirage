@@ -28,12 +28,12 @@ ws = Workspace({"/gmail": vfs}, mode=MountMode.READ)
 {/* generated: config-table gmail omit=folder_id start */}
 | Field | Description |
 | --- | --- |
+| <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `30` | Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off. |
 | <code style={{ whiteSpace: 'nowrap' }}>access_token</code><br />secret | OAuth access token, or a callable that returns one. Takes precedence over `client_id` and `refresh_token`. |
 | <code style={{ whiteSpace: 'nowrap' }}>client_id</code> | Google OAuth client ID. Required with `refresh_token` when `access_token` is unset; mirage then mints and renews access tokens itself. |
 | <code style={{ whiteSpace: 'nowrap' }}>client_secret</code><br />secret | Google OAuth client secret, sent with the refresh-token grant. Omit it for a PKCE client. |
 | <code style={{ whiteSpace: 'nowrap' }}>refresh_token</code><br />secret | User's OAuth refresh token. Required with `client_id` when `access_token` is unset. |
 | <code style={{ whiteSpace: 'nowrap' }}>api_base</code> | One base URL that replaces every Google API host and the OAuth token endpoint, such as a test server. Unset uses Google's hosts. |
-| <code style={{ whiteSpace: 'nowrap' }}>walk_limit</code><br />default `1000` | Most files one command walks under a folder: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit, and the listing then keeps no message text. |
 
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table gmail end */}
@@ -472,4 +472,5 @@ of the plain-text body a `.gmail.json` holds, such as one inside a link.
 Attachments are always read, and so is every message for a text that is not
 ASCII, or that may be part of the labels field (`inbox`, `STARRED`, `Label_1`,
 `abel`), since a message's labels change after the listing kept its text. With
-`walk_limit: -1` the listing keeps no message text, and every message is read.
+`walk_limit: -1` in the mount's `"*"` [command limit](/home/core/output-limits), the listing keeps no message text, and every message
+is read.

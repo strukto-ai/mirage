@@ -19,11 +19,14 @@ import type {
   MongoIterOptions,
 } from '@struktoai/mirage-core/core/mongodb/_driver'
 import type { EntityKind } from '@struktoai/mirage-core/core/mongodb/types'
+import { stallTimeout } from '@struktoai/mirage-core/core/api/client'
 
 export interface HttpMongoDriverOptions {
   endpoint: string
   fetchImpl?: typeof fetch
   headers?: Record<string, string>
+  /** Seconds a request may stall (`stallTimeout`); absent is the default. */
+  timeout?: number
 }
 
 interface MongoProxyRequest {
@@ -50,7 +53,7 @@ export class HttpMongoDriver implements MongoDriver {
 
   constructor(options: HttpMongoDriverOptions) {
     this.endpoint = options.endpoint
-    this.fetchImpl = options.fetchImpl ?? fetch.bind(globalThis)
+    this.fetchImpl = stallTimeout(options.timeout, options.fetchImpl ?? fetch.bind(globalThis))
     this.headers = options.headers ?? {}
   }
 

@@ -15,10 +15,14 @@
 import type { Db, MongoClient } from 'mongodb'
 import { Accessor } from '@struktoai/mirage-core/accessor/index'
 import { loadOptionalPeer } from '@struktoai/mirage-core/utils/optional_peer'
+import { DEFAULT_TIMEOUT } from '@struktoai/mirage-core/core/api/constants'
 import type { GridFSConfig } from '../vfs/gridfs/config.ts'
 
 interface MongoModule {
-  MongoClient: new (uri: string) => MongoClient
+  MongoClient: new (
+    uri: string,
+    options: { connectTimeoutMS: number; socketTimeoutMS: number },
+  ) => MongoClient
 }
 
 export class GridFSAccessor extends Accessor {
@@ -45,7 +49,11 @@ export class GridFSAccessor extends Accessor {
       feature: 'GridFSVFS',
       packageName: 'mongodb',
     })
-    const client = new mod.MongoClient(this.config.uri)
+    const timeoutMs = (this.config.timeout ?? DEFAULT_TIMEOUT) * 1000
+    const client = new mod.MongoClient(this.config.uri, {
+      connectTimeoutMS: timeoutMs,
+      socketTimeoutMS: timeoutMs,
+    })
     await client.connect()
     return client
   }

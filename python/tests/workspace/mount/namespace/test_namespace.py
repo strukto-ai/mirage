@@ -146,6 +146,20 @@ async def test_purge_under_keeps_a_mount_below():
 
 
 @pytest.mark.asyncio
+async def test_rename_under_keeps_a_mount_below():
+    ws = Workspace({"/data": RAMVFS(), "/data/sub/m": RAMVFS()})
+    try:
+        await ws.namespace.symlink("/data/sub/a", "/t1", 1.0)
+        await ws.namespace.symlink("/data/sub/m/b", "/t2", 1.0)
+        assert await ws.namespace.rename_under("/data/sub", "/data/new") == 1
+        assert ws.namespace.is_link("/data/new/a") is True
+        assert ws.namespace.is_link("/data/sub/m/b") is True
+        assert ws.namespace.is_link("/data/new/m/b") is False
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
 async def test_drop_overlays_under_keeps_links_and_siblings(namespace):
     await namespace.set_attrs("/data/sub", mode=0o700)
     await namespace.set_attrs("/data/sub/deep/x", mode=0o600)

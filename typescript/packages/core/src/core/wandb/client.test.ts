@@ -35,9 +35,10 @@ describe('W&B client', () => {
         const chunks = []
         for await (const chunk of c.download(target)) chunks.push(new TextDecoder().decode(chunk))
         expect(chunks.join('')).toBe('file bytes')
-        expect(request).toHaveBeenCalledExactlyOnceWith(new URL(target, base_url + '/'), {
-          headers: authenticated ? c.headers() : {},
-        })
+        expect(request).toHaveBeenCalledExactlyOnceWith(
+          new URL(target, base_url + '/'),
+          expect.objectContaining({ headers: authenticated ? c.headers() : {} }),
+        )
       } finally {
         vi.unstubAllGlobals()
       }

@@ -16,11 +16,11 @@ from collections.abc import Hashable, Iterable
 from types import TracebackType
 from typing import Any, Self
 
-import aiohttp
 from pydantic import BaseModel
 
 from mirage.accessor.responses import ResponseCache
 from mirage.core.api.client import SessionPool
+from mirage.core.api.constants import DEFAULT_TIMEOUT
 from mirage.core.api.oauth import TokenManager
 from mirage.types import JsonValue, ReadSpec
 from mirage.utils.clock import Clock
@@ -135,14 +135,14 @@ class SessionAccessor(Accessor):
     it at the request.
 
     Args:
-        timeout (aiohttp.ClientTimeout | None): applied to the pool's
-            session at creation; None takes aiohttp's default.
+        timeout (float): seconds a request may wait to connect, or between
+            two reads of its response.
         retry_connection (bool): allow aiohttp's automatic connection retry.
     """
 
     def __init__(
         self,
-        timeout: aiohttp.ClientTimeout | None = None,
+        timeout: float = DEFAULT_TIMEOUT,
         *,
         retry_connection: bool = True,
     ) -> None:

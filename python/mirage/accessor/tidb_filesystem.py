@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import aiohttp
 
 from mirage.accessor.base import SessionAccessor
 from mirage.vfs.tidb_filesystem.config import TiDBFilesystemConfig
@@ -20,7 +19,5 @@ from mirage.vfs.tidb_filesystem.config import TiDBFilesystemConfig
 
 class TiDBFilesystemAccessor(SessionAccessor):
     def __init__(self, config: TiDBFilesystemConfig) -> None:
-        super().__init__(
-            aiohttp.ClientTimeout(total=config.timeout), retry_connection=False
-        )
+        super().__init__(config.timeout, retry_connection=False)
         self.config = config

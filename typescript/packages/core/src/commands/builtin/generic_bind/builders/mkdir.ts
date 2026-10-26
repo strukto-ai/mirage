@@ -255,7 +255,7 @@ const mkdir: CommandFn = async (_accessor, paths, _texts, ctx) => {
     if (mode !== null && !existed && (await entryKind(files.stat, p)).exists) {
       await files.setAttrs(p, { mode })
     }
-    lines.push(...createdLines(names))
+    for (const item of createdLines(names)) lines.push(item)
   }
   return [formatOptionalRecords(lines), operandsIo(errors.map((line) => `${line}\n`).join(''))]
 }

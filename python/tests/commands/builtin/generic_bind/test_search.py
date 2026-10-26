@@ -54,9 +54,8 @@ class SearchRAM(RAMVFS):
         lines: str | None = "bytes",
         upper: bool = False,
         resource: bool = False,
-        walk_limit: int = 10000,
     ) -> None:
-        super().__init__(walk_limit=walk_limit)
+        super().__init__()
         self.lines, self.upper = lines, upper
         self.reads: list[str] = []
         self.asked: list[tuple[str, bool]] = []
@@ -484,7 +483,8 @@ def test_rg_closes_a_streamed_answer_it_stops_inside():
     ],
 )
 def test_only_the_files_a_search_leaves_count_to_the_limit(limit, out):
-    vfs = SearchRAM(lines=None, walk_limit=limit)
+    vfs = SearchRAM(lines=None)
+    vfs.walk_limit = limit
     line = "grep -r ada /d"
     assert _run(vfs, line) == (_run(RAMVFS(), line) if out is None else out)
     assert sorted(vfs.reads) == ["d/a.txt", "d/sub/d.txt"][:limit]

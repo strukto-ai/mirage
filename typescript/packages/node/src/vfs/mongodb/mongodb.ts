@@ -28,7 +28,6 @@ import { VFS_MD } from '@struktoai/mirage-core/vfs/mongodb/mongodb'
 import { VFSName } from '@struktoai/mirage-core/types'
 
 import { MongoDBStore } from './store.ts'
-import { WALK_LIMIT } from '@struktoai/mirage-core/vfs/constants'
 
 export interface MongoDBVFSOptions {
   config: MongoDBConfig
@@ -50,14 +49,12 @@ export class MongoDBVFS extends MongoDBVFSBase {
   readonly store: MongoDBStore
   override readonly accessor: MongoDBAccessor
 
-  override readonly walkLimit: number
   constructor(options: MongoDBVFSOptions | MongoDBConfig) {
     super()
     const { config, prefix } =
       'config' in options ? options : { config: options, prefix: undefined }
     this.config = resolveMongoDBConfig(config)
-    this.walkLimit = config.walkLimit ?? WALK_LIMIT
-    this.store = new MongoDBStore(this.config.uri)
+    this.store = new MongoDBStore(this.config.uri, this.config.timeout)
     this.accessor = new MongoDBAccessor(this.store, this.config)
     this.vfsMd = prefix === undefined ? VFS_MD : VFS_MD.replace('{prefix}', prefix)
   }

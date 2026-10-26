@@ -276,7 +276,7 @@ export class RedisStore implements RedisStoreLike {
     const c = await this.client()
     const keys: string[] = []
     for await (const k of c.scanIterator({ MATCH: pattern })) {
-      if (Array.isArray(k)) keys.push(...k)
+      if (Array.isArray(k)) for (const item of k) keys.push(item)
       else keys.push(k)
     }
     return keys

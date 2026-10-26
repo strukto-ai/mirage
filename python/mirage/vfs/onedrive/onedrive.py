@@ -70,7 +70,6 @@ class OneDriveVFS(BaseVFS):
     def __init__(self, config: OneDriveConfig) -> None:
         super().__init__()
         self.config = config
-        self.walk_limit = config.walk_limit
         self.accessor = OneDriveAccessor(self.config)
 
     async def readdir(

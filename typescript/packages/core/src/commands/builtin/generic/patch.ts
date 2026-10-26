@@ -107,7 +107,7 @@ function rejectedLines(hunk: Hunk, grown: number): string[] {
       continue
     }
     if (line.startsWith(' ')) {
-      lines.push(...pending)
+      for (const item of pending) lines.push(item)
       pending = []
     }
     lines.push(line)
@@ -485,12 +485,12 @@ function applySection(
       notes.push(placedNote(ordinal, at + 1 + grown, fuzz, shift))
       exact = false
     }
-    out.push(...lines.slice(used, at + want.lead))
+    for (const item of lines.slice(used, at + want.lead)) out.push(item)
     used = emit(lines, hunk, want, at, out)
     const [old, added] = sizesOf(hunk)
     grown += added - old
   }
-  out.push(...lines.slice(used))
+  for (const item of lines.slice(used)) out.push(item)
   return { lines: out, notes, rejected, exact }
 }
 
@@ -585,7 +585,7 @@ async function patchFile(
     reverse,
     forward,
   )
-  sink.report.push(...outcome.notes)
+  for (const item of outcome.notes) sink.report.push(item)
   if (outcome.lines !== null) {
     if (!outcome.exact && !sink.written.has(spec.virtual)) {
       if (original === null) {

@@ -53,5 +53,6 @@ async def send_raw(config: EmailConfig, raw: bytes) -> Message:
         password=config.password.get_secret_value(),
         use_tls=config.smtp_port == IMPLICIT_TLS_PORT,
         start_tls=None,
+        timeout=config.timeout,
     )
     return message

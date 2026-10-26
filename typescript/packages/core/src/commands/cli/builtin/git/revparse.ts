@@ -671,7 +671,7 @@ export async function splitRevisions(
     const [left, right, symmetric] = ends
     if (symmetric) {
       shown.push(left, right)
-      hidden.push(...(await mergeBases(repo, left, right)))
+      for (const item of await mergeBases(repo, left, right)) hidden.push(item)
     } else {
       shown.push(right)
       hidden.push(left)

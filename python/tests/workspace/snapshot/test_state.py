@@ -36,6 +36,7 @@ from mirage import (
 from mirage.cache.file.config import RedisCacheConfig
 from mirage.cache.index import IndexConfig, RedisIndexConfig
 from mirage.policy import Action, Deny, Policy, PolicyDenied
+from mirage.policy.builtin.output_cap import ALL_COMMANDS
 from mirage.policy.types import SessionContext
 from mirage.secrets import registry
 from mirage.secrets.registry import register_secrets
@@ -43,6 +44,7 @@ from mirage.secrets.types import ResolvedSecret
 from mirage.types import (
     ContentType,
     FileType,
+    Limit,
     ListingVersion,
     ReadPolicy,
     ReadSpec,
@@ -1194,17 +1196,19 @@ async def test_a_rebuilt_disk_mount_keeps_its_folder_versions(
 @pytest.mark.parametrize("route", ["copy", "load"])
 @pytest.mark.parametrize("kind", ["ram", "disk"])
 @pytest.mark.parametrize("limit", [2, -1])
+@pytest.mark.parametrize("scope", ["workspace", "mount"])
 async def test_a_rebuilt_local_mount_keeps_its_walk_limit(
-    tmp_path, route, kind, limit
+    tmp_path, route, kind, limit, scope
 ):
     root = tmp_path / "root"
     root.mkdir()
-    vfs = (
-        RAMVFS(walk_limit=limit)
-        if kind == "ram"
-        else DiskVFS(str(root), walk_limit=limit)
+    vfs = RAMVFS() if kind == "ram" else DiskVFS(str(root))
+    table = {ALL_COMMANDS: Limit(walk_limit=limit)}
+    ws = (
+        Workspace({"/d": vfs}, command_limits=table)
+        if scope == "workspace"
+        else Workspace({"/d": Mount(vfs=vfs, command_limits=table)})
     )
-    ws = Workspace({"/d": vfs})
     try:
         if route == "copy":
             rebuilt = await ws.copy()
@@ -1218,6 +1222,27 @@ async def test_a_rebuilt_local_mount_keeps_its_walk_limit(
             await rebuilt.close()
     finally:
         await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("named", [None, {}])
+async def test_an_override_naming_no_limits_keeps_the_saved_ones(named):
+    saved = {"cat": Limit(max_bytes=2)}
+    ws = Workspace({"/d": Mount(vfs=RAMVFS(), command_limits=saved)})
+    try:
+        state = await to_state_dict(ws)
+    finally:
+        await ws.close()
+    override = (
+        Mount(vfs=RAMVFS())
+        if named is None
+        else Mount(vfs=RAMVFS(), command_limits=named)
+    )
+    restored = await Workspace.from_state(state, mounts={"/d/": override})
+    try:
+        assert restored.mount("/d").command_limits["cat"].max_bytes == 2
+    finally:
+        await restored.close()
 
 
 class RootOnlyDisk(DiskVFS):

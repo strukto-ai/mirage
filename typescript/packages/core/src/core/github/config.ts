@@ -15,8 +15,10 @@
 import { z } from 'zod'
 import type { ConfigOf, RedactedConfig } from '../../vfs/secrets.ts'
 import { parseConfigWithSchema, redactConfigWithSchema, secretStr } from '../../vfs/secrets.ts'
+import { timeoutShape } from '../api/config.ts'
 
 const GitHubConfigSchema = z.object({
+  ...timeoutShape,
   token: secretStr().describe('GitHub personal access token.'),
   owner: z.string().describe('Repository owner, a user or an organization.'),
   repo: z.string().describe('Repository name.'),
@@ -29,11 +31,6 @@ const GitHubConfigSchema = z.object({
   baseUrl: z.string().optional().meta({
     description: 'GitHub API root; set it for GitHub Enterprise.',
     default: 'https://api.github.com',
-  }),
-  walkLimit: z.number().int().min(-1).optional().meta({
-    description:
-      'Most files one command walks under a folder, each file read one blob request: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit and reads every file without asking code search.',
-    default: 5000,
   }),
 })
 
@@ -50,6 +47,7 @@ export function normalizeGitHubConfig(input: Record<string, unknown>): GitHubCon
 }
 
 export const GhConfigSchema = z.object({
+  ...timeoutShape,
   token: secretStr(),
   baseUrl: z.string().optional(),
   repo: z.string().optional(),

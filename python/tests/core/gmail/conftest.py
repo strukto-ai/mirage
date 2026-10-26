@@ -16,7 +16,8 @@ from typing import Any
 
 import pytest
 
-from mirage.types import FileStat, MountMode, PathSpec
+from mirage.policy.builtin.output_cap import ALL_COMMANDS
+from mirage.types import FileStat, Limit, MountMode, PathSpec
 from mirage.vfs.gmail.config import GmailConfig
 from mirage.vfs.gmail.gmail import GmailVFS
 from mirage.workspace import Workspace
@@ -46,16 +47,29 @@ def gmail(monkeypatch):
     """Run a line over a Gmail mount served by a ``FakeGmail``.
 
     Returns:
-        an async ``run(line, fake=None, **config)`` giving the output, the
-        exit code, the message ids read and the queries searched.
+        an async ``run(line, fake=None, walk_limit=None, **config)`` giving
+        the output, the exit code, the message ids read and the queries
+        searched; ``walk_limit`` is the mount's ``"*"`` command limit.
     """
 
-    async def run(line: str, fake: FakeGmail | None = None, **config: Any):
+    async def run(
+        line: str,
+        fake: FakeGmail | None = None,
+        walk_limit: int | None = None,
+        **config: Any,
+    ):
         fake = fake or FakeGmail()
         install_api(monkeypatch, gmail=fake)
         settings = {"access_token": "t"} | config
         vfs = CountingGmail(GmailConfig(**settings))
-        ws = Workspace({"/gmail": vfs}, mode=MountMode.READ)
+        limits = (
+            {}
+            if walk_limit is None
+            else {ALL_COMMANDS: Limit(walk_limit=walk_limit)}
+        )
+        ws = Workspace(
+            {"/gmail": (vfs, MountMode.READ, limits)}, mode=MountMode.READ
+        )
         try:
             result = await ws.shell(line)
             out = await result.stdout_str()

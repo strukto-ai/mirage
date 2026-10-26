@@ -458,7 +458,7 @@ async def test_a_line_that_times_out_still_lands_its_writes(monkeypatch):
     monkeypatch.setattr(mounts, "PipeServer", Server)
     ws = workspace(
         FakeSandbox("ssh"),
-        command_limits={"python3": Limit(timeout_seconds=0.05)},
+        command_limits={"line": Limit(timeout_seconds=0.05)},
     )
     agent = await ws.session("agent", profile="agent")
     assert (await agent.shell("python3 slow.py")).exit_code == 124

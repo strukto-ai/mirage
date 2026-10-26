@@ -39,6 +39,7 @@ export interface HttpTrelloTransportOptions {
   apiKey: string
   apiToken: string
   baseUrl?: string
+  timeout?: number
 }
 
 export class HttpTrelloTransport implements TrelloTransport {
@@ -46,11 +47,13 @@ export class HttpTrelloTransport implements TrelloTransport {
   private readonly apiKey: string
   private readonly apiToken: string
   private readonly baseUrl: string
+  private readonly timeout: number | undefined
 
   constructor(opts: HttpTrelloTransportOptions) {
     this.apiKey = opts.apiKey
     this.apiToken = opts.apiToken
     this.baseUrl = rstripSlash(opts.baseUrl ?? 'https://api.trello.com/1')
+    this.timeout = opts.timeout
   }
 
   async call(
@@ -62,6 +65,7 @@ export class HttpTrelloTransport implements TrelloTransport {
     // auth first, so a caller's params can overwrite key/token
     return apiRequest(method, `${this.baseUrl}${path}`, {
       fetchFn: this.fetch,
+      timeout: this.timeout,
       params: { key: this.apiKey, token: this.apiToken, ...params },
       ...(body !== undefined
         ? { json: body, headers: { 'Content-Type': 'application/json; charset=utf-8' } }

@@ -16,6 +16,7 @@ import { sleep } from '../../utils/abort.ts'
 import { type ByteWindow, rangeHeader } from '../../utils/ranges.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import { CHUNK_SIZE, chunks } from '../../io/cooperative.ts'
+import { DEFAULT_TIMEOUT } from './constants.ts'
 import { ResponseTooLargeError } from './errors.ts'
 
 export const MAX_BODY_BYTES = 64 * 1024 * 1024
@@ -25,6 +26,93 @@ export const MAX_BODY_BYTES = 64 * 1024 * 1024
 export type ErrorOf = (response: Response, body: string) => Error
 
 /**
+ * `fetchFn` (the global fetch, read per call, when absent) bounded by how
+ * long a request may wait on the server: to connect and answer, then for
+ * each chunk of the body the caller asks for. The clock restarts when the
+ * headers arrive and on every chunk, and stops while the caller is not
+ * reading, once the body ends and when the caller cancels it, so a download
+ * that keeps flowing is never cut off. A request that waits longer fails
+ * with a `TimeoutError` DOMException. The body is relayed, locking the
+ * original only while a read is pending, so a body drained, failed or
+ * cancelled is left unlocked; the relay keeps the original's `url` and
+ * `redirected`. Python's twin is `stall_timeout`, which aiohttp spells as
+ * sock_connect and sock_read.
+ */
+export function stallTimeout(
+  seconds: number = DEFAULT_TIMEOUT,
+  fetchFn?: typeof fetch,
+): typeof fetch {
+  const send: typeof fetch = fetchFn ?? ((input, init) => fetch(input, init))
+  return async (input, init) => {
+    const controller = new AbortController()
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const stop = (): void => {
+      clearTimeout(timer)
+    }
+    const arm = (): void => {
+      stop()
+      timer = setTimeout(
+        () => {
+          controller.abort(new DOMException(`no progress for ${String(seconds)}s`, 'TimeoutError'))
+        },
+        Math.min(seconds * 1000, 2 ** 31 - 1),
+      )
+    }
+    const timedOut = (err: unknown): unknown =>
+      controller.signal.aborted ? controller.signal.reason : err
+    const signal =
+      init?.signal == null ? controller.signal : AbortSignal.any([init.signal, controller.signal])
+    arm()
+    let response: Response
+    try {
+      response = await send(input, { ...init, signal })
+    } catch (err) {
+      throw timedOut(err)
+    } finally {
+      stop()
+    }
+    const source = response.body
+    if (source == null) return response
+    let reading: ReadableStreamDefaultReader<Uint8Array> | undefined
+    const body = new ReadableStream<Uint8Array>(
+      {
+        async pull(sink) {
+          const reader = source.getReader()
+          reading = reader
+          arm()
+          try {
+            const result = await reader.read()
+            if (result.done) sink.close()
+            else sink.enqueue(result.value)
+          } catch (err) {
+            throw timedOut(err)
+          } finally {
+            stop()
+            reading = undefined
+            reader.releaseLock()
+          }
+        },
+        async cancel(reason) {
+          stop()
+          await (reading ?? source).cancel(reason)
+        },
+      },
+      { highWaterMark: 0 },
+    )
+    const relayed = new Response(body, {
+      status: response.status,
+      statusText: response.statusText,
+      headers: response.headers,
+    })
+    Object.defineProperties(relayed, {
+      url: { value: response.url },
+      redirected: { value: response.redirected },
+    })
+    return relayed
+  }
+}
+
+/**
  * Pull a GET response in bounded chunks, cancelling its body on early exit.
  * `retry` applies to opening the response only: once a chunk has reached the
  * caller a failure propagates, since a second attempt would hand it the same
@@ -32,7 +120,10 @@ export type ErrorOf = (response: Response, body: string) => Error
  */
 export async function* apiStream(
   url: string,
-  options: Pick<ApiRequestOptions, 'errorOf' | 'headers' | 'fetchFn' | 'retry' | 'sleep'> & {
+  options: Pick<
+    ApiRequestOptions,
+    'errorOf' | 'headers' | 'fetchFn' | 'retry' | 'sleep' | 'timeout'
+  > & {
     signal?: AbortSignal
     /** Told the answering response's headers, lower-cased, once and before
      * the first chunk, so an empty body reports them too. */
@@ -41,11 +132,12 @@ export async function* apiStream(
 ): AsyncGenerator<Uint8Array, void> {
   const retry = options.retry ?? NO_RETRY
   const wait = options.sleep ?? ((seconds: number) => sleep(seconds * 1000, options.signal))
+  const doFetch = stallTimeout(options.timeout, options.fetchFn)
   for (let attempt = 0; ; attempt += 1) {
     const last = attempt >= retry.maxRetries
     let response: Response
     try {
-      response = await (options.fetchFn ?? fetch)(url, {
+      response = await doFetch(url, {
         method: 'GET',
         ...(options.headers === undefined ? {} : { headers: options.headers }),
         ...(options.signal === undefined ? {} : { signal: options.signal }),
@@ -248,8 +340,9 @@ export interface ApiRequestOptions {
    * Defaults to 64 MiB; use a stream for larger downloads. Ignored Range
    * prefixes do not count, and overflow fails rather than truncates. */
   maxBodyBytes?: number | undefined
-  /** Per-attempt timeout; absent leaves the platform default. */
-  timeoutSeconds?: number | undefined
+  /** Seconds a request may wait to connect, or between two reads of its
+   * response, before it fails (`stallTimeout`); absent is `DEFAULT_TIMEOUT`. */
+  timeout?: number | undefined
   /** The fetch to use, so transports keep their injection seam. */
   fetchFn?: typeof fetch | undefined
   /** The wait between attempts, in seconds, injectable so a test or a
@@ -365,7 +458,7 @@ export async function apiRequest(
   if (!Number.isSafeInteger(maxBodyBytes) || maxBodyBytes < 0) {
     throw new RangeError('max_body_bytes must be a non-negative safe integer')
   }
-  const doFetch = options.fetchFn ?? fetch
+  const doFetch = stallTimeout(options.timeout, options.fetchFn)
   const target = new URL(url)
   for (const [name, value] of Object.entries(options.params ?? {})) {
     target.searchParams.set(name, String(value))
@@ -385,9 +478,6 @@ export async function apiRequest(
     const init: RequestInit = { method, headers: { ...headers } }
     if (options.json !== undefined) init.body = JSON.stringify(options.json)
     else if (options.body !== undefined) init.body = options.body
-    if (options.timeoutSeconds !== undefined) {
-      init.signal = AbortSignal.timeout(Math.ceil(options.timeoutSeconds * 1000))
-    }
     let response: Response
     try {
       response = await doFetch(target.toString(), init)

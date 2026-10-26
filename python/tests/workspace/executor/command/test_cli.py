@@ -20,6 +20,7 @@ import pytest
 from pydantic import BaseModel
 
 from mirage.accessor.base import Accessor, NOOPAccessor
+from mirage.commands.builtin.utils.limit import run_with_timeout
 from mirage.commands.cli.types import CLI, CLIHandler
 from mirage.commands.config import Context, command
 from mirage.commands.errors import PartialOutputError
@@ -42,7 +43,7 @@ from mirage.runtime.types import (
 )
 from mirage.runtime.workspace import WorkspaceRuntime
 from mirage.shell.variable import VarAttr
-from mirage.types import Limit, MountMode, PathSpec
+from mirage.types import MountMode, PathSpec
 from mirage.vfs.disk import DiskVFS
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
@@ -320,52 +321,6 @@ async def test_leaf_declaring_help_is_handed_the_flag():
     )
     assert io.exit_code == 0
     assert await materialize(stdout) == b"help=True\n"
-
-
-async def slow_send(config: None, paths, texts, ctx: Context):
-    await asyncio.sleep(0.5)
-    return None, IOResult()
-
-
-@pytest.mark.asyncio
-async def test_leaf_limit_bounds_the_handler():
-    # The declared limit wraps the handler body like mount
-    # dispatch: a blocking leaf times out instead of hanging.
-    spec = CLI(
-        spec=CommandSpec(name="prog", subcommands=(CommandSpec(name="run"),)),
-        handlers={
-            "run": CLIHandler(fn=slow_send, limit=Limit(timeout_seconds=0.05))
-        },
-    )
-    install = CLIInstall(name="prog", cli=spec, config=None)
-    with pytest.raises(CommandTimeoutError, match="prog run"):
-        await handle_cli(install, ["prog", "run"], SessionState("t"))
-
-
-@pytest.mark.asyncio
-async def test_a_timed_out_write_still_drops_the_caches():
-    # asyncio cancels the leaf, but a request it already sent may have
-    # been accepted, and the service will not roll it back.
-    dropped = []
-
-    async def drop():
-        dropped.append(True)
-
-    spec = CLI(
-        spec=CommandSpec(name="prog", subcommands=(CommandSpec(name="run"),)),
-        handlers={
-            "run": CLIHandler(
-                fn=slow_send, write=True, limit=Limit(timeout_seconds=0.05)
-            )
-        },
-        config_model=TokenConfig,
-    )
-    install = token_install("prog", spec, "t")
-    with pytest.raises(CommandTimeoutError):
-        await handle_cli(
-            install, ["prog", "run"], SessionState("t"), drop_caches=drop
-        )
-    assert dropped == [True]
 
 
 @pytest.mark.asyncio
@@ -913,25 +868,6 @@ async def test_script_exit_code_and_stderr_surface():
 
 
 @pytest.mark.asyncio
-async def test_script_limit_bounds_the_run():
-    sleepy = SleepingRuntime()
-    spec = CLI(
-        spec=CommandSpec(name="pager"),
-        handlers={"": CLIHandler(limit=Limit(timeout_seconds=0.05))},
-        script=ScriptSource("print('hi')"),
-    )
-    install = CLIInstall(name="pager", cli=spec, config=None)
-    with pytest.raises(CommandTimeoutError, match="pager"):
-        await drained(
-            install,
-            ["pager"],
-            SessionState("t"),
-            context=CLIContext(entries=[sleepy]),
-        )
-    assert sleepy.cancelled
-
-
-@pytest.mark.asyncio
 async def test_script_settles_its_runtime_however_the_program_ends():
     settled = []
 
@@ -945,18 +881,18 @@ async def test_script_settles_its_runtime_however_the_program_ends():
         SessionState("t"),
         context=CLIContext(entries=[py], settle=settle),
     )
-    spec = CLI(
-        spec=CommandSpec(name="pager"),
-        handlers={"": CLIHandler(limit=Limit(timeout_seconds=0.05))},
-        script=ScriptSource("print('hi')"),
-    )
     with pytest.raises(CommandTimeoutError):
-        await drained(
-            CLIInstall(name="pager", cli=spec, config=None),
-            ["pager"],
-            SessionState("t"),
-            context=CLIContext(entries=[sleepy], settle=settle),
+        await run_with_timeout(
+            drained(
+                script_install(),
+                ["pager"],
+                SessionState("t"),
+                context=CLIContext(entries=[sleepy], settle=settle),
+            ),
+            0.05,
+            "line",
         )
+    assert sleepy.cancelled
     assert settled == [py, sleepy]
 
 
@@ -1298,27 +1234,6 @@ async def test_git_usage_style_does_not_change_custom_cli_option_grammar():
 
 
 @pytest.mark.asyncio
-async def test_profile_and_workspace_override_a_cli_deadline():
-    spec = CLI(
-        spec=CommandSpec(name="prog"),
-        handlers={
-            "": CLIHandler(fn=slow_send, limit=Limit(timeout_seconds=0.01))
-        },
-    )
-    with Workspace(
-        {"/ram": RAMVFS()},
-        command_limits={"prog": Limit(timeout_seconds=1)},
-        profiles={
-            "short": {"command_limits": {"prog": {"timeout_seconds": 0.01}}}
-        },
-    ) as ws:
-        ws.register_cli("prog", spec)
-        ws.create_session("short", profile="short")
-        assert (await ws.shell("prog")).exit_code == 0
-        assert (await ws.shell("prog", session_id="short")).exit_code == 124
-
-
-@pytest.mark.asyncio
 @pytest.mark.parametrize("fails", [False, True])
 async def test_invocation_shell_is_revoked_after_handler_settles(fails):
     saved = []
@@ -1508,24 +1423,13 @@ async def test_native_output_closes_on_early_pipeline_consumer_exit():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("timeout", [None, 1])
-async def test_native_cli_unstarted_output_close_joins_producer(timeout):
+async def test_native_cli_unstarted_output_close_joins_producer():
     closed = asyncio.Event()
 
     async def writer(config, paths, texts, ctx):
         return _HeldSource(b"prefix", closed.set), IOResult()
 
-    cli = CLI(
-        CommandSpec(name="writer"),
-        handlers={
-            "": CLIHandler(
-                writer,
-                limit=Limit(timeout_seconds=timeout)
-                if timeout is not None
-                else None,
-            )
-        },
-    )
+    cli = CLI(CommandSpec(name="writer"), handlers={"": CLIHandler(writer)})
     output, _, _ = await handle_cli(
         CLIInstall(name="writer", cli=cli), ["writer"], SessionState("test")
     )

@@ -46,6 +46,7 @@ optional credentials, endpoint, and connection settings. Both `READ` and
 {/* generated: config-table s3 start */}
 | Field | Description |
 | --- | --- |
+| <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `30` | Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off. |
 | <code style={{ whiteSpace: 'nowrap' }}>region</code> | AWS region requests are signed for and sent to. Unset leaves it to the AWS SDK's environment variables and profile. |
 | <code style={{ whiteSpace: 'nowrap' }}>aws_access_key_id</code><br />secret | Access key ID; set it with `aws_secret_access_key`. Unset uses the AWS credential chain. |
 | <code style={{ whiteSpace: 'nowrap' }}>aws_secret_access_key</code><br />secret | Secret access key paired with `aws_access_key_id`. |
@@ -54,11 +55,9 @@ optional credentials, endpoint, and connection settings. Both `READ` and
 | <code style={{ whiteSpace: 'nowrap' }}>bucket</code><br />required | Name of the bucket to mount. |
 | <code style={{ whiteSpace: 'nowrap' }}>endpoint_url</code> | Endpoint URL of an S3-compatible server. Unset uses `AWS_ENDPOINT_URL_S3` or `AWS_ENDPOINT_URL` when set, else AWS's endpoint for `region`; an endpoint set only in an AWS profile is not read. |
 | <code style={{ whiteSpace: 'nowrap' }}>path_style</code><br />default `False` | Address the bucket in the URL path (`<endpoint>/<bucket>/<key>`) instead of as a subdomain of the endpoint. |
-| <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `30` | Seconds to wait to connect, and for each read of a response, before the request fails. |
 | <code style={{ whiteSpace: 'nowrap' }}>proxy</code><br />secret | Proxy URL for every HTTP and HTTPS request to the endpoint. |
 | <code style={{ whiteSpace: 'nowrap' }}>key_prefix</code> | Key prefix inside the bucket that the mount treats as its root; keys outside it are not visible. Leading slashes are dropped and a trailing `/` is added. |
 | <code style={{ whiteSpace: 'nowrap' }}>default_content_type</code> | `Content-Type` stored with every object the mount writes. Unset sends none, so the store applies its own default. |
-| <code style={{ whiteSpace: 'nowrap' }}>walk_limit</code><br />default `1000` | Most files one command walks under a folder: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit. |
 
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table s3 end */}

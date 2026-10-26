@@ -91,7 +91,7 @@ async def imap_server() -> AsyncIterator[
         )
         servers.append(server)
         port = server.sockets[0].getsockname()[1]
-        clients.append(await IMAPClient.connect("127.0.0.1", port, False))
+        clients.append(await IMAPClient.connect("127.0.0.1", port, False, 30))
         return clients[-1], received
 
     yield start
@@ -198,7 +198,7 @@ async def test_append_sends_its_literal_after_the_continuation():
     got: dict[str, bytes] = {}
     server, port = await _append_server(False, got)
     try:
-        client = await IMAPClient.connect("127.0.0.1", port, False)
+        client = await IMAPClient.connect("127.0.0.1", port, False, 30)
         response = await client.append(MESSAGE, '"Sent"', "\\Seen")
         assert response.result == "OK"
         assert got["line"].endswith(
@@ -216,7 +216,7 @@ async def test_a_refused_append_answers_before_the_literal():
     got: dict[str, bytes] = {}
     server, port = await _append_server(True, got)
     try:
-        client = await IMAPClient.connect("127.0.0.1", port, False)
+        client = await IMAPClient.connect("127.0.0.1", port, False, 30)
         response = await client.append(MESSAGE, '"Gone"')
         assert response.result == "NO"
         assert response.lines == [b"[TRYCREATE] no such mailbox"]
@@ -271,7 +271,7 @@ async def _quiet_server(
 async def test_a_server_that_says_bye_while_idle_is_not_alive():
     server, port = await _quiet_server(b"* BYE idle too long\r\n")
     try:
-        client = await IMAPClient.connect("127.0.0.1", port, False)
+        client = await IMAPClient.connect("127.0.0.1", port, False, 30)
         assert (await client.login("u", "p")).result == "OK"
         await asyncio.sleep(0.1)
         assert not client.alive
@@ -285,7 +285,7 @@ async def test_a_server_that_says_bye_while_idle_is_not_alive():
 async def test_an_abandoned_command_closes_the_connection():
     server, port = await _quiet_server(b"")
     try:
-        client = await IMAPClient.connect("127.0.0.1", port, False)
+        client = await IMAPClient.connect("127.0.0.1", port, False, 30)
         assert (await client.login("u", "p")).result == "OK"
         with pytest.raises(TimeoutError):
             await asyncio.wait_for(client.select('"INBOX"'), 0.2)

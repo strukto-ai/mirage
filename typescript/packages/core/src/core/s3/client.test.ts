@@ -101,12 +101,12 @@ describe('S3 client', () => {
     const agents = makeAgents()
     const client = await createS3Client({
       bucket: 'b',
-      timeoutMs: 1234,
+      timeout: 5,
       httpAgentProvider: () => agents,
     })
     const resolved = await resolvedHandlerConfig(client)
-    expect(resolved.requestTimeout).toBe(1234)
-    expect(resolved.connectionTimeout).toBe(1234)
+    expect(resolved.requestTimeout).toBe(5000)
+    expect(resolved.connectionTimeout).toBe(5000)
     expect(resolved.httpsAgent).toBe(agents.httpsAgent)
     client.destroy()
   })

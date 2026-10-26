@@ -17,6 +17,7 @@ import asyncio
 import pytest
 
 from mirage import MountMode, Workspace
+from mirage.types import Limit
 from mirage.vfs.ram import RAMVFS
 
 
@@ -42,21 +43,34 @@ async def _multiline_stdin():
         yield f"line{i}\n".encode()
 
 
-def _ws():
-    return Workspace({"/data": RAMVFS()}, mode=MountMode.WRITE)
+def _ws(line=None):
+    return Workspace(
+        {"/data": RAMVFS()},
+        mode=MountMode.WRITE,
+        command_limits=(
+            {"line": Limit(timeout_seconds=line)} if line is not None else None
+        ),
+    )
 
 
 @pytest.mark.asyncio
-async def test_pipeline_budget_bounds_slow_final_stage():
-    ws = _ws()
-    ws.get_session(ws.default_session_id).pipeline_timeout_seconds = 0.1
+async def test_line_deadline_bounds_slow_final_stage():
+    ws = _ws(line=0.1)
     r = await ws.shell("cat | cat", stdin=_slow_stdin())
     assert r.exit_code == 124
-    assert "pipeline: timed out after 0.1s" in (await r.stderr_str())
+    assert "line: timed out after 0.1s" in (await r.stderr_str())
 
 
 @pytest.mark.asyncio
-async def test_pipeline_without_budget_is_unbounded():
+async def test_line_deadline_cuts_a_loop_of_fast_commands():
+    ws = _ws(line=0.2)
+    r = await ws.shell("while :; do :; done")
+    assert r.exit_code == 124
+    assert "line: timed out after 0.2s" in (await r.stderr_str())
+
+
+@pytest.mark.asyncio
+async def test_pipeline_under_the_default_deadline_finishes():
     ws = _ws()
     r = await ws.shell("cat | cat", stdin=_quick_stdin())
     assert r.exit_code == 0
@@ -64,9 +78,8 @@ async def test_pipeline_without_budget_is_unbounded():
 
 
 @pytest.mark.asyncio
-async def test_pipeline_budget_tears_down_upstream_producer():
-    ws = _ws()
-    ws.get_session(ws.default_session_id).pipeline_timeout_seconds = 0.1
+async def test_line_deadline_tears_down_upstream_producer():
+    ws = _ws(line=0.1)
     flag = {"closed": False}
     r = await ws.shell("cat | cat", stdin=_probed_stdin(flag))
     assert r.exit_code == 124

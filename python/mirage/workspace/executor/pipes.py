@@ -17,7 +17,6 @@ from collections.abc import Awaitable, Callable
 from functools import partial
 from typing import Any
 
-from mirage.commands.builtin.utils.limit import run_with_timeout
 from mirage.context import reset_current_session, set_current_evaluation
 from mirage.io import IOResult
 from mirage.io.pipe import CAPACITY
@@ -222,11 +221,7 @@ async def handle_pipe(
             if sink is None
             else pump(sink, Channel.STDOUT, last)
         )
-        await run_with_timeout(
-            asyncio.gather(output_task, *tasks),
-            session.pipeline_timeout_seconds,
-            "pipeline",
-        )
+        await asyncio.gather(output_task, *tasks)
         last_stdout = output_task.result()
     except BaseException:
         failed = True

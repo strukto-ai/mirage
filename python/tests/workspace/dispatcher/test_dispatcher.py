@@ -24,6 +24,8 @@ import pytest
 
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.cache.index.scope import command_scope
+from mirage.commands.cli.types import CLI, CLIHandler
+from mirage.commands.spec.types import CommandSpec
 from mirage.context import (
     Caller,
     current_caller,
@@ -34,7 +36,6 @@ from mirage.core.time_range import followed_day
 from mirage.errors import FsCondition, posix_errno
 from mirage.errors.fs import erofs
 from mirage.errors.types import (
-    CommandTimeoutError,
     ReadOnlyError,
     WalkDeclinedError,
 )
@@ -52,6 +53,7 @@ from mirage.policy import (
     VfsContext,
     VfsResultContext,
 )
+from mirage.policy.builtin.output_cap import ALL_COMMANDS
 from mirage.policy.builtin.permissions import PermissionsPolicy
 from mirage.policy.types import EntryGate
 from mirage.types import (
@@ -2346,10 +2348,9 @@ class Tape(BaseVFS):
     name = "tape"
     caches_reads = True
 
-    def __init__(self, delay: float = 0.0) -> None:
+    def __init__(self) -> None:
         super().__init__()
         self.files = {"a.txt": b"0123456789" * 5}
-        self.delay = delay
         self.pulled = 0
         self.reads = 0
         self.closed = False
@@ -2390,7 +2391,7 @@ class Tape(BaseVFS):
     async def _pulled(self, data: bytes) -> AsyncIterator[bytes]:
         try:
             for at in range(0, len(data), 10):
-                await asyncio.sleep(self.delay)
+                await asyncio.sleep(0)
                 self.pulled += 1
                 yield data[at : at + 10]
         finally:
@@ -2463,30 +2464,6 @@ async def test_a_window_or_a_post_vfs_policy_gets_whole_bytes(
         got, _ = await ws.dispatch("read", TAPE, stream=True, **kwargs)
         assert isinstance(got, bytes)
         assert tape.reads == 1
-
-
-@pytest.mark.asyncio
-async def test_each_pull_gets_the_whole_timeout():
-    tape = Tape(delay=0.05)
-    with Workspace({"/tape/": tape}, mode=MountMode.WRITE) as ws:
-        ws.namespace.mount_for("/tape/a.txt").command_limits["read"] = Limit(
-            timeout_seconds=0.2
-        )
-        stream, _ = await ws.dispatch("read", TAPE, stream=True)
-        got = []
-        async for chunk in stream:
-            got.append(chunk)
-            await asyncio.sleep(0.1)
-        assert len(got) == 5
-        tape.files["b.txt"] = tape.files["a.txt"]
-        tape.delay = 0.5
-        with pytest.raises(CommandTimeoutError):
-            await ws.dispatch(
-                "read",
-                PathSpec.from_str_path("/tape/b.txt"),
-                stream=True,
-                filetype=None,
-            )
 
 
 @pytest.mark.asyncio
@@ -2970,8 +2947,10 @@ async def test_a_scan_guard_counts_only_the_files_the_session_sees(
 class TreeCountingRAM(RAMVFS):
     """A RAM mount with no walk guard that counts its tree reads."""
 
+    walk_limit = -1
+
     def __init__(self) -> None:
-        super().__init__(walk_limit=-1)
+        super().__init__()
         self.trees = 0
 
     async def read_tree(self, path):
@@ -2991,8 +2970,7 @@ async def test_a_mount_with_no_scan_guard_is_not_counted():
 class LimitedRAM(RAMVFS):
     """A RAM mount held to a ``walk_limit`` with no guard of its own."""
 
-    def __init__(self) -> None:
-        super().__init__(walk_limit=2)
+    walk_limit = 2
 
 
 class ListedRAM(LimitedRAM):
@@ -3027,7 +3005,7 @@ class LinedRAM(LimitedRAM):
         )
 
 
-def _limited(cls: type[LimitedRAM], files: int) -> LimitedRAM:
+def _limited(cls: type[RAMVFS], files: int) -> RAMVFS:
     vfs = cls()
     vfs._store.dirs.update({"/d", "/d/secret"})
     vfs._store.files["/d/secret/b.txt"] = b"b\n"
@@ -3138,6 +3116,19 @@ async def test_a_glob_past_the_walk_limit_is_refused(line, out, err):
 
 
 @pytest.mark.asyncio
+async def test_a_glob_counts_against_the_profiles_walk_limit():
+    with Workspace({"/ram/": _limited(RAMVFS, 3)}) as ws:
+        ws.create_session(
+            "capped", profile={"command_limits": {"*": {"walk_limit": 2}}}
+        )
+        result = await ws.shell("echo /ram/d/*; echo $?", session_id="capped")
+        assert (await result.stdout_str(), await result.stderr_str()) == (
+            "126\n",
+            f"echo: Argument list too long\necho: {GLOB_REFUSED}\n",
+        )
+
+
+@pytest.mark.asyncio
 async def test_a_named_file_counts_nothing_against_a_walk():
     vfs = LimitedRAM()
     vfs._store.dirs.add("/d")
@@ -3169,15 +3160,25 @@ async def test_lines_a_search_hands_over_count_against_the_limit():
     assert vfs.asked == ["/ram/d/f0.txt", "/ram/d/f1.txt"]
 
 
+def _capped(
+    top: RAMVFS, remote: RAMVFS, mode: MountMode = MountMode.READ
+) -> dict[str, tuple[RAMVFS, MountMode, dict[str, Limit]]]:
+    """``top`` at ``/a`` with no walk cap and ``remote`` under it at
+    ``/a/remote`` held to two files."""
+    return {
+        "/a/": (top, mode, {ALL_COMMANDS: Limit(walk_limit=-1)}),
+        "/a/remote/": (remote, mode, {ALL_COMMANDS: Limit(walk_limit=2)}),
+    }
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("sort", ["path", "modified"])
 async def test_a_planned_rg_counts_each_file_against_its_own_mount(sort):
-    top = RAMVFS(walk_limit=-1)
+    top, remote = RAMVFS(), RAMVFS()
     top._store.files["/t.txt"] = b"hello\n"
-    remote = RAMVFS(walk_limit=2)
     for i in range(4):
         remote._store.files[f"/r{i}.txt"] = b"hello\n"
-    with Workspace({"/a/": top, "/a/remote/": remote}) as ws:
+    with Workspace(_capped(top, remote)) as ws:
         out = await ws.shell(f"rg --sort {sort} -l hello /a")
         assert (
             sorted((await out.stdout_str()).splitlines()),
@@ -3199,13 +3200,12 @@ NESTED_REFUSED = (
 @pytest.mark.asyncio
 @pytest.mark.parametrize("command", ["cat", "echo"])
 async def test_a_glob_counts_each_match_against_its_own_mount(command):
-    top = RAMVFS(walk_limit=-1)
+    top, remote = RAMVFS(), RAMVFS()
     top._store.dirs.add("/b")
     top._store.files["/b/t.txt"] = b"t\n"
-    remote = RAMVFS(walk_limit=2)
     for i in range(3):
         remote._store.files[f"/r{i}.txt"] = b"r\n"
-    with Workspace({"/a/": top, "/a/remote/": remote}) as ws:
+    with Workspace(_capped(top, remote)) as ws:
         out = await ws.shell(f"{command} /a/*/*.txt; echo $?")
         assert (await out.stdout_str(), await out.stderr_str()) == (
             "126\n",
@@ -3216,13 +3216,12 @@ async def test_a_glob_counts_each_match_against_its_own_mount(command):
 
 @pytest.mark.asyncio
 async def test_a_glob_through_a_link_counts_against_the_target_mount():
-    top = RAMVFS(walk_limit=-1)
+    top, remote = RAMVFS(), RAMVFS()
     top._store.dirs.add("/data")
     for i in range(3):
         top._store.files[f"/data/t{i}.txt"] = b"t\n"
-    remote = RAMVFS(walk_limit=2)
     with Workspace(
-        {"/a/": top, "/a/remote/": remote}, mode=MountMode.WRITE
+        _capped(top, remote, MountMode.WRITE), mode=MountMode.WRITE
     ) as ws:
         await ws.shell("ln -s /a/data /a/remote/link")
         out = await ws.shell("echo /a/*/*/*.txt; echo $?")
@@ -3265,6 +3264,124 @@ async def test_a_copy_past_the_walk_limit_is_refused(cls):
             "",
             b"tar: more than 2 files in scope (walk_limit); narrow the path\n",
             1,
+        )
+
+
+@pytest.mark.asyncio
+async def test_a_full_walk_follows_the_commands_walk_limit():
+    vfs = _limited(RAMVFS, 3)
+    limits = {"rm": Limit(walk_limit=2)}
+    with Workspace(
+        {"/ram/": (vfs, MountMode.WRITE, limits)}, mode=MountMode.WRITE
+    ) as ws:
+        out = await ws.shell("rm -r /ram/d")
+        assert (out.stderr, out.exit_code) == (
+            b"rm: more than 2 files in scope (walk_limit); narrow the path\n",
+            1,
+        )
+    assert len(vfs._store.files) == 3
+
+
+@pytest.mark.asyncio
+async def test_a_backend_walk_rule_is_asked_within_the_commands_limit():
+    vfs = SearchedRAM()
+    vfs._store.dirs.add("/d")
+    for i in range(3):
+        vfs._store.files[f"/d/a{i}.txt"] = b"a\n"
+    limits = {"rm": Limit(walk_limit=2)}
+    with Workspace(
+        {"/ram/": (vfs, MountMode.WRITE, limits)}, mode=MountMode.WRITE
+    ) as ws:
+        refused = await ws.shell("rm -r /ram/d")
+        assert (refused.stderr, vfs.counted) == (
+            b"rm: more than 2 files in scope (walk_limit); narrow the path\n",
+            [],
+        )
+        ran = await ws.shell("rm /ram/d/a0.txt && rm -r /ram/d")
+        assert (ran.exit_code, vfs.counted) == (0, [2])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "name, line, out",
+    [
+        ("tar", "cd /ram && tar -cf d.tar d; echo $?", "0\n"),
+        ("find", "find /ram/d -type f | wc -l", "3\n"),
+    ],
+)
+async def test_a_null_walk_limit_lifts_the_mounts(name, line, out):
+    limits = {name: Limit(walk_limit=None)}
+    with Workspace(
+        {"/ram/": (_limited(LimitedRAM, 3), MountMode.WRITE, limits)},
+        mode=MountMode.WRITE,
+    ) as ws:
+        result = await ws.shell(line)
+        assert (await result.stdout_str(), await result.stderr_str()) == (
+            out,
+            "",
+        )
+
+
+@pytest.mark.asyncio
+async def test_a_registered_command_walks_under_its_declared_limit():
+    with Workspace({"/ram/": _limited(RAMVFS, 3)}) as ws:
+        mount = ws.mount("/ram/")
+        find = mount.resolve_command("find")
+        mount.register_commands(
+            [dataclasses.replace(find, limit=Limit(walk_limit=2))]
+        )
+        result = await ws.shell("find /ram/d")
+        assert (
+            await result.stdout_str(),
+            result.stderr,
+            result.exit_code,
+        ) == (
+            "/ram/d\n/ram/d/a0.txt\n/ram/d/a1.txt\n",
+            b"find: /ram/d: stopped after 2 files (walk_limit); "
+            b"narrow the path\n",
+            1,
+        )
+
+
+async def _nested_chmod(accessor, paths, texts, ctx):
+    assert ctx.shell is not None
+    inner = await ctx.shell("chmod -R 700 /ram/d")
+    return inner.stdout, inner
+
+
+@pytest.mark.asyncio
+async def test_a_command_a_registered_one_runs_keeps_none_of_its_limit():
+    unbounded = Limit(walk_limit=-1)
+    tree = CLI(
+        spec=CommandSpec(name="outer"),
+        handlers={"": CLIHandler(fn=_nested_chmod, limit=unbounded)},
+    )
+    with Workspace(
+        {"/ram/": _limited(LimitedRAM, 3)}, mode=MountMode.WRITE
+    ) as ws:
+        ws.mount("/ram/").register_commands([tree])
+        result = await ws.shell("outer")
+        assert await result.stderr_str() == (
+            "chmod: more than 2 files in scope (walk_limit); narrow the path\n"
+        )
+
+
+@pytest.mark.asyncio
+async def test_two_mounts_of_one_vfs_settle_on_one_walk_limit():
+    capped = {ALL_COMMANDS: Limit(walk_limit=2)}
+    vfs = _limited(RAMVFS, 3)
+    with pytest.raises(ValueError, match="2 differs from /b/'s 10000"):
+        Workspace({"/a/": (vfs, MountMode.READ, capped), "/b/": vfs})
+    vfs = _limited(RAMVFS, 3)
+    with Workspace(
+        {
+            "/a/": (vfs, MountMode.READ, capped),
+            "/b/": (vfs, MountMode.READ, capped),
+        }
+    ) as ws:
+        result = await ws.shell("ls -R /b/d")
+        assert result.stderr == (
+            b"ls: /b/d: stopped after 2 files (walk_limit); narrow the path\n"
         )
 
 

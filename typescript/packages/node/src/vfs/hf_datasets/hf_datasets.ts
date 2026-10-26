@@ -22,7 +22,6 @@ import {
   type HfDatasetsConfigRedacted,
   redactHfDatasetsConfig,
 } from './config.ts'
-import { WALK_LIMIT } from '@struktoai/mirage-core/vfs/constants'
 
 export interface HfDatasetsVFSState {
   type: string
@@ -34,10 +33,8 @@ export class HfDatasetsVFS extends HfHubVFS {
   readonly config: HfDatasetsConfig
   readonly accessor: HfDatasetsAccessor
 
-  override readonly walkLimit: number
   constructor(config: HfDatasetsConfig) {
     super()
-    this.walkLimit = config.walkLimit ?? WALK_LIMIT
     assertHfRepoRef(config.repoId, 'repo_id')
     const normalized = normalizeKeyPrefix(config.keyPrefix)
     const cfg: HfDatasetsConfig = { ...config }

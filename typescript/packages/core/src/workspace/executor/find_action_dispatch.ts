@@ -103,7 +103,7 @@ export interface FindActionOptions {
 export function execWords(action: ExecAction, paths: readonly string[]): string[] {
   const words: string[] = []
   for (const word of action.argv) {
-    if (action.batch && word === EXEC_PLACEHOLDER) words.push(...paths)
+    if (action.batch && word === EXEC_PLACEHOLDER) for (const item of paths) words.push(item)
     else if (!action.batch) words.push(word.replaceAll(EXEC_PLACEHOLDER, paths[0] ?? ''))
     else words.push(word)
   }

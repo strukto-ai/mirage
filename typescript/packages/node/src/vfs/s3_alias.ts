@@ -20,6 +20,7 @@ import {
   z,
 } from '@struktoai/mirage-core/vfs/secrets'
 import type { ConfigOf, RedactedConfig } from '@struktoai/mirage-core/vfs/secrets'
+import { timeoutShape } from '@struktoai/mirage-core/core/api/config'
 import { S3_FAMILY_NORMALIZER } from './s3/config.ts'
 import type { S3Config, S3ConfigRedacted } from './s3/config.ts'
 
@@ -50,9 +51,8 @@ export interface S3AliasConfig {
   endpoint?: string
   forcePathStyle?: boolean
   keyPrefix?: string
-  timeoutMs?: number
+  timeout?: number
   proxy?: string
-  walkLimit?: number
 }
 
 export const ALIAS_SHAPE = {
@@ -84,20 +84,10 @@ export const ALIAS_SHAPE = {
     .describe(
       'Key prefix inside the bucket that the mount treats as its root; keys outside it are not visible. Leading slashes are dropped and a trailing `/` is added.',
     ),
-  timeoutMs: z
-    .number()
-    .optional()
-    .describe(
-      "Milliseconds to wait to connect, and for each read of a response, before the request fails. Unset leaves the AWS SDK's own timeouts.",
-    ),
+  ...timeoutShape,
   proxy: secretStr()
     .optional()
     .describe('Proxy URL for every HTTP and HTTPS request to the endpoint.'),
-  walkLimit: z.number().int().min(-1).optional().meta({
-    description:
-      'Most files one command walks under a folder: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit.',
-    default: 1000,
-  }),
 }
 
 // What a caller may write, split the way python splits
@@ -154,9 +144,8 @@ const optional = (config: S3AliasConfig): Partial<S3Config> => ({
   ...(config.sessionToken !== undefined ? { sessionToken: config.sessionToken } : {}),
   ...(config.profile !== undefined ? { profile: config.profile } : {}),
   ...(config.keyPrefix !== undefined ? { keyPrefix: config.keyPrefix } : {}),
-  ...(config.timeoutMs !== undefined ? { timeoutMs: config.timeoutMs } : {}),
+  ...(config.timeout !== undefined ? { timeout: config.timeout } : {}),
   ...(config.proxy !== undefined ? { proxy: config.proxy } : {}),
-  ...(config.walkLimit !== undefined ? { walkLimit: config.walkLimit } : {}),
 })
 
 /**

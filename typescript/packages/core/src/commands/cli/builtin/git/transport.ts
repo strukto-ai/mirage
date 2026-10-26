@@ -165,7 +165,7 @@ export async function missingObjects(
     else if (type === 'commit') {
       const { commit } = await git.readCommit({ ...repoArgs(repo), oid })
       trees.push(commit.tree)
-      stack.push(...commit.parent)
+      for (const item of commit.parent) stack.push(item)
     }
   }
   const held = new Set<string>()

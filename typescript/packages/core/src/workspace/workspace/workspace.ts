@@ -14,6 +14,7 @@ import { DiffPool } from '../../rs/diff_pool.ts'
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { IOConfig } from '../../io/config.ts'
+import { checkCommandLimits } from '../../policy/builtin/output_cap.ts'
 import { ShellExecution } from '../shell_execution.ts'
 import { ExecutionScope } from '../execution.ts'
 import { newExecutionId } from '../../execution/context.ts'
@@ -518,11 +519,13 @@ export class Workspace {
     const defaultBase = this.baseProfile(null)
     this.sessionManager.defaultProfile =
       defaultBase === null ? null : compileProfile(defaultBase, this.profileName(null))
+    checkCommandLimits(options.commandLimits ?? {}, 'workspace', true)
     this.registry.commandLimits = { ...options.commandLimits }
     for (const [prefix, limits] of Object.entries(normalized.commandLimits)) {
       const mount = this.registry.mountForPrefix(prefix)
       for (const [name, limit] of Object.entries(limits)) mount.commandLimits.set(name, limit)
     }
+    for (const mount of this.registry.allMounts()) this.registry.settleWalkLimit(mount)
     // The facade delegates every op to the dispatcher, so FUSE and
     // programmatic ws.vfs walk the same pipeline as a shell command and
     // the policy gates fire exactly once, at that entry point. It keeps the
@@ -1079,6 +1082,9 @@ export class Workspace {
     }
     if (profile.policy != null) {
       parseProfilePolicy(profile.policy, `profile '${name}' policy`, true)
+    }
+    if (profile.commandLimits != null) {
+      checkCommandLimits(profile.commandLimits, `profile '${name}'`, true)
     }
     // Its env names pointers in the workspace env grammar, so the
     // sources it names are checked here too, before a session runs.

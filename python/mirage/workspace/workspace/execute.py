@@ -19,6 +19,7 @@ from dataclasses import dataclass, field
 from functools import partial
 from typing import Any
 
+from mirage.commands.builtin.utils.limit import run_with_timeout
 from mirage.context import (
     bind_caller,
     current_caller,
@@ -34,6 +35,7 @@ from mirage.observe.context import RecordingScope, active_records
 from mirage.observe.observer import Observer
 from mirage.observe.record import OpRecord
 from mirage.policy import Deny, HandOff, Pending
+from mirage.policy.builtin.output_cap import LINE, line_timeout
 from mirage.policy.decisions import is_pending
 from mirage.process.table import ProcessTable
 from mirage.process.types import ProcessInfo
@@ -54,7 +56,7 @@ from mirage.shell.types import NodeType as NT
 from mirage.shell.types import TSNodeLike
 from mirage.types import PathSpec, Refusal
 from mirage.utils.abort import MirageAbortError
-from mirage.workspace.abort import set_line_writer
+from mirage.workspace.abort import line_status_writer, set_line_writer
 from mirage.workspace.dispatcher.dispatcher import Dispatcher
 from mirage.workspace.evaluation import EvaluationContext, child_context
 from mirage.workspace.execution import ExecutionScope
@@ -694,6 +696,12 @@ async def run_prepared_line(
     # typed line is read, never inside the evaluator). Internal
     # evaluations get an inert scope.
     is_line = record
+    # The `line` deadline is the outermost line's, recorded or not; a
+    # nested one runs inside it.
+    top_level = is_line or line_status_writer() is None
+    # Its budget runs from here, through the passes that judge the line
+    # and read its variables to whichever route runs it.
+    budget_start = asyncio.get_running_loop().time()
     scope = RecordingScope(
         active=is_line, ledger=ws.records, clock=ws.registry.clock
     )
@@ -915,6 +923,15 @@ async def run_prepared_line(
                     )
                     else None,
                     sink,
+                    (
+                        line_timeout(
+                            ws.registry.command_limits,
+                            effective_session.command_limits,
+                        )
+                        if top_level
+                        else None
+                    ),
+                    budget_start,
                 )
                 if io.refusal is None:
                     io.refusal = nested.latest
@@ -1022,28 +1039,41 @@ async def run_prepared_line(
                         names = plan_names(nodes)
             # No seam of its own: the whole line is one task under
             # ``Workspace.shell``, and a cancel lands on whichever await
-            # the tree is in.
-            io, _ = await run_command_tree(
-                ws.dispatch,
-                ws.registry,
-                ws.namespace,
-                job_table or ws.job_table,
-                exec_recursion,
-                ast,
-                context,
-                stdin,
-                cancel,
-                handed=handed,
-                sink=sink,
-                call_stack=call_stack,
-                execution_scope=execution_scope,
-                route=ws.router.context(
-                    command, effective_session, await judged()
-                )
-                if await ws.registry.policies.wants_for(
-                    "post_execute", effective_session.session_id
-                )
-                else None,
+            # the tree is in. A top-level line runs under its ``line``
+            # deadline, which a nested one shares.
+            io, _ = await run_with_timeout(
+                run_command_tree(
+                    ws.dispatch,
+                    ws.registry,
+                    ws.namespace,
+                    job_table or ws.job_table,
+                    exec_recursion,
+                    ast,
+                    context,
+                    stdin,
+                    cancel,
+                    handed=handed,
+                    sink=sink,
+                    call_stack=call_stack,
+                    execution_scope=execution_scope,
+                    route=ws.router.context(
+                        command, effective_session, await judged()
+                    )
+                    if await ws.registry.policies.wants_for(
+                        "post_execute", effective_session.session_id
+                    )
+                    else None,
+                ),
+                (
+                    line_timeout(
+                        ws.registry.command_limits,
+                        effective_session.command_limits,
+                    )
+                    if top_level
+                    else None
+                ),
+                LINE,
+                budget_start,
             )
             # A record a nested line earned is the line's to report when
             # its own tree earned none (see NestedRefusal).

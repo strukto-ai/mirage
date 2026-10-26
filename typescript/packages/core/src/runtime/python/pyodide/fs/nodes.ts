@@ -109,7 +109,7 @@ export class NodeTable {
     while (pending.length > 0) {
       const node = pending.pop()
       if (node === undefined) break
-      pending.push(...(node.children?.values() ?? []))
+      for (const item of node.children?.values() ?? []) pending.push(item)
       this.host.destroyNode?.(node)
     }
     this.root.children?.clear()

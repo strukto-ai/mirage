@@ -87,6 +87,7 @@ from mirage.policy import (
     ShellExplanation,
 )
 from mirage.policy.builtin import PlacementPolicy
+from mirage.policy.builtin.output_cap import check_command_limits
 from mirage.policy.types import DryRun, PolicyCaller, policy_caller
 from mirage.process.child import ChildProcess
 from mirage.process.stdio import ProcessInput, ProcessOutput
@@ -304,6 +305,9 @@ class Workspace:
         self._registry.diff = self._diff_pool
         self._registry.process_view = self._process_view
         self._registry.fill_env = self._fill_tree_env
+        check_command_limits(
+            command_limits or {}, "workspace", takes_line=True
+        )
         self._registry.command_limits = dict(command_limits or {})
         # One provider scopes every control-plane store by workspace id;
         # the per-plane params (observe / namespace_store / session_store)

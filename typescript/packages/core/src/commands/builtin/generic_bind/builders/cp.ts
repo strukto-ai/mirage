@@ -59,6 +59,7 @@ export const BUILDER: GenericCommand = {
       (p) => files.readdir(p),
       files.stat,
       files.answers('read_tree'),
+      files.signal,
     )
     const findFn: NativeCopy['find'] = async (src, options) => {
       const refused: string[] = []

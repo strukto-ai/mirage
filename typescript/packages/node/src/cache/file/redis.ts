@@ -219,7 +219,7 @@ export class RedisFileCacheStore extends RedisVFS implements FileCache {
     const out: (string | null)[] = []
     for (let start = 0; start < keys.length; start += KEY_BATCH) {
       const batch = keys.slice(start, start + KEY_BATCH).map((k) => this.metaKey(k))
-      out.push(...(await c.mGet(batch)))
+      for (const item of await c.mGet(batch)) out.push(item)
     }
     return out
   }

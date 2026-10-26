@@ -41,7 +41,6 @@ import { rmR as dropboxRmR } from '../../core/dropbox/rm.ts'
 import { rename as dropboxRename } from '../../core/dropbox/rename.ts'
 import { copy as dropboxCopy, dirCopy as dropboxDirCopy } from '../../core/dropbox/copy.ts'
 import { filesContaining as dropboxFilesContaining } from '../../core/dropbox/search.ts'
-import { WALK_LIMIT } from '../constants.ts'
 
 const mkdirOp = (accessor: DropboxAccessor, path: PathSpec, parents?: boolean): Promise<void> =>
   dropboxMkdir(accessor, path, parents)
@@ -70,12 +69,9 @@ export class DropboxVFS extends BaseVFS {
   readonly config: DropboxConfig
   override readonly accessor: DropboxAccessor
 
-  override readonly walkLimit: number
-
   constructor(config: DropboxConfig) {
     super()
     this.config = config
-    this.walkLimit = config.walkLimit ?? WALK_LIMIT
     const tm = new DropboxTokenManager(config)
     this.accessor = new DropboxAccessor({
       tokenManager: tm,

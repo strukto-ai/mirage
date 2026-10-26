@@ -50,7 +50,7 @@ export async function heldPages<T>(
 ): Promise<T[]> {
   const held: T[] = []
   for await (const page of pages) {
-    held.push(...page)
+    for (const item of page) held.push(item)
     if (limit !== undefined && held.length >= limit) break
   }
   return held

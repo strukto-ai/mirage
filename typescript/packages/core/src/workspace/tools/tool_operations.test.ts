@@ -14,11 +14,12 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { Files } from '../files.ts'
-import { MountMode } from '../../types.ts'
+import { Limit, MountMode } from '../../types.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { Session, Workspace } from '../workspace/workspace.ts'
 import { MirageToolOperations, TOOL_NAMES } from './tool_operations.ts'
 import { Outcome } from '../../policy/types.ts'
+import { ALL_COMMANDS } from '../../policy/builtin/output_cap.ts'
 import type { Policy } from '../../policy/base.ts'
 import { parseSessionProfile } from '../../policy/profile.ts'
 import type { VfsContext } from '../../policy/types.ts'
@@ -93,8 +94,10 @@ describe('edit', () => {
 describe('glob', () => {
   // Twin of test_glob_past_the_walk_limit_says_why.
   it('says why past the walk_limit', async () => {
-    const limited = new Workspace({ '/': new RAMVFS({ walkLimit: 2 }) }, { mode: MountMode.WRITE })
-      .tools
+    const limited = new Workspace(
+      { '/': [new RAMVFS(), MountMode.WRITE, { [ALL_COMMANDS]: new Limit({ walkLimit: 2 }) }] },
+      { mode: MountMode.WRITE },
+    ).tools
     for (const name of ['a', 'b', 'c']) await limited.write(`/${name}.py`, 'x')
     const result = await limited.glob('*.py', '/')
     expect([result.content[0]?.text, result.isError]).toEqual([

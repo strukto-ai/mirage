@@ -58,7 +58,6 @@ class EmailVFS(BaseVFS):
     def __init__(self, config: EmailConfig) -> None:
         super().__init__()
         self.config = config
-        self.walk_limit = config.walk_limit
         self.accessor = EmailAccessor(config)
 
     async def readdir(

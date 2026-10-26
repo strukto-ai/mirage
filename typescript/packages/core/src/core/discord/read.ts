@@ -79,7 +79,7 @@ async function readBlob(
   path: PathSpec,
   entry: FileStat | null,
 ): Promise<Uint8Array> {
-  return downloadFile(await blobUrl(accessor, path, entry), 0, null)
+  return downloadFile(await blobUrl(accessor, path, entry), 0, null, accessor.timeout)
 }
 
 async function readBlobRange(
@@ -91,7 +91,7 @@ async function readBlobRange(
   offset: number,
   size: number | null,
 ): Promise<Uint8Array> {
-  return downloadFile(await blobUrl(accessor, path, entry), offset, size)
+  return downloadFile(await blobUrl(accessor, path, entry), offset, size, accessor.timeout)
 }
 
 export const read = makeRead<DiscordAccessor>(detectScope, {
@@ -117,7 +117,7 @@ export async function* readStream(
 ): AsyncGenerator<Uint8Array, void> {
   if (detectScope(path).kind === 'file_blob') {
     const url = await blobUrl(accessor, path, entry)
-    yield* downloadFileStream(url, signal)
+    yield* downloadFileStream(url, signal, accessor.timeout)
   } else {
     yield* chunks(await read(accessor, path, entry, parent), signal)
   }

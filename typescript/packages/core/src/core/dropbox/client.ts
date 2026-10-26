@@ -19,7 +19,7 @@ import {
   TOKEN_BUFFER_SECONDS,
   RESULT_HEADER,
 } from './constants.ts'
-import { type ApiResponse, apiRequest, loweredHeaders } from '../api/client.ts'
+import { type ApiResponse, apiRequest, loweredHeaders, stallTimeout } from '../api/client.ts'
 import { TokenManager as OAuthTokenManager } from '../api/oauth.ts'
 import { ByteSpool } from '../../io/spool.ts'
 import { rstripSlash } from '../../utils/slash.ts'
@@ -38,6 +38,7 @@ function headerJson(arg: Record<string, JsonValue>): string {
 }
 
 export interface DropboxConfig {
+  timeout?: number
   clientId: string
   clientSecret?: string
   refreshToken: string
@@ -90,6 +91,7 @@ async function refreshAccessToken(config: DropboxConfig): Promise<[string, numbe
     body.set('client_secret', config.clientSecret)
   }
   const data = (await apiRequest('POST', tokenUrlOf(config), {
+    timeout: config.timeout,
     errorOf: (r, text) =>
       new DropboxApiError(`Dropbox token refresh → ${String(r.status)} ${text}`, r.status),
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -104,7 +106,7 @@ export class DropboxTokenManager extends OAuthTokenManager {
   private readonly config: DropboxConfig
 
   constructor(config: DropboxConfig) {
-    super(TOKEN_BUFFER_SECONDS)
+    super(TOKEN_BUFFER_SECONDS, undefined, config.timeout)
     this.config = config
     if (config.endpoint !== undefined && config.endpoint !== '') {
       const base = `${rstripSlash(config.endpoint)}/2`
@@ -137,6 +139,7 @@ export async function dropboxRpc(
 ): Promise<unknown> {
   const headers = await dropboxAuthHeaders(tm)
   return apiRequest('POST', `${tm.apiBase}${endpoint}`, {
+    timeout: tm.timeout,
     errorOf: (r, text) =>
       new DropboxApiError(
         `Dropbox POST ${endpoint} → ${String(r.status)} ${text}`,
@@ -173,6 +176,7 @@ export async function dropboxUpload(
       ? { path, mode: 'overwrite', mute: true }
       : { path, mode: { '.tag': 'update', update: rev }, mute: true, autorename: false }
   const resp = (await apiRequest('POST', `${tm.contentBase}/files/upload`, {
+    timeout: tm.timeout,
     errorOf: (r, text) =>
       new DropboxApiError(
         `Dropbox upload ${path} → ${String(r.status)} ${text}`,
@@ -202,6 +206,7 @@ export async function dropboxDownload(
 ): Promise<[Uint8Array, string | null]> {
   const headers = await dropboxAuthHeaders(tm)
   const resp = (await apiRequest('POST', `${tm.contentBase}/files/download`, {
+    timeout: tm.timeout,
     errorOf: (r, text) =>
       new DropboxApiError(
         `Dropbox download ${path} → ${String(r.status)} ${text}`,
@@ -226,7 +231,7 @@ export async function* dropboxDownloadStream(
 ): AsyncIterable<Uint8Array> {
   const headers = await dropboxAuthHeaders(tm)
   const url = `${tm.contentBase}/files/download`
-  const r = await fetch(url, {
+  const r = await stallTimeout(tm.timeout)(url, {
     method: 'POST',
     headers: { ...headers, 'Dropbox-API-Arg': headerJson({ path }) },
   })
@@ -263,6 +268,7 @@ async function sessionRequest(
   data: Uint8Array,
 ): Promise<unknown> {
   return apiRequest('POST', `${tm.contentBase}/files/upload_session/${action}`, {
+    timeout: tm.timeout,
     errorOf: (r, text) =>
       new DropboxApiError(
         `Dropbox upload ${path} → ${String(r.status)} ${text}`,

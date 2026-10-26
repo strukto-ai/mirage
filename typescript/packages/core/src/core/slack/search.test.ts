@@ -21,7 +21,8 @@ vi.mock('./history.ts', async (importOriginal) => {
 })
 
 import { SlackAccessor } from '../../accessor/slack.ts'
-import { MountMode } from '../../types.ts'
+import { ALL_COMMANDS } from '../../policy/builtin/output_cap.ts'
+import { Limit, MountMode } from '../../types.ts'
 import { SlackVFSBase } from '../../vfs/slack/slack.ts'
 import { Mount } from '../../workspace/mount/spec.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
@@ -324,11 +325,9 @@ class FakeSlack implements SlackTransport {
 class SearchSlackVFS extends SlackVFSBase {
   override readonly name = 'slack'
   override readonly accessor: SlackAccessor
-  override readonly walkLimit: number
-  constructor(transport: SlackTransport, walkLimit: number) {
+  constructor(transport: SlackTransport) {
     super()
     this.accessor = new SlackAccessor(transport)
-    this.walkLimit = walkLimit
   }
 }
 
@@ -336,8 +335,14 @@ type Ran = [string, number, string[], string[]]
 
 async function onSlack(line: string, fake = new FakeSlack(), walkLimit = 1000): Promise<Ran> {
   vi.mocked(getHistoryJsonl).mockClear()
+  const limits = { [ALL_COMMANDS]: new Limit({ walkLimit }) }
   const ws = new Workspace(
-    { '/slack': new Mount(new SearchSlackVFS(fake, walkLimit), { mode: MountMode.READ }) },
+    {
+      '/slack': new Mount(new SearchSlackVFS(fake), {
+        mode: MountMode.READ,
+        commandLimits: limits,
+      }),
+    },
     {},
   )
   try {

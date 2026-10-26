@@ -13,12 +13,13 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import inspect
 import logging
 from collections.abc import AsyncIterator, Awaitable
 from typing import TypeVar
 
 from mirage.errors.types import CommandTimeoutError
-from mirage.io.stream import OutputStream, close_quietly, ensure_stream
+from mirage.io.stream import close_quietly, ensure_stream
 from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.types import Limit, OnExceed
 
@@ -28,91 +29,11 @@ TRUNCATION_NOTICE = "output truncated at limit"
 T = TypeVar("T")
 
 
-async def with_timeout(
-    src: ByteSource,
-    seconds: float,
-    command: str,
-) -> AsyncIterator[bytes]:
-    stream = ensure_stream(src)
-    loop = asyncio.get_running_loop()
-    start = loop.time()
-    iterator = stream.__aiter__()
-    try:
-        while True:
-            remaining = seconds - (loop.time() - start)
-            if remaining <= 0:
-                raise CommandTimeoutError(command, seconds)
-            try:
-                chunk = await asyncio.wait_for(
-                    iterator.__anext__(), timeout=remaining
-                )
-            except StopAsyncIteration:
-                return
-            except asyncio.TimeoutError as exc:
-                raise CommandTimeoutError(command, seconds) from exc
-            yield chunk
-    finally:
-        await close_quietly(stream)
-
-
-async def with_pull_timeout(
-    src: AsyncIterator[bytes], seconds: float | None, name: str
-) -> AsyncIterator[bytes]:
-    """Give each pull of a streamed op its own timeout.
-
-    An op's timeout bounds a backend call, and a streamed op calls the
-    backend once per pull, so each pull gets the whole budget and a
-    consumer that pauses between pulls spends none of it.
-
-    Args:
-        src (AsyncIterator[bytes]): the op's stream.
-        seconds (float | None): the budget per pull, None for none.
-        name (str): the op name for the timeout message.
-    """
-    iterator = src.__aiter__()
-    try:
-        while True:
-            try:
-                chunk = await run_with_timeout(
-                    iterator.__anext__(), seconds, name
-                )
-            except StopAsyncIteration:
-                return
-            yield chunk
-    finally:
-        await close_quietly(iterator)
-
-
-def maybe_with_timeout(
-    stream: ByteSource | None,
-    limit: Limit | None,
-    command: str,
-) -> ByteSource | None:
-    """Wrap a byte stream with a timeout if the limit calls for one.
-
-    Returns the stream untouched when it is None, already bytes, or the
-    limit has no positive timeout. Single source of the wrap rule
-    shared by stdout, stderr, and any other stream channel.
-
-    Args:
-        stream (ByteSource | None): the stream to maybe wrap.
-        limit (Limit | None): resolved limit.
-        command (str): command name for the timeout message.
-    """
-    if stream is None or isinstance(stream, bytes):
-        return stream
-    if limit is None or not limit.timeout_seconds:
-        return stream
-    if limit.timeout_seconds <= 0:
-        return stream
-    return OutputStream(
-        with_timeout(stream, limit.timeout_seconds, command),
-        lambda: close_quietly(stream),
-    )
-
-
 async def run_with_timeout(
-    coro: Awaitable[T], seconds: float | None, name: str
+    coro: Awaitable[T],
+    seconds: float | None,
+    name: str,
+    start: float | None = None,
 ) -> T:
     """Wrap a coroutine with a deadline, mapping overrun to a timeout error.
 
@@ -123,10 +44,24 @@ async def run_with_timeout(
         coro (Awaitable[T]): the awaitable to run.
         seconds (float | None): timeout budget, or None to disable.
         name (str): command/op name for the timeout message.
+        start (float | None): the loop time the budget began, when work
+            before this call already spent part of it; None for now.
     """
     if not seconds or seconds <= 0:
         return await coro
-    deadline = asyncio.timeout(seconds)
+    if start is not None and asyncio.get_running_loop().time() >= (
+        start + seconds
+    ):
+        # Spent before the call: a deadline already past fires only at
+        # the call's first suspension, which a quick call never reaches.
+        if inspect.iscoroutine(coro):
+            coro.close()
+        raise CommandTimeoutError(name or "?", seconds)
+    deadline = (
+        asyncio.timeout(seconds)
+        if start is None
+        else asyncio.timeout_at(start + seconds)
+    )
     try:
         async with deadline:
             return await coro

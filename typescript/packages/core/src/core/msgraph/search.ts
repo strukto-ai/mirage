@@ -48,7 +48,8 @@ export async function filesContaining(
       }
       const items = await graphList(config, loc.item(`/search(q='${quoted}')`), { $select: 'id' })
       for (const item of items) {
-        if (typeof item.id === 'string') found.push(...(files.get(item.id) ?? []))
+        if (typeof item.id === 'string')
+          for (const element of files.get(item.id) ?? []) found.push(element)
       }
     }
   } catch (err) {

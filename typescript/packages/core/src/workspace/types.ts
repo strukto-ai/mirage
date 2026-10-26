@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { OpRecord } from '../observe/record.ts'
-import type { MountMode, PathSpec } from '../types.ts'
+import type { Limit, MountMode, PathSpec } from '../types.ts'
 
 /**
  * What the namespace's reader knows about one mount: its prefix, its VFS's
@@ -31,6 +31,10 @@ export interface MountRow {
   readonly calls?: ReadonlySet<string>
   readonly searchable?: readonly string[] | null
   readonly walkLimit?: number
+  /** The mount's own command limits. */
+  readonly commandLimits?: ReadonlyMap<string, Limit>
+  /** The workspace's, which a command's walk resolves through beside the mount's. */
+  readonly workspaceLimits?: Readonly<Record<string, Limit>>
 }
 
 export interface ExecutionNodeInit {

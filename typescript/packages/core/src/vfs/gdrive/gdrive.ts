@@ -40,7 +40,6 @@ import { copy as gdriveCopy } from '../../core/gdrive/copy.ts'
 import { truncate as gdriveTruncate } from '../../core/gdrive/truncate.ts'
 import { filesContaining as gdriveFilesContaining } from '../../core/gdrive/search.ts'
 import { tree as gdriveTree } from '../../core/gdrive/tree.ts'
-import { WALK_LIMIT } from '../constants.ts'
 
 export const VFS_MD = `{prefix}
   Mirrors Google Drive folder hierarchy. May contain:
@@ -95,12 +94,9 @@ export class GoogleDriveVFS extends BaseVFS {
   readonly config: GDriveConfig
   override readonly accessor: GDriveAccessor
 
-  override readonly walkLimit: number
-
   constructor(config: GDriveConfig) {
     super()
     this.config = config
-    this.walkLimit = config.walkLimit ?? WALK_LIMIT
     const tm = new TokenManager(config)
     this.accessor = new GDriveAccessor({ tokenManager: tm })
   }

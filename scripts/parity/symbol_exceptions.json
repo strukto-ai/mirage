@@ -1,5 +1,5 @@
 {
-  "baseline": 2940,
+  "baseline": 2935,
  "modules": {
   "vfs/tidb_filesystem/config": {
    "typescript_only": {
@@ -760,7 +760,8 @@
     "CheckFn": "Python names the PrimitiveMove.check_unlink callable type beside MoveFn, as a forward reference to PathSpec; TypeScript types the field inline."
    },
    "typescript_only": {
-    "DirListingInit": "A TypeScript DirListing takes its fields as one object; the Python dataclass takes them as keywords."
+    "DirListingInit": "A TypeScript DirListing takes its fields as one object; the Python dataclass takes them as keywords.",
+    "LIMIT_FIELDS": "Limit.layered walks every field in order; Python reads them off the pydantic model's model_fields, a TypeScript class has no field list to walk."
    }
   },
   "cache/file/redis": {
@@ -847,11 +848,6 @@
   "commands/spec/parser": {
    "typescript_only": {
     "PARSES": "TypeScript keeps each spec's readings in a WeakMap keyed by the spec, as compileSpec keeps its tables; Python keeps them on the spec itself, since a frozen dataclass key would hash every field on every parse."
-   }
-  },
-  "commands/builtin/utils/limit": {
-   "typescript_only": {
-    "deadlineCheck": "A JavaScript generator cannot be cancelled from outside, so a TypeScript scan inside one pull checks the invocation's deadline itself; Python's with_timeout cancels the pull, and the scan stops at its next await."
    }
   },
   "commands/cli/builtin/git/dates": {
@@ -973,7 +969,9 @@
   },
   "io/yield_budget": {
    "python_only": {
-    "YIELD_SWITCHES": "Python yields every few GIL switch intervals, since a loop that yields more often keeps its other threads from the GIL; TypeScript runs every workspace on one thread and keeps a fixed YIELD_INTERVAL."
+    "YIELD_SWITCHES": "Python yields every few GIL switch intervals, since a loop that yields more often keeps its other threads from the GIL; TypeScript runs every workspace on one thread and keeps a fixed YIELD_INTERVAL.",
+    "_TASK_BUDGETS": "The budget task_turn keeps per asyncio task; TypeScript has no task identity, so guardDispatch and treeWalk each own a budget per command.",
+    "task_turn": "Spends the running asyncio task's budget at the dispatcher, where a command's ops meet; TypeScript has no task identity, so guardDispatch and treeWalk each own a budget per command."
    },
    "typescript_only": {
     "YIELD_INTERVAL": "TypeScript has no GIL and yields on a fixed interval; Python derives its interval from the GIL switch interval (YIELD_SWITCHES)."
@@ -999,6 +997,11 @@
     "ReasonReply": "Names the JSON reply shape a profile compile or restriction answers, which TypeScript reads typed; Python reads the same JSON as mappings.",
     "RuleReply": "Names the JSON reply shape a profile compile or restriction answers, which TypeScript reads typed; Python reads the same JSON as mappings.",
     "RulesReply": "Names the JSON reply shape a profile compile or restriction answers, which TypeScript reads typed; Python reads the same JSON as mappings."
+   }
+  },
+  "policy/builtin/output_cap": {
+   "typescript_only": {
+    "WIRE_FIELDS": "A command_limits entry spells each Limit field in snake_case; pydantic validates and dumps those names itself, a TypeScript Limit takes camelCase, so the config reader and writer map them here."
    }
   },
   "runtime/wasm/constants": {

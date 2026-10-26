@@ -82,7 +82,7 @@ function definedBodies(node: TSNodeLike): Map<string, TSNodeLike[]> {
         else bodies.push(body)
       }
     }
-    stack.push(...current.namedChildren)
+    for (const child of current.namedChildren) stack.push(child)
   }
   return out
 }
@@ -150,7 +150,7 @@ export function lineNodes(node: TSNodeLike, session: SessionState): TSNodeLike[]
         found.push([parse(aliased + ALIAS_REST, others), aliases])
       }
       for (const [body] of found) nodes.push(body)
-      frontier.push(...found)
+      for (const item of found) frontier.push(item)
     }
   }
   return nodes
@@ -255,7 +255,7 @@ function replacementBlocked(part: TSNodeLike): boolean {
     const current = stack.pop()
     if (current === undefined) break
     if (SUBSTITUTIONS.has(current.type)) return true
-    stack.push(...current.namedChildren)
+    for (const child of current.namedChildren) stack.push(child)
   }
   return false
 }
@@ -500,7 +500,7 @@ function arithTargets(
     // recursion lands on (`arr=(TOKEN); $((arr))` reads arr[0]), so
     // every string in the structure is chased.
     if (typeof value === 'string') {
-      frontier.push(...identifierNames(value))
+      for (const item of identifierNames(value)) frontier.push(item)
     } else if (Array.isArray(value)) {
       for (const item of value) if (item !== null) frontier.push(...identifierNames(item))
     } else if (value !== null) {
@@ -509,7 +509,7 @@ function arithTargets(
     const entry = assigned.get(name)
     if (entry !== undefined) {
       for (const literal of entry[0]) frontier.push(...identifierNames(literal))
-      frontier.push(...entry[1])
+      for (const item of entry[1]) frontier.push(item)
     }
   }
   return out

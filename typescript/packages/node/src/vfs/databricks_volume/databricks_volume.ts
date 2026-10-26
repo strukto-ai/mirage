@@ -22,7 +22,6 @@ import {
   type DatabricksVolumeConfig,
   type DatabricksVolumeConfigRedacted,
 } from './config.ts'
-import { WALK_LIMIT } from '@struktoai/mirage-core/vfs/constants'
 
 export interface DatabricksVolumeVFSState {
   type: string
@@ -39,11 +38,9 @@ export class DatabricksVolumeVFS extends DatabricksVolumeVFSBase {
   readonly config: DatabricksVolumeConfig
   override readonly accessor: DatabricksVolumeAccessor
 
-  override readonly walkLimit: number
   private constructor(config: DatabricksVolumeConfig, accessor: DatabricksVolumeAccessor) {
     super()
     this.config = config
-    this.walkLimit = config.walkLimit ?? WALK_LIMIT
     this.accessor = accessor
   }
 

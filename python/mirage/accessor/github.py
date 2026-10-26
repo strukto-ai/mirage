@@ -32,7 +32,7 @@ class GitHubAccount(SessionAccessor):
     """
 
     def __init__(self, config: GhConfig) -> None:
-        super().__init__()
+        super().__init__(config.timeout)
         self.config = config
 
     @property

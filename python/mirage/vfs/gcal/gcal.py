@@ -120,8 +120,9 @@ class GCalVFS(BaseVFS):
     def __init__(self, config: GCalConfig) -> None:
         super().__init__()
         self.config = config
-        self.walk_limit = config.walk_limit
-        self.accessor = GCalAccessor(self.config, TokenManager(config))
+        self.accessor = GCalAccessor(
+            self.config, TokenManager(config), lambda: self.walk_limit >= 0
+        )
         self.vfs_md = (
             tree_vfs_md(config.bucket_days) + self.accessor.time_range.vfs_md()
         )

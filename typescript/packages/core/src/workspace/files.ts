@@ -433,7 +433,7 @@ export class Files {
       enclosing?.push(...mine)
       if (own === null || own.records.length === 0) return
       const records = own.records.splice(0)
-      this.recorded.push(...records)
+      for (const item of records) this.recorded.push(item)
       if (this.sink === null) return
       const session = this.sessionFor(seen)
       for (const rec of records) await this.sink(rec, session)

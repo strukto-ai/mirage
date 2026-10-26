@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { YieldBudget } from '../io/yield_budget.ts'
 import { makeAbortError } from '../utils/abort.ts'
 import {
   type CallerDispatchFn,
@@ -33,8 +34,15 @@ export function runWithLineAbort<T>(
   sessions: readonly SessionState[],
   writer: StatusWriter,
   fn: () => Promise<T>,
+  stop?: AbortSignal,
 ): Promise<T> {
-  return runWithCaller({ ...currentCaller(), lineAbort: { signal, sessions, writer } }, fn)
+  return runWithCaller(
+    {
+      ...currentCaller(),
+      lineAbort: { signal, sessions, writer, ...(stop === undefined ? {} : { stop }) },
+    },
+    fn,
+  )
 }
 
 /**
@@ -83,15 +91,26 @@ export function abortedLine(session: SessionState): AbortSignal | undefined {
  * Refusing at the dispatcher, the one seam every handler's I/O goes through,
  * stops it there without threading the signal through each handler. An
  * op already in flight settles on its own.
+ *
+ * The command's ops also share one yield budget: a walk the index answers
+ * resolves each op in a microtask, which no timer or abort ever runs between,
+ * so the budget hands the loop a task-queue turn every few milliseconds and
+ * the abort or timeout that fired there refuses the next op. Python's
+ * dispatcher spends the running task's budget, `task_turn`, the same way.
  */
 export function guardDispatch(
   dispatch: CallerDispatchFn,
   signal: AbortSignal | undefined,
 ): CallerDispatchFn {
-  if (signal === undefined) return dispatch
+  const budget = new YieldBudget()
   return (op, path, args, kwargs, report, caller) => {
-    if (signal.aborted) return Promise.reject(makeAbortError(signal))
-    return dispatch(op, path, args, kwargs, report, caller)
+    if (signal?.aborted === true) return Promise.reject(makeAbortError(signal))
+    const pending = budget.run()
+    if (pending === undefined) return dispatch(op, path, args, kwargs, report, caller)
+    return pending.then(() => {
+      if (signal?.aborted === true) throw makeAbortError(signal)
+      return dispatch(op, path, args, kwargs, report, caller)
+    })
   }
 }
 

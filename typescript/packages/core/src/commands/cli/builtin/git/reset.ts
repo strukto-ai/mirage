@@ -112,7 +112,8 @@ export async function reset(
     if (recorded === undefined) removed.push(name)
     else staged.set(name, restored(recorded.oid, Number.parseInt(recorded.mode, 8)))
   }
-  if (texts.length === 0) removed.push(...visibleEntries(repo.location, state.conflicts).keys())
+  if (texts.length === 0)
+    for (const item of visibleEntries(repo.location, state.conflicts).keys()) removed.push(item)
   // The tree is walked before the index is written, so a work tree past its
   // walk_limit leaves the index as it was.
   const tracked = new Set(visibleEntries(repo.location, state.entries).keys())

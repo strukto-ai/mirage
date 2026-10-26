@@ -281,12 +281,14 @@ Whether a command may copy, compare, change or remove every file under a folder.
 | Raises `ValueError` (TypeScript: rejects) | Refuses the command before it touches anything. It prints `<command>: <message>` and exits 1. |
 
 These commands call `before_full_walk`: `tar -c`, `zip -r`, `cp -r`, `rm -r`,
-`chmod -R`, `chown -R`, `chgrp -R`, `mv` to another mount and `diff -r`. The
-default refuses more than `walk_limit` files.
+`chmod -R`, `chown -R`, `chgrp -R`, `mv` to another mount and `diff -r`.
+Mirage refuses more than the command's `walk_limit` files before it asks, so
+the default lets the walk run.
 
 ## `walk_limit`
 
-The most files one command walks under a folder (TypeScript: `walkLimit`).
+The most files one command walks under a folder (TypeScript: `walkLimit`), a
+field of [`command_limits`](/home/core/output-limits).
 
 | Command | Past the limit |
 | --- | --- |
@@ -316,7 +318,8 @@ and returns `truncated: true` where it stops.
 | `0` | Read or list nothing under a folder | Always refused |
 | A positive number | Stop after that many files | Refused above that many files |
 
-It is 1000 unless your VFS sets it:
+It is 1000 unless your VFS starts at another value or a `command_limits`
+entry sets it:
 
 <Tabs>
   <Tab title="Python" icon="/images/python-logo.svg">
@@ -328,7 +331,7 @@ It is 1000 unless your VFS sets it:
   <Tab title="TypeScript" icon="/images/typescript-logo.svg">
     ```typescript
     export class SearchableNotesVFS extends NotesVFS {
-      override readonly walkLimit: number = 500
+      override walkLimit = 500
     }
     ```
   </Tab>
@@ -368,39 +371,46 @@ it.
 | [SSH](/python/vfs/ssh#integration) | Any text, on servers that run commands | No |
 | [PostgreSQL](/python/vfs/postgres#integration), [MongoDB](/python/vfs/mongodb#integration), [Airtable](/python/vfs/airtable#integration) | Any text, as lines of one file | No |
 
-Every built-in VFS sets `walk_limit` in its config: 1000, or 5000 on
-GitHub, where each file is one request, and 10000 on disk, RAM and OPFS. On the
-VFSs above from Google Drive to GitHub, `-1` also turns the service's search
-off, so every file is read and no match is missed:
+Every built-in VFS starts at 1000, or 5000 on GitHub, where each file is one
+request, and 10000 on disk, RAM and OPFS. A mount's `command_limits` change it:
+the `"*"` entry, for every command, else the workspace's, sets the mount's own
+`walk_limit`, and an entry named for one command, such as `find`, changes only
+how far that command walks. On the VFSs above from Google Drive to GitHub, the
+mount's own `-1` also turns the service's search off, so every file is read and
+no match is missed:
 
 <Tabs>
   <Tab title="Python" icon="/images/python-logo.svg">
     ```python
     import os
 
-    from mirage import MountMode, Workspace
+    from mirage import Limit, MountMode, Workspace
     from mirage.vfs.slack import SlackConfig, SlackVFS
 
     slack = SlackVFS(
         config=SlackConfig(
             token=os.environ["SLACK_BOT_TOKEN"],
             search_token=os.environ["SLACK_USER_TOKEN"],
-            walk_limit=5000,
         )
     )
-    ws = Workspace({"/slack": slack}, mode=MountMode.READ)
+    ws = Workspace(
+        {"/slack": (slack, MountMode.READ, {"*": Limit(walk_limit=5000)})},
+        mode=MountMode.READ,
+    )
     ```
   </Tab>
   <Tab title="TypeScript" icon="/images/typescript-logo.svg">
     ```typescript
-    import { MountMode, SlackVFS, Workspace } from '@struktoai/mirage-node'
+    import { Limit, MountMode, SlackVFS, Workspace } from '@struktoai/mirage-node'
 
     const slack = new SlackVFS({
       token: process.env.SLACK_BOT_TOKEN!,
       searchToken: process.env.SLACK_USER_TOKEN,
-      walkLimit: 5000,
     })
-    const ws = new Workspace({ '/slack': slack }, { mode: MountMode.READ })
+    const ws = new Workspace(
+      { '/slack': [slack, MountMode.READ, { '*': new Limit({ walkLimit: 5000 }) }] },
+      { mode: MountMode.READ },
+    )
     ```
   </Tab>
   <Tab title="YAML" icon="file-code">
@@ -412,7 +422,9 @@ off, so every file is read and no match is missed:
         config:
           token: ${SLACK_BOT_TOKEN}
           search_token: ${SLACK_USER_TOKEN}
-          walk_limit: 5000
+        command_limits:
+          "*":
+            walk_limit: 5000
     ```
   </Tab>
 </Tabs>

@@ -58,6 +58,8 @@ import { callerStream } from './dispatch.ts'
  * Mirrors Python's `CommandFiles`.
  */
 export interface CommandFiles {
+  /** The line's abort and the command's deadline, for a walk `treeWalk` answers. */
+  readonly signal?: AbortSignal
   /** The entry at `path` itself, as lstat answers. */
   readonly stat: (path: PathSpec) => Promise<FileStat>
   readonly exists: (path: PathSpec) => Promise<boolean>
@@ -557,6 +559,7 @@ export function commandFiles(ctx: Context, paths: readonly PathSpec[] = []): Com
   const links = crossing ? undefined : table
   const access = crossing ? undefined : ctx.session?.access()
   return {
+    ...(ctx.signal === undefined ? {} : { signal: ctx.signal }),
     stat,
     exists: guard((path: PathSpec) => dispatchedExists(dispatch, path)),
     readdir,

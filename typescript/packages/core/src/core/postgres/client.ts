@@ -258,7 +258,7 @@ export async function fetchRowsAfter(
     const key = pk.map((column) => quoteIdent(column)).join(', ')
     const marks = pk.map((_, i) => `$${String(i + 2)}`).join(', ')
     where = ` WHERE (${key}) > (${marks})`
-    params.push(...after)
+    for (const item of after) params.push(item)
   }
   const [select, names] = keyTexts(pk, columns, 'data.')
   const rows = await fetchBoundedQuery(

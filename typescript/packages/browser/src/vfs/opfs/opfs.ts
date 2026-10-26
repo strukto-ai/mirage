@@ -37,16 +37,13 @@ import { rename as opfsRename } from '../../core/opfs/rename.ts'
 import { copy as opfsCopy } from '../../core/opfs/copy.ts'
 import { truncate as opfsTruncate } from '../../core/opfs/truncate.ts'
 import { LOCAL_WALK_LIMIT } from '@struktoai/mirage-core/vfs/constants'
-import { VFSConfigError } from '@struktoai/mirage-core/vfs/errors'
 
 export interface OPFSVFSOptions {
   root?: string
-  walkLimit?: number
 }
 
 export interface OPFSVFSState {
   type: string
-  config: { walk_limit: number }
   files: Record<string, Uint8Array>
   dirs: string[]
 }
@@ -105,16 +102,10 @@ export class OPFSVFS extends BaseVFS {
   private rootHandle: FileSystemDirectoryHandle | null = null
   private openPromise: Promise<FileSystemDirectoryHandle> | null = null
 
-  override readonly walkLimit: number
+  override walkLimit: number = LOCAL_WALK_LIMIT
 
   constructor(options: OPFSVFSOptions = {}) {
-    let limit: unknown = options.walkLimit
-    if (limit === undefined) limit = LOCAL_WALK_LIMIT
-    if (typeof limit !== 'number' || !Number.isInteger(limit) || limit < -1) {
-      throw new VFSConfigError('opfs: walk_limit: must be an integer of -1 or more')
-    }
     super()
-    this.walkLimit = limit
     this.rootName = options.root ?? ''
     this.accessor = new OPFSAccessor(this)
   }
@@ -224,7 +215,6 @@ export class OPFSVFS extends BaseVFS {
     dirs.sort(compareCodePoints)
     return {
       type: this.name,
-      config: { walk_limit: this.walkLimit },
       files,
       dirs,
     }

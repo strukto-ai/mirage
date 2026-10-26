@@ -259,79 +259,19 @@ def test_yaml_external_capture_matches_the_sdk_default(entry):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("name", ["native-tool", "python3"])
-@pytest.mark.parametrize("timeout", [1, 0, None])
-async def test_external_mount_timeout_replaces_default(
-    monkeypatch, name, timeout
-):
-    monkeypatch.setitem(
-        DEFAULT_COMMAND_LIMITS, name, Limit(timeout_seconds=0.05)
-    )
-    probe = DelayedProcessProbe(captures=("python3", EXTERNAL_COMMANDS))
-    async with workspace(
-        {"/": RAMVFS()}, mode=MountMode.EXEC, runtimes=[probe]
-    ) as ws:
-        for mount in ws._registry.mounts():
-            mount.command_limits[name] = Limit(timeout_seconds=timeout)
-        result = await ws.shell(f"PROGRAM={name}; $PROGRAM")
-        assert result.exit_code == 0
-        assert await result.stdout_str() == "completed\n"
-        assert len(probe.requests) == 1
-        assert not probe.cancelled
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("source", ["default", "mount"])
-async def test_external_timeout_cancels_process(monkeypatch, source):
-    monkeypatch.setitem(
-        DEFAULT_COMMAND_LIMITS,
-        "native-tool",
-        Limit(timeout_seconds=0.05 if source == "default" else 1),
-    )
-    overrides = (
-        {"native-tool": Limit(timeout_seconds=0.05)}
-        if source == "mount"
-        else {}
-    )
+async def test_the_line_deadline_cancels_an_external_process():
     probe = DelayedProcessProbe()
     async with workspace(
-        {"/": (RAMVFS(), MountMode.EXEC, overrides)},
+        {"/": RAMVFS()},
         mode=MountMode.EXEC,
         runtimes=[probe],
+        command_limits={"line": Limit(timeout_seconds=0.05)},
     ) as ws:
         result = await ws.shell("native-tool")
         assert result.exit_code == 124
-        assert (
-            "native-tool: timed out after 0.05s" in await result.stderr_str()
-        )
+        assert "line: timed out after 0.05s" in await result.stderr_str()
         assert len(probe.requests) == 1
         assert probe.cancelled
-
-
-@pytest.mark.asyncio
-async def test_external_timeout_includes_stdin_materialization(monkeypatch):
-    monkeypatch.setitem(
-        DEFAULT_COMMAND_LIMITS, "native-tool", Limit(timeout_seconds=0.05)
-    )
-    cancelled = False
-
-    async def slow_stdin():
-        nonlocal cancelled
-        try:
-            await asyncio.sleep(0.15)
-            yield b"late\n"
-        finally:
-            cancelled = True
-
-    probe = ProcessProbe()
-    async with workspace({"/": RAMVFS()}, runtimes=[probe]) as ws:
-        result = await ws.shell("native-tool", stdin=slow_stdin())
-        assert result.exit_code == 124
-        assert (
-            "native-tool: timed out after 0.05s" in await result.stderr_str()
-        )
-        assert not probe.requests
-        assert cancelled
 
 
 class ShellProbe(Runtime, LineExecutorMixin):

@@ -31,6 +31,7 @@ const rg: CommandFn = async (_accessor, paths, texts, ctx) => {
     readdir,
     stat,
     false,
+    files.signal,
   )
   return rgGeneric(
     resolved,
@@ -39,7 +40,13 @@ const rg: CommandFn = async (_accessor, paths, texts, ctx) => {
     levelStat,
     levelReaddir,
     await searchReads(files, 'rg', resolved, texts, ctx),
-    treeWalk<string[], FileStat>(files.readTree, readdir, stat, files.answers('read_tree')),
+    treeWalk<string[], FileStat>(
+      files.readTree,
+      readdir,
+      stat,
+      files.answers('read_tree'),
+      files.signal,
+    ),
   )
 }
 

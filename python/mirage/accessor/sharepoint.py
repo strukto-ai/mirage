@@ -1,10 +1,8 @@
-import aiohttp
-from pydantic import Field, field_validator
+from pydantic import field_validator
 
 from mirage.accessor.base import SessionAccessor
 from mirage.core.msgraph.config import MsGraphConfig
 from mirage.utils import key_prefix as kp
-from mirage.vfs.constants import WALK_LIMIT
 
 
 class SharePointConfig(MsGraphConfig):
@@ -22,11 +20,6 @@ class SharePointConfig(MsGraphConfig):
     """Folder path inside the scoped library that the mount uses as its
     root; takes effect only with `site` and `drive` set. `..` segments are
     rejected."""
-    walk_limit: int = Field(default=WALK_LIMIT, ge=-1)
-    """Most files one command walks under a folder: `grep -r`, `find` and other
-    walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is
-    refused. `-1` lifts the limit and reads every file without asking Graph
-    search, which lags writes and covers only extracted text."""
 
     @field_validator("key_prefix")
     @classmethod
@@ -39,7 +32,7 @@ class SharePointConfig(MsGraphConfig):
 
 class SharePointAccessor(SessionAccessor):
     def __init__(self, config: SharePointConfig) -> None:
-        super().__init__(timeout=aiohttp.ClientTimeout(total=config.timeout))
+        super().__init__(timeout=config.timeout)
         self.config = config
         # Name -> id lookups for the two namespace levels above a drive item,
         # so resolving a path does not call /sites and /drives on every op.

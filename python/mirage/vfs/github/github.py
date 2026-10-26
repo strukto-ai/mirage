@@ -17,7 +17,7 @@ from typing import Any
 from mirage.accessor.github import GitHubAccessor, GitHubAccount
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.core.github.config import GhConfig, GitHubConfig
-from mirage.core.github.constants import COMMIT_SHA
+from mirage.core.github.constants import COMMIT_SHA, WALK_LIMIT
 from mirage.core.github.read import read_many as _read_many
 from mirage.core.github.read import read_stream as _read_stream
 from mirage.core.github.readdir import readdir as _readdir
@@ -76,6 +76,7 @@ class GitHubVFS(BaseVFS):
     # VFS.
     index_ttl: float = 86_400
     whole_word_search: bool = True
+    walk_limit: int = WALK_LIMIT
 
     def __init__(
         self,
@@ -136,10 +137,13 @@ class GitHubVFS(BaseVFS):
                 "constructor kwargs or in GitHubConfig"
             )
         self.config = config
-        self.walk_limit = config.walk_limit
         self.accessor = GitHubAccessor(
             GitHubAccount(
-                GhConfig(token=config.token, base_url=config.base_url)
+                GhConfig(
+                    token=config.token,
+                    base_url=config.base_url,
+                    timeout=config.timeout,
+                )
             ),
             owner,
             repo,

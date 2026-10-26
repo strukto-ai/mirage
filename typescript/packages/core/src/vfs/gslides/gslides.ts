@@ -33,7 +33,6 @@ import { makeFilename } from './slide_entry.ts'
 import type { DeltaHook } from '../../events/base.ts'
 import { unlink as gslidesUnlink } from '../../core/gslides/unlink.ts'
 import { rename as gslidesRename } from '../../core/gslides/rename.ts'
-import { WALK_LIMIT } from '../constants.ts'
 
 export const VFS_MD = `{prefix}
   owned/
@@ -116,12 +115,9 @@ export class GSlidesVFS extends BaseVFS {
   readonly config: GSlidesConfig
   override readonly accessor: GSlidesAccessor
 
-  override readonly walkLimit: number
-
   constructor(config: GSlidesConfig) {
     super()
     this.config = config
-    this.walkLimit = config.walkLimit ?? WALK_LIMIT
     const tm = new TokenManager(config)
     this.accessor = new GSlidesAccessor({ tokenManager: tm })
   }

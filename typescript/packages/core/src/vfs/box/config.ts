@@ -20,8 +20,10 @@ import {
   z,
 } from '../secrets.ts'
 import type { ConfigOf, RedactedConfig } from '../secrets.ts'
+import { timeoutShape } from '../../core/api/config.ts'
 
 export interface BoxConfig {
+  timeout?: number
   // API origin override (e.g. an integ fake). Defaults to api.box.com.
   endpoint?: string
   // Box folder id to mount as the workspace root instead of the account
@@ -29,7 +31,6 @@ export interface BoxConfig {
   // the Box web URL (box.com/folder/<id>), so a subfolder mount survives
   // reorganization that a path prefix would not.
   rootFolderId?: string
-  walkLimit?: number
   clientId?: string
   clientSecret?: string
   refreshToken?: string
@@ -48,6 +49,7 @@ export interface BoxConfig {
 }
 
 const BoxConfigSchema = z.object({
+  ...timeoutShape,
   endpoint: z
     .string()
     .optional()
@@ -58,11 +60,6 @@ const BoxConfigSchema = z.object({
     description:
       "Box folder ID the mount uses as its root, from the folder's web URL (`box.com/folder/<id>`); unlike a path it survives renames and moves. `0` is the account root.",
     default: '0',
-  }),
-  walkLimit: z.number().int().min(-1).optional().meta({
-    description:
-      'Most files one command walks under a folder: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit and reads every file without asking Box search, which lags writes.',
-    default: 1000,
   }),
   clientId: z
     .string()

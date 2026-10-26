@@ -51,7 +51,6 @@ class DatabricksVolumeVFS(BaseVFS):
     ) -> None:
         super().__init__()
         self.config = config
-        self.walk_limit = config.walk_limit
         self.accessor = DatabricksVolumeAccessor(self.config)
 
     async def readdir(

@@ -23,9 +23,9 @@ const decode = (bytes: Uint8Array): string => new TextDecoder().decode(bytes)
 
 describe('failureResult', () => {
   it('reports 124 with the timeout message', () => {
-    const result = failureResult(new CommandTimeoutError('sleep 99', 2))
+    const result = failureResult(new CommandTimeoutError('line', 2))
     expect(result.exitCode).toBe(124)
-    expect(decode(result.stderr)).toBe('sleep 99: timed out after 2s\n')
+    expect(decode(result.stderr)).toBe('line: timed out after 2s\n')
   })
 
   it('keeps a usage error exit code', () => {

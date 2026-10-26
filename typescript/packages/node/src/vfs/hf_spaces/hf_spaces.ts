@@ -18,7 +18,6 @@ import { accountOf, HfSpacesAccessor } from '../../accessor/hf_hub.ts'
 import { assertHfRepoRef } from '../hf_buckets/config.ts'
 import { HfHubVFS } from '../hf_hub/base.ts'
 import { type HfSpacesConfig, type HfSpacesConfigRedacted, redactHfSpacesConfig } from './config.ts'
-import { WALK_LIMIT } from '@struktoai/mirage-core/vfs/constants'
 
 export interface HfSpacesVFSState {
   type: string
@@ -30,10 +29,8 @@ export class HfSpacesVFS extends HfHubVFS {
   readonly config: HfSpacesConfig
   readonly accessor: HfSpacesAccessor
 
-  override readonly walkLimit: number
   constructor(config: HfSpacesConfig) {
     super()
-    this.walkLimit = config.walkLimit ?? WALK_LIMIT
     assertHfRepoRef(config.repoId, 'repo_id')
     const normalized = normalizeKeyPrefix(config.keyPrefix)
     const cfg: HfSpacesConfig = { ...config }

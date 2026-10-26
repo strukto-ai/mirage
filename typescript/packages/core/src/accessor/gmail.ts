@@ -18,9 +18,16 @@ import type { GmailConfig } from '../vfs/gmail/config.ts'
 
 export class GmailAccessor extends GoogleApiAccessor {
   readonly config: GmailConfig
+  /**
+   * Whether the mount walks under a `walkLimit`, asked when a listing runs,
+   * since the mount settles its own once mounted; a listing then keeps each
+   * message's text for the search.
+   */
+  readonly capped: () => boolean
 
-  constructor(opts: { tokenManager: TokenManager; config: GmailConfig }) {
+  constructor(opts: { tokenManager: TokenManager; config: GmailConfig; capped?: () => boolean }) {
     super(opts)
     this.config = opts.config
+    this.capped = opts.capped ?? (() => true)
   }
 }

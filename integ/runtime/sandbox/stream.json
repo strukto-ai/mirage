@@ -16,18 +16,13 @@
       "world": {
         "mounts": {
           "/ram": {
-            "vfs": "ram",
-            "limits": {
-              "perl": {
-                "timeout_seconds": 3
-              }
-            }
+            "vfs": "ram"
           }
         }
       },
       "steps": [
         {
-          "command": "perl -e '$|=1; print qq(first\\n); sleep 30' | head -n 1",
+          "command": "timeout 3 perl -e '$|=1; print qq(first\\n); sleep 30' | head -n 1",
           "expect": {
             "exit": 0,
             "stdout": "first\n"
@@ -53,12 +48,12 @@
       "world": {
         "mounts": {
           "/ram": {
-            "vfs": "ram",
-            "limits": {
-              "yes": {
-                "timeout_seconds": 20
-              }
-            }
+            "vfs": "ram"
+          }
+        },
+        "command_limits": {
+          "line": {
+            "timeout_seconds": 20
           }
         }
       },
@@ -151,12 +146,12 @@
       "world": {
         "mounts": {
           "/ram": {
-            "vfs": "ram",
-            "limits": {
-              "head": {
-                "timeout_seconds": 20
-              }
-            }
+            "vfs": "ram"
+          }
+        },
+        "command_limits": {
+          "line": {
+            "timeout_seconds": 20
           }
         }
       },

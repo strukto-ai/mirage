@@ -20,21 +20,23 @@ import {
   z,
 } from '@struktoai/mirage-core/vfs/secrets'
 import type { ConfigOf, RedactedConfig } from '@struktoai/mirage-core/vfs/secrets'
+import { timeoutShape } from '@struktoai/mirage-core/core/api/config'
 
 // Stricter than core's DropboxConfig on purpose: a server is a confidential
 // client and python requires the secret too, while the browser refreshes as a
 // PKCE public client that has none. The class in core takes either.
 export interface DropboxConfig {
+  timeout?: number
   clientId: string
   clientSecret: string
   refreshToken: string
   rootPath?: string
-  walkLimit?: number
   endpoint?: string
   refreshFn?: (refreshToken: string) => Promise<{ accessToken: string; expiresIn: number }>
 }
 
 const DropboxConfigSchema = z.object({
+  ...timeoutShape,
   clientId: z.string().describe('Dropbox app key.'),
   clientSecret: secretStr().describe('Dropbox app secret.'),
   refreshToken: secretStr().describe(
@@ -46,11 +48,6 @@ const DropboxConfigSchema = z.object({
     .describe(
       'Dropbox folder the mount uses as its root, such as `/Projects`; unset or `/` is the account root. `..` segments are rejected.',
     ),
-  walkLimit: z.number().int().min(-1).optional().meta({
-    description:
-      'Most files one command walks under a folder: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit and reads every file without asking Dropbox search, which needs a plan with full-text search and lags writes.',
-    default: 1000,
-  }),
   endpoint: z
     .string()
     .optional()

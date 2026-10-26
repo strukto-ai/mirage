@@ -21,6 +21,7 @@ import {
   secretSchema,
   secretStr,
 } from '../../vfs/secrets.ts'
+import { timeoutShape } from '../api/config.ts'
 
 // A pre-minted token read on every request. This is how a caller that
 // already owns the OAuth dance (a service account, a host application's
@@ -54,6 +55,7 @@ function hasGoogleCredential(config: {
 
 export const GoogleConfigSchema = z
   .object({
+    ...timeoutShape,
     // Two ways to authenticate, the same two MsGraphConfig offers: a token
     // (or provider) supplied by the caller, or the refresh-token grant where
     // mirage mints and renews the access token itself through TokenManager.
@@ -113,13 +115,7 @@ export const GoogleConfigSchema = z
 // adds a shape that can drift from it.
 export type GoogleConfig = ConfigOf<typeof GoogleConfigSchema>
 
-export const GoogleAppConfigSchema = GoogleConfigSchema.extend({
-  walkLimit: z.number().int().min(-1).optional().meta({
-    description:
-      "Most files one command walks under a folder: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit and reads every file without asking Drive full-text search, which searches a file's text, not the JSON the mount renders.",
-    default: 1000,
-  }),
-})
+const GoogleAppConfigSchema = GoogleConfigSchema
 
 export type GoogleAppConfig = ConfigOf<typeof GoogleAppConfigSchema>
 

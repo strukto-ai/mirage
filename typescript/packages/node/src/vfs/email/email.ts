@@ -68,12 +68,9 @@ export class EmailVFS extends BaseVFS {
   readonly config: EmailConfig
   override readonly accessor: EmailAccessor
 
-  override readonly walkLimit: number
-
   constructor(config: EmailConfig) {
     super()
     this.config = config
-    this.walkLimit = config.walkLimit
     this.accessor = new EmailAccessor(config)
   }
 

@@ -21,6 +21,7 @@ import {
   secretStr,
 } from '../secrets.ts'
 import * as kp from '../../utils/key_prefix.ts'
+import { timeoutShape } from '../../core/api/config.ts'
 
 export type S3BrowserOperation = 'GET' | 'PUT' | 'HEAD' | 'DELETE' | 'LIST' | 'COPY'
 
@@ -81,12 +82,7 @@ export const S3ConfigSchema = z.object({
     .describe(
       'Address the bucket in the URL path (`<endpoint>/<bucket>/<key>`) instead of as a subdomain of the endpoint.',
     ),
-  timeoutMs: z
-    .number()
-    .optional()
-    .describe(
-      "Milliseconds to wait to connect, and for each read of a response, before the request fails. Unset leaves the AWS SDK's own timeouts. Applies to the AWS SDK client only: with `presignedUrlProvider` the signed-URL requests take no timeout.",
-    ),
+  ...timeoutShape,
   presignedUrlProvider: secretSchema(
     z.custom<S3BrowserPresignedUrlProvider>((value) => typeof value === 'function'),
   )
@@ -113,11 +109,6 @@ export const S3ConfigSchema = z.object({
     .describe(
       'Key prefix inside the bucket that the mount treats as its root; keys outside it are not visible. Leading slashes are dropped and a trailing `/` is added.',
     ),
-  walkLimit: z.number().int().min(-1).optional().meta({
-    description:
-      'Most files one command walks under a folder: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit.',
-    default: 1000,
-  }),
 })
 
 export interface S3Config {
@@ -129,12 +120,11 @@ export interface S3Config {
   sessionToken?: string
   profile?: string
   forcePathStyle?: boolean
-  timeoutMs?: number
+  timeout?: number
   presignedUrlProvider?: S3BrowserPresignedUrlProvider
   httpAgentProvider?: S3HttpAgentProvider
   defaultContentType?: string
   keyPrefix?: string
-  walkLimit?: number
 }
 
 export function normalizeKeyPrefix(v: string | undefined): string | undefined {

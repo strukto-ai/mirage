@@ -1,12 +1,12 @@
 ---
 title: Limit command output
-description: Cap command output and execution time at the workspace, mount, or profile level.
+description: Cap command output, execution time and walks at the workspace, mount, or profile level.
 icon: gauge
 ---
 
 Mirage keeps large results from flooding an agent. `cat`, `grep`, `rg`, `head`,
-and `tail` return at most 2,000 lines by default, and every command stops after
-600 seconds.
+and `tail` return at most 2,000 lines by default, a line stops after 600
+seconds, and a walk stops at its mount's `walk_limit`.
 
 ## Set Limits
 
@@ -26,7 +26,10 @@ ws = Workspace(
         }),
     },
     mode=MountMode.WRITE,
-    command_limits={"head": Limit(max_lines=500, timeout_seconds=30)},
+    command_limits={
+        "head": Limit(max_lines=500),
+        "line": Limit(timeout_seconds=30),
+    },
     profiles={
         "researcher": {"command_limits": {"head": Limit(max_lines=5000)}},
     },
@@ -47,7 +50,10 @@ const ws = new Workspace(
   },
   {
     mode: MountMode.WRITE,
-    commandLimits: { head: new Limit({ maxLines: 500, timeoutSeconds: 30 }) },
+    commandLimits: {
+      head: new Limit({ maxLines: 500 }),
+      line: new Limit({ timeoutSeconds: 30 }),
+    },
     profiles: { researcher: { commandLimits: { head: new Limit({ maxLines: 5000 }) } } },
   },
 )
@@ -59,11 +65,24 @@ The workspace YAML uses the same fields in snake case under `command_limits`.
 
 ## Choose Which Limit Applies
 
-A command uses the first configured entry that names it: the session profile,
-the mount, the workspace, the command's own default, then Mirage's built-in
-default. An entry replaces that command's entire limit, so include the timeout
-again when an override should retain it. Commands absent from an override keep
-their inherited limits.
+Each field comes from the most specific entry that sets it: the session profile,
+the mount, then the workspace (each looked up by the command's name, then under
+`"*"`, the entry for every command), the command's own default, and Mirage's
+built-in default; a walk's `walk_limit` ends at the mount backend's default. An
+entry that sets one field inherits the rest.
+
+## Limit a Line's Time
+
+A line has one time limit: the `line` entry's `timeout_seconds`, on the
+workspace or a profile (the profile's over the workspace's). It bounds the whole
+top-level line, loops, pipelines and the lines it runs (`sh -c`, `eval`,
+`xargs`) included, and is 600 seconds unless an entry sets it; `0` or `None`
+lifts it. A line past it exits 124 with `line: timed out after Ns`.
+
+No other entry takes `timeout_seconds`, a `line` entry takes nothing else, and a
+mount has no `line` entry, since a line spans mounts; each is refused when the
+workspace, mount or profile is built. To bound one command inside a line, use
+`timeout`, as in bash: `timeout 5 grep -r TODO /data`.
 
 For commands spanning multiple mounts, Mirage applies the tightest resolved
 limit from those mounts.
@@ -72,13 +91,16 @@ limit from those mounts.
 
 - `max_lines` and `max_bytes` cap output. Use `None` in Python or `null` in
   TypeScript for no cap.
-- `timeout_seconds` sets a deadline. A command that passes it exits 124.
+- `timeout_seconds`, on the `line` entry only, sets the line's deadline. A line
+  that passes it exits 124.
+- `walk_limit` caps the entries one walk lists on a mount, `-1` for no cap; see
+  [walks](/home/integration/walks).
 - `on_exceed=TRUNCATE`, the default, returns the capped output, writes a notice
   to stderr, and preserves the command's exit code.
 - `on_exceed=ERROR` drops the output and exits 1, so `&&` and `||` see a failure.
 
 In TypeScript, use the camel-case forms `maxLines`, `maxBytes`, `timeoutSeconds`,
-and `onExceed`.
+`walkLimit`, and `onExceed`.
 
 Caps apply to each command's printed output. `cat big.txt; echo end` still prints
 `end`. Input to a pipe, redirect, or command substitution is not cut, so

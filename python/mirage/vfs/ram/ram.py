@@ -36,7 +36,6 @@ from mirage.io.types import ByteSource
 from mirage.types import FileStat, PathSpec, VFSName
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.constants import LOCAL_WALK_LIMIT
-from mirage.vfs.errors import VFSConfigError
 from mirage.vfs.ram.store import RAMStore
 
 
@@ -49,24 +48,10 @@ class RAMVFS(BaseVFS):
 
     reads_ranges: bool = True
     local: bool = True
+    walk_limit: int = LOCAL_WALK_LIMIT
 
-    def __init__(self, walk_limit: int = LOCAL_WALK_LIMIT) -> None:
-        """Args:
-        walk_limit (int): the most files one command walks under a
-            directory: searches and listings stop there, and a glob
-            matching more, tar -c, cp -r, rm -r and the like are
-            refused; -1 for no cap.
-        """
-        if (
-            isinstance(walk_limit, bool)
-            or not isinstance(walk_limit, int)
-            or walk_limit < -1
-        ):
-            raise VFSConfigError(
-                "ram: walk_limit: must be an integer of -1 or more"
-            )
+    def __init__(self) -> None:
         super().__init__()
-        self.walk_limit = walk_limit
         self._store = RAMStore()
         self.accessor = RAMAccessor(self._store)
 
@@ -147,7 +132,6 @@ class RAMVFS(BaseVFS):
     def get_state(self) -> dict[str, Any]:
         return {
             "type": self.name,
-            "config": {"walk_limit": self.walk_limit},
             "files": dict(self._store.files),
             "dirs": list(self._store.dirs),
             "modified": dict(self._store.modified),

@@ -47,6 +47,7 @@ Both `READ` and `WRITE` modes are supported.
 {/* generated: config-table minio start */}
 | Field | Description |
 | --- | --- |
+| <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `30` | Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off. |
 | <code style={{ whiteSpace: 'nowrap' }}>bucket</code><br />required | Name of the bucket to mount. |
 | <code style={{ whiteSpace: 'nowrap' }}>region</code><br />default `'us-east-1'` | Region requests are signed for; the gateway's endpoint does not depend on it. |
 | <code style={{ whiteSpace: 'nowrap' }}>endpoint_url</code><br />required | URL of the self-hosted S3 gateway, such as `http://localhost:9000`. |
@@ -56,9 +57,7 @@ Both `READ` and `WRITE` modes are supported.
 | <code style={{ whiteSpace: 'nowrap' }}>aws_profile</code> | Named profile in the shared AWS config and credentials files that supplies credentials when no access key pair is given. |
 | <code style={{ whiteSpace: 'nowrap' }}>path_style</code><br />default `True` | Address the bucket in the URL path (`<endpoint>/<bucket>/<key>`) instead of as a subdomain of the endpoint. |
 | <code style={{ whiteSpace: 'nowrap' }}>key_prefix</code> | Key prefix inside the bucket that the mount treats as its root; keys outside it are not visible. Leading slashes are dropped and a trailing `/` is added. |
-| <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `30` | Seconds to wait to connect, and for each read of a response, before the request fails. |
 | <code style={{ whiteSpace: 'nowrap' }}>proxy</code><br />secret | Proxy URL for every HTTP and HTTPS request to the endpoint. |
-| <code style={{ whiteSpace: 'nowrap' }}>walk_limit</code><br />default `1000` | Most files one command walks under a folder: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit. |
 
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table minio end */}

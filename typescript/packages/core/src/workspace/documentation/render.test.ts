@@ -18,8 +18,9 @@ import { CLI, CLIHandler } from '../../commands/cli/types.ts'
 import { command } from '../../commands/config.ts'
 import { Argument, CommandSpec } from '../../commands/spec/types.ts'
 import { IOResult } from '../../io/types.ts'
+import { ALL_COMMANDS } from '../../policy/builtin/output_cap.ts'
 import { parseSessionProfile } from '../../policy/profile.ts'
-import { MountMode, type PathSpec } from '../../types.ts'
+import { Limit, MountMode, type PathSpec } from '../../types.ts'
 import { norm } from '../../utils/path.ts'
 import { BaseVFS } from '../../vfs/base.ts'
 import { methodName } from '../../vfs/call.ts'
@@ -433,13 +434,11 @@ describe('vfsMd', () => {
   })
 
   it('names no search a mount turned off', async () => {
-    const docs = new GDocsVFS({
-      clientId: 'x',
-      clientSecret: 'y',
-      refreshToken: 'z',
-      walkLimit: -1,
-    })
-    const ws = new Workspace({ '/docs': [docs, MountMode.READ] }, { mode: MountMode.READ })
+    const docs = new GDocsVFS({ clientId: 'x', clientSecret: 'y', refreshToken: 'z' })
+    const ws = new Workspace(
+      { '/docs': [docs, MountMode.READ, { [ALL_COMMANDS]: new Limit({ walkLimit: -1 }) }] },
+      { mode: MountMode.READ },
+    )
     expect(await ws.vfsMd()).not.toContain('search')
   })
 

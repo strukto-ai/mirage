@@ -27,7 +27,6 @@ import type { DeltaHook } from '../../events/base.ts'
 import { filesContaining as gmailFilesContaining } from '../../core/gmail/search.ts'
 import { read as gmailRead } from '../../core/gmail/read.ts'
 import { stat as gmailStat } from '../../core/gmail/stat.ts'
-import { WALK_LIMIT } from '../constants.ts'
 
 export const VFS_MD = `{prefix}
   <label>/
@@ -112,14 +111,15 @@ export class GmailVFS extends BaseVFS {
   readonly config: GmailConfig
   override readonly accessor: GmailAccessor
 
-  override readonly walkLimit: number
-
   constructor(config: GmailConfig) {
     super()
     this.config = config
-    this.walkLimit = config.walkLimit ?? WALK_LIMIT
     const tm = new TokenManager(config)
-    this.accessor = new GmailAccessor({ tokenManager: tm, config })
+    this.accessor = new GmailAccessor({
+      tokenManager: tm,
+      config,
+      capped: () => this.walkLimit >= 0,
+    })
   }
 
   override readdir(path: PathSpec, handed?: Handed): Promise<FileStat[] | DirListing> {

@@ -222,7 +222,7 @@ def selftest_mount_read() -> None:
     )
 
     bare, moded, limited, kept = RAMVFS(), RAMVFS(), RAMVFS(), RAMVFS()
-    limits = {"cat": Limit(timeout_seconds=5)}
+    limits = {"cat": Limit(max_lines=5)}
     out = runner_main.adapters.apply_mount_read(
         {
             "/data": bare,
@@ -1255,7 +1255,7 @@ MOUNT_READ_PROBE = (
     "  const moded = new n.RAMVFS()\n"
     "  const limited = new n.RAMVFS()\n"
     "  const kept = new n.RAMVFS()\n"
-    "  const limits = { cat: { timeoutSeconds: 5 } }\n"
+    "  const limits = { cat: { maxLines: 5 } }\n"
     "  const m = a.applyMountRead({ '/data': bare, '/ro': [moded, 'read'],\n"
     "    '/lim': [limited, 'read', limits], '/keep': kept },\n"
     "    { '/data': bound, '/ro': bound, '/lim': bound })\n"

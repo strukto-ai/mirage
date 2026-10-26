@@ -11,7 +11,6 @@ import type { PathSpec, FileStat } from '../../types.ts'
 import { readdir } from '../../core/wandb/readdir.ts'
 import { readStream } from '../../core/wandb/read.ts'
 import { stat } from '../../core/wandb/stat.ts'
-import { WALK_LIMIT } from '../constants.ts'
 
 export const VFS_MD = `Read-only W&B experiments: /<entity>/<project>/<run-id>/ contains
 run.json (identity, creator, sweep/group/job, tags, timestamps, notes, system metrics,
@@ -42,11 +41,9 @@ export class WandbVFS extends BaseVFS {
   readonly config: WandbConfig
   override readonly accessor: WandbAccessor
 
-  override readonly walkLimit: number
   constructor(config: WandbConfig) {
     super()
     this.config = config
-    this.walkLimit = config.walkLimit ?? WALK_LIMIT
     this.accessor = new WandbAccessor(config)
   }
 

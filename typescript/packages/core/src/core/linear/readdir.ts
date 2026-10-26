@@ -156,7 +156,7 @@ async function listIssues(
       extra: {
         issue_key: pickString(issue, 'identifier'),
         json_size: toJsonBytes(normalizeIssue(issue)).length,
-        ...(accessor.walkLimit >= 0 ? { unsearched: unsearchedText(issue) } : {}),
+        ...(accessor.capped() ? { unsearched: unsearchedText(issue) } : {}),
       },
     }),
   )

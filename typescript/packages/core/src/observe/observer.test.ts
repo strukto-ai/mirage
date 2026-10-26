@@ -82,6 +82,25 @@ describe('Observer', () => {
     expect(parsed.exit_code).toBe(0)
   })
 
+  // Twin of test_a_long_line_lets_the_loop_run_while_it_logs.
+  it('lets the loop run while it logs a long line', async () => {
+    const o = new Observer(new RAMObserverStore(), new ManualClock(NEW_YEAR))
+    const rec = new OpRecord({
+      op: 'read',
+      path: '/f',
+      source: 'ram',
+      bytes: 1,
+      timestamp: NEW_YEAR * 1000,
+      durationMs: 1,
+    })
+    let turned = false
+    setTimeout(() => {
+      turned = true
+    }, 0)
+    await o.logExecution('grep -r x /d', new IOResult(), new Array<OpRecord>(10_000).fill(rec), 's')
+    expect(turned).toBe(true)
+  })
+
   it('appends successive entries', async () => {
     const store = new RAMObserverStore()
     const o = new Observer(store, new ManualClock(NEW_YEAR))

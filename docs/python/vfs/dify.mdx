@@ -33,15 +33,14 @@ The VFS is read-only. A snapshot keeps its config, and a load needs the mount ha
 {/* generated: config-table dify start */}
 | Field | Description |
 | --- | --- |
+| <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `30` | Seconds a request may wait to connect, or between two reads of its answer, before it fails; a download that keeps flowing is never cut off. |
 | <code style={{ whiteSpace: 'nowrap' }}>api_key</code><br />required, secret | Dify Knowledge API key, sent as `Authorization: Bearer`. |
 | <code style={{ whiteSpace: 'nowrap' }}>base_url</code><br />required | Dify API root, such as `https://api.dify.ai/v1`. |
 | <code style={{ whiteSpace: 'nowrap' }}>dataset_id</code><br />required | ID of the Knowledge dataset the mount shows. |
 | <code style={{ whiteSpace: 'nowrap' }}>slug_metadata_name</code><br />default `'slug'` | Document metadata field whose value is the document's path in the mount. A document without it is mounted under its document name. |
 | <code style={{ whiteSpace: 'nowrap' }}>max_concurrency</code><br />default `10` | The most Dify API requests in flight at once. |
-| <code style={{ whiteSpace: 'nowrap' }}>request_timeout</code><br />default `30.0` | Seconds to wait for one HTTP request to Dify. |
 | <code style={{ whiteSpace: 'nowrap' }}>retry_attempts</code><br />default `4` | Attempts per request, the first included. A 429, a 5xx or a transport error is retried. |
 | <code style={{ whiteSpace: 'nowrap' }}>retry_max_delay</code><br />default `30.0` | Longest wait in seconds before a retry, whether from backoff or `Retry-After`. |
-| <code style={{ whiteSpace: 'nowrap' }}>walk_limit</code><br />default `1000` | Most files one command walks under a folder: `grep -r`, `find` and other walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is refused. `-1` lifts the limit. |
 
 Fields marked secret are redacted in snapshots.
 {/* generated: config-table dify end */}

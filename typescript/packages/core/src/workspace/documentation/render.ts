@@ -469,7 +469,7 @@ export function skillMd(registry: MountRegistry, session: SessionState): string 
     compareCodePoints(a, b),
   )) {
     const found = cliPages(head, install.cli.spec, install.cli.spec.usageStyle, session, registry)
-    pages.push(...found)
+    for (const item of found) pages.push(item)
     if (found.length > 0 && ownsArgv(install.cli))
       pages.push(
         'This program parses its own arguments; only its registered description is available here.',

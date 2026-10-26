@@ -42,6 +42,7 @@ class EmailAccessor(Accessor):
                     self.config.imap_host,
                     self.config.imap_port,
                     self.config.use_ssl,
+                    self.config.timeout,
                 )
                 response = await client.login(
                     self.config.username, reveal_secret(self.config.password)

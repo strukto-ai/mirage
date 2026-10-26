@@ -93,62 +93,6 @@ export const hubFetch: typeof fetch = async (input, init) => {
  * serves every public repo without a token, so a mount with no credential
  * reads normally and only the write path needs one.
  */
-/**
- * A fetch that gives up on a request making no progress for `ms`.
- *
- * The clock runs while connecting and waiting for the answer, and restarts on
- * every chunk of the body, so a large download that keeps flowing is never
- * cut off; a total bound would fail any file that takes longer than it to
- * arrive. It is what huggingface_hub's own timeout means, and the python twin
- * is `stall_timeout`, which aiohttp spells as sock_connect and sock_read. A
- * bound of zero or less is none, as aiohttp reads a zero.
- */
-export function stallFetch(ms: number): typeof fetch {
-  if (ms <= 0) return hubFetch
-  return async (input, init) => {
-    const controller = new AbortController()
-    let timer: ReturnType<typeof setTimeout> | undefined
-    const arm = (): void => {
-      clearTimeout(timer)
-      timer = setTimeout(() => {
-        controller.abort(new DOMException(`no progress for ${String(ms)}ms`, 'TimeoutError'))
-      }, ms)
-      // A body the caller stopped reading must not hold the process open.
-      timer.unref()
-    }
-    arm()
-    const signal =
-      init?.signal == null ? controller.signal : AbortSignal.any([init.signal, controller.signal])
-    let response: Response
-    try {
-      response = await hubFetch(input, { ...init, signal })
-    } catch (err) {
-      clearTimeout(timer)
-      throw err
-    }
-    if (response.body === null) {
-      clearTimeout(timer)
-      return response
-    }
-    const body = response.body.pipeThrough(
-      new TransformStream<Uint8Array, Uint8Array>({
-        transform(chunk, sink) {
-          arm()
-          sink.enqueue(chunk)
-        },
-        flush() {
-          clearTimeout(timer)
-        },
-      }),
-    )
-    return new Response(body, {
-      status: response.status,
-      statusText: response.statusText,
-      headers: response.headers,
-    })
-  }
-}
-
 export function hubHeaders(token: string | undefined): Record<string, string> {
   const headers: Record<string, string> = { Accept: 'application/json' }
   if (token !== undefined && token !== '') headers.Authorization = `Bearer ${token}`
@@ -249,7 +193,8 @@ export async function hubGet(
     headers: hubHeaders(account.token),
     params,
     retry: RETRY,
-    fetchFn: stallFetch(account.timeoutMs),
+    fetchFn: hubFetch,
+    timeout: account.config.timeout,
   })
 }
 
@@ -265,7 +210,8 @@ export async function hubGetResponse(
     params,
     retry: RETRY,
     read: 'response',
-    fetchFn: stallFetch(account.timeoutMs),
+    fetchFn: hubFetch,
+    timeout: account.config.timeout,
   })) as ApiResponse
 }
 
@@ -286,7 +232,8 @@ export async function hubPost(
     params,
     json: body,
     retry,
-    fetchFn: stallFetch(account.timeoutMs),
+    fetchFn: hubFetch,
+    timeout: account.config.timeout,
   })
 }
 
@@ -303,7 +250,8 @@ export async function hubRequest(
     headers: hubHeaders(account.token),
     params,
     retry: WRITE_RETRY,
-    fetchFn: stallFetch(account.timeoutMs),
+    fetchFn: hubFetch,
+    timeout: account.config.timeout,
   }
   if (body !== null && body !== undefined) options.json = body
   return apiRequest(method.toUpperCase(), url, options)
@@ -322,7 +270,8 @@ export async function hubPostNdjson(
     params,
     body: payload,
     retry: WRITE_RETRY,
-    fetchFn: stallFetch(account.timeoutMs),
+    fetchFn: hubFetch,
+    timeout: account.config.timeout,
   })
 }
 
@@ -343,7 +292,8 @@ export async function hubBytes(
     retry: RETRY,
     read: 'bytes',
     window,
-    fetchFn: stallFetch(account.timeoutMs),
+    fetchFn: hubFetch,
+    timeout: account.config.timeout,
   })) as Uint8Array
 }
 
@@ -365,7 +315,8 @@ export async function hubBytesTagged(
     retry: RETRY,
     read: 'bytes_response',
     window,
-    fetchFn: stallFetch(account.timeoutMs),
+    fetchFn: hubFetch,
+    timeout: account.config.timeout,
   })) as ApiResponse
   return [response.data as Uint8Array, response.headers.etag ?? '']
 }
@@ -393,7 +344,8 @@ export async function* hubStream(
   yield* apiStream(url, {
     errorOf,
     headers: hubHeaders(account.token),
-    fetchFn: stallFetch(account.timeoutMs),
+    fetchFn: hubFetch,
+    timeout: account.config.timeout,
     retry: RETRY,
     ...(onResponse === undefined ? {} : { onResponse }),
   })

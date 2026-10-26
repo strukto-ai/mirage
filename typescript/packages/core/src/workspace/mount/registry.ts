@@ -37,8 +37,9 @@ import { DocumentVFS } from '../../vfs/document/document.ts'
 import { HistoryViewVFS } from '../../vfs/history/history.ts'
 import { DevIndex, DevVFS } from '../../vfs/dev/dev.ts'
 import { type Decisions, MountRootPolicy, Policies } from '../../policy/index.ts'
+import { ALL_COMMANDS } from '../../policy/builtin/output_cap.ts'
 import {
-  type Limit,
+  Limit,
   type ReadSpec,
   DEFAULT_READ_SPEC,
   MountMode,
@@ -405,7 +406,10 @@ export class MountRegistry {
     const m = new MountEntry(
       alias === undefined ? init : { ...init, indexConfig: alias.indexConfig },
     )
-    if (alias !== undefined) m.activity = alias.activity
+    if (alias !== undefined) {
+      m.activity = alias.activity
+      m.backendWalkLimit = alias.backendWalkLimit
+    }
     for (const cmd of [...GENERIC_COMMANDS, ...GENERAL_COMMANDS]) {
       m.registerGeneral(cmd)
     }
@@ -503,10 +507,10 @@ export class MountRegistry {
         },
         this.mountList,
       )
+      this.settleWalkLimit(m)
       this.attachManager(m)
       this.mountList.push(m)
       this.mountList.sort((a, b) => b.prefix.length - a.prefix.length)
-      this.rowCache = null
       if (norm === '/') this.rootRef = m
       return m
     } catch (err) {
@@ -601,11 +605,50 @@ export class MountRegistry {
    * command's output guard resolves with; tolerant of a prefix that matches
    * no mount (unmounted between stamp and boundary) by answering null.
    */
-  limitOverride(prefix: string, name: string): Limit | null {
-    for (const m of this.mountList) {
-      if (m.prefix === prefix || rstripSlash(m.prefix) === prefix) {
-        return m.commandLimits.get(name) ?? null
+  /**
+   * Set the mount's `walkLimit`, which decides how its backend searches (its
+   * own search API under a cap, every file without): the mount's `*` entry,
+   * else the workspace's, else the backend's default, a null one lifting the
+   * cap. A command's own `walkLimit` changes only how far that command walks.
+   * The mounts of one VFS share its search, so they settle on one limit; one
+   * that would settle on another is refused. Mirrors Python's
+   * `settle_walk_limit`.
+   */
+  settleWalkLimit(entry: MountEntry): void {
+    const settled = this.settledWalkLimit(entry)
+    for (const other of this.mountList) {
+      if (other === entry || other.vfs !== entry.vfs) continue
+      const theirs = this.settledWalkLimit(other)
+      if (theirs !== settled) {
+        throw new Error(
+          `mount ${entry.prefix}: walk_limit ${String(settled)} differs from ${other.prefix}'s ${String(theirs)} on the same VFS`,
+        )
       }
+    }
+    entry.vfs.walkLimit = settled
+    entry.calls = entry.answeredCalls()
+    this.rowCache = null
+  }
+
+  private settledWalkLimit(entry: MountEntry): number {
+    const found = Limit.layered([
+      entry.commandLimits.get(ALL_COMMANDS) ?? null,
+      Object.hasOwn(this.commandLimits, ALL_COMMANDS)
+        ? (this.commandLimits[ALL_COMMANDS] ?? null)
+        : null,
+      new Limit({ walkLimit: entry.backendWalkLimit }),
+    ])
+    return found === null ? entry.backendWalkLimit : (found.walkLimit ?? -1)
+  }
+
+  /**
+   * The mount a command's output guard resolves a stamped prefix to; null
+   * for a prefix that matches no mount (unmounted between stamp and
+   * boundary). Mirrors Python's `limit_mount`.
+   */
+  limitMount(prefix: string): MountEntry | null {
+    for (const m of this.mountList) {
+      if (m.prefix === prefix || rstripSlash(m.prefix) === prefix) return m
     }
     return null
   }
@@ -698,6 +741,8 @@ export class MountRegistry {
         calls: mount.calls,
         searchable: vfs.searchable,
         walkLimit: vfs.walkLimit,
+        commandLimits: mount.commandLimits,
+        workspaceLimits: this.commandLimits,
       }
     })
     return [...this.rowCache]

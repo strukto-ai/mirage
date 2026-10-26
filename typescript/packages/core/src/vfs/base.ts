@@ -268,8 +268,10 @@ export class BaseVFS<A extends Accessor = Accessor> {
    * work tree fail, a glob matching more is refused, and so are tar -c, zip
    * -r, cp -r, rm -r, chmod -R, chown -R, chgrp -R, mv to another mount and
    * diff -r of a directory holding more (`beforeFullWalk`); -1 for no cap.
+   * This is the backend's own value: the mount's `'*'` command limit, else
+   * the workspace's, replaces it when the VFS is mounted.
    */
-  readonly walkLimit: number = WALK_LIMIT
+  walkLimit: number = WALK_LIMIT
   /**
    * Extensions whose `read` is a rendering rather than the stored bytes,
    * each to the name of the method that renders it, which takes `read`'s
@@ -734,9 +736,9 @@ export class BaseVFS<A extends Accessor = Accessor> {
    * the first file it touches there: tar -c, zip -r, cp -r, mv across
    * mounts, diff -r, rm -r, chmod -R, chown -R and chgrp -R. Resolve to let
    * the walk run; reject to refuse it, and the error's message is what the
-   * command prints. The default refuses more than `walkLimit` files.
-   * Searches and listings are never refused: they stop after `walkLimit`
-   * files.
+   * command prints. The dispatcher has already refused more than the
+   * command's `walkLimit` files, so the default lets the walk run. Searches
+   * and listings are never refused: they stop after `walkLimit` files.
    *
    * @param path the directory about to be walked.
    * @param files how many files the session sees under `path`, with every
@@ -745,13 +747,7 @@ export class BaseVFS<A extends Accessor = Accessor> {
    *   null when neither counts, and the guard counts them itself.
    */
   @vfsCall({ effect: Effect.READ, target: Target.DIR })
-  beforeFullWalk(_path: PathSpec, files: number | null, _handed?: Handed): Promise<void> {
-    const limit = this.walkLimit
-    if (limit >= 0 && files !== null && files > limit) {
-      return Promise.reject(
-        new Error(`more than ${String(limit)} files in scope (walk_limit); narrow the path`),
-      )
-    }
+  beforeFullWalk(_path: PathSpec, _files: number | null, _handed?: Handed): Promise<void> {
     return Promise.resolve()
   }
 

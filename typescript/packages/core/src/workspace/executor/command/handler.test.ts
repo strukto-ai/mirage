@@ -11,14 +11,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { CommandFnResult } from '../../../commands/config.ts'
 import { PartialOutputError, UsageError } from '../../../commands/errors.ts'
 import { enoent } from '../../../errors/fs.ts'
 import { PipeClosed } from '../../../io/errors.ts'
 import { IOResult, materialize, type ByteSource, type Rows } from '../../../io/types.ts'
-import { Limit, PathSpec, type Producer } from '../../../types.ts'
-import { CommandTimeoutError } from '../../../errors/types.ts'
+import { PathSpec, type Producer } from '../../../types.ts'
 import { cliVoice, mountVoice, runHandler, type RunHandlerOpts } from './handler.ts'
 
 const ENC = new TextEncoder()
@@ -44,7 +43,7 @@ function run(
   voice = LEAF,
   opts: RunHandlerOpts = {},
 ): Promise<CommandFnResult> {
-  return runHandler(body, 'x', null, PRODUCER, voice, opts)
+  return runHandler(body, 'x', PRODUCER, voice, opts)
 }
 
 async function text(source: ByteSource | null | undefined): Promise<string> {
@@ -125,7 +124,7 @@ describe('runHandler', () => {
 })
 
 describe('runHandler with rows', () => {
-  it('holds and drops caches until a renderer past its timeout settles', async () => {
+  it('holds and drops caches until a renderer past its abort settles', async () => {
     // A renderer cannot be cancelled, so what the caller holds for the
     // handler (a CLI's client) is kept until the rendered answer settles, a
     // write it makes late is followed by a cache drop, and the stream it
@@ -154,24 +153,55 @@ describe('runHandler with rows', () => {
     }
     let settled = 0
     const drops = new Drops()
-    const out = runHandler(
-      Promise.resolve([null, new IOResult({ rows })]),
-      'x',
-      new Limit({ timeoutSeconds: 0.01 }),
-      PRODUCER,
-      LEAF,
-      {
-        drop: drops.drop,
-        settle: () => {
-          settled += 1
-        },
+    const abort = new AbortController()
+    abort.abort()
+    const out = runHandler(Promise.resolve([null, new IOResult({ rows })]), 'x', PRODUCER, LEAF, {
+      drop: drops.drop,
+      settle: () => {
+        settled += 1
       },
-    )
-    await expect(out).rejects.toBeInstanceOf(CommandTimeoutError)
+      signal: abort.signal,
+    })
+    await expect(out).rejects.toMatchObject({ name: 'AbortError' })
     await new Promise((resolve) => setTimeout(resolve, 0))
     expect([settled, drops.count]).toEqual([0, 1])
     finish()
     await new Promise((resolve) => setTimeout(resolve, 0))
     expect([settled, closed, drops.count]).toEqual([1, 1, 2])
+  })
+
+  it('reports a drop that fails once a body past its abort settles', async () => {
+    let calls = 0
+    const drop = (): Promise<void> => {
+      calls += 1
+      return calls === 1 ? Promise.resolve() : Promise.reject(new Error('torn down'))
+    }
+    let finish: () => void = () => undefined
+    const body = new Promise<CommandFnResult>((resolve) => {
+      finish = () => {
+        resolve([null, new IOResult()])
+      }
+    })
+    const abort = new AbortController()
+    abort.abort()
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const unhandled: unknown[] = []
+    const onUnhandled = (reason: unknown): void => {
+      unhandled.push(reason)
+    }
+    process.on('unhandledRejection', onUnhandled)
+    try {
+      await expect(run(body, LEAF, { drop, signal: abort.signal })).rejects.toMatchObject({
+        name: 'AbortError',
+      })
+      finish()
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      expect(calls).toBe(2)
+      expect(unhandled).toEqual([])
+      expect(warn).toHaveBeenCalledWith('x: cache drop after timeout failed: torn down')
+    } finally {
+      process.off('unhandledRejection', onUnhandled)
+      warn.mockRestore()
+    }
   })
 })

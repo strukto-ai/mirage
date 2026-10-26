@@ -21,7 +21,6 @@ from dataclasses import dataclass
 from typing import Any
 
 from mirage.accessor.base import Accessor
-from mirage.commands.builtin.utils.limit import run_with_timeout
 from mirage.commands.config import CommandFnResult, Context
 from mirage.commands.errors import PartialOutputError, UsageError
 from mirage.commands.spec.usage import read_fail_exit_code
@@ -34,7 +33,7 @@ from mirage.io.errors import PipeClosed
 from mirage.io.stream import OutputStream, close_quietly
 from mirage.io.types import ByteSource, CommandOutput, IOResult
 from mirage.shell.bytes import encode_text
-from mirage.types import Limit, PathSpec, Producer
+from mirage.types import PathSpec, Producer
 from mirage.workspace.files import Files, reader_of
 
 logger = logging.getLogger(__name__)
@@ -207,7 +206,6 @@ async def answered(body: Awaitable[CommandFnResult]) -> CommandOutput:
 async def run_handler(
     body: Awaitable[CommandFnResult],
     name: str,
-    limit: Limit | None,
     producer: Producer,
     voice: HandlerVoice,
     drop: Callable[[], Awaitable[None]] | None = None,
@@ -216,9 +214,8 @@ async def run_handler(
 ) -> CommandFnResult:
     """Run one handler body: a mount command's, or a CLI leaf's.
 
-    The body runs under the resolved limit's timeout, which must bound
-    it as well as its output: an eager handler does its work inside the
-    call, where the stream guard never runs. A usage error is the
+    The body runs until it answers, or the line's deadline cancels it. A
+    usage error is the
     handler's own words and exit code; any other failure is worded in
     the caller's voice, so the rest of the line keeps running. A handler
     that may have written past the dispatcher drops caches afterwards,
@@ -231,13 +228,12 @@ async def run_handler(
     no producer. None is the handler declining, which a mount's cascade
     reads as "try the next handler". Rows a handler hands over in place
     of stdout (``IOResult.rows``) lose those the session cannot see and
-    are rendered here, inside the timeout, so this is the one place a
+    are rendered here, inside the run, so this is the one place a
     command's output meets the session's hides.
 
     Args:
         body (Awaitable[CommandFnResult]): the started handler call.
-        name (str): the command the timeout names.
-        limit (Limit | None): the resolved limit.
+        name (str): the command the handler runs as.
         producer (Producer): the facts the output guards resolve from.
         voice (HandlerVoice): how the caller words a failure.
         drop (Callable[[], Awaitable[None]] | None): drops the caches a
@@ -249,9 +245,8 @@ async def run_handler(
         vfs (Files | None): the handler's files, whose session's hides
             filter the rows it hands over; None filters none.
     """
-    timeout = limit.timeout_seconds if limit is not None else None
     try:
-        out = await run_with_timeout(_rendered(body, vfs, name), timeout, name)
+        out = await _rendered(body, vfs, name)
     except (CommandTimeoutError, asyncio.CancelledError):
         if drop is not None:
             await drop()

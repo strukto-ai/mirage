@@ -14,7 +14,7 @@
 
 import { concat } from '../../../utils/bytes.ts'
 import { chunks } from '../../../io/cooperative.ts'
-import { OutputStream, closeQuietly, ensureStream } from '../../../io/stream.ts'
+import { closeQuietly, ensureStream } from '../../../io/stream.ts'
 import { type ByteSource, IOResult, materialize } from '../../../io/types.ts'
 import { type Limit, OnExceed } from '../../../types.ts'
 import { CommandTimeoutError } from '../../../errors/types.ts'
@@ -46,95 +46,25 @@ function withDeadline<T>(promise: Promise<T>, ms: number): Promise<T | typeof TI
   })
 }
 
-async function* withTimeout(
-  src: ByteSource,
-  seconds: number,
-  command: string,
-): AsyncIterableIterator<Uint8Array> {
-  const iterable = ensureStream(src)
-  const iterator = iterable[Symbol.asyncIterator]()
-  const deadline = performance.now() + seconds * 1000
-  let pulling = false
-  try {
-    for (;;) {
-      const remaining = deadline - performance.now()
-      if (remaining <= 0) throw new CommandTimeoutError(command, seconds)
-      pulling = true
-      const next = await withDeadline(iterator.next(), remaining)
-      if (next === TIMED_OUT) throw new CommandTimeoutError(command, seconds)
-      pulling = false
-      if (next.done === true) return
-      yield next.value
-    }
-  } finally {
-    const closing = iterator.return?.()
-    if (closing !== undefined) {
-      // A deadline can win while next() is still pending; return is then
-      // queued behind that pull and cannot delay the timeout itself.
-      if (pulling) void closing.catch(() => undefined)
-      else await closing
-    }
-  }
-}
-
-/**
- * Give each pull of a streamed op its own timeout. An op's timeout bounds a
- * backend call, and a streamed op calls the backend once per pull, so each
- * pull gets the whole budget and a consumer that pauses between pulls spends
- * none of it. Mirrors Python's `with_pull_timeout`.
- */
-export async function* withPullTimeout(
-  src: AsyncIterable<Uint8Array>,
-  seconds: number | null,
-  name: string,
-): AsyncIterableIterator<Uint8Array> {
-  const iterator = src[Symbol.asyncIterator]()
-  let pulling = false
-  try {
-    for (;;) {
-      pulling = true
-      const next = await runWithTimeout(iterator.next(), seconds, name)
-      pulling = false
-      if (next.done === true) return
-      yield next.value
-    }
-  } finally {
-    const closing = iterator.return?.()
-    if (closing !== undefined) {
-      if (pulling) {
-        void closing.catch((err: unknown) => {
-          console.debug(`${name}: closing a timed-out stream failed: ${String(err)}`)
-        })
-      } else await closing
-    }
-  }
-}
-
-export function maybeWithTimeout(
-  stream: ByteSource | null,
-  limit: Limit | null,
-  command: string,
-): ByteSource | null {
-  if (stream === null || stream instanceof Uint8Array) return stream
-  const timeout = limit?.timeoutSeconds ?? null
-  if (timeout === null || timeout <= 0) return stream
-  return new OutputStream(withTimeout(stream, timeout, command), () => closeQuietly(stream))
-}
-
 /**
  * Wait for `promise` until its deadline, then throw a timeout error. The call
  * itself runs on, and a stream it answers after the deadline is closed, since
  * no one reads it and it may hold the backend open (an SSH follow's remote
- * `tail`). Mirrors Python's `run_with_timeout`, whose deadline cancels the
- * call itself.
+ * `tail`). `start` is when the budget began (`performance.now()`), when work
+ * before this call already spent part of it. Mirrors Python's
+ * `run_with_timeout`, whose deadline cancels the call itself.
  */
 export async function runWithTimeout<T>(
   promise: Promise<T>,
   seconds: number | null,
   name: string,
+  start?: number,
 ): Promise<T> {
   if (seconds === null || seconds <= 0) return await promise
-  const result = await withDeadline(promise, seconds * 1000)
+  const left = seconds * 1000 - (start === undefined ? 0 : performance.now() - start)
+  // Spent before the call: a race against no time left loses to a call that
+  // settles in a microtask.
+  const result = left > 0 ? await withDeadline(promise, left) : TIMED_OUT
   if (result === TIMED_OUT) {
     void promise.then(
       async (late) => {
@@ -276,28 +206,11 @@ export async function guardOutput(
   return [data, io.stderr, io.exitCode]
 }
 
-/**
- * An invocation's deadline, captured now, before a lazy producer starts
- * running: a check that throws CommandTimeoutError once it has passed.
- * Undefined without a timeout. A lazy output's own timeout leaves the
- * command's signal alone, so a scan inside one pull checks this as well.
- */
-export function deadlineCheck(
-  ctx: Pick<Context, 'timeoutSeconds' | 'spec'>,
-): (() => void) | undefined {
-  const seconds = ctx.timeoutSeconds
-  if (seconds === undefined || seconds <= 0) return undefined
-  const deadline = performance.now() + seconds * 1000
-  return () => {
-    if (performance.now() >= deadline) throw new CommandTimeoutError(ctx.spec?.name ?? '?', seconds)
-  }
-}
-
-/** An invocation's input under its abort and its deadline; `split` as in chunks. */
+/** An invocation's input under its abort; `split` as in chunks. */
 export function guardInput(
   source: ByteSource,
-  ctx: Pick<Context, 'signal' | 'timeoutSeconds' | 'spec'>,
+  ctx: Pick<Context, 'signal'>,
   split = true,
 ): AsyncIterable<Uint8Array> {
-  return chunks(source, ctx.signal, split, deadlineCheck(ctx))
+  return chunks(source, ctx.signal, split)
 }

@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import math
+
 from langfuse import Langfuse
 
 from mirage.accessor.base import Accessor
@@ -26,6 +28,6 @@ class LangfuseAccessor(Accessor):
             public_key=config.public_key,
             secret_key=reveal_secret(config.secret_key),
             host=config.host,
-            timeout=30,
+            timeout=math.ceil(config.timeout),
         )
         self.api = self.client.async_api

@@ -14,7 +14,9 @@
 
 from collections.abc import Callable
 
-from pydantic import BaseModel, ConfigDict, SecretStr
+from pydantic import BaseModel, ConfigDict, Field, SecretStr
+
+from mirage.core.api.constants import DEFAULT_TIMEOUT
 
 GRAPH_VERSION = "v1.0"
 DEFAULT_GRAPH_API = f"https://graph.microsoft.com/{GRAPH_VERSION}"
@@ -37,9 +39,10 @@ class MsGraphConfig(BaseModel):
     deployment but the worldwide one: a sovereign cloud, a private
     endpoint or a test server. Unset uses
     `https://graph.microsoft.com/v1.0`."""
-    timeout: int = 30
-    """Seconds one Graph request may take; also how long a server-side copy
-    is polled before it fails as unconfirmed."""
+    timeout: float = Field(default=DEFAULT_TIMEOUT, gt=0)
+    """Seconds a Graph request may wait to connect, or between two reads of
+    its answer, before it fails; also how long a server-side copy is polled
+    before it fails as unconfirmed."""
     max_retries: int = 5
     """Times a request is retried after a `429`, `503` or `504` response.
     Each retry waits what `Retry-After` asks or an exponential backoff, at

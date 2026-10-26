@@ -14,12 +14,12 @@
 
 from collections.abc import Awaitable, Callable
 
-from pydantic import BaseModel, ConfigDict, Field, SecretStr
+from pydantic import ConfigDict, SecretStr
 
-from mirage.vfs.constants import WALK_LIMIT
+from mirage.core.api.config import TimeoutConfig
 
 
-class BoxConfig(BaseModel):
+class BoxConfig(TimeoutConfig):
     model_config = ConfigDict(
         frozen=True, arbitrary_types_allowed=True, extra="forbid"
     )
@@ -47,11 +47,6 @@ class BoxConfig(BaseModel):
     """Box folder ID the mount uses as its root, from the folder's web URL
     (`box.com/folder/<id>`); unlike a path it survives renames and moves.
     Unset mounts the account root, folder `0`."""
-    walk_limit: int = Field(default=WALK_LIMIT, ge=-1)
-    """Most files one command walks under a folder: `grep -r`, `find` and other
-    walks stop there, and a larger glob, `tar -c`, `cp -r` or `rm -r` is
-    refused. `-1` lifts the limit and reads every file without asking Box
-    search, which lags writes."""
     refresh_fn: Callable[[str], Awaitable[tuple[str, str, int]]] | None = None
     """Async callable that takes the current refresh token and returns
     `(access_token, refresh_token, expires_in)`, called instead of Box's
