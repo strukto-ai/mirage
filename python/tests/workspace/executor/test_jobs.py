@@ -1377,3 +1377,16 @@ async def test_a_workspace_waits_for_anothers_job_status():
     finally:
         await a.close()
         await b.close()
+
+
+@pytest.mark.asyncio
+async def test_a_substitution_lists_anothers_jobs():
+    store = RAMWorkspaceStateStore()
+    a, b = _sharing(store), _sharing(store)
+    try:
+        await a.shell("sleep 30 &", session_id="s")
+        listed = await b.shell('echo "$(jobs)"', session_id="s")
+        assert listed.stdout == b"[1] running sleep 30\n"
+    finally:
+        await a.close()
+        await b.close()

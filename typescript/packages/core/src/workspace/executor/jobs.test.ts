@@ -835,3 +835,18 @@ it("a workspace waits for another's job status", async () => {
     await b.close()
   }
 })
+
+it("a substitution lists another's jobs", async () => {
+  const store = new RAMWorkspaceStateStore()
+  const a = sharing(store)
+  const b = sharing(store)
+  try {
+    await a.shell('sleep 30 &', { sessionId: 's' })
+    expect(stdoutStr(await b.shell('echo "$(jobs)"', { sessionId: 's' }))).toBe(
+      '[1] running sleep 30\n',
+    )
+  } finally {
+    await a.close()
+    await b.close()
+  }
+})

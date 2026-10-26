@@ -28,6 +28,7 @@ import { RAMJobStore } from './ram.ts'
 import { JobTable } from './table.ts'
 import { Job, type JobResult, type JobRunner, JobStatus } from './types.ts'
 import { ManualClock } from '../../utils/clock.ts'
+import type { RecordFields } from '../../workspace/record/types.ts'
 
 const dec = (b: Uint8Array | undefined): string =>
   b === undefined ? '' : new TextDecoder().decode(b)
@@ -1103,5 +1104,83 @@ describe('JobTable on a shared store, across reuse and failure', () => {
     release()
     expect((await waiting).exitCode).toBe(0)
     expect(store.count.most).toBe(1)
+  })
+})
+
+/**
+ * A job store that runs one hook right after a list read, as another
+ * workspace's write landing between a read and what follows it.
+ */
+class HookAfterRead extends RAMJobStore {
+  afterRead: (() => Promise<void>) | null = null
+
+  override async load(sessionId: string): Promise<RecordFields | null> {
+    const fields = await super.load(sessionId)
+    const hook = this.afterRead
+    this.afterRead = null
+    if (hook !== null) await hook()
+    return fields
+  }
+}
+
+describe('JobTable on a shared store, across reaps and closes', () => {
+  it('a sync never attaches a console reaped after its read', async () => {
+    const store = new HookAfterRead()
+    const a = new JobTable(store)
+    const b = new JobTable(store)
+    let release = (): void => undefined
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const abort = new AbortController()
+    const job = await a.submit({
+      command: 'slow',
+      run: gated(gate),
+      abort,
+      cwd: '/',
+      sessionId: 's',
+    })
+    store.afterRead = async () => {
+      release()
+      await job.process?.join()
+      await a.reap(1, 's')
+    }
+    await b.sync('s')
+    expect(b.listJobs('s')).toEqual([])
+  })
+
+  it('a close elsewhere stops a disowned job', async () => {
+    const store = new RAMJobStore()
+    const a = new JobTable(store)
+    const b = new JobTable(store)
+    const job = await sleeping(a)
+    await b.sync('s')
+    expect(await b.disown(1, 's')).toBe(true)
+    expect((await sleeping(b)).id).toBe(1)
+    await b.closeSession('s')
+    await job.process?.join()
+    expect([job.status, job.exitCode]).toEqual([JobStatus.KILLED, 137])
+  })
+
+  it('a disowned job drops its record when it ends', async () => {
+    const store = new RAMJobStore()
+    const jt = new JobTable(store)
+    let release = (): void => undefined
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const abort = new AbortController()
+    const job = await jt.submit({
+      command: 'slow',
+      run: gated(gate),
+      abort,
+      cwd: '/',
+      sessionId: 's',
+    })
+    expect(await jt.disown(job.id, 's')).toBe(true)
+    expect(Object.keys((await store.load('s'))?.disowned ?? {})).toEqual([job.consoleName])
+    release()
+    await job.process?.join()
+    expect((await store.load('s'))?.disowned).toBeUndefined()
   })
 })

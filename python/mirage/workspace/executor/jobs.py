@@ -1185,7 +1185,10 @@ async def handle_jobs(
             flags.update(word[1:])
         else:
             specs.append(word)
-    await job_table.sync(sid)
+    table: JobTable | None = job_table
+    while table is not None:
+        await table.sync(sid)
+        table = table.parent
     jobs = job_table.listing(sid)
     if specs:
         picked: list[Job] = []

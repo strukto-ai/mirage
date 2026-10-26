@@ -22,14 +22,15 @@ from mirage.workspace.record.types import RecordFields, generation_of
 
 
 def _console_names(fields: RecordFields | None) -> set[str]:
-    """The consoles a job list names.
+    """The consoles a job list names, its disowned jobs' included.
 
     Args:
         fields (RecordFields | None): the list, or None.
     """
     if fields is None:
         return set()
-    return {job["console"] for job in fields.get("jobs", {}).values()}
+    listed = {job["console"] for job in fields.get("jobs", {}).values()}
+    return listed | set(fields.get("disowned", {}))
 
 
 class RAMJobStore(JobStore):

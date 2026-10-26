@@ -16,10 +16,11 @@ import { RAMConsoleStore, type ConsoleStore } from '../console/index.ts'
 import { generationOf, type RecordFields } from '../../workspace/record/types.ts'
 import { JobStore } from './store.ts'
 
-/** The consoles a job list names. */
+/** The consoles a job list names, its disowned jobs' included. */
 function consoleNames(fields: RecordFields | undefined): Set<string> {
   const jobs = (fields?.jobs ?? {}) as Record<string, { console: string }>
-  return new Set(Object.values(jobs).map((job) => job.console))
+  const disowned = (fields?.disowned ?? {}) as Record<string, unknown>
+  return new Set([...Object.values(jobs).map((job) => job.console), ...Object.keys(disowned)])
 }
 
 /**

@@ -396,25 +396,41 @@ export class JobTable {
    * ending. A job is the one listed under its number only while their
    * consoles match: once the list empties, numbering restarts and a new
    * job can take a reaped one's number.
+   *
+   * A console attached to a job first seen here is the job's only while
+   * the list has not changed since it was read: a store drops the console
+   * of a job reaped meanwhile, and attaching then would open an empty one
+   * that never ends. So the list is read again after such an attach, and
+   * the sync retried should it have moved.
    */
   async sync(sessionId = ''): Promise<void> {
-    const fields = await this.store.load(sessionId)
-    const entries = (fields?.jobs ?? {}) as Record<string, ListEntry>
     const local = this.jobs.get(sessionId) ?? new Map<number, Job>()
-    const jobs = new Map<number, Job>()
-    for (const key of Object.keys(entries).sort((a, b) => Number(a) - Number(b))) {
-      const jobId = Number(key)
-      const entry = entries[key]
-      if (entry === undefined) continue
-      let job = local.get(jobId)
-      if (job?.consoleName === entry.console) local.delete(jobId)
-      else job = this.remote(jobId, sessionId, entry)
-      if (job.process === null && job.status === JobStatus.RUNNING && entry.ending !== undefined)
-        [job.status, job.exitCode] = ended(entry.ending)
-      jobs.set(jobId, job)
+    let jobs = new Map<number, Job>()
+    for (let attempt = 0; attempt < LIST_MAX_RETRIES; attempt++) {
+      const fields = await this.store.load(sessionId)
+      const entries = (fields?.jobs ?? {}) as Record<string, ListEntry>
+      jobs = new Map<number, Job>()
+      let attached = false
+      for (const key of Object.keys(entries).sort((a, b) => Number(a) - Number(b))) {
+        const jobId = Number(key)
+        const entry = entries[key]
+        if (entry === undefined) continue
+        let job = local.get(jobId)
+        if (job?.consoleName !== entry.console) {
+          job = this.remote(jobId, sessionId, entry)
+          attached = true
+        }
+        if (job.process === null && job.status === JobStatus.RUNNING && entry.ending !== undefined)
+          [job.status, job.exitCode] = ended(entry.ending)
+        jobs.set(jobId, job)
+      }
+      if (!attached || generationOf(await this.store.load(sessionId)) === generationOf(fields))
+        break
     }
+    const kept = new Set(jobs.values())
     for (const job of local.values()) {
-      if (job.process !== null && job.status === JobStatus.RUNNING) this.disowned.push(job)
+      if (job.process !== null && job.status === JobStatus.RUNNING && !kept.has(job))
+        this.disowned.push(job)
     }
     this.jobs.set(sessionId, jobs)
     for (const job of jobs.values()) {
@@ -500,8 +516,9 @@ export class JobTable {
     const job = jobs?.get(jobId)
     if (jobs === undefined || job === undefined) return false
     jobs.delete(jobId)
-    if (job.process !== null && job.status === JobStatus.RUNNING) this.disowned.push(job)
-    await this.remove(sessionId, new Set([job.consoleName]))
+    const running = job.status === JobStatus.RUNNING
+    if (job.process !== null && running) this.disowned.push(job)
+    await this.remove(sessionId, new Set([job.consoleName]), false, running)
     return true
   }
 
@@ -514,12 +531,20 @@ export class JobTable {
    * list numbered from 1 rather than inheriting jobs it never launched,
    * under a profile it may not share. Session closure revokes process
    * entry points and stops disowned runners too. Closing a session closes
-   * it everywhere, so the jobs other workspaces run in it are stopped too.
+   * it everywhere, so the jobs other workspaces run in it are stopped too,
+   * the disowned ones included: their consoles are ended, which their
+   * owners watch for.
    */
   async closeSession(sessionId: string): Promise<Job[]> {
     await this.sync(sessionId)
     const running = this.runningJobs(sessionId)
     for (const job of running) await this.kill(job.id, sessionId)
+    const fields = await this.store.load(sessionId)
+    for (const [name, entry] of Object.entries(
+      (fields?.disowned ?? {}) as Record<string, ListEntry>,
+    ))
+      if (entry.owner !== this.owner)
+        await markKilled(new JobConsole(this.store.console(name)), KILLED_EXIT_CODE)
     this.jobs.delete(sessionId)
     await this.store.delete(sessionId)
     this.processes.revokeSession(sessionId)
@@ -693,11 +718,12 @@ export class JobTable {
   }
 
   /**
-   * Keep how a job this table ran ended in its list entry. The entry
-   * outlives the console's output, which a shared store expires, so a
-   * workspace that attaches after the output went still reads how the job
-   * ended instead of taking it as hung up. A failed write is logged: the
-   * console still holds the ending.
+   * Keep how a job this table ran ended in its list entry, or drop its
+   * disowned record, which nothing else would. The entry outlives the
+   * console's output, which a shared store expires, so a workspace that
+   * attaches after the output went still reads how the job ended instead
+   * of taking it as hung up. A failed write is logged: the console still
+   * holds the ending.
    */
   private async recordEnding(job: Job): Promise<void> {
     const ending = outcomeOf(job)
@@ -706,10 +732,16 @@ export class JobTable {
         const fields = await this.store.load(job.sessionId)
         if (fields === null) return
         const jobs = { ...((fields.jobs ?? {}) as Record<string, ListEntry>) }
-        const entry = jobs[job.id.toString()]
-        if (entry?.console !== job.consoleName || entry.ending === ending) return
-        jobs[job.id.toString()] = { ...entry, ending }
-        if (await this.write(job.sessionId, fields, jobs, Number(fields.next ?? 1))) return
+        const held = { ...((fields.disowned ?? {}) as Record<string, ListEntry>) }
+        if (job.consoleName in held) {
+          // eslint-disable-next-line @typescript-eslint/no-dynamic-delete -- held is keyed by console name
+          delete held[job.consoleName]
+        } else {
+          const entry = jobs[job.id.toString()]
+          if (entry?.console !== job.consoleName || entry.ending === ending) return
+          jobs[job.id.toString()] = { ...entry, ending }
+        }
+        if (await this.write(job.sessionId, fields, jobs, Number(fields.next ?? 1), held)) return
       }
       console.debug('job ending kept conflicting:', job.id)
     } catch (err) {
@@ -799,9 +831,16 @@ export class JobTable {
    * Drop jobs from a session's list, named by their consoles, never by
    * number: another workspace may have reaped one and a new job taken its
    * number. With `giveBack` the jobs never started, so the last number
-   * handed out is free again, as no job took it.
+   * handed out is free again, as no job took it. With `disowned` the jobs
+   * still run, disowned: their entries move to the list's disowned ones,
+   * by console, where the session's close still reaches them.
    */
-  private async remove(sessionId: string, names: Set<string>, giveBack = false): Promise<void> {
+  private async remove(
+    sessionId: string,
+    names: Set<string>,
+    giveBack = false,
+    disowned = false,
+  ): Promise<void> {
     for (let attempt = 0; attempt < LIST_MAX_RETRIES; attempt++) {
       const fields = await this.store.load(sessionId)
       if (fields === null) return
@@ -817,24 +856,32 @@ export class JobTable {
       )
       let following = Number(fields.next ?? 1)
       if (giveBack && dropped.has(following - 1)) following -= 1
-      if (await this.write(sessionId, fields, jobs, following)) return
+      const held = { ...((fields.disowned ?? {}) as Record<string, ListEntry>) }
+      if (disowned)
+        for (const [key, entry] of Object.entries(stored))
+          if (dropped.has(Number(key))) held[entry.console] = entry
+      if (await this.write(sessionId, fields, jobs, following, held)) return
     }
     throw new Error(`job list of session ${sessionId} kept conflicting with another writer`)
   }
 
-  /** Write a session's list over the one read, iff still current. */
+  /**
+   * Write a session's list over the one read, iff still current.
+   * `disowned` is the disowned jobs still running, by console; null keeps
+   * the ones read.
+   */
   private write(
     sessionId: string,
     fields: RecordFields | null,
     jobs: Record<string, ListEntry>,
     following: number,
+    disowned: Record<string, ListEntry> | null = null,
   ): Promise<boolean> {
     const expected = generationOf(fields)
-    return this.store.casSet(
-      sessionId,
-      { next: following, jobs, generation: expected + 1 },
-      expected,
-    )
+    const held = disowned ?? ((fields?.disowned ?? {}) as Record<string, ListEntry>)
+    const record: RecordFields = { next: following, jobs, generation: expected + 1 }
+    if (Object.keys(held).length > 0) record.disowned = held
+    return this.store.casSet(sessionId, record, expected)
   }
 
   /** Renew this table's lease while it runs jobs on a store that leases owners. */

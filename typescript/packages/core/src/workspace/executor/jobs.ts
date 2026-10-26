@@ -1002,7 +1002,8 @@ export async function handleJobs(
       specs.push(word)
     }
   }
-  await jobTable.sync(sid)
+  for (let table: JobTable | null = jobTable; table !== null; table = table.parent)
+    await table.sync(sid)
   let jobs = jobTable.listing(sid)
   if (specs.length > 0) {
     const picked: Job[] = []

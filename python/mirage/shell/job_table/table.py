@@ -468,31 +468,47 @@ class JobTable:
         number only while their consoles match: once the list empties,
         numbering restarts and a new job can take a reaped one's number.
 
+        A console attached to a job first seen here is the job's only
+        while the list has not changed since it was read: a store drops
+        the console of a job reaped meanwhile, and attaching then would
+        open an empty one that never ends. So the list is read again
+        after such an attach, and the sync retried should it have moved.
+
         Args:
             session_id (str): the session whose list to refresh.
         """
-        fields = await self.store.load(session_id)
-        entries: RecordFields = fields.get("jobs", {}) if fields else {}
         local = self._jobs.get(session_id, {})
         jobs: dict[int, Job] = {}
-        for key in sorted(entries, key=int):
-            job_id = int(key)
-            entry = entries[key]
-            job = local.get(job_id)
-            if job is not None and job.console_name == entry["console"]:
-                del local[job_id]
-            else:
-                job = self._remote(job_id, session_id, entry)
-            ending = entry.get("ending")
-            if (
-                job.process is None
-                and job.status == JobStatus.RUNNING
-                and ending is not None
-            ):
-                job.status, job.exit_code = _ended(ending)
-            jobs[job_id] = job
+        for _ in range(LIST_MAX_RETRIES):
+            fields = await self.store.load(session_id)
+            entries: RecordFields = fields.get("jobs", {}) if fields else {}
+            jobs = {}
+            attached = False
+            for key in sorted(entries, key=int):
+                job_id = int(key)
+                entry = entries[key]
+                job = local.get(job_id)
+                if job is None or job.console_name != entry["console"]:
+                    job = self._remote(job_id, session_id, entry)
+                    attached = True
+                ending = entry.get("ending")
+                if (
+                    job.process is None
+                    and job.status == JobStatus.RUNNING
+                    and ending is not None
+                ):
+                    job.status, job.exit_code = _ended(ending)
+                jobs[job_id] = job
+            if not attached or generation_of(
+                await self.store.load(session_id)
+            ) == generation_of(fields):
+                break
         for job in local.values():
-            if job.process is not None and job.status == JobStatus.RUNNING:
+            if (
+                job.process is not None
+                and job.status == JobStatus.RUNNING
+                and all(job is not kept for kept in jobs.values())
+            ):
                 self._disowned.append(job)
         self._jobs[session_id] = jobs
         for job in jobs.values():
@@ -599,9 +615,10 @@ class JobTable:
         job = self._jobs.get(session_id, {}).pop(job_id, None)
         if job is None:
             return False
-        if job.process is not None and job.status == JobStatus.RUNNING:
+        running = job.status == JobStatus.RUNNING
+        if job.process is not None and running:
             self._disowned.append(job)
-        await self._remove(session_id, {job.console_name})
+        await self._remove(session_id, {job.console_name}, disowned=running)
         return True
 
     async def close_session(self, session_id: str) -> list[Job]:
@@ -614,7 +631,8 @@ class JobTable:
         never launched, under a profile it may not share. Session closure
         revokes its process entry points and stops disowned runners too.
         Closing a session closes it everywhere, so the jobs other
-        workspaces run in it are stopped too.
+        workspaces run in it are stopped too, the disowned ones included:
+        their consoles are ended, which their owners watch for.
 
         Args:
             session_id (str): the session being closed.
@@ -623,6 +641,11 @@ class JobTable:
         running = self.running_jobs(session_id)
         for job in running:
             await self.kill(job.id, session_id)
+        fields = await self.store.load(session_id)
+        for name, entry in (fields or {}).get("disowned", {}).items():
+            if entry["owner"] != self.owner:
+                console = JobConsole(self.store.console(name))
+                await _mark_killed(console, KILLED_EXIT_CODE)
         self._jobs.pop(session_id, None)
         await self.store.delete(session_id)
         self.processes.revoke_session(session_id)
@@ -809,7 +832,8 @@ class JobTable:
         self._drop_lease()
 
     async def _record_ending(self, job: Job) -> None:
-        """Keep how a job this table ran ended in its list entry.
+        """Keep how a job this table ran ended in its list entry, or drop
+        its disowned record, which nothing else would.
 
         The entry outlives the console's output, which a shared store
         expires, so a workspace that attaches after the output went
@@ -826,16 +850,20 @@ class JobTable:
                 if fields is None:
                     return
                 jobs = dict(fields.get("jobs", {}))
+                held = dict(fields.get("disowned", {}))
                 entry = jobs.get(str(job.id))
-                if (
-                    entry is None
-                    or entry["console"] != job.console_name
-                    or entry.get("ending") == ending
-                ):
-                    return
-                jobs[str(job.id)] = {**entry, "ending": ending}
+                if held.pop(job.console_name, None) is None:
+                    if (
+                        entry is None
+                        or entry["console"] != job.console_name
+                        or entry.get("ending") == ending
+                    ):
+                        return
+                    jobs[str(job.id)] = {**entry, "ending": ending}
                 following = int(fields.get("next", 1))
-                if await self._write(job.session_id, fields, jobs, following):
+                if await self._write(
+                    job.session_id, fields, jobs, following, held
+                ):
                     return
             logger.debug("job %d ending kept conflicting", job.id)
         except Exception as exc:
@@ -926,7 +954,11 @@ class JobTable:
         )
 
     async def _remove(
-        self, session_id: str, names: set[str], give_back: bool = False
+        self,
+        session_id: str,
+        names: set[str],
+        give_back: bool = False,
+        disowned: bool = False,
     ) -> None:
         """Drop jobs from a session's list.
 
@@ -938,6 +970,9 @@ class JobTable:
             names (set[str]): the consoles of the jobs to drop.
             give_back (bool): the jobs never started, so the last number
                 handed out is free again, as no job took it.
+            disowned (bool): the jobs still run, disowned: their entries
+                move to the list's disowned ones, by console, where the
+                session's close still reaches them.
         """
         for _ in range(LIST_MAX_RETRIES):
             fields = await self.store.load(session_id)
@@ -953,7 +988,14 @@ class JobTable:
             following = int(fields.get("next", 1))
             if give_back and following - 1 in dropped:
                 following -= 1
-            if await self._write(session_id, fields, jobs, following):
+            held = dict(fields.get("disowned", {}))
+            if disowned:
+                held |= {
+                    v["console"]: v
+                    for k, v in stored.items()
+                    if int(k) in dropped
+                }
+            if await self._write(session_id, fields, jobs, following, held):
                 return
         raise RuntimeError(
             f"job list of session {session_id!r} kept conflicting "
@@ -966,6 +1008,7 @@ class JobTable:
         fields: RecordFields | None,
         jobs: RecordFields,
         following: int,
+        disowned: RecordFields | None = None,
     ) -> bool:
         """Write a session's list over the one read, iff still current.
 
@@ -974,13 +1017,23 @@ class JobTable:
             fields (RecordFields | None): the list as read.
             jobs (RecordFields): the jobs it holds now.
             following (int): the number the next job takes.
+            disowned (RecordFields | None): the disowned jobs still
+                running, by console; None keeps the ones read.
         """
         expected = generation_of(fields)
-        return await self.store.cas_set(
-            session_id,
-            {"next": following, "jobs": jobs, "generation": expected + 1},
-            expected,
+        held = (
+            (fields or {}).get("disowned", {})
+            if disowned is None
+            else disowned
         )
+        record: RecordFields = {
+            "next": following,
+            "jobs": jobs,
+            "generation": expected + 1,
+        }
+        if held:
+            record["disowned"] = held
+        return await self.store.cas_set(session_id, record, expected)
 
     def _keep_lease(self) -> None:
         """Renew this table's lease while it runs jobs on a store that

@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+from collections.abc import Awaitable, Callable
 from functools import partial
 
 import pytest
@@ -29,6 +30,7 @@ from mirage.shell.job_table.ram import RAMJobStore
 from mirage.shell.job_table.table import JobTable
 from mirage.shell.job_table.types import Job, JobStatus
 from mirage.utils.clock import ManualClock
+from mirage.workspace.record.types import RecordFields
 from mirage.workspace.types import ExecutionNode
 
 
@@ -816,3 +818,79 @@ async def test_a_long_wait_elsewhere_keeps_one_read_across_lease_checks():
     async with asyncio.timeout(2):
         assert (await waiting).exit_code == 0
     assert store.count["most"] == 1
+
+
+class _HookAfterRead(RAMJobStore):
+    """A job store that runs one hook right after a list read, as another
+    workspace's write landing between a read and what follows it."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.after_read: Callable[[], Awaitable[None]] | None = None
+
+    async def load(self, session_id: str) -> RecordFields | None:
+        fields = await super().load(session_id)
+        hook, self.after_read = self.after_read, None
+        if hook is not None:
+            await hook()
+        return fields
+
+
+@pytest.mark.asyncio
+async def test_a_sync_never_attaches_a_console_reaped_after_its_read():
+    store = _HookAfterRead()
+    a, b = JobTable(store), JobTable(store)
+    gate = asyncio.Event()
+
+    async def run(job: Job) -> tuple[IOResult, ExecutionNode]:
+        await gate.wait()
+        return IOResult(), ExecutionNode()
+
+    job = await a.submit("slow", run, "/", session_id="s")
+
+    async def end_and_reap() -> None:
+        gate.set()
+        assert job.process is not None
+        await job.process.join()
+        await a.reap(1, "s")
+
+    store.after_read = end_and_reap
+    await b.sync("s")
+    assert b.list_jobs("s") == []
+
+
+@pytest.mark.asyncio
+async def test_a_close_elsewhere_stops_a_disowned_job():
+    store = RAMJobStore()
+    a, b = JobTable(store), JobTable(store)
+    job = await a.submit("sleep 30", _run_forever, "/", session_id="s")
+    await asyncio.sleep(0)
+    await b.sync("s")
+    assert await b.disown(1, "s")
+    assert (await b.submit("next", _run_forever, "/", session_id="s")).id == 1
+    await b.close_session("s")
+    assert job.process is not None
+    async with asyncio.timeout(2):
+        await job.process.join()
+    assert (job.status, job.exit_code) == (JobStatus.KILLED, 137)
+
+
+@pytest.mark.asyncio
+async def test_a_disowned_job_drops_its_record_when_it_ends():
+    store = RAMJobStore()
+    table = JobTable(store)
+    gate = asyncio.Event()
+
+    async def run(job: Job) -> tuple[IOResult, ExecutionNode]:
+        await gate.wait()
+        return IOResult(), ExecutionNode()
+
+    job = await table.submit("slow", run, "/", session_id="s")
+    assert await table.disown(job.id, "s")
+    held = await store.load("s")
+    assert held is not None and list(held["disowned"]) == [job.console_name]
+    gate.set()
+    assert job.process is not None
+    await job.process.join()
+    ended = await store.load("s")
+    assert ended is not None and "disowned" not in ended
