@@ -363,7 +363,7 @@ describe('a mount that keeps its VFS listings', () => {
     const d = store.add('d')
     store.add('sub', d)
     store.add('f.txt', d, ENC.encode('f'))
-    const ws = await workspace(store)
+    const ws = workspace(store)
     try {
       const level = (await ws.dispatch('read_tree', '/f/d', [], { level: true })) as Map<
         string,

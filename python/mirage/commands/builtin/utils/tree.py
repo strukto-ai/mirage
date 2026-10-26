@@ -252,7 +252,9 @@ async def _level(
             if limit is None
             else read_tree(path, limit=limit, level=True)
         )
-    except (OperationNotSupportedError, NotADirectoryError) as exc:
+    except (WalkDeclinedError, NotADirectoryError):
+        return None
+    except OperationNotSupportedError as exc:
         logger.debug("no level read of %s: %s", path.virtual, exc)
         return None
     if found is None:

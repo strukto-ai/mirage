@@ -210,7 +210,8 @@ async function level(
   try {
     found = await readTree(path, limit, true)
   } catch (err) {
-    if ((err as { code?: unknown }).code !== 'ENOTSUP' && !isEnotdir(err)) throw err
+    if ((err as Partial<WalkDeclinedError>).declined === true || isEnotdir(err)) return null
+    if ((err as { code?: unknown }).code !== 'ENOTSUP') throw err
     console.debug(`no level read of ${path.virtual}: ${String(err)}`)
     return null
   }
