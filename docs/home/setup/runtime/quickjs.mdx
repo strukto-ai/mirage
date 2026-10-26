@@ -9,31 +9,34 @@ ES2023 for small scripts and pipe transforms, with access to workspace files
 under the same permissions as shell commands. Despite the command name,
 it does not provide Node.js APIs, npm packages or network access.
 
+Both SDKs run the same engine, the WASI build of
+[quickjs-ng](https://github.com/quickjs-ng/quickjs), so a script answers
+the same in either.
+
 ## Installation
+
+Download `qjs-wasi.wasm` from a
+[quickjs-ng release](https://github.com/quickjs-ng/quickjs/releases) and
+point the runtime's `home`, or `MIRAGE_QUICKJS_HOME`, at its directory.
 
 <Tabs>
   <Tab title="Python" icon="/images/python-logo.svg">
     ```bash
     pip install 'mirage-ai[quickjs]'
     ```
-
-    Download `qjs-wasi.wasm` from a
-    [quickjs-ng release](https://github.com/quickjs-ng/quickjs/releases).
-    Point `home`, or `MIRAGE_QUICKJS_HOME`, at its directory.
   </Tab>
   <Tab title="TypeScript" icon="/images/typescript-logo.svg">
-    ```bash
-    pnpm add quickjs-emscripten
-    ```
-
-    The package bundles its WebAssembly.
+    No package to add: each run executes in a worker. In a browser, `home`
+    is the URL of the folder holding `qjs-wasi.wasm`, and the page needs the
+    same [worker setup](/typescript/runtime/python#worker-and-browser-setup)
+    as Pyodide.
   </Tab>
 </Tabs>
 
 ## Usage
 
-QuickJS is in the default runtimes, so `node` works once it is installed. To
-list it yourself:
+QuickJS is in the default runtimes, so `node` works once its engine is found.
+To list it yourself:
 
 <Tabs>
   <Tab title="Python" icon="/images/python-logo.svg">
@@ -51,9 +54,15 @@ list it yourself:
   </Tab>
   <Tab title="TypeScript" icon="/images/typescript-logo.svg">
     ```typescript
-    import { MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
+    import { buildRuntime, MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
 
-    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.EXEC, runtimes: ['quickjs'] })
+    const ws = new Workspace(
+      { '/data': new RAMVFS() },
+      {
+        mode: MountMode.EXEC,
+        runtimes: [buildRuntime('quickjs', { config: { home: '/path/to/quickjs' } })],
+      },
+    )
     await ws.shell("node -e 'console.log(1 + 1)'")
     ```
   </Tab>
@@ -68,34 +77,20 @@ list it yourself:
       /data:
         vfs: ram
     ```
-
-    `home` is for the Python SDK; TypeScript ignores it.
   </Tab>
 </Tabs>
 
 ## JavaScript compatibility
 
-`std` and `os` are globals. The SDK columns identify where their APIs differ.
-
-In TypeScript, any `std` or `os` function not listed as supported throws
-`TypeError`.
-
-Examples assume a writable `/data` mount. Mount modes and permissions still apply.
+`std` and `os` are globals, as `qjs --std` gives them. Examples assume a
+writable `/data` mount. Mount modes and permissions still apply.
 
 ### `std.open()`
 
 `std.open(path, mode, errorObj)` returns `null` on failure and sets
-`errorObj.errno`. A read-only mount refuses modes that write. Modes and
-modifiers are listed separately; for example, `rb` combines `r` and `b`.
-
-| Mode or modifier | Python SDK | TypeScript SDK |
-| --- | --- | --- |
-| `r` | ✓ | ✓ |
-| `w` | ✓ | ✓ |
-| `a` | ✓ | ✓ |
-| `x` | ✓ | ✓ |
-| `b` | ✓ | ✓ |
-| `+` | ✓ | ✓ |
+`errorObj.errno`. A read-only mount refuses modes that write. The modes are
+`r`, `w`, `a` and `x`, with the `b` and `+` modifiers; for example, `rb`
+combines `r` and `b`.
 
 <AccordionGroup>
   <Accordion title="Example: append to a workspace file" id="std-open-example">
@@ -122,20 +117,8 @@ modifiers are listed separately; for example, `rb` combines `r` and `b`.
 
 ### File objects
 
-| API | Python SDK | TypeScript SDK |
-| --- | --- | --- |
-| `file.readAsString()` | ✓ | ✓ |
-| `file.read()` | ✓ | ✓ |
-| `file.getline()` | ✓ | ✓ |
-| `file.seek()` | ✓ | ✓ |
-| `file.tell()` | ✓ | ✓ |
-| `file.eof()` | ✓ | ✓ |
-| `file.puts()` | ✓ | ✓ |
-| `file.write()` | ✓ | ✓ |
-| `file.flush()` | ✓ | ✓ |
-| `file.close()` | ✓ | ✓ |
-| `file.printf()` | ✓ | ✗ |
-| `file.tello()` | ✓ | ✗ |
+`readAsString()`, `read()`, `getline()`, `seek()`, `tell()`, `tello()`,
+`eof()`, `puts()`, `write()`, `printf()`, `flush()` and `close()`.
 
 <AccordionGroup>
   <Accordion title="Example: write, seek and read a file" id="file-objects-example">
@@ -156,30 +139,16 @@ modifiers are listed separately; for example, `rb` combines `r` and `b`.
   <Accordion title="Limitations" id="file-objects-limitations">
     | API or behavior | Limitation |
     | --- | --- |
-    | `file.printf()` | Not available in the TypeScript SDK. |
-    | `file.tello()` | Not available in the TypeScript SDK. |
-    | `file.puts()`, `file.write()` | Reach the mount at `close`, or when the run ends. |
-    | `file.flush()` | Sends pending writes to the mount in the TypeScript SDK; in the Python SDK they wait for `close`. |
+    | `file.puts()`, `file.write()`, `file.flush()` | Reach the mount at `close`, or when the run ends; a write the mount refuses fails the `close`. |
   </Accordion>
 </AccordionGroup>
 
 ### `std`
 
-Environment variables come from the Mirage session. `std.loadFile()` returns
-`null` when reading fails.
-
-| API | Python SDK | TypeScript SDK |
-| --- | --- | --- |
-| `std.getenv()` | ✓ | ✓ |
-| `std.exit()` | ✓ | ✓ |
-| `std.loadFile()` | ✓ | ✓ |
-| `std.printf()` | ✓ | ✓ |
-| `std.writeFile()` | ✓ | ✗ |
-| `std.fdopen()` | ✓ | ✗ |
-| `std.strerror()` | ✓ | ✗ |
-| `std.setenv()` | ✓ | ✗ |
-| `std.getenviron()` | ✓ | ✗ |
-| `std.Error` | ✓ | ✓ |
+`getenv()`, `setenv()`, `getenviron()`, `exit()`, `loadFile()`,
+`writeFile()`, `printf()`, `fdopen()`, `strerror()` and `Error`. Environment
+variables come from the Mirage session. `std.loadFile()` returns `null` when
+reading fails.
 
 <AccordionGroup>
   <Accordion title="Example: read a session environment variable" id="std-example">
@@ -191,11 +160,6 @@ Environment variables come from the Mirage session. `std.loadFile()` returns
   <Accordion title="Limitations" id="std-limitations">
     | API or behavior | Limitation |
     | --- | --- |
-    | `std.writeFile()` | Not available in the TypeScript SDK. |
-    | `std.fdopen()` | Not available in the TypeScript SDK. |
-    | `std.strerror()` | Not available in the TypeScript SDK. |
-    | `std.setenv()` | Not available in the TypeScript SDK. |
-    | `std.getenviron()` | Not available in the TypeScript SDK. |
     | `std.popen()` | ✗ |
     | `std.tmpfile()` | ✗ |
   </Accordion>
@@ -203,16 +167,8 @@ Environment variables come from the Mirage session. `std.loadFile()` returns
 
 ### Standard streams
 
-`std.in` receives the command's piped input.
-
-| API | Python SDK | TypeScript SDK |
-| --- | --- | --- |
-| `std.in.readAsString()` | ✓ | ✓ |
-| `std.out.puts()` | ✓ | ✓ |
-| `std.err.puts()` | ✓ | ✓ |
-| `std.out.printf()` | ✓ | ✓ |
-| `std.err.printf()` | ✓ | ✓ |
-| `std.out.flush()` | ✓ | ✗ |
+`std.in` receives the command's piped input as it arrives, and `std.in`,
+`std.out` and `std.err` are descriptors 0 to 2.
 
 <AccordionGroup>
   <Accordion title="Example: forward piped input" id="standard-streams-example">
@@ -225,33 +181,15 @@ Environment variables come from the Mirage session. `std.loadFile()` returns
   <Accordion title="Limitations" id="standard-streams-limitations">
     | API or behavior | Limitation |
     | --- | --- |
-    | `std.out.flush()` | Not available in the TypeScript SDK. |
     | `std.out.printf()`, `std.err.printf()` | C format; return the UTF-8 bytes written. Unlike `printf` on an opened FILE. |
   </Accordion>
 </AccordionGroup>
 
 ### `os`
 
-| API | Python SDK | TypeScript SDK |
-| --- | --- | --- |
-| `os.readdir()` | ✓ | ✓ |
-| `os.stat()` | ✓ | ✓ |
-| `os.mkdir()` | ✓ | ✓ |
-| `os.remove()` | ✓ | ✓ |
-| `os.utimes()` | ✓ | ✓ |
-| `os.rename()` | ✓ | ✓ |
-| `os.getcwd()` | ✓ | ✓ |
-| `os.chdir()` | ✓ | ✓ |
-| `os.open()` | ✓ | ✗ |
-| `os.read()` | ✓ | ✗ |
-| `os.write()` | ✓ | ✗ |
-| `os.seek()` | ✓ | ✗ |
-| `os.close()` | ✓ | ✗ |
-| `os.sleep()` | ✓ | ✗ |
-| `os.setTimeout()` | ✓ | ✗ |
-| `os.platform` | ✓ | ✓ |
-
-- `os.readdir()`: Returns `[value, errno]`.
+`readdir()`, `stat()`, `mkdir()`, `remove()`, `utimes()`, `rename()`,
+`getcwd()`, `chdir()`, `open()`, `read()`, `write()`, `seek()`, `close()`,
+`sleep()`, `setTimeout()` and `platform`.
 
 <AccordionGroup>
   <Accordion title="Example: list a workspace directory" id="os-example">
@@ -266,19 +204,12 @@ Environment variables come from the Mirage session. `std.loadFile()` returns
   <Accordion title="Limitations" id="os-limitations">
     | API or behavior | Limitation |
     | --- | --- |
-    | `os.open()` | Not available in the TypeScript SDK. |
-    | `os.read()` | Not available in the TypeScript SDK. |
-    | `os.write()` | Not available in the TypeScript SDK. |
-    | `os.seek()` | Not available in the TypeScript SDK. |
-    | `os.close()` | Not available in the TypeScript SDK. |
-    | `os.sleep()` | Not available in the TypeScript SDK. |
-    | `os.setTimeout()` | Not available in the TypeScript SDK. |
     | `os.lstat()` | ✗ |
     | `os.symlink()` | ✗ |
     | `os.readlink()` | ✗ |
     | `os.realpath()` | ✗ |
     | `os.exec()` | ✗ |
-    | `os.stat()` | Returns `[value, errno]`. In Python, `mode` has only the file type bits. |
+    | `os.readdir()`, `os.stat()` | Return `[value, errno]`. `mode` from `os.stat()` has only the file type bits. |
     | `os.remove()` | `os.remove` also removes an empty directory. |
     | `os.rename()` | `-75` (`EXDEV`) across mounts. |
     | `os.getcwd()`, `os.chdir()` | The shell's working directory; a change lasts for the run. |
@@ -288,10 +219,7 @@ Environment variables come from the Mirage session. `std.loadFile()` returns
 
 ### `console` and printing
 
-| API | Python SDK | TypeScript SDK |
-| --- | --- | --- |
-| `console.log()` | ✓ | ✓ |
-| `print()` | ✓ | ✓ |
+`console.log()` and `print()`.
 
 <AccordionGroup>
   <Accordion title="Example: print a result" id="console-example">
@@ -309,14 +237,8 @@ Environment variables come from the Mirage session. `std.loadFile()` returns
 
 ### Runtime globals
 
-| API | Python SDK | TypeScript SDK |
-| --- | --- | --- |
-| `scriptArgs` | ✓ | ✓ |
-| `atob()` | ✓ | ✓ |
-| `btoa()` | ✓ | ✓ |
-| `queueMicrotask()` | ✓ | ✓ |
-
-- `scriptArgs`: The invocation name and arguments.
+`scriptArgs`, the invocation name and arguments, and `atob()`, `btoa()` and
+`queueMicrotask()`.
 
 <Accordion title="Example: read arguments and encode text" id="globals-example">
   ```javascript
@@ -347,9 +269,7 @@ Unavailable in this runtime.
   `.js` and `-e` run as classic scripts, and `-m` forces module mode.
 - `console.log` and `print` add a newline; `std.out.puts` and `std.err.puts`
   write raw.
-- An error in async code fails the run. In TypeScript this holds for a
-  module and for the promise a script ends with, as in `main()`; a promise
-  the script drops before then is not reported.
+- An error in async code fails the run.
 - QuickJS cannot reach host files or the network. `command_limits` bound its
-  time and output, and in TypeScript a run also stops at 64 MiB of memory.
-  Run untrusted or heavy code in a [sandbox](/home/setup/runtime/sandbox).
+  time and output. Run untrusted or heavy code in a
+  [sandbox](/home/setup/runtime/sandbox).

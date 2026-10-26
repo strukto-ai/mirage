@@ -14,7 +14,10 @@
         "disk",
         "ssh",
         "s3",
-        "redis"
+        "redis",
+        "ram+cache",
+        "disk+cache",
+        "redis+cache"
       ],
       "world": {
         "mounts": {
@@ -93,6 +96,16 @@
             }
           }
         }
+      ],
+      "backends": [
+        "ram",
+        "disk",
+        "ssh",
+        "s3",
+        "redis",
+        "ram+cache",
+        "disk+cache",
+        "redis+cache"
       ]
     },
     {
@@ -134,6 +147,16 @@
             }
           }
         }
+      ],
+      "backends": [
+        "ram",
+        "disk",
+        "ssh",
+        "s3",
+        "redis",
+        "ram+cache",
+        "disk+cache",
+        "redis+cache"
       ]
     },
     {
@@ -143,6 +166,16 @@
         "wasi",
         "pyodide",
         "host"
+      ],
+      "backends": [
+        "ram",
+        "disk",
+        "ssh",
+        "s3",
+        "redis",
+        "ram+cache",
+        "disk+cache",
+        "redis+cache"
       ],
       "world": {
         "mounts": {

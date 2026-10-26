@@ -13,14 +13,18 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { Buffer } from 'node:buffer'
-import { constants } from 'node:fs'
+import { randomBytes } from 'node:crypto'
+import { constants, type Stats } from 'node:fs'
+import type * as fsPromises from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { posix } from 'node:path'
+import { type Interface, createInterface } from 'node:readline'
 import { fileURLToPath } from 'node:url'
 import { classify } from '@struktoai/mirage-core/errors/classify'
 import { ebadf, einval, isMissingPath } from '@struktoai/mirage-core/errors/fs'
 import { posixErrno, posixPhrase } from '@struktoai/mirage-core/errors/posix'
 import type { FsCondition } from '@struktoai/mirage-core/errors/types'
+import { linkView } from '@struktoai/mirage-core/commands/builtin/utils/links'
 import { workspaceBridge } from '@struktoai/mirage-core/runtime/binding'
 import { MountCore } from '@struktoai/mirage-core/mount/core'
 import { type Descriptor, RuntimeFiles } from '@struktoai/mirage-core/runtime/files'
@@ -29,6 +33,7 @@ import { posixStat } from '@struktoai/mirage-core/runtime/stat'
 import { PrefixResolver } from '@struktoai/mirage-core/runtime/resolver'
 import type { VFSEntry, VFSStat } from '@struktoai/mirage-core/runtime/types'
 import { MountMode, type SetAttrFields } from '@struktoai/mirage-core/types'
+import { MAX_SYMLINK_HOPS } from '@struktoai/mirage-core/utils/path'
 import { entryName } from '@struktoai/mirage-core/utils/remnants'
 import { pathMode } from '@struktoai/mirage-core/workspace/files'
 import type { Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
@@ -41,6 +46,8 @@ import {
   type RoutedCall,
 } from './constants.ts'
 import { Descriptors, openFlags } from './descriptors.ts'
+import { dirent, openedDir } from './list.ts'
+import { stats } from './stat.ts'
 
 type FsObject = Record<string, unknown>
 type Fn = (...args: unknown[]) => unknown
@@ -48,7 +55,11 @@ type Callback = (err: unknown, value?: unknown) => void
 type Options = Record<string, unknown> | string | number | null | undefined
 
 const fs = createRequire(import.meta.url)('node:fs') as FsObject & { promises: FsObject }
-const { S_IFMT, S_IFREG, S_IFDIR, S_IFCHR, S_IFLNK, W_OK, X_OK, COPYFILE_EXCL } = constants
+// fs.promises as the patch leaves it, each call looked up when it is
+// made: a call on it reaches node for a host path and the workspace for
+// a mounted one, so a cp or glob across the two takes each end where it is.
+const routed = fs.promises as unknown as typeof fsPromises
+const { W_OK, X_OK, COPYFILE_EXCL } = constants
 
 /** `path` as a string a mount could serve, or null: a descriptor and a
  * Buffer are host spellings no mount uses. */
@@ -56,11 +67,6 @@ function spelled(path: unknown): string | null {
   if (typeof path === 'string') return path
   if (path instanceof URL && path.protocol === 'file:') return fileURLToPath(path)
   return null
-}
-
-/** A stamp in nanoseconds, as node's BigIntStats spells one. */
-function ns(date: Date): bigint {
-  return BigInt(date.getTime()) * 1_000_000n
 }
 
 /** A refusal spelled the way node's own fs spells an error. */
@@ -99,10 +105,52 @@ function fieldsOf(options: Options): Record<string, unknown> {
   return typeof options === 'object' && options !== null ? options : {}
 }
 
+/** The mode a node call asks for: its number, its octal text, or the
+ * `mode` of its options. */
+function modeOf(options: Options): number | undefined {
+  const mode = typeof options === 'object' ? fieldsOf(options).mode : options
+  if (typeof mode === 'number') return mode
+  return typeof mode === 'string' ? parseInt(mode, 8) : undefined
+}
+
 function encodingOf(options: Options): BufferEncoding | undefined {
   if (typeof options === 'string') return options as BufferEncoding
   return (fieldsOf(options).encoding ?? undefined) as BufferEncoding | undefined
 }
+
+/** A name as node answers one: a string, or a Buffer or another
+ * encoding where the options ask for it. */
+function encoded(text: string, options: Options): Buffer | string {
+  const encoding = encodingOf(options) as string | undefined
+  if (encoding === undefined || encoding === 'utf8') return text
+  const bytes = Buffer.from(text)
+  return encoding === 'buffer' ? bytes : bytes.toString(encoding as BufferEncoding)
+}
+
+/** One of node's own `cp` refusals (`ERR_FS_CP_*`), spelled as node spells it. */
+function cpRefusal(
+  code: string,
+  title: string,
+  condition: FsCondition,
+  detail: string,
+  path: string,
+): Error {
+  return Object.assign(new Error(`${title}: cp returned ${condition} (${detail}) ${path}`), {
+    code,
+    errno: posixErrno(condition),
+    syscall: 'cp',
+    path,
+  })
+}
+
+/** Six characters from the alphabet of node's `mkdtemp` template. */
+function tempSuffix(): string {
+  const alphabet = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
+  return Array.from(randomBytes(6), (byte) => alphabet[byte % alphabet.length]).join('')
+}
+
+// A path segment holding a character node's glob matcher reads as one.
+const GLOB_MAGIC = /[*?[\]{}()!+@]/
 
 function bytesOf(data: unknown, options: Options): Uint8Array {
   if (typeof data === 'string') return Buffer.from(data, encodingOf(options) ?? 'utf8')
@@ -119,6 +167,13 @@ function refusedIterator(err: Error): AsyncIterableIterator<never> {
       return this
     },
   }
+}
+
+/** Every item an async iterator yields. */
+async function collected(items: AsyncIterable<unknown>): Promise<unknown[]> {
+  const out: unknown[] = []
+  for await (const item of items) out.push(item)
+  return out
 }
 
 /** A time argument (seconds, a numeric string, a Date) as the ISO stamp
@@ -320,6 +375,14 @@ class MountedFileHandle {
     if (!this.live()) throw ebadf(String(this.fd))
     return (fs.createWriteStream as Fn)(null, { ...fieldsOf(options), fd: this.fd })
   }
+
+  // node's own reads its lines through createReadStream, as this does.
+  readLines(options?: Options): Interface {
+    return createInterface({
+      input: this.createReadStream(options) as NodeJS.ReadableStream,
+      crlfDelay: Infinity,
+    })
+  }
 }
 
 /**
@@ -331,7 +394,10 @@ class MountedFileHandle {
  * a mount and the other on the host reaches the host through `native`,
  * node's own functions as they were before the patch.
  */
-class HostFs implements Record<RoutedCall, (...args: never[]) => Promise<unknown>> {
+class HostFs implements Record<
+  RoutedCall,
+  (...args: never[]) => Promise<unknown> | AsyncIterable<unknown>
+> {
   private readonly files: RuntimeFiles
   // The descriptors `open` hands out for mounted paths (descriptors.ts).
   readonly descriptors: Descriptors
@@ -358,6 +424,9 @@ class HostFs implements Record<RoutedCall, (...args: never[]) => Promise<unknown
         })
       }
     }
+    // Where a link leads, so a file reads as one inode whichever spelling
+    // reached it.
+    const links = linkView(ws.vfs)
     this.files = new RuntimeFiles(
       workspaceBridge(
         async (name, path, args, kwargs) => (await dispatch(name, path, args, kwargs))[0],
@@ -366,7 +435,7 @@ class HostFs implements Record<RoutedCall, (...args: never[]) => Promise<unknown
         () => [],
         (directory) => ws.namespace.linkNamesUnder(directory),
       ),
-      null,
+      links === undefined ? null : links.resolve.bind(links),
       new MountCore(ws.vfs.over(dispatch)),
     )
     this.descriptors = new Descriptors(this.files, native)
@@ -388,70 +457,15 @@ class HostFs implements Record<RoutedCall, (...args: never[]) => Promise<unknown
   private statsOf(path: string, st: VFSStat, options?: Options, unlinked = false): unknown {
     // The stat every runtime shares; an owner the row lacks is this
     // process's own.
-    const posix = posixStat(st, path, this.ws.registry.tryMountFor(path)?.prefix ?? '/', {
+    // The file the links lead to names both its inode and its device, so a
+    // stat through a link and the fstat of its open file agree.
+    const named = st.name ?? path
+    const posix = posixStat(st, named, this.ws.registry.tryMountFor(named)?.prefix ?? '/', {
       uid: process.getuid?.() ?? 0,
       gid: process.getgid?.() ?? 0,
       unknownMs: this.born,
     })
-    const kind = posix.mode & S_IFMT
-    const mtime = new Date(posix.mtimeMs)
-    const atime = new Date(posix.atimeMs)
-    const kinds = {
-      isFile: () => kind === S_IFREG,
-      isDirectory: () => kind === S_IFDIR,
-      isBlockDevice: () => false,
-      isCharacterDevice: () => kind === S_IFCHR,
-      isSymbolicLink: () => kind === S_IFLNK,
-      isFIFO: () => false,
-      isSocket: () => false,
-    }
-    const dates = { atime, mtime, ctime: mtime, birthtime: mtime }
-    const fields: Record<string, number> = {
-      dev: posix.dev,
-      ino: posix.ino,
-      mode: posix.mode,
-      nlink: unlinked ? 0 : posix.nlink,
-      uid: posix.uid,
-      gid: posix.gid,
-      rdev: posix.rdev,
-      size: posix.size,
-      blksize: posix.blksize,
-      blocks: posix.blocks,
-      atimeMs: posix.atimeMs,
-      mtimeMs: posix.mtimeMs,
-      ctimeMs: posix.ctimeMs,
-      birthtimeMs: posix.mtimeMs,
-    }
-    if (fieldsOf(options).bigint !== true) return { ...kinds, ...fields, ...dates }
-    // node's BigIntStats: every number a bigint, plus the stamps in ns.
-    const big = Object.fromEntries(
-      Object.entries(fields).map(([k, v]) => [k, BigInt(Math.trunc(v))]),
-    )
-    return {
-      ...kinds,
-      ...big,
-      atimeNs: ns(atime),
-      mtimeNs: ns(mtime),
-      ctimeNs: ns(mtime),
-      birthtimeNs: ns(mtime),
-      ...dates,
-    }
-  }
-
-  private direntOf(directory: string, row: VFSEntry): unknown {
-    const kind = row.isLink === true ? S_IFLNK : row.isDir ? S_IFDIR : (row.mode ?? 0) & S_IFMT
-    return {
-      name: entryName(row.path),
-      parentPath: directory,
-      path: directory,
-      isFile: () => kind === S_IFREG,
-      isDirectory: () => kind === S_IFDIR,
-      isBlockDevice: () => false,
-      isCharacterDevice: () => kind === S_IFCHR,
-      isSymbolicLink: () => kind === S_IFLNK,
-      isFIFO: () => false,
-      isSocket: () => false,
-    }
+    return stats(unlinked ? { ...posix, nlink: 0 } : posix, fieldsOf(options).bigint === true)
   }
 
   /**
@@ -553,6 +567,7 @@ class HostFs implements Record<RoutedCall, (...args: never[]) => Promise<unknown
   async mkdir(path: string, options?: Options): Promise<string | undefined> {
     if (fieldsOf(options).recursive !== true) {
       await this.files.mkdir(path)
+      await this.narrowed(path, modeOf(options))
       return undefined
     }
     // Each missing ancestor in turn, stopping at the mount root, as
@@ -575,6 +590,407 @@ class HostFs implements Record<RoutedCall, (...args: never[]) => Promise<unknown
     return missing[0]
   }
 
+  async cp(src: string, dst: string, options?: Options): Promise<void> {
+    const opts = fieldsOf(options)
+    const filter = opts.filter as ((from: string, to: string) => unknown) | undefined
+    if (filter !== undefined && !(await filter(src, dst))) return
+    const from = await this.checked(src, dst, opts)
+    // node makes the destination's missing parents first.
+    const parent = posix.dirname(posix.resolve(dst))
+    try {
+      await routed.stat(parent)
+    } catch (err) {
+      if (!isMissingPath(err)) throw err
+      await routed.mkdir(parent, { recursive: true })
+    }
+    await this.copied(src, dst, from, opts)
+  }
+
+  /** Narrow a directory just made to the permissions `mode` asks for, as
+   * mkdir(2) does: its own are what the umask left of 0o777, so the two
+   * together are what mkdir(2) leaves of `mode`, and a bit it inherited
+   * (a parent's set-group-ID) stays. A mode asking all of 0o777 needs no
+   * lookup, and one the workspace refuses leaves the directory as made. */
+  private async narrowed(path: string, mode: number | undefined): Promise<void> {
+    if (mode === undefined || (mode & 0o777) === 0o777) return
+    let own: number
+    try {
+      own = (await this.files.stat(path)).mode & 0o7777
+    } catch (err) {
+      const condition = classify(err)
+      if (condition !== 'EACCES' && condition !== 'EPERM') throw err
+      console.debug(`mkdir: ${path} keeps the mode it was made with: ${String(err)}`)
+      return
+    }
+    const narrow = (own & ~0o777) | (own & mode & 0o777)
+    if (narrow !== own) await this.files.setattr(path, { mode: narrow })
+  }
+
+  /** Whether the link at `path` leads to a directory; a dangling one
+   * leads nowhere. */
+  private async linksToDirectory(path: string): Promise<boolean> {
+    try {
+      return (await this.entryOf(path, true)).isDirectory()
+    } catch (err) {
+      if (!isMissingPath(err)) throw err
+      return false
+    }
+  }
+
+  /** The source's entry once the pair passes the checks node's `cp`
+   * makes of every pair it copies: two names for one file (a link that
+   * makes them one is caught as one spelling is), a directory without
+   * `recursive`, and a directory into itself. */
+  private async checked(src: string, dst: string, opts: Record<string, unknown>): Promise<Stats> {
+    const follow = opts.dereference === true
+    const [source, target] = [await this.identity(src, follow), await this.identity(dst, follow)]
+    if (source === target) {
+      throw cpRefusal(
+        'ERR_FS_CP_EINVAL',
+        'Invalid src or dest',
+        'EINVAL',
+        'src and dest cannot be the same',
+        dst,
+      )
+    }
+    const from = await this.entryOf(src, follow)
+    if (from.isDirectory()) {
+      if (opts.recursive !== true) {
+        throw cpRefusal(
+          'ERR_FS_EISDIR',
+          'Path is a directory',
+          'EISDIR',
+          `${src} is a directory (not copied)`,
+          src,
+        )
+      }
+      if (target.startsWith(`${source}/`)) {
+        throw cpRefusal(
+          'ERR_FS_CP_EINVAL',
+          'Invalid src or dest',
+          'EINVAL',
+          `cannot copy ${src} to a subdirectory of self ${dst}`,
+          dst,
+        )
+      }
+    }
+    return from
+  }
+
+  /** The file `path` names once its links are followed, as node's `cp`
+   * tells two files apart: its directories always, its last name when
+   * `follow`, and a name not there as it is spelled. */
+  private async identity(path: string, follow: boolean): Promise<string> {
+    const absolute = posix.resolve(path)
+    if (absolute === '/') return absolute
+    if (follow) {
+      try {
+        return await routed.realpath(absolute)
+      } catch (err) {
+        if (!isMissingPath(err)) throw err
+      }
+    }
+    return posix.join(await this.identity(posix.dirname(absolute), true), posix.basename(absolute))
+  }
+
+  /** A path's own entry, or its target's, through the patched calls, so
+   * a host path reaches node and a mounted one the workspace. */
+  private entryOf(path: string, follow: boolean): Promise<Stats> {
+    return follow ? routed.stat(path) : routed.lstat(path)
+  }
+
+  /** One entry of a `cp` and what is under it, as node's own copies it:
+   * a name already there is replaced unless `force` is off, and a link
+   * keeps its target, a relative one resolved against where it was. */
+  private async copied(
+    src: string,
+    dst: string,
+    from: Stats,
+    opts: Record<string, unknown>,
+  ): Promise<void> {
+    let to: Stats | null = null
+    try {
+      // `dereference` follows a link on either side, as node's does.
+      to = await this.entryOf(dst, opts.dereference === true)
+    } catch (err) {
+      if (!isMissingPath(err)) throw err
+    }
+    if (from.isDirectory()) {
+      if (to !== null && !to.isDirectory()) {
+        throw cpRefusal(
+          'ERR_FS_CP_DIR_TO_NON_DIR',
+          'Cannot overwrite non-directory with directory',
+          'EISDIR',
+          `cannot overwrite non-directory ${dst} with directory ${src}`,
+          dst,
+        )
+      }
+      if (to === null) await routed.mkdir(dst)
+      const filter = opts.filter as ((from: string, to: string) => unknown) | undefined
+      for (const name of await routed.readdir(src)) {
+        const [child, target] = [posix.join(src, name), posix.join(dst, name)]
+        if (filter !== undefined && !(await filter(child, target))) continue
+        await this.copied(child, target, await this.checked(child, target, opts), opts)
+      }
+      // A directory it made takes the source's mode, once its entries are in.
+      if (to === null) await routed.chmod(dst, from.mode & 0o7777)
+      return
+    }
+    if (to?.isDirectory() === true) {
+      throw cpRefusal(
+        'ERR_FS_CP_NON_DIR_TO_DIR',
+        'Cannot overwrite directory with non-directory',
+        'ENOTDIR',
+        `cannot overwrite directory ${dst} with non-directory ${src}`,
+        dst,
+      )
+    }
+    if (from.isSymbolicLink()) {
+      const target = await routed.readlink(src)
+      const kept =
+        opts.verbatimSymlinks === true || posix.isAbsolute(target)
+          ? target
+          : posix.resolve(posix.dirname(src), target)
+      // A link replaces a link there, whatever `force` says, unless one
+      // leads into the other's directory; onto any other entry the
+      // symlink itself refuses the name, as node's does.
+      if (to?.isSymbolicLink() === true) {
+        const there = await routed.readlink(dst)
+        const leads = posix.resolve(kept)
+        const led = posix.isAbsolute(there) ? there : posix.resolve(posix.dirname(dst), there)
+        if ((await this.entryOf(src, true)).isDirectory()) {
+          if (led === leads || led.startsWith(`${leads}/`)) {
+            throw cpRefusal(
+              'ERR_FS_CP_EINVAL',
+              'Invalid src or dest',
+              'EINVAL',
+              `cannot copy ${kept} to a subdirectory of self ${led}`,
+              dst,
+            )
+          }
+          if (leads.startsWith(`${led}/`)) {
+            throw cpRefusal(
+              'ERR_FS_CP_SYMLINK_TO_SUBDIRECTORY',
+              'Cannot overwrite symlink in subdirectory of self',
+              'EINVAL',
+              `cannot overwrite ${led} with ${kept}`,
+              dst,
+            )
+          }
+        }
+        await routed.unlink(dst)
+      }
+      await routed.symlink(kept, dst)
+      return
+    }
+    if (!from.isFile() && !from.isCharacterDevice() && !from.isBlockDevice()) {
+      const [code, kind] = from.isSocket()
+        ? ['ERR_FS_CP_SOCKET', 'a socket file']
+        : from.isFIFO()
+          ? ['ERR_FS_CP_FIFO_PIPE', 'a FIFO pipe']
+          : ['ERR_FS_CP_UNKNOWN', 'an unknown file type']
+      throw cpRefusal(code, `Cannot copy ${kind}`, 'EINVAL', `cannot copy ${kind}: ${dst}`, dst)
+    }
+    if (to !== null) {
+      if (opts.force === false) {
+        if (opts.errorOnExist !== true) return
+        throw cpRefusal(
+          'ERR_FS_CP_EEXIST',
+          'Target already exists',
+          'EEXIST',
+          `${dst} already exists`,
+          dst,
+        )
+      }
+      await routed.unlink(dst)
+    }
+    await routed.copyFile(src, dst, typeof opts.mode === 'number' ? opts.mode : 0)
+    if (opts.preserveTimestamps === true) await routed.utimes(dst, from.atime, from.mtime)
+    await routed.chmod(dst, from.mode & 0o7777)
+  }
+
+  /** The names `pattern` matches, as node's `fs.promises.glob` yields
+   * them: by node's own matcher, under the part of the pattern that has
+   * no wildcard, relative to `cwd` for a relative pattern. */
+  async *glob(pattern: unknown, options?: Options): AsyncGenerator {
+    const opts = fieldsOf(options)
+    const cwd = spelled(opts.cwd) ?? process.cwd()
+    const exclude = opts.exclude
+    const typed = opts.withFileTypes === true
+    const follow = opts.followSymlinks === true
+    const seen = new Set<string>()
+    for (const raw of Array.isArray(pattern) ? pattern : [pattern]) {
+      const spelling = spelled(raw)
+      if (spelling === null) continue
+      const spelt = posix.isAbsolute(spelling)
+        ? posix.normalize(spelling)
+        : posix.join(cwd, spelling)
+      // A trailing slash asks for directories, named without it.
+      const directories = spelt.length > 1 && spelt.endsWith('/')
+      const absolute = directories ? spelt.slice(0, -1) : spelt
+      const shown = (path: string): string =>
+        posix.isAbsolute(spelling) ? path : posix.relative(cwd, path) || '.'
+      const parts = absolute.split('/').slice(1)
+      const magic = parts.findIndex((part) => GLOB_MAGIC.test(part))
+      const base = `/${parts.slice(0, magic === -1 ? parts.length : magic).join('/')}`
+      const rest = magic === -1 ? '' : parts.slice(magic).join('/')
+      // A `**` that is a whole name, inside braces too, may match at any
+      // depth; within a name (`foo**`) it is a `*`.
+      const depth = /(^|[/{,])\*\*($|[/},])/.test(rest) ? Infinity : rest.split('/').length
+      // An exclusion is matched from `cwd` and from the root alike,
+      // whichever way the pattern is spelled, as node matches it.
+      const skipped = (path: string, named: string, entry: unknown): boolean => {
+        if (typeof exclude === 'function') return Boolean((exclude as Fn)(typed ? entry : named))
+        const spellings = [path, posix.relative(cwd, path) || '.']
+        return (
+          Array.isArray(exclude) &&
+          exclude.some((ex) => spellings.some((name) => posix.matchesGlob(name, String(ex))))
+        )
+      }
+      let top: Stats
+      try {
+        top = await this.entryOf(base, true)
+      } catch (err) {
+        if (!isMissingPath(err)) throw err
+        continue
+      }
+      const baseEntry = {
+        name: posix.basename(base),
+        parentPath: posix.dirname(base),
+        path: posix.dirname(base),
+        isFile: () => top.isFile(),
+        isDirectory: () => top.isDirectory(),
+        isBlockDevice: () => false,
+        isCharacterDevice: () => false,
+        isSymbolicLink: () => false,
+        isFIFO: () => false,
+        isSocket: () => false,
+      }
+      // Each entry carries the directories its branch went through, by
+      // where their links lead, so a followed link never walks into one
+      // of them again, as node's walk does.
+      const pending: [string, string, number, unknown, string[]][] = [[base, '', 0, baseEntry, []]]
+      for (let next = pending.shift(); next !== undefined; next = pending.shift()) {
+        const [path, relative, level, entry, walked] = next
+        const named = shown(path)
+        // An excluded name is left out with all under it, the base too.
+        if (skipped(path, named, entry)) continue
+        const kind = entry as { isDirectory(): boolean; isSymbolicLink(): boolean }
+        // `followSymlinks` takes a link to a directory as one.
+        const isDirectory =
+          kind.isDirectory() ||
+          (follow && kind.isSymbolicLink() && (await this.linksToDirectory(path)))
+        if (
+          (magic === -1 ? relative === '' : posix.matchesGlob(relative, rest)) &&
+          (!directories || isDirectory) &&
+          !seen.has(named)
+        ) {
+          seen.add(named)
+          yield typed ? entry : named
+        }
+        if (magic === -1 || !isDirectory || level >= depth) continue
+        // A mounted directory's name is where the namespace's links lead,
+        // which needs no lookup; a host one is node's own realpath.
+        const real = !follow
+          ? path
+          : this.mounted(path)
+            ? this.files.walked(path)
+            : await routed.realpath(path)
+        if (follow && walked.includes(real)) continue
+        const branch = follow ? [...walked, real] : walked
+        const children = (await routed.readdir(path, { withFileTypes: true })) as unknown as {
+          name: string
+          isSymbolicLink(): boolean
+          isDirectory(): boolean
+        }[]
+        for (const child of children) {
+          const childPath = posix.join(path, child.name)
+          pending.push([
+            childPath,
+            relative === '' ? child.name : `${relative}/${child.name}`,
+            child.isSymbolicLink() && !follow ? depth : level + 1,
+            child,
+            branch,
+          ])
+        }
+      }
+    }
+  }
+
+  async mkdtemp(prefix: string, options?: Options): Promise<Buffer | string> {
+    // A prefix whose names fall outside the mount (`/data` makes
+    // `/dataXXXXXX`) is the host's.
+    if (!this.mounted(`${prefix}XXXXXX`))
+      return this.nativeCall('mkdtemp', prefix, options) as Promise<string>
+    // Six characters after the prefix, as node's template has them, drawn
+    // again for a name already there.
+    for (;;) {
+      const path = prefix + tempSuffix()
+      try {
+        await this.files.mkdir(path)
+        await this.narrowed(path, 0o700)
+        return encoded(path, options)
+      } catch (err) {
+        if (classify(err) !== 'EEXIST') throw fsError(err, 'mkdtemp', path)
+      }
+    }
+  }
+
+  async mkdtempDisposable(prefix: string, options?: Options): Promise<unknown> {
+    // The name handed back takes the encoding asked for; the removal takes
+    // the directory's own.
+    const made = String(await this.mkdtemp(prefix))
+    const remove = (): Promise<void> => routed.rm(made, { recursive: true, force: true })
+    return { path: encoded(made, options), remove, [Symbol.asyncDispose]: remove }
+  }
+
+  async opendir(path: string, options?: Options): Promise<unknown> {
+    try {
+      return openedDir(
+        path,
+        await this.readdir(path, {
+          withFileTypes: true,
+          recursive: fieldsOf(options).recursive === true,
+          encoding: fieldsOf(options).encoding,
+        }),
+      )
+    } catch (err) {
+      throw fsError(err, 'opendir', path)
+    }
+  }
+
+  async realpath(path: string, options?: Options): Promise<Buffer | string> {
+    // As realpath(3) walks a path: each name in turn, a link swapped for
+    // where it leads, so a `..` after a link climbs from its target.
+    const todo = path.split('/')
+    let done = '/'
+    let hops = 0
+    for (let name = todo.shift(); name !== undefined; name = todo.shift()) {
+      if (name === '' || name === '.') continue
+      if (name === '..') {
+        done = posix.dirname(done)
+        continue
+      }
+      const next = posix.join(done, name)
+      let st: VFSStat
+      try {
+        st = await this.files.stat(next, true)
+      } catch (err) {
+        throw fsError(err, 'realpath', path)
+      }
+      if (st.isLink === true) {
+        if (++hops > MAX_SYMLINK_HOPS) throw refusal('ELOOP', 'realpath', path)
+        const target = await this.files.readlink(next)
+        if (target.startsWith('/')) done = '/'
+        todo.unshift(...target.split('/'))
+        continue
+      }
+      if (!st.isDir && todo.some((rest) => rest !== '')) throw refusal('ENOTDIR', 'realpath', path)
+      done = next
+    }
+    return encoded(done, options)
+  }
+
   async readFile(path: string, options?: Options): Promise<Buffer | string> {
     const bytes = Buffer.from(await this.files.read(path))
     const encoding = encodingOf(options)
@@ -588,7 +1004,9 @@ class HostFs implements Record<RoutedCall, (...args: never[]) => Promise<unknown
     const walk = async (directory: string, prefix: string): Promise<void> => {
       for (const row of await this.files.readdir(directory, typed || recursive)) {
         const name = entryName(row.path)
-        out.push(typed ? this.direntOf(directory, row) : prefix + name)
+        out.push(
+          typed ? dirent(directory, row, encoded(name, options)) : encoded(prefix + name, options),
+        )
         if (recursive && row.isDir && row.isLink !== true) {
           await walk(posix.join(directory, name), `${prefix}${name}/`)
         }
@@ -599,11 +1017,7 @@ class HostFs implements Record<RoutedCall, (...args: never[]) => Promise<unknown
   }
 
   async readlink(path: string, options?: Options): Promise<Buffer | string> {
-    const target = await this.files.readlink(path)
-    const encoding = encodingOf(options) as string | undefined
-    if (encoding === undefined || encoding === 'utf8') return target
-    const bytes = Buffer.from(target)
-    return encoding === 'buffer' ? bytes : bytes.toString(encoding as BufferEncoding)
+    return encoded(await this.files.readlink(path), options)
   }
 
   async rename(src: string, dst: string): Promise<void> {
@@ -826,7 +1240,7 @@ class HostFs implements Record<RoutedCall, (...args: never[]) => Promise<unknown
         }
         case 'fstat': {
           const row = await this.files.fstat(desc.fd)
-          return [this.statsOf(desc.opened, row, rest[0] as Options, this.files.unlinked(desc.fd))]
+          return [this.statsOf(desc.inode, row, rest[0] as Options, this.files.unlinked(desc.fd))]
         }
         case 'ftruncate':
           if (!desc.mode.writable) throw einval(desc.path)
@@ -944,8 +1358,9 @@ export function patchNodeFs(ws: Workspace): () => void {
     FILE_CALLS.has(name) &&
     (host.descriptors.get(args[0]) !== undefined || args[0] instanceof MountedFileHandle)
   for (const name of ROUTED_CALLS) {
-    const route = (args: unknown[]): Promise<unknown> =>
-      (host[name] as (...a: unknown[]) => Promise<unknown>).call(host, ...spellPaths(name, args))
+    // A promise, or for `glob` the iterator node's answers with.
+    const route = (args: unknown[]): unknown =>
+      (host[name] as (...a: unknown[]) => unknown).call(host, ...spellPaths(name, args))
     swap(fs.promises, name, (original) => (...args) => {
       if (byDescriptor(name, args)) return host.fileCall(name, args[0], args.slice(1))
       return mountedIn(name, args) === null ? original(...args) : route(args)
@@ -962,8 +1377,13 @@ export function patchNodeFs(ws: Workspace): () => void {
       }
       if (typeof done !== 'function' || mountedIn(name, rest) === null) return original(...args)
       const callback = done as Callback
-      // `exists` is the one callback without an error slot.
-      route(rest).then(
+      const answered = route(rest)
+      // `glob`'s callback takes every name at once; `exists` is the one
+      // callback without an error slot.
+      ;(name === 'glob'
+        ? collected(answered as AsyncIterable<unknown>)
+        : (answered as Promise<unknown>)
+      ).then(
         (value) => {
           if (name === 'exists') callback(value)
           else callback(null, value)

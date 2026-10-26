@@ -20,8 +20,7 @@ import type { BridgeDispatchFn } from '../../../types.ts'
 import type { VFSEntry, VFSStat } from '../../../types.ts'
 import { PyodideRuntime } from '../runtime.ts'
 import type { FlushFailure, SyncVFS } from '../fs/types.ts'
-import { failureText } from './failure.ts'
-import { requestOverBridge, requestSync } from './transport.ts'
+import { failureText, requestOverBridge, requestSync } from '../../../wasm/transport.ts'
 import type { ExecuteRequest, VfsRequest, WorkerMessage } from './types.ts'
 
 const node = (globalThis as { process?: { versions?: { node?: string } } }).process?.versions?.node
@@ -52,6 +51,8 @@ const sync: SyncVFS = {
     })
   },
   process: (payload) => call({ op: 'process', path: '', payload }) as string,
+  stdin: (size) => call({ op: 'stdin', path: '', size }) as Uint8Array,
+  output: (fd, bytes) => call({ op: 'output', path: '', fh: fd, bytes }) as boolean,
   open: (path, mode) => call({ op: 'open', path, mode }) as number,
   pread: (fh, offset, size) => call({ op: 'pread', path: '', fh, offset, size }) as Uint8Array,
   pwrite: (fh, offset, bytes) => {

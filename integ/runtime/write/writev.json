@@ -13,7 +13,10 @@
         "disk",
         "ssh",
         "s3",
-        "redis"
+        "redis",
+        "ram+cache",
+        "disk+cache",
+        "redis+cache"
       ],
       "world": {
         "mounts": {

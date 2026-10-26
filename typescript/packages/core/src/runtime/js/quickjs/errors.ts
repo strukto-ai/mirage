@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+/** No quickjs module could be found or fetched where the runtime looks. */
 export class QuickJsUnavailableError extends Error {
   constructor(message: string, options?: { cause?: unknown }) {
     super(message, options)

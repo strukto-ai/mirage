@@ -40,6 +40,16 @@
             }
           }
         }
+      ],
+      "backends": [
+        "ram",
+        "disk",
+        "ssh",
+        "s3",
+        "redis",
+        "ram+cache",
+        "disk+cache",
+        "redis+cache"
       ]
     },
     {
@@ -98,6 +108,16 @@
             "stdout": "['user.guest']\n"
           }
         }
+      ],
+      "backends": [
+        "ram",
+        "disk",
+        "ssh",
+        "s3",
+        "redis",
+        "ram+cache",
+        "disk+cache",
+        "redis+cache"
       ]
     }
   ]

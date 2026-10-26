@@ -419,6 +419,19 @@ export class AsyncLineIterator implements AsyncIterableIterator<Uint8Array> {
   }
 
   /**
+   * At most `size` bytes with at most one pull of the source, as a
+   * read(2) of a pipe answers (Python's `read1`): what has arrived, the
+   * rest kept for the next read; empty at the end of input.
+   */
+  async read1(size: number): Promise<Uint8Array> {
+    if (size <= 0) return new Uint8Array(0)
+    const chunk = await this.readChunk()
+    if (chunk === null) return new Uint8Array(0)
+    if (chunk.byteLength > size) this.unread(chunk.subarray(size))
+    return chunk.subarray(0, size)
+  }
+
+  /**
    * Read at most `count` characters, stopping early at `delim` (null
    * reads through delimiters). `read -n` is the delimited form, `read
    * -N` the null one. The delimiter is consumed and not returned.

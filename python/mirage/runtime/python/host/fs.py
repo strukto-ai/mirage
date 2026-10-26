@@ -371,14 +371,18 @@ class HostFs:
         shares; an owner the row lacks is the host process's own.
 
         Args:
-            virtual (str): the path being statted (the inode's name).
+            virtual (str): the path being statted (the inode's name when
+                the row names none).
             st (VFSStat): the mount's row for it.
             unlinked (bool): the file has no name left, so no link.
         """
+        # The file the links lead to names both its inode and its device,
+        # so a stat through a link and the fstat of its open file agree.
+        named = st.name or virtual
         posix = posix_stat(
             st,
-            virtual,
-            owner_prefix(self._files.mount_prefixes(), virtual) or "/",
+            named,
+            owner_prefix(self._files.mount_prefixes(), named) or "/",
             uid=self._uid,
             gid=self._gid,
             unknown_ns=int(self._now * 1_000_000_000),
@@ -788,6 +792,31 @@ class HostFs:
             self._host.mkdir(path, mode, dir_fd=dir_fd)
             return
         self._adapter.mkdir(virtual)
+        if mode & 0o777 != 0o777:
+            self._narrow(virtual, mode)
+
+    def _narrow(self, virtual: str, mode: int) -> None:
+        """Narrow a directory just made to the permissions mode asks for.
+
+        Its own are what the umask left of 0o777, so the two together are
+        what mkdir(2) leaves of mode (tempfile's private 0o700 among
+        them), and a bit it inherited (a parent's set-group-ID) stays. A
+        lookup the workspace refuses leaves the directory as made.
+
+        Args:
+            virtual (str): the directory mkdir made.
+            mode (int): the mode mkdir was asked for.
+        """
+        try:
+            own = self._adapter.stat(virtual).mode & 0o7777
+        except PermissionError as exc:
+            logger.debug(
+                "mkdir: %s keeps the mode it was made with: %r", virtual, exc
+            )
+            return
+        narrow = own & ~0o777 | own & mode & 0o777
+        if narrow != own:
+            self._adapter.setattr(virtual, mode=narrow)
 
     def makedirs(
         self, name: Any, mode: int = 0o777, exist_ok: bool = False
@@ -801,7 +830,7 @@ class HostFs:
 
         Args:
             name (Any): the directory to create.
-            mode (int): dropped, as for mkdir.
+            mode (int): dropped; a single mkdir narrows to its mode.
             exist_ok (bool): stay quiet when the leaf is already there.
         """
         virtual = self._virtual(name)
@@ -1155,7 +1184,7 @@ class HostFs:
         desc = self._descriptors[fd]
         st = syscall(self._adapter.fstat)(desc.fh)
         unlinked = self._adapter.unlinked(desc.fh)
-        return self._stat_of(desc.opened, st, unlinked)
+        return self._stat_of(desc.inode or desc.opened, st, unlinked)
 
     def fsync(self, fd: int) -> None:
         self._descriptors[fd].land()

@@ -15,6 +15,7 @@
 import asyncio
 import errno
 import inspect
+import io
 import struct
 
 import pytest
@@ -138,7 +139,7 @@ def test_install_wasi_fs_locks_the_callback_slab_before_its_funcs(monkeypatch):
         return real_func(*args, **kwargs)
 
     monkeypatch.setattr(fs, "Func", counting_func)
-    install_wasi_fs(linker, store, WasiFs(WasmView(), b""))
+    install_wasi_fs(linker, store, WasiFs(WasmView(), None))
     assert order[0] == "lock"
     assert order.count("lock") == 1
     assert order.count("func") == len(_spec())
@@ -304,7 +305,7 @@ def test_wasi_open_wires_retained_read_checks(
         files=ws.vfs,
     )
     view = WasmView(files=files)
-    wasi = WasiFs(view, b"stdin")
+    wasi = WasiFs(view, io.BytesIO(b"stdin").read)
     memory = {}
     monkeypatch.setattr(wasi, "_path_arg", lambda *args: path)
     monkeypatch.setattr(

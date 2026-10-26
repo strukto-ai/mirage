@@ -1510,22 +1510,44 @@ def _backend_variants(case: dict[str, Any]) -> list[dict[str, Any]]:
         return [case]
     variants = []
     for backend in backends:
+        # `<backend>+cache` serves repeat reads from the file cache.
+        base, _, cached = backend.partition("+")
+        if cached not in ("", "cache"):
+            raise ValueError(f"{case['id']}: unknown backend {backend}")
         world = copy.deepcopy(case.get("world", {}))
         for spec in world.get("mounts", {}).values():
             if spec.get("vfs") == "ram":
-                spec["vfs"] = backend
+                spec["vfs"] = base
                 spec["scoped"] = True
+                if cached:
+                    spec["cache_reads"] = True
         variants.append(
             {
                 **case,
                 "id": f"{case['id']}@{backend}",
                 "backend": backend,
                 "world": world,
-                "requires": case.get("requires", [])
-                + BACKEND_REQUIRES[backend],
+                "requires": case.get("requires", []) + BACKEND_REQUIRES[base],
             }
         )
     return variants
+
+
+def _backend_keys(backend: str | None, runtime: str | None) -> list[str]:
+    """The ``expect_on`` keys a backend variant answers to, weakest first:
+    a cached one answers as its backend does, then as itself.
+
+    Args:
+        backend (str | None): the variant's backend; None for none.
+        runtime (str | None): the variant's runtime; None for none.
+    """
+    if backend is None:
+        return []
+    names = dict.fromkeys([backend.partition("+")[0], backend])
+    keys = list(names)
+    if runtime is not None:
+        keys += [f"{runtime}@{name}" for name in names]
+    return keys
 
 
 async def _remove_roots(ws: Workspace) -> None:
@@ -1652,12 +1674,7 @@ def _run_host_case(suite: str, case: dict[str, Any]) -> list[str]:
         )
         problems: list[str] = []
         try:
-            backend = case.get("backend")
-            keys = (
-                []
-                if backend is None
-                else [backend, f"{HOST_RUNTIME}@{backend}"]
-            )
+            keys = _backend_keys(case.get("backend"), HOST_RUNTIME)
             for index, step in enumerate(case["steps"]):
                 step = _overlay(step, keys)
                 label = f"step[{index}]"
@@ -1712,10 +1729,7 @@ async def _run_case(suite: str, case: dict[str, Any]) -> list[str]:
                         f"{case_id}: {name} filesystem {operation}: "
                         f"expected {expected}, got {operation in supported}"
                     )
-        backend = case.get("backend")
-        keys = [] if backend is None else [backend]
-        if backend is not None and "runtime" in case:
-            keys.append(f"{case['runtime']}@{backend}")
+        keys = _backend_keys(case.get("backend"), case.get("runtime"))
         for index, step in enumerate(case["steps"]):
             step = _overlay(step, keys)
             if "parallel" in step:

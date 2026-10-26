@@ -147,22 +147,22 @@ def _call_guarded(
 def _open_mode(oflags: int, rights_base: int, fdflags: int) -> OpenMode:
     """The open facts preview1 spells as oflags, rights and fdflags.
 
+    Only the write right lets the descriptor write, as open(2)'s access
+    mode does: a read-only open that creates hands out a file that only
+    reads.
+
     Args:
         oflags (int): the open's oflags bag.
         rights_base (int): the rights the guest asked for.
         fdflags (int): the descriptor flags.
     """
     create = bool(oflags & OFLAG_CREAT)
-    truncate = bool(oflags & OFLAG_TRUNC)
-    append = bool(fdflags & FDFLAG_APPEND)
+    writable = bool(rights_base & RIGHT_FD_WRITE)
     return OpenMode(
         readable=bool(rights_base & RIGHT_FD_READ),
-        writable=create
-        or truncate
-        or append
-        or bool(rights_base & RIGHT_FD_WRITE),
-        truncate=truncate,
-        append=append,
+        writable=writable,
+        truncate=writable and bool(oflags & OFLAG_TRUNC),
+        append=bool(fdflags & FDFLAG_APPEND),
         create=create,
         exclusive=create and bool(oflags & OFLAG_EXCL),
         binary=True,
@@ -178,8 +178,10 @@ class FdEntry:
         file (Descriptor | None): a mount file, open on the run's core,
             which holds what it read and wrote; None otherwise.
         local (ChunkedHandle | None): bytes it only reads that are no
-            mount's, stdin's or an interpreter build file's; None
-            otherwise.
+            mount's, an interpreter build file's; None otherwise.
+        pipe (Callable[[int], bytes] | None): stdin's reader, one
+            read(2) of the run's input: what has arrived, up to the size
+            asked, and b"" at its end; None otherwise.
         pos (int): where the next read of ``local`` starts.
         path (str): guest path, for dirs and build files.
         preopen (bool): the preopened root dir, which close refuses.
@@ -193,6 +195,7 @@ class FdEntry:
     kind: FdKind
     file: Descriptor | None = None
     local: ChunkedHandle | None = None
+    pipe: Callable[[int], bytes] | None = None
     pos: int = 0
     path: str = ""
     preopen: bool = False
@@ -208,6 +211,8 @@ class FdEntry:
         """
         if self.file is not None:
             return self.file.read(size)
+        if self.pipe is not None:
+            return self.pipe(size) if size > 0 else b""
         if self.local is None:
             return b""
         chunk = self.local.pread(self.pos, size)
@@ -269,7 +274,8 @@ class WasiFs:
 
     Args:
         fs (WasmView): the files the guest sees.
-        stdin (bytes): the guest's whole input.
+        stdin (Callable[[int], bytes] | None): reads the guest's input as
+            a pipe does, as it reads it; None gives it none.
         cancelled (threading.Event | None): set once the run is
             cancelled.
         output (Callable[[bytes], None] | None): takes each stdout write
@@ -281,7 +287,7 @@ class WasiFs:
     def __init__(
         self,
         fs: WasmView,
-        stdin: bytes,
+        stdin: Callable[[int], bytes] | None,
         cancelled: threading.Event | None = None,
         output: Callable[[bytes], None] | None = None,
         errors: Callable[[bytes], None] | None = None,
@@ -296,15 +302,7 @@ class WasiFs:
         self._memory: "wasmtime.Memory | None" = None
         self._fds: FileTable[FdEntry] = FileTable(first_id=4)
         self._fds.set(
-            0,
-            FdEntry(
-                kind="stdin",
-                local=ChunkedHandle(
-                    path="",
-                    size=len(stdin),
-                    fetch=lambda offset, size: stdin[offset : offset + size],
-                ),
-            ),
+            0, FdEntry(kind="stdin", pipe=stdin or (lambda size: b""))
         )
         self._fds.set(1, FdEntry(kind="stdout"))
         self._fds.set(2, FdEntry(kind="stderr"))
@@ -375,7 +373,9 @@ class WasiFs:
                     error = EBADF
                 elif kind == 1:
                     if (
-                        entry.file is None and entry.local is None
+                        entry.file is None
+                        and entry.local is None
+                        and entry.pipe is None
                     ) or not entry.readable:
                         error = EBADF
                     else:
@@ -771,7 +771,7 @@ class WasiFs:
                 # The core's row, its size the handle's, which counts what
                 # it wrote and has not landed.
                 posix = posix_stat(
-                    file.files.fstat(file.fh), entry.opened, "/"
+                    file.files.fstat(file.fh), file.inode or file.opened, "/"
                 )
                 if file.files.unlinked(file.fh):
                     posix = dataclasses.replace(posix, nlink=0)

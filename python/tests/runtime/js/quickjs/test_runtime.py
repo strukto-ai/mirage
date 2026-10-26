@@ -353,6 +353,40 @@ async def test_a_deadline_joins_the_landing_of_what_a_stopped_guest_wrote():
 
 
 @live
+@pytest.mark.asyncio
+async def test_descriptor_and_byte_calls_answer_as_the_shim_mirrors():
+    ws = Workspace(
+        {"/data": RAMVFS()}, mode=MountMode.EXEC, runtimes=["quickjs"]
+    )
+    program = "\n".join(
+        [
+            "const fd = os.open('/data/z', os.O_RDWR | os.O_CREAT)",
+            "const b = new Uint8Array([104, 105]).buffer",
+            "console.log(fd, os.write(fd, b, 0, 2),"
+            " os.seek(fd, 0n, std.SEEK_SET), os.seek(fd, -1, std.SEEK_SET))",
+            "const got = new ArrayBuffer(4)",
+            "console.log(os.read(fd, got, 0, 4),"
+            " new Uint8Array(got, 0, 2).join(','),"
+            " os.close(fd), os.close(fd), os.isatty(fd))",
+            "const f = std.open('/data/z', 'r+')",
+            "const first = f.getByte()",
+            "f.seek(0, std.SEEK_END)",
+            "console.log(first, f.putByte(321), f.tell())",
+            "f.close()",
+            "console.log(std.loadFile('/data/z'))",
+        ]
+    )
+    try:
+        await ws.shell("cat > /data/p.js", stdin=program.encode())
+        io = await ws.shell("node /data/p.js")
+        assert await io.stdout_str() == (
+            "4 2 0 -28\n2 104,105 0 -8 false\n104 65 3\nhiA\n"
+        )
+    finally:
+        await ws.close()
+
+
+@live
 def test_quickjs_reuses_compiled_module():
     rt = QuickJsRuntime()
     first = asyncio.run(_run(rt, Program(code="console.log(1)")))
