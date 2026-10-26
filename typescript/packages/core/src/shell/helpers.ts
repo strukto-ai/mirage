@@ -587,6 +587,9 @@ export function getRedirects(node: TSNodeLike): [TSNodeLike | null, Redirect[]] 
     }
   }
 
+  if (command?.type === NT.DECLARATION_COMMAND || command?.type === NT.UNSET_COMMAND) {
+    return [command, [...commandRedirects(command), ...redirects]]
+  }
   if (command?.type !== NT.COMMAND) return [command, redirects]
   return [
     getParts(command).length === 0 ? null : command,
@@ -756,17 +759,26 @@ function shellSplit(text: string): string[] | null {
 /**
  * Get every operand word of an unset_command, keeping `-f`/`-v`/`-n` and
  * keeping a subscript target (`unset arr[1]`, quoted or not) as one word.
- * Mirrors Python's `get_unset_args`.
+ * A redirect among the words is no operand. Mirrors Python's
+ * `get_unset_args`.
  */
 export function getUnsetArgs(node: TSNodeLike): string[] {
-  const operands = node.children.slice(1)
+  const operands = node.children.slice(1).filter((c) => !REDIRECT_NODE_TYPES.has(c.type))
   const first = operands[0]
   if (first === undefined) return []
   if (first.startIndex !== undefined && node.startIndex !== undefined) {
-    const split = shellSplit(node.text.slice(first.startIndex - node.startIndex))
+    let text = node.text
+    for (const child of node.children) {
+      if (!REDIRECT_NODE_TYPES.has(child.type)) continue
+      if (child.startIndex === undefined || child.endIndex === undefined) continue
+      const start = child.startIndex - node.startIndex
+      const end = child.endIndex - node.startIndex
+      text = text.slice(0, start) + ' '.repeat(end - start) + text.slice(end)
+    }
+    const split = shellSplit(text.slice(first.startIndex - node.startIndex))
     if (split !== null) return split
   }
-  return node.namedChildren.map((c) => getText(c))
+  return operands.filter((c) => c.isNamed === true).map((c) => getText(c))
 }
 
 /** The command a `!` negates; null for a bare `!`, which negates the empty command. */

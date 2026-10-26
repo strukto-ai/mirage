@@ -705,9 +705,13 @@ def get_redirects(
         elif child.type == NT.HERESTRING_REDIRECT:
             redirects.append(_parse_herestring_redirect(child))
 
-    if command is not None and command.type == NT.COMMAND:
+    if command is not None and command.type in (
+        NT.COMMAND,
+        NT.DECLARATION_COMMAND,
+        NT.UNSET_COMMAND,
+    ):
         redirects = [*command_redirects(command), *redirects]
-        if not get_parts(command):
+        if command.type == NT.COMMAND and not get_parts(command):
             command = None
     return command, redirects
 
@@ -853,17 +857,25 @@ def get_unset_args(node: TSNodeLike) -> list[str]:
     The leading option words are preserved so the handler can tell a
     function unset (``unset -f``) from a variable unset, and the operand
     span is split the way the shell does so a subscript target
-    (``unset arr[1]``, quoted or not) stays one word.
+    (``unset arr[1]``, quoted or not) stays one word. A redirect among
+    the words is no operand.
     """
-    operands = node.children[1:]
+    operands = [
+        c for c in node.children[1:] if c.type not in REDIRECT_NODE_TYPES
+    ]
     if not operands:
         return []
+    text = bytearray(node.text or b"")
+    for child in node.children:
+        if child.type in REDIRECT_NODE_TYPES:
+            start = child.start_byte - node.start_byte
+            end = child.end_byte - node.start_byte
+            text[start:end] = b" " * (end - start)
     start = operands[0].start_byte - node.start_byte
-    text = decode_text((node.text or b"")[start:])
     try:
-        return shlex.split(text)
+        return shlex.split(decode_text(bytes(text[start:])))
     except ValueError:
-        return [get_text(c) for c in node.named_children]
+        return [get_text(c) for c in operands if c.is_named]
 
 
 def get_negated_command(node: TSNodeLike) -> TSNodeLike | None:

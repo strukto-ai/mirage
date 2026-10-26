@@ -479,7 +479,7 @@ impl Parser<'_> {
         self.skip_space();
         let start = self.i;
         if self.at_redirect() && !self.starts(b"<<") {
-            let redirect = self.redirect(true)?;
+            let redirect = self.redirect(false)?;
             self.skip_space();
             if self.peek() == b')' {
                 return Ok(vec![redirect.with_field("redirect")]);

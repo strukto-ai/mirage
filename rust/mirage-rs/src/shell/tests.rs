@@ -82,11 +82,61 @@ fn a_redirect_wraps_everything_before_it() {
         "(program (redirected_statement body: (list (command name: (command_name (word=a))) \
          (command name: (command_name (word=b)))) redirect: (file_redirect destination: (word=f))))"
     );
+}
+
+#[test]
+fn a_redirect_takes_one_word() {
+    // The words after it are the command's; redirects that end it wrap it.
     assert_eq!(
-        read("echo a > f b"),
+        read("echo a > f b 2>&1 c > g"),
         "(program (redirected_statement body: (command name: (command_name (word=echo)) \
-         argument: (word=a)) redirect: (file_redirect destination: (word=f) destination: (word=b))))"
+         argument: (word=a) redirect: (file_redirect destination: (word=f)) argument: (word=b) \
+         redirect: (file_redirect descriptor: (file_descriptor=2) destination: (number=1)) \
+         argument: (word=c)) redirect: (file_redirect destination: (word=g))))"
     );
+    assert_eq!(lowered("cat <<E -n\nx\nE").0, "cat <\"x\n\" -n\n");
+    assert_eq!(
+        read("cat <<E -n\nx\nE"),
+        "(program (command name: (command_name (word=cat)) redirect: (file_redirect \
+         destination: (string (string_content=x))) argument: (word=-n)))"
+    );
+    assert_eq!(
+        read("echo a >&- b"),
+        "(program (command name: (command_name (word=echo)) argument: (word=a) \
+         redirect: (file_redirect=>&-) argument: (word=b)))"
+    );
+    // A declaration's redirects apply in the order written, so the ones
+    // after its words join the ones among them.
+    assert_eq!(
+        read("unset a > f b 2> g"),
+        "(program (redirected_statement body: (unset_command (variable_name=a) \
+         redirect: (file_redirect destination: (word=f)) (variable_name=b)) \
+         redirect: (file_redirect descriptor: (file_descriptor=2) destination: (word=g))))"
+    );
+    assert!(read("[ a ] > f ]").starts_with("(program (command name: (command_name (word=[))"));
+    assert!(read("echo $(< f g)").contains(
+        "(command redirect: (file_redirect destination: (word=f)) name: (command_name (word=g)))"
+    ));
+    // After a compound command, or before an array value, bash refuses a
+    // word.
+    for (line, near) in [
+        ("{ echo a; } > f b", "b"),
+        ("(echo a) > f b", "b"),
+        ("if a; then b; fi > f c", "c"),
+        ("[[ a ]] > f b", "b"),
+        ("time { a; } > f b", "b"),
+        ("declare a=1 > f b=(1)", "("),
+    ] {
+        let refusal = refused(line);
+        assert_eq!(
+            (
+                String::from_utf8_lossy(&refusal.message).into_owned(),
+                refusal.status
+            ),
+            (format!("mirage: syntax error near '{near}'\n"), 2),
+            "{line}"
+        );
+    }
 }
 
 #[test]

@@ -1007,7 +1007,7 @@ impl Parser<'_> {
             } else if self.at_redirect() {
                 let mut children = vec![left.with_field("body")];
                 while self.at_redirect() {
-                    children.push(self.redirect(true)?.with_field("redirect"));
+                    children.push(self.redirect(false)?.with_field("redirect"));
                     self.skip_blank();
                 }
                 if self.at_herestring() {
@@ -1084,7 +1084,7 @@ impl Parser<'_> {
             if self.at_redirect() {
                 let mut wrapped = vec![body.with_field("body")];
                 while self.at_redirect() {
-                    wrapped.push(self.redirect(true)?.with_field("redirect"));
+                    wrapped.push(self.redirect(false)?.with_field("redirect"));
                     self.skip_blank();
                 }
                 body = Syn::node("redirected_statement", wrapped);
@@ -1156,15 +1156,19 @@ impl Parser<'_> {
         }
         if self.peek() == b'[' && is_space(self.at(1)) {
             // `[` is a command: one whose words the grammar cannot read
-            // as a test, or that has no `]`, still runs.
+            // as a test, or that has no `]`, still runs, and so does one
+            // with words after a redirect that follows its `]`.
             let mark = self.mark();
-            match self.test_command(false) {
-                Ok(node) => return Ok(node),
-                Err(_) => {
-                    self.reset(mark);
-                    return self.command();
+            if let Ok(node) = self.test_command(false) {
+                let after = self.mark();
+                self.skip_blank();
+                if !(self.at_redirect() && self.words_after_redirects()?) {
+                    self.reset(after);
+                    return Ok(node);
                 }
             }
+            self.reset(mark);
+            return self.command();
         }
         if self.at_word(b"if") {
             return self.if_statement();

@@ -1866,6 +1866,171 @@
         "stdout": "st=1\nst=0\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "redirect_words_after_the_target_are_arguments",
+      "seq": 501181,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "echo hi > /data/rw-out there; cat /data/rw-out; echo a 2>&1 b; echo x > /data/rw-a; cat 2>/dev/null /data/rw-a /data/rw-a; wc -l < /data/rw-a /data/rw-a; cat <&- /data/rw-a; echo a > /data/rw-b b > /data/rw-c c; cat /data/rw-b /data/rw-c; echo $(< /data/rw-a tr x y); rm /data/rw-out /data/rw-a /data/rw-b /data/rw-c",
+      "expect": {
+        "exit": 0,
+        "stdout": "hi there\na b\nx\nx\n1 /data/rw-a\nx\na b c\ny\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "redirect_words_after_a_heredoc_are_arguments",
+      "seq": 501182,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "cat <<EOF -n\nx\nEOF\necho <<OUT $(cat <<IN)\nin\nIN\nout\nOUT",
+      "expect": {
+        "exit": 0,
+        "stdout": "     1\tx\nin\n",
+        "stderr": "mirage: line 4: warning: command substitution: 1 unterminated here-document\n"
+      }
+    },
+    {
+      "id": "redirect_words_after_a_declaration_are_operands",
+      "seq": 501183,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(f() { local x=1 > /dev/null y=2; echo \"$x $y\"; }; f; declare v=1 > /dev/null w=2; echo \"$v $w\"; a=1; b=2; unset a > /dev/null b; echo \"${a-unset} ${b-unset}\")",
+      "expect": {
+        "exit": 0,
+        "stdout": "1 2\n1 2\nunset unset\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "redirect_word_after_a_compound_command_is_refused",
+      "seq": 501184,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "echo before; { echo a; } > /dev/null b",
+      "expect": {
+        "exit": 2,
+        "stdout": "",
+        "stderr": "mirage: syntax error near 'b'\n"
+      }
+    },
+    {
+      "id": "redirect_word_after_a_test_bracket_goes_to_it",
+      "seq": 501185,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "[ a = a ] > /dev/null ]; echo \"st=$?\"",
+      "expect": {
+        "exit": 0,
+        "stdout": "st=2\n",
+        "stderr": "bash: [: too many arguments\n"
+      }
     }
   ]
 }
