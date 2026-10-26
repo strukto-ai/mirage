@@ -15,7 +15,6 @@
 import type { CommandFnResult } from '../../../commands/config.ts'
 import { currentCaller } from '../../../context/session_context.ts'
 import { PartialOutputError, UsageError } from '../../../commands/errors.ts'
-import { runWithTimeout } from '../../../commands/builtin/utils/limit.ts'
 import { readFailExitCode } from '../../../commands/spec/usage.ts'
 import { errorVirtualPath, fsStrerror } from '../../../errors/fs.ts'
 import { formatFsError } from '../../../errors/render.ts'
@@ -71,11 +70,9 @@ export interface RunHandlerOpts {
   scope?: (result: [ByteSource | null, IOResult]) => [ByteSource | null, IOResult]
   /** The caller's abort, which stops waiting for the body. */
   signal?: AbortSignal
-  /** Aborted when the limit trips, so a runtime can kill what it spawned. */
-  abort?: AbortController
   /**
    * Called once the answer, its rows rendered, has settled, however the
-   * caller left: a handler and its renderer may run past a timeout, so a
+   * caller left: a handler and its renderer may run past an abort, so a
    * caller keeps what they use (a CLI's client) until then.
    */
   settle?: () => void
@@ -184,17 +181,15 @@ export async function answered(
 /**
  * Run one handler body: a mount command's, or a CLI leaf's.
  *
- * The body runs under the resolved limit's timeout, which must bound it as
- * well as its output: an eager handler does its work inside the call, where
- * the stream guard never runs. Racing a promise does not stop its work, so
- * the timeout aborts `opts.abort` for a runtime that can kill what it
- * spawned, and output the body hands back after its caller left is closed.
+ * The body runs until it answers or the caller's signal aborts (the line's
+ * deadline among the reasons). Racing a promise does not stop its work, so
+ * output the body hands back after its caller left is closed.
  * A usage error is the handler's own words and exit code; any other failure
  * is worded in the caller's voice, so the rest of the line keeps running. A
  * handler that may have written past the dispatcher drops caches afterwards,
  * whether it answered, failed (in its own words too), timed out or was
  * cancelled, again when a body (or the renderer of the rows it handed over)
- * still running past its timeout settles, since its write may land then, and
+ * still running past its abort settles, since its write may land then, and
  * again once an answer that streams has ended or
  * been closed, since a stream does its work as it is pulled. An answer
  * carries the producer the output limits resolve from and
@@ -202,7 +197,7 @@ export async function answered(
  * failure the runner framed carries no producer. Null is the handler
  * declining, which a mount's cascade reads as "try the next handler".
  * Rows a handler hands over in place of stdout (`IOResult.rows`) lose those
- * the session cannot see and are rendered here, inside the timeout, so this
+ * the session cannot see and are rendered here, inside the run, so this
  * is the one place a command's output meets the session's hides.
  * Mirrors Python's `run_handler`.
  */
@@ -214,7 +209,6 @@ export async function runHandler(
   voice: HandlerVoice,
   opts: RunHandlerOpts = {},
 ): Promise<CommandFnResult> {
-  const timeout = limit?.timeoutSeconds ?? null
   let out: CommandFnResult
   // The rendered answer is what a caller that left abandons: a renderer that
   // finishes late hands back output nobody reads.
@@ -227,9 +221,8 @@ export async function runHandler(
   const grace = (): number =>
     (runner?.signal ?? stopSignal(opts.signal)) === null ? ABORT_JOIN_MS : STOP_WAIT_SECONDS * 1000
   try {
-    out = await runWithTimeout(joinOrAbort(answer, opts.signal, grace), timeout, name)
+    out = await joinOrAbort(answer, opts.signal, grace)
   } catch (err) {
-    if (err instanceof CommandTimeoutError) opts.abort?.abort()
     abandon(answer, err, name)
     const drop = opts.drop
     if (drop !== undefined) {

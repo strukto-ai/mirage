@@ -58,7 +58,6 @@ import type { Clock } from '../../utils/clock.ts'
 
 import { getExtension } from '../../utils/filetype.ts'
 import { resolveLimit } from '../../policy/index.ts'
-import { runWithTimeout, withPullTimeout } from '../../commands/builtin/utils/limit.ts'
 import { materialize, type ByteSource, IOResult } from '../../io/types.ts'
 import { closeQuietly } from '../../io/stream.ts'
 import { flagOccurrences } from '../../commands/spec/flag_view.ts'
@@ -68,7 +67,6 @@ import { latestFingerprint } from '../../cache/file/io.ts'
 import type { OpRecord } from '../../observe/record.ts'
 import { type WriteContext } from '../../cache/types.ts'
 import type { CacheManager } from '../../cache/manager.ts'
-import { mergeSignals } from '../../utils/abort.ts'
 import {
   answered,
   cliVoice,
@@ -1537,9 +1535,8 @@ export class MountEntry {
    * pulls. The backend runs on each pull, after this frame is gone, so every
    * pull gets what a call gets around it: the caller's context (session,
    * recorder, cache scope), the mount's recording context, its write context
-   * (a read hands its token on only where a write will send it), its revision
-   * pins, and the read's timeout, which bounds each pull rather than the whole
-   * stream. The mount is held until the stream ends or is closed. A read that
+   * (a read hands its token on only where a write will send it) and its
+   * revision pins. The mount is held until the stream ends or is closed. A read that
    * is neither async nor handed stats is called as the stream opens, so what
    * it binds (a pipe) is bound before the path can be released. Mirrors
    * Python's `read_stream`.
@@ -1547,7 +1544,6 @@ export class MountEntry {
   readStream(scope: PathSpec, access?: SessionAccess): AsyncIterable<Uint8Array> {
     const vfs = this.viewFor(access)
     if (this.retiring) throw ebusy(this.prefix)
-    const limit = this.commandLimits.get('read') ?? null
     const revisions = this.revisions.size > 0 ? this.revisions : null
     const bound = currentCaller()
     const caller: Caller = {
@@ -1557,13 +1553,10 @@ export class MountEntry {
       revisions: { map: revisions },
     }
     const signal = callerSignal()
-    const stream = withPullTimeout(
+    const stream =
       this.wants('read').length > 0 || vfs.read.constructor.name === 'AsyncFunction'
         ? this.streamed(vfs, scope, this.index, signal)
-        : asStream(runWithCaller(caller, async () => vfs.read(scope, {}, 0, null, signal))),
-      limit?.timeoutSeconds ?? null,
-      'read',
-    )
+        : asStream(runWithCaller(caller, async () => vfs.read(scope, {}, 0, null, signal)))
     return this.activity.hold(withCaller(stream, caller)) as AsyncIterable<Uint8Array>
   }
 
@@ -1895,13 +1888,8 @@ export class MountEntry {
   }
 
   /**
-   * Run one handler under the mount-resolved timeout, through the runner a
-   * CLI leaf shares, in this mount's voice.
-   *
-   * The dispatch-level guard only sees default limits (the mount is unknown
-   * before routing), so the mount-resolved timeout must also bound the
-   * command body: eager commands do their work inside cmd.fn, where the
-   * stream-consumption guard never runs. `tables` are the workspace's and
+   * Run one handler through the runner a CLI leaf shares, in this mount's
+   * voice. `tables` are the workspace's and
    * the profile's command limits, resolved with this mount's own. `typed` are
    * the operands as the line typed them, which a file error names. A user
    * command that declares a write reaches its backend through its own
@@ -2001,11 +1989,8 @@ export class MountEntry {
   /**
    * Run a handler body through the shared runner with what this mount binds
    * around it. The runner abandons the promise, it cannot cancel it; the
-   * aborted signal lets a runtime kill what it spawned (python cancels the
-   * task instead). The ambient context.signal is a background job's kill
-   * channel, folded into the same wire. timeoutSeconds rides along so an
-   * engine that executes on the event loop (quickjs) can interrupt itself
-   * when the timer cannot fire.
+   * context's signal (a background job's kill channel, the line's deadline)
+   * lets a runtime kill what it spawned (python cancels the task instead).
    */
   private runIn(
     name: string,
@@ -2016,26 +2001,14 @@ export class MountEntry {
     writes: boolean,
     call: (ctx: Context) => Promise<CommandFnResult>,
   ): Promise<CommandFnResult> {
-    const timeout = limit !== null ? limit.timeoutSeconds : null
-    const guard = timeout !== null && timeout > 0 ? new AbortController() : null
-    const runSignal = mergeSignals(guard?.signal, ctx.signal)
-    const runCtx =
-      runSignal !== undefined
-        ? {
-            ...ctx,
-            signal: runSignal,
-            ...(timeout !== null && timeout > 0 ? { timeoutSeconds: timeout } : {}),
-          }
-        : ctx
-    // No hold past the timeout: an unmount waits on this mount's activity
+    // No hold past an abort: an unmount waits on this mount's activity
     // with no grace, so a body, or a renderer of the rows it handed over,
     // that ignores the abort is let go rather than waited on.
-    return runHandler(call(runCtx), name, limit, producer, voice, {
+    return runHandler(call(ctx), name, limit, producer, voice, {
       scope: (result) => wrapMountStreams(result, this.activity),
       ...(writes ? { drop: () => this.dropCaches() } : {}),
-      ...(runSignal !== undefined ? { signal: runSignal } : {}),
-      ...(guard !== null ? { abort: guard } : {}),
-      ...(runCtx.vfs !== undefined ? { vfs: runCtx.vfs } : {}),
+      ...(ctx.signal !== undefined ? { signal: ctx.signal } : {}),
+      ...(ctx.vfs !== undefined ? { vfs: ctx.vfs } : {}),
     })
   }
 
@@ -2087,18 +2060,10 @@ export class MountEntry {
         ...kwargs,
         ...(kwargs.index === undefined ? { index: this.index } : {}),
       }
-      // A file call is never cut: only the op entry's timeout applies,
-      // bounding the backend call itself.
-      const opOverride = this.commandLimits.get(name) ?? null
-      const opTimeout = opOverride !== null ? opOverride.timeoutSeconds : null
       return runWithMountContext(
         () =>
           this.runWithWriteRevisions(async () => {
-            const result = await runWithTimeout(
-              this.callKeyed(name, scope, args, effectiveKwargs, access),
-              opTimeout,
-              name,
-            )
+            const result = await this.callKeyed(name, scope, args, effectiveKwargs, access)
             return result === null || result === undefined
               ? null
               : wrapStream(result, this.mountId, this.activity)
@@ -2106,15 +2071,6 @@ export class MountEntry {
         this.mountId,
       )
     })
-  }
-
-  /**
-   * The op entry's timeout for `name`, null for none. A file call is never
-   * cut: only the op entry's timeout applies, bounding the backend call
-   * itself. Mirrors Python's _op_timeout.
-   */
-  opTimeout(name: string): number | null {
-    return this.commandLimits.get(name)?.timeoutSeconds ?? null
   }
 
   /** `path` as this mount's VFS addresses it. Mirrors Python's _scope. */
@@ -2147,12 +2103,12 @@ export class MountEntry {
   }
 
   /**
-   * Copy a file from `source`'s store into this mount's, store to store,
-   * under the mount's `copy` timeout. For `cp` and `mv` between two mounts,
+   * Copy a file from `source`'s store into this mount's, store to store.
+   * For `cp` and `mv` between two mounts,
    * once the dispatcher has judged `src` as a read and `dst` as a create and
    * `canCopyFrom` has said yes. The VFS rejects EXDEV when it cannot make the
    * copy after all, and the caller moves the bytes itself. `onCall` receives
-   * the store's own call once it starts, which a timeout does not stop.
+   * the store's own call once it starts.
    * Mirrors Python's `copy_from`.
    */
   async copyFrom(
@@ -2163,7 +2119,7 @@ export class MountEntry {
   ): Promise<void> {
     await this.use(() =>
       source.use(() =>
-        this.framed('copy', () => {
+        this.framed(() => {
           this.requireWritable('write', PathSpec.fromStrPath(dst), [])
           const pending = this.vfs.copyFrom(source.vfs, source.scope(src), this.scope(dst))
           onCall?.(pending)
@@ -2174,14 +2130,14 @@ export class MountEntry {
   }
 
   /**
-   * Read several whole files on this mount in one request, under the mount's
-   * `read` timeout. For the dispatcher's read-ahead, once it has walked and
+   * Read several whole files on this mount in one request. For the
+   * dispatcher's read-ahead, once it has walked and
    * followed each path; keyed by virtual path, a file left out is read on its
    * own later. Mirrors Python's `read_many`.
    */
   async readMany(paths: readonly string[], limit: number): Promise<Map<string, Uint8Array>> {
     return this.use(() =>
-      this.framed('read', () =>
+      this.framed(() =>
         this.batchRead(
           paths.map((p) => this.scope(p)),
           limit,
@@ -2192,11 +2148,11 @@ export class MountEntry {
 
   /**
    * Run one backend call as `call` frames its own: in this mount's recording
-   * and write contexts, under the op's timeout. Mirrors Python's `_framed`.
+   * and write contexts. Mirrors Python's `_framed`.
    */
-  private framed<T>(op: string, work: () => Promise<T>): Promise<T> {
+  private framed<T>(work: () => Promise<T>): Promise<T> {
     return runWithMountContext(
-      () => this.runWithWriteRevisions(() => runWithTimeout(work(), this.opTimeout(op), op)),
+      () => this.runWithWriteRevisions(work),
       this.mountId,
     )
   }
@@ -2220,8 +2176,7 @@ export class MountEntry {
   }
 
   /**
-   * Rank several scopes on this mount as one query, under the mount's
-   * `search` timeout. For the dispatcher, once it has walked, followed and
+   * Rank several scopes on this mount as one query. For the dispatcher, once it has walked, followed and
    * admitted each scope as it does a `search`'s one. Mirrors Python's
    * `search_many`.
    */
@@ -2230,7 +2185,7 @@ export class MountEntry {
     query: SearchQuery,
   ): Promise<[string, string][] | null> {
     return this.use(() =>
-      this.framed('search', () =>
+      this.framed(() =>
         this.vfs.searchMany(
           paths.map((p) => this.scope(p)),
           query,

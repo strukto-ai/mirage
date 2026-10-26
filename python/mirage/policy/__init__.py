@@ -20,7 +20,6 @@ if TYPE_CHECKING:
     from mirage.policy.base import Policy
     from mirage.policy.builtin import (
         DEFAULT_COMMAND_LIMITS,
-        FALLBACK_LIMIT,
         MountRootPolicy,
         PermissionsPolicy,
         resolve_limit,
@@ -108,7 +107,6 @@ _EXPORTS: dict[str, tuple[str, ...]] = {
     "mirage.policy.base": ("Policy",),
     "mirage.policy.builtin": (
         "DEFAULT_COMMAND_LIMITS",
-        "FALLBACK_LIMIT",
         "MountRootPolicy",
         "PermissionsPolicy",
         "resolve_limit",
@@ -221,7 +219,6 @@ __all__ = [
     "Explanation",
     "HandOff",
     "Occurrence",
-    "FALLBACK_LIMIT",
     "Limit",
     "MountCommandsBlock",
     "MountRootPolicy",

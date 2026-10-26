@@ -15,7 +15,6 @@
 import { Limit, type LimitInit, OnExceed, type Producer } from '../../types.ts'
 
 const DEFAULT_MAX_LINES = 2000
-const DEFAULT_TIMEOUT_SECONDS = 600
 
 // Null prototype: command names are script-controlled, so a name like
 // `toString` must fall through to the fallback instead of resolving an
@@ -25,20 +24,18 @@ export const DEFAULT_COMMAND_LIMITS: Record<string, Limit> = Object.assign(
   Object.fromEntries(
     ['cat', 'grep', 'rg', 'head', 'tail'].map((name) => [
       name,
-      new Limit({
-        maxLines: DEFAULT_MAX_LINES,
-        timeoutSeconds: DEFAULT_TIMEOUT_SECONDS,
-      }),
+      new Limit({ maxLines: DEFAULT_MAX_LINES }),
     ]),
   ),
 )
 
-export const FALLBACK_LIMIT = new Limit({ timeoutSeconds: DEFAULT_TIMEOUT_SECONDS })
+/** The line's time limit when no `line` entry names one. Mirrors Python's LINE_TIMEOUT_SECONDS. */
+export const LINE_TIMEOUT_SECONDS = 600
 
 /** The entry naming every command in a limit table. Mirrors Python's ALL_COMMANDS. */
 export const ALL_COMMANDS = '*'
 
-/** The entry naming the whole line, whose `timeoutSeconds` is its deadline. Mirrors Python's LINE. */
+/** The entry naming the whole line, whose `timeoutSeconds` is its one time limit. Mirrors Python's LINE. */
 export const LINE = 'line'
 
 interface LimitMount {
@@ -64,9 +61,8 @@ function entries(table: Readonly<Record<string, Limit>>, name: string): (Limit |
  *
  * Field by field, from the most specific layer that sets it: the profile's
  * entry for the command, then its `*` entry for every command, then the
- * mount's two, the workspace's two, the command's own default, the built-in
- * table and the fallback; on a mount, its backend's default (`walkLimit`)
- * last. A layer that names one bound inherits the rest. A command across
+ * mount's two, the workspace's two, the command's own default and the
+ * built-in table; on a mount, its backend's default (`walkLimit`) last. A layer that names one bound inherits the rest. A command across
  * several mounts resolves on each and keeps the tightest bound. Mirrors
  * Python's resolve_limit.
  */
@@ -83,7 +79,6 @@ export function resolveLimit(
     ...entries(workspaceLimits, name),
     commandDefault,
     DEFAULT_COMMAND_LIMITS[name] ?? null,
-    FALLBACK_LIMIT,
   ]
   if (mounts.length === 0) return Limit.layered([...above, ...below])
   return Limit.aggr(
@@ -191,16 +186,52 @@ export function commandLimitsToJSON(
 }
 
 /**
- * The whole line's deadline: the `line` entry's `timeoutSeconds`, the
- * profile's over the workspace's; null for none, which is the default.
- * Mirrors Python's line_timeout.
+ * The whole line's deadline, the one time limit a line runs under: the
+ * `line` entry's `timeoutSeconds`, the profile's over the workspace's, else
+ * `LINE_TIMEOUT_SECONDS`. An entry naming it as null or 0 lifts it. Mirrors
+ * Python's line_timeout.
  */
 export function lineTimeout(
   workspaceLimits: Readonly<Record<string, Limit>> = {},
   profileLimits: Readonly<Record<string, Limit>> = {},
 ): number | null {
-  return (
-    Limit.layered([ownLimit(profileLimits, LINE), ownLimit(workspaceLimits, LINE)])
-      ?.timeoutSeconds ?? null
-  )
+  const found = Limit.layered([ownLimit(profileLimits, LINE), ownLimit(workspaceLimits, LINE)])
+  if (found === null || !found.fieldsSet.has('timeoutSeconds')) return LINE_TIMEOUT_SECONDS
+  return found.timeoutSeconds !== null && found.timeoutSeconds > 0 ? found.timeoutSeconds : null
+}
+
+/**
+ * Refuse a table that names time where no time limit applies. A line runs
+ * under one time limit, the `line` entry's `timeoutSeconds`; no command or
+ * op entry takes one, and the `line` entry takes nothing else. A mount
+ * names no line, since a line spans mounts. Mirrors Python's
+ * check_command_limits.
+ */
+export function checkCommandLimits(
+  limits: Readonly<Record<string, Limit>>,
+  where: string,
+  takesLine: boolean,
+): void {
+  for (const [name, limit] of Object.entries(limits)) {
+    if (name !== LINE) {
+      if (limit.fieldsSet.has('timeoutSeconds')) {
+        throw new Error(
+          `${where}: command_limits['${name}'].timeout_seconds: a line has one time limit, set it on '${LINE}'`,
+        )
+      }
+      continue
+    }
+    if (!takesLine) {
+      throw new Error(
+        `${where}: command_limits['${LINE}']: a line spans mounts, set it on the workspace or a profile`,
+      )
+    }
+    const extra = [...limit.fieldsSet].filter((field) => field !== 'timeoutSeconds')
+    if (extra.length > 0) {
+      const named = extra.map((field) => field.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`))
+      throw new Error(
+        `${where}: command_limits['${LINE}'] takes only timeout_seconds, not ${named.sort().join(', ')}`,
+      )
+    }
+  }
 }

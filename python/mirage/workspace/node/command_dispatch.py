@@ -27,8 +27,6 @@ from typing import Any, TypeVar
 
 from mirage.commands.builtin.utils.limit import (
     guard_io,
-    maybe_with_timeout,
-    run_with_timeout,
 )
 from mirage.context import (
     RedirectRunner,
@@ -52,7 +50,6 @@ from mirage.policy import (
     post_command_gate,
     refusal_of,
     render_deny,
-    resolve_limit,
     resolve_producer,
 )
 from mirage.policy.types import Claimant, HandOff, SessionContext
@@ -128,7 +125,6 @@ from mirage.workspace.lookup import (
     lookup,
     runtime_refused,
 )
-from mirage.workspace.lookup.constants import INTERPRETER_NAMES
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.node.admission import (
@@ -665,24 +661,6 @@ async def _dispatch_command_body(
     if expanded is not None:
         expanded.words = (argv.name, *argv.args)
 
-    # Limits resolve against the expanded name, so `$CMD`-style
-    # invocations get their real command's policy.
-    # Mount, CLI and external dispatch own their resolved deadlines.
-    owns_deadline = (
-        "/" not in argv.name
-        and lookup(argv.name, session, registry, context.frame.routing)
-        in (Consumer.EXTERNAL, Consumer.MOUNT, Consumer.CLI)
-    ) or argv.name in INTERPRETER_NAMES
-    resolved = (
-        resolve_limit(
-            argv.name,
-            workspace_limits=registry.command_limits,
-            profile_limits=session.command_limits,
-        )
-        if argv.name and not owns_deadline
-        else None
-    )
-    timeout = resolved.timeout_seconds if resolved is not None else None
     body = _run_argv(
         recurse,
         dispatch,
@@ -710,11 +688,7 @@ async def _dispatch_command_body(
     if xtrace and sink is not None:
         await sink.emit(Channel.STDERR, trace_command([argv.name, *argv.args]))
         xtrace = False
-    stdout, io, exec_node = await run_with_timeout(
-        body, timeout, argv.name or "?"
-    )
-    # A builtin that streams (xargs) runs on after it returns.
-    stdout = maybe_with_timeout(stdout, resolved, argv.name or "?")
+    stdout, io, exec_node = await body
     if io.producer is None and argv.name:
         # Builtins and other non-mount routes return no rider; stamp the
         # expanded name here so post_execute policies keyed on a command

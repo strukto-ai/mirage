@@ -21,7 +21,6 @@ import { keepVersions } from '../../cache/file/io.ts'
 import { drainBudget, type FileCache } from '../../cache/file/mixin.ts'
 import { type KeyHold, KeyLock } from '../../cache/lock.ts'
 import type { CacheManager } from '../../cache/manager.ts'
-import { runWithTimeout } from '../../commands/builtin/utils/limit.ts'
 import {
   dispatchStat,
   dotRefusal,
@@ -53,7 +52,7 @@ import {
   noXattr,
   walkRefusal,
 } from '../../errors/fs.ts'
-import { CommandTimeoutError, type FsError } from '../../errors/types.ts'
+import { type FsError } from '../../errors/types.ts'
 import { Policies, PolicyDenied } from '../../policy/index.ts'
 import type { Decisions } from '../../policy/decisions.ts'
 import { Boundary } from '../../policy/boundary.ts'
@@ -1668,8 +1667,6 @@ export class Dispatcher {
     try {
       await this.holdWrite(
         [key],
-        other.opTimeout('copy'),
-        'copy',
         `copy ${call.path.virtual}`,
         (onCall) => other.copyFrom(owner, call.path.virtual, dst.virtual, onCall),
         async () => {
@@ -2105,12 +2102,8 @@ export class Dispatcher {
 
   /**
    * Run a fresh stat under its path's writer hold, so no local write to the
-   * path lands between the backend's answer and its reconcile. The wait for
-   * the hold is bounded by the stat's own timeout, since a write the clock
-   * gave up on keeps the path until its call settles; a waiter past it leaves
-   * the queue rather than running late. Once admitted, the backend call keeps
-   * its own timeout and the reconcile runs to its end under the hold. Mirrors
-   * Python's Dispatcher._fresh_call.
+   * path lands between the backend's answer and its reconcile; the reconcile
+   * runs to its end under the hold. Mirrors Python's Dispatcher._fresh_call.
    */
   private async freshCall(
     call: Call,
@@ -2120,32 +2113,9 @@ export class Dispatcher {
     mode: MountMode,
   ): Promise<[unknown, PathSpec | null, readonly unknown[]]> {
     const key = `${String(this.storeId(vfs))}:${mountKey(call.path.virtual, rstripSlash(mount.prefix))}`
-    const seconds = mount.opTimeout('stat')
-    const expired = new AbortController()
-    let admitted = false
-    const timer =
-      seconds !== null && seconds > 0
-        ? setTimeout(() => {
-            if (!admitted) expired.abort()
-          }, seconds * 1000)
-        : undefined
-    try {
-      return await this.state.writers.withLock(
-        key,
-        () => {
-          admitted = true
-          return this.callBackend(call, mount, vfs, scope, mode)
-        },
-        expired.signal,
-      )
-    } catch (err) {
-      if (expired.signal.aborted && seconds !== null) {
-        throw new CommandTimeoutError('stat', seconds)
-      }
-      throw err
-    } finally {
-      clearTimeout(timer)
-    }
+    return await this.state.writers.withLock(key, () =>
+      this.callBackend(call, mount, vfs, scope, mode),
+    )
   }
 
   /**
@@ -2196,11 +2166,6 @@ export class Dispatcher {
     const dst =
       DESTINATION_OPS.has(name) && call.args?.[0] instanceof PathSpec ? call.args[0] : null
     const fullArgs = (call.args ?? []).map(keyed)
-    // Per-op command limits bind to the executing (post-follow)
-    // mount, and the timeout window covers only the backend op — cache
-    // probes and post-write invalidation stay outside the budget —
-    // mirroring Python's Mount.call.
-    const opTimeout = mount.opTimeout(name)
     // A fill keeps the token its backend records with the read; a read
     // outside a line (FUSE, ws.vfs) records into a scope of its own for that.
     const recorded = <T>(fill: () => Promise<T>): Promise<T> =>
@@ -2223,7 +2188,7 @@ export class Dispatcher {
                     : mount.callKeyed(name, scope, fullArgs, opKwargs, this.access),
                 )
                 onCall?.(pending)
-                return runWithTimeout(pending, opTimeout, name)
+                return pending
               }),
             mount.mountId,
           )
@@ -2291,8 +2256,6 @@ export class Dispatcher {
         try {
           result = await this.holdWrite(
             keys,
-            opTimeout,
-            name,
             `${name} ${p.virtual}`,
             (onCall, holds) =>
               activeRecords() === undefined
@@ -2620,8 +2583,6 @@ export class Dispatcher {
    *
    * Args:
    *   keys: the names to hold, in the one order every writer takes them.
-   *   timeout: the op's timeout in seconds, or null for none.
-   *   name: the function, for the timeout's error.
    *   label: the op and path, for a late failure's report.
    *   call: runs the op, handing over the store's own call once it starts.
    *   after: the bookkeeping, run while the caller still waits.
@@ -2629,8 +2590,6 @@ export class Dispatcher {
    */
   private async holdWrite(
     keys: readonly string[],
-    timeout: number | null,
-    name: string,
     label: string,
     call: (
       onCall: (storeCall: Promise<unknown>) => void,
@@ -2694,11 +2653,7 @@ export class Dispatcher {
     })
     let value: unknown
     try {
-      value = await runWithTimeout(
-        entered.then(() => answer),
-        timeout,
-        name,
-      )
+      value = await entered.then(() => answer)
     } catch (err) {
       if (turn.started && !turn.settled) turn.late = true
       if (!turn.entered) {

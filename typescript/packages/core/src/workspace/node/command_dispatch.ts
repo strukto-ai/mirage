@@ -55,14 +55,12 @@ import { aliasCommandText, aliasMark, expandingAliases } from '../executor/built
 import { checkSyntax, sourceOffsets, syntaxErrorResult } from '../../shell/parse/index.ts'
 import { findSyntaxIssue } from '../../shell/parse/syntax.ts'
 import type { ParseScope } from '../../shell/parse/scope.ts'
-import { INTERPRETER_NAMES } from '../lookup/constants.ts'
-import { guardIO, maybeWithTimeout, runWithTimeout } from '../../commands/builtin/utils/limit.ts'
+import { guardIO } from '../../commands/builtin/utils/limit.ts'
 import {
   PolicyDenied,
   postCommandGate,
   refusalOf,
   renderDeny,
-  resolveLimit,
   resolveProducer,
   type Claimant,
   type HandOff,
@@ -560,21 +558,6 @@ async function runCommandBody(
   )
   if (expanded !== undefined) expanded.words = [argv.name, ...argv.args]
 
-  // Limits resolve against the expanded name, so `$CMD`-style
-  // invocations get their real command's policy.
-  // Mount, CLI and external dispatch own their resolved deadlines.
-  const consumer = lookup(argv.name, session, registry, context.frame.routing)
-  const ownsDeadline =
-    !argv.name.includes('/') &&
-    (consumer === Consumer.EXTERNAL ||
-      consumer === Consumer.MOUNT ||
-      consumer === Consumer.CLI ||
-      INTERPRETER_NAMES.has(argv.name))
-  const resolved =
-    argv.name !== '' && !ownsDeadline
-      ? resolveLimit(argv.name, [], null, null, registry.commandLimits, session.commandLimits)
-      : null
-  const timeout = resolved !== null ? resolved.timeoutSeconds : null
   // Capture xtrace before the body runs so `set -x` itself is not
   // traced (bash enables tracing only for the following commands). A body
   // that writes as it runs is traced before it starts.
@@ -583,8 +566,7 @@ async function runCommandBody(
     await sink.emit(Channel.STDERR, traceCommand([argv.name, ...argv.args]))
     xtrace = false
   }
-  const [rawStdout, io, execNode] = await runWithTimeout(
-    runArgv(
+  const [ranStdout, io, execNode] = await runArgv(
       recurse,
       dispatch,
       registry,
@@ -604,12 +586,8 @@ async function runCommandBody(
       parser,
       seedPrefix,
       assigned,
-    ),
-    timeout,
-    argv.name !== '' ? argv.name : '?',
   )
-  // A builtin that streams (xargs) runs on after it returns.
-  let stdout = maybeWithTimeout(rawStdout, resolved, argv.name !== '' ? argv.name : '?')
+  let stdout = ranStdout
   if (io.producer === null && argv.name !== '') {
     // Builtins and other non-mount routes return no rider; stamp the
     // expanded name here so postExecute policies keyed on a command

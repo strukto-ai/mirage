@@ -17,6 +17,7 @@ import { HISTORY_PREFIX } from '../../vfs/history/history.ts'
 import type { BaseVFS } from '../../vfs/base.ts'
 import { type Limit, type ReadSpec, MountMode, WritePolicy } from '../../types.ts'
 import { normDir } from '../../utils/slash.ts'
+import { checkCommandLimits } from '../../policy/builtin/output_cap.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import type { MountSpec } from './types.ts'
 import { Mount } from '../mount/spec.ts'
@@ -96,6 +97,9 @@ export function normalizeMounts(
     } else {
       bare[prefix] = spec as BaseVFS
     }
+  }
+  for (const [prefix, table] of Object.entries(commandLimits)) {
+    checkCommandLimits(table, `mount ${prefix}`, false)
   }
   // Every mount spelling converges here, which is why this is where a
   // read policy is checked against what its backend can honour: one

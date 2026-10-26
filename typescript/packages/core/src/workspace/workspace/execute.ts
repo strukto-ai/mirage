@@ -51,6 +51,7 @@ import { DiscardSignal, ExitSignal } from '../../shell/errors.ts'
 import { formatFsError } from '../../errors/render.ts'
 import { isFsError } from '../../errors/fs.ts'
 import {
+  atDeadline,
   hasAborted,
   makeAbortError,
   mergeSignals,
@@ -1033,6 +1034,7 @@ async function runParsedLine(
           claimantFor(rootNode, handed),
           route,
           options.sink,
+          isLine ? lineTimeout(env.registry.commandLimits, effectiveSession.commandLimits) : null,
         )
       // The runtime's file calls are the line's, recorded as a tree's are,
       // and handed over however the run ends: a call it finished before it
@@ -1150,12 +1152,14 @@ async function runParsedLine(
       : null
     const deadline = lineSeconds !== null && lineSeconds > 0 ? new AbortController() : null
     const runBody = async (): Promise<[ByteSource | null, IOResult, ExecutionNode]> => {
-      const timer =
+      // atDeadline, not a bare timer: an engine that holds the event loop
+      // (QuickJS) fires it from its interrupt hook.
+      const disarm =
         deadline === null || lineSeconds === null
           ? undefined
-          : setTimeout(() => {
+          : atDeadline(lineSeconds, () => {
               deadline.abort()
-            }, lineSeconds * 1000)
+            })
       try {
         // The one cancellation seam, the twin of Python's run_cancellable:
         // a responsive tree unwinds at its checkpoints and reports its own
@@ -1205,7 +1209,7 @@ async function runParsedLine(
         if (aborted) failed.exitCode = 130
         return [null, new IOResult(failed), new ExecutionNode({ command, ...failed })]
       } finally {
-        clearTimeout(timer)
+        disarm?.()
       }
     }
     try {

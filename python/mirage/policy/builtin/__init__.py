@@ -21,7 +21,6 @@ if TYPE_CHECKING:
     from mirage.policy.builtin.output_cap import (
         ALL_COMMANDS,
         DEFAULT_COMMAND_LIMITS,
-        FALLBACK_LIMIT,
         resolve_limit,
         resolve_producer,
     )
@@ -33,7 +32,6 @@ _EXPORTS: dict[str, tuple[str, ...]] = {
     "mirage.policy.builtin.output_cap": (
         "ALL_COMMANDS",
         "DEFAULT_COMMAND_LIMITS",
-        "FALLBACK_LIMIT",
         "resolve_limit",
         "resolve_producer",
     ),
@@ -44,7 +42,6 @@ _EXPORTS: dict[str, tuple[str, ...]] = {
 __all__ = [
     "ALL_COMMANDS",
     "DEFAULT_COMMAND_LIMITS",
-    "FALLBACK_LIMIT",
     "MountRootPolicy",
     "PermissionsPolicy",
     "PlacementPolicy",

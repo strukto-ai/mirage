@@ -21,7 +21,6 @@ from dataclasses import dataclass
 from typing import Any
 
 from mirage.accessor.base import Accessor
-from mirage.commands.builtin.utils.limit import run_with_timeout
 from mirage.commands.config import CommandFnResult, Context
 from mirage.commands.errors import PartialOutputError, UsageError
 from mirage.commands.spec.usage import read_fail_exit_code
@@ -249,9 +248,8 @@ async def run_handler(
         vfs (Files | None): the handler's files, whose session's hides
             filter the rows it hands over; None filters none.
     """
-    timeout = limit.timeout_seconds if limit is not None else None
     try:
-        out = await run_with_timeout(_rendered(body, vfs, name), timeout, name)
+        out = await _rendered(body, vfs, name)
     except (CommandTimeoutError, asyncio.CancelledError):
         if drop is not None:
             await drop()

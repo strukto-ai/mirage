@@ -18,7 +18,10 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
-from mirage.policy.builtin.output_cap import command_limits_to_json
+from mirage.policy.builtin.output_cap import (
+    check_command_limits,
+    command_limits_to_json,
+)
 from mirage.policy.constants import (
     DEFAULT_ASK_REASON,
     DEFAULT_DENY_REASON,
@@ -690,6 +693,15 @@ class SessionProfile(BaseModel):
     policy: dict[ScriptMethod, list[ProfilePolicy]] | None = None
     command_limits: dict[str, Limit] | None = None
     processes: ProcessPermissions | None = None
+
+    @field_validator("command_limits")
+    @classmethod
+    def _v_command_limits(
+        cls, v: dict[str, Limit] | None
+    ) -> dict[str, Limit] | None:
+        if v is not None:
+            check_command_limits(v, "profile", takes_line=True)
+        return v
 
     @model_validator(mode="before")
     @classmethod

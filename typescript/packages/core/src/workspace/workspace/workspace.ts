@@ -14,6 +14,7 @@ import { DiffPool } from '../../rs/diff_pool.ts'
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { IOConfig } from '../../io/config.ts'
+import { checkCommandLimits } from '../../policy/builtin/output_cap.ts'
 import { ShellExecution } from '../shell_execution.ts'
 import { ExecutionScope } from '../execution.ts'
 import { newExecutionId } from '../../execution/context.ts'
@@ -518,6 +519,7 @@ export class Workspace {
     const defaultBase = this.baseProfile(null)
     this.sessionManager.defaultProfile =
       defaultBase === null ? null : compileProfile(defaultBase, this.profileName(null))
+    checkCommandLimits(options.commandLimits ?? {}, 'workspace', true)
     this.registry.commandLimits = { ...options.commandLimits }
     for (const [prefix, limits] of Object.entries(normalized.commandLimits)) {
       const mount = this.registry.mountForPrefix(prefix)

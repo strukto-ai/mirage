@@ -36,7 +36,6 @@ from mirage.commands.builtin.generic.program import (
     value_refusal,
 )
 from mirage.commands.builtin.utils.identity import identity_from
-from mirage.commands.builtin.utils.limit import maybe_with_timeout
 from mirage.commands.cli.types import CLI
 from mirage.commands.cli.walk import invoked_env_names, supplied_env_names
 from mirage.commands.errors import FindParseError
@@ -50,7 +49,6 @@ from mirage.context.session_context import session_access
 from mirage.io import IOResult
 from mirage.io.stream import materialize
 from mirage.io.types import ByteSource
-from mirage.policy import resolve_limit, resolve_producer
 from mirage.policy.types import HandOff
 from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import encode_text
@@ -895,16 +893,6 @@ async def handle_command(
         io.producer = Producer(
             command=cmd_name, prefixes=tuple(m.prefix for m in mounts)
         )
-        stdout = maybe_with_timeout(
-            stdout,
-            resolve_limit(
-                cmd_name,
-                mounts,
-                workspace_limits=registry.command_limits,
-                profile_limits=session.command_limits,
-            ),
-            cmd_name,
-        )
         return stdout, io, await exec_node(cmd_str, io, path_scopes)
 
     # Reject unsupported cross-mount commands. Path-flag targets count: a
@@ -1099,18 +1087,5 @@ async def handle_command(
     if warn_bytes:
         existing = await materialize(io.stderr) if io.stderr else b""
         io.stderr = warn_bytes + existing
-
-    resolved = (
-        resolve_producer(
-            io.producer,
-            registry.limit_mount,
-            registry.command_limits,
-            session.command_limits,
-        )
-        if io.producer is not None
-        else None
-    )
-    stdout = maybe_with_timeout(stdout, resolved, cmd_name)
-    io.stderr = maybe_with_timeout(io.stderr, resolved, cmd_name)
 
     return stdout, io, await exec_node(cmd_str, io, paths)

@@ -18,8 +18,6 @@ import type { Runtime } from '../../../runtime/base.ts'
 import { CommandTimeoutError } from '../../../errors/types.ts'
 import { hasAborted } from '../../../utils/abort.ts'
 import { runOutput } from '../../../commands/builtin/general/interpreter.ts'
-import { runWithTimeout } from '../../../commands/builtin/utils/limit.ts'
-import { resolveLimit } from '../../../policy/index.ts'
 import type { ByteSource, IOResult } from '../../../io/types.ts'
 import { EXTERNAL_COMMANDS } from '../../../runtime/constants.ts'
 import { isProcessExecutor } from '../../../runtime/mixin.ts'
@@ -39,7 +37,7 @@ import { Channel, type JobConsole } from '../../../shell/console/index.ts'
 /**
  * Execute one admitted program; its surrounding shell stays in Mirage.
  *
- * Its output is handed over as it runs (`runOutput`), within the program's
+ * Its output is handed over as it runs (`runOutput`), within the line's
  * deadline, kept alive until the output is closed. A program writes its
  * stderr into `sink` as it arrives, where the statement it runs in writes (a
  * job's console, a redirect, a compound body), so it lands beside its stdout
@@ -64,15 +62,6 @@ export async function runExternal(
     const stderr = await denied.materializeStderr()
     return [null, denied, new ExecutionNode({ command, exitCode: 126, stderr })]
   }
-  const guard = resolveLimit(
-    argv.name,
-    registry.allMounts(),
-    null,
-    null,
-    registry.commandLimits,
-    session.commandLimits,
-  )
-  const timeout = guard?.timeoutSeconds ?? null
   // A runtime that runs an argv gets one; a line runtime gets the program
   // as one quoted line.
   const process = isProcessExecutor(runtime)
@@ -94,26 +83,16 @@ export async function runExternal(
       said.push(new Uint8Array(chunk))
       await errors(chunk)
     }
-    const deadline = new AbortController()
     try {
-      const result = await runWithTimeout(
-        executeProgram(
-          runtime,
-          argv.name,
-          process ? argv.tokens : [],
-          { ...ctx, signal: AbortSignal.any([stop, deadline.signal]) },
-          { kind, output, errors: told },
-        ),
-        timeout,
+      const result = await executeProgram(
+        runtime,
         argv.name,
+        process ? argv.tokens : [],
+        { ...ctx, signal: stop },
+        { kind, output, errors: told },
       )
       node.stderr = concat([...said, result.stderr ?? new Uint8Array()])
       return result
-    } catch (err) {
-      // A run past its deadline is stopped before its runtime settles,
-      // which may wait for the run.
-      if (err instanceof CommandTimeoutError) deadline.abort()
-      throw err
     } finally {
       await registry.settle(runtime)
     }

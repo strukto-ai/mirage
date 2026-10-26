@@ -36,7 +36,6 @@ from mirage.cache.file.mixin import FileCacheMixin
 from mirage.cache.index.ram import ListingCheckStore
 from mirage.cache.lock import KeyLock
 from mirage.cache.manager import CacheManager
-from mirage.commands.builtin.utils.limit import run_with_timeout
 from mirage.commands.builtin.utils.paths import (
     dot_refusal,
     hidden_walk,
@@ -2371,11 +2370,7 @@ class Dispatcher:
         prefix = mount.prefix.rstrip("/")
         key = f"{id(mount.vfs)}:{mount_key(call.path.virtual, prefix)}"
         async with AsyncExitStack() as held:
-            await run_with_timeout(
-                held.enter_async_context(self._writers.with_lock(key)),
-                mount.op_timeout("stat"),
-                "stat",
-            )
+            await held.enter_async_context(self._writers.with_lock(key))
             return await self._call(call, mount, self._filler(call, mount))
 
     async def _visible_files(

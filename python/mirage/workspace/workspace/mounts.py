@@ -21,6 +21,7 @@ from mirage.cache.file.io import mutation_lock
 from mirage.cache.file.mixin import FileCacheMixin
 from mirage.cache.index import IndexConfig
 from mirage.cache.index.store import IndexCacheStore
+from mirage.policy.builtin.output_cap import check_command_limits
 from mirage.shell.constants import BIN_PREFIX
 from mirage.types import (
     KERNEL_BACKENDS,
@@ -233,6 +234,9 @@ def install_mounts(
             vfs_ref=spec.vfs_ref,
         )
         if spec.command_limits:
+            check_command_limits(
+                spec.command_limits, f"mount {spec.prefix}", takes_line=False
+            )
             entry.command_limits.update(spec.command_limits)
         registry.settle_walk_limit(entry)
     implicit_root = registry.root_mount is None

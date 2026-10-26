@@ -18,7 +18,6 @@ from dataclasses import dataclass, field, replace
 from typing import Any
 
 from mirage.commands.builtin.general.interpreter import run_output
-from mirage.commands.builtin.utils.limit import maybe_with_timeout
 from mirage.commands.cli.constants import CLI_CONFIG_ENV, GIT_LONG_OPTIONS
 from mirage.commands.cli.refusal import (
     ARGPARSE_EXIT,
@@ -773,11 +772,9 @@ async def run_walked(
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Run a walked leaf with the one Context a leaf gets, and record it.
 
-    The leaf's declared limit bounds the handler body and its streams,
-    exactly like mount dispatch: without the wrap a blocking leaf hangs
-    forever and an unbounded-output leaf ignores its own limits. A
-    failure the runner framed is recorded as it is; an answer gets the
-    parse's warnings ahead of its stderr and the limit's stream guards.
+    The leaf's declared limit caps its output, exactly like mount
+    dispatch. A failure the runner framed is recorded as it is; an answer
+    gets the parse's warnings ahead of its stderr.
 
     Args:
         walked (LeafCall): the leaf the walk resolved.
@@ -850,6 +847,4 @@ async def run_walked(
         warn = encode_text("".join(f"{prog}: {w}\n" for w in walked.warnings))
         existing = await materialize(io.stderr) if io.stderr else b""
         io.stderr = warn + existing
-    stdout = maybe_with_timeout(stdout, limit, prog)
-    io.stderr = maybe_with_timeout(io.stderr, limit, prog)
     return stdout, io, await exec_node(walked.cmd_str, io, walked.paths)

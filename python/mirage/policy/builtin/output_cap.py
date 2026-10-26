@@ -18,16 +18,13 @@ from typing import Protocol
 from mirage.types import JsonValue, Limit, Producer
 
 _DEFAULT_MAX_LINES = 2000
-_DEFAULT_TIMEOUT_SECONDS = 600.0
 
 DEFAULT_COMMAND_LIMITS: dict[str, Limit] = {
-    name: Limit(
-        max_lines=_DEFAULT_MAX_LINES, timeout_seconds=_DEFAULT_TIMEOUT_SECONDS
-    )
+    name: Limit(max_lines=_DEFAULT_MAX_LINES)
     for name in ("cat", "grep", "rg", "head", "tail")
 }
 
-FALLBACK_LIMIT = Limit(timeout_seconds=_DEFAULT_TIMEOUT_SECONDS)
+LINE_TIMEOUT_SECONDS = 600.0
 
 ALL_COMMANDS = "*"
 LINE = "line"
@@ -62,8 +59,8 @@ def resolve_limit(
     Field by field, from the most specific layer that sets it: the
     profile's entry for the command, then its ``"*"`` entry for every
     command, then the mount's two, the workspace's two, the command's
-    own default, the built-in table and the fallback; on a mount, its
-    backend's default (``walk_limit``) last. A layer that names one
+    own default and the built-in table; on a mount, its backend's
+    default (``walk_limit``) last. A layer that names one
     bound inherits the rest. A command across several mounts resolves
     on each and keeps the tightest bound.
 
@@ -84,7 +81,6 @@ def resolve_limit(
         *_entries(workspace_limits, name),
         command_default,
         DEFAULT_COMMAND_LIMITS.get(name),
-        FALLBACK_LIMIT,
     )
     spanned = list(mounts)
     if not spanned:
@@ -159,9 +155,10 @@ def line_timeout(
     workspace_limits: Mapping[str, Limit] | None = None,
     profile_limits: Mapping[str, Limit] | None = None,
 ) -> float | None:
-    """The whole line's deadline: the ``line`` entry's
-    ``timeout_seconds``, the profile's over the workspace's; None for
-    none, which is the default.
+    """The whole line's deadline, the one time limit a line runs under:
+    the ``line`` entry's ``timeout_seconds``, the profile's over the
+    workspace's, else ``LINE_TIMEOUT_SECONDS``. An entry naming it as
+    None or 0 lifts it.
 
     Args:
         workspace_limits (Mapping[str, Limit] | None): the workspace's
@@ -175,4 +172,45 @@ def line_timeout(
             (workspace_limits or {}).get(LINE),
         )
     )
-    return found.timeout_seconds if found is not None else None
+    if found is None or "timeout_seconds" not in found.model_fields_set:
+        return LINE_TIMEOUT_SECONDS
+    return found.timeout_seconds or None
+
+
+def check_command_limits(
+    limits: Mapping[str, Limit], where: str, *, takes_line: bool
+) -> None:
+    """Refuse a table that names time where no time limit applies.
+
+    A line runs under one time limit, the ``line`` entry's
+    ``timeout_seconds``; no command or op entry takes one, and the
+    ``line`` entry takes nothing else. A mount names no line, since a
+    line spans mounts.
+
+    Args:
+        limits (Mapping[str, Limit]): the table, keyed by command.
+        where (str): what the table belongs to, for the message.
+        takes_line (bool): whether the table may hold a ``line`` entry.
+
+    Raises:
+        ValueError: an entry names a bound it cannot take.
+    """
+    for name, limit in limits.items():
+        if name != LINE:
+            if "timeout_seconds" in limit.model_fields_set:
+                raise ValueError(
+                    f"{where}: command_limits[{name!r}].timeout_seconds:"
+                    f" a line has one time limit, set it on {LINE!r}"
+                )
+            continue
+        if not takes_line:
+            raise ValueError(
+                f"{where}: command_limits[{LINE!r}]: a line spans mounts,"
+                " set it on the workspace or a profile"
+            )
+        extra = sorted(limit.model_fields_set - {"timeout_seconds"})
+        if extra:
+            raise ValueError(
+                f"{where}: command_limits[{LINE!r}] takes only"
+                f" timeout_seconds, not {', '.join(extra)}"
+            )

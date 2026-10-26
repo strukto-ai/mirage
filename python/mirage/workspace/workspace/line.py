@@ -33,6 +33,7 @@ from mirage.policy import (
     render_deny,
     resolve_limit,
 )
+from mirage.policy.builtin.output_cap import LINE
 from mirage.policy.types import RouteContext
 from mirage.runtime.base import Runtime
 from mirage.runtime.mixin import LineExecutorMixin
@@ -56,12 +57,13 @@ async def run_whole_line(
     cancel: asyncio.Event | None = None,
     route: RouteContext | None = None,
     sink: JobConsole | None = None,
+    timeout: float | None = None,
 ) -> IOResult:
     """Hand the raw line to one runtime instead of walking its tree.
 
     A whole line is a command like any other: the same boundary
-    consultation as the tree, so ``timeout_seconds`` answers 124 and
-    the policies' merged Limit caps the output. Its output is handed
+    consultation as the tree, so its deadline answers 124 and the
+    policies' merged Limit caps the output. Its output is handed
     over as the runtime writes it (``run_output``): into ``sink`` as it
     comes, unless a ``post_execute`` policy must see it whole before any
     of it escapes, and back in the result without one.
@@ -83,6 +85,8 @@ async def run_whole_line(
             when no policy reads ``post_execute``.
         sink (JobConsole | None): where the line writes; None returns
             its output in the result.
+        timeout (float | None): the line's deadline in seconds; None for
+            a line nested in one that holds it.
     """
     assert isinstance(runtime, Runtime)
     name = command_name(command)
@@ -93,7 +97,6 @@ async def run_whole_line(
         workspace_limits=registry.command_limits,
         profile_limits=session.command_limits,
     )
-    timeout = guard.timeout_seconds if guard is not None else None
     ctx = Context(
         flags={"c": command},
         stdin=stdin,
@@ -108,7 +111,7 @@ async def run_whole_line(
                     [], [], ctx, kind="line", output=output, errors=errors
                 ),
                 timeout,
-                name,
+                LINE,
             )
         finally:
             await registry.settle(runtime)

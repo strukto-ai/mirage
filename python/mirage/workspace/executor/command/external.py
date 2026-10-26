@@ -17,12 +17,10 @@ import shlex
 from typing import Any
 
 from mirage.commands.builtin.general.interpreter import run_output
-from mirage.commands.builtin.utils.limit import run_with_timeout
 from mirage.commands.config import Context
 from mirage.errors.types import CommandTimeoutError
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
-from mirage.policy import resolve_limit
 from mirage.runtime.base import Runtime
 from mirage.runtime.constants import EXTERNAL_COMMANDS
 from mirage.runtime.mixin import ProcessExecutorMixin
@@ -75,13 +73,6 @@ async def run_external(
             ExecutionNode(command=command, exit_code=126, stderr=err),
         )
     runtime = Runtime.require(entry)
-    guard = resolve_limit(
-        argv.name,
-        registry.mounts(),
-        workspace_limits=registry.command_limits,
-        profile_limits=session.command_limits,
-    )
-    timeout = guard.timeout_seconds if guard is not None else None
     # A runtime that runs an argv gets one; a line runtime gets the
     # program as one quoted line.
     process = isinstance(runtime, ProcessExecutorMixin)
@@ -107,18 +98,14 @@ async def run_external(
             await errors(chunk)
 
         try:
-            result = await run_with_timeout(
-                _execute_program(
-                    runtime,
-                    argv.name,
-                    list(argv.tokens) if process else [],
-                    ctx,
-                    kind,
-                    output,
-                    told,
-                ),
-                timeout,
+            result = await _execute_program(
+                runtime,
                 argv.name,
+                list(argv.tokens) if process else [],
+                ctx,
+                kind,
+                output,
+                told,
             )
         finally:
             await registry.settle(runtime)

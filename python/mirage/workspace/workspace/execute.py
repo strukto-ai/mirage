@@ -920,6 +920,14 @@ async def run_prepared_line(
                     )
                     else None,
                     sink,
+                    (
+                        line_timeout(
+                            ws.registry.command_limits,
+                            effective_session.command_limits,
+                        )
+                        if is_line
+                        else None
+                    ),
                 )
                 if io.refusal is None:
                     io.refusal = nested.latest
