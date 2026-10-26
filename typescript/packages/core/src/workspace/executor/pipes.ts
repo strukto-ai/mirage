@@ -16,7 +16,7 @@ import { childContext, type EvaluationContext } from '../evaluation.ts'
 import { runWithEvaluation } from '../../context/session_context.ts'
 
 import type { ProcessHandle } from '../../process/handle.ts'
-import type { ProcessSupervisor } from '../../process/supervisor.ts'
+import type { ProcessTable } from '../../process/table.ts'
 import { PathSpec } from '../../types.ts'
 import { runWithTimeout } from '../../commands/builtin/utils/limit.ts'
 import { asyncChain, closeQuietly, discardIo, discardStreams } from '../../io/stream.ts'
@@ -81,7 +81,7 @@ export async function handlePipe(
   stdin: ByteSource | null = null,
   callStack: CallStack | null = null,
   signal?: AbortSignal,
-  processes?: ProcessSupervisor,
+  processes?: ProcessTable,
   // Each stage is a child shell, which runs its own EXIT action through
   // this when it ends.
   executeFn: ExecuteFn | null = null,

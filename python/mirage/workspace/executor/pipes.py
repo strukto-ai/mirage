@@ -30,7 +30,7 @@ from mirage.io.stream import (
 from mirage.io.types import ByteSource, materialize
 from mirage.policy.decisions import Decisions
 from mirage.policy.types import HandOff
-from mirage.process.supervisor import ProcessSupervisor
+from mirage.process.table import ProcessTable
 from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import decode_text
 from mirage.shell.call_stack import CallStack
@@ -89,7 +89,7 @@ async def handle_pipe(
     context: EvaluationContext,
     stdin: ByteSource | None = None,
     call_stack: CallStack | None = None,
-    processes: ProcessSupervisor | None = None,
+    processes: ProcessTable | None = None,
     execute_fn: Callable[..., Any] | None = None,
     buffer_bytes: int = CAPACITY,
     sink: JobConsole | None = None,

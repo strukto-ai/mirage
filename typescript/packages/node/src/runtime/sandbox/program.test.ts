@@ -19,7 +19,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import { closeChildren, openProgramPipe, runProgram } from './program.ts'
-import { ProcessSupervisor } from '@struktoai/mirage-core/process/supervisor'
+import { ProcessTable } from '@struktoai/mirage-core/process/table'
 import type { ProcessHandle } from '@struktoai/mirage-core/process/handle'
 import { runWithExecution } from '@struktoai/mirage-core/context/session_context'
 import { PathSpec } from '@struktoai/mirage-core/types'
@@ -71,7 +71,7 @@ function shRunner(
   stdin: AsyncIterable<Uint8Array> | null = null,
 ): ProcessHandle {
   const abort = new AbortController()
-  return new ProcessSupervisor(runWithExecution).start({
+  return new ProcessTable(runWithExecution).start({
     sessionId: 's',
     command: 'sh',
     cwd: PathSpec.fromStrPath('/'),

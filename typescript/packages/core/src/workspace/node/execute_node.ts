@@ -30,7 +30,7 @@ import {
   runWithEvaluation,
 } from '../../context/session_context.ts'
 import type { ProcessHandle } from '../../process/handle.ts'
-import type { ProcessSupervisor } from '../../process/supervisor.ts'
+import type { ProcessTable } from '../../process/table.ts'
 import { share } from '../../io/async_line_iterator.ts'
 import { type ByteSource, IOResult } from '../../io/types.ts'
 import { makeAbortError, mergeSignals } from '../../utils/abort.ts'
@@ -264,7 +264,7 @@ async function recurseReassociated(
   redirects: readonly Redirect[],
   right: TSNodeLike,
   signal: AbortSignal | undefined,
-  processes: ProcessSupervisor | undefined,
+  processes: ProcessTable | undefined,
   node: TSNodeLike,
   context: EvaluationContext,
   stdin: ByteSource | null,
@@ -303,7 +303,7 @@ async function recurseLifted(
   stages: PipelineStages,
   right: TSNodeLike,
   signal: AbortSignal | undefined,
-  processes: ProcessSupervisor | undefined,
+  processes: ProcessTable | undefined,
   node: TSNodeLike,
   context: EvaluationContext,
   stdin: ByteSource | null,
@@ -343,7 +343,7 @@ async function recurseStage(
   stages: PipelineStages,
   targets: readonly TSNodeLike[],
   signal: AbortSignal | undefined,
-  processes: ProcessSupervisor | undefined,
+  processes: ProcessTable | undefined,
   node: TSNodeLike,
   context: EvaluationContext,
   stdin: ByteSource | null,
@@ -406,7 +406,7 @@ async function runPipeline(
   stdin: ByteSource | null,
   callStack: CallStack | null,
   signal?: AbortSignal,
-  processes?: ProcessSupervisor,
+  processes?: ProcessTable,
   sink?: JobConsole,
 ): Promise<Result> {
   const session = context.session
@@ -518,7 +518,7 @@ async function runRedirected(
   command: TSNodeLike | null,
   redirects: Redirect[],
   signal: AbortSignal | undefined,
-  processes: ProcessSupervisor | undefined,
+  processes: ProcessTable | undefined,
   sink: JobConsole | undefined,
   context: EvaluationContext,
   stdin: ByteSource | null,

@@ -13,7 +13,7 @@ from mirage.types import PathSpec
 from mirage.utils.ids import IdSource
 
 
-class ProcessSupervisor:
+class ProcessTable:
     """Own live runners independently of shell job-table membership.
 
     IDs are workspace-local and never reused. Exited runners leave this
@@ -78,7 +78,7 @@ class ProcessSupervisor:
         """
         with self._lock:
             if self._stopped:
-                raise RuntimeError("process supervisor is stopped")
+                raise RuntimeError("process table is stopped")
             if (
                 limit is not None
                 and sum(

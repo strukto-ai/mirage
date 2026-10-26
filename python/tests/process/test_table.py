@@ -10,14 +10,14 @@ from mirage.context.session_context import (
 )
 from mirage.process.config import ProcessPermissions
 from mirage.process.handle import ProcessHandle
-from mirage.process.supervisor import ProcessSupervisor
+from mirage.process.table import ProcessTable
 from mirage.process.types import ProcessState
 from mirage.types import PathSpec
 
 
 @pytest.mark.asyncio
 async def test_execution_context_isolated_between_concurrent_runners():
-    supervisor = ProcessSupervisor(bind=run_with_execution)
+    processes = ProcessTable(bind=run_with_execution)
     release = asyncio.Event()
     seen = []
 
@@ -28,7 +28,7 @@ async def test_execution_context_isolated_between_concurrent_runners():
         return 0
 
     handles = [
-        supervisor.start(
+        processes.start(
             session_id="same",
             command="probe",
             cwd=PathSpec.from_str_path("/"),
@@ -46,7 +46,7 @@ async def test_execution_context_isolated_between_concurrent_runners():
 
 @pytest.mark.asyncio
 async def test_execution_ancestry_does_not_grant_cancellation_ownership():
-    supervisor = ProcessSupervisor()
+    processes = ProcessTable()
     started, release = asyncio.Event(), asyncio.Event()
     children = []
 
@@ -56,7 +56,7 @@ async def test_execution_ancestry_does_not_grant_cancellation_ownership():
 
     async def parent():
         children.append(
-            supervisor.start(
+            processes.start(
                 session_id="a",
                 command="detached",
                 cwd=PathSpec.from_str_path("/"),
@@ -67,7 +67,7 @@ async def test_execution_ancestry_does_not_grant_cancellation_ownership():
         await asyncio.Event().wait()
         return 0
 
-    root = supervisor.start(
+    root = processes.start(
         session_id="a",
         command="parent",
         cwd=PathSpec.from_str_path("/"),
@@ -86,7 +86,7 @@ async def test_execution_ancestry_does_not_grant_cancellation_ownership():
 
 @pytest.mark.asyncio
 async def test_cancel_does_not_claim_exit_before_finally_finishes():
-    supervisor = ProcessSupervisor()
+    processes = ProcessTable()
     entered, cleaning, release = (
         asyncio.Event(),
         asyncio.Event(),
@@ -102,13 +102,13 @@ async def test_cancel_does_not_claim_exit_before_finally_finishes():
             await release.wait()
         return 0
 
-    process = supervisor.start(
+    process = processes.start(
         session_id="a",
         command="work",
         cwd=PathSpec.from_str_path("/"),
         run=run,
     )
-    view = supervisor.view("a")
+    view = processes.view("a")
     await entered.wait()
     assert process.terminate()
     assert not process.terminate()
@@ -122,9 +122,9 @@ async def test_cancel_does_not_claim_exit_before_finally_finishes():
     waiter.cancel()
     with pytest.raises(asyncio.CancelledError):
         await waiter
-    assert supervisor.live() == (process,)
+    assert processes.live() == (process,)
     with pytest.raises(BlockingIOError):
-        supervisor.start(
+        processes.start(
             session_id="a",
             command="replacement",
             cwd=PathSpec.from_str_path("/"),
@@ -141,26 +141,26 @@ async def test_cancel_does_not_claim_exit_before_finally_finishes():
 
 @pytest.mark.asyncio
 async def test_views_are_immutable_scoped_and_revoked_on_session_reuse():
-    supervisor = ProcessSupervisor()
+    processes = ProcessTable()
     release = asyncio.Event()
 
     async def run():
         await release.wait()
         return 7
 
-    a = supervisor.start(
+    a = processes.start(
         session_id="a", command="a", cwd=PathSpec.from_str_path("/"), run=run
     )
-    b = supervisor.start(
+    b = processes.start(
         session_id="b", command="b", cwd=PathSpec.from_str_path("/"), run=run
     )
-    old_view = supervisor.view("a")
+    old_view = processes.view("a")
     assert old_view.list() == (a.info,)
     with pytest.raises(FrozenInstanceError):
         a.info.command = "changed"
-    supervisor.revoke_session("a")
-    new_view = supervisor.view("a")
-    replacement = supervisor.start(
+    processes.revoke_session("a")
+    new_view = processes.view("a")
+    replacement = processes.start(
         session_id="a", command="new", cwd=PathSpec.from_str_path("/"), run=run
     )
     assert old_view.list() == ()
@@ -173,17 +173,17 @@ async def test_views_are_immutable_scoped_and_revoked_on_session_reuse():
             a.join(), b.join(), replacement.join()
         )
     ] == [7, 7, 7]
-    assert supervisor.live() == ()
+    assert processes.live() == ()
 
 
 @pytest.mark.asyncio
 async def test_failed_runner_is_observed_and_retired():
-    supervisor = ProcessSupervisor()
+    processes = ProcessTable()
 
     async def run():
         raise RuntimeError("failed cleanup")
 
-    process = supervisor.start(
+    process = processes.start(
         session_id="a",
         command="work",
         cwd=PathSpec.from_str_path("/"),
@@ -192,18 +192,18 @@ async def test_failed_runner_is_observed_and_retired():
     result = await process.join()
     assert result.exit_code == 1
     assert result.failure == "failed cleanup"
-    assert supervisor.live() == ()
+    assert processes.live() == ()
 
 
 @pytest.mark.asyncio
 async def test_prestart_cancellation_still_completes_and_retires():
-    supervisor = ProcessSupervisor()
+    processes = ProcessTable()
 
     async def run():
         await asyncio.Event().wait()
         return 0
 
-    process = supervisor.start(
+    process = processes.start(
         session_id="a",
         command="work",
         cwd=PathSpec.from_str_path("/"),
@@ -211,27 +211,27 @@ async def test_prestart_cancellation_still_completes_and_retires():
     )
     process.task.cancel()
     assert (await process.join()).exit_code == 137
-    assert supervisor.live() == ()
+    assert processes.live() == ()
 
 
 @pytest.mark.asyncio
 async def test_stop_closes_admission_and_cancels_every_live_runner():
-    supervisor = ProcessSupervisor()
+    processes = ProcessTable()
 
     async def run():
         await asyncio.Event().wait()
         return 0
 
-    a = supervisor.start(
+    a = processes.start(
         session_id="a", command="a", cwd=PathSpec.from_str_path("/"), run=run
     )
-    b = supervisor.start(
+    b = processes.start(
         session_id="b", command="b", cwd=PathSpec.from_str_path("/"), run=run
     )
-    supervisor.stop()
-    supervisor.stop()
+    processes.stop()
+    processes.stop()
     with pytest.raises(RuntimeError, match="stopped"):
-        supervisor.start(
+        processes.start(
             session_id="a",
             command="new",
             cwd=PathSpec.from_str_path("/"),
@@ -241,7 +241,7 @@ async def test_stop_closes_admission_and_cancels_every_live_runner():
         result.cancellation_requested
         for result in await asyncio.gather(a.join(), b.join())
     )
-    assert supervisor.live() == ()
+    assert processes.live() == ()
 
 
 def _join_on_another_loop(process):
@@ -251,14 +251,14 @@ def _join_on_another_loop(process):
 
 @pytest.mark.asyncio
 async def test_join_can_cross_event_loops_without_blocking_the_runner():
-    supervisor = ProcessSupervisor()
+    processes = ProcessTable()
     release = asyncio.Event()
 
     async def run():
         await release.wait()
         return 12
 
-    process = supervisor.start(
+    process = processes.start(
         session_id="a",
         command="work",
         cwd=PathSpec.from_str_path("/"),
@@ -274,27 +274,27 @@ async def test_join_can_cross_event_loops_without_blocking_the_runner():
 
 @pytest.mark.asyncio
 async def test_workspace_list_does_not_grant_kill():
-    supervisor = ProcessSupervisor()
+    processes = ProcessTable()
     release = asyncio.Event()
 
     async def run():
         await release.wait()
         return 0
 
-    child = supervisor.start(
+    child = processes.start(
         session_id="other",
         command="secret argument",
         cwd=PathSpec.from_str_path("/private"),
         run=run,
     )
     grants = ProcessPermissions(list="workspace")
-    view = supervisor.view("observer", lambda: grants)
+    view = processes.view("observer", lambda: grants)
     [info] = view.list()
     assert info.pid == child.info.pid and info.command == "secret argument"
     with pytest.raises(PermissionError) as denied:
         view.terminate(child.info.pid, 15)
     assert denied.value.errno == errno.EPERM
-    supervisor.revoke_session("observer")
+    processes.revoke_session("observer")
     with pytest.raises(PermissionError):
         view.check_spawn()
     assert view.list() == ()
@@ -304,7 +304,7 @@ async def test_workspace_list_does_not_grant_kill():
 
 @pytest.mark.asyncio
 async def test_start_refuses_a_session_at_its_limit():
-    supervisor = ProcessSupervisor()
+    processes = ProcessTable()
     release = asyncio.Event()
 
     async def run():
@@ -312,7 +312,7 @@ async def test_start_refuses_a_session_at_its_limit():
         return 0
 
     def start(session_id: str) -> ProcessHandle:
-        return supervisor.start(
+        return processes.start(
             session_id=session_id,
             command="work",
             cwd=PathSpec.from_str_path("/"),
@@ -336,7 +336,7 @@ async def test_start_refuses_a_session_at_its_limit():
 
 @pytest.mark.asyncio
 async def test_cancel_group_reaches_grandchild_after_intermediate_exit():
-    supervisor = ProcessSupervisor()
+    processes = ProcessTable()
     release = asyncio.Event()
 
     async def run():
@@ -346,20 +346,20 @@ async def test_cancel_group_reaches_grandchild_after_intermediate_exit():
     async def quick():
         return 0
 
-    root = supervisor.start(
+    root = processes.start(
         session_id="a",
         command="root",
         cwd=PathSpec.from_str_path("/"),
         run=run,
     )
-    middle = supervisor.start(
+    middle = processes.start(
         session_id="a",
         command="middle",
         cwd=PathSpec.from_str_path("/"),
         run=quick,
         parent_pid=root.info.pid,
     )
-    leaf = supervisor.start(
+    leaf = processes.start(
         session_id="a",
         command="leaf",
         cwd=PathSpec.from_str_path("/"),
@@ -370,16 +370,16 @@ async def test_cancel_group_reaches_grandchild_after_intermediate_exit():
     assert leaf.info.group_id == root.info.pid
     root.terminate()
     with pytest.raises(RuntimeError, match="accepting children"):
-        supervisor.start(
+        processes.start(
             session_id="a",
             command="late",
             cwd=PathSpec.from_str_path("/"),
             run=run,
             parent_pid=root.info.pid,
         )
-    await supervisor.drain()
+    await processes.drain()
     assert (await leaf.join()).cancellation_requested
-    assert supervisor.live() == ()
+    assert processes.live() == ()
 
 
 async def _hangs() -> int:
@@ -395,14 +395,14 @@ async def _exits() -> int:
 # still stops what it left running (``sh -c 'sleep 100 &'``).
 @pytest.mark.asyncio
 async def test_stopping_an_exited_runner_stops_what_it_left_running():
-    supervisor = ProcessSupervisor()
-    parent = supervisor.start(
+    processes = ProcessTable()
+    parent = processes.start(
         session_id="a",
         command="sh",
         cwd=PathSpec.from_str_path("/"),
         run=_exits,
     )
-    left = supervisor.start(
+    left = processes.start(
         session_id="a",
         command="sleep",
         cwd=PathSpec.from_str_path("/"),
@@ -420,19 +420,19 @@ async def test_stopping_an_exited_runner_stops_what_it_left_running():
 # program a child runner started receives that signal too.
 @pytest.mark.asyncio
 async def test_a_group_stopped_with_a_signal_passes_it_to_every_child():
-    supervisor = ProcessSupervisor()
+    processes = ProcessTable()
 
     async def run():
         await asyncio.Event().wait()
         return 0
 
-    root = supervisor.start(
+    root = processes.start(
         session_id="a",
         command="root",
         cwd=PathSpec.from_str_path("/"),
         run=run,
     )
-    child = supervisor.start(
+    child = processes.start(
         session_id="a",
         command="child",
         cwd=PathSpec.from_str_path("/"),
@@ -450,14 +450,14 @@ async def test_a_group_stopped_with_a_signal_passes_it_to_every_child():
 # so a runner that starts at once sees both.
 @pytest.mark.asyncio
 async def test_started_runs_before_the_runner_with_the_process_live():
-    supervisor = ProcessSupervisor()
+    processes = ProcessTable()
     order: list[str] = []
 
     async def run() -> int:
-        order.append(f"run {[p.info.pid for p in supervisor.live()]}")
+        order.append(f"run {[p.info.pid for p in processes.live()]}")
         return 0
 
-    handle = supervisor.start(
+    handle = processes.start(
         session_id="s",
         command="probe",
         cwd=PathSpec.from_str_path("/"),

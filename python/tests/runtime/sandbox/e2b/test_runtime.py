@@ -25,7 +25,7 @@ from mirage import RAMVFS, MountMode, Workspace
 from mirage.commands.config import Context
 from mirage.context.session_context import run_with_execution
 from mirage.io.types import materialize
-from mirage.process.supervisor import ProcessSupervisor
+from mirage.process.table import ProcessTable
 from mirage.runtime.sandbox.constants import EXEC_ID, wrap_line
 from mirage.runtime.sandbox.e2b import E2BConfig, E2BRuntime, sdk
 from mirage.runtime.sandbox.e2b.constants import PTY_MARK, PTY_RAW
@@ -344,7 +344,7 @@ async def test_a_term_kill_leaves_only_a_tagged_command_to_the_reap(
         )
         return result.exit_code
 
-    runner = ProcessSupervisor(bind=run_with_execution).start(
+    runner = ProcessTable(bind=run_with_execution).start(
         session_id="s",
         command="sleep",
         cwd=PathSpec.from_str_path("/"),
