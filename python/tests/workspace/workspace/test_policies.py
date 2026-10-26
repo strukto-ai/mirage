@@ -2153,6 +2153,27 @@ async def test_pre_execute_reads_a_commands_own_prefix_as_pre_command_will():
 
 
 @pytest.mark.asyncio
+async def test_env_s_command_is_read_in_the_environment_env_gives_it():
+    spy = SeePrefix()
+    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE, policies=[spy])
+    try:
+        await ws.shell(
+            "GPU=1 env -u GPU echo a; env GPU=2 echo b; GPU=3 env -i echo c"
+        )
+        assert spy.routed == [
+            ("env", "1"),
+            ("echo", None),
+            ("env", None),
+            ("echo", "2"),
+            ("env", "3"),
+            ("echo", None),
+        ]
+        assert sorted(spy.commanded, key=str) == sorted(spy.routed, key=str)
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
 async def test_a_prefix_leaves_a_readonly_name_and_the_next_command_alone():
     spy = SeePrefix()
     ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE, policies=[spy])

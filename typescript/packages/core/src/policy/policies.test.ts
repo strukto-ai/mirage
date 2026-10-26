@@ -1579,6 +1579,26 @@ describe('what a method sees', () => {
     }
   })
 
+  it("env's command is read in the environment env gives it", async () => {
+    const spy = new SeePrefix()
+    const ws = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE, policies: [spy] })
+    try {
+      await ws.shell('GPU=1 env -u GPU echo a; env GPU=2 echo b; GPU=3 env -i echo c')
+      expect(spy.routed).toEqual([
+        ['env', '1'],
+        ['echo', null],
+        ['env', null],
+        ['echo', '2'],
+        ['env', '3'],
+        ['echo', null],
+      ])
+      const key = (pair: [string, string | null]): string => JSON.stringify(pair)
+      expect(spy.commanded.map(key).sort()).toEqual(spy.routed.map(key).sort())
+    } finally {
+      await ws.close()
+    }
+  })
+
   it('a prefix leaves a readonly name and the next command alone', async () => {
     const spy = new SeePrefix()
     const ws = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE, policies: [spy] })

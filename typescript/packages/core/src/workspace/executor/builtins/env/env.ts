@@ -28,12 +28,16 @@ function envError(message: string): Result {
   return fail('env', `${message}\n${ENV_HELP_HINT}`, 125)
 }
 
-export async function handleEnv(
-  executeFn: ExecuteStringFn,
+/**
+ * What `env` runs and the environment it runs it in, read off its words:
+ * the command's words, the environment in `environ` order, whether `-i`
+ * cleared it and whether `-0` was given; or the message for words env
+ * refuses. Mirrors the Python `env_child`.
+ */
+export function envChild(
   args: string[],
   session: SessionState,
-  stdin: ByteSource | null = null,
-): Promise<Result> {
+): [string[], Record<string, string>, boolean, boolean] | string {
   let ignoreEnv = false
   let nullSep = false
   const unset: string[] = []
@@ -61,9 +65,7 @@ export async function handleEnv(
       continue
     }
     if (tok === '--unset') {
-      if (i + 1 >= args.length) {
-        return envError("env: option '--unset' requires an argument")
-      }
+      if (i + 1 >= args.length) return "env: option '--unset' requires an argument"
       unset.push(args[i + 1] ?? '')
       i += 2
       continue
@@ -73,13 +75,10 @@ export async function handleEnv(
       i += 1
       continue
     }
-    if (tok.startsWith('--')) {
-      return envError(`env: unrecognized option '${tok}'`)
-    }
+    if (tok.startsWith('--')) return `env: unrecognized option '${tok}'`
     if (tok.startsWith('-') && tok.length > 1) {
       let j = 1
       let consumedNext = false
-      let errored: string | null = null
       while (j < tok.length) {
         const ch = tok[j]
         if (ch === 'i') {
@@ -94,16 +93,14 @@ export async function handleEnv(
             unset.push(args[i + 1] ?? '')
             consumedNext = true
           } else {
-            errored = "env: option requires an argument -- 'u'"
+            return "env: option requires an argument -- 'u'"
           }
           break
         } else {
-          errored = `env: invalid option -- '${ch ?? ''}'`
-          break
+          return `env: invalid option -- '${ch ?? ''}'`
         }
         j += 1
       }
-      if (errored !== null) return envError(errored)
       i += consumedNext ? 2 : 1
       continue
     }
@@ -122,8 +119,45 @@ export async function handleEnv(
     base[tok.slice(0, eq)] = tok.slice(eq + 1)
     i += 1
   }
+  return [args.slice(i), base, ignoreEnv, nullSep]
+}
 
-  const command = args.slice(i)
+/**
+ * The session's variables as `env`'s command sees them. Only the scalars
+ * are replaced: arrays were never part of the env the old two-container
+ * store swapped, and bash does not put one in a child's environment
+ * either. A still-unfetched managed entry is a scalar in waiting, so it
+ * is replaced too: surviving the swap would let the inner line fetch and
+ * read a name `-i` or `-u` just cleared.
+ *
+ * Built through `varsFromEnv`, the one conversion from an embedder's
+ * process environment to session records, so the export attribute is
+ * stamped in exactly one place rather than restated here. Seeded plain,
+ * `env -i FOO=bar printenv FOO` printed nothing, since the process view a
+ * command reads carries only exported names. Mirrors the Python
+ * `env_vars`.
+ */
+export function envVars(
+  session: SessionState,
+  base: Record<string, string>,
+): Record<string, ShellVar> {
+  const swapped = ownRecord<ShellVar>()
+  for (const [name, v] of Object.entries(session.vars)) {
+    if (typeof v.value !== 'string' && v.managed === undefined) swapped[name] = v
+  }
+  Object.assign(swapped, varsFromEnv(base))
+  return swapped
+}
+
+export async function handleEnv(
+  executeFn: ExecuteStringFn,
+  args: string[],
+  session: SessionState,
+  stdin: ByteSource | null = null,
+): Promise<Result> {
+  const child = envChild(args, session)
+  if (typeof child === 'string') return envError(child)
+  const [command, base, ignoreEnv, nullSep] = child
   if (command.length > 0 && nullSep) {
     return envError('env: cannot specify --null (-0) with command')
   }
@@ -137,25 +171,8 @@ export async function handleEnv(
     return ok('env', out)
   }
 
-  // `env NAME=v cmd` runs the command with a replaced environment. Only
-  // the scalars are replaced: arrays were never part of the env the old
-  // two-container store swapped, and bash does not put one in a child's
-  // environment either. A still-unfetched managed entry is a scalar in
-  // waiting, so it is replaced too: surviving the swap would let the
-  // inner line fetch and read a name `-i` or `-u` just cleared.
-  //
-  // Built through `varsFromEnv`, the one conversion from an embedder's
-  // process environment to session records, so the export attribute is
-  // stamped in exactly one place rather than restated here. Seeded
-  // plain, `env -i FOO=bar printenv FOO` printed nothing, since the
-  // process view a command reads carries only exported names.
   const saved = session.vars
-  const swapped = ownRecord<ShellVar>()
-  for (const [name, v] of Object.entries(saved)) {
-    if (typeof v.value !== 'string' && v.managed === undefined) swapped[name] = v
-  }
-  Object.assign(swapped, varsFromEnv(base))
-  session.vars = swapped
+  session.vars = envVars(session, base)
   // The command gets its own copy of the functions `export -f` marked,
   // empty under `-i`: they are part of bash's environment, as its
   // `BASH_FUNC_NAME%%` entries.

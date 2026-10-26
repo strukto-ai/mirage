@@ -62,6 +62,7 @@ from mirage.types import PathSpec, Refusal
 from mirage.utils.hidden import is_glob
 from mirage.utils.path import resolve_path
 from mirage.workspace.executor.builtins.alias.alias import expanding_aliases
+from mirage.workspace.executor.builtins.env.env import env_child, env_vars
 from mirage.workspace.executor.command.routing import command_words
 from mirage.workspace.expand.classify.path import classify_bare_path
 from mirage.workspace.lookup import line_flags, reads_subtrees
@@ -606,13 +607,20 @@ async def _judge_words(
         ctx,
         session,
     )
+    # env's command runs in the environment env builds for it.
+    child = env_child(args, session) if name == "env" and inners else None
+    inner_session = (
+        session.fork(vars=env_vars(session, child[1]))
+        if child is not None and not isinstance(child, str)
+        else session
+    )
     for inner in inners:
         if not inner.readable:
             continue
         if inner.line is not None:
             async for one in _judge_line(
-                parse(inner.line, expanding_aliases(session)),
-                session,
+                parse(inner.line, expanding_aliases(inner_session)),
+                inner_session,
                 registry,
                 namespace,
                 line_frame(inner.line, occurrence),
@@ -632,7 +640,7 @@ async def _judge_words(
             async for one in _judge_words(
                 argv,
                 within,
-                session,
+                inner_session,
                 registry,
                 namespace,
                 stated=stated and not inner.open,

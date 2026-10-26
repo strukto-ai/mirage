@@ -47,6 +47,7 @@ import { PathSpec, type Refusal } from '../../types.ts'
 import { isGlob } from '../../utils/hidden.ts'
 import { resolvePath } from '../../utils/path.ts'
 import { commandWords } from '../executor/command/routing.ts'
+import { envChild, envVars } from '../executor/builtins/env/env.ts'
 import { classifyBarePath } from '../expand/classify/path.ts'
 import { lineFlags, readsSubtrees } from '../lookup/index.ts'
 import type { MountRegistry } from '../mount/registry.ts'
@@ -539,12 +540,18 @@ async function* judgeWords(
     ctx,
     session,
   }
+  // env's command runs in the environment env builds for it.
+  const child = name === 'env' && inners.length > 0 ? envChild(args, session) : null
+  const innerSession =
+    child !== null && typeof child !== 'string'
+      ? session.fork({ vars: envVars(session, child[1]) })
+      : session
   for (const inner of inners) {
     if (!innerReadable(inner)) continue
     if (inner.line !== null) {
       yield* judgeLine(
         reparse(inner.line),
-        session,
+        innerSession,
         registry,
         namespace,
         reparse,
@@ -561,7 +568,7 @@ async function* judgeWords(
       yield* judgeWords(
         inner.argv,
         within,
-        session,
+        innerSession,
         registry,
         namespace,
         reparse,
