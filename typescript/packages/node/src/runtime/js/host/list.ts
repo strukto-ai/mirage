@@ -41,6 +41,27 @@ export function dirent(directory: string, row: VFSEntry, name: unknown): unknown
   }
 }
 
+/** What a closed `Dir` refuses every call with, as node's does. */
+function refused(): Error {
+  return Object.assign(new Error('Directory handle was closed'), { code: 'ERR_DIR_CLOSED' })
+}
+
+/** `work`'s answer, or, for a call with a callback, nothing: the callback
+ * gets it, as node's callback forms do. */
+function settle(work: () => unknown, done: unknown): Promise<unknown> | undefined {
+  const settled = Promise.resolve().then(work)
+  if (typeof done !== 'function') return settled
+  settled.then(
+    (value) => {
+      ;(done as (err: unknown, value?: unknown) => void)(null, value)
+    },
+    (err: unknown) => {
+      ;(done as (err: unknown) => void)(err)
+    },
+  )
+  return undefined
+}
+
 /**
  * The `Dir` node's `opendir` answers, over a listing already read, the
  * twin of python's `MountScandir`. The listing is read whole as the
@@ -52,8 +73,6 @@ export function dirent(directory: string, row: VFSEntry, name: unknown): unknown
  */
 export function openedDir(path: string, entries: unknown[]): unknown {
   let closed = false
-  const refused = (): Error =>
-    Object.assign(new Error('Directory handle was closed'), { code: 'ERR_DIR_CLOSED' })
   const readSync = (): unknown => {
     if (closed) throw refused()
     return entries.shift() ?? null
@@ -63,20 +82,6 @@ export function openedDir(path: string, entries: unknown[]): unknown {
     closed = true
   }
   const read = (): Promise<unknown> => Promise.resolve().then(readSync)
-  // A call with a callback answers it and returns nothing, as node's do.
-  const settle = (work: () => unknown, done: unknown): Promise<unknown> | undefined => {
-    const settled = Promise.resolve().then(work)
-    if (typeof done !== 'function') return settled
-    settled.then(
-      (value) => {
-        ;(done as (err: unknown, value?: unknown) => void)(null, value)
-      },
-      (err: unknown) => {
-        ;(done as (err: unknown) => void)(err)
-      },
-    )
-    return undefined
-  }
   return {
     path,
     read: (done?: unknown) => settle(readSync, done),

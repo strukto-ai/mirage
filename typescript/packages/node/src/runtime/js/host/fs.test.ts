@@ -701,6 +701,13 @@ describe('patchNodeFs — refusals', () => {
   })
 })
 
+/** What an async iterable yields, as sorted strings. */
+async function names(items: AsyncIterable<unknown>): Promise<string[]> {
+  const out: string[] = []
+  for await (const item of items) out.push(String(item))
+  return out.sort()
+}
+
 describe('patchNodeFs — calls node makes on its own', () => {
   // d/a.txt, d/sub/b.txt, a link at /data/link to d/a.txt and one at
   // d/sub/up to its parent.
@@ -714,11 +721,6 @@ describe('patchNodeFs — calls node makes on its own', () => {
     await ws.vfs.symlink('/data/d/sub/up', '..')
     restore = patchNodeFs(ws)
     return [ws, requireCjs('fs') as Fs]
-  }
-  const names = async (items: AsyncIterable<unknown>): Promise<string[]> => {
-    const out: string[] = []
-    for await (const item of items) out.push(String(item))
-    return out.sort()
   }
 
   it('realpath follows each link in turn, as realpath(3) does', async () => {

@@ -546,9 +546,9 @@
         },
         {
           "program": {
-            "python": "import os\nl, t = os.stat('/data/lo'), os.stat('/other/g.txt')\nf = open('/data/lo')\nf.close()\nfd = os.open('/data/lo', os.O_RDONLY)\ns = os.fstat(fd)\nos.close(fd)\nprint(l.st_ino == t.st_ino, l.st_dev == t.st_dev, s.st_ino == t.st_ino, s.st_dev == t.st_dev, f.name)",
+            "python": "import os\nl, t = os.stat('/data/lo'), os.stat('/other/g.txt')\nf = open('/data/lo')\nf.close()\nfd = os.open('/data/lo', os.O_RDONLY)\nos.remove('/data/lo')\ns = os.fstat(fd)\nos.close(fd)\nprint(l.st_ino == t.st_ino, l.st_dev == t.st_dev, s.st_ino == t.st_ino, s.st_dev == t.st_dev, f.name)",
             "js": "const [l] = os.stat('/data/lo')\nconst [t] = os.stat('/other/g.txt')\nconsole.log(l.ino === t.ino, l.dev === t.dev)",
-            "node": "const fsp = require('node:fs').promises\nconst [l, t] = [await fsp.stat('/data/lo'), await fsp.stat('/other/g.txt')]\nconst h = await fsp.open('/data/lo')\nconst s = await h.stat()\nawait h.close()\nconsole.log(l.ino === t.ino, l.dev === t.dev, s.ino === t.ino, s.dev === t.dev)"
+            "node": "const fsp = require('node:fs').promises\nconst [l, t] = [await fsp.stat('/data/lo'), await fsp.stat('/other/g.txt')]\nconst h = await fsp.open('/data/lo')\nawait fsp.unlink('/data/lo')\nconst s = await h.stat()\nawait h.close()\nconsole.log(l.ino === t.ino, l.dev === t.dev, s.ino === t.ino, s.dev === t.dev)"
           },
           "expect": {
             "python": {

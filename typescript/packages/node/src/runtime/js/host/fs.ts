@@ -1123,14 +1123,7 @@ class HostFs implements Record<
         }
         case 'fstat': {
           const row = await this.files.fstat(desc.fd)
-          return [
-            this.statsOf(
-              this.files.walked(desc.opened),
-              row,
-              rest[0] as Options,
-              this.files.unlinked(desc.fd),
-            ),
-          ]
+          return [this.statsOf(desc.inode, row, rest[0] as Options, this.files.unlinked(desc.fd))]
         }
         case 'ftruncate':
           if (!desc.mode.writable) throw einval(desc.path)

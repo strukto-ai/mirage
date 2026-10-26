@@ -4,6 +4,7 @@ import glob
 import importlib
 import io
 import json
+import logging
 import operator
 import os
 import shutil
@@ -27,6 +28,8 @@ _exit_status = None
 # The most of the run's input one read asks the host for, and the most of
 # its output one write hands over: the bridge's own buffer.
 STDIO_CHUNK = 64 * 1024
+
+logger = logging.getLogger(__name__)
 _FLAG_FIELDS = tuple(
     name
     for name, field in vars(type(sys.flags)).items()
@@ -589,8 +592,10 @@ class OutputCapture(io.RawIOBase):
             # A guest may reconfigure buffering, close, or detach the wrapper.
             if self.text.buffer is not None and not self.text.closed:
                 self.text.close()
-        except BrokenPipeError:
-            pass
+        except BrokenPipeError as error:
+            # Its reader went away; what the run's exit had to say about it
+            # was said by finish.
+            logger.debug("guest stream %d closed: %r", self.fd, error)
         finally:
             self.close()
 

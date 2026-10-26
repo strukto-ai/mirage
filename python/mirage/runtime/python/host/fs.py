@@ -1159,7 +1159,7 @@ class HostFs:
         desc = self._descriptors[fd]
         st = syscall(self._adapter.fstat)(desc.fh)
         unlinked = self._adapter.unlinked(desc.fh)
-        return self._stat_of(self._adapter.walked(desc.opened), st, unlinked)
+        return self._stat_of(desc.inode or desc.opened, st, unlinked)
 
     def fsync(self, fd: int) -> None:
         self._descriptors[fd].land()

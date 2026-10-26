@@ -103,9 +103,10 @@ export class Descriptor {
    * @param files the adapter whose core the handle is on.
    * @param fd the core's handle.
    * @param mode what the open asked for.
-   * @param opened the path it was opened at, which its inode number comes
-   *   from however the file is renamed since.
+   * @param opened the path it was opened at, the name a file object reports.
    * @param directory it names a directory, which it may not read.
+   * @param inode where the links on `opened` led as it opened, which names
+   *   its inode however the file is renamed or the link changed since.
    */
   constructor(
     readonly files: RuntimeFiles,
@@ -113,6 +114,7 @@ export class Descriptor {
     readonly mode: OpenMode,
     readonly opened: string,
     readonly directory = false,
+    readonly inode = opened,
   ) {}
 
   /** The path its file has now; a rename moves it. */

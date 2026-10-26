@@ -771,9 +771,7 @@ class WasiFs:
                 # The core's row, its size the handle's, which counts what
                 # it wrote and has not landed.
                 posix = posix_stat(
-                    file.files.fstat(file.fh),
-                    self._fs.walked(entry.opened),
-                    "/",
+                    file.files.fstat(file.fh), file.inode or file.opened, "/"
                 )
                 if file.files.unlinked(file.fh):
                     posix = dataclasses.replace(posix, nlink=0)
