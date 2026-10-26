@@ -36,7 +36,7 @@ from mirage.policy import (
     ask_rule,
     policy_denied,
     refusal_of,
-    render_deny,
+    render_command_deny,
 )
 from mirage.policy.builtin.permissions import PermissionsPolicy
 from mirage.policy.match import (
@@ -595,11 +595,7 @@ async def gate(
     # The methods read the session this command is judged in, which for a
     # line explain walks is the walked one, not the stored one.
     views = registry.policies.views
-    handles = (
-        views(session.session_id, session)
-        if views is not None and not rules_only
-        else None
-    )
+    handles = views(session.session_id, session) if views is not None else None
     view, vfs, caller = handles or (None, None, None)
     ctx = CommandContext(
         command=name,
@@ -780,7 +776,7 @@ async def admit(
             judged=frozenset(_norm(p.virtual) for p in ctx.paths),
             granted=tuple(granted),
         )
-    err, code = render_deny(name, action)
+    err, code = await render_command_deny(name, action, ctx)
     return Refused(err, code, refusal_of(action))
 
 

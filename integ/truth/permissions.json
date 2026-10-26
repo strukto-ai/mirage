@@ -37,7 +37,7 @@
     "                                                      ask at depth 1",
     "oncall     rm /runbook/frozen/rollback.md             [1] rm: cannot remove '/runbook/frozen/rollback.md': Permission denied",
     "                                                      deny at depth 2 outranks it",
-    "oncall     cp /vault/aws.token /runbook/steps.md      [1] cp: /vault/aws.token: Permission denied",
+    "oncall     cp /vault/aws.token /runbook/steps.md      [1] cp: cannot open '/vault/aws.token' for reading: Permission denied",
     "                                                      every operand is judged: the source's deny wins",
     "oncall     rm /repo/service.py                        [1] rm: cannot remove '/repo/service.py': Read-only file system",
     "                                                      the mount section narrowed the mode",
