@@ -41,7 +41,7 @@ describe('node/js: quickjs runtime', () => {
       for (const line of ['js --version', 'node -v']) {
         const io = await ws.shell(line)
         expect(io.exitCode).toBe(0)
-        expect(stdoutStr(io)).toMatch(/^JavaScript \(quickjs \d{4}-\d{2}-\d{2}\)\n$/)
+        expect(stdoutStr(io)).toMatch(/^JavaScript \(quickjs-ng \d+\.\d+\.\d+\)\n$/)
         expect(stderrStr(io)).toBe('')
       }
     } finally {
