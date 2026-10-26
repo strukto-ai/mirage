@@ -458,6 +458,146 @@
         "stdout": "error: process ID list syntax error\nerror: unknown user-defined format specifier \"foo\"\nrc=1\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "job_ps_refuses_missing_lists_and_unknown_letters",
+      "seq": 502422,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "ps -p 2>&1 | head -1; ps -p 0 2>&1 | head -1; ps -o 2>&1 | head -1; ps -o pid,,comm 2>&1 | head -1; ps --foo 2>&1 | head -1; ps bb 2>&1 | head -1; ps -b 2>&1 | head -1",
+      "expect": {
+        "exit": 0,
+        "stdout": "error: list of process IDs must follow -p\nerror: process ID out of range\nerror: format specification must follow -o\nerror: improper format list\nerror: unknown gnu long option\nerror: unsupported option (BSD syntax)\nerror: unsupported SysV option\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "job_ps_reads_long_forms_and_layout_letters",
+      "seq": 502423,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "ps --pid=999999999 --format=pid=; echo rc=$?; ps --pid 999999999 --format pid=; echo rc=$?; ps -f -p 999999999 >/dev/null; echo rc=$?; ps w -p 999999999 -o pid=; echo rc=$?",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\nrc=1\nrc=1\nrc=1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "job_ps_prints_owner_and_start_columns",
+      "seq": 502424,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "(sleep 5 & p=$!; ps -o pgid=,sid=,user=,group=,etime=,etimes=,lstart=,start=,stime=,bsdstart= -p \"$p\" | awk '{print NF}'; kill \"$p\"; wait)",
+      "expect": {
+        "exit": 0,
+        "stdout": "14\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "job_kill_reads_its_option_words",
+      "seq": 502425,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "kill -s; echo rc=$?; kill -n; echo rc=$?; kill '-?'; echo rc=$?; kill ''; echo rc=$?; (sleep 5 & kill -- %1; wait %1; echo rc=$?)",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\nrc=1\nrc=2\nrc=1\nrc=143\n",
+        "stderr": "bash: kill: -s: option requires an argument\nbash: kill: -n: option requires an argument\nkill: usage: kill [-s sigspec | -n signum | -sigspec] pid | jobspec ... or kill -l [sigspec]\nbash: kill: `': not a pid or valid job spec\n"
+      }
     }
   ]
 }
