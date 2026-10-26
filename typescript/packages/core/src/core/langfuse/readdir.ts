@@ -83,51 +83,47 @@ function dirs(names: readonly string[]): FileStat[] {
   return names.map((name) => new FileStat({ name, type: FileType.DIRECTORY }))
 }
 
-function traceRows(traces: readonly Record<string, unknown>[]): FileStat[] {
-  return traces.map(
-    (t) => new FileStat({ name: `${pickString(t, 'id')}.json`, type: FileType.FILE }),
-  )
+function traceRows(roots: readonly Record<string, unknown>[]): FileStat[] {
+  // A trace can hold more than one root observation.
+  const ids = new Set(roots.map((r) => pickString(r, 'traceId')))
+  return [...ids].map((id) => new FileStat({ name: `${id}.json`, type: FileType.FILE }))
 }
 
 async function listTraces(accessor: LangfuseAccessor, _match: ScopeMatch): Promise<DirListing> {
-  const limit = accessor.config.defaultTraceLimit ?? DEFAULT_TRACE_LIMIT
   // No implicit time window: an unset defaultFromTimestamp lists whatever the
   // project holds, up to defaultTraceLimit. A rolling default would hide
   // traces that read() happily serves, and python applies no window either.
-  const opts: { limit: number; fromTimestamp?: string } = { limit }
-  const from = accessor.config.defaultFromTimestamp
-  if (from !== undefined && from !== '') opts.fromTimestamp = from
-  const traces = await fetchTraces(accessor.transport, opts)
-  // The list endpoint returns trace summaries while a read renders the full
-  // trace with its observations, so a size here would cost one fetchTrace per
-  // entry. Traces and prompts stay size-unknown until a read hydrates them;
-  // the dataset .jsonl files are sized because their listing already carries
-  // every item.
+  const traces = await fetchTraces(accessor.transport, {
+    limit: accessor.config.defaultTraceLimit ?? DEFAULT_TRACE_LIMIT,
+    fromTimestamp: accessor.config.defaultFromTimestamp,
+  })
+  // The listing carries root observations while a read renders the whole
+  // trace with its observations and scores, so a size here would cost one
+  // fetchTrace per entry. Traces and prompts stay size-unknown until a read
+  // hydrates them; the dataset .jsonl files are sized because their listing
+  // already carries every item.
   return new DirListing({ entries: traceRows(traces), partial: bounded(accessor, traces) })
 }
 
 async function listSessions(accessor: LangfuseAccessor, _match: ScopeMatch): Promise<DirListing> {
-  // One page of the newest sessions: an older one that drops off it has not
-  // been deleted, so the listing evicts nothing.
-  const sessions = await fetchSessions(accessor.transport)
-  return new DirListing({
-    entries: dirs(sessions.map((s) => pickString(s, 'id'))),
-    window: true,
+  // The sessions of one page of the newest traces: an older one that drops
+  // off it has not been deleted, so the listing evicts nothing.
+  const sessions = await fetchSessions(accessor.transport, {
+    limit: accessor.config.defaultTraceLimit ?? DEFAULT_TRACE_LIMIT,
+    fromTimestamp: accessor.config.defaultFromTimestamp,
   })
+  return new DirListing({ entries: dirs(sessions), window: true })
 }
 
 async function listSessionTraces(
   accessor: LangfuseAccessor,
   match: ScopeMatch,
 ): Promise<DirListing> {
-  const limit = accessor.config.defaultTraceLimit ?? DEFAULT_TRACE_LIMIT
-  const opts: { sessionId: string; limit: number; fromTimestamp?: string } = {
+  const traces = await fetchTraces(accessor.transport, {
     sessionId: match.slots.session_id ?? '',
-    limit,
-  }
-  const from = accessor.config.defaultFromTimestamp
-  if (from !== undefined && from !== '') opts.fromTimestamp = from
-  const traces = await fetchTraces(accessor.transport, opts)
+    limit: accessor.config.defaultTraceLimit ?? DEFAULT_TRACE_LIMIT,
+    fromTimestamp: accessor.config.defaultFromTimestamp,
+  })
   return new DirListing({ entries: traceRows(traces), partial: bounded(accessor, traces) })
 }
 

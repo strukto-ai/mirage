@@ -85,7 +85,7 @@ async def test_stat_traces_dir(accessor):
 
 @pytest.mark.asyncio
 async def test_stat_trace_file(accessor):
-    with listed("fetch_traces", [{"id": "abc"}]):
+    with listed("fetch_traces", [{"traceId": "abc"}]):
         result = await mounted_stat(accessor, "/traces/abc.json")
     assert result.content == ContentType.JSON
     assert result.name == "abc.json"
@@ -93,7 +93,7 @@ async def test_stat_trace_file(accessor):
 
 @pytest.mark.asyncio
 async def test_stat_session_dir(accessor):
-    with listed("fetch_sessions", [{"id": "sid1"}]):
+    with listed("fetch_sessions", ["sid1"]):
         result = await mounted_stat(accessor, "/sessions/sid1")
     assert result.type == FileType.DIRECTORY
     assert result.extra["session_id"] == "sid1"
@@ -143,7 +143,7 @@ async def test_stat_unlisted_trace_raises(accessor):
     # absent from the parent listing is asked of the API (the listing is
     # bounded), and the API's 404 is ENOENT, not a confident stat.
     with (
-        listed("fetch_traces", [{"id": "present"}]),
+        listed("fetch_traces", [{"traceId": "present"}]),
         patch(
             "mirage.core.langfuse.read.fetch_trace",
             new_callable=AsyncMock,
@@ -172,7 +172,7 @@ async def test_stat_finds_a_trace_the_bounded_listing_left_out():
         accessor = LangfuseAccessor(config=config)
     trace = {"id": "t_old", "name": "chat"}
     with (
-        listed("fetch_traces", [{"id": "t_new"}]),
+        listed("fetch_traces", [{"traceId": "t_new"}]),
         patch(
             "mirage.core.langfuse.read.fetch_trace",
             new_callable=AsyncMock,
@@ -205,12 +205,12 @@ async def test_stat_of_a_trace_the_api_does_not_have_is_enoent(accessor):
 @pytest.mark.asyncio
 async def test_stat_refuses_another_sessions_trace(accessor):
     with (
-        listed("fetch_sessions", [{"id": "s1"}]),
+        listed("fetch_sessions", ["s1"]),
         listed("fetch_traces", []),
         patch(
             "mirage.core.langfuse.read.fetch_trace",
             new_callable=AsyncMock,
-            return_value={"id": "t1", "sessionId": "s2"},
+            return_value={"traceId": "t1", "sessionId": "s2"},
         ),
     ):
         with pytest.raises(FileNotFoundError):

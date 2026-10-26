@@ -14,7 +14,7 @@
       "command": "ls /lf/traces",
       "expect": {
         "exit": 0,
-        "stdout": "trace-alpha.json\ntrace-beta.json\ntrace-gamma.json\n",
+        "stdout": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1.json\nb2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2.json\nc3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3.json\n",
         "stderr": ""
       }
     },
@@ -30,14 +30,14 @@
       "seq": 600003,
       "targets": ["langfuse"],
       "command": "ls /lf/sessions/session-one",
-      "expect": { "exit": 0, "stdout": "trace-alpha.json\ntrace-beta.json\n", "stderr": "" }
+      "expect": { "exit": 0, "stdout": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1.json\nb2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2.json\n", "stderr": "" }
     },
     {
       "id": "lf_session_two_ls",
       "seq": 600004,
       "targets": ["langfuse"],
       "command": "ls /lf/sessions/session-two",
-      "expect": { "exit": 0, "stdout": "trace-gamma.json\n", "stderr": "" }
+      "expect": { "exit": 0, "stdout": "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3.json\n", "stderr": "" }
     },
     {
       "id": "lf_prompts_ls",

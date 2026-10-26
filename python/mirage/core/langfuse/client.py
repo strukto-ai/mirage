@@ -12,8 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import Awaitable
-from datetime import datetime
+from collections.abc import Awaitable, Callable
+from datetime import UTC, datetime
 from typing import Any, TypeVar, cast
 
 from langfuse.api.client import AsyncLangfuseAPI
@@ -78,43 +78,124 @@ def _wire_numbers(value: Any) -> Any:
     return value
 
 
+# A root observation stands for its trace: v4 keeps no trace entity, and
+# the root carries the trace's name, user, session and tags.
+TRACE_FIELDS = "core,basic"
+OBSERVATION_FIELDS = (
+    "core,basic,time,io,metadata,model,usage,prompt,metrics,trace_context"
+)
+SCORE_FIELDS = "details,subject"
+EXPERIMENT_FIELDS = "core,metadata,scores"
+# The experiments endpoint requires a lower bound; the epoch asks for all.
+EXPERIMENTS_FROM = datetime(1970, 1, 1, tzinfo=UTC)
+PAGE_SIZE = 100
+
+
+async def _collect(
+    page: Callable[..., Awaitable[Any]],
+    limit: int | None = None,
+    **kwargs: Any,
+) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    cursor: str | None = None
+    while limit is None or len(out) < limit:
+        size = PAGE_SIZE if limit is None else min(PAGE_SIZE, limit - len(out))
+        result = await page(limit=size, cursor=cursor, **kwargs)
+        out.extend(_to_dict(row) for row in result.data)
+        cursor = result.meta.cursor
+        if not result.data or not cursor:
+            break
+    return out
+
+
 async def fetch_traces(
     api: AsyncLangfuseAPI,
     limit: int = 100,
-    name: str | None = None,
-    user_id: str | None = None,
     session_id: str | None = None,
-    order_by: str | None = None,
     from_timestamp: str | None = None,
 ) -> list[dict[str, Any]]:
-    kwargs: dict[str, Any] = {"limit": limit}
-    if name:
-        kwargs["name"] = name
-    if user_id:
-        kwargs["user_id"] = user_id
+    """The root observations of the newest traces, one or more per trace.
+
+    Args:
+        api (AsyncLangfuseAPI): the Langfuse API client.
+        limit (int): the most root observations to return.
+        session_id (str | None): only this session's traces.
+        from_timestamp (str | None): ISO 8601 lower bound on start time.
+
+    Returns:
+        list[dict[str, Any]]: root observations, newest first.
+    """
+    kwargs: dict[str, Any] = {
+        "fields": TRACE_FIELDS,
+        "is_root_observation": True,
+    }
     if session_id:
         kwargs["session_id"] = session_id
-    if order_by:
-        kwargs["order_by"] = order_by
     if from_timestamp:
-        kwargs["from_timestamp"] = datetime.fromisoformat(
+        kwargs["from_start_time"] = datetime.fromisoformat(
             from_timestamp.replace("Z", "+00:00")
         )
-    result = await api.trace.list(**kwargs)
-    return [_to_dict(t) for t in result.data]
+    return await _collect(api.observations.get_many, limit, **kwargs)
+
+
+def _start_time(observation: dict[str, Any]) -> str:
+    return observation.get("startTime") or ""
 
 
 async def fetch_trace(api: AsyncLangfuseAPI, trace_id: str) -> dict[str, Any]:
-    result = await api.trace.get(trace_id)
-    return _to_dict(result)
+    """One trace: its root observation, the rest and its scores.
+
+    Args:
+        api (AsyncLangfuseAPI): the Langfuse API client.
+        trace_id (str): the trace id.
+
+    Returns:
+        dict[str, Any]: the root observation with ``observations`` and
+        ``scores`` added.
+
+    Raises:
+        ApiError: 404 when the trace has no observations.
+    """
+    observations = await _collect(
+        api.observations.get_many,
+        trace_id=trace_id,
+        fields=OBSERVATION_FIELDS,
+    )
+    if not observations:
+        raise ApiError(
+            status_code=404, body={"message": f"trace {trace_id} not found"}
+        )
+    roots = [o for o in observations if o.get("isRootObservation")]
+    root = min(roots or observations, key=_start_time)
+    scores = await _collect(
+        api.scores.get_many, trace_id=trace_id, fields=SCORE_FIELDS
+    )
+    return {
+        **root,
+        "observations": [o for o in observations if o is not root],
+        "scores": scores,
+    }
 
 
 async def fetch_sessions(
     api: AsyncLangfuseAPI,
     limit: int = 100,
-) -> list[dict[str, Any]]:
-    result = await api.sessions.list(limit=limit)
-    return [_to_dict(s) for s in result.data]
+    from_timestamp: str | None = None,
+) -> list[str]:
+    """The sessions of the newest traces, newest first.
+
+    Args:
+        api (AsyncLangfuseAPI): the Langfuse API client.
+        limit (int): the most traces to look through.
+        from_timestamp (str | None): ISO 8601 lower bound on start time.
+
+    Returns:
+        list[str]: distinct session ids.
+    """
+    roots = await fetch_traces(api, limit=limit, from_timestamp=from_timestamp)
+    return list(
+        dict.fromkeys(r["sessionId"] for r in roots if r.get("sessionId"))
+    )
 
 
 async def fetch_prompts(api: AsyncLangfuseAPI) -> list[dict[str, Any]]:
@@ -154,10 +235,20 @@ async def fetch_dataset_items(
 async def fetch_dataset_runs(
     api: AsyncLangfuseAPI,
     dataset_name: str,
-    limit: int = 100,
 ) -> list[dict[str, Any]]:
-    result = await api.datasets.get_runs(
-        dataset_name=dataset_name,
-        limit=limit,
+    """The experiments run on a dataset.
+
+    Args:
+        api (AsyncLangfuseAPI): the Langfuse API client.
+        dataset_name (str): the dataset's name.
+
+    Returns:
+        list[dict[str, Any]]: experiments, latest activity first.
+    """
+    dataset = await api.datasets.get(dataset_name)
+    return await _collect(
+        api.experiments.list,
+        from_start_time=EXPERIMENTS_FROM,
+        dataset_id=dataset.id,
+        fields=EXPERIMENT_FIELDS,
     )
-    return [_to_dict(r) for r in result.data]

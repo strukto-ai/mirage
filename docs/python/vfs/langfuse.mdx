@@ -200,13 +200,15 @@ Example:
 from `default_from_timestamp` on). The cap bounds the listing, not the tree:
 `stat` and `cat` still reach an older trace by its id, and `sessions/<id>/`
 serves only that session's traces.
-Each trace is a `.json` file containing the full trace object with nested
-observations (spans, generations, events).
+Each trace is a `.json` file: the trace's root observation, with its other
+observations (spans, generations, events) in `observations` and its scores in
+`scores`. `input` and `output` are the strings Langfuse stores; `jq
+'.input | fromjson'` parses a JSON one.
 
 ### Sessions
 
-`/langfuse/sessions/` groups traces by session ID. Each session directory
-contains trace `.json` files belonging to that session.
+`/langfuse/sessions/` lists the sessions of the traces `traces/` lists. Each
+session directory contains trace `.json` files belonging to that session.
 
 ### Prompts
 
@@ -217,7 +219,8 @@ and metadata.
 ### Datasets
 
 `/langfuse/datasets/` lists dataset names as directories. Each contains
-`items.jsonl` (dataset items) and `runs/` with run results.
+`items.jsonl` (dataset items) and `runs/`, one `.jsonl` file per experiment
+run on the dataset.
 
 ## grep and rg
 

@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { randomUUID } from 'node:crypto'
+import { randomBytes } from 'node:crypto'
 import { resolve } from 'node:path'
 import { setTimeout as sleep } from 'node:timers/promises'
 import { fileURLToPath } from 'node:url'
@@ -39,7 +39,11 @@ const AUTH = Buffer.from(
 async function api(method: 'GET' | 'POST', path: string, body?: Json): Promise<unknown> {
   const response = await fetch(`${HOST}${path}`, {
     method,
-    headers: { Authorization: `Basic ${AUTH}`, 'Content-Type': 'application/json' },
+    headers: {
+      Authorization: `Basic ${AUTH}`,
+      'Content-Type': 'application/json',
+      'x-langfuse-ingestion-version': '4',
+    },
     ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
   })
   const text = await response.text()
@@ -173,54 +177,58 @@ const TRACES: TraceSpec[] = [
   },
 ]
 
-// One trace holding a span with a generation under it, the shape the
-// Python seed's nested observations produce.
-function traceEvents(spec: TraceSpec): Json[] {
-  const now = new Date().toISOString()
-  const traceId = randomUUID()
-  const spanId = randomUUID()
-  const event = (type: string, body: { [key: string]: Json }): Json => ({
-    id: randomUUID(),
-    type,
-    timestamp: now,
-    body,
+function attr(key: string, value: string | string[]): Json {
+  if (Array.isArray(value)) {
+    return { key, value: { arrayValue: { values: value.map((v) => ({ stringValue: v })) } } }
+  }
+  return { key, value: { stringValue: value } }
+}
+
+// One trace as OpenTelemetry spans, the way Langfuse v4 ingests it: a root
+// span carrying the trace's name, user, session and tags, with a generation
+// under it.
+function traceSpans(spec: TraceSpec): Json[] {
+  const nanos = String(BigInt(Date.now()) * 1_000_000n)
+  const traceId = randomBytes(16).toString('hex')
+  const rootId = randomBytes(8).toString('hex')
+  const input = JSON.stringify(spec.input)
+  const output = JSON.stringify(spec.output)
+  const span = (spanId: string, name: string, attributes: Json[], parent?: string): Json => ({
+    traceId,
+    spanId,
+    ...(parent !== undefined ? { parentSpanId: parent } : {}),
+    name,
+    kind: 1,
+    startTimeUnixNano: nanos,
+    endTimeUnixNano: nanos,
+    attributes,
+    status: {},
   })
   return [
-    event('trace-create', {
-      id: traceId,
-      timestamp: now,
-      name: spec.traceName,
-      ...(spec.sessionId !== undefined ? { sessionId: spec.sessionId } : {}),
-      userId: spec.userId,
-      tags: spec.tags,
-      metadata: { env: 'production' },
-      input: spec.input,
-      output: spec.output,
-    }),
-    event('span-create', {
-      id: spanId,
-      traceId,
-      name: spec.traceName,
-      startTime: now,
-      endTime: now,
-      input: spec.input,
-      output: spec.output,
-    }),
-    event('generation-create', {
-      id: randomUUID(),
-      traceId,
-      parentObservationId: spanId,
-      name: `${spec.traceName}-llm`,
-      startTime: now,
-      endTime: now,
-      model: spec.model,
-      input: spec.input,
-      output: spec.output,
-      usageDetails: {
-        input_tokens: 50 + JSON.stringify(spec.input).length,
-        output_tokens: 30 + JSON.stringify(spec.output).length,
-      },
-    }),
+    span(rootId, spec.traceName, [
+      attr('langfuse.trace.name', spec.traceName),
+      attr('langfuse.user.id', spec.userId),
+      ...(spec.sessionId !== undefined ? [attr('langfuse.session.id', spec.sessionId)] : []),
+      attr('langfuse.trace.tags', spec.tags),
+      attr('langfuse.trace.metadata.env', 'production'),
+      attr('langfuse.observation.input', input),
+      attr('langfuse.observation.output', output),
+    ]),
+    span(
+      randomBytes(8).toString('hex'),
+      `${spec.traceName}-llm`,
+      [
+        attr('langfuse.observation.type', 'generation'),
+        attr('langfuse.observation.model.name', spec.model),
+        attr('langfuse.observation.input', input),
+        attr('langfuse.observation.output', output),
+        attr(
+          'langfuse.observation.usage_details',
+          JSON.stringify({ input: 50 + input.length, output: 30 + output.length }),
+        ),
+      ],
+      rootId,
+    ),
   ]
 }
 
@@ -269,9 +277,9 @@ async function main(): Promise<void> {
   }
 
   console.log('\n=== Creating traces ===')
-  const batch: Json[] = []
+  const spans: Json[] = []
   for (const spec of TRACES) {
-    batch.push(...traceEvents(spec))
+    spans.push(...traceSpans(spec))
     console.log(`  created: ${spec.traceName} (session=${spec.sessionId ?? '-'})`)
   }
   console.log(`\n  total: ${String(TRACES.length)} traces`)
@@ -281,16 +289,18 @@ async function main(): Promise<void> {
   await createDataset('sentiment-eval', 'Sentiment classification', SENTIMENT_ITEMS)
 
   console.log('\n=== Flushing ===')
-  const ingested = (await api('POST', '/api/public/ingestion', { batch })) as {
-    errors: unknown[]
-  }
-  if (ingested.errors.length > 0) {
-    throw new Error(`ingestion reported errors: ${JSON.stringify(ingested.errors)}`)
-  }
+  await api('POST', '/api/public/otel/v1/traces', {
+    resourceSpans: [
+      { resource: { attributes: [] }, scopeSpans: [{ scope: { name: 'seed' }, spans }] },
+    ],
+  })
   await sleep(3000)
 
   console.log('\n=== Verifying ===')
-  const traces = (await api('GET', '/api/public/traces?limit=5')) as {
+  const traces = (await api(
+    'GET',
+    '/api/public/v2/observations?isRootObservation=true&limit=5',
+  )) as {
     data: { name: string | null; sessionId: string | null }[]
   }
   console.log(`  traces: ${String(traces.data.length)} found`)

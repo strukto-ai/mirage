@@ -1,11 +1,11 @@
-# Real Langfuse v3 stack for the integ battery. Six containers because that
+# Real Langfuse v4 stack for the integ battery. Six containers because that
 # is what Langfuse self-hosting requires: web + async worker in front of
 # Postgres (OLTP), ClickHouse (OLAP, where traces land), Redis (ingestion
 # queue) and an S3-compatible blob store (raw event upload).
 #
 # Keys and ids are pinned through LANGFUSE_INIT_* headless initialization so
-# the integ adapters can authenticate with constants and so `htmlPath` in API
-# responses carries a stable project id.
+# the integ adapters can authenticate with constants and so `projectId` in API
+# responses is stable.
 services:
   langfuse-postgres:
     image: postgres:16
@@ -20,7 +20,7 @@ services:
       retries: 30
 
   langfuse-clickhouse:
-    image: clickhouse/clickhouse-server:24.12
+    image: clickhouse/clickhouse-server:26.4.5
     environment:
       CLICKHOUSE_DB: default
       CLICKHOUSE_USER: clickhouse
@@ -68,7 +68,7 @@ services:
       echo minio-init-done"
 
   langfuse-worker:
-    image: langfuse/langfuse-worker:3.225.5
+    image: langfuse/langfuse-worker:4.70.1
     depends_on:
       langfuse-postgres:
         condition: service_healthy
@@ -100,7 +100,7 @@ services:
       LANGFUSE_ENABLE_EXPERIMENTAL_FEATURES: "false"
 
   langfuse-web:
-    image: langfuse/langfuse:3.225.5
+    image: langfuse/langfuse:4.70.1
     depends_on:
       langfuse-worker:
         condition: service_started

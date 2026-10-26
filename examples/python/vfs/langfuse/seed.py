@@ -251,7 +251,7 @@ langfuse.flush()
 time.sleep(3)
 
 print("\n=== Verifying ===")
-traces = langfuse.api.trace.list(limit=5)
+traces = langfuse.api.observations.get_many(is_root_observation=True, limit=5)
 print(f"  traces: {len(traces.data)} found")
 for t in traces.data[:3]:
     print(f"    {t.name} (session={t.session_id})")

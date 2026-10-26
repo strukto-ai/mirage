@@ -1382,7 +1382,7 @@
         "langfuse"
       ],
       "clear_cache": true,
-      "command": "set -o pipefail; f=/lf/traces/trace-beta.json; echo \"cold=$(stat -c %s \"$f\")\"; bytes=$(cat \"$f\" | wc -c) && test \"$bytes\" -gt 0 && echo read=positive && test \"$(stat -c %s \"$f\")\" = \"$bytes\" && echo warm=read",
+      "command": "set -o pipefail; f=/lf/traces/b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2.json; echo \"cold=$(stat -c %s \"$f\")\"; bytes=$(cat \"$f\" | wc -c) && test \"$bytes\" -gt 0 && echo read=positive && test \"$(stat -c %s \"$f\")\" = \"$bytes\" && echo warm=read",
       "expect": {
         "exit": 0,
         "stdout": "cold=-\nread=positive\nwarm=read\n",
