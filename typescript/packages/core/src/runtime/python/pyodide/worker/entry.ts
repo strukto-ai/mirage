@@ -52,6 +52,8 @@ const sync: SyncVFS = {
     })
   },
   process: (payload) => call({ op: 'process', path: '', payload }) as string,
+  stdin: (size) => call({ op: 'stdin', path: '', size }) as Uint8Array,
+  output: (fd, bytes) => call({ op: 'output', path: '', fh: fd, bytes }) as boolean,
   open: (path, mode) => call({ op: 'open', path, mode }) as number,
   pread: (fh, offset, size) => call({ op: 'pread', path: '', fh, offset, size }) as Uint8Array,
   pwrite: (fh, offset, bytes) => {

@@ -30,6 +30,10 @@ export interface SyncVFS {
   /** Check a requested alias against command rules without issuing a backend op. */
   checkPath(path: string, follow: boolean): void
   process?(payload: string): string
+  /** One read(2) of the run's input: what has arrived, up to `size` bytes; empty at its end. */
+  stdin?(size: number): Uint8Array
+  /** Hand one write to the run's stdout (1) or stderr (2): false once its reader has gone. */
+  output?(fd: 1 | 2, bytes: Uint8Array): boolean
   /**
    * Open a file on the run's open-file core (`RuntimeFiles.open`), which
    * holds what the handle reads and writes, and answer the handle.

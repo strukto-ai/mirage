@@ -350,6 +350,49 @@
           }
         }
       ]
+    },
+    {
+      "id": "paths_resolve_list_and_copy_on_the_mount",
+      "note": "What each language's own library builds on the calls the entry point routes: python's realpath, scandir, mkdtemp, glob and copytree, and node's realpath, opendir, mkdtemp, glob and cp, which node answers on its own and the patch serves.",
+      "runtimes": [
+        "host"
+      ],
+      "backends": [
+        "ram",
+        "disk",
+        "ssh",
+        "s3",
+        "redis",
+        "ram+cache",
+        "disk+cache",
+        "redis+cache"
+      ],
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram"
+          }
+        }
+      },
+      "steps": [
+        {
+          "program": {
+            "python": "import glob, os, shutil, tempfile\nos.makedirs('/data/d/sub')\nopen('/data/d/a.txt', 'w').write('a')\nopen('/data/d/sub/b.txt', 'w').write('b')\nos.symlink('d/a.txt', '/data/link')\nprint(os.path.realpath('/data/link'))\nprint(' '.join(sorted(f'{e.name}:{str(e.is_dir()).lower()}' for e in os.scandir('/data/d'))))\nmade = tempfile.mkdtemp(prefix='tmp-', dir='/data')\nprint(str(os.path.isdir(made)).lower(), str(made.startswith('/data/tmp-')).lower())\nprint(' '.join(sorted(glob.glob('/data/d/**/*.txt', recursive=True))))\nshutil.copytree('/data/d', '/data/e')\nprint(' '.join(sorted(os.listdir('/data/e'))), open('/data/e/sub/b.txt').read())",
+            "node": "const fsp = require('node:fs').promises\nawait fsp.mkdir('/data/d/sub', { recursive: true })\nawait fsp.writeFile('/data/d/a.txt', 'a')\nawait fsp.writeFile('/data/d/sub/b.txt', 'b')\nawait fsp.symlink('d/a.txt', '/data/link')\nconsole.log(await fsp.realpath('/data/link'))\nconst seen = []\nfor await (const e of await fsp.opendir('/data/d')) seen.push(`${e.name}:${e.isDirectory()}`)\nconsole.log(seen.sort().join(' '))\nconst made = await fsp.mkdtemp('/data/tmp-')\nconsole.log((await fsp.stat(made)).isDirectory(), made.startsWith('/data/tmp-'))\nconst found = []\nfor await (const f of fsp.glob('/data/d/**/*.txt')) found.push(f)\nconsole.log(found.sort().join(' '))\nawait fsp.cp('/data/d', '/data/e', { recursive: true })\nconsole.log((await fsp.readdir('/data/e')).sort().join(' '), await fsp.readFile('/data/e/sub/b.txt', 'utf8'))"
+          },
+          "expect": {
+            "exit": 0,
+            "stdout": "/data/d/a.txt\na.txt:false sub:true\ntrue true\n/data/d/a.txt /data/d/sub/b.txt\na.txt sub b\n"
+          }
+        },
+        {
+          "command": "cat /data/e/a.txt /data/e/sub/b.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "ab"
+          }
+        }
+      ]
     }
   ]
 }

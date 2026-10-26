@@ -1,0 +1,116 @@
+{
+  "cases": [
+    {
+      "id": "a_reader_takes_its_input_as_it_comes",
+      "note": "seq would write about 900 MB. A program reads its input as it arrives, as from a pipe, so one that reads a line, or none, ends at once and its writer stops; one that took its input whole first would take seconds and gigabytes.",
+      "runtimes": [
+        "wasi",
+        "pyodide",
+        "quickjs",
+        "local"
+      ],
+      "steps": [
+        {
+          "command": {
+            "python": "seq 100000000 | python3 -c \"import sys; print(sys.stdin.readline(), end='')\"",
+            "js": "seq 100000000 | node -e \"console.log(std.in.getline())\""
+          },
+          "expect": {
+            "exit": 0,
+            "stdout": "1\n"
+          }
+        },
+        {
+          "command": {
+            "python": "seq 100000000 | python3 -c \"print('done')\"",
+            "js": "seq 100000000 | node -e \"console.log('done')\""
+          },
+          "expect": {
+            "exit": 0,
+            "stdout": "done\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "input_from_a_mount_reaches_the_program",
+      "note": "The input is over 1 MiB, so a backend that serves ranges hands it over in pieces. Monty has no sys.stdin: its input arrives whole, as the stdin global.",
+      "runtimes": [
+        "monty",
+        "wasi",
+        "pyodide",
+        "quickjs",
+        "local"
+      ],
+      "backends": [
+        "ram",
+        "disk",
+        "ssh",
+        "s3",
+        "redis",
+        "ram+cache",
+        "disk+cache",
+        "redis+cache"
+      ],
+      "world": {
+        "mounts": {
+          "/data": {
+            "vfs": "ram"
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "seq 200000 > /data/in.txt",
+          "expect": {
+            "exit": 0
+          }
+        },
+        {
+          "command": {
+            "python": "python3 -c \"try:\n    data = stdin\nexcept NameError:\n    import sys\n    data = sys.stdin.buffer.read()\nprint(len(data), data.count(b'\\n'))\" < /data/in.txt",
+            "js": "node -e \"const data = new Uint8Array(std.in.readAsArrayBuffer())\nconsole.log(data.length, data.filter((b) => b === 10).length)\" < /data/in.txt"
+          },
+          "expect": {
+            "exit": 0,
+            "stdout": "1288895 200000\n"
+          }
+        },
+        {
+          "command": {
+            "python": "python3 -c \"import sys\nn = 0\nfor line in sys.stdin:\n    n += 1\nprint(n, line, end='')\" < /data/in.txt",
+            "js": "node -e \"let n = 0, line, last\nwhile ((line = std.in.getline()) !== null) {\n  n++\n  last = line\n}\nconsole.log(n, last)\" < /data/in.txt"
+          },
+          "expect": {
+            "exit": 0,
+            "stdout": "200000 200000\n"
+          },
+          "expect_on": {
+            "monty": {
+              "exit": 1,
+              "stdout": "",
+              "stderr_contains": "no attribute 'stdin'"
+            }
+          }
+        },
+        {
+          "command": {
+            "python": "cat /data/in.txt | python3 -c \"import sys\nn = 0\nfor line in sys.stdin:\n    n += 1\nprint(n, line, end='')\"",
+            "js": "cat /data/in.txt | node -e \"let n = 0, line, last\nwhile ((line = std.in.getline()) !== null) {\n  n++\n  last = line\n}\nconsole.log(n, last)\""
+          },
+          "expect": {
+            "exit": 0,
+            "stdout": "200000 200000\n"
+          },
+          "expect_on": {
+            "monty": {
+              "exit": 1,
+              "stdout": "",
+              "stderr_contains": "no attribute 'stdin'"
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

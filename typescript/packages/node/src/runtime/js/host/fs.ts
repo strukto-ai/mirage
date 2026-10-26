@@ -13,7 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { Buffer } from 'node:buffer'
-import { constants } from 'node:fs'
+import { randomBytes } from 'node:crypto'
+import { constants, type Stats } from 'node:fs'
+import type * as fsPromises from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { posix } from 'node:path'
 import { type Interface, createInterface } from 'node:readline'
@@ -30,6 +32,7 @@ import { posixStat } from '@struktoai/mirage-core/runtime/stat'
 import { PrefixResolver } from '@struktoai/mirage-core/runtime/resolver'
 import type { VFSEntry, VFSStat } from '@struktoai/mirage-core/runtime/types'
 import { MountMode, type SetAttrFields } from '@struktoai/mirage-core/types'
+import { MAX_SYMLINK_HOPS } from '@struktoai/mirage-core/utils/path'
 import { entryName } from '@struktoai/mirage-core/utils/remnants'
 import { pathMode } from '@struktoai/mirage-core/workspace/files'
 import type { Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
@@ -49,6 +52,10 @@ type Callback = (err: unknown, value?: unknown) => void
 type Options = Record<string, unknown> | string | number | null | undefined
 
 const fs = createRequire(import.meta.url)('node:fs') as FsObject & { promises: FsObject }
+// fs.promises as the patch leaves it, each call looked up when it is
+// made: a call on it reaches node for a host path and the workspace for
+// a mounted one, so a cp or glob across the two takes each end where it is.
+const routed = fs.promises as unknown as typeof fsPromises
 const { S_IFMT, S_IFREG, S_IFDIR, S_IFCHR, S_IFLNK, W_OK, X_OK, COPYFILE_EXCL } = constants
 
 /** `path` as a string a mount could serve, or null: a descriptor and a
@@ -105,6 +112,40 @@ function encodingOf(options: Options): BufferEncoding | undefined {
   return (fieldsOf(options).encoding ?? undefined) as BufferEncoding | undefined
 }
 
+/** A name as node answers one: a string, or a Buffer or another
+ * encoding where the options ask for it. */
+function encoded(text: string, options: Options): Buffer | string {
+  const encoding = encodingOf(options) as string | undefined
+  if (encoding === undefined || encoding === 'utf8') return text
+  const bytes = Buffer.from(text)
+  return encoding === 'buffer' ? bytes : bytes.toString(encoding as BufferEncoding)
+}
+
+/** One of node's own `cp` refusals (`ERR_FS_CP_*`), spelled as node spells it. */
+function cpRefusal(
+  code: string,
+  title: string,
+  condition: FsCondition,
+  detail: string,
+  path: string,
+): Error {
+  return Object.assign(new Error(`${title}: cp returned ${condition} (${detail}) ${path}`), {
+    code,
+    errno: posixErrno(condition),
+    syscall: 'cp',
+    path,
+  })
+}
+
+/** Six characters from the alphabet of node's `mkdtemp` template. */
+function tempSuffix(): string {
+  const alphabet = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
+  return Array.from(randomBytes(6), (byte) => alphabet[byte % alphabet.length]).join('')
+}
+
+// A path segment holding a character node's glob matcher reads as one.
+const GLOB_MAGIC = /[*?[\]{}()!+@]/
+
 function bytesOf(data: unknown, options: Options): Uint8Array {
   if (typeof data === 'string') return Buffer.from(data, encodingOf(options) ?? 'utf8')
   if (ArrayBuffer.isView(data)) return new Uint8Array(data.buffer, data.byteOffset, data.byteLength)
@@ -120,6 +161,13 @@ function refusedIterator(err: Error): AsyncIterableIterator<never> {
       return this
     },
   }
+}
+
+/** Every item an async iterator yields. */
+async function collected(items: AsyncIterable<unknown>): Promise<unknown[]> {
+  const out: unknown[] = []
+  for await (const item of items) out.push(item)
+  return out
 }
 
 /** A time argument (seconds, a numeric string, a Date) as the ISO stamp
@@ -340,7 +388,10 @@ class MountedFileHandle {
  * a mount and the other on the host reaches the host through `native`,
  * node's own functions as they were before the patch.
  */
-class HostFs implements Record<RoutedCall, (...args: never[]) => Promise<unknown>> {
+class HostFs implements Record<
+  RoutedCall,
+  (...args: never[]) => Promise<unknown> | AsyncIterable<unknown>
+> {
   private readonly files: RuntimeFiles
   // The descriptors `open` hands out for mounted paths (descriptors.ts).
   readonly descriptors: Descriptors
@@ -584,6 +635,308 @@ class HostFs implements Record<RoutedCall, (...args: never[]) => Promise<unknown
     return missing[0]
   }
 
+  async cp(src: string, dst: string, options?: Options): Promise<void> {
+    const opts = fieldsOf(options)
+    const filter = opts.filter as ((from: string, to: string) => unknown) | undefined
+    if (posix.resolve(src) === posix.resolve(dst)) {
+      throw cpRefusal(
+        'ERR_FS_CP_EINVAL',
+        'Invalid src or dest',
+        'EINVAL',
+        'src and dest cannot be the same',
+        dst,
+      )
+    }
+    if (filter !== undefined && !(await filter(src, dst))) return
+    const from = await this.entryOf(src, opts.dereference === true)
+    if (from.isDirectory()) {
+      if (opts.recursive !== true) {
+        throw cpRefusal(
+          'ERR_FS_EISDIR',
+          'Path is a directory',
+          'EISDIR',
+          `${src} is a directory (not copied)`,
+          src,
+        )
+      }
+      if (posix.resolve(dst).startsWith(`${posix.resolve(src)}/`)) {
+        throw cpRefusal(
+          'ERR_FS_CP_EINVAL',
+          'Invalid src or dest',
+          'EINVAL',
+          `cannot copy ${src} to a subdirectory of self ${dst}`,
+          dst,
+        )
+      }
+    }
+    await this.copied(src, dst, from, opts)
+  }
+
+  /** A path's own entry, or its target's, through the patched calls, so
+   * a host path reaches node and a mounted one the workspace. */
+  private entryOf(path: string, follow: boolean): Promise<Stats> {
+    return follow ? routed.stat(path) : routed.lstat(path)
+  }
+
+  /** One entry of a `cp` and what is under it, as node's own copies it:
+   * a name already there is replaced unless `force` is off, and a link
+   * keeps its target, a relative one resolved against where it was. */
+  private async copied(
+    src: string,
+    dst: string,
+    from: Stats,
+    opts: Record<string, unknown>,
+  ): Promise<void> {
+    let to: Stats | null = null
+    try {
+      to = await this.entryOf(dst, false)
+    } catch (err) {
+      if (!isMissingPath(err)) throw err
+    }
+    if (from.isDirectory()) {
+      if (to !== null && !to.isDirectory()) {
+        throw cpRefusal(
+          'ERR_FS_CP_DIR_TO_NON_DIR',
+          'Cannot overwrite non-directory with directory',
+          'EISDIR',
+          `cannot overwrite non-directory ${dst} with directory ${src}`,
+          dst,
+        )
+      }
+      if (to === null) await routed.mkdir(dst)
+      const filter = opts.filter as ((from: string, to: string) => unknown) | undefined
+      for (const name of await routed.readdir(src)) {
+        const [child, target] = [posix.join(src, name), posix.join(dst, name)]
+        if (filter !== undefined && !(await filter(child, target))) continue
+        await this.copied(child, target, await this.entryOf(child, opts.dereference === true), opts)
+      }
+      return
+    }
+    if (to?.isDirectory() === true) {
+      throw cpRefusal(
+        'ERR_FS_CP_NON_DIR_TO_DIR',
+        'Cannot overwrite directory with non-directory',
+        'ENOTDIR',
+        `cannot overwrite directory ${dst} with non-directory ${src}`,
+        dst,
+      )
+    }
+    if (to !== null) {
+      if (opts.force === false) {
+        if (opts.errorOnExist !== true) return
+        throw cpRefusal(
+          'ERR_FS_CP_EEXIST',
+          'Target already exists',
+          'EEXIST',
+          `${dst} already exists`,
+          dst,
+        )
+      }
+      await routed.unlink(dst)
+    }
+    if (from.isSymbolicLink()) {
+      const target = await routed.readlink(src)
+      const kept =
+        opts.verbatimSymlinks === true || posix.isAbsolute(target)
+          ? target
+          : posix.resolve(posix.dirname(src), target)
+      await routed.symlink(kept, dst)
+      return
+    }
+    await routed.copyFile(src, dst, typeof opts.mode === 'number' ? opts.mode : 0)
+    if (opts.preserveTimestamps === true) await routed.utimes(dst, from.atime, from.mtime)
+  }
+
+  /** The names `pattern` matches, as node's `fs.promises.glob` yields
+   * them: by node's own matcher, under the part of the pattern that has
+   * no wildcard, relative to `cwd` for a relative pattern. */
+  async *glob(pattern: unknown, options?: Options): AsyncGenerator {
+    const opts = fieldsOf(options)
+    const cwd = spelled(opts.cwd) ?? process.cwd()
+    const exclude = opts.exclude
+    const typed = opts.withFileTypes === true
+    const seen = new Set<string>()
+    for (const raw of Array.isArray(pattern) ? pattern : [pattern]) {
+      const spelling = spelled(raw)
+      if (spelling === null) continue
+      const absolute = posix.isAbsolute(spelling)
+        ? posix.normalize(spelling)
+        : posix.join(cwd, spelling)
+      const shown = (path: string): string =>
+        posix.isAbsolute(spelling) ? path : posix.relative(cwd, path) || '.'
+      const parts = absolute.split('/').slice(1)
+      const magic = parts.findIndex((part) => GLOB_MAGIC.test(part))
+      const base = `/${parts.slice(0, magic === -1 ? parts.length : magic).join('/')}`
+      const rest = magic === -1 ? '' : parts.slice(magic).join('/')
+      const depth = rest.split('/').includes('**') ? Infinity : rest.split('/').length
+      const skipped = (path: string, entry: unknown): boolean => {
+        if (typeof exclude === 'function') return Boolean((exclude as Fn)(typed ? entry : path))
+        return Array.isArray(exclude) && exclude.some((ex) => posix.matchesGlob(path, String(ex)))
+      }
+      let top: Stats
+      try {
+        top = await this.entryOf(base, true)
+      } catch (err) {
+        if (!isMissingPath(err)) throw err
+        continue
+      }
+      const baseEntry = {
+        name: posix.basename(base),
+        parentPath: posix.dirname(base),
+        path: posix.dirname(base),
+        isFile: () => top.isFile(),
+        isDirectory: () => top.isDirectory(),
+        isBlockDevice: () => false,
+        isCharacterDevice: () => false,
+        isSymbolicLink: () => false,
+        isFIFO: () => false,
+        isSocket: () => false,
+      }
+      const pending: [string, string, number, unknown][] = [[base, '', 0, baseEntry]]
+      for (let next = pending.shift(); next !== undefined; next = pending.shift()) {
+        const [path, relative, level, entry] = next
+        const named = shown(path)
+        if (relative !== '' && skipped(named, entry)) continue
+        if (
+          (magic === -1 ? relative === '' : posix.matchesGlob(relative, rest)) &&
+          !seen.has(named)
+        ) {
+          seen.add(named)
+          yield typed ? entry : named
+        }
+        const isDirectory = (entry as { isDirectory(): boolean }).isDirectory()
+        if (magic === -1 || !isDirectory || level >= depth) continue
+        const children = (await routed.readdir(path, { withFileTypes: true })) as unknown as {
+          name: string
+          isSymbolicLink(): boolean
+          isDirectory(): boolean
+        }[]
+        for (const child of children) {
+          const childPath = posix.join(path, child.name)
+          pending.push([
+            childPath,
+            relative === '' ? child.name : `${relative}/${child.name}`,
+            child.isSymbolicLink() ? depth : level + 1,
+            child,
+          ])
+        }
+      }
+    }
+  }
+
+  async mkdtemp(prefix: string, options?: Options): Promise<Buffer | string> {
+    // A prefix whose names fall outside the mount (`/data` makes
+    // `/dataXXXXXX`) is the host's.
+    if (!this.mounted(`${prefix}XXXXXX`))
+      return this.nativeCall('mkdtemp', prefix, options) as Promise<string>
+    // Six characters after the prefix, as node's template has them, drawn
+    // again for a name already there.
+    for (;;) {
+      const path = prefix + tempSuffix()
+      try {
+        await this.files.mkdir(path)
+        return encoded(path, options)
+      } catch (err) {
+        if (classify(err) !== 'EEXIST') throw fsError(err, 'mkdtemp', path)
+      }
+    }
+  }
+
+  async mkdtempDisposable(prefix: string, options?: Options): Promise<unknown> {
+    const path = await this.mkdtemp(prefix, options)
+    const remove = (): Promise<void> => routed.rm(String(path), { recursive: true, force: true })
+    return { path, remove, [Symbol.asyncDispose]: remove }
+  }
+
+  async opendir(path: string, options?: Options): Promise<unknown> {
+    let entries: unknown[]
+    try {
+      entries = await this.readdir(path, {
+        withFileTypes: true,
+        recursive: fieldsOf(options).recursive === true,
+      })
+    } catch (err) {
+      throw fsError(err, 'opendir', path)
+    }
+    // The listing is read whole as the directory opens, where node reads
+    // a batch at a time: a caller cannot tell the two apart, and the
+    // sync reads then need no workspace call.
+    let closed = false
+    const refused = (): Error =>
+      Object.assign(new Error('Directory handle was closed'), { code: 'ERR_DIR_CLOSED' })
+    const readSync = (): unknown => {
+      if (closed) throw refused()
+      return entries.shift() ?? null
+    }
+    const closeSync = (): void => {
+      if (closed) throw refused()
+      closed = true
+    }
+    const read = (): Promise<unknown> => Promise.resolve().then(readSync)
+    const settle = (work: () => unknown, done: unknown): Promise<unknown> | undefined => {
+      const settled = Promise.resolve().then(work)
+      if (typeof done !== 'function') return settled
+      answer(
+        settled.then((value) => [value]),
+        done as Fn,
+      )
+      return undefined
+    }
+    return {
+      path,
+      read: (done?: unknown) => settle(readSync, done),
+      readSync,
+      close: (done?: unknown) => settle(closeSync, done),
+      closeSync,
+      async *[Symbol.asyncIterator]() {
+        try {
+          for (let entry = await read(); entry !== null; entry = await read()) yield entry
+        } finally {
+          if (!closed) closeSync()
+        }
+      },
+      [Symbol.asyncDispose]: () => {
+        if (!closed) closeSync()
+        return Promise.resolve()
+      },
+      [Symbol.dispose]: () => {
+        if (!closed) closeSync()
+      },
+    }
+  }
+
+  async realpath(path: string, options?: Options): Promise<Buffer | string> {
+    // As realpath(3) walks a path: each name in turn, a link swapped for
+    // where it leads, so a `..` after a link climbs from its target.
+    const todo = path.split('/')
+    let done = '/'
+    let hops = 0
+    for (let name = todo.shift(); name !== undefined; name = todo.shift()) {
+      if (name === '' || name === '.') continue
+      if (name === '..') {
+        done = posix.dirname(done)
+        continue
+      }
+      const next = posix.join(done, name)
+      let st: VFSStat
+      try {
+        st = await this.files.stat(next, true)
+      } catch (err) {
+        throw fsError(err, 'realpath', path)
+      }
+      if (st.isLink === true) {
+        if (++hops > MAX_SYMLINK_HOPS) throw refusal('ELOOP', 'realpath', path)
+        const target = await this.files.readlink(next)
+        if (target.startsWith('/')) done = '/'
+        todo.unshift(...target.split('/'))
+        continue
+      }
+      if (!st.isDir && todo.some((rest) => rest !== '')) throw refusal('ENOTDIR', 'realpath', path)
+      done = next
+    }
+    return encoded(done, options)
+  }
+
   async readFile(path: string, options?: Options): Promise<Buffer | string> {
     const bytes = Buffer.from(await this.files.read(path))
     const encoding = encodingOf(options)
@@ -608,11 +961,7 @@ class HostFs implements Record<RoutedCall, (...args: never[]) => Promise<unknown
   }
 
   async readlink(path: string, options?: Options): Promise<Buffer | string> {
-    const target = await this.files.readlink(path)
-    const encoding = encodingOf(options) as string | undefined
-    if (encoding === undefined || encoding === 'utf8') return target
-    const bytes = Buffer.from(target)
-    return encoding === 'buffer' ? bytes : bytes.toString(encoding as BufferEncoding)
+    return encoded(await this.files.readlink(path), options)
   }
 
   async rename(src: string, dst: string): Promise<void> {
@@ -953,8 +1302,9 @@ export function patchNodeFs(ws: Workspace): () => void {
     FILE_CALLS.has(name) &&
     (host.descriptors.get(args[0]) !== undefined || args[0] instanceof MountedFileHandle)
   for (const name of ROUTED_CALLS) {
-    const route = (args: unknown[]): Promise<unknown> =>
-      (host[name] as (...a: unknown[]) => Promise<unknown>).call(host, ...spellPaths(name, args))
+    // A promise, or for `glob` the iterator node's answers with.
+    const route = (args: unknown[]): unknown =>
+      (host[name] as (...a: unknown[]) => unknown).call(host, ...spellPaths(name, args))
     swap(fs.promises, name, (original) => (...args) => {
       if (byDescriptor(name, args)) return host.fileCall(name, args[0], args.slice(1))
       return mountedIn(name, args) === null ? original(...args) : route(args)
@@ -971,8 +1321,13 @@ export function patchNodeFs(ws: Workspace): () => void {
       }
       if (typeof done !== 'function' || mountedIn(name, rest) === null) return original(...args)
       const callback = done as Callback
-      // `exists` is the one callback without an error slot.
-      route(rest).then(
+      const answered = route(rest)
+      // `glob`'s callback takes every name at once; `exists` is the one
+      // callback without an error slot.
+      ;(name === 'glob'
+        ? collected(answered as AsyncIterable<unknown>)
+        : (answered as Promise<unknown>)
+      ).then(
         (value) => {
           if (name === 'exists') callback(value)
           else callback(null, value)

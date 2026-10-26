@@ -31,15 +31,21 @@ export const ROUTED_CALLS = [
   'chmod',
   'chown',
   'copyFile',
+  'cp',
   'exists',
+  'glob',
   'lchmod',
   'lchown',
   'lstat',
   'lutimes',
   'mkdir',
+  'mkdtemp',
+  'mkdtempDisposable',
+  'opendir',
   'readFile',
   'readdir',
   'readlink',
+  'realpath',
   'rename',
   'rm',
   'rmdir',
@@ -72,17 +78,12 @@ export const DESCRIPTOR_CALLS = [
   'writev',
 ] as const
 
-// Watchers have no workspace twin. A hard link answers EPERM, as link(2)
-// does on a filesystem without them.
+// Watchers, a Blob over a file and filesystem statistics have no
+// workspace twin. A hard link answers EPERM, as link(2) does on a
+// filesystem without them.
 export const REFUSED_CALLS: Readonly<Record<string, FsCondition>> = {
-  cp: 'ENOTSUP',
-  glob: 'ENOTSUP',
   link: HARD_LINK_REFUSAL,
-  mkdtemp: 'ENOTSUP',
-  mkdtempDisposable: 'ENOTSUP',
   openAsBlob: 'ENOTSUP',
-  opendir: 'ENOTSUP',
-  realpath: 'ENOTSUP',
   statfs: 'ENOTSUP',
   watch: 'ENOTSUP',
   watchFile: 'ENOTSUP',

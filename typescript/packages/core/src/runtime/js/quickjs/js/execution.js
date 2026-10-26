@@ -1,3 +1,8 @@
+// The host hands the bootstrap its functions as globals. Each part
+// takes those it calls, and the last removes them all, so a program sees
+// the real engine's globals.
+const { __mirage_atob, __mirage_btoa, __mirage_env, __mirage_log, __mirage_now, __mirage_setExit } =
+  globalThis
 const __join = (a) => a.map(String).join(' ')
 // The host's string channel is a C string: text with a NUL in it crosses
 // as the pieces between its NULs.
@@ -126,23 +131,6 @@ const __sprintf = (fmtIn, args) => {
 globalThis.console = { log: (...a) => __mirage_log(__pieces(__join(a) + '\n')) }
 globalThis.print = (...a) => __mirage_log(__pieces(__join(a) + '\n'))
 globalThis.std = {
-  in: { readAsString: (max) => __text(__mirage_readStdin(max === undefined ? -1 : toIndex(max))) },
-  out: {
-    puts: (s) => __mirage_log(__pieces(String(s))),
-    printf: (fmt, ...a) => {
-      const s = __sprintf(fmt, a)
-      __mirage_log(__pieces(s))
-      return __mirage_byteLength(__pieces(s))
-    },
-  },
-  err: {
-    puts: (s) => __mirage_error(__pieces(String(s))),
-    printf: (fmt, ...a) => {
-      const s = __sprintf(fmt, a)
-      __mirage_error(__pieces(s))
-      return __mirage_byteLength(__pieces(s))
-    },
-  },
   exit: (n) => {
     __mirage_setExit(n | 0)
     while (true) {
@@ -151,7 +139,116 @@ globalThis.std = {
   },
   getenv: (k) =>
     Object.prototype.hasOwnProperty.call(__mirage_env, k) ? __mirage_env[k] : undefined,
+  setenv: (k, v) => {
+    __mirage_env[String(k)] = String(v)
+  },
+  unsetenv: (k) => {
+    Reflect.deleteProperty(__mirage_env, String(k))
+  },
+  getenviron: () => ({ ...__mirage_env }),
+  // wasi-libc's messages by WASI errno; a number past them reads as its
+  // first, as the real engine's strerror answers.
+  strerror: (n) => __messages[n | 0] ?? __messages[0],
+  gc: () => undefined,
+  puts: (s) => std.out.puts(s),
+  evalScript: (source, options) => {
+    // The engine's eval takes no async flag, so an async evaluation
+    // answers the script's value once it has run, as `{ value }`.
+    if (options?.async !== true) return (0, eval)(String(source))
+    try {
+      return Promise.resolve({ value: (0, eval)(String(source)) })
+    } catch (e) {
+      return Promise.reject(e)
+    }
+  },
+  loadScript: (path) => {
+    const text = std.loadFile(path)
+    if (text === null) throw new ReferenceError(`could not load '${path}'`)
+    return (0, eval)(text)
+  },
 }
+const __messages = [
+  'Success',
+  'Argument list too long',
+  'Permission denied',
+  'Address in use',
+  'Address not available',
+  'Address family not supported by protocol',
+  'Resource temporarily unavailable',
+  'Operation already in progress',
+  'Bad file descriptor',
+  'Bad message',
+  'Resource busy',
+  'Operation canceled',
+  'No child process',
+  'Connection aborted',
+  'Connection refused',
+  'Connection reset by peer',
+  'Resource deadlock would occur',
+  'Destination address required',
+  'Domain error',
+  'Quota exceeded',
+  'File exists',
+  'Bad address',
+  'File too large',
+  'Host is unreachable',
+  'Identifier removed',
+  'Illegal byte sequence',
+  'Operation in progress',
+  'Interrupted system call',
+  'Invalid argument',
+  'I/O error',
+  'Socket is connected',
+  'Is a directory',
+  'Symbolic link loop',
+  'No file descriptors available',
+  'Too many links',
+  'Message too large',
+  'Multihop attempted',
+  'Filename too long',
+  'Network is down',
+  'Connection reset by network',
+  'Network unreachable',
+  'Too many open files in system',
+  'No buffer space available',
+  'No such device',
+  'No such file or directory',
+  'Exec format error',
+  'No locks available',
+  'Link has been severed',
+  'Out of memory',
+  'No message of desired type',
+  'Protocol not available',
+  'No space left on device',
+  'Function not implemented',
+  'Socket not connected',
+  'Not a directory',
+  'Directory not empty',
+  'State not recoverable',
+  'Not a socket',
+  'Not supported',
+  'Not a tty',
+  'No such device or address',
+  'Value too large for data type',
+  'Previous owner died',
+  'Operation not permitted',
+  'Broken pipe',
+  'Protocol error',
+  'Protocol not supported',
+  'Protocol wrong type for socket',
+  'Result not representable',
+  'Read-only file system',
+  'Invalid seek',
+  'No such process',
+  'Stale file handle',
+  'Operation timed out',
+  'Text file busy',
+  'Cross-device link',
+  'Capabilities insufficient',
+]
+globalThis.gc = () => undefined
+globalThis.performance = { now: () => __mirage_now(), timeOrigin: Date.now() - __mirage_now() }
+globalThis.navigator = { userAgent: 'quickjs' }
 
 std.sprintf = (format, ...args) => __sprintf(format, args)
 std.printf = (...args) => std.out.printf(...args)

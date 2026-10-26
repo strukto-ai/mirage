@@ -17,17 +17,17 @@ import { CommandTimeoutError } from '../../../errors/types.ts'
 import { HOME_CONFIG_KEYS, type RuntimeOptions } from '../../config.ts'
 import { JsRuntime } from '../base.ts'
 import type { OutputFn, Program, RunResult } from '../../types.ts'
-import { materialize } from '../../../io/types.ts'
-import { abortable, fireDue, mergeSignals } from '../../../utils/abort.ts'
+import { AsyncLineIterator } from '../../../io/async_line_iterator.ts'
+import { abortable, fireDue, hasAborted, mergeSignals, sleep } from '../../../utils/abort.ts'
+import { concat } from '../../../utils/bytes.ts'
 import { RuntimeFiles } from '../../files.ts'
-import { fromGuestText, installQuickJsFs, toGuestText } from './fs.ts'
+import { type QuickJsStreams, fromGuestText, installQuickJsFs, toGuestText } from './fs.ts'
 import { cwdPreamble } from './execution.ts'
 import BOOTSTRAP from '../../../generated/quickjs.ts'
 import { loadQuickJsModule, type NewAsyncModule } from './loader.ts'
 import type { QuickJSAsyncContext, QuickJSAsyncRuntime, QuickJSHandle } from 'quickjs-emscripten'
 
 const ENC = new TextEncoder()
-const DEC = new TextDecoder('utf-8', { fatal: false })
 
 const MEMORY_LIMIT = 64 * 1024 * 1024
 const STACK_SIZE = 1024 * 1024
@@ -92,12 +92,9 @@ export class QuickJsRuntime extends JsRuntime<NewAsyncModule> {
     output?: OutputFn,
     errors?: OutputFn,
   ): Promise<RunResult> {
-    // Read through the run's signal: input left open must not hold back
-    // the stop of a run that is cancelled or past its deadline.
-    const stdin =
-      program.stdin === null
-        ? new Uint8Array()
-        : await abortable(materialize(program.stdin), ctx.signal)
+    // The program takes its input as it reads it, as from a pipe, so a
+    // writer that never ends holds back only a program that waits on it.
+    const stdin = program.stdin === null ? null : new AsyncLineIterator(program.stdin)
     const QuickJS = await newAsyncModule()
     // Module-owned context, not newRuntime(): the async module's runtime
     // disposer unregisters callbacks before QTS_FreeRuntime, so a runtime
@@ -109,8 +106,8 @@ export class QuickJsRuntime extends JsRuntime<NewAsyncModule> {
     const runtime: QuickJSAsyncRuntime = vm.runtime
     runtime.setMemoryLimit(MEMORY_LIMIT)
     runtime.setMaxStackSize(STACK_SIZE)
-    const out: string[] = []
-    const err: string[] = []
+    const out: Uint8Array[] = []
+    const err: Uint8Array[] = []
     const exit = { code: 0, called: false }
     // The guest executes on this event loop, so a busy loop blocks the
     // limit timer itself: the VM's interrupt hook is the only thing
@@ -124,7 +121,8 @@ export class QuickJsRuntime extends JsRuntime<NewAsyncModule> {
         ctx.timeoutSeconds !== undefined && ctx.timeoutSeconds > 0
           ? AbortSignal.timeout(Math.min(Math.ceil(ctx.timeoutSeconds * 1000), 2 ** 31 - 1))
           : undefined
-      this.installGlobals(
+      const stop = mergeSignals(ctx.signal, deadline)
+      const streams = this.installGlobals(
         vm,
         program,
         stdin,
@@ -132,10 +130,10 @@ export class QuickJsRuntime extends JsRuntime<NewAsyncModule> {
         exit,
         [out, output],
         [err, errors],
-        mergeSignals(ctx.signal, deadline),
+        stop,
       )
       const files = RuntimeFiles.of(ctx, this.binding)
-      const closeAll = installQuickJsFs(vm, files, ctx.signal)
+      const closeAll = installQuickJsFs(vm, files, ctx.signal, streams)
 
       const boot = vm.evalCode(`(() => { ${BOOTSTRAP} })()`, 'mirage:bootstrap')
       if (boot.error) {
@@ -162,12 +160,14 @@ export class QuickJsRuntime extends JsRuntime<NewAsyncModule> {
         } else {
           // A cancelled run's interruption is no error of the program's:
           // it ends as a killed one does, saying nothing, as Monty's does.
-          if (ctx.signal?.aborted !== true) err.push(this.formatError(vm, result.error) + '\n')
+          if (ctx.signal?.aborted !== true)
+            err.push(ENC.encode(this.formatError(vm, result.error) + '\n'))
           exitCode = 1
         }
         result.error.dispose()
       } else {
         exitCode = await this.drainJobs(runtime, vm, err, exit, ctx.signal)
+        if (exitCode === 0) exitCode = await this.runTimers(runtime, vm, err, exit, stop)
         // A module's evaluation is a promise, so a throw after a top-level
         // await rejects it rather than failing the eval; a script's last
         // value is the promise of the async call it ends with (`main()`).
@@ -178,7 +178,7 @@ export class QuickJsRuntime extends JsRuntime<NewAsyncModule> {
           if (!exit.called) {
             const label = ctx.flags.module === true ? '' : 'Possibly unhandled promise rejection: '
             if (ctx.signal?.aborted !== true)
-              err.push(label + this.formatError(vm, state.error) + '\n')
+              err.push(ENC.encode(label + this.formatError(vm, state.error) + '\n'))
             exitCode = 1
           }
           state.error.dispose()
@@ -197,11 +197,11 @@ export class QuickJsRuntime extends JsRuntime<NewAsyncModule> {
       // Files the guest left open still owe the mount their writes, however
       // the program ended.
       const lost = await closeAll()
-      for (const line of lost) err.push(`${this.name}: ${line}\n`)
+      for (const line of lost) err.push(ENC.encode(`${this.name}: ${line}\n`))
       if (lost.length > 0 && exitCode === 0) exitCode = 1
       return {
-        stdout: ENC.encode(out.join('')),
-        stderr: err.length > 0 ? ENC.encode(err.join('')) : null,
+        stdout: concat(out),
+        stderr: err.length > 0 ? concat(err) : null,
         exitCode,
       }
     } finally {
@@ -246,43 +246,53 @@ export class QuickJsRuntime extends JsRuntime<NewAsyncModule> {
   private installGlobals(
     ctx: QuickJSAsyncContext,
     program: Program,
-    stdin: Uint8Array,
+    stdin: AsyncLineIterator | null,
     run: Context,
     exit: { code: number; called: boolean },
-    out: [string[], OutputFn | undefined],
-    err: [string[], OutputFn | undefined],
+    out: [Uint8Array[], OutputFn | undefined],
+    err: [Uint8Array[], OutputFn | undefined],
     stop: AbortSignal | undefined,
-  ): void {
+  ): QuickJsStreams {
     const setGlobal = (name: string, handle: QuickJSHandle): void => {
       ctx.setProp(ctx.global, name, handle)
       handle.dispose()
     }
-    const hostLog = ([kept, sink]: [string[], OutputFn | undefined]): QuickJSHandle =>
-      sink === undefined
+    const send =
+      ([kept, sink]: [Uint8Array[], OutputFn | undefined]) =>
+      async (bytes: Uint8Array): Promise<void> => {
+        if (exit.called) return
+        run.signal?.throwIfAborted()
+        if (sink === undefined) {
+          kept.push(bytes)
+          return
+        }
+        // A reader that went away ends the program at once, 141, as
+        // SIGPIPE ends one.
+        await abortable(sink(bytes), stop).catch((error: unknown) => {
+          if (stop?.aborted === true) {
+            // Stopped while it waited: the program ends at its next
+            // step, as an interrupted one does.
+            exit.code = 1
+            exit.called = true
+            return
+          }
+          console.debug(`${this.name}: the reader went away: ${String(error)}`)
+          exit.code = 141
+          exit.called = true
+        })
+      }
+    const hostLog = (channel: [Uint8Array[], OutputFn | undefined]): QuickJSHandle => {
+      const [kept, sink] = channel
+      const write = send(channel)
+      return sink === undefined
         ? ctx.newFunction('', (h) => {
             run.signal?.throwIfAborted()
-            kept.push(fromGuestText(ctx, h))
+            kept.push(ENC.encode(fromGuestText(ctx, h)))
           })
         : ctx.newAsyncifiedFunction('', async (h) => {
-            if (exit.called) return
-            run.signal?.throwIfAborted()
-            // A reader that went away ends the program at once, 141, as
-            // SIGPIPE ends one.
-            await abortable(sink(ENC.encode(fromGuestText(ctx, h))), stop).catch(
-              (error: unknown) => {
-                if (stop?.aborted === true) {
-                  // Stopped while it waited: the program ends at its next
-                  // step, as an interrupted one does.
-                  exit.code = 1
-                  exit.called = true
-                  return
-                }
-                console.debug(`${this.name}: the reader went away: ${String(error)}`)
-                exit.code = 141
-                exit.called = true
-              },
-            )
+            await write(ENC.encode(fromGuestText(ctx, h)))
           })
+    }
     setGlobal(
       '__mirage_atob',
       ctx.newFunction('atob', (h) => toGuestText(ctx, atob(fromGuestText(ctx, h)))),
@@ -292,7 +302,6 @@ export class QuickJsRuntime extends JsRuntime<NewAsyncModule> {
       ctx.newFunction('btoa', (h) => toGuestText(ctx, btoa(fromGuestText(ctx, h)))),
     )
     setGlobal('__mirage_log', hostLog(out))
-    setGlobal('__mirage_error', hostLog(err))
     setGlobal(
       '__mirage_setExit',
       ctx.newFunction('', (h) => {
@@ -300,16 +309,16 @@ export class QuickJsRuntime extends JsRuntime<NewAsyncModule> {
         exit.called = true
       }),
     )
-    let position = 0
     setGlobal(
-      '__mirage_readStdin',
-      ctx.newFunction('', (max) => {
-        run.signal?.throwIfAborted()
-        const count = ctx.getNumber(max)
-        const end = count < 0 ? stdin.length : Math.min(stdin.length, position + count)
-        const text = DEC.decode(stdin.subarray(position, end))
-        position = end
-        return toGuestText(ctx, text)
+      '__mirage_now',
+      ctx.newFunction('', () => ctx.newNumber(performance.now())),
+    )
+    // os.sleep blocks the guest, as the real engine's does, but not the
+    // host's loop; a stop ends the wait and the run at its next step.
+    setGlobal(
+      '__mirage_sleep',
+      ctx.newAsyncifiedFunction('', async (ms) => {
+        await sleep(Math.max(0, ctx.getNumber(ms)), stop).catch(() => undefined)
       }),
     )
     setGlobal(
@@ -327,6 +336,23 @@ export class QuickJsRuntime extends JsRuntime<NewAsyncModule> {
       s.dispose()
     })
     setGlobal('scriptArgs', argv)
+    // The real engine's own argv up to its program's, as the Python
+    // runtime runs qjs: `--std`, the mode and the source after `-e`.
+    const execArgv = ctx.newArray()
+    ;[
+      'qjs',
+      '--std',
+      run.flags.module === true ? '-m' : '--script',
+      '-e',
+      program.code,
+      '--',
+    ].forEach((a, i) => {
+      const s = ctx.newString(a)
+      ctx.setProp(execArgv, i, s)
+      s.dispose()
+    })
+    setGlobal('execArgv', execArgv)
+    setGlobal('argv0', ctx.newString('qjs'))
     const env = ctx.newObject()
     for (const [k, v] of Object.entries(run.env ?? {})) {
       const s = ctx.newString(v)
@@ -334,6 +360,58 @@ export class QuickJsRuntime extends JsRuntime<NewAsyncModule> {
       s.dispose()
     }
     setGlobal('__mirage_env', env)
+    // A stop ends a read that waits on its writer, so the run stops at
+    // its next step.
+    const next = (): Promise<Uint8Array | null> =>
+      stdin === null ? Promise.resolve(null) : abortable(stdin.readChunk(), stop)
+    return {
+      read: async (size) => {
+        run.signal?.throwIfAborted()
+        if (size < 0) {
+          const parts: Uint8Array[] = []
+          for (let chunk = await next(); chunk !== null; chunk = await next()) parts.push(chunk)
+          return concat(parts)
+        }
+        return stdin === null ? new Uint8Array() : abortable(stdin.read1(size), stop)
+      },
+      write: (fd, bytes) => send(fd === 1 ? out : err)(bytes),
+    }
+  }
+
+  /**
+   * Run the timers and fd handlers the program set (`os.setTimeout`,
+   * `os.setReadHandler`), as the real engine's loop does once the script
+   * and its jobs are done: until none is left, the program exits or the
+   * run is stopped. A callback that throws ends the run, as there.
+   */
+  private async runTimers(
+    runtime: QuickJSAsyncRuntime,
+    ctx: QuickJSAsyncContext,
+    err: Uint8Array[],
+    exit: { called: boolean },
+    stop: AbortSignal | undefined,
+  ): Promise<number> {
+    const stopped = (): boolean => exit.called || hasAborted(stop)
+    for (;;) {
+      if (stopped()) return 0
+      const tick = await ctx.evalCodeAsync(
+        "globalThis[Symbol.for('mirage.tick')]()",
+        'mirage:timers',
+      )
+      if (tick.error) {
+        if (!stopped()) err.push(ENC.encode(this.formatError(ctx, tick.error) + '\n'))
+        tick.error.dispose()
+        return 1
+      }
+      const delay = ctx.getNumber(tick.value)
+      tick.value.dispose()
+      const drained = await this.drainJobs(runtime, ctx, err, exit, stop)
+      if (drained !== 0) return drained
+      if (delay < 0) return 0
+      // A handler that never lets go keeps the loop busy; a turn of the
+      // host's loop each time lets a cancel reach it.
+      await sleep(delay, stop).catch(() => undefined)
+    }
   }
 
   /**
@@ -351,7 +429,7 @@ export class QuickJsRuntime extends JsRuntime<NewAsyncModule> {
   private async drainJobs(
     runtime: QuickJSAsyncRuntime,
     ctx: QuickJSAsyncContext,
-    err: string[],
+    err: Uint8Array[],
     exit: { called: boolean },
     signal: AbortSignal | undefined,
   ): Promise<number> {
@@ -390,7 +468,8 @@ export class QuickJsRuntime extends JsRuntime<NewAsyncModule> {
       const jobs = memory.heapValueHandle(done)
       if (ctx.typeof(jobs) !== 'number') {
         // A cancelled run's interruption is no error of the program's.
-        if (!exit.called && signal?.aborted !== true) err.push(this.formatError(ctx, jobs) + '\n')
+        if (!exit.called && signal?.aborted !== true)
+          err.push(ENC.encode(this.formatError(ctx, jobs) + '\n'))
         jobs.dispose()
         return 1
       }

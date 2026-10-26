@@ -16,12 +16,17 @@ from contextlib import contextmanager
 
 import _mirage_exit
 import _mirage_process
+import _mirage_stdio
 import _mirage_xattr
+from pyodide.ffi import to_js
 
 _process_active = False
 _inherited_inputs = {}
 _process_stdio = None
 _exit_status = None
+# The most of the run's input one read asks the host for, and the most of
+# its output one write hands over: the bridge's own buffer.
+STDIO_CHUNK = 64 * 1024
 _FLAG_FIELDS = tuple(
     name
     for name, field in vars(type(sys.flags)).items()
@@ -76,7 +81,7 @@ def _process_call(op, **params):
         if inherited is not None:
             stream, offset = inherited
             if not stream.closed:
-                stream.seek(max(stream.tell(), offset + count))
+                stream.skip_to(offset + count)
     if op == "spawn":
         _process_active = True
     elif op == "finish":
@@ -267,10 +272,9 @@ class MiragePopen:
         inherited = b""
         source = None
         if stdin is None:
-            source = _process_stdio[0].buffer
-            offset = source.tell()
-            inherited = source.read()
-            source.seek(offset)
+            source = _process_stdio[0].buffer.raw
+            offset = source.taken
+            inherited = source.rest()
         result = _process_call(
             "spawn",
             argv=argv,
@@ -445,16 +449,78 @@ subprocess.Popen = MiragePopen
 shutil.which = process_which
 
 
-class OutputCapture(io.RawIOBase):
+class PipeInput(io.RawIOBase):
+    """The run's input, as a pipe hands it over: the host sends each
+    piece as the guest reads it, so a writer that never ends holds back
+    only a read that waits on it."""
+
     def __init__(self):
         super().__init__()
-        self.data = bytearray()
+        self.held = bytearray()
+        self.taken = 0
+        self.ended = False
+
+    def readable(self):
+        return True
+
+    def _pull(self):
+        # Numbers, not a buffer: Pyodide's buffer conversion slices with
+        # signed wasm32 addresses, so above 2 GiB it reads the wrong bytes.
+        data = bytes(_mirage_stdio.read(STDIO_CHUNK).to_py())
+        if data:
+            self.held.extend(data)
+        else:
+            self.ended = True
+
+    def readinto(self, target):
+        self._checkClosed()
+        if not target:
+            return 0
+        if not self.held and not self.ended:
+            self._pull()
+        size = min(len(target), len(self.held))
+        target[:size] = self.held[:size]
+        del self.held[:size]
+        self.taken += size
+        return size
+
+    def rest(self):
+        """The input left, read to its end and kept for the guest's own
+        reads."""
+        while not self.ended:
+            self._pull()
+        return bytes(self.held)
+
+    def skip_to(self, taken):
+        """Drop what a child read, up to ``taken`` bytes into the input.
+
+        Args:
+            taken (int): how far into the input the child has read.
+        """
+        drop = min(len(self.held), max(0, taken - self.taken))
+        del self.held[:drop]
+        self.taken += drop
+
+
+class OutputCapture(io.RawIOBase):
+    """One of the run's output streams, each write handed to the host as
+    it is made. As CPython's to a pipe, stdout is written a block at a
+    time and stderr a line at a time; text goes to the block at once, so
+    it keeps its order with what the guest writes to ``buffer``.
+
+    Args:
+        fd (int): 1 for stdout, 2 for stderr.
+    """
+
+    def __init__(self, fd):
+        super().__init__()
+        self.fd = fd
         self.text = io.TextIOWrapper(
-            self,
+            io.BufferedWriter(self),
             encoding="utf-8",
             errors="replace",
             write_through=True,
-            line_buffering=True,
+            line_buffering=fd == 2,
         )
 
     def writable(self):
@@ -462,29 +528,33 @@ class OutputCapture(io.RawIOBase):
 
     def write(self, data):
         self._checkClosed()
-        if _exit_status is None:
-            self.data.extend(data)
+        self._send(bytes(data))
         return len(data)
+
+    def _send(self, data):
+        if _exit_status is not None:
+            return
+        for start in range(0, len(data), STDIO_CHUNK):
+            # Numbers, not a buffer, for the reason PipeInput reads them.
+            piece = to_js(list(data[start : start + STDIO_CHUNK]))
+            if _mirage_stdio.write(self.fd, piece) < 0:
+                raise BrokenPipeError(errno.EPIPE, os.strerror(errno.EPIPE))
 
     def diagnostic(self, text):
         # Host diagnostics remain available even after the guest closes stderr.
         if self.text.buffer is not None and not self.text.closed:
             self.text.flush()
-        if _exit_status is None:
-            self.data.extend(text.encode("utf-8", errors="replace"))
+        self._send(text.encode("utf-8", errors="replace"))
 
     def __exit__(self, *exc):
         try:
             # A guest may reconfigure buffering, close, or detach the wrapper.
             if self.text.buffer is not None and not self.text.closed:
                 self.text.close()
+        except BrokenPipeError:
+            pass
         finally:
             self.close()
-
-    def to_list(self):
-        # Pyodide's toJs buffer conversion slices with signed wasm32 addresses:
-        # above 2 GiB it reads the wrong bytes. Transfer numeric values.
-        return list(self.data)
 
 
 class InvocationFlags(tuple):
@@ -606,7 +676,7 @@ def run(request, arm_interrupt, disarm_interrupt):
     script = request["script"]
     script_cli = request["script_cli"]
     merged_env = request["env"]
-    stdin_bytes = request["stdin"]
+    piped = request["piped"]
     saved_getcwd = os.getcwd
     saved_cwd = saved_getcwd()
     saved_chdir = os.chdir
@@ -620,16 +690,14 @@ def run(request, arm_interrupt, disarm_interrupt):
     had_main = "__main__" in sys.modules
     saved_main = sys.modules.get("__main__")
 
-    out_bytes = OutputCapture()
-    err_bytes = OutputCapture()
+    out_bytes = OutputCapture(1)
+    err_bytes = OutputCapture(2)
     out_text = out_bytes.text
     err_text = err_bytes.text
 
-    stdin_buf = io.BytesIO(
-        bytes(stdin_bytes) if stdin_bytes is not None else b""
-    )
+    stdin_pipe = PipeInput()
     stdin_text = io.TextIOWrapper(
-        stdin_buf, encoding="utf-8", errors="replace"
+        io.BufferedReader(stdin_pipe), encoding="utf-8", errors="replace"
     )
 
     flags = dict(init_flags) if init_flags is not None else {}
@@ -660,9 +728,7 @@ def run(request, arm_interrupt, disarm_interrupt):
                 if script_cli:
                     user_globals.update(
                         argv=list(argv),
-                        stdin=bytes(stdin_bytes)
-                        if stdin_bytes is not None
-                        else None,
+                        stdin=stdin_pipe.rest() if piped else None,
                     )
                 os._exit = program_exit
                 try:
@@ -732,7 +798,7 @@ def run(request, arm_interrupt, disarm_interrupt):
     if _exit_status is not None:
         exit_code = _exit_status
         _exit_status = None
-    return (out_bytes.to_list(), err_bytes.to_list(), exit_code)
+    return exit_code
 
 
 def seed_sys_path(paths):

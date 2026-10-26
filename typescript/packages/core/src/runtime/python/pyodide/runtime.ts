@@ -20,9 +20,11 @@ import { asyncContextIsolatesTasks } from '../../../utils/async_context.ts'
 import { ConcurrencyLimiter } from '../../../concurrency/limiter.ts'
 import { CommandTimeoutError } from '../../../errors/types.ts'
 import { PythonRuntime } from '../base.ts'
-import type { Program, RunResult, RuntimeReach } from '../../types.ts'
-import { materialize } from '../../../io/types.ts'
+import type { OutputFn, Program, RunResult, RuntimeReach } from '../../types.ts'
+import { AsyncLineIterator } from '../../../io/async_line_iterator.ts'
+import { type ByteSource, materialize } from '../../../io/types.ts'
 import { abortable } from '../../../utils/abort.ts'
+import { concat } from '../../../utils/bytes.ts'
 import { memoryLimit, type RuntimeOptions } from '../../config.ts'
 import type { WorkspaceBinding } from '../../binding.ts'
 import {
@@ -36,7 +38,7 @@ import { sealWorkerRealm } from './seal.ts'
 import { RuntimeFiles } from '../../files.ts'
 import { createJournal, type MutationJournal } from './fs/journal.ts'
 import { PyodideFs } from './fs/fs.ts'
-import { PyodideExecution } from './execution.ts'
+import { type GuestStdio, PyodideExecution } from './execution.ts'
 import { mainFilename } from '../execution.ts'
 import { unhonoredNotice } from '../flags.ts'
 import type { FlushFailure, FSStream, SyncVFS, XattrOp } from './fs/types.ts'
@@ -46,6 +48,47 @@ import { errnoError } from './fs/errors.ts'
 import { decodeBase64, encodeBase64 } from '../../../utils/base64.ts'
 import { KEYS, type PyodideConfig } from './config.ts'
 import { PyodideWorkerClient } from './worker/client.ts'
+import type { HostStdio } from './worker/types.ts'
+
+/**
+ * The run's streams on the main thread: its input taken as the guest
+ * reads it, as from a pipe, and its output handed to the sinks as it is
+ * written, or kept for the result where a stream has none.
+ *
+ * Args:
+ *   stdin: the run's input.
+ *   output: receives stdout as it is written.
+ *   errors: the same for stderr.
+ */
+function hostStdio(
+  stdin: ByteSource | null,
+  output?: OutputFn,
+  errors?: OutputFn,
+): HostStdio & { kept: [Uint8Array[], Uint8Array[]] } {
+  const input = stdin === null ? null : new AsyncLineIterator(stdin)
+  const kept: [Uint8Array[], Uint8Array[]] = [[], []]
+  return {
+    kept,
+    read: (size, stop) =>
+      input === null ? Promise.resolve(new Uint8Array()) : abortable(input.read1(size), stop),
+    write: async (fd, bytes, stop) => {
+      const sink = fd === 1 ? output : errors
+      if (sink === undefined) {
+        ;(fd === 1 ? kept[0] : kept[1]).push(bytes)
+        return true
+      }
+      try {
+        await abortable(sink(bytes), stop)
+        return true
+      } catch (error) {
+        if (stop.aborted) throw error
+        // A reader that went away fails the guest's write with EPIPE.
+        console.debug(`pyodide: the reader went away: ${String(error)}`)
+        return false
+      }
+    },
+  }
+}
 
 function bridgeBytes(value: Uint8Array | ArrayLike<number>): Uint8Array {
   return value instanceof Uint8Array ? value : new Uint8Array(value)
@@ -255,23 +298,27 @@ export class PyodideRuntime extends PythonRuntime<undefined> {
 
   /**
    * Run one program on a fresh interpreter: in the worker for a run with
-   * files, in process for one without. The guest's prints come back in the
-   * result, its input whole: both cross to the guest as a message.
+   * files, in process for one without. In the worker the guest reads its
+   * input as it comes and its writes go to `output` and `errors` as it
+   * makes them; in process it reads its input whole and its output comes
+   * back in the result.
    *
    * @param _engine none; each run builds its own interpreter.
-   * @param source the source and argv to run.
+   * @param program the source and argv to run.
    * @param ctx the run's context.
+   * @param output receives stdout as the guest writes it.
+   * @param errors the same for stderr.
    */
-  async interpret(_engine: undefined, source: Program, ctx: Context): Promise<RunResult> {
-    // Read through the run's signal: input left open must not hold back
-    // the stop of a run that is cancelled or past its deadline.
-    const program = {
-      ...source,
-      stdin: source.stdin === null ? null : await abortable(materialize(source.stdin), ctx.signal),
-    }
+  async interpret(
+    _engine: undefined,
+    program: Program,
+    ctx: Context,
+    output?: OutputFn,
+    errors?: OutputFn,
+  ): Promise<RunResult> {
     const binding = this.binding
     const execute = async (runtime: PyodideRuntime): Promise<RunResult> =>
-      this.capped(runtime, await runtime.runOne(program, ctx, binding))
+      this.capped(runtime, await runtime.runOne(program, ctx, binding, output, errors))
     if (this.sync === undefined && (ctx.processes?.depth ?? 0) > 0)
       return this.withFreshRuntime(execute)
     const caller = currentCaller()
@@ -778,9 +825,11 @@ export class PyodideRuntime extends PythonRuntime<undefined> {
   }
 
   private async runOne(
-    program: Program & { stdin: Uint8Array | null },
+    program: Program,
     ctx: Context,
     binding: WorkspaceBinding | null,
+    output?: OutputFn,
+    errors?: OutputFn,
   ): Promise<RunResult> {
     const files = RuntimeFiles.of(ctx, binding)
     this.files = files
@@ -798,14 +847,17 @@ export class PyodideRuntime extends PythonRuntime<undefined> {
     const worker = await this.ensureWorker(files)
     if (worker instanceof PyodideUnavailableError) throw worker
     if (worker !== null && files !== null && binding !== null) {
+      const stdio = hostStdio(program.stdin, output, errors)
       try {
-        return await this.onWorker(() =>
+        const result = await this.onWorker(() =>
           worker.execute(
             {
               kind: 'execute',
               config: this.config as PyodideConfig,
               prefixes: binding.resolver.prefixes(),
-              program,
+              // The input stays here and reaches the guest over the
+              // bridge; an empty one tells the worker it has any.
+              program: { ...program, stdin: program.stdin === null ? null : new Uint8Array() },
               cwd: ctx.cwd.virtual,
               env: { ...ctx.env },
               flags: ctx.flags,
@@ -813,8 +865,16 @@ export class PyodideRuntime extends PythonRuntime<undefined> {
             },
             ctx,
             files,
+            stdio,
           ),
         )
+        const [out, err] = stdio.kept
+        const stderr = concat([...err, ...(result.stderr === null ? [] : [result.stderr])])
+        return {
+          ...result,
+          stdout: concat([...out, result.stdout]),
+          stderr: stderr.length > 0 ? stderr : null,
+        }
       } catch (error) {
         if (!(error instanceof PyodideMemoryError)) throw error
         return {
@@ -837,11 +897,22 @@ export class PyodideRuntime extends PythonRuntime<undefined> {
     // sys.argv[0] is the program's own name when the caller has one (a
     // CLI install's head word), else CPython's own -c spelling.
     const argv = [program.prog ?? '-c', ...program.args]
+    // In the worker the guest's streams are the main thread's, over the
+    // bridge; in process it reads its input whole, read through the run's
+    // signal so input left open cannot hold back the run's stop.
+    const read = this.sync?.stdin?.bind(this.sync)
+    const write = this.sync?.output?.bind(this.sync)
+    const streams: GuestStdio | undefined =
+      read !== undefined && write !== undefined ? { read, write } : undefined
     const request = {
       code: program.code,
       argv,
       env: { ...ctx.env },
-      stdin: program.stdin,
+      stdin:
+        streams !== undefined || program.stdin === null
+          ? null
+          : await abortable(materialize(program.stdin), ctx.signal),
+      piped: program.stdin !== null,
       flags: ctx.flags,
       script_cli: program.scriptCli ?? false,
       cwd: this.guestCwd(ctx.cwd),
@@ -866,7 +937,7 @@ export class PyodideRuntime extends PythonRuntime<undefined> {
       slot.armed?.disarm()
     }
     try {
-      const arr = this.guestModule(pyodide).run(request, arm, disarm)
+      const arr = this.guestModule(pyodide).run(request, arm, disarm, streams)
       if (slot.armed?.disarm() === 'deadline' && ctx.timeoutSeconds !== undefined) {
         throw new CommandTimeoutError(this.name, ctx.timeoutSeconds)
       }

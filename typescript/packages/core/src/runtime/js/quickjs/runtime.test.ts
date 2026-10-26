@@ -253,7 +253,20 @@ describe('QuickJS output', () => {
   }, 10_000)
 
   // Input left open does not hold back the stop of a run.
-  it('stops at an abort while its input stays open', async () => {
+  it('ends without waiting on input it never reads', async () => {
+    const rt = new QuickJsRuntime()
+    const open: AsyncIterable<Uint8Array> = {
+      [Symbol.asyncIterator]: () => ({ next: () => new Promise(() => undefined) }),
+    }
+    const result = await rt.execute(
+      [],
+      [],
+      context({ flags: { c: 'console.log(1)' }, stdin: open }),
+    )
+    expect([new TextDecoder().decode(result.stdout), result.exitCode]).toEqual(['1\n', 0])
+  }, 10_000)
+
+  it('stops at an abort while it waits on input that stays open', async () => {
     const rt = new QuickJsRuntime()
     const stop = new AbortController()
     const open: AsyncIterable<Uint8Array> = {
@@ -262,11 +275,16 @@ describe('QuickJS output', () => {
     const run = rt.execute(
       [],
       [],
-      context({ flags: { c: 'console.log(1)' }, stdin: open, signal: stop.signal }),
+      context({
+        flags: { c: 'console.log(std.in.getline())' },
+        stdin: open,
+        signal: stop.signal,
+      }),
     )
     setTimeout(() => {
       stop.abort()
     }, 100)
-    await expect(run).rejects.toMatchObject({ name: 'AbortError' })
+    const result = await run
+    expect([new TextDecoder().decode(result.stdout), result.exitCode]).toEqual(['', 1])
   }, 10_000)
 })

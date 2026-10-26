@@ -28,8 +28,10 @@ import { failureText } from './failure.ts'
 import { compiledModule } from '../../../../rs/stream.ts'
 import { answerOverBridge, bridged, respond } from './transport.ts'
 import { GuestProcessTable } from './process.ts'
+import { mergeSignals } from '../../../../utils/abort.ts'
 import type {
   ExecuteRequest,
+  HostStdio,
   VfsRequest,
   WorkerMessage,
   WorkerPort,
@@ -196,10 +198,20 @@ export class PyodideWorkerClient {
    * @param ctx the run's context: its processes, and the signal that
    *   interrupts the guest.
    * @param files the run's file adapter, which answers the guest's calls.
+   * @param stdio the run's standard streams, which answer its stdio calls.
    */
-  async execute(request: ExecuteRequest, ctx: Context, files: RuntimeFiles): Promise<RunResult> {
+  async execute(
+    request: ExecuteRequest,
+    ctx: Context,
+    files: RuntimeFiles,
+    stdio: HostStdio,
+  ): Promise<RunResult> {
     if (this.failure !== null) throw this.failure
     const signal = ctx.signal
+    // A stdio call the guest left waiting (a read of input that has not
+    // come, its deadline past) ends with the run.
+    const ended = new AbortController()
+    const stop = mergeSignals(signal, ended.signal) ?? ended.signal
     // The guest's calls stop once the run is cancelled; the run's end
     // still closes what it left open through `files`.
     const live = signal === undefined ? files : files.withSignal(signal)
@@ -249,7 +261,9 @@ export class PyodideWorkerClient {
         }
         if (message.kind === 'vfs') {
           const response = this.answer(message, () =>
-            runWithCaller(caller, () => this.operation(message, live, processes, handles)),
+            runWithCaller(caller, () =>
+              this.operation(message, live, processes, handles, stdio, stop),
+            ),
           )
           responses.add(response)
           void response.then(() => {
@@ -266,6 +280,7 @@ export class PyodideWorkerClient {
         throw new Error(message.message)
       }
     } finally {
+      ended.abort()
       unwatch?.()
       signal?.removeEventListener('abort', abort)
       // An interrupted guest can finish while a backend mutation is still pending.
@@ -344,9 +359,15 @@ export class PyodideWorkerClient {
     files: RuntimeFiles,
     processes: GuestProcessTable,
     handles: Set<number>,
+    stdio: HostStdio,
+    stop: AbortSignal,
   ): Promise<unknown> {
     const fh = request.fh ?? -1
     switch (request.op) {
+      case 'stdin':
+        return stdio.read(request.size ?? 0, stop)
+      case 'output':
+        return stdio.write(fh === 2 ? 2 : 1, request.bytes ?? new Uint8Array(), stop)
       case 'process':
         // A child reads the mounts, so what an open file wrote lands
         // first, as a child would read it from the page cache.
