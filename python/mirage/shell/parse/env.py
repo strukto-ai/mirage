@@ -319,7 +319,8 @@ def implicit_reads(node: TSNodeLike) -> frozenset[str]:
     """Names the program reads without a ``$NAME`` in the text.
 
     Tilde expansion resolves ``~`` and ``~/...`` against ``$HOME``
-    wherever a word expands (patterns and redirect targets included),
+    wherever a word expands (patterns, ``=~``'s regex and redirect
+    targets included),
     and the word scan mirrors ``expand_tilde`` exactly: ``~user``, a
     mid-word tilde and a quoted one stay literal. ``cd`` reads
     ``$HOME`` bare, ``$OLDPWD`` for ``-`` and ``$CDPATH`` for a
@@ -334,7 +335,7 @@ def implicit_reads(node: TSNodeLike) -> frozenset[str]:
     """
     out: set[str] = set()
     for n in walk_named_outside_defs(node):
-        if n.type == "word":
+        if n.type in ("word", "regex"):
             text = n.text
             if text is not None and (text == b"~" or text.startswith(b"~/")):
                 out.add("HOME")
