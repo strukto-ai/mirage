@@ -124,6 +124,40 @@ it('a deadline joins the landing of what a stopped guest wrote', async () => {
   }
 }, 20_000)
 
+class SlowCreateRAMVFS extends RAMVFS {
+  override async create(...args: Parameters<RAMVFS['create']>): ReturnType<RAMVFS['create']> {
+    await slow()
+    return super.create(...args)
+  }
+
+  override async truncate(...args: Parameters<RAMVFS['truncate']>): ReturnType<RAMVFS['truncate']> {
+    await slow()
+    return super.truncate(...args)
+  }
+}
+
+it('a deadline joins an open still under way', async () => {
+  // The guest is stopped inside its open (a first run has the engine up);
+  // the run ends once the open has, so the file it made is there when the
+  // line goes on.
+  const ws = new Workspace(
+    { '/data': new SlowCreateRAMVFS() },
+    {
+      mode: MountMode.EXEC,
+      runtimes: [new QuickJsRuntime(), 'workspace'],
+    },
+  )
+  try {
+    await ws.shell('node -e 0')
+    const io = await ws.shell(
+      `timeout 0.2 node -e "std.open('/data/n', 'w'); for (;;) {}"; echo $?; ls /data`,
+    )
+    expect(io.stdoutText).toBe('124\nn\n')
+  } finally {
+    await ws.close()
+  }
+}, 20_000)
+
 function full(): Promise<void> {
   return Promise.reject(Object.assign(new Error('no space'), { code: 'ENOSPC' }))
 }
@@ -160,7 +194,7 @@ it('answers the descriptor and byte calls as qjs on WASI does', async () => {
   const rt = new QuickJsRuntime()
   const ws = new Workspace(
     { '/data': new RAMVFS() },
-    { mode: MountMode.EXEC, shellParser: await getTestParser(), runtimes: [rt, 'workspace'] },
+    { mode: MountMode.EXEC, runtimes: [rt, 'workspace'] },
   )
   try {
     const result = await execute(

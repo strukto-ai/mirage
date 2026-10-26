@@ -761,14 +761,21 @@ describe('patchNodeFs — calls node makes on its own', () => {
     'mkdtempDisposable removes what it made',
     async () => {
       const [ws, fs] = await world()
-      const made = await (
-        fs.promises as unknown as {
-          mkdtempDisposable(prefix: string): Promise<{ path: string; remove(): Promise<void> }>
-        }
-      ).mkdtempDisposable('/data/dt-')
+      const promises = fs.promises as unknown as {
+        mkdtempDisposable(
+          prefix: string,
+          options?: { encoding: string },
+        ): Promise<{ path: string; remove(): Promise<void> }>
+      }
+      const made = await promises.mkdtempDisposable('/data/dt-')
       expect((await fs.promises.stat(made.path)).isDirectory()).toBe(true)
       await made.remove()
       expect(await ws.vfs.exists(made.path)).toBe(false)
+      const hex = await promises.mkdtempDisposable('/data/dt-', { encoding: 'hex' })
+      const named = Buffer.from(hex.path, 'hex').toString()
+      expect(named).toMatch(/^\/data\/dt-.{6}$/)
+      await hex.remove()
+      expect(await ws.vfs.exists(named)).toBe(false)
       await ws.close()
     },
   )

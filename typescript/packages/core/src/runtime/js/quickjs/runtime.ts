@@ -161,15 +161,17 @@ export class QuickJsRuntime extends JsRuntime<WasmExecution> {
       ctx.timeoutSeconds !== undefined && ctx.timeoutSeconds > 0
         ? AbortSignal.timeout(Math.min(Math.ceil(ctx.timeoutSeconds * 1000), 2 ** 31 - 1))
         : undefined
+    const stop = mergeSignals(ctx.signal, deadline)
+    const files = RuntimeFiles.of(ctx, this.binding)
     try {
       const [stdout, stderr, exitCode] = await engine.run(
         argv,
         program.stdin,
         Object.entries(ctx.env ?? {}),
-        new WasmView(RuntimeFiles.of(ctx, this.binding)),
+        new WasmView(stop === undefined ? files : (files?.withSignal(stop) ?? null)),
         output,
         errors,
-        mergeSignals(ctx.signal, deadline),
+        stop,
       )
       return { stdout, stderr, exitCode }
     } catch (err) {

@@ -19,7 +19,13 @@ import { concat } from '../../utils/bytes.ts'
 import type { Descriptor } from '../files.ts'
 import type { OpenMode } from '../handles/mode.ts'
 import type { OutputFn, VFSStat } from '../types.ts'
-import { answerOverBridge, type BridgeCall, respond, serviceWorkerBridge } from './transport.ts'
+import {
+  answerOverBridge,
+  type BridgeCall,
+  failureText,
+  respond,
+  serviceWorkerBridge,
+} from './transport.ts'
 import type { WasmView } from './view.ts'
 
 /** One run the host hands a worker: the module and what the guest starts with. */
@@ -182,10 +188,14 @@ export class WasmExecution {
     private readonly trapPrefix: string,
   ) {}
 
+  /** The compiled module; a load that failed is tried again on the next run. */
   private module(): Promise<WebAssembly.Module> {
-    this.compiled ??= this.source().then((bytes) =>
-      WebAssembly.compile(bytes as Uint8Array<ArrayBuffer>),
-    )
+    this.compiled ??= this.source()
+      .then((bytes) => WebAssembly.compile(bytes as Uint8Array<ArrayBuffer>))
+      .catch((error: unknown) => {
+        this.compiled = null
+        throw error
+      })
     return this.compiled
   }
 
@@ -214,9 +224,8 @@ export class WasmExecution {
     stop?: AbortSignal,
   ): Promise<[Uint8Array, Uint8Array | null, number]> {
     this.checkOpen()
-    const module = await this.module()
-    stop?.throwIfAborted()
-    const port = this.idle.pop() ?? (await this.ready())
+    const module = await abortable(this.module(), stop)
+    const port = this.idle.pop() ?? (await this.started(stop))
     const reader = stdin === null ? null : new AsyncLineIterator(stdin)
     const kept: [Uint8Array[], Uint8Array[]] = [[], []]
     const open = new Map<number, Descriptor>()
@@ -230,12 +239,13 @@ export class WasmExecution {
     const operation = async (call: GuestCall): Promise<unknown> => {
       const args = call.args ?? []
       switch (call.op) {
-        // A stop does not wait on a slow backend: the call is answered
-        // with the stop and the run ends.
+        // The view's files stop with the run, and the run's end waits for
+        // a call under way, as Python's abort joins it, so a file it
+        // opens is among those the end lands.
         case 'view':
-          return abortable(this.viewCall(view, open, call.method ?? '', args), halt)
+          return this.viewCall(view, open, call.method ?? '', args)
         case 'file':
-          return abortable(this.fileCall(open, call.file ?? -1, call.method ?? '', args), halt)
+          return this.fileCall(open, call.file ?? -1, call.method ?? '', args)
         case 'stdin':
           return reader === null
             ? new Uint8Array()
@@ -265,6 +275,9 @@ export class WasmExecution {
           )
       }
     }
+    let fail = (error: Error): void => {
+      throw error
+    }
     const answer = (message: GuestCall & BridgeCall): void => {
       if (message.buffer !== undefined) buffers.add(message.buffer)
       const work = (): Promise<unknown> => operation(message)
@@ -272,18 +285,24 @@ export class WasmExecution {
         message.buffer !== undefined
           ? respond(message.buffer, work)
           : answerOverBridge(port.bridge ?? '', message.id ?? '', work)
-      answers.add(done)
-      void done
+      const settled: Promise<void> = done
         .catch((error: unknown) => {
-          console.debug(`${this.trapPrefix}: a guest call went unanswered: ${String(error)}`)
+          // An answer that cannot reach the guest leaves it waiting forever.
+          fail(error instanceof Error ? error : new Error(failureText(error)))
         })
         .finally(() => {
-          answers.delete(done)
+          answers.delete(settled)
           if (message.buffer !== undefined) buffers.delete(message.buffer)
         })
+      answers.add(settled)
     }
     let end = (): void => undefined
     const result = new Promise<Extract<GuestReply, { kind: 'result' }>>((resolve, reject) => {
+      fail = (error) => {
+        state.stopped = true
+        port.terminate()
+        reject(error)
+      }
       port.listen((message) => {
         if (message instanceof Error) reject(message)
         else if (message.kind === 'vfs') answer(message)
@@ -347,6 +366,25 @@ export class WasmExecution {
 
   private checkOpen(): void {
     if (this.closed) throw new Error('WASM execution is closed')
+  }
+
+  /** A started worker, or the stop; one that starts after the stop goes. */
+  private async started(stop?: AbortSignal): Promise<Port> {
+    const starting = this.ready()
+    try {
+      return await abortable(starting, stop)
+    } catch (error) {
+      if (stop?.aborted === true)
+        void starting.then(
+          (port) => {
+            port.terminate()
+          },
+          (failure: unknown) => {
+            console.debug(`${this.trapPrefix}: a stopped run's worker failed: ${String(failure)}`)
+          },
+        )
+      throw error
+    }
   }
 
   /** A started worker, listening. */

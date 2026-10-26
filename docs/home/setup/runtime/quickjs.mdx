@@ -44,34 +44,28 @@ To list it yourself:
     from mirage import RAMVFS, MountMode, Workspace
     from mirage.runtime.js import QuickJsRuntime
 
-````
-ws = Workspace(
-    {"/data": RAMVFS()},
-    mode=MountMode.EXEC,
-    runtimes=[QuickJsRuntime(config={"home": "/path/to/quickjs"})],
-)
-await ws.shell("node -e 'console.log(1 + 1)'")
-```
-````
-
-</Tab>
+    ws = Workspace(
+        {"/data": RAMVFS()},
+        mode=MountMode.EXEC,
+        runtimes=[QuickJsRuntime(config={"home": "/path/to/quickjs"})],
+    )
+    await ws.shell("node -e 'console.log(1 + 1)'")
+    ```
+  </Tab>
   <Tab title="TypeScript" icon="/images/typescript-logo.svg">
     ```typescript
     import { buildRuntime, MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
 
-````
-const ws = new Workspace(
-  { '/data': new RAMVFS() },
-  {
-    mode: MountMode.EXEC,
-    runtimes: [buildRuntime('quickjs', { config: { home: '/path/to/quickjs' } })],
-  },
-)
-await ws.shell("node -e 'console.log(1 + 1)'")
-```
-````
-
-</Tab>
+    const ws = new Workspace(
+      { '/data': new RAMVFS() },
+      {
+        mode: MountMode.EXEC,
+        runtimes: [buildRuntime('quickjs', { config: { home: '/path/to/quickjs' } })],
+      },
+    )
+    await ws.shell("node -e 'console.log(1 + 1)'")
+    ```
+  </Tab>
   <Tab title="YAML" icon="file-code">
     ```yaml
     mode: exec

@@ -822,9 +822,11 @@ class HostFs implements Record<
   }
 
   async mkdtempDisposable(prefix: string, options?: Options): Promise<unknown> {
-    const path = await this.mkdtemp(prefix, options)
-    const remove = (): Promise<void> => routed.rm(String(path), { recursive: true, force: true })
-    return { path, remove, [Symbol.asyncDispose]: remove }
+    // The name handed back takes the encoding asked for; the removal takes
+    // the directory's own.
+    const made = String(await this.mkdtemp(prefix))
+    const remove = (): Promise<void> => routed.rm(made, { recursive: true, force: true })
+    return { path: encoded(made, options), remove, [Symbol.asyncDispose]: remove }
   }
 
   async opendir(path: string, options?: Options): Promise<unknown> {
