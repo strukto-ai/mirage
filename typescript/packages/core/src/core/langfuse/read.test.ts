@@ -23,11 +23,13 @@ const DEC = new TextDecoder()
 
 class RecordingTransport implements LangfuseTransport {
   readonly paths: string[] = []
+  readonly queries: Record<string, string | number | undefined>[] = []
 
   constructor(private readonly bodies: Record<string, unknown>) {}
 
-  request(path: string): Promise<unknown> {
+  request(path: string, query: Record<string, string | number | undefined> = {}): Promise<unknown> {
     this.paths.push(path)
+    this.queries.push(query)
     const body = this.bodies[path]
     if (body === undefined) return Promise.resolve({ data: [] })
     return Promise.resolve(body)
@@ -50,12 +52,13 @@ function spec(virtual: string): PathSpec {
   return new PathSpec({ virtual, directory: virtual, vfsPath: stripSlash(virtual) })
 }
 
+const DATASET = { '/api/public/v2/datasets/eval-basic': { id: 'ds-1', name: 'eval-basic' } }
+
 describe('langfuse read dataset run', () => {
   it('renders a .jsonl run as one line, not an indented document', async () => {
     const transport = new RecordingTransport({
-      '/api/public/datasets/eval-basic/runs': {
-        data: [{ name: 'run-alpha', datasetName: 'eval-basic' }],
-      },
+      ...DATASET,
+      '/api/public/experiments': { data: [{ name: 'run-alpha', datasetId: 'ds-1' }] },
     })
     const bytes = await read(accessor(transport), spec('/datasets/eval-basic/runs/run-alpha.jsonl'))
     const text = DEC.decode(bytes)
@@ -63,22 +66,86 @@ describe('langfuse read dataset run', () => {
     expect(JSON.parse(text.trimEnd())).toMatchObject({ name: 'run-alpha' })
   })
 
-  it('requests dataset runs outside the v2 namespace', async () => {
-    // /api/public/v2/datasets/{name}/runs is a hard 404 on a real server.
+  it("lists the experiments by the dataset's id", async () => {
     const transport = new RecordingTransport({
-      '/api/public/datasets/eval-basic/runs': { data: [{ name: 'run-alpha' }] },
+      ...DATASET,
+      '/api/public/experiments': { data: [{ name: 'run-alpha' }] },
     })
     await read(accessor(transport), spec('/datasets/eval-basic/runs/run-alpha.jsonl'))
-    expect(transport.paths).toEqual(['/api/public/datasets/eval-basic/runs'])
+    expect(transport.paths).toEqual([
+      '/api/public/v2/datasets/eval-basic',
+      '/api/public/experiments',
+    ])
+    expect(transport.queries[1]).toMatchObject({ datasetId: 'ds-1' })
+    // A whole-name filter: the name parameter would split a name on commas.
+    expect(JSON.parse(String(transport.queries[1]?.filter))).toEqual([
+      { type: 'string', column: 'name', operator: '=', value: 'run-alpha' },
+    ])
   })
 
   it('raises ENOENT when the named run is absent', async () => {
     const transport = new RecordingTransport({
-      '/api/public/datasets/eval-basic/runs': { data: [{ name: 'other' }] },
+      ...DATASET,
+      '/api/public/experiments': { data: [{ name: 'other' }] },
     })
     await expect(
       read(accessor(transport), spec('/datasets/eval-basic/runs/run-alpha.jsonl')),
     ).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+})
+
+describe('langfuse read trace', () => {
+  it('renders the root observation with the rest and the scores', async () => {
+    const transport = new RecordingTransport({
+      '/api/public/v2/observations': {
+        data: [
+          { id: 'child', traceId: 't1', startTime: '2026-01-01T00:00:01.000Z' },
+          {
+            id: 'root',
+            traceId: 't1',
+            startTime: '2026-01-01T00:00:00.000Z',
+            isRootObservation: true,
+          },
+        ],
+        meta: {},
+      },
+      '/api/public/v3/scores': { data: [{ id: 'score-1' }], meta: {} },
+    })
+    const doc = JSON.parse(
+      DEC.decode(await read(accessor(transport), spec('/traces/t1.json'))),
+    ) as {
+      id: string
+      observations: { id: string }[]
+      scores: { id: string }[]
+    }
+    expect(doc.id).toBe('root')
+    expect(doc.observations.map((o) => o.id)).toEqual(['child'])
+    expect(doc.scores.map((o) => o.id)).toEqual(['score-1'])
+    expect(transport.queries[0]).toMatchObject({ traceId: 't1' })
+  })
+
+  it('follows the cursor to the last page', async () => {
+    const pages = [
+      { data: [{ id: 'root', isRootObservation: true }], meta: { cursor: 'next' } },
+      { data: [{ id: 'leaf' }], meta: {} },
+    ]
+    const transport: LangfuseTransport = {
+      request: (path) =>
+        Promise.resolve(path === '/api/public/v2/observations' ? pages.shift() : { data: [] }),
+    }
+    const doc = JSON.parse(
+      DEC.decode(await read(accessor(transport), spec('/traces/t1.json'))),
+    ) as {
+      observations: { id: string }[]
+    }
+    expect(doc.observations.map((o) => o.id)).toEqual(['leaf'])
+  })
+
+  it('raises ENOENT for a trace with no observations', async () => {
+    const transport = new RecordingTransport({})
+    await expect(read(accessor(transport), spec('/traces/absent.json'))).rejects.toMatchObject({
+      code: 'ENOENT',
+    })
   })
 })
 
@@ -123,7 +190,9 @@ describe('langfuse read dataset items', () => {
 describe('langfuse read of a session trace', () => {
   it("refuses another session's trace and serves its own", async () => {
     const transport = new RecordingTransport({
-      '/api/public/traces/t1': { id: 't1', sessionId: 's2' },
+      '/api/public/v2/observations': {
+        data: [{ id: 'root', traceId: 't1', sessionId: 's2', isRootObservation: true }],
+      },
     })
     await expect(read(accessor(transport), spec('/sessions/s1/t1.json'))).rejects.toMatchObject({
       code: 'ENOENT',
@@ -132,5 +201,26 @@ describe('langfuse read of a session trace', () => {
     expect((JSON.parse(new TextDecoder().decode(own)) as { sessionId: string }).sessionId).toBe(
       's2',
     )
+  })
+})
+
+describe('langfuse read of a trace with roots in two sessions', () => {
+  it('opens under every session one of its roots names', async () => {
+    const transport = new RecordingTransport({
+      '/api/public/v2/observations': {
+        data: [
+          { id: 'early', traceId: 't1', startTime: 'a', sessionId: 's1', isRootObservation: true },
+          { id: 'late', traceId: 't1', startTime: 'b', sessionId: 's2', isRootObservation: true },
+          { id: 'leaf', traceId: 't1', startTime: 'c', sessionId: 's3' },
+        ],
+      },
+    })
+    for (const session of ['s1', 's2']) {
+      const own = await read(accessor(transport), spec(`/sessions/${session}/t1.json`))
+      expect((JSON.parse(DEC.decode(own)) as { id: string }).id).toBe('early')
+    }
+    await expect(read(accessor(transport), spec('/sessions/s3/t1.json'))).rejects.toMatchObject({
+      code: 'ENOENT',
+    })
   })
 })

@@ -94,30 +94,65 @@ describe('langfuse readdir trace window', () => {
     // A rolling default window hid traces that read() happily serves, so an
     // unset config must not narrow the listing.
     const transport = new RecordingTransport({
-      '/api/public/traces': { data: [{ id: 'trace-old' }] },
+      '/api/public/v2/observations': { data: [{ traceId: 'trace-old' }] },
     })
     const entries = await readdir(accessor(transport), spec('/traces'))
     expect(names(entries)).toEqual(['trace-old.json'])
-    expect(transport.calls[0]?.query).not.toHaveProperty('fromTimestamp')
+    expect(transport.calls[0]?.query).not.toHaveProperty('fromStartTime')
   })
 
   it('passes an explicit fromTimestamp through', async () => {
     const transport = new RecordingTransport({
-      '/api/public/traces': { data: [{ id: 'trace-new' }] },
+      '/api/public/v2/observations': { data: [{ traceId: 'trace-new' }] },
     })
     await readdir(
       accessor(transport, { defaultFromTimestamp: '2026-01-01T00:00:00Z' }),
       spec('/traces'),
     )
-    expect(transport.calls[0]?.query?.fromTimestamp).toBe('2026-01-01T00:00:00Z')
+    expect(transport.calls[0]?.query?.fromStartTime).toBe('2026-01-01T00:00:00Z')
   })
 
   it('defaults the trace limit to python default_trace_limit', async () => {
     const transport = new RecordingTransport({
-      '/api/public/traces': { data: [] },
+      '/api/public/v2/observations': { data: [] },
     })
     await readdir(accessor(transport), spec('/traces'))
     expect(transport.calls[0]?.query?.limit).toBe(100)
+  })
+
+  it('lists root observations once per trace', async () => {
+    const transport = new RecordingTransport({
+      '/api/public/v2/observations': {
+        data: [{ traceId: 't1' }, { traceId: 't1' }, { traceId: 't2' }],
+      },
+    })
+    const entries = await readdir(accessor(transport), spec('/traces'))
+    expect(names(entries)).toEqual(['t1.json', 't2.json'])
+    expect(transport.calls[0]?.query?.isRootObservation).toBe('true')
+  })
+})
+
+describe('langfuse readdir sessions', () => {
+  it('lists the distinct sessions of the root observations', async () => {
+    const transport = new RecordingTransport({
+      '/api/public/v2/observations': {
+        data: [
+          { traceId: 't1', sessionId: 's1' },
+          { traceId: 't2', sessionId: '' },
+          { traceId: 't3', sessionId: 's1' },
+          { traceId: 't4', sessionId: 's2' },
+        ],
+      },
+    })
+    expect(names(await readdir(accessor(transport), spec('/sessions')))).toEqual(['s1', 's2'])
+  })
+
+  it("asks for one session's root observations", async () => {
+    const transport = new RecordingTransport({
+      '/api/public/v2/observations': { data: [{ traceId: 't1', sessionId: 's1' }] },
+    })
+    expect(names(await readdir(accessor(transport), spec('/sessions/s1')))).toEqual(['t1.json'])
+    expect(transport.calls[0]?.query?.sessionId).toBe('s1')
   })
 })
 
@@ -136,7 +171,8 @@ describe('langfuse readdir dataset sizes', () => {
   it('stores the rendered run size on each run listing entry', async () => {
     const runs = [{ name: 'run-a', metadata: { k: 'v' } }, { name: 'run-b' }]
     const transport = new RecordingTransport({
-      '/api/public/datasets/qa-eval/runs': { data: runs },
+      '/api/public/v2/datasets/qa-eval': { id: 'ds-1' },
+      '/api/public/experiments': { data: runs },
     })
     const listed = rowsOf(await readdir(accessor(transport), spec('/datasets/qa-eval/runs')))
     expect(listed[0]?.name).toBe('run-a.jsonl')
@@ -147,7 +183,9 @@ describe('langfuse readdir dataset sizes', () => {
 // Mirrors python's test_a_bounded_trace_listing_is_not_cached_as_the_directory
 // and test_a_trace_listing_short_of_the_limit_is_the_directory.
 describe('langfuse bounded trace listing', () => {
-  const TRACES = { '/api/public/traces': { data: [{ id: 't1' }, { id: 't2' }] } }
+  const TRACES = {
+    '/api/public/v2/observations': { data: [{ traceId: 't1' }, { traceId: 't2' }] },
+  }
   it('fetches a full page once through the workspace index view', async () => {
     const transport = new RecordingTransport(TRACES)
     const vfs = mountedVfs(accessor(transport, { defaultTraceLimit: 2 }))
@@ -188,28 +226,32 @@ describe('langfuse bounded trace listing', () => {
     })
   }
 
-  it('short of the limit is the directory', async () => {
+  it('short of the limit is still not the directory', async () => {
+    // A trace whose root observation never arrived is absent from any page.
     const out = await readdir(
       accessor(new RecordingTransport(TRACES), { defaultTraceLimit: 3 }),
       spec('/traces'),
     )
-    expect((out as DirListing).partial).toBe(false)
+    expect((out as DirListing).partial).toBe(true)
   })
 })
 
 describe('langfuse single-page listings', () => {
   it.each([
-    ['/sessions', '/api/public/sessions', [{ id: 'session-1' }]],
-    ['/prompts', '/api/public/v2/prompts', [{ name: 'summarize', versions: [1] }]],
-    ['/datasets', '/api/public/v2/datasets', [{ name: 'qa-eval' }]],
-    ['/datasets/qa-eval/runs', '/api/public/datasets/qa-eval/runs', [{ name: 'run-a' }]],
-  ])('writes %s as a window', async (path, endpoint, rows) => {
+    ['/sessions', { '/api/public/v2/observations': { data: [{ sessionId: 'session-1' }] } }],
+    ['/prompts', { '/api/public/v2/prompts': { data: [{ name: 'summarize', versions: [1] }] } }],
+    ['/datasets', { '/api/public/v2/datasets': { data: [{ name: 'qa-eval' }] } }],
+    [
+      '/datasets/qa-eval/runs',
+      {
+        '/api/public/v2/datasets/qa-eval': { id: 'ds-1' },
+        '/api/public/experiments': { data: [{ name: 'run-a' }] },
+      },
+    ],
+  ])('writes %s as a window', async (path, bodies) => {
     // Each of these is one page of the newest entries: an older one that
     // drops off the page has not been deleted.
-    const out = await readdir(
-      accessor(new RecordingTransport({ [endpoint]: { data: rows } })),
-      spec(path),
-    )
+    const out = await readdir(accessor(new RecordingTransport(bodies)), spec(path))
     expect(rowsOf(out)).toHaveLength(1)
     expect((out as DirListing).window).toBe(true)
   })

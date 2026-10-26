@@ -2276,7 +2276,7 @@ wheels = [
 
 [[package]]
 name = "langfuse"
-version = "4.3.1"
+version = "5.0.4"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "backoff" },
@@ -2286,11 +2286,12 @@ dependencies = [
     { name = "opentelemetry-sdk" },
     { name = "packaging" },
     { name = "pydantic" },
+    { name = "typing-extensions" },
     { name = "wrapt" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/0c/84/e04d7966e79eda4126e9c4a90f374b1b7d9a6d8155e386f9bade49f19296/langfuse-4.3.1.tar.gz", hash = "sha256:fb83155d17c2bc96fdc7c749f10c8ae8b6be1e47619e31627b5a907f965a6580", size = 276525, upload-time = "2026-04-16T12:20:17.679Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/75/b3/6694c5edf351a01f85aae48a867fd34979865062cda808630aae86a99768/langfuse-5.0.4.tar.gz", hash = "sha256:f9f13a7a0bf0aad4d75287411cece3172c717d9440e73b4b84255ffffb549c31", size = 367328, upload-time = "2026-10-21T07:36:07.896Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/b3/45/bcc15ea8df11224516e060efb2d813cdfafb8d285233f350ff0d8098ff20/langfuse-4.3.1-py3-none-any.whl", hash = "sha256:4ec1524fcb082acaff1a746f3da1ab92c4fb2352e66350c11341b34c13013685", size = 476379, upload-time = "2026-04-16T12:20:18.741Z" },
+    { url = "https://files.pythonhosted.org/packages/42/f4/de90215c074ddde1849a60a939f75f9ceaf656c019501b5cac7cdb63b2fc/langfuse-5.0.4-py3-none-any.whl", hash = "sha256:6ab4ddcbc4b33efbd9c7f5feb405bfb0060949e7a170f7410f8fcc52984887a7", size = 637544, upload-time = "2026-10-21T07:36:06.457Z" },
 ]
 
 [[package]]
@@ -2901,7 +2902,7 @@ requires-dist = [
     { name = "jq", specifier = ">=1.12.0" },
     { name = "jsonschema", specifier = ">=4.26.0" },
     { name = "lancedb", marker = "extra == 'lancedb'", specifier = ">=0.33.0" },
-    { name = "langfuse", marker = "extra == 'langfuse'", specifier = ">=4.2.0" },
+    { name = "langfuse", marker = "extra == 'langfuse'", specifier = ">=5.0.4" },
     { name = "mcp", specifier = ">=2.3.0,<3" },
     { name = "mem0ai", marker = "extra == 'mem0'", specifier = ">=2.0.6" },
     { name = "mfusepy", marker = "extra == 'fuse'", specifier = ">=1.0.0" },

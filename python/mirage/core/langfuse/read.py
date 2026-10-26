@@ -30,6 +30,14 @@ from mirage.errors.fs import enoent
 from mirage.types import FileStat, PathSpec
 
 
+def _in_session(trace: dict[str, Any], session_id: str) -> bool:
+    roots = [trace]
+    roots.extend(
+        o for o in trace.get("observations", []) if o.get("isRootObservation")
+    )
+    return any(r.get("sessionId") == session_id for r in roots)
+
+
 async def fetch_trace_file(
     accessor: LangfuseAccessor, match: ScopeMatch, path: PathSpec
 ) -> dict[str, Any]:
@@ -38,8 +46,9 @@ async def fetch_trace_file(
     A trace is addressed by its id whatever the listing holds: the
     listing stops at ``default_trace_limit`` and
     ``default_from_timestamp``, and an older trace is still the
-    project's. Under ``sessions/<id>/`` the trace must be that session's,
-    so a path cannot name another session's trace.
+    project's. Under ``sessions/<id>/`` the trace must have a root
+    observation in that session, the rule its listing uses, so a path
+    cannot name another session's trace.
 
     Args:
         accessor (LangfuseAccessor): The mount's accessor.
@@ -50,7 +59,7 @@ async def fetch_trace_file(
         fetch_trace(accessor.api, match.slots["trace_id"]), path.virtual
     )
     session_id = match.slots.get("session_id")
-    if session_id is not None and data.get("sessionId") != session_id:
+    if session_id is not None and not _in_session(data, session_id):
         raise enoent(path.virtual)
     return data
 
@@ -106,11 +115,13 @@ async def _read_dataset_run(
     entry: FileStat | None,
     parent: FileStat | None,
 ) -> bytes:
+    run_name = match.slots["run_name"]
     runs = await fetch_or_enoent(
-        fetch_dataset_runs(accessor.api, match.slots["dataset_name"]),
+        fetch_dataset_runs(
+            accessor.api, match.slots["dataset_name"], run_name
+        ),
         path.virtual,
     )
-    run_name = match.slots["run_name"]
     matched = [r for r in runs if r.get("name") == run_name]
     if not matched:
         raise enoent(path.virtual)

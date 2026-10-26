@@ -6,7 +6,7 @@
       "targets": [
         "langfuse"
       ],
-      "command": "jq -r '.name' /lf/traces/trace-alpha.json",
+      "command": "jq -r '.name' /lf/traces/a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1.json",
       "expect": {
         "exit": 0,
         "stdout": "checkout-flow\n",
@@ -19,7 +19,7 @@
       "targets": [
         "langfuse"
       ],
-      "command": "jq -r '.userId' /lf/traces/trace-beta.json",
+      "command": "jq -r '.userId' /lf/traces/b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2.json",
       "expect": {
         "exit": 0,
         "stdout": "user-bo\n",
@@ -32,7 +32,7 @@
       "targets": [
         "langfuse"
       ],
-      "command": "jq -r '.sessionId' /lf/traces/trace-gamma.json",
+      "command": "jq -r '.sessionId' /lf/traces/c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3.json",
       "expect": {
         "exit": 0,
         "stdout": "session-two\n",
@@ -45,7 +45,7 @@
       "targets": [
         "langfuse"
       ],
-      "command": "jq -r '.tags | join(\",\")' /lf/traces/trace-alpha.json",
+      "command": "jq -r '.tags | join(\",\")' /lf/traces/a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1.json",
       "expect": {
         "exit": 0,
         "stdout": "checkout,prod\n",
@@ -58,7 +58,7 @@
       "targets": [
         "langfuse"
       ],
-      "command": "jq -r '.input.cart' /lf/traces/trace-alpha.json",
+      "command": "jq -r '.input | fromjson | .cart' /lf/traces/a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1.json",
       "expect": {
         "exit": 0,
         "stdout": "two items\n",
@@ -71,7 +71,7 @@
       "targets": [
         "langfuse"
       ],
-      "command": "jq -r '.output.status' /lf/traces/trace-alpha.json",
+      "command": "jq -r '.output | fromjson | .status' /lf/traces/a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1.json",
       "expect": {
         "exit": 0,
         "stdout": "confirmed\n",
@@ -84,7 +84,7 @@
       "targets": [
         "langfuse"
       ],
-      "command": "jq -r '.metadata.region' /lf/traces/trace-gamma.json",
+      "command": "jq -r '.metadata.region' /lf/traces/c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3.json",
       "expect": {
         "exit": 0,
         "stdout": "eu-west\n",
@@ -97,7 +97,7 @@
       "targets": [
         "langfuse"
       ],
-      "command": "jq -r '.timestamp' /lf/traces/trace-beta.json | cut -c1-19",
+      "command": "jq -r '.startTime' /lf/traces/b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2.json | cut -c1-19",
       "expect": {
         "exit": 0,
         "stdout": "2026-01-01T00:05:00\n",
@@ -110,7 +110,7 @@
       "targets": [
         "langfuse"
       ],
-      "command": "jq -r '.projectId' /lf/traces/trace-alpha.json",
+      "command": "jq -r '.projectId' /lf/traces/a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1.json",
       "expect": {
         "exit": 0,
         "stdout": "mirage-integ-project\n",
@@ -118,15 +118,15 @@
       }
     },
     {
-      "id": "lf_trace_html_path",
+      "id": "lf_trace_trace_id",
       "seq": 600029,
       "targets": [
         "langfuse"
       ],
-      "command": "jq -r '.htmlPath' /lf/traces/trace-alpha.json",
+      "command": "jq -r '.traceId' /lf/traces/a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1.json",
       "expect": {
         "exit": 0,
-        "stdout": "/project/mirage-integ-project/traces/trace-alpha\n",
+        "stdout": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1\n",
         "stderr": ""
       }
     },
@@ -136,10 +136,10 @@
       "targets": [
         "langfuse"
       ],
-      "command": "jq -c 'del(.createdAt, .updatedAt) | keys' /lf/traces/trace-beta.json",
+      "command": "jq -c 'del(.createdAt, .updatedAt) | keys' /lf/traces/b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2.json",
       "expect": {
         "exit": 0,
-        "stdout": "[\"bookmarked\",\"environment\",\"externalId\",\"htmlPath\",\"id\",\"input\",\"latency\",\"metadata\",\"name\",\"observations\",\"output\",\"projectId\",\"public\",\"release\",\"scores\",\"sessionId\",\"tags\",\"timestamp\",\"totalCost\",\"userId\",\"version\"]\n",
+        "stdout": "[\"bookmarked\",\"completionStartTime\",\"costDetails\",\"endTime\",\"environment\",\"id\",\"input\",\"inputCost\",\"inputPrice\",\"inputUsage\",\"internalModelId\",\"isRootObservation\",\"latency\",\"level\",\"metadata\",\"model\",\"modelId\",\"modelParameters\",\"name\",\"observations\",\"output\",\"outputCost\",\"outputPrice\",\"outputUsage\",\"parentObservationId\",\"projectId\",\"promptId\",\"promptName\",\"promptVersion\",\"public\",\"release\",\"scores\",\"sessionId\",\"startTime\",\"statusMessage\",\"tags\",\"timeToFirstToken\",\"totalCost\",\"totalPrice\",\"totalUsage\",\"traceId\",\"traceName\",\"type\",\"usageDetails\",\"usagePricingTierId\",\"usagePricingTierName\",\"userId\",\"version\"]\n",
         "stderr": ""
       }
     },
@@ -149,7 +149,7 @@
       "targets": [
         "langfuse"
       ],
-      "command": "jq -r '.name' /lf/sessions/session-one/trace-beta.json",
+      "command": "jq -r '.name' /lf/sessions/session-one/b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2.json",
       "expect": {
         "exit": 0,
         "stdout": "search-query\n",
@@ -162,10 +162,10 @@
       "targets": [
         "langfuse"
       ],
-      "command": "grep -c checkout-flow /lf/traces/trace-alpha.json",
+      "command": "grep -c checkout-flow /lf/traces/a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1.json",
       "expect": {
         "exit": 0,
-        "stdout": "1\n",
+        "stdout": "3\n",
         "stderr": ""
       }
     },
@@ -175,7 +175,7 @@
       "targets": [
         "langfuse"
       ],
-      "command": "grep __lf_absent__ /lf/traces/trace-alpha.json",
+      "command": "grep __lf_absent__ /lf/traces/a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1.json",
       "expect": {
         "exit": 1,
         "stdout": "",

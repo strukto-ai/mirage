@@ -15,7 +15,9 @@
 import argparse
 import asyncio
 import base64
+import json
 import sys
+from datetime import datetime
 from typing import Any
 
 import aiohttp
@@ -23,47 +25,52 @@ import aiohttp
 PUBLIC_KEY = "pk-lf-mirage-integ"
 SECRET_KEY = "sk-lf-mirage-integ"
 
-# Traces are ingested with client-chosen ids and timestamps, so every VFS name
-# the battery asserts on is fixed. createdAt/updatedAt vary between seeds;
-# latency and htmlPath are fixed by the observation times and project id.
-# Model-price initialization can race the web container's schema migrations:
-# trace-alpha's generation then has empty costDetails and null pricing tiers,
-# or populated costDetails, usagePricingTierId/Name and calculated costs.
-# These change the rendered byte length (5.6K vs 5.8K for all traces), so the
-# battery checks du's shape and sum against reads rather than a fixed size.
-# Traces have unknown sizes until read; each du case warms its own cache.
+# Langfuse v4 keeps no trace entity: a trace is its OpenTelemetry spans, and
+# the root span carries the trace's name, user, session, tags and metadata.
+# Ids and timestamps are client-chosen, so every VFS name the battery asserts
+# on is fixed. createdAt/updatedAt vary between seeds. Model-price
+# initialization can race the web container's schema migrations, so the
+# generation's cost fields may or may not be populated; the battery checks
+# du's shape and sum against reads rather than a fixed size.
+TRACE_ALPHA = "a1" * 16
+TRACE_BETA = "b2" * 16
+TRACE_GAMMA = "c3" * 16
+
 TRACES = [
     {
-        "event_id": "11111111-1111-4111-8111-111111111111",
-        "id": "trace-alpha",
+        "id": TRACE_ALPHA,
+        "root": "a1a1a1a1a1a1a100",
         "name": "checkout-flow",
         "userId": "user-ana",
         "sessionId": "session-one",
-        "timestamp": "2026-01-01T00:00:00.000Z",
+        "start": "2026-01-01T00:00:00.000Z",
+        "end": "2026-01-01T00:00:03.000Z",
         "input": {"cart": "two items"},
         "output": {"status": "confirmed"},
         "tags": ["checkout", "prod"],
         "metadata": {"region": "eu-west"},
     },
     {
-        "event_id": "22222222-2222-4222-8222-222222222222",
-        "id": "trace-beta",
+        "id": TRACE_BETA,
+        "root": "b2b2b2b2b2b2b200",
         "name": "search-query",
         "userId": "user-bo",
         "sessionId": "session-one",
-        "timestamp": "2026-01-01T00:05:00.000Z",
+        "start": "2026-01-01T00:05:00.000Z",
+        "end": "2026-01-01T00:05:01.000Z",
         "input": {"query": "running shoes"},
         "output": {"hits": 12},
         "tags": ["search"],
         "metadata": {"region": "us-east"},
     },
     {
-        "event_id": "33333333-3333-4333-8333-333333333333",
-        "id": "trace-gamma",
+        "id": TRACE_GAMMA,
+        "root": "c3c3c3c3c3c3c300",
         "name": "summarize-doc",
         "userId": "user-ana",
         "sessionId": "session-two",
-        "timestamp": "2026-01-01T00:10:00.000Z",
+        "start": "2026-01-01T00:10:00.000Z",
+        "end": "2026-01-01T00:10:01.000Z",
         "input": {"doc": "quarterly report"},
         "output": {"summary": "revenue grew"},
         "tags": ["summarize", "prod"],
@@ -71,51 +78,43 @@ TRACES = [
     },
 ]
 
-# trace-alpha carries a span with a nested generation plus a score, so the
+# TRACE_ALPHA carries a span with a nested generation plus a score, so the
 # `observations` and `scores` arrays in a rendered trace document are populated
 # rather than empty.
 OBSERVATIONS = [
     {
-        "event_id": "44444444-4444-4444-8444-444444444444",
-        "type": "span-create",
-        "body": {
-            "id": "obs-span-checkout",
-            "traceId": "trace-alpha",
-            "type": "SPAN",
-            "name": "validate-cart",
-            "startTime": "2026-01-01T00:00:01.000Z",
-            "endTime": "2026-01-01T00:00:02.000Z",
-            "input": {"items": 2},
-            "output": {"valid": True},
-            "level": "DEFAULT",
-        },
+        "traceId": TRACE_ALPHA,
+        "id": "a1a1a1a1a1a1a101",
+        "parent": "a1a1a1a1a1a1a100",
+        "type": "span",
+        "name": "validate-cart",
+        "start": "2026-01-01T00:00:01.000Z",
+        "end": "2026-01-01T00:00:02.000Z",
+        "input": {"items": 2},
+        "output": {"valid": True},
     },
     {
-        "event_id": "55555555-5555-4555-8555-555555555555",
-        "type": "generation-create",
-        "body": {
-            "id": "obs-gen-summary",
-            "traceId": "trace-alpha",
-            "parentObservationId": "obs-span-checkout",
-            "type": "GENERATION",
-            "name": "describe-order",
-            "startTime": "2026-01-01T00:00:01.200Z",
-            "endTime": "2026-01-01T00:00:01.800Z",
-            "model": "gpt-4o-mini",
-            "input": [{"role": "user", "content": "describe the order"}],
-            "output": {"content": "two items, confirmed"},
-            "level": "DEFAULT",
-        },
+        "traceId": TRACE_ALPHA,
+        "id": "a1a1a1a1a1a1a102",
+        "parent": "a1a1a1a1a1a1a101",
+        "type": "generation",
+        "name": "describe-order",
+        "start": "2026-01-01T00:00:01.200Z",
+        "end": "2026-01-01T00:00:01.800Z",
+        "model": "gpt-4o-mini",
+        "input": [{"role": "user", "content": "describe the order"}],
+        "output": {"content": "two items, confirmed"},
     },
 ]
 
+# Score events are the one kind v4's ingestion endpoint still accepts.
 SCORES = [
     {
         "event_id": "66666666-6666-4666-8666-666666666666",
         "type": "score-create",
         "body": {
             "id": "score-helpfulness",
-            "traceId": "trace-alpha",
+            "traceId": TRACE_ALPHA,
             "name": "helpfulness",
             "value": 0.75,
             "dataType": "NUMERIC",
@@ -168,10 +167,14 @@ DATASET_ITEMS = [
     },
 ]
 
+
+# The fixture run is a v4 experiment over eval-basic: TRACE_ALPHA's root span
+# carries the experiment attributes the SDK's run_experiment sets.
+RUN_ID = "e5e5e5e5e5e5e5e5"
 RUN_NAME = "run-alpha"
 RUN_DATASET = "eval-basic"
 RUN_ITEM_ID = "item-one"
-RUN_TRACE_ID = "trace-alpha"
+RUN_FROM = "2026-01-01T00:00:00.000Z"
 
 POLL_ATTEMPTS = 120
 POLL_DELAY = 2.0
@@ -357,36 +360,209 @@ async def seed_dataset_items(
             )
 
 
+async def dataset_id(
+    session: aiohttp.ClientSession, host: str, name: str
+) -> str:
+    """Look up the server-assigned id of a fixture dataset.
+
+    Args:
+        session (aiohttp.ClientSession): shared HTTP session.
+        host (str): Langfuse base URL.
+        name (str): dataset name.
+
+    Returns:
+        str: the dataset id.
+
+    Raises:
+        RuntimeError: the dataset is missing.
+    """
+    status, body = await request(
+        session, host, "GET", f"/api/public/v2/datasets/{name}"
+    )
+    if status != 200 or not isinstance(body, dict):
+        raise RuntimeError(f"dataset {name} lookup failed: {status} {body}")
+    return str(body["id"])
+
+
+def nanos(stamp: str) -> str:
+    """Convert an ISO timestamp to OTLP unix nanoseconds.
+
+    Args:
+        stamp (str): ISO 8601 timestamp with a Z suffix.
+
+    Returns:
+        str: unix nanoseconds as a decimal string.
+    """
+    moment = datetime.fromisoformat(stamp.replace("Z", "+00:00"))
+    return str(int(moment.timestamp() * 1000) * 1_000_000)
+
+
+def attr(key: str, value: str | list[str]) -> dict[str, Any]:
+    """Build an OTLP string or string-array attribute.
+
+    Args:
+        key (str): attribute key.
+        value (str | list[str]): attribute value.
+
+    Returns:
+        dict[str, Any]: OTLP KeyValue.
+    """
+    if isinstance(value, list):
+        items = [{"stringValue": item} for item in value]
+        return {"key": key, "value": {"arrayValue": {"values": items}}}
+    return {"key": key, "value": {"stringValue": value}}
+
+
+def span(
+    trace_id: str,
+    span_id: str,
+    name: str,
+    start: str,
+    end: str,
+    attrs: list[dict[str, Any]],
+    parent: str | None = None,
+) -> dict[str, Any]:
+    """Build one OTLP span.
+
+    Args:
+        trace_id (str): 32 hex digit trace id.
+        span_id (str): 16 hex digit span id.
+        name (str): span name.
+        start (str): ISO start time.
+        end (str): ISO end time.
+        attrs (list[dict[str, Any]]): OTLP attributes.
+        parent (str | None): parent span id for a child span.
+
+    Returns:
+        dict[str, Any]: OTLP span.
+    """
+    out: dict[str, Any] = {
+        "traceId": trace_id,
+        "spanId": span_id,
+        "name": name,
+        "kind": 1,
+        "startTimeUnixNano": nanos(start),
+        "endTimeUnixNano": nanos(end),
+        "attributes": attrs,
+        "status": {},
+    }
+    if parent is not None:
+        out["parentSpanId"] = parent
+    return out
+
+
+def root_span(spec: dict[str, Any], run_dataset_id: str) -> dict[str, Any]:
+    """Build a trace's root span with its trace-level attributes.
+
+    Args:
+        spec (dict[str, Any]): one TRACES entry.
+        run_dataset_id (str): id of the dataset the fixture run covers.
+
+    Returns:
+        dict[str, Any]: OTLP span.
+    """
+    attrs = [
+        attr("langfuse.trace.name", spec["name"]),
+        attr("langfuse.user.id", spec["userId"]),
+        attr("langfuse.session.id", spec["sessionId"]),
+        attr("langfuse.trace.tags", spec["tags"]),
+        attr("langfuse.observation.type", "span"),
+        attr("langfuse.observation.input", json.dumps(spec["input"])),
+        attr("langfuse.observation.output", json.dumps(spec["output"])),
+    ]
+    attrs.extend(
+        attr(f"langfuse.trace.metadata.{key}", value)
+        for key, value in spec["metadata"].items()
+    )
+    if spec["id"] == TRACE_ALPHA:
+        attrs.extend(
+            [
+                attr("langfuse.experiment.id", RUN_ID),
+                attr("langfuse.experiment.name", RUN_NAME),
+                attr("langfuse.experiment.dataset.id", run_dataset_id),
+                attr("langfuse.experiment.item.id", RUN_ITEM_ID),
+                attr(
+                    "langfuse.experiment.item.root_observation_id",
+                    spec["root"],
+                ),
+            ]
+        )
+    return span(
+        spec["id"],
+        spec["root"],
+        spec["name"],
+        spec["start"],
+        spec["end"],
+        attrs,
+    )
+
+
+def child_span(spec: dict[str, Any]) -> dict[str, Any]:
+    """Build a nested observation's span.
+
+    Args:
+        spec (dict[str, Any]): one OBSERVATIONS entry.
+
+    Returns:
+        dict[str, Any]: OTLP span.
+    """
+    attrs = [
+        attr("langfuse.observation.type", spec["type"]),
+        attr("langfuse.observation.input", json.dumps(spec["input"])),
+        attr("langfuse.observation.output", json.dumps(spec["output"])),
+    ]
+    if "model" in spec:
+        attrs.append(attr("langfuse.observation.model.name", spec["model"]))
+    return span(
+        spec["traceId"],
+        spec["id"],
+        spec["name"],
+        spec["start"],
+        spec["end"],
+        attrs,
+        spec["parent"],
+    )
+
+
 async def ingest_traces(session: aiohttp.ClientSession, host: str) -> None:
-    """Push the fixture traces through the async ingestion endpoint.
+    """Push the fixture spans over OTLP and the score through ingestion.
 
     Args:
         session (aiohttp.ClientSession): shared HTTP session.
         host (str): Langfuse base URL.
 
     Raises:
-        RuntimeError: the ingestion batch was rejected.
+        RuntimeError: a batch was rejected.
     """
-    batch = []
-    for spec in TRACES:
-        body = {k: v for k, v in spec.items() if k != "event_id"}
-        batch.append(
+    run_dataset_id = await dataset_id(session, host, RUN_DATASET)
+    spans = [root_span(spec, run_dataset_id) for spec in TRACES]
+    spans.extend(child_span(spec) for spec in OBSERVATIONS)
+    payload = {
+        "resourceSpans": [
             {
-                "id": spec["event_id"],
-                "type": "trace-create",
-                "timestamp": spec["timestamp"],
-                "body": body,
+                "resource": {"attributes": [attr("service.name", "mirage")]},
+                "scopeSpans": [
+                    {"scope": {"name": "mirage-integ"}, "spans": spans}
+                ],
             }
-        )
-    for extra in (*OBSERVATIONS, *SCORES):
-        batch.append(
-            {
-                "id": extra["event_id"],
-                "type": extra["type"],
-                "timestamp": "2026-01-01T00:00:00.000Z",
-                "body": extra["body"],
-            }
-        )
+        ]
+    }
+    url = f"{host.rstrip('/')}/api/public/otel/v1/traces"
+    headers = {**auth_header(), "x-langfuse-ingestion-version": "4"}
+    async with session.post(url, json=payload, headers=headers) as response:
+        if response.status not in (200, 201, 202):
+            raise RuntimeError(
+                f"otlp push failed: {response.status} {await response.text()}"
+            )
+    batch = [
+        {
+            "id": score["event_id"],
+            "type": score["type"],
+            "timestamp": "2026-01-01T00:00:00.000Z",
+            "body": score["body"],
+        }
+        for score in SCORES
+    ]
     status, body = await request(
         session, host, "POST", "/api/public/ingestion", {"batch": batch}
     )
@@ -397,117 +573,91 @@ async def ingest_traces(session: aiohttp.ClientSession, host: str) -> None:
 
 
 async def wait_for_traces(session: aiohttp.ClientSession, host: str) -> None:
-    """Poll until every ingested trace is queryable.
+    """Poll until every ingested observation is queryable.
 
-    Ingestion is queued through Redis and written to ClickHouse by the worker
-    container, so the traces are not readable the moment the POST returns.
+    OTLP spans are queued through Redis and written to ClickHouse by the
+    worker container, so they are not readable the moment the POST returns.
 
     Args:
         session (aiohttp.ClientSession): shared HTTP session.
         host (str): Langfuse base URL.
 
     Raises:
-        RuntimeError: the traces never landed.
+        RuntimeError: the observations never landed.
     """
-    wanted = {str(spec["id"]) for spec in TRACES}
+    wanted = {str(spec["root"]) for spec in TRACES}
+    wanted.update(str(spec["id"]) for spec in OBSERVATIONS)
     for _ in range(POLL_ATTEMPTS):
         status, body = await request(
-            session, host, "GET", "/api/public/traces", None, {"limit": "100"}
+            session,
+            host,
+            "GET",
+            "/api/public/v2/observations",
+            None,
+            {"limit": "100"},
         )
         if status == 200 and isinstance(body, dict):
             have = {row.get("id") for row in body.get("data", [])}
             missing = wanted - have
             if not missing:
                 return
-            print(f"waiting for traces: {sorted(missing)}", file=sys.stderr)
-        await asyncio.sleep(POLL_DELAY)
-    raise RuntimeError("ingested traces never became queryable")
-
-
-async def wait_for_observations(
-    session: aiohttp.ClientSession, host: str
-) -> None:
-    """Poll until the ingested observations and score reach the trace.
-
-    Observations travel the same async queue as traces but are joined onto the
-    trace document later, so a trace can be readable while still reporting an
-    empty `observations` array.
-
-    Args:
-        session (aiohttp.ClientSession): shared HTTP session.
-        host (str): Langfuse base URL.
-
-    Raises:
-        RuntimeError: the observations never appeared on the trace.
-    """
-    wanted = {str(o["body"]["id"]) for o in OBSERVATIONS}
-    for _ in range(POLL_ATTEMPTS):
-        status, body = await request(
-            session, host, "GET", "/api/public/traces/trace-alpha"
-        )
-        if status == 200 and isinstance(body, dict):
-            have = {
-                row.get("id")
-                for row in body.get("observations", [])
-                if isinstance(row, dict)
-            }
-            if wanted <= have and body.get("scores"):
-                return
             print(
-                f"waiting for observations: {sorted(wanted - have)}",
-                file=sys.stderr,
+                f"waiting for observations: {sorted(missing)}", file=sys.stderr
             )
         await asyncio.sleep(POLL_DELAY)
-    raise RuntimeError("ingested observations never reached the trace")
+    raise RuntimeError("ingested observations never became queryable")
 
 
-async def seed_dataset_run(session: aiohttp.ClientSession, host: str) -> None:
-    """Link a dataset item to an ingested trace, creating the fixture run.
+async def wait_for_scores(session: aiohttp.ClientSession, host: str) -> None:
+    """Poll until the fixture score is queryable.
 
     Args:
         session (aiohttp.ClientSession): shared HTTP session.
         host (str): Langfuse base URL.
 
     Raises:
-        RuntimeError: the server rejected the dataset run item.
+        RuntimeError: the score never landed.
     """
-    status, body = await request(
-        session,
-        host,
-        "POST",
-        "/api/public/dataset-run-items",
-        {
-            "runName": RUN_NAME,
-            "datasetItemId": RUN_ITEM_ID,
-            "traceId": RUN_TRACE_ID,
-        },
-    )
-    if status not in (200, 201):
-        raise RuntimeError(f"dataset run item failed: {status} {body}")
+    for _ in range(POLL_ATTEMPTS):
+        status, body = await request(
+            session,
+            host,
+            "GET",
+            "/api/public/v3/scores",
+            None,
+            {"traceId": TRACE_ALPHA},
+        )
+        if status == 200 and isinstance(body, dict) and body.get("data"):
+            return
+        print("waiting for scores", file=sys.stderr)
+        await asyncio.sleep(POLL_DELAY)
+    raise RuntimeError("ingested score never became queryable")
 
 
 async def wait_for_run(session: aiohttp.ClientSession, host: str) -> None:
-    """Poll until the fixture dataset run is listed for its dataset.
+    """Poll until the fixture experiment is listed.
 
     Args:
         session (aiohttp.ClientSession): shared HTTP session.
         host (str): Langfuse base URL.
 
     Raises:
-        RuntimeError: the run never appeared.
+        RuntimeError: the experiment never appeared.
     """
-    path = f"/api/public/datasets/{RUN_DATASET}/runs"
     for _ in range(POLL_ATTEMPTS):
         status, body = await request(
-            session, host, "GET", path, None, {"limit": "100"}
+            session,
+            host,
+            "GET",
+            "/api/public/experiments",
+            None,
+            {"fromStartTime": RUN_FROM, "name": RUN_NAME},
         )
-        if status == 200 and isinstance(body, dict):
-            names = {row.get("name") for row in body.get("data", [])}
-            if RUN_NAME in names:
-                return
-            print(f"waiting for dataset run {RUN_NAME}", file=sys.stderr)
+        if status == 200 and isinstance(body, dict) and body.get("data"):
+            return
+        print(f"waiting for experiment {RUN_NAME}", file=sys.stderr)
         await asyncio.sleep(POLL_DELAY)
-    raise RuntimeError("dataset run never became queryable")
+    raise RuntimeError("experiment never became queryable")
 
 
 async def seed(host: str) -> None:
@@ -523,8 +673,7 @@ async def seed(host: str) -> None:
         await seed_dataset_items(session, host)
         await ingest_traces(session, host)
         await wait_for_traces(session, host)
-        await wait_for_observations(session, host)
-        await seed_dataset_run(session, host)
+        await wait_for_scores(session, host)
         await wait_for_run(session, host)
     print(f"LANGFUSE_URL={host}")
 

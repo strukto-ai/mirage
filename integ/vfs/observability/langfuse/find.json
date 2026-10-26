@@ -22,7 +22,7 @@
       "command": "find /lf/traces -type f | sort",
       "expect": {
         "exit": 0,
-        "stdout": "/lf/traces/trace-alpha.json\n/lf/traces/trace-beta.json\n/lf/traces/trace-gamma.json\n",
+        "stdout": "/lf/traces/a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1.json\n/lf/traces/b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2.json\n/lf/traces/c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3.json\n",
         "stderr": ""
       }
     },
@@ -45,10 +45,10 @@
       "targets": [
         "langfuse"
       ],
-      "command": "find /lf/traces -name 'trace-b*' | sort",
+      "command": "find /lf/traces -name 'b2*' | sort",
       "expect": {
         "exit": 0,
-        "stdout": "/lf/traces/trace-beta.json\n",
+        "stdout": "/lf/traces/b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2.json\n",
         "stderr": ""
       }
     },

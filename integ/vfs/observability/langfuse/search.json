@@ -9,7 +9,7 @@
       "command": "grep -r checkout-flow /lf/traces | cut -d: -f1",
       "expect": {
         "exit": 0,
-        "stdout": "/lf/traces/trace-alpha.json\n",
+        "stdout": "/lf/traces/a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1.json\n/lf/traces/a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1.json\n/lf/traces/a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1.json\n",
         "stderr": ""
       }
     },
@@ -22,7 +22,7 @@
       "command": "rg checkout-flow /lf/traces | cut -d: -f1",
       "expect": {
         "exit": 0,
-        "stdout": "/lf/traces/trace-alpha.json\n",
+        "stdout": "/lf/traces/a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1.json\n/lf/traces/a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1.json\n/lf/traces/a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1.json\n",
         "stderr": ""
       }
     },
@@ -48,7 +48,7 @@
       "command": "rg -l gpt-4o-mini /lf/traces",
       "expect": {
         "exit": 0,
-        "stdout": "/lf/traces/trace-alpha.json\n",
+        "stdout": "/lf/traces/a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1.json\n",
         "stderr": ""
       }
     },
@@ -61,7 +61,7 @@
       "command": "grep -rl gpt-4o-mini /lf/traces",
       "expect": {
         "exit": 0,
-        "stdout": "/lf/traces/trace-alpha.json\n",
+        "stdout": "/lf/traces/a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1.json\n",
         "stderr": ""
       }
     },
@@ -74,7 +74,7 @@
       "command": "grep -rn gpt-4o-mini /lf/traces | cut -d: -f1 | sort -u",
       "expect": {
         "exit": 0,
-        "stdout": "/lf/traces/trace-alpha.json\n",
+        "stdout": "/lf/traces/a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1.json\n",
         "stderr": ""
       }
     },
@@ -87,7 +87,7 @@
       "command": "grep -rl checkout-flow /lf/sessions",
       "expect": {
         "exit": 0,
-        "stdout": "/lf/sessions/session-one/trace-alpha.json\n",
+        "stdout": "/lf/sessions/session-one/a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1.json\n",
         "stderr": ""
       }
     },
@@ -100,7 +100,7 @@
       "command": "rg checkout-flow /lf/traces /lf/sessions | cut -d: -f1 | sort -u",
       "expect": {
         "exit": 0,
-        "stdout": "/lf/sessions/session-one/trace-alpha.json\n/lf/traces/trace-alpha.json\n",
+        "stdout": "/lf/sessions/session-one/a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1.json\n/lf/traces/a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1.json\n",
         "stderr": ""
       }
     },
@@ -126,7 +126,7 @@
       "command": "grep -r checkout-flow /lf/traces /lf/sessions | cut -d: -f1 | sort -u",
       "expect": {
         "exit": 0,
-        "stdout": "/lf/sessions/session-one/trace-alpha.json\n/lf/traces/trace-alpha.json\n",
+        "stdout": "/lf/sessions/session-one/a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1.json\n/lf/traces/a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1.json\n",
         "stderr": ""
       }
     },
@@ -139,7 +139,7 @@
       "command": "rg checkout-flow /lf/traces /lf/traces | cut -d: -f1",
       "expect": {
         "exit": 0,
-        "stdout": "/lf/traces/trace-alpha.json\n/lf/traces/trace-alpha.json\n",
+        "stdout": "/lf/traces/a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1.json\n/lf/traces/a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1.json\n/lf/traces/a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1.json\n/lf/traces/a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1.json\n/lf/traces/a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1.json\n/lf/traces/a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1.json\n",
         "stderr": ""
       }
     },

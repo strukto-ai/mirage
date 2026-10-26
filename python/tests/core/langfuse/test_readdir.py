@@ -61,7 +61,7 @@ async def test_partial_trace_page_serves_child_stats_without_refetch(config):
     with patch(
         "mirage.core.langfuse.readdir.fetch_traces",
         new_callable=AsyncMock,
-        return_value=[{"id": "t1"}, {"id": "t2"}],
+        return_value=[{"traceId": "t1"}, {"traceId": "t2"}],
     ) as fetch:
         paths, _ = await ws.dispatch("readdir", parent)
         for path in paths:
@@ -88,7 +88,7 @@ async def test_workspace_long_listing_fetches_a_full_trace_page_once():
         with patch(
             "mirage.core.langfuse.readdir.fetch_traces",
             new_callable=AsyncMock,
-            return_value=[{"id": "t1"}, {"id": "t2"}],
+            return_value=[{"traceId": "t1"}, {"traceId": "t2"}],
         ) as fetch:
             result = await ws.shell("ls -l /nested/lf/traces")
             assert result.exit_code == 0
@@ -113,8 +113,8 @@ async def test_readdir_traces(accessor):
         "mirage.core.langfuse.readdir.fetch_traces",
         new_callable=AsyncMock,
         return_value=[
-            {"id": "abc123", "name": "chat"},
-            {"id": "def456", "name": "search"},
+            {"traceId": "abc123", "name": "chat"},
+            {"traceId": "def456", "name": "search"},
         ],
     ):
         result = await readdir(
@@ -133,7 +133,7 @@ async def test_readdir_sessions(accessor):
     with patch(
         "mirage.core.langfuse.readdir.fetch_sessions",
         new_callable=AsyncMock,
-        return_value=[{"id": "session-1"}, {"id": "session-2"}],
+        return_value=["session-1", "session-2"],
     ):
         result = await readdir(
             accessor,
@@ -277,7 +277,7 @@ async def test_readdir_prompt_versions(accessor):
 async def test_readdir_traces_applies_no_window_by_default(accessor):
     # An implicit rolling window would hide traces that read() serves, so an
     # unset default_from_timestamp must not narrow the listing.
-    fake = AsyncMock(return_value=[{"id": "old-trace"}])
+    fake = AsyncMock(return_value=[{"traceId": "old-trace"}])
     with patch("mirage.core.langfuse.readdir.fetch_traces", fake):
         result = await readdir(
             accessor,
@@ -346,24 +346,28 @@ async def test_a_bounded_trace_listing_is_not_cached_as_the_directory(knobs):
     """A full page or a set window leaves older traces out, so the
     listing must not become the index's proof that they are absent."""
     accessor = _bounded_accessor(**knobs)
-    traces = [{"id": "t1"}, {"id": "t2"}]
+    traces = [{"traceId": "t1"}, {"traceId": "t2"}]
     result = await _list_traces_dir(accessor, traces)
     assert _names(result) == ["t1.json", "t2.json"]
     assert result.partial is True
 
 
 @pytest.mark.asyncio
-async def test_a_trace_listing_short_of_the_limit_is_the_directory():
+async def test_a_trace_listing_short_of_the_limit_is_not_the_directory():
+    """A trace whose root observation never arrived is absent from any
+    page, so even a short listing cannot prove a trace missing."""
     accessor = _bounded_accessor(default_trace_limit=3)
-    result = await _list_traces_dir(accessor, [{"id": "t1"}, {"id": "t2"}])
-    assert result.partial is False
+    result = await _list_traces_dir(
+        accessor, [{"traceId": "t1"}, {"traceId": "t2"}]
+    )
+    assert result.partial is True
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "path, fetch, rows",
     [
-        ("/sessions", "fetch_sessions", [{"id": "session-1"}]),
+        ("/sessions", "fetch_sessions", ["session-1"]),
         (
             "/prompts",
             "fetch_prompts",

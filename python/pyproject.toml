@@ -132,7 +132,7 @@ aws-sm   = ["aioboto3>=15.5.0", "botocore>=1.40.61"]
 # --- data ---
 
 # --- observability ---
-langfuse = ["langfuse>=4.2.0"]
+langfuse = ["langfuse>=5.0.4"]
 
 # --- chroma ---
 # thin HTTP-only client; the accessor uses AsyncHttpClient exclusively

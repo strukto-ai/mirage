@@ -27,14 +27,22 @@ import {
 } from './client.ts'
 import { detectScope } from './scope.ts'
 
+function inSession(trace: Record<string, unknown>, sessionId: string): boolean {
+  const observations = Array.isArray(trace.observations)
+    ? (trace.observations as Record<string, unknown>[])
+    : []
+  const roots = [trace, ...observations.filter((o) => o.isRootObservation === true)]
+  return roots.some((r) => r.sessionId === sessionId)
+}
+
 /**
  * The trace a trace path names, or ENOENT.
  *
  * A trace is addressed by its id whatever the listing holds: the listing
  * stops at `defaultTraceLimit` and `defaultFromTimestamp`, and an older
- * trace is still the project's. Under `sessions/<id>/` the trace must be
- * that session's, so a path cannot name another session's trace. Mirrors
- * python's `fetch_trace_file`.
+ * trace is still the project's. Under `sessions/<id>/` the trace must have a
+ * root observation in that session, the rule its listing uses, so a path
+ * cannot name another session's trace. Mirrors python's `fetch_trace_file`.
  */
 export async function fetchTraceFile(
   accessor: LangfuseAccessor,
@@ -43,7 +51,7 @@ export async function fetchTraceFile(
 ): Promise<Record<string, unknown>> {
   const data = await fetchOrEnoent(fetchTrace(accessor.transport, match.slots.trace_id ?? ''), path)
   const sessionId = match.slots.session_id
-  if (sessionId !== undefined && data.sessionId !== sessionId) throw enoent(path)
+  if (sessionId !== undefined && !inSession(data, sessionId)) throw enoent(path)
   return data
 }
 
@@ -87,11 +95,11 @@ async function readDatasetRun(
   match: ScopeMatch,
   path: PathSpec,
 ): Promise<Uint8Array> {
+  const runName = match.slots.run_name ?? ''
   const runs = await fetchOrEnoent(
-    fetchDatasetRuns(accessor.transport, match.slots.dataset_name ?? ''),
+    fetchDatasetRuns(accessor.transport, match.slots.dataset_name ?? '', runName),
     path,
   )
-  const runName = match.slots.run_name ?? ''
   const matched = runs.filter((r) => r.name === runName)
   const first = matched[0]
   if (first === undefined) throw enoent(path)

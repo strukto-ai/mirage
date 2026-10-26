@@ -6,7 +6,7 @@
       "targets": [
         "langfuse"
       ],
-      "command": "jq -r '.observations | length' /lf/traces/trace-alpha.json",
+      "command": "jq -r '.observations | length' /lf/traces/a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1.json",
       "expect": {
         "exit": 0,
         "stdout": "2\n",
@@ -19,7 +19,7 @@
       "targets": [
         "langfuse"
       ],
-      "command": "jq -r '.observations[].name' /lf/traces/trace-alpha.json | sort",
+      "command": "jq -r '.observations[].name' /lf/traces/a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1.json | sort",
       "expect": {
         "exit": 0,
         "stdout": "describe-order\nvalidate-cart\n",
@@ -32,7 +32,7 @@
       "targets": [
         "langfuse"
       ],
-      "command": "jq -r '.observations[].type' /lf/traces/trace-alpha.json | sort",
+      "command": "jq -r '.observations[].type' /lf/traces/a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1.json | sort",
       "expect": {
         "exit": 0,
         "stdout": "GENERATION\nSPAN\n",
@@ -45,7 +45,7 @@
       "targets": [
         "langfuse"
       ],
-      "command": "jq -r '.observations[] | select(.type==\"GENERATION\") | .model' /lf/traces/trace-alpha.json",
+      "command": "jq -r '.observations[] | select(.type==\"GENERATION\") | .model' /lf/traces/a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1.json",
       "expect": {
         "exit": 0,
         "stdout": "gpt-4o-mini\n",
@@ -58,10 +58,10 @@
       "targets": [
         "langfuse"
       ],
-      "command": "jq -r '.observations[] | select(.name==\"describe-order\") | .parentObservationId' /lf/traces/trace-alpha.json",
+      "command": "jq -r '.observations[] | select(.name==\"describe-order\") | .parentObservationId' /lf/traces/a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1.json",
       "expect": {
         "exit": 0,
-        "stdout": "obs-span-checkout\n",
+        "stdout": "a1a1a1a1a1a1a101\n",
         "stderr": ""
       }
     },
@@ -71,7 +71,7 @@
       "targets": [
         "langfuse"
       ],
-      "command": "jq -r '.observations[] | select(.name==\"validate-cart\") | .input.items' /lf/traces/trace-alpha.json",
+      "command": "jq -r '.observations[] | select(.name==\"validate-cart\") | .input | fromjson | .items' /lf/traces/a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1.json",
       "expect": {
         "exit": 0,
         "stdout": "2\n",
@@ -84,7 +84,7 @@
       "targets": [
         "langfuse"
       ],
-      "command": "jq -r '.observations[] | select(.type==\"GENERATION\") | .output.content' /lf/traces/trace-alpha.json",
+      "command": "jq -r '.observations[] | select(.type==\"GENERATION\") | .output | fromjson | .content' /lf/traces/a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1.json",
       "expect": {
         "exit": 0,
         "stdout": "two items, confirmed\n",
@@ -97,7 +97,7 @@
       "targets": [
         "langfuse"
       ],
-      "command": "jq -r '.scores | length' /lf/traces/trace-alpha.json",
+      "command": "jq -r '.scores | length' /lf/traces/a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1.json",
       "expect": {
         "exit": 0,
         "stdout": "1\n",
@@ -110,7 +110,7 @@
       "targets": [
         "langfuse"
       ],
-      "command": "jq -r '.scores[0].name' /lf/traces/trace-alpha.json",
+      "command": "jq -r '.scores[0].name' /lf/traces/a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1.json",
       "expect": {
         "exit": 0,
         "stdout": "helpfulness\n",
@@ -123,7 +123,7 @@
       "targets": [
         "langfuse"
       ],
-      "command": "jq -r '.scores[0].value' /lf/traces/trace-alpha.json",
+      "command": "jq -r '.scores[0].value' /lf/traces/a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1.json",
       "expect": {
         "exit": 0,
         "stdout": "0.75\n",
@@ -136,7 +136,7 @@
       "targets": [
         "langfuse"
       ],
-      "command": "jq -r '.scores[0].comment' /lf/traces/trace-alpha.json",
+      "command": "jq -r '.scores[0].comment' /lf/traces/a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1.json",
       "expect": {
         "exit": 0,
         "stdout": "clear summary\n",
@@ -149,7 +149,7 @@
       "targets": [
         "langfuse"
       ],
-      "command": "jq -r '.scores[0].dataType' /lf/traces/trace-alpha.json",
+      "command": "jq -r '.scores[0].dataType' /lf/traces/a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1.json",
       "expect": {
         "exit": 0,
         "stdout": "NUMERIC\n",
@@ -162,10 +162,10 @@
       "targets": [
         "langfuse"
       ],
-      "command": "jq -r '.latency' /lf/traces/trace-alpha.json",
+      "command": "jq -r '.latency' /lf/traces/a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1.json",
       "expect": {
         "exit": 0,
-        "stdout": "1\n",
+        "stdout": "3\n",
         "stderr": ""
       }
     },
@@ -175,7 +175,7 @@
       "targets": [
         "langfuse"
       ],
-      "command": "jq -r '.observations | length' /lf/traces/trace-beta.json",
+      "command": "jq -r '.observations | length' /lf/traces/b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2.json",
       "expect": {
         "exit": 0,
         "stdout": "0\n",
@@ -188,7 +188,7 @@
       "targets": [
         "langfuse"
       ],
-      "command": "jq -r '.scores | length' /lf/traces/trace-beta.json",
+      "command": "jq -r '.scores | length' /lf/traces/b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2.json",
       "expect": {
         "exit": 0,
         "stdout": "0\n",
@@ -201,7 +201,7 @@
       "targets": [
         "langfuse"
       ],
-      "command": "grep -c obs-span-checkout /lf/traces/trace-alpha.json",
+      "command": "grep -c a1a1a1a1a1a1a101 /lf/traces/a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1.json",
       "expect": {
         "exit": 0,
         "stdout": "2\n",

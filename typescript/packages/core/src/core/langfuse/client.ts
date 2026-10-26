@@ -134,77 +134,105 @@ function asObject(value: unknown): Record<string, unknown> {
   return {}
 }
 
-export interface FetchTracesOptions {
-  limit?: number
-  name?: string | null
-  userId?: string | null
-  sessionId?: string | null
-  orderBy?: string | null
-  fromTimestamp?: string | null
-  toTimestamp?: string | null
+// A root observation stands for its trace: v4 keeps no trace entity, and the
+// root carries the trace's name, user, session and tags.
+const TRACE_FIELDS = 'core,basic'
+const OBSERVATION_FIELDS = 'core,basic,time,io,metadata,model,usage,prompt,metrics,trace_context'
+const SCORE_FIELDS = 'details,subject'
+const EXPERIMENT_FIELDS = 'core,metadata,scores'
+// The experiments endpoint requires a lower bound; the epoch asks for all.
+const EXPERIMENTS_FROM = '1970-01-01T00:00:00.000Z'
+const PAGE_SIZE = 100
+
+async function collect(
+  transport: LangfuseTransport,
+  path: string,
+  query: Record<string, string | number | undefined>,
+  limit?: number,
+): Promise<Record<string, unknown>[]> {
+  const out: Record<string, unknown>[] = []
+  let cursor: string | undefined
+  while (limit === undefined || out.length < limit) {
+    const size = limit === undefined ? PAGE_SIZE : Math.min(PAGE_SIZE, limit - out.length)
+    const body = await transport.request(path, { ...query, limit: size, cursor })
+    const data = getData(body)
+    for (const item of data) out.push(item)
+    const next = asObject(asObject(body).meta).cursor
+    cursor = typeof next === 'string' && next !== '' ? next : undefined
+    if (data.length === 0 || cursor === undefined) break
+  }
+  return out
 }
 
-const TRACES_PAGE_SIZE = 100
+export interface FetchTracesOptions {
+  limit?: number
+  sessionId?: string | null | undefined
+  fromTimestamp?: string | null | undefined
+}
 
+/** The root observations of the newest traces, one or more per trace. */
 export async function fetchTraces(
   transport: LangfuseTransport,
   opts: FetchTracesOptions = {},
 ): Promise<Record<string, unknown>[]> {
-  const total = opts.limit ?? TRACES_PAGE_SIZE
-  const base: Record<string, string | number | undefined> = {}
-  if (opts.name !== undefined && opts.name !== null && opts.name !== '') base.name = opts.name
-  if (opts.userId !== undefined && opts.userId !== null && opts.userId !== '') {
-    base.userId = opts.userId
+  const query: Record<string, string | number | undefined> = {
+    fields: TRACE_FIELDS,
+    isRootObservation: 'true',
   }
   if (opts.sessionId !== undefined && opts.sessionId !== null && opts.sessionId !== '') {
-    base.sessionId = opts.sessionId
-  }
-  if (opts.orderBy !== undefined && opts.orderBy !== null && opts.orderBy !== '') {
-    base.orderBy = opts.orderBy
+    query.sessionId = opts.sessionId
   }
   if (
     opts.fromTimestamp !== undefined &&
     opts.fromTimestamp !== null &&
     opts.fromTimestamp !== ''
   ) {
-    base.fromTimestamp = opts.fromTimestamp
+    query.fromStartTime = opts.fromTimestamp
   }
-  if (opts.toTimestamp !== undefined && opts.toTimestamp !== null && opts.toTimestamp !== '') {
-    base.toTimestamp = opts.toTimestamp
-  }
-  const out: Record<string, unknown>[] = []
-  let page = 1
-  while (out.length < total) {
-    const remaining = total - out.length
-    const pageLimit = Math.min(TRACES_PAGE_SIZE, remaining)
-    const body = await transport.request('/api/public/traces', {
-      ...base,
-      limit: pageLimit,
-      page,
-    })
-    const data = getData(body)
-    if (data.length === 0) break
-    for (const item of data) out.push(item)
-    if (data.length < pageLimit) break
-    page += 1
-  }
-  return out
+  return collect(transport, '/api/public/v2/observations', query, opts.limit ?? PAGE_SIZE)
 }
 
+function startTime(observation: Record<string, unknown>): string {
+  return typeof observation.startTime === 'string' ? observation.startTime : ''
+}
+
+/** One trace: its root observation with the rest and its scores added. */
 export async function fetchTrace(
   transport: LangfuseTransport,
   traceId: string,
 ): Promise<Record<string, unknown>> {
-  const body = await transport.request(`/api/public/traces/${encodeURIComponent(traceId)}`)
-  return asObject(body)
+  const observations = await collect(transport, '/api/public/v2/observations', {
+    traceId,
+    fields: OBSERVATION_FIELDS,
+  })
+  const roots = observations.filter((o) => o.isRootObservation === true)
+  const candidates = roots.length > 0 ? roots : observations
+  const root = candidates.reduce<Record<string, unknown> | undefined>(
+    (best, o) => (best === undefined || startTime(o) < startTime(best) ? o : best),
+    undefined,
+  )
+  if (root === undefined) {
+    throw new LangfuseApiError(`trace ${traceId} not found`, [], 404)
+  }
+  const scores = await collect(transport, '/api/public/v3/scores', {
+    traceId,
+    fields: SCORE_FIELDS,
+  })
+  return { ...root, observations: observations.filter((o) => o !== root), scores }
 }
 
+/** The distinct sessions of the newest traces, newest first. */
 export async function fetchSessions(
   transport: LangfuseTransport,
-  opts: { limit?: number } = {},
-): Promise<Record<string, unknown>[]> {
-  const body = await transport.request('/api/public/sessions', { limit: opts.limit ?? 100 })
-  return getData(body)
+  opts: { limit?: number; fromTimestamp?: string | null | undefined } = {},
+): Promise<string[]> {
+  const roots = await fetchTraces(transport, opts)
+  const ids = new Set<string>()
+  for (const root of roots) {
+    const id = root.sessionId
+    if (typeof id === 'string' && id !== '') ids.add(id)
+  }
+  return [...ids]
 }
 
 export async function fetchPrompts(
@@ -244,14 +272,26 @@ export async function fetchDatasetItems(
   return getData(body)
 }
 
+/** The experiments run on a dataset, or only the one named `runName`. */
 export async function fetchDatasetRuns(
   transport: LangfuseTransport,
   datasetName: string,
-  opts: { limit?: number } = {},
+  runName?: string,
 ): Promise<Record<string, unknown>[]> {
-  const body = await transport.request(
-    `/api/public/datasets/${encodeURIComponent(datasetName)}/runs`,
-    { limit: opts.limit ?? 100 },
+  const dataset = asObject(
+    await transport.request(`/api/public/v2/datasets/${encodeURIComponent(datasetName)}`),
   )
-  return getData(body)
+  const datasetId = typeof dataset.id === 'string' ? dataset.id : ''
+  const query: Record<string, string | number | undefined> = {
+    fromStartTime: EXPERIMENTS_FROM,
+    datasetId,
+    fields: EXPERIMENT_FIELDS,
+  }
+  // The name parameter splits on commas; the filter matches whole names.
+  if (runName !== undefined) {
+    query.filter = JSON.stringify([
+      { type: 'string', column: 'name', operator: '=', value: runName },
+    ])
+  }
+  return collect(transport, '/api/public/experiments', query)
 }

@@ -50,11 +50,11 @@
       "expect": { "exit": 0, "stdout": "run-alpha\n", "stderr": "" }
     },
     {
-      "id": "lf_dataset_run_dataset_name",
+      "id": "lf_dataset_run_item_count",
       "seq": 600067,
       "targets": ["langfuse"],
-      "command": "jq -r '.datasetName' /lf/datasets/eval-basic/runs/run-alpha.jsonl",
-      "expect": { "exit": 0, "stdout": "eval-basic\n", "stderr": "" }
+      "command": "jq -r '.itemCount' /lf/datasets/eval-basic/runs/run-alpha.jsonl",
+      "expect": { "exit": 0, "stdout": "1\n", "stderr": "" }
     },
     {
       "id": "lf_dataset_run_metadata",
