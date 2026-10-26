@@ -142,6 +142,39 @@ describe('mount-root protection — mv', () => {
     expect((await ws.shell('ls /r2')).stdoutText).toBe('a\nb\n')
     await ws.close()
   })
+
+  it('mv across mounts leaves a nested mount root', async () => {
+    // GNU 9.7: the copy takes the nested mount's files and removes them,
+    // but its mountpoint is busy, so it stays and mv exits 1.
+    const ws = new Workspace(
+      {
+        '/': new RAMVFS(),
+        '/data': new RAMVFS(),
+        '/data/dir/inner': new RAMVFS(),
+        '/ram': new RAMVFS(),
+      },
+      { mode: MountMode.WRITE },
+    )
+    await ws.shell('mkdir -p /data/dir && echo f > /data/dir/f')
+    await ws.shell('echo i > /data/dir/inner/i')
+    const r = await ws.shell('mv -v /data/dir /ram/')
+    expect(r.exitCode).toBe(1)
+    // No `removed directory` line: the folders holding the root stay.
+    expect(r.stdoutText).toBe(
+      "created directory '/ram/dir'\n" +
+        "copied '/data/dir/f' -> '/ram/dir/f'\n" +
+        "created directory '/ram/dir/inner'\n" +
+        "copied '/data/dir/inner/i' -> '/ram/dir/inner/i'\n" +
+        "removed '/data/dir/inner/i'\n" +
+        "removed '/data/dir/f'\n",
+    )
+    expect(r.stderrText).toBe("mv: cannot remove '/data/dir/inner': Device or resource busy\n")
+    expect((await ws.shell('cat /ram/dir/f /ram/dir/inner/i')).stdoutText).toBe('f\ni\n')
+    expect((await ws.shell('ls /data/dir')).stdoutText).toBe('inner\n')
+    await ws.shell('echo later > /data/dir/inner/later')
+    expect((await ws.shell('ls /data/dir/inner')).stdoutText).toBe('later\n')
+    await ws.close()
+  })
 })
 
 describe('mount-root protection — mkdir', () => {

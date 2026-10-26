@@ -45,6 +45,7 @@ import {
   isFsError,
   isLandedMove,
   isStaleWrite,
+  strerrorOf,
   virtualOf,
   withInner,
 } from '../../../errors/fs.ts'
@@ -192,11 +193,30 @@ function moveError(src: PathSpec, target: PathSpec, reason: string): string {
   return `mv: cannot move '${src.rawPath}' to '${target.rawPath}': ${reason}`
 }
 
+// Remove one copied entry; why it stayed, null once it is gone. Mirrors
+// Python's _remove_entry.
+async function removeEntry(
+  strategy: PrimitiveMove,
+  stat: StatFn,
+  spec: PathSpec,
+  isDir: boolean,
+): Promise<string | null> {
+  try {
+    if (isDir) await strategy.rmdir(spec)
+    else await strategy.unlink(spec)
+  } catch (err) {
+    if (!isFsError(err)) throw err
+    if (!(await entryGone(strategy, stat, spec, isDir))) return strerrorOf(err)
+  }
+  return null
+}
+
 // Remove copied source entries children first, GNU rm style. A failed
 // removal is reported per entry ('mv: cannot remove ...') and the remaining
 // entries are still attempted; directories with a failed descendant are
 // skipped silently like GNU, which never reports the not-empty ancestors of
-// a file it could not remove. Returns whether the source is fully gone.
+// a file it could not remove. A mount root is busy: its files go, the root
+// stays (coreutils 9.7). Returns whether the source is fully gone.
 async function removeEntries(
   strategy: PrimitiveMove,
   stat: StatFn,
@@ -204,6 +224,7 @@ async function removeEntries(
   entries: { path: string; kind: FileType }[],
   errors: string[],
   lines?: string[],
+  mountRoot?: (path: string) => boolean,
 ): Promise<boolean> {
   const failed: string[] = []
   for (let i = entries.length - 1; i >= 0; i -= 1) {
@@ -216,16 +237,14 @@ async function removeEntries(
       continue
     }
     const spec = descendantPath(src, node.path)
-    try {
-      if (isDir) await strategy.rmdir(spec)
-      else await strategy.unlink(spec)
-    } catch (err) {
-      if (!isFsError(err)) throw err
-      if (!(await entryGone(strategy, stat, spec, isDir))) {
-        errors.push(`mv: cannot remove '${spec.rawPath}': ${String(fsStrerror(err))}`)
-        failed.push(base)
-        continue
-      }
+    const reason =
+      isDir && mountRoot?.(spec.virtual) === true
+        ? posixPhrase('EBUSY')
+        : await removeEntry(strategy, stat, spec, isDir)
+    if (reason !== null) {
+      errors.push(`mv: cannot remove '${spec.rawPath}': ${reason}`)
+      failed.push(base)
+      continue
     }
     lines?.push(`removed ${isDir ? 'directory ' : ''}'${spec.rawPath}'`)
   }
@@ -348,7 +367,8 @@ export async function mvGeneric(
   // Where -i reads its answers.
   stdin?: ByteSource | null,
   // Whether a path is a mount root, which a move can neither replace nor
-  // rename aside; undefined outside a workspace.
+  // rename aside, nor remove from a source moved across mounts; undefined
+  // outside a workspace.
   mountRoot?: (path: string) => boolean,
   // The command's dispatcher, which lets a source's mount refuse a tree
   // copied across mounts; undefined outside a workspace.
@@ -621,7 +641,15 @@ export async function mvGeneric(
       // GNU keeps the whole source tree when any copy failed; the
       // destination keeps the entries that landed.
       if (!copiedAll) continue
-      const removedAll = await removeEntries(strategy, stat, src, entries, errors, verbose)
+      const removedAll = await removeEntries(
+        strategy,
+        stat,
+        src,
+        entries,
+        errors,
+        verbose,
+        mountRoot,
+      )
       // GNU leaves the copied destination in place and reports the source
       // entries it could not remove.
       if (!removedAll) continue

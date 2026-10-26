@@ -41,6 +41,20 @@
       }
     },
     {
+      "id": "boundary_mv_across_leaves_the_nested_mount_root",
+      "seq": 923203,
+      "targets": [
+        "ram-commands"
+      ],
+      "command": "mv /vault/d /scratch/vm; echo rc=$?; ls /vault/d; ls /vault/d/inner; find /scratch/vm; mv /scratch/vm/inner/sec.txt /vault/d/inner/ && mkdir /vault/d/sub && mv /scratch/vm/sub/top.txt /vault/d/sub/ && rm -r /scratch/vm",
+      "expect": {
+        "exit": 0,
+        "stdout": "rc=1\ninner\n/scratch/vm\n/scratch/vm/inner\n/scratch/vm/inner/sec.txt\n/scratch/vm/sub\n/scratch/vm/sub/top.txt\n",
+        "stderr": "mv: cannot remove '/vault/d/inner': Device or resource busy\n"
+      },
+      "note": "GNU 9.7: across devices mv copies the nested mount's files and removes them, but the mountpoint is busy, so it stays and mv exits 1."
+    },
+    {
       "id": "boundary_hidden_mount_ls",
       "seq": 923210,
       "targets": [

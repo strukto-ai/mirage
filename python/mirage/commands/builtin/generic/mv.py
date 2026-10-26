@@ -58,7 +58,7 @@ from mirage.commands.errors import UsageError
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.usage import usage_hint
 from mirage.errors.constants import FS_ERRORS
-from mirage.errors.fs import fs_strerror, inner_suffix, with_inner
+from mirage.errors.fs import fs_strerror, inner_suffix, strerror_of, with_inner
 from mirage.errors.posix import posix_phrase
 from mirage.errors.types import FsCondition, StaleWriteError
 from mirage.io.types import ByteSource, IOResult
@@ -220,12 +220,32 @@ def _move_error(src: PathSpec, target: PathSpec, reason: str | None) -> str:
     return f"mv: cannot move '{src.raw_path}' to '{target.raw_path}': {reason}"
 
 
+async def _remove_entry(
+    strategy: PrimitiveMove, stat: StatFn, entry: PathSpec, is_dir: bool
+) -> str | None:
+    """Remove one copied entry; why it stayed, None once it is gone.
+
+    Args:
+        strategy (PrimitiveMove): Transfer primitives for both mounts.
+        stat (StatFn): Stats a path; raises when missing.
+        entry (PathSpec): The entry to remove.
+        is_dir (bool): Whether the entry is a directory.
+    """
+    try:
+        await (strategy.rmdir if is_dir else strategy.unlink)(entry)
+    except FS_ERRORS as exc:
+        if not await _entry_gone(strategy, stat, entry, is_dir):
+            return strerror_of(exc)
+    return None
+
+
 async def _remove_entries(
     strategy: PrimitiveMove,
     stat: StatFn,
     entries: list[tuple[PathSpec, FileType]],
     errors: list[str],
     lines: list[str] | None = None,
+    mount_root: MountIsRoot | None = None,
 ) -> bool:
     """Remove copied source entries children first, GNU rm style.
 
@@ -244,6 +264,8 @@ async def _remove_entries(
         errors (list[str]): Collected stderr lines, appended in place.
         lines (list[str] | None): Verbose sink for GNU's ``removed``
             lines; None keeps the removal silent.
+        mount_root (MountIsRoot | None): Whether a path is a mount root,
+            which is busy: its files go, the root stays (coreutils 9.7).
 
     Returns:
         bool: Whether the source is fully gone.
@@ -255,15 +277,15 @@ async def _remove_entries(
         if is_dir and any(f.startswith(base + "/") for f in failed):
             failed.append(base)
             continue
-        try:
-            await (strategy.rmdir if is_dir else strategy.unlink)(entry)
-        except FS_ERRORS as exc:
-            if not await _entry_gone(strategy, stat, entry, is_dir):
-                errors.append(
-                    f"mv: cannot remove '{entry.raw_path}': {fs_strerror(exc)}"
-                )
-                failed.append(base)
-                continue
+        reason = (
+            posix_phrase(FsCondition.EBUSY)
+            if is_dir and mount_root is not None and mount_root(entry.virtual)
+            else await _remove_entry(strategy, stat, entry, is_dir)
+        )
+        if reason is not None:
+            errors.append(f"mv: cannot remove '{entry.raw_path}': {reason}")
+            failed.append(base)
+            continue
         if lines is not None:
             noun = "directory " if is_dir else ""
             lines.append(f"removed {noun}'{entry.raw_path}'")
@@ -437,8 +459,9 @@ async def mv_generic(
             source, since a file carries nothing below it to reveal.
         stdin (ByteSource | None): where ``-i`` reads its answers.
         mount_root (MountIsRoot | None): Whether a path is a mount root,
-            which a move can neither replace nor rename aside; None
-            outside a workspace.
+            which a move can neither replace nor rename aside, nor
+            remove from a source moved across mounts; None outside a
+            workspace.
         dispatch (DispatchFn | None): the command's dispatcher, which
             lets a source's mount refuse a tree copied across mounts;
             None outside a workspace.
@@ -769,7 +792,7 @@ async def mv_generic(
                 # the destination keeps the entries that landed.
                 continue
             removed_all = await _remove_entries(
-                strategy, stat, entries, errors, verbose
+                strategy, stat, entries, errors, verbose, mount_root
             )
             if not removed_all:
                 # GNU leaves the copied destination in place and reports

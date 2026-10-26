@@ -221,6 +221,43 @@ def test_mv_of_several_sources_into_a_mount_root_is_allowed():
     _run(go())
 
 
+def test_mv_across_mounts_leaves_a_nested_mount_root():
+    # GNU 9.7: the copy takes the nested mount's files and removes them,
+    # but its mountpoint is busy, so it stays and mv exits 1.
+    async def go():
+        ws = Workspace(
+            {
+                "/data": (RAMVFS(), MountMode.WRITE),
+                "/data/dir/inner": (RAMVFS(), MountMode.WRITE),
+                "/ram": (RAMVFS(), MountMode.WRITE),
+            }
+        )
+        await _exec(ws, "mkdir -p /data/dir && echo f > /data/dir/f")
+        await _exec(ws, "echo i > /data/dir/inner/i")
+        r = await _exec(ws, "mv -v /data/dir /ram/")
+        assert r.exit_code == 1
+        # No `removed directory` line: the folders holding the root stay.
+        assert r.stdout == (
+            b"created directory '/ram/dir'\n"
+            b"copied '/data/dir/f' -> '/ram/dir/f'\n"
+            b"created directory '/ram/dir/inner'\n"
+            b"copied '/data/dir/inner/i' -> '/ram/dir/inner/i'\n"
+            b"removed '/data/dir/inner/i'\n"
+            b"removed '/data/dir/f'\n"
+        )
+        assert r.stderr == (
+            b"mv: cannot remove '/data/dir/inner': Device or resource busy\n"
+        )
+        assert (await _exec(ws, "cat /ram/dir/f /ram/dir/inner/i")).stdout == (
+            b"f\ni\n"
+        )
+        assert (await _exec(ws, "ls /data/dir")).stdout == b"inner\n"
+        await _exec(ws, "echo later > /data/dir/inner/later")
+        assert (await _exec(ws, "ls /data/dir/inner")).stdout == b"later\n"
+
+    _run(go())
+
+
 # ── mkdir ──────────────────────────────────────────
 
 
