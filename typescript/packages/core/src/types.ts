@@ -341,6 +341,7 @@ export interface LimitInit {
   maxBytes?: number | null
   maxLines?: number | null
   timeoutSeconds?: number | null
+  walkLimit?: number | null
   onExceed?: OnExceed
 }
 
@@ -354,24 +355,37 @@ function minPositive(values: (number | null)[]): number | null {
   return positives.length > 0 ? Math.min(...positives) : null
 }
 
+function tightestWalk(values: (number | null)[]): number | null {
+  const present = values.filter((v): v is number => v !== null)
+  const caps = present.filter((v) => v >= 0)
+  if (caps.length > 0) return Math.min(...caps)
+  return present.length > 0 ? -1 : null
+}
+
 /**
  * A bound on a result: the policy layer's limit arm and the shape
  * every cap config parses into. Carries its fields inline (the Deny
  * precedent: an action is its payload). `kind` is the wire
  * discriminant; `aggr` is the composition law (AND to the tightest
- * per bound, ANY on error mode).
+ * per bound, ANY on error mode) and `layered` the resolution law (each
+ * field from the most specific layer that sets it). `walkLimit` caps the
+ * entries one walk lists on a mount, -1 for no cap.
  */
 export class Limit {
   readonly kind = 'limit' as const
   readonly maxBytes: number | null
   readonly maxLines: number | null
   readonly timeoutSeconds: number | null
-  readonly onExceed: OnExceed
+  readonly walkLimit: number | null
+  // Null until a layer names it, so `layered` can tell an inherited mode
+  // from a chosen one; Python reads `model_fields_set` for the same.
+  private readonly exceed: OnExceed | null
 
   constructor(init: LimitInit = {}) {
     const maxBytes = init.maxBytes ?? null
     const maxLines = init.maxLines ?? null
     const timeoutSeconds = init.timeoutSeconds ?? null
+    const walkLimit = init.walkLimit ?? null
     if (maxBytes !== null && (!Number.isInteger(maxBytes) || maxBytes < 0)) {
       throw new TypeError(`maxBytes must be a non-negative integer, got ${String(maxBytes)}`)
     }
@@ -383,10 +397,44 @@ export class Limit {
         `timeoutSeconds must be a non-negative number, got ${String(timeoutSeconds)}`,
       )
     }
+    if (walkLimit !== null && (!Number.isInteger(walkLimit) || walkLimit < -1)) {
+      throw new TypeError(`walkLimit must be an integer of at least -1, got ${String(walkLimit)}`)
+    }
     this.maxBytes = maxBytes
     this.maxLines = maxLines
     this.timeoutSeconds = timeoutSeconds
-    this.onExceed = init.onExceed ?? OnExceed.TRUNCATE
+    this.walkLimit = walkLimit
+    this.exceed = init.onExceed ?? null
+  }
+
+  get onExceed(): OnExceed {
+    return this.exceed ?? OnExceed.TRUNCATE
+  }
+
+  /** The mode a layer named, null when it inherits one. */
+  get chosenOnExceed(): OnExceed | null {
+    return this.exceed
+  }
+
+  /**
+   * Each field from the first limit that sets it, most specific first: a
+   * layer naming one bound inherits the others from the layers below it.
+   * Returns null when nothing is configured. Mirrors Python's Limit.layered.
+   */
+  static layered(limits: Iterable<Limit | null>): Limit | null {
+    const present = [...limits].filter((s): s is Limit => s !== null)
+    if (present.length === 0) return null
+    const pick = <K extends 'maxBytes' | 'maxLines' | 'timeoutSeconds' | 'walkLimit'>(
+      key: K,
+    ): number | null => present.find((s) => s[key] !== null)?.[key] ?? null
+    const exceed = present.find((s) => s.exceed !== null)?.exceed
+    return new Limit({
+      maxBytes: pick('maxBytes'),
+      maxLines: pick('maxLines'),
+      timeoutSeconds: pick('timeoutSeconds'),
+      walkLimit: pick('walkLimit'),
+      ...(exceed === undefined || exceed === null ? {} : { onExceed: exceed }),
+    })
   }
 
   /**
@@ -410,7 +458,7 @@ export class Limit {
 }
 
 /** Every Limit field that composes; `kind` is the wire discriminant, not a bound. */
-type LimitAggrField = Exclude<keyof Limit, 'kind'>
+type LimitAggrField = Exclude<keyof Limit, 'kind' | 'chosenOnExceed'>
 
 /**
  * Each bound's composition law, keyed by field.
@@ -423,6 +471,7 @@ const LIMIT_AGGR: { [K in LimitAggrField]: (present: readonly Limit[]) => Limit[
   maxBytes: (present) => minBound(present.map((s) => s.maxBytes)),
   maxLines: (present) => minBound(present.map((s) => s.maxLines)),
   timeoutSeconds: (present) => minPositive(present.map((s) => s.timeoutSeconds)),
+  walkLimit: (present) => tightestWalk(present.map((s) => s.walkLimit)),
   onExceed: (present) =>
     present.some((s) => s.onExceed === OnExceed.ERROR) ? OnExceed.ERROR : OnExceed.TRUNCATE,
 }

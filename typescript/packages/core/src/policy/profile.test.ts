@@ -436,7 +436,7 @@ const DOCUMENT = {
     ],
   },
   command_limits: {
-    cat: { max_bytes: 10, max_lines: null, timeout_seconds: null, on_exceed: 'truncate' },
+    cat: { max_bytes: 10, on_exceed: 'truncate' },
   },
   processes: { list: 'workspace', kill: 'workspace', max: null },
   mounts: {

@@ -216,7 +216,7 @@ async def test_fan_out_find_has_limit_set():
     ws = Workspace({"/a/": a}, mode=MountMode.WRITE)
     r = await ws.shell("find /")
     assert r.producer is not None
-    resolved = resolve_producer(r.producer, ws._registry.limit_override)
+    resolved = resolve_producer(r.producer, ws._registry.limit_mount)
     assert resolved is not None
     assert resolved.timeout_seconds is not None
 
@@ -238,7 +238,7 @@ async def test_cross_mount_honors_per_mount_timeout_override():
     )
     r = await ws.shell("cat /a/x.txt /b/y.txt")
     assert r.producer is not None
-    resolved = resolve_producer(r.producer, ws._registry.limit_override)
+    resolved = resolve_producer(r.producer, ws._registry.limit_mount)
     assert resolved is not None
     assert resolved.timeout_seconds == 3.0
 
@@ -264,7 +264,7 @@ async def test_fan_out_uses_tightest_timeout_among_mounts():
     )
     r = await ws.shell("find /p")
     assert r.producer is not None
-    resolved = resolve_producer(r.producer, ws._registry.limit_override)
+    resolved = resolve_producer(r.producer, ws._registry.limit_mount)
     assert resolved is not None
     assert resolved.timeout_seconds == 2.0
 
@@ -294,7 +294,7 @@ async def test_fan_out_tightest_when_parent_is_tighter():
     )
     r = await ws.shell("find /p")
     assert r.producer is not None
-    resolved = resolve_producer(r.producer, ws._registry.limit_override)
+    resolved = resolve_producer(r.producer, ws._registry.limit_mount)
     assert resolved is not None
     assert resolved.timeout_seconds == 2.0
 
@@ -445,7 +445,7 @@ async def test_cross_mount_cat_aggregates_tightest_limit():
         mode=MountMode.WRITE,
     )
     r = await ws.shell("cat /a/x.txt /b/y.txt")
-    resolved = resolve_producer(r.producer, ws._registry.limit_override)
+    resolved = resolve_producer(r.producer, ws._registry.limit_mount)
     assert resolved.max_lines == 1
     assert resolved.on_exceed is OnExceed.ERROR
 

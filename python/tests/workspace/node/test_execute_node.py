@@ -96,7 +96,13 @@ def _mock_registry():
 
 
 async def _sort_run_command(
-    name, paths, texts, flag_kwargs, context=Context(), limit_override=None
+    name,
+    paths,
+    texts,
+    flag_kwargs,
+    context=Context(),
+    workspace_limits=None,
+    profile_limits=None,
 ):
     """Mock run_command that sorts stdin for sort command."""
     if name == "sort" and context.stdin:

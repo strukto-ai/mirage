@@ -654,7 +654,7 @@ async def _dispatch_command_body(
         ):
             bound = resolve_producer(
                 io.producer,
-                registry.limit_override,
+                registry.limit_mount,
                 registry.command_limits,
                 session.command_limits,
             )

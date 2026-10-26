@@ -989,6 +989,7 @@ export function sessionAccess(session: SessionAccess | null): SessionAccess {
       umask: DEFAULT_UMASK,
       shopts: {},
       mountModes: null,
+      commandLimits: {},
     }
   )
 }

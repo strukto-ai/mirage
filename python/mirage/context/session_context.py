@@ -1106,4 +1106,5 @@ def session_access(session: SessionState | None) -> SessionAccess:
         umask=session.umask if session is not None else DEFAULT_UMASK,
         shopts=session.shopts if session is not None else {},
         mount_modes=session.mount_modes if session is not None else None,
+        command_limits=session.command_limits if session is not None else {},
     )

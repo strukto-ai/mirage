@@ -92,7 +92,7 @@ import type { BaseVFS } from '../../vfs/base.ts'
 import type { Accessor } from '../../accessor/base.ts'
 import type { DirListing } from '../../types.ts'
 import {
-  type Limit,
+  Limit,
   type Producer,
   type ReadSpec,
   type SearchQuery,
@@ -399,6 +399,12 @@ function namedSpec(cmd: Command, cmdName: string): CommandSpec {
   return new CommandSpec({ ...spec, name: cmdName })
 }
 
+/** The workspace's and the session profile's command limits, which a mount resolves a command's limit through with its own. */
+export interface LimitTables {
+  readonly workspace?: Readonly<Record<string, Limit>>
+  readonly profile?: Readonly<Record<string, Limit>>
+}
+
 export class MountEntry {
   visible: ((sessionId: string | null) => boolean) | null = null
   readonly mountId: string
@@ -441,6 +447,11 @@ export class MountEntry {
   private readonly trees = new Map<string, [Command, CLI]>()
   private readonly cmdSpecs = new Map<string, CommandSpec>()
   readonly commandLimits = new Map<string, Limit>()
+
+  /** The bottom layer of a command's limit on this mount: its backend's `walkLimit`. */
+  get defaultLimit(): Limit {
+    return new Limit({ walkLimit: this.vfs.walkLimit })
+  }
   // first token -> descending token counts of multi-word command names
   // (e.g. "gws docs documents get"); backs longest-prefix command
   // resolution. null until first built; invalidated on register.
@@ -1612,7 +1623,7 @@ export class MountEntry {
     texts: string[],
     flags: Record<string, FlagValue>,
     ctx: Partial<Context> = {},
-    limitOverride: Limit | null = null,
+    tables: LimitTables = {},
   ): Promise<[ByteSource | null, IOResult]> {
     return this.use(async (): Promise<[ByteSource | null, IOResult]> => {
       const handlers = await this.pickHandlers(cmdName, paths, ctx)
@@ -1642,7 +1653,7 @@ export class MountEntry {
             operands,
             texts,
             { ...runCtx, spec: namedSpec(cmd, cmdName) },
-            limitOverride,
+            tables,
             access,
             paths,
           )
@@ -1880,10 +1891,9 @@ export class MountEntry {
    * The dispatch-level guard only sees default limits (the mount is unknown
    * before routing), so the mount-resolved timeout must also bound the
    * command body: eager commands do their work inside cmd.fn, where the
-   * stream-consumption guard never runs. limitOverride is the caller's
-   * profile, mount and workspace entry; a null one is "no opinion" and must
-   * not shadow this mount's own table. `typed` are the operands as the line
-   * typed them, which a file error names. A user
+   * stream-consumption guard never runs. `tables` are the workspace's and
+   * the profile's command limits, resolved with this mount's own. `typed` are
+   * the operands as the line typed them, which a file error names. A user
    * command that declares a write reaches its backend through its own
    * handle, past the dispatcher's per-path invalidation, so this mount drops
    * its caches once it has run; mirage's own commands write through the
@@ -1895,15 +1905,17 @@ export class MountEntry {
     paths: PathSpec[],
     texts: string[],
     ctx: Context,
-    limitOverride: Limit | null,
+    tables: LimitTables,
     access: SessionAccess | undefined,
     typed: readonly PathSpec[],
   ): Promise<CommandFnResult> {
     const limit = resolveLimit(
       cmdName,
-      [],
+      [this],
       cmd.limit,
-      limitOverride ?? this.commandLimits.get(cmdName) ?? null,
+      null,
+      tables.workspace ?? {},
+      tables.profile ?? {},
     )
     const accessor = this.viewFor(access).accessor
     return this.runIn(

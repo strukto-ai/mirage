@@ -49,6 +49,7 @@ from mirage.shell.console import (
 from mirage.shell.constants import BIN_PREFIX
 from mirage.shell.job_table import Job, JobStatus, JobTable
 from mirage.shell.variable import ShellVar
+from mirage.policy.builtin.output_cap import command_limits_to_json
 from mirage.types import (
     JsonValue,
     Limit,
@@ -376,10 +377,9 @@ async def to_state_dict(ws: WorkspaceLike) -> dict[str, Any]:
             for name, profile in ws._profiles.items()
         },
         StateKey.PROFILE: ws._default_profile_name,
-        StateKey.COMMAND_LIMITS: {
-            name: limit.model_dump()
-            for name, limit in ws.registry.command_limits.items()
-        },
+        StateKey.COMMAND_LIMITS: command_limits_to_json(
+            ws.registry.command_limits
+        ),
     }
 
 

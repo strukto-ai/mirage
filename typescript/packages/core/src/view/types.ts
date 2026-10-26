@@ -14,7 +14,14 @@
 
 import { type ShellValue, type VarAttr } from '../shell/variable.ts'
 import type { IndexCacheStore } from '../cache/index/store.ts'
-import type { FileStat, MountMode, PathSpec, SetAttrFields, Visibility } from '../types.ts'
+import type {
+  FileStat,
+  Limit,
+  MountMode,
+  PathSpec,
+  SetAttrFields,
+  Visibility,
+} from '../types.ts'
 import type { ByteSource, IOResult, OpReport } from '../io/types.ts'
 
 /**
@@ -254,6 +261,8 @@ export interface SessionAccess {
   readonly umask: number
   readonly shopts: Readonly<Record<string, boolean>>
   readonly mountModes: ReadonlyMap<string, MountMode> | null
+  /** The session profile's command limits. */
+  readonly commandLimits?: Readonly<Record<string, Limit>>
 }
 
 /** The public file operations a consumer uses, independent of the dispatcher. */

@@ -269,7 +269,7 @@ export class BaseVFS<A extends Accessor = Accessor> {
    * -r, cp -r, rm -r, chmod -R, chown -R, chgrp -R, mv to another mount and
    * diff -r of a directory holding more (`beforeFullWalk`); -1 for no cap.
    */
-  readonly walkLimit: number = WALK_LIMIT
+  walkLimit: number = WALK_LIMIT
   /**
    * Extensions whose `read` is a rendering rather than the stored bytes,
    * each to the name of the method that renders it, which takes `read`'s

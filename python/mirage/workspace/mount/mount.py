@@ -17,7 +17,13 @@ import dataclasses
 import functools
 import inspect
 import logging
-from collections.abc import AsyncIterator, Awaitable, Iterable, Iterator
+from collections.abc import (
+    AsyncIterator,
+    Awaitable,
+    Iterable,
+    Iterator,
+    Mapping,
+)
 from contextlib import (
     AbstractAsyncContextManager,
     asynccontextmanager,
@@ -622,6 +628,12 @@ class MountEntry:
         self.command_limits: dict[str, Limit] = {}
         # key: (cmd_name, target_resource_type)
 
+    @property
+    def default_limit(self) -> Limit:
+        """The bottom layer of a command's limit on this mount: its
+        backend's ``walk_limit``."""
+        return Limit(walk_limit=self.vfs.walk_limit)
+
     @asynccontextmanager
     async def use(self) -> AsyncIterator[None]:
         await self.ensure_ready()
@@ -1050,7 +1062,8 @@ class MountEntry:
         texts: list[str],
         flag_kwargs: dict[str, FlagValue],
         ctx: Context = Context(),
-        limit_override: Limit | None = None,
+        workspace_limits: Mapping[str, Limit] | None = None,
+        profile_limits: Mapping[str, Limit] | None = None,
     ) -> tuple[ByteSource | None, IOResult]:
         """Execute a command on this mount's VFS.
 
@@ -1069,8 +1082,11 @@ class MountEntry:
                 with the facts only this mount can supply added. A
                 handler reads the fields it wants, so no list of command
                 names is kept here.
-            limit_override (Limit | None): the caller's output limit,
-                which the mount applies itself.
+            workspace_limits (Mapping[str, Limit] | None): the
+                workspace's command limits, which the mount resolves the
+                command's bound through with its own.
+            profile_limits (Mapping[str, Limit] | None): the session
+                profile's command limits, above the mount's.
         """
         async with self.use():
             handlers = await self._pick_handlers(
@@ -1105,7 +1121,7 @@ class MountEntry:
                         self._command_ctx(
                             flags, ctx, self.prefix if user else ""
                         ),
-                        limit_override,
+                        (workspace_limits, profile_limits),
                         paths,
                     )
                     if result is not None:
@@ -1365,7 +1381,9 @@ class MountEntry:
         paths: list[PathSpec],
         texts: list[str],
         ctx: Context,
-        limit_override: Limit | None,
+        tables: tuple[
+            Mapping[str, Limit] | None, Mapping[str, Limit] | None
+        ],
         typed: list[PathSpec],
     ) -> CommandFnResult:
         """Run one handler under the mount-resolved timeout, through the
@@ -1386,14 +1404,17 @@ class MountEntry:
             paths (list[PathSpec]): the keyed path operands.
             texts (list[str]): positional text args.
             ctx (Context): the handler's context.
-            limit_override (Limit | None): the caller's output limit.
+            tables (tuple[Mapping[str, Limit] | None, Mapping[str, Limit]
+                | None]): the workspace's and the profile's command limits.
             typed (list[PathSpec]): the operands as the line typed them,
                 which a file error names.
         """
         limit = resolve_limit(
             cmd_name,
+            [self],
             command_default=cmd.limit,
-            mount_override=limit_override or self.command_limits.get(cmd_name),
+            workspace_limits=tables[0],
+            profile_limits=tables[1],
         )
         ctx = dataclasses.replace(ctx, spec=_named_spec(cmd, cmd_name))
         with host_io():

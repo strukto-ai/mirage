@@ -422,16 +422,16 @@ describe('Mount.runCommand', () => {
     expect(fired).toEqual(['/file.tally'])
   })
 
-  it('a null limitOverride does not shadow the mount own table', async () => {
-    // A caller with no profile, mount or workspace entry passes null,
-    // which must fall through to the serving mount's command_limits.
+  it('empty tables do not shadow the mount own table', async () => {
+    // A caller with no profile or workspace entry passes empty tables,
+    // which fall through to the serving mount's command_limits.
     const m = makeMount()
     m.commandLimits.set('cat', new Limit({ timeoutSeconds: 0.05 }))
     const [cmd] = command({ name: 'cat', vfs: 'ram', spec: BASIC_SPEC, fn: HANG_CMD })
     if (cmd === undefined) throw new Error('missing')
     m.register(cmd)
     await expect(
-      m.runCommand('cat', [PathSpec.fromStrPath('/x.txt')], [], {}, {}, null),
+      m.runCommand('cat', [PathSpec.fromStrPath('/x.txt')], [], {}, {}, {}),
     ).rejects.toThrow(/cat: timed out after 0.05s/)
   })
 })

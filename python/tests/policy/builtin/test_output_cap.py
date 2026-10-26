@@ -12,11 +12,16 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from types import SimpleNamespace
+
 import pytest
 from pydantic import ValidationError
 
+
 from mirage.policy.builtin.output_cap import (
+    ALL_COMMANDS,
     DEFAULT_COMMAND_LIMITS,
+    FALLBACK_LIMIT,
     resolve_limit,
     resolve_producer,
 )
@@ -47,22 +52,10 @@ def test_rejects_negative_limits():
         Limit(max_lines=-5)
 
 
-def test_resolve_prefers_mount_override():
-    override = Limit(max_lines=5)
-    default = Limit(max_lines=50)
-    assert (
-        resolve_limit("cat", command_default=default, mount_override=override)
-        is override
-    )
-
-
-def test_resolve_falls_back_to_command_default():
-    default = Limit(max_lines=50)
-    assert resolve_limit("cat", command_default=default) is default
-
-
-def test_resolve_falls_back_to_central_default():
-    assert resolve_limit("cat") is DEFAULT_COMMAND_LIMITS["cat"]
+def _lines(*args):
+    resolved = resolve_limit("cat", [], *args)
+    assert resolved is not None
+    return resolved.max_lines
 
 
 def test_resolve_walks_profile_mount_workspace_declared_then_table():
@@ -70,24 +63,49 @@ def test_resolve_walks_profile_mount_workspace_declared_then_table():
     mount = Limit(max_lines=2)
     workspace = {"cat": Limit(max_lines=3)}
     declared = Limit(max_lines=4)
-    assert (
-        resolve_limit("cat", [], declared, mount, workspace, profile)
-        is profile["cat"]
+    assert _lines(declared, mount, workspace, profile) == 1
+    assert _lines(declared, mount, workspace, {}) == 2
+    assert _lines(declared, None, workspace, {}) == 3
+    assert _lines(declared, None, {}, {}) == 4
+    assert _lines(None, None, {}, {}) == DEFAULT_COMMAND_LIMITS["cat"].max_lines
+    assert _lines(None, None, workspace, {"head": Limit()}) == 3
+
+
+def _mount(table=None, walk=1000):
+    return SimpleNamespace(
+        command_limits=table or {}, default_limit=Limit(walk_limit=walk)
     )
-    assert resolve_limit("cat", [], declared, mount, workspace, {}) is mount
-    assert (
-        resolve_limit("cat", [], declared, None, workspace, {})
-        is workspace["cat"]
+
+
+def test_a_layer_naming_one_bound_inherits_the_rest():
+    resolved = resolve_limit(
+        "cat", workspace_limits={"cat": Limit(max_lines=5)}
     )
-    assert resolve_limit("cat", [], declared, None, {}, {}) is declared
-    assert (
-        resolve_limit("cat", [], None, None, {}, {})
-        is DEFAULT_COMMAND_LIMITS["cat"]
+    assert resolved is not None
+    assert (resolved.max_lines, resolved.timeout_seconds) == (
+        5,
+        DEFAULT_COMMAND_LIMITS["cat"].timeout_seconds,
     )
-    assert (
-        resolve_limit("cat", [], None, None, workspace, {"head": Limit()})
-        is workspace["cat"]
-    )
+
+
+def test_every_command_entry_sits_below_each_layers_own():
+    workspace = {
+        ALL_COMMANDS: Limit(timeout_seconds=9, walk_limit=7),
+        "find": Limit(walk_limit=50),
+    }
+    mount = _mount({ALL_COMMANDS: Limit(timeout_seconds=5)})
+    find = resolve_limit("find", [mount], workspace_limits=workspace)
+    ls = resolve_limit("ls", [mount], workspace_limits=workspace)
+    assert find is not None and ls is not None
+    assert (find.timeout_seconds, find.walk_limit) == (5, 50)
+    assert (ls.timeout_seconds, ls.walk_limit) == (5, 7)
+
+
+def test_the_mount_walk_default_is_last_and_mounts_keep_the_tightest():
+    spread = resolve_limit("ls", [_mount(), _mount(walk=-1), _mount(walk=200)])
+    assert spread is not None and spread.walk_limit == 200
+    uncapped = resolve_limit("ls", [_mount(walk=-1)])
+    assert uncapped is not None and uncapped.walk_limit == -1
 
 
 def test_rejects_negative_or_infinite_timeouts():
@@ -97,14 +115,12 @@ def test_rejects_negative_or_infinite_timeouts():
 
 
 def test_resolve_unknown_command_returns_fallback_limit():
-    from mirage.policy.builtin.output_cap import FALLBACK_LIMIT
-
-    assert resolve_limit("nl") is FALLBACK_LIMIT
+    assert resolve_limit("nl") == FALLBACK_LIMIT
     assert FALLBACK_LIMIT.timeout_seconds is not None
 
 
-def _override_table(table):
-    return lambda prefix, name: table.get((prefix, name))
+def _mounts(table):
+    return lambda prefix: _mount(table.get(prefix)) if prefix in table else None
 
 
 def test_resolve_producer_prefers_the_mount_override():
@@ -112,7 +128,7 @@ def test_resolve_producer_prefers_the_mount_override():
         command="cat", prefixes=("/a/",), declared=Limit(max_lines=50)
     )
     resolved = resolve_producer(
-        producer, _override_table({("/a/", "cat"): Limit(max_lines=4)})
+        producer, _mounts({"/a/": {"cat": Limit(max_lines=4)}})
     )
     assert resolved is not None
     assert resolved.max_lines == 4
@@ -122,10 +138,10 @@ def test_resolve_producer_falls_back_to_declared_then_table():
     declared = Producer(
         command="cat", prefixes=(), declared=Limit(max_lines=50)
     )
-    resolved = resolve_producer(declared, _override_table({}))
+    resolved = resolve_producer(declared, _mounts({}))
     assert resolved is not None
     assert resolved.max_lines == 50
-    table = resolve_producer(Producer(command="cat"), _override_table({}))
+    table = resolve_producer(Producer(command="cat"), _mounts({}))
     assert table is not None
     assert table.max_lines == DEFAULT_COMMAND_LIMITS["cat"].max_lines
 
@@ -134,10 +150,10 @@ def test_resolve_producer_aggregates_tightest_across_prefixes():
     producer = Producer(command="cat", prefixes=("/a/", "/b/"))
     resolved = resolve_producer(
         producer,
-        _override_table(
+        _mounts(
             {
-                ("/a/", "cat"): Limit(max_lines=9),
-                ("/b/", "cat"): Limit(max_lines=3),
+                "/a/": {"cat": Limit(max_lines=9)},
+                "/b/": {"cat": Limit(max_lines=3)},
             }
         ),
     )
@@ -146,4 +162,4 @@ def test_resolve_producer_aggregates_tightest_across_prefixes():
 
 
 def test_resolve_producer_empty_command_has_no_bound():
-    assert resolve_producer(Producer(command=""), _override_table({})) is None
+    assert resolve_producer(Producer(command=""), _mounts({})) is None

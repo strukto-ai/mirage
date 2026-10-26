@@ -524,6 +524,7 @@ export class Workspace {
       const mount = this.registry.mountForPrefix(prefix)
       for (const [name, limit] of Object.entries(limits)) mount.commandLimits.set(name, limit)
     }
+    for (const mount of this.registry.allMounts()) this.registry.settleWalkLimit(mount)
     // The facade delegates every op to the dispatcher, so FUSE and
     // programmatic ws.vfs walk the same pipeline as a shell command and
     // the policy gates fire exactly once, at that entry point. It keeps the

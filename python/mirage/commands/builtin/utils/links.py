@@ -14,7 +14,7 @@
 
 import logging
 import posixpath
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable, Mapping
 from dataclasses import dataclass
 
 from mirage.commands.builtin.utils.paths import resolve_path_stat
@@ -24,7 +24,7 @@ from mirage.errors.fs import eloop
 from mirage.io.cooperative import chunks
 from mirage.io.types import ByteSource
 from mirage.runtime.types import DispatchFn
-from mirage.types import FileStat, PathSpec
+from mirage.types import FileStat, Limit, PathSpec
 from mirage.utils.path import CycleError, resolve_path
 from mirage.view.types import FollowOperands, LinkView, MountView
 from mirage.workspace.files import Files, operands_of, reader_of
@@ -310,7 +310,10 @@ def link_view(files: Files | None) -> LinkView | None:
 
 
 def mount_view(
-    files: Files | None, crossing: bool = False
+    files: Files | None,
+    crossing: bool = False,
+    command: str | None = None,
+    profile: Mapping[str, Limit] | None = None,
 ) -> MountView | None:
     """Where the mount boundaries are, read off the session's files, or
     None outside a workspace.
@@ -318,13 +321,19 @@ def mount_view(
     Every mount below a path, hidden or not, is a boundary a backend's
     own walk stops at; only the visible ones are ever named. A walk
     through the dispatcher (``crossing``) has no boundary to stop at
-    (``NamespaceReader.mounts``).
+    (``NamespaceReader.mounts``). Each mount's ``walk_limit`` is
+    ``command``'s there, under the session's ``profile``.
 
     Args:
         files (Files | None): the session's files.
         crossing (bool): the walk goes through the dispatcher.
+        command (str | None): the command walking.
+        profile (Mapping[str, Limit] | None): the session profile's
+            command limits.
     """
-    return reader_of(files).mounts(crossing) if files is not None else None
+    if files is None:
+        return None
+    return reader_of(files).mounts(crossing, command, profile)
 
 
 def owed_names(files: Files | None, directory: str) -> list[str]:
@@ -393,7 +402,16 @@ def mounts_of(ctx: Context) -> MountView | None:
     Args:
         ctx (Context): the invocation's context.
     """
-    return mount_view(ctx.vfs, crossing=crosses_mounts(ctx))
+    return mount_view(
+        ctx.vfs,
+        crossing=crosses_mounts(ctx),
+        command=ctx.spec.name if ctx.spec is not None else None,
+        profile=(
+            ctx.session.access().command_limits
+            if ctx.session is not None
+            else None
+        ),
+    )
 
 
 def link_resolver(ctx: Context) -> LinkResolver | None:

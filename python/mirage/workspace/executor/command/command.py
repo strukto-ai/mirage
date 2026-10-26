@@ -1103,7 +1103,7 @@ async def handle_command(
     resolved = (
         resolve_producer(
             io.producer,
-            registry.limit_override,
+            registry.limit_mount,
             registry.command_limits,
             session.command_limits,
         )

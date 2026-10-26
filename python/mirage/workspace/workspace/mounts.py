@@ -234,6 +234,7 @@ def install_mounts(
         )
         if spec.command_limits:
             entry.command_limits.update(spec.command_limits)
+        registry.settle_walk_limit(entry)
     implicit_root = registry.root_mount is None
     if implicit_root:
         # Pinned bounded, not inherited. This anchor is synthesized after

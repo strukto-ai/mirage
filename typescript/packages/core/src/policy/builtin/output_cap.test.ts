@@ -15,6 +15,7 @@
 import { describe, expect, it } from 'vitest'
 import { Limit, OnExceed } from '../../types.ts'
 import {
+  ALL_COMMANDS,
   DEFAULT_COMMAND_LIMITS,
   FALLBACK_LIMIT,
   resolveProducer,
@@ -51,38 +52,27 @@ describe('Limit', () => {
 })
 
 describe('resolveLimit', () => {
-  it('prefers mount override over command default', () => {
-    const override = new Limit({ maxLines: 5 })
-    const cmd = new Limit({ maxLines: 50 })
-    expect(resolveLimit('cat', [], cmd, override)).toBe(override)
-  })
-
-  it('falls back to command default when no override', () => {
-    const cmd = new Limit({ maxLines: 50 })
-    expect(resolveLimit('cat', [], cmd, null)).toBe(cmd)
-  })
-
-  it('falls back to central default for known names', () => {
-    expect(resolveLimit('cat')).toBe(DEFAULT_COMMAND_LIMITS.cat)
-  })
-
   it('walks profile, mount, workspace, declared, then the table', () => {
     const profile = { cat: new Limit({ maxLines: 1 }) }
     const mount = new Limit({ maxLines: 2 })
     const workspace = { cat: new Limit({ maxLines: 3 }) }
     const declared = new Limit({ maxLines: 4 })
-    expect(resolveLimit('cat', [], declared, mount, workspace, profile)).toBe(profile.cat)
-    expect(resolveLimit('cat', [], declared, mount, workspace, {})).toBe(mount)
-    expect(resolveLimit('cat', [], declared, null, workspace, {})).toBe(workspace.cat)
-    expect(resolveLimit('cat', [], declared, null, {}, {})).toBe(declared)
-    expect(resolveLimit('cat', [], null, null, {}, {})).toBe(DEFAULT_COMMAND_LIMITS.cat)
-    expect(resolveLimit('cat', [], null, null, workspace, { head: new Limit() })).toBe(
-      workspace.cat,
-    )
+    const lines = (
+      cmd: Limit | null,
+      override: Limit | null,
+      ws: Record<string, Limit>,
+      prof: Record<string, Limit>,
+    ) => resolveLimit('cat', [], cmd, override, ws, prof)?.maxLines
+    expect(lines(declared, mount, workspace, profile)).toBe(1)
+    expect(lines(declared, mount, workspace, {})).toBe(2)
+    expect(lines(declared, null, workspace, {})).toBe(3)
+    expect(lines(declared, null, {}, {})).toBe(4)
+    expect(lines(null, null, {}, {})).toBe(DEFAULT_COMMAND_LIMITS.cat?.maxLines)
+    expect(lines(null, null, workspace, { head: new Limit() })).toBe(3)
   })
 
   it('returns FALLBACK_LIMIT for unknown command', () => {
-    expect(resolveLimit('nl')).toBe(FALLBACK_LIMIT)
+    expect(resolveLimit('nl')).toEqual(FALLBACK_LIMIT)
     expect(FALLBACK_LIMIT.timeoutSeconds).not.toBeNull()
   })
 
@@ -114,31 +104,58 @@ describe('Limit.aggr', () => {
   })
 })
 
+const mountOf = (table: Record<string, Limit> = {}, walk = 1000) => ({
+  commandLimits: new Map(Object.entries(table)),
+  defaultLimit: new Limit({ walkLimit: walk }),
+})
+
 describe('resolveLimit across mounts', () => {
   it('aggregates per-mount overrides, falling back to command default', () => {
-    const m1 = { commandLimits: new Map([['cat', new Limit({ maxLines: 10 })]]) }
-    const m2 = { commandLimits: new Map<string, Limit>() }
-    const merged = resolveLimit('cat', [m1, m2])
+    const merged = resolveLimit('cat', [mountOf({ cat: new Limit({ maxLines: 10 }) }), mountOf()])
     expect(merged?.maxLines).toBe(10)
+  })
+
+  it('lets a layer naming one bound inherit the rest', () => {
+    const resolved = resolveLimit('cat', [], null, null, { cat: new Limit({ maxLines: 5 }) })
+    expect([resolved?.maxLines, resolved?.timeoutSeconds]).toEqual([
+      5,
+      DEFAULT_COMMAND_LIMITS.cat?.timeoutSeconds,
+    ])
+  })
+
+  it('puts each layer\'s every-command entry below its own', () => {
+    const workspace = {
+      [ALL_COMMANDS]: new Limit({ timeoutSeconds: 9, walkLimit: 7 }),
+      find: new Limit({ walkLimit: 50 }),
+    }
+    const mount = mountOf({ [ALL_COMMANDS]: new Limit({ timeoutSeconds: 5 }) })
+    const find = resolveLimit('find', [mount], null, null, workspace)
+    const ls = resolveLimit('ls', [mount], null, null, workspace)
+    expect([find?.timeoutSeconds, find?.walkLimit]).toEqual([5, 50])
+    expect([ls?.timeoutSeconds, ls?.walkLimit]).toEqual([5, 7])
+  })
+
+  it('reads the mount walk default last and keeps the tightest across mounts', () => {
+    expect(resolveLimit('ls', [mountOf(), mountOf({}, -1), mountOf({}, 200)])?.walkLimit).toBe(200)
+    expect(resolveLimit('ls', [mountOf({}, -1)])?.walkLimit).toBe(-1)
   })
 })
 
 describe('prototype-colliding command names', () => {
   it('falls through to the fallback instead of an Object.prototype member', () => {
-    const sg = resolveLimit('toString')
-    expect(sg).toBe(FALLBACK_LIMIT)
-    expect(resolveLimit('constructor')).toBe(FALLBACK_LIMIT)
+    expect(resolveLimit('toString')).toEqual(FALLBACK_LIMIT)
+    expect(resolveLimit('constructor')).toEqual(FALLBACK_LIMIT)
   })
 })
 
 describe('resolveProducer', () => {
-  const table = (entries: Record<string, Limit>) => (prefix: string, name: string) =>
-    entries[`${prefix}|${name}`] ?? null
+  const table = (entries: Record<string, Record<string, Limit>>) => (prefix: string) =>
+    Object.hasOwn(entries, prefix) ? mountOf(entries[prefix]) : null
 
   it('prefers the mount override over the declared bound', () => {
     const resolved = resolveProducer(
       { command: 'cat', prefixes: ['/a/'], declared: new Limit({ maxLines: 50 }) },
-      table({ '/a/|cat': new Limit({ maxLines: 4 }) }),
+      table({ '/a/': { cat: new Limit({ maxLines: 4 }) } }),
     )
     expect(resolved?.maxLines).toBe(4)
   })
@@ -157,8 +174,8 @@ describe('resolveProducer', () => {
     const resolved = resolveProducer(
       { command: 'cat', prefixes: ['/a/', '/b/'], declared: null },
       table({
-        '/a/|cat': new Limit({ maxLines: 9 }),
-        '/b/|cat': new Limit({ maxLines: 3 }),
+        '/a/': { cat: new Limit({ maxLines: 9 }) },
+        '/b/': { cat: new Limit({ maxLines: 3 }) },
       }),
     )
     expect(resolved?.maxLines).toBe(3)

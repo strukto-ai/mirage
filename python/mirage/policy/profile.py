@@ -35,6 +35,7 @@ from mirage.policy.types import (
 from mirage.process.config import ProcessPermissions
 from mirage.runtime.types import ScriptSource
 from mirage.secrets.config import EnvVar
+from mirage.policy.builtin.output_cap import command_limits_to_json
 from mirage.types import (
     DEFAULT_VISIBILITY,
     Limit,
@@ -817,10 +818,7 @@ def profile_to_dict(profile: SessionProfile) -> dict[str, Any]:
             for name, entry in profile.env.items()
         }
     if profile.command_limits is not None:
-        doc["command_limits"] = {
-            name: limit.model_dump(mode="json")
-            for name, limit in profile.command_limits.items()
-        }
+        doc["command_limits"] = command_limits_to_json(profile.command_limits)
     if profile.processes is not None:
         doc["processes"] = profile.processes.model_dump(mode="json")
     if profile.mounts is not None:

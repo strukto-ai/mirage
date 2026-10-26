@@ -37,8 +37,9 @@ import { DocumentVFS } from '../../vfs/document/document.ts'
 import { HistoryViewVFS } from '../../vfs/history/history.ts'
 import { DevIndex, DevVFS } from '../../vfs/dev/dev.ts'
 import { type Decisions, MountRootPolicy, Policies } from '../../policy/index.ts'
+import { ALL_COMMANDS } from '../../policy/builtin/output_cap.ts'
 import {
-  type Limit,
+  Limit,
   type ReadSpec,
   DEFAULT_READ_SPEC,
   MountMode,
@@ -506,7 +507,7 @@ export class MountRegistry {
       this.attachManager(m)
       this.mountList.push(m)
       this.mountList.sort((a, b) => b.prefix.length - a.prefix.length)
-      this.rowCache = null
+      this.settleWalkLimit(m)
       if (norm === '/') this.rootRef = m
       return m
     } catch (err) {
@@ -601,11 +602,33 @@ export class MountRegistry {
    * command's output guard resolves with; tolerant of a prefix that matches
    * no mount (unmounted between stamp and boundary) by answering null.
    */
-  limitOverride(prefix: string, name: string): Limit | null {
+  /**
+   * Set the mount's `walkLimit`, which decides how its backend searches (its
+   * own search API under a cap, every file without): the mount's `*` entry,
+   * else the workspace's, else the backend's default. A command's own
+   * `walkLimit` changes only how far that command walks. Mirrors Python's
+   * `settle_walk_limit`.
+   */
+  settleWalkLimit(entry: MountEntry): void {
+    const found = Limit.layered([
+      entry.commandLimits.get(ALL_COMMANDS) ?? null,
+      Object.hasOwn(this.commandLimits, ALL_COMMANDS)
+        ? (this.commandLimits[ALL_COMMANDS] ?? null)
+        : null,
+      new Limit({ walkLimit: entry.vfs.walkLimit }),
+    ])
+    if (found?.walkLimit != null) entry.vfs.walkLimit = found.walkLimit
+    this.rowCache = null
+  }
+
+  /**
+   * The mount a command's output guard resolves a stamped prefix to; null
+   * for a prefix that matches no mount (unmounted between stamp and
+   * boundary). Mirrors Python's `limit_mount`.
+   */
+  limitMount(prefix: string): MountEntry | null {
     for (const m of this.mountList) {
-      if (m.prefix === prefix || rstripSlash(m.prefix) === prefix) {
-        return m.commandLimits.get(name) ?? null
-      }
+      if (m.prefix === prefix || rstripSlash(m.prefix) === prefix) return m
     }
     return null
   }
@@ -698,6 +721,8 @@ export class MountRegistry {
         calls: mount.calls,
         searchable: vfs.searchable,
         walkLimit: vfs.walkLimit,
+        commandLimits: mount.commandLimits,
+        workspaceLimits: this.commandLimits,
       }
     })
     return [...this.rowCache]

@@ -14,8 +14,10 @@
 
 import posixpath
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 
-from mirage.types import FileStat, PathSpec, Visibility
+from mirage.policy.builtin.output_cap import resolve_limit
+from mirage.types import FileStat, Limit, PathSpec, Visibility
 from mirage.utils.hidden import hidden_under, leads_hidden, path_visible
 from mirage.utils.path import norm, norm_dir, owner_prefix
 from mirage.view.namespace_view import namespace_names
@@ -42,6 +44,16 @@ def sees(
     if vis is None or links is None:
         return True
     return not leads_hidden(vis, virtual, links.symlink_targets())
+
+
+@dataclass(frozen=True, slots=True)
+class _RowLimits:
+    command_limits: Mapping[str, Limit]
+    walk: int
+
+    @property
+    def default_limit(self) -> Limit:
+        return Limit(walk_limit=self.walk)
 
 
 class NamespaceReader:
@@ -320,7 +332,12 @@ class NamespaceReader:
             directory,
         )
 
-    def mounts(self, crossing: bool) -> MountView:
+    def mounts(
+        self,
+        crossing: bool,
+        command: str | None = None,
+        profile: Mapping[str, Limit] | None = None,
+    ) -> MountView:
         """Where the mount boundaries are, as the session sees them.
 
         Every mount below a path, hidden or not, is a boundary a
@@ -332,8 +349,15 @@ class NamespaceReader:
         and it takes no mount's shortcut, so no mount answers a function
         for it or narrows its search.
 
+        A walk's ``walk_limit`` on each mount is ``command``'s, resolved
+        through the session's ``profile``, the mount's and the
+        workspace's command limits; without a command, the mount's own.
+
         Args:
             crossing (bool): the walk goes through the dispatcher.
+            command (str | None): the command walking.
+            profile (Mapping[str, Limit] | None): the session profile's
+                command limits.
         """
 
         def below(virtual: str) -> list[str]:
@@ -374,7 +398,19 @@ class NamespaceReader:
 
         def walk_limit(virtual: str) -> int:
             row = owner(virtual)
-            return row.walk_limit if row is not None else -1
+            if row is None:
+                return -1
+            if command is None:
+                return row.walk_limit
+            found = resolve_limit(
+                command,
+                [_RowLimits(row.command_limits, row.walk_limit)],
+                workspace_limits=row.workspace_limits,
+                profile_limits=profile,
+            )
+            if found is None or found.walk_limit is None:
+                return row.walk_limit
+            return found.walk_limit
 
         return MountView(
             descendants=below,

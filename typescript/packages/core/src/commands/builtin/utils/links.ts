@@ -16,7 +16,7 @@ import { chunks } from '../../../io/cooperative.ts'
 import type { Context } from '../../config.ts'
 import type { FollowOperands, LinkView, MountView } from '../../../view/types.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
-import type { FileStat } from '../../../types.ts'
+import type { FileStat, Limit } from '../../../types.ts'
 import { type Caller, currentCaller } from '../../../context/session_context.ts'
 import { PathSpec } from '../../../types.ts'
 import { eloop, isEnoent, isEnotdir } from '../../../errors/fs.ts'
@@ -228,9 +228,14 @@ export function linkView(files: Files | undefined): LinkView | undefined {
  * through the dispatcher (`crossing`) has no boundary to stop at
  * (`NamespaceReader.mounts`). Mirrors Python's mount_view.
  */
-export function mountView(files: Files | undefined, crossing = false): MountView | undefined {
+export function mountView(
+  files: Files | undefined,
+  crossing = false,
+  command: string | null = null,
+  profile: Readonly<Record<string, Limit>> = {},
+): MountView | undefined {
   if (files === undefined) return undefined
-  return readerOf(files).mounts(crossing)
+  return readerOf(files).mounts(crossing, command, profile)
 }
 
 /**
@@ -292,7 +297,12 @@ export function mountRoot(ctx: Context): string {
  * Mirrors Python's mounts_of.
  */
 export function mountsOf(ctx: Context): MountView | undefined {
-  return mountView(ctx.vfs, crossesMounts(ctx))
+  return mountView(
+    ctx.vfs,
+    crossesMounts(ctx),
+    ctx.spec?.name ?? null,
+    ctx.session?.access().commandLimits ?? {},
+  )
 }
 
 /** The link resolver an invocation carries: null outside a workspace.

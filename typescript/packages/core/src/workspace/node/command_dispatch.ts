@@ -584,7 +584,7 @@ async function runCommandBody(
     ) {
       const bound = resolveProducer(
         io.producer,
-        (prefix, name) => registry.limitOverride(prefix, name),
+        (prefix) => registry.limitMount(prefix),
         registry.commandLimits,
         session.commandLimits,
       )

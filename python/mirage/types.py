@@ -741,13 +741,22 @@ def _min_bound(values: Iterable[int | None]) -> int | None:
     return min(bounds) if bounds else None
 
 
+def _tightest_walk(values: Iterable[int | None]) -> int | None:
+    present = [v for v in values if v is not None]
+    caps = [v for v in present if v >= 0]
+    return min(caps) if caps else (-1 if present else None)
+
+
 class Limit(BaseModel):
     """A bound on a result: the policy layer's limit arm and the shape
     every cap config parses into.
 
     Carries its fields inline (the Deny precedent: an action is its
     payload). ``kind`` is the wire discriminant; ``aggr`` is the
-    composition law (AND to the tightest per bound, ANY on error mode).
+    composition law (AND to the tightest per bound, ANY on error mode)
+    and ``layered`` the resolution law (each field from the most
+    specific layer that sets it). ``walk_limit`` caps the entries one
+    walk lists on a mount, -1 for no cap.
     """
 
     kind: ClassVar[str] = "limit"
@@ -760,6 +769,9 @@ class Limit(BaseModel):
         NonNegativeFloat | None,
         Field(allow_inf_nan=False),
         Aggr(_min_positive),
+    ] = None
+    walk_limit: Annotated[
+        int | None, Field(ge=-1), Aggr(_tightest_walk)
     ] = None
     on_exceed: Annotated[OnExceed, Aggr(_prefer_error)] = OnExceed.TRUNCATE
 
@@ -790,6 +802,27 @@ class Limit(BaseModel):
             kwargs[name] = (
                 rule.reduce(values) if rule is not None else values[0]
             )
+        return cls(**kwargs)
+
+    @classmethod
+    def layered(cls, limits: "Iterable[Limit | None]") -> "Limit | None":
+        """Each field from the first limit that sets it, most specific
+        first: a layer naming one bound inherits the others from the
+        layers below it. Returns None when nothing is configured.
+
+        Args:
+            limits (Iterable[Limit | None]): layers, most specific first.
+        """
+        present = [s for s in limits if s is not None]
+        if not present:
+            return None
+        kwargs: dict[str, Any] = {}
+        for name in cls.model_fields:
+            for layer in present:
+                value = getattr(layer, name)
+                if name in layer.model_fields_set and value is not None:
+                    kwargs[name] = value
+                    break
         return cls(**kwargs)
 
 

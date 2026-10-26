@@ -1000,7 +1000,7 @@ export async function handleCommand(
     io.producer !== null
       ? resolveProducer(
           io.producer,
-          (prefix, name) => registry.limitOverride(prefix, name),
+          (prefix) => registry.limitMount(prefix),
           registry.commandLimits,
           session.commandLimits,
         )

@@ -40,6 +40,7 @@ from mirage.errors.types import NoMountError
 from mirage.io.config import IOConfig
 from mirage.observe.observer import Observer
 from mirage.policy import Decisions, MountRootPolicy, Policies
+from mirage.policy.builtin.output_cap import ALL_COMMANDS
 from mirage.process.view import ProcessView
 from mirage.rs.diff_types import DiffComputer
 from mirage.runtime.base import Runtime
@@ -513,7 +514,7 @@ class MountRegistry:
         self._attach_manager(m)
         self._mounts.append(m)
         self._mounts.sort(key=lambda x: len(x.prefix), reverse=True)
-        self._rows = None
+        self.settle_walk_limit(m)
         if norm_prefix == "/":
             self._root = m
         return m
@@ -619,20 +620,38 @@ class MountRegistry:
                 return m
         return None
 
-    def limit_override(self, prefix: str, name: str) -> Limit | None:
-        """One mount's configured cap for a command or op name.
+    def settle_walk_limit(self, entry: MountEntry) -> None:
+        """Set the mount's ``walk_limit``, which decides how its backend
+        searches (its own search API under a cap, every file without):
+        the mount's ``"*"`` entry, else the workspace's, else the
+        backend's default. A command's own ``walk_limit`` changes only
+        how far that command walks.
 
-        The lookup a command's output guard resolves with; tolerant of a
-        prefix that matches no mount (unmounted between stamp and
-        boundary) by answering None.
+        Args:
+            entry (MountEntry): the mount, its own limits applied.
+        """
+        found = Limit.layered(
+            (
+                entry.command_limits.get(ALL_COMMANDS),
+                self.command_limits.get(ALL_COMMANDS),
+                Limit(walk_limit=entry.vfs.walk_limit),
+            )
+        )
+        if found is not None and found.walk_limit is not None:
+            entry.vfs.walk_limit = found.walk_limit
+        self._rows = None
+
+    def limit_mount(self, prefix: str) -> MountEntry | None:
+        """The mount a command's output guard resolves a stamped prefix
+        to; None for a prefix that matches no mount (unmounted between
+        stamp and boundary).
 
         Args:
             prefix (str): the mount prefix as stamped at dispatch.
-            name (str): command or op name.
         """
         for m in self._mounts:
             if m.prefix == prefix or m.prefix.rstrip("/") == prefix:
-                return m.command_limits.get(name)
+                return m
         return None
 
     def is_mount_root(self, path: str) -> bool:
@@ -1080,6 +1099,8 @@ class MountRegistry:
                 visible=m.visible,
                 searchable=m.vfs.searchable,
                 walk_limit=m.vfs.walk_limit,
+                command_limits=m.command_limits,
+                workspace_limits=self.command_limits,
                 calls=m.calls,
             )
             for m in self._mounts

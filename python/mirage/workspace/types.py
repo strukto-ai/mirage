@@ -12,13 +12,13 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
 from mirage.io.types import IOResult
 from mirage.observe.record import OpRecord
-from mirage.types import MountMode, PathSpec
+from mirage.types import Limit, MountMode, PathSpec
 
 # Runs one text line in a session (`execute_fn(line, session_id=...)`):
 # what `eval`, `source`, `xargs` and find's `-exec` hand their inner
@@ -48,6 +48,10 @@ class MountRow:
             answers for; None for every file.
         walk_limit (int): the mount VFS's ``walk_limit``, -1
             for no cap.
+        command_limits (Mapping[str, Limit]): the mount's own command
+            limits.
+        workspace_limits (Mapping[str, Limit]): the workspace's, which
+            a command's walk resolves through beside the mount's.
         calls (frozenset[str]): the functions the mount's VFS answers
             itself: each dispatcher call it defines, and ``read_range``
             when its reads fetch only the range asked for.
@@ -61,6 +65,8 @@ class MountRow:
     visible: Callable[[str | None], bool] | None = None
     searchable: tuple[str, ...] | None = None
     walk_limit: int = -1
+    command_limits: Mapping[str, Limit] = field(default_factory=dict)
+    workspace_limits: Mapping[str, Limit] = field(default_factory=dict)
     calls: frozenset[str] = frozenset()
 
 

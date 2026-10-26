@@ -46,6 +46,7 @@ from mirage.shell.variable import (
     copy_var,
     stored_attrs,
 )
+from mirage.policy.builtin.output_cap import command_limits_to_json
 from mirage.types import (
     DEFAULT_VISIBILITY,
     HiddenPaths,
@@ -639,10 +640,9 @@ class SessionState:
         if self.scripts:
             data["scripts"] = scripts_to_dict(self.scripts)
         if self.command_limits:
-            data["command_limits"] = {
-                name: limit.model_dump()
-                for name, limit in self.command_limits.items()
-            }
+            data["command_limits"] = command_limits_to_json(
+                self.command_limits
+            )
         if self.processes != ProcessPermissions():
             data["processes"] = self.processes.model_dump()
         if self.profile is not None:

@@ -25,7 +25,6 @@ import { envSnapshot, sessionView } from '../../session/state.ts'
 import { Files } from '../../files.ts'
 import { MountCommandUnsupported, type MountRegistry } from '../../mount/registry.ts'
 import { MountCommandAmbiguous } from '../../mount/errors.ts'
-import { ownLimit } from '../../../policy/builtin/output_cap.ts'
 import type { Runtime } from '../../../runtime/base.ts'
 import { WorkspaceRuntime } from '../../../runtime/workspace.ts'
 import type { RouteDecision } from '../../../runtime/types.ts'
@@ -230,12 +229,6 @@ export async function runOnMount(
   let flags = flagKwargs
   if (cmdName === 'find') flags = scalarFindFlags(flags)
 
-  // The profile, serving mount and workspace entries, in precedence order;
-  // the mount folds in the command's declared default and the built-in.
-  const limitOverride =
-    ownLimit(session.commandLimits, cmdName) ??
-    mount.commandLimits.get(cmdName) ??
-    ownLimit(registry.commandLimits, cmdName)
 
   const routing = context.frame.routing
   if (routing === undefined) throw new Error(`${cmdName}: run outside a routed line`)
@@ -282,7 +275,7 @@ export async function runOnMount(
           : {}),
         ...(opts.argv !== undefined ? { argv: opts.argv } : {}),
       },
-      limitOverride,
+      { workspace: registry.commandLimits, profile: session.commandLimits },
     )
   } catch (err) {
     // Command-owned usage errors (extra operands, missing patterns) become

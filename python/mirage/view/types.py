@@ -13,12 +13,12 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Literal, Protocol, TypeVar, overload, runtime_checkable
 
 from mirage.io.types import ByteSource, IOResult
 from mirage.shell.variable import ShellValue, VarAttr
-from mirage.types import FileStat, MountMode, PathSpec, Visibility
+from mirage.types import FileStat, Limit, MountMode, PathSpec, Visibility
 
 T = TypeVar("T")
 
@@ -370,6 +370,7 @@ class SessionAccess:
     umask: int
     shopts: Mapping[str, bool]
     mount_modes: Mapping[str, MountMode] | None
+    command_limits: Mapping[str, Limit] = field(default_factory=dict)
 
 
 class FileView(Protocol):
