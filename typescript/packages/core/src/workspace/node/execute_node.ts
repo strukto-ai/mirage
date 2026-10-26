@@ -1603,7 +1603,7 @@ async function executeNodeBody(
       )
     if (opener === '[[') {
       const tree = await expandDoubleBracket(node, context, executeFn, callStack, view)
-      return handleTest(dispatch, deps.namespace, tree, session, '[[', view, admitted)
+      return handleTest(dispatch, deps.namespace, tree, session, '[[', view, admitted, signal)
     }
     const expanded = await expandTestExpr(node, context, executeFn, callStack, view)
     return handleTest(dispatch, deps.namespace, expanded, session, '[', view, admitted)

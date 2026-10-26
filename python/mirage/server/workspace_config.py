@@ -16,6 +16,7 @@ import os
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from mirage.concurrency.limiter import run_blocking
 from mirage.utils.ids import new_workspace_id
 
 if TYPE_CHECKING:
@@ -107,7 +108,9 @@ async def build_workspace_from_config(config_path: str | Path) -> "Workspace":
     workspace = Workspace(**kwargs)
     try:
         for prefix, (backend, mountpoint) in config.kernel_mounts().items():
-            workspace.add_fuse_mount(prefix, mountpoint, backend=backend)
+            await run_blocking(
+                workspace.add_fuse_mount, prefix, mountpoint, backend=backend
+            )
     except Exception:
         await workspace.close()
         raise

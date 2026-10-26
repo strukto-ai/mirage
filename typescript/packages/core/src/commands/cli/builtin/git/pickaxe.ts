@@ -47,7 +47,7 @@ export interface Pickaxe {
  * one), and `^` never holds where it resumes. mirage-rs counts the whole blob
  * in one request.
  */
-export function contains(text: string, pattern: PosixRegex): number {
+export function contains(text: string, pattern: PosixRegex): Promise<number> {
   return pattern.contains(text)
 }
 
@@ -96,7 +96,7 @@ async function greps(
     if (tag === DiffOpTag.EQUAL) continue
     for (const line of [...before.slice(i1, i2), ...after.slice(j1, j2)]) {
       const text = byteView(line.endsWith('\n') ? line.slice(0, -1) : line, pattern.utf8)
-      if (pattern.search(text) !== null) return true
+      if ((await pattern.search(text)) !== null) return true
     }
   }
   return false

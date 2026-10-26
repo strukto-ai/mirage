@@ -58,7 +58,7 @@ def contains(text: str, pattern: PosixRegex) -> int:
         text (str): the blob's text.
         pattern (PosixRegex): the compiled expression.
     """
-    return pattern.contains(text)
+    return pattern.contains_blocking(text)
 
 
 def _occurrences(
@@ -116,7 +116,7 @@ def _greps(
             continue
         for line in (*before[i1:i2], *after[j1:j2]):
             text = byte_view(line, pattern.utf8).removesuffix("\n")
-            if pattern.search(text):
+            if pattern.search_blocking(text):
                 return True
     return False
 

@@ -317,7 +317,7 @@ export async function config(
       if (
         listing ||
         (pattern
-          ? pattern.search(byteView(line.path, utf8)) !== null
+          ? (await pattern.search(byteView(line.path, utf8), 0, ctx.signal)) !== null
           : line.path === configKey(key))
       )
         values.push([source, line.path, line.value ?? ''])

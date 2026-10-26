@@ -13,6 +13,8 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 
+import asyncio
+
 import pytest
 
 from mirage.commands.builtin.general.expr import (
@@ -28,6 +30,10 @@ from tests.commands.builtin.conftest import output_bytes as _bytes
 from tests.commands.builtin.conftest import ram_workspace as _ws
 from tests.commands.builtin.conftest import run_raw as _run_raw
 from tests.commands.builtin.conftest import stderr_text as _stderr_text
+
+
+def _evaluate(args: list[str], utf8: bool = False) -> tuple[str, int]:
+    return asyncio.run(_expr_eval(args, utf8))
 
 
 def test_expr_add():
@@ -52,33 +58,33 @@ def _out(cmd):
 
 def test_expr_division_truncates_toward_zero():
     # GNU truncates, python's `//` floors: `-10 / 3` is -3, not -4.
-    assert _expr_eval(["-10", "/", "3"]) == ("-3", 0)
-    assert _expr_eval(["10", "/", "-3"]) == ("-3", 0)
-    assert _expr_eval(["-10", "/", "-3"]) == ("3", 0)
-    assert _expr_eval(["-7", "/", "2"]) == ("-3", 0)
+    assert _evaluate(["-10", "/", "3"]) == ("-3", 0)
+    assert _evaluate(["10", "/", "-3"]) == ("-3", 0)
+    assert _evaluate(["-10", "/", "-3"]) == ("3", 0)
+    assert _evaluate(["-7", "/", "2"]) == ("-3", 0)
 
 
 def test_expr_remainder_takes_the_dividend_sign():
     # GNU: `-10 % 3` is -1 where python answers 2, and `10 % -3` is 1
     # where python answers -2.
-    assert _expr_eval(["-10", "%", "3"]) == ("-1", 0)
-    assert _expr_eval(["10", "%", "-3"]) == ("1", 0)
-    assert _expr_eval(["-7", "%", "2"]) == ("-1", 0)
+    assert _evaluate(["-10", "%", "3"]) == ("-1", 0)
+    assert _evaluate(["10", "%", "-3"]) == ("1", 0)
+    assert _evaluate(["-7", "%", "2"]) == ("-1", 0)
 
 
 def test_expr_exits_one_when_the_result_is_zero():
     # POSIX: exit 1 means "succeeded, the value was 0 or empty". Only
     # exit 2 is an error, so the two must not be conflated.
-    assert _expr_eval(["-1", "/", "2"]) == ("0", 1)
-    assert _expr_eval(["1", "/", "-2"]) == ("0", 1)
+    assert _evaluate(["-1", "/", "2"]) == ("0", 1)
+    assert _evaluate(["1", "/", "-2"]) == ("0", 1)
 
 
 def test_expr_is_arbitrary_precision():
-    assert _expr_eval(["9223372036854775807", "+", "1"]) == (
+    assert _evaluate(["9223372036854775807", "+", "1"]) == (
         "9223372036854775808",
         0,
     )
-    assert _expr_eval(["2", "*", "99999999999999999999"]) == (
+    assert _evaluate(["2", "*", "99999999999999999999"]) == (
         "199999999999999999998",
         0,
     )
@@ -94,37 +100,37 @@ def test_expr_compares_an_operand_past_every_float_as_a_number():
     # The decisive rows: a float64 read answered these upside down,
     # because `Infinity` is not an integer operand and the comparison
     # quietly became a byte-order string compare.
-    assert _expr_eval(["2", "<", BEYOND_FLOAT]) == ("1", 0)
-    assert _expr_eval(["2", ">", BEYOND_FLOAT]) == ("0", 1)
-    assert _expr_eval([BEYOND_FLOAT, ">", "2"]) == ("1", 0)
-    assert _expr_eval(["-" + BEYOND_FLOAT, "<", "2"]) == ("1", 0)
+    assert _evaluate(["2", "<", BEYOND_FLOAT]) == ("1", 0)
+    assert _evaluate(["2", ">", BEYOND_FLOAT]) == ("0", 1)
+    assert _evaluate([BEYOND_FLOAT, ">", "2"]) == ("1", 0)
+    assert _evaluate(["-" + BEYOND_FLOAT, "<", "2"]) == ("1", 0)
 
 
 def test_expr_arithmetic_on_an_operand_past_every_float():
-    assert _expr_eval([BEYOND_FLOAT, "+", "0"]) == (BEYOND_FLOAT, 0)
-    assert _expr_eval([BEYOND_FLOAT, "%", "7"]) == ("2", 0)
+    assert _evaluate([BEYOND_FLOAT, "+", "0"]) == (BEYOND_FLOAT, 0)
+    assert _evaluate([BEYOND_FLOAT, "%", "7"]) == ("2", 0)
 
 
 def test_expr_never_prints_exponential_notation():
     # `expr` cannot print `1e+24`, and could not read it back as an
     # operand either, so a product this size has to render in full.
-    assert _expr_eval(["1000000000000", "*", "1000000000000"]) == (
+    assert _evaluate(["1000000000000", "*", "1000000000000"]) == (
         "1" + "0" * 24,
         0,
     )
-    assert _expr_eval(["999999999999999999999", "+", "1"]) == (
+    assert _evaluate(["999999999999999999999", "+", "1"]) == (
         "1" + "0" * 21,
         0,
     )
-    assert _expr_eval(["2147483647", "*", "2147483647"]) == (
+    assert _evaluate(["2147483647", "*", "2147483647"]) == (
         "4611686014132420609",
         0,
     )
 
 
 def test_expr_substr_clamps_a_length_past_every_float():
-    assert _expr_eval(["substr", "abcde", "1", BEYOND_FLOAT]) == ("abcde", 0)
-    assert _expr_eval(["substr", "abcde", BEYOND_FLOAT, "1"]) == ("", 1)
+    assert _evaluate(["substr", "abcde", "1", BEYOND_FLOAT]) == ("abcde", 0)
+    assert _evaluate(["substr", "abcde", BEYOND_FLOAT, "1"]) == ("", 1)
 
 
 def test_expr_refuses_an_operand_with_a_trailing_newline():
@@ -132,19 +138,19 @@ def test_expr_refuses_an_operand_with_a_trailing_newline():
     # `^-?[0-9]+$` with `match` read `12\n` as 12. GNU's scanner stops at
     # the first non-digit and refuses the word.
     with pytest.raises(ExprError) as caught:
-        _expr_eval(["12\n", "+", "1"])
+        _evaluate(["12\n", "+", "1"])
     assert str(caught.value) == "expr: non-integer argument"
     # The same word in a comparison is a string, not a number, so
     # `12\n` and `12` are not equal.
-    assert _expr_eval(["12\n", "=", "12"]) == ("0", 1)
-    assert _expr_eval(["substr", "abcde", "2\n", "1"]) == ("", 1)
+    assert _evaluate(["12\n", "=", "12"]) == ("0", 1)
+    assert _evaluate(["substr", "abcde", "2\n", "1"]) == ("", 1)
 
 
 def test_expr_accepts_leading_zeros_as_decimal():
     # `05` is decimal 5, not octal, and `00` / `-0` are zero.
-    assert _expr_eval(["05", "+", "1"]) == ("6", 0)
-    assert _expr_eval(["00", "+", "1"]) == ("1", 0)
-    assert _expr_eval(["-0", "+", "1"]) == ("1", 0)
+    assert _evaluate(["05", "+", "1"]) == ("6", 0)
+    assert _evaluate(["00", "+", "1"]) == ("1", 0)
+    assert _evaluate(["-0", "+", "1"]) == ("1", 0)
 
 
 def test_expr_rejects_operands_python_int_would_accept():
@@ -162,20 +168,20 @@ def test_expr_rejects_operands_python_int_would_accept():
         "1.5",
     ):
         with pytest.raises(ExprError) as caught:
-            _expr_eval([operand, "+", "1"])
+            _evaluate([operand, "+", "1"])
         assert str(caught.value) == "expr: non-integer argument"
 
 
 def test_expr_comparison_falls_back_to_strings_for_a_bad_operand():
     # `+5` is not an integer operand, so GNU compares the two as
     # strings and `+5` != `5`.
-    assert _expr_eval(["+5", "=", "5"]) == ("0", 1)
+    assert _evaluate(["+5", "=", "5"]) == ("0", 1)
 
 
 def test_expr_zero_divisor_raises_gnu_wording():
     for op in ("/", "%"):
         with pytest.raises(ExprError) as caught:
-            _expr_eval(["1", op, "0"])
+            _evaluate(["1", op, "0"])
         assert str(caught.value) == "expr: division by zero"
 
 
@@ -234,7 +240,7 @@ PRECEDENCE = [
 
 @pytest.mark.parametrize("args,value,code", PRECEDENCE)
 def test_expr_precedence_table(args, value, code):
-    assert _expr_eval(list(args)) == (value, code)
+    assert _evaluate(list(args)) == (value, code)
 
 
 def test_expr_does_not_know_caret_angle_or_bang():
@@ -245,7 +251,7 @@ def test_expr_does_not_know_caret_angle_or_bang():
         (["!", "0"], "unexpected argument '0'"),
     ):
         with pytest.raises(ExprError) as caught:
-            _expr_eval(list(args))
+            _evaluate(list(args))
         assert str(caught.value) == f"expr: syntax error: {detail}"
 
 
@@ -263,7 +269,7 @@ SHORT_CIRCUIT = [
 
 @pytest.mark.parametrize("args,value,code", SHORT_CIRCUIT)
 def test_expr_or_and_and_short_circuit(args, value, code):
-    assert _expr_eval(list(args)) == (value, code)
+    assert _evaluate(list(args)) == (value, code)
 
 
 def test_expr_truthiness_counts_any_run_of_zeros_as_false():
@@ -285,18 +291,18 @@ PARENS = [
 
 @pytest.mark.parametrize("args,value,code", PARENS)
 def test_expr_parentheses(args, value, code):
-    assert _expr_eval(list(args)) == (value, code)
+    assert _evaluate(list(args)) == (value, code)
 
 
 def test_expr_reads_a_chain_of_two_thousand_keywords():
     # GNU 9.7: each `length` reads the next as its operand, at any length
     # of chain; the call stack once ran out near 1,000.
     chain = ["length"] * 2000
-    assert _expr_eval([*chain, "abc"]) == ("1", 0)
-    assert _expr_eval(["substr", *chain, "abcdef", "1", "1"]) == ("1", 0)
-    assert _expr_eval([*chain[1:], "+", "length"]) == ("1", 0)
+    assert _evaluate([*chain, "abc"]) == ("1", 0)
+    assert _evaluate(["substr", *chain, "abcdef", "1", "1"]) == ("1", 0)
+    assert _evaluate([*chain[1:], "+", "length"]) == ("1", 0)
     with pytest.raises(ExprError) as caught:
-        _expr_eval([*chain, "length"])
+        _evaluate([*chain, "length"])
     assert str(caught.value) == (
         "expr: syntax error: missing argument after 'length'"
     )
@@ -305,9 +311,9 @@ def test_expr_reads_a_chain_of_two_thousand_keywords():
 def test_expr_refuses_nesting_past_our_own_limit():
     # GNU declares no limit and segfaults with nothing on stderr, so the
     # limit and its wording are ours, not a GNU string.
-    assert _expr_eval(["("] * 64 + ["1"] + [")"] * 64) == ("1", 0)
+    assert _evaluate(["("] * 64 + ["1"] + [")"] * 64) == ("1", 0)
     with pytest.raises(ExprError) as caught:
-        _expr_eval(["("] * 65 + ["1"] + [")"] * 65)
+        _evaluate(["("] * 65 + ["1"] + [")"] * 65)
     assert str(caught.value) == (
         "expr: expression nesting too deep (limit 64)"
     )
@@ -336,7 +342,7 @@ QUOTING = [
 
 @pytest.mark.parametrize("args,value,code", QUOTING)
 def test_expr_plus_quotes_exactly_one_word(args, value, code):
-    assert _expr_eval(list(args)) == (value, code)
+    assert _evaluate(list(args)) == (value, code)
 
 
 def test_expr_plus_does_not_recurse():
@@ -348,7 +354,7 @@ def test_expr_plus_does_not_recurse():
         (["+", "length", "abcde"], "unexpected argument 'abcde'"),
     ):
         with pytest.raises(ExprError) as caught:
-            _expr_eval(list(args))
+            _evaluate(list(args))
         assert str(caught.value) == f"expr: syntax error: {detail}"
 
 
@@ -386,7 +392,7 @@ KEYWORDS = [
 
 @pytest.mark.parametrize("args,value,code", KEYWORDS)
 def test_expr_keyword_operators(args, value, code):
-    assert _expr_eval(list(args)) == (value, code)
+    assert _evaluate(list(args)) == (value, code)
 
 
 def test_expr_keyword_missing_operand_names_the_last_word_seen():
@@ -398,7 +404,7 @@ def test_expr_keyword_missing_operand_names_the_last_word_seen():
         (["substr", "abc", "1", "2", "3"], "unexpected argument '3'"),
     ):
         with pytest.raises(ExprError) as caught:
-            _expr_eval(list(args))
+            _evaluate(list(args))
         assert str(caught.value) == f"expr: syntax error: {detail}"
 
 
@@ -442,7 +448,7 @@ BRE = [
 
 @pytest.mark.parametrize("args,value,code", BRE)
 def test_expr_colon_is_a_posix_bre(args, value, code):
-    assert _expr_eval(list(args)) == (value, code)
+    assert _evaluate(list(args)) == (value, code)
 
 
 def test_expr_bad_regex_uses_glibc_regerror_wording():
@@ -454,7 +460,7 @@ def test_expr_bad_regex_uses_glibc_regerror_wording():
         (r"a\{1,", "expr: Unmatched \\{"),
     ):
         with pytest.raises(ExprError) as caught:
-            _expr_eval(["abc", ":", pattern])
+            _evaluate(["abc", ":", pattern])
         assert str(caught.value) == message
 
 
@@ -488,7 +494,7 @@ COMPARISONS = [
 def test_expr_comparison_is_numeric_only_when_both_sides_are(
     args, value, code
 ):
-    assert _expr_eval(list(args)) == (value, code)
+    assert _evaluate(list(args)) == (value, code)
 
 
 def test_expr_zero_expression_words_is_the_only_two_line_diagnostic():
@@ -528,7 +534,7 @@ QUOTED_CLAUSES = [
 def test_expr_quotes_the_word_in_every_clause(words, detail):
     texts = [w.decode("utf-8", "surrogateescape") for w in words]
     with pytest.raises(ExprError) as caught:
-        _expr_eval([byte_view(t) for t in texts])
+        _evaluate([byte_view(t) for t in texts])
     assert str(caught.value) == f"expr: syntax error: {detail}"
 
 
@@ -567,7 +573,7 @@ CLOSE_CLAUSES = [
 @pytest.mark.parametrize("args,detail", CLOSE_CLAUSES)
 def test_expr_unclosed_paren_picks_after_or_instead_of(args, detail):
     with pytest.raises(ExprError) as caught:
-        _expr_eval(list(args))
+        _evaluate(list(args))
     assert str(caught.value) == f"expr: syntax error: {detail}"
 
 
@@ -618,14 +624,14 @@ def test_expr_is_arbitrary_precision_past_the_cpython_cap():
     # GNU answers these; a bare `int(text)` raised `ValueError` and the
     # executor rendered it as `expr: <python message>` with exit 1.
     over = "1" + "0" * 4300
-    assert _expr_eval([over, "+", "0"]) == (over, 0)
-    assert _expr_eval(["2", "<", "1" + "0" * 8000]) == ("1", 0)
-    assert _expr_eval(["-" + "9" * 4301, "<", "2"]) == ("1", 0)
-    assert _expr_eval([over, "%", "7"]) == ("4", 0)
-    assert _expr_eval(["1" + "0" * 8000, "%", "7"]) == ("2", 0)
+    assert _evaluate([over, "+", "0"]) == (over, 0)
+    assert _evaluate(["2", "<", "1" + "0" * 8000]) == ("1", 0)
+    assert _evaluate(["-" + "9" * 4301, "<", "2"]) == ("1", 0)
+    assert _evaluate([over, "%", "7"]) == ("4", 0)
+    assert _evaluate(["1" + "0" * 8000, "%", "7"]) == ("2", 0)
     # The result side too: the product is 4400 digits, over the cap even
     # though neither operand is.
-    value, code = _expr_eval(["9" * 2200, "*", "9" * 2200])
+    value, code = _evaluate(["9" * 2200, "*", "9" * 2200])
     assert (len(value), code) == (4400, 0)
     assert value == digits_of_int(int_of_digits("9" * 2200) ** 2)
 
@@ -645,7 +651,7 @@ def test_expr_syntax_error_wordings():
         (["(", ")"], "unexpected ')'"),
     ):
         with pytest.raises(ExprError) as caught:
-            _expr_eval(list(args))
+            _evaluate(list(args))
         assert str(caught.value) == f"expr: syntax error: {detail}"
 
 
@@ -671,7 +677,7 @@ def _eval_bytes(*words: bytes) -> tuple[bytes, int]:
         tuple[bytes, int]: stdout without its newline, and the exit code.
     """
     texts = [w.decode("utf-8", "surrogateescape") for w in words]
-    value, code = _expr_eval([byte_view(t) for t in texts])
+    value, code = _evaluate([byte_view(t) for t in texts])
     return from_byte_view(value), code
 
 

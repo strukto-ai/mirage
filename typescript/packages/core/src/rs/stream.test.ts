@@ -56,7 +56,7 @@ describe('openStream', () => {
     const glob = new GlobMatcher('a*b')
     const large = new PosixRegex('x$')
     const size = 34 * 1024 * 1024
-    expect(large.search('a'.repeat(size) + 'x')).toEqual([[size, size + 1]])
+    expect(await large.search('a'.repeat(size) + 'x')).toEqual([[size, size + 1]])
     const before = await openStream('base64', DECODE)
     const grown = instance(before)
     // Only the matchers are left on the grown instance, so it retires.
@@ -64,9 +64,9 @@ describe('openStream', () => {
     const after = await openStream('base64', DECODE)
     expect(instance(after)).not.toBe(grown)
     after.close()
-    expect(small.search('abc')).toEqual([[1, 2]])
+    expect(await small.search('abc')).toEqual([[1, 2]])
     expect(glob.matches('axb')).toBe(true)
-    expect(large.search('ax')).toEqual([[1, 2]])
+    expect(await large.search('ax')).toEqual([[1, 2]])
   })
 
   it('reads one input after another', async () => {

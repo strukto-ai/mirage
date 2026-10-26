@@ -133,13 +133,22 @@ export function patternWarnings(matcher: LineRegex, prog = 'grep'): string {
 }
 
 /** Whether a pattern list selects one line, given without its terminator. */
-export function lineSelected(matcher: LineRegex, line: string): boolean {
-  return matcher.matches(line)
+export function lineSelected(
+  matcher: LineRegex,
+  line: string,
+  signal?: AbortSignal,
+): Promise<boolean> {
+  return matcher.matches(line, signal)
 }
 
 /** What -o prints from one line: each match's start and text. */
-export function linePieces(matcher: LineRegex, line: string): [number, string][] {
-  return matcher.extents(line).map(([start, end]) => [start, line.slice(start, end)])
+export async function linePieces(
+  matcher: LineRegex,
+  line: string,
+  signal?: AbortSignal,
+): Promise<[number, string][]> {
+  const extents = await matcher.extents(line, signal)
+  return extents.map(([start, end]) => [start, line.slice(start, end)])
 }
 
 /**

@@ -9,6 +9,7 @@ use super::io::{Io, LIMIT, Next, Ordered, OutFile, OutPipe, Reader, STDERR_NAME,
 use super::parser::{Cmp, GetlineKind, RedirKind};
 use super::text::{Regexes, split, split_assignment, substitute, substr};
 use super::value::{MAX_LEN, Value, compare, format_num, strnum, to_int};
+use crate::regex::unbounded;
 use crate::request::{Opening, Request, WriteMode};
 
 const MAX_CALL_DEPTH: usize = 100;
@@ -471,7 +472,7 @@ impl Machine {
                 let ofs = special(&self.globals, OFS);
                 let text = self.record.text(&ofs)?;
                 let regex = self.regexes.get(&self.code.strings[at as usize])?;
-                let found = regex.find(text, 0).is_some();
+                let found = unbounded(|budget| regex.find(text, 0, budget)).is_some();
                 self.stack.push(num(found));
             }
             Op::Load(var) => {
@@ -632,7 +633,8 @@ impl Machine {
             Op::Match(negated) => {
                 let pattern = self.pop_text();
                 let subject = self.pop_text();
-                let found = self.regexes.get(&pattern)?.find(&subject, 0).is_some();
+                let regex = self.regexes.get(&pattern)?;
+                let found = unbounded(|budget| regex.find(&subject, 0, budget)).is_some();
                 self.stack.push(num(found != negated));
             }
             Op::Jump(to) => self.pc = to as usize,
@@ -816,7 +818,8 @@ impl Machine {
             Op::MatchFn => {
                 let pattern = self.pop_text();
                 let subject = self.pop_text();
-                let (start, length) = match self.regexes.get(&pattern)?.find(&subject, 0) {
+                let regex = self.regexes.get(&pattern)?;
+                let (start, length) = match unbounded(|budget| regex.find(&subject, 0, budget)) {
                     Some((from, to)) => (from as f64 + 1.0, (to - from) as f64),
                     None => (0.0, -1.0),
                 };
