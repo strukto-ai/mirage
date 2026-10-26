@@ -121,9 +121,8 @@ export async function renderCommandDeny(
  * command touches a file, so each line is the one GNU prints when that
  * operand's step is refused: cp opens a source file for reading, reads a
  * source directory and creates each copy, and mv moves each source onto its
- * target. A target given by `-t`, after more than one source, with a
- * trailing slash or that is a directory takes each source by its base name,
- * unless `-T`. A source named `.` or `..`, or a link cp copies as a link,
+ * target. A target given by `-t`, after more than one source or that is a
+ * directory takes each source by its base name, unless `-T`. A source named `.` or `..`, or a link cp copies as a link,
  * keeps `renderDeny`'s line: GNU's there depends on what the directory or
  * the link holds.
  */
@@ -135,10 +134,8 @@ async function transferLines(
   if (subject !== 'cp' && subject !== 'mv') return null
   const spec = SPECS[subject]
   if (spec === undefined) return null
-  const flags = new FlagView(
-    parseToKwargs(parseCommand(spec, [...ctx.argv], ctx.cwd, subject)),
-    spec,
-  )
+  const parsed = parseCommand(spec, [...ctx.argv], ctx.cwd, subject)
+  const flags = new FlagView(parseToKwargs(parsed), spec)
   const named = flags.asStr('target_directory') ?? null
   const operands = operandPaths(ctx)
   const directory =
@@ -160,13 +157,15 @@ async function transferLines(
   if (namedSource !== undefined) refused = [namedSource]
   else if (path === target.rawPath || path === target.virtual) refused = sources
   else return null
-  const goal = target.rawPath || target.virtual
+  const typedTarget = parsed.rawPathFlags.target_directory
+  const goal =
+    directory !== undefined && typeof typedTarget === 'string'
+      ? typedTarget
+      : target.rawPath || target.virtual
   const into =
     directory !== undefined ||
     (!flags.asBool('no_target_directory') &&
-      (sources.length > 1 ||
-        goal.endsWith('/') ||
-        (await fileType(ctx, target)) === FileType.DIRECTORY))
+      (sources.length > 1 || (await fileType(ctx, target)) === FileType.DIRECTORY))
   const landing = (name: string): string => {
     if (!into) return goal
     const base = rstripSlash(name)

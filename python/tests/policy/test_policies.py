@@ -235,7 +235,26 @@ SEALED_TRANSFERS = (
         "cp: /data/sec/dir/.: Permission denied\n",
     ),
     ("cat /data/sec/k", "cat: /data/sec/k: Permission denied\n"),
+    (
+        "cp -r /data/tree /data/sec/new/",
+        "cp: cannot create directory '/data/sec/new/': Permission denied\n",
+    ),
+    (
+        "cd /data && cp --target-directory=sec/sub open",
+        "cp: cannot create regular file 'sec/sub/open': Permission denied\n",
+    ),
+    (
+        "cd /data && cp -tsec/sub open",
+        "cp: cannot create regular file 'sec/sub/open': Permission denied\n",
+    ),
 )
+
+
+class RefusesTargetStat(Policy):
+    async def pre_vfs(self, ctx: VfsContext) -> Action | None:
+        if ctx.call.name == "stat" and ctx.path.virtual == "/data/sec/sub":
+            return Deny("no looking")
+        return None
 
 
 @pytest.mark.asyncio
@@ -243,8 +262,13 @@ async def test_a_refused_cp_or_mv_operand_reads_as_gnu_reports_it():
     # GNU (coreutils 9.7) names the step the operand's role takes: cp
     # opens a source, reads a source directory and creates each copy, mv
     # moves a source onto its target. A link cp copies as a link, or a
-    # source named "dir/.", keeps the plain line.
-    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
+    # source named "dir/.", keeps the plain line. The wording's own stats
+    # are a deciding read, so a coded policy never changes them.
+    ws = Workspace(
+        {"/data/": RAMVFS()},
+        mode=MountMode.WRITE,
+        policies=[RefusesTargetStat()],
+    )
     rule = {"reason": "sealed", "paths": ["/data/sec/*"]}
     ws.create_session("agent", profile={"commands": {"deny": [rule]}})
     try:

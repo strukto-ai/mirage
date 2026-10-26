@@ -253,8 +253,18 @@ describe('Policies', () => {
     // GNU (coreutils 9.7) names the step the operand's role takes: cp opens
     // a source, reads a source directory and creates each copy, mv moves a
     // source onto its target. A link cp copies as a link, or a source named
-    // "dir/.", keeps the plain line.
-    const ws = new Workspace({ '/data/': new RAMVFS() }, { mode: MountMode.WRITE })
+    // "dir/.", keeps the plain line. The wording's own stats are a deciding
+    // read, so a coded policy never changes them.
+    const refusesTargetStat: Policy = {
+      preVfs: (ctx: VfsContext): Action | null =>
+        ctx.call.name === 'stat' && ctx.path.virtual === '/data/sec/sub'
+          ? { kind: 'deny', reason: 'no looking' }
+          : null,
+    }
+    const ws = new Workspace(
+      { '/data/': new RAMVFS() },
+      { mode: MountMode.WRITE, policies: [refusesTargetStat] },
+    )
     const rule = { reason: 'sealed', paths: ['/data/sec/*'] }
     ws.createSession('agent', { profile: { commands: { deny: [rule] } } })
     try {
@@ -304,6 +314,18 @@ describe('Policies', () => {
         ['cp -P /data/sec/lnk /data/out/l', 'cp: /data/sec/lnk: Permission denied\n'],
         ['cp -r /data/sec/dir/. /data/out/d', 'cp: /data/sec/dir/.: Permission denied\n'],
         ['cat /data/sec/k', 'cat: /data/sec/k: Permission denied\n'],
+        [
+          'cp -r /data/tree /data/sec/new/',
+          "cp: cannot create directory '/data/sec/new/': Permission denied\n",
+        ],
+        [
+          'cd /data && cp --target-directory=sec/sub open',
+          "cp: cannot create regular file 'sec/sub/open': Permission denied\n",
+        ],
+        [
+          'cd /data && cp -tsec/sub open',
+          "cp: cannot create regular file 'sec/sub/open': Permission denied\n",
+        ],
       ]
       for (const [line, stderr] of cases) {
         const run = await ws.shell(line, { sessionId: 'agent' })

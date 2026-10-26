@@ -147,8 +147,8 @@ async def transfer_lines(
     the one GNU prints when that operand's step is refused: cp opens a
     source file for reading, reads a source directory and creates each
     copy, and mv moves each source onto its target. A target given by
-    ``-t``, after more than one source, with a trailing slash or that is
-    a directory takes each source by its base name, unless ``-T``. A
+    ``-t``, after more than one source or that is a directory takes each
+    source by its base name, unless ``-T``. A
     source named ``.`` or ``..``, or a link cp copies as a link, keeps
     ``render_deny``'s line: GNU's there depends on what the directory
     or the link holds.
@@ -161,10 +161,8 @@ async def transfer_lines(
     if subject not in ("cp", "mv"):
         return None
     spec = SPECS[subject]
-    flags = FlagView(
-        parse_to_kwargs(parse_command(spec, list(ctx.argv), ctx.cwd, subject)),
-        spec=spec,
-    )
+    parsed = parse_command(spec, list(ctx.argv), ctx.cwd, subject)
+    flags = FlagView(parse_to_kwargs(parsed), spec=spec)
     named = flags.as_str("target_directory")
     operands = operand_paths(ctx)
     directory = next(
@@ -190,12 +188,16 @@ async def transfer_lines(
         refused = list(sources)
     else:
         return None
-    goal = target.raw_path or target.virtual
+    typed_target = parsed.raw_path_flags.get("target_directory")
+    goal = (
+        typed_target
+        if directory is not None and isinstance(typed_target, str)
+        else target.raw_path or target.virtual
+    )
     into = directory is not None or (
         not flags.as_bool("no_target_directory")
         and (
             len(sources) > 1
-            or goal.endswith("/")
             or await _file_type(ctx, target) == FileType.DIRECTORY
         )
     )
@@ -254,13 +256,16 @@ async def _file_type(
 ) -> FileType | None:
     if ctx.vfs is None:
         return None
+    token = set_explaining(DryRun.DECIDING)
     try:
         found = await ctx.vfs.stat(operand, nofollow=nofollow)
-    except OSError as exc:
+    except Exception as exc:
         logger.debug(
             "no stat for refused operand %s: %s", operand.virtual, exc
         )
         return None
+    finally:
+        reset_explaining(token)
     return found.type
 
 
