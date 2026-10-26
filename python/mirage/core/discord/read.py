@@ -50,9 +50,7 @@ async def _read_chat(
 ) -> bytes:
     await guard_day(accessor, match, path.virtual)
     channel_id = day_channel_id(path, entry, parent)
-    return await get_history_jsonl(
-        accessor, channel_id, match.slots["day"], accessor.time_range
-    )
+    return await get_history_jsonl(accessor, channel_id, match.slots["day"])
 
 
 async def _read_member(

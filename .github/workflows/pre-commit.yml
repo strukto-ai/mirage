@@ -26,6 +26,7 @@ env:
 jobs:
   pre-commit:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       # `--from-ref` needs a merge base and both PR parents; the default
       # depth-1 fetch of refs/pull/N/merge has neither.

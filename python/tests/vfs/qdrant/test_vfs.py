@@ -33,7 +33,6 @@ def test_vfs_registers_commands():
         "head",
         "ls",
         "rg",
-        "search",
         "stat",
         "tail",
         "tree",

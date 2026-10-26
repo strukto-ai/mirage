@@ -74,7 +74,7 @@ export interface VfsCall {
 
 /**
  * One `[path, record]` pair per hit: the hit's virtual path and the text
- * record the `search` command prints. null declines; [] means no results.
+ * record the `search` CLI prints. null declines; [] means no results.
  */
 export type SearchOp<A extends Accessor = Accessor> = (
   accessor: A,
@@ -89,7 +89,7 @@ export type SearchManyOp<A extends Accessor = Accessor> = (
   query: SearchQuery,
 ) => Promise<[string, string][] | null>
 
-/** Optional resource search, what the `search` command asks. */
+/** Optional resource search, what the `search` CLI asks. */
 export interface SearchOps<A extends Accessor = Accessor> {
   search: SearchOp<A>
   searchMany: SearchManyOp<A>

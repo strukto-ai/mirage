@@ -14,7 +14,7 @@
 
 import type { Context } from '../../../commands/config.ts'
 import { PythonRuntime } from '../base.ts'
-import type { Program, RunResult } from '../../types.ts'
+import type { OutputFn, Program, RunResult } from '../../types.ts'
 import { memoryLimit, type RuntimeOptions } from '../../config.ts'
 import { RuntimeFiles } from '../../files.ts'
 import { unhonoredNotice } from '../flags.ts'
@@ -78,21 +78,35 @@ export class MontyRuntime extends PythonRuntime<MontyExecution> {
    * Monty implements a Python subset with no `compile`, no `warnings`
    * and no `sys.path`, so the interpreter-init switches have nothing to
    * act on here even though every real-CPython engine honors them. The
-   * notice rides on stderr and the program's own exit code stands.
+   * notice rides on stderr, ahead of what the program writes there, and
+   * the program's own exit code stands.
    *
    * @param engine the install's worker pool.
    * @param program the source and argv to run.
    * @param ctx the run's context.
+   * @param output receives stdout as it is printed.
+   * @param errors receives stderr as it is printed.
    */
-  async interpret(engine: MontyExecution, program: Program, ctx: Context): Promise<RunResult> {
-    const notice = unhonoredNotice(ctx.flags, this.name)
+  async interpret(
+    engine: MontyExecution,
+    program: Program,
+    ctx: Context,
+    output?: OutputFn,
+    errors?: OutputFn,
+  ): Promise<RunResult> {
+    let notice = unhonoredNotice(ctx.flags, this.name)
+    if (notice.length > 0 && errors !== undefined) {
+      await errors(notice)
+      notice = new Uint8Array()
+    }
     // A nested call must not queue behind a parent holding this pool.
     const execution = (ctx.processes?.depth ?? 0) > 0 ? new MontyExecution(this.maxMemory) : engine
-    const result = await execution
-      .run(program, ctx, RuntimeFiles.of(ctx, this.binding))
-      .finally(async () => {
-        if (execution !== engine) await execution.close()
-      })
+    // Every file call is the guest's own: none is left to land at the end.
+    const files = RuntimeFiles.of(ctx, this.binding)
+    const live = ctx.signal === undefined ? files : (files?.withSignal(ctx.signal) ?? null)
+    const result = await execution.run(program, ctx, live, output, errors).finally(async () => {
+      if (execution !== engine) await execution.close()
+    })
     if (notice.length === 0) return result
     const stderr = result.stderr ?? new Uint8Array()
     const merged = new Uint8Array(notice.length + stderr.length)

@@ -50,7 +50,7 @@
     "@earendil-works/pi-coding-agent": "^0.84.2 || ^1.0.0"
   },
   "devDependencies": {
-    "@earendil-works/pi-coding-agent": "^1.0.0",
+    "@earendil-works/pi-coding-agent": "^1.4.0",
     "@struktoai/mirage-node": "workspace:*",
     "@types/node": "^22.0.0",
     "@types/picomatch": "^4.0.3",

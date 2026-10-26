@@ -91,14 +91,13 @@ describe('runHandler', () => {
   })
 
   it.each([
-    ['a framed stream', true, true, false],
-    ['an unframed stream', true, false, false],
-    ['a stream closed early', true, true, true],
-    ['bytes', false, true, false],
-  ])('drops once it answers %s, and again once a stream ends', async (_, lazy, frame, early) => {
+    ['a stream', true, false],
+    ['a stream closed early', true, true],
+    ['bytes', false, false],
+  ])('drops once it answers %s, and again once a stream ends', async (_, lazy, early) => {
     const drops = new Drops()
     const stdout = lazy ? stream(['a\n', 'b\n']) : ENC.encode('a\nb\n')
-    const out = await run(answer(stdout), LEAF, { drop: drops.drop, frame })
+    const out = await run(answer(stdout), LEAF, { drop: drops.drop })
     expect(drops.count).toBe(1)
     if (early) {
       const pulled = out?.[0] as AsyncIterableIterator<Uint8Array>

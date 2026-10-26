@@ -21,6 +21,8 @@ import { ConcurrencyLimiter } from '../../../concurrency/limiter.ts'
 import { CommandTimeoutError } from '../../../errors/types.ts'
 import { PythonRuntime } from '../base.ts'
 import type { Program, RunResult, RuntimeReach } from '../../types.ts'
+import { materialize } from '../../../io/types.ts'
+import { abortable } from '../../../utils/abort.ts'
 import { memoryLimit, type RuntimeOptions } from '../../config.ts'
 import type { WorkspaceBinding } from '../../binding.ts'
 import {
@@ -37,7 +39,7 @@ import { PyodideFs } from './fs/fs.ts'
 import { PyodideExecution } from './execution.ts'
 import { mainFilename } from '../execution.ts'
 import { unhonoredNotice } from '../flags.ts'
-import type { FlushFailure, SyncVFS, XattrOp } from './fs/types.ts'
+import type { FlushFailure, FSStream, SyncVFS, XattrOp } from './fs/types.ts'
 import { classify } from '../../../errors/index.ts'
 import { resolvePath } from '../../../utils/path.ts'
 import { errnoError } from './fs/errors.ts'
@@ -194,6 +196,7 @@ export class PyodideRuntime extends PythonRuntime<undefined> {
   private files: RuntimeFiles | null = null
   private readonly journal: MutationJournal = createJournal()
   private readonly deferred = new Map<string, FlushFailure>()
+  private readonly streams = new Set<FSStream>()
   private readonly mounted = new Set<string>()
   // The directories made to hold a mountpoint, which an unmount takes
   // back so a mount the session no longer sees leaves no name behind.
@@ -252,13 +255,20 @@ export class PyodideRuntime extends PythonRuntime<undefined> {
 
   /**
    * Run one program on a fresh interpreter: in the worker for a run with
-   * files, in process for one without.
+   * files, in process for one without. The guest's prints come back in the
+   * result, its input whole: both cross to the guest as a message.
    *
    * @param _engine none; each run builds its own interpreter.
-   * @param program the source and argv to run.
+   * @param source the source and argv to run.
    * @param ctx the run's context.
    */
-  async interpret(_engine: undefined, program: Program, ctx: Context): Promise<RunResult> {
+  async interpret(_engine: undefined, source: Program, ctx: Context): Promise<RunResult> {
+    // Read through the run's signal: input left open must not hold back
+    // the stop of a run that is cancelled or past its deadline.
+    const program = {
+      ...source,
+      stdin: source.stdin === null ? null : await abortable(materialize(source.stdin), ctx.signal),
+    }
     const binding = this.binding
     const execute = async (runtime: PyodideRuntime): Promise<RunResult> =>
       this.capped(runtime, await runtime.runOne(program, ctx, binding))
@@ -598,6 +608,7 @@ export class PyodideRuntime extends PythonRuntime<undefined> {
           },
         },
         this.deferred,
+        this.streams,
       )
       let dir = ''
       for (const part of mountpoint.split('/').slice(1)) {
@@ -698,18 +709,35 @@ export class PyodideRuntime extends PythonRuntime<undefined> {
   }
 
   /**
-   * Replay every mutation the shim recorded during the run, in the order
-   * the guest performed them. The guest cannot await the bridge from its
-   * sync WASM frames without JSPI, so it only records; ordering is what
-   * makes a create-then-rename or mkdir-then-write sequence land the same
-   * way it ran. Returns one message per failure for the caller's stderr.
+   * Land what the run left open and replay every mutation the shim
+   * recorded during it, in the order the guest performed them. The guest
+   * cannot await the bridge from its sync WASM frames without JSPI, so it
+   * only records; ordering is what makes a create-then-rename or
+   * mkdir-then-write sequence land the same way it ran. Returns one
+   * message per failure for the caller's stderr.
    */
   private drainMutations(): string[] {
     this.journal.reopen()
     const sync = this.sync
     if (this.files === null || sync === undefined) return []
+    // A file still open lands as its close would, since the core held it
+    // for this run only; a stream a later run uses opens again.
+    const unlanded: string[] = []
+    for (const stream of this.streams) {
+      const fh = stream.fh
+      delete stream.fh
+      if (fh === undefined) continue
+      try {
+        sync.close(fh)
+      } catch (error) {
+        unlanded.push(
+          `python3: failed to write ${stream.opened ?? ''} on mount: ${error instanceof Error ? error.message : String(error)}`,
+        )
+      }
+    }
+    this.streams.clear()
     // A refusal no later call of its file came to claim.
-    const deferred = [...this.deferred.values()].map((failure) => failure.message)
+    const deferred = [...[...this.deferred.values()].map((failure) => failure.message), ...unlanded]
     this.deferred.clear()
     const failures = this.syncFailures.splice(0)
     const pending = this.journal.takeMutations()
@@ -750,7 +778,7 @@ export class PyodideRuntime extends PythonRuntime<undefined> {
   }
 
   private async runOne(
-    program: Program,
+    program: Program & { stdin: Uint8Array | null },
     ctx: Context,
     binding: WorkspaceBinding | null,
   ): Promise<RunResult> {

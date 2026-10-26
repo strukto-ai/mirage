@@ -314,14 +314,7 @@ class HostFs:
         # there; mirrors mount/core.py.
         self._uid = _real_os.getuid() if hasattr(_real_os, "getuid") else 0
         self._gid = _real_os.getgid() if hasattr(_real_os, "getgid") else 0
-        reader = reader_of(files)
-        self._descriptors = Descriptors(
-            self._adapter,
-            self._host,
-            (lambda path: posixpath.normpath(reader.follow(path)))
-            if reader.linked
-            else None,
-        )
+        self._descriptors = Descriptors(self._adapter, self._host)
 
     @property
     def files(self) -> WorkspaceFiles:
@@ -777,9 +770,9 @@ class HostFs:
             access, stamp = (float(value) for value in times)
         else:
             access = stamp = time.time()
-        # Writes a descriptor still owes land first, or landing them at
-        # its close would stamp over the times set here.
-        self._descriptors.land_path(virtual, follow_symlinks)
+        # Writes a descriptor still owes land first (the adapter's core
+        # sees to it), or landing them at its close would stamp over the
+        # times set here.
         self._adapter.setattr(
             virtual,
             atime=timestamp_iso(access),
@@ -887,9 +880,7 @@ class HostFs:
         if virtual is None:
             self._host.remove(path, dir_fd=dir_fd)
             return
-        held = self._descriptors.hold(virtual)
         self._adapter.unlink(virtual)
-        self._descriptors.keep(held)
 
     def unlink(self, path: Any, *, dir_fd: int | None = None) -> None:
         self.remove(path, dir_fd=dir_fd)
@@ -952,15 +943,7 @@ class HostFs:
                 None,
                 _spelled(dst),
             )
-        # Both ends as the walk names them before the rename, which may
-        # move a link the walk takes. A rename onto its own name changes
-        # nothing, its descriptors included.
-        old = self._descriptors.walked(source, False)
-        new = self._descriptors.walked(dest, False)
-        held = [] if old == new else self._descriptors.hold(dest)
         self._adapter.rename(source, dest)
-        self._descriptors.keep(held)
-        self._descriptors.moved(old, new)
 
     def renames(self, old: Any, new: Any) -> None:
         """Rename, creating the destination's parents and pruning the
@@ -1046,7 +1029,6 @@ class HostFs:
         # truncate(2) names a file that is there; the op creates a
         # missing one, as GNU truncate does without -c.
         self._adapter.stat(virtual)
-        self._descriptors.land_path(virtual)
         self._adapter.truncate(virtual, length)
 
     def open(
@@ -1097,8 +1079,9 @@ class HostFs:
         if offset < 0:
             raise fs_error(self._descriptors[fd].path, FsCondition.EINVAL)
         # Linux appends a positioned write on an O_APPEND descriptor,
-        # whatever the offset, and leaves the position where it was.
-        handle.pwrite(handle.size if handle.append else offset, payload)
+        # whatever the offset, and leaves the position where it was: the
+        # core writes an appending handle at its end.
+        handle.pwrite(offset, payload)
         return len(payload)
 
     def readv(self, fd: int, buffers: Any) -> int:
@@ -1161,29 +1144,24 @@ class HostFs:
 
     def lseek(self, fd: int, pos: int, how: int) -> int:
         desc = self._descriptors[fd]
-        if desc.handle is None:
+        if desc.directory:
             return 0
-        moved = desc.handle.seek(pos, how)
+        moved = desc.seek(pos, how)
         if moved is None:
             raise fs_error(desc.path, FsCondition.EINVAL)
         return moved
 
     def fstat(self, fd: int) -> _real_os.stat_result:
         desc = self._descriptors[fd]
-        held = desc.stat if desc.kept is not None else None
-        st = self._adapter.stat(desc.path) if held is None else held
-        if desc.handle is not None:
-            st = dataclasses.replace(st, size=desc.handle.size)
-        # A fetched row was judged by its stat; a held one is judged here.
-        if held is not None:
-            st = self._adapter.stat_cached(desc.path, st)
-        return self._stat_of(desc.opened, st, desc.kept is not None)
+        st = syscall(self._adapter.fstat)(desc.fh)
+        unlinked = self._adapter.unlinked(desc.fh)
+        return self._stat_of(desc.opened, st, unlinked)
 
     def fsync(self, fd: int) -> None:
-        self._descriptors.land(self._descriptors[fd])
+        self._descriptors[fd].land()
 
     def ftruncate(self, fd: int, length: int) -> None:
-        if not self._descriptors[fd].facts.writable:
+        if not self._descriptors[fd].mode.writable:
             raise fs_error(self._descriptors[fd].path, FsCondition.EINVAL)
         self._descriptors.file(fd, False, True).truncate(length)
 

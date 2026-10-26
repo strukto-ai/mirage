@@ -15,7 +15,7 @@
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import dotenv from 'dotenv'
-import { DifyVFS, MountMode, Workspace, type FileStat } from '@struktoai/mirage-node'
+import { DifyVFS, MountMode, SEARCH, Workspace, type FileStat } from '@struktoai/mirage-node'
 
 const __HERE = fileURLToPath(new URL('.', import.meta.url))
 dotenv.config({ path: resolve(__HERE, '../../../../.env.development'), override: true })
@@ -70,6 +70,7 @@ async function firstDocumentPath(ws: Workspace): Promise<string | null> {
 async function main(): Promise<void> {
   const vfs = buildVfs()
   const ws = new Workspace({ '/knowledge/': vfs }, { mode: MountMode.READ })
+  ws.registerCli('search', SEARCH)
   try {
     console.log('=== Dify Knowledge ===\n')
 

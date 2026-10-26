@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { byteView, utf8Locale } from '../../../shell/bytes.ts'
+import { utf8Locale } from '../../../shell/bytes.ts'
 import { isStdin, operandLabel } from '../utils/stream.ts'
 import { stdinStream, stdinStat } from '../utils/stream.ts'
 import { guardInput } from '../utils/limit.ts'
@@ -28,22 +28,14 @@ import { IOResult, materialize } from '../../../io/types.ts'
 import { concat } from '../../../utils/bytes.ts'
 import { FileType, PathSpec, type FileStat } from '../../../types.ts'
 import type { CommandFnResult, Context } from '../../config.ts'
-import {
-  NEVER_MATCH,
-  compilePerl,
-  type LineMatcher,
-  matcherSyntax,
-  patternWarnings,
-  resolvePattern,
-} from '../grep_pattern.ts'
+import { matcherSyntax, patternWarnings, resolvePattern } from '../grep_pattern.ts'
 import { exitCodeFor } from '../grep_scan.ts'
 import { BINARY_EXTENSIONS, getExtension } from '../../../utils/filetype.ts'
-import { Worker } from '../../../concurrency/worker.ts'
-import { grepInput, nameEnd, type FlagSet } from '../grep_binary.ts'
+import { nameEnd, type FlagSet } from '../grep_binary.ts'
 import { openGrep, streamConfig, streamInput } from '../grep_stream.ts'
-import { RegexSyntax } from '../types.ts'
 import { OutputStream } from '../../../io/stream.ts'
 import type { OpenStream } from '../../../rs/stream.ts'
+import type { LineRegex } from '../../../rs/regex.ts'
 import { fileAdmitted, dirAdmitted, parseFileGlobs } from '../grep_select.ts'
 import { resolveSource } from '../utils/stream.ts'
 import { WalkLimitError, UsageError } from '../../errors.ts'
@@ -155,7 +147,7 @@ function ignoresCase(fl: FlagView): boolean {
  * What grep warns once for the line, before it reads a file: an obsolete -u,
  * then the pattern's compile-time warnings. Mirrors Python's `line_warnings`.
  */
-export function lineWarnings(fl: FlagView, matcher: LineMatcher | null): string {
+export function lineWarnings(fl: FlagView, matcher: LineRegex | null): string {
   return (
     (fl.asBool('unix_byte_offsets') ? UNIX_BYTE_OFFSETS : '') +
     (matcher === null ? '' : patternWarnings(matcher))
@@ -303,38 +295,21 @@ export async function grepGeneric(
     ]
   if (resolution.neverMatch) f.fixedString = false
   const utf8 = utf8Locale(ctx.env)
-  // -G, -E and -F run in mirage-rs, which compiles the list once for every
-  // input; -P stays with the host's PCRE translation.
-  let pat: RegExp | null = null
-  let rs: OpenStream | null = null
+  // mirage-rs compiles the list once for every input.
+  let searcher: OpenStream
   let warning: Uint8Array
   try {
-    if (f.syntax === RegexSyntax.PERL) {
-      pat = resolution.neverMatch
-        ? new RegExp(NEVER_MATCH)
-        : compilePerl(
-            byteView(resolution.pattern, utf8),
-            f.ignoreCase,
-            f.wholeWord,
-            utf8,
-            f.lineRegexp,
-          )
-      warning = ENC.encode(lineWarnings(fl, null))
-    } else {
-      const [opened, warnings] = await openGrep(
-        streamConfig(f, resolution.neverMatch ? null : resolution.pattern, utf8),
-      )
-      rs = opened
-      warning = fl.asBool('unix_byte_offsets')
-        ? concat([ENC.encode(UNIX_BYTE_OFFSETS), warnings])
-        : warnings
-    }
+    const [opened, warnings] = await openGrep(
+      streamConfig(f, resolution.neverMatch ? null : resolution.pattern, utf8),
+    )
+    searcher = opened
+    warning = fl.asBool('unix_byte_offsets')
+      ? concat([ENC.encode(UNIX_BYTE_OFFSETS), warnings])
+      : warnings
   } catch (error) {
     if (!(error instanceof UsageError)) throw error
     return [null, new IOResult({ exitCode: 2, stderr: ENC.encode(error.message + '\n') })]
   }
-  const searcher = rs
-  let worker: Worker | undefined
   const search = (
     source: AsyncIterable<Uint8Array>,
     label: string,
@@ -343,29 +318,13 @@ export async function grepGeneric(
     afterOutput = false,
     size: number | null = null,
   ): AsyncIterable<Uint8Array> =>
-    searcher !== null
-      ? streamInput(source, searcher, label, show, fileIO, afterOutput, size, ctx.signal)
-      : grepInput(
-          source,
-          pat ?? new RegExp(NEVER_MATCH),
-          f,
-          label,
-          show,
-          fileIO,
-          afterOutput,
-          ctx.signal,
-          utf8,
-          size,
-          worker,
-        )
+    streamInput(source, searcher, label, show, fileIO, afterOutput, size, ctx.signal)
   // The stream is released however the output ends, read or not.
   const owned = (output: AsyncIterable<Uint8Array>): AsyncIterable<Uint8Array> =>
-    searcher === null
-      ? output
-      : new OutputStream(output[Symbol.asyncIterator](), () => {
-          searcher.close()
-          return Promise.resolve()
-        })
+    new OutputStream(output[Symbol.asyncIterator](), () => {
+      searcher.close()
+      return Promise.resolve()
+    })
   const io = warning.byteLength > 0 ? new IOResult({ stderr: warning }) : new IOResult()
   io.exitCode = 1
   const first = paths[0]
@@ -377,12 +336,11 @@ export async function grepGeneric(
         io,
       ]
     } catch (error) {
-      searcher?.close()
+      searcher.close()
       if (!(error instanceof Error)) throw error
       return [null, new IOResult({ exitCode: 2, stderr: ENC.encode(error.message + '\n') })]
     }
   }
-  if (searcher === null) worker = new Worker()
   const mounts = mountsOf(ctx)
   const rd = mountParentReaddir((p: string) => readdir(toPathspec(p)), mounts, mountRoot(ctx))
   const st = mountParentStat((p: string) => stat(toPathspec(p)), mounts)
@@ -491,6 +449,8 @@ export async function grepGeneric(
         }
       } finally {
         matched ||= fileIO.exitCode === 0
+        // A -P search that gave up ends its file with an error.
+        failed ||= fileIO.exitCode === 2
         updateStatus(fileIO)
         if (fileIO.stderr !== null) notices.push(await materialize(fileIO.stderr))
       }
@@ -512,7 +472,6 @@ export async function grepGeneric(
         if (f.quiet && matched) break
       }
     } finally {
-      await worker?.close()
       if (notices.length > 0) io.stderr = concat([await materialize(io.stderr), ...notices])
     }
   }

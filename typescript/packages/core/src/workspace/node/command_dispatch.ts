@@ -32,7 +32,7 @@ import {
 } from '../../context/session_context.ts'
 import { guardDispatch } from '../abort.ts'
 import { mergeSignals } from '../../utils/abort.ts'
-import { type ByteSource, IOResult, materialize } from '../../io/types.ts'
+import { type ByteSource, IOResult, type OutputState, materialize } from '../../io/types.ts'
 import { commandRecords } from '../../observe/context.ts'
 import type { OpRecord } from '../../observe/record.ts'
 import { decodeText, encodeText } from '../../shell/bytes.ts'
@@ -362,6 +362,7 @@ export async function executeCommand(
     await sink.emit(Channel.STDERR, encodeText(refused))
     refused = ''
   }
+  let settling: OutputState | null = null
   try {
     const [stdout, io, execNode] = await runCommandBody(
       recurse,
@@ -384,6 +385,10 @@ export async function executeCommand(
       new Set(prefixAssignments.map(([k]) => k)),
     )
     if (refused !== '') io.stderr = concat([encodeText(refused), await materialize(io.stderr)])
+    // A run that starts as its output is read still runs under the prefix,
+    // so the lines it shells out see it: the prefix ends as that output
+    // settles.
+    if (prefixAssignments.length > 0 && io.output?.settled === false) settling = io.output
     return [stdout, io, execNode]
   } catch (err) {
     if (!(err instanceof TooManyMatches)) throw err
@@ -398,7 +403,13 @@ export async function executeCommand(
   } finally {
     const frames = session.localFrames
     if (frames[frames.length - 1] === savedEnvOverrides) frames.pop()
-    restore(savedEnvOverrides)
+    if (settling !== null) {
+      settling.callbacks.push(() => {
+        restore(savedEnvOverrides)
+      })
+    } else {
+      restore(savedEnvOverrides)
+    }
   }
 }
 

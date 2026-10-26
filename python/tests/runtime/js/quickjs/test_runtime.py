@@ -65,7 +65,7 @@ class _ArgvSpy:
     def __init__(self) -> None:
         self.argv: list[str] = []
 
-    async def run(self, *, argv, stdin, env, fs):
+    async def run(self, *, argv, stdin, env, fs, output=None, errors=None):
         self.argv = list(argv)
         return b"", b"", 0
 
@@ -236,6 +236,59 @@ async def test_quickjs_node_command_end_to_end():
     await ws.close()
 
 
+# A run cancelled while its sink holds a write waits for that write to
+# finish its own cleanup, so neither outlives the run.
+@live
+@pytest.mark.asyncio
+async def test_quickjs_cancelled_run_waits_for_the_write_its_sink_holds():
+    entered, cleaned = asyncio.Event(), asyncio.Event()
+
+    async def output(data: bytes) -> None:
+        entered.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            await asyncio.sleep(0.1)
+            cleaned.set()
+            raise
+
+    rt = QuickJsRuntime()
+    run = asyncio.ensure_future(
+        rt.execute(
+            [], [], Context(flags={"c": "console.log(1)"}), output=output
+        )
+    )
+    try:
+        await asyncio.wait_for(entered.wait(), 30)
+        run.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await run
+        assert cleaned.is_set()
+    finally:
+        await rt.close()
+
+
+# A program's writes reach its reader as it runs, so one that never ends
+# stops once its reader has what it wanted, as SIGPIPE stops it.
+@live
+@pytest.mark.asyncio
+async def test_quickjs_endless_writer_stops_once_its_reader_has_enough():
+    ws = Workspace(
+        {"/ram": RAMVFS()}, mode=MountMode.EXEC, runtimes=["quickjs"]
+    )
+    try:
+        r = await asyncio.wait_for(
+            ws.shell(
+                "js -e \"for (;;) console.log('y')\" | head -n 2;"
+                ' echo "${PIPESTATUS[@]}"'
+            ),
+            30,
+        )
+        assert (await r.stdout_str()) == "y\ny\n141 0\n"
+    finally:
+        await ws.close()
+
+
 @live
 @pytest.mark.asyncio
 async def test_quickjs_cancellation_stops_the_run():
@@ -248,6 +301,55 @@ async def test_quickjs_cancellation_stops_the_run():
     result = await _run(rt, Program(code="console.log('alive')"))
     assert result.exit_code == 0
     assert result.stdout == b"alive\n"
+
+
+@live
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line,code",
+    [
+        ('timeout 1 node -e "for (;;) {}"', 124),
+        ('timeout -s CONT -k 1 1 node -e "for (;;) {}"', 137),
+    ],
+)
+async def test_a_deadline_stops_a_guest_that_never_yields(line, code):
+    ws = Workspace(
+        {"/data": RAMVFS()}, mode=MountMode.EXEC, runtimes=["quickjs"]
+    )
+    try:
+        io = await ws.shell(line)
+        assert io.exit_code == code
+        assert await io.stderr_str() == ""
+    finally:
+        await ws.close()
+
+
+class _SlowRAM(RAMVFS):
+    async def pwrite(self, path, data, offset):
+        await asyncio.sleep(0.6)
+        await super().pwrite(path, data, offset)
+
+    async def write(self, path, data, *, atomic=False):
+        await asyncio.sleep(0.6)
+        await super().write(path, data, atomic=atomic)
+
+
+@live
+@pytest.mark.asyncio
+async def test_a_deadline_joins_the_landing_of_what_a_stopped_guest_wrote():
+    # The run's end closes the file it left open, which takes longer than
+    # a moment: timeout answers once that write has landed.
+    ws = Workspace(
+        {"/data": _SlowRAM()}, mode=MountMode.EXEC, runtimes=["quickjs"]
+    )
+    try:
+        io = await ws.shell(
+            "timeout 1 node -e \"const f = std.open('/data/o', 'w'); "
+            "f.puts('kept'); f.flush(); for (;;) {}\"; cat /data/o"
+        )
+        assert await io.stdout_str() == "kept"
+    finally:
+        await ws.close()
 
 
 @live

@@ -27,7 +27,7 @@ import { IOResult, type ByteSource } from '../../../io/types.ts'
 import { encodeText } from '../../../shell/bytes.ts'
 import { STOP_WAIT_SECONDS } from '../../../shell/job_table/constants.ts'
 import type { Limit, PathSpec, Producer } from '../../../types.ts'
-import { ABORT_JOIN_MS, joinOrAbort } from '../../../utils/abort.ts'
+import { ABORT_JOIN_MS, joinOrAbort, stopSignal } from '../../../utils/abort.ts'
 import { concat } from '../../../utils/bytes.ts'
 import { readerOf, type Files } from '../../files.ts'
 
@@ -69,8 +69,6 @@ export interface RunHandlerOpts {
    * its recorder and activity to the stream).
    */
   scope?: (result: [ByteSource | null, IOResult]) => [ByteSource | null, IOResult]
-  /** False leaves a script leaf's output as its runtime worded it. */
-  frame?: boolean
   /** The caller's abort, which stops waiting for the body. */
   signal?: AbortSignal
   /** Aborted when the limit trips, so a runtime can kill what it spawned. */
@@ -227,7 +225,7 @@ export async function runHandler(
   // the cancelled handler whole; any other abort releases the caller soon.
   const runner = currentCaller().process
   const grace = (): number =>
-    (runner?.signal ?? null) === null ? ABORT_JOIN_MS : STOP_WAIT_SECONDS * 1000
+    (runner?.signal ?? stopSignal(opts.signal)) === null ? ABORT_JOIN_MS : STOP_WAIT_SECONDS * 1000
   try {
     out = await runWithTimeout(joinOrAbort(answer, opts.signal, grace), timeout, name)
   } catch (err) {
@@ -263,13 +261,8 @@ export async function runHandler(
   const source = out[0]
   out[1].producer = producer
   const [stream, io] = opts.scope !== undefined ? opts.scope(out) : out
-  let pulled: AsyncIterator<Uint8Array>
-  if (opts.frame === false || stream === null || (stream instanceof Uint8Array && !voice.splits)) {
-    if (drop === undefined || stream === null || stream instanceof Uint8Array) return [stream, io]
-    pulled = stream[Symbol.asyncIterator]()
-  } else {
-    pulled = framed(stream, io, voice)
-  }
+  if (stream === null || (stream instanceof Uint8Array && !voice.splits)) return [stream, io]
+  const pulled = framed(stream, io, voice)
   const lazy = !(stream instanceof Uint8Array)
   return [
     new OutputStream(pulled, async () => {
@@ -323,6 +316,7 @@ async function* framed(
     if (printed !== null) yield* chunks(printed)
     io.stderr = concat([await io.materializeStderr(), stderr])
     io.exitCode = exitCode
+    io.output?.finish()
   } finally {
     await closeQuietly(source)
   }

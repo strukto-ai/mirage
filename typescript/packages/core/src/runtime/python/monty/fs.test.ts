@@ -15,11 +15,11 @@
 import { describe, expect, it, vi, type Mock } from 'vitest'
 import type { BridgeDispatchFn } from '../../types.ts'
 import { ContentType, FileStat, FileType } from '../../../types.ts'
-import { RuntimeFiles } from '../../files.ts'
 import { MontyFs } from './index.ts'
 import type { GuestStat } from './stat.ts'
 import { PrefixResolver } from '../../resolver.ts'
 import { MAX_URANDOM_BYTES } from './constants.ts'
+import { filesOver } from '../../../../tests/runtime/fixtures/bridge.ts'
 
 const NOT_HANDLED = Symbol('NOT_HANDLED')
 
@@ -54,7 +54,7 @@ function accessOn(
   return new MontyFs(
     BITS,
     env,
-    new RuntimeFiles(
+    filesOver(
       dispatch,
       new PrefixResolver(
         () => mounts,

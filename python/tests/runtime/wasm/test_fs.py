@@ -14,7 +14,6 @@
 
 import asyncio
 import errno
-import functools
 import inspect
 import struct
 
@@ -27,8 +26,8 @@ import wasmtime
 from mirage import MountMode, Workspace
 from mirage.context import reset_current_session, set_current_session
 from mirage.policy import Deny, Policy
-from mirage.runtime.files import RuntimeFiles
-from mirage.runtime.handles import FileHandle
+from mirage.runtime.files import Descriptor, RuntimeFiles
+from mirage.runtime.handles.mode import OpenMode
 from mirage.runtime.resolver import PrefixResolver
 from mirage.runtime.wasm import fs
 from mirage.runtime.wasm.constants import (
@@ -150,33 +149,53 @@ def test_unpack_iovs_decodes_pointer_length_pairs():
     assert unpack_iovs(raw, 2) == [(16, 128), (4096, 64)]
 
 
-def _refuse_flush(path, steps):
-    raise NotImplementedError("truncate is not supported")
+class _RefusingRAM(RAMVFS):
+    """A mount that takes no write once ``refused`` is set."""
+
+    refused = False
+
+    async def pwrite(self, *args, **kwargs):
+        if self.refused:
+            raise NotImplementedError("pwrite is not supported")
+        return await super().pwrite(*args, **kwargs)
 
 
-def test_close_all_reports_a_flush_the_mount_cannot_take(monkeypatch):
-    view = WasmView()
-    monkeypatch.setattr(view, "flush", _refuse_flush)
+_READ_WRITE = OpenMode(
+    readable=True,
+    writable=True,
+    truncate=False,
+    append=False,
+    create=False,
+    exclusive=False,
+    binary=True,
+)
+
+
+def _wasi_over_ram(
+    vfs: RAMVFS | None = None, body: bytes = b""
+) -> tuple[Workspace, WasiFs, int, Descriptor]:
+    ws = Workspace({"/data/": vfs or RAMVFS()}, mode=MountMode.WRITE)
+    asyncio.run(ws.vfs.write("/data/f.txt", body))
+    files = RuntimeFiles(
+        ws.vfs.dispatch, asyncio.new_event_loop(), files=ws.vfs
+    )
+    view = WasmView(files=files)
     wasi_fs = WasiFs(view, b"")
-    handle = FileHandle.opened(
-        "/data/f.txt", None, size=0, writable=True, append=False
-    )
-    handle.write(b"kept")
-    wasi_fs._fds.add(FdEntry(kind="file", handle=handle, path="/data/f.txt"))
-    assert wasi_fs.close_all() == ["/data/f.txt: truncate is not supported"]
-
-
-def _wasi_over_ram() -> tuple[Workspace, WasiFs, int, FileHandle]:
-    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
-    asyncio.run(ws.vfs.write("/data/f.txt", b""))
-    wasi_fs = WasiFs(WasmView(files=RuntimeFiles(ws.vfs.dispatch, None)), b"")
-    handle = FileHandle.opened(
-        "/data/f.txt", None, size=0, writable=True, append=False
-    )
+    desc = view.open("/data/f.txt", _READ_WRITE)
+    assert desc is not None
     fd = wasi_fs._fds.add(
-        FdEntry(kind="file", handle=handle, path="/data/f.txt")
+        FdEntry(kind="file", file=desc, opened="/data/f.txt")
     )
-    return ws, wasi_fs, fd, handle
+    return ws, wasi_fs, fd, desc
+
+
+def test_close_all_reports_a_landing_the_mount_cannot_take():
+    vfs = _RefusingRAM()
+    _, wasi_fs, _, desc = _wasi_over_ram(vfs)
+    desc.write(b"kept")
+    vfs.refused = True
+    (failure,) = wasi_fs.close_all()
+    assert failure.startswith("/data/f.txt: ")
 
 
 def _refuse_read(*args, **kwargs):
@@ -185,24 +204,15 @@ def _refuse_read(*args, **kwargs):
 
 def test_a_read_that_fails_as_a_name_goes_fails_the_reads_after(monkeypatch):
     # The removal goes ahead, but the bytes it could not keep are not an
-    # empty file: every read after it reports why.
-    ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE)
-    asyncio.run(ws.vfs.write("/data/f.txt", b"body"))
-    files = RuntimeFiles(ws.vfs.dispatch, None)
-    wasi_fs = WasiFs(WasmView(files=files), b"")
-    entry = FdEntry(kind="file", path="/data/f.txt")
-    entry.handle = FileHandle.opened(
-        "/data/f.txt",
-        functools.partial(wasi_fs._fetch, entry, False),
-        size=4,
-        writable=False,
-        append=False,
-    )
-    wasi_fs._fds.add(entry)
-    monkeypatch.setattr(files, "read", _refuse_read)
-    wasi_fs._keep(wasi_fs._hold("/data/f.txt"))
+    # empty file, nor the next file the name is given: every read after
+    # it reports why.
+    ws, wasi_fs, fd, desc = _wasi_over_ram(body=b"body")
+    monkeypatch.setattr(ws.vfs, "read", _refuse_read)
+    wasi_fs._fs.unlink("/data/f.txt")
+    monkeypatch.undo()
+    asyncio.run(ws.vfs.write("/data/f.txt", b"other"))
     with pytest.raises(PermissionError):
-        entry.handle.read(4)
+        desc.read(4)
 
 
 def test_fd_sync_lands_what_a_file_owes_before_its_close():
@@ -227,17 +237,30 @@ def test_fd_filestat_set_times_stamps_after_the_writes_land():
 
 def test_set_times_lands_every_fd_on_the_file_first():
     ws, wasi_fs, fd, handle = _wasi_over_ram()
-    other = FileHandle.opened(
-        "/data/f.txt", None, size=0, writable=True, append=False
-    )
+    other = wasi_fs._fs.open("/data/f.txt", _READ_WRITE)
+    assert other is not None
     other.write(b"other")
     other_fd = wasi_fs._fds.add(
-        FdEntry(kind="file", handle=other, path="/data/f.txt")
+        FdEntry(kind="file", file=other, opened="/data/f.txt")
     )
     stamp = 981173107 * 1_000_000_000
     assert wasi_fs.fd_filestat_set_times(None, fd, 0, stamp, FST_MTIM) == 0
     assert wasi_fs.fd_close(None, other_fd) == 0
     assert mtime_ns(asyncio.run(ws.vfs.stat("/data/f.txt"))) == stamp
+
+
+def test_two_fds_land_in_the_order_they_wrote():
+    ws, wasi_fs, fd, first = _wasi_over_ram(body=b"0000")
+    second = wasi_fs._fs.open("/data/f.txt", _READ_WRITE)
+    assert second is not None
+    later = wasi_fs._fds.add(
+        FdEntry(kind="file", file=second, opened="/data/f.txt")
+    )
+    first.write(b"AAAA")
+    second.write(b"BB")
+    assert wasi_fs.fd_close(None, later) == 0
+    assert wasi_fs.fd_close(None, fd) == 0
+    assert asyncio.run(ws.vfs.read("/data/f.txt")) == b"BBAA"
 
 
 class _RetainedPolicy(Policy):
@@ -275,7 +298,10 @@ def test_wasi_open_wires_retained_read_checks(
     token = set_current_session(ws.create_session("reader"))
     prefixes = ["/data/"]
     files = RuntimeFiles(
-        ws.vfs.dispatch, loop, PrefixResolver(lambda: prefixes)
+        ws.vfs.dispatch,
+        loop,
+        PrefixResolver(lambda: prefixes),
+        files=ws.vfs,
     )
     view = WasmView(files=files)
     wasi = WasiFs(view, b"stdin")
@@ -308,7 +334,7 @@ def test_wasi_open_wires_retained_read_checks(
         with pytest.raises(OSError):
             wasi.fd_read(None, fd, 0, 1, 8)
         assert memory == {}
-        assert wasi._fds.get(fd).handle.pos == 1
+        assert wasi._fds.get(fd).file.pos == 1
         # stdin is a delivered input stream, not a mounted file.
         assert wasi.fd_read(None, 0, 0, 1, 8) == 0
         assert memory[16] == (b"s" if vectored else b"st")

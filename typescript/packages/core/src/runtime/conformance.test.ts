@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { WorkspaceBinding } from './binding.ts'
 import { describe, expect, it } from 'vitest'
 import { ContentType, FileStat, FileType } from '../types.ts'
 import { MontyRuntime } from './python/monty/index.ts'
@@ -21,6 +20,7 @@ import { QuickJsRuntime } from './js/quickjs/runtime.ts'
 import type { Runtime } from './base.ts'
 import type { BridgeDispatchFn, RunResult } from './types.ts'
 import { PrefixResolver } from './resolver.ts'
+import { bindOver } from '../../tests/runtime/fixtures/bridge.ts'
 import { context } from '../../tests/workspace/fixtures/context.ts'
 
 interface CountingBridge {
@@ -135,7 +135,7 @@ describe('append ships only the deltas', () => {
     async (_name, make, program) => {
       const counting = makeCountingBridge({ '/data/log.txt': 'S'.repeat(64) })
       const rt = make()
-      rt.bind(WorkspaceBinding.overBridge(counting.dispatch, new PrefixResolver(() => ['/data/'])))
+      bindOver(rt, counting.dispatch, new PrefixResolver(() => ['/data/']))
       const result = await run(rt, program)
       await rt.close()
       expect(result.exitCode).toBe(0)

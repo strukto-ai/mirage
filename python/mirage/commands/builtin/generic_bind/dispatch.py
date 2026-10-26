@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import AsyncIterator, Awaitable, Callable
-from dataclasses import replace
 
 from mirage.accessor.base import NOOPAccessor
 from mirage.commands.builtin.generic_bind.adapter import GenericCommand
@@ -135,7 +134,7 @@ async def run_dispatch(
     # through the dispatcher, even inside a command a mount runs (a
     # nested line): the builder's files and ``mounts_of`` read this to
     # know the walk crosses.
-    token = bind_caller(replace(current_caller(), mount=None))
+    token = bind_caller(current_caller().changed({"mount": None}))
     try:
         result = await builder.fn(
             NOOPAccessor(),

@@ -15,7 +15,6 @@
 import itertools
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from dataclasses import replace
 
 from mirage.context.session_context import (
     bind_caller,
@@ -59,7 +58,7 @@ async def command_scope() -> AsyncIterator[None]:
     nested command (a ``$(...)``, a function body) gets its own later
     stamp, and the outer one comes back when it ends.
     """
-    token = bind_caller(replace(current_caller(), command_started=tick()))
+    token = bind_caller(current_caller().changed({"command_started": tick()}))
     try:
         yield
     finally:

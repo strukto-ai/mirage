@@ -19,6 +19,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from mirage.accessor.s3 import S3Accessor
 from mirage.types import PathSpec
 from mirage.vfs.s3 import S3Config
+from tests.e2e.s3_mock import S3_SESSION
 
 
 def _config():
@@ -70,7 +71,7 @@ def test_read_stream_returns_async_iterator():
             chunks.append(chunk)
         return chunks
 
-    with patch("mirage.core.s3.stream.async_session", return_value=session):
+    with patch(S3_SESSION, return_value=session):
         chunks = asyncio.run(_run())
     assert b"".join(chunks) == b"hello world"
 
@@ -89,7 +90,7 @@ def test_read_stream_yields_chunks():
             chunks.append(chunk)
         return chunks
 
-    with patch("mirage.core.s3.stream.async_session", return_value=session):
+    with patch(S3_SESSION, return_value=session):
         chunks = asyncio.run(_run())
     assert b"".join(chunks) == b"a" * 100
     assert len(chunks) >= 2
@@ -101,7 +102,7 @@ def test_read_bytes_returns_bytes():
     config = _config()
     session = _mock_session(b"file content here")
 
-    with patch("mirage.core.s3.read.async_session", return_value=session):
+    with patch(S3_SESSION, return_value=session):
         result = asyncio.run(read(config, PathSpec.from_str_path("test.txt")))
     assert isinstance(result, bytes)
     assert result == b"file content here"

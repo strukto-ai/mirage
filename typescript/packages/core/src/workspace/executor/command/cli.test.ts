@@ -41,6 +41,7 @@ import { WorkspaceRuntime } from '../../../runtime/workspace.ts'
 import { noWorker } from '../../../runtime/python/pyodide/errors.ts'
 import type { Program, RunResult, Language } from '../../../runtime/types.ts'
 import { SessionState } from '../../session/session.ts'
+import type { ExecutionNode } from '../../types.ts'
 import { handleCli, reachesService } from './cli.ts'
 import { NOOPAccessor } from '../../../accessor/base.ts'
 
@@ -377,6 +378,18 @@ class FakePyRuntime extends LanguageRuntime {
   }
 }
 
+class ShellingRuntime extends FakePyRuntime {
+  override readonly name = 'shellpy'
+  shell: Context['shell']
+
+  override async interpret(_engine: unknown, _program: Program, ctx: Context): Promise<RunResult> {
+    this.shell = ctx.shell
+    if (ctx.shell === undefined) throw new Error('missing invocation shell')
+    await ctx.shell('echo nested')
+    return this.result
+  }
+}
+
 class TierPyRuntime extends PythonRuntime {
   seen: (Context & Program)[] = []
 
@@ -454,6 +467,14 @@ function scriptInstall(
   return installOf('pager', spec, opts.config ?? null)
 }
 
+/** A CLI line run to the end of its output, which a script's run settles its status and stderr by. */
+async function drained(
+  ...args: Parameters<typeof handleCli>
+): Promise<[Uint8Array, IOResult, ExecutionNode]> {
+  const [stdout, io, node] = await handleCli(...args)
+  return [await materialize(stdout), io, node]
+}
+
 describe('handleCli script arm', () => {
   it('selects by language and runs with verbatim argv', async () => {
     // The python script lands on the python-speaking entry even though
@@ -461,7 +482,7 @@ describe('handleCli script arm', () => {
     // verbatim so it can re-parse natively.
     const py = new FakePyRuntime()
     const js = new FakeJsRuntime()
-    const [stdout, io, node] = await handleCli(
+    const [stdout, io, node] = await drained(
       scriptInstall(),
       ['pager', 'report.txt', 'x'],
       new SessionState({ sessionId: 't' }),
@@ -486,7 +507,7 @@ describe('handleCli script arm', () => {
     const install = scriptInstall({
       options: [new Argument(['-n', '--lines'], { type: 'int' })],
     })
-    const [, io] = await handleCli(
+    const [, io] = await drained(
       install,
       ['pager', '-n', '3', 'report.txt'],
       new SessionState({ sessionId: 't' }),
@@ -506,7 +527,7 @@ describe('handleCli script arm', () => {
       script: new ScriptSource('export const x = 1', 'js', true),
     })
     const install = installOf('pager', spec)
-    const [, io] = await handleCli(install, ['pager'], new SessionState({ sessionId: 't' }), null, {
+    const [, io] = await drained(install, ['pager'], new SessionState({ sessionId: 't' }), null, {
       entries: [js],
     })
     expect(io.exitCode).toBe(0)
@@ -515,7 +536,7 @@ describe('handleCli script arm', () => {
 
   it('a non-module script sends no module flag', async () => {
     const py = new FakePyRuntime()
-    await handleCli(scriptInstall(), ['pager'], new SessionState({ sessionId: 't' }), null, {
+    await drained(scriptInstall(), ['pager'], new SessionState({ sessionId: 't' }), null, {
       entries: [py],
     })
     expect(py.seen.pop()?.flags).toEqual({ c: "print('hi')", scriptCli: true })
@@ -524,7 +545,7 @@ describe('handleCli script arm', () => {
   it('the env carries MIRAGE_CLI_CONFIG as JSON', async () => {
     const py = new FakePyRuntime()
     const session = new SessionState({ sessionId: 't', vars: varsFromEnv({ EDITOR: 'vi' }) })
-    const [, io] = await handleCli(
+    const [, io] = await drained(
       scriptInstall({ config: { apiKey: 'k1' } }),
       ['pager'],
       session,
@@ -541,7 +562,7 @@ describe('handleCli script arm', () => {
 
   it('the env omits MIRAGE_CLI_CONFIG without config', async () => {
     const py = new FakePyRuntime()
-    await handleCli(scriptInstall(), ['pager'], new SessionState({ sessionId: 't' }), null, {
+    await drained(scriptInstall(), ['pager'], new SessionState({ sessionId: 't' }), null, {
       entries: [py],
     })
     expect(py.seen.pop()?.env).not.toHaveProperty('MIRAGE_CLI_CONFIG')
@@ -552,24 +573,18 @@ describe('handleCli script arm', () => {
     // 'pager:' and two installs of one program are distinguishable.
     const py = new FakePyRuntime()
     const install = installOf('renamed', scriptInstall().cli)
-    await handleCli(
-      install,
-      ['renamed', 'report.txt'],
-      new SessionState({ sessionId: 't' }),
-      null,
-      {
-        entries: [py],
-      },
-    )
+    await drained(install, ['renamed', 'report.txt'], new SessionState({ sessionId: 't' }), null, {
+      entries: [py],
+    })
     const run = py.seen.pop()
     expect(run?.prog).toBe('renamed')
     expect(run?.args).toEqual(['report.txt'])
   })
 
-  it('stdin materializes to bytes', async () => {
+  it('stdin reaches the program', async () => {
     const py = new FakePyRuntime()
     const stdin = new TextEncoder().encode('body')
-    await handleCli(scriptInstall(), ['pager'], new SessionState({ sessionId: 't' }), stdin, {
+    await drained(scriptInstall(), ['pager'], new SessionState({ sessionId: 't' }), stdin, {
       entries: [py],
     })
     expect(py.seen.pop()?.stdin).toEqual(stdin)
@@ -579,7 +594,7 @@ describe('handleCli script arm', () => {
     // A grammarless script root answers its own --help: mirage would
     // render a page documenting only --help, which documents nothing.
     const py = new FakePyRuntime()
-    const [, io] = await handleCli(
+    const [, io] = await drained(
       scriptInstall(),
       ['pager', '--help'],
       new SessionState({ sessionId: 't' }),
@@ -597,7 +612,7 @@ describe('handleCli script arm', () => {
     const install = scriptInstall({
       options: [new Argument(['-n', '--lines'], { type: 'int' })],
     })
-    const [stdout, io] = await handleCli(
+    const [stdout, io] = await drained(
       install,
       ['pager', '--help'],
       new SessionState({ sessionId: 't' }),
@@ -616,7 +631,7 @@ describe('handleCli script arm', () => {
     // refused on its behalf: a yaml clis entry declares no grammar at
     // all, which would leave the tier operand-only.
     const py = new FakePyRuntime()
-    const [, io] = await handleCli(
+    const [, io] = await drained(
       scriptInstall(),
       ['pager', '--width', '80', '-n', 'x'],
       new SessionState({ sessionId: 't' }),
@@ -632,7 +647,7 @@ describe('handleCli script arm', () => {
     const install = scriptInstall({
       options: [new Argument(['-n', '--lines'], { type: 'int' })],
     })
-    const [, io] = await handleCli(
+    const [, io] = await drained(
       install,
       ['pager', '--frobnicate'],
       new SessionState({ sessionId: 't' }),
@@ -651,7 +666,7 @@ describe('handleCli script arm', () => {
     // even when an earlier entry speaks the same language.
     const first = new FakePyRuntime()
     const pinned = new OtherPyRuntime()
-    const [, io] = await handleCli(
+    const [, io] = await drained(
       scriptInstall({ runtime: 'otherpy' }),
       ['pager'],
       new SessionState({ sessionId: 't' }),
@@ -668,7 +683,7 @@ describe('handleCli script arm', () => {
   it('runs where the line runs its interpreter', async () => {
     const first = new TierPyRuntime('first')
     const second = new TierPyRuntime('second')
-    const [, io] = await handleCli(
+    const [, io] = await drained(
       scriptInstall(),
       ['pager'],
       new SessionState({ sessionId: 't' }),
@@ -706,7 +721,7 @@ describe('handleCli script arm', () => {
 
   it('is refused when the line refused its interpreter', async () => {
     const py = new TierPyRuntime('first')
-    const [, io, node] = await handleCli(
+    const [, io, node] = await drained(
       scriptInstall(),
       ['pager'],
       new SessionState({ sessionId: 't' }),
@@ -723,7 +738,7 @@ describe('handleCli script arm', () => {
   // the entry the line passed over does not run it either.
   it('is refused where the line runs python3 on a runtime without python', async () => {
     const py = new TierPyRuntime('first')
-    const [, io] = await handleCli(
+    const [, io] = await drained(
       scriptInstall(),
       ['pager'],
       new SessionState({ sessionId: 't' }),
@@ -739,7 +754,7 @@ describe('handleCli script arm', () => {
 
   // The interpreter is missing, not the program: 127, as python3 answers.
   it('exits 127 when its runtime is unavailable', async () => {
-    const [, io, node] = await handleCli(
+    const [, io, node] = await drained(
       scriptInstall(),
       ['pager'],
       new SessionState({ sessionId: 't' }),
@@ -753,7 +768,7 @@ describe('handleCli script arm', () => {
 
   it('runs on the first entry where the workspace serves python3', async () => {
     const py = new TierPyRuntime('first')
-    const [, io] = await handleCli(
+    const [, io] = await drained(
       scriptInstall(),
       ['pager'],
       new SessionState({ sessionId: 't' }),
@@ -766,7 +781,7 @@ describe('handleCli script arm', () => {
 
   it('an unknown pin exits 127', async () => {
     const py = new FakePyRuntime()
-    const [, io, node] = await handleCli(
+    const [, io, node] = await drained(
       scriptInstall({ runtime: 'local' }),
       ['pager'],
       new SessionState({ sessionId: 't' }),
@@ -783,7 +798,7 @@ describe('handleCli script arm', () => {
 
   it('a pin language mismatch exits 127', async () => {
     const js = new FakeJsRuntime()
-    const [, io] = await handleCli(
+    const [, io] = await drained(
       scriptInstall({ runtime: 'fakejs' }),
       ['pager'],
       new SessionState({ sessionId: 't' }),
@@ -799,7 +814,7 @@ describe('handleCli script arm', () => {
 
   it('no language match exits 127', async () => {
     const py = new FakePyRuntime()
-    const [, io] = await handleCli(
+    const [, io] = await drained(
       scriptInstall({ language: 'js' }),
       ['pager'],
       new SessionState({ sessionId: 't' }),
@@ -813,7 +828,7 @@ describe('handleCli script arm', () => {
   })
 
   it('outside a workspace exits 127', async () => {
-    const [, io] = await handleCli(scriptInstall(), ['pager'], new SessionState({ sessionId: 't' }))
+    const [, io] = await drained(scriptInstall(), ['pager'], new SessionState({ sessionId: 't' }))
     expect(io.exitCode).toBe(127)
     expect(dec.decode(await materialize(io.stderr))).toBe(
       'pager: no workspace runtime runs python scripts (workspace runtimes: none)\n',
@@ -822,7 +837,7 @@ describe('handleCli script arm', () => {
 
   it('a crash reports prog-prefixed exit 1', async () => {
     const crash = new CrashingRuntime()
-    const [, io] = await handleCli(
+    const [, io, node] = await drained(
       scriptInstall(),
       ['pager'],
       new SessionState({ sessionId: 't' }),
@@ -831,6 +846,26 @@ describe('handleCli script arm', () => {
     )
     expect(io.exitCode).toBe(1)
     expect(dec.decode(await materialize(io.stderr))).toBe('pager: engine exploded\n')
+    expect(node.exitCode).toBe(1)
+    expect(dec.decode(node.stderr)).toBe('pager: engine exploded\n')
+  })
+
+  // A script's run starts as its output is read, after the leaf returned,
+  // so its shell stays live until that output settles.
+  it('a script reaches the shell while its output is read', async () => {
+    const evaluate = vi.fn(() => Promise.resolve(new IOResult()))
+    const shelling = new ShellingRuntime()
+    const [, io] = await drained(
+      scriptInstall(),
+      ['pager'],
+      new SessionState({ sessionId: 't' }),
+      null,
+      { entries: [shelling], shell: evaluate },
+    )
+    expect(io.exitCode).toBe(0)
+    expect(evaluate).toHaveBeenCalledTimes(1)
+    if (shelling.shell === undefined) throw new Error('missing saved shell')
+    await expect(shelling.shell('echo late')).rejects.toThrow('no longer active')
   })
 
   it('the exit code and stderr surface', async () => {
@@ -840,14 +875,14 @@ describe('handleCli script arm', () => {
       stderr: new TextEncoder().encode('boom\n'),
       exitCode: 3,
     }
-    const [stdout, io, node] = await handleCli(
+    const [stdout, io, node] = await drained(
       scriptInstall(),
       ['pager'],
       new SessionState({ sessionId: 't' }),
       null,
       { entries: [py] },
     )
-    expect(stdout).toBeNull()
+    expect(stdout).toEqual(new Uint8Array())
     expect(io.exitCode).toBe(3)
     expect(dec.decode(await materialize(io.stderr))).toBe('boom\n')
     expect(node.exitCode).toBe(3)
@@ -862,7 +897,7 @@ describe('handleCli script arm', () => {
     })
     const install = installOf('pager', spec)
     await expect(
-      handleCli(install, ['pager'], new SessionState({ sessionId: 't' }), null, {
+      drained(install, ['pager'], new SessionState({ sessionId: 't' }), null, {
         entries: [sleepy],
       }),
     ).rejects.toThrow(/pager: timed out/)
@@ -878,7 +913,7 @@ describe('handleCli script arm', () => {
     }
     const py = new FakePyRuntime(),
       sleepy = new SleepingRuntime()
-    await handleCli(scriptInstall(), ['pager'], new SessionState({ sessionId: 't' }), null, {
+    await drained(scriptInstall(), ['pager'], new SessionState({ sessionId: 't' }), null, {
       entries: [py],
       settle,
     })
@@ -888,7 +923,7 @@ describe('handleCli script arm', () => {
       script: new ScriptSource("print('hi')"),
     })
     await expect(
-      handleCli(installOf('pager', spec), ['pager'], new SessionState({ sessionId: 't' }), null, {
+      drained(installOf('pager', spec), ['pager'], new SessionState({ sessionId: 't' }), null, {
         entries: [sleepy],
         settle,
       }),

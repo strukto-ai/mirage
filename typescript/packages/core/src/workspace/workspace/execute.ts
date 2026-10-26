@@ -55,6 +55,7 @@ import {
   abortable,
   ABORT_JOIN_MS,
   joinOrAbort,
+  stopSignal,
 } from '../../utils/abort.ts'
 import { lineStatusWriter, runWithLineAbort } from '../abort.ts'
 import type { Dispatcher } from '../dispatcher/index.ts'
@@ -343,6 +344,10 @@ async function runLine(
         cancel: () => {
           abort.abort()
         },
+        started: (info) => {
+          targetSession.processId = info.pid
+          targetSession.shellPid ??= info.pid
+        },
         run: async () => {
           result = await runWithSession(
             targetSession,
@@ -365,8 +370,6 @@ async function runLine(
       recordStatus(targetSession, FORK_FAILED_STATUS)
       return new ExecuteResult(new Uint8Array(), encodeText(FORK_FAILED), FORK_FAILED_STATUS)
     }
-    targetSession.processId = process.info.pid
-    targetSession.shellPid ??= process.info.pid
     try {
       await process.task
       if (result === undefined) throw new Error('process completed without a result')
@@ -1029,6 +1032,7 @@ async function runParsedLine(
           killed,
           claimantFor(rootNode, handed),
           route,
+          options.sink,
         )
       // The runtime's file calls are the line's, recorded as a tree's are,
       // and handed over however the run ends: a call it finished before it
@@ -1161,7 +1165,9 @@ async function runParsedLine(
         // bound to answer it, as Python joins the cancelled line whole.
         const runner = currentCaller().process
         const result = await joinOrAbort(running, killed, () =>
-          (runner?.signal ?? null) === null ? ABORT_JOIN_MS : STOP_WAIT_SECONDS * 1000,
+          (runner?.signal ?? stopSignal(killed)) === null
+            ? ABORT_JOIN_MS
+            : STOP_WAIT_SECONDS * 1000,
         )
         if (killed?.aborted === true) throw makeAbortError(killed)
         return result

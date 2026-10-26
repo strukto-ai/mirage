@@ -75,7 +75,7 @@ export async function readdir(
   else if (ps.length === 3) {
     // A run the stored listing of its project names is not asked about again.
     const key = rstripSlash(path.virtual)
-    const listed = await index?.listDir(key.slice(0, key.lastIndexOf('/')) || '/')
+    const listed = await index?.listDir(key.slice(0, key.lastIndexOf('/')) || '/', key)
     if (listed?.entries?.includes(key) !== true) await accessor.client.run(runVars(ps), RUN_EXISTS)
     return [...LEAVES.map(leaf), row('files', true)]
   } else if (ps[3] === 'files') {

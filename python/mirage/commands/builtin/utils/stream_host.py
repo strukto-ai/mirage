@@ -34,7 +34,7 @@ from mirage.rs.stream import Served, open_stream, serve_requests
 from mirage.runtime.types import DispatchFn, ShellFn
 from mirage.shell.bytes import byte_view, text_view
 from mirage.shell.join import shell_join
-from mirage.types import JsonValue, PathSpec, ReadStreamFn
+from mirage.types import FileType, JsonValue, PathSpec, ReadStreamFn
 
 STDIN_NAMES = frozenset({"-", "/dev/stdin"})
 
@@ -136,7 +136,11 @@ class StreamHost:
                 yield chunk
 
     def open_input(
-        self, name: str, operand: int | None, file: bool = False
+        self,
+        name: str,
+        operand: int | None,
+        file: bool = False,
+        as_operand: bool = False,
     ) -> AsyncIterator[bytes]:
         """Open an input by name.
 
@@ -145,10 +149,14 @@ class StreamHost:
             operand (int | None): The operand, from 1, the name came from.
             file (bool): a file a script names, which no spelling of
                 stdin stands for.
+            as_operand (bool): a name standing in for an operand (unzip's
+                ``X.zip`` for ``X``), read as an operand is.
         """
         if file:
             return self.read_path(name)
         path = self._operand(name, operand)
+        if path is None and as_operand:
+            path = PathSpec.from_str_path(name, cwd=self.cwd.virtual)
         if path is not None:
             if is_stdin(path, self.dash):
                 return self.stdin_view()
@@ -210,8 +218,8 @@ class StreamHost:
             return Served({})
         if op == "write":
             return await self._write(request, data)
-        if op == "unlink":
-            return await self._unlink(str(request["path"]))
+        if op in ("unlink", "mkdir", "stat"):
+            return await self._path_op(op, str(request["path"]))
         if op == "fill" and isinstance(into := request.get("into"), int):
             return await self._fill(into, request)
         if op == "flush":
@@ -262,7 +270,12 @@ class StreamHost:
         index = operand if isinstance(operand, int) else None
         if self.command and (named := self._operand(name, index)):
             self.named[fd] = named
-        return self.open_input(name, index, request.get("file") is True)
+        return self.open_input(
+            name,
+            index,
+            request.get("file") is True,
+            request.get("as_operand") is True,
+        )
 
     def _failed(self, fd: int, exc: Exception) -> Served:
         """A failed input's reply, or raise what is not the file's own: the
@@ -288,6 +301,16 @@ class StreamHost:
         return Served({"size": spool.size})
 
     async def _read(self, fd: int, request: Mapping[str, JsonValue]) -> Served:
+        spool, skip, size = (request.get(k) for k in ("spool", "skip", "size"))
+        if isinstance(spool, int) and isinstance(size, int):
+            # A window comes whole, and nothing stays open.
+            held = self.spools.get(spool)
+            offset = skip if isinstance(skip, int) else 0
+            if held is None or offset >= held.size:
+                return Served({})
+            return Served(
+                {}, await held.read(offset, min(size, held.size - offset))
+            )
         source = self.inputs.get(fd)
         if source is None:
             source = self._open(fd, request)
@@ -295,8 +318,16 @@ class StreamHost:
                 self.inputs[fd] = source
         if source is None:
             return Served({"end": True})
+        least = request.get("least")
         try:
             chunk = await anext(source, None)
+            # A file read whole gathers chunks to `least` bytes a reply.
+            if chunk is not None and isinstance(least, int):
+                parts, size = [chunk], len(chunk)
+                while size < least and (more := await anext(source, None)):
+                    parts.append(more)
+                    size += len(more)
+                chunk = b"".join(parts)
         except Exception as exc:
             del self.inputs[fd]
             return self._failed(fd, exc)
@@ -312,15 +343,20 @@ class StreamHost:
         assert self.dispatch is not None
         await self.dispatch("write", path, data=source, atomic=atomic)
 
-    async def _unlink(self, name: str) -> Served:
+    async def _path_op(self, op: str, name: str) -> Served:
+        """Unlink, make (one level) or stat a path; a stat answers what
+        stands there, ``dir`` or ``file``, or why it found nothing."""
         if self.dispatch is None:
             return Served({"fatal": "file output requires a workspace"})
         path = PathSpec.from_str_path(text_view(name), cwd=self.cwd.virtual)
         try:
-            await self.dispatch("unlink", path)
+            found, _ = await self.dispatch(op, path)
         except WALK_ERRORS as exc:
             return Served(_failure(exc))
-        return Served({})
+        if op != "stat" or found is None:
+            return Served({})
+        kind = "dir" if found.type == FileType.DIRECTORY else "file"
+        return Served({"kind": kind})
 
     async def _write(
         self, request: Mapping[str, JsonValue], data: bytes
@@ -328,9 +364,11 @@ class StreamHost:
         """Write to a file: ``append`` adds to it, otherwise it is emptied
         first, every held write committed before; ``atomic`` replaces it
         whole, once flushed, with what this and later writes carry, and
-        ``create`` writes it whole as they carry it; ``spool`` writes that
+        ``create`` writes it whole as they carry it, ``whole`` from this
+        write's bytes alone; ``spool`` writes that
         spool's bytes past its first ``skip`` and drops it, or, with
-        ``size``, writes the file whole from that many and keeps it."""
+        ``size``, that many of them and keeps it, with ``create`` the
+        file whole from them."""
         if self.dispatch is None:
             return Served({"fatal": "file output requires a workspace"})
         name = str(request["path"])
@@ -342,20 +380,30 @@ class StreamHost:
                 line = f"'{quote_text(text_view(name))}' would overwrite input"
                 refused = byte_view(f"{self.command}: {line}; aborting\n")
                 return Served({"error": refused, "line": refused})
+        if request.get("whole"):
+            try:
+                await self.dispatch("write", path, data=data)
+            except WALK_ERRORS as exc:
+                return Served(_failure(exc))
+            return Served({})
         spool_fd = request.get("spool")
         size, skip = request.get("size"), request.get("skip")
         offset = skip if isinstance(skip, int) else 0
-        if isinstance(size, int) and isinstance(spool_fd, int):
+        window_size = size if isinstance(size, int) else None
+        keep = window_size is not None
+        if request.get("create") and keep and isinstance(spool_fd, int):
             # A window of a spool is the whole file, written as one call.
             whole = self.spools.get(spool_fd)
-            window = b"" if whole is None else whole.stream(offset, size)
+            window = (
+                b"" if whole is None else whole.stream(offset, window_size)
+            )
             try:
                 await self.dispatch("write", path, data=window)
             except WALK_ERRORS as exc:
                 return Served(_failure(exc))
             return Served({})
         spool = (
-            self.spools.pop(spool_fd, None)
+            (self.spools.get if keep else self.spools.pop)(spool_fd, None)
             if isinstance(spool_fd, int)
             else None
         )
@@ -385,12 +433,12 @@ class StreamHost:
             if writer is not None and data:
                 await writer.write(data)
             if writer is not None and spool is not None:
-                async for chunk in spool.stream(offset):
+                async for chunk in spool.stream(offset, window_size):
                     await writer.write(chunk)
         except WALK_ERRORS as exc:
             return Served(_failure(exc))
         finally:
-            if spool is not None:
+            if spool is not None and not keep:
                 await spool.close()
         return Served({})
 

@@ -1,0 +1,125 @@
+---
+title: OpenAI Codex
+description: Connect Codex to a Mirage workspace through SSH, MCP, a FUSE mount or exec-server forward.
+icon: /images/openai-logo.svg
+---
+
+| Way | Codex gets | Needs |
+| --- | --- | --- |
+| [SSH](#ssh) | its own tools, run in the workspace | the daemon's [SSH server](/home/access/ssh) |
+| [MCP](#mcp) | Mirage's seven tools, beside its own | the `mirage` CLI, or Node.js for the plugin |
+| [FUSE](#fuse) | its own tools, on the workspace as a folder | the `mirage` CLI and a [FUSE driver](/home/setup/fuse) |
+| [Exec-server forward](#exec-server-forward) | its own tools, run in the workspace, for a remote harness | `codex exec-server forward` |
+
+## Install
+
+<CodeGroup>
+```bash uv
+uv tool install 'mirage-ai[ssh]'
+```
+```bash npm
+npm install -g @struktoai/mirage-cli
+```
+</CodeGroup>
+
+The `ssh` extra is for SSH and exec-server forward. Install [Codex](https://github.com/openai/codex) separately.
+
+## Workspace
+
+```yaml workspace.yaml
+mounts:
+  /:
+    vfs: ram
+    mode: write
+```
+
+```bash
+mirage workspace create workspace.yaml --id demo
+```
+
+## SSH
+
+Codex runs its shell commands, file reads and patches in the workspace. Turn on the daemon's [SSH server](/home/access/ssh#set-up), then add it as a Codex environment:
+
+```toml ~/.codex/environments.toml
+default = "mirage"
+include_local = false
+
+[[environments]]
+id = "mirage"
+program = "ssh"
+args = ["-T", "-p", "2222", "demo@127.0.0.1", "-s", "codex-exec"]
+```
+
+```bash
+codex -C /
+```
+
+- It works in the Codex TUI and in `codex exec`, not the Codex app.
+- Commands run under the SSH key's [profile](/home/profiles).
+- Codex checks `-C` on the local disk, so pass `-C /` and use absolute workspace paths.
+- The protocol is experimental and follows Codex 0.147.
+
+## MCP
+
+<Tabs>
+  <Tab title="Plugin">
+    ```bash
+    codex plugin marketplace add strukto-ai/mirage
+    codex plugin add mirage@mirage
+    ```
+
+    The plugin adds a filesystem skill, a VFS authoring skill and an MCP server that runs `npx -y @struktoai/mirage-cli mcp` on your project's `.mirage/workspace.yaml`.
+  </Tab>
+  <Tab title="mirage mcp">
+    ```bash
+    codex mcp add mirage -- mirage mcp -w demo
+    ```
+
+    Add `-s SESSION` to serve the tools as a session, under its profile.
+  </Tab>
+</Tabs>
+
+Codex gets `shell`, `read`, `write`, `edit`, `ls`, `grep` and `glob` from the workspace's [MCP server](/home/access/mcp), beside its own tools.
+
+## FUSE
+
+Install your platform's [FUSE driver](/home/setup/fuse). With uv, install `'mirage-ai[fuse]'`; with npm on macOS, also follow the [macFUSE 4 workaround](/typescript/setup/fuse#macfuse-4-symlink-workaround). Then expose the workspace at a local folder:
+
+```yaml workspace.yaml
+mounts:
+  /:
+    vfs: ram
+    mode: write
+    backend: fuse
+    mountpoint: /tmp/mirage-demo
+```
+
+```bash
+mirage workspace create workspace.yaml --id demo-fuse
+cd /tmp/mirage-demo && codex
+```
+
+File operations inside `/tmp/mirage-demo` go through Mirage, with Codex's own tools. The mount does not restrict the agent's access to other host paths. In the Codex app, open the mountpoint as the project folder. `mirage workspace delete demo-fuse` unmounts it. On macOS the daemon holds one FUSE mount at a time.
+
+## Exec-server forward
+
+`codex exec-server forward` carries the tool calls of a remote harness, such as an OpenAI Agents API session ([Python](/python/agents/openai-agents-api), [TypeScript](/typescript/agents/openai-agents-api)), to an exec server. `mirage codex-exec` makes the workspace that exec server: it listens on a local port and relays each connection to the server's codex-exec route with the CLI's token, which forward cannot send itself.
+
+```bash
+npm install -g @openai/codex@alpha
+mirage codex-exec demo --listen 127.0.0.1:8790
+```
+
+```bash
+CODEX_API_KEY="$OPENAI_EXECUTOR_API_KEY" codex exec-server forward \
+  --connect ws://127.0.0.1:8790 \
+  --remote "$REMOTE_URL" \
+  --environment-id "$ENVIRONMENT_ID"
+```
+
+The remote URL and environment id come from the harness's session, and `CODEX_API_KEY` is its environment key.
+
+- Each connection runs in a fresh session under the workspace's default profile, closed when the connection ends. A reconnect starts a new session; the files stay.
+- `mirage codex-exec` lets in any connection on its port, as you, and refuses one from a browser page. Keep it on loopback.
+- On a hosted server, run [`mirage login`](/home/access/cli#log-in) first; the relay asks for its token on every connection.

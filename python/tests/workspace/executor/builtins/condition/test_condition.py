@@ -16,11 +16,14 @@ from typing import Any, cast
 
 import pytest
 
+import mirage.workspace.executor.builtins.condition.condition as condition_module
 from mirage import RAMVFS, MountMode, Workspace
 from mirage.errors.fs import efbig
 from mirage.io import IOResult
 from mirage.types import ContentType, FileStat, FileType, PathSpec
+from mirage.utils.clock import Clock, ManualClock
 from mirage.workspace.executor.builtins.condition import CondContext, eval_flat
+from mirage.workspace.files import Files
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.session import SessionState
 
@@ -396,3 +399,24 @@ async def test_if_integration():
     assert await io.stdout_str() == "yes\n"
     io = await ws.shell("if [[ plain.txt == *.txt ]]; then echo yes; fi")
     assert await io.stdout_str() == "yes\n"
+
+
+class _ClockSeen(Files):
+    seen: list[Clock | None] = []
+
+    def __init__(self, *args: Any, clock: Clock | None = None, **kwargs: Any):
+        _ClockSeen.seen.append(clock)
+        super().__init__(*args, clock=clock, **kwargs)
+
+
+@pytest.mark.asyncio
+async def test_a_test_reads_links_on_the_workspace_clock(monkeypatch):
+    monkeypatch.setattr(condition_module, "Files", _ClockSeen)
+    _ClockSeen.seen = []
+    clock = ManualClock()
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.WRITE, clock=clock)
+    try:
+        await ws.shell("[ -e /data ]")
+    finally:
+        await ws.close()
+    assert _ClockSeen.seen and all(c is clock for c in _ClockSeen.seen)

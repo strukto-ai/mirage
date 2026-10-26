@@ -49,4 +49,4 @@ class PipeConsole(JobConsole):
         self._pipe.close_reader()
 
     def stream(self) -> AsyncIterator[bytes]:
-        return self._pipe.stream()
+        return self._pipe.stream(joined=True)

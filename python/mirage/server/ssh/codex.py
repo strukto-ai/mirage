@@ -18,7 +18,6 @@ import binascii
 import concurrent.futures
 import json
 import logging
-import os
 import posixpath
 import shlex
 import stat
@@ -42,6 +41,7 @@ from mirage.errors.types import NoMountError
 from mirage.io.types import ByteSource
 from mirage.mount.core import MountCore
 from mirage.mount.types import MountAttrs
+from mirage.runtime.handles.mode import OpenMode
 from mirage.server.registry import WorkspaceEntry, WorkspaceRegistry
 from mirage.server.rpc.constants import (
     RPC_INTERNAL_ERROR,
@@ -79,6 +79,15 @@ Handler = Callable[[Message], Awaitable[JsonValue]]
 FILE_SCHEME = "file://"
 NS_PER_MS = 1_000_000
 MISSING = (FileNotFoundError, NotADirectoryError, NoMountError)
+WRITE = OpenMode(
+    readable=False,
+    writable=True,
+    truncate=True,
+    append=False,
+    create=True,
+    exclusive=False,
+    binary=True,
+)
 
 
 def to_path(uri: JsonValue) -> str:
@@ -276,11 +285,7 @@ async def write_file(core: MountCore, path: str, data: bytes) -> None:
     parent = await lookup(core, posixpath.dirname(path))
     if parent is None:
         raise enoent(path)
-    fh = (
-        await core.open(path, os.O_TRUNC)
-        if await lookup(core, path)
-        else await core.create(path)
-    )
+    fh = await core.open(path, WRITE)
     try:
         if data:
             await core.write(path, data, 0, fh)
@@ -305,28 +310,21 @@ async def directory(core: MountCore, path: str) -> list[JsonValue]:
     """``fs/readDirectory``: each entry with the kind it points at.
 
     An entry that vanishes between the listing and its stat is left
-    out, as SFTP's listing leaves it out.
+    out, as SFTP's listing leaves it out (``MountCore.listing``).
 
     Args:
         core (MountCore): the channel's mount core.
         path (str): the directory.
     """
-    entries: list[JsonValue] = []
-    for name in await children(core, path):
-        child = posixpath.join(path, name)
-        try:
-            st = await followed(core, child)
-        except MISSING as exc:
-            logger.debug("codex: %s vanished while listing: %r", child, exc)
-            continue
-        entries.append(
-            {
-                "fileName": name,
-                "isDirectory": stat.S_ISDIR(st.mode),
-                "isFile": stat.S_ISREG(st.mode),
-            }
-        )
-    return entries
+    names = await children(core, path)
+    return [
+        {
+            "fileName": name,
+            "isDirectory": stat.S_ISDIR(st.mode),
+            "isFile": stat.S_ISREG(st.mode),
+        }
+        for name, st in await core.listing(path, names, follow=True)
+    ]
 
 
 async def walk_kind(core: MountCore, path: str, follow: bool) -> str | None:

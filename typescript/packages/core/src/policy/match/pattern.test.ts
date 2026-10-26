@@ -14,7 +14,6 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { WILDCARD } from '../constants.ts'
 import { patternMatches, patternReaches, splitPattern } from './pattern.ts'
 
 describe('patterns', () => {
@@ -22,7 +21,7 @@ describe('patterns', () => {
     expect(splitPattern('git push')).toEqual(['git', 'push'])
     expect(splitPattern('git *')).toEqual(['git'])
     expect(splitPattern('git * *')).toEqual(['git'])
-    expect(splitPattern('git * --hard')).toEqual(['git', WILDCARD, '--hard'])
+    expect(splitPattern('git * --hard')).toEqual(['git', '*', '--hard'])
     expect(splitPattern('  rm  ')).toEqual(['rm'])
     expect(splitPattern('*')).toEqual([])
   })

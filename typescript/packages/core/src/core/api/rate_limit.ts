@@ -12,18 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { sleep } from '../../utils/abort.ts'
-
-function monotonicSeconds(): number {
-  return performance.now() / 1000
-}
-
-export interface RateLimiterOptions {
-  /** Monotonic seconds, injectable for tests. */
-  readonly clock?: () => number
-  /** The wait, injectable for tests. */
-  readonly sleep?: (seconds: number) => Promise<void>
-}
+import { isSystemClock, SystemClock, type Clock } from '../../utils/clock.ts'
 
 /**
  * Spaces calls that share a key to at most `rate` per second.
@@ -39,33 +28,81 @@ export interface RateLimiterOptions {
  */
 export class RateLimiter {
   private readonly interval: number
-  private readonly clock: () => number
-  private readonly sleep: (seconds: number) => Promise<void>
+  private clock: Clock
   private readonly next = new Map<string, number>()
   private readonly shift = new Map<string, number>()
+  private schedule = 0
+  private readonly holders = new Set<unknown>()
 
-  constructor(rate: number, options: RateLimiterOptions = {}) {
+  /**
+   * @param clock what slots are read and waited on; omitted means the system
+   *   clock until `bindClock` names the workspace's.
+   */
+  constructor(rate: number, clock?: Clock) {
     if (!(rate > 0)) throw new RangeError(`rate must be positive, got ${String(rate)}`)
     this.interval = 1 / rate
-    this.clock = options.clock ?? monotonicSeconds
-    this.sleep = options.sleep ?? ((seconds) => sleep(seconds * 1000))
+    this.clock = clock ?? new SystemClock()
   }
 
-  /** Wait for this key's next slot (an Airtable base id). */
+  /**
+   * Read and wait on `clock` while `owner` holds the limiter. Slots taken on
+   * another clock mean nothing on this one, so they are dropped; binding the
+   * clock already in use keeps them, so a second mount of one accessor cannot
+   * release a burst. Slots can follow one clock only, so while another owner
+   * holds the limiter a different clock is refused; two system clocks agree.
+   *
+   * @param owner who holds it, released by the same key.
+   * @throws Error when another owner holds the limiter on another clock.
+   */
+  bindClock(clock: Clock, owner: unknown): void {
+    const same = clock === this.clock || (isSystemClock(clock) && isSystemClock(this.clock))
+    if (!same) {
+      if ([...this.holders].some((held) => held !== owner)) {
+        throw new Error(
+          'this client is held by a workspace on another clock; ' +
+            'unmount or uninstall it there, or give both one clock',
+        )
+      }
+      this.clock = clock
+      this.schedule += 1
+      this.next.clear()
+      this.shift.clear()
+    }
+    this.holders.add(owner)
+  }
+
+  /** Let `owner` go; once none holds, another clock may bind. */
+  releaseClock(owner: unknown): void {
+    this.holders.delete(owner)
+  }
+
+  /**
+   * Wait for this key's next slot (an Airtable base id). A caller waits out its
+   * slot on the clock it took it on; once another clock is bound, even one it
+   * then returns to, that slot means nothing on the new schedule, so the caller
+   * leaves it alone.
+   */
   async acquire(key: string): Promise<void> {
-    let now = this.clock()
+    const clock = this.clock
+    const schedule = this.schedule
+    let now = clock.monotonic()
     let slot = Math.max(now, this.next.get(key) ?? now)
     this.next.set(key, slot + this.interval)
     if (slot <= now) return
     let seen = this.shift.get(key) ?? 0
-    await this.sleep(slot - now)
-    for (let moved = this.shift.get(key) ?? 0; moved !== seen; moved = this.shift.get(key) ?? 0) {
+    await clock.sleep(slot - now)
+    for (
+      let moved = this.shift.get(key) ?? 0;
+      this.schedule === schedule && moved !== seen;
+      moved = this.shift.get(key) ?? 0
+    ) {
       slot += moved - seen
       seen = moved
-      now = this.clock()
-      if (slot > now) await this.sleep(slot - now)
+      now = clock.monotonic()
+      if (slot > now) await clock.sleep(slot - now)
     }
-    const late = this.clock() - slot
+    if (this.schedule !== schedule) return
+    const late = clock.monotonic() - slot
     if (late > 0) {
       this.shift.set(key, seen + late)
       this.next.set(key, (this.next.get(key) ?? slot) + late)

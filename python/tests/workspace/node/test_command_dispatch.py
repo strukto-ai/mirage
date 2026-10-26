@@ -14,6 +14,9 @@
 
 import pytest
 
+from mirage.io.types import materialize
+from mirage.runtime.language import LanguageRuntime
+from mirage.runtime.types import RunResult
 from mirage.types import MountMode
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
@@ -49,3 +52,37 @@ async def test_a_loop_fails_its_operand_not_the_line():
     assert r.exit_code == 1
     assert r.stdout == b"a\nb\n"
     assert r.stderr == (b"cat: /data/l1: Too many levels of symbolic links\n")
+
+
+class ShellsOut(LanguageRuntime):
+    name = "shellsout"
+    language = "python"
+
+    def __init__(self) -> None:
+        super().__init__(captures=["python3"])
+
+    async def interpret(
+        self, engine, program, ctx, output=None, errors=None
+    ) -> RunResult:
+        nested = await ctx.shell("printenv TOKEN")
+        return RunResult(
+            stdout=await materialize(nested.stdout), stderr=None, exit_code=0
+        )
+
+
+# A run starts as its output is read, after dispatch returned, and the
+# lines it shells out still run under its prefix assignment.
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line", ["TOKEN=one python3 -c x", "TOKEN=one python3 -c x | cat"]
+)
+async def test_a_lazy_run_shells_out_under_its_prefix(line):
+    ws = Workspace(
+        {"/data": RAMVFS()}, mode=MountMode.EXEC, runtimes=[ShellsOut()]
+    )
+    try:
+        assert (await ws.shell(line)).stdout == b"one\n"
+        after = await ws.shell('echo "[$TOKEN]"')
+        assert after.stdout == b"[]\n"
+    finally:
+        await ws.close()

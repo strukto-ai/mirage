@@ -66,10 +66,6 @@ export class NodeTable {
     node.stream_ops = this.streamOps
     if (this.host.isDir(mode)) node.children = new Map()
     else if (this.host.isLink(mode)) node.link = ''
-    else {
-      node.contents = new Uint8Array(0)
-      node.usedBytes = 0
-    }
     node.atime = node.mtime = node.ctime = Date.now()
     if (parent !== null) {
       parent.children ??= new Map()
@@ -83,8 +79,8 @@ export class NodeTable {
    *
    * Only a node placed from an unclassified listing row is ever built on
    * a guess, and the guess is a regular file. When the mount says it is
-   * a directory, the node trades its content for a child table, which is
-   * what `makeNode` would have built for one.
+   * a directory, the node gets a child table, which is what `makeNode`
+   * would have built for one.
    *
    * Args:
    *   node: the node to retype.
@@ -93,11 +89,7 @@ export class NodeTable {
   retype(node: FSNode, mode: number): void {
     const becomesDir = this.host.isDir(mode) && !this.host.isDir(node.mode)
     node.mode = mode
-    if (!becomesDir) return
-    node.children = new Map()
-    delete node.contents
-    delete node.usedBytes
-    delete node.loaded
+    if (becomesDir) node.children = new Map()
   }
 
   childOf(parent: FSNode, name: string): FSNode | undefined {
@@ -107,10 +99,9 @@ export class NodeTable {
   /**
    * Forget every node below the root, so the next lookup asks the mount.
    *
-   * A child process may have changed anything the tree served. A node an
-   * open handle still holds keeps its bytes, as a descriptor keeps its
-   * inode: emptying it would hand a later read stale lengths over no
-   * content, and a later write would ship that empty buffer whole.
+   * A child process may have changed anything the tree served. A stream
+   * open on a forgotten node reads on through its core handle, as a
+   * descriptor keeps its inode.
    */
   invalidate(): void {
     if (this.root === null) return

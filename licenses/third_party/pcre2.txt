@@ -1,11 +1,8 @@
-The compile error texts in python/mirage/commands/builtin/utils/pcre.py and
-typescript/packages/core/src/commands/builtin/utils/pcre.ts are PCRE2's
+The compile and UTF-8 error texts in rust/mirage-rs/src/pcre/translate.rs are PCRE2's
 (src/pcre2_error.c of PCRE2 10.43 and 10.46,
 https://github.com/PCRE2Project/pcre2), and the \h and \v lists in
-python/mirage/commands/builtin/utils/unicode_tables.py and
-typescript/packages/core/src/commands/builtin/utils/unicode_tables.ts are its
-hspace_list and vspace_list (src/pcre2_tables.c). PCRE2 10.46 carries this
-notice:
+rust/mirage-rs/src/pcre/charset.rs are its hspace_list and vspace_list
+(src/pcre2_tables.c). PCRE2 10.46 carries this notice:
 
 PCRE2 License
 =============

@@ -60,7 +60,7 @@ export async function storedListing(
  * `beyond_window`.
  */
 export async function beyondWindow(index: IndexCacheStore, key: string): Promise<boolean> {
-  const listing = await index.listDir(folderOf(key))
+  const listing = await index.listDir(folderOf(key), key)
   return listing.window === true && listing.entries != null && !listing.entries.includes(key)
 }
 
@@ -99,7 +99,7 @@ export async function keepListing(
  */
 export async function unprovenMiss(index: IndexCacheStore, key: string): Promise<boolean> {
   const folder = folderOf(key)
-  const listing = await index.listDir(folder)
+  const listing = await index.listDir(folder, key)
   return (
     listing.entries != null &&
     listing.window !== true &&
@@ -124,7 +124,7 @@ export async function storedStat(
   proves: ((folder: string) => boolean) | null = null,
 ): Promise<FileStat | null> {
   const folder = folderOf(key)
-  const listing = await index.listDir(folder)
+  const listing = await index.listDir(folder, key)
   if (listing.entries != null) {
     if (!listing.entries.includes(key)) {
       if (listing.window === true || (proves !== null && !proves(folder))) return null

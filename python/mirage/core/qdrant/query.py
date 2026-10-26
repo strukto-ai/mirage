@@ -361,7 +361,7 @@ async def search_rows(
             )
         else:
             raise ValueError(
-                "search: the query needs a vector: pass embed, or set "
+                "the query needs a vector: pass embed, or set "
                 "cloud_inference for a cluster with inference"
             )
         client = await accessor.client()

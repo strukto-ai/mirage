@@ -78,6 +78,27 @@ async def test_the_strictest_bound_wins(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_an_answer_is_kept_from_when_it_arrives(monkeypatch):
+    # A fetch slower than the bound is kept for the bound once it lands,
+    # as the file cache keeps a read from when it lands.
+    now = [0.0]
+    monkeypatch.setattr(
+        "mirage.accessor.responses.time.monotonic", lambda: now[0]
+    )
+    service, cache = _Service(), ResponseCache[str, int](1)
+
+    async def slow() -> int:
+        now[0] += 5.0
+        return await service.answer()
+
+    assert await cache.get("q", slow) == 1
+    now[0] = 5.5
+    assert await cache.get("q", slow) == 1
+    now[0] = 6.0
+    assert await cache.get("q", slow) == 2
+
+
+@pytest.mark.asyncio
 async def test_a_stricter_mount_drops_what_a_looser_one_kept():
     # Kept under a 600 s bound, an answer would outlive a 30 s one.
     service, cache = _Service(), ResponseCache[str, int]()

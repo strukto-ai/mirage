@@ -17,7 +17,7 @@ import { dirname, join, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import ts from 'typescript'
 import { describe, expect, it } from 'vitest'
-import { ManualClock } from './clock.ts'
+import { ManualClock, SystemClock } from './clock.ts'
 import {
   type IdSource,
   SeededIdSource,
@@ -42,7 +42,7 @@ const SEED_7_IDS = [
 const SRC_DIR = join(dirname(fileURLToPath(import.meta.url)), '..')
 
 // The packages whose ids and draws come from the workspace IdSource.
-const SEAMED_PACKAGES = ['commands', 'core', 'execution', 'process', 'workspace']
+const SEAMED_PACKAGES = ['cache', 'commands', 'core', 'execution', 'process', 'workspace']
 
 const GLOBAL_DRAWS: Record<string, Set<string>> = {
   crypto: new Set(['randomUUID', 'getRandomValues']),
@@ -124,6 +124,64 @@ describe('SystemIdSource', () => {
     expect(ids.uuid7()).toMatch(UUID7_RE)
     const word = ids.randomU32()
     expect(Number.isInteger(word) && word >= 0 && word < 2 ** 32).toBe(true)
+  })
+
+  it('stamps a uuid7 from its clock', () => {
+    const source = new SystemIdSource(new ManualClock(1_700_000_000))
+    expect(stampOf(source.uuid7())).toBe(1_700_000_000_000)
+  })
+
+  it('never waits on a frozen clock', () => {
+    // Waiting for a frozen clock to tick would spin forever, so a burst
+    // past the counter moves on to the next millisecond by itself.
+    const source = new SystemIdSource(new ManualClock(5))
+    const values = Array.from({ length: 5000 }, () => source.uuid7())
+    expect(values).toEqual([...values].sort())
+    expect(new Set(values).size).toBe(values.length)
+    expect(stampOf(values[0] ?? '')).toBe(5000)
+    expect(stampOf(values.at(-1) ?? '')).toBeGreaterThan(5000)
+  })
+
+  it('keeps its order when the clock goes back', () => {
+    const clock = {
+      wall: 10,
+      now: () => clock.wall,
+      monotonic: () => 0,
+      sleep: () => Promise.resolve(),
+    }
+    const source = new SystemIdSource(clock)
+    const first = source.uuid7()
+    clock.wall = 9
+    const second = source.uuid7()
+    expect(first < second).toBe(true)
+    expect(stampOf(second)).toBe(10_000)
+  })
+
+  it('shares the process floor with every source on the system clock', () => {
+    // Callers build a throwaway source per id; ids from all of them, and from
+    // uuid7() itself, still sort by when they were minted.
+    const values: string[] = []
+    for (let i = 0; i < 1000; i++) {
+      values.push(
+        new SystemIdSource().uuid7(),
+        uuid7(),
+        new SystemIdSource(new SystemClock()).uuid7(),
+      )
+    }
+    expect(values).toEqual([...values].sort())
+  })
+
+  it('keeps its own floor on another clock', () => {
+    // A source on a clock far ahead must not drag the process's own ids,
+    // or another source's, into its future.
+    new SystemIdSource(new ManualClock(4_000_000_000)).uuid7()
+    expect(stampOf(uuid7())).toBeLessThanOrEqual(Date.now())
+    expect(stampOf(new SystemIdSource(new ManualClock(5)).uuid7())).toBe(5000)
+  })
+
+  it('orders ids within one millisecond', () => {
+    const values = Array.from({ length: 200 }, () => uuid7())
+    expect(values).toEqual([...values].sort())
   })
 })
 

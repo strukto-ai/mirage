@@ -49,6 +49,7 @@ export class CLIRegistry {
   private readonly installs = new Map<string, CLIInstall>()
   private readonly retiring = new Map<CLIInstall, Promise<void>>()
   private shutdown = new AbortController()
+  private clocksBound = false
 
   /**
    * @param peers the mounts' accessors, which an install may share an account with.
@@ -86,7 +87,6 @@ export class CLIRegistry {
     }
     const validated = this.validateConfig(name, spec, config)
     const accessor = spec.accessor(validated)
-    accessor.bindClock?.(this.clock)
     accessor.join?.([...this.peers(), ...[...this.installs.values()].map((i) => i.accessor)])
     const install: CLIInstall = {
       name,
@@ -95,6 +95,7 @@ export class CLIRegistry {
       accessor,
       activity: new Activity(),
     }
+    if (this.clocksBound) accessor.bindClock?.(this.clock, install)
     this.installs.set(name, install)
     return install
   }
@@ -184,6 +185,37 @@ export class CLIRegistry {
   }
 
   /**
+   * Hand every install's accessor the workspace clock, once the workspace is
+   * built; an install made later takes it at once. Each install holds on its
+   * own, so removing one leaves another that shares its client holding.
+   * Mirrors Python's `CLIRegistry.bind_clocks`.
+   *
+   * @throws Error when another workspace holds a client on another clock;
+   *   nothing stays bound.
+   */
+  bindClocks(): void {
+    try {
+      for (const install of this.installs.values()) {
+        install.accessor.bindClock?.(this.clock, install)
+      }
+    } catch (err) {
+      this.releaseClocks()
+      throw err
+    }
+    this.clocksBound = true
+  }
+
+  /**
+   * Let go of the workspace clock on every install's accessor, as the
+   * workspace closes or fails to come to be. Mirrors Python's
+   * `CLIRegistry.release_clocks`.
+   */
+  releaseClocks(): void {
+    this.clocksBound = false
+    for (const install of this.installs.values()) install.accessor.releaseClock?.(install)
+  }
+
+  /**
    * Remove an installed CLI now and close its accessor once the lines running
    * on it and their output streams are done; its head word stops resolving
    * (127) at once.
@@ -248,13 +280,17 @@ export class CLIRegistry {
 
 async function retire(install: CLIInstall, shutdown: AbortSignal): Promise<void> {
   try {
-    await abortable(install.activity.wait(), shutdown)
-  } catch (error) {
-    if (!shutdown.aborted) throw error
-    await closeAfterGrace(install)
-    return
+    try {
+      await abortable(install.activity.wait(), shutdown)
+    } catch (error) {
+      if (!shutdown.aborted) throw error
+      await closeAfterGrace(install)
+      return
+    }
+    await install.accessor.close?.()
+  } finally {
+    install.accessor.releaseClock?.(install)
   }
-  await install.accessor.close?.()
 }
 
 async function closeAfterGrace(install: CLIInstall): Promise<void> {
@@ -269,5 +305,9 @@ async function closeAfterGrace(install: CLIInstall): Promise<void> {
   } finally {
     clearTimeout(timer)
   }
-  await install.accessor.close?.()
+  try {
+    await install.accessor.close?.()
+  } finally {
+    install.accessor.releaseClock?.(install)
+  }
 }

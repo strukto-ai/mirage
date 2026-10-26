@@ -68,6 +68,19 @@ describe('classifyErrno', () => {
     expect(classifyErrno(new Error('something else entirely'))).toBe(EIO)
   })
 
+  it('logs only an error nothing names', () => {
+    // A bug in the core would otherwise read only as "I/O error"; an error
+    // with a code of its own is an I/O error already.
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    try {
+      expect(classifyErrno(new Error('boom'))).toBe(EIO)
+      expect(classifyErrno(Object.assign(new Error('bare'), { code: 'EWHATEVER' }))).toBe(EIO)
+      expect(warn.mock.calls).toEqual([['unclassified mount error: Error: boom']])
+    } finally {
+      warn.mockRestore()
+    }
+  })
+
   it('prefers the code property over the message', () => {
     const err = unnamedFsError('ENOTEMPTY', 'no such file or directory')
     expect(classifyErrno(err)).toBe(ENOTEMPTY)

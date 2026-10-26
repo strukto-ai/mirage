@@ -363,3 +363,22 @@ describe('python3: TS-specific (Pyodide isolation + mechanics)', { timeout: 3000
     await ws.close()
   }, 60_000)
 })
+
+// A program's prints reach its reader as it runs, so one that never ends
+// stops once its reader has what it wanted.
+it('an endless printer stops once its reader has enough', async () => {
+  const ws = new Workspace(
+    { '/': new RAMVFS() },
+    {
+      mode: MountMode.EXEC,
+      shellParser: await getTestParser(),
+      runtimes: [new MontyRuntime(), 'workspace'],
+    },
+  )
+  try {
+    const io = await ws.shell("python3 -c 'while True: print(1)' | head -n 2")
+    expect(stdoutStr(io)).toBe('1\n1\n')
+  } finally {
+    await ws.close()
+  }
+}, 30_000)

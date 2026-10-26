@@ -1409,7 +1409,7 @@ async def test_execution_cleanup_failure_still_stops_diff_pool_and_other_resourc
         closed.append("runtimes")
 
     execution = FailedExecution()
-    ws._shell_executions.add(execution)
+    ws._shell_executions[execution] = None
     monkeypatch.setattr(ws._runtimes, "close", close_runtimes)
     with pytest.raises(ValueError, match="execution cleanup failed"):
         await ws.close()

@@ -1,5 +1,4 @@
 import json
-import re
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import Literal
@@ -11,11 +10,10 @@ from mirage.commands.builtin.rg_search import (
     RgFlags,
     Tally,
     Totals,
-    search_haystack,
+    folds_case,
     transcoded,
 )
 from mirage.commands.errors import UsageError
-from mirage.concurrency.worker import Worker
 from mirage.io.stream import close_quietly, discard_streams
 from mirage.io.yield_budget import YieldBudget
 from mirage.rs.errors import StreamRefusal
@@ -34,6 +32,7 @@ class SearchHints:
 @dataclass(frozen=True, slots=True)
 class Compiled:
     terms: SearchHints | None
+    pcre: bool
 
 
 COMPILED = TypeAdapter(Compiled)
@@ -44,9 +43,6 @@ BLOCK_BYTES = 64 * 1024
 @dataclass(frozen=True, slots=True)
 class RgProgram:
     stream: OpenStream
-
-
-RgPattern = re.Pattern[str] | RgProgram
 
 
 def latin1(text: str) -> str:
@@ -60,9 +56,15 @@ def stream_config(
     regex_size_limit: int | None = None,
     dfa_size_limit: int | None = None,
 ) -> dict[str, JsonValue]:
+    # PCRE2 folds as -S reads the pattern here, which the default engine
+    # works out itself; --engine auto hands it the same answer.
+    pcre = f.engine != "default"
     config: dict[str, JsonValue] = {
-        "ignore_case": f.ignore_case,
-        "smart_case": f.smart_case,
+        "engine": f.engine,
+        "ignore_case": (
+            folds_case(pattern, f.fixed_string, f) if pcre else f.ignore_case
+        ),
+        "smart_case": f.smart_case and not pcre,
         "whole_word": f.whole_word,
         "line_regexp": f.line_regexp,
         "fixed_string": f.fixed_string,
@@ -147,6 +149,7 @@ def settle(stream: OpenStream, tally: Tally) -> None:
     tally.matched_lines = progress.matched_lines
     tally.searched = progress.searched
     tally.nul = progress.nul
+    tally.error = progress.error
 
 
 async def drained(
@@ -235,31 +238,6 @@ async def stream_haystack(
         await close_quietly(source)
 
 
-async def search_input(
-    source: AsyncIterator[bytes],
-    pat: RgPattern,
-    f: RgFlags,
-    name: str,
-    label: str | None,
-    tally: Tally,
-    named: bool = True,
-    pipe: bool = False,
-    worker: Worker | None = None,
-) -> AsyncIterator[bytes]:
-    result = (
-        stream_haystack(source, pat, f, name, label, tally, named, pipe)
-        if isinstance(pat, RgProgram)
-        else search_haystack(
-            source, pat, f, name, label, tally, named, pipe, worker
-        )
-    )
-    try:
-        async for output in result:
-            yield output
-    finally:
-        await close_quietly(result)
-
-
 def format_output(program: RgProgram, message: dict[str, JsonValue]) -> bytes:
     return program.stream.feed_input(2, json.dumps(message).encode())
 
@@ -287,5 +265,5 @@ def format_totals(
     )
 
 
-def required_terms(program: RgProgram) -> SearchHints | None:
-    return COMPILED.validate_json(program.stream.metadata()).terms
+def compiled_terms(program: RgProgram) -> Compiled:
+    return COMPILED.validate_json(program.stream.metadata())

@@ -73,7 +73,7 @@
         "redis",
         "opfs"
       ],
-      "command": "mkdir -p /data/ztrav/sub && echo z | tee /data/ztrav/g.txt > /dev/null && (cd /data/ztrav && zip -q /data/ztrav.zip sub/../g.txt) && unzip -l /data/ztrav.zip | tail -n 1 | awk '{print $2}'",
+      "command": "mkdir -p /data/ztrav/sub && echo z | tee /data/ztrav/g.txt > /dev/null && (cd /data/ztrav && zip -q /data/ztrav.zip sub/../g.txt) && unzip -l /data/ztrav.zip | awk 'NR == 4 {print $4}'",
       "expect": {
         "exit": 0,
         "stdout": "sub/../g.txt\n",

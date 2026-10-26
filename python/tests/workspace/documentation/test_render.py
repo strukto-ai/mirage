@@ -18,6 +18,7 @@ from unittest.mock import AsyncMock
 import pytest
 from pydantic import BaseModel
 
+from mirage.commands.cli.builtin.search import SEARCH
 from mirage.commands.cli.types import CLI, CLIHandler
 from mirage.commands.config import command
 from mirage.commands.spec.types import Argument, CommandSpec
@@ -223,7 +224,7 @@ async def test_vfs_md_says_what_each_path_supports():
     assert row(markdown, supported, "/docs") == (
         "Commands that read files (`ls`, `cat`, `grep`, `find`, `jq` and "
         "the rest), and `mv`, `rm` and `unlink`. `grep -r` and `rg` with `-w` "
-        "use `gdocs` search."
+        "ask `gdocs` which files may match."
     )
     assert row(markdown, limits, "/data").startswith(
         "Read only: no command changes files."
@@ -233,7 +234,7 @@ async def test_vfs_md_says_what_each_path_supports():
         "`cp`, `cp -r`, `mkdir`, `rm -r`, `rmdir`, `truncate`, `sed -i`. "
         "Without `-w`, `grep -r` and `rg` read every file."
     )
-    assert "`slack` search covers only `channels/*/*/chat.jsonl`" in row(
+    assert "`slack` answers only for `channels/*/*/chat.jsonl`" in row(
         markdown, limits, "/slack"
     )
     assert row(markdown, limits, "/").endswith(
@@ -242,16 +243,15 @@ async def test_vfs_md_says_what_each_path_supports():
     )
 
 
+# VFS.md describes the Unix commands; a CLI is SKILL.md's.
 @pytest.mark.asyncio
-async def test_vfs_md_names_a_mounts_own_commands():
+async def test_vfs_md_leaves_out_a_cli_over_the_mount():
     qdrant = QdrantVFS(
         QdrantConfig(collection="c", group_by=["label"], id_field="id")
     )
     ws = Workspace({"/vectors": (qdrant, MountMode.READ)})
-    markdown = await ws.vfs_md()
-    assert row(
-        markdown, "## Supported Unix Commands for VFS", "/vectors"
-    ).endswith("Also `search`.")
+    ws.register_cli("search", SEARCH)
+    assert "search" not in await ws.vfs_md()
 
 
 @pytest.mark.asyncio
@@ -280,7 +280,9 @@ async def test_vfs_md_names_each_search_command_the_profile_allows():
     )
     markdown = await ws.vfs_md()
     assert "`rg`" not in markdown
-    assert "`grep -r` with `-w` uses `gdocs` search." in markdown
+    assert (
+        "`grep -r` with `-w` asks `gdocs` which files may match." in markdown
+    )
     assert "Without `-w`, `grep -r` reads every file." in markdown
 
 

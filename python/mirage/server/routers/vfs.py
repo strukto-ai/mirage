@@ -89,7 +89,8 @@ async def session_of(entry: WorkspaceEntry, session_id: str | None) -> Session:
         HTTPException: 404 when no such session exists.
     """
     ws = entry.runner.ws
-    await entry.runner.call(ws.ensure_sessions_loaded())
+    if not ws.sessions_loaded:
+        await entry.runner.call(ws.ensure_sessions_loaded())
     if session_id and not any(
         s.session_id == session_id for s in ws.list_sessions()
     ):

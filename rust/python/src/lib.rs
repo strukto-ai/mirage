@@ -1,3 +1,5 @@
+mod shell;
+
 use pyo3::create_exception;
 use pyo3::exceptions::PyException;
 use pyo3::prelude::*;
@@ -81,9 +83,10 @@ impl Stream {
         self.inner.cancel()
     }
 
-    /// One bounded step of the work `busy` reports, and its output.
+    /// Bounded steps of the work `busy` reports, up to a piece of output
+    /// (`streams::drain_steps`), and that output.
     fn drain<'py>(&mut self, py: Python<'py>) -> PyResult<Bound<'py, PyBytes>> {
-        self.step(py, |stream, out| stream.drain(out))
+        self.step(py, |stream, out| streams::drain_steps(stream, out))
     }
 
     fn end_input<'py>(&mut self, py: Python<'py>, index: usize) -> PyResult<Bound<'py, PyBytes>> {
@@ -94,6 +97,14 @@ impl Stream {
     fn begin(&mut self, py: Python<'_>, config: &[u8]) -> PyResult<()> {
         self.inner
             .begin(config)
+            .map_err(|err| StreamError::new_err((err.message, PyBytes::new(py, b"").unbind())))
+    }
+
+    /// Whether the input fed since the last answer, then `data`, passes the
+    /// stream's test, in one call; the next input starts empty.
+    fn test(&mut self, py: Python<'_>, data: &[u8]) -> PyResult<bool> {
+        let inner = &mut self.inner;
+        py.detach(|| inner.test(data))
             .map_err(|err| StreamError::new_err((err.message, PyBytes::new(py, b"").unbind())))
     }
 
@@ -210,6 +221,8 @@ impl NFSServer {
 fn mirage_rs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Stream>()?;
     m.add_class::<NFSServer>()?;
+    m.add_class::<shell::ShellTree>()?;
+    m.add_class::<shell::ShellNode>()?;
     m.add("StreamError", m.py().get_type::<StreamError>())?;
     Ok(())
 }

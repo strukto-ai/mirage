@@ -16,9 +16,8 @@ import re
 
 from mirage.accessor.s3 import S3Accessor
 from mirage.core.s3.client import (
-    _client_kwargs,
     _key,
-    async_session,
+    create_s3_client,
     is_not_found,
 )
 from mirage.core.s3.read import _fp_rev_from_s3_response
@@ -64,9 +63,7 @@ async def checksum(
     pinned = revision_for(virtual)
     if pinned is not None:
         kwargs["VersionId"] = pinned
-    client = await accessor.cached_client(
-        lambda: async_session(config).client(**_client_kwargs(config))
-    )
+    client = await accessor.cached_client(lambda: create_s3_client(config))
     timer = start_op()
     try:
         resp = await client.head_object(**kwargs)

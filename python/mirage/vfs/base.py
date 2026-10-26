@@ -659,7 +659,7 @@ class BaseVFS:
 
         One ``(path, record)`` pair per hit: the hit's virtual path, which
         the dispatcher drops the hit for when the session hides it, and
-        the record the ``search`` command prints, a header line naming
+        the record the ``search`` CLI prints, a header line naming
         the path (``path:score`` where the store ranks) and then the
         hit's text. Errors and incomplete results are raised, never
         answered as a miss.

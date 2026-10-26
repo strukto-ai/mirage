@@ -20,7 +20,7 @@ from mirage.server.daemon_config import DaemonConfigError
 
 
 def test_an_unreachable_daemon_is_one_line_and_exit_one(monkeypatch, capsys):
-    def down() -> None:
+    def down(args: list[str] | None = None) -> None:
         raise DaemonUnreachable("daemon not reachable at http://x")
 
     monkeypatch.setattr(main_module, "app", down)
@@ -31,7 +31,7 @@ def test_an_unreachable_daemon_is_one_line_and_exit_one(monkeypatch, capsys):
 
 
 def test_a_bad_config_is_one_line_and_exit_two(monkeypatch, capsys):
-    def bad() -> None:
+    def bad(args: list[str] | None = None) -> None:
         raise DaemonConfigError("unknown key: nope")
 
     monkeypatch.setattr(main_module, "app", bad)

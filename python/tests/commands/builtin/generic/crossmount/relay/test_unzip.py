@@ -46,5 +46,16 @@ async def _run(line: str) -> tuple[int, bytes, dict[str, bytes]]:
 async def test_relay_listing_letters_list_instead_of_extracting():
     exit_code, out, written = await _run("unzip -l /a/a.zip -d /b/out")
     assert exit_code == 0
-    assert out.startswith(b"  Length      Name\n")
+    assert out.startswith(
+        b"Archive:  /a/a.zip\n  Length      Date    Time    Name\n"
+    )
     assert written == {}
+
+
+@pytest.mark.asyncio
+async def test_relay_finds_a_suffixed_archive_beside_the_typed_name():
+    # Across mounts the host's working directory is /, so a.zip for a is
+    # found beside the operand, typed in /a.
+    exit_code, _, written = await _run("cd /a && unzip -q a -d /b/out")
+    assert exit_code == 0
+    assert sorted(written) == ["/out/drop.txt", "/out/keep.txt"]

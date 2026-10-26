@@ -161,10 +161,13 @@ pub extern "C" fn mirage_rs_cancel(handle: u32) -> i32 {
     with_slot(handle, 0, |slot| i32::from(slot.stream.cancel()))
 }
 
-/// One bounded step of the work `mirage_rs_busy` reports, and its output.
+/// Bounded steps of the work `mirage_rs_busy` reports, up to a piece of
+/// output (`mirage_rs::drain_steps`), and that output.
 #[unsafe(no_mangle)]
 pub extern "C" fn mirage_rs_drain(handle: u32) -> i32 {
-    call(handle, 0, |stream, _, out| stream.drain(out))
+    call(handle, 0, |stream, _, out| {
+        mirage_rs::drain_steps(stream, out)
+    })
 }
 
 /// Start the next input of a stream that reads one after another, its
@@ -172,6 +175,26 @@ pub extern "C" fn mirage_rs_drain(handle: u32) -> i32 {
 #[unsafe(no_mangle)]
 pub extern "C" fn mirage_rs_begin(handle: u32, len: usize) -> i32 {
     call(handle, len, |stream, input, _| stream.begin(input))
+}
+
+/// Whether the input fed since the last answer, then the first `len` bytes
+/// of the input window, passes the stream's test: 1 yes, 0 no, -1 a refusal
+/// (or no such stream).
+#[unsafe(no_mangle)]
+pub extern "C" fn mirage_rs_test(handle: u32, len: usize) -> i32 {
+    STATE.with_borrow_mut(|state| {
+        let Some(slot) = state.slots.get_mut(&handle) else {
+            return -1;
+        };
+        slot.out.clear();
+        match slot.stream.test(&state.input[..len.min(state.input.len())]) {
+            Ok(answer) => i32::from(answer),
+            Err(err) => {
+                slot.error = err.message.into_bytes();
+                -1
+            }
+        }
+    })
 }
 
 /// 1 once the stream wants no more of the current input, else 0.
@@ -442,4 +465,133 @@ pub extern "C" fn mirage_rs_nfs_close(handle: u32) {
     SERVERS.with_borrow_mut(|servers| {
         servers.remove(&handle);
     });
+}
+
+/// The last shell parse: its node table and its error.
+#[derive(Default)]
+struct Parsed {
+    table: Vec<u32>,
+    error_at: i32,
+    message: Vec<u8>,
+    names: Vec<u8>,
+}
+
+thread_local! {
+    static PARSED: RefCell<Parsed> = RefCell::new(Parsed::default());
+}
+
+/// How many `u32`s one node takes in the table.
+const NODE_WORDS: usize = 10;
+
+/// The UTF-16 offset of each byte offset of `source`, which is how a
+/// host's strings count.
+fn utf16_offsets(source: &[u8]) -> Vec<u32> {
+    let mut offsets = Vec::with_capacity(source.len() + 1);
+    let mut units = 0u32;
+    for &byte in source {
+        offsets.push(units);
+        // A lead byte starts a character: four-byte ones take two units,
+        // the rest one; continuation bytes take none.
+        units += match byte {
+            0x80..=0xbf => 0,
+            0xf0..=0xff => 2,
+            _ => 1,
+        };
+    }
+    offsets.push(units);
+    offsets
+}
+
+/// Parse the args buffer's first `len` bytes as a shell program. Its node
+/// table, `NODE_WORDS` words a node level by level, offsets and columns in
+/// UTF-16 units, is at `mirage_rs_shell_table` until the next parse:
+/// kind | field << 16 | flags << 24 (1 named, 2 has_error),
+/// start, end, start row, start column, end row, end column, parent,
+/// first child, child count. Returns the node count.
+#[unsafe(no_mangle)]
+pub extern "C" fn mirage_rs_shell_parse(len: usize) -> usize {
+    let args = STATE.with_borrow_mut(|state| std::mem::take(&mut state.args));
+    let source = &args[..len.min(args.len())];
+    let tree = mirage_rs::shell::parse(source);
+    let utf16 = utf16_offsets(source);
+    let column =
+        |offset: u32, bytes: u32| utf16[offset as usize] - utf16[(offset - bytes) as usize];
+    PARSED.with_borrow_mut(|parsed| {
+        parsed.table.clear();
+        parsed.table.reserve(tree.nodes.len() * NODE_WORDS);
+        for node in &tree.nodes {
+            let flags = u32::from(node.named) | u32::from(node.has_error) << 1;
+            parsed.table.extend_from_slice(&[
+                u32::from(node.kind) | u32::from(node.field) << 16 | flags << 24,
+                utf16[node.start as usize],
+                utf16[node.end as usize],
+                node.start_row,
+                column(node.start, node.start_column),
+                node.end_row,
+                column(node.end, node.end_column),
+                node.parent,
+                node.first_child,
+                node.child_count,
+            ]);
+        }
+        match &tree.error {
+            Some((at, message)) => {
+                parsed.error_at = i32::try_from(utf16[(*at).min(source.len())]).unwrap_or(i32::MAX);
+                parsed.message = message.clone().into_bytes();
+            }
+            None => {
+                parsed.error_at = -1;
+                parsed.message.clear();
+            }
+        }
+    });
+    tree.nodes.len()
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn mirage_rs_shell_table() -> *const u32 {
+    PARSED.with_borrow(|parsed| parsed.table.as_ptr())
+}
+
+/// Where the last parse's syntax error is, in UTF-16 units; -1 for none.
+#[unsafe(no_mangle)]
+pub extern "C" fn mirage_rs_shell_error_at() -> i32 {
+    PARSED.with_borrow(|parsed| parsed.error_at)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn mirage_rs_shell_message() -> *const u8 {
+    PARSED.with_borrow(|parsed| parsed.message.as_ptr())
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn mirage_rs_shell_message_len() -> usize {
+    PARSED.with_borrow(|parsed| parsed.message.len())
+}
+
+/// Node kind names, then field names, each NUL-terminated; a kind's name
+/// starts with `1` when the kind is named, `0` when not, and an empty name
+/// ends the kinds.
+#[unsafe(no_mangle)]
+pub extern "C" fn mirage_rs_shell_names() -> *const u8 {
+    PARSED.with_borrow_mut(|parsed| {
+        if parsed.names.is_empty() {
+            for (name, named) in mirage_rs::shell::KINDS {
+                parsed.names.push(if *named { b'1' } else { b'0' });
+                parsed.names.extend_from_slice(name.as_bytes());
+                parsed.names.push(0);
+            }
+            parsed.names.push(0);
+            for field in mirage_rs::shell::FIELDS {
+                parsed.names.extend_from_slice(field.as_bytes());
+                parsed.names.push(0);
+            }
+        }
+        parsed.names.as_ptr()
+    })
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn mirage_rs_shell_names_len() -> usize {
+    PARSED.with_borrow(|parsed| parsed.names.len())
 }

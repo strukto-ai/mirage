@@ -3,6 +3,7 @@ import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
 from copy import copy
 from types import TracebackType
+from typing import cast
 
 from mirage.concurrency.limiter import owned_task, settle
 from mirage.io.output import OutputPipe
@@ -42,7 +43,7 @@ class ShellEvents(AsyncIterator[OutputEvent]):
             raise StopAsyncIteration
         if self._pull is not None:
             raise RuntimeError("shell events already have a pending reader")
-        self._pull = asyncio.create_task(anext(self._source))
+        self._pull = owned_task(anext(self._source))
         try:
             event = await self._pull
             if self._ended:
@@ -75,6 +76,12 @@ class ShellExecution:
     backpressures execution. Its capacity defaults to 64 KiB.
     Use ``async with`` when leaving iteration early.
     Closing joins the invocation under the shell's normal cancellation policy.
+    The invocation and each pull of its output start eagerly where Python
+    can, so work that is ready costs the loop no turn; the watcher of the
+    caller's cancel event only waits on it and is cancelled, not joined.
+    A line can end before that watcher first runs, so the event is read
+    again once it returns: a caller's abort wins over a line that ended
+    meanwhile, as it does over one that ended in the same turn.
     """
 
     def __init__(
@@ -91,7 +98,7 @@ class ShellExecution:
         self._output = ShellOutput(buffer_bytes)
         self.events = ShellEvents(self, self._output)
         self._closing: asyncio.Task[None] | None = None
-        self._task = asyncio.create_task(self._run(run, scope, cancel))
+        self._task = owned_task(self._run(run, scope, cancel))
         self._task.add_done_callback(self._observed)
 
     def on_settled(self, callback: Callable[[], None]) -> None:
@@ -115,6 +122,7 @@ class ShellExecution:
         scope: ExecutionScope,
         external: asyncio.Event | None,
     ) -> IOResult:
+        self._task = cast("asyncio.Task[IOResult]", asyncio.current_task())
         watcher = (
             asyncio.create_task(self._watch(external))
             if external is not None
@@ -126,6 +134,8 @@ class ShellExecution:
             ):
                 raise MirageAbortError()
             result = await run(self._output, self._cancel, scope)
+            if external is not None and external.is_set():
+                raise MirageAbortError()
             self._output.pipe.end()
             return result
         except BaseException as error:
@@ -135,7 +145,6 @@ class ShellExecution:
         finally:
             if watcher is not None:
                 watcher.cancel()
-                await asyncio.gather(watcher, return_exceptions=True)
 
     async def _watch(self, external: asyncio.Event) -> None:
         await external.wait()

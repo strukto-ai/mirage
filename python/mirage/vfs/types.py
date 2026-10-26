@@ -67,7 +67,7 @@ class SearchOp(Protocol):
     """Search a resource; None declines, [] means no results.
 
     One ``(path, record)`` pair per hit: the hit's virtual path and the
-    text record the ``search`` command prints. Errors and incomplete
+    text record the ``search`` CLI prints. Errors and incomplete
     results must be reported, never treated as misses.
     """
 
@@ -94,7 +94,7 @@ class SearchManyOp(Protocol):
 
 @dataclass(frozen=True, kw_only=True)
 class SearchOps:
-    """Optional resource search, what the ``search`` command asks.
+    """Optional resource search, what the ``search`` CLI asks.
 
     Args:
         search (SearchOp): the resource's single-scope search callback.

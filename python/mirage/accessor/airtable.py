@@ -12,9 +12,12 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import Hashable
+
 from mirage.accessor.base import SessionAccessor
 from mirage.core.airtable.config import AirtableConfig
 from mirage.core.api.rate_limit import RateLimiter
+from mirage.utils.clock import Clock
 
 
 class AirtableAccessor(SessionAccessor):
@@ -28,3 +31,23 @@ class AirtableAccessor(SessionAccessor):
         super().__init__()
         self.config = config
         self.limiter = RateLimiter(config.requests_per_second)
+
+    def bind_clock(self, clock: Clock, owner: Hashable) -> None:
+        """Pace each base's calls on the workspace's clock.
+
+        Args:
+            clock (Clock): the workspace's clock.
+            owner (Hashable): who holds it, released by the same key.
+
+        Raises:
+            ValueError: a workspace on another clock mounts it.
+        """
+        self.limiter.bind_clock(clock, owner)
+
+    def release_clock(self, owner: Hashable) -> None:
+        """Let ``owner`` go.
+
+        Args:
+            owner (Hashable): the key it was bound with.
+        """
+        self.limiter.release_clock(owner)

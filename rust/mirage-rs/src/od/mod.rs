@@ -650,7 +650,11 @@ impl Od {
         }
         if let Some(input) = &mut self.input {
             let open = input.open.take();
-            self.io.push(Request::Read { fd: input.fd, open });
+            self.io.push(Request::Read {
+                fd: input.fd,
+                open,
+                least: 0,
+            });
         }
     }
 

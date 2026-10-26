@@ -24,6 +24,8 @@ mod nl;
 mod numfmt;
 mod od;
 mod paste;
+mod pcre;
+mod policy;
 mod printf;
 mod records;
 mod reflow;
@@ -36,10 +38,12 @@ mod rg_grapheme;
 mod rg_matcher;
 mod sed;
 mod seq;
+pub mod shell;
 mod sort;
 mod split;
 mod strings;
 mod tac;
+mod task;
 mod tr;
 mod tsort;
 mod uniq;
@@ -47,6 +51,7 @@ mod utf8;
 mod wc;
 mod width;
 mod xxd;
+mod zip;
 
 use std::fmt;
 
@@ -111,6 +116,15 @@ pub trait Stream: Send + Sync {
     fn begin(&mut self, config: &[u8]) -> Result<(), StreamError> {
         let _ = config;
         Err(StreamError::new("this stream reads one input"))
+    }
+
+    /// Answer a yes-or-no question about one whole input in one call: the
+    /// bytes fed since the last answer, then `input`. The next input starts
+    /// empty. It is for a host asking once per name, where the calls of
+    /// `begin`, `feed`, `finish` and `drain` would cost more than the work.
+    fn test(&mut self, input: &[u8]) -> Result<bool, StreamError> {
+        let _ = input;
+        Err(StreamError::new("this stream answers no test"))
     }
 
     /// Whether the stream wants no more of the current input: the host
@@ -339,6 +353,7 @@ pub fn open(kind: &str, config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
         "numfmt" => numfmt::open(config),
         "od" => od::open(config),
         "paste" => paste::open(config),
+        "policy" => policy::stream::open(config),
         "printf" => printf::open(config),
         "regex" => regex::stream::open(config),
         "rev" => rev::open(config),
@@ -354,10 +369,35 @@ pub fn open(kind: &str, config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
         "tsort" => tsort::open(config),
         "unexpand" => expand::open_unexpand(config),
         "uniq" => uniq::open(config),
+        "unzip" => zip::open_unzip(config),
         "wc" => wc::open(config),
         "xxd" => xxd::open(config),
+        "zip" => zip::open_zip(config),
         _ => Err(StreamError::new(format!("unknown stream: {kind}"))),
     }
+}
+
+/// The output a host's `drain` call gathers before it hands back.
+pub const PIECE: usize = 16 * 1024;
+
+/// The bounded steps one host `drain` call runs at most.
+pub const STEPS: usize = 8;
+
+/// What a host's `drain` call runs: bounded steps of the work `busy`
+/// reports, until they have written a piece of output, the stream is no
+/// longer busy, or `STEPS` of them have run. A stream whose steps write a
+/// few bytes each (`cut`, `jq`) or none (`sort` before its output) then
+/// crosses into the host, and on down a pipe, once per piece rather than
+/// once per step, and the host still yields between calls.
+pub fn drain_steps(stream: &mut dyn Stream, out: &mut Vec<u8>) -> Result<(), StreamError> {
+    let start = out.len();
+    for _ in 0..STEPS {
+        stream.drain(out)?;
+        if out.len() - start >= PIECE || !stream.busy() {
+            break;
+        }
+    }
+    Ok(())
 }
 
 pub(crate) fn parse_config<'a, T: serde::Deserialize<'a>>(
@@ -401,5 +441,76 @@ pub(crate) fn drain_all(stream: &mut dyn Stream, out: &mut Vec<u8>) {
             stream.drain(out).expect("drain");
         }
         stream.feed(&[], out).expect("feed");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{PIECE, STEPS, Stream, StreamError, drain_steps};
+
+    struct Steps {
+        left: usize,
+        width: usize,
+        taken: usize,
+    }
+
+    impl Stream for Steps {
+        fn feed(&mut self, _: &[u8], _: &mut Vec<u8>) -> Result<(), StreamError> {
+            Ok(())
+        }
+        fn finish(&mut self, _: &mut Vec<u8>) -> Result<(), StreamError> {
+            Ok(())
+        }
+        fn busy(&self) -> bool {
+            self.left > 0
+        }
+        fn drain(&mut self, out: &mut Vec<u8>) -> Result<(), StreamError> {
+            self.left -= 1;
+            self.taken += 1;
+            out.resize(out.len() + self.width, b'x');
+            if self.left == 1 && self.width == 3 {
+                return Err(StreamError::new("refused"));
+            }
+            Ok(())
+        }
+    }
+
+    fn drained(left: usize, width: usize) -> (usize, usize) {
+        let mut stream = Steps {
+            left,
+            width,
+            taken: 0,
+        };
+        let mut out = Vec::new();
+        drain_steps(&mut stream, &mut out).expect("drain");
+        (stream.taken, out.len())
+    }
+
+    #[test]
+    fn a_call_gathers_small_steps_up_to_its_step_bound() {
+        assert_eq!(drained(100, 10), (STEPS, STEPS * 10));
+    }
+
+    #[test]
+    fn a_call_hands_back_once_it_holds_a_piece() {
+        assert_eq!(drained(100, PIECE / 2), (2, PIECE));
+        assert_eq!(drained(100, PIECE * 4), (1, PIECE * 4));
+    }
+
+    #[test]
+    fn a_call_ends_with_the_work() {
+        assert_eq!(drained(3, 10), (3, 30));
+    }
+
+    #[test]
+    fn a_refusal_keeps_the_output_written_before_it() {
+        let mut stream = Steps {
+            left: 5,
+            width: 3,
+            taken: 0,
+        };
+        let mut out = Vec::new();
+        assert!(drain_steps(&mut stream, &mut out).is_err());
+        assert_eq!((stream.taken, out.len()), (4, 12));
     }
 }

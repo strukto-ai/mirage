@@ -5,7 +5,7 @@ description = "A unified virtual filesystem for AI agents. Mount S3, Google Driv
 readme = "README.md"
 license = "Apache-2.0"
 license-files = ["LICENSE", "THIRD_PARTY_NOTICES"]
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 authors = [
     { name = "Zecheng Zhang", email = "zecheng@strukto.ai" },
 ]
@@ -27,7 +27,6 @@ classifiers = [
     "Operating System :: POSIX :: Linux",
     "Operating System :: MacOS :: MacOS X",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Topic :: Software Development :: Libraries :: Python Modules",
     "Topic :: System :: Filesystems",
@@ -64,6 +63,7 @@ Issues = "https://github.com/strukto-ai/mirage/issues"
 
 [project.scripts]
 mirage = "mirage.cli.main:main"
+mirage-bash = "mirage.cli.bash:main"
 
 [build-system]
 requires = ["maturin>=1.9,<2"]
@@ -144,28 +144,27 @@ chroma   = ["chromadb-client>=1.0.0"]
 qdrant   = ["qdrant-client>=1.18.0"]
 
 # --- openai ---
-openai      = ["openai>=3.13.0", "openai-agents>=0.21.0"]
+openai      = ["openai>=3.37.0", "openai-agents>=0.24.0"]
 
 # --- pydantic-ai ---
 pydantic-ai = [
-    "pydantic-ai-slim>=2.52.0",
-    "pydantic-ai-backend[console]>=0.2.30",
-    "chardet>=5.2.0",
+    "pydantic-ai-slim>=2.61.0",
+    "pydantic-ai-backend[console]>=0.2.37",
 ]
 
 # --- deepagents ---
 deepagents  = [
-    "deepagents>=0.7.6",
+    "deepagents>=0.7.32",
 ]
 
 # --- agno ---
 agno        = [
-    "agno>=2.7.4",
+    "agno>=3.1.10",
 ]
 
 # --- claude-agent-sdk ---
 claude-agent-sdk = [
-    "claude-agent-sdk>=0.2.123",
+    "claude-agent-sdk>=0.2.174",
 ]
 
 # --- claude-managed-agents ---

@@ -6,7 +6,7 @@ icon: /images/openai-logo.svg
 
 OpenAI's [Agents API](https://developers.openai.com/api/docs/guides/agents-api/overview) runs the agent on OpenAI's servers. With a `self_hosted` environment, its shell commands, file reads and patches run in a Mirage workspace, under the workspace's profile and mount modes. No sandbox holds the files.
 
-The workspace connects through Codex's exec-server relay, set up on the [Codex page](/python/agents/codex#exec-server-forward). The Agents API is in beta.
+The workspace connects through Codex's exec-server relay, set up on the [Codex page](/home/agents/codex#exec-server-forward). The Agents API is in beta.
 
 ## Install
 
@@ -53,7 +53,7 @@ print(session.environment.id, session.environment.remote_url)
 
 ## Connect the workspace
 
-Hand the session's `environment.id` and `environment.remote_url`, with an [environment key](https://developers.openai.com/api/docs/guides/agents-api/environments/self-hosted#authentication), to [`codex exec-server forward`](/python/agents/codex#exec-server-forward) pointed at workspace `demo`. The agent's commands then run in the workspace, and what it writes lands in its mounts.
+Hand the session's `environment.id` and `environment.remote_url`, with an [environment key](https://developers.openai.com/api/docs/guides/agents-api/environments/self-hosted#authentication), to [`codex exec-server forward`](/home/agents/codex#exec-server-forward) pointed at workspace `demo`. The agent's commands then run in the workspace, and what it writes lands in its mounts.
 
 ## Run a task
 

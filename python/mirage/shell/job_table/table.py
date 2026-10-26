@@ -35,6 +35,7 @@ from mirage.shell.job_table.types import (
     JobStatus,
 )
 from mirage.types import PathSpec
+from mirage.utils.clock import Clock, SystemClock
 
 logger = logging.getLogger(__name__)
 
@@ -191,6 +192,7 @@ class JobTable:
         console_factory: ConsoleFactory | None = None,
         processes: ProcessSupervisor | None = None,
         parent: "JobTable | None" = None,
+        clock: Clock | None = None,
     ) -> None:
         """Create a table, optionally choosing where consoles live.
 
@@ -212,8 +214,11 @@ class JobTable:
             parent (JobTable | None): the table of the shell a ``$( )``
                 is part of, whose jobs ``jobs`` still lists there, as
                 bash's does; its ``wait`` and ``kill`` reach none of them.
+            clock (Clock | None): the workspace clock a job's
+                ``created_at`` is read on; None is the system clock.
         """
         self.parent = parent
+        self.clock: Clock = clock if clock is not None else SystemClock()
         self.processes = processes or ProcessSupervisor(
             bind=run_with_execution
         )
@@ -239,7 +244,9 @@ class JobTable:
             parent (JobTable | None): the table a ``$( )`` still lists
                 in ``jobs``.
         """
-        table = JobTable(self._console_factory, self.processes, parent)
+        table = JobTable(
+            self._console_factory, self.processes, parent, self.clock
+        )
         table._console_owner = self._console_owner
         return table
 
@@ -311,6 +318,7 @@ class JobTable:
                 session_id=session_id,
                 console=console,
                 simple=simple,
+                created_at=self.clock.now(),
             )
         except Exception:
             process.terminate()

@@ -15,18 +15,19 @@
 import asyncio
 import errno
 import logging
-from dataclasses import replace
 
 import pytest
 
+from mirage import MountMode, Workspace
 from mirage.errors.types import OperationNotSupportedError
 from mirage.runtime.constants import LISTING_ENTRY_CONCURRENCY
 from mirage.runtime.errors import CrossMountError
-from mirage.runtime.files import RuntimeFiles, stat_row
-from mirage.runtime.handles import FlushStep
+from mirage.runtime.files import RuntimeFiles
+from mirage.runtime.handles import parse_mode
 from mirage.runtime.resolver import PrefixResolver
 from mirage.runtime.types import VFSEntry, VFSStat
 from mirage.types import DEVICE_NUMBERS_KEY, ContentType, FileStat, FileType
+from mirage.utils.dates import ns_to_iso
 from mirage.utils.stat_view import (
     CHAR_MODE,
     DIR_MODE,
@@ -34,6 +35,7 @@ from mirage.utils.stat_view import (
     FILE_MODE,
     LINK_MODE,
 )
+from mirage.vfs.ram import RAMVFS
 
 
 class ListingVFS(RuntimeFiles):
@@ -563,33 +565,6 @@ def test_an_append_keeps_a_write_made_since_the_last_one():
     assert vfs.writes == [("/s3/a", b"head-1"), ("/s3/a", b"other-2")]
 
 
-def test_flush_sends_each_step_in_order():
-    vfs = RecordingVFS(prefixes=["/data/"])
-    vfs.flush(
-        "/data/f",
-        [
-            FlushStep("truncate", length=2),
-            FlushStep("pwrite", data=b"z", offset=4),
-            FlushStep("append", data=b"!"),
-        ],
-    )
-    assert vfs.calls == [
-        ("truncate", "/data/f", {"length": 2}),
-        ("pwrite", "/data/f", {"data": b"z", "offset": 4}),
-        ("append", "/data/f", {"data": b"!"}),
-    ]
-
-
-def test_flush_falls_back_to_a_whole_write_and_remembers_the_mount():
-    vfs = RecordingVFS(prefixes=["/data/"], no_append=["/data"])
-    vfs.flush("/data/log.txt", [FlushStep("append", data=b"XYZ")])
-    vfs.flush("/data/log.txt", [FlushStep("append", data=b"123")])
-    ops = [op for op, _, _ in vfs.calls]
-    # One failed probe for the mount, not one per call: the second flush
-    # reads the base fresh and writes, with no append tried.
-    assert ops == ["append", "read", "write", "read", "write"]
-
-
 def test_symlink_sends_the_target_verbatim():
     vfs = RecordingVFS(prefixes=["/data/"])
     vfs.symlink("/data/l", "../up/t.txt")
@@ -674,62 +649,32 @@ async def test_readdir_is_one_hop_that_stats_at_most_the_cap_at_once():
     assert tasks <= 2 * LISTING_ENTRY_CONCURRENCY + 4
 
 
-def test_read_cached_dispatches_the_retained_logical_bytes():
-    calls = []
-
-    async def dispatch(name, path, **kwargs):
-        calls.append((name, path.virtual, kwargs))
-        return b"checked", None
-
-    files = RuntimeFiles(dispatch, None)
-    assert files.read_cached("/data/f", b"held") == b"held"
-    assert calls == [("read", "/data/f", {"retained": b"held"})]
-
-
-def test_stat_cached_preserves_unknown_source_and_checks_logical_changes():
-    row = FileStat(
-        name="unknown",
-        type=FileType.FILE,
-        size=None,
-        uid="owner",
-        modified="2026-07-15T00:00:00Z",
-        extra={"policy_tag": "secret"},
-    )
-    files = RuntimeFiles(None, None)
-    seen = []
-
-    def dispatch(op, path, **kwargs):
-        assert op == "stat"
-        assert path == "/data/unknown"
-        seen.append(kwargs["retained"])
-        return kwargs["retained"]
-
-    files.call = dispatch
-    projected = stat_row(row)
-    assert files.stat_cached("/data/unknown", projected) == projected
-    assert seen[-1] is row
-    checked = files.stat_cached(
-        "/data/unknown", replace(projected, size=7, mode=0o100600)
-    )
-    assert (checked.size, checked.mode) == (7, 0o100600)
-    assert (seen[-1].size, seen[-1].mode) == (7, 0o100600)
-    assert seen[-1].uid == "owner"
-    assert seen[-1].modified == row.modified
-    assert seen[-1].extra == row.extra
-
-
-def test_stat_cached_leaves_out_times_the_backend_never_gave():
-    # A runtime fills a missing time for its guest; the policy sees the
-    # backend's row without it.
-    row = FileStat(name="f", type=FileType.FILE, size=3)
-    files = RuntimeFiles(None, None)
-    seen = []
-
-    def dispatch(op, path, **kwargs):
-        seen.append(kwargs["retained"])
-        return kwargs["retained"]
-
-    files.call = dispatch
-    filled = replace(stat_row(row), mtime_ns=1, atime_ns=1)
-    assert files.stat_cached("/data/f", filled) == filled
-    assert (seen[-1].modified, seen[-1].atime) == (None, None)
+@pytest.mark.asyncio
+async def test_an_fstat_sees_a_change_by_path_at_once():
+    # A change by path the guest makes past the core's own ops (os.utime,
+    # chmod, a whole-file write) reaches the files open there at once, as
+    # fstat after utime(2) does.
+    with Workspace({"/data": RAMVFS()}, mode=MountMode.WRITE) as ws:
+        await ws.vfs.write("/data/a.txt", b"abc")
+        files = RuntimeFiles.of(ws.runtime_context().ctx, ws._runtime_binding)
+        assert files is not None
+        fh = await asyncio.to_thread(
+            files.open, "/data/a.txt", parse_mode("r")
+        )
+        try:
+            await asyncio.to_thread(files.fstat, fh)
+            stamp = ns_to_iso(981173106 * 10**9)
+            await asyncio.to_thread(
+                files.setattr, "/data/a.txt", mode=0o600, mtime=stamp
+            )
+            row = await asyncio.to_thread(files.fstat, fh)
+            assert (row.mode & 0o777, row.mtime_ns) == (
+                0o600,
+                981173106 * 10**9,
+            )
+            await asyncio.to_thread(files.write, "/data/a.txt", b"abcdef")
+            assert (await asyncio.to_thread(files.fstat, fh)).size == 6
+            await asyncio.to_thread(files.append, "/data/a.txt", b"gh")
+            assert (await asyncio.to_thread(files.fstat, fh)).size == 8
+        finally:
+            await asyncio.to_thread(files.close, fh)

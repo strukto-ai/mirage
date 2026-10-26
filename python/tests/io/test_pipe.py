@@ -9,7 +9,11 @@ from mirage.io.pipe import CAPACITY, BytePipe
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("capacity", [CHUNK_SIZE, CAPACITY, 262144])
-async def test_large_write_waits_at_capacity_and_preserves_bytes(capacity):
+@pytest.mark.parametrize("joined", [False, True])
+async def test_large_write_waits_at_capacity_and_preserves_bytes(
+    capacity, joined
+):
+    read = capacity if joined else CHUNK_SIZE
     pipe = BytePipe(capacity)
     data = b"a" * (capacity * 3 + 7)
     writing = asyncio.create_task(pipe.write(data))
@@ -23,12 +27,13 @@ async def test_large_write_waits_at_capacity_and_preserves_bytes(capacity):
 
     finishing = asyncio.create_task(produce())
     parts = []
-    async for part in pipe.stream():
-        assert len(part) <= CHUNK_SIZE
+    async for part in pipe.stream(joined):
+        assert len(part) <= read
         assert pipe.buffered_bytes <= capacity
         parts.append(part)
     await finishing
     assert b"".join(parts) == data
+    assert len(parts[0]) == read
 
 
 @pytest.mark.asyncio

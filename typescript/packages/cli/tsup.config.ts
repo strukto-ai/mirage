@@ -17,6 +17,6 @@ import { BASE } from '../../tsup.base.config.ts'
 
 export default defineConfig({
   ...BASE,
-  entry: ['src/index.ts', 'src/bin/mirage.ts'],
+  entry: ['src/index.ts', 'src/bin/mirage.ts', 'src/bin/mirage-bash.ts'],
   platform: 'node',
 })

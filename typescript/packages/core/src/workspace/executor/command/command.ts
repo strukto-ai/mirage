@@ -83,7 +83,7 @@ import { standardRequest } from '../../../commands/spec/standard.ts'
 import { handleCli, handleMountCli, reachesService, walkLeaf, type LeafCall } from './cli.ts'
 import { pathStat } from '../../mount/namespace/probe.ts'
 import { Files } from '../../files.ts'
-import { findStartPoints, nestedShell, runOnMount, type RunOnMountCtx } from './run.ts'
+import { execNode, findStartPoints, nestedShell, runOnMount, type RunOnMountCtx } from './run.ts'
 import type { FollowOperands, SessionView, StatPath } from '../../../view/types.ts'
 import { applyFindActions } from '../find_action_dispatch.ts'
 import { operandFollow } from '../builtins/links/links.ts'
@@ -1007,12 +1007,5 @@ export async function handleCommand(
       : null
   stdout = maybeWithTimeout(stdout, resolved, cmdName)
   io.stderr = maybeWithTimeout(io.stderr, resolved, cmdName)
-  const stderrBytes = await io.materializeStderr()
-  const exec = new ExecutionNode({
-    command: cmdStr,
-    stderr: stderrBytes,
-    exitCode: io.exitCode,
-    paths,
-  })
-  return [stdout, io, exec]
+  return [stdout, io, await execNode(cmdStr, io, paths)]
 }

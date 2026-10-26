@@ -52,10 +52,19 @@ const sync: SyncVFS = {
     })
   },
   process: (payload) => call({ op: 'process', path: '', payload }) as string,
-  read: (path, raw = false) => call({ op: 'read', path, raw }) as Uint8Array,
-  readCached: (path, retained) => call({ op: 'read', path, retained }) as Uint8Array,
+  open: (path, mode) => call({ op: 'open', path, mode }) as number,
+  pread: (fh, offset, size) => call({ op: 'pread', path: '', fh, offset, size }) as Uint8Array,
+  pwrite: (fh, offset, bytes) => {
+    call({ op: 'pwrite', path: '', fh, offset, bytes })
+  },
+  fstat: (fh) => call({ op: 'fstat', path: '', fh }) as VFSStat,
+  ftruncate: (fh, size) => {
+    call({ op: 'ftruncate', path: '', fh, size })
+  },
+  close: (fh) => {
+    call({ op: 'close', path: '', fh })
+  },
   stat: (path) => call({ op: 'stat', path }) as VFSStat,
-  statCached: (path, retainedStat) => call({ op: 'stat', path, retainedStat }) as VFSStat,
   readdir: (path, classify = true) => call({ op: 'readdir', path, classify }) as VFSEntry[],
   readlink: (path) => call({ op: 'readlink', path }) as string,
   flush: (mutations) => {

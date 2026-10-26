@@ -4,8 +4,8 @@ description: "Register and discover Mirage’s supported CLIs, and use them with
 icon: wrench
 ---
 
-Mirage includes eleven command-line programs for working with services and Git
-repositories inside a workspace. Each program's `--help` describes the
+Mirage includes twelve command-line programs for working with services, Git
+repositories and search mounts inside a workspace. Each program's `--help` describes the
 commands and flags implemented by Mirage.
 
 The [host `mirage` CLI](/home/access/cli) connects to and manages workspaces.
@@ -26,12 +26,13 @@ The programs on this page run in those workspaces through `ws.shell(...)`,
 | [himalaya](/python/cli/himalaya) | List and search mail; read, compose, reply, forward and send messages | 7 |
 | [linear](/python/cli/linear) | Query teams, issues, projects and documents; update issues and comments | 26 |
 | [ntn](/python/cli/ntn) | Read and edit Markdown pages, query data sources and call Notion APIs | 9 |
+| [search](/python/cli/search) | Rank the records of Dify, Chroma, mem0, Qdrant and LanceDB mounts for a query | 1 |
 | [slack](/python/cli/slack) | Read and send messages; manage reactions and pins; find members and search | 11 |
 | [trello](/python/cli/trello) | Read boards, lists, labels and cards; create, update, move, assign, label and comment on cards | 16 |
 {/* END GENERATED CLI COMMANDS */}
 
-All eleven are available in Python and TypeScript on Node. The TypeScript Node
-package provides `hf` and `himalaya`; the other nine live in core. These are
+All twelve are available in Python and TypeScript on Node. The TypeScript Node
+package provides `hf` and `himalaya`; the other ten live in core. These are
 Mirage implementations of the listed command trees, not installed copies of
 the upstream binaries. Each reference links its upstream project or service
 API and documents its supported subset, limits and relevant licenses. See
@@ -53,7 +54,7 @@ await ws.shell("slack --help")
 ```
 
 `register_cli(name, spec, config)` validates a config mapping or accepts an instance of the declared model.
-`git` has no account config; register its `GIT` spec without the third argument.
+`git` and `search` have no account config; register their `GIT` and `SEARCH` specs without the third argument.
 Two installations of the same spec under different names can use different
 accounts. Registration is a host operation, not an agent shell command.
 

@@ -113,6 +113,7 @@ from mirage.utils.hidden import (
     leads_hidden,
     move_reveals,
     path_visible,
+    visible_links,
 )
 from mirage.utils.key_prefix import mount_key, under_path
 from mirage.utils.path import (
@@ -983,7 +984,7 @@ class Dispatcher:
             report (OpReport | None): the caller's report.
             kwargs (dict[str, Any]): the op's own arguments.
         """
-        token = bind_caller(dataclasses.replace(caller, rule_gate=None))
+        token = bind_caller(caller.changed({"rule_gate": None}))
         try:
             if (
                 name == "read"
@@ -1096,7 +1097,7 @@ class Dispatcher:
         # would tell that it is there.
         if not sees(caller.visibility, self._namespace, path.virtual):
             return False
-        prober = dataclasses.replace(caller, rule_gate=None)
+        prober = caller.changed({"rule_gate": None})
         # A read follows a final link, so the kind is its target's, as
         # GNU's cat calls a link to a directory one; the error keeps the
         # name as typed.
@@ -2880,10 +2881,16 @@ class Dispatcher:
         owner = self._namespace.try_mount_for(path.virtual)
         links = self._namespace.symlink_targets()
         merged = dict(tree)
-        for virtual, row in self._namespace.link_stats_below(path.virtual):
-            if self._namespace.try_mount_for(
-                virtual
-            ) is not owner or leads_hidden(vis, virtual, links):
+        candidates = [
+            (virtual, row)
+            for virtual, row in self._namespace.link_stats_below(path.virtual)
+            if self._namespace.try_mount_for(virtual) is owner
+        ]
+        visible = visible_links(
+            vis, [virtual for virtual, _ in candidates], links
+        )
+        for (virtual, row), shown in zip(candidates, visible, strict=True):
+            if not shown:
                 continue
             rel = virtual[len(base) + 1 :]
             if rel in merged:

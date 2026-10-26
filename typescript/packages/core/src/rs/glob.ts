@@ -13,9 +13,10 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { z } from 'zod'
+import type { util } from 'zod'
 import { YieldBudget } from '../io/yield_budget.ts'
 import type { OpenStream } from './stream.ts'
-import { openStreamSync } from './stream.ts'
+import { MovableStream, openStreamSync } from './stream.ts'
 
 const position = z.number().int().nonnegative().nullable()
 const units = z.array(z.number().int().min(0).max(0x10ffff))
@@ -24,6 +25,9 @@ const finalizer = new FinalizationRegistry<OpenStream>((stream) => {
   stream.close()
 })
 const decoder = new TextDecoder()
+const CHUNK = 4096
+const CACHE_SIZE = 256
+const scratch = new Uint8Array(4 * CHUNK)
 
 interface Plain {
   kind: 'matches' | 'shape' | 'parts'
@@ -44,22 +48,47 @@ interface Replace {
 }
 type Operation = Plain | End | Suffix | Replace
 type Reply = boolean | number | null | number[] | number[][]
+type Dialect = 'shell' | 'python'
 
-function* encodedUnits(text: string): Generator<Uint8Array> {
-  let buffer = new Uint8Array(16 * 1024)
-  let view = new DataView(buffer.buffer)
+// The code points as little-endian u32 units. A `transient` result may be the
+// shared scratch, good until the next transient call: for a caller that hands
+// it to Wasm before it awaits.
+function encoded(text: string, transient = false): Uint8Array {
+  const bytes = transient && text.length <= CHUNK ? scratch : new Uint8Array(4 * text.length)
+  const view = new DataView(bytes.buffer)
   let size = 0
-  for (const char of text) {
-    view.setUint32(size, char.codePointAt(0) ?? 0, true)
-    size += 4
-    if (size === buffer.length) {
-      yield buffer
-      buffer = new Uint8Array(16 * 1024)
-      view = new DataView(buffer.buffer)
-      size = 0
-    }
+  for (let at = 0; at < text.length; size += 4) {
+    const unit = text.codePointAt(at) ?? 0
+    view.setUint32(size, unit, true)
+    at += unit > 0xffff ? 2 : 1
   }
-  if (size > 0) yield buffer.subarray(0, size)
+  return bytes.subarray(0, size)
+}
+
+// The text encoded a piece of about CHUNK characters at a time, never splitting
+// a surrogate pair, for a caller that yields between pieces.
+function* pieces(text: string): Generator<Uint8Array> {
+  for (let at = 0; at < text.length;) {
+    let end = Math.min(at + CHUNK, text.length)
+    if ((text.codePointAt(end - 1) ?? 0) > 0xffff) end += 1
+    yield encoded(text.slice(at, end))
+    at = end
+  }
+}
+
+function config(
+  pattern: string,
+  extglob: boolean,
+  period: boolean,
+  dialect: Dialect,
+): Readonly<Record<string, util.JSONType>> {
+  return {
+    pattern: Array.from(pattern, (ch) => ch.codePointAt(0) ?? 0),
+    extglob,
+    period,
+    dialect,
+    operation: { kind: 'matches' },
+  }
 }
 
 function text(result: readonly number[]): string {
@@ -76,17 +105,11 @@ export class Glob {
     pattern: string,
     extglob = false,
     period = false,
-    dialect: 'shell' | 'python' = 'shell',
+    dialect: Dialect = 'shell',
     signal?: AbortSignal,
   ) {
     this.budget = new YieldBudget(signal)
-    this.stream = openStreamSync('glob', {
-      pattern: Array.from(pattern, (ch) => ch.codePointAt(0) ?? 0),
-      extglob,
-      period,
-      dialect,
-      operation: { kind: 'matches' },
-    })
+    this.stream = openStreamSync('glob', config(pattern, extglob, period, dialect))
     finalizer.register(this, this.stream, this)
   }
 
@@ -104,9 +127,7 @@ export class Glob {
   }
 
   private run(name: string, operation: Operation): Reply {
-    if (!this.prepare(name, operation)) {
-      for (const part of encodedUnits(name)) this.stream.feed(part)
-    }
+    if (!this.prepare(name, operation)) this.stream.feed(encoded(name, true))
     let out = decoder.decode(this.stream.finish())
     while (this.stream.busy()) out += decoder.decode(this.stream.drain())
     return JSON.parse(out) as Reply
@@ -115,7 +136,7 @@ export class Glob {
   private async runAsync(name: string, operation: Operation): Promise<Reply> {
     const budget = this.budget
     if (!this.prepare(name, operation)) {
-      for (const part of encodedUnits(name)) {
+      for (const part of pieces(name)) {
         const pending = budget.run()
         if (pending !== undefined) await pending
         this.stream.feed(part)
@@ -128,10 +149,6 @@ export class Glob {
       out += decoder.decode(this.stream.drain())
     }
     return JSON.parse(out) as Reply
-  }
-
-  matches(name: string): boolean {
-    return z.boolean().parse(this.run(name, { kind: 'matches' }))
   }
 
   async matchesAsync(name: string): Promise<boolean> {
@@ -169,4 +186,41 @@ export class Glob {
       .parse(this.run('', { kind: 'parts' }))
       .map(text)
   }
+}
+
+/** One compiled pattern asked whether whole names match, one Wasm call per name. Mirrors Python's GlobMatcher. */
+export class GlobMatcher {
+  private readonly stream: MovableStream
+
+  constructor(pattern: string, extglob = false, period = false, dialect: Dialect = 'shell') {
+    this.stream = new MovableStream('glob', config(pattern, extglob, period, dialect))
+  }
+
+  matches(name: string): boolean {
+    return this.stream.live.test(encoded(name, true))
+  }
+}
+
+const matchers = new Map<string, (GlobMatcher | undefined)[]>()
+
+/**
+ * A compiled GlobMatcher, shared by every caller asking the same; the pattern
+ * compiled first leaves first. A hit is one lookup, since a filter asks once
+ * per name. Mirrors Python's glob_matcher.
+ */
+export function globMatcher(
+  pattern: string,
+  extglob = false,
+  period = false,
+  dialect: Dialect = 'shell',
+): GlobMatcher {
+  let kinds = matchers.get(pattern)
+  if (kinds === undefined) {
+    const oldest = matchers.keys().next().value
+    if (matchers.size >= CACHE_SIZE && oldest !== undefined) matchers.delete(oldest)
+    kinds = []
+    matchers.set(pattern, kinds)
+  }
+  const kind = (dialect === 'python' ? 4 : 0) + (extglob ? 2 : 0) + (period ? 1 : 0)
+  return (kinds[kind] ??= new GlobMatcher(pattern, extglob, period, dialect))
 }

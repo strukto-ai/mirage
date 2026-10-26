@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from dataclasses import replace
 
 from mirage.context import bind_caller, current_caller
 from mirage.workspace.types import StatusWriter
@@ -28,7 +27,7 @@ def set_line_writer(writer: StatusWriter) -> None:
     Args:
         writer (StatusWriter): the line's identity.
     """
-    bind_caller(replace(current_caller(), line_writer=writer))
+    bind_caller(current_caller().changed({"line_writer": writer}))
 
 
 def line_status_writer() -> StatusWriter | None:

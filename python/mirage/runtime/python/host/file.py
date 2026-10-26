@@ -21,8 +21,9 @@ from typing import IO, TYPE_CHECKING, Any, cast
 
 from mirage.errors.posix import posix_errno, posix_phrase
 from mirage.errors.types import FsCondition
-from mirage.runtime.handles import FileHandle
+from mirage.runtime.files import Descriptor
 from mirage.runtime.handles.mode import OpenMode
+from mirage.runtime.python.host.syscall import syscall
 
 if TYPE_CHECKING:
     from _typeshed import ReadableBuffer, WriteableBuffer
@@ -52,19 +53,19 @@ def raw_mode(facts: OpenMode) -> str:
 
 
 class HandleRaw(io.RawIOBase):
-    """A raw stream over a file handle, for CPython's buffered layers.
+    """A raw stream over a mounted descriptor, for CPython's buffered
+    layers.
 
     The same layering CPython puts over a real file: a buffered stream
     over this raw one, and a text stream over that for a text mode. Its
-    ``flush`` lands the handle's writes on the mount, which a close, and
-    a flush through the layers above, comes down to.
+    ``flush`` lands the descriptor's writes on the mount, which a close,
+    and a flush through the layers above, comes down to.
 
     Args:
-        handle (FileHandle): the handle it reads and writes through.
+        handle (Descriptor): the descriptor it reads and writes through.
         readable (bool): whether the mode reads.
         writable (bool): whether the mode writes.
         mode (str): the mode ``io.FileIO`` would report.
-        land (Callable[[], None]): lands the handle's writes.
         live (Callable[[], bool] | None): whether the descriptor a
             stream over one wraps is still open; None for a plain open.
         release (Callable[[], None] | None): what a close gives back
@@ -76,24 +77,22 @@ class HandleRaw(io.RawIOBase):
 
     def __init__(
         self,
-        handle: FileHandle,
+        handle: Descriptor,
         readable: bool,
         writable: bool,
         mode: str,
-        land: Callable[[], None],
         live: Callable[[], bool] | None = None,
         release: Callable[[], None] | None = None,
         fd: int | None = None,
     ) -> None:
         super().__init__()
         self._handle = handle
-        self._land = land
         self._live = live
         self._readable = readable
         self._writable = writable
         self._release = release
         self._fd = fd
-        self.name = handle.path
+        self.name = handle.opened
         self.mode = mode
 
     def readable(self) -> bool:
@@ -131,19 +130,19 @@ class HandleRaw(io.RawIOBase):
 
     def readinto(self, buffer: "WriteableBuffer") -> int:
         self._check(reading=True)
-        chunk = self._handle.read(len(memoryview(buffer)))
+        chunk = syscall(self._handle.read)(len(memoryview(buffer)))
         memoryview(buffer).cast("B")[: len(chunk)] = chunk
         return len(chunk)
 
     def write(self, data: "ReadableBuffer") -> int:
         self._check(reading=False)
         payload = bytes(data)
-        self._handle.write(payload)
+        syscall(self._handle.write)(payload)
         return len(payload)
 
     def seek(self, offset: int, whence: int = 0) -> int:
         self._check()
-        pos = self._handle.seek(offset, whence)
+        pos = syscall(self._handle.seek)(offset, whence)
         if pos is None:
             raise OSError(
                 posix_errno(FsCondition.EINVAL),
@@ -158,12 +157,17 @@ class HandleRaw(io.RawIOBase):
     def truncate(self, size: int | None = None) -> int:
         self._check(reading=False)
         size = self._handle.pos if size is None else size
-        self._handle.truncate(size)
+        syscall(self._handle.truncate)(size)
         return size
+
+    def readall(self) -> bytes:
+        self._check(reading=True)
+        return syscall(self._handle.read)()
 
     def flush(self) -> None:
         super().flush()
-        self._land()
+        if self._writable:
+            syscall(self._handle.land)()
 
     def close(self) -> None:
         if self.closed:
@@ -172,7 +176,7 @@ class HandleRaw(io.RawIOBase):
             super().close()
         finally:
             if self._release is not None:
-                self._release()
+                syscall(self._release)()
 
 
 class _LandingWriter(io.BufferedWriter):

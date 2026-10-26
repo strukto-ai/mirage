@@ -47,6 +47,7 @@ class ProcessSupervisor:
         parent_pid: int | None = None,
         limit: int | None = None,
         execution_id: str | None = None,
+        started: Callable[[ProcessInfo], None] | None = None,
     ) -> ProcessHandle:
         """Track a runner; its caller owns admission before command effects.
 
@@ -61,6 +62,15 @@ class ProcessSupervisor:
                 until they finish cleanup and leave the live registry.
             execution_id (str | None): external execution identity for
                 an admitted root; children receive a fresh identity.
+            started (Callable[[ProcessInfo], None] | None): what the
+                caller sets up from the process's identity before its
+                runner runs (the session's ``$BASHPID``). A caller that
+                passes it has nothing left to do first, so the runner
+                then starts at once, eagerly, unless a runner started
+                before it has yet to begin: runners begin in the order
+                they were started, so a job's redirect lands before the
+                line that started it reads the file. Without it the
+                runner starts on the loop's next turn.
 
         Raises:
             BlockingIOError: the session already holds ``limit``
@@ -109,8 +119,12 @@ class ProcessSupervisor:
                 lambda signal: self.terminate_children(pid, signal),
                 self._bind,
             )
+            eager = started is not None and not self.queued()
             self._live[pid] = (self._generations.get(session_id, 0), handle)
-            return handle
+        if started is not None:
+            started(handle.info)
+        handle.start(eager=eager)
+        return handle
 
     def terminate_children(self, pid: int, signal: int = 9) -> None:
         """Request cancellation of every live runner under ``pid``.
@@ -217,6 +231,11 @@ class ProcessSupervisor:
         """Host-only inventory, including disowned and stopping runners."""
         with self._lock:
             return tuple(handle for _, handle in self._live.values())
+
+    def queued(self) -> bool:
+        """Whether a runner that was started has yet to begin."""
+        with self._lock:
+            return any(not handle.begun for _, handle in self._live.values())
 
     async def drain(
         self, blocked: asyncio.AbstractEventLoop | None = None

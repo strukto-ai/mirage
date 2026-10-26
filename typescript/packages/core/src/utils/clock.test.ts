@@ -17,7 +17,7 @@ import { dirname, join, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import ts from 'typescript'
 import { describe, expect, it } from 'vitest'
-import { type Clock, ManualClock, SystemClock } from './clock.ts'
+import { type Clock, isSystemClock, ManualClock, SystemClock } from './clock.ts'
 
 const SRC_DIR = join(dirname(fileURLToPath(import.meta.url)), '..')
 
@@ -26,14 +26,17 @@ const SRC_DIR = join(dirname(fileURLToPath(import.meta.url)), '..')
 const SEAMED = [
   'cache',
   'observe',
+  'accessor/airtable.ts',
   'accessor/base.ts',
   'accessor/box.ts',
   'accessor/dropbox.ts',
   'accessor/google_api.ts',
   'core/api/oauth.ts',
+  'core/api/rate_limit.ts',
   'core/box/client.ts',
   'core/dropbox/client.ts',
   'core/google/client.ts',
+  'shell/job_table',
   'workspace/files.ts',
   'workspace/mount/mount.ts',
   'workspace/mount/registry.ts',
@@ -55,6 +58,10 @@ const KEPT_ON_SYSTEM_CLOCK: Record<string, string> = {
     'the trust window and row-write times are counted per key prefix across every ' +
     'store sharing it, and those stores may hold different clocks, so they stay on ' +
     'the process monotonic clock; listing expiry already reads the store clock',
+  'shell/job_table/table.ts setTimeout':
+    'bounds the join on a stopping job with a loop timer, which fake timers ' +
+    'already replace; on a manual clock a clock sleep would end the bound before ' +
+    'the job stops',
 }
 
 describe('SystemClock', () => {
@@ -82,6 +89,20 @@ describe('SystemClock', () => {
     const started = performance.now()
     await new SystemClock().sleep(0.02)
     expect(performance.now() - started).toBeGreaterThanOrEqual(15)
+  })
+})
+
+describe('isSystemClock', () => {
+  it('knows a platform clock, even one from another copy of this module', () => {
+    expect(isSystemClock(new SystemClock())).toBe(true)
+    const copy = {
+      platform: true,
+      now: () => 0,
+      monotonic: () => 0,
+      sleep: () => Promise.resolve(),
+    }
+    expect(isSystemClock(copy)).toBe(true)
+    expect(isSystemClock(new ManualClock())).toBe(false)
   })
 })
 

@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 import { describe, expect, it } from 'vitest'
 import { helpSpec, registeredSpec, specOf } from './builtins.ts'
+import { PARSE_KEPT_CHARS, PARSES_KEPT } from './constants.ts'
 import { flagOccurrences } from './flag_view.ts'
 import { ParsedArgs, parseCommand, parseToKwargs } from './parser.ts'
 import { CommandSpec, Argument } from './types.ts'
@@ -888,11 +889,10 @@ describe('choices violations are reported, never thrown', () => {
     expect(parsed.invalidValueOptions).toEqual([])
   })
 
-  // python's compileSpec twin caches on a frozen dataclass, so ITS key is
-  // structural and a spec built to look exactly like tee's shares the
-  // builtin's compiled tables. The word-choice decision is therefore read off
-  // the spec in both languages and never stored on the compiled tables,
-  // which is the only way the two answer alike here. Mirrors test_parser.py.
+  // A spec built to look exactly like tee's compiles to tables of its own,
+  // in both languages, and the word-choice decision is read off the spec,
+  // so the twin never inherits it and the real tee never loses it.
+  // Mirrors test_parser.py.
   it('gives a structural twin of a builtin spec no word choice', () => {
     const tee = specOf('tee')
     // Declared the long way round, exactly as builtin_specs/text_proc.ts
@@ -2199,4 +2199,30 @@ it.each([
     ],
   })
   expect(parseCommand(spec, words, '/').flags).toEqual(expected)
+})
+
+describe('readings a spec keeps', () => {
+  it('reads one command twice once', () => {
+    const spec = specOf('grep')
+    const first = parseCommand(spec, ['-c', 'x', 'f'], '/')
+    expect(parseCommand(spec, ['-c', 'x', 'f'], '/')).toBe(first)
+    expect(parseCommand(spec, ['-c', 'x', 'f'], '/w')).not.toBe(first)
+  })
+
+  it('reads a line past the kept length afresh', () => {
+    const spec = specOf('grep')
+    const words = ['-e', 'x'.repeat(PARSE_KEPT_CHARS)]
+    expect(parseCommand(spec, words, '/')).not.toBe(parseCommand(spec, words, '/'))
+  })
+
+  it('stays right once the table starts over', () => {
+    const spec = new CommandSpec({ arguments: [new Argument('--count', { type: 'int' })] })
+    for (let round = 0; round < 2; round++) {
+      for (let n = 0; n <= PARSES_KEPT; n++) {
+        expect(parseCommand(spec, ['--count', String(n)], '/').flags).toEqual({
+          '--count': String(n),
+        })
+      }
+    }
+  })
 })

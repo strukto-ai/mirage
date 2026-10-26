@@ -12,8 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { Accessor } from './base.ts'
-import type { Clock } from '../utils/clock.ts'
+import { TokenAccessor } from './base.ts'
 import type { DropboxTokenManager } from '../core/dropbox/client.ts'
 
 /**
@@ -29,18 +28,13 @@ export function normalizeDropboxRootPath(value: string | undefined): string {
   return parts.length === 0 ? '' : '/' + parts.join('/')
 }
 
-export class DropboxAccessor extends Accessor {
-  readonly tokenManager: DropboxTokenManager
+export class DropboxAccessor extends TokenAccessor {
+  override readonly tokenManager: DropboxTokenManager
   readonly rootPath: string
 
   constructor(opts: { tokenManager: DropboxTokenManager; rootPath?: string }) {
     super()
     this.tokenManager = opts.tokenManager
     this.rootPath = normalizeDropboxRootPath(opts.rootPath)
-  }
-
-  /** Read token expiry on the workspace's clock. */
-  override bindClock(clock: Clock): void {
-    this.tokenManager.bindClock(clock)
   }
 }

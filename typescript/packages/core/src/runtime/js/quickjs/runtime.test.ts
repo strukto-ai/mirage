@@ -59,6 +59,74 @@ describe('QuickJS cwd', () => {
   })
 })
 
+// The guest runs on the event loop, so a loop that never yields holds back
+// the timer `timeout` keeps; the VM's interrupt hook meets the deadline.
+it.each([
+  ['timeout 1 node -e "for (;;) {}"', 124],
+  ['timeout -s CONT -k 1 1 node -e "for (;;) {}"', 137],
+  ['timeout 1 node -e "Promise.resolve().then(() => { for (;;) {} })"', 124],
+  ['timeout 1 node -e "(async () => { await 0; for (;;) {} })()"', 124],
+])(
+  'a deadline stops a guest that never yields: %s',
+  async (line, code) => {
+    const ws = new Workspace(
+      { '/data': new RAMVFS() },
+      {
+        mode: MountMode.EXEC,
+        shellParser: await getTestParser(),
+        runtimes: [new QuickJsRuntime(), 'workspace'],
+      },
+    )
+    try {
+      const io = await ws.shell(line)
+      expect(io.exitCode).toBe(code)
+      expect(io.stderrText).toBe('')
+    } finally {
+      await ws.close()
+    }
+  },
+  20_000,
+)
+
+function slow(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 600))
+}
+
+class SlowRAMVFS extends RAMVFS {
+  override async pwrite(...args: Parameters<RAMVFS['pwrite']>): ReturnType<RAMVFS['pwrite']> {
+    await slow()
+    return super.pwrite(...args)
+  }
+
+  override async write(...args: Parameters<RAMVFS['write']>): ReturnType<RAMVFS['write']> {
+    await slow()
+    return super.write(...args)
+  }
+}
+
+it('a deadline joins the landing of what a stopped guest wrote', async () => {
+  // The run's end closes the file it left open, which takes longer than a
+  // plain abort's grace: the stop names a signal, so the line waits for it,
+  // as a kill's does. The stderr the guest wrote before the stop reaches the
+  // line only as its run ends, and is kept.
+  const ws = new Workspace(
+    { '/data': new SlowRAMVFS() },
+    {
+      mode: MountMode.EXEC,
+      shellParser: await getTestParser(),
+      runtimes: [new QuickJsRuntime(), 'workspace'],
+    },
+  )
+  try {
+    const io = await ws.shell(
+      `timeout 1 node -e "std.err.puts('warn\\n'); const f = std.open('/data/o', 'w'); f.puts('kept'); for (;;) {}"; cat /data/o`,
+    )
+    expect([io.stdoutText, io.stderrText]).toEqual(['kept', 'warn\n'])
+  } finally {
+    await ws.close()
+  }
+}, 20_000)
+
 function full(): Promise<void> {
   return Promise.reject(Object.assign(new Error('no space'), { code: 'ENOSPC' }))
 }
@@ -124,4 +192,51 @@ describe('QuickJS compatibility', () => {
     expect(new TextDecoder().decode(result.stderr ?? new Uint8Array())).toBe(stderr)
     expect(result.exitCode).toBe(exitCode)
   })
+})
+
+// A reader that holds the program's prints back does not hold its deadline
+// back: the run still times out.
+describe('QuickJS output', () => {
+  it('times out while its reader holds the prints back', async () => {
+    const rt = new QuickJsRuntime()
+    const run = rt.execute(
+      [],
+      [],
+      context({ flags: { c: 'console.log(1); console.log(2)' }, timeoutSeconds: 0.3005 }),
+      { output: () => new Promise<void>(() => undefined) },
+    )
+    await expect(run).rejects.toThrow('timed out')
+  }, 10_000)
+
+  it('times out in a queued job while its reader holds the prints back', async () => {
+    const rt = new QuickJsRuntime()
+    const run = rt.execute(
+      [],
+      [],
+      context({
+        flags: { c: 'Promise.resolve().then(() => console.log(1))' },
+        timeoutSeconds: 0.3005,
+      }),
+      { output: () => new Promise<void>(() => undefined) },
+    )
+    await expect(run).rejects.toThrow('timed out')
+  }, 10_000)
+
+  // Input left open does not hold back the stop of a run.
+  it('stops at an abort while its input stays open', async () => {
+    const rt = new QuickJsRuntime()
+    const stop = new AbortController()
+    const open: AsyncIterable<Uint8Array> = {
+      [Symbol.asyncIterator]: () => ({ next: () => new Promise(() => undefined) }),
+    }
+    const run = rt.execute(
+      [],
+      [],
+      context({ flags: { c: 'console.log(1)' }, stdin: open, signal: stop.signal }),
+    )
+    setTimeout(() => {
+      stop.abort()
+    }, 100)
+    await expect(run).rejects.toMatchObject({ name: 'AbortError' })
+  }, 10_000)
 })

@@ -16,7 +16,12 @@ import asyncio
 from dataclasses import fields
 from typing import Any
 
-from mirage.commands.builtin.utils.limit import guard_output, run_with_timeout
+from mirage.commands.builtin.general.interpreter import run_output
+from mirage.commands.builtin.utils.limit import (
+    guard_io,
+    guard_output,
+    run_with_timeout,
+)
 from mirage.commands.config import Context
 from mirage.io import IOResult
 from mirage.io.types import ByteSource, materialize
@@ -31,7 +36,10 @@ from mirage.policy import (
 from mirage.policy.types import RouteContext
 from mirage.runtime.base import Runtime
 from mirage.runtime.mixin import LineExecutorMixin
+from mirage.runtime.types import OutputFn, RunResult
+from mirage.shell.console import Channel, JobConsole
 from mirage.types import Limit, PathSpec, Producer
+from mirage.workspace.executor.jobs import pump
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.session import SessionState, env_snapshot
 from mirage.workspace.types import ExecutionNode
@@ -47,12 +55,16 @@ async def run_whole_line(
     claimant: Claimant | None = None,
     cancel: asyncio.Event | None = None,
     route: RouteContext | None = None,
+    sink: JobConsole | None = None,
 ) -> IOResult:
     """Hand the raw line to one runtime instead of walking its tree.
 
     A whole line is a command like any other: the same boundary
     consultation as the tree, so ``timeout_seconds`` answers 124 and
-    the policies' merged Limit caps the output.
+    the policies' merged Limit caps the output. Its output is handed
+    over as the runtime writes it (``run_output``): into ``sink`` as it
+    comes, unless a ``post_execute`` policy must see it whole before any
+    of it escapes, and back in the result without one.
 
     Args:
         runtime (LineExecutorMixin): the runtime that captured the
@@ -69,9 +81,10 @@ async def run_whole_line(
         route (RouteContext | None): what ``pre_execute`` saw of the
             line, which ``post_execute`` sees with what came back; None
             when no policy reads ``post_execute``.
+        sink (JobConsole | None): where the line writes; None returns
+            its output in the result.
     """
     assert isinstance(runtime, Runtime)
-    data = await materialize(stdin) if stdin is not None else None
     name = command_name(command)
     mounts = registry.mounts()
     guard = resolve_limit(
@@ -81,57 +94,72 @@ async def run_whole_line(
         profile_limits=session.command_limits,
     )
     timeout = guard.timeout_seconds if guard is not None else None
-    try:
-        result = await run_with_timeout(
-            runtime.execute(
-                [],
-                [],
-                Context(
-                    flags={"c": command},
-                    stdin=data,
-                    env=env_snapshot(session),
-                    cwd=PathSpec.from_str_path(session.cwd),
+    ctx = Context(
+        flags={"c": command},
+        stdin=stdin,
+        env=env_snapshot(session),
+        cwd=PathSpec.from_str_path(session.cwd),
+    )
+
+    async def run(output: OutputFn, errors: OutputFn) -> RunResult:
+        try:
+            return await run_with_timeout(
+                runtime.execute(
+                    [], [], ctx, kind="line", output=output, errors=errors
                 ),
-                kind="line",
-            ),
-            timeout,
-            name,
-        )
-    finally:
-        await registry.settle(runtime)
-    refused, bound = None, None
-    if route is not None:
-        refused, bound = await post_execute_gate(
-            registry.policies,
-            ExecuteResultContext(
-                **{f.name: getattr(route, f.name) for f in fields(route)},
-                producer=Producer(
-                    command=name, prefixes=tuple(m.prefix for m in mounts)
-                ),
-                exit_code=result.exit_code,
-                output=result.stdout or b"",
-                results=ExecutionNode(
-                    command=command,
-                    stderr=result.stderr or b"",
-                    exit_code=result.exit_code,
-                ).to_dict(),
-            ),
-            claimant,
-            cancel,
-        )
+                timeout,
+                name,
+            )
+        finally:
+            await registry.settle(runtime)
+
+    producer = Producer(command=name, prefixes=tuple(m.prefix for m in mounts))
+    shown = sink if route is None else None
+
+    async def errors(chunk: bytes) -> None:
+        assert shown is not None
+        await shown.emit(Channel.STDERR, chunk)
+
+    stdout, io = run_output(
+        run, producer, errors if shown is not None else None, stdin
+    )
+    if route is None:
+        out = guard_io(stdout, io, guard if session.terminal_output else None)
+        if shown is None:
+            data = await materialize(out)
+            return IOResult(
+                exit_code=io.exit_code, stdout=data, stderr=io.stderr
+            )
+        await pump(shown, Channel.STDOUT, out)
+        return IOResult(exit_code=io.exit_code, stderr=io.stderr)
+    data = await materialize(stdout)
+    stderr = await io.materialize_stderr()
+    refused, bound = await post_execute_gate(
+        registry.policies,
+        ExecuteResultContext(
+            **{f.name: getattr(route, f.name) for f in fields(route)},
+            producer=producer,
+            exit_code=io.exit_code,
+            output=data,
+            results=ExecutionNode(
+                command=command, stderr=stderr, exit_code=io.exit_code
+            ).to_dict(),
+        ),
+        claimant,
+        cancel,
+    )
     if refused is not None:
-        existing = result.stderr or b""
         err, code = render_deny(name, refused)
         return IOResult(
             exit_code=code,
             stdout=None,
-            stderr=existing + err,
+            stderr=stderr + err,
             refusal=refusal_of(refused),
         )
-    stdout, stderr, exit_code = await guard_output(
-        result.stdout or b"",
-        result.stderr,
-        result.exit_code,
+    capped, capped_err, exit_code = await guard_output(
+        data,
+        stderr or None,
+        io.exit_code,
         Limit.aggr([guard if session.terminal_output else None, bound]),
     )
-    return IOResult(exit_code=exit_code, stdout=stdout, stderr=stderr)
+    return IOResult(exit_code=exit_code, stdout=capped, stderr=capped_err)

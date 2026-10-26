@@ -258,7 +258,7 @@ async def test_upload_session_digests_commit_condition_and_abort(fail):
 async def test_upload_session_waits_out_a_pending_commit_on_its_clock():
     clock = ManualClock()
     tm = BoxTokenManager(BoxConfig(access_token="token"))
-    tm.bind_clock(clock)
+    tm.bind_clock(clock, "ws")
     base = "https://example.test/session"
     async with ByteSpool(0) as spool:
         await spool.append(b"abc")

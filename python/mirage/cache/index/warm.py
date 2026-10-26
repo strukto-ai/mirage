@@ -56,7 +56,7 @@ async def entry_or_warm(
     """
     parent = virtual_key.rstrip("/").rsplit("/", 1)[0] or "/"
     async with index_lock(index, parent):
-        listing = await index.list_dir(parent)
+        listing = await index.list_dir(parent, virtual_key)
         if listing.entries is not None and virtual_key not in listing.entries:
             return None
         hit = await index.get(virtual_key)
@@ -84,7 +84,7 @@ async def entry_or_warm(
         except FileNotFoundError as exc:
             logger.debug("index warm failed for %s: %s", virtual_key, exc)
             return None
-        listing = await index.list_dir(parent)
+        listing = await index.list_dir(parent, virtual_key)
         if listing.entries is not None and virtual_key not in listing.entries:
             return None
         warmed = await index.get(virtual_key)

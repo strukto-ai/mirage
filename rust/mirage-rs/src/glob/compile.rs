@@ -27,6 +27,16 @@ pub(super) enum Atom {
     Class(Class),
 }
 
+impl Atom {
+    pub(super) fn contains(self, cp: u32) -> bool {
+        match self {
+            Self::Literal(unit) => unit == cp,
+            Self::Range(lo, hi) => lo <= cp && cp <= hi,
+            Self::Class(class) => class.contains(cp),
+        }
+    }
+}
+
 #[derive(Clone, Copy)]
 pub(super) enum Class {
     Alpha,

@@ -22,13 +22,30 @@ fn request(
     extglob: bool,
     period: bool,
 ) -> Value {
+    let test = operation == json!({"kind":"matches"});
     let config = json!({"pattern": pattern, "dialect": if python { "python" } else { "shell" }, "extglob": extglob, "period": period, "operation": operation});
     let mut stream = open(&serde_json::to_vec(&config).unwrap()).unwrap();
     let bytes: Vec<u8> = subject.iter().flat_map(|cp| cp.to_le_bytes()).collect();
     for chunk in bytes.chunks(7) {
         stream.feed(chunk, &mut Vec::new()).unwrap();
     }
-    collect(stream.as_mut())
+    let answer = collect(stream.as_mut());
+    if test {
+        let mut stream = open(&serde_json::to_vec(&config).unwrap()).unwrap();
+        let (head, tail) = bytes.split_at((bytes.len() / 2).saturating_sub(1));
+        stream.feed(head, &mut Vec::new()).unwrap();
+        assert_eq!(
+            json!(stream.test(tail).unwrap()),
+            answer,
+            "test {pattern:?} {subject:?}"
+        );
+        assert_eq!(
+            json!(stream.test(&bytes).unwrap()),
+            answer,
+            "retest {pattern:?}"
+        );
+    }
+    answer
 }
 fn matches(name: &str, pattern: &str, extglob: bool) -> bool {
     request(
@@ -604,6 +621,8 @@ fn dialects_and_quoted_units_remain_distinct() {
         ("-", "[z-a]", false),
         ("b", "[z-ab]", true),
         ("b", "[!z-a]", true),
+        ("b", "[![:foo:]]", false),
+        ("b", "[[:foo:]b]", false),
     ] {
         assert_eq!(matches(name, pattern, false), expected);
     }
@@ -857,4 +876,47 @@ fn separated_stars_keep_only_the_last_live() {
         }
         assert_eq!(serde_json::from_slice::<Value>(&output).unwrap(), expected);
     }
+}
+#[test]
+fn test_agrees_with_the_stepped_match() {
+    let mut pieces: Vec<Vec<u32>> =
+        "a b . * ? [ ] ! ^ - / \u{fdd0} \u{fdd1} \u{fdd2} @( ( ) | +( [:alpha:] [:x:]"
+            .split(' ')
+            .map(units)
+            .collect();
+    pieces.push(vec![0xd83d]);
+    let mut letters = units("ab.*?[]-/A1");
+    letters.push(0xd83d);
+    let mut seed = 0x9e37_79b9_7f4a_7c15_u64;
+    let mut next = |bound: usize| {
+        seed ^= seed << 13;
+        seed ^= seed >> 7;
+        seed ^= seed << 17;
+        (seed % bound as u64) as usize
+    };
+    for _ in 0..20_000 {
+        let pattern: Vec<u32> = (0..next(9))
+            .flat_map(|_| pieces[next(pieces.len())].iter().copied())
+            .collect();
+        let subject: Vec<u32> = (0..next(8)).map(|_| letters[next(letters.len())]).collect();
+        let (python, extglob, period) = (next(4) == 0, next(2) == 0, next(2) == 0);
+        request(
+            &pattern,
+            &subject,
+            json!({"kind":"matches"}),
+            python,
+            extglob,
+            period,
+        );
+    }
+}
+#[test]
+fn test_refuses_a_split_unit_and_a_busy_stream() {
+    let config =
+        serde_json::to_vec(&json!({"pattern": units("a*"), "operation": {"kind":"matches"}}))
+            .unwrap();
+    assert!(open(&config).unwrap().test(&[97, 0]).is_err());
+    let mut stream = open(&config).unwrap();
+    stream.finish(&mut Vec::new()).unwrap();
+    assert!(stream.test(&[97, 0, 0, 0]).is_err());
 }

@@ -400,3 +400,26 @@ it('a group stopped with a signal passes it to every child', async () => {
   expect([(await root.join()).exitCode, child.signal]).toEqual([143, 15])
   expect((await child.join()).exitCode).toBe(143)
 })
+
+// A caller's setup from the new process's identity (the session's
+// $BASHPID) runs before the runner does, with the process already live,
+// so a runner that starts at once sees both.
+it('runs started before the runner with the process live', async () => {
+  const supervisor = new ProcessSupervisor()
+  const order: string[] = []
+  const handle = supervisor.start({
+    sessionId: 's',
+    command: 'probe',
+    cwd: PathSpec.fromStrPath('/'),
+    cancel: () => undefined,
+    started: (info) => {
+      order.push(`started ${String(info.pid)}`)
+    },
+    run: () => {
+      order.push(`run ${JSON.stringify(supervisor.live().map((p) => p.info.pid))}`)
+      return Promise.resolve(0)
+    },
+  })
+  await handle.join()
+  expect(order).toEqual(['started 1', 'run [1]'])
+})

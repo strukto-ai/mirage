@@ -18,9 +18,8 @@ from typing import Any
 
 from mirage.accessor.s3 import S3Accessor
 from mirage.core.s3.client import (
-    _client_kwargs,
     _key,
-    async_session,
+    create_s3_client,
     is_not_found,
 )
 from mirage.core.s3.read import _fp_rev_from_s3_response
@@ -51,9 +50,7 @@ async def read_stream(
     # The accessor's cached client, not a fresh one. It outlives this
     # generator, which is what a stream needs: the body is consumed after
     # the call that produced it returns.
-    client = await accessor.cached_client(
-        lambda: async_session(config).client(**_client_kwargs(config))
-    )
+    client = await accessor.cached_client(lambda: create_s3_client(config))
     kwargs: dict[str, Any] = {
         "Bucket": config.bucket,
         "Key": _key(path, config),

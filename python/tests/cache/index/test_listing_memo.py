@@ -102,6 +102,23 @@ async def test_one_command_reads_a_listing_once(memo):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("partial", [False, True])
+async def test_a_lookup_of_one_child_narrows_the_listing(memo, partial):
+    folder = Folder(partial=partial)
+
+    async def keys(child: str | None = None) -> list[str] | None:
+        listing = await memo.read("/d", folder, child)
+        return listing.partial_entries if partial else listing.entries
+
+    assert await keys("/d/a") == ["/d/a"]
+    async with command_scope():
+        assert await keys("/d/b") == ["/d/b"]
+        assert await keys("/d/z") == []
+        assert await keys() == ["/d/a", "/d/b"]
+    assert folder.reads == 2
+
+
+@pytest.mark.asyncio
 async def test_each_command_reads_its_own_listing(memo):
     folder = Folder()
     for _ in range(2):

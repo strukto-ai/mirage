@@ -42,6 +42,7 @@ from mirage.observe.context import RecordingScope, record, start_op
 from mirage.policy import Deny, Policy, PolicyDenied
 from mirage.runtime.binding import WorkspaceBinding, capture_binding
 from mirage.runtime.files import RuntimeFiles
+from mirage.runtime.handles import parse_mode
 from mirage.runtime.js import QuickJsRuntime
 from mirage.runtime.language import LanguageRuntime
 from mirage.runtime.mixin import LineExecutorMixin, ProcessExecutorMixin
@@ -455,3 +456,35 @@ async def test_cancelled_runtime_owner_refuses_queued_callbacks_without_backend_
     manual = RuntimeFiles(dispatch, asyncio.get_running_loop())
     await manual._call("write", "/data/host", data=b"allowed")
     assert seen == ["read", "write"]
+
+
+@pytest.mark.asyncio
+async def test_a_cancelled_run_still_lands_what_its_guest_wrote():
+    # A write(2) a killed process made stays in its file, so the close
+    # a cancelled run's end makes lands it, past the abort too; a new
+    # call the guest makes is refused.
+    with Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC) as ws:
+        ready = asyncio.get_running_loop().create_future()
+
+        async def run():
+            ctx = ws.runtime_context().ctx
+            ready.set_result(RuntimeFiles.of(ctx, ws._runtime_binding))
+            await asyncio.Event().wait()
+
+        owner = asyncio.create_task(run())
+        files = await ready
+        fh = await asyncio.to_thread(
+            files.open, "/data/out.txt", parse_mode("w")
+        )
+        await asyncio.to_thread(files.pwrite, fh, 0, b"kept")
+        owner.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await owner
+        await files.abort()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.to_thread(
+                files.open, "/data/late.txt", parse_mode("w")
+            )
+        await asyncio.to_thread(files.close, fh)
+        assert await ws.vfs.read("/data/out.txt") == b"kept"
+        assert not await ws.vfs.exists("/data/late.txt")

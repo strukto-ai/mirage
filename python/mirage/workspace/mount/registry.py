@@ -116,7 +116,8 @@ class MountRegistry:
             builds reads time through; None means the system clock.
         ids (IdSource | None): where the mounts this registry places
             and the commands it runs draw generated ids and random
-            values; None means the system source.
+            values; None means the system source, stamping ids from
+            ``clock``.
     """
 
     def __init__(
@@ -127,7 +128,10 @@ class MountRegistry:
     ) -> None:
         self.io = io if io is not None else IOConfig()
         self.clock: Clock = clock if clock is not None else SystemClock()
-        self.ids: IdSource = ids if ids is not None else SystemIdSource()
+        self._clocks_bound = False
+        self.ids: IdSource = (
+            ids if ids is not None else SystemIdSource(self.clock)
+        )
         # Scopes the redis index stores this registry builds; the
         # workspace sets it.
         self.workspace_id: str | None = None
@@ -403,7 +407,8 @@ class MountRegistry:
         driver: its index store (shared with any earlier mount of the
         same instance, else ``store``, else built from ``index`` or the
         driver's ``index_ttl``), the driver's op and command tables, and
-        the reference it was built from.
+        the reference it was built from. Once the workspace is built, the
+        VFS takes the workspace clock before anything is placed.
 
         Args:
             prefix (str): the virtual prefix.
@@ -419,6 +424,10 @@ class MountRegistry:
                 built from, recorded for snapshots.
             store (IndexCacheStore | None): a store the placement
                 supplies itself, as the reserved /dev mount does.
+
+        Raises:
+            ValueError: the prefix is taken, or another workspace holds
+                the VFS on another clock.
         """
         self.check_vfs_available(vfs)
         norm_prefix = norm_dir(prefix)
@@ -426,6 +435,51 @@ class MountRegistry:
             if existing.prefix == norm_prefix:
                 raise ValueError(f"duplicate mount prefix: {norm_prefix!r}")
         alias = next((e for e in self._mounts if e.vfs is vfs), None)
+        if self._clocks_bound:
+            vfs.accessor.bind_clock(self.clock, self)
+        try:
+            return self._place(
+                norm_prefix,
+                vfs,
+                mode,
+                read,
+                write,
+                index,
+                vfs_ref,
+                store,
+                alias,
+            )
+        except BaseException:
+            if self._clocks_bound and alias is None:
+                vfs.accessor.release_clock(self)
+            raise
+
+    def _place(
+        self,
+        norm_prefix: str,
+        vfs: BaseVFS,
+        mode: MountMode,
+        read: ReadSpec | None,
+        write: WritePolicy | None,
+        index: IndexConfig | None,
+        vfs_ref: str | None,
+        store: IndexCacheStore | None,
+        alias: MountEntry | None,
+    ) -> MountEntry:
+        """Build and register one mount, its clock already taken.
+
+        Args:
+            norm_prefix (str): the normalized prefix.
+            vfs (BaseVFS): the driver.
+            mode (MountMode): the mount's ceiling.
+            read (ReadSpec | None): its read policy, None for the default.
+            write (WritePolicy | None): its write policy, None for the
+                default.
+            index (IndexConfig | None): the index store to build.
+            vfs_ref (str | None): the ``vfs:`` value it was built from.
+            store (IndexCacheStore | None): a store the placement supplies.
+            alias (MountEntry | None): an earlier mount of the same VFS.
+        """
         if alias is not None:
             store = alias.index_store
             index = alias.index_config
@@ -433,9 +487,8 @@ class MountRegistry:
             store = NULL_INDEX
         elif store is None:
             store = build_index(
-                index, vfs.index_ttl, self.clock, self.workspace_id
+                index, vfs.index_ttl, self.clock, self.workspace_id, self.ids
             )
-        vfs.accessor.bind_clock(self.clock)
         m = MountEntry(
             norm_prefix,
             vfs,
@@ -464,6 +517,43 @@ class MountRegistry:
         if norm_prefix == "/":
             self._root = m
         return m
+
+    def bind_clocks(self) -> None:
+        """Hand every mount's and CLI install's accessor the workspace
+        clock, once the workspace is built; a mount placed later takes it
+        as it is placed.
+
+        Raises:
+            ValueError: another workspace holds one of the VFSes on
+                another clock; nothing stays bound.
+        """
+        try:
+            for m in self._mounts:
+                m.vfs.accessor.bind_clock(self.clock, self)
+            self.clis.bind_clocks()
+        except BaseException:
+            self.release_clocks()
+            raise
+        self._clocks_bound = True
+
+    def release_clock(self, vfs: BaseVFS) -> None:
+        """Let go of the workspace clock on ``vfs`` once no mount of it
+        remains, as an unmounted mount finishes its last call.
+
+        Args:
+            vfs (BaseVFS): the driver an unmount removed.
+        """
+        if not any(m.vfs is vfs for m in self._mounts):
+            vfs.accessor.release_clock(self)
+
+    def release_clocks(self) -> None:
+        """Let go of the workspace clock on every mount and CLI install,
+        as the workspace closes or fails to come to be, so another
+        workspace may mount its VFSes on its own."""
+        self._clocks_bound = False
+        for m in self._mounts:
+            m.vfs.accessor.release_clock(self)
+        self.clis.release_clocks()
 
     def unmount(self, prefix: str) -> MountEntry:
         """Remove a mount by exact prefix and return it.

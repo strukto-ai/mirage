@@ -1302,7 +1302,11 @@ impl Machine {
         if !std::mem::replace(&mut emit.waiting, true) {
             let open = (!std::mem::replace(&mut emit.opened, true))
                 .then(|| (self.rfiles[emit.file].clone(), Opening::File));
-            self.io.push(Request::Read { fd: emit.fd, open });
+            self.io.push(Request::Read {
+                fd: emit.fd,
+                open,
+                least: 0,
+            });
         }
         Ok(())
     }

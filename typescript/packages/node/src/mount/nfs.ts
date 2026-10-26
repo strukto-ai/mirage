@@ -15,15 +15,14 @@
 import { execFile } from 'node:child_process'
 import { type AddressInfo, type Server, type Socket, createServer } from 'node:net'
 import { constants as osConstants } from 'node:os'
-import { posix } from 'node:path'
 import { promisify } from 'node:util'
 import { NFSEngine, type NFSRequest } from '@struktoai/mirage-core/rs/nfs'
 import type { JsonValue } from '@struktoai/mirage-core/types'
 import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
-import { LISTING_CONCURRENCY, OPEN_HANDLES, RESERVED_PORTS } from './constants.ts'
-import type { MountCore } from './core.ts'
+import { OPEN_HANDLES, RESERVED_PORTS } from './constants.ts'
+import type { MountCore } from '@struktoai/mirage-core/mount/core'
 import { classifyErrno } from './errors.ts'
-import type { MountAttrs } from './types.ts'
+import type { MountAttrs } from '@struktoai/mirage-core/mount/types'
 
 export const HOST = '127.0.0.1'
 export const LINUX_OPTIONS =
@@ -284,22 +283,13 @@ export class MirageNFSServer {
     const found = after === null ? 0 : names.findIndex((name) => compareCodePoints(name, after) > 0)
     const start = found === -1 ? names.length : found
     const page = names.slice(start, start + limit)
-    const rows: JsonValue[] = new Array<JsonValue>(page.length).fill(null)
-    const todo = page.entries()
-    const worker = async (): Promise<void> => {
-      for (const [index, name] of todo) {
-        try {
-          const attrs = await this.core.getattr(posix.join(path, name))
-          rows[index] = { name, attrs: wireAttrs(attrs) }
-        } catch (err) {
-          const code = classifyErrno(err)
-          if (code !== osConstants.errno.ENOENT && code !== osConstants.errno.ENOTDIR) throw err
-          console.debug(`nfs: ${name} vanished while listing: ${String(err)}`)
-          rows[index] = { name, attrs: null }
-        }
-      }
-    }
-    await Promise.all(Array.from({ length: Math.min(LISTING_CONCURRENCY, page.length) }, worker))
+    // A name that vanished keeps its place with no attributes: the engine
+    // leaves it out and pages on from the last name sent.
+    const stats = new Map(await this.core.listing(path, page))
+    const rows: JsonValue[] = page.map((name) => {
+      const attrs = stats.get(name)
+      return { name, attrs: attrs === undefined ? null : wireAttrs(attrs) }
+    })
     return [rows, start + limit >= names.length]
   }
 

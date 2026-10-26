@@ -19,6 +19,7 @@ import tempfile
 from build_table import build_table
 
 from mirage import MountMode, Workspace
+from mirage.commands.cli.builtin.search import SEARCH
 from mirage.vfs.lancedb import LanceDBConfig, LanceDBVFS
 
 
@@ -39,6 +40,7 @@ async def main() -> None:
     )
     vfs = LanceDBVFS(config)
     with Workspace({"/fashion/": vfs}, mode=MountMode.READ) as ws:
+        ws.register_cli("search", SEARCH)
         print(
             f"=== VFS MODE: LanceDB table 'fashion' ({uri}) at /fashion/ ==="
         )

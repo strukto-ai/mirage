@@ -1,0 +1,656 @@
+{
+  "patterns": [
+    {
+      "pattern": "git push",
+      "tokens": [
+        "git",
+        "push",
+        "origin"
+      ],
+      "split": [
+        "git",
+        "push"
+      ],
+      "matches": true,
+      "reaches": true
+    },
+    {
+      "pattern": "git push",
+      "tokens": [
+        "git",
+        "pull"
+      ],
+      "split": [
+        "git",
+        "push"
+      ],
+      "matches": false,
+      "reaches": false
+    },
+    {
+      "pattern": "git push",
+      "tokens": [
+        "git"
+      ],
+      "split": [
+        "git",
+        "push"
+      ],
+      "matches": false,
+      "reaches": true
+    },
+    {
+      "pattern": "git * --hard",
+      "tokens": [
+        "git",
+        "reset",
+        "--hard"
+      ],
+      "split": [
+        "git",
+        "*",
+        "--hard"
+      ],
+      "matches": true,
+      "reaches": true
+    },
+    {
+      "pattern": "git * --hard",
+      "tokens": [
+        "git",
+        "--hard"
+      ],
+      "split": [
+        "git",
+        "*",
+        "--hard"
+      ],
+      "matches": false,
+      "reaches": true
+    },
+    {
+      "pattern": "git * *",
+      "tokens": [
+        "git"
+      ],
+      "split": [
+        "git"
+      ],
+      "matches": true,
+      "reaches": true
+    },
+    {
+      "pattern": "*",
+      "tokens": [
+        "anything"
+      ],
+      "split": [],
+      "matches": true,
+      "reaches": true
+    },
+    {
+      "pattern": "rm -rf",
+      "tokens": [
+        "rm",
+        "-r",
+        "-f"
+      ],
+      "split": [
+        "rm",
+        "-rf"
+      ],
+      "matches": false,
+      "reaches": false
+    },
+    {
+      "pattern": "linear issue list",
+      "tokens": [
+        "linear",
+        "issue"
+      ],
+      "split": [
+        "linear",
+        "issue",
+        "list"
+      ],
+      "matches": false,
+      "reaches": true
+    }
+  ],
+  "visibility": [
+    {
+      "hide": [
+        "/repo"
+      ],
+      "show": [
+        {
+          "path": "/repo/public",
+          "mode": null
+        }
+      ],
+      "vars": [
+        "AWS_*"
+      ],
+      "queries": [
+        {
+          "path": "/",
+          "visible": true,
+          "hide_depth": null,
+          "show_depth": null,
+          "mode": null,
+          "hidden_under": true
+        },
+        {
+          "path": "/repo",
+          "visible": true,
+          "hide_depth": 1,
+          "show_depth": null,
+          "mode": null,
+          "hidden_under": true
+        },
+        {
+          "path": "/repo/private",
+          "visible": false,
+          "hide_depth": 1,
+          "show_depth": null,
+          "mode": null,
+          "hidden_under": true
+        },
+        {
+          "path": "/repo/public/a",
+          "visible": true,
+          "hide_depth": 1,
+          "show_depth": 2,
+          "mode": null,
+          "hidden_under": true
+        },
+        {
+          "path": "/repository",
+          "visible": true,
+          "hide_depth": null,
+          "show_depth": null,
+          "mode": null,
+          "hidden_under": false
+        }
+      ],
+      "moves": [
+        {
+          "src": "/repo",
+          "dst": "/visible",
+          "reveals": true
+        }
+      ],
+      "variables": [
+        {
+          "name": "AWS_KEY",
+          "hidden": true
+        },
+        {
+          "name": "HOME",
+          "hidden": false
+        }
+      ]
+    },
+    {
+      "hide": [
+        "/repo/*"
+      ],
+      "show": [
+        {
+          "path": "/repo/public/*",
+          "mode": "write"
+        },
+        {
+          "path": "/repo/public/private",
+          "mode": "read"
+        }
+      ],
+      "vars": [],
+      "queries": [
+        {
+          "path": "/repo",
+          "visible": true,
+          "hide_depth": null,
+          "show_depth": null,
+          "mode": null,
+          "hidden_under": true
+        },
+        {
+          "path": "/repo/public",
+          "visible": true,
+          "hide_depth": 1,
+          "show_depth": null,
+          "mode": null,
+          "hidden_under": true
+        },
+        {
+          "path": "/repo/public/a",
+          "visible": true,
+          "hide_depth": 1,
+          "show_depth": 2,
+          "mode": [
+            2,
+            "write"
+          ],
+          "hidden_under": true
+        },
+        {
+          "path": "/repo/public/private/a",
+          "visible": true,
+          "hide_depth": 1,
+          "show_depth": 3,
+          "mode": [
+            3,
+            "read"
+          ],
+          "hidden_under": true
+        }
+      ],
+      "moves": [
+        {
+          "src": "/repo",
+          "dst": "/visible",
+          "reveals": true
+        }
+      ],
+      "variables": [
+        {
+          "name": "AWS_KEY",
+          "hidden": false
+        },
+        {
+          "name": "HOME",
+          "hidden": false
+        }
+      ]
+    },
+    {
+      "hide": [
+        "*.key",
+        "/data/protected/*"
+      ],
+      "show": [],
+      "vars": [],
+      "queries": [
+        {
+          "path": "/data/x.key/child",
+          "visible": false,
+          "hide_depth": 0,
+          "show_depth": null,
+          "mode": null,
+          "hidden_under": true
+        },
+        {
+          "path": "/data/x.keyx",
+          "visible": true,
+          "hide_depth": null,
+          "show_depth": null,
+          "mode": null,
+          "hidden_under": true
+        },
+        {
+          "path": "/data/protected",
+          "visible": true,
+          "hide_depth": null,
+          "show_depth": null,
+          "mode": null,
+          "hidden_under": true
+        },
+        {
+          "path": "/data/protected/a",
+          "visible": false,
+          "hide_depth": 2,
+          "show_depth": null,
+          "mode": null,
+          "hidden_under": true
+        }
+      ],
+      "moves": [
+        {
+          "src": "/repo",
+          "dst": "/visible",
+          "reveals": false
+        }
+      ],
+      "variables": [
+        {
+          "name": "AWS_KEY",
+          "hidden": false
+        },
+        {
+          "name": "HOME",
+          "hidden": false
+        }
+      ]
+    }
+  ],
+  "admissions": [
+    {
+      "name": "per_subject_deny",
+      "rules": {
+        "allow": null,
+        "deny": [
+          {
+            "reason": "sealed",
+            "paths": [
+              "/sealed/*"
+            ]
+          }
+        ],
+        "ask": [
+          {
+            "reason": "review",
+            "paths": [
+              "/review/deep/*"
+            ]
+          }
+        ]
+      },
+      "facts": {
+        "command": "cp",
+        "tokens": [
+          "cp",
+          "/sealed/x",
+          "/review/deep/y"
+        ],
+        "tool": true,
+        "cwd": "/",
+        "paths": [
+          "/sealed/x",
+          "/review/deep/y"
+        ],
+        "operands": [
+          "/sealed/x",
+          "/review/deep/y"
+        ],
+        "walks": false,
+        "move_target": null
+      },
+      "expected": {
+        "outcome": "deny",
+        "rule": 0,
+        "matched_path": "/sealed/x",
+        "source": "top",
+        "asks": []
+      }
+    },
+    {
+      "name": "all_winning_asks",
+      "rules": {
+        "allow": null,
+        "deny": [],
+        "ask": [
+          {
+            "reason": "source",
+            "paths": [
+              "/a/*"
+            ]
+          },
+          {
+            "reason": "destination",
+            "paths": [
+              "/deep/b/*"
+            ]
+          }
+        ]
+      },
+      "facts": {
+        "command": "cp",
+        "tokens": [
+          "cp",
+          "/a/x",
+          "/deep/b/y"
+        ],
+        "tool": true,
+        "cwd": "/",
+        "paths": [
+          "/a/x",
+          "/deep/b/y"
+        ],
+        "operands": [
+          "/a/x",
+          "/deep/b/y"
+        ],
+        "walks": false,
+        "move_target": null
+      },
+      "expected": {
+        "outcome": "ask",
+        "rule": 1,
+        "matched_path": "/deep/b/y",
+        "source": "top",
+        "asks": [
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "name": "deeper_ask",
+      "rules": {
+        "allow": null,
+        "deny": [
+          {
+            "reason": "broad",
+            "paths": [
+              "/repo/*"
+            ]
+          }
+        ],
+        "ask": [
+          {
+            "reason": "deep",
+            "paths": [
+              "/repo/outbox/*"
+            ]
+          }
+        ]
+      },
+      "facts": {
+        "command": "cp",
+        "tokens": [
+          "cp",
+          "/repo/outbox/x"
+        ],
+        "tool": true,
+        "cwd": "/",
+        "paths": [
+          "/repo/outbox/x"
+        ],
+        "operands": [
+          "/repo/outbox/x"
+        ],
+        "walks": false,
+        "move_target": null
+      },
+      "expected": {
+        "outcome": "ask",
+        "rule": 1,
+        "matched_path": "/repo/outbox/x",
+        "source": "top",
+        "asks": [
+          1
+        ]
+      }
+    },
+    {
+      "name": "deny_tie",
+      "rules": {
+        "allow": null,
+        "deny": [
+          {
+            "reason": "deny",
+            "paths": [
+              "/repo/*"
+            ]
+          }
+        ],
+        "ask": [
+          {
+            "reason": "ask",
+            "paths": [
+              "/repo/*"
+            ]
+          }
+        ]
+      },
+      "facts": {
+        "command": "cp",
+        "tokens": [
+          "cp",
+          "/repo/x"
+        ],
+        "tool": true,
+        "cwd": "/",
+        "paths": [
+          "/repo/x"
+        ],
+        "operands": [
+          "/repo/x"
+        ],
+        "walks": false,
+        "move_target": null
+      },
+      "expected": {
+        "outcome": "deny",
+        "rule": 0,
+        "matched_path": "/repo/x",
+        "source": "top",
+        "asks": []
+      }
+    },
+    {
+      "name": "empty_allow",
+      "rules": {
+        "allow": [],
+        "deny": [],
+        "ask": []
+      },
+      "facts": {
+        "command": "ls",
+        "tokens": [
+          "ls"
+        ],
+        "tool": true,
+        "cwd": "/",
+        "paths": [],
+        "operands": [],
+        "walks": false,
+        "move_target": null
+      },
+      "expected": {
+        "outcome": "deny",
+        "rule": null,
+        "matched_path": null,
+        "source": "commands.allow",
+        "asks": []
+      }
+    },
+    {
+      "name": "omitted_allow",
+      "rules": {
+        "allow": null,
+        "deny": [],
+        "ask": []
+      },
+      "facts": {
+        "command": "ls",
+        "tokens": [
+          "ls"
+        ],
+        "tool": true,
+        "cwd": "/",
+        "paths": [],
+        "operands": [],
+        "walks": false,
+        "move_target": null
+      },
+      "expected": {
+        "outcome": "allow",
+        "rule": null,
+        "matched_path": null,
+        "source": "",
+        "asks": []
+      }
+    },
+    {
+      "name": "mount_ancestor",
+      "rules": {
+        "allow": null,
+        "deny": [
+          {
+            "reason": "mount",
+            "mount": "/scratch/child"
+          }
+        ],
+        "ask": []
+      },
+      "facts": {
+        "command": "grep",
+        "tokens": [
+          "grep",
+          "/scratch"
+        ],
+        "tool": true,
+        "cwd": "/",
+        "paths": [
+          "/scratch"
+        ],
+        "operands": [
+          "/scratch"
+        ],
+        "walks": true,
+        "move_target": null
+      },
+      "expected": {
+        "outcome": "deny",
+        "rule": 0,
+        "matched_path": null,
+        "source": "mounts./scratch/child",
+        "asks": []
+      }
+    },
+    {
+      "name": "subtree_source",
+      "rules": {
+        "allow": null,
+        "deny": [
+          {
+            "reason": "inside",
+            "paths": [
+              "/repo/locked/*"
+            ]
+          }
+        ],
+        "ask": []
+      },
+      "facts": {
+        "command": "mv",
+        "tokens": [
+          "mv",
+          "/repo",
+          "/elsewhere"
+        ],
+        "tool": true,
+        "cwd": "/",
+        "paths": [
+          "/repo",
+          "/elsewhere"
+        ],
+        "operands": [
+          "/repo",
+          "/elsewhere"
+        ],
+        "walks": false,
+        "move_target": null
+      },
+      "expected": {
+        "outcome": "deny",
+        "rule": 0,
+        "matched_path": "/repo",
+        "source": "top",
+        "asks": []
+      }
+    }
+  ]
+}

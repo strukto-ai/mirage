@@ -69,6 +69,7 @@ class CLIRegistry:
         self._installs: dict[str, CLIInstall] = {}
         self._peers = peers
         self._clock: Clock = clock if clock is not None else SystemClock()
+        self._clocks_bound = False
         self._retiring: dict[int, asyncio.Task[None]] = {}
         self._shutdown = asyncio.Event()
 
@@ -109,13 +110,14 @@ class CLIRegistry:
             )
         validated = self._validate_config(name, spec, config)
         accessor = spec.accessor(validated)
-        accessor.bind_clock(self._clock)
         accessor.join(
             [*self._peers(), *(i.accessor for i in self._installs.values())]
         )
         install = CLIInstall(
             name=name, cli=spec, config=validated, accessor=accessor
         )
+        if self._clocks_bound:
+            accessor.bind_clock(self._clock, id(install))
         self._installs[name] = install
         return install
 
@@ -196,6 +198,31 @@ class CLIRegistry:
             # hand the refused value back. Field and type only, chain
             # cut, the way `build_vfs` reports its config class.
             raise ValueError(f"CLI {name!r}: {error_summary(exc)}") from None
+
+    def bind_clocks(self) -> None:
+        """Hand every install's accessor the workspace clock, once the
+        workspace is built; an install made later takes it at once. Each
+        install holds on its own, so removing one leaves another that
+        shares its client holding.
+
+        Raises:
+            ValueError: another workspace holds a client on another
+                clock; nothing stays bound.
+        """
+        try:
+            for install in self._installs.values():
+                install.accessor.bind_clock(self._clock, id(install))
+        except BaseException:
+            self.release_clocks()
+            raise
+        self._clocks_bound = True
+
+    def release_clocks(self) -> None:
+        """Let go of the workspace clock on every install's accessor, as
+        the workspace closes or fails to come to be."""
+        self._clocks_bound = False
+        for install in self._installs.values():
+            install.accessor.release_clock(id(install))
 
     async def uninstall(self, name: str) -> None:
         """Remove an installed CLI now and close its accessor once the
@@ -282,10 +309,13 @@ async def _retire(install: CLIInstall, shutdown: asyncio.Event) -> None:
         idle.cancel()
         stopping.cancel()
         await asyncio.gather(idle, stopping, return_exceptions=True)
-    if idle in done:
-        await install.accessor.close()
-    else:
-        await _close_after_grace(install)
+    try:
+        if idle in done:
+            await install.accessor.close()
+        else:
+            await _close_after_grace(install)
+    finally:
+        install.accessor.release_clock(id(install))
 
 
 async def _close_after_grace(install: CLIInstall) -> None:
@@ -295,4 +325,7 @@ async def _close_after_grace(install: CLIInstall) -> None:
     finally:
         idle.cancel()
         await asyncio.gather(idle, return_exceptions=True)
-    await install.accessor.close()
+    try:
+        await install.accessor.close()
+    finally:
+        install.accessor.release_clock(id(install))

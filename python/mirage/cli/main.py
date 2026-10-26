@@ -53,11 +53,16 @@ app.command("logout")(login_module.logout_cmd)
 app.command("whoami")(login_module.whoami_cmd)
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> None:
     """Entry point that turns config errors into clean exit-2 lines and
-    an unreachable daemon or an ended login into a clean exit-1 line."""
+    an unreachable daemon or an ended login into a clean exit-1 line.
+
+    Args:
+        argv (list[str] | None): the arguments after the program name;
+            the process's own when None.
+    """
     try:
-        app()
+        app(args=argv)
     except DaemonConfigError as e:
         typer.echo(str(e), err=True)
         raise SystemExit(2) from e

@@ -12,8 +12,9 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.policy.match.pattern import pattern_matches, pattern_reaches
+
 from mirage.policy.types import AdmissionRules, CommandContext
+from mirage.rs.policy import admission_matcher, units
 
 
 def head_allowed(name: str, rules: AdmissionRules | None) -> bool:
@@ -27,9 +28,9 @@ def head_allowed(name: str, rules: AdmissionRules | None) -> bool:
         name (str): the command name.
         rules (AdmissionRules | None): the session's admission rules.
     """
-    if rules is None or rules.allow is None:
-        return True
-    return any(pattern_reaches(p, (name,)) for p in rules.allow)
+    return (
+        admission_matcher(rules).ask("head_allowed", name=units(name)) is True
+    )
 
 
 def line_tokens(ctx: CommandContext) -> tuple[str, ...]:
@@ -54,7 +55,11 @@ def line_allowed(ctx: CommandContext, rules: AdmissionRules | None) -> bool:
         ctx (CommandContext): the classified command.
         rules (AdmissionRules | None): the session's admission rules.
     """
-    if not ctx.tool or rules is None or rules.allow is None:
-        return True
-    tokens = line_tokens(ctx)
-    return any(pattern_matches(p, tokens) for p in rules.allow)
+    return (
+        admission_matcher(rules).ask(
+            "line_allowed",
+            tokens=[units(v) for v in line_tokens(ctx)],
+            tool=ctx.tool,
+        )
+        is True
+    )

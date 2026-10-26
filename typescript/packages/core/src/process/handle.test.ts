@@ -53,12 +53,15 @@ describe('ProcessHandle', () => {
         finished.push(pid)
       },
     )
+    handle.start()
     const done = await handle.join()
     expect([done.state, done.exitCode, finished]).toEqual(['exited', 3, [7]])
   })
 
   it('a failing runner exits 1 with its failure', async () => {
-    const done = await new ProcessHandle(info(), raises, ignore, ignore).join()
+    const handle = new ProcessHandle(info(), raises, ignore, ignore)
+    handle.start()
+    const done = await handle.join()
     expect([done.exitCode, done.failure]).toEqual([1, 'boom'])
   })
 
@@ -81,6 +84,7 @@ describe('ProcessHandle', () => {
       abort.abort()
     }
     const handle = new ProcessHandle(info(), run, cancel, ignore)
+    handle.start()
     await running
     expect(handle.terminate()).toBe(true)
     expect(handle.terminate()).toBe(false)
@@ -119,6 +123,7 @@ describe('ProcessHandle', () => {
         return run()
       },
     )
+    handle.start()
     expect(handle.signal).toBeNull()
     expect(handle.terminate(signal)).toBe(true)
     const done = await handle.join()
@@ -147,9 +152,46 @@ describe('ProcessHandle', () => {
       },
       ignore,
     )
+    handle.start()
     expect(handle.programCode).toBeNull()
     expect(handle.terminate(15)).toBe(true)
     const done = await handle.join()
     expect([done.exitCode, handle.programCode]).toEqual([143, 3])
+  })
+
+  // An eager start runs the runner up to its first wait before start
+  // returns, so a caller's setup must come first: the supervisor's
+  // `started` hook.
+  it('an eager start runs the runner before start returns', () => {
+    const order: string[] = []
+    const handle = new ProcessHandle(
+      info(),
+      () => {
+        order.push('run')
+        return Promise.resolve(0)
+      },
+      ignore,
+      ignore,
+    )
+    handle.start(true)
+    order.push('returned')
+    expect(order).toEqual(['run', 'returned'])
+  })
+
+  // A runner that throws before it returns its promise fails like one
+  // whose promise rejects, so its slot is freed rather than held forever.
+  it('an eager runner that throws at once fails and finishes', async () => {
+    const finished: number[] = []
+    const handle = new ProcessHandle(
+      info(),
+      () => {
+        throw new Error('boom')
+      },
+      ignore,
+      (pid) => finished.push(pid),
+    )
+    handle.start(true)
+    const ended = await handle.join()
+    expect([ended.exitCode, ended.failure, finished]).toEqual([1, 'boom', [ended.pid]])
   })
 })

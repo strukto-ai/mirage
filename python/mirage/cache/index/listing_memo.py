@@ -32,19 +32,6 @@ _HOLDERS_BY_PREFIX: Counter[str] = Counter()
 _PREFIX_LOCK = threading.Lock()
 
 
-def _copied(listing: ListResult) -> ListResult:
-    return listing.model_copy(
-        update={
-            "entries": None
-            if listing.entries is None
-            else list(listing.entries),
-            "partial_entries": None
-            if listing.partial_entries is None
-            else list(listing.partial_entries),
-        }
-    )
-
-
 @dataclass
 class _Read:
     writes_before: int
@@ -53,6 +40,50 @@ class _Read:
     listing: ListResult
     row_writes: int = -1
     rows: dict[str, FileStat | None] = field(default_factory=dict)
+    # Where each listed key sits, built on the first lookup of one.
+    positions: dict[str, int] | None = None
+
+
+def _positions(kept: _Read) -> dict[str, int]:
+    if kept.positions is None:
+        keys = kept.listing.entries or kept.listing.partial_entries or []
+        kept.positions = {key: at for at, key in enumerate(keys)}
+    return kept.positions
+
+
+def _answer(
+    listing: ListResult, child: str | None, kept: _Read | None
+) -> ListResult:
+    """A listing as ``read`` answers it: a kept one copied, so a
+    caller's edit never reaches it, or, given ``child``, narrowed to
+    that key where it is listed.
+
+    Args:
+        listing (ListResult): the listing read.
+        child (str | None): the key to narrow the entries to.
+        kept (_Read | None): the read that keeps the listing, if any.
+    """
+    if child is None and kept is None:
+        return listing
+    named = child is not None and (
+        child in (listing.entries or listing.partial_entries or [])
+        if kept is None
+        else child in _positions(kept)
+    )
+
+    def keys(entries: list[str] | None) -> list[str] | None:
+        if entries is None:
+            return None
+        if child is None:
+            return list(entries)
+        return [child] if named else []
+
+    return listing.model_copy(
+        update={
+            "entries": keys(listing.entries),
+            "partial_entries": keys(listing.partial_entries),
+        }
+    )
 
 
 class ListingMemo:
@@ -93,6 +124,7 @@ class ListingMemo:
         self,
         folder: str,
         fetch: Callable[[], Awaitable[tuple[ListResult, float | None]]],
+        child: str | None = None,
     ) -> ListResult:
         """A folder's listing, read from Redis at most once per command.
 
@@ -101,25 +133,26 @@ class ListingMemo:
             fetch (Callable[[], Awaitable[tuple[ListResult, float | None]]]):
                 reads the listing from Redis and answers it with its
                 expiry, or with None when there is no live listing to keep.
+            child (str | None): the one key a lookup asks about, to
+                narrow the entries to.
         """
         stamp = sole_command_started()
         if stamp is None:
-            return (await fetch())[0]
+            return _answer((await fetch())[0], child, None)
         kept = self._reads.get((stamp, folder))
         if kept is not None and self._live(kept):
-            return _copied(kept.listing)
+            return _answer(kept.listing, child, kept)
         writes = _WRITES_BY_PREFIX[self._key_prefix]
         read_at = monotonic()
         listing, expires_at = await fetch()
         if expires_at is None or _WRITES_BY_PREFIX[self._key_prefix] != writes:
-            return listing
+            return _answer(listing, child, None)
         while self._reads and not self._live(next(iter(self._reads.values()))):
             self._reads.popitem(last=False)
+        read = _Read(writes, read_at, expires_at, listing)
         self._reads.pop((stamp, folder), None)
-        self._reads[stamp, folder] = _Read(
-            writes, read_at, expires_at, listing
-        )
-        return _copied(listing)
+        self._reads[stamp, folder] = read
+        return _answer(listing, child, read)
 
     async def row(
         self,
@@ -152,10 +185,11 @@ class ListingMemo:
         if path in kept.rows:
             row = kept.rows[path]
         else:
-            paths = kept.listing.entries or kept.listing.partial_entries or []
-            if path not in paths:
+            position = _positions(kept).get(path)
+            if position is None:
                 return None
-            start = paths.index(path) // ROW_READ_BATCH * ROW_READ_BATCH
+            paths = kept.listing.entries or kept.listing.partial_entries or []
+            start = position // ROW_READ_BATCH * ROW_READ_BATCH
             missing = [
                 p
                 for p in paths[start : start + ROW_READ_BATCH]

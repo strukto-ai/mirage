@@ -146,6 +146,7 @@ def _session_follow(
         Files(
             dispatch,
             namespace.readers(lambda _session: session.visibility),
+            clock=namespace.clock,
         )
     )
     return links.resolve if links is not None else None

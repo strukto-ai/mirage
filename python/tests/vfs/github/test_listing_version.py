@@ -113,9 +113,9 @@ def _count_list_dirs(monkeypatch, store) -> list[str]:
     reads: list[str] = []
     list_dir = store.list_dir
 
-    async def counted(path):
+    async def counted(path, child=None):
         reads.append(path)
-        return await list_dir(path)
+        return await list_dir(path, child)
 
     monkeypatch.setattr(store, "list_dir", counted)
     return reads

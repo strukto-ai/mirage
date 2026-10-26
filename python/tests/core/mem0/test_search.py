@@ -2,7 +2,8 @@ import pytest
 from pydantic import SecretStr
 
 from mirage.accessor.mem0 import Mem0Accessor
-from mirage.core.mem0.search import search_memories_rendered
+from mirage.core.mem0.search import search_many, search_memories_rendered
+from mirage.types import PathSpec, SearchQuery
 from mirage.vfs.mem0.config import Mem0Config
 
 
@@ -90,3 +91,42 @@ async def test_search_rejects_non_positive_top_k():
         await search_memories_rendered(
             _accessor(), "morning", mount_prefix="/mem", top_k=0, threshold=0.0
         )
+
+
+class ListingClient:
+    def __init__(self):
+        self.asked: list[str] = []
+
+    async def get_all(self, options=None):
+        self.asked.append("get_all")
+        return {"next": None, "results": []}
+
+    async def search(self, query, options=None):
+        self.asked.append("search")
+        return {"results": []}
+
+
+# A glob scope is expanded by listing the memories, so a value the search
+# refuses is refused before that listing.
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "query,message",
+    [
+        (SearchQuery("morning", options={"threshold": 1.5}), "threshold"),
+        (SearchQuery("morning", options={"top_k": 0}), "top-k"),
+        (SearchQuery(""), "query"),
+    ],
+)
+async def test_search_many_refuses_before_listing_a_glob(query, message):
+    acc = _accessor()
+    acc._client = ListingClient()
+    glob = PathSpec(
+        virtual="/mem/*.json",
+        directory="/mem",
+        vfs_path="*.json",
+        pattern="*.json",
+        resolved=False,
+    )
+    with pytest.raises(ValueError, match=message):
+        await search_many(acc, [glob], query)
+    assert acc._client.asked == []

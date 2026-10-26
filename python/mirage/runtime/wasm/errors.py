@@ -24,6 +24,7 @@ EINVAL = wasi_errno(FsCondition.EINVAL)
 EIO = wasi_errno(FsCondition.EIO)
 ENOENT = wasi_errno(FsCondition.ENOENT)
 ENOTDIR = wasi_errno(FsCondition.ENOTDIR)
+EPIPE = wasi_errno(FsCondition.EPIPE)
 
 # Which refusal a hard link gets is decided once, for every surface that
 # can spell one; rendering it in preview1 numbers is this one's part.

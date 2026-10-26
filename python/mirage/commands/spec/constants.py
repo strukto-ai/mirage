@@ -719,9 +719,8 @@ FLOAT_VALUE = re.compile(
 )
 
 # GNU usage-error exit codes, pinned against debian coreutils/grep/diffutils
-# and hostname 3.25 (plus ripgrep and jq upstream docs). search and
-# chroma-query, mirage's own, exit 2 like argparse. Everything else exits
-# 1. Keys are plain strings, not CommandName members: types.py (the enum's
+# and hostname 3.25 (plus ripgrep and jq upstream docs). Everything else
+# exits 1. Keys are plain strings, not CommandName members: types.py (the enum's
 # home) imports this module for flag_kwarg_name, so importing the enum
 # here would be a cycle; StrEnum members hash as their values, so lookups
 # with CommandName still hit.
@@ -731,8 +730,6 @@ USAGE_EXIT = {
     "fgrep": 2,
     "zgrep": 2,
     "rg": 2,
-    "search": 2,
-    "chroma-query": 2,
     "ls": 2,
     "sort": 2,
     "diff": 2,
@@ -830,6 +827,20 @@ OLD_OPTION_EXIT = 2
 # Commands whose `Try '--help'` hint line is prefixed with the command
 # name (GNU diffutils style: `diff: Try 'diff --help' ...`).
 USAGE_HINT_PREFIX = frozenset({"diff", "cmp", "patch"})
+
+# How many distinct readings one spec keeps before it starts over. A
+# line reads each command's words from classification, admission,
+# routing and dispatch, a few dozen times with two or three distinct
+# inputs, so a handful covers a line.
+PARSES_KEPT = 16
+
+# The most characters a command's words may hold, in all, for a spec to
+# keep its reading of them. A longer line (a `jq --argjson` document, a
+# heredoc-sized printf) is read afresh each time: keeping it would hold
+# its words until the table starts over, and reading them is cheap
+# beside what the command then does with them. With PARSES_KEPT this
+# bounds what one spec holds to about 16K characters.
+PARSE_KEPT_CHARS = 1024
 
 
 def flag_kwarg_name(flag: str) -> str:

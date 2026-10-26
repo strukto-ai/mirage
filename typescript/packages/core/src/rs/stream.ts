@@ -36,6 +36,7 @@ interface Exports {
   mirage_rs_feed_input(handle: number, index: number, len: number): number
   mirage_rs_end_input(handle: number, index: number): number
   mirage_rs_begin(handle: number, len: number): number
+  mirage_rs_test(handle: number, len: number): number
   mirage_rs_done(handle: number): number
   mirage_rs_status(handle: number): number
   mirage_rs_metadata(handle: number): number
@@ -78,6 +79,13 @@ function retire(exports: Exports, trapped: boolean): void {
 export function compiledModule(): Promise<WebAssembly.Module> {
   compiled ??= WebAssembly.compile(decodeBase64(MIRAGE_RS_WASM) as BufferSource)
   return compiled
+}
+
+/** The compiled module, compiled now if no one has yet, for a caller that cannot wait. */
+export function moduleSync(): WebAssembly.Module {
+  compiledSync ??= new WebAssembly.Module(decodeBase64(MIRAGE_RS_WASM) as BufferSource)
+  compiled ??= Promise.resolve(compiledSync)
+  return compiledSync
 }
 
 /** Run on the module the page compiled: a browser worker's bundle leaves the bytes out. */
@@ -150,7 +158,7 @@ export class OpenStream {
     return this.guard(() => this.exports.mirage_rs_cancel(this.handle) === 1)
   }
 
-  /** One bounded step of the work `busy` reports, and its output. */
+  /** Bounded steps of the work `busy` reports, up to a piece of output, and that output. */
   drain(): Uint8Array {
     return this.guard(() => this.collect(this.exports.mirage_rs_drain(this.handle), []))
   }
@@ -182,6 +190,21 @@ export class OpenStream {
       const window = this.exports.mirage_rs_input(this.handle)
       new Uint8Array(this.exports.memory.buffer, window, bytes.byteLength).set(bytes)
       this.collect(this.exports.mirage_rs_begin(this.handle, bytes.byteLength), [])
+    })
+  }
+
+  /** Whether the input fed since the last answer, then `chunk`, passes the stream's test, in one call. */
+  test(chunk: Uint8Array): boolean {
+    return this.guard(() => {
+      const cut = Math.max(0, chunk.byteLength - this.capacity)
+      if (cut > 0)
+        this.push(chunk.subarray(0, cut), (len) => this.exports.mirage_rs_feed(this.handle, len))
+      const tail = chunk.subarray(cut)
+      const window = this.exports.mirage_rs_input(this.handle)
+      new Uint8Array(this.exports.memory.buffer, window, tail.byteLength).set(tail)
+      const answer = this.exports.mirage_rs_test(this.handle, tail.byteLength)
+      if (answer < 0) this.collect(1, [])
+      return answer === 1
     })
   }
 
@@ -220,10 +243,13 @@ export class OpenStream {
   }
 
   /** Answer the request taken last with the host's reply and the bytes it carries. */
-  respond(reply: Readonly<Record<string, util.JSONType>>, data: Uint8Array): Uint8Array {
+  respond(
+    reply: Readonly<Record<string, util.JSONType>>,
+    data: Uint8Array | readonly Uint8Array[],
+  ): Uint8Array {
     const header = encoder.encode(JSON.stringify(reply))
     return this.guard(() => {
-      for (const part of [header, data]) {
+      for (const part of [header, ...(data instanceof Uint8Array ? [data] : data)]) {
         for (let offset = 0; offset < part.byteLength; offset += this.capacity) {
           const piece = part.subarray(offset, offset + this.capacity)
           const window = this.exports.mirage_rs_input(this.handle)
@@ -301,7 +327,8 @@ export class OpenStream {
 /** What a host made of one request: the reply, the bytes it carries, and output it wrote doing it. Mirrors Python's Served. */
 export interface Served {
   readonly reply: Record<string, util.JSONType>
-  readonly data?: Uint8Array
+  /** The bytes, or the parts they come in. */
+  readonly data?: Uint8Array | readonly Uint8Array[]
   readonly output?: Uint8Array | AsyncIterable<Uint8Array> | null
 }
 
@@ -363,10 +390,44 @@ export function openStreamSync(
   config: Readonly<Record<string, util.JSONType>>,
   movable = false,
 ): OpenStream {
-  compiledSync ??= new WebAssembly.Module(decodeBase64(MIRAGE_RS_WASM) as BufferSource)
-  compiled ??= Promise.resolve(compiledSync)
-  synchronous ??= new WebAssembly.Instance(compiledSync, {}).exports as unknown as Exports
+  synchronous ??= new WebAssembly.Instance(moduleSync(), {}).exports as unknown as Exports
   return open(synchronous, kind, config, movable)
+}
+
+const movableFinalizer = new FinalizationRegistry<OpenStream>((stream) => {
+  stream.close()
+})
+
+/**
+ * A movable synchronous stream for an object a cache keeps, such as a compiled
+ * matcher: it opens again on the live instance once the one it was on retired,
+ * and closes when its owner is collected. A retired stream is unregistered, so
+ * it never holds its instance's memory.
+ */
+export class MovableStream {
+  private stream: OpenStream
+
+  constructor(
+    private readonly kind: string,
+    private readonly config: Readonly<Record<string, util.JSONType>>,
+  ) {
+    this.stream = this.open()
+  }
+
+  /** The stream, opened again first when its instance retired. */
+  get live(): OpenStream {
+    if (!this.stream.live) {
+      movableFinalizer.unregister(this)
+      this.stream = this.open()
+    }
+    return this.stream
+  }
+
+  private open(): OpenStream {
+    const stream = openStreamSync(this.kind, this.config, true)
+    movableFinalizer.register(this, stream, this)
+    return stream
+  }
 }
 
 function open(

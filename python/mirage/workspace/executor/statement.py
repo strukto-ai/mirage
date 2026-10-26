@@ -14,7 +14,7 @@
 
 from collections.abc import Awaitable, Callable, Iterator, Sequence
 from contextlib import aclosing, contextmanager
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 
 from mirage.commands.spec.usage import read_fail_exit_code
 from mirage.context.session_context import (
@@ -484,7 +484,7 @@ def recording(session: SessionState, recorder: Recorder) -> Iterator[None]:
         session (SessionState): the shell running it.
         recorder (Recorder): where it writes.
     """
-    enclosing = bind_caller(replace(current_caller(), enclosing=recorder))
+    enclosing = bind_caller(current_caller().changed({"enclosing": recorder}))
     leave = (session.job_output or session.tty.jobs).record(recorder)
     try:
         yield

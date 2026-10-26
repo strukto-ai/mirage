@@ -525,9 +525,7 @@ class ScriptPolicy(Policy, SessionScopedMixin):
         # The policy's own read: its pre_vfs and post_vfs let it through,
         # since the policy is the one asking and judging its own read
         # would re-enter the run that is waiting on it.
-        token = bind_caller(
-            dataclasses.replace(current_caller(), policy_read=True)
-        )
+        token = bind_caller(current_caller().changed({"policy_read": True}))
         try:
             return await self._dispatch(name, path, report=report, **kwargs)
         finally:

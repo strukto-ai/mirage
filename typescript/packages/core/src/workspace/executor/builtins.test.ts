@@ -1809,6 +1809,20 @@ describe('handleMan', () => {
   })
 })
 
+// A line that prints, then prints again a moment after its stop.
+async function goesOn(
+  _cmd: string,
+  opts: { sessionId: string; signal?: AbortSignal; sink?: JobConsole },
+): Promise<IOResult> {
+  await opts.sink?.emit(Channel.STDOUT, new TextEncoder().encode('early\n'))
+  await new Promise((resolve) => {
+    opts.signal?.addEventListener('abort', resolve, { once: true })
+  })
+  await new Promise((resolve) => setTimeout(resolve, 20))
+  await opts.sink?.emit(Channel.STDOUT, new TextEncoder().encode('late\n'))
+  return new IOResult()
+}
+
 function slowShell(
   delays: Record<string, number> = {},
   exitCodes: Record<string, number> = {},
@@ -2969,6 +2983,13 @@ describe('handleTimeout', () => {
       return new IOResult()
     }
     const [stdout, io] = await handleTimeout(early, ['0.05', 'sleep', '1'], session)
+    expect([decode(await materialize(stdout)), io.exitCode]).toEqual(['early\n', 124])
+  })
+
+  // What the line prints as it winds down past its stop is lost, as a
+  // signalled process prints nothing more; what it lands is still joined.
+  it('drops what the line prints after its stop', async () => {
+    const [stdout, io] = await handleTimeout(goesOn, ['0.05', 'rev', 'a', 'b'], session)
     expect([decode(await materialize(stdout)), io.exitCode]).toEqual(['early\n', 124])
   })
 

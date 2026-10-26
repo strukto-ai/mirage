@@ -68,6 +68,24 @@ describe('ResponseCache', () => {
     expect(await cache.get('q', answer)).toBe(2)
   })
 
+  // Twin of test_an_answer_is_kept_from_when_it_arrives.
+  it('keeps an answer for its bound from when it arrives', async () => {
+    // A fetch slower than the bound is kept for the bound once it lands,
+    // as the file cache keeps a read from when it lands.
+    vi.useFakeTimers({ now: 0 })
+    const answer = service()
+    const slow = () => {
+      vi.setSystemTime(Date.now() + 5_000)
+      return answer()
+    }
+    const cache = new ResponseCache<string, number>(1)
+    expect(await cache.get('q', slow)).toBe(1)
+    vi.setSystemTime(5_500)
+    expect(await cache.get('q', slow)).toBe(1)
+    vi.setSystemTime(6_000)
+    expect(await cache.get('q', slow)).toBe(2)
+  })
+
   it('drops what it kept when a stricter mount governs it', async () => {
     // Kept under a 600 s bound, an answer would outlive a 30 s one.
     const answer = service()

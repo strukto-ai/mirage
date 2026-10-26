@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 import sys
 
 import pytest
@@ -367,3 +368,36 @@ async def test_unsetting_the_function_restores_the_handoff(ws_cpython):
     )
     assert io.exit_code == 0
     assert await materialize(io.stdout) == b"['-c', '-u', 'x']\n"
+
+
+# A program's prints reach its reader as it runs, so one that never ends
+# stops once its reader has what it wanted.
+@pytest.mark.asyncio
+async def test_an_endless_printer_stops_once_its_reader_has_enough(ws):
+    io = await asyncio.wait_for(
+        ws.shell("python3 -c 'while True: print(1)' | head -n 2"), 30
+    )
+    assert await materialize(io.stdout) == b"1\n1\n"
+
+
+@pytest.mark.asyncio
+async def test_an_endless_host_printer_stops_once_its_reader_has_enough(
+    ws_cpython,
+):
+    io = await asyncio.wait_for(
+        ws_cpython.shell("python3 -c 'while True: print(1)' | head -n 2"), 30
+    )
+    assert await materialize(io.stdout) == b"1\n1\n"
+
+
+@pytest.mark.asyncio
+async def test_unbuffered_host_output_reaches_its_reader_before_the_end(
+    ws_cpython,
+):
+    io = await asyncio.wait_for(
+        ws_cpython.shell(
+            "python3 -u -c 'import time; print(1); time.sleep(60)' | head -n 1"
+        ),
+        30,
+    )
+    assert await materialize(io.stdout) == b"1\n"

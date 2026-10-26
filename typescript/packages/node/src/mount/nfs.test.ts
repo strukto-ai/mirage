@@ -24,7 +24,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { DiskVFS } from '../vfs/disk/disk.ts'
 import { Workspace } from '../workspace.ts'
 import type * as ConstantsModule from './constants.ts'
-import { MountCore } from './core.ts'
+import { MountCore } from '@struktoai/mirage-core/mount/core'
 import { MirageNFSServer, mountArgs, unmountArgs } from './nfs.ts'
 
 vi.mock('./constants.ts', async (importOriginal) => ({
@@ -409,10 +409,10 @@ describe('MirageNFSServer handles and shutdown', () => {
     const clients = sockets.map((socket) => new Client(socket))
     const opened: string[] = []
     const realOpen = core.open.bind(core)
-    vi.spyOn(core, 'open').mockImplementation(async (path: string, flags?: number) => {
+    vi.spyOn(core, 'open').mockImplementation(async (path, mode, perm) => {
       opened.push(path)
       await new Promise((resolve) => setTimeout(resolve, 10))
-      return realOpen(path, flags)
+      return realOpen(path, mode, perm)
     })
     try {
       const handles = await Promise.all(clients.map((client, i) => client.handle(names[i] ?? '')))
@@ -536,10 +536,10 @@ describe('MirageNFSServer and session changes', () => {
       let releaseGate = (): void => undefined
       const realOpen = core.open.bind(core)
       const realRelease = core.release.bind(core)
-      vi.spyOn(core, 'open').mockImplementation(async (path: string, flags?: number) => {
+      vi.spyOn(core, 'open').mockImplementation(async (path, mode, perm) => {
         opening.push(path)
         if (holdOpen !== null) await holdOpen
-        const fd = await realOpen(path, flags)
+        const fd = await realOpen(path, mode, perm)
         fds.push(fd)
         return fd
       })
@@ -586,6 +586,40 @@ describe('MirageNFSServer and session changes', () => {
       await ws.setSessionProfile('reader', { paths: { hide: ['/a.txt'] } })
       const reply = await client.call(NFS, 6, concat([opaque(handle), u64(0), u32(100)]))
       expect(reply.u32()).toBe(2)
+    } finally {
+      socket.destroy()
+      await server.close()
+    }
+  })
+
+  it('pages on past a page whose names all vanished', async () => {
+    const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })
+    await ws.shell('mkdir /d && for i in $(seq 100 299); do echo > /d/f$i; done')
+    const core = new MountCore(ws.vfs, { session: ws.createSession('reader') })
+    const getattr = core.getattr.bind(core)
+    core.getattr = (path, follow, ctx) =>
+      path.startsWith('/d/f') && path < '/d/f250'
+        ? Promise.reject(Object.assign(new Error(path), { code: 'ENOENT' }))
+        : getattr(path, follow, ctx)
+    const server = new MirageNFSServer(core, '/', false)
+    const port = await server.start()
+    const socket = connect(port, '127.0.0.1')
+    await new Promise<void>((resolve) => socket.once('connect', resolve))
+    const client = new Client(socket)
+    try {
+      const dir = await client.handle('d')
+      let [listed, eof] = await client.readdir(dir, 0, 512)
+      let cookie = listed.at(-1)?.[1] ?? 0
+      for (let turn = 0; turn < 200 && !eof; turn++) {
+        const [page, end] = await client.readdir(dir, cookie, 512)
+        listed = [...listed, ...page]
+        cookie = page.at(-1)?.[1] ?? cookie
+        eof = end
+      }
+      expect(listed.map(([name]) => name)).toEqual(
+        Array.from({ length: 50 }, (_, i) => `f${String(i + 250)}`),
+      )
+      expect(eof).toBe(true)
     } finally {
       socket.destroy()
       await server.close()

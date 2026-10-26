@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import time
 from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 from types import MappingProxyType
@@ -57,6 +56,8 @@ from mirage.types import (
     ShownPaths,
     Visibility,
 )
+from mirage.utils.clock import SystemClock
+from mirage.utils.ids import IdSource, SystemIdSource
 from mirage.workspace.session.constants import (
     INHERITED_FIELDS,
     STARTUP_VALUES,
@@ -282,7 +283,8 @@ class SessionState:
     # and an array in another, and an attribute cannot drift from the
     # value it describes.
     vars: dict[str, ShellVar] = field(default_factory=dict)
-    created_at: float = field(default_factory=time.time)
+    # The manager stamps it on the workspace clock.
+    created_at: float = field(default_factory=SystemClock().now)
     functions: dict[str, str] = field(default_factory=dict)
     # The functions `readonly -f` has frozen. A set beside `functions`
     # rather than a flag on the source because readonly is the
@@ -315,6 +317,11 @@ class SessionState:
     # past. Runtime identity, never serialized: a restored snapshot has
     # no line running on it.
     status_writer: StatusWriter | None = None
+    # Where `$RANDOM` draws its first seed: the workspace's id source,
+    # shared by every fork and never serialized.
+    ids: IdSource = field(
+        default_factory=SystemIdSource, repr=False, compare=False
+    )
     shell_options: dict[str, bool] = field(default_factory=dict)
     # `shopt` options, kept apart from `set -o` ones because bash keeps
     # two vocabularies (`shopt -o` is the bridge). Only the names set

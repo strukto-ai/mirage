@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import os
 from dataclasses import dataclass
 
 from mirage.runtime.handles.constants import MODE_BASES, MODE_CHARS
@@ -35,6 +36,8 @@ class OpenMode:
         create (bool): a missing file is created (w, a, x).
         exclusive (bool): an existing file refuses the open (x).
         binary (bool): the handle carries bytes, not text (b).
+        directory (bool): a directory may open, for a read: ``os.open``
+            and preview1 open one, ``open`` and SFTP refuse it.
     """
 
     readable: bool
@@ -44,6 +47,40 @@ class OpenMode:
     create: bool
     exclusive: bool
     binary: bool
+    directory: bool = False
+
+
+READ = OpenMode(
+    readable=True,
+    writable=False,
+    truncate=False,
+    append=False,
+    create=False,
+    exclusive=False,
+    binary=True,
+)
+
+
+def open_mode(flags: int) -> OpenMode:
+    """What open(2) flags say about a handle, in the mode vocabulary.
+
+    Args:
+        flags (int): the ``os.O_*`` flags.
+    """
+    # Windows' os has no O_ACCMODE; the access bits are these three there
+    # too.
+    access = flags & (os.O_RDONLY | os.O_WRONLY | os.O_RDWR)
+    writable = access in (os.O_WRONLY, os.O_RDWR)
+    create = bool(flags & os.O_CREAT)
+    return OpenMode(
+        readable=access in (os.O_RDONLY, os.O_RDWR),
+        writable=writable,
+        truncate=writable and bool(flags & os.O_TRUNC),
+        append=bool(flags & os.O_APPEND),
+        create=create,
+        exclusive=create and bool(flags & os.O_EXCL),
+        binary=True,
+    )
 
 
 def parse_mode(mode: str) -> OpenMode:

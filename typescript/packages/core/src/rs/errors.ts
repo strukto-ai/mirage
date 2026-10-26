@@ -29,6 +29,21 @@ export class StreamRefusal extends Error {
 }
 
 /**
+ * A -P line search gave up at PCRE2's match limit: `message` in GNU grep's
+ * words, `spans` the matches -o found on the line before it. Mirrors
+ * Python's SearchLimit.
+ */
+export class SearchLimit extends Error {
+  readonly spans: [number, number][]
+
+  constructor(message: string, spans: [number, number][]) {
+    super(message)
+    this.name = 'SearchLimit'
+    this.spans = spans
+  }
+}
+
+/**
  * A pattern mirage-rs refused to compile. `message` is the refusal as the
  * program words it, without its `prog: ` prefix (`Unmatched ( or \(`).
  * Mirrors Python's RegexError.

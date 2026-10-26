@@ -14,7 +14,6 @@
 
 from collections.abc import AsyncIterator, Iterator
 from contextlib import contextmanager
-from dataclasses import replace
 
 from mirage.context.session_context import (
     CallerToken,
@@ -85,7 +84,7 @@ def fresh_recorder(
 
 
 def _set_recorder(rec: Recorder | None) -> CallerToken:
-    return bind_caller(replace(current_caller(), recorder=rec))
+    return bind_caller(current_caller().changed({"recorder": rec}))
 
 
 class RecordingScope:
@@ -147,7 +146,7 @@ def active_records() -> list[OpRecord] | None:
 def _set_command_sink(
     sink: tuple[list[OpRecord] | None, list[OpRecord]] | None,
 ) -> CallerToken:
-    return bind_caller(replace(current_caller(), command_sink=sink))
+    return bind_caller(current_caller().changed({"command_sink": sink}))
 
 
 @contextmanager
@@ -479,7 +478,7 @@ def record_stream(
 
 
 def _set_revisions(revisions: dict[str, str] | None) -> CallerToken:
-    return bind_caller(replace(current_caller(), revisions=revisions))
+    return bind_caller(current_caller().changed({"revisions": revisions}))
 
 
 def push_revisions(revisions: dict[str, str] | None) -> CallerToken:

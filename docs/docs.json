@@ -70,6 +70,15 @@
             "pages": [
               "home/agents",
               {
+                "group": "Coding Agents",
+                "icon": "laptop-code",
+                "pages": [
+                  "home/agents/claude-code",
+                  "home/agents/codex",
+                  "home/agents/grok-build"
+                ]
+              },
+              {
                 "group": "Access",
                 "icon": "plug",
                 "pages": [
@@ -215,7 +224,8 @@
                   "home/setup/cli/airtable",
                   "home/setup/cli/gh",
                   "home/setup/cli/hf",
-                  "home/setup/cli/git"
+                  "home/setup/cli/git",
+                  "home/setup/cli/search"
                 ]
               }
             ]
@@ -328,15 +338,6 @@
             "group": "AI Agents",
             "pages": [
               "python/agents/index",
-              {
-                "group": "Coding Agents",
-                "icon": "laptop-code",
-                "pages": [
-                  "python/agents/claude-code",
-                  "python/agents/codex",
-                  "python/agents/grok-build"
-                ]
-              },
               {
                 "group": "Agent SDKs",
                 "icon": "cubes",
@@ -484,7 +485,8 @@
                   "python/cli/airtable",
                   "python/cli/gh",
                   "python/cli/hf",
-                  "python/cli/git"
+                  "python/cli/git",
+                  "python/cli/search"
                 ]
               }
             ]
@@ -523,12 +525,9 @@
             "pages": [
               "typescript/agents/index",
               {
-                "group": "Coding Agents",
+                "group": "Coding Agent Plugins",
                 "icon": "laptop-code",
                 "pages": [
-                  "typescript/agents/claude-code",
-                  "typescript/agents/codex",
-                  "typescript/agents/grok-build",
                   "typescript/agents/pi",
                   "typescript/agents/opencode",
                   "typescript/agents/dsh"
@@ -680,7 +679,8 @@
                   "typescript/cli/airtable",
                   "typescript/cli/gh",
                   "typescript/cli/hf",
-                  "typescript/cli/git"
+                  "typescript/cli/git",
+                  "typescript/cli/search"
                 ]
               }
             ]
@@ -847,6 +847,30 @@
     {
       "source": "/home/access/fuse",
       "destination": "/home/setup/fuse"
+    },
+    {
+      "source": "/python/agents/claude-code",
+      "destination": "/home/agents/claude-code"
+    },
+    {
+      "source": "/python/agents/codex",
+      "destination": "/home/agents/codex"
+    },
+    {
+      "source": "/python/agents/grok-build",
+      "destination": "/home/agents/grok-build"
+    },
+    {
+      "source": "/typescript/agents/claude-code",
+      "destination": "/home/agents/claude-code"
+    },
+    {
+      "source": "/typescript/agents/codex",
+      "destination": "/home/agents/codex"
+    },
+    {
+      "source": "/typescript/agents/grok-build",
+      "destination": "/home/agents/grok-build"
     }
   ],
   "navbar": {

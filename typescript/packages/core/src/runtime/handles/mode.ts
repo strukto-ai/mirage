@@ -39,6 +39,44 @@ export interface OpenMode {
   exclusive: boolean
   /** The handle carries bytes, not text (b). */
   binary: boolean
+  /** A directory may open, for a read: `os.open` and preview1 open one, `open` and SFTP refuse it. */
+  directory?: boolean
+}
+
+/** A handle that only reads, as an open with no flags asks for. */
+export const READ: OpenMode = Object.freeze({
+  readable: true,
+  writable: false,
+  truncate: false,
+  append: false,
+  create: false,
+  exclusive: false,
+  binary: true,
+})
+
+/**
+ * What open(2) flags say about a handle, in the mode vocabulary. The flag
+ * numbers are the host's (`fs.constants` under node, Emscripten's own), so
+ * they come with the flags. Mirrors Python's `open_mode`.
+ */
+export function openMode(
+  flags: number,
+  bits: Readonly<
+    Record<'O_WRONLY' | 'O_RDWR' | 'O_CREAT' | 'O_EXCL' | 'O_TRUNC' | 'O_APPEND', number>
+  >,
+): OpenMode {
+  const access = flags & (bits.O_WRONLY | bits.O_RDWR)
+  const writable = access === bits.O_WRONLY || access === bits.O_RDWR
+  const create = (flags & bits.O_CREAT) !== 0
+  return {
+    readable: access === 0 || access === bits.O_RDWR,
+    writable,
+    truncate: writable && (flags & bits.O_TRUNC) !== 0,
+    append: (flags & bits.O_APPEND) !== 0,
+    create,
+    exclusive: create && (flags & bits.O_EXCL) !== 0,
+    binary: true,
+  }
 }
 
 /**

@@ -18,6 +18,7 @@ import { Channel, JobConsole, KILLED_OUTCOME, exitOutcome } from '../console/ind
 import { KILLED_EXIT_CODE, STOP_WAIT_SECONDS } from './constants.ts'
 import { type ConsoleFactory, Job, type JobResult, type JobRunner, JobStatus } from './types.ts'
 import { encodeText } from '../bytes.ts'
+import { SystemClock, type Clock } from '../../utils/clock.ts'
 
 function isAbortError(err: unknown): boolean {
   if (err instanceof Error && err.name === 'AbortError') return true
@@ -154,6 +155,8 @@ export class JobTable {
     // The table of the shell a `$( )` is part of, whose jobs `jobs` still
     // lists there, as bash's does; its `wait` and `kill` reach none of them.
     readonly parent: JobTable | null = null,
+    // The workspace clock a job's `createdAt` is read on.
+    readonly clock: Clock = new SystemClock(),
   ) {
     this.consoleFactory = consoleFactory
   }
@@ -165,7 +168,7 @@ export class JobTable {
    * `parent` is the table a `$( )` still lists in `jobs`.
    */
   child(parent: JobTable | null = null): JobTable {
-    const table = new JobTable(this.consoleFactory, this.processes, parent)
+    const table = new JobTable(this.consoleFactory, this.processes, parent, this.clock)
     table.consoleOwner = this.consoleOwner
     return table
   }
@@ -238,6 +241,7 @@ export class JobTable {
         sessionId,
         console: jobConsole,
         simple: init.simple ?? false,
+        createdAt: this.clock.now(),
       })
     } catch (error) {
       process.terminate()

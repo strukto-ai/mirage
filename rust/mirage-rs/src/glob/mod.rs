@@ -4,6 +4,7 @@ use serde::Deserialize;
 
 mod compile;
 mod evaluate;
+mod flat;
 mod reverse;
 #[cfg(test)]
 mod tests;
@@ -11,12 +12,39 @@ mod tests;
 use crate::{Stream, StreamError, parse_config};
 use compile::{Compiler, Dialect, Program, is};
 use evaluate::Evaluator;
+use flat::Flat;
 use reverse::Reverse;
 
 const WORK: usize = 2048;
 type Span = (usize, usize);
 type Positions = Arc<Vec<Span>>;
 type Key = (usize, usize, usize);
+
+pub(crate) struct CompiledGlob {
+    program: Program,
+    flat: Option<Flat>,
+}
+
+impl CompiledGlob {
+    pub(crate) fn new(pattern: Vec<u32>) -> Self {
+        let mut compiler = Compiler::new(pattern, Dialect::Shell, false);
+        while !compiler.done() {
+            compiler.step();
+        }
+        let flat = Flat::new(&compiler.program);
+        Self {
+            program: compiler.program,
+            flat,
+        }
+    }
+
+    pub(crate) fn matches(&self, subject: &[u32]) -> bool {
+        match &self.flat {
+            Some(flat) => flat.matches(subject, false),
+            None => Evaluator::matches(&self.program, subject, false),
+        }
+    }
+}
 
 fn yes() -> bool {
     true
@@ -70,6 +98,7 @@ struct Request {
 struct Glob {
     compiler: Option<Compiler>,
     program: Option<Program>,
+    flat: Option<Option<Flat>>,
     reverse: Option<Reverse>,
     reversed_compiler: Option<Compiler>,
     reversed: Option<Program>,
@@ -100,6 +129,7 @@ pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
             config.extglob,
         )),
         program: None,
+        flat: None,
         reverse: None,
         reversed_compiler: None,
         reversed: None,
@@ -142,6 +172,16 @@ fn emit_option(out: &mut Vec<u8>, value: Option<usize>) {
 }
 
 impl Glob {
+    fn decode(&mut self, units: &[u8]) -> Result<(), StreamError> {
+        for unit in units.chunks_exact(4) {
+            let cp = u32::from_le_bytes(unit.try_into().expect("four bytes"));
+            if cp > 0x10ffff {
+                return Err(StreamError::new("glob unit is past U+10FFFF"));
+            }
+            self.subject.push(cp);
+        }
+        Ok(())
+    }
     fn needs_reverse(&self) -> bool {
         match &self.operation {
             Operation::Suffix { .. } => true,
@@ -355,23 +395,23 @@ impl Glob {
 }
 
 impl Stream for Glob {
-    fn feed(&mut self, input: &[u8], _: &mut Vec<u8>) -> Result<(), StreamError> {
+    fn feed(&mut self, mut input: &[u8], _: &mut Vec<u8>) -> Result<(), StreamError> {
         if self.active {
             return Err(StreamError::new("glob operation is still busy"));
         }
-        for &byte in input {
-            self.partial.push(byte);
-            if self.partial.len() == 4 {
-                let cp =
-                    u32::from_le_bytes(self.partial.as_slice().try_into().expect("four bytes"));
-                if cp > 0x10ffff {
-                    return Err(StreamError::new("glob unit is past U+10FFFF"));
-                }
-                self.subject.push(cp);
-                self.partial.clear();
+        if !self.partial.is_empty() {
+            let (head, rest) = input.split_at(input.len().min(4 - self.partial.len()));
+            self.partial.extend_from_slice(head);
+            input = rest;
+            if self.partial.len() < 4 {
+                return Ok(());
             }
+            let unit = std::mem::take(&mut self.partial);
+            self.decode(&unit)?;
         }
-        Ok(())
+        let whole = input.len() / 4 * 4;
+        self.partial.extend_from_slice(&input[whole..]);
+        self.decode(&input[..whole])
     }
     fn finish(&mut self, _: &mut Vec<u8>) -> Result<(), StreamError> {
         if !self.partial.is_empty() {
@@ -382,6 +422,25 @@ impl Stream for Glob {
     }
     fn busy(&self) -> bool {
         self.active
+    }
+    fn test(&mut self, input: &[u8]) -> Result<bool, StreamError> {
+        self.feed(input, &mut Vec::new())?;
+        if !self.partial.is_empty() {
+            return Err(StreamError::new("glob subject ends inside a u32 unit"));
+        }
+        while self.compiler.is_some() {
+            self.compile_step();
+        }
+        let subject = std::mem::take(&mut self.subject);
+        let period = self.period && subject.first() == Some(&u32::from(b'.'));
+        let program = self.program.as_ref().expect("compiled pattern");
+        let answer = match self.flat.get_or_insert_with(|| Flat::new(program)) {
+            Some(flat) => flat.matches(&subject, period),
+            None => Evaluator::matches(program, &subject, period),
+        };
+        self.forward = Evaluator::default();
+        self.backward = Evaluator::default();
+        Ok(answer)
     }
     fn drain(&mut self, out: &mut Vec<u8>) -> Result<(), StreamError> {
         for _ in 0..WORK {

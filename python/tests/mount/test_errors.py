@@ -73,6 +73,17 @@ def test_unrecognised_error_is_eio():
     assert classify_error(RuntimeError("something else entirely")) == errno.EIO
 
 
+def test_only_an_error_nothing_names_is_logged(caplog):
+    # A bug in the core would otherwise read only as "I/O error"; a bare
+    # OSError is an I/O error already.
+    with caplog.at_level(logging.WARNING, logger="mirage.mount.errors"):
+        assert classify_error(RuntimeError("boom")) == errno.EIO
+        assert classify_error(OSError("bare")) == errno.EIO
+    assert [r.getMessage() for r in caplog.records] == [
+        "unclassified mount error: RuntimeError('boom')"
+    ]
+
+
 def test_symlink_loop_is_eloop_not_eio():
     # CycleError is documented as POSIX ELOOP and raised as
     # CycleError(path), so no needle can match its message. Before the

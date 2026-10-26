@@ -17,6 +17,7 @@ import { RAMAccessor } from '../../../../accessor/ram.ts'
 import { mkdir } from '../../../../core/ram/mkdir.ts'
 import { read } from '../../../../core/ram/read.ts'
 import { write } from '../../../../core/ram/write.ts'
+import { materialize } from '../../../../io/types.ts'
 import { PathSpec } from '../../../../types.ts'
 import { decodeBase64 } from '../../../../utils/base64.ts'
 import { RAMStore } from '../../../../vfs/ram/store.ts'
@@ -51,7 +52,8 @@ async function run(
     BUILDER.fn(accessor, [PathSpec.fromStrPath('/m.zip')], [], { ...ctx(flags), vfs: files }),
   )
   if (result === null) throw new Error('unzip returned nothing')
-  const [, io] = result
+  const [out, io] = result
+  await materialize(out)
   const kept = DEC.decode(await read(accessor, PathSpec.fromStrPath('/a/b.txt')))
   return [kept, io.exitCode, DEC.decode(await io.materializeStderr())]
 }

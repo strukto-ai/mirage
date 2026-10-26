@@ -31,6 +31,7 @@ from mirage.runtime.python.monty.fs import MontyFs
 from mirage.runtime.python.monty.loader import pydantic_monty
 from mirage.runtime.types import (
     FilesystemOperation,
+    OutputFn,
     Program,
     RunResult,
     RuntimeReach,
@@ -93,22 +94,33 @@ class MontyRuntime(PythonRuntime[MontyExecution]):
         await engine.close()
 
     async def interpret(
-        self, engine: MontyExecution, program: Program, ctx: Context
+        self,
+        engine: MontyExecution,
+        program: Program,
+        ctx: Context,
+        output: OutputFn | None = None,
+        errors: OutputFn | None = None,
     ) -> RunResult:
         """Run one program, reporting any switch this engine cannot honor.
 
         Monty implements a Python subset with no ``compile``, no
         ``warnings`` and no ``sys.path``, so the interpreter-init
         switches have nothing to act on here even though every
-        real-CPython engine honors them. The notice rides on stderr and
-        the program's own exit code stands.
+        real-CPython engine honors them. The notice rides on stderr,
+        ahead of what the program writes there, and the program's own
+        exit code stands.
 
         Args:
             engine (MontyExecution): the install's worker pool.
             program (Program): the source and argv to run.
             ctx (Context): the run's context.
+            output (OutputFn | None): receives stdout as it is printed.
+            errors (OutputFn | None): receives stderr as it is printed.
         """
         notice = unhonored_notice(ctx.flags, self.name)
+        if notice and errors is not None:
+            await errors(notice)
+            notice = b""
         # A nested call must not queue behind a parent holding this pool.
         nested = ctx.processes is not None and ctx.processes.depth > 0
         execution = MontyExecution(self._max_memory) if nested else engine
@@ -118,6 +130,8 @@ class MontyRuntime(PythonRuntime[MontyExecution]):
                 program,
                 ctx.cwd,
                 MontyFs(files, ctx.env or {}),
+                output,
+                errors,
             )
         except asyncio.CancelledError:
             if files is not None:

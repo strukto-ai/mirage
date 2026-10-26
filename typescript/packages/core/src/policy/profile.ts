@@ -824,7 +824,7 @@ function mountDoc(entry: ProfileMount): Record<string, unknown> {
 
 function pathsDoc(block: PathsBlock): Record<string, unknown> {
   // A path shown twice answers with the weaker of its modes, and an
-  // entry without one states visibility only (`shownMode`), so the
+  // entry without one states visibility only (it sets no mode), so the
   // mapping keeps that answer for each path.
   const show = new Map<string, MountMode | null>()
   for (const e of block.show ?? []) {

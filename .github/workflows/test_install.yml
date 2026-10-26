@@ -28,6 +28,7 @@ concurrency:
 jobs:
   changes:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     if: github.event_name == 'pull_request'
     permissions:
       pull-requests: read
@@ -56,6 +57,7 @@ jobs:
     needs: changes
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.hit == 'true') }}
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     # Each check runs from python/, whose mirage/ would shadow the installed
     # package, native module and all, were the current directory on
     # sys.path; PYTHONSAFEPATH (3.11 and later) keeps it off.
@@ -64,11 +66,11 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      # Its own entry: these installs resolve fresh from PyPI on 3.11 as
-      # well as 3.12, wheels the shared entry never holds. The lock does
-      # not pin a fresh resolution and an entry is never re-saved, so the
-      # key also turns over weekly: a release is cached within the week
-      # rather than fetched on every run until the lock next changes.
+      # Its own entry: these installs resolve fresh from PyPI, wheels the
+      # shared entry never holds. The lock does not pin a fresh resolution and
+      # an entry is never re-saved, so the key also turns over weekly: a
+      # release is cached within the week rather than fetched on every run
+      # until the lock next changes.
       - name: Name the week's install cache
         id: week
         run: echo "week=$(date -u +%G-%V)" >> "$GITHUB_OUTPUT"
@@ -78,10 +80,10 @@ jobs:
         with:
           cache-suffix: install-${{ steps.week.outputs.week }}
 
-      - name: Base install (no extras) on 3.11 and 3.12
+      - name: Base install (no extras)
         working-directory: python
         run: |
-          for ver in 3.11 3.12; do
+          for ver in 3.12; do
             rm -rf .venv-min
             uv venv --python "$ver" .venv-min
             uv pip install --python .venv-min/bin/python .
@@ -151,7 +153,7 @@ jobs:
           failed=()
           for entry in "${entries[@]}"; do
             IFS=: read -r extra module pyver <<< "$entry"
-            pyver="${pyver:-3.11}"
+            pyver="${pyver:-3.12}"
             echo "::group::${extra} (${pyver})"
             rm -rf .venv-x
             if uv venv --python "$pyver" .venv-x \
@@ -174,6 +176,7 @@ jobs:
     needs: changes
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.hit == 'true') }}
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
 
@@ -243,6 +246,7 @@ jobs:
   gate:
     name: test-install-gate
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     needs: [changes, python-install, ts-install]
     if: always()
     steps:

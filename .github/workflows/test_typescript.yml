@@ -42,6 +42,7 @@ concurrency:
 jobs:
   changes:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     if: github.event_name == 'pull_request'
     permissions:
       pull-requests: read
@@ -80,6 +81,7 @@ jobs:
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.hit == 'true') }}
     name: TypeScript ${{ matrix.leg }} (Node ${{ matrix.node-version }})
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     strategy:
       # Keep every shard's result even when a sibling fails.
       fail-fast: false
@@ -236,6 +238,7 @@ jobs:
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.hit == 'true') }}
     name: python-fs and audit
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
 
@@ -286,6 +289,7 @@ jobs:
   gate:
     name: test-typescript-gate
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     needs: [changes, test, python-fs]
     if: always()
     steps:

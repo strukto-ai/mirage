@@ -174,7 +174,9 @@ describe('node VFS registry', () => {
       try {
         const markdown = await ws.vfsMd()
         expect(markdown).toContain('| `/gh` | `github`, read |')
-        expect(markdown).toContain('`grep -r` and `rg` with `-w` use `github` search.')
+        expect(markdown).toContain(
+          '`grep -r` and `rg` with `-w` ask `github` which files may match.',
+        )
       } finally {
         await ws.close()
       }

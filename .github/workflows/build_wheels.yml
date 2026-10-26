@@ -9,12 +9,13 @@ permissions:
   workflow_call:
 
 jobs:
-  # abi3 wheels (CPython 3.11 and later), one per platform mirage-ai installs
+  # abi3 wheels (CPython 3.12 and later), one per platform mirage-ai installs
   # on, each carrying the Python package and its native module. Linux builds
   # in maturin's manylinux and musllinux containers, aarch64 cross-compiled
   # there; macOS x86_64 cross-compiles on the arm64 runner.
   build:
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -33,7 +34,7 @@ jobs:
       - if: runner.os == 'Windows'
         uses: actions/setup-python@v7
         with:
-          python-version: "3.11"
+          python-version: "3.12"
       - uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
         with:
           working-directory: python
@@ -48,6 +49,7 @@ jobs:
   # Anything without a wheel above builds from this with Rust 1.85 or later.
   sdist:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
       - uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
@@ -79,6 +81,7 @@ jobs:
   check:
     needs: build
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -100,7 +103,7 @@ jobs:
       - if: ${{ !matrix.alpine }}
         uses: actions/setup-python@v7
         with:
-          python-version: "3.11"
+          python-version: "3.12"
       - name: Install the wheel and run every stream
         if: ${{ !matrix.alpine }}
         shell: bash
@@ -111,7 +114,7 @@ jobs:
       - name: Install the wheel in Alpine and run every stream
         if: ${{ matrix.alpine }}
         run: >-
-          docker run --rm -v "$PWD:/w" -w /w python:3.11-alpine
+          docker run --rm -v "$PWD:/w" -w /w python:3.12-alpine
           sh -c "apk add --no-cache build-base
           && pip install --prefer-binary dist/*.whl
           && python scripts/check_mirage_rs_wheel.py

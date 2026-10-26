@@ -15,7 +15,7 @@
 import asyncio
 import logging
 from collections.abc import Awaitable, Callable, Mapping, Sequence
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from functools import partial
 from typing import Any
 
@@ -36,6 +36,7 @@ from mirage.observe.record import OpRecord
 from mirage.policy import Deny, HandOff, Pending
 from mirage.policy.decisions import is_pending
 from mirage.process.supervisor import ProcessSupervisor
+from mirage.process.types import ProcessInfo
 from mirage.runtime.routing import RouteError
 from mirage.runtime.table import whole_line_runtime
 from mirage.runtime.types import DispatchFn, RouteDecision, RuntimeIdentity
@@ -597,6 +598,11 @@ async def _run_line(
             finally:
                 reset_current_session(token)
 
+        def started(info: ProcessInfo) -> None:
+            session.process_id = info.pid
+            if session.shell_pid is None:
+                session.shell_pid = info.pid
+
         try:
             process = ws.processes.start(
                 session_id=session.session_id,
@@ -605,13 +611,11 @@ async def _run_line(
                 run=run,
                 limit=session.processes.max,
                 execution_id=execution_scope.id,
+                started=started,
             )
         except BlockingIOError:
             record_status(session, FORK_FAILED_STATUS)
             return IOResult(exit_code=FORK_FAILED_STATUS, stderr=FORK_FAILED)
-        session.process_id = process.info.pid
-        if session.shell_pid is None:
-            session.shell_pid = process.info.pid
         try:
             await process.task
             return results[0]
@@ -772,14 +776,15 @@ async def run_prepared_line(
         # line held on a later question (`x=1 cmd`, `export a=1; export
         # b=2`) finds it.
         line_token = bind_caller(
-            replace(
-                current_caller(),
-                refusals=note,
-                call=(
-                    ws.registry.decisions,
-                    handed,
-                    effective_session.session_id,
-                ),
+            current_caller().changed(
+                {
+                    "refusals": note,
+                    "call": (
+                        ws.registry.decisions,
+                        handed,
+                        effective_session.session_id,
+                    ),
+                }
             )
         )
         judgments: list[list[tuple[Walked, list[Judged]]]] = []
@@ -904,6 +909,7 @@ async def run_prepared_line(
                         "post_execute", effective_session.session_id
                     )
                     else None,
+                    sink,
                 )
                 if io.refusal is None:
                     io.refusal = nested.latest

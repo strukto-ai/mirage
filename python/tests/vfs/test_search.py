@@ -4,7 +4,6 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from mirage.commands.builtin.generic.search import search_resources
 from mirage.types import PathSpec, SearchQuery
 from mirage.vfs.chroma import ChromaVFS
 from mirage.vfs.dify import DifyVFS
@@ -57,13 +56,10 @@ async def test_builtin_semantic_adapters_delegate_one_batch(
     )
     vfs = vfs_over(VFS_CLASSES[backend], client)
 
-    async def dispatch(name, path, /, query, scopes):
-        return await vfs.search_many([path, *scopes], query), None
-
-    result = await search_resources(
-        dispatch, [PATH, PATH], SearchQuery("question", options=options)
+    result = await vfs.search_many(
+        [PATH, PATH], SearchQuery("question", options=options)
     )
-    assert result == b"ranked record\n"
+    assert result == [("/data/a", "ranked record")]
     raw.assert_awaited_once()
     assert raw.await_args.kwargs["top_k"] == 2
     assert raw.await_args.kwargs["mount_prefix"] == "/data"

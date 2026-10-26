@@ -18,6 +18,8 @@ pub(crate) enum WriteMode {
     /// Write the file whole as one streamed write, its bytes landing as
     /// this write and the appends after it carry them.
     Create,
+    /// Write the file whole from this write's bytes alone, now.
+    Whole,
     /// Replace the file whole, once flushed, with what this write and the
     /// appends after it carry; never flushed, it changes nothing.
     Replace,
@@ -34,28 +36,42 @@ pub(crate) enum WriteMode {
         skip: u64,
         size: u64,
     },
+    /// Append `size` bytes of a spool past its first `skip`, keeping the
+    /// spool.
+    Slice {
+        fd: u32,
+        skip: u64,
+        size: u64,
+    },
 }
 
-/// What a read opens: an operand still as typed, a name a program reads
-/// (where `-` and `/dev/stdin` are standard input), a file a script
-/// names, which no spelling of standard input stands for, or a spool the
-/// run filled, past its first `skip` bytes.
+/// What a read opens: an operand still as typed, a name standing in for
+/// one (unzip's `X.zip` for `X`), read as that operand is, a name a
+/// program reads (where `-` and `/dev/stdin` are standard input), a file
+/// a script names, which no spelling of standard input stands for, or a
+/// spool the run filled, past its first `skip` bytes; a window, `size`
+/// bytes of a spool, comes whole in one reply and leaves nothing open.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Opening {
     Operand(usize),
+    AsOperand,
     Name,
     File,
     Spool { fd: u32, skip: u64 },
+    Window { fd: u32, skip: u64, size: u64 },
 }
 
 /// What the host is asked to do, in the order the run asks.
 #[derive(Debug)]
 pub(crate) enum Request {
     /// The next chunk of input `fd`; the first read of a named input says
-    /// which file, and which operand when it is one still as typed.
+    /// which file, and which operand when it is one still as typed. A file
+    /// read whole asks for `least` bytes a reply, the host gathering chunks
+    /// until it has them or the input ends.
     Read {
         fd: u32,
         open: Option<(Vec<u8>, Opening)>,
+        least: u64,
     },
     /// Let go of input `fd`, or of spool `fd` unsent.
     Close {
@@ -68,6 +84,14 @@ pub(crate) enum Request {
         open: (Vec<u8>, Opening),
     },
     Unlink {
+        path: Vec<u8>,
+    },
+    /// What stands at a path: a directory, a file, or nothing.
+    Stat {
+        path: Vec<u8>,
+    },
+    /// Make one directory, its parent standing.
+    Mkdir {
         path: Vec<u8>,
     },
     Write {
@@ -119,9 +143,18 @@ fn opening(put: &mut impl FnMut(&str, Json), path: &[u8], opening: Opening) {
                 put("skip", skip.into());
             }
         }
+        Opening::Window { fd, skip, size } => {
+            put("spool", fd.into());
+            put("skip", skip.into());
+            put("size", size.into());
+        }
         Opening::Operand(operand) => {
             put("path", latin1(path));
             put("operand", operand.into());
+        }
+        Opening::AsOperand => {
+            put("path", latin1(path));
+            put("as_operand", true.into());
         }
         Opening::File => {
             put("path", latin1(path));
@@ -140,9 +173,12 @@ impl Request {
             header.insert(key.to_owned(), value);
         };
         match self {
-            Request::Read { fd, open } => {
+            Request::Read { fd, open, least } => {
                 put("op", "read".into());
                 put("fd", (*fd).into());
+                if *least > 0 {
+                    put("least", (*least).into());
+                }
                 if let Some((path, how)) = open {
                     opening(&mut put, path, *how);
                 }
@@ -163,6 +199,14 @@ impl Request {
                 put("op", "unlink".into());
                 put("path", latin1(path));
             }
+            Request::Stat { path } => {
+                put("op", "stat".into());
+                put("path", latin1(path));
+            }
+            Request::Mkdir { path } => {
+                put("op", "mkdir".into());
+                put("path", latin1(path));
+            }
             Request::Write {
                 path,
                 mode,
@@ -174,6 +218,7 @@ impl Request {
                     WriteMode::Truncate => put("append", false.into()),
                     WriteMode::Append => put("append", true.into()),
                     WriteMode::Create => put("create", true.into()),
+                    WriteMode::Whole => put("whole", true.into()),
                     WriteMode::Replace => put("atomic", true.into()),
                     WriteMode::Spool { fd, skip } => {
                         put("append", true.into());
@@ -184,6 +229,12 @@ impl Request {
                     }
                     WriteMode::Window { fd, skip, size } => {
                         put("create", true.into());
+                        put("spool", (*fd).into());
+                        put("skip", (*skip).into());
+                        put("size", (*size).into());
+                    }
+                    WriteMode::Slice { fd, skip, size } => {
+                        put("append", true.into());
                         put("spool", (*fd).into());
                         put("skip", (*skip).into());
                         put("size", (*size).into());
@@ -257,6 +308,8 @@ pub(crate) struct Reply {
     pub(crate) status: Option<f64>,
     /// A filled spool's length.
     pub(crate) size: u64,
+    /// What a stat found: `dir` or `file`; none when nothing stands there.
+    pub(crate) kind: Option<String>,
 }
 
 impl Reply {

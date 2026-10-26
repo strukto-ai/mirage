@@ -245,6 +245,17 @@ EVERY = "a.txt b.txt c.txt sub/d.txt z.txt"
         ("rg -x bob /d", "files", "b.txt", "bob -w"),
         ("grep -rE 'conn.*refused' /d", "files", "b.txt", "refused"),
         ("grep -rP 'conn.*refused' /d", "files", "b.txt", "refused"),
+        # A caseless -P line keeps its literals' hints past a \s.
+        ("grep -riP 'WAS\\s+REFUSED' /d", "files", "b.txt", "refused"),
+        ("rg -iP 'CONN\\s+WA' /d", "files", "b.txt", "conn"),
+        # --engine auto running the default engine asks what it would.
+        (
+            "rg --engine auto -w '(?i:ADA)' /d",
+            "files",
+            "a.txt sub/d.txt",
+            "ada -w",
+        ),
+        ("rg --engine auto café /d", "files", "", "café"),
         # -a reads the binary-extension file no search vouches for, and a
         # named file is read whatever the search said (twice, as GNU does).
         (

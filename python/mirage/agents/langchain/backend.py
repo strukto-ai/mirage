@@ -21,6 +21,7 @@ from pathlib import PurePosixPath
 from typing import ParamSpec, TypeVar
 
 from deepagents.backends.protocol import (
+    DeleteResult,
     EditResult,
     ExecuteResponse,
     FileData,
@@ -34,6 +35,11 @@ from deepagents.backends.protocol import (
     SandboxBackendProtocol,
     WriteResult,
 )
+from deepagents.backends.utils import (
+    InvalidGlobPatternError,
+    compile_grep_include_glob,
+    slice_read_response,
+)
 
 from mirage.agents.langchain.convert import (
     io_to_execute_response,
@@ -41,6 +47,7 @@ from mirage.agents.langchain.convert import (
     io_to_grep_matches,
 )
 from mirage.bridge.sync import on_owner_loop
+from mirage.commands.builtin.utils.limit import TRUNCATION_NOTICE
 from mirage.io.types import IOResult
 from mirage.workspace.files import Files
 from mirage.workspace.tools.io_text import replace_text, with_refusal
@@ -105,15 +112,22 @@ def _to_read_result(
             file_data=FileData(content=content, encoding="base64")
         )
 
-    text = data.decode("utf-8")
-    lines = text.splitlines(keepends=True)
-    if lines and offset >= len(lines):
-        error = (
-            f"Line offset {offset} exceeds file length ({len(lines)} lines)"
-        )
-        return ReadResult(error=error)
-    content = "".join(lines[offset : offset + limit])
-    return ReadResult(file_data=FileData(content=content, encoding="utf-8"))
+    return slice_read_response(
+        FileData(content=data.decode("utf-8"), encoding="utf-8"),
+        offset,
+        limit,
+    )
+
+
+def _relative_to(root: str, path: str) -> str:
+    prefix = root.rstrip("/") + "/"
+    if path.startswith(prefix):
+        return path[len(prefix) :]
+    return PurePosixPath(path).name
+
+
+async def _capped(io: IOResult) -> bool:
+    return TRUNCATION_NOTICE in await io.stderr_str()
 
 
 async def _command_error(
@@ -132,7 +146,7 @@ class LangchainWorkspace(SandboxBackendProtocol):
     """Deep Agents backend backed by a Mirage Workspace.
 
     File operations (read, write, edit, ls, upload, download) go through the
-    Files facade directly. Shell operations (execute, grep, glob) go through
+    Files facade directly. Shell operations (execute, grep, glob, delete) go through
     Workspace.shell() for pipe and flag support. Both run as the session,
     so its profile judges every call.
 
@@ -328,25 +342,41 @@ class LangchainWorkspace(SandboxBackendProtocol):
         command line. A run that hits the cap with matches left over is
         reported truncated; one that lands on it exactly is complete.
 
+        ``glob`` follows Deep Agents' include-glob rules: without a ``/``
+        it matches the basename at any depth, with one the path relative
+        to ``path``. A basename glob narrows the command line too. A
+        search the workspace's output cap cut short is reported truncated.
+
         Args:
             pattern (str): literal text to search for.
             path (str | None): directory to search, root when absent.
             glob (str | None): filename filter for which files to search.
             max_count (int | None): total cap on matches returned.
         """
-        parts = ["grep", "-rnH"]
+        root = path or "/"
+        included = None
         if glob:
+            try:
+                included = compile_grep_include_glob(glob)
+            except InvalidGlobPatternError as exc:
+                return GrepResult(error=str(exc))
+        parts = ["grep", "-rnH"]
+        if glob and "/" not in glob:
             parts.extend(["--include", shlex.quote(glob)])
         parts.append(shlex.quote(pattern))
-        parts.append(shlex.quote(path or "/"))
+        parts.append(shlex.quote(root))
         io = await self._exec(" ".join(parts))
         await io.materialize_stdout()
         error = await _command_error(io, GREP_SUCCESS_EXIT_CODES)
         if error:
             return GrepResult(error=error)
         matches = io_to_grep_matches(io)
+        if included is not None:
+            matches = [
+                m for m in matches if included(_relative_to(root, m["path"]))
+            ]
         if max_count is None or len(matches) <= max_count:
-            return GrepResult(matches=matches)
+            return GrepResult(matches=matches, truncated=await _capped(io))
         return GrepResult(matches=matches[:max_count], truncated=True)
 
     # ── glob ─────────────────────────────────────────────────
@@ -356,15 +386,55 @@ class LangchainWorkspace(SandboxBackendProtocol):
 
     @on_owner_loop
     async def aglob(self, pattern: str, path: str | None = None) -> GlobResult:
-        name = pattern.split("/")[-1] if "/" in pattern else pattern
-        io = await self._exec(
-            f"find {shlex.quote(path or '/')} -name {shlex.quote(name)}"
-        )
+        """Find the files under ``path`` that a pattern matches.
+
+        Matching is Deep Agents' own: without a ``/`` the pattern matches
+        the basename at any depth, with one the path relative to ``path``,
+        and only regular files are returned. A listing the workspace's
+        output cap cut short is reported truncated.
+
+        Args:
+            pattern (str): the glob pattern.
+            path (str | None): directory to search, root when absent.
+        """
+        try:
+            matches = compile_grep_include_glob(pattern)
+        except InvalidGlobPatternError as exc:
+            return GlobResult(error=str(exc))
+        root = path or "/"
+        io = await self._exec(f"find {shlex.quote(root)} -type f")
         await io.materialize_stdout()
         error = await _command_error(io)
         if error:
             return GlobResult(error=error)
-        return GlobResult(matches=io_to_file_infos(io))
+        capped = await _capped(io)
+        return GlobResult(
+            matches=[
+                info
+                for info in io_to_file_infos(io)
+                if matches(_relative_to(root, info["path"]))
+            ],
+            truncated=capped,
+            truncation_reason="budget" if capped else None,
+        )
+
+    # ── delete ───────────────────────────────────────────────
+
+    def delete(self, file_path: str) -> DeleteResult:
+        return self._run(self.adelete, file_path)
+
+    @on_owner_loop
+    async def adelete(self, file_path: str) -> DeleteResult:
+        """Remove a file, or a directory with everything under it.
+
+        Args:
+            file_path (str): the path to remove.
+        """
+        io = await self._exec(f"rm -r -- {shlex.quote(file_path)}")
+        error = await _command_error(io)
+        if error:
+            return DeleteResult(error=error)
+        return DeleteResult(path=file_path)
 
     # ── upload / download ────────────────────────────────────
 

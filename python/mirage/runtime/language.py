@@ -21,6 +21,7 @@ from mirage.runtime.mixin import E
 from mirage.runtime.source import Argv0Rules, resolve_program
 from mirage.runtime.types import (
     Language,
+    OutputFn,
     Program,
     RunResult,
 )
@@ -54,7 +55,13 @@ class LanguageRuntime(Runtime[E]):
     argv0_rules: ClassVar[Argv0Rules] = Argv0Rules()
 
     async def run(
-        self, engine: E, paths: list[PathSpec], texts: list[str], ctx: Context
+        self,
+        engine: E,
+        paths: list[PathSpec],
+        texts: list[str],
+        ctx: Context,
+        output: OutputFn | None = None,
+        errors: OutputFn | None = None,
     ) -> RunResult:
         """Resolve the program from the operands, then interpret it.
 
@@ -63,6 +70,8 @@ class LanguageRuntime(Runtime[E]):
             paths (list[PathSpec]): the script operand, if any.
             texts (list[str]): the program's argv.
             ctx (Context): the run's context.
+            output (OutputFn | None): receives stdout as it comes.
+            errors (OutputFn | None): receives stderr as it comes.
         """
         label = (ctx.spec.name if ctx.spec is not None else "") or (
             self.commands[0] if self.commands else self.name
@@ -78,7 +87,12 @@ class LanguageRuntime(Runtime[E]):
         )
         if isinstance(program, RunResult):
             return program
-        return await self.interpret(engine, program, ctx)
+        return await self.interpret(
+            engine,
+            program,
+            ctx,
+            **self._sinks(self.interpret, output, errors),
+        )
 
     def module_code(self, name: str, label: str) -> str | None:
         """The program ``-m name`` runs; None where this runtime cannot
@@ -104,9 +118,14 @@ class LanguageRuntime(Runtime[E]):
 
     @abstractmethod
     async def interpret(
-        self, engine: E, program: Program, ctx: Context
+        self,
+        engine: E,
+        program: Program,
+        ctx: Context,
+        output: OutputFn | None = None,
+        errors: OutputFn | None = None,
     ) -> RunResult:
-        """Execute one program and return its captured outcome.
+        """Execute one program and return its outcome.
 
         Each call represents an independent language command, such as
         python3 or node. Guest globals, imports and builtin mutations
@@ -119,4 +138,10 @@ class LanguageRuntime(Runtime[E]):
             program (Program): the source and argv to run.
             ctx (Context): the run's context: working directory,
                 environment, switches, files.
+            output (OutputFn | None): receives stdout as the program
+                writes it, which the result then leaves out; None, or an
+                engine that cannot stream, returns it whole. A runtime
+                that leaves both sinks out of its signature is never
+                handed them.
+            errors (OutputFn | None): the same for stderr.
         """

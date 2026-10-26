@@ -31,7 +31,8 @@ import type { ByteSource } from '../../../../io/types.ts'
 import { ensureStream, yieldBytes } from '../../../../io/stream.ts'
 import { Channel, JobConsole } from '../../../../shell/console/index.ts'
 import { shellJoin } from '../../../../shell/join.ts'
-import { abortable } from '../../../../utils/abort.ts'
+import { SignalStop, abortable, atDeadline, joinOrAbort } from '../../../../utils/abort.ts'
+import { STOP_WAIT_SECONDS } from '../../../../shell/job_table/constants.ts'
 import { execs } from '../../../lookup/lookup.ts'
 import type { MountRegistry } from '../../../mount/registry.ts'
 import type { SessionState } from '../../../session/session.ts'
@@ -215,22 +216,25 @@ async function executeDrained(
   return io
 }
 
-async function raceDeadline<T>(run: Promise<T>, seconds: number): Promise<T | typeof TIMED_OUT> {
-  let timer: ReturnType<typeof setTimeout> | undefined
+// `reached` runs at the deadline itself: a guest that holds the event loop
+// (QuickJS) meets it there, where nothing waiting on the race can run.
+async function raceDeadline<T>(
+  run: Promise<T>,
+  seconds: number,
+  reached: () => void,
+): Promise<T | typeof TIMED_OUT> {
+  let cancel = (): void => undefined
   const deadline = new Promise<typeof TIMED_OUT>((resolve) => {
-    timer = setTimeout(() => {
+    cancel = atDeadline(seconds, () => {
       resolve(TIMED_OUT)
-    }, seconds * 1000)
+      reached()
+    })
   })
   try {
     return await Promise.race([run, deadline])
   } finally {
-    clearTimeout(timer)
+    cancel()
   }
-}
-
-function sleep(seconds: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, seconds * 1000))
 }
 
 interface Supervision {
@@ -364,51 +368,87 @@ async function supervise(
   lineSignal: AbortSignal | undefined,
   how: Supervision,
 ): Promise<Result> {
-  const result = seconds > 0 && seconds < Infinity ? await raceDeadline(run, seconds) : await run
-  if (result !== TIMED_OUT) {
-    return [
-      await sink.snapshot(Channel.STDOUT),
-      result,
-      new ExecutionNode({ command: 'timeout', exitCode: result.exitCode }),
-    ]
-  }
-  const said: string[] = []
-  const say = (number: number): void => {
-    if (how.verbose) {
-      said.push(
-        `timeout: sending signal ${signalName(number)} to command '${quoteText(how.name)}'\n`,
-      )
-    }
-  }
   const { signal, killAfter, foreground } = how
-  say(signal)
   const stops = STOP_SIGNALS.has(signal) && (foreground || signal === SIGSTOP)
-  if (stops || (signal === SIGCHLD && !foreground)) {
-    // The command stops, or timeout never wakes: only -k's KILL ends the
-    // wait, and not even that once timeout stopped itself.
-    if (stops) abort.abort()
-    if (killAfter === 0 || (signal === SIGSTOP && !foreground)) {
-      await abortable(new Promise<never>(() => undefined), lineSignal)
-    }
-    await sleep(killAfter)
-    abort.abort()
-    say(SIGKILL)
-    return ended(sink, held, said, 137)
+  const carriesOn =
+    (signal === SIGCHLD && !foreground) || CONTINUE_SIGNALS.has(signal) || STOP_SIGNALS.has(signal)
+  // -k's KILL, armed at the deadline itself for a run the signal leaves
+  // going, which may hold the event loop past it.
+  const kill: { at: Promise<typeof TIMED_OUT> | null; cancel: () => void } = {
+    at: null,
+    cancel: () => undefined,
   }
-  if (CONTINUE_SIGNALS.has(signal) || STOP_SIGNALS.has(signal)) {
-    const late = killAfter > 0 ? await raceDeadline(run, killAfter) : await run
-    if (late === TIMED_OUT) {
-      abort.abort()
+  const reached = (): void => {
+    if (stops || !carriesOn) abort.abort(new SignalStop(signal))
+    if (!carriesOn || killAfter === 0) return
+    kill.at = new Promise((resolve) => {
+      kill.cancel = atDeadline(killAfter, () => {
+        resolve(TIMED_OUT)
+        abort.abort(new SignalStop(SIGKILL))
+      })
+    })
+  }
+  // What the stopped run printed up to the stop is its output. What it
+  // still does as it ends (a guest landing what it wrote) is done before
+  // timeout answers, as Python joins the cancelled run, but what it prints
+  // on stdout then is lost: a JS run goes on past its abort, where a
+  // cancelled Python task stops at its next await. Its stderr is read after
+  // the join, since a runtime hands over what its guest wrote there as the
+  // run ends. One that will not end is let go after a stop's grace.
+  const stop = async (said: readonly string[], exitCode: number): Promise<Result> => {
+    const printed = await sink.snapshot(Channel.STDOUT)
+    try {
+      await joinOrAbort(run, abort.signal, STOP_WAIT_SECONDS * 1000)
+    } catch (err) {
+      console.debug(`timeout: the stopped run ended: ${String(err)}`)
+    }
+    const [, io, node] = await ended(sink, held, said, exitCode)
+    return [printed.byteLength > 0 ? printed : null, io, node]
+  }
+  try {
+    const result =
+      seconds > 0 && seconds < Infinity ? await raceDeadline(run, seconds, reached) : await run
+    if (result !== TIMED_OUT) {
+      return [
+        await sink.snapshot(Channel.STDOUT),
+        result,
+        new ExecutionNode({ command: 'timeout', exitCode: result.exitCode }),
+      ]
+    }
+    const said: string[] = []
+    const say = (number: number): void => {
+      if (how.verbose) {
+        said.push(
+          `timeout: sending signal ${signalName(number)} to command '${quoteText(how.name)}'\n`,
+        )
+      }
+    }
+    say(signal)
+    if (stops || (signal === SIGCHLD && !foreground)) {
+      // The command stops, or timeout never wakes: only -k's KILL ends the
+      // wait, and not even that once timeout stopped itself.
+      if (kill.at === null || (signal === SIGSTOP && !foreground)) {
+        await abortable(new Promise<never>(() => undefined), lineSignal)
+      }
+      await kill.at
       say(SIGKILL)
-      return ended(sink, held, said, 137)
+      return await stop(said, 137)
     }
-    return ended(sink, held, said, how.preserve ? late.exitCode : 124, true)
+    if (carriesOn) {
+      const late = kill.at === null ? await run : await Promise.race([run, kill.at])
+      if (late === TIMED_OUT) {
+        say(SIGKILL)
+        return await stop(said, 137)
+      }
+      return await ended(sink, held, said, how.preserve ? late.exitCode : 124, true)
+    }
+    if (SELF_KILLING_SIGNALS.has(signal) && (!foreground || signal === SIGKILL)) {
+      return await stop(said, 128 + signal)
+    }
+    return await stop(said, how.preserve ? 128 + signal : 124)
+  } finally {
+    kill.cancel()
   }
-  abort.abort()
-  if (SELF_KILLING_SIGNALS.has(signal) && (!foreground || signal === SIGKILL)) {
-    return ended(sink, held, said, 128 + signal)
-  }
-  return ended(sink, held, said, how.preserve ? 128 + signal : 124)
 }
 
 /**

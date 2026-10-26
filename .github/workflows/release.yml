@@ -19,6 +19,7 @@ jobs:
   # version, bumped by hand, so a drift stops here.
   versions:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     outputs:
       npm-tag: ${{ steps.check.outputs.npm-tag }}
       npm-packages: ${{ steps.check.outputs.npm-packages }}
@@ -38,6 +39,7 @@ jobs:
   npm:
     needs: versions
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-node-pnpm
@@ -72,6 +74,7 @@ jobs:
     if: github.event_name == 'push' && github.ref_type == 'tag'
     needs: [wheels, npm]
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     environment: pypi
     permissions:
       id-token: write
@@ -92,6 +95,7 @@ jobs:
     if: github.event_name == 'push' && github.ref_type == 'tag'
     needs: [versions, publish-pypi]
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     environment: npm
     permissions:
       id-token: write

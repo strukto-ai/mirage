@@ -168,8 +168,8 @@ export class IndexView extends IndexCacheStore {
     })
   }
 
-  async listDir(path: string): Promise<ListResult> {
-    const result = await this.fencedListDir(path)
+  async listDir(path: string, child?: string): Promise<ListResult> {
+    const result = await this.fencedListDir(path, child)
     // Asked outside the fence, since a gate may reach the backend, and only
     // about a listing the store has: a NOT_FOUND must stay one. A refusal
     // leaves the listing stored for the re-list to diff.
@@ -183,10 +183,10 @@ export class IndexView extends IndexCacheStore {
     return result
   }
 
-  private fencedListDir(path: string): Promise<ListResult> {
+  private fencedListDir(path: string, child: string | undefined): Promise<ListResult> {
     return this.fence(async () => {
       if (!this.owns(path)) return { status: LookupStatus.NOT_FOUND }
-      const result = await this.inner.listDir(path)
+      const result = await this.inner.listDir(path, child)
       if (!this.owns(path)) return { status: LookupStatus.NOT_FOUND }
       // A child of a folder this mount owns is its own too, unless a nested
       // mount sits at that very name.

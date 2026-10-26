@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.accessor.base import Accessor
+from mirage.accessor.base import TokenAccessor
 from mirage.core.gcal.api import CalendarApi, CalendarClient
 from mirage.core.gdocs.api import DocsApi, DocsClient
 from mirage.core.gdrive.api import DriveApi, DriveClient
@@ -21,10 +21,11 @@ from mirage.core.google.client import TokenManager
 from mirage.core.google.config import GoogleConfig
 from mirage.core.gsheets.api import SheetsApi, SheetsClient
 from mirage.core.gslides.api import SlidesApi, SlidesClient
-from mirage.utils.clock import Clock
 
 
-class GoogleApiAccessor(Accessor):
+class GoogleApiAccessor(TokenAccessor):
+    token_manager: TokenManager
+
     def __init__(
         self, config: GoogleConfig, token_manager: TokenManager
     ) -> None:
@@ -60,15 +61,3 @@ class GoogleApiAccessor(Accessor):
     def calendar(self) -> CalendarApi:
         """The one door every Calendar request goes through."""
         return CalendarClient(self.token_manager)
-
-    async def close(self) -> None:
-        """Drain the token manager's connection pool. Idempotent."""
-        await self.token_manager.close()
-
-    def bind_clock(self, clock: Clock) -> None:
-        """Read token expiry and retry waits on the workspace's clock.
-
-        Args:
-            clock (Clock): the workspace's clock.
-        """
-        self.token_manager.bind_clock(clock)

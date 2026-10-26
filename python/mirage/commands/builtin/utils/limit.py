@@ -14,7 +14,6 @@
 
 import asyncio
 import logging
-import time
 from collections.abc import AsyncIterator, Awaitable
 from typing import TypeVar
 
@@ -24,6 +23,8 @@ from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.types import Limit, OnExceed
 
 logger = logging.getLogger(__name__)
+
+TRUNCATION_NOTICE = "output truncated at limit"
 T = TypeVar("T")
 
 
@@ -33,11 +34,12 @@ async def with_timeout(
     command: str,
 ) -> AsyncIterator[bytes]:
     stream = ensure_stream(src)
-    start = time.monotonic()
+    loop = asyncio.get_running_loop()
+    start = loop.time()
     iterator = stream.__aiter__()
     try:
         while True:
-            remaining = seconds - (time.monotonic() - start)
+            remaining = seconds - (loop.time() - start)
             if remaining <= 0:
                 raise CommandTimeoutError(command, seconds)
             try:
@@ -142,7 +144,7 @@ def _build_notice(limit: Limit) -> bytes:
         parts.append(f"{limit.max_bytes} bytes")
     detail = " / ".join(parts)
     return (
-        f"output truncated at limit ({detail}); "
+        f"{TRUNCATION_NOTICE} ({detail}); "
         "narrow the selection or raise command_limits for this command\n"
     ).encode()
 

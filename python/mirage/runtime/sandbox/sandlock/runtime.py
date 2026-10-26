@@ -83,13 +83,15 @@ class SandlockRuntime(
         paths: list[PathSpec],
         texts: list[str],
         ctx: Context,
+        output: OutputFn | None = None,
+        errors: OutputFn | None = None,
     ) -> RunResult:
         line = ctx.flags.get("c")
         return await self._run_process(
             ["/bin/sh", "-c", line if isinstance(line, str) else ""],
             ctx,
-            None,
-            None,
+            output,
+            errors,
         )
 
     async def run_process(
@@ -98,7 +100,7 @@ class SandlockRuntime(
         paths: list[PathSpec],
         texts: list[str],
         ctx: Context,
-        output: OutputFn | None,
+        output: OutputFn | None = None,
         errors: OutputFn | None = None,
     ) -> RunResult:
         return await self._run_process(texts, ctx, output, errors)

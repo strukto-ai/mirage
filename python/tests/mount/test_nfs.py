@@ -26,6 +26,7 @@ from mirage import MountMode, Workspace
 from mirage.mount import nfs
 from mirage.mount.core import MountCore
 from mirage.mount.nfs import MirageNFSServer, mount_args, unmount_args
+from mirage.runtime.handles.mode import READ, OpenMode
 from mirage.vfs.disk import DiskVFS
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace.session.session import SessionState
@@ -147,9 +148,11 @@ class Counting(MountCore):
         self.opened: list[str] = []
         self.released: list[int] = []
 
-    async def open(self, path: str, flags: int = 0) -> int:
+    async def open(
+        self, path: str, mode: OpenMode = READ, perm: int | None = None
+    ) -> int:
         self.opened.append(path)
-        return await super().open(path, flags)
+        return await super().open(path, mode, perm)
 
     async def release(self, fh: int) -> None:
         self.released.append(fh)
@@ -405,6 +408,46 @@ async def test_a_listing_pages_by_name_and_a_later_page_sees_a_new_hide() -> (
         await server.close()
 
 
+@pytest.mark.asyncio
+async def test_a_page_whose_names_all_vanished_pages_on(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
+    await ws.shell(
+        "mkdir /d && for i in $(seq 100 299); do echo > /d/f$i; done"
+    )
+    core = MountCore.getattr
+
+    async def getattr(self, path, follow=False, ctx=None):
+        if path.startswith("/d/f") and path < "/d/f250":
+            raise FileNotFoundError(path)
+        return await core(self, path, follow, ctx)
+
+    monkeypatch.setattr(MountCore, "getattr", getattr)
+    server = MirageNFSServer(MountCore(ws.vfs), secure=False)
+    port = await server.start()
+    reader, writer = await asyncio.open_connection("127.0.0.1", port)
+    client = Client(reader, writer)
+    try:
+        directory = await client.handle("d")
+        listed, eof = await client.readdir(directory, 0, 512)
+        assert listed or not eof
+        cookie = listed[-1][1] if listed else 0
+        for _ in range(200):
+            if eof:
+                break
+            page, eof = await client.readdir(directory, cookie, 512)
+            listed += page
+            cookie = page[-1][1] if page else cookie
+        assert [name for name, _ in listed] == [
+            f"f{i}" for i in range(250, 300)
+        ]
+        assert eof
+    finally:
+        writer.close()
+        await server.close()
+
+
 class Gated(Counting):
     def __init__(self, ws: Workspace, session: SessionState) -> None:
         super().__init__(ws, session)
@@ -414,11 +457,13 @@ class Gated(Counting):
         self.hold_open: asyncio.Future[None] | None = None
         self.hold_release: asyncio.Future[None] | None = None
 
-    async def open(self, path: str, flags: int = 0) -> int:
+    async def open(
+        self, path: str, mode: OpenMode = READ, perm: int | None = None
+    ) -> int:
         self.opening.append(path)
         if self.hold_open is not None:
             await self.hold_open
-        fh = await super().open(path, flags)
+        fh = await super().open(path, mode, perm)
         self.fhs.append(fh)
         return fh
 
@@ -479,9 +524,11 @@ async def test_a_reset_after_a_session_change_keeps_handles_opened_since() -> (
 
 
 class Slow(Counting):
-    async def open(self, path: str, flags: int = 0) -> int:
+    async def open(
+        self, path: str, mode: OpenMode = READ, perm: int | None = None
+    ) -> int:
         await asyncio.sleep(0.01)
-        return await super().open(path, flags)
+        return await super().open(path, mode, perm)
 
 
 @pytest.mark.asyncio

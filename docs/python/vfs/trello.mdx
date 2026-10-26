@@ -84,7 +84,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Trello mounted at `/<path>`
 
     | Path | Supported |
     | --- | --- |
-    | `/<path>` | Commands that read files (`ls`, `cat`, `grep`, `find`, `jq` and the rest). `grep -r` and `rg` with `-w` use `trello` search. |
+    | `/<path>` | Commands that read files (`ls`, `cat`, `grep`, `find`, `jq` and the rest). `grep -r` and `rg` with `-w` ask `trello` which files may match. |
 
     #### Limitations of Unix Commands for VFS
 
@@ -92,7 +92,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Trello mounted at `/<path>`
 
     | Path | Limitations |
     | --- | --- |
-    | `/<path>` | Read only: no command changes files. Without `-w`, `grep -r` and `rg` read every file. `trello` search covers only `workspaces/*/boards/*/lists/*/cards/*/card.json`; `grep -r` and `rg` read every other file. `grep -r`, `find` and `du` stop after 1000 files; a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. |
+    | `/<path>` | Read only: no command changes files. Without `-w`, `grep -r` and `rg` read every file. `trello` answers only for `workspaces/*/boards/*/lists/*/cards/*/card.json`; `grep -r` and `rg` read every other file. `grep -r`, `find` and `du` stop after 1000 files; a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. |
 
     Run `man` to list every command, and `man <cmd>` or `<cmd> --help` for one command's usage.
   </Tab>
@@ -143,7 +143,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Trello mounted at `/<path>`
 
     | Path | Supported |
     | --- | --- |
-    | `/<path>` | Commands that read files (`ls`, `cat`, `grep`, `find`, `jq` and the rest). `grep -r` and `rg` with `-w` use `trello` search. |
+    | `/<path>` | Commands that read files (`ls`, `cat`, `grep`, `find`, `jq` and the rest). `grep -r` and `rg` with `-w` ask `trello` which files may match. |
 
     ## Limitations of Unix Commands for VFS
 
@@ -151,7 +151,7 @@ The [VFS.md](/home/setup/vfs-md) an agent reads with Trello mounted at `/<path>`
 
     | Path | Limitations |
     | --- | --- |
-    | `/<path>` | Read only: no command changes files. Without `-w`, `grep -r` and `rg` read every file. `trello` search covers only `workspaces/*/boards/*/lists/*/cards/*/card.json`; `grep -r` and `rg` read every other file. `grep -r`, `find` and `du` stop after 1000 files; a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. |
+    | `/<path>` | Read only: no command changes files. Without `-w`, `grep -r` and `rg` read every file. `trello` answers only for `workspaces/*/boards/*/lists/*/cards/*/card.json`; `grep -r` and `rg` read every other file. `grep -r`, `find` and `du` stop after 1000 files; a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. |
 
     Run `man` to list every command, and `man <cmd>` or `<cmd> --help` for one command's usage.
     ````

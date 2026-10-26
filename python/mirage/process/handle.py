@@ -6,8 +6,9 @@ from collections.abc import Callable
 from concurrent.futures import Future
 from dataclasses import replace
 from threading import RLock
-from typing import Protocol
+from typing import Protocol, cast
 
+from mirage.concurrency.limiter import owned_task
 from mirage.process.types import ProcessInfo, ProcessRunner, ProcessState
 
 logger = logging.getLogger(__name__)
@@ -33,7 +34,13 @@ class ProcessHandle:
     signal ended. Joining waits for the runner, including its finally
     blocks; it does not assert that a provider has stopped native
     descendants. A cancelled waiter never cancels the runner.
+
+    The runner starts once ``start`` is called, so whoever tracks the
+    handle registers it before even a synchronous prelude of the runner
+    runs.
     """
+
+    task: asyncio.Task[int]
 
     def __init__(
         self,
@@ -44,16 +51,38 @@ class ProcessHandle:
         bind: ExecutionBind | None = None,
     ) -> None:
         self._info = info
+        self._run = run
+        self._bind = bind
         self._lock = RLock()
         self._finished = finished
         self._cancel_children = cancel_children
         self._signal: int | None = None
         self._program_code: int | None = None
         self._completion: Future[ProcessInfo] = Future()
-        self.task = asyncio.create_task(
-            run() if bind is None else bind(info.execution_id, run, self)
-        )
-        self.task.add_done_callback(self._settle)
+        self.begun = False
+
+    def start(self, eager: bool = False) -> None:
+        """Start the runner.
+
+        Args:
+            eager (bool): run it at once, up to its first wait, so a
+                runner that never waits is done, and settled, before
+                this returns and costs the loop no turn; otherwise it
+                starts on the loop's next turn.
+        """
+        work = self._work()
+        self.task = owned_task(work) if eager else asyncio.create_task(work)
+        if self.task.done():
+            self._settle(self.task)
+        else:
+            self.task.add_done_callback(self._settle)
+
+    async def _work(self) -> int:
+        self.task = cast("asyncio.Task[int]", asyncio.current_task())
+        self.begun = True
+        if self._bind is None:
+            return await self._run()
+        return await self._bind(self._info.execution_id, self._run, self)
 
     @property
     def info(self) -> ProcessInfo:

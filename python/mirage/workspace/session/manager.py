@@ -23,6 +23,8 @@ from mirage.policy.types import AdmissionRules, Decision, ProfileScripts
 from mirage.secrets.config import EnvVar
 from mirage.shell.variable import ShellVar
 from mirage.types import MountMode
+from mirage.utils.clock import Clock, SystemClock
+from mirage.utils.ids import IdSource, SystemIdSource
 from mirage.workspace.mount.namespace.ram import RAMNamespaceStore
 from mirage.workspace.mount.namespace.store import NamespaceStore
 from mirage.workspace.record.types import (
@@ -80,6 +82,18 @@ class SessionManager(SessionOwner):
     execute, snapshot, explicit persist). ``close``
     deletes from the store — closing a session revokes it everywhere —
     while process shutdown leaves stored sessions in place.
+
+    Args:
+        default_session_id (str): the id of the session made now.
+        store (NamespaceStore | None): where sessions persist; None keeps
+            them in memory.
+        seed_vars (dict[str, ShellVar] | None): the workspace's env
+            block, the template every session starts from.
+        clock (Clock | None): the workspace clock a session's
+            ``created_at`` is read on; None is the system clock.
+        ids (IdSource | None): the workspace's id source, which each
+            session's ``$RANDOM`` first draws from; None is the system
+            source.
     """
 
     def __init__(
@@ -87,8 +101,12 @@ class SessionManager(SessionOwner):
         default_session_id: str,
         store: NamespaceStore | None = None,
         seed_vars: dict[str, ShellVar] | None = None,
+        clock: Clock | None = None,
+        ids: IdSource | None = None,
     ) -> None:
         self._default_id = default_session_id
+        self._clock: Clock = clock if clock is not None else SystemClock()
+        self._ids: IdSource = ids if ids is not None else SystemIdSource()
         self._store = store if store is not None else RAMNamespaceStore()
         self._sessions: dict[str, SessionState] = {}
         self._locks: dict[str, asyncio.Lock] = {}
@@ -106,7 +124,10 @@ class SessionManager(SessionOwner):
             var.managed is not None for var in self._seed_vars.values()
         )
         self._sessions[default_session_id] = SessionState(
-            session_id=default_session_id, vars=dict(self._seed_vars)
+            session_id=default_session_id,
+            vars=dict(self._seed_vars),
+            created_at=self._clock.now(),
+            ids=self._ids,
         )
         self._locks[default_session_id] = asyncio.Lock()
         self._loaded = False
@@ -363,6 +384,7 @@ class SessionManager(SessionOwner):
                 if sid in self._sessions:
                     continue
                 session = SessionState.from_dict(fields)
+                session.ids = self._ids
                 self._sessions[sid] = session
                 self._locks[sid] = asyncio.Lock()
                 self._persisted[sid] = copy.deepcopy(session.to_dict())
@@ -484,7 +506,11 @@ class SessionManager(SessionOwner):
         if env is not None:
             seeded.update(vars_from_entries(env))
         session = SessionState(
-            session_id=session_id, mount_modes=mount_modes, vars=seeded
+            session_id=session_id,
+            mount_modes=mount_modes,
+            vars=seeded,
+            created_at=self._clock.now(),
+            ids=self._ids,
         )
         if profile is not None:
             apply_profile(session, profile)

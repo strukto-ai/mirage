@@ -216,6 +216,28 @@ async def _slowly(line: str, monkeypatch: pytest.MonkeyPatch) -> str:
     return await (await ws.shell(line)).stdout_str()
 
 
+# Runners begin in the order they were started: a job begins before the
+# subshell or substitution after it in its line, and before the next
+# line, so each reads what the job's redirect wrote.
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "lines",
+    [
+        ["echo hi > /m/a & (cat /m/a); wait"],
+        ['echo hi > /m/a & echo "$(cat /m/a)"; wait'],
+        ["echo hi > /m/a &", "cat /m/a; wait"],
+    ],
+)
+async def test_a_job_begins_before_what_its_line_runs_next(lines):
+    ws = _workspace()
+    for line in lines:
+        result = await ws.shell(line)
+    assert (await result.stdout_str(), await result.stderr_str()) == (
+        "hi\n",
+        "",
+    )
+
+
 def test_a_job_writing_while_its_redirect_opens_the_file_keeps_both(
     monkeypatch: pytest.MonkeyPatch,
 ):

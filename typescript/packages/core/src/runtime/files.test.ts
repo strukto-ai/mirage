@@ -13,11 +13,24 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it, vi } from 'vitest'
+import { getTestParser } from '../../tests/workspace/fixtures/workspace_fixture.ts'
 import { enotsup } from '../errors/fs.ts'
-import { ContentType, DEVICE_NUMBERS_KEY, FileStat, FileType } from '../types.ts'
+import { MountCore } from '../mount/core.ts'
+import {
+  ContentType,
+  DEVICE_NUMBERS_KEY,
+  FileStat,
+  FileType,
+  MountMode,
+  PathSpec,
+} from '../types.ts'
 import { CHAR_MODE, DIR_MODE, DIR_SIZE, FILE_MODE, LINK_MODE } from '../utils/stat_view.ts'
+import { RAMVFS } from '../vfs/ram/ram.ts'
+import { Workspace } from '../workspace/workspace/workspace.ts'
+import { workspaceBridge } from './binding.ts'
 import { LISTING_ENTRY_CONCURRENCY } from './constants.ts'
 import { CrossMountError } from './errors.ts'
+import { parseMode } from './handles/index.ts'
 import type { BridgeDispatchFn } from './types.ts'
 import { RuntimeFiles } from './files.ts'
 import { PrefixResolver } from './resolver.ts'
@@ -45,13 +58,6 @@ describe('RuntimeFiles transport', () => {
     await expect(live.write('/ram/y', data)).rejects.toThrow('revoked')
     expect(dispatch).toHaveBeenCalledTimes(1)
     expect(await files.read('/ram/x')).toBe(data)
-  })
-
-  it('forwards retained bytes through the same read boundary', async () => {
-    const retained = enc.encode('held')
-    const dispatch = vi.fn<BridgeDispatchFn>(() => Promise.resolve(retained))
-    expect(await new RuntimeFiles(dispatch).readCached('/ram/x.txt', retained)).toBe(retained)
-    expect(dispatch).toHaveBeenCalledWith('read', '/ram/x.txt', undefined, undefined, { retained })
   })
 
   it('forwards a ranged and a raw read as the read attrs', async () => {
@@ -378,18 +384,14 @@ describe('RuntimeFiles transport', () => {
     await expect(refused).rejects.toThrow(message)
   })
 
-  it('forwards create and truncate as their own ops, never a write', async () => {
-    // The bridge used to lack both verbs, so quickjs faked them with
-    // write: the ledger recorded the wrong op and a backend with a
-    // native truncate got a whole-file write instead.
+  it('forwards truncate as its own op, never a write', async () => {
+    // The bridge used to lack the verb, so quickjs faked it with write:
+    // the ledger recorded the wrong op and a backend with a native
+    // truncate got a whole-file write instead.
     const dispatch = vi.fn<BridgeDispatchFn>(() => Promise.resolve(undefined))
     const vfs = new RuntimeFiles(dispatch)
-    await vfs.create('/ram/new.txt')
     await vfs.truncate('/ram/old.txt')
-    expect(dispatch.mock.calls.map((c) => [c[0], c[1]])).toEqual([
-      ['create', '/ram/new.txt'],
-      ['truncate', '/ram/old.txt'],
-    ])
+    expect(dispatch.mock.calls.map((c) => [c[0], c[1]])).toEqual([['truncate', '/ram/old.txt']])
   })
 })
 
@@ -589,72 +591,42 @@ describe('RuntimeFiles append', () => {
   })
 })
 
-describe('RuntimeFiles flush', () => {
-  it('sends each step of a plan in order', async () => {
-    const dispatch = vi.fn<BridgeDispatchFn>(() => Promise.resolve(undefined))
-    await new RuntimeFiles(dispatch, new PrefixResolver(() => ['/a'])).flush('/a/x', [
-      { kind: 'truncate', length: 2 },
-      { kind: 'pwrite', data: enc.encode('z'), offset: 4 },
-      { kind: 'append', data: enc.encode('!') },
-    ])
-    expect(dispatch.mock.calls).toEqual([
-      ['truncate', '/a/x', undefined, undefined, { length: 2 }],
-      ['pwrite', '/a/x', enc.encode('z'), undefined, { offset: 4 }],
-      ['append', '/a/x', enc.encode('!')],
-    ])
-  })
-})
-
-it('preserves unknown source metadata and checks logical changes in retained stat', async () => {
-  const source = new FileStat({
-    name: 'unknown',
-    type: FileType.FILE,
-    uid: 'owner',
-    modified: '2026-07-15T00:00:00Z',
-    extra: { policy_tag: 'secret' },
-  })
-  const seen: FileStat[] = []
-  const dispatch: BridgeDispatchFn = (op, path, _bytes, _dst, attrs) => {
-    expect(op).toBe('stat')
-    expect(path).toBe('/data/unknown')
-    if (attrs?.retained !== undefined) {
-      expect(attrs.retained).toBeInstanceOf(FileStat)
-      seen.push(attrs.retained as FileStat)
-      return Promise.resolve(attrs.retained)
+describe('RuntimeFiles over a core', () => {
+  it('lets an fstat see a change by path at once', async () => {
+    // A change by path the guest makes past the core's own ops (utimes,
+    // chmod, a whole-file write) reaches the files open there at once, as
+    // fstat after utime(2) does. Mirrors test_files.py.
+    const ws = new Workspace(
+      { '/data': new RAMVFS() },
+      { mode: MountMode.WRITE, shellParser: await getTestParser() },
+    )
+    try {
+      await ws.vfs.write('/data/a.txt', enc.encode('abc'))
+      const files = new RuntimeFiles(
+        workspaceBridge(
+          async (name, path, args, kwargs) =>
+            (await ws.vfs.dispatch(name, PathSpec.fromStrPath(path), args, kwargs))[0],
+        ),
+        undefined,
+        null,
+        new MountCore(ws.vfs),
+      )
+      const fd = await files.open('/data/a.txt', parseMode('r'))
+      try {
+        await files.fstat(fd)
+        const stamp = new Date(981173106 * 1000)
+        await files.setattr('/data/a.txt', { mode: 0o600, mtime: stamp.toISOString() })
+        const row = await files.fstat(fd)
+        expect([row.mode & 0o777, row.mtimeMs]).toEqual([0o600, stamp.getTime()])
+        await files.write('/data/a.txt', enc.encode('abcdef'))
+        expect((await files.fstat(fd)).size).toBe(6)
+        await files.append('/data/a.txt', enc.encode('gh'))
+        expect((await files.fstat(fd)).size).toBe(8)
+      } finally {
+        await files.close(fd)
+      }
+    } finally {
+      await ws.close()
     }
-    return Promise.resolve(source)
-  }
-  const files = new RuntimeFiles(dispatch)
-  const row = await files.stat('/data/unknown')
-  expect(await files.statCached('/data/unknown', row)).toEqual(row)
-  expect(seen[0]).toEqual(source)
-  expect(seen[0]?.size).toBeNull()
-  expect((await files.statCached('/data/unknown', { ...row, size: 7, mode: 0o100600 })).size).toBe(
-    7,
-  )
-  expect(seen[1]).toMatchObject({
-    size: 7,
-    mode: 0o100600,
-    uid: 'owner',
-    modified: source.modified,
-    extra: source.extra,
   })
-})
-
-it('leaves out of a retained stat the times the backend never gave', async () => {
-  // A runtime fills a missing time for its guest; the policy sees the
-  // backend's row without it.
-  const source = new FileStat({ name: 'f', type: FileType.FILE, size: 3 })
-  const seen: FileStat[] = []
-  const dispatch: BridgeDispatchFn = (_op, _path, _bytes, _dst, attrs) => {
-    if (attrs?.retained !== undefined) {
-      seen.push(attrs.retained as FileStat)
-      return Promise.resolve(attrs.retained)
-    }
-    return Promise.resolve(source)
-  }
-  const files = new RuntimeFiles(dispatch)
-  const row = { ...(await files.stat('/data/f')), mtimeMs: 1, atimeMs: 1 }
-  expect(await files.statCached('/data/f', row)).toEqual(row)
-  expect([seen[0]?.modified ?? null, seen[0]?.atime ?? null]).toEqual([null, null])
 })

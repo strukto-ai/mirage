@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { readFileSync } from 'node:fs'
-import { WorkspaceBinding } from '../../binding.ts'
 import type { Context } from '../../../commands/config.ts'
 import type { Program, RunResult } from '../../types.ts'
 import { PyodideWorkerClient } from './worker/client.ts'
@@ -31,6 +30,7 @@ import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { MountMode } from '../../../types.ts'
 import { getTestParser } from '../../../../tests/workspace/fixtures/workspace_fixture.ts'
 import { context } from '../../../../tests/workspace/fixtures/context.ts'
+import { bindOver, runContext } from '../../../../tests/runtime/fixtures/bridge.ts'
 
 /** Run a resolved program; pyodide has no engine, so the run queues at the call. */
 function interpret(
@@ -38,7 +38,7 @@ function interpret(
   program: Partial<Program> & { code: string },
   extra: Partial<Context> = {},
 ): Promise<RunResult> {
-  return rt.interpret(undefined, { args: [], stdin: null, ...program }, context(extra))
+  return rt.interpret(undefined, { args: [], stdin: null, ...program }, runContext(rt, extra))
 }
 
 /** An empty cwd: the interpreter stays in the directory it started in. */
@@ -62,11 +62,10 @@ describe('Pyodide execution lifetime', { timeout: 120_000 }, () => {
   it.each(['inline', 'worker'] as const)('isolates commands (%s)', async (mode) => {
     const rt = new PyodideRuntime({ config: { autoLoadFromImports: false } })
     if (mode !== 'inline') {
-      rt.bind(
-        WorkspaceBinding.overBridge(
-          () => Promise.reject(new Error('unexpected filesystem operation')),
-          new PrefixResolver(() => []),
-        ),
+      bindOver(
+        rt,
+        () => Promise.reject(new Error('unexpected filesystem operation')),
+        new PrefixResolver(() => []),
       )
     }
     const mutate =
@@ -99,19 +98,18 @@ describe('Pyodide concurrency', { timeout: 120_000 }, () => {
       )
       const create = vi.spyOn(PyodideWorkerClient, 'create')
       const pending: Promise<unknown>[] = []
-      rt.bind(
-        WorkspaceBinding.overBridge(
-          async (op, path, _bytes, _dst, attrs) => {
-            if (attrs?.retained !== undefined) return attrs.retained
-            if (op === 'stat') return new FileStat({ name: path, type: FileType.FILE, size: 5 })
-            const read = reads.get(path.slice('/data/'.length))
-            if (op !== 'read' || read === undefined) throw new Error(`unexpected ${op}: ${path}`)
-            read.entered.resolve()
-            await read.release.promise
-            return new TextEncoder().encode(getCurrentSession()?.sessionId ?? 'missing')
-          },
-          new PrefixResolver(() => ['/data/']),
-        ),
+      bindOver(
+        rt,
+        async (op, path, _bytes, _dst, attrs) => {
+          if (attrs?.retained !== undefined) return attrs.retained
+          if (op === 'stat') return new FileStat({ name: path, type: FileType.FILE, size: 5 })
+          const read = reads.get(path.slice('/data/'.length))
+          if (op !== 'read' || read === undefined) throw new Error(`unexpected ${op}: ${path}`)
+          read.entered.resolve()
+          await read.release.promise
+          return new TextEncoder().encode(getCurrentSession()?.sessionId ?? 'missing')
+        },
+        new PrefixResolver(() => ['/data/']),
       )
       const run = (name: string) =>
         runWithSession(new SessionState({ sessionId: name }), () =>
@@ -186,22 +184,21 @@ describe('Pyodide concurrency', { timeout: 120_000 }, () => {
       const started = gate()
       const release = gate()
       const rt = new PyodideRuntime({ config: { maxConcurrency: 2 } })
-      rt.bind(
-        WorkspaceBinding.overBridge(
-          async (op, path, _bytes, _dst, attrs) => {
-            if (attrs?.retained !== undefined) return attrs.retained
-            if (op === 'stat') return new FileStat({ name: path, type: FileType.FILE, size: 4 })
-            if (op !== 'read') throw new Error(`unexpected ${op}: ${path}`)
-            if (path === '/data/started') {
-              started.resolve()
-              return new TextEncoder().encode('busy')
-            }
-            entered.resolve()
-            await release.promise
-            return new TextEncoder().encode('safe')
-          },
-          new PrefixResolver(() => ['/data/']),
-        ),
+      bindOver(
+        rt,
+        async (op, path, _bytes, _dst, attrs) => {
+          if (attrs?.retained !== undefined) return attrs.retained
+          if (op === 'stat') return new FileStat({ name: path, type: FileType.FILE, size: 4 })
+          if (op !== 'read') throw new Error(`unexpected ${op}: ${path}`)
+          if (path === '/data/started') {
+            started.resolve()
+            return new TextEncoder().encode('busy')
+          }
+          entered.resolve()
+          await release.promise
+          return new TextEncoder().encode('safe')
+        },
+        new PrefixResolver(() => ['/data/']),
       )
       const controller = new AbortController()
       const pending: Promise<unknown>[] = []
@@ -244,6 +241,122 @@ describe('Pyodide concurrency', { timeout: 120_000 }, () => {
       }
     },
   )
+
+  it('truncates nothing when its open stat revokes the run', async () => {
+    const rt = new PyodideRuntime()
+    const controller = new AbortController()
+    const calls: string[] = []
+    bindOver(
+      rt,
+      (op, path, _bytes, _dst, attrs) => {
+        if (attrs?.retained !== undefined) return Promise.resolve(attrs.retained)
+        calls.push(op)
+        if (op === 'stat') {
+          controller.abort()
+          return Promise.resolve(new FileStat({ name: path, type: FileType.FILE, size: 3 }))
+        }
+        return Promise.resolve(op === 'read' ? new TextEncoder().encode('abc') : undefined)
+      },
+      new PrefixResolver(() => ['/data/']),
+    )
+    try {
+      await interpret(rt, { code: "open('/data/f', 'w')" }, { signal: controller.signal }).catch(
+        () => undefined,
+      )
+      expect(calls).not.toContain('truncate')
+      expect(calls).not.toContain('write')
+    } finally {
+      await rt.close()
+    }
+  })
+
+  it('lands what it wrote before its run was revoked', async () => {
+    const rt = new PyodideRuntime()
+    const controller = new AbortController()
+    const calls: string[] = []
+    const missing = (): Promise<never> =>
+      Promise.reject(Object.assign(new Error('missing'), { code: 'ENOENT' }))
+    let made = false
+    bindOver(
+      rt,
+      (op, path, _bytes, _dst, attrs) => {
+        if (attrs?.retained !== undefined) return Promise.resolve(attrs.retained)
+        calls.push(`${op} ${path}`)
+        if (path === '/data/out') {
+          if (op === 'create') made = true
+          if (op === 'readdir' || (op === 'stat' && !made)) return missing()
+          if (op === 'stat')
+            return Promise.resolve(new FileStat({ name: 'out', type: FileType.FILE, size: 0 }))
+          return Promise.resolve(undefined)
+        }
+        if (op === 'stat')
+          return Promise.resolve(new FileStat({ name: path, type: FileType.FILE, size: 3 }))
+        if (op !== 'read') return Promise.resolve(undefined)
+        controller.abort()
+        return Promise.resolve(new TextEncoder().encode('abc'))
+      },
+      new PrefixResolver(() => ['/data/']),
+    )
+    try {
+      await interpret(
+        rt,
+        {
+          code: [
+            'import os',
+            "fd = os.open('/data/out', os.O_WRONLY | os.O_CREAT)",
+            "os.write(fd, b'kept')",
+            "open('/data/f').read()",
+            'os.close(fd)',
+          ].join('\n'),
+        },
+        { signal: controller.signal },
+      ).catch(() => undefined)
+      expect(calls).toContain('pwrite /data/out')
+    } finally {
+      await rt.close()
+    }
+  })
+
+  it('starts no child once the flush before it revokes the run', async () => {
+    const rt = new PyodideRuntime()
+    const controller = new AbortController()
+    const calls: string[] = []
+    const missing = (): Promise<never> =>
+      Promise.reject(Object.assign(new Error('missing'), { code: 'ENOENT' }))
+    let made = false
+    bindOver(
+      rt,
+      (op, path, _bytes, _dst, attrs) => {
+        if (attrs?.retained !== undefined) return Promise.resolve(attrs.retained)
+        calls.push(`${op} ${path}`)
+        if (op === 'create') made = true
+        if (op === 'pwrite') controller.abort()
+        if (op === 'readdir' || (op === 'stat' && !made)) return missing()
+        if (op === 'stat')
+          return Promise.resolve(new FileStat({ name: path, type: FileType.FILE, size: 0 }))
+        return Promise.resolve(undefined)
+      },
+      new PrefixResolver(() => ['/data/']),
+    )
+    try {
+      await interpret(
+        rt,
+        {
+          code: [
+            'import os, subprocess',
+            "fd = os.open('/data/out', os.O_WRONLY | os.O_CREAT)",
+            "os.write(fd, b'kept')",
+            "subprocess.run(['/data/tool'])",
+          ].join('\n'),
+        },
+        { signal: controller.signal },
+      ).catch(() => undefined)
+      expect(calls).toContain('pwrite /data/out')
+      expect(calls).not.toContain('stat /data/tool')
+    } finally {
+      await rt.close()
+    }
+  })
 })
 
 describe('Python guest module', { timeout: 120_000 }, () => {
@@ -738,11 +851,10 @@ describe('Pyodide command cwd', { timeout: 120_000 }, () => {
   it('keeps executing with a cwd on an unsupported root mount', async () => {
     const rt = new PyodideRuntime()
     try {
-      rt.bind(
-        WorkspaceBinding.overBridge(
-          () => Promise.reject(new Error('root mount must not be read')),
-          new PrefixResolver(() => ['/']),
-        ),
+      bindOver(
+        rt,
+        () => Promise.reject(new Error('root mount must not be read')),
+        new PrefixResolver(() => ['/']),
       )
       const before = await defaultCwd(rt)
       const result = await interpret(
@@ -766,11 +878,10 @@ describe('Pyodide command cwd', { timeout: 120_000 }, () => {
 
   it('still rejects a missing cwd on a supported child of a root mount', async () => {
     const rt = new PyodideRuntime()
-    rt.bind(
-      WorkspaceBinding.overBridge(
-        () => Promise.reject(Object.assign(new Error('missing'), { code: 'ENOENT' })),
-        new PrefixResolver(() => ['/', '/data/']),
-      ),
+    bindOver(
+      rt,
+      () => Promise.reject(Object.assign(new Error('missing'), { code: 'ENOENT' })),
+      new PrefixResolver(() => ['/', '/data/']),
     )
     try {
       const result = await interpret(
@@ -864,11 +975,10 @@ it.each([false, true])(
     const execute = vi.spyOn(PyodideWorkerClient.prototype, 'execute')
     const rt = new PyodideRuntime()
     if (worker)
-      rt.bind(
-        WorkspaceBinding.overBridge(
-          () => Promise.reject(new Error('unexpected I/O')),
-          new PrefixResolver(() => ['/data/']),
-        ),
+      bindOver(
+        rt,
+        () => Promise.reject(new Error('unexpected I/O')),
+        new PrefixResolver(() => ['/data/']),
       )
     try {
       for (const [env, expected] of [

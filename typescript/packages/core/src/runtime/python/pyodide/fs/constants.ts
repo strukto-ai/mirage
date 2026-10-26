@@ -22,16 +22,16 @@ export const UMASK = 0o022
 
 export { BLKSIZE, BLOCK_UNIT } from '../../../../utils/stat_view.ts'
 
-// The open flags' access bits, as Emscripten numbers them.
-export const O_ACCMODE = 3
-
-// The open flag that puts every write at the end, as Emscripten numbers it.
-export const O_APPEND = 1024
+// The open flags, as Emscripten numbers them.
+export const FLAGS = {
+  O_WRONLY: 1,
+  O_RDWR: 2,
+  O_CREAT: 64,
+  O_EXCL: 128,
+  O_TRUNC: 512,
+  O_APPEND: 1024,
+} as const
 
 // llseek's whence, which Emscripten passes through as the raw number.
 export const SEEK_CUR = 1
 export const SEEK_END = 2
-
-// The smallest buffer a written file grows to; past it, each growth
-// doubles the capacity.
-export const GROW_FLOOR = 4096

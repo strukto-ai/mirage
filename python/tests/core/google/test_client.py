@@ -198,9 +198,10 @@ async def test_binding_another_clock_drops_a_refreshed_token():
     mgr = _manager()
     with _refresh_returning("token-1", "token-2"):
         assert await mgr.get_token() == "token-1"
-        mgr.bind_clock(mgr.clock)
+        mgr.bind_clock(mgr.clock, "a")
         assert await mgr.get_token() == "token-1"
-        mgr.bind_clock(ManualClock())
+        mgr.release_clock("a")
+        mgr.bind_clock(ManualClock(), "b")
         assert await mgr.get_token() == "token-2"
 
 
@@ -209,7 +210,7 @@ async def test_binding_another_system_clock_keeps_a_refreshed_token():
     mgr = _manager()
     with _refresh_returning("token-1") as refresh:
         assert await mgr.get_token() == "token-1"
-        mgr.bind_clock(SystemClock())
+        mgr.bind_clock(SystemClock(), "a")
         assert await mgr.get_token() == "token-1"
     refresh.assert_called_once()
 
@@ -218,7 +219,7 @@ async def test_binding_another_system_clock_keeps_a_refreshed_token():
 async def test_binding_another_clock_keeps_a_seeded_token():
     mgr = _manager()
     mgr.seed("minted", float("inf"))
-    mgr.bind_clock(ManualClock())
+    mgr.bind_clock(ManualClock(), "a")
     assert await mgr.get_token() == "minted"
 
 

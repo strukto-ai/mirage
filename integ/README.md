@@ -240,9 +240,10 @@ flowchart LR
     IN["integ/**<br/>command JSON + crossmount coverage gate"] --> core & ts & data
     D["data/**"] --> core
     RS["rust/**<br/>mirage-rs, built into both hosts"] --> core & ts & data & database & runtime
-    DB["mongodb · postgres · chroma · qdrant<br/>python layers, integ/vfs/&lt;name&gt;,<br/>integ/runners, targets.json"] --> database
+    DB["mongodb · postgres · chroma · qdrant<br/>python layers, the search CLI,<br/>integ/vfs/&lt;name&gt;, integ/runners, targets.json"] --> database
     OB["langfuse · jaeger layers<br/>integ/vfs/observability, seeds,<br/>integ/runners, targets.json"] --> observability
     FS["fuse and mount core modules,<br/>workspace fuse and nfs wiring<br/>integ/fuse, check_json.py"] --> fuse
+    FP["shared Rust policy and glob,<br/>native and Wasm bindings,<br/>rs/policy, hidden, path and session context adapters"] --> fuse
     RT["python/** and typescript/**<br/>minus the runtime drop list<br/>integ/runtime, integ/fixtures/runtime"] --> runtime
     core --> J1["integ"]
     ts --> J2["integ-ts"]
@@ -287,7 +288,7 @@ remain covered by the same whole-host filters on both hosts.
 | python or typescript source, except the runtime drop list below                                                      | runtime                           |
 | `integ/runtime/`, `integ/fixtures/runtime/`, `integ/tsconfig.json`                                                   | runtime                           |
 | `integ/package.json`                                                                                                 | runtime, fuse                     |
-| the python mongodb, postgres, chroma and qdrant layers; their `integ/vfs/` cases                                     | database                          |
+| the python mongodb, postgres, chroma and qdrant layers and the `search` CLI; their `integ/vfs/` cases                | database                          |
 | the langfuse and jaeger layers in either language; `integ/vfs/observability/`; the langfuse and jaeger seeds         | observability                     |
 | `integ/runners/`, `integ/targets.json`                                                                               | database, observability           |
 | the FUSE and mount core modules and the FUSE and NFS wiring in either language; `integ/fuse/`, `integ/check_json.py` | fuse                              |

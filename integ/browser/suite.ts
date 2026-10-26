@@ -416,11 +416,11 @@ const CHECKS: [string, Check][] = [
     },
   ],
   [
-    'a bundled regexp worker can be interrupted',
+    'a run of costly grep -P searches can be interrupted between them',
     async (ws) => {
       const controller = new AbortController()
       const running = aborted(
-        shell(ws, "printf 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa!\\n' | grep -P '^(a+)+$'", {
+        shell(ws, "seq 2000 | sed 's/.*/aaaaaaaaaaaaaaaaaax/' | grep -cP '^(a|a)+\\1c|x$'", {
           signal: controller.signal,
         }),
       )

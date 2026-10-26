@@ -14,7 +14,7 @@
 
 import { KeyLock } from '../lock.ts'
 import type { Clock } from '../../utils/clock.ts'
-import { uuid7 } from '../../utils/ids.ts'
+import { SystemIdSource, type IdSource } from '../../utils/ids.ts'
 import { loadOptionalPeer } from '../../utils/optional_peer.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import { FileStat, FileType } from '../../types.ts'
@@ -562,6 +562,13 @@ export interface RedisClientLike {
 export interface RedisIndexCacheOptions {
   ttl?: number
   clock?: Clock
+  /**
+   * Where generation and lease tokens are drawn; the system source by default.
+   * The tokens only fence clients of one server apart, so a seeded source,
+   * which mints the same tokens on every run, needs a server that is itself
+   * part of the replayed run.
+   */
+  ids?: IdSource
   url?: string
   client?: RedisClientLike
   keyPrefix?: string
@@ -587,9 +594,11 @@ export class RedisIndexCacheStore extends IndexCacheStore {
   private readonly pendingSeeds: PendingSeed[] = []
   private readonly listings: ListingMemo
   private closed = false
+  private readonly ids: IdSource
 
   constructor(options: RedisIndexCacheOptions = {}) {
     super(options.clock)
+    this.ids = options.ids ?? new SystemIdSource()
     this.ttl = options.ttl ?? 600
     this.url = options.url ?? 'redis://localhost:6379/0'
     this.providedClient = options.client ?? null
@@ -667,7 +676,7 @@ export class RedisIndexCacheStore extends IndexCacheStore {
       `${this.generationKey}:`,
     ]
     for (let attempt = 0; attempt < 3; attempt++) {
-      const candidate = String(Number.parseInt(uuid7().replaceAll('-', '').slice(-12), 16))
+      const candidate = String(Number.parseInt(this.ids.uuid7().replaceAll('-', '').slice(-12), 16))
       const [initialStatus, token] = (await c.eval(RECOVER_PATHS, {
         keys: [this.pathsKey],
         arguments: [candidate, 'begin'],
@@ -733,7 +742,7 @@ export class RedisIndexCacheStore extends IndexCacheStore {
       const current = await c.get(key)
       if (current !== null) return current
       // A new token after eviction must never revive an old listing.
-      const generation = uuid7()
+      const generation = this.ids.uuid7()
       if (key === this.generationKey) {
         await c.set(key, generation, { NX: true })
       } else {
@@ -771,7 +780,7 @@ export class RedisIndexCacheStore extends IndexCacheStore {
           // could stamp the pending snapshot with a replacement generation.
           for (const [i, path] of paths.entries()) {
             const token = current[i]
-            if (token == null) missing.set(path, uuid7())
+            if (token == null) missing.set(path, this.ids.uuid7())
             else directories.set(path, token)
           }
           if (missing.size > 0) {
@@ -814,7 +823,7 @@ export class RedisIndexCacheStore extends IndexCacheStore {
                 this.tombstonePrefix,
                 path,
                 this.entryPrefix,
-                lastSeed.get(path) === number ? uuid7() : '',
+                lastSeed.get(path) === number ? this.ids.uuid7() : '',
               ],
             })
           }
@@ -917,7 +926,7 @@ export class RedisIndexCacheStore extends IndexCacheStore {
           vfsPath,
           JSON.stringify(fresh),
           String(now.getTime() / 1000),
-          uuid7(),
+          this.ids.uuid7(),
         ],
       })
       await pipe.exec()
@@ -959,8 +968,8 @@ export class RedisIndexCacheStore extends IndexCacheStore {
    * while exactly one command is live is served from that command's memo,
    * under the same write counting and window.
    */
-  listDir(vfsPath: string): Promise<ListResult> {
-    return this.listings.read(vfsPath, () => this.readListing(vfsPath))
+  listDir(vfsPath: string, child?: string): Promise<ListResult> {
+    return this.listings.read(vfsPath, () => this.readListing(vfsPath), child)
   }
 
   private async readListing(vfsPath: string): Promise<[ListResult, number | null]> {
@@ -1059,7 +1068,7 @@ export class RedisIndexCacheStore extends IndexCacheStore {
             this.tombstonePrefix,
             `${this.generationKey}:`,
             '[]',
-            uuid7(),
+            this.ids.uuid7(),
             ...rows.flat(),
           ],
         })
@@ -1082,7 +1091,7 @@ export class RedisIndexCacheStore extends IndexCacheStore {
           this.tombstonePrefix,
           `${this.generationKey}:`,
           JSON.stringify(excluded.map(rstripSlash)),
-          uuid7(),
+          this.ids.uuid7(),
           ...rows.flat(),
         ],
       })) as [string[], number[]]
@@ -1114,7 +1123,7 @@ export class RedisIndexCacheStore extends IndexCacheStore {
           this.tombstonePrefix,
           `${this.generationKey}:`,
           vfsPath,
-          uuid7(),
+          this.ids.uuid7(),
         ],
       })
     })
@@ -1197,7 +1206,7 @@ export class RedisIndexCacheStore extends IndexCacheStore {
       await this.flushSeed()
       const c = await this.client()
       // Atomically expire listings without overwriting concurrent refills/deletions.
-      await c.set(this.generationKey, uuid7())
+      await c.set(this.generationKey, this.ids.uuid7())
     })
   }
 

@@ -21,9 +21,9 @@ import { rstripSlash, stripSlash } from '../../utils/slash.ts'
 import { listingAt, treeKey, type SlugTree } from './tree.ts'
 
 export function validateQuery(query: string, topK: number): void {
-  if (query === '') throw new Error('search: query is required')
-  if (query.length > 250) throw new Error('search: query cannot exceed 250 characters')
-  if (topK <= 0) throw new Error('search: top-k must be positive')
+  if (query === '') throw new Error('query is required')
+  if (query.length > 250) throw new Error('query cannot exceed 250 characters')
+  if (topK <= 0) throw new Error('top-k must be positive')
 }
 
 /** Every file a search scope covers, keyed by its slug. */
@@ -69,7 +69,7 @@ export async function searchScope<A>(
   paths: readonly PathSpec[],
 ): Promise<[PathSpec[], string]> {
   const first = paths[0]
-  if (first === undefined) throw new Error('search: at least one scope is required')
+  if (first === undefined) throw new Error('at least one scope is required')
   const prefix = mountPrefixOf(first.virtual, first.vfsPath)
   if (paths.some((p) => stripSlash(p.vfsPath) === '')) return [[], prefix]
   const signal = callerSignal() ?? null

@@ -46,10 +46,10 @@
     "@struktoai/mirage-core": "workspace:*"
   },
   "peerDependencies": {
-    "@mastra/core": "^1.59.0"
+    "@mastra/core": "^1.79.0"
   },
   "devDependencies": {
-    "@mastra/core": "^1.59.0",
+    "@mastra/core": "^1.79.0",
     "@struktoai/mirage-node": "workspace:*",
     "@types/node": "^22.0.0",
     "tsup": "^8.5.0",

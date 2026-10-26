@@ -12,20 +12,19 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { constants as fsConstants } from 'node:fs'
 import { createRequire } from 'node:module'
 import { constants as osConstants } from 'node:os'
 import { posix } from 'node:path'
 import type { SessionState } from '@struktoai/mirage-core/workspace/session/session'
-import { eexist, eisdir, enoent, enotdir } from '@struktoai/mirage-core/errors/fs'
+import { eexist, enoent, enotdir } from '@struktoai/mirage-core/errors/fs'
+import { MountCore } from '@struktoai/mirage-core/mount/core'
+import type { MountAttrs } from '@struktoai/mirage-core/mount/types'
 import { registerPipeServer } from '@struktoai/mirage-core/runtime/sandbox/mounts'
 import type { PipeWriter } from '@struktoai/mirage-core/runtime/types'
 import type { Files } from '@struktoai/mirage-core/workspace/files'
 import type { Attributes, FileEntry, SFTPWrapper } from 'ssh2'
-import { OPEN, PIPE_PACKET_SIZE, SSH2_SFTP_MODULE, STATUS } from './constants.ts'
-import { MountCore } from './core.ts'
+import { OPEN, OWNER, PIPE_PACKET_SIZE, SSH2_SFTP_MODULE, STATUS } from './constants.ts'
 import { EACCES, ENOENT, EROFS, SFTPStatusError, classifyErrno } from './errors.ts'
-import type { MountAttrs } from './types.ts'
 
 const S_IFMT = 0o170000
 const S_IFDIR = 0o040000
@@ -37,7 +36,6 @@ interface OpenFile {
   kind: 'file'
   path: string
   fd: number
-  appendAt: number | null
 }
 
 interface OpenDir {
@@ -333,22 +331,7 @@ export class MirageSFTPServer {
     }
     dir.done = true
     const entries: FileEntry[] = []
-    for (const name of await core.readdir(dir.path)) {
-      const child =
-        name === '.'
-          ? dir.path
-          : name === '..'
-            ? posix.dirname(dir.path)
-            : posix.join(dir.path, name)
-      let attr: MountAttrs
-      try {
-        attr = await core.getattr(child)
-      } catch (err) {
-        // Vanished between the listing and its stat, as ls leaves out a
-        // file deleted mid-listing; anything else is a real failure.
-        if (classifyErrno(err) !== ENOENT) throw err
-        continue
-      }
+    for (const [name, attr] of await core.listing(dir.path)) {
       const attrs = toAttrs(attr)
       entries.push({ filename: name, longname: longname(name, attrs), attrs })
     }
@@ -363,20 +346,20 @@ export class MirageSFTPServer {
   ): Promise<void> {
     const core = await this.mount()
     const path = workspacePath(filename)
-    const found = await exists(core, path)
-    if (found && (flags & OPEN.CREAT) !== 0 && (flags & OPEN.EXCL) !== 0) {
-      throw eexist(path)
+    // The open's effect is the core's (create, exclusive, truncate), and a
+    // directory refuses it, as SFTP opens files only.
+    const creates = (flags & OPEN.CREAT) !== 0
+    const mode = {
+      readable: (flags & OPEN.READ) !== 0,
+      writable: (flags & (OPEN.WRITE | OPEN.APPEND)) !== 0,
+      truncate: (flags & OPEN.TRUNC) !== 0,
+      append: (flags & OPEN.APPEND) !== 0,
+      create: creates,
+      exclusive: creates && (flags & OPEN.EXCL) !== 0,
+      binary: true,
     }
-    let fd: number
-    if (!found) {
-      if ((flags & OPEN.CREAT) === 0) throw enoent(path)
-      fd = await core.create(path, modeOf(attrs))
-    } else {
-      if (isDir((await core.getattr(path)).mode)) throw eisdir(path)
-      fd = await core.open(path, (flags & OPEN.TRUNC) !== 0 ? fsConstants.O_TRUNC : 0)
-    }
-    const appendAt = (flags & OPEN.APPEND) !== 0 ? (await core.fgetattr(path, fd)).size : null
-    this.sftp.handle(id, this.addHandle({ kind: 'file', path, fd, appendAt }))
+    const fd = await core.open(path, mode, modeOf(attrs))
+    this.sftp.handle(id, this.addHandle({ kind: 'file', path, fd }))
   }
 
   private async read(id: number, buf: Buffer, offset: number, len: number): Promise<void> {
@@ -393,14 +376,9 @@ export class MirageSFTPServer {
   private async write(id: number, buf: Buffer, offset: number, data: Buffer): Promise<void> {
     const core = await this.mount()
     const f = this.file(buf)
-    let at = offset
-    if (f.appendAt !== null) {
-      at = f.appendAt
-      f.appendAt += data.byteLength
-    }
     // A copy: the handle holds the bytes until close, and ssh2 reuses the
     // packet buffer they arrived in.
-    await core.write(f.path, f.fd, new Uint8Array(data), at)
+    await core.write(f.path, f.fd, new Uint8Array(data), offset)
     this.sftp.status(id, STATUS.OK)
   }
 
@@ -478,7 +456,7 @@ export class PipeServer {
     session: SessionState,
     private readonly run: (op: () => Promise<void>) => Promise<void> = (op) => op(),
   ) {
-    this.core = new MountCore(files, { session })
+    this.core = new MountCore(files, { session, owner: OWNER })
   }
 
   /** Answer the client's requests until it closes the pipe. */

@@ -16,16 +16,12 @@ import type { Context } from '../../../commands/config.ts'
 import type { ExecutionKind, OutputFn, RunResult } from '../../../runtime/types.ts'
 import type { Runtime } from '../../../runtime/base.ts'
 import { CommandTimeoutError } from '../../../errors/types.ts'
-import { hasAborted, mergeSignals } from '../../../utils/abort.ts'
+import { hasAborted } from '../../../utils/abort.ts'
 import { runOutput } from '../../../commands/builtin/general/interpreter.ts'
 import { runWithTimeout } from '../../../commands/builtin/utils/limit.ts'
 import { resolveLimit } from '../../../policy/index.ts'
-import { IOResult, OutputState, materialize, type ByteSource } from '../../../io/types.ts'
+import type { ByteSource, IOResult } from '../../../io/types.ts'
 import { EXTERNAL_COMMANDS } from '../../../runtime/constants.ts'
-import { BytePipe } from '../../../io/pipe.ts'
-import { PipeClosed } from '../../../io/errors.ts'
-import { OutputStream, closeQuietly } from '../../../io/stream.ts'
-import { currentCaller, withCaller } from '../../../context/session_context.ts'
 import { isProcessExecutor } from '../../../runtime/mixin.ts'
 import type { RouteDecision } from '../../../runtime/types.ts'
 import { shellJoin } from '../../../shell/join.ts'
@@ -43,10 +39,12 @@ import { Channel, type JobConsole } from '../../../shell/console/index.ts'
 /**
  * Execute one admitted program; its surrounding shell stays in Mirage.
  *
- * A program a process runtime streams writes its stderr into `sink` as it
- * arrives, where the statement it runs in writes (a job's console, a
- * redirect, a compound body), so it lands beside its stdout and stays when
- * the program is stopped; without one it comes back in the result.
+ * Its output is handed over as it runs (`runOutput`), within the program's
+ * deadline, kept alive until the output is closed. A program writes its
+ * stderr into `sink` as it arrives, where the statement it runs in writes (a
+ * job's console, a redirect, a compound body), so it lands beside its stdout
+ * and stays when the program is stopped; without one it lands on the result,
+ * kept as it arrives all the same.
  */
 export async function runExternal(
   argv: Argv,
@@ -75,145 +73,69 @@ export async function runExternal(
     session.commandLimits,
   )
   const timeout = guard?.timeoutSeconds ?? null
-  if (isProcessExecutor(runtime))
-    return streamExternal(runtime, argv, stdin, session, registry, timeout, signal, sink)
-  const deadline = timeout !== null && timeout > 0 ? new AbortController() : null
-  const runSignal = mergeSignals(signal, deadline?.signal)
-  const execute = async () => {
-    const input = stdin === null ? null : await materialize(stdin)
-    runSignal?.throwIfAborted()
-    const ctx: Context = {
-      stdin: input,
-      flags: { c: command },
-      cwd: PathSpec.fromStrPath(session.cwd),
-      env: envSnapshot(session),
-      ...(runSignal !== undefined ? { signal: runSignal } : {}),
-    }
-    return executeProgram(runtime, argv.name, [], ctx, { kind: 'line' })
+  // A runtime that runs an argv gets one; a line runtime gets the program
+  // as one quoted line.
+  const process = isProcessExecutor(runtime)
+  const kind: ExecutionKind = process ? 'process' : 'line'
+  const ctx: Context = {
+    stdin,
+    flags: process ? {} : { c: command },
+    cwd: PathSpec.fromStrPath(session.cwd),
+    env: envSnapshot(session),
   }
-  try {
-    const result = await runWithTimeout(execute(), timeout, argv.name)
-    const [stdout, io] = runOutput(result, {
-      command: argv.name,
-      declared: null,
-      prefixes: registry.allMounts().map((mount) => mount.prefix),
-    })
-    return [
-      stdout,
-      io,
-      new ExecutionNode({
-        command,
-        exitCode: result.exitCode,
-        stderr: result.stderr ?? new Uint8Array(),
-      }),
-    ]
-  } catch (err) {
-    if (err instanceof CommandTimeoutError) deadline?.abort()
-    throw err
-  } finally {
-    await registry.settle(runtime)
-  }
-}
-
-function streamExternal(
-  runtime: Runtime,
-  argv: Argv,
-  stdin: ByteSource | null,
-  session: SessionState,
-  registry: MountRegistry,
-  timeout: number | null,
-  signal?: AbortSignal,
-  sink?: JobConsole,
-): [ByteSource, IOResult, ExecutionNode] {
-  const cwd = PathSpec.fromStrPath(session.cwd)
-  const env = envSnapshot(session)
-  const pipe = new BytePipe()
-  const controller = new AbortController()
-  const runSignal = mergeSignals(signal, controller.signal) ?? controller.signal
-  const caller = currentCaller()
-  const io = new IOResult({
-    producer: {
-      command: argv.name,
-      declared: null,
-      prefixes: registry.allMounts().map((m) => m.prefix),
-      native: true,
-    },
-  })
-  const state = new OutputState()
-  io.output = state
-  const node = new ExecutionNode({ command: shellJoin(argv.tokens), exitCode: 0 })
-  let task: Promise<void> | undefined
-  let settled = false
-  let closing: Promise<void> | undefined
+  const node = new ExecutionNode({ command, exitCode: 0 })
   const said: Uint8Array[] = []
-  // Stdout written before a stderr chunk reaches the sink first, so the two
-  // keep the order the program wrote them in (`> f 2>&1`); the command's
-  // record keeps a copy for the policies that read it.
-  const errors = async (chunk: Uint8Array): Promise<void> => {
-    said.push(chunk)
-    await pipe.drain()
+  const toSink = async (chunk: Uint8Array): Promise<void> => {
     await sink?.emit(Channel.STDERR, chunk)
   }
-  const execute = async (): Promise<void> => {
+  const run = async (output: OutputFn, errors: OutputFn, stop: AbortSignal): Promise<RunResult> => {
+    // The command's record keeps a copy for the policies that read it.
+    const told = async (chunk: Uint8Array): Promise<void> => {
+      said.push(new Uint8Array(chunk))
+      await errors(chunk)
+    }
+    const deadline = new AbortController()
     try {
       const result = await runWithTimeout(
         executeProgram(
           runtime,
           argv.name,
-          argv.tokens,
-          { stdin, flags: {}, cwd, env, signal: runSignal },
-          {
-            kind: 'process',
-            output: (chunk) => pipe.write(chunk),
-            ...(sink !== undefined ? { errors } : {}),
-          },
+          process ? argv.tokens : [],
+          { ...ctx, signal: AbortSignal.any([stop, deadline.signal]) },
+          { kind, output, errors: told },
         ),
         timeout,
         argv.name,
       )
-      if (result.stdout.length) await pipe.write(result.stdout)
-      io.exitCode = node.exitCode = result.exitCode
-      const stderr = result.stderr ?? new Uint8Array()
-      io.stderr = stderr
-      node.stderr = said.length > 0 ? concat(said) : stderr
-      pipe.end()
-    } catch (error) {
-      controller.abort()
-      pipe.end(error)
-      throw error
+      node.stderr = concat([...said, result.stderr ?? new Uint8Array()])
+      return result
+    } catch (err) {
+      // A run past its deadline is stopped before its runtime settles,
+      // which may wait for the run.
+      if (err instanceof CommandTimeoutError) deadline.abort()
+      throw err
     } finally {
-      settled = true
       await registry.settle(runtime)
     }
   }
-  const close = (): Promise<void> => {
-    closing ??= (async () => {
-      pipe.closeReader()
-      if (!settled && task !== undefined) {
-        io.exitCode = node.exitCode = 141
-        controller.abort()
-      }
-      await task?.catch((error: unknown) => {
-        if (error instanceof PipeClosed || (error instanceof Error && error.name === 'AbortError'))
-          return
-        console.error(`external stream cleanup failed: ${String(error)}`)
-      })
-      await closeQuietly(stdin)
-      state.finish()
-    })()
-    return closing
-  }
-  async function* output(): AsyncGenerator<Uint8Array> {
-    task = execute()
-    void task.catch(() => undefined)
-    try {
-      yield* pipe.stream()
-      await task
-    } finally {
-      await close()
-    }
-  }
-  return [new OutputStream(withCaller(output(), caller), close), io, node]
+  const [stdout, io] = runOutput(
+    run,
+    {
+      command: argv.name,
+      declared: null,
+      prefixes: registry.allMounts().map((mount) => mount.prefix),
+      native: true,
+    },
+    sink !== undefined ? toSink : undefined,
+    stdin,
+    signal,
+  )
+  // The record takes the status the output settles with: 141 for a reader
+  // that stopped early.
+  io.output?.callbacks.push(() => {
+    node.exitCode = io.exitCode
+  })
+  return [stdout, io, node]
 }
 
 /**

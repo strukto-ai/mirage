@@ -197,7 +197,8 @@ export class Workspace {
   readonly processes: ProcessSupervisor
   readonly jobTable: JobTable
   readonly cache: FileCache & BaseVFS
-  private readonly clock: Clock
+  /** The clock this workspace reads time and waits on; a rebuild that shares its mounts runs on it too. */
+  readonly clock: Clock
   private readonly ids: IdSource
   readonly namespace: Namespace
   private readonly dispatcher: Dispatcher
@@ -280,7 +281,7 @@ export class Workspace {
     const index = options.index === undefined ? undefined : normalizeIndexConfig(options.index)
     // Before the mounts: the write verdict asks whether the cache keeps anything.
     this.clock = options.clock ?? new SystemClock()
-    this.ids = options.ids ?? new SystemIdSource()
+    this.ids = options.ids ?? new SystemIdSource(this.clock)
     // Minted before any mount, so a seeded source hands out the same draws in
     // the same order on both hosts.
     this.wsId = options.workspaceId ?? this.ids.uuid7()
@@ -314,7 +315,7 @@ export class Workspace {
     this.registry.diff = this.diffPool
     this.registry.processView = (session) => this.processView(session)
     this.registry.fillEnv = (session, names) => this.fillTreeEnv(session, names)
-    this.jobTable = new JobTable(options.consoleFactory ?? null, this.processes)
+    this.jobTable = new JobTable(options.consoleFactory ?? null, this.processes, null, this.clock)
     const stores = resolveControlStores(this.wsId, options)
     this.ownsStateStore = stores.owned
     this.stateStoreInternal = stores.stateStore
@@ -358,7 +359,13 @@ export class Workspace {
         sourceFor(seeded.managed.source)
       }
     }
-    this.sessionManager = new SessionManager(sessionId, stores.sessions, seedVars)
+    this.sessionManager = new SessionManager(
+      sessionId,
+      stores.sessions,
+      seedVars,
+      this.clock,
+      this.ids,
+    )
     this.meta = new WorkspaceMeta(
       this.wsId,
       this.stateStoreInternal,
@@ -575,6 +582,7 @@ export class Workspace {
     if (options.routePolicy !== undefined) {
       this.registry.policies.place(new PlacementPolicy(options.routePolicy, this.scriptPolicy))
     }
+    this.registry.bindClocks()
   }
 
   /**
@@ -2018,7 +2026,12 @@ export class Workspace {
     cliOverrides: CLIOverrides = {},
   ): Promise<InstanceType<T>> {
     const ws = await this._fromState(state, options, overrides, cliOverrides)
-    await ws.installDriftState(state, options.driftPolicy ?? DriftPolicy.STRICT)
+    try {
+      await ws.installDriftState(state, options.driftPolicy ?? DriftPolicy.STRICT)
+    } catch (err) {
+      ws.registry.releaseClocks()
+      throw err
+    }
     return ws
   }
 
@@ -2084,10 +2097,15 @@ export class Workspace {
     // A caller's own profile table or default is a document the state did
     // not record, so the restored sessions keep the narrowing it gave
     // them, as a checkout's do, rather than the recorded one.
-    await applyStateDict(ws, state, {
-      builtForState: options.profiles === undefined && options.profile === undefined,
-      shared,
-    })
+    try {
+      await applyStateDict(ws, state, {
+        builtForState: options.profiles === undefined && options.profile === undefined,
+        shared,
+      })
+    } catch (err) {
+      ws.registry.releaseClocks()
+      throw err
+    }
     return ws
   }
 
@@ -2227,6 +2245,7 @@ export class Workspace {
       // stop a settled runner resuming onto a released VFS, so a
       // teardown that raises must still close the entry point behind it.
       this.closed = true
+      this.registry.releaseClocks()
     }
   }
 }

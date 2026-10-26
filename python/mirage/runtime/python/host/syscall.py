@@ -61,7 +61,7 @@ def host_files(
     resolver = PrefixResolver(
         list, reader.link_names_under if reader.linked else None
     )
-    return RuntimeFiles(dispatch, loop, resolver)
+    return RuntimeFiles(dispatch, loop, resolver, files=files._over(dispatch))
 
 
 def as_raised(exc: OSError) -> OSError:

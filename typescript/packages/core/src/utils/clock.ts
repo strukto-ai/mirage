@@ -26,6 +26,9 @@ export interface Clock {
 
 /** Platform clock used when no clock is supplied. */
 export class SystemClock implements Clock {
+  /** Marks a platform clock, so two copies of this module still agree. */
+  readonly platform = true
+
   /** Seconds since the unix epoch. */
   now(): number {
     return Date.now() / 1000
@@ -87,4 +90,9 @@ export class ManualClock implements Clock {
     if (seconds > 0) this.advance(seconds)
     await Promise.resolve()
   }
+}
+
+/** Whether `clock` reads the platform clock, so any two such agree. */
+export function isSystemClock(clock: Clock): boolean {
+  return (clock as { platform?: unknown }).platform === true
 }

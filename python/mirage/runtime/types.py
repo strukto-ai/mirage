@@ -132,12 +132,16 @@ class CommandRuntime:
         exec_path_allowed (ExecPathFn | None): whether policy lets an
             interpreter load code from a path; None outside a workspace,
             where ``exec_allowed`` decides.
+        settle (Callable[[], Awaitable[None]] | None): what the workspace
+            does once the program's run ends, since the program may have
+            written past the dispatcher; None outside a workspace.
     """
 
     bound: RuntimeIdentity | None = None
     unavailable: str | None = None
     exec_allowed: bool = True
     exec_path_allowed: ExecPathFn | None = None
+    settle: Callable[[], Awaitable[None]] | None = None
 
 
 class ShellFn(Protocol):
@@ -307,7 +311,9 @@ class Program:
             CPython payload, the installed head word of a script CLI;
             None leaves the engine's own spelling. "" is an answer
             (CPython's for a program piped in with no operand).
-        stdin (bytes | None): the input left after any read as source.
+        stdin (ByteSource | None): the input left after any read as
+            source, still unread; an engine that takes its input whole
+            collects it.
         script_path (PathSpec | None): the script the program was read
             from, ``raw_path`` as typed.
         script_cli (bool): an installed script CLI, which also finds its
@@ -317,7 +323,7 @@ class Program:
     code: str
     args: list[str] = field(default_factory=list)
     prog: str | None = None
-    stdin: bytes | None = None
+    stdin: ByteSource | None = None
     script_path: PathSpec | None = None
     script_cli: bool = False
 

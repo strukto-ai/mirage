@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { WILDCARD } from '../constants.ts'
+import { admissionMatcher, fromUnits, units } from '../../rs/policy.ts'
 
 /**
  * A command pattern's tokens. Whitespace-split; trailing wildcards are
@@ -21,18 +21,18 @@ import { WILDCARD } from '../constants.ts'
  * command).
  */
 export function splitPattern(pattern: string): string[] {
-  const tokens = pattern.split(/\s+/).filter((t) => t !== '')
-  while (tokens.length > 0 && tokens[tokens.length - 1] === WILDCARD) tokens.pop()
-  return tokens
+  const parts = admissionMatcher(null).ask('split_pattern', { pattern: units(pattern) })
+  return (parts as number[][]).map(fromUnits)
 }
-
 /** Whether a pattern is a prefix of a line's tokens (command name first). */
 export function patternMatches(pattern: string, tokens: readonly string[]): boolean {
-  const want = splitPattern(pattern)
-  if (want.length > tokens.length) return false
-  return want.every((w, i) => w === WILDCARD || w === tokens[i])
+  return (
+    admissionMatcher(null).ask('pattern_matches', {
+      pattern: units(pattern),
+      tokens: tokens.map(units),
+    }) === true
+  )
 }
-
 /**
  * Whether a pattern can match some line running the node at a path.
  *
@@ -44,6 +44,10 @@ export function patternMatches(pattern: string, tokens: readonly string[]): bool
  * issue` reaches `linear issue list`).
  */
 export function patternReaches(pattern: string, path: readonly string[]): boolean {
-  const want = splitPattern(pattern)
-  return want.slice(0, path.length).every((w, i) => w === WILDCARD || w === path[i])
+  return (
+    admissionMatcher(null).ask('pattern_reaches', {
+      pattern: units(pattern),
+      tokens: path.map(units),
+    }) === true
+  )
 }

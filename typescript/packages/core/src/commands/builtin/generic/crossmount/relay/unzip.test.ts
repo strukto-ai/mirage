@@ -36,6 +36,14 @@ async function run(
 it('lists instead of extracting under -l', async () => {
   const { exitCode, out, written } = await run('unzip -l /a/a.zip -d /b/out')
   expect(exitCode).toBe(0)
-  expect(out.startsWith('  Length      Name\n')).toBe(true)
+  expect(out.startsWith('Archive:  /a/a.zip\n  Length      Date    Time    Name\n')).toBe(true)
   expect(written).toEqual({})
+})
+
+it('finds a suffixed archive beside the typed name', async () => {
+  // Across mounts the host's working directory is /, so a.zip for a is found
+  // beside the operand, typed in /a.
+  const { exitCode, written } = await run('cd /a && unzip -q a -d /b/out')
+  expect(exitCode).toBe(0)
+  expect(Object.keys(written).sort()).toEqual(['/out/drop.txt', '/out/keep.txt'])
 })

@@ -23,7 +23,7 @@ from pathlib import Path
 import pytest
 
 import mirage
-from mirage.utils.clock import ManualClock
+from mirage.utils.clock import ManualClock, SystemClock
 from mirage.utils.ids import (
     IdSource,
     SeededIdSource,
@@ -48,7 +48,14 @@ SEED_7_IDS = [
 MIRAGE_DIR = Path(mirage.__file__).parent
 
 # The packages whose ids and draws come from the workspace IdSource.
-SEAMED_PACKAGES = ("commands", "core", "execution", "process", "workspace")
+SEAMED_PACKAGES = (
+    "cache",
+    "commands",
+    "core",
+    "execution",
+    "process",
+    "workspace",
+)
 
 DIRECT_DRAWS = frozenset(
     {
@@ -180,6 +187,67 @@ def test_system_source_satisfies_the_protocol():
     ids: IdSource = SystemIdSource()
     assert uuid.UUID(ids.uuid7()).version == 7
     assert 0 <= ids.random_u32() < 2**32
+
+
+class SettableClock:
+    def __init__(self, wall: float) -> None:
+        self.wall = wall
+
+    def now(self) -> float:
+        return self.wall
+
+    def monotonic(self) -> float:
+        return 0.0
+
+    async def sleep(self, seconds: float) -> None:
+        return None
+
+
+def test_system_uuid7_is_stamped_from_its_clock():
+    source = SystemIdSource(ManualClock(start=1_700_000_000.0))
+    assert uuid.UUID(source.uuid7()).int >> 80 == 1_700_000_000_000
+
+
+def test_system_uuid7_never_waits_on_a_frozen_clock():
+    # Waiting for a frozen clock to tick would spin forever, so a burst
+    # past the counter moves on to the next millisecond by itself.
+    source = SystemIdSource(ManualClock(start=5.0))
+    values = [source.uuid7() for _ in range(5000)]
+    assert values == sorted(values)
+    assert len(set(values)) == len(values)
+    assert uuid.UUID(values[0]).int >> 80 == 5000
+    assert uuid.UUID(values[-1]).int >> 80 > 5000
+
+
+def test_system_uuid7_keeps_its_order_when_the_clock_goes_back():
+    clock = SettableClock(10.0)
+    source = SystemIdSource(clock)
+    first = source.uuid7()
+    clock.wall = 9.0
+    second = source.uuid7()
+    assert first < second
+    assert uuid.UUID(second).int >> 80 == 10_000
+
+
+def test_system_clock_sources_share_the_process_floor():
+    # Callers build a throwaway source per id; ids from all of them,
+    # and from uuid7() itself, still sort by when they were minted.
+    values = []
+    for _ in range(1000):
+        values.append(SystemIdSource().uuid7())
+        values.append(uuid7())
+        values.append(SystemIdSource(SystemClock()).uuid7())
+    assert values == sorted(values)
+
+
+def test_a_source_on_another_clock_keeps_its_own_floor():
+    # A source on a clock far ahead must not drag the process's own
+    # ids, or another source's, into its future.
+    SystemIdSource(ManualClock(start=4_000_000_000.0)).uuid7()
+    embedded_ms = uuid.UUID(uuid7()).int >> 80
+    assert embedded_ms <= time.time_ns() // 1_000_000
+    early = SystemIdSource(ManualClock(start=5.0))
+    assert uuid.UUID(early.uuid7()).int >> 80 == 5000
 
 
 def test_splitmix64_matches_its_published_vector():

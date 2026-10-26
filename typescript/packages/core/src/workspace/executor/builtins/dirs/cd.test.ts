@@ -14,12 +14,32 @@
 
 import { resolveSymlinks } from '../../../../utils/path.ts'
 import { varsFromEnv } from '../../../../workspace/session/session.ts'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { PathSpec } from '../../../../types.ts'
 import { ContentType, FileType } from '../../../../types.ts'
 import { SessionState } from '../../../session/session.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
 import { handleCd } from './cd.ts'
+import { ManualClock } from '../../../../utils/clock.ts'
+import { MountMode } from '../../../../types.ts'
+import { RAMVFS } from '../../../../vfs/ram/ram.ts'
+import { Workspace } from '../../../workspace/workspace.ts'
+import { getTestParser } from '../../../../../tests/workspace/fixtures/workspace_fixture.ts'
+
+import type * as FilesModule from '../../../files.ts'
+
+const seenClocks = vi.hoisted(() => [] as unknown[])
+
+vi.mock('../../../files.ts', async (importOriginal) => {
+  const mod = await importOriginal<typeof FilesModule>()
+  class ClockSeen extends mod.Files {
+    constructor(...args: ConstructorParameters<typeof mod.Files>) {
+      super(...args)
+      if (args[3]?.ledger !== false) seenClocks.push(args[3]?.clock)
+    }
+  }
+  return { ...mod, Files: ClockSeen }
+})
 
 // A follow over a fixed link table, as the session's link view resolves.
 function through(links: ReadonlyMap<string, string>): (path: string) => string {
@@ -254,4 +274,20 @@ describe('handleCd', () => {
     expect(seen).toEqual(['/data'])
     expect(s.cwd).toBe('/data')
   })
+})
+
+it('cd reads links on the workspace clock', async () => {
+  seenClocks.length = 0
+  const clock = new ManualClock()
+  const ws = new Workspace(
+    { '/data': new RAMVFS() },
+    { mode: MountMode.WRITE, shellParser: await getTestParser(), clock },
+  )
+  try {
+    await ws.shell('mkdir /data/d && ln -s /data/d /data/link && cd /data/link')
+  } finally {
+    await ws.close()
+  }
+  expect(seenClocks.length).toBeGreaterThan(0)
+  expect(seenClocks.every((c) => c === clock)).toBe(true)
 })

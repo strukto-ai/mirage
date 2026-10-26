@@ -20,6 +20,7 @@ import {
   DEFAULT_REQUESTS_PER_SECOND,
 } from '../core/airtable/constants.ts'
 import { RateLimiter } from '../core/api/rate_limit.ts'
+import type { Clock } from '../utils/clock.ts'
 
 /**
  * The account, its bounds with defaults applied, and the per-base pacing
@@ -41,5 +42,20 @@ export class AirtableAccessor extends Accessor {
     this.maxReadRecords = config.maxReadRecords ?? DEFAULT_MAX_READ_RECORDS
     this.limiter = new RateLimiter(config.requestsPerSecond ?? DEFAULT_REQUESTS_PER_SECOND)
     this.fetchFn = options.fetchFn
+  }
+
+  /**
+   * Pace each base's calls on the workspace's clock.
+   *
+   * @param owner who holds it, released by the same key.
+   * @throws Error when a workspace on another clock mounts it.
+   */
+  override bindClock(clock: Clock, owner: unknown): void {
+    this.limiter.bindClock(clock, owner)
+  }
+
+  /** Let `owner` go. */
+  override releaseClock(owner: unknown): void {
+    this.limiter.releaseClock(owner)
   }
 }

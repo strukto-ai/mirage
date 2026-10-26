@@ -251,9 +251,11 @@ through `ctx.vfs`.
 
 ### FUSE and FSKit
 
-`mount/` (python) and `node/src/mount/`: `MountCore` owns the semantics
-every kernel or protocol adapter shares (FUSE, SFTP, codex-exec), async on
-both hosts with per-file ordering; `classify_error` is the one errno table.
+`mount/` (python) and `core/src/mount/` (node's adapters in
+`node/src/mount/`): `MountCore` owns the semantics every kernel or protocol
+adapter and every runtime's open files share (FUSE, SFTP, NFS, codex-exec),
+async on both hosts with per-file ordering; `classify_error` is the one
+errno table.
 `fuse/` and `node/src/fuse/`: `MirageFS` is the libfuse adapter and owns the
 sync bridge. `direct_io` plus `attr_timeout=0` keep unknown sizes correct.
 Python fskit writes need `fuse/darwin.py`. One FUSE mount per process on

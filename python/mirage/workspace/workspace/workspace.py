@@ -275,7 +275,9 @@ class Workspace:
         ids: IdSource | None = None,
     ) -> None:
         self._clock: Clock = clock if clock is not None else SystemClock()
-        self._ids: IdSource = ids if ids is not None else SystemIdSource()
+        self._ids: IdSource = (
+            ids if ids is not None else SystemIdSource(self._clock)
+        )
         # Minted before any mount, so a seeded source hands out the same
         # draws in the same order on both hosts.
         self._workspace_id = (
@@ -327,9 +329,11 @@ class Workspace:
         self._shared_mounts: set[int] = set()
         self._drift = DriftQueue()
         self.processes = ProcessSupervisor(self._ids, bind=run_with_execution)
-        self.job_table = JobTable(console_factory, self.processes)
+        self.job_table = JobTable(
+            console_factory, self.processes, clock=self._clock
+        )
         self._lines: dict[asyncio.Event, tuple[str | None, asyncio.Event]] = {}
-        self._shell_executions: set[ShellExecution] = set()
+        self._shell_executions: dict[ShellExecution, None] = {}
         self._admitting = asyncio.Event()
         self._admitting.set()
         self._capture_lock = asyncio.Lock()
@@ -393,7 +397,11 @@ class Workspace:
         if profile is not None and profile not in self._profiles:
             raise PolicyError(f"unknown profile {profile!r}")
         self._session_mgr = SessionManager(
-            session_id, store=stores.sessions, seed_vars=seed_vars
+            session_id,
+            store=stores.sessions,
+            seed_vars=seed_vars,
+            clock=self._clock,
+            ids=self._ids,
         )
         self._tools: dict[str | None, MirageToolOperations] = {}
         self._reads: dict[str, FileVersionTracker] = {}
@@ -594,17 +602,22 @@ class Workspace:
         # section arrives as {head: (spec key or tree, config)}; a spec
         # key resolves against the named registry and every entry
         # installs through the same fail-loud path as register_cli.
-        if clis:
-            for cli_name, (spec_or_key, cli_config) in clis.items():
+        try:
+            for cli_name, (spec_or_key, cli_config) in (clis or {}).items():
                 cli_spec = (
                     spec_or_key
                     if isinstance(spec_or_key, CLI)
                     else cli_spec_for(spec_or_key)
                 )
                 self._registry.clis.install(cli_name, cli_spec, cli_config)
-
-        for prefix, target_backend, target_point in kernel_targets(specs):
-            self.add_fuse_mount(prefix, target_point, backend=target_backend)
+            self._registry.bind_clocks()
+            for prefix, target_backend, target_point in kernel_targets(specs):
+                self.add_fuse_mount(
+                    prefix, target_point, backend=target_backend
+                )
+        except BaseException:
+            self._registry.release_clocks()
+            raise
 
     async def history(self) -> list[dict[str, Any]]:
         """Command events recorded by the hidden recorder.
@@ -749,6 +762,12 @@ class Workspace:
         workspace never heard of.
         """
         return self._declared_sources
+
+    @property
+    def clock(self) -> Clock:
+        """The clock this workspace reads time and waits on; a rebuild
+        that shares its mounts runs on it too."""
+        return self._clock
 
     async def _secret_sources(self) -> Mapping[str, ResolvedSource]:
         """The declared source instances, built once.
@@ -1614,11 +1633,14 @@ class Workspace:
                 for result in execution_results
                 if isinstance(result, BaseException)
             ]
-            failures.extend(
-                await close_workspace(
-                    self._close_deps(drop_state, blocked_loop)
+            try:
+                failures.extend(
+                    await close_workspace(
+                        self._close_deps(drop_state, blocked_loop)
+                    )
                 )
-            )
+            finally:
+                self._registry.release_clocks()
             self._closed = True
             self._async_closed = True
             if failures:
@@ -1887,13 +1909,17 @@ class Workspace:
             clock=clock,
             ids=ids,
         )
-        await install_fingerprints(
-            ws._registry,
-            ws._cache,
-            ws._drift,
-            state.get(StateKey.FINGERPRINTS) or [],
-            drift_policy,
-        )
+        try:
+            await install_fingerprints(
+                ws._registry,
+                ws._cache,
+                ws._drift,
+                state.get(StateKey.FINGERPRINTS) or [],
+                drift_policy,
+            )
+        except BaseException:
+            ws._registry.release_clocks()
+            raise
         live_only = state.get(StateKey.LIVE_ONLY_MOUNTS) or []
         if live_only:
             logger.warning(
@@ -1986,9 +2012,13 @@ class Workspace:
                 id(r.vfs if isinstance(r, Mount) else r)
                 for r in mounts.values()
             }
-        await apply_state_dict(
-            ws, state, built_for_state=built_for_state, shared=shared
-        )
+        try:
+            await apply_state_dict(
+                ws, state, built_for_state=built_for_state, shared=shared
+            )
+        except BaseException:
+            ws._registry.release_clocks()
+            raise
         return ws
 
     def __deepcopy__(self, memo: dict[int, Any]) -> "Workspace":
@@ -2390,7 +2420,7 @@ class Workspace:
         self._writes += 1
         self._writes_idle.clear()
         try:
-            yield replace(caller, write_held=True)
+            yield caller.changed({"write_held": True})
         finally:
             self._writes -= 1
             if self._writes == 0:
@@ -2535,7 +2565,10 @@ class Workspace:
         """
         caller = current_caller()
         return await self.dispatch(
-            name, path, caller=replace(caller, rule_gate=caller.gate), **kwargs
+            name,
+            path,
+            caller=caller.changed({"rule_gate": caller.gate}),
+            **kwargs,
         )
 
     async def stat(self, path: str) -> FileStat:
@@ -2863,9 +2896,9 @@ class Workspace:
             buffer_bytes=self.io.buffer_bytes,
         )
         if stream:
-            self._shell_executions.add(execution)
+            self._shell_executions[execution] = None
             execution.on_settled(
-                lambda: self._shell_executions.discard(execution)
+                lambda: self._shell_executions.pop(execution, None)
             )
             try:
                 await asyncio.sleep(0)
@@ -2908,7 +2941,7 @@ class Workspace:
         if handed is None:
             stop = asyncio.Event()
             self._lines[stop] = (session_id, ended)
-            token = bind_caller(replace(current_caller(), stop=stop))
+            token = bind_caller(current_caller().changed({"stop": stop}))
 
         async def line() -> IOResult:
             result = await self._serialize_line(
@@ -2940,6 +2973,12 @@ class Workspace:
         try:
             if stop is not None:
                 await self._admit_line(stop, cancel)
+            if self.processes.queued():
+                # A job started before this line (an earlier line's, or
+                # the enclosing line's when this one is its substitution)
+                # begins first, as its fork already runs: what its
+                # redirect opens is there for the line to read.
+                await asyncio.sleep(0)
             result = await run_cancellable(line(), cancel, stop)
         except (MirageAbortError, asyncio.CancelledError):
             # An abandoned invocation is the caller's outcome, not the

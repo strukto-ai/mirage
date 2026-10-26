@@ -28,6 +28,7 @@ from mirage.types import (
     MountMode,
     Visibility,
 )
+from mirage.utils.clock import Clock
 from mirage.utils.dates import epoch_to_iso
 from mirage.utils.path import ancestors, glob_prefix_match, resolve_symlinks
 from mirage.vfs.base import BaseVFS
@@ -196,6 +197,12 @@ class Namespace:
     @property
     def registry(self) -> MountRegistry:
         return self._registry
+
+    @property
+    def clock(self) -> Clock:
+        """The workspace clock, which a file call outside a line records
+        on."""
+        return self._registry.clock
 
     def readers(
         self, visibility: Callable[[str | None], Visibility | None]
