@@ -167,10 +167,13 @@ def _race_two_reclaimers(monkeypatch, lock_path: str, late_step: str) -> None:
     monkeypatch.setattr(os, late_step, late)
 
 
-def _stale_lock(client: DiskRecordClient, name: str) -> str:
-    lock_path = client.path(name) + ".lock"
+def _stale_lock(
+    client: DiskRecordClient, name: str, suffix: str = ".lock"
+) -> str:
+    lock_path = client.path(name) + suffix
     Path(lock_path).write_text("424242")
-    os.utime(lock_path, (0, 0))
+    old = time.time() - 100
+    os.utime(lock_path, (old, old))
     return lock_path
 
 
@@ -220,6 +223,34 @@ async def test_two_claims_over_one_stale_lock_have_one_winner(
     )
     assert sorted(won) == [False, True]
     assert sorted(os.listdir(tmp_path)) == ["ws.json"]
+
+
+@pytest.mark.asyncio
+async def test_a_stale_guard_does_not_cost_the_next_claim(tmp_path):
+    client = DiskRecordClient(str(tmp_path), "")
+    _stale_lock(client, "k")
+    _stale_lock(client, "k", ".lock.reclaim")
+    assert await client.cas_put("k", {"generation": 1}, 0)
+    assert os.listdir(tmp_path) == ["k.json"]
+
+
+@pytest.mark.asyncio
+async def test_a_guard_reclaimed_mid_reclaim_still_lets_the_claim_win(
+    tmp_path, monkeypatch
+):
+    client = DiskRecordClient(str(tmp_path), "")
+    lock_path = _stale_lock(client, "k")
+    stats = count()
+    real_stat = os.stat
+
+    def stat(path, *args, **kwargs):
+        if path == lock_path and next(stats) == 1:
+            os.unlink(f"{lock_path}.reclaim")
+        return real_stat(path, *args, **kwargs)
+
+    monkeypatch.setattr(os, "stat", stat)
+    assert await client.cas_put("k", {"generation": 1}, 0)
+    assert os.listdir(tmp_path) == ["k.json"]
 
 
 @pytest.mark.asyncio

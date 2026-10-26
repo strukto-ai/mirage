@@ -81,10 +81,11 @@ function raceTwoReclaimers(lock: string, lateStep: LateStep): void {
   }
 }
 
-function staleLock(client: DiskRecordClient, name: string): string {
-  const lock = `${client.path(name)}.lock`
+function staleLock(client: DiskRecordClient, name: string, suffix = '.lock'): string {
+  const lock = `${client.path(name)}${suffix}`
   writeFileSync(lock, '424242')
-  utimesSync(lock, 0, 0)
+  const old = (Date.now() - 100_000) / 1000
+  utimesSync(lock, old, old)
   return lock
 }
 
@@ -138,6 +139,26 @@ describe('DiskRecordClient lock reclaim and release', () => {
       expect(readdirSync(root)).toEqual(['ws.json'])
     },
   )
+
+  it('lets the next claim win over a stale guard', async () => {
+    const client = new DiskRecordClient(root, '')
+    staleLock(client, 'k')
+    staleLock(client, 'k', '.lock.reclaim')
+    expect(await client.casPut('k', { generation: 1 }, 0)).toBe(true)
+    expect(readdirSync(root)).toEqual(['k.json'])
+  })
+
+  it('lets the claim win when its guard is reclaimed mid-reclaim', async () => {
+    const client = new DiskRecordClient(root, '')
+    const lock = staleLock(client, 'k')
+    let stats = 0
+    vi.mocked(fs.stat).mockImplementation((async (p: string, opts?: { bigint?: boolean }) => {
+      if (p === lock && stats++ === 1) await real.unlink(`${lock}.reclaim`)
+      return real.stat(p, opts)
+    }) as typeof fs.stat)
+    expect(await client.casPut('k', { generation: 1 }, 0)).toBe(true)
+    expect(readdirSync(root)).toEqual(['k.json'])
+  })
 
   it('leaves a lock another writer took on release', async () => {
     const client = new DiskRecordClient(root, '')

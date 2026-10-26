@@ -64,10 +64,10 @@ def _reclaim_stale_lock(lock_path: str) -> bool:
     """True when the lock is gone or was stale and removed; False when a
     live writer still holds it or another waiter is reclaiming it.
 
-    Reclaimers serialize on a ``.reclaim`` guard, itself reclaimed the
-    same way, and re-check the age under it: no waiter creates a lock
-    while the stale one exists, so the lock found stale is the one
-    removed, never a fresh lock another reclaimer just took."""
+    Reclaimers serialize on a ``.reclaim`` guard, a lock of its own and
+    reclaimed the same way, and re-check the age under it: no waiter
+    creates a lock while the stale one exists, so the lock found stale
+    is the one removed, unless a live holder outlived the stale window."""
 
     def age() -> float | None:
         try:
@@ -76,22 +76,20 @@ def _reclaim_stale_lock(lock_path: str) -> bool:
             return None
 
     seen = age()
-    if seen is None:
-        return True
-    if seen <= LOCK_STALE_SECONDS:
-        return False
+    if seen is None or seen <= LOCK_STALE_SECONDS:
+        return seen is None
     guard = f"{lock_path}.reclaim"
-    try:
-        os.close(os.open(guard, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
-    except FileExistsError:
-        _reclaim_stale_lock(guard)
-        return False
+    fd = _acquire_lock(guard)
+    if fd is None:
+        if not _reclaim_stale_lock(guard):
+            return False
+        fd = _acquire_lock(guard)
+        if fd is None:
+            return False
     try:
         seen = age()
-        if seen is None:
-            return True
-        if seen <= LOCK_STALE_SECONDS:
-            return False
+        if seen is None or seen <= LOCK_STALE_SECONDS:
+            return seen is None
         logger.warning("reclaiming stale lock %s (age %.1fs)", lock_path, seen)
         try:
             os.unlink(lock_path)
@@ -101,7 +99,7 @@ def _reclaim_stale_lock(lock_path: str) -> bool:
             pass
         return True
     finally:
-        os.unlink(guard)
+        _release_lock(fd, guard)
 
 
 def _release_lock(fd: int, lock_path: str) -> None:

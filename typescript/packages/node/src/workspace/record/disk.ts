@@ -188,10 +188,10 @@ export class DiskRecordClient {
 
   // True when the lock is gone or was stale and removed; false when a
   // live writer still holds it or another waiter is reclaiming it.
-  // Reclaimers serialize on a `.reclaim` guard, itself reclaimed the
-  // same way, and re-check the age under it: no waiter creates a lock
-  // while the stale one exists, so the lock found stale is the one
-  // removed, never a fresh lock another reclaimer just took.
+  // Reclaimers serialize on a `.reclaim` guard, a lock of its own and
+  // reclaimed the same way, and re-check the age under it: no waiter
+  // creates a lock while the stale one exists, so the lock found stale
+  // is the one removed, unless a live holder outlived the stale window.
   private async reclaimStaleLock(lockPath: string): Promise<boolean> {
     const age = async (): Promise<number | null> => {
       try {
@@ -202,20 +202,17 @@ export class DiskRecordClient {
       }
     }
     let seen = await age()
-    if (seen === null) return true
-    if (seen <= LOCK_STALE_SECONDS) return false
+    if (seen === null || seen <= LOCK_STALE_SECONDS) return seen === null
     const guard = `${lockPath}.reclaim`
-    try {
-      await (await open(guard, 'wx')).close()
-    } catch (e) {
-      if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e
-      await this.reclaimStaleLock(guard)
-      return false
+    let fh = await this.acquireLock(guard)
+    if (fh === null) {
+      if (!(await this.reclaimStaleLock(guard))) return false
+      fh = await this.acquireLock(guard)
+      if (fh === null) return false
     }
     try {
       seen = await age()
-      if (seen === null) return true
-      if (seen <= LOCK_STALE_SECONDS) return false
+      if (seen === null || seen <= LOCK_STALE_SECONDS) return seen === null
       console.warn(`mirage: reclaiming stale lock ${lockPath} (age ${seen.toFixed(1)}s)`)
       try {
         await unlink(lockPath)
@@ -226,7 +223,7 @@ export class DiskRecordClient {
       }
       return true
     } finally {
-      await unlink(guard)
+      await this.releaseLock(fh, guard)
     }
   }
 
